@@ -55,6 +55,11 @@ async function initBuildPanel() {
   document.getElementById('bm-close').addEventListener('click', () => {
     document.getElementById('build-modal').style.display = 'none';
   });
+  document.getElementById('bm-abort').addEventListener('click', async () => {
+    document.getElementById('bm-abort').disabled = true;
+    document.getElementById('bm-abort').textContent = 'Aborting...';
+    await window.electronAPI.abortCompile();
+  });
 
   // Initial state
   setFlashEnabled(false);
@@ -121,6 +126,7 @@ async function doFlash() {
   stopCompileTimer();
   document.getElementById('bm-title').textContent = '⚡ Flashing...';
   document.getElementById('bm-title').style.color = '#eee';
+  document.getElementById('bm-abort').style.display = 'none';
   document.getElementById('bm-close').style.display = 'none';
   document.getElementById('build-modal').style.display = 'flex';
   startFlashTimer();
@@ -283,7 +289,7 @@ function onBuildStatus({ type, ok, message }) {
   }
 }
 
-function onBuildDone({ type, ok, error }) {
+function onBuildDone({ type, ok, error, aborted }) {
   if (type === 'compile') {
     if (ok) {
       compileSuccess = true;
@@ -301,6 +307,10 @@ function onBuildDone({ type, ok, error }) {
         finishBuildModal(true, '✓ Compile Successful', 'No board connected — flash when ready.');
         appendLog('\n✓ Firmware ready. Connect board to flash.', false);
       }
+    } else if (aborted) {
+      compileSuccess = false;
+      setFlashEnabled(false);
+      finishBuildModal(false, '⊘ Compile Aborted', 'Compile was stopped.');
     } else {
       compileSuccess = false;
       setFlashEnabled(false);
@@ -327,6 +337,10 @@ function showBuildModal(title) {
   document.getElementById('bm-log').innerHTML = '';
   document.getElementById('bm-status').textContent = '';
   document.getElementById('bm-close').style.display = 'none';
+  const abortBtn = document.getElementById('bm-abort');
+  abortBtn.style.display = 'inline-block';
+  abortBtn.disabled = false;
+  abortBtn.textContent = '⊘ Abort';
   // Reset both timers
   document.getElementById('bm-timer-compile').style.display = 'none';
   document.getElementById('bm-timer-flash').style.display = 'none';
@@ -337,8 +351,10 @@ function showBuildModal(title) {
 function setBarMode(mode) {
   const bar = document.getElementById('bm-bar');
   bar.className = '';
-  bar.style.width = '';
-  bar.style.left  = '0';
+  bar.style.width     = '';
+  bar.style.left      = '0';
+  bar.style.animation = '';
+  bar.style.background = '';
   if (mode === 'knightrider') bar.classList.add('bm-bar-knightrider');
   else if (mode === 'flash') {
     bar.style.position = 'absolute';
@@ -356,6 +372,7 @@ function finishBuildModal(success, title, statusMsg) {
   document.getElementById('bm-title').textContent = title;
   document.getElementById('bm-title').style.color = success ? '#4d4' : '#e44';
   document.getElementById('bm-status').textContent = statusMsg || '';
+  document.getElementById('bm-abort').style.display = 'none';
   document.getElementById('bm-close').style.display = 'inline-block';
   setBarMode(success ? 'success' : 'error');
 }

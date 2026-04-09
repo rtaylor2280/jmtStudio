@@ -10,6 +10,27 @@ const fs        = require('fs');
 const { spawn } = require('child_process');
 const proffie   = require('./proffieos');
 
+// ── Abort state ───────────────────────────────────────
+let _currentProc = null;
+let _aborted     = false;
+
+function clearPartialBuild(buildPath) {
+  ['ProffieOS.elf', 'ProffieOS.bin', 'ProffieOS.dfu'].forEach(f => {
+    const fp = path.join(buildPath, f);
+    try { if (fs.existsSync(fp)) fs.unlinkSync(fp); } catch {}
+  });
+}
+
+function abort() {
+  if (_currentProc) {
+    _aborted = true;
+    _currentProc.kill();
+    _currentProc = null;
+    return { ok: true };
+  }
+  return { ok: false, error: 'No active process to abort' };
+}
+
 // ── Constants ──────────────────────────────────────────
 const CORE_ID       = 'proffieboard:stm32l4';
 const CORE_VERSION  = '4.6.0';
@@ -71,6 +92,7 @@ function runCli(args, onLog) {
     onLog(`> arduino-cli ${fullArgs.join(' ')}`, false);
 
     const proc = spawn(v.cliPath, fullArgs, { cwd: dataPath });
+    _currentProc = proc;
 
     let stdout = '', stderr = '';
 
@@ -85,10 +107,12 @@ function runCli(args, onLog) {
     });
 
     proc.on('close', code => {
+      _currentProc = null;
       resolve({ ok: code === 0, code, stdout, stderr });
     });
 
     proc.on('error', e => {
+      _currentProc = null;
       const msg = `Failed to start arduino-cli: ${e.message}`;
       onLog(msg, true);
       resolve({ ok: false, code: -1, stdout: '', stderr: msg });
@@ -200,6 +224,13 @@ async function compile(configContent, fqbn, buildOptions, onLog) {
     onLog('--- Compile successful ---', false);
     return { ok: true, buildPath };
   } else {
+    const wasAborted = _aborted;
+    _aborted = false;
+    if (wasAborted) {
+      onLog('--- Compile aborted ---', true);
+      clearPartialBuild(buildPath);
+      return { ok: false, aborted: true, error: 'Compile aborted' };
+    }
     onLog('--- Compile failed ---', true);
     const cleanError = extractCompileError(result.stderr + result.stdout);
     return { ok: false, error: cleanError };
@@ -459,6 +490,7 @@ module.exports = {
   initialize,
   compile,
   flash,
+  abort,
   getStatus,
   validateCli,
   CORE_ID,

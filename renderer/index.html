@@ -436,23 +436,12 @@
   50%  { left: 70%;  width: 30%; }
   100% { left: 0%;   width: 30%; }
   }
-  @keyframes flashprogress {
-    0%   { width: 15%; }
-    85%  { width: 85%; }
-    100% { width: 85%; }
-  }
   .bm-bar-knightrider {
     animation: knightrider 1.4s ease-in-out infinite;
     background: #025192 !important;
     box-shadow: 0 0 12px rgba(2,81,146,0.8), 0 0 24px rgba(2,81,146,0.4);
   }
-  .bm-bar-flash {
-    animation: flashprogress 30s ease-out forwards;
-    width: 15%;
-    background: #025192 !important;
-    box-shadow: 0 0 8px rgba(2,81,146,0.6);
-  }
-  .bm-bar-success { background: #025192 !important; box-shadow: 0 0 8px rgba(2,81,146,0.6) !important; animation: none !important; width: 100% !important; }
+.bm-bar-success { background: #025192 !important; box-shadow: 0 0 8px rgba(2,81,146,0.6) !important; animation: none !important; width: 100% !important; }
   .bm-bar-error   { background: #e44 !important; box-shadow: 0 0 8px rgba(220,60,60,0.5) !important; animation: none !important; width: 100% !important; }
 
   /* ── Unsaved modal ── */
@@ -697,13 +686,6 @@ function updateWindowTitle() {
   window.electronAPI.setTitle(`${name}${isDirty ? ' ●' : ''} — JMT Studio`);
 }
 
-// ── File path ──────────────────────────────────────────
-function setFilePath(p) {
-  currentFilePath = p;
-  document.getElementById('stat-filepath').textContent = p || '';
-  updateWindowTitle();
-}
-
 // ── Banner ─────────────────────────────────────────────
 function updateBanner() {
   const name = document.getElementById('input-filename').value.trim();
@@ -871,14 +853,16 @@ async function doSave() {
 window.doSave = doSave;
 
 async function doSaveAs() {
-  const name    = document.getElementById('input-filename').value.trim() || 'my_config';
+  const name     = document.getElementById('input-filename').value.trim() || 'my_config';
+  const savePath = await window.electronAPI.getSavePath(name + '.h');
+  if (!savePath) return;
+  // Update filename field BEFORE injecting metadata so @jmt:name is correct
+  const base = savePath.split(/[\\/]/).pop().replace(/\.h$/i, '');
+  document.getElementById('input-filename').value = base;
   const content = injectMetadata(window.getEditorContent());
-  const res     = await window.electronAPI.saveAs(name + '.h', content);
+  const res = await window.electronAPI.saveFile(savePath, content);
   if (res.ok) {
-    setFilePath(res.filePath);
-    // Update filename field from the actual saved filename
-    const base = res.filePath.split(/[\\/]/).pop().replace(/\.h$/i, '');
-    document.getElementById('input-filename').value = base;
+    setFilePath(savePath);
     updateBanner();
     setDirty(false);
   }
@@ -1079,7 +1063,7 @@ require(['vs/editor/editor.main'], function () {
         // Update modal bar directly
         const modalBar = document.getElementById('bm-bar');
         if (modalBar) {
-          modalBar.classList.remove('bm-bar-knightrider', 'bm-bar-flash', 'bm-bar-success', 'bm-bar-error');
+          modalBar.classList.remove('bm-bar-knightrider', 'bm-bar-success', 'bm-bar-error');
           modalBar.style.animation = 'none';
           modalBar.style.position  = 'absolute';
           modalBar.style.left      = '0';
@@ -1107,7 +1091,10 @@ require(['vs/editor/editor.main'], function () {
     <!-- Status / close -->
     <div style="display:flex;align-items:center;justify-content:space-between;padding-bottom:10px;border-bottom:1px solid #1e1e1e;">
       <div id="bm-status" style="font-size:0.82rem;color:#666;"></div>
-      <button id="bm-close" style="display:none;padding:6px 20px;background:#1a3a1a;color:#4d4;border:1px solid #2a5a2a;border-radius:4px;font-size:0.82rem;font-weight:600;cursor:pointer;">Close</button>
+      <div style="display:flex;gap:8px;">
+        <button id="bm-abort" style="padding:6px 20px;background:#3a1a1a;color:#e55;border:1px solid #5a2a2a;border-radius:4px;font-size:0.82rem;font-weight:600;cursor:pointer;">⊘ Abort</button>
+        <button id="bm-close" style="display:none;padding:6px 20px;background:#1a3a1a;color:#4d4;border:1px solid #2a5a2a;border-radius:4px;font-size:0.82rem;font-weight:600;cursor:pointer;">Close</button>
+      </div>
     </div>
 
     <!-- Elapsed time -->

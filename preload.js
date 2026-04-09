@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readFile:      (filePath)             => ipcRenderer.invoke('file:read', filePath),
   saveFile:      (filePath, content)    => ipcRenderer.invoke('file:save', { filePath, content }),
   saveAs:        (defaultName, content) => ipcRenderer.invoke('dialog:saveAs', { defaultName, content }),
+  getSavePath:   (defaultName)          => ipcRenderer.invoke('dialog:getSavePath', { defaultName }),
   getLastFile:   ()                     => ipcRenderer.invoke('store:getLastFile'),
   clearLastFile: ()                     => ipcRenderer.invoke('store:clearLastFile'),
   setTitle:      (title)                => ipcRenderer.send('title:set', title),
@@ -16,7 +17,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   compile: (configContent, fqbn, buildOptions) => 
     ipcRenderer.invoke('toolchain:compile', { configContent, fqbn, buildOptions }),
   flash:   (port, fqbn)          => ipcRenderer.invoke('toolchain:flash', { port, fqbn }),
-  getToolStatus: ()              => ipcRenderer.invoke('toolchain:getStatus'),
+  getToolStatus:  ()             => ipcRenderer.invoke('toolchain:getStatus'),
+  abortCompile:   ()             => ipcRenderer.invoke('toolchain:abort'),
 
   // ── Port detection ───────────────────────────────────
   listPorts:          () => ipcRenderer.invoke('ports:list'),
@@ -40,7 +42,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('build:done', handler);
   },
   onAppClosing:    (cb) => ipcRenderer.on('app:closing', cb),
-  confirmClose:    (save, cancel) => ipcRenderer.send('app:confirmClose', { save, cancel }),
   doClose:         () => ipcRenderer.send('app:doClose')
 
 });

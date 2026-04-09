@@ -114,13 +114,16 @@ ipcMain.handle('dialog:saveAs', async (_, { defaultName, content }) => {
   }
 });
 
-ipcMain.on('app:confirmClose', (_, { save, cancel }) => {
-  if (cancel) return;
-  if (save) {
-    // Renderer handles save then sends app:doClose
-  } else {
-    win.destroy();
-  }
+ipcMain.handle('dialog:getSavePath', async (_, { defaultName }) => {
+  const lastDir = Store.get('lastDir');
+  const { canceled, filePath } = await dialog.showSaveDialog(win, {
+    title: 'Save Config As',
+    defaultPath: path.join(lastDir || app.getPath('documents'), defaultName || 'my_config.h'),
+    filters: [{ name: 'Header Files', extensions: ['h'] }]
+  });
+  if (canceled || !filePath) return null;
+  Store.set('lastDir', path.dirname(filePath));
+  return filePath;
 });
 
 ipcMain.on('app:doClose', () => {
@@ -188,6 +191,7 @@ ipcMain.handle('toolchain:flash', async (_, { port, fqbn }) => {
 });
 
 ipcMain.handle('toolchain:getStatus', () => toolchain.getStatus());
+ipcMain.handle('toolchain:abort',     () => toolchain.abort());
 
 // ── IPC: Port detection ────────────────────────────────
 ipcMain.handle('ports:list', async () => {
