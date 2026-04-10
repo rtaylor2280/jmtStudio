@@ -2,6 +2,7 @@
   "name": "jmt-studio",
   "version": "1.0.0",
   "description": "ProffieOS Configuration Tool by Jedi Master Tech",
+  "author": "Jedi Master Tech",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -12,12 +13,21 @@
   "build": {
     "appId": "com.jmt.proffieos-editor",
     "productName": "JMT Studio",
+    "npmRebuild": false,
     "directories": {
       "output": "dist"
     },
     "win": {
       "target": "nsis",
       "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "JMT Studio"
     },
     "mac": {
       "target": "dmg",
@@ -33,13 +43,20 @@
       "assets/**/*"
     ],
     "extraResources": [
-      { "from": "resources/", "to": ".", "filter": ["**/*"] }
+      {
+        "from": "resources/",
+        "to": ".",
+        "filter": [
+          "**/*"
+        ]
+      }
     ]
   },
   "devDependencies": {
     "electron": "^29.0.0",
-    "electron-builder": "^24.0.0",
-    "monaco-editor": "0.44.0"
+    "electron-builder": "^24.13.3",
+    "monaco-editor": "0.44.0",
+    "png-to-ico": "^3.0.1"
   },
   "dependencies": {
     "serialport": "^13.0.0"

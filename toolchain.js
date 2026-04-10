@@ -192,6 +192,9 @@ async function initialize(onLog) {
   if (!sourceCheck.ok) return { ok: false, error: sourceCheck.error };
   onLog(`ProffieOS v${proffie.PROFFIE_VERSION} source validated.`, false);
 
+  const wsResult = proffie.initWorkspace(onLog);
+  if (!wsResult.ok) return { ok: false, error: wsResult.error };
+
   await ensureCliConfig(onLog);
   const coreResult = await ensureCore(onLog);
   if (!coreResult.ok) return { ok: false, error: coreResult.error };
