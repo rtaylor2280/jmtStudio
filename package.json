@@ -27,7 +27,8 @@
       "allowToChangeInstallationDirectory": false,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "JMT Studio"
+      "shortcutName": "JMT Studio",
+      "include": "build/installer.nsh"
     },
     "mac": {
       "target": "dmg",
