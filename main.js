@@ -33,6 +33,47 @@ function addRecentFile(filePath) {
 // ── Window ─────────────────────────────────────────────
 let win;
 
+function showSplash(parentWin) {
+  const [cx, cy] = parentWin.getContentBounds
+    ? (() => { const b = parentWin.getBounds(); return [b.x + b.width / 2, b.y + b.height / 2]; })()
+    : [960, 540];
+
+  const splash = new BrowserWindow({
+    width: 400,
+    height: 400,
+    x: Math.round(cx - 200),
+    y: Math.round(cy - 200),
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable: false,
+    focusable: false,
+    webPreferences: { contextIsolation: true }
+  });
+
+  splash.loadFile(path.join(__dirname, 'renderer', 'splash.html'));
+  splash.setIgnoreMouseEvents(true);
+
+  setTimeout(() => {
+    if (splash.isDestroyed()) return;
+    // Fade out using native window opacity — 400ms over ~24 steps
+    const duration = 400;
+    const interval = 16;
+    const steps = duration / interval;
+    let step = 0;
+    const timer = setInterval(() => {
+      step++;
+      if (splash.isDestroyed()) { clearInterval(timer); return; }
+      splash.setOpacity(1 - step / steps);
+      if (step >= steps) {
+        clearInterval(timer);
+        if (!splash.isDestroyed()) splash.destroy();
+      }
+    }, interval);
+  }, 1500);
+}
+
 function createWindow() {
   const bounds = Store.get('windowBounds')    || {};
   const wasMax = Store.get('windowMaximized') || false;
@@ -40,8 +81,7 @@ function createWindow() {
   win = new BrowserWindow({
     width:    bounds.width  || 1280,
     height:   1,
-    x:        bounds.x,
-    y:        bounds.y,
+    ...(bounds.x != null && bounds.y != null ? { x: bounds.x, y: bounds.y } : {}),
     minWidth: 800,
     minHeight: 500,
     backgroundColor: '#111111',
@@ -59,6 +99,7 @@ function createWindow() {
     win.show();
     win.setSize(bounds.width || 1280, bounds.height || 860);
     if (wasMax) win.maximize();
+    showSplash(win);
   });
 
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
@@ -235,6 +276,8 @@ ipcMain.handle('toolchain:flash', async (_, { port, fqbn }) => {
 });
 
 ipcMain.handle('toolchain:getStatus', () => toolchain.getStatus());
+ipcMain.handle('cache:check', (_, { configContent, fqbn, usb }) =>
+  toolchain.checkCacheAndRestore(configContent, fqbn, usb));
 ipcMain.handle('app:getVersion',      () => app.getVersion());
 ipcMain.handle('toolchain:abort',     () => toolchain.abort());
 

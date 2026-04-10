@@ -22,6 +22,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getToolStatus:  ()             => ipcRenderer.invoke('toolchain:getStatus'),
   abortCompile:   ()             => ipcRenderer.invoke('toolchain:abort'),
   getAppVersion:  ()             => ipcRenderer.invoke('app:getVersion'),
+  checkCache: (configContent, fqbn, usb) =>
+    ipcRenderer.invoke('cache:check', { configContent, fqbn, usb }),
 
   // ── Port detection ───────────────────────────────────
   listPorts:          () => ipcRenderer.invoke('ports:list'),

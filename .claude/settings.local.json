@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -n \"module.exports\\\\|getStatus\\\\|return { ok: true, buildPath\" c:/Coding/proffieos-editor/toolchain.js)",
+      "Read(//c/Users/Ryan/AppData/Roaming/jmt-studio-dev/arduino-data/packages/proffieboard/hardware/**)",
+      "Read(//c/Users/Ryan/AppData/Roaming/jmt-studio/arduino-data/packages/proffieboard/hardware/stm32l4/**)"
+    ]
+  }
+}

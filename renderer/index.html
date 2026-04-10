@@ -41,30 +41,40 @@
     gap: 10px;
     flex-shrink: 0;
   }
-  .title-group svg { color: #e53; flex-shrink: 0; }
+  .title-group svg { color: #025192; flex-shrink: 0; }
   h1 { font-size: 1rem; font-weight: 600; color: #eee; letter-spacing: 0.03em; white-space: nowrap; }
 
   .btn-group { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 
-  #bp-board-select {
+  #bp-board-display {
+    background: #141414;
+    border: 1px solid #2e2e2e;
+    border-radius: 3px;
+    color: #888;
+    font-size: 0.78rem;
+    padding: 4px 6px;
+    outline: none;
+    width: 160px;
+    cursor: default;
+  }
+
+  #input-board {
+    width: 160px;
+  }
+
+  .meta-field select {
     background: #181818;
     border: 1px solid #2e2e2e;
     border-radius: 3px;
     color: #ccc;
-    font-size: 0.78rem;
-    padding: 4px 6px;
+    font-size: 0.82rem;
+    padding: 4px 7px;
+    font-family: inherit;
     outline: none;
-    min-width: 160px;
+    transition: border-color 0.15s;
     cursor: pointer;
   }
-  #bp-board-select:focus { border-color: #4d9; }
-
-  #input-board { 
-    width: 160px; 
-    opacity: 0.7; 
-    cursor: default;
-    background: #141414;
-  }
+  .meta-field select:focus { border-color: #4d9; }
 
   .filename-wrap {
     position: relative;
@@ -580,7 +590,7 @@
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
       </svg>
-      <h1>JMT Studio</h1>
+      <h1>Config Manager</h1>
     </div>
     <div class="btn-group">
       <button id="btn-undo" title="Undo (Ctrl+Z)">&#8634;</button>
@@ -614,7 +624,12 @@
     </div>
     <div class="meta-field">
       <label>Board</label>
-      <input type="text" id="input-board" placeholder="Auto-detected on port scan" spellcheck="false" readonly />
+      <select id="input-board">
+        <option value="">Select board...</option>
+        <option value="Proffieboard V3" data-fqbn="proffieboard:stm32l4:ProffieboardV3-L452RE">Proffieboard V3</option>
+        <option value="Proffieboard V2" data-fqbn="proffieboard:stm32l4:ProffieboardV2-L433CC">Proffieboard V2</option>
+        <option value="Proffieboard"    data-fqbn="proffieboard:stm32l4:Proffieboard-L433CC">Proffieboard</option>
+      </select>
     </div>
     <div class="meta-field">
       <label>OS Version</label>
@@ -643,8 +658,8 @@
   <div class="port-group">
     <label>Port</label>
     <select id="bp-port-select"><option value="">Scanning...</option></select>
-    <label style="margin-left:8px">Board</label>
-    <select id="bp-board-select"><option value="">—</option></select>
+    <label style="margin-left:8px">Detected</label>
+    <input type="text" id="bp-board-display" readonly placeholder="—" />
     <button id="bp-btn-refresh-ports" title="Refresh ports">↺</button>
     <label style="margin-left:8px">USB</label>
     <select id="bp-usb-select" style="background:#181818;border:1px solid #2e2e2e;border-radius:3px;color:#ccc;font-size:0.78rem;padding:4px 6px;outline:none;cursor:pointer;">
@@ -847,7 +862,7 @@ function updateStatusMeta() {
     ts.style.display = 'none';
   }
 }
-document.getElementById('input-board').addEventListener('input', updateStatusMeta);
+document.getElementById('input-board').addEventListener('change', updateStatusMeta);
 document.getElementById('input-version').addEventListener('input', updateStatusMeta);
 document.getElementById('input-version').addEventListener('input', validateFields);
 
@@ -856,6 +871,7 @@ let metaCreated  = null;
 let metaUpdated  = null;
 let metaCompiled = null;
 let metaFlashed  = null;
+let metaPort     = null;
 let toolVersion  = '1.0.0';
 
 function nowIso() {
@@ -880,14 +896,17 @@ function injectMetadata(content) {
   const lines = [
     '// Configuration edited with JMT Studio (jedimastertech.com)',
   ];
+  const usbVal = document.getElementById('bp-usb-select') ? document.getElementById('bp-usb-select').value : '';
   if (desc)    lines.push(`// @jmt:description ${desc}`);
   if (board)   lines.push(`// @jmt:board       ${board}`);
   if (version) lines.push(`// @jmt:os_version  ${version}`);
+  if (usbVal)  lines.push(`// @jmt:usb         ${usbVal}`);
   metaUpdated = now;
   lines.push(`// @jmt:created     ${metaCreated}`);
   lines.push(`// @jmt:updated     ${now}`);
   if (metaCompiled) lines.push(`// @jmt:compiled    ${metaCompiled}`);
   if (metaFlashed)  lines.push(`// @jmt:flashed     ${metaFlashed}`);
+  if (metaPort)     lines.push(`// @jmt:last_port   ${metaPort}`);
   lines.push(`// @jmt:tool_version ${toolVersion}`);
   return lines.join('\n') + '\n' + stripped;
 }
@@ -903,17 +922,22 @@ function extractMetadata(content) {
     updated:  m(/^\/\/ @jmt:updated\s+(.+)$/m),
     compiled: m(/^\/\/ @jmt:compiled\s+(.+)$/m),
     flashed:  m(/^\/\/ @jmt:flashed\s+(.+)$/m),
+    usb:      m(/^\/\/ @jmt:usb\s+(.+)$/m),
+    port:     m(/^\/\/ @jmt:last_port\s+(.+)$/m),
     clean:    stripJmtLines(content)
   };
 }
 
 // ── Load content ───────────────────────────────────────
 function loadContent(rawContent, filePath) {
-  const { desc, board, version, created, updated, compiled, flashed, clean } = extractMetadata(rawContent);
+  const { desc, board, version, created, updated, compiled, flashed, usb, port, clean } = extractMetadata(rawContent);
   const base = filePath ? filePath.split(/[\\/]/).pop().replace(/\.[^.]+$/, '') : null;
   document.getElementById('input-filename').value = base || 'my_config';
   document.getElementById('input-desc').value     = desc    || '';
-  document.getElementById('input-board').value    = board   || '';
+  const boardSel = document.getElementById('input-board');
+  boardSel.value = board ? (Array.from(boardSel.options).find(o => o.value === board) ? board : '') : '';
+  boardSel.dispatchEvent(new Event('change'));
+  if (usb && window.setSelectedUsb) window.setSelectedUsb(usb);
   const versionNum = parseFloat(version || '');
   document.getElementById('input-version').value  = !isNaN(versionNum) ? versionNum : '';
   if (version && isNaN(parseFloat(version))) {
@@ -925,6 +949,7 @@ function loadContent(rawContent, filePath) {
   metaUpdated  = updated  || null;
   metaCompiled = compiled || null;
   metaFlashed  = flashed  || null;
+  metaPort     = port     || null;
   closeDiff();
   editor.setValue(clean);
   takeSnapshot(clean);
@@ -935,11 +960,14 @@ function loadContent(rawContent, filePath) {
   setDirty(false);
   editor.focus();
   if (isElectron && window.refreshPorts) window.refreshPorts();
+  // refreshPorts triggers checkCacheForConfig once FQBN is resolved
 }
 
 function clearMeta() {
-  ['input-filename','input-desc','input-board','input-version']
+  ['input-filename','input-desc','input-version']
     .forEach(id => document.getElementById(id).value = '');
+  document.getElementById('input-board').value = '';
+  document.getElementById('input-board').dispatchEvent(new Event('change'));
   metaCreated = metaUpdated = metaCompiled = metaFlashed = null;
   updateBanner();
   updateStatusMeta();
@@ -1123,16 +1151,19 @@ document.getElementById('btn-saveas').style.display   = isElectron ? '' : 'none'
 document.getElementById('btn-download').style.display = isElectron ? 'none' : '';
 
 // ── Compile/flash timestamp setters (called from buildPanel) ──
-window.setCompiledTimestamp = async () => {
-  metaCompiled = nowIso();
+// isoString: pass cached timestamp on restore; omit for a fresh compile (saves file)
+window.setCompiledTimestamp = async (isoString) => {
+  metaCompiled = isoString || nowIso();
   updateStatusMeta();
-  if (currentFilePath) await doSave();
+  if (!isoString && currentFilePath) await doSave();
 };
-window.setFlashedTimestamp = async () => {
+window.setFlashedTimestamp = async (port) => {
   metaFlashed = nowIso();
+  if (port) metaPort = port;
   updateStatusMeta();
   if (currentFilePath) await doSave();
 };
+window.getLastPort = () => metaPort;
 
 // ── Recent files dropdown ──────────────────────────────
 async function openRecent(filePath) {

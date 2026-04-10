@@ -9,6 +9,7 @@ const path      = require('path');
 const fs        = require('fs');
 const { spawn } = require('child_process');
 const proffie   = require('./proffieos');
+const cache     = require('./cacheManager');
 
 // ── Abort state ───────────────────────────────────────
 let _currentProc = null;
@@ -234,6 +235,12 @@ async function compile(configContent, fqbn, buildOptions, onLog) {
 
   if (result.ok) {
     onLog('--- Compile successful ---', false);
+    // Save to persistent cache
+    try {
+      const { app } = require('electron');
+      cache.cacheCompileResult(buildPath, configContent, fqbn, usb,
+        new Date().toISOString(), app.getVersion());
+    } catch {}
     return { ok: true, buildPath };
   } else {
     const wasAborted = _aborted;
@@ -364,19 +371,29 @@ async function flash(port, fqbn, onLog) {
 
   // ── Step 1: Convert .elf to .bin ──
   onLog('Converting firmware to binary...', false);
-  const dataPath = getArduinoDataPath();
 
-  const corePath = path.join(dataPath, 'packages', 'proffieboard', 'tools', 'arm-none-eabi-gcc');
+  // Search for arm-none-eabi-objcopy in all known package locations
+  const objcopyBin = process.platform === 'win32' ? 'arm-none-eabi-objcopy.exe' : 'arm-none-eabi-objcopy';
+  const searchBases = [
+    getArduinoDataPath(),
+    // System Arduino15 (Windows default — used when arduino-cli falls back to system install)
+    process.platform === 'win32'
+      ? path.join(process.env.LOCALAPPDATA || '', 'Arduino15')
+      : path.join(process.env.HOME || '', 'Library', 'Arduino15')
+  ];
+
   let objcopy = null;
-  if (fs.existsSync(corePath)) {
-    const versions = fs.readdirSync(corePath);
-    if (versions.length) {
-      objcopy = path.join(corePath, versions[0], 'bin',
-        process.platform === 'win32' ? 'arm-none-eabi-objcopy.exe' : 'arm-none-eabi-objcopy');
+  for (const base of searchBases) {
+    const toolPath = path.join(base, 'packages', 'proffieboard', 'tools', 'arm-none-eabi-gcc');
+    if (!fs.existsSync(toolPath)) continue;
+    for (const ver of fs.readdirSync(toolPath)) {
+      const candidate = path.join(toolPath, ver, 'bin', objcopyBin);
+      if (fs.existsSync(candidate)) { objcopy = candidate; break; }
     }
+    if (objcopy) break;
   }
 
-  if (!objcopy || !fs.existsSync(objcopy)) {
+  if (!objcopy) {
     const msg = 'arm-none-eabi-objcopy not found. Core may not be installed correctly.';
     onLog(msg, true);
     return { ok: false, error: msg };
@@ -498,12 +515,17 @@ function getStatus() {
   };
 }
 
+function checkCacheAndRestore(configContent, fqbn, usb) {
+  return cache.checkAndRestore(configContent, fqbn, usb);
+}
+
 module.exports = {
   initialize,
   compile,
   flash,
   abort,
   getStatus,
+  checkCacheAndRestore,
   validateCli,
   CORE_ID,
   CORE_VERSION
