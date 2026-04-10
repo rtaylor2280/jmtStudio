@@ -1,25 +1,25 @@
-// ProffieOS7 Config File for Single Button V8.1 with JMT Prop Compiled with JMT Studio
+// ProffieOS7 Config File for Two Button V8.1
 #ifdef CONFIG_TOP 
 
 // ------------ Board & Hardware Setup ------------
 #include "proffieboard_v3_config.h"
-#define NUM_BLADES 2                           	// Number of blade definitions in CONFIG_PRESETS
-#define NUM_BUTTONS 1                          	// Number of physical buttons
+#define NUM_BLADES 2                           	// Number of blade definitions in CONFIG_PRESETSs
+#define NUM_BUTTONS 2                          	// Number of physical buttons
 const unsigned int maxLedsPerStrip = 144;      	// Max LEDs per strip (important for memory allocation)
 #define EXTRA_COLOR_BUFFER_SPACE 60            	// Adds buffer space to avoid color artifacts on longer blades
 #define SHARED_POWER_PINS                      	// Allows power pins to be shared between blades
 
 // ------------ Charge Settings ------------
 #define CHARGE_DETECT_PIN 7                    	// Pin used for charge mode detection (Free1)
-#define CHARGE_FULL_ENTER     32750    			// ~99.8%
-#define CHARGE_FULL_EXIT      32300    			// ~98.6%
-#define CHARGE_FULL_DWELL_MS  45000    			// 45 seconds (balanced approach to true full reading)
-#define JMT_CHARGE_LOCKOUT						// Enables lockout of controls while charging
-#define JMT_CHARGE_STYLE_PRESET					// Enables last preset to be a charge style based on current blade config
-#define JMT_CHARGE_COMPLETE_ANNOUNCE			// Annonces charge complete on smoothed 100%
+#define CHARGE_FULL_ENTER     32750    			    // ~99.8%
+#define CHARGE_FULL_EXIT      32300    			    // ~98.6%
+#define CHARGE_FULL_DWELL_MS  45000    			    // 45 seconds (balanced approach to true full reading)
+#define JMT_CHARGE_LOCKOUT						          // Enables lockout of controls while charging
+#define JMT_CHARGE_STYLE_PRESET					        // Enables last preset to be a charge style based on current blade config
+#define JMT_CHARGE_COMPLETE_ANNOUNCE			      // Annonces charge complete on smoothed 100%
 
 // ------------ Blade Variables ------------
-#define NUM_SWITCH_LEDS 2                      	// Defines number of switch LEDs for use in blade configs
+#define NUM_SWITCH_LEDS 6                      	// Defines number of switch LEDs for use in blade configs
 
 // ------------ Audio & Motion Settings ------------
 #define VOLUME 1800                            	// Master volume (0–2047)
@@ -32,21 +32,21 @@ const unsigned int maxLedsPerStrip = 144;      	// Max LEDs per strip (important
 #define KILL_OLD_PLAYERS                       	// Stops old sounds before starting new ones
 
 // ------------ Audio Filtering ------------
-#define FILTER_CUTOFF_FREQUENCY 100            	// [24mm] Conservative cutoff for smaller speakers to reduce bass stress
-//#define FILTER_CUTOFF_FREQUENCY 80           	// [28mm] Lower cutoff to allow more bass while still protecting the speaker
+//#define FILTER_CUTOFF_FREQUENCY 100           // [24mm] Conservative cutoff for smaller speakers to reduce bass stress
+#define FILTER_CUTOFF_FREQUENCY 80           	  // [28mm] Lower cutoff to allow more bass while still protecting the speaker
 #define FILTER_ORDER 8                         	// Steepness of the filter roll-off (Butterworth order)
 
 // ------------ Power & Idle Management ------------
-#define MOTION_TIMEOUT (60 * 7 * 1000)        	// Time (ms) to shut down after inactivity (15 minutes)
+#define MOTION_TIMEOUT (60 * 6 * 1000)        	// Time (ms) to shut down after inactivity (15 minutes)
 #define IDLE_OFF_TIME (60 * 7 * 1000)         	// Time (ms) to power down completely after idle
 
 // ------------ Blade Detect & ID Monitoring ------------
+#define NO_BLADE_ID_RANGE 40000,100000         	// ID reading range interpreted as "no blade"
 #define BLADE_ID_SCAN_MILLIS 500              	// Interval between automatic Blade ID scans (ms)
 #define BLADE_ID_TIMES 10                      	// Number of samples averaged for each ID scan
-#define NO_BLADE_ID_RANGE 40000,100000         	// ID reading range interpreted as "no blade"
 #define ENABLE_POWER_FOR_ID PowerPINS<bladePowerPin2, bladePowerPin3> // Power blade during ID read for stable measurement
 #define BLADE_ID_STOP_SCAN_WHILE_IGNITED        // Disable ID scanning while blade is ignited
-#define JMT_BLADE_DETECT						// Use the JMT Blade Detect method to include Blade Detect features on Blade ID
+#define JMT_BLADE_DETECT						            // Use the JMT Blade Detect method to include Blade Detect features on Blade ID
 
 // ------------ Preset Behavior ------------
 #define SAVE_VOLUME                            	// Remembers last used volume
@@ -87,330 +87,417 @@ const unsigned int maxLedsPerStrip = 144;      	// Max LEDs per strip (important
 
 #endif
 
+#ifdef CONFIG_PROP
+#include "../props/jmt_fett_prop.h"
+#endif
+
 #ifdef CONFIG_PRESETS
-#include "../functions/charge_full_prop.h" 		//custom function for charge state during charing styles
+#include "../functions/charge_full_prop.h" 		  //custom function for charge state during charing styles
 #include "G:\My Drive\Ryan\Lightsaber\ProffieOS Versions\my_styles.h"
 
 Preset presets[] = {
- 
-{ "Luke_EP6;common",  "Luke_EP6/tracks/track1.wav",
-  StylePtr<MainRotoscopeSingleColorOriginalTrilogyBaseColor>("0,65535,0"),
-  StylePtr<PixelSwitchWrapper<MainRotoscopeSingleColorOriginalTrilogyBaseColor>>("0,65535,0"),
 
-  "Luke"
-  },
-
-{ "Father;common",  "Father/tracks/track1.wav",
+{ "Father;common", "Father/tracks/track1.wav",
   StylePtr<MainHyperResponsiveRotoscopeVader>(),
-  StylePtr<PixelSwitchWrapper<MainHyperResponsiveRotoscopeVader>>("65535,0,0"),
+  StylePtr<CrystalChamberAccelWrapper<MainHyperResponsiveRotoscopeVader,0>>("65535,0,0"),
 
   "Vader"
   },
 
-{ "Jinn_EP1;common",  "Jinn_EP1/tracks/track1.wav",
-  StylePtr<MainHyperResponsiveRotoscopePrequelsBaseColor>("0,65535,0"),
-  StylePtr<PixelSwitchWrapper<MainHyperResponsiveRotoscopePrequelsBaseColor>>("0,65535,0"),
+{ "Luke_EP6;common", "Luke_EP6/tracks/track1.wav",
+  StylePtr<MainRotoscopeSingleColorOriginalTrilogyBaseColor>("0,65535,0"),
+  StylePtr<CrystalChamberAccelWrapper<MainRotoscopeSingleColorOriginalTrilogyBaseColor,0>>("0,65535,0"),
 
-  "Qui-Gon"
+  "Luke"
   },
-  
-{ "Dark_Apprentice;common",  "Dark_Apprentice/tracks/track1.wav",
+
+{ "Dark_Apprentice;common", "Dark_Apprentice/tracks/track1.wav",
   StylePtr<MainHyperResponsiveRotoscopePrequelsBaseColor>("65535,0,0"),
-  StylePtr<PixelSwitchWrapper<MainHyperResponsiveRotoscopePrequelsBaseColor>>("65535,0,0"),
+  StylePtr<CrystalChamberAccelWrapper<MainHyperResponsiveRotoscopePrequelsBaseColor,0>>("65535,0,0"),
 
   "Maul"
   },
-/*
-{ "OB_EP3;common",  "OB_EP3/tracks/AniObi-trk.wav",
+
+{ "Jinn_EP1;common", "Jinn_EP1/tracks/track1.wav",
+  StylePtr<MainHyperResponsiveRotoscopePrequelsBaseColor>("0,65535,0"),
+  StylePtr<CrystalChamberAccelWrapper<MainHyperResponsiveRotoscopePrequelsBaseColor,0>>("0,65535,0"),
+
+  "Qui-Gon"
+  },
+
+{ "Kenobi;common", "Kenobi/tracks/track1.wav",
+  StylePtr<MainHyperResponsiveRotoscopePrequelsBaseColor>("6939,9252,59110"),
+  StylePtr<CrystalChamberAccelWrapper<MainHyperResponsiveRotoscopePrequelsBaseColor,0>>("6939,9252,59110"),
+
+  "Kenobi"
+  },
+
+{ "OB_EP3;common", "OB_EP3/tracks/AniObi-trk.wav",
   StylePtr<MainHyperResponsiveRotoscopePrequelsBaseColor>("0,0,65535"),
-  StylePtr<PixelSwitchWrapper<MainHyperResponsiveRotoscopePrequelsBaseColor>>("0,0,65535"),
+  StylePtr<CrystalChamberAccelWrapper<MainHyperResponsiveRotoscopePrequelsBaseColor,0>>("0,0,65535"),
 
   "Obi-Wan"
   },
 
-{ "Dark_Ani;common",  "Dark_Ani/tracks/AniObi-trk.wav",
+{ "Dark_Ani;common", "Dark_Ani/tracks/AniObi-trk.wav",
   StylePtr<MainHyperResponsiveRotoscopePrequelsBaseColor>("0,0,65535"),
-  StylePtr<PixelSwitchWrapper<MainHyperResponsiveRotoscopePrequelsBaseColor>>("0,0,65535"),
+  StylePtr<CrystalChamberAccelWrapper<MainHyperResponsiveRotoscopePrequelsBaseColor,0>>("0,0,65535"),
 
   "Anakin"
   },
 
-{ "Little_Green_Master;common",  "",
+{ "Little_Green_Master;common", "",
   StylePtr<MainHyperResponsiveRotoscopePrequelsBaseColor>("0,65535,0"),
-  StylePtr<PixelSwitchWrapper<MainHyperResponsiveRotoscopePrequelsBaseColor>>("0,65535,0"),
+  StylePtr<CrystalChamberAccelWrapper<MainHyperResponsiveRotoscopePrequelsBaseColor,0>>("0,65535,0"),
 
   "Yoda"
   },
 
-{ "Master_Mace;common",  "Master_Mace/tracks/Mace Windu vs Palpatine.wav",
+{ "Master_Mace;common", "Master_Mace/tracks/Mace Windu vs Palpatine.wav",
   StylePtr<MainHyperResponsiveRotoscopePrequelsBaseColor>("30326,0,49858"),
-  StylePtr<PixelSwitchWrapper<MainHyperResponsiveRotoscopePrequelsBaseColor>>("30326,0,49858"),
+  StylePtr<CrystalChamberAccelWrapper<MainHyperResponsiveRotoscopePrequelsBaseColor,0>>("30326,0,49858"),
 
   "Mace Windu"
   },
 
-{ "DarkBeskar;common",  "DarkBeskar/tracks/mando_theme.wav",
+{ "DarkBeskar;common", "DarkBeskar/tracks/mando_theme.wav",
   StylePtr<MainLiveActionDarksaberHyperResponsiveBaseColor>(),
-  StylePtr<PixelSwitchWrapper<MainLiveActionDarksaberHyperResponsiveBaseColor>>("25700,25700,38550"),
+  StylePtr<CrystalChamberAccelWrapper<MainLiveActionDarksaberHyperResponsiveBaseColor,0>>("25700,25700,38550"),
 
   "Darksaber"
   },
 
-{ "TanosBlade;common",  "TanosBlade/tracks/track1.wav",
-  StylePtr<MainAhsokaTanoBaseColor>(),
-  StylePtr<PixelSwitchWrapper<MainAhsokaTanoBaseColor>>("25700,25700,38550"),
+{ "Rescue;common", "Rescue/tracks/Hallway_Long.wav",
+  StylePtr<ControlMainHyperResponsiveRotoscopeSequels>("0,65535,0"),
+  StylePtr<CrystalChamberAccelWrapper<MainHyperResponsiveRotoscopeSequels,0>>("0,65535,0"),
 
-  "Ahsoka"
-  },
-
-{ "Sabine;common",  "Sabine/tracks/track1.wav",
-  StylePtr<ControlMainSabineWrenBaseColor>(),
-  StylePtr<PixelSwitchWrapper<ControlMainSabineWrenBaseColor>>("0,65535,0"),
-
-  "Sabine"
+  "GM Luke"
   },
   
-{ "Skoll;common",  "Skoll/tracks/track1.wav",
+{ "Talzin_Blade;common", "",
+  StylePtr<MainBladeofTalzinBaseColor>(),
+  StylePtr<CrystalChamberAccelWrapper<MainBladeofTalzinBaseColor,0>>("0,65535,0"),
+
+  "Talzin"
+  },
+
+{ "Skoll;common", "Skoll/tracks/track1.wav",
   StylePtr<MainBaylanSkollBaseColor>(),
-  StylePtr<PixelSwitchWrapper<MainBaylanSkollBaseColor>>("65535,3598,0"),
+  StylePtr<CrystalChamberAccelWrapper<MainBaylanSkollBaseColor,0>>("65535,3598,0"),
 
   "Skoll"
   },
 
-{ "Moon-Hati;common",  "Moon-Hati/tracks/track1.wav",
+{ "Moon-Hati;common", "Moon-Hati/tracks/track1.wav",
   StylePtr<ControlMainShinHatiBaseColor>(),
-  StylePtr<PixelSwitchWrapper<ControlMainShinHatiBaseColor>>("65535,3598,0"),
+  StylePtr<CrystalChamberAccelWrapper<ControlMainShinHatiBaseColor,0>>("65535,3598,0"),
   
   "Shin Hati"
   },
 
-{ "Blind_Cowboy;common",  "",
+{ "TanosBlade;common", "TanosBlade/tracks/track1.wav",
+  StylePtr<MainAhsokaTanoBaseColor>(),
+  StylePtr<CrystalChamberAccelWrapper<MainAhsokaTanoBaseColor,0>>("25700,25700,38550"),
+
+  "Ahsoka"
+  },
+
+{ "Blind_Cowboy;common", "",
   StylePtr<ControlMainEzraBridgerBaseColor>(),
-  StylePtr<PixelSwitchWrapper<ControlMainEzraBridgerBaseColor>>("0,0,65535"),
+  StylePtr<CrystalChamberAccelWrapper<ControlMainEzraBridgerBaseColor,0>>("0,0,65535"),
 
   "Kannan Jarrus"
   },
 
-{ "Nomad;common",  "",
+{ "Nomad;common", "",
   StylePtr<ControlMainEzraBridgerBaseColor>(),
-  StylePtr<PixelSwitchWrapper<ControlMainEzraBridgerBaseColor>>("0,0,65535"),
+  StylePtr<CrystalChamberAccelWrapper<ControlMainEzraBridgerBaseColor,0>>("0,0,65535"),
 
   "Ezra Bridger"
   },
 
-{ "Survivor2-Blue;common",  "Survivor2-Blue/tracks/cal-trk.wav",
+{ "Sabine;common", "Sabine/tracks/track1.wav",
+  StylePtr<ControlMainSabineWrenBaseColor>(),
+  StylePtr<CrystalChamberAccelWrapper<ControlMainSabineWrenBaseColor,0>>("0,65535,0"),
+
+  "Sabine"
+  },
+  
+{ "Survivor2-Blue;common", "Survivor2-Blue/tracks/cal-trk.wav",
    StylePtr<MainCalKestisSurvivorBlueBaseColor>(),
-   StylePtr<PixelSwitchWrapper<MainCalKestisSurvivorBlueBaseColor>>("0,0,65535"),
+   StylePtr<CrystalChamberAccelWrapper<MainCalKestisSurvivorBlueBaseColor,0>>("0,0,65535"),
   
    "Cal Kestis"
   },
 
-{ "RENvious;common",  "RENvious/tracks/track1.wav",
+{ "RENvious;common", "RENvious/tracks/track1.wav",
   StylePtr<MainKyloRenUnstableFilmBasedBaseColor>(),
-  StylePtr<PixelSwitchWrapper<MainKyloRenUnstableFilmBasedBaseColor>>("65535,0,0"),
+  StylePtr<CrystalChamberAccelWrapper<MainKyloRenUnstableFilmBasedBaseColor,0>>("65535,0,0"),
 
   "Kylo Ren"
   },
 
-{ "Fire;common",  "common/tracks/mars.wav",
+{ "Fire;common", "Fire/tracks/The_Bridge_of_Khazad-dum.wav",
   StylePtr<MainResponsiveFlameRealFlameGradientBaseColor>(),
-  StylePtr<PixelSwitchWrapper<MainResponsiveFlameRealFlameGradientBaseColor>>("65535,7816,0"),
+  StylePtr<CrystalChamberAccelWrapper<MainResponsiveFlameRealFlameGradientBaseColor,0>>("65535,7816,0"),
 
   "Fire Blade"
   },
 
-{ "The_Water_Saber;common",  "The_Water_Saber/tracks/Donkey_Kong_Country_Aquatic_Ambience.wav",
-  StylePtr<MainInteractiveWaterBladeBaseColor>(),
-  StylePtr<PixelSwitchWrapper<MainInteractiveWaterBladeBaseColor>>("0,34695,65535"),
-
-  "Water Blade"
-  },
-  
-{ "lightsaber_of_the_bells_2;common",  "lightsaber_of_the_bells_2/tracks/Star Wars The Mandalorian Theme x Carol of The Bells  EPIC CHRISTMAS MIX.wav",
-  StylePtr<MainChristmasTreeMultiColoredLightsBaseColor>(),
-  StylePtr<ChristmasPixelSwitchWrapper<PixelSwitchStandard>>("0,65535,0"),
+{ "The_Water_Saber;common", "The_Water_Saber/tracks/Donkey_Kong_Country_Aquatic_Ambience.wav",
+    StylePtr<MainInteractiveWaterBladeBaseColor>(),
+    StylePtr<CrystalChamberAccelWrapper<MainInteractiveWaterBladeBaseColor,0>>("0,34695,65535"),
 
   "Water Blade"
   },
   
 { "Skotos;common", "common/tracks/mercury.wav",
   StylePtr<GreyscaleFontsSkotos>(),
-  StylePtr<PixelSwitchWrapper<GreyscaleFontsSkotos>>("17219,0,29555"),
+  StylePtr<CrystalChamberAccelWrapper<GreyscaleFontsSkotos,0>>("17219,0,29555"),
   
   "Skotos"
   },
   
 { "Defect;common", "common/tracks/mercury.wav",
   StylePtr<GreyscaleFontsDefect>(),
-  StylePtr<PixelSwitchWrapper<GreyscaleFontsDefect>>("65535,0,0"),
+  StylePtr<CrystalChamberAccelWrapper<GreyscaleFontsDefect,0>>("65535,0,0"),
   
   "Defect"
   },
   
 { "Binary_Light;common", "common/tracks/mars.wav",
   StylePtr<GreyscaleFontsBinary_Light>(),
-  StylePtr<PixelSwitchWrapper<GreyscaleFontsBinary_Light>>("8357,8357,20393"),
+  StylePtr<CrystalChamberAccelWrapper<GreyscaleFontsBinary_Light,0>>("8357,8357,20393"),
   
   "Binary"
   },
   
 { "Null;common", "common/tracks/mars.wav",
   StylePtr<GreyscaleFontsNull>(),
-  StylePtr<PixelSwitchWrapper<GreyscaleFontsNull>>("20560,12850,53970"),
+  StylePtr<CrystalChamberAccelWrapper<GreyscaleFontsNull,0>>("20560,12850,53970"),
   
   "Null"
   },
   
 { "Analog;common", "",
   StylePtr<ControlMainAnalogAudioFlickerwithRippleSwingBaseColor>(),
-  StylePtr<PixelSwitchWrapper<ControlMainAnalogAudioFlickerwithRippleSwingBaseColor>>("0,34695,65535"),
+  StylePtr<CrystalChamberAccelWrapper<ControlMainAnalogAudioFlickerwithRippleSwingBaseColor,0>>("0,34695,65535"),
 
   "Analog"
   },
 
 { "Apocalypse;common", "",
   StylePtr<ControlMainApocalypseSwingSpeedSplitBladeBaseColor>(),
-  StylePtr<PixelSwitchWrapper<ControlMainApocalypseSwingSpeedSplitBladeBaseColor>>("65535,0,0"),
+  StylePtr<CrystalChamberAccelWrapper<ControlMainApocalypseSwingSpeedSplitBladeBaseColor,0>>("65535,0,0"),
 
   "Apocalypse"
   },
 
 { "Assassin;common", "",
   StylePtr<ControlMainAssasinHumpFlickerRippleSwingBaseColor>(),
-  StylePtr<PixelSwitchWrapper<ControlMainAssasinHumpFlickerRippleSwingBaseColor>>("0,65535,0"),
+  StylePtr<CrystalChamberAccelWrapper<ControlMainAssasinHumpFlickerRippleSwingBaseColor,0>>("0,65535,0"),
 
   "Assassin"
   },
 
 { "Coda;common", "",
   StylePtr<ControlMainCODARollingPulsewithUnstableSwingBaseColor>(),
-  StylePtr<PixelSwitchWrapper<ControlMainCODARollingPulsewithUnstableSwingBaseColor>>("7710,37008,65535"),
+  StylePtr<CrystalChamberAccelWrapper<ControlMainCODARollingPulsewithUnstableSwingBaseColor,0>>("7710,37008,65535"),
 
   "Coda"
   },
 
 { "Deadlink;common", "",
   StylePtr<ControlMainDeadlinkHumpFlickerwithRippleSwingBaseColor>(),
-  StylePtr<PixelSwitchWrapper<ControlMainDeadlinkHumpFlickerwithRippleSwingBaseColor>>("65535,0,65535"),
+  StylePtr<CrystalChamberAccelWrapper<ControlMainDeadlinkHumpFlickerwithRippleSwingBaseColor,0>>("65535,0,65535"),
 
   "Deadlink"
   },
 
 { "Exalted;common", "",
   StylePtr<ControlMainExaltedUnstableBladeRippleSwingBaseColor>(),
-  StylePtr<PixelSwitchWrapper<ControlMainExaltedUnstableBladeRippleSwingBaseColor>>("65535,0,0"),
+  StylePtr<CrystalChamberAccelWrapper<ControlMainExaltedUnstableBladeRippleSwingBaseColor,0>>("65535,0,0"),
 
   "Exalted"
   },
 
 { "Grey;common", "",
   StylePtr<ControlMainGreyAudioFlickerRippleSwingBaseColor>(),
-  StylePtr<PixelSwitchWrapper<ControlMainGreyAudioFlickerRippleSwingBaseColor>>("25700,25700,38550"),
+  StylePtr<CrystalChamberAccelWrapper<ControlMainGreyAudioFlickerRippleSwingBaseColor,0>>("25700,25700,38550"),
 
   "Grey"
   },
 
 { "Magnetic;common", "",
   StylePtr<ControlMainMagneticLavaLampwithFlickerBaseColor>(),
-  StylePtr<PixelSwitchWrapper<ControlMainMagneticLavaLampwithFlickerBaseColor>>("0,65535,52171"),
+  StylePtr<CrystalChamberAccelWrapper<ControlMainMagneticLavaLampwithFlickerBaseColor,0>>("0,65535,52171"),
 
   "Magnetic"
   },
 
 { "Masterless;common", "",
   StylePtr<ControlMainMasterlessRotoscopewithColorSwingBaseColor>(),
-  StylePtr<PixelSwitchWrapper<ControlMainMasterlessRotoscopewithColorSwingBaseColor>>("65535,65535,0"),
+  StylePtr<CrystalChamberAccelWrapper<ControlMainMasterlessRotoscopewithColorSwingBaseColor,0>>("65535,65535,0"),
 
   "Masterless"
   },
 
 { "Mercenary;common", "",
   StylePtr<ControlMainMercenarySmokeBladewithRippleSwingBaseColor>(),
-  StylePtr<PixelSwitchWrapper<ControlMainMercenarySmokeBladewithRippleSwingBaseColor>>("65535,65535,0"),
+  StylePtr<CrystalChamberAccelWrapper<ControlMainMercenarySmokeBladewithRippleSwingBaseColor,0>>("65535,65535,0"),
 
   "Mercenary"
   },
 
 { "Seethe;common", "",
   StylePtr<ControlMainSeetheAudioFlickerUnstableSwingBaseColor>(),
-  StylePtr<PixelSwitchWrapper<ControlMainSeetheAudioFlickerUnstableSwingBaseColor>>("65535,0,0"),
+  StylePtr<CrystalChamberAccelWrapper<ControlMainSeetheAudioFlickerUnstableSwingBaseColor,0>>("65535,0,0"),
 
   "Seethe"
   },
 
 { "Splinter;common", "",
   StylePtr<ControlMainSplinterSwingSpeedSplitBladeBaseColor>(),
-  StylePtr<PixelSwitchWrapper<ControlMainSplinterSwingSpeedSplitBladeBaseColor>>("65535,17476,0"),
+  StylePtr<CrystalChamberAccelWrapper<ControlMainSplinterSwingSpeedSplitBladeBaseColor,0>>("65535,17476,0"),
 
   "Splinter"
   },
 
 { "Stitched;common", "",
   StylePtr<GreyscaleFontsStitched>(),
-  StylePtr<PixelSwitchWrapper<GreyscaleFontsStitched>>("13655,53737,65535"),
+  StylePtr<CrystalChamberAccelWrapper<GreyscaleFontsStitched>>("13655,53737,65535"),
 
   "stitched"},
 
-
 { "Volatile;common", "",
   StylePtr<ControlMainVolatileTwoColorRotatingSwingSpeedAudioFlickerBaseColor>(),
-  StylePtr<PixelSwitchWrapper<ControlMainVolatileTwoColorRotatingSwingSpeedAudioFlickerBaseColor>>("0,0,65535"),
+  StylePtr<CrystalChamberAccelWrapper<ControlMainVolatileTwoColorRotatingSwingSpeedAudioFlickerBaseColor,0>>("0,0,65535"),
 
   "Volatile"
   },
 
 { "Paradise;common",  "common/tracks/mars.wav",
   StylePtr<MainPinkToBlueSparkle>(),
-  StylePtr<PixelSwitchWrapper<MainPinkToBlueSparkle>>("12029,0,35913"),
+  StylePtr<CrystalChamberAccelWrapper<MainPinkToBlueSparkle,0>>("12029,0,35913"),
 
-"Paradise"
-},
+  "Paradise"
+  },
 
-{ "Techno;common",  "",
+{ "Techno;common", "",
   StylePtr<ControlMainRainbowBlade>(),
   StylePtr<RainbowSwitch>(),
 
   "Techno"
-},
+  },
+
+{ "BlasterMode;common", "BlasterMode/tracks/mando.wav",
+  StylePtr<BlasterMode>(),
+  StylePtr<CrystalChamberAccelWrapper<BlasterMode,0>>("0,65535,65535"),
+
+  "BlasterMode"
+  },
+
+{ "Energy;common", "Energy/tracks/track01.wav",
+  StylePtr<EnergyOrange>(),
+  StylePtr<CrystalChamberAccelWrapper<EnergyOrange,0>>(),
+
+  "Energy"
+  },
 
 { "Excalibur;common", "",
   StylePtr<WhiteBlue>(),
-  StylePtr<PixelSwitchWrapper<WhiteBlue>>("51400,51400,65535"),
+  StylePtr<CrystalChamberAccelWrapper<WhiteBlue,0>>("51400,51400,65535"),
 
   "Excalibur"
   },
 
+{ "G-Grievous;common", "G-Grievous/tracks/grievous.wav",
+  StylePtr<Grievous>(),
+  StylePtr<CrystalChamberAccelWrapper<Grievous,0>>("17990,33410,46260"),
+
+  "Grievous"
+  },
+
+{ "KyberRadiance;common", "KyberRadiance/tracks/KR.wav",
+  StylePtr<KyberRadiance>(),
+  StylePtr<CrystalChamberAccelWrapper<KyberRadiance,0>>("0,65535,65535"),
+
+  "KyberRadiance"
+  },
+
+{ "Nexus;common", "Nexus/tracks/track02.wav",
+  StylePtr<Nexus>(),
+  StylePtr<CrystalChamberAccelWrapper<Nexus,0>>("7710,0,16962"),
+
+  "Nexus"
+  },
+
 { "Origin;common", "Origin/tracks/origin.wav",
   StylePtr<Origin>(),
-  StylePtr<PixelSwitchWrapper<Origin>>("29555,3855,56540"),
+  StylePtr<CrystalChamberAccelWrapper<Origin,0>>("29555,3855,56540"),
 
   "Origin"
   },
-  
+
 { "Quantum2;common", "Quantum/tracks/track01.wav",
   StylePtr<QuantumStyle2>(),
-  StylePtr<PixelSwitchWrapper<QuantumStyle2>>("0,51400,51400"),
+  StylePtr<CrystalChamberAccelWrapper<QuantumStyle2,0>>("0,51400,51400"),
 
   "QuantumStyle2"
+  },
+
+{ "Soulcleaver;common", "Soulcleaver/tracks/soulc.wav",
+  StylePtr<SoulcleaverRed>(),
+  StylePtr<CrystalChamberAccelWrapper<SoulcleaverRed,0>>("65535,0,0"),
+
+  "SoulcleaverRed"
   },
   
 { "Supernova;common", "Supernova/tracks/track1.wav",
   StylePtr<Supernova>(),
-  StylePtr<PixelSwitchWrapper<Supernova>>("65535,0,0"),
+  StylePtr<CrystalChamberAccelWrapper<Supernova,0>>("65535,0,0"),
 
   "Supernova"
   },
 
-{ "VoltBlade;common", "VoltBlade/tracks/track01.wav",
-  StylePtr<VoltBlade>(),
-  StylePtr<PixelSwitchWrapper<VoltBlade>>("7710,37008,65535"),
+{ "TheFaultyDarksaber;common", "TheFaultyDarksaber/tracks/track1.wav",
+  StylePtr<TheFaultyDarksaber>(),
+  StylePtr<CrystalChamberAccelWrapper<TheFaultyDarksaber,0>>("27242,23130,52685"),
+
+  "TheFaultyDarksaber"
+  },
+  
+{ "V-Der;common", "V-Der/tracks/track1.wav",
+  StylePtr<VDer>(),
+  StylePtr<CrystalChamberAccelWrapper<VDer,0>>("65535,0,0"),
 
   "VoltBlade"
   },
-*/
+  
+{ "VoltBlade;common", "VoltBlade/tracks/track01.wav",
+  StylePtr<VoltBlade>(),
+  StylePtr<CrystalChamberAccelWrapper<VoltBlade,0>>("7710,37008,65535"),
+
+  "VoltBlade"
+  },
+
+{ "WinduRevenge;common", "WinduRevenge/tracks/eclipse.wav",
+  StylePtr<WinduRevenge>(),
+  StylePtr<CrystalChamberAccelWrapper<WinduRevenge,0>>("24415,0,54069"),
+
+  "WinduRevenge"
+  },
+
+{ "Sebulba;common", "Sebulba/tracks/sebulba.wav",
+  StylePtr<Sebulba>(),
+  StylePtr<CrystalChamberAccelWrapper<Sebulba,0>>("24415,0,54069"),
+
+  "Sebulba"
+  },
+
 { "ChargeFont;common", "",
   ChargingStylePtr<BatteryBladeStyle>(),
-  StylePtr<ChargingButtonStyle<10, 100, 12000>>(),
+  StylePtr<ChargingButtonStyle<>>(),
 
   "Charging"
   },
@@ -418,7 +505,7 @@ Preset presets[] = {
 };
 
 BladeConfig blades[] = {
-  
+
 // JMT Octocore 33" Blade
 { 3000, 
 WS281XBladePtr<128, bladePin, Color8::GRB, PowerPINS<bladePowerPin2, bladePowerPin3>>(),
@@ -444,20 +531,14 @@ CONFIGARRAY(presets)
 { NO_BLADE, 
 WS281XBladePtr<16, bladePin, Color8::GRB, PowerPINS<bladePowerPin2, bladePowerPin3>>(),
 DimBlade(30.0, WS281XBladePtr<NUM_SWITCH_LEDS, blade2Pin, Color8::GRB, PowerPINS<bladePowerPin4>>()),
-CONFIGARRAY(presets)
+CONFIGARRAY(presets),
 },
   
 };
 
 #endif
 
-//prop must be defined at end to ensure order of variables defined supports JMT charge features
-#ifdef CONFIG_PROP
-#include "../props/jmt_fett_prop.h"
-#undef  PROP_TYPE
-#define PROP_TYPE JMTFettProp
-#endif
-
 #ifdef CONFIG_BUTTONS
 Button PowerButton(BUTTON_POWER, powerButtonPin, "pow");
+Button AuxButton(BUTTON_AUX, auxPin, "aux");
 #endif

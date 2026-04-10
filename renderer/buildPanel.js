@@ -294,6 +294,7 @@ function onBuildDone({ type, ok, error, aborted }) {
     if (ok) {
       compileSuccess = true;
       setFlashEnabled(true);
+      if (window.setCompiledTimestamp) window.setCompiledTimestamp();
       if (selectedPort) {
         stopCompileTimer();
         // Don't show Close — transitioning straight to flash
@@ -320,6 +321,7 @@ function onBuildDone({ type, ok, error, aborted }) {
   }
   if (type === 'flash') {
     window._isFlashing = false;
+    if (ok && window.setFlashedTimestamp) window.setFlashedTimestamp();
     finishBuildModal(ok,
       ok ? '✓ Flash Complete' : '✗ Flash Failed',
       ok ? 'Firmware uploaded successfully.' : error
@@ -474,4 +476,5 @@ function setStatus(type, state, message) {
 }
 
 // ── Expose init ────────────────────────────────────────
-window.initBuildPanel = initBuildPanel;
+window.initBuildPanel  = initBuildPanel;
+window.refreshPorts    = refreshPorts;

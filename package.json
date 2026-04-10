@@ -6,7 +6,8 @@
   "scripts": {
     "start": "electron .",
     "build": "electron-builder --win --x64",
-    "build:mac": "electron-builder --mac"
+    "build:mac": "electron-builder --mac",
+    "postinstall": "node scripts/copy-monaco.js"
   },
   "build": {
     "appId": "com.jmt.proffieos-editor",
@@ -25,12 +26,20 @@
     "files": [
       "main.js",
       "preload.js",
-      "renderer/**/*"
+      "toolchain.js",
+      "portDetector.js",
+      "proffieos.js",
+      "renderer/**/*",
+      "assets/**/*"
+    ],
+    "extraResources": [
+      { "from": "resources/", "to": ".", "filter": ["**/*"] }
     ]
   },
   "devDependencies": {
     "electron": "^29.0.0",
-    "electron-builder": "^24.0.0"
+    "electron-builder": "^24.0.0",
+    "monaco-editor": "0.44.0"
   },
   "dependencies": {
     "serialport": "^13.0.0"

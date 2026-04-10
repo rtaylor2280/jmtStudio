@@ -144,10 +144,19 @@ async function ensureCliConfig(onLog) {
 
 // ── First-run: install core if not present ─────────────
 async function ensureCore(onLog) {
-  const dataPath   = getArduinoDataPath();
-  const corePath   = path.join(dataPath, 'packages', 'proffieboard');
+  const dataPath    = getArduinoDataPath();
+  const hardwarePath = path.join(dataPath, 'packages', 'proffieboard', 'hardware', 'stm32l4');
 
-  if (fs.existsSync(corePath)) {
+  // Check for boards.txt inside any installed version — this file only exists after
+  // a complete successful install. The top-level packages/proffieboard dir is not
+  // a reliable check because arduino-cli creates it during core update-index.
+  // Note: arduino-cli installs 4.6.0 as directory "4.6", so we check version-agnostically.
+  const isInstalled = fs.existsSync(hardwarePath) &&
+    fs.readdirSync(hardwarePath).some(v =>
+      fs.existsSync(path.join(hardwarePath, v, 'boards.txt'))
+    );
+
+  if (isInstalled) {
     onLog(`Core ${CORE_ID}@${CORE_VERSION} already installed.`, false);
     return { ok: true };
   }

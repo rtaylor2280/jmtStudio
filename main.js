@@ -19,17 +19,30 @@ const Store = {
   }
 };
 
+function addRecentFile(filePath) {
+  let files = Store.get('recentFiles') || [];
+  files = [filePath, ...files.filter(f => f !== filePath)].slice(0, 10);
+  Store.set('recentFiles', files);
+}
+
 // ── Window ─────────────────────────────────────────────
 let win;
 
 function createWindow() {
+  const bounds = Store.get('windowBounds')    || {};
+  const wasMax = Store.get('windowMaximized') || false;
+
   win = new BrowserWindow({
-    width: 1280,
-    height: 860,
+    width:    bounds.width  || 1280,
+    height:   1,
+    x:        bounds.x,
+    y:        bounds.y,
     minWidth: 800,
     minHeight: 500,
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#111111',
     titleBarStyle: 'default',
+    icon: path.join(__dirname, 'assets', 'icon.ico'),
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -37,8 +50,23 @@ function createWindow() {
     }
   });
 
+  win.once('ready-to-show', () => {
+    win.show();
+    win.setSize(bounds.width || 1280, bounds.height || 860);
+    if (wasMax) win.maximize();
+  });
+
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   win.setMenuBarVisibility(false);
+
+  const saveBounds = () => {
+    if (!win.isMaximized() && !win.isMinimized()) {
+      Store.set('windowBounds', win.getBounds());
+    }
+    Store.set('windowMaximized', win.isMaximized());
+  };
+  win.on('resize', saveBounds);
+  win.on('move',   saveBounds);
 
   // ── Close handler ──
   win.on('close', (e) => {
@@ -77,6 +105,7 @@ ipcMain.handle('dialog:open', async () => {
   const filePath = filePaths[0];
   Store.set('lastDir', path.dirname(filePath));
   Store.set('lastFile', filePath);
+  addRecentFile(filePath);
   return { filePath, content: fs.readFileSync(filePath, 'utf8') };
 });
 
@@ -90,6 +119,7 @@ ipcMain.handle('file:save', async (_, { filePath, content }) => {
     fs.writeFileSync(filePath, content, 'utf8');
     Store.set('lastFile', filePath);
     Store.set('lastDir', path.dirname(filePath));
+    addRecentFile(filePath);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e.message };
@@ -108,6 +138,7 @@ ipcMain.handle('dialog:saveAs', async (_, { defaultName, content }) => {
     fs.writeFileSync(filePath, content, 'utf8');
     Store.set('lastFile', filePath);
     Store.set('lastDir', path.dirname(filePath));
+    addRecentFile(filePath);
     return { ok: true, filePath };
   } catch (e) {
     return { ok: false, error: e.message };
@@ -132,6 +163,14 @@ ipcMain.on('app:doClose', () => {
 
 ipcMain.handle('store:getLastFile',   () => Store.get('lastFile'));
 ipcMain.handle('store:clearLastFile', () => Store.set('lastFile', null));
+ipcMain.handle('store:getRecentFiles', () => {
+  const files = Store.get('recentFiles') || [];
+  return files.map(fp => ({ filePath: fp, exists: fs.existsSync(fp) }));
+});
+ipcMain.handle('store:removeRecentFile', (_, filePath) => {
+  const files = (Store.get('recentFiles') || []).filter(f => f !== filePath);
+  Store.set('recentFiles', files);
+});
 ipcMain.on('title:set', (_, title) => win.setTitle(title));
 
 // ── IPC: Toolchain ─────────────────────────────────────
@@ -191,6 +230,7 @@ ipcMain.handle('toolchain:flash', async (_, { port, fqbn }) => {
 });
 
 ipcMain.handle('toolchain:getStatus', () => toolchain.getStatus());
+ipcMain.handle('app:getVersion',      () => app.getVersion());
 ipcMain.handle('toolchain:abort',     () => toolchain.abort());
 
 // ── IPC: Port detection ────────────────────────────────

@@ -8,8 +8,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveFile:      (filePath, content)    => ipcRenderer.invoke('file:save', { filePath, content }),
   saveAs:        (defaultName, content) => ipcRenderer.invoke('dialog:saveAs', { defaultName, content }),
   getSavePath:   (defaultName)          => ipcRenderer.invoke('dialog:getSavePath', { defaultName }),
-  getLastFile:   ()                     => ipcRenderer.invoke('store:getLastFile'),
-  clearLastFile: ()                     => ipcRenderer.invoke('store:clearLastFile'),
+  getLastFile:    ()                     => ipcRenderer.invoke('store:getLastFile'),
+  clearLastFile:  ()                     => ipcRenderer.invoke('store:clearLastFile'),
+  getRecentFiles:    ()           => ipcRenderer.invoke('store:getRecentFiles'),
+  removeRecentFile:  (filePath)  => ipcRenderer.invoke('store:removeRecentFile', filePath),
   setTitle:      (title)                => ipcRenderer.send('title:set', title),
 
   // ── Toolchain ────────────────────────────────────────
@@ -19,6 +21,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   flash:   (port, fqbn)          => ipcRenderer.invoke('toolchain:flash', { port, fqbn }),
   getToolStatus:  ()             => ipcRenderer.invoke('toolchain:getStatus'),
   abortCompile:   ()             => ipcRenderer.invoke('toolchain:abort'),
+  getAppVersion:  ()             => ipcRenderer.invoke('app:getVersion'),
 
   // ── Port detection ───────────────────────────────────
   listPorts:          () => ipcRenderer.invoke('ports:list'),

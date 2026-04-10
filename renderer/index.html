@@ -7,8 +7,12 @@
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+  html {
+    background: #111111;
+  }
+
   body {
-    background: #1a1a1a;
+    background: #111111;
     color: #ccc;
     font-family: 'Segoe UI', system-ui, sans-serif;
     display: flex;
@@ -62,12 +66,108 @@
     background: #141414;
   }
 
+  .filename-wrap {
+    position: relative;
+  }
   #input-filename {
     width: 200px;
     font-family: monospace;
     opacity: 0.7;
-    cursor: default;
+    cursor: pointer;
     background: #141414;
+    padding-right: 22px;
+  }
+  #input-filename:hover { border-color: #4d9; opacity: 1; }
+  .filename-chevron {
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 0.6rem;
+    color: #888;
+    pointer-events: none;
+    line-height: 1;
+  }
+
+  #recent-dropdown {
+    display: none;
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    width: 360px;
+    background: #1a1a1a;
+    border: 1px solid #3a3a3a;
+    border-radius: 5px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+    z-index: 300;
+    overflow: hidden;
+  }
+  #recent-dropdown.open { display: block; }
+  .recent-header {
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #666;
+    padding: 7px 12px 5px;
+    border-bottom: 1px solid #2a2a2a;
+  }
+  .recent-item {
+    display: flex;
+    align-items: center;
+    padding: 7px 8px 7px 12px;
+    border-bottom: 1px solid #1e1e1e;
+    transition: background 0.1s;
+    gap: 6px;
+  }
+  .recent-item:last-child { border-bottom: none; }
+  .recent-item:hover { background: #252525; }
+  .recent-item.current { background: #1a2a1a; cursor: default; }
+  .recent-item-text {
+    flex: 1;
+    min-width: 0;
+    cursor: pointer;
+  }
+  .recent-item.current .recent-item-text { cursor: default; }
+  .recent-name {
+    font-family: monospace;
+    font-size: 0.8rem;
+    color: #ccc;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .recent-item.current .recent-name::after {
+    content: ' — current';
+    color: #4d9;
+    font-size: 0.7rem;
+  }
+  .recent-path {
+    font-size: 0.67rem;
+    color: #666;
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-family: monospace;
+  }
+  .recent-remove {
+    background: none;
+    border: none;
+    color: #555;
+    font-size: 0.75rem;
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: 3px;
+    flex-shrink: 0;
+    line-height: 1;
+    transition: color 0.1s, background 0.1s;
+  }
+  .recent-remove:hover { color: #e44; background: #2a1a1a; }
+  .recent-empty {
+    padding: 14px 12px;
+    font-size: 0.78rem;
+    color: #666;
+    text-align: center;
   }
 
   button {
@@ -119,7 +219,7 @@
     flex-wrap: wrap;
   }
   .meta-field { display: flex; flex-direction: column; gap: 3px; }
-  .meta-field label { font-size: 0.67rem; text-transform: uppercase; letter-spacing: 0.07em; color: #555; }
+  .meta-field label { font-size: 0.67rem; text-transform: uppercase; letter-spacing: 0.07em; color: #888; }
   .meta-field input {
     background: #181818;
     border: 1px solid #2e2e2e;
@@ -132,7 +232,6 @@
     transition: border-color 0.15s;
   }
   .meta-field input:focus { border-color: #4d9; }
-  #input-filename { width: 200px; font-family: monospace; }
   #input-desc     { width: 380px; }
   #input-board    { width: 160px; }
   #input-version  { width: 80px; }
@@ -210,7 +309,7 @@
     align-items: center;
     gap: 6px;
   }
-  .port-group label { font-size: 0.72rem; color: #666; white-space: nowrap; }
+  .port-group label { font-size: 0.72rem; color: #999; white-space: nowrap; }
 
   #bp-port-select {
     background: #181818;
@@ -227,7 +326,7 @@
 
   #bp-btn-refresh-ports {
     background: #222;
-    color: #888;
+    color: #aaa;
     border: 1px solid #333;
     padding: 4px 8px;
     font-size: 0.85rem;
@@ -267,7 +366,7 @@
   .bp-status-pending { background: #66f; box-shadow: 0 0 4px #66fa; animation: pulse-dot 1.2s ease-in-out infinite; }
   @keyframes pulse-dot { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
 
-  .bp-status-text { color: #777; white-space: nowrap; }
+  .bp-status-text { color: #999; white-space: nowrap; }
 
   /* ── Empty state ── */
   #empty-state {
@@ -277,10 +376,10 @@
     align-items: center;
     justify-content: center;
     gap: 16px;
-    color: #444;
+    color: #777;
   }
   #empty-state.visible { display: flex; }
-  #empty-state svg { color: #333; }
+  #empty-state svg { color: #555; }
   #empty-state p { font-size: 0.9rem; }
   #btn-open-empty {
     padding: 10px 28px;
@@ -366,7 +465,7 @@
     background: #111;
     border: none;
     border-bottom: 1px solid #222;
-    color: #666;
+    color: #999;
     font-size: 0.72rem;
     font-weight: 600;
     padding: 4px 16px;
@@ -382,12 +481,12 @@
   #bp-log-clear {
     background: none;
     border: none;
-    color: #444;
+    color: #666;
     font-size: 0.7rem;
     cursor: pointer;
     padding: 0 4px;
   }
-  #bp-log-clear:hover { color: #888; }
+  #bp-log-clear:hover { color: #aaa; }
 
   #bp-log-body { display: none; }
   #bp-log-body.open { display: block; }
@@ -400,7 +499,7 @@
     overflow-y: auto;
     white-space: pre-wrap;
     word-break: break-all;
-    color: #888;
+    color: #aaa;
   }
   #bp-log-content::-webkit-scrollbar { width: 6px; }
   #bp-log-content::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
@@ -414,7 +513,7 @@
     border-top: 1px solid #2e2e2e;
     padding: 3px 16px;
     font-size: 0.72rem;
-    color: #555;
+    color: #888;
     display: flex;
     gap: 20px;
     flex-shrink: 0;
@@ -426,7 +525,7 @@
   #stat-diff-info { color: #88f; display: none; }
   #stat-diff-info.visible { display: inline; }
   #stat-filepath {
-    color: #444; font-family: monospace; font-size: 0.68rem;
+    color: #777; font-family: monospace; font-size: 0.68rem;
     max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
 
@@ -463,7 +562,7 @@
     width: 90%;
   }
   .modal h2 { font-size: 0.95rem; color: #eee; margin-bottom: 8px; }
-  .modal p  { font-size: 0.82rem; color: #888; margin-bottom: 20px; line-height: 1.5; }
+  .modal p  { font-size: 0.82rem; color: #aaa; margin-bottom: 20px; line-height: 1.5; }
   .modal-btns { display: flex; justify-content: flex-end; gap: 8px; }
   .modal-btn-cancel  { background: #2a2a2a; color: #aaa; border: 1px solid #3a3a3a; }
   .modal-btn-discard { background: #3a1a1a; color: #e55; border: 1px solid #5a2a2a; }
@@ -471,6 +570,8 @@
 </style>
 </head>
 <body>
+
+
 
 <!-- ── Header ── -->
 <header>
@@ -498,7 +599,14 @@
   <div class="meta-bar">
     <div class="meta-field">
       <label>File Name</label>
-      <input type="text" id="input-filename" placeholder="Auto-set on save" spellcheck="false" readonly />
+      <div class="filename-wrap">
+        <input type="text" id="input-filename" placeholder="Open a file..." spellcheck="false" readonly title="Click to see recent files" />
+        <span class="filename-chevron">▾</span>
+        <div id="recent-dropdown">
+          <div class="recent-header">Recent Files</div>
+          <div id="recent-list"></div>
+        </div>
+      </div>
     </div>
     <div class="meta-field">
       <label>Description</label>
@@ -511,6 +619,10 @@
     <div class="meta-field">
       <label>OS Version</label>
       <input type="number" id="input-version" placeholder="8.1" min="1" step="0.1" spellcheck="false" style="width:80px;" />
+    </div>
+    <div id="meta-timestamps" style="display:none;margin-left:auto;text-align:right;line-height:1.7;font-size:0.7rem;">
+      <div><span style="color:#666;text-transform:uppercase;letter-spacing:0.06em;font-size:0.62rem;">Created</span> <span id="meta-created-val" style="color:#888;font-family:monospace;"></span></div>
+      <div><span style="color:#666;text-transform:uppercase;letter-spacing:0.06em;font-size:0.62rem;">Updated</span> <span id="meta-updated-val" style="color:#888;font-family:monospace;"></span></div>
     </div>
   </div>
 </header>
@@ -608,6 +720,8 @@
   <span class="hl">C++</span>
   <span id="stat-board"></span>
   <span id="stat-version"></span>
+  <span id="stat-compiled"></span>
+  <span id="stat-flashed"></span>
   <span id="stat-dirty">&#9679; unsaved</span>
   <span id="stat-diff-info">&#9776; diff view</span>
   <span id="stat-filepath"></span>
@@ -628,7 +742,7 @@
 
 <input type="file" id="file-input" accept=".h,.txt" style="display:none" />
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs/loader.min.js"></script>
+<script src="./vs/loader.js"></script>
 <script>
 // ── Environment ────────────────────────────────────────
 const isElectron = !!window.electronAPI;
@@ -704,50 +818,100 @@ document.getElementById('input-filename').addEventListener('input', updateBanner
 document.getElementById('input-desc').addEventListener('input', updateBanner);
 
 // ── Status meta ────────────────────────────────────────
+function fmtTimestamp(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' ' +
+    d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+}
+
 function updateStatusMeta() {
   const board   = document.getElementById('input-board').value.trim();
   const version = document.getElementById('input-version').value.trim();
-  document.getElementById('stat-board').textContent   = board || '';
-  document.getElementById('stat-version').textContent = version ? 'ProffieOS ' + version : '';
+  document.getElementById('stat-board').textContent    = board || '';
+  document.getElementById('stat-version').textContent  = version ? 'ProffieOS ' + version : '';
+
+  const compiledEl = document.getElementById('stat-compiled');
+  const flashedEl  = document.getElementById('stat-flashed');
+  compiledEl.textContent = metaCompiled ? '⚙ ' + fmtTimestamp(metaCompiled) : '';
+  compiledEl.title       = '';
+  flashedEl.textContent  = metaFlashed  ? '⚡ ' + fmtTimestamp(metaFlashed)  : '';
+  flashedEl.title        = '';
+
+  const ts = document.getElementById('meta-timestamps');
+  if (metaCreated || metaUpdated) {
+    ts.style.display = '';
+    document.getElementById('meta-created-val').textContent = metaCreated ? fmtTimestamp(metaCreated) : '—';
+    document.getElementById('meta-updated-val').textContent = metaUpdated ? fmtTimestamp(metaUpdated) : '—';
+  } else {
+    ts.style.display = 'none';
+  }
 }
 document.getElementById('input-board').addEventListener('input', updateStatusMeta);
 document.getElementById('input-version').addEventListener('input', updateStatusMeta);
 document.getElementById('input-version').addEventListener('input', validateFields);
 
 // ── Metadata ───────────────────────────────────────────
-const META_NAME = '// @jmt:name', META_DESC = '// @jmt:desc',
-      META_BOARD = '// @jmt:board', META_VERSION = '// @jmt:version';
+let metaCreated  = null;
+let metaUpdated  = null;
+let metaCompiled = null;
+let metaFlashed  = null;
+let toolVersion  = '1.0.0';
+
+function nowIso() {
+  const d = new Date(), p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+function stripJmtLines(content) {
+  return content
+    .replace(/^\/\/ Configuration edited with JMT Studio[^\n]*\n?/m, '')
+    .replace(/^\/\/ @jmt:\S+[^\n]*\n?/gm, '');
+}
 
 function injectMetadata(content) {
-  const name = document.getElementById('input-filename').value.trim();
-  const desc = document.getElementById('input-desc').value.trim();
-  const board = document.getElementById('input-board').value.trim();
+  const desc    = document.getElementById('input-desc').value.trim();
+  const board   = document.getElementById('input-board').value.trim();
   const version = document.getElementById('input-version').value.trim();
-  const stripped = content.replace(/^\/\/ @jmt:\S+.*\n?/gm, '');
-  const lines = [];
-  if (name)    lines.push(`${META_NAME}    ${name}`);
-  if (desc)    lines.push(`${META_DESC}    ${desc}`);
-  if (board)   lines.push(`${META_BOARD}   ${board}`);
-  if (version) lines.push(`${META_VERSION} ${version}`);
-  return lines.length ? lines.join('\n') + '\n' + stripped : stripped;
+  const now     = nowIso();
+  if (!metaCreated) metaCreated = now;
+
+  const stripped = stripJmtLines(content);
+  const lines = [
+    '// Configuration edited with JMT Studio (jedimastertech.com)',
+  ];
+  if (desc)    lines.push(`// @jmt:description ${desc}`);
+  if (board)   lines.push(`// @jmt:board       ${board}`);
+  if (version) lines.push(`// @jmt:os_version  ${version}`);
+  metaUpdated = now;
+  lines.push(`// @jmt:created     ${metaCreated}`);
+  lines.push(`// @jmt:updated     ${now}`);
+  if (metaCompiled) lines.push(`// @jmt:compiled    ${metaCompiled}`);
+  if (metaFlashed)  lines.push(`// @jmt:flashed     ${metaFlashed}`);
+  lines.push(`// @jmt:tool_version ${toolVersion}`);
+  return lines.join('\n') + '\n' + stripped;
 }
 
 function extractMetadata(content) {
   const m = (re) => { const r = content.match(re); return r ? r[1].trim() : null; };
   return {
-    name:    m(/^\/\/ @jmt:name\s+(.+)$/m),
-    desc:    m(/^\/\/ @jmt:desc\s+(.+)$/m),
-    board:   m(/^\/\/ @jmt:board\s+(.+)$/m),
-    version: m(/^\/\/ @jmt:version\s+(.+)$/m),
-    clean:   content.replace(/^\/\/ @jmt:\S+.*\n?/gm, '')
+    // Support both old and new tag names for backwards compatibility
+    desc:     m(/^\/\/ @jmt:description\s+(.+)$/m) || m(/^\/\/ @jmt:desc\s+(.+)$/m),
+    board:    m(/^\/\/ @jmt:board\s+(.+)$/m),
+    version:  m(/^\/\/ @jmt:os_version\s+(.+)$/m)  || m(/^\/\/ @jmt:version\s+(.+)$/m),
+    created:  m(/^\/\/ @jmt:created\s+(.+)$/m),
+    updated:  m(/^\/\/ @jmt:updated\s+(.+)$/m),
+    compiled: m(/^\/\/ @jmt:compiled\s+(.+)$/m),
+    flashed:  m(/^\/\/ @jmt:flashed\s+(.+)$/m),
+    clean:    stripJmtLines(content)
   };
 }
 
 // ── Load content ───────────────────────────────────────
 function loadContent(rawContent, filePath) {
-  const { name, desc, board, version, clean } = extractMetadata(rawContent);
+  const { desc, board, version, created, updated, compiled, flashed, clean } = extractMetadata(rawContent);
   const base = filePath ? filePath.split(/[\\/]/).pop().replace(/\.[^.]+$/, '') : null;
-  document.getElementById('input-filename').value = name    || base || 'my_config';
+  document.getElementById('input-filename').value = base || 'my_config';
   document.getElementById('input-desc').value     = desc    || '';
   document.getElementById('input-board').value    = board   || '';
   const versionNum = parseFloat(version || '');
@@ -757,6 +921,10 @@ function loadContent(rawContent, filePath) {
   } else {
     document.getElementById('input-version').classList.remove('field-error');
   }
+  metaCreated  = created  || null;
+  metaUpdated  = updated  || null;
+  metaCompiled = compiled || null;
+  metaFlashed  = flashed  || null;
   closeDiff();
   editor.setValue(clean);
   takeSnapshot(clean);
@@ -766,11 +934,13 @@ function loadContent(rawContent, filePath) {
   updateStatusMeta();
   setDirty(false);
   editor.focus();
+  if (isElectron && window.refreshPorts) window.refreshPorts();
 }
 
 function clearMeta() {
   ['input-filename','input-desc','input-board','input-version']
     .forEach(id => document.getElementById(id).value = '');
+  metaCreated = metaUpdated = metaCompiled = metaFlashed = null;
   updateBanner();
   updateStatusMeta();
 }
@@ -844,7 +1014,7 @@ async function doSave() {
   if (isElectron) {
     if (currentFilePath) {
       const res = await window.electronAPI.saveFile(currentFilePath, content);
-      if (res.ok) setDirty(false);
+      if (res.ok) { setDirty(false); updateStatusMeta(); }
       else alert('Save failed: ' + res.error);
     } else { await doSaveAs(); }
   } else { doDownload(); }
@@ -865,6 +1035,7 @@ async function doSaveAs() {
     setFilePath(savePath);
     updateBanner();
     setDirty(false);
+    updateStatusMeta();
   }
 }
 
@@ -951,8 +1122,103 @@ document.getElementById('btn-save').style.display     = isElectron ? '' : 'none'
 document.getElementById('btn-saveas').style.display   = isElectron ? '' : 'none';
 document.getElementById('btn-download').style.display = isElectron ? 'none' : '';
 
+// ── Compile/flash timestamp setters (called from buildPanel) ──
+window.setCompiledTimestamp = async () => {
+  metaCompiled = nowIso();
+  updateStatusMeta();
+  if (currentFilePath) await doSave();
+};
+window.setFlashedTimestamp = async () => {
+  metaFlashed = nowIso();
+  updateStatusMeta();
+  if (currentFilePath) await doSave();
+};
+
+// ── Recent files dropdown ──────────────────────────────
+async function openRecent(filePath) {
+  if (!await guardUnsaved('Save current file before opening another?')) return;
+  const res = await window.electronAPI.readFile(filePath);
+  if (res) loadContent(res.content, res.filePath);
+}
+
+async function buildRecentList() {
+  const items = await window.electronAPI.getRecentFiles();
+  const list  = document.getElementById('recent-list');
+  list.innerHTML = '';
+
+  if (!items || !items.length) {
+    list.innerHTML = '<div class="recent-empty">No recent files yet</div>';
+    return;
+  }
+
+  // Auto-remove missing files silently
+  const missing = items.filter(i => !i.exists);
+  missing.forEach(i => window.electronAPI.removeRecentFile(i.filePath));
+  const present = items.filter(i => i.exists);
+
+  if (!present.length) {
+    list.innerHTML = '<div class="recent-empty">No recent files yet</div>';
+    return;
+  }
+
+  present.forEach(({ filePath }) => {
+    const parts     = filePath.split(/[\\/]/);
+    const name      = parts.pop().replace(/\.[^.]+$/, '');
+    const folder    = parts.join('/');
+    const isCurrent = filePath === currentFilePath;
+
+    const div = document.createElement('div');
+    div.className = 'recent-item' + (isCurrent ? ' current' : '');
+
+    const textDiv = document.createElement('div');
+    textDiv.className = 'recent-item-text';
+    textDiv.title = filePath;
+    textDiv.innerHTML = `<div class="recent-name">${name}</div><div class="recent-path">${folder}</div>`;
+    if (!isCurrent) {
+      textDiv.addEventListener('click', () => {
+        closeRecentDropdown();
+        openRecent(filePath);
+      });
+    }
+
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'recent-remove';
+    removeBtn.title = 'Remove from list';
+    removeBtn.textContent = '✕';
+    removeBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await window.electronAPI.removeRecentFile(filePath);
+      div.remove();
+      if (!list.querySelector('.recent-item')) {
+        list.innerHTML = '<div class="recent-empty">No recent files yet</div>';
+      }
+    });
+
+    div.appendChild(textDiv);
+    if (!isCurrent) div.appendChild(removeBtn);
+    list.appendChild(div);
+  });
+}
+
+function closeRecentDropdown() {
+  document.getElementById('recent-dropdown').classList.remove('open');
+}
+
+if (isElectron) {
+  document.getElementById('input-filename').addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const dd = document.getElementById('recent-dropdown');
+    const opening = !dd.classList.contains('open');
+    dd.classList.toggle('open');
+    if (opening) await buildRecentList();
+  });
+
+  document.addEventListener('click', closeRecentDropdown);
+  document.getElementById('recent-dropdown').addEventListener('click', e => e.stopPropagation());
+}
+
 // ── Monaco + buildPanel init ───────────────────────────
-require.config({ paths: { vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs' } });
+require.config({ paths: { vs: './vs' } });
 require(['vs/editor/editor.main'], function () {
 
   editor = monaco.editor.create(document.getElementById('editor'), {
@@ -1023,6 +1289,7 @@ require(['vs/editor/editor.main'], function () {
   // ── Startup ──
   (async () => {
     if (isElectron) {
+      toolVersion = await window.electronAPI.getAppVersion();
       const lastPath = await window.electronAPI.getLastFile();
       if (lastPath) {
         const res = await window.electronAPI.readFile(lastPath);
@@ -1086,11 +1353,11 @@ require(['vs/editor/editor.main'], function () {
     </div>
 
     <!-- Log output -->
-    <div id="bm-log" style="font-family:'Cascadia Code',Consolas,monospace;font-size:0.72rem;line-height:1.5;color:#888;background:#0d0d0d;border:1px solid #1e1e1e;border-radius:4px;padding:10px 12px;height:220px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;margin-bottom:18px;"></div>
+    <div id="bm-log" style="font-family:'Cascadia Code',Consolas,monospace;font-size:0.72rem;line-height:1.5;color:#aaa;background:#0d0d0d;border:1px solid #1e1e1e;border-radius:4px;padding:10px 12px;height:220px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;margin-bottom:18px;"></div>
 
     <!-- Status / close -->
     <div style="display:flex;align-items:center;justify-content:space-between;padding-bottom:10px;border-bottom:1px solid #1e1e1e;">
-      <div id="bm-status" style="font-size:0.82rem;color:#666;"></div>
+      <div id="bm-status" style="font-size:0.82rem;color:#999;"></div>
       <div style="display:flex;gap:8px;">
         <button id="bm-abort" style="padding:6px 20px;background:#3a1a1a;color:#e55;border:1px solid #5a2a2a;border-radius:4px;font-size:0.82rem;font-weight:600;cursor:pointer;">⊘ Abort</button>
         <button id="bm-close" style="display:none;padding:6px 20px;background:#1a3a1a;color:#4d4;border:1px solid #2a5a2a;border-radius:4px;font-size:0.82rem;font-weight:600;cursor:pointer;">Close</button>
@@ -1098,7 +1365,7 @@ require(['vs/editor/editor.main'], function () {
     </div>
 
     <!-- Elapsed time -->
-    <div style="display:flex;gap:20px;justify-content:flex-end;margin-top:10px;font-family:monospace;font-size:0.72rem;color:#555;">
+    <div style="display:flex;gap:20px;justify-content:flex-end;margin-top:10px;font-family:monospace;font-size:0.72rem;color:#888;">
       <span id="bm-timer-compile" style="display:none;">Compile Time: <span id="bm-timer-compile-val">0:00</span></span>
       <span id="bm-timer-flash" style="display:none;">Flash Time: <span id="bm-timer-flash-val">0:00</span></span>
     </div>
