@@ -12,6 +12,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   clearLastFile:  ()                     => ipcRenderer.invoke('store:clearLastFile'),
   getRecentFiles:    ()           => ipcRenderer.invoke('store:getRecentFiles'),
   removeRecentFile:  (filePath)  => ipcRenderer.invoke('store:removeRecentFile', filePath),
+  getFavorites:      ()                        => ipcRenderer.invoke('favorites:get'),
+  addFavorite:       (filePath)                => ipcRenderer.invoke('favorites:add', filePath),
+  removeFavorite:    (filePath)                => ipcRenderer.invoke('favorites:remove', filePath),
   setTitle:      (title)                => ipcRenderer.send('title:set', title),
 
   // ── Toolchain ────────────────────────────────────────

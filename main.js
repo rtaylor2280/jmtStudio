@@ -26,7 +26,7 @@ const Store = {
 
 function addRecentFile(filePath) {
   let files = Store.get('recentFiles') || [];
-  files = [filePath, ...files.filter(f => f !== filePath)].slice(0, 10);
+  files = [filePath, ...files.filter(f => f !== filePath)].slice(0, 5);
   Store.set('recentFiles', files);
 }
 
@@ -211,7 +211,16 @@ ipcMain.handle('store:getLastFile',   () => Store.get('lastFile'));
 ipcMain.handle('store:clearLastFile', () => Store.set('lastFile', null));
 ipcMain.handle('store:getRecentFiles', () => {
   const files = Store.get('recentFiles') || [];
-  return files.map(fp => ({ filePath: fp, exists: fs.existsSync(fp) }));
+  return files.map(fp => {
+    if (!fs.existsSync(fp)) return { filePath: fp, exists: false, desc: null };
+    try {
+      const content = fs.readFileSync(fp, 'utf8');
+      const m = content.match(/^\/\/ @jmt:description\s+(.+)$/m);
+      return { filePath: fp, exists: true, desc: m ? m[1].trim() : null };
+    } catch {
+      return { filePath: fp, exists: false, desc: null };
+    }
+  });
 });
 ipcMain.handle('store:removeRecentFile', (_, filePath) => {
   const files = (Store.get('recentFiles') || []).filter(f => f !== filePath);
@@ -288,4 +297,34 @@ ipcMain.handle('ports:list', async () => {
 
 ipcMain.handle('ports:getRecommended', async () => {
   return await portDetect.getRecommendedPort();
+});
+
+// ── IPC: Favorites ─────────────────────────────────────
+ipcMain.handle('favorites:get', () => {
+  const favs = Store.get('favorites') || [];
+  return favs.map(({ filePath }) => {
+    if (!fs.existsSync(filePath)) return { filePath, exists: false, desc: null };
+    try {
+      const content = fs.readFileSync(filePath, 'utf8');
+      const m = content.match(/^\/\/ @jmt:description\s+(.+)$/m);
+      return { filePath, exists: true, desc: m ? m[1].trim() : null };
+    } catch {
+      return { filePath, exists: false, desc: null };
+    }
+  });
+});
+
+ipcMain.handle('favorites:add', (_, filePath) => {
+  let favs = Store.get('favorites') || [];
+  if (!favs.find(f => f.filePath === filePath)) {
+    favs = [{ filePath }, ...favs];
+    Store.set('favorites', favs);
+  }
+  return true;
+});
+
+ipcMain.handle('favorites:remove', (_, filePath) => {
+  const favs = (Store.get('favorites') || []).filter(f => f.filePath !== filePath);
+  Store.set('favorites', favs);
+  return true;
 });
