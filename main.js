@@ -4,6 +4,11 @@ const fs          = require('fs');
 const toolchain   = require('./toolchain');
 const portDetect  = require('./portDetector');
 
+// ── Separate userData for dev vs prod ──────────────────
+if (!app.isPackaged) {
+  app.setPath('userData', path.join(app.getPath('appData'), 'jmt-studio-dev'));
+}
+
 // ── Persist last file path ─────────────────────────────
 const Store = {
   _path: path.join(app.getPath('userData'), 'prefs.json'),
