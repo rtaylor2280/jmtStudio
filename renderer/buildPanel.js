@@ -14,8 +14,9 @@ const KNOWN_BOARDS = [
 ];
 
 // ── State ──────────────────────────────────────────────
-let selectedPort    = null;
-let selectedFqbn  = null;
+let selectedPort              = null;
+let selectedPortIsProffieboard = false;
+let selectedFqbn              = null;
 let compileSuccess  = false;   // true after successful compile this session
 let toolchainReady  = false;
 let isBusy          = false;   // true while compile/flash running
@@ -67,6 +68,7 @@ async function initBuildPanel() {
   document.getElementById('input-board').addEventListener('change', onInputBoardChange);
   el('bp-usb-select').addEventListener('change', e => {
     selectedUsb = e.target.value;
+    updateUsbChangedIndicator();
     checkCacheForConfig();
   });
   document.getElementById('bm-close').addEventListener('click', () => {
@@ -171,6 +173,7 @@ async function refreshPorts() {
   if (!result.ok || result.ports.length === 0) {
     portSelect.innerHTML = '<option value="">No ports detected</option>';
     selectedPort = null;
+    selectedPortIsProffieboard = false;
     updateBoardDisplay('');
     setStatus('port', 'error', 'No device detected');
     setFlashEnabled(false);
@@ -194,6 +197,7 @@ async function refreshPorts() {
   if (result.autoSelected && result.port) {
     portSelect.value = result.port.path;
     selectedPort = result.port.path;
+    selectedPortIsProffieboard = true;
     const detectedName = detectedBoardName(result.port.variants);
     updateBoardDisplay(detectedName);
     autoSelectMetaBoard(detectedName);
@@ -204,6 +208,7 @@ async function refreshPorts() {
     if (preferred) {
       portSelect.value = preferred.path;
       selectedPort = preferred.path;
+      selectedPortIsProffieboard = true;
       const detectedName = detectedBoardName(preferred.variants);
       updateBoardDisplay(detectedName);
       autoSelectMetaBoard(detectedName);
@@ -211,18 +216,20 @@ async function refreshPorts() {
     } else {
       portSelect.value = '';
       selectedPort = null;
+      selectedPortIsProffieboard = false;
       updateBoardDisplay('');
       setStatus('port', 'warn', `${result.proffieports.length} Proffieboards — select port`);
     }
   } else {
+    // Non-Proffieboard port — show in dropdown but don't allow flash
     portSelect.value = displayPorts[0].path;
     selectedPort = displayPorts[0].path;
-    const detectedName = detectedBoardName(displayPorts[0].variants);
-    updateBoardDisplay(detectedName);
-    autoSelectMetaBoard(detectedName);
+    selectedPortIsProffieboard = false;
+    updateBoardDisplay('');
     setStatus('port', 'warn', result.message);
   }
 
+  updatePortChangedIndicator();
   // After FQBN is resolved, check if a valid cache exists for the current config
   if (!compileSuccess) await checkCacheForConfig();
 }
@@ -238,6 +245,18 @@ function detectedBoardName(variants) {
 function updateBoardDisplay(name) {
   const disp = el('bp-board-display');
   if (disp) disp.value = name || '';
+}
+
+function updateUsbChangedIndicator() {
+  const baseline = window.getBaselineUsb ? window.getBaselineUsb() : null;
+  el('bp-usb-select').classList.toggle('field-changed',
+    baseline !== null && selectedUsb !== baseline);
+}
+
+function updatePortChangedIndicator() {
+  const lastPort = window.getLastPort ? window.getLastPort() : null;
+  el('bp-port-select').classList.toggle('field-changed',
+    lastPort !== null && selectedPort !== null && selectedPort !== lastPort);
 }
 
 // Auto-selects the meta bar board dropdown if it is currently empty
@@ -257,19 +276,23 @@ function autoSelectMetaBoard(boardName) {
 
 function onPortChange(e) {
   selectedPort = e.target.value || null;
+  const port = selectedPort ? cachedPorts.find(p => p.path === selectedPort) : null;
+  selectedPortIsProffieboard = port ? port.isProffieboard : false;
+  updatePortChangedIndicator();
   if (!selectedPort) {
     updateBoardDisplay('');
+    setFlashEnabled(false);
     setStatus('port', 'error', 'No port selected');
     return;
   }
-  const port = cachedPorts.find(p => p.path === selectedPort);
   if (port) {
     const name = detectedBoardName(port.variants);
-    updateBoardDisplay(name);
-    autoSelectMetaBoard(name);
+    updateBoardDisplay(port.isProffieboard ? name : '');
+    if (port.isProffieboard) autoSelectMetaBoard(name);
     setStatus('port', port.isProffieboard ? 'ok' : 'warn',
       port.isProffieboard ? `Proffieboard on ${selectedPort}` : `Port: ${selectedPort}`);
   }
+  setFlashEnabled(selectedPortIsProffieboard && compileSuccess);
 }
 
 // Driven by the meta bar board <select> — this is the single source of truth for selectedFqbn
@@ -395,6 +418,7 @@ function stopWaitForBoard() {
 function startWaitForBoard() {
   // Clear stale port state immediately — board must be verified before flash is allowed
   selectedPort = null;
+  selectedPortIsProffieboard = false;
   setFlashEnabled(false);
 
   stopCompileTimer();
@@ -412,11 +436,13 @@ function startWaitForBoard() {
     if (result.ok && result.autoSelected && result.port) {
       stopWaitForBoard();
       selectedPort = result.port.path;
+      selectedPortIsProffieboard = true;
       cachedPorts  = result.ports;
       const portSelect = el('bp-port-select');
       portSelect.innerHTML = `<option value="${result.port.path}">${result.port.path}</option>`;
       portSelect.value = result.port.path;
       setFlashEnabled(true);
+      updatePortChangedIndicator();
       const name = detectedBoardName(result.port.variants);
       updateBoardDisplay(name);
       autoSelectMetaBoard(name);
@@ -485,7 +511,7 @@ function toggleLog() {
 function setBusy(busy) {
   isBusy = busy;
   el('bp-btn-compile').disabled = busy || !selectedFqbn || compileSuccess;
-  el('bp-btn-flash').disabled   = busy || !compileSuccess || !selectedPort;
+  el('bp-btn-flash').disabled   = busy || !compileSuccess || !selectedPort || !selectedPortIsProffieboard;
   el('bp-btn-refresh-ports').disabled = busy;
   el('bp-port-select').disabled = busy;
 }
@@ -495,7 +521,7 @@ function updateCompileButton() {
 }
 
 function setFlashEnabled(enabled) {
-  el('bp-btn-flash').disabled = !enabled || !selectedPort || isBusy;
+  el('bp-btn-flash').disabled = !enabled || !selectedPort || !selectedPortIsProffieboard || isBusy;
 }
 
 function startCompileTimer() {
@@ -571,4 +597,5 @@ window.setSelectedUsb      = (usb) => {
   selectedUsb = usb;
   const sel = el('bp-usb-select');
   if (sel) sel.value = usb;
+  updateUsbChangedIndicator();
 };

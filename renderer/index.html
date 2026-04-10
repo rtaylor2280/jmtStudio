@@ -75,6 +75,7 @@
     cursor: pointer;
   }
   .meta-field select:focus { border-color: #4d9; }
+  .field-changed { color: #e55 !important; }
 
   .filename-wrap {
     position: relative;
@@ -862,8 +863,8 @@ function updateStatusMeta() {
     ts.style.display = 'none';
   }
 }
-document.getElementById('input-board').addEventListener('change', updateStatusMeta);
-document.getElementById('input-version').addEventListener('input', updateStatusMeta);
+document.getElementById('input-board').addEventListener('change', () => { updateChangedIndicators(); updateStatusMeta(); });
+document.getElementById('input-version').addEventListener('input', () => { updateChangedIndicators(); updateStatusMeta(); });
 document.getElementById('input-version').addEventListener('input', validateFields);
 
 // ── Metadata ───────────────────────────────────────────
@@ -873,6 +874,21 @@ let metaCompiled = null;
 let metaFlashed  = null;
 let metaPort     = null;
 let toolVersion  = '1.0.0';
+
+// Baseline values — set on file load, used to detect divergence from stored state
+let baselineBoard   = null;
+let baselineVersion = null;
+let baselineUsb     = null;
+
+function updateChangedIndicators() {
+  const boardSel  = document.getElementById('input-board');
+  const versionEl = document.getElementById('input-version');
+  boardSel.classList.toggle('field-changed',
+    baselineBoard !== null && boardSel.value !== baselineBoard);
+  versionEl.classList.toggle('field-changed',
+    baselineVersion !== null && versionEl.value.trim() !== String(baselineVersion));
+}
+window.getBaselineUsb = () => baselineUsb;
 
 function nowIso() {
   const d = new Date(), p = n => String(n).padStart(2, '0');
@@ -950,6 +966,10 @@ function loadContent(rawContent, filePath) {
   metaCompiled = compiled || null;
   metaFlashed  = flashed  || null;
   metaPort     = port     || null;
+  baselineBoard   = board   || null;
+  baselineVersion = version || null;
+  baselineUsb     = usb     || null;
+  updateChangedIndicators();
   closeDiff();
   editor.setValue(clean);
   takeSnapshot(clean);
@@ -968,7 +988,10 @@ function clearMeta() {
     .forEach(id => document.getElementById(id).value = '');
   document.getElementById('input-board').value = '';
   document.getElementById('input-board').dispatchEvent(new Event('change'));
-  metaCreated = metaUpdated = metaCompiled = metaFlashed = null;
+  metaCreated = metaUpdated = metaCompiled = metaFlashed = metaPort = null;
+  baselineBoard = baselineVersion = baselineUsb = null;
+  ['input-board','input-version'].forEach(id =>
+    document.getElementById(id).classList.remove('field-changed'));
   updateBanner();
   updateStatusMeta();
 }
