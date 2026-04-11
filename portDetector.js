@@ -16,8 +16,14 @@ function getCliPath() {
 }
 
 function getArduinoDataPath() {
+  // Always use the prod userData path for arduino-data so installed packages are
+  // shared between dev and prod builds. In dev mode, app.getPath('userData') is
+  // overridden to 'jmt-studio-dev', which would be missing the board packages.
   const { app } = require('electron');
-  return path.join(app.getPath('userData'), 'arduino-data');
+  const base = app.isPackaged
+    ? app.getPath('userData')
+    : path.join(app.getPath('appData'), 'jmt-studio');
+  return path.join(base, 'arduino-data');
 }
 
 // ── Run arduino-cli board list ─────────────────────────

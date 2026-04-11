@@ -17,7 +17,8 @@ const KNOWN_BOARDS = [
 let selectedPort              = null;
 let selectedPortIsProffieboard = false;
 let selectedFqbn              = null;
-let compileSuccess  = false;   // true after successful compile this session
+let compileSuccess      = false;   // true after successful compile this session
+let cacheCheckPending   = false;   // true while cache check is in flight
 let toolchainReady  = false;
 let isBusy          = false;   // true while compile/flash running
 let unsubs          = [];      // IPC listener cleanup functions
@@ -32,6 +33,7 @@ window.onEditorContentChanged = () => {
   if (compileSuccess) {
     compileSuccess = false;
     setFlashEnabled(false);
+    cacheCheckPending = true;
     updateCompileButton();
     setStatus('compile', 'warn', 'Config changed — recompile needed');
   }
@@ -79,6 +81,10 @@ async function initBuildPanel() {
     document.getElementById('bm-abort').disabled = true;
     document.getElementById('bm-abort').textContent = 'Aborting...';
     await window.electronAPI.abortCompile();
+  });
+  document.getElementById('bm-retry').addEventListener('click', () => {
+    document.getElementById('build-modal').style.display = 'none';
+    doFlash();
   });
 
   // Initial state
@@ -309,6 +315,7 @@ function onInputBoardChange() {
     setStatus('compile', 'warn', 'Board changed — recompile needed');
   }
   selectedFqbn = newFqbn;
+  cacheCheckPending = true;
   updateCompileButton();
   checkCacheForConfig('Board changed — recompile needed');
 }
@@ -340,7 +347,7 @@ function onBuildStatus({ type, ok, message }) {
   }
 }
 
-function onBuildDone({ type, ok, error, aborted }) {
+function onBuildDone({ type, ok, error, aborted, retriable }) {
   if (type === 'compile') {
     if (ok) {
       compileSuccess = true;
@@ -364,7 +371,8 @@ function onBuildDone({ type, ok, error, aborted }) {
     if (ok && window.setFlashedTimestamp) window.setFlashedTimestamp(selectedPort);
     finishBuildModal(ok,
       ok ? '✓ Flash Complete' : '✗ Flash Failed',
-      ok ? 'Firmware uploaded successfully.' : error
+      ok ? 'Firmware uploaded successfully.' : error,
+      { retriable: !!retriable }
     );
     if (!ok && error) appendLog(`\n⚠ ${error}`, true);
   }
@@ -379,6 +387,7 @@ function showBuildModal(title) {
   document.getElementById('bm-log').innerHTML = '';
   document.getElementById('bm-status').textContent = '';
   document.getElementById('bm-close').style.display = 'none';
+  document.getElementById('bm-retry').style.display = 'none';
   const abortBtn = document.getElementById('bm-abort');
   abortBtn.style.display = 'inline-block';
   abortBtn.disabled = false;
@@ -457,13 +466,14 @@ function startWaitForBoard() {
   waitForBoardInterval = setInterval(pollForBoard, 2000);
 }
 
-function finishBuildModal(success, title, statusMsg) {
+function finishBuildModal(success, title, statusMsg, { retriable = false } = {}) {
   stopCompileTimer();
   stopFlashTimer();
   document.getElementById('bm-title').textContent = title;
   document.getElementById('bm-title').style.color = success ? '#4d4' : '#e44';
   document.getElementById('bm-status').textContent = statusMsg || '';
   document.getElementById('bm-abort').style.display = 'none';
+  document.getElementById('bm-retry').style.display = retriable ? 'inline-block' : 'none';
   document.getElementById('bm-close').style.display = 'inline-block';
   setBarMode(success ? 'success' : 'error');
 }
@@ -510,15 +520,16 @@ function toggleLog() {
 // ── UI helpers ─────────────────────────────────────────
 function setBusy(busy) {
   isBusy = busy;
-  el('bp-btn-compile').disabled = busy || !selectedFqbn || compileSuccess;
+  el('bp-btn-compile').disabled = busy || !selectedFqbn || compileSuccess || !window._currentFilePath || cacheCheckPending;
   el('bp-btn-flash').disabled   = busy || !compileSuccess || !selectedPort || !selectedPortIsProffieboard;
   el('bp-btn-refresh-ports').disabled = busy;
   el('bp-port-select').disabled = busy;
 }
 
 function updateCompileButton() {
-  if (!isBusy) el('bp-btn-compile').disabled = !selectedFqbn || compileSuccess;
+  if (!isBusy) el('bp-btn-compile').disabled = !selectedFqbn || compileSuccess || !window._currentFilePath || cacheCheckPending;
 }
+window.updateCompileButton = updateCompileButton;
 
 function setFlashEnabled(enabled) {
   el('bp-btn-flash').disabled = !enabled || !selectedPort || !selectedPortIsProffieboard || isBusy;
@@ -576,15 +587,23 @@ async function checkCacheForConfig(missStatus) {
   const content = window.getEditorContent();
   if (!content || content.trim() === '') return;
 
+  cacheCheckPending = true;
+  updateCompileButton();
+
   const result = await window.electronAPI.checkCache(content, selectedFqbn, selectedUsb);
+  cacheCheckPending = false;
+
   if (result.hit) {
     compileSuccess = true;
     setFlashEnabled(!!selectedPort);
     updateCompileButton();
     setStatus('compile', 'ok', 'Compile restored from cache');
     if (window.setCompiledTimestamp) window.setCompiledTimestamp(result.metadata.compiledAt);
-  } else if (!compileSuccess && missStatus !== false) {
-    setStatus('compile', missStatus ? 'warn' : '', missStatus || 'Not compiled');
+  } else {
+    updateCompileButton();
+    if (!compileSuccess && missStatus !== false) {
+      setStatus('compile', missStatus ? 'warn' : '', missStatus || 'Not compiled');
+    }
   }
 }
 

@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getFavorites:      ()                        => ipcRenderer.invoke('favorites:get'),
   addFavorite:       (filePath)                => ipcRenderer.invoke('favorites:add', filePath),
   removeFavorite:    (filePath)                => ipcRenderer.invoke('favorites:remove', filePath),
+  reorderFavorites:  (orderedPaths)            => ipcRenderer.invoke('favorites:reorder', orderedPaths),
   setTitle:      (title)                => ipcRenderer.send('title:set', title),
 
   // ── Toolchain ────────────────────────────────────────
@@ -25,6 +26,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getToolStatus:  ()             => ipcRenderer.invoke('toolchain:getStatus'),
   abortCompile:   ()             => ipcRenderer.invoke('toolchain:abort'),
   getAppVersion:  ()             => ipcRenderer.invoke('app:getVersion'),
+  isDevMode:      ()             => ipcRenderer.invoke('app:isDevMode'),
   checkCache: (configContent, fqbn, usb) =>
     ipcRenderer.invoke('cache:check', { configContent, fqbn, usb }),
 

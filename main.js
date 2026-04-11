@@ -288,6 +288,7 @@ ipcMain.handle('toolchain:getStatus', () => toolchain.getStatus());
 ipcMain.handle('cache:check', (_, { configContent, fqbn, usb }) =>
   toolchain.checkCacheAndRestore(configContent, fqbn, usb));
 ipcMain.handle('app:getVersion',      () => app.getVersion());
+ipcMain.handle('app:isDevMode',       () => !app.isPackaged);
 ipcMain.handle('toolchain:abort',     () => toolchain.abort());
 
 // ── IPC: Port detection ────────────────────────────────
@@ -326,5 +327,10 @@ ipcMain.handle('favorites:add', (_, filePath) => {
 ipcMain.handle('favorites:remove', (_, filePath) => {
   const favs = (Store.get('favorites') || []).filter(f => f.filePath !== filePath);
   Store.set('favorites', favs);
+  return true;
+});
+
+ipcMain.handle('favorites:reorder', (_, orderedPaths) => {
+  Store.set('favorites', orderedPaths.map(fp => ({ filePath: fp })));
   return true;
 });

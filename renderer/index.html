@@ -7,6 +7,19 @@
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+  #dev-bar {
+    display: none;
+    background: #025192;
+    color: #cedbea;
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-align: center;
+    padding: 2px 0;
+    text-transform: uppercase;
+    user-select: none;
+  }
+
   html {
     background: #111111;
   }
@@ -734,11 +747,14 @@
   }
   .fav-card:hover .fav-card-remove { opacity: 1; }
   .fav-card-remove:hover { color: #e44 !important; background: rgba(40,10,10,0.8); opacity: 1 !important; }
+  .fav-card[draggable="true"] { cursor: grab; }
+  .fav-card.dragging { opacity: 0.35; border-style: dashed; }
+  .fav-card.drag-over { border-color: #025192; box-shadow: 0 0 0 2px rgba(2,81,146,0.35); }
 </style>
 </head>
 <body>
 
-
+<div id="dev-bar">Dev Build</div>
 
 <!-- ── Header ── -->
 <header>
@@ -814,7 +830,7 @@
 
 <!-- ── Build toolbar ── -->
 <div id="build-toolbar">
-  <button class="build-btn-compile" id="bp-btn-compile">⚙ Compile</button>
+  <button class="build-btn-compile" id="bp-btn-compile" disabled>⚙ Compile</button>
   <button class="build-btn-flash"   id="bp-btn-flash"   disabled>⚡ Flash</button>
 
   <div class="build-divider"></div>
@@ -935,6 +951,7 @@ let diffVisible     = false;
 let currentFilePath = null;
 let fileIsOpen      = false;
 let favoritePaths   = new Set();
+let dragSrcPath     = null;
 
 // ── Editor content accessor for buildPanel ─────────────
 window.getEditorContent = () => {
@@ -954,7 +971,7 @@ function setFileOpen(open) {
   } else {
     updateBanner();
   }
-  if (isElectron) updateFavButton();
+  if (isElectron) { updateFavButton(); window.updateCompileButton?.(); }
 }
 
 // ── Unsaved modal ──────────────────────────────────────
@@ -1551,6 +1568,49 @@ async function refreshEmptyStateFavs() {
     card.appendChild(xBtn);
 
     card.addEventListener('click', () => openFavorite(filePath));
+
+    card.draggable = true;
+    card.addEventListener('dragstart', (e) => {
+      dragSrcPath = filePath;
+      e.dataTransfer.effectAllowed = 'move';
+      setTimeout(() => card.classList.add('dragging'), 0);
+    });
+    card.addEventListener('dragend', () => {
+      dragSrcPath = null;
+      card.classList.remove('dragging');
+      container.querySelectorAll('.fav-card').forEach(c => c.classList.remove('drag-over'));
+    });
+    card.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      if (filePath !== dragSrcPath) {
+        container.querySelectorAll('.fav-card').forEach(c => c.classList.remove('drag-over'));
+        card.classList.add('drag-over');
+      }
+    });
+    card.addEventListener('dragleave', () => card.classList.remove('drag-over'));
+    card.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      if (!dragSrcPath || dragSrcPath === filePath) return;
+      card.classList.remove('drag-over');
+
+      const srcIdx = present.findIndex(p => p.filePath === dragSrcPath);
+      const tgtIdx = present.findIndex(p => p.filePath === filePath);
+      if (srcIdx === -1 || tgtIdx === -1) return;
+
+      const reordered = [...present];
+      const [moved] = reordered.splice(srcIdx, 1);
+      reordered.splice(tgtIdx, 0, moved);
+
+      const allItems = await window.electronAPI.getFavorites();
+      const missingPaths = allItems.filter(i => !i.exists).map(i => i.filePath);
+      await window.electronAPI.reorderFavorites([
+        ...reordered.map(p => p.filePath),
+        ...missingPaths
+      ]);
+      await refreshEmptyStateFavs();
+    });
+
     container.appendChild(card);
   });
 }
@@ -1665,6 +1725,9 @@ require(['vs/editor/editor.main'], function () {
   (async () => {
     if (isElectron) {
       toolVersion = await window.electronAPI.getAppVersion();
+      if (await window.electronAPI.isDevMode()) {
+        document.getElementById('dev-bar').style.display = 'block';
+      }
       await loadFavorites();
       const lastPath = await window.electronAPI.getLastFile();
       if (lastPath) {
@@ -1736,6 +1799,7 @@ require(['vs/editor/editor.main'], function () {
       <div id="bm-status" style="font-size:0.82rem;color:#999;"></div>
       <div style="display:flex;gap:8px;">
         <button id="bm-abort" style="padding:6px 20px;background:#3a1a1a;color:#e55;border:1px solid #5a2a2a;border-radius:4px;font-size:0.82rem;font-weight:600;cursor:pointer;">⊘ Abort</button>
+        <button id="bm-retry" style="display:none;padding:6px 20px;background:#1a2a3a;color:#4af;border:1px solid #2a4a6a;border-radius:4px;font-size:0.82rem;font-weight:600;cursor:pointer;">↺ Retry Flash</button>
         <button id="bm-close" style="display:none;padding:6px 20px;background:#1a3a1a;color:#4d4;border:1px solid #2a5a2a;border-radius:4px;font-size:0.82rem;font-weight:600;cursor:pointer;">Close</button>
       </div>
     </div>

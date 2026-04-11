@@ -48,9 +48,14 @@ function getCliPath() {
 }
 
 function getArduinoDataPath() {
-  // Isolated data dir inside userData so we don't pollute system Arduino install
+  // Always use the prod userData path for arduino-data so installed packages are
+  // shared between dev and prod builds. In dev mode, app.getPath('userData') is
+  // overridden to 'jmt-studio-dev', which would be missing the board packages.
   const { app } = require('electron');
-  return path.join(app.getPath('userData'), 'arduino-data');
+  const base = app.isPackaged
+    ? app.getPath('userData')
+    : path.join(app.getPath('appData'), 'jmt-studio');
+  return path.join(base, 'arduino-data');
 }
 
 function getBuildOutputPath() {
@@ -284,20 +289,44 @@ function getDfuSuffixPath() {
   return path.join(getToolsPath(), bin);
 }
 
+// ── Arduino IDE process check ──────────────────────────
+function checkArduinoRunning() {
+  return new Promise(resolve => {
+    if (process.platform !== 'win32') { resolve(false); return; }
+    const { execFile } = require('child_process');
+    execFile('tasklist', ['/FO', 'CSV', '/NH'], { timeout: 3000 }, (err, stdout) => {
+      if (err) { resolve(false); return; }
+      resolve(stdout.toLowerCase().includes('arduino'));
+    });
+  });
+}
+
 // ── 1200-bps touch reset ───────────────────────────────
+// Resolves { ok, retriable } — retriable=true means port was locked, user can fix and retry
 function touchReset(port, onLog) {
   return new Promise((resolve) => {
     onLog(`Sending 1200-bps touch reset on ${port}...`, false);
     const { SerialPort } = require('serialport');
     const sp = new SerialPort({ path: port, baudRate: 1200, autoOpen: false });
-    sp.open(err => {
+    sp.open(async err => {
       if (err) {
-        onLog(`Touch reset open error: ${err.message}`, true);
-        return resolve(false);
+        const isAccessDenied = err.message.toLowerCase().includes('access denied')
+                            || err.message.toLowerCase().includes('cannot open');
+        if (isAccessDenied) {
+          const arduinoOpen = await checkArduinoRunning();
+          if (arduinoOpen) {
+            onLog(`Arduino IDE is open and is likely holding ${port}. Close Arduino IDE and retry.`, true);
+          } else {
+            onLog(`Port ${port} is in use by another application. Close it and retry.`, true);
+          }
+          return resolve({ ok: false, retriable: true });
+        }
+        onLog(`Touch reset error: ${err.message}`, true);
+        return resolve({ ok: false, retriable: false });
       }
       sp.set({ dtr: false }, () => {
         setTimeout(() => {
-          sp.close(() => resolve(true));
+          sp.close(() => resolve({ ok: true, retriable: false }));
         }, 200);
       });
     });
@@ -435,7 +464,13 @@ async function flash(port, fqbn, onLog) {
   onLog('DFU suffix added.', false);
 
   // ── Step 3: 1200-bps touch reset ──
-  await touchReset(port, onLog);
+  const resetResult = await touchReset(port, onLog);
+  if (!resetResult.ok) {
+    const msg = resetResult.retriable
+      ? 'Flash stopped — free the port and click Retry Flash.'
+      : 'Touch reset failed. Try pressing the reset button manually.';
+    return { ok: false, error: msg, retriable: resetResult.retriable };
+  }
   await new Promise(r => setTimeout(r, 1000));
 
   // ── Step 4: Wait for DFU device ──

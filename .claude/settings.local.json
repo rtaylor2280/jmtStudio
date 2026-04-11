@@ -3,7 +3,13 @@
     "allow": [
       "Bash(grep -n \"module.exports\\\\|getStatus\\\\|return { ok: true, buildPath\" c:/Coding/proffieos-editor/toolchain.js)",
       "Read(//c/Users/Ryan/AppData/Roaming/jmt-studio-dev/arduino-data/packages/proffieboard/hardware/**)",
-      "Read(//c/Users/Ryan/AppData/Roaming/jmt-studio/arduino-data/packages/proffieboard/hardware/stm32l4/**)"
+      "Read(//c/Users/Ryan/AppData/Roaming/jmt-studio/arduino-data/packages/proffieboard/hardware/stm32l4/**)",
+      "Bash(node -e \"require\\('./toolchain'\\)\")",
+      "Bash(node -e \"require\\('./main'\\)\")",
+      "Bash(node -e ':*)",
+      "Read(//c/Users/Ryan/AppData/Roaming/JMT Studio/arduino-data/packages/proffieboard/hardware/**)",
+      "Read(//c/Users/Ryan/AppData/Roaming/JMT Studio/arduino-data/packages/**)",
+      "Read(//c/Users/Ryan/AppData/Roaming/**)"
     ]
   }
 }
