@@ -616,6 +616,44 @@
     100% { transform: translateX(350%); }
   }
 
+  /* ── Settings / About button ── */
+  #btn-settings {
+    background: transparent;
+    border: 1px solid transparent;
+    color: #555;
+    font-size: 1.25rem;
+    padding: 2px 7px;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  #btn-settings:hover { color: #aaa; border-color: #3a3a3a; }
+
+  /* ── About modal ── */
+  #modal-about .modal { width: 560px; max-width: 95vw; }
+  #modal-about .about-header { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; padding-bottom: 4px; }
+  #modal-about .about-header img { width: 52px; height: 52px; object-fit: contain; flex-shrink: 0; }
+  #modal-about .about-app-name { font-size: 1.1rem; color: #eee; font-weight: 700; letter-spacing: 0.01em; }
+  #modal-about .about-byline { font-size: 0.78rem; color: #666; margin-top: 2px; }
+  #modal-about .about-desc { font-size: 0.82rem; color: #888; line-height: 1.55; margin-bottom: 20px; }
+  #modal-about .about-grid { display: grid; grid-template-columns: 130px 1fr; gap: 10px 0; margin-bottom: 20px; align-items: baseline; }
+  #modal-about .about-grid-label { font-size: 0.72rem; color: #555; padding-top: 1px; }
+  #modal-about .about-grid-val { font-size: 0.82rem; color: #aaa; line-height: 1.5; }
+  #modal-about .about-grid-val a { color: #4a9edd; text-decoration: none; }
+  #modal-about .about-grid-val a:hover { text-decoration: underline; }
+  #modal-about .about-grid-sublabel { font-size: 0.72rem; color: #444; margin-bottom: 2px; }
+  #modal-about .about-section-heading { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.09em; color: #444; margin: 20px 0 12px; padding-bottom: 6px; border-bottom: 1px solid #2a2a2a; }
+  #modal-about .about-section-heading:first-of-type { margin-top: 0; }
+  #modal-about .settings-item { display: flex; align-items: center; justify-content: space-between; padding: 7px 0; border-bottom: 1px solid #1e1e1e; }
+  #modal-about .settings-item:last-child { border-bottom: none; }
+  #modal-about .settings-item-label { font-size: 0.82rem; color: #888; }
+  #modal-about .settings-item-btn { background: #2a2a2a; border: 1px solid #3a3a3a; color: #aaa; border-radius: 3px; padding: 4px 10px; font-size: 0.75rem; cursor: not-allowed; opacity: 0.5; }
+  #modal-about .about-footer { font-size: 0.75rem; color: #4a4a4a; line-height: 1.6; border-top: 1px solid #2a2a2a; padding-top: 14px; margin-top: 20px; }
+  #modal-about .about-license-toggle { background: none; border: none; color: #4a9edd; font-size: 0.75rem; cursor: pointer; padding: 0; margin-top: 8px; display: block; }
+  #modal-about .about-license-toggle:hover { text-decoration: underline; }
+  #modal-about .about-license-body { display: none; font-size: 0.73rem; color: #999; line-height: 1.6; margin-top: 8px; white-space: pre-wrap; background: #0a0a0a; border: 1px solid #222; border-radius: 4px; padding: 12px 14px; max-height: 180px; overflow-y: auto; }
+  #modal-about .about-license-body.open { display: block; }
+
   /* ── Favorites ── */
   .fav-wrap { position: relative; }
   #btn-fav { background: #1a1a2a; color: #888; border: 1px solid #2a2a3a; }
@@ -806,6 +844,7 @@
       <button id="btn-save"     style="display:none">&#8595; Save</button>
       <button id="btn-saveas"   style="display:none">&#8595; Save As</button>
       <button id="btn-download" style="display:none">&#8595; Download</button>
+      <button id="btn-settings" title="About JMT Studio">&#9881;</button>
     </div>
   </div>
   <div class="meta-bar">
@@ -991,6 +1030,63 @@
   </div>
 </div>
 
+<!-- ── About / Settings modal ── -->
+<div class="modal-overlay" id="modal-about">
+  <div class="modal">
+    <div class="about-header">
+      <img src="../assets/logo.png" alt="JMT Logo" />
+      <div>
+        <div class="about-app-name">JMT Studio</div>
+        <div class="about-byline">by Jedi Master Tech</div>
+      </div>
+    </div>
+
+    <div class="about-section-heading">Settings</div>
+
+    <div class="settings-item">
+      <span class="settings-item-label">Clear Compile Cache</span>
+      <button class="settings-item-btn" disabled>Clear</button>
+    </div>
+    <div class="settings-item">
+      <span class="settings-item-label">Update Current Default OS Version (including JMT support)</span>
+      <button class="settings-item-btn" disabled>Update</button>
+    </div>
+
+    <div class="about-section-heading">About</div>
+
+    <div class="about-desc">Desktop tools for editing, compiling, and flashing ProffieOS configurations.</div>
+
+    <div class="about-grid">
+      <div class="about-grid-label">Version</div>
+      <div class="about-grid-val" id="about-version-str">—</div>
+
+      <div class="about-grid-label">Website</div>
+      <div class="about-grid-val"><a href="#" id="about-website-link">jedimastertech.com</a></div>
+
+      <div class="about-grid-label">Support</div>
+      <div class="about-grid-val">
+        <div class="about-grid-sublabel">For bug reports, feature suggestions, and app questions:</div>
+        <a href="#" id="about-support-link">jmtstudio@jedimastertech.com</a>
+      </div>
+
+      <div class="about-grid-label">General Inquiries</div>
+      <div class="about-grid-val"><a href="#" id="about-info-link">info@jedimastertech.com</a></div>
+    </div>
+
+    <div class="about-footer">
+      <span id="about-restriction-text">&copy; 2026 Jedi Master Tech. All rights reserved.<br>
+      JMT Studio may be used for personal and commercial purposes, including managing, configuring, and building lightsabers using ProffieOS.<br>
+      Unauthorized copying, modification, distribution, or resale is prohibited.</span>
+      <button class="about-license-toggle" id="about-license-toggle">View License</button>
+      <div class="about-license-body" id="about-license-body"></div>
+    </div>
+
+    <div class="modal-btns" style="margin-top:18px;">
+      <button class="modal-btn-cancel" id="about-close-btn">Close</button>
+    </div>
+  </div>
+</div>
+
 <input type="file" id="file-input" accept=".h,.txt" style="display:none" />
 
 <script src="./vs/loader.js"></script>
@@ -1020,7 +1116,8 @@ function setFileOpen(open) {
   fileIsOpen = open;
   document.getElementById('empty-state').classList.toggle('visible', !open);
   document.getElementById('editor-container').classList.toggle('visible', open);
-  ['btn-close','btn-save','btn-saveas','btn-download','btn-undo','btn-redo'].forEach(id => {
+  ['btn-close','btn-save','btn-saveas','btn-download','btn-undo','btn-redo',
+   'input-desc','input-board','input-version','bp-usb-select'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.disabled = !open;
   });
@@ -1659,6 +1756,58 @@ document.getElementById('import-confirm-btn').addEventListener('click', async ()
   const verSel   = document.getElementById('input-version');
   populateVersionSelect(verSel, versions, result.versionName);
   verSel.dispatchEvent(new Event('change'));
+});
+
+// ── About / Settings modal ─────────────────────────────
+const LICENSE_TEXT = `Permission is granted to use JMT Studio for personal and commercial purposes, including managing, configuring, and building lightsabers using ProffieOS. Use of this software in the creation or sale of physical products is permitted.
+
+You may not:
+- redistribute this software
+- sell or sublicense this software as a standalone product
+- modify and distribute modified versions
+- reverse engineer, decompile, or attempt to extract source code from this software
+- remove or alter any copyright, branding, or attribution
+
+This software is provided "as is", without warranty of any kind, express or implied, including but not limited to the warranties of merchantability and fitness for a particular purpose. In no event shall Jedi Master Tech be liable for any claim, damages, or other liability arising from the use of this software.
+
+JMT Studio is a product of Jedi Master Tech and is not affiliated with or endorsed by ProffieOS or its contributors.
+
+Copyright © 2026 Jedi Master Tech. All rights reserved.`;
+
+async function openAboutModal() {
+  document.getElementById('about-license-body').textContent = LICENSE_TEXT;
+  document.getElementById('about-license-body').classList.remove('open');
+  document.getElementById('about-license-toggle').textContent = 'View License';
+  let ver = '—';
+  try { ver = await window.electronAPI.getAppVersion(); } catch {}
+  document.getElementById('about-version-str').textContent = `v${ver}`;
+  document.getElementById('modal-about').classList.add('active');
+}
+
+document.getElementById('btn-settings').addEventListener('click', openAboutModal);
+document.getElementById('about-close-btn').addEventListener('click', () => {
+  document.getElementById('modal-about').classList.remove('active');
+});
+document.getElementById('modal-about').addEventListener('click', (e) => {
+  if (e.target === e.currentTarget) e.currentTarget.classList.remove('active');
+});
+document.getElementById('about-license-toggle').addEventListener('click', () => {
+  const body = document.getElementById('about-license-body');
+  const btn  = document.getElementById('about-license-toggle');
+  const open = body.classList.toggle('open');
+  btn.textContent = open ? 'Hide License' : 'View License';
+});
+document.getElementById('about-website-link').addEventListener('click', (e) => {
+  e.preventDefault();
+  if (window.electronAPI?.openExternal) window.electronAPI.openExternal('https://www.jedimastertech.com');
+});
+document.getElementById('about-support-link').addEventListener('click', (e) => {
+  e.preventDefault();
+  if (window.electronAPI?.openExternal) window.electronAPI.openExternal('mailto:jmtstudio@jedimastertech.com');
+});
+document.getElementById('about-info-link').addEventListener('click', (e) => {
+  e.preventDefault();
+  if (window.electronAPI?.openExternal) window.electronAPI.openExternal('mailto:info@jedimastertech.com');
 });
 
 // ── Favorites ──────────────────────────────────────────

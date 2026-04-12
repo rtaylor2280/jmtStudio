@@ -1,6 +1,6 @@
 {
   "name": "jmt-studio",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "description": "ProffieOS Configuration Tool by Jedi Master Tech",
   "author": "Jedi Master Tech",
   "main": "main.js",
@@ -42,7 +42,8 @@
       "proffieos.js",
       "cacheManager.js",
       "renderer/**/*",
-      "assets/**/*"
+      "assets/**/*",
+      "LICENSE.txt"
     ],
     "extraResources": [
       {
