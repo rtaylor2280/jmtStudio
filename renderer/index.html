@@ -859,11 +859,16 @@
   <div class="build-divider"></div>
 
   <div class="port-group">
-    <label>Port</label>
+    <label id="bp-label-port">Port</label>
     <select id="bp-port-select"><option value="">Scanning...</option></select>
-    <label style="margin-left:8px">Detected</label>
+    <label id="bp-label-detected" style="margin-left:8px">Detected</label>
     <input type="text" id="bp-board-display" readonly placeholder="—" />
     <button id="bp-btn-refresh-ports" title="Refresh ports">↺</button>
+    <div id="bp-dfu-mode-indicator" style="display:none;align-items:center;gap:8px;">
+      <span style="font-size:0.78rem;color:#4af;font-weight:600;">⚡ Bootloader Mode (DFU)</span>
+      <span style="font-size:0.72rem;color:#666;">· No port required</span>
+      <button id="bp-btn-exit-dfu" style="padding:3px 10px;background:#1a2a1a;color:#6d6;border:1px solid #2a4a2a;border-radius:3px;font-size:0.72rem;cursor:pointer;">Exit</button>
+    </div>
     <label style="margin-left:8px">USB</label>
     <select id="bp-usb-select" style="background:#181818;border:1px solid #2e2e2e;border-radius:3px;color:#ccc;font-size:0.78rem;padding:4px 6px;outline:none;cursor:pointer;">
       <option value="cdc">Serial</option>
@@ -1232,7 +1237,10 @@ function loadContent(rawContent, filePath) {
   updateStatusMeta();
   setDirty(false);
   editor.focus();
-  if (isElectron) checkDescDupe();
+  if (isElectron) {
+    if (filePath) window.electronAPI.setLastFile(filePath);
+    checkDescDupe();
+  }
   if (isElectron && window.refreshPorts) window.refreshPorts();
   // refreshPorts triggers checkCacheForConfig once FQBN is resolved
 }
@@ -1321,8 +1329,17 @@ async function doSave() {
   if (isElectron) {
     if (currentFilePath) {
       const res = await window.electronAPI.saveFile(currentFilePath, content);
-      if (res.ok) { setDirty(false); updateStatusMeta(); }
-      else { alert('Save failed: ' + res.error); }
+      if (res.ok) {
+        setDirty(false);
+        updateStatusMeta();
+        // Baselines now match the saved file — clear changed indicators
+        baselineBoard   = document.getElementById('input-board').value   || null;
+        baselineVersion = document.getElementById('input-version').value || null;
+        const usbEl = document.getElementById('bp-usb-select');
+        if (usbEl) baselineUsb = usbEl.value || null;
+        updateChangedIndicators();
+        if (window.updateUsbChangedIndicator) window.updateUsbChangedIndicator();
+      } else { alert('Save failed: ' + res.error); }
     } else { await doSaveAs(); }
   } else { doDownload(); }
 }
@@ -1995,9 +2012,12 @@ require(['vs/editor/editor.main'], function () {
     <div style="display:flex;align-items:center;justify-content:space-between;padding-bottom:10px;border-bottom:1px solid #1e1e1e;">
       <div id="bm-status" style="font-size:0.82rem;color:#999;"></div>
       <div style="display:flex;gap:8px;">
-        <button id="bm-abort" style="padding:6px 20px;background:#3a1a1a;color:#e55;border:1px solid #5a2a2a;border-radius:4px;font-size:0.82rem;font-weight:600;cursor:pointer;">⊘ Abort</button>
-        <button id="bm-retry" style="display:none;padding:6px 20px;background:#1a2a3a;color:#4af;border:1px solid #2a4a6a;border-radius:4px;font-size:0.82rem;font-weight:600;cursor:pointer;">↺ Retry Flash</button>
-        <button id="bm-close" style="display:none;padding:6px 20px;background:#1a3a1a;color:#4d4;border:1px solid #2a5a2a;border-radius:4px;font-size:0.82rem;font-weight:600;cursor:pointer;">Close</button>
+        <button id="bm-abort"     style="padding:6px 20px;background:#3a1a1a;color:#e55;border:1px solid #5a2a2a;border-radius:4px;font-size:0.82rem;font-weight:600;cursor:pointer;">⊘ Abort</button>
+        <button id="bm-dfu-setup"   style="display:none;padding:6px 20px;background:#025192;color:#fff;border:1px solid #0a6abf;border-radius:4px;font-size:0.82rem;font-weight:600;cursor:pointer;">▶ Run DFU Setup</button>
+        <button id="bm-dfu-manual" style="display:none;padding:6px 20px;background:#1a1a2a;color:#8af;border:1px solid #2a3a5a;border-radius:4px;font-size:0.82rem;font-weight:600;cursor:pointer;">Manual Setup (proffie-dfu-setup.exe)</button>
+        <button id="bm-zadig"      style="display:none;padding:6px 20px;background:#1a1a2a;color:#8af;border:1px solid #2a3a5a;border-radius:4px;font-size:0.82rem;font-weight:600;cursor:pointer;">Manual Setup (Zadig)</button>
+        <button id="bm-retry"     style="display:none;padding:6px 20px;background:#1a2a3a;color:#4af;border:1px solid #2a4a6a;border-radius:4px;font-size:0.82rem;font-weight:600;cursor:pointer;">↺ Retry Flash</button>
+        <button id="bm-close"     style="display:none;padding:6px 20px;background:#1a3a1a;color:#4d4;border:1px solid #2a5a2a;border-radius:4px;font-size:0.82rem;font-weight:600;cursor:pointer;">Close</button>
       </div>
     </div>
 

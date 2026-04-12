@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveAs:        (defaultName, content) => ipcRenderer.invoke('dialog:saveAs', { defaultName, content }),
   getSavePath:   (defaultName)          => ipcRenderer.invoke('dialog:getSavePath', { defaultName }),
   getLastFile:    ()                     => ipcRenderer.invoke('store:getLastFile'),
+  setLastFile:    (filePath)             => ipcRenderer.invoke('store:setLastFile', filePath),
   clearLastFile:  ()                     => ipcRenderer.invoke('store:clearLastFile'),
   getRecentFiles:    ()           => ipcRenderer.invoke('store:getRecentFiles'),
   removeRecentFile:  (filePath)  => ipcRenderer.invoke('store:removeRecentFile', filePath),
@@ -59,6 +60,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   selectFolder:        ()                        => ipcRenderer.invoke('dialog:selectFolder'),
   validateVersionSource: (sourcePath)            => ipcRenderer.invoke('proffieOS:validateSource', sourcePath),
   importVersion:       (sourcePath, versionName) => ipcRenderer.invoke('proffieOS:importVersion', { sourcePath, versionName }),
+
+  // ── DFU ──────────────────────────────────────────────
+  detectDFU:    () => ipcRenderer.invoke('dfu:detect'),
+  flashDFU:     () => ipcRenderer.invoke('dfu:flash'),
+  runDfuSetup:  () => ipcRenderer.invoke('dfu:runSetup'),
+  openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
 
   onAppClosing:    (cb) => ipcRenderer.on('app:closing', cb),
   doClose:         () => ipcRenderer.send('app:doClose')

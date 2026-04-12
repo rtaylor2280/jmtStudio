@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path        = require('path');
 const fs          = require('fs');
 const toolchain   = require('./toolchain');
@@ -219,6 +219,7 @@ ipcMain.on('app:doClose', () => {
 });
 
 ipcMain.handle('store:getLastFile',   () => Store.get('lastFile'));
+ipcMain.handle('store:setLastFile',   (_, filePath) => Store.set('lastFile', filePath));
 ipcMain.handle('store:clearLastFile', () => Store.set('lastFile', null));
 ipcMain.handle('store:getRecentFiles', () => {
   const files = Store.get('recentFiles') || [];
@@ -386,4 +387,42 @@ ipcMain.handle('proffieOS:validateSource', (_, sourcePath) => {
 
 ipcMain.handle('proffieOS:importVersion', (_, { sourcePath, versionName }) => {
   return proffie.importVersion(sourcePath, versionName);
+});
+
+// ── IPC: DFU ───────────────────────────────────────────
+ipcMain.handle('shell:openExternal', (_, url) => {
+  shell.openExternal(url);
+});
+
+ipcMain.handle('dfu:detect', async () => {
+  return await toolchain.detectDFU();
+});
+
+ipcMain.handle('dfu:runSetup', async () => {
+  const path    = require('path');
+  const proffie = require('./proffieos');
+  const setupExe = path.join(proffie.getResourcesPath(), 'tools', 'windows', 'proffie-dfu-setup.exe');
+  const error = await shell.openPath(setupExe);
+  return { ok: !error, error: error || null };
+});
+
+ipcMain.handle('dfu:flash', async () => {
+  const log = makeLogger();
+
+  if (win && !win.isDestroyed()) {
+    win.webContents.send('build:status', { type: 'flash', ok: null, message: 'Flashing via DFU...' });
+  }
+
+  const result = await toolchain.flashDFU(log);
+
+  if (win && !win.isDestroyed()) {
+    win.webContents.send('build:status', {
+      type: 'flash',
+      ok: result.ok,
+      message: result.ok ? 'DFU flash successful' : result.error
+    });
+    win.webContents.send('build:done', { type: 'flash', ...result });
+  }
+
+  return result;
 });

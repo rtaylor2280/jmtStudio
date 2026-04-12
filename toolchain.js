@@ -366,23 +366,9 @@ function waitForDfu(onLog, timeoutMs = 10000) {
   });
 }
 
-// ── Flash ──────────────────────────────────────────────
-/**
- * Uploads compiled firmware to connected Proffieboard.
- * port: serial port string e.g. 'COM3' or '/dev/ttyUSB0'
- * onLog(line, isError) streams output back to renderer.
- * Returns { ok, error? }
- */
-async function flash(port, fqbn, onLog) {
-  onLog('--- Flash started ---', false);
-
-  if (!port) {
-    const msg = 'No port selected.';
-    onLog(msg, true);
-    return { ok: false, error: msg };
-  }
-
-  // Check build output
+// ── Prepare firmware (shared by flash and flashDFU) ───
+// Converts .elf → .bin → .dfu and returns { ok, dfuPath, toolsDir }
+async function prepareFirmware(onLog) {
   const buildPath = getBuildOutputPath();
   if (!fs.existsSync(buildPath)) {
     const msg = 'No compiled firmware found. Run Compile before flashing.';
@@ -390,7 +376,6 @@ async function flash(port, fqbn, onLog) {
     return { ok: false, error: msg };
   }
 
-  // Find .elf file
   const elfFiles = fs.readdirSync(buildPath).filter(f => f.endsWith('.elf'));
   if (!elfFiles.length) {
     const msg = 'No .elf file found in build output. Run Compile before flashing.';
@@ -403,14 +388,12 @@ async function flash(port, fqbn, onLog) {
   const dfuPath  = path.join(buildPath, 'ProffieOS.dfu');
   const toolsDir = getToolsPath();
 
-  // ── Step 1: Convert .elf to .bin ──
+  // Convert .elf to .bin
   onLog('Converting firmware to binary...', false);
 
-  // Search for arm-none-eabi-objcopy in all known package locations
   const objcopyBin = process.platform === 'win32' ? 'arm-none-eabi-objcopy.exe' : 'arm-none-eabi-objcopy';
   const searchBases = [
     getArduinoDataPath(),
-    // System Arduino15 (Windows default — used when arduino-cli falls back to system install)
     process.platform === 'win32'
       ? path.join(process.env.LOCALAPPDATA || '', 'Arduino15')
       : path.join(process.env.HOME || '', 'Library', 'Arduino15')
@@ -447,7 +430,7 @@ async function flash(port, fqbn, onLog) {
   }
   onLog('Binary created.', false);
 
-  // ── Step 2: Add DFU suffix ──
+  // Add DFU suffix
   onLog('Adding DFU suffix...', false);
   fs.copyFileSync(binPath, dfuPath);
 
@@ -468,25 +451,11 @@ async function flash(port, fqbn, onLog) {
   }
   onLog('DFU suffix added.', false);
 
-  // ── Step 3: 1200-bps touch reset ──
-  const resetResult = await touchReset(port, onLog);
-  if (!resetResult.ok) {
-    const msg = resetResult.retriable
-      ? 'Flash stopped — free the port and click Retry Flash.'
-      : 'Touch reset failed. Try pressing the reset button manually.';
-    return { ok: false, error: msg, retriable: resetResult.retriable };
-  }
-  await new Promise(r => setTimeout(r, 1000));
+  return { ok: true, dfuPath, toolsDir };
+}
 
-  // ── Step 4: Wait for DFU device ──
-  const dfuFound = await waitForDfu(onLog);
-  if (!dfuFound) {
-    const msg = 'DFU device not detected. Try pressing the reset button or reconnecting.';
-    onLog(msg, true);
-    return { ok: false, error: msg };
-  }
-
-  // ── Step 5: Flash via dfu-util ──
+// ── Run dfu-util flash (shared by flash and flashDFU) ─
+async function runDfuFlash(dfuPath, toolsDir, onLog) {
   onLog('Flashing firmware...', false);
 
   const flashResult = await new Promise(resolve => {
@@ -523,6 +492,94 @@ async function flash(port, fqbn, onLog) {
     onLog('--- Flash failed ---', true);
     return { ok: false, error: extractFlashError(flashResult.stderr + flashResult.stdout) };
   }
+}
+
+// ── Detect DFU device ──────────────────────────────────
+// Returns { found, accessible }
+// found: DFU device is visible on USB
+// accessible: driver is set up correctly (false = Windows driver issue)
+function detectDFU() {
+  const { execFile } = require('child_process');
+  const dfuUtil  = getDfuUtilPath();
+  const toolsDir = getToolsPath();
+
+  return new Promise(resolve => {
+    execFile(dfuUtil, ['-l'], { timeout: 5000, cwd: toolsDir }, (_err, stdout, stderr) => {
+      const output = (stdout || '') + (stderr || '');
+      const lines  = output.split(/\r?\n/);
+
+      // Proffieboard DFU accessible: appears in a "Found DFU:" line with matching VID:PID
+      const accessible = lines.some(l =>
+        l.trim().startsWith('Found DFU:') &&
+        (l.includes('0483:df11') || l.includes('1209:6668'))
+      );
+      if (accessible) return resolve({ found: true, accessible: true });
+
+      // Proffieboard mentioned but not accessible (wrong driver on Windows)
+      const mentioned = output.includes('0483:df11') || output.includes('1209:6668');
+      if (mentioned) return resolve({ found: true, accessible: false });
+
+      resolve({ found: false });
+    });
+  });
+}
+
+// ── Flash ──────────────────────────────────────────────
+/**
+ * Uploads compiled firmware via 1200-bps touch reset → DFU → dfu-util.
+ * port: serial port string e.g. 'COM3' or '/dev/ttyUSB0'
+ * onLog(line, isError) streams output back to renderer.
+ * Returns { ok, error? }
+ */
+async function flash(port, fqbn, onLog) {
+  onLog('--- Flash started ---', false);
+
+  if (!port) {
+    const msg = 'No port selected.';
+    onLog(msg, true);
+    return { ok: false, error: msg };
+  }
+
+  const prep = await prepareFirmware(onLog);
+  if (!prep.ok) return prep;
+
+  const { dfuPath, toolsDir } = prep;
+
+  // 1200-bps touch reset
+  const resetResult = await touchReset(port, onLog);
+  if (!resetResult.ok) {
+    const msg = resetResult.retriable
+      ? 'Flash stopped — free the port and click Retry Flash.'
+      : 'Touch reset failed. Try pressing the reset button manually.';
+    return { ok: false, error: msg, retriable: resetResult.retriable };
+  }
+  await new Promise(r => setTimeout(r, 1000));
+
+  // Wait for DFU device
+  const dfuFound = await waitForDfu(onLog);
+  if (!dfuFound) {
+    const msg = 'DFU device not detected. Try pressing the reset button or reconnecting.';
+    onLog(msg, true);
+    return { ok: false, error: msg };
+  }
+
+  return await runDfuFlash(dfuPath, toolsDir, onLog);
+}
+
+// ── Flash DFU ──────────────────────────────────────────
+/**
+ * Uploads compiled firmware directly via dfu-util (board already in bootloader mode).
+ * No serial port or touch reset required.
+ * onLog(line, isError) streams output back to renderer.
+ * Returns { ok, error? }
+ */
+async function flashDFU(onLog) {
+  onLog('--- DFU Flash started ---', false);
+
+  const prep = await prepareFirmware(onLog);
+  if (!prep.ok) return prep;
+
+  return await runDfuFlash(prep.dfuPath, prep.toolsDir, onLog);
 }
 
 // ── Extract readable flash error ───────────────────────
@@ -564,6 +621,8 @@ module.exports = {
   initialize,
   compile,
   flash,
+  flashDFU,
+  detectDFU,
   abort,
   getStatus,
   checkCacheAndRestore,
