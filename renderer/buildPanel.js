@@ -136,7 +136,7 @@ async function initBuildPanel() {
     window.electronAPI.openExternal('https://zadig.akeo.ie');
   });
   document.getElementById('bm-abort').addEventListener('click', async () => {
-    if (isDfuMode) return; // DFU cancel is handled by startDfuWaitModal's own handler
+    if (isDfuMode && !isBusy) return; // DFU waiting: cancel handled by startDfuWaitModal's own handler
     document.getElementById('bm-abort').disabled = true;
     document.getElementById('bm-abort').textContent = 'Aborting...';
     await window.electronAPI.abortCompile();
