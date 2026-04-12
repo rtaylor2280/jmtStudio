@@ -62,7 +62,12 @@ async function initBuildPanel() {
   // Wire buttons
   el('bp-btn-compile').addEventListener('click', doCompile);
   el('bp-btn-flash').addEventListener('click', doFlash);
-  el('bp-btn-refresh-ports').addEventListener('click', refreshPorts);
+  el('bp-btn-refresh-ports').addEventListener('click', async () => {
+    const btn = el('bp-btn-refresh-ports');
+    btn.style.animation = 'spin 0.7s linear infinite';
+    await refreshPorts();
+    btn.style.animation = '';
+  });
   el('bp-port-select').addEventListener('change', onPortChange);
   el('bp-log-toggle').addEventListener('click', toggleLog);
   el('bp-log-clear').addEventListener('click', clearLog);
@@ -202,10 +207,7 @@ async function doFlash() {
 
 // ── Port detection ─────────────────────────────────────
 async function refreshPorts() {
-  const btn = el('bp-btn-refresh-ports');
-  btn.style.animation = 'spin 0.7s linear infinite';
   const result = await window.electronAPI.getRecommendedPort();
-  btn.style.animation = '';
 
   const portSelect = el('bp-port-select');
   portSelect.innerHTML = '';
@@ -411,7 +413,7 @@ function onBuildDone({ type, ok, error, aborted, retriable }) {
         document.getElementById('bm-title').textContent = '✓ Compile Successful';
         document.getElementById('bm-title').style.color = '#4d4';
         document.getElementById('bm-abort').style.display = 'none';
-        document.getElementById('bm-close').style.display = 'inline-block';
+        document.getElementById('bm-close').style.display = 'none';
         document.getElementById('bm-status').textContent = 'Board connected — flashing...';
         setBarMode('success');
         setFlashEnabled(true);

@@ -84,7 +84,17 @@ function hashVersion(versionName) {
         walk(fullPath);
       } else {
         hash.update(rel + '\0');
-        hash.update(fs.readFileSync(fullPath));
+        // For ProffieOS.ino, skip the CONFIG_FILE define line — we manage that
+        // line ourselves via ensureConfigFileRef(), so it must not affect the hash.
+        if (entry.name === 'ProffieOS.ino' && dir === dirPath) {
+          const content = fs.readFileSync(fullPath, 'utf8')
+            .split(/\r?\n/)
+            .filter(l => !/^\s*(?:\/\/)?\s*#\s*define\s+CONFIG_FILE\b/.test(l))
+            .join('\n');
+          hash.update(content);
+        } else {
+          hash.update(fs.readFileSync(fullPath));
+        }
         hash.update('\0');
       }
     }
@@ -311,6 +321,40 @@ function readStagedConfig() {
   catch { return null; }
 }
 
+// ── Import ─────────────────────────────────────────────
+
+/**
+ * Copies an existing ProffieOS source folder into the versions directory
+ * under a user-supplied name. sourcePath must be a folder named "ProffieOS"
+ * containing ProffieOS.ino.
+ */
+function importVersion(sourcePath, versionName) {
+  if (path.basename(sourcePath) !== 'ProffieOS') {
+    return { ok: false, error: 'Selected folder must be named "ProffieOS".' };
+  }
+  const name = (versionName || '').trim();
+  if (!name) {
+    return { ok: false, error: 'Version name is required.' };
+  }
+  if (/[<>:"/\\|?*\x00-\x1f]/.test(name)) {
+    return { ok: false, error: 'Version name contains invalid characters.' };
+  }
+  if (!fs.existsSync(path.join(sourcePath, 'ProffieOS.ino'))) {
+    return { ok: false, error: 'Selected folder does not contain ProffieOS.ino — is this a valid ProffieOS source?' };
+  }
+  const dest = path.join(getVersionsRootPath(), name, 'ProffieOS');
+  if (fs.existsSync(dest)) {
+    return { ok: false, error: `A version named "${name}" already exists.` };
+  }
+  try {
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    copyDirSync(sourcePath, dest);
+    return { ok: true, versionName: name };
+  } catch (e) {
+    return { ok: false, error: `Import failed: ${e.message}` };
+  }
+}
+
 // ── Info ───────────────────────────────────────────────
 
 function getInfo() {
@@ -345,6 +389,7 @@ module.exports = {
   ensureConfigFileRef,
   stageConfig,
   readStagedConfig,
+  importVersion,
   getInfo,
   CONFIG_FILENAME
 };

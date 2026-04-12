@@ -53,9 +53,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('build:done', handler);
   },
   // ── ProffieOS versions ───────────────────────────────────
-  listProffieVersions: ()     => ipcRenderer.invoke('proffieOS:listVersions'),
-  getSelectedVersion:  ()     => ipcRenderer.invoke('proffieOS:getSelected'),
-  selectVersion:       (name) => ipcRenderer.invoke('proffieOS:selectVersion', name),
+  listProffieVersions: ()                        => ipcRenderer.invoke('proffieOS:listVersions'),
+  getSelectedVersion:  ()                        => ipcRenderer.invoke('proffieOS:getSelected'),
+  selectVersion:       (name)                    => ipcRenderer.invoke('proffieOS:selectVersion', name),
+  selectFolder:        ()                        => ipcRenderer.invoke('dialog:selectFolder'),
+  validateVersionSource: (sourcePath)            => ipcRenderer.invoke('proffieOS:validateSource', sourcePath),
+  importVersion:       (sourcePath, versionName) => ipcRenderer.invoke('proffieOS:importVersion', { sourcePath, versionName }),
 
   onAppClosing:    (cb) => ipcRenderer.on('app:closing', cb),
   doClose:         () => ipcRenderer.send('app:doClose')

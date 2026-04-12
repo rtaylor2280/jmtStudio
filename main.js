@@ -364,3 +364,26 @@ ipcMain.handle('proffieOS:selectVersion', (_, name) => {
   Store.set('lastVersion', name);
   return { ok: true, name };
 });
+
+ipcMain.handle('dialog:selectFolder', async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+    title: 'Select ProffieOS Folder',
+    properties: ['openDirectory']
+  });
+  if (canceled || !filePaths.length) return null;
+  return filePaths[0];
+});
+
+ipcMain.handle('proffieOS:validateSource', (_, sourcePath) => {
+  if (path.basename(sourcePath) !== 'ProffieOS') {
+    return { ok: false, error: 'Folder must be named "ProffieOS".' };
+  }
+  if (!fs.existsSync(path.join(sourcePath, 'ProffieOS.ino'))) {
+    return { ok: false, error: 'Folder does not contain ProffieOS.ino — not a valid ProffieOS source.' };
+  }
+  return { ok: true };
+});
+
+ipcMain.handle('proffieOS:importVersion', (_, { sourcePath, versionName }) => {
+  return proffie.importVersion(sourcePath, versionName);
+});
