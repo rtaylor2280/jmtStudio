@@ -350,7 +350,11 @@ function waitForDfu(onLog, timeoutMs = 10000) {
       const { execFile } = require('child_process');
       execFile(dfuUtil, ['-l'], { timeout: 3000, cwd: toolsDir }, (err, stdout, stderr) => {
         const output = (stdout || '') + (stderr || '');
-        const found  = output.includes('1209:6668') || output.includes('0483:df11');
+        const lines  = output.split(/\r?\n/);
+        const found  = lines.some(l =>
+          l.trim().startsWith('Found DFU:') &&
+          (l.includes('0483:df11') || l.includes('1209:6668'))
+        );
         if (found) {
           onLog('DFU device detected.', false);
           return resolve(true);

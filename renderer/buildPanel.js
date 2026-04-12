@@ -190,7 +190,7 @@ async function doCompile() {
   setBusy(false);
   if (result.ok) {
     compileSuccess = true;
-    setFlashEnabled(!!selectedPort);
+    if (!isDfuMode) setFlashEnabled(!!selectedPort); // DFU mode: onBuildDone sets flash state
     updateCompileButton();
   }
 }
@@ -825,7 +825,14 @@ async function checkCacheForConfig(missStatus) {
   cacheCheckPending = true;
   updateCompileButton();
 
-  const result = await window.electronAPI.checkCache(content, selectedFqbn, selectedUsb);
+  let result;
+  try {
+    result = await window.electronAPI.checkCache(content, selectedFqbn, selectedUsb);
+  } catch {
+    cacheCheckPending = false;
+    updateCompileButton();
+    return;
+  }
   cacheCheckPending = false;
 
   if (result.hit) {

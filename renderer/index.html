@@ -1020,6 +1020,11 @@ function setFileOpen(open) {
   fileIsOpen = open;
   document.getElementById('empty-state').classList.toggle('visible', !open);
   document.getElementById('editor-container').classList.toggle('visible', open);
+  ['btn-close','btn-save','btn-saveas','btn-download','btn-undo','btn-redo'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = !open;
+  });
+  document.getElementById('chk-diff').disabled = !open;
   if (!open) {
     document.getElementById('config-banner').classList.remove('visible');
     if (isElectron) refreshEmptyStateFavs();
