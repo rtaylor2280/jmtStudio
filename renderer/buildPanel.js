@@ -1074,7 +1074,8 @@ function onOsVersionChange() {
 window.initBuildPanel           = initBuildPanel;
 window.refreshPorts             = refreshPorts;
 window.checkCacheForConfig      = checkCacheForConfig;
-window.updateUsbChangedIndicator = updateUsbChangedIndicator;
+window.updateUsbChangedIndicator  = updateUsbChangedIndicator;
+window.updatePortChangedIndicator = updatePortChangedIndicator;
 window.setSelectedUsb      = (usb) => {
   if (!usb) return;
   selectedUsb = usb;
