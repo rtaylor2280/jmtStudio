@@ -4,3 +4,4 @@ out/
 .env
 local/
 renderer/vs/
+.claude/

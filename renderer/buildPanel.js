@@ -26,7 +26,6 @@ let cachedPorts = [];
 let selectedUsb = 'cdc_webusb'; // default Serial + WebUSB
 let compileTimerInterval  = null;
 let flashTimerInterval    = null;
-let waitForBoardInterval  = null;
 let contentDebounceTimer  = null;
 window._isFlashing = false;
 window.onEditorContentChanged = () => {
@@ -73,9 +72,34 @@ async function initBuildPanel() {
     updateUsbChangedIndicator();
     checkCacheForConfig();
   });
+  document.getElementById('input-version').addEventListener('change', onOsVersionChange);
   document.getElementById('bm-close').addEventListener('click', () => {
-    stopWaitForBoard();
+    stopPortWatch();
     document.getElementById('build-modal').style.display = 'none';
+  });
+  document.getElementById('bm-board-flash').addEventListener('click', () => {
+    const port = document.getElementById('bm-board-port-select').value;
+    if (!port) return;
+    const found = cachedPorts.find(p => p.path === port);
+    selectedPort = port;
+    selectedPortIsProffieboard = true;
+    const portSelect = el('bp-port-select');
+    portSelect.innerHTML = '';
+    const opt = document.createElement('option');
+    opt.value = port; opt.textContent = port;
+    portSelect.appendChild(opt);
+    portSelect.value = port;
+    setFlashEnabled(true);
+    updatePortChangedIndicator();
+    if (found) {
+      const name = detectedBoardName(found.variants);
+      updateBoardDisplay(name);
+      autoSelectMetaBoard(name);
+    }
+    setStatus('port', 'ok', `Proffieboard on ${port}`);
+    stopPortWatch();
+    document.getElementById('bm-board-select-wrap').style.display = 'none';
+    doFlash();
   });
   document.getElementById('bm-abort').addEventListener('click', async () => {
     document.getElementById('bm-abort').disabled = true;
@@ -143,8 +167,18 @@ async function doFlash() {
     appendLog('Compile first before flashing.', true);
     return;
   }
-  if (!selectedPort) {
-    appendLog('No port selected.', true);
+
+  // Pre-flash port check — verify board is still present
+  if (!selectedPort || !selectedPortIsProffieboard) {
+    showWaitForBoardInModal();
+    startPortWatch('wait-flash');
+    return;
+  }
+  const rawPorts = await window.electronAPI.listPortsRaw();
+  if (!rawPorts.find(p => p.path === selectedPort)) {
+    appendModalLog('Selected port disconnected — waiting for board...', true);
+    showWaitForBoardInModal();
+    startPortWatch('wait-flash');
     return;
   }
 
@@ -186,21 +220,15 @@ async function refreshPorts() {
     return;
   }
 
-  // Only show Proffieboard ports — fall back to all if none detected
-  const displayPorts = result.proffieports.length > 0
-    ? result.proffieports
-    : result.ports;
-
-  displayPorts.forEach(p => {
-    const opt = document.createElement('option');
-    opt.value = p.path;
-    opt.textContent = p.path;
-    portSelect.appendChild(opt);
-  });
-
   cachedPorts = result.ports;
 
   if (result.autoSelected && result.port) {
+    // Single Proffieboard detected — auto-select it
+    result.proffieports.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.path; opt.textContent = p.path;
+      portSelect.appendChild(opt);
+    });
     portSelect.value = result.port.path;
     selectedPort = result.port.path;
     selectedPortIsProffieboard = true;
@@ -209,8 +237,14 @@ async function refreshPorts() {
     autoSelectMetaBoard(detectedName);
     setStatus('port', 'ok', `Proffieboard on ${result.port.path}`);
   } else if (result.proffieports.length > 1) {
-    const lastPort   = window.getLastPort ? window.getLastPort() : null;
-    const preferred  = lastPort ? result.proffieports.find(p => p.path === lastPort) : null;
+    // Multiple Proffieboards — try to restore last used
+    result.proffieports.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.path; opt.textContent = p.path;
+      portSelect.appendChild(opt);
+    });
+    const lastPort  = window.getLastPort ? window.getLastPort() : null;
+    const preferred = lastPort ? result.proffieports.find(p => p.path === lastPort) : null;
     if (preferred) {
       portSelect.value = preferred.path;
       selectedPort = preferred.path;
@@ -227,15 +261,31 @@ async function refreshPorts() {
       setStatus('port', 'warn', `${result.proffieports.length} Proffieboards — select port`);
     }
   } else {
-    // Non-Proffieboard port — show in dropdown but don't allow flash
-    portSelect.value = displayPorts[0].path;
-    selectedPort = displayPorts[0].path;
+    // No Proffieboard detected — show all ports for manual inspection but don't select any
+    const placeholder = document.createElement('option');
+    placeholder.value = ''; placeholder.textContent = '—';
+    portSelect.appendChild(placeholder);
+    result.ports.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.path; opt.textContent = p.path;
+      portSelect.appendChild(opt);
+    });
+    portSelect.value = '';
+    selectedPort = null;
     selectedPortIsProffieboard = false;
     updateBoardDisplay('');
     setStatus('port', 'warn', result.message);
   }
 
   updatePortChangedIndicator();
+
+  // Start background port watcher when no Proffieboard is connected
+  if (!selectedPortIsProffieboard) {
+    startPortWatch('monitor');
+  } else {
+    stopPortWatch();
+  }
+
   // After FQBN is resolved, check if a valid cache exists for the current config
   if (!compileSuccess) await checkCacheForConfig();
 }
@@ -351,10 +401,32 @@ function onBuildDone({ type, ok, error, aborted, retriable }) {
   if (type === 'compile') {
     if (ok) {
       compileSuccess = true;
-      setFlashEnabled(!!selectedPort);
       updateCompileButton();
       if (window.setCompiledTimestamp) window.setCompiledTimestamp();
-      startWaitForBoard();
+      stopCompileTimer();
+      appendLog('\n✓ Firmware ready.', false);
+
+      if (selectedPortIsProffieboard && selectedPort) {
+        // Board already connected — show success then flash immediately
+        document.getElementById('bm-title').textContent = '✓ Compile Successful';
+        document.getElementById('bm-title').style.color = '#4d4';
+        document.getElementById('bm-abort').style.display = 'none';
+        document.getElementById('bm-close').style.display = 'inline-block';
+        document.getElementById('bm-status').textContent = 'Board connected — flashing...';
+        setBarMode('success');
+        setFlashEnabled(true);
+        setTimeout(() => doFlash(), 1200);
+      } else {
+        // No board — show wait UI and start watcher
+        setFlashEnabled(false);
+        document.getElementById('bm-title').textContent = '✓ Compile Successful';
+        document.getElementById('bm-title').style.color = '#4d4';
+        document.getElementById('bm-abort').style.display = 'none';
+        document.getElementById('bm-close').style.display = 'inline-block';
+        document.getElementById('bm-status').textContent = 'Connect your Proffieboard to flash...';
+        setBarMode('success');
+        startPortWatch('wait-flash');
+      }
     } else if (aborted) {
       compileSuccess = false;
       setFlashEnabled(false);
@@ -388,6 +460,7 @@ function showBuildModal(title) {
   document.getElementById('bm-status').textContent = '';
   document.getElementById('bm-close').style.display = 'none';
   document.getElementById('bm-retry').style.display = 'none';
+  document.getElementById('bm-board-select-wrap').style.display = 'none';
   const abortBtn = document.getElementById('bm-abort');
   abortBtn.style.display = 'inline-block';
   abortBtn.disabled = false;
@@ -417,56 +490,117 @@ function setBarMode(mode) {
   else if (mode === 'error')   { bar.classList.add('bm-bar-error');   bar.style.left = '0'; }
 }
 
-function stopWaitForBoard() {
-  if (waitForBoardInterval) {
-    clearInterval(waitForBoardInterval);
-    waitForBoardInterval = null;
+// ── Port watcher ───────────────────────────────────────
+// Polls SerialPort.list() cheaply every 1s; on change fires getRecommendedPort().
+// context: 'monitor' (main UI) | 'wait-flash' (modal waiting for board)
+
+let _portWatchInterval = null;
+let _portWatchContext  = null;
+let _lastRawPortKey    = null;
+
+function startPortWatch(context) {
+  _portWatchContext = context;
+  if (_portWatchInterval) return; // already running, context updated above
+  _lastRawPortKey = null;
+
+  _portWatchInterval = setInterval(async () => {
+    try {
+      const raw = await window.electronAPI.listPortsRaw();
+      const key = raw.map(p => p.path).sort().join(',');
+      if (key === _lastRawPortKey) return;
+      _lastRawPortKey = key;
+      const result = await window.electronAPI.getRecommendedPort();
+      handlePortWatchResult(result);
+    } catch {}
+  }, 1000);
+}
+
+function stopPortWatch() {
+  if (_portWatchInterval) { clearInterval(_portWatchInterval); _portWatchInterval = null; }
+  _lastRawPortKey   = null;
+  _portWatchContext = null;
+}
+
+async function handlePortWatchResult(result) {
+  const proffieports = result.ok ? (result.proffieports || []) : [];
+
+  if (_portWatchContext === 'monitor') {
+    if (proffieports.length === 0) return; // still no board, keep watching
+    stopPortWatch();
+    await refreshPorts(); // board appeared — full UI refresh
+
+  } else if (_portWatchContext === 'wait-flash') {
+    if (proffieports.length === 0) return; // still waiting
+
+    if (proffieports.length === 1 || result.autoSelected) {
+      const port = result.port || proffieports[0];
+      stopPortWatch();
+      _selectPortAndFlash(port, result);
+    } else {
+      // Multiple boards — show selector; prefer metaPort if stored
+      showMultiBoardSelect(proffieports);
+    }
   }
 }
 
-function startWaitForBoard() {
-  // Clear stale port state immediately — board must be verified before flash is allowed
-  selectedPort = null;
-  selectedPortIsProffieboard = false;
-  setFlashEnabled(false);
+function _selectPortAndFlash(port, result) {
+  selectedPort = port.path;
+  selectedPortIsProffieboard = true;
+  if (result.ports) cachedPorts = result.ports;
 
-  stopCompileTimer();
-  document.getElementById('bm-title').textContent = '✓ Compile Successful';
-  document.getElementById('bm-title').style.color = '#4d4';
-  document.getElementById('bm-status').textContent = 'Connect a board to flash...';
+  const portSelect = el('bp-port-select');
+  portSelect.innerHTML = '';
+  const opt = document.createElement('option');
+  opt.value = port.path; opt.textContent = port.path;
+  portSelect.appendChild(opt);
+  portSelect.value = port.path;
+  setFlashEnabled(true);
+  updatePortChangedIndicator();
+  const name = detectedBoardName(port.variants);
+  updateBoardDisplay(name);
+  autoSelectMetaBoard(name);
+  setStatus('port', 'ok', `Proffieboard on ${port.path}`);
+  document.getElementById('bm-board-select-wrap').style.display = 'none';
+  document.getElementById('bm-status').textContent = 'Board detected — flashing...';
+  setTimeout(() => doFlash(), 1200);
+}
+
+function showWaitForBoardInModal() {
+  document.getElementById('build-modal').style.display = 'flex';
+  document.getElementById('bm-title').textContent = '⚡ Connect Board';
+  document.getElementById('bm-title').style.color = '#eee';
+  document.getElementById('bm-status').textContent = 'Connect your Proffieboard to continue...';
   document.getElementById('bm-abort').style.display = 'none';
+  document.getElementById('bm-retry').style.display = 'none';
   document.getElementById('bm-close').style.display = 'inline-block';
-  setBarMode('success');
-  appendLog('\n✓ Firmware ready. Waiting for board...', false);
+  document.getElementById('bm-board-select-wrap').style.display = 'none';
+  setBarMode('knightrider');
+}
 
-  async function pollForBoard() {
-    if (!compileSuccess) { stopWaitForBoard(); return; }
-    const result = await window.electronAPI.getRecommendedPort();
-    if (result.ok && result.autoSelected && result.port) {
-      stopWaitForBoard();
-      selectedPort = result.port.path;
-      selectedPortIsProffieboard = true;
-      cachedPorts  = result.ports;
-      const portSelect = el('bp-port-select');
-      portSelect.innerHTML = `<option value="${result.port.path}">${result.port.path}</option>`;
-      portSelect.value = result.port.path;
-      setFlashEnabled(true);
-      updatePortChangedIndicator();
-      const name = detectedBoardName(result.port.variants);
-      updateBoardDisplay(name);
-      autoSelectMetaBoard(name);
-      setStatus('port', 'ok', `Proffieboard on ${result.port.path}`);
-      document.getElementById('bm-status').textContent = 'Board detected — flashing...';
-      setTimeout(() => doFlash(), 1200);
-    }
-  }
+function showMultiBoardSelect(proffieports) {
+  const sel = document.getElementById('bm-board-port-select');
+  const currentVal = sel.value;
+  sel.innerHTML = '';
 
-  // Check immediately (handles board-was-connected case), then poll every 2s
-  pollForBoard();
-  waitForBoardInterval = setInterval(pollForBoard, 2000);
+  // Prefer port stored in file metadata
+  const preferred = window.getLastPort ? window.getLastPort() : null;
+  const sorted = preferred
+    ? [proffieports.find(p => p.path === preferred), ...proffieports.filter(p => p.path !== preferred)].filter(Boolean)
+    : proffieports;
+
+  sorted.forEach(p => {
+    const opt = document.createElement('option');
+    opt.value = p.path; opt.textContent = p.path;
+    sel.appendChild(opt);
+  });
+  if (currentVal) sel.value = currentVal; // preserve selection if already shown
+
+  document.getElementById('bm-status').textContent = 'Multiple Proffieboards detected — select one:';
+  document.getElementById('bm-board-select-wrap').style.display = 'flex';
 }
 
 function finishBuildModal(success, title, statusMsg, { retriable = false } = {}) {
+  stopPortWatch();
   stopCompileTimer();
   stopFlashTimer();
   document.getElementById('bm-title').textContent = title;
@@ -605,6 +739,20 @@ async function checkCacheForConfig(missStatus) {
       setStatus('compile', missStatus ? 'warn' : '', missStatus || 'Not compiled');
     }
   }
+}
+
+// ── ProffieOS version ──────────────────────────────────
+function onOsVersionChange() {
+  // IPC selectVersion is called by index.html's change handler.
+  // Here we only handle compile-state invalidation.
+  if (compileSuccess) {
+    compileSuccess = false;
+    setFlashEnabled(false);
+    setStatus('compile', 'warn', 'OS version changed — recompile needed');
+  }
+  cacheCheckPending = true;
+  updateCompileButton();
+  checkCacheForConfig('OS version changed — recompile needed');
 }
 
 // ── Expose init ────────────────────────────────────────

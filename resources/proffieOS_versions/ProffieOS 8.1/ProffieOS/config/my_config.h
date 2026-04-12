@@ -1,4 +1,4 @@
-// ProffieOS7 Config File for Two Button V8.1 modified again
+// ProffieOS7 Config File for Two Button V8.1 modified221
 #ifdef CONFIG_TOP 
 
 // ------------ Board & Hardware Setup ------------

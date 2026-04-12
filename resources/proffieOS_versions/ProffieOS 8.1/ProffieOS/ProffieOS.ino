@@ -25,9 +25,7 @@
 |  Add the slashes to any that you are not using.                   |
 \*-----------------------------------------------------------------*/
 
-// Proffie OS8.1 for Two Button Saber
 #define CONFIG_FILE "config/my_config.h"
-
 // #define CONFIG_FILE "config/default_proffieboard_config.h"
 // #define CONFIG_FILE "config/proffieboard_v1_test_bench_config.h"
 // #define CONFIG_FILE "config/proffieboard_v2_testing_config.h"

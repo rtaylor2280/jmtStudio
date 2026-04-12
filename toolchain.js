@@ -196,7 +196,7 @@ async function initialize(onLog) {
 
   const sourceCheck = proffie.validateProffieOSSource();
   if (!sourceCheck.ok) return { ok: false, error: sourceCheck.error };
-  onLog(`ProffieOS v${proffie.PROFFIE_VERSION} source validated.`, false);
+  onLog(`ProffieOS source validated (${proffie.getSelectedVersion()}).`, false);
 
   const wsResult = proffie.initWorkspace(onLog);
   if (!wsResult.ok) return { ok: false, error: wsResult.error };
@@ -220,6 +220,9 @@ async function compile(configContent, fqbn, buildOptions, onLog) {
 
   const usb = (buildOptions && buildOptions.usb) || 'cdc_webusb';
 
+  const refCheck = proffie.ensureConfigFileRef(onLog);
+  if (!refCheck.ok) { onLog(refCheck.error, true); return { ok: false, error: refCheck.error }; }
+
   const staged = proffie.stageConfig(configContent);
   if (!staged.ok) { onLog(staged.error, true); return { ok: false, error: staged.error }; }
   onLog(`Config staged to: ${staged.stagedPath}`, false);
@@ -233,6 +236,7 @@ async function compile(configContent, fqbn, buildOptions, onLog) {
     '--fqbn', `${fqbn}:usb=${usb},dosfs=sdmmc1,speed=80,opt=os,pclk=2`,
     '--build-path', buildPath,
     '--warnings', 'none',
+    '--verbose',
     sketchPath
   ];
 
@@ -243,7 +247,8 @@ async function compile(configContent, fqbn, buildOptions, onLog) {
     // Save to persistent cache
     try {
       const { app } = require('electron');
-      cache.cacheCompileResult(buildPath, configContent, fqbn, usb,
+      const proffieOSHash = proffie.hashVersion(proffie.getSelectedVersion());
+      cache.cacheCompileResult(buildPath, configContent, fqbn, usb, proffieOSHash,
         new Date().toISOString(), app.getVersion());
     } catch {}
     return { ok: true, buildPath };
@@ -551,7 +556,8 @@ function getStatus() {
 }
 
 function checkCacheAndRestore(configContent, fqbn, usb) {
-  return cache.checkAndRestore(configContent, fqbn, usb);
+  const proffieOSHash = proffie.hashVersion(proffie.getSelectedVersion());
+  return cache.checkAndRestore(configContent, fqbn, usb, proffieOSHash);
 }
 
 module.exports = {

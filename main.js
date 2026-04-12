@@ -3,6 +3,7 @@ const path        = require('path');
 const fs          = require('fs');
 const toolchain   = require('./toolchain');
 const portDetect  = require('./portDetector');
+const proffie     = require('./proffieos');
 
 // ── Separate userData for dev vs prod ──────────────────
 if (!app.isPackaged) {
@@ -121,7 +122,17 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  // Initialize selected ProffieOS version from prefs before window opens
+  const versions    = proffie.listVersions();
+  const lastVersion = Store.get('lastVersion');
+  const initVersion = (lastVersion && versions.includes(lastVersion))
+    ? lastVersion
+    : (versions[0] || null);
+  if (initVersion) proffie.setSelectedVersion(initVersion);
+
+  createWindow();
+});
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 
@@ -296,6 +307,12 @@ ipcMain.handle('ports:list', async () => {
   return await portDetect.listPorts();
 });
 
+ipcMain.handle('ports:listRaw', async () => {
+  const { SerialPort } = require('serialport');
+  const ports = await SerialPort.list();
+  return ports.map(p => ({ path: p.path }));
+});
+
 ipcMain.handle('ports:getRecommended', async () => {
   return await portDetect.getRecommendedPort();
 });
@@ -333,4 +350,17 @@ ipcMain.handle('favorites:remove', (_, filePath) => {
 ipcMain.handle('favorites:reorder', (_, orderedPaths) => {
   Store.set('favorites', orderedPaths.map(fp => ({ filePath: fp })));
   return true;
+});
+
+// ── IPC: ProffieOS versions ────────────────────────────
+ipcMain.handle('proffieOS:listVersions', () => proffie.listVersions());
+
+ipcMain.handle('proffieOS:getSelected', () => ({
+  name: proffie.getSelectedVersion()
+}));
+
+ipcMain.handle('proffieOS:selectVersion', (_, name) => {
+  proffie.setSelectedVersion(name);
+  Store.set('lastVersion', name);
+  return { ok: true, name };
 });

@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // ── Port detection ───────────────────────────────────
   listPorts:          () => ipcRenderer.invoke('ports:list'),
+  listPortsRaw:       () => ipcRenderer.invoke('ports:listRaw'),
   getRecommendedPort: () => ipcRenderer.invoke('ports:getRecommended'),
 
   // ── Build events (main → renderer) ──────────────────
@@ -51,6 +52,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('build:done', handler);
     return () => ipcRenderer.removeListener('build:done', handler);
   },
+  // ── ProffieOS versions ───────────────────────────────────
+  listProffieVersions: ()     => ipcRenderer.invoke('proffieOS:listVersions'),
+  getSelectedVersion:  ()     => ipcRenderer.invoke('proffieOS:getSelected'),
+  selectVersion:       (name) => ipcRenderer.invoke('proffieOS:selectVersion', name),
+
   onAppClosing:    (cb) => ipcRenderer.on('app:closing', cb),
   doClose:         () => ipcRenderer.send('app:doClose')
 

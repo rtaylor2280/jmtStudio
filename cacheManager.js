@@ -58,10 +58,10 @@ function computeConfigHash(content) {
 
 /**
  * Computes a stable hash of the build package identity.
- * Any change to FQBN, USB mode, or core version produces a new hash.
+ * Any change to FQBN, USB mode, core version, or ProffieOS source produces a new hash.
  */
-function computeBuildPackageHash(fqbn, usb) {
-  const identity = `fqbn=${fqbn}|usb=${usb}|core=${CORE_VERSION}`;
+function computeBuildPackageHash(fqbn, usb, proffieOSHash) {
+  const identity = `fqbn=${fqbn}|usb=${usb}|core=${CORE_VERSION}|os=${proffieOSHash || ''}`;
   return crypto.createHash('sha256').update(identity, 'utf8').digest('hex').slice(0, 16);
 }
 
@@ -103,11 +103,12 @@ function saveToCache(buildOutputPath, configHash, buildPkgHash, meta) {
   const metadata = {
     configHash,
     buildPkgHash,
-    fqbn:        meta.fqbn,
-    usb:         meta.usb,
-    coreVersion: CORE_VERSION,
-    compiledAt:  meta.compiledAt,
-    toolVersion: meta.toolVersion,
+    fqbn:          meta.fqbn,
+    usb:           meta.usb,
+    proffieOSHash: meta.proffieOSHash,
+    coreVersion:   CORE_VERSION,
+    compiledAt:    meta.compiledAt,
+    toolVersion:   meta.toolVersion,
   };
   fs.writeFileSync(path.join(cacheDir, 'metadata.json'), JSON.stringify(metadata, null, 2), 'utf8');
 
@@ -163,9 +164,9 @@ function restoreToOutput(configHash, buildPkgHash) {
  * Given config content + build parameters, checks the cache and restores if hit.
  * Returns { hit, buildPath?, metadata? }
  */
-function checkAndRestore(configContent, fqbn, usb) {
+function checkAndRestore(configContent, fqbn, usb, proffieOSHash) {
   const configHash   = computeConfigHash(configContent);
-  const buildPkgHash = computeBuildPackageHash(fqbn, usb);
+  const buildPkgHash = computeBuildPackageHash(fqbn, usb, proffieOSHash);
   const result       = restoreToOutput(configHash, buildPkgHash);
   if (!result.ok) return { hit: false };
   return { hit: true, buildPath: result.buildPath, metadata: result.metadata };
@@ -175,11 +176,11 @@ function checkAndRestore(configContent, fqbn, usb) {
  * Saves a completed compile to the cache.
  * Called from toolchain.js after a successful compile.
  */
-function cacheCompileResult(buildOutputPath, configContent, fqbn, usb, compiledAt, toolVersion) {
+function cacheCompileResult(buildOutputPath, configContent, fqbn, usb, proffieOSHash, compiledAt, toolVersion) {
   const configHash   = computeConfigHash(configContent);
-  const buildPkgHash = computeBuildPackageHash(fqbn, usb);
+  const buildPkgHash = computeBuildPackageHash(fqbn, usb, proffieOSHash);
   return saveToCache(buildOutputPath, configHash, buildPkgHash, {
-    fqbn, usb, compiledAt, toolVersion,
+    fqbn, usb, proffieOSHash, compiledAt, toolVersion,
   });
 }
 

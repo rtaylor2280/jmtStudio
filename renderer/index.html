@@ -258,9 +258,7 @@
   .meta-field input:focus { border-color: #4d9; }
   #input-desc     { width: 380px; }
   #input-board    { width: 160px; }
-  #input-version  { width: 80px; }
-  #input-version::-webkit-inner-spin-button,
-  #input-version::-webkit-outer-spin-button { -webkit-appearance: none; }
+  #input-version  { width: 160px; background:#181818; border:1px solid #2e2e2e; border-radius:3px; color:#ccc; font-size:0.78rem; padding:4px 6px; outline:none; cursor:pointer; }
 
   .field-error {
     border-color: #e44 !important;
@@ -813,7 +811,7 @@
     </div>
     <div class="meta-field">
       <label>OS Version</label>
-      <input type="number" id="input-version" placeholder="—" min="1" step="0.1" spellcheck="false" style="width:80px;" />
+      <select id="input-version"></select>
     </div>
     <div id="meta-timestamps" style="display:none;margin-left:auto;text-align:right;line-height:1.7;font-size:0.7rem;">
       <div><span style="color:#666;text-transform:uppercase;letter-spacing:0.06em;font-size:0.62rem;">Created</span> <span id="meta-created-val" style="color:#888;font-family:monospace;"></span></div>
@@ -1032,7 +1030,7 @@ function updateStatusMeta() {
   const board   = document.getElementById('input-board').value.trim();
   const version = document.getElementById('input-version').value.trim();
   document.getElementById('stat-board').textContent    = board || '';
-  document.getElementById('stat-version').textContent  = version ? 'ProffieOS ' + version : '';
+  document.getElementById('stat-version').textContent  = version || '';
 
   const compiledEl = document.getElementById('stat-compiled');
   const flashedEl  = document.getElementById('stat-flashed');
@@ -1051,7 +1049,13 @@ function updateStatusMeta() {
   }
 }
 document.getElementById('input-board').addEventListener('change', () => { updateChangedIndicators(); updateStatusMeta(); if (fileIsOpen) setDirty(true); });
-document.getElementById('input-version').addEventListener('input', () => { updateChangedIndicators(); updateStatusMeta(); validateFields(); if (fileIsOpen) setDirty(true); });
+document.getElementById('input-version').addEventListener('change', () => {
+  updateChangedIndicators();
+  updateStatusMeta();
+  if (fileIsOpen) setDirty(true);
+  const name = document.getElementById('input-version').value;
+  if (name && window.electronAPI) window.electronAPI.selectVersion(name);
+});
 
 // ── Metadata ───────────────────────────────────────────
 let metaCreated  = null;
@@ -1072,7 +1076,7 @@ function updateChangedIndicators() {
   boardSel.classList.toggle('field-changed',
     baselineBoard !== null && boardSel.value !== baselineBoard);
   versionEl.classList.toggle('field-changed',
-    baselineVersion !== null && versionEl.value.trim() !== String(baselineVersion));
+    baselineVersion !== null && versionEl.value !== baselineVersion);
 }
 window.getBaselineUsb = () => baselineUsb;
 
@@ -1140,20 +1144,24 @@ function loadContent(rawContent, filePath) {
   boardSel.value = board ? (Array.from(boardSel.options).find(o => o.value === board) ? board : '') : '';
   boardSel.dispatchEvent(new Event('change'));
   if (usb && window.setSelectedUsb) window.setSelectedUsb(usb);
-  const versionNum = parseFloat(version || '');
-  document.getElementById('input-version').value  = !isNaN(versionNum) ? versionNum : '';
-  if (version && isNaN(parseFloat(version))) {
-    document.getElementById('input-version').classList.add('field-error');
-  } else {
-    document.getElementById('input-version').classList.remove('field-error');
+  const versionSel  = document.getElementById('input-version');
+  const exactMatch  = version
+    ? Array.from(versionSel.options).find(o => o.value === version)
+    : null;
+  // Only update selection on exact match — invalid/missing metadata leaves the
+  // dropdown at its current selection. The invalid value is dropped on next save.
+  const resolvedVersion = exactMatch ? exactMatch.value : null;
+  if (resolvedVersion) {
+    versionSel.value = resolvedVersion;
+    if (window.electronAPI) window.electronAPI.selectVersion(resolvedVersion);
   }
   metaCreated  = created  || null;
   metaUpdated  = updated  || null;
   metaCompiled = compiled || null;
   metaFlashed  = flashed  || null;
   metaPort     = port     || null;
-  baselineBoard   = board   || null;
-  baselineVersion = version || null;
+  baselineBoard   = board           || null;
+  baselineVersion = resolvedVersion || null;
   baselineUsb     = usb     || null;
   updateChangedIndicators();
   closeDiff();
@@ -1171,12 +1179,13 @@ function loadContent(rawContent, filePath) {
 }
 
 function clearMeta() {
-  ['input-filename','input-desc','input-version']
+  ['input-filename','input-desc']
     .forEach(id => document.getElementById(id).value = '');
   document.getElementById('input-board').value = '';
   document.getElementById('input-board').dispatchEvent(new Event('change'));
   metaCreated = metaUpdated = metaCompiled = metaFlashed = metaPort = null;
   baselineBoard = baselineVersion = baselineUsb = null;
+  // input-version stays at current selection (persistent compile setting)
   ['input-board','input-version'].forEach(id =>
     document.getElementById(id).classList.remove('field-changed'));
   document.getElementById('input-desc').classList.remove('field-warn');
@@ -1188,7 +1197,7 @@ function validateFields() {
   let valid = true;
   const versionEl = document.getElementById('input-version');
   const val = versionEl.value.trim();
-  if (val !== '' && isNaN(parseFloat(val))) {
+  if (false) { // select is always valid — kept for structure
     versionEl.classList.add('field-error');
     valid = false;
   } else {
@@ -1728,6 +1737,17 @@ require(['vs/editor/editor.main'], function () {
       if (await window.electronAPI.isDevMode()) {
         document.getElementById('dev-bar').style.display = 'block';
       }
+      // Populate OS version dropdown
+      const versions   = await window.electronAPI.listProffieVersions();
+      const currentVer = await window.electronAPI.getSelectedVersion();
+      const verSel     = document.getElementById('input-version');
+      versions.forEach(name => {
+        const opt = document.createElement('option');
+        opt.value = opt.textContent = name;
+        verSel.appendChild(opt);
+      });
+      if (currentVer && currentVer.name) verSel.value = currentVer.name;
+
       await loadFavorites();
       const lastPath = await window.electronAPI.getLastFile();
       if (lastPath) {
@@ -1793,6 +1813,13 @@ require(['vs/editor/editor.main'], function () {
 
     <!-- Log output -->
     <div id="bm-log" style="font-family:'Cascadia Code',Consolas,monospace;font-size:0.72rem;line-height:1.5;color:#aaa;background:#0d0d0d;border:1px solid #1e1e1e;border-radius:4px;padding:10px 12px;height:220px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;margin-bottom:18px;"></div>
+
+    <!-- Multi-board port selector (shown when multiple Proffieboards detected) -->
+    <div id="bm-board-select-wrap" style="display:none;align-items:center;gap:10px;margin-bottom:14px;">
+      <span style="font-size:0.8rem;color:#aaa;white-space:nowrap;">Select board:</span>
+      <select id="bm-board-port-select" style="flex:1;background:#181818;border:1px solid #2e2e2e;border-radius:3px;color:#ccc;font-size:0.78rem;padding:4px 8px;outline:none;cursor:pointer;"></select>
+      <button id="bm-board-flash" style="padding:6px 16px;background:#1a2a3a;color:#4af;border:1px solid #2a4a6a;border-radius:4px;font-size:0.82rem;font-weight:600;cursor:pointer;">⚡ Flash</button>
+    </div>
 
     <!-- Status / close -->
     <div style="display:flex;align-items:center;justify-content:space-between;padding-bottom:10px;border-bottom:1px solid #1e1e1e;">
