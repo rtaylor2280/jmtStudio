@@ -399,8 +399,6 @@ ipcMain.handle('dfu:detect', async () => {
 });
 
 ipcMain.handle('dfu:runSetup', async () => {
-  const path    = require('path');
-  const proffie = require('./proffieos');
   const setupExe = path.join(proffie.getResourcesPath(), 'tools', 'windows', 'proffie-dfu-setup.exe');
   const error = await shell.openPath(setupExe);
   return { ok: !error, error: error || null };

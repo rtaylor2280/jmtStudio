@@ -1313,9 +1313,12 @@ function showDiff(visible) {
 
 function refreshDiff() {
   if (!diffEditorInstance) return;
+  // Dispose old models to prevent accumulation
+  const prev = diffEditorInstance.getModel();
   const orig = monaco.editor.createModel(snapshot, 'cpp');
   const curr = monaco.editor.createModel(editor.getValue(), 'cpp');
   diffEditorInstance.setModel({ original: orig, modified: curr });
+  if (prev) { prev.original?.dispose(); prev.modified?.dispose(); }
   diffEditorInstance.getModifiedEditor().onDidChangeModelContent(() => {
     if (diffVisible) setDirty(true);
   });
@@ -1361,6 +1364,13 @@ async function doSaveAs() {
     setDirty(false);
     updateStatusMeta();
     updateFavButton();
+    // Baselines now match the saved file — clear changed indicators
+    baselineBoard   = document.getElementById('input-board').value   || null;
+    baselineVersion = document.getElementById('input-version').value || null;
+    const usbEl = document.getElementById('bp-usb-select');
+    if (usbEl) baselineUsb = usbEl.value || null;
+    updateChangedIndicators();
+    if (window.updateUsbChangedIndicator) window.updateUsbChangedIndicator();
   }
 }
 

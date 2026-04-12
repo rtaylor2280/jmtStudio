@@ -1042,6 +1042,8 @@ async function watchForSerialAfterDfu() {
     }
   }
 
+  // Reset dfuDeviceReady so Close button exits DFU mode
+  dfuDeviceReady = false;
   document.getElementById('bm-status').textContent =
     'Flash complete — board not yet detected. Try power cycling.';
   appendModalLog('Board not detected after restart. Try power cycling or reconnecting.', true);
