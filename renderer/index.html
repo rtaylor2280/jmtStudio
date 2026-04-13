@@ -1782,6 +1782,7 @@ function setFileOpen(open) {
   document.getElementById('chk-diff').disabled = !open;
   document.getElementById('btn-compare').disabled = !open;
   if (!open) {
+    _compareFilePath = null;
     _resetCompareUI();
     document.getElementById('config-banner').classList.remove('visible');
     if (isElectron) refreshEmptyStateFavs();
@@ -2048,11 +2049,9 @@ function takeSnapshot(content) {
 // ── Diff ───────────────────────────────────────────────
 
 // Resets compare-specific UI without touching the diff editor visibility.
-// Call this before switching to snapshot diff, or when file is closed.
+// Does NOT clear _compareFilePath — the remembered file persists for re-toggle.
 function _resetCompareUI() {
-  if (!_compareMode) return;
-  _compareMode     = false;
-  _compareFilePath = null;
+  _compareMode = false;
   document.getElementById('btn-compare').classList.remove('active');
   document.getElementById('diff-label-orig').textContent = 'Original (baseline)';
 }
@@ -2122,7 +2121,7 @@ async function startCompare(filePath) {
   clearBtn.className   = 'compare-clear-btn';
   clearBtn.title       = 'Clear compare';
   clearBtn.textContent = '✕';
-  clearBtn.addEventListener('click', () => closeDiff());
+  clearBtn.addEventListener('click', () => { _compareFilePath = null; closeDiff(); });
   origLabel.appendChild(clearBtn);
 
   // Set diff model — compare file as original, current editor content as modified
@@ -2199,8 +2198,13 @@ function closeComparePicker() {
 }
 
 document.getElementById('btn-compare').addEventListener('click', () => {
-  if (_compareMode) { closeDiff(); return; }
-  openComparePicker();
+  if (_compareMode) {
+    closeDiff();           // hide view, file is remembered
+  } else if (_compareFilePath) {
+    startCompare(_compareFilePath);  // re-show with remembered file
+  } else {
+    openComparePicker();   // no file yet — pick one
+  }
 });
 document.getElementById('compare-pick-cancel').addEventListener('click', closeComparePicker);
 document.getElementById('compare-pick-browse').addEventListener('click', async () => {
