@@ -2,13 +2,45 @@
 // One message per line — edit freely. Order is preserved (not random).
 // First message appears at 60 seconds; each subsequent message every ~25 seconds.
 // Remove a line to skip it. Add lines to extend the sequence.
+// At ~25s per message, 35 messages covers roughly 15 minutes of compile time.
+✅ Refined version (cleaned, de-duplicated, better pacing)
+
+I kept your voice, just tightened and spaced things better:
+
 const COMPILE_HINTS = [
   "Hang in there, this can sometimes take a while\u2026",
-  "Still compiling\u2026 large configs take longer to process.",
-  "ProffieOS is compiling all blade styles and effects.",
+  "Compiling ProffieOS — large configs take longer to process.",
+  "Building blade styles and effects\u2026",
   "Optimizing memory usage for your config\u2026",
-  "Still working\u2026 complex configs require extra processing.",
+  "Your blade styles are being resolved into optimized machine code.",
   "Good things take time\u2026 especially lightsabers.",
-  "Almost there\u2026 just finishing up.",
+  "The compiler is resolving template parameters across your entire config.",
+  "No errors so far — that\u2019s a good sign.",
+  "ProffieOS uses extensive C++ templates — complex configs compile slowly by design.",
+  "Each preset is being individually optimized.",
   "Calibrating the Force\u2026",
+  "The STM32 toolchain is carefully arranging memory layout.",
+  "Large style stacks take longer — the result is worth it.",
+  "Working through complex sections of your build\u2026",
+  "Your saber is being brought to life, one instruction at a time.",
+  "ProffieOS links together hundreds of template classes.",
+  "No news is good news — still compiling cleanly.",
+  "Blade effects are being compiled into efficient embedded code.",
+  "The compiler is inlining and optimizing your style functions.",
+  "Still going\u2026 ProffieOS is thorough.",
+  "This is a good time to stretch.",
+  "Complex configs take time — this is completely normal.",
+  "The more effects in your config, the more work the compiler does.",
+  "The toolchain is making sure everything fits in memory.",
+  "ProffieOS is a sophisticated system — compiling it takes time.",
+  "Take a breath. This is one of the longer ones.",
+  "Almost every builder has waited through a compile like this.",
+  "The compiler is working hard behind the scenes.",
+  "Memory optimization pass\u2026 fitting your config into flash.",
+  "Still going\u2026 larger configs can take 10\u201315 minutes.",
+  "Linking\u2026 this is usually one of the final steps.",
+  "Every blade style, sound, and preset is being wired together.",
+  "The wait is part of the craft. Your config will be worth it.",
+  "Thanks for your patience\u2026 almost there.",
+  "Finalizing build\u2026 just about done.",
 ];
