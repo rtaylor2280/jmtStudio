@@ -411,6 +411,45 @@
   #banner-name { font-size: 0.8rem; color: #7a7; margin-top: 2px; font-family: monospace; }
   #meta-timestamps { text-align: right; line-height: 1.7; font-size: 0.7rem; flex-shrink: 0; }
 
+  /* ── Compare split banner ── */
+  #config-banner.comparing {
+    padding: 0;
+    background: transparent;
+    align-items: stretch;
+    border-bottom: 1px solid var(--c-border);
+    border-top: none;
+    gap: 0;
+  }
+  #banner-current-half {
+    flex: 1; display: flex; align-items: center; justify-content: space-between;
+    gap: 16px; min-width: 0;
+  }
+  #config-banner.comparing #banner-current-half {
+    background: #161f16;
+    padding: 8px 16px 7px 14px;
+  }
+  #banner-compare-half {
+    display: none; flex: 1; align-items: center; justify-content: space-between;
+    gap: 8px; min-width: 0;
+    background: #0d1e28;
+    padding: 8px 10px 7px 16px;
+  }
+  #config-banner.comparing #banner-compare-half { display: flex; }
+  #banner-split-divider { display: none; }
+  #compare-banner-desc {
+    font-size: 1.15rem; font-weight: 700; color: #4bc;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1;
+  }
+  #compare-banner-clear {
+    background: none; border: none; color: #2a8aaa; cursor: pointer;
+    font-size: 1.1rem; padding: 2px 6px; border-radius: 3px; flex-shrink: 0; line-height: 1;
+  }
+  #compare-banner-clear:hover { color: #f88; background: rgba(255,100,100,0.1); }
+  html.light-mode #config-banner.comparing #banner-current-half { background: #f0f8f0; }
+  html.light-mode #banner-compare-half  { background: #e0f0f8; }
+  html.light-mode #compare-banner-desc  { color: #1a6a8a; }
+  html.light-mode #compare-banner-clear { color: #3a7a9a; }
+
   /* ── Build toolbar ── */
   #build-toolbar {
     display: flex;
@@ -554,6 +593,8 @@
   #editor-container.visible { display: block; }
   #editor, #diff-editor { width: 100%; height: 100%; }
   #diff-editor { display: none; }
+  /* Push diff editor content below the floating label bar so line 1 isn't obscured */
+  #diff-labels.visible ~ #diff-editor { margin-top: 24px; height: calc(100% - 24px); }
 
   #diff-labels {
     display: none;
@@ -1459,13 +1500,20 @@
 
 <!-- ── Config banner ── -->
 <div id="config-banner">
-  <div>
-    <div id="banner-desc"></div>
-    <div id="banner-name"></div>
+  <div id="banner-compare-half">
+    <div id="compare-banner-desc"></div>
+    <button id="compare-banner-clear" title="Clear compare file">&#10005;</button>
   </div>
-  <div id="meta-timestamps" style="display:none;">
-    <div><span style="color:#4a6a4a;text-transform:uppercase;letter-spacing:0.06em;font-size:0.62rem;">Created</span> <span id="meta-created-val" style="color:#6a8a6a;font-family:monospace;"></span></div>
-    <div><span style="color:#4a6a4a;text-transform:uppercase;letter-spacing:0.06em;font-size:0.62rem;">Updated</span> <span id="meta-updated-val" style="color:#6a8a6a;font-family:monospace;"></span></div>
+  <div id="banner-split-divider"></div>
+  <div id="banner-current-half">
+    <div>
+      <div id="banner-desc"></div>
+      <div id="banner-name"></div>
+    </div>
+    <div id="meta-timestamps" style="display:none;">
+      <div><span style="color:#4a6a4a;text-transform:uppercase;letter-spacing:0.06em;font-size:0.62rem;">Created</span> <span id="meta-created-val" style="color:#6a8a6a;font-family:monospace;"></span></div>
+      <div><span style="color:#4a6a4a;text-transform:uppercase;letter-spacing:0.06em;font-size:0.62rem;">Updated</span> <span id="meta-updated-val" style="color:#6a8a6a;font-family:monospace;"></span></div>
+    </div>
   </div>
 </div>
 
@@ -1537,11 +1585,11 @@
 <!-- ── Editor ── -->
 <div id="editor-container">
   <div id="editor"></div>
-  <div id="diff-editor"></div>
   <div id="diff-labels">
     <div class="diff-label orig" id="diff-label-orig">Original (baseline)</div>
     <div class="diff-label curr">Current</div>
   </div>
+  <div id="diff-editor"></div>
 </div>
 
 <!-- ── Log panel ── -->
@@ -2054,6 +2102,17 @@ function _resetCompareUI() {
   _compareMode = false;
   document.getElementById('btn-compare').classList.remove('active');
   document.getElementById('diff-label-orig').textContent = 'Original (baseline)';
+  document.getElementById('config-banner').classList.remove('comparing');
+}
+
+function _stripJmtMeta(content) {
+  return stripJmtLines(content);
+}
+
+function _getCompareLabel(content, filePath) {
+  const m = content.match(/^\/\/ @jmt:description\s+(.+)$/m);
+  if (m) return m[1].trim();
+  return filePath.split(/[\\/]/).pop().replace(/\.[^.]+$/, '');
 }
 
 function closeDiff() {
@@ -2110,23 +2169,14 @@ async function startCompare(filePath) {
   document.getElementById('diff-labels').classList.add('visible');
   document.getElementById('stat-diff-info').classList.add('visible');
 
-  // Update orig label with filename + clear button
-  const fname = filePath.split(/[\\/]/).pop();
-  const origLabel = document.getElementById('diff-label-orig');
-  origLabel.innerHTML = '';
-  const nameSpan = document.createElement('span');
-  nameSpan.textContent = fname;
-  origLabel.appendChild(nameSpan);
-  const clearBtn = document.createElement('button');
-  clearBtn.className   = 'compare-clear-btn';
-  clearBtn.title       = 'Clear compare';
-  clearBtn.textContent = '✕';
-  clearBtn.addEventListener('click', () => { _compareFilePath = null; closeDiff(); });
-  origLabel.appendChild(clearBtn);
+  // Populate compare half of banner and update diff label
+  document.getElementById('compare-banner-desc').textContent = _getCompareLabel(res.content, filePath);
+  document.getElementById('config-banner').classList.add('comparing');
+  document.getElementById('diff-label-orig').textContent = 'Compare file (baseline)';
 
-  // Set diff model — compare file as original, current editor content as modified
+  // Set diff model — strip @jmt: metadata from compare file so only real content diffs show
   const prev = diffEditorInstance.getModel();
-  const orig = monaco.editor.createModel(res.content, 'cpp');
+  const orig = monaco.editor.createModel(_stripJmtMeta(res.content), 'cpp');
   const curr = monaco.editor.createModel(editor.getValue(), 'cpp');
   diffEditorInstance.setModel({ original: orig, modified: curr });
   if (prev) { prev.original?.dispose(); prev.modified?.dispose(); }
@@ -2205,6 +2255,10 @@ document.getElementById('btn-compare').addEventListener('click', () => {
   } else {
     openComparePicker();   // no file yet — pick one
   }
+});
+document.getElementById('compare-banner-clear').addEventListener('click', () => {
+  _compareFilePath = null;
+  closeDiff();
 });
 document.getElementById('compare-pick-cancel').addEventListener('click', closeComparePicker);
 document.getElementById('compare-pick-browse').addEventListener('click', async () => {
