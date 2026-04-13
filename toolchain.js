@@ -471,6 +471,14 @@ async function runDfuFlash(dfuPath, toolsDir, onLog) {
     ], { cwd: toolsDir });
 
     let stdout = '', stderr = '';
+    // Buffer partial lines — data chunks don't align with line boundaries
+    let stderrBuf = '';
+
+    function flushStderrLine(line) {
+      if (!line) return;
+      stderr += line + '\n';
+      onLog(line, line.toLowerCase().includes('error'));
+    }
 
     proc.stdout.on('data', d => {
       const lines = d.toString().split(/\r?\n/).filter(Boolean);
@@ -478,15 +486,20 @@ async function runDfuFlash(dfuPath, toolsDir, onLog) {
     });
 
     proc.stderr.on('data', d => {
-      // dfu-util uses bare \r to overwrite progress lines; split on \r, \n, or \r\n
-      const lines = d.toString().split(/\r?\n|\r/).filter(Boolean);
-      lines.forEach(l => {
-        stderr += l + '\n';
-        onLog(l, l.toLowerCase().includes('error'));
-      });
+      stderrBuf += d.toString();
+      // Extract every complete line (terminated by \r\n, \n, or bare \r)
+      let match;
+      while ((match = stderrBuf.match(/^([^\r\n]*)(\r\n|\r|\n)/)) !== null) {
+        flushStderrLine(match[1]);
+        stderrBuf = stderrBuf.slice(match[0].length);
+      }
     });
 
-    proc.on('close', code => resolve({ ok: code === 0, stdout, stderr }));
+    proc.on('close', code => {
+      // Flush any remaining partial line
+      if (stderrBuf.trim()) flushStderrLine(stderrBuf.trim());
+      resolve({ ok: code === 0, stdout, stderr });
+    });
     proc.on('error', e => resolve({ ok: false, error: e.message }));
   });
 
