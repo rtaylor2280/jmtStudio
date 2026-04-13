@@ -878,6 +878,13 @@ function stopFlashTimer() {
  * type: 'toolchain' | 'compile' | 'flash' | 'port'
  * state: 'ok' | 'error' | 'warn' | 'pending'
  */
+const PORT_DFU_TIP =
+  'No Proffieboard detected.\n' +
+  'Try Bootloader Mode (DFU):\n' +
+  '  • Hold the BOOT button while plugging in USB, or\n' +
+  '  • Double-tap the reset button on the board.\n' +
+  'Then click Flash — the app will detect it automatically.';
+
 function setStatus(type, state, message) {
   const dot  = el(`bp-status-${type}-dot`);
   const text = el(`bp-status-${type}-text`);
@@ -885,6 +892,14 @@ function setStatus(type, state, message) {
 
   dot.className = `bp-status-dot bp-status-${state}`;
   text.textContent = message;
+
+  if (type === 'port' && (state === 'warn' || state === 'error')) {
+    text.title  = PORT_DFU_TIP;
+    text.style.cursor = 'help';
+  } else if (type === 'port') {
+    text.title  = '';
+    text.style.cursor = '';
+  }
 }
 
 // ── Cache check ────────────────────────────────────────

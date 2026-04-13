@@ -311,30 +311,16 @@
   #btn-save     { background: #1a3a1a; color: #4d4; border: 1px solid #2a5a2a; }
   #btn-saveas   { background: #1a2e1a; color: #3b3; border: 1px solid #254525; }
   #btn-download { background: #1a3a1a; color: #4d4; border: 1px solid #2a5a2a; }
-  #btn-undo     { background: var(--c-bg-card); color: var(--c-text-sub); border: 1px solid var(--c-border-strong); font-size: 1rem; padding: 4px 9px; }
-  #btn-redo     { background: var(--c-bg-card); color: var(--c-text-sub); border: 1px solid var(--c-border-strong); font-size: 1rem; padding: 4px 9px; }
+  #btn-undo     { background: var(--c-bg-card); color: var(--c-text-sub); border: 1px solid var(--c-border-strong); }
+  #btn-redo     { background: var(--c-bg-card); color: var(--c-text-sub); border: 1px solid var(--c-border-strong); }
 
-  .diff-toggle {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 10px;
-    background: #1e1e2e;
-    border: 1px solid #3a3a5a;
-    border-radius: 4px;
-    cursor: pointer;
-    user-select: none;
-    font-size: 0.8rem;
-    color: #99a;
-    transition: background 0.15s, color 0.15s;
-  }
-  .diff-toggle:hover { background: #252535; }
+  .diff-toggle { background: #1e1e2e; border: 1px solid #3a3a5a; color: #99a; }
+  .diff-toggle:hover { background: #252535; opacity: 1; }
   .diff-toggle.active { background: #1a2040; color: #88f; border-color: #4a4a8a; }
-  .diff-toggle input { accent-color: #66f; cursor: pointer; }
-  .diff-toggle:has(input:disabled) { opacity: 0.35; cursor: not-allowed; pointer-events: none; }
-  #btn-compare { border: none; }
+  .diff-toggle:disabled { opacity: 0.35; cursor: not-allowed; pointer-events: none; }
+  .toolbar-divider { width: 1px; background: var(--c-border-strong); align-self: stretch; margin: 2px 2px; flex-shrink: 0; }
   #btn-compare:disabled { opacity: 0.35; cursor: not-allowed; pointer-events: none; }
-  #btn-compare.active { background: #1a3030; color: #4cf; border-color: #2a6060 !important; border: 1px solid; }
+  #btn-compare.active { background: #1a3030; color: #4cf; border-color: #2a6060; }
   #btn-compare.active:hover { background: #1f3838; }
   .compare-clear-btn {
     background: none; border: none; color: inherit; cursor: pointer;
@@ -1427,11 +1413,9 @@
       <div class="tab-btns" id="tab-btns-config">
         <button id="btn-undo" title="Undo (Ctrl+Z)">&#8634;</button>
         <button id="btn-redo" title="Redo (Ctrl+Y)">&#8635;</button>
-        <label class="diff-toggle" id="diff-toggle-label">
-          <input type="checkbox" id="chk-diff" />
-          &#9776; Show Changes
-        </label>
+        <button class="diff-toggle" id="diff-toggle-label">&#916; Show Changes</button>
         <button class="diff-toggle" id="btn-compare" disabled>&#8644; Compare File</button>
+        <div class="toolbar-divider"></div>
         <div class="fav-wrap">
           <button id="btn-fav">Favorites &#9662;</button>
           <div id="fav-dropdown">
@@ -1822,7 +1806,7 @@ function setFileOpen(open) {
     const el = document.getElementById(id);
     if (el) el.disabled = !open;
   });
-  document.getElementById('chk-diff').disabled = !open;
+  document.getElementById('diff-toggle-label').disabled = !open;
   document.getElementById('btn-compare').disabled = !open;
   if (!open) {
     _compareFilePath = null;
@@ -2118,7 +2102,6 @@ function _getCompareLabel(content, filePath) {
 function closeDiff() {
   _resetCompareUI();
   diffVisible = false;
-  document.getElementById('chk-diff').checked = false;
   document.getElementById('editor').style.display      = 'block';
   document.getElementById('diff-editor').style.display = 'none';
   document.getElementById('diff-labels').classList.remove('visible');
@@ -2157,7 +2140,6 @@ async function startCompare(filePath) {
   _compareFilePath = filePath;
 
   // Deactivate snapshot diff if active (without calling closeDiff which hides the editor)
-  document.getElementById('chk-diff').checked = false;
   document.getElementById('diff-toggle-label').classList.remove('active');
 
   document.getElementById('btn-compare').classList.add('active');
@@ -2280,7 +2262,9 @@ function refreshDiff() {
   });
 }
 
-document.getElementById('chk-diff').addEventListener('change', e => showDiff(e.target.checked));
+document.getElementById('diff-toggle-label').addEventListener('click', () => {
+  showDiff(!document.getElementById('diff-toggle-label').classList.contains('active'));
+});
 
 // ── Save / Download ────────────────────────────────────
 async function doSave() {
