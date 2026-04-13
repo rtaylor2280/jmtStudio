@@ -1147,6 +1147,12 @@ function onOsVersionChange() {
 window.initBuildPanel           = initBuildPanel;
 window.refreshPorts             = refreshPorts;
 window.clearBuildLog            = clearLog;
+window.resetCompileState        = () => {
+  compileSuccess = false;
+  setFlashEnabled(false);
+  setStatus('compile', 'warn', 'Cache cleared — recompile needed');
+  updateCompileButton();
+};
 window.checkCacheForConfig      = checkCacheForConfig;
 window.updateUsbChangedIndicator  = updateUsbChangedIndicator;
 window.updatePortChangedIndicator = updatePortChangedIndicator;

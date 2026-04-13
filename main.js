@@ -317,7 +317,9 @@ ipcMain.handle('cache:getSize', () => {
 });
 
 ipcMain.handle('cache:clear', () => {
-  const cacheRoot = path.join(app.getPath('userData'), 'build-cache');
+  const userData    = app.getPath('userData');
+  const cacheRoot   = path.join(userData, 'build-cache');
+  const buildOutput = path.join(userData, 'build-output');
   function dirSize(p) {
     if (!fs.existsSync(p)) return 0;
     return fs.readdirSync(p, { withFileTypes: true }).reduce((sum, e) => {
@@ -325,9 +327,10 @@ ipcMain.handle('cache:clear', () => {
       return sum + (e.isDirectory() ? dirSize(full) : fs.statSync(full).size);
     }, 0);
   }
-  const bytes = dirSize(cacheRoot);
+  const bytes = dirSize(cacheRoot) + dirSize(buildOutput);
   try {
-    if (fs.existsSync(cacheRoot)) fs.rmSync(cacheRoot, { recursive: true, force: true });
+    if (fs.existsSync(cacheRoot))   fs.rmSync(cacheRoot,   { recursive: true, force: true });
+    if (fs.existsSync(buildOutput)) fs.rmSync(buildOutput, { recursive: true, force: true });
     return { ok: true, bytesCleared: bytes };
   } catch (err) {
     return { ok: false, error: err.message };

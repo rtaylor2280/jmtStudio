@@ -2727,6 +2727,8 @@ document.getElementById('btn-cache-confirm').addEventListener('click', async () 
       const freed = fmtBytes(result.bytesCleared);
       document.getElementById('cache-size-label').textContent =
         result.bytesCleared > 0 ? `✓ Cleared (${freed} freed)` : '✓ Cleared';
+      // Build output was also deleted — reset compile state so Flash is disabled
+      if (window.resetCompileState) window.resetCompileState();
     } else {
       confirmBtn.textContent = 'Error — try again';
       confirmBtn.disabled = false;
