@@ -745,6 +745,13 @@
   #modal-about .settings-item:last-child { border-bottom: none; }
   #modal-about .settings-item-label { font-size: 0.82rem; color: var(--c-text-muted); }
   #modal-about .settings-item-btn { background: var(--c-border); border: 1px solid var(--c-border-heavy); color: var(--c-text-sub); border-radius: 3px; padding: 4px 10px; font-size: 0.75rem; cursor: not-allowed; opacity: 0.5; }
+  #modal-about .settings-item-btn.enabled { cursor: pointer; opacity: 1; }
+  #modal-about .settings-item-btn.enabled:hover { background: var(--c-border-strong); }
+  #modal-about .settings-item-btn.danger { background: #3a1010; color: #e55; border-color: #6a2020; cursor: pointer; opacity: 1; }
+  #modal-about .settings-item-btn.danger:hover { background: #4a1818; }
+  #modal-about .cache-warning { font-size: 0.78rem; color: var(--c-text-muted); background: var(--c-bg-inset); border: 1px solid var(--c-border); border-radius: 4px; padding: 10px 12px; margin-top: 6px; line-height: 1.5; }
+  #modal-about .cache-warning strong { color: var(--c-text); }
+  #modal-about .cache-warning-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; }
   .theme-selector { display: flex; background: var(--c-bg-raised); border: 1px solid var(--c-border-heavy); border-radius: 4px; overflow: hidden; }
   .theme-btn { background: transparent; border: none; border-right: 1px solid var(--c-border-heavy); color: var(--c-text-muted); padding: 4px 14px; font-size: 0.75rem; font-weight: 400; cursor: pointer; border-radius: 0; white-space: nowrap; }
   .theme-btn:last-child { border-right: none; }
@@ -1154,9 +1161,22 @@
       </div>
     </div>
 
-    <div class="settings-item">
-      <span class="settings-item-label">Clear Compile Cache</span>
-      <button class="settings-item-btn" disabled>Clear</button>
+    <div class="settings-item" id="settings-cache-item">
+      <span class="settings-item-label">Clear Compile Cache <span id="cache-size-label" style="font-size:0.72rem;color:var(--c-text-dim);"></span></span>
+      <button class="settings-item-btn enabled" id="btn-clear-cache">Clear</button>
+    </div>
+    <div id="cache-confirm-panel" style="display:none;">
+      <div class="cache-warning">
+        <strong>Delete all cached compile results?</strong><br>
+        Cached builds let the app skip recompiling unchanged configs. Clearing the cache means
+        your next compile for each config will run from scratch — up to 10–15 minutes for
+        complex builds.<br><br>
+        This does <strong>not</strong> affect your config files.
+        <div class="cache-warning-actions">
+          <button class="settings-item-btn enabled" id="btn-cache-cancel">Cancel</button>
+          <button class="settings-item-btn danger" id="btn-cache-confirm">Yes, Delete Cache</button>
+        </div>
+      </div>
     </div>
     <div class="settings-item">
       <span class="settings-item-label">Update Current Default OS Version (including JMT support)</span>
@@ -1909,13 +1929,31 @@ JMT Studio is a product of Jedi Master Tech and is not affiliated with or endors
 
 Copyright © 2026 Jedi Master Tech. All rights reserved.`;
 
+function fmtBytes(b) {
+  if (b < 1024) return `${b} B`;
+  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
+  return `${(b / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 async function openAboutModal() {
   document.getElementById('about-license-body').textContent = LICENSE_TEXT;
   document.getElementById('about-license-body').classList.remove('open');
   document.getElementById('about-license-toggle').textContent = 'View License';
+  // Reset cache panel state
+  document.getElementById('cache-confirm-panel').style.display = 'none';
+  document.getElementById('btn-clear-cache').textContent = 'Clear';
+  document.getElementById('btn-clear-cache').disabled = false;
+  document.getElementById('cache-size-label').textContent = '';
   let ver = '—';
   try { ver = await window.electronAPI.getAppVersion(); } catch {}
   document.getElementById('about-version-str').textContent = `v${ver}`;
+  // Load cache size
+  if (window.electronAPI?.getCacheSize) {
+    try {
+      const bytes = await window.electronAPI.getCacheSize();
+      document.getElementById('cache-size-label').textContent = bytes > 0 ? `(${fmtBytes(bytes)})` : '(empty)';
+    } catch {}
+  }
   // Sync theme selector active state
   const current = localStorage.getItem('jmt-theme') || 'dark';
   document.querySelectorAll('.theme-btn').forEach(btn => {
@@ -1923,6 +1961,43 @@ async function openAboutModal() {
   });
   document.getElementById('modal-about').classList.add('active');
 }
+
+document.getElementById('btn-clear-cache').addEventListener('click', () => {
+  document.getElementById('cache-confirm-panel').style.display = 'block';
+  document.getElementById('btn-clear-cache').disabled = true;
+});
+
+document.getElementById('btn-cache-cancel').addEventListener('click', () => {
+  document.getElementById('cache-confirm-panel').style.display = 'none';
+  document.getElementById('btn-clear-cache').disabled = false;
+});
+
+document.getElementById('btn-cache-confirm').addEventListener('click', async () => {
+  const confirmBtn = document.getElementById('btn-cache-confirm');
+  const cancelBtn  = document.getElementById('btn-cache-cancel');
+  confirmBtn.disabled = true;
+  cancelBtn.disabled  = true;
+  confirmBtn.textContent = 'Deleting…';
+  try {
+    const result = await window.electronAPI.clearCache();
+    if (result.ok) {
+      document.getElementById('cache-confirm-panel').style.display = 'none';
+      document.getElementById('btn-clear-cache').disabled = false;
+      document.getElementById('btn-clear-cache').textContent = 'Clear';
+      const freed = fmtBytes(result.bytesCleared);
+      document.getElementById('cache-size-label').textContent =
+        result.bytesCleared > 0 ? `✓ Cleared (${freed} freed)` : '✓ Cleared';
+    } else {
+      confirmBtn.textContent = 'Error — try again';
+      confirmBtn.disabled = false;
+      cancelBtn.disabled  = false;
+    }
+  } catch {
+    confirmBtn.textContent = 'Error — try again';
+    confirmBtn.disabled = false;
+    cancelBtn.disabled  = false;
+  }
+});
 
 document.getElementById('btn-settings').addEventListener('click', openAboutModal);
 document.getElementById('theme-selector').addEventListener('click', (e) => {

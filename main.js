@@ -299,6 +299,37 @@ ipcMain.handle('toolchain:flash', async (_, { port, fqbn }) => {
 ipcMain.handle('toolchain:getStatus', () => toolchain.getStatus());
 ipcMain.handle('cache:check', (_, { configContent, fqbn, usb }) =>
   toolchain.checkCacheAndRestore(configContent, fqbn, usb));
+
+ipcMain.handle('cache:getSize', () => {
+  const cacheRoot = path.join(app.getPath('userData'), 'build-cache');
+  function dirSize(p) {
+    if (!fs.existsSync(p)) return 0;
+    return fs.readdirSync(p, { withFileTypes: true }).reduce((sum, e) => {
+      const full = path.join(p, e.name);
+      return sum + (e.isDirectory() ? dirSize(full) : fs.statSync(full).size);
+    }, 0);
+  }
+  return dirSize(cacheRoot);
+});
+
+ipcMain.handle('cache:clear', () => {
+  const cacheRoot = path.join(app.getPath('userData'), 'build-cache');
+  function dirSize(p) {
+    if (!fs.existsSync(p)) return 0;
+    return fs.readdirSync(p, { withFileTypes: true }).reduce((sum, e) => {
+      const full = path.join(p, e.name);
+      return sum + (e.isDirectory() ? dirSize(full) : fs.statSync(full).size);
+    }, 0);
+  }
+  const bytes = dirSize(cacheRoot);
+  try {
+    if (fs.existsSync(cacheRoot)) fs.rmSync(cacheRoot, { recursive: true, force: true });
+    return { ok: true, bytesCleared: bytes };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
 ipcMain.handle('app:getVersion',      () => app.getVersion());
 ipcMain.handle('app:isDevMode',       () => !app.isPackaged);
 ipcMain.handle('toolchain:abort',     () => toolchain.abort());
