@@ -86,6 +86,7 @@
   html.light-mode #config-banner  { background: #f0f8f0; border-bottom-color: #c0d8c0; }
   html.light-mode #banner-desc    { color: #2a6a2a; }
   html.light-mode #banner-name    { color: #4a7a4a; }
+  html.light-mode #meta-timestamps span { color: #5a8a5a !important; }
 
   /* ── Empty state open button — light mode ── */
   html.light-mode #btn-open-empty { background: #e8f0fe; color: #1a3a8a; border-color: #b0c8f0; }
@@ -372,10 +373,15 @@
     border-bottom: 1px solid #2a3a2a;
     padding: 8px 16px 7px;
     flex-shrink: 0;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
   }
-  #config-banner.visible { display: block; }
+  #config-banner.visible { display: flex; }
   #banner-desc { font-size: 1.15rem; font-weight: 700; color: #6e6; letter-spacing: 0.02em; }
   #banner-name { font-size: 0.8rem; color: #7a7; margin-top: 2px; font-family: monospace; }
+  #meta-timestamps { text-align: right; line-height: 1.7; font-size: 0.7rem; flex-shrink: 0; }
 
   /* ── Build toolbar ── */
   #build-toolbar {
@@ -1297,6 +1303,19 @@
     flex: 1;
     margin-right: 12px;
   }
+  #vp-file-modal-search-btn {
+    background: var(--c-bg-raised);
+    border: 1px solid var(--c-border);
+    color: var(--c-text-sub);
+    font-size: 0.78rem;
+    padding: 3px 9px;
+    border-radius: 3px;
+    cursor: pointer;
+    flex-shrink: 0;
+    margin-right: 6px;
+    opacity: 0.85;
+  }
+  #vp-file-modal-search-btn:hover { background: var(--c-bg-hover); color: var(--c-text); opacity: 1; border-color: var(--c-border-strong); }
   .vp-file-modal-close {
     background: none;
     border: none;
@@ -1391,10 +1410,6 @@
       <label>OS Version</label>
       <select id="input-version"></select>
     </div>
-    <div id="meta-timestamps" style="display:none;margin-left:auto;text-align:right;line-height:1.7;font-size:0.7rem;">
-      <div><span style="color:#666;text-transform:uppercase;letter-spacing:0.06em;font-size:0.62rem;">Created</span> <span id="meta-created-val" style="color:#888;font-family:monospace;"></span></div>
-      <div><span style="color:#666;text-transform:uppercase;letter-spacing:0.06em;font-size:0.62rem;">Updated</span> <span id="meta-updated-val" style="color:#888;font-family:monospace;"></span></div>
-    </div>
   </div>
 </header>
 
@@ -1415,8 +1430,14 @@
 
 <!-- ── Config banner ── -->
 <div id="config-banner">
-  <div id="banner-desc"></div>
-  <div id="banner-name"></div>
+  <div>
+    <div id="banner-desc"></div>
+    <div id="banner-name"></div>
+  </div>
+  <div id="meta-timestamps" style="display:none;">
+    <div><span style="color:#4a6a4a;text-transform:uppercase;letter-spacing:0.06em;font-size:0.62rem;">Created</span> <span id="meta-created-val" style="color:#6a8a6a;font-family:monospace;"></span></div>
+    <div><span style="color:#4a6a4a;text-transform:uppercase;letter-spacing:0.06em;font-size:0.62rem;">Updated</span> <span id="meta-updated-val" style="color:#6a8a6a;font-family:monospace;"></span></div>
+  </div>
 </div>
 
 <!-- ── Build toolbar ── -->
@@ -1535,13 +1556,17 @@
 <!-- ── Import ProffieOS Version modal ── -->
 <div class="modal-overlay" id="modal-import-version">
   <div class="modal">
-    <h2>Import ProffieOS Version</h2>
-    <div class="import-field">
+    <h2 id="import-modal-title">Import ProffieOS Version</h2>
+    <div class="import-field" id="import-folder-field">
       <label>ProffieOS Folder</label>
       <div class="import-folder-row">
         <input type="text" id="import-folder-path" placeholder="Select a folder named ProffieOS..." readonly />
         <button id="import-browse-btn">Browse...</button>
       </div>
+    </div>
+    <div class="import-field" id="import-source-field" style="display:none;">
+      <label>Duplicating From</label>
+      <div style="padding:5px 8px;font-size:0.8rem;color:var(--c-text-sub);background:var(--c-bg-inset);border:1px solid var(--c-border);border-radius:3px;" id="import-source-name"></div>
     </div>
     <div class="import-field">
       <label>Version Name</label>
@@ -1549,7 +1574,7 @@
     </div>
     <div id="import-version-error"></div>
     <div id="import-progress-wrap">
-      <span>Copying files...</span>
+      <span id="import-progress-label">Copying files...</span>
       <div id="import-progress-track"><div id="import-progress-bar"></div></div>
     </div>
     <div class="modal-btns" style="margin-top:18px;">
@@ -1643,6 +1668,7 @@
   <div class="vp-file-modal-inner">
     <div class="vp-file-modal-header">
       <div id="vp-file-modal-title"></div>
+      <button id="vp-file-modal-search-btn" title="Search (Ctrl+F)">&#128269; Search</button>
       <button class="vp-file-modal-close" id="vp-file-modal-close-btn" title="Close">&#10005;</button>
     </div>
     <div id="vp-file-modal-editor"></div>
@@ -2257,26 +2283,40 @@ function populateVersionSelect(sel, versions, selectedName) {
 
 // ── Import version modal ────────────────────────────────
 
-let _importFolderPath = null;
+let _importFolderPath  = null;
+let _importDuplicateFrom = null;  // set when modal is opened for duplicate
 
-function openImportVersionModal() {
+function openImportVersionModal(duplicateFrom) {
+  _importDuplicateFrom = duplicateFrom || null;
   _importFolderPath = null;
+
+  const isDupe = !!_importDuplicateFrom;
+  document.getElementById('import-modal-title').textContent  = isDupe ? 'Duplicate Version' : 'Import ProffieOS Version';
+  document.getElementById('import-folder-field').style.display = isDupe ? 'none' : '';
+  document.getElementById('import-source-field').style.display = isDupe ? '' : 'none';
+  if (isDupe) document.getElementById('import-source-name').textContent = _importDuplicateFrom;
   document.getElementById('import-folder-path').value = '';
-  document.getElementById('import-version-name').value = '';
+  document.getElementById('import-version-name').value = isDupe ? `${_importDuplicateFrom} (copy)` : '';
   document.getElementById('import-version-error').textContent = '';
-  document.getElementById('import-confirm-btn').disabled = true;
+  document.getElementById('import-confirm-btn').disabled = isDupe ? false : true;
+  document.getElementById('import-confirm-btn').textContent = isDupe ? 'Duplicate' : 'Import';
+  document.getElementById('import-progress-label').textContent = isDupe ? 'Duplicating files...' : 'Copying files...';
   document.getElementById('import-progress-wrap').style.display = 'none';
   document.getElementById('modal-import-version').classList.add('active');
-  document.getElementById('import-version-name').focus();
+  const nameEl = document.getElementById('import-version-name');
+  nameEl.focus();
+  if (isDupe) nameEl.select();
 }
 
 function closeImportVersionModal() {
   document.getElementById('modal-import-version').classList.remove('active');
   _importFromVersionsTab = false;
+  _importDuplicateFrom   = null;
+  document.getElementById('import-confirm-btn').textContent = 'Import';
 }
 
 function updateImportConfirmState() {
-  const hasFolder = !!_importFolderPath;
+  const hasFolder = _importDuplicateFrom ? true : !!_importFolderPath;
   const hasName   = document.getElementById('import-version-name').value.trim().length > 0;
   document.getElementById('import-confirm-btn').disabled = !(hasFolder && hasName);
 }
@@ -2319,43 +2359,50 @@ document.getElementById('import-confirm-btn').addEventListener('click', async ()
   const name     = document.getElementById('import-version-name').value.trim();
   const errorEl  = document.getElementById('import-version-error');
   const btn      = document.getElementById('import-confirm-btn');
+  const isDupe   = !!_importDuplicateFrom;
 
   btn.disabled = true;
-  btn.textContent = 'Importing...';
+  btn.textContent = isDupe ? 'Duplicating...' : 'Importing...';
   errorEl.textContent = '';
   document.getElementById('import-cancel-btn').disabled = true;
   document.getElementById('import-progress-wrap').style.display = 'block';
 
-  const result = await window.electronAPI.importVersion(_importFolderPath, name);
+  const result = isDupe
+    ? await window.electronAPI.duplicateVersion(_importDuplicateFrom, name)
+    : await window.electronAPI.importVersion(_importFolderPath, name);
 
   document.getElementById('import-progress-wrap').style.display = 'none';
   document.getElementById('import-cancel-btn').disabled = false;
-  btn.textContent = 'Import';
+  btn.textContent = isDupe ? 'Duplicate' : 'Import';
   if (!result.ok) {
     errorEl.textContent = result.error;
     btn.disabled = false;
     return;
   }
 
-  // Success — repopulate the dropdown in both cases; selection behavior differs
-  closeImportVersionModal();
+  // Success — repopulate the dropdown; selection behavior differs by context
   const fromVersionsTab = _importFromVersionsTab;
-  _importFromVersionsTab = false;
+  closeImportVersionModal();
   const versions = await window.electronAPI.listProffieVersions();
   const verSel   = document.getElementById('input-version');
-  if (fromVersionsTab) {
-    // Triggered from OS Versions tab — new version appears in dropdown but
-    // selection stays on whatever was already chosen
+  if (fromVersionsTab || isDupe) {
+    // Triggered from OS Versions tab or duplicate — dropdown gets updated
+    // but current selection stays unchanged
     const currentSel = verSel.value || verSel.dataset.lastValue || '';
     populateVersionSelect(verSel, versions, currentSel);
-    // no dispatchEvent — selection didn't change
   } else {
-    // Triggered from Config Manager dropdown sentinel — new version becomes
-    // the active selection
+    // Triggered from Config Manager dropdown sentinel — new version becomes active
     populateVersionSelect(verSel, versions, result.versionName);
     verSel.dispatchEvent(new Event('change'));
   }
-  if (window.vpRefresh) window.vpRefresh();
+  // Refresh the versions panel; if from Versions tab context, select the new entry
+  const newName = result.newName || result.versionName;
+  if (window.vpRefresh) {
+    await window.vpRefresh();
+    if ((fromVersionsTab || isDupe) && newName && window.vpSelectVersion) {
+      window.vpSelectVersion(newName);
+    }
+  }
 });
 
 // ── About / Settings modal ─────────────────────────────
@@ -2481,7 +2528,16 @@ document.getElementById('btn-vp-import')?.addEventListener('click', () => {
   openImportVersionModal();
 });
 
-// ── VP file modal close ────────────────────────────────
+// Expose duplicate entry point for versionsPanel.js
+window.openImportVersionModalForDuplicate = (sourceName) => {
+  _importFromVersionsTab = true;
+  openImportVersionModal(sourceName);
+};
+
+// ── VP file modal controls ─────────────────────────────
+document.getElementById('vp-file-modal-search-btn')?.addEventListener('click', () => {
+  if (window.vpOpenFind) window.vpOpenFind();
+});
 document.getElementById('vp-file-modal-close-btn')?.addEventListener('click', () => {
   if (window.vpCloseFileModal) window.vpCloseFileModal();
 });

@@ -49,17 +49,35 @@ function _resolveVersionFolder(name) {
   return null;
 }
 
-// Returns sorted list of available version names from both bundled and user paths.
+// Returns version names: bundled first (alphabetical), then user versions
+// ordered by folder creation time oldest → newest.
 function listVersions() {
-  const names = new Set();
-  [getBundledVersionsPath(), getUserVersionsPath()].forEach(root => {
-    if (fs.existsSync(root)) {
-      fs.readdirSync(root, { withFileTypes: true })
-        .filter(e => e.isDirectory())
-        .forEach(e => names.add(e.name));
-    }
-  });
-  return [...names].sort();
+  const bundled = [];
+  const user    = [];
+
+  const bundledRoot = getBundledVersionsPath();
+  if (fs.existsSync(bundledRoot)) {
+    fs.readdirSync(bundledRoot, { withFileTypes: true })
+      .filter(e => e.isDirectory())
+      .forEach(e => bundled.push(e.name));
+  }
+  bundled.sort();
+
+  const userRoot = getUserVersionsPath();
+  if (fs.existsSync(userRoot)) {
+    fs.readdirSync(userRoot, { withFileTypes: true })
+      .filter(e => e.isDirectory())
+      .forEach(e => {
+        let ctime = 0;
+        try { ctime = fs.statSync(path.join(userRoot, e.name)).ctimeMs; } catch {}
+        user.push({ name: e.name, ctime });
+      });
+  }
+  user.sort((a, b) => a.ctime - b.ctime);
+
+  // Deduplicate: bundled names take precedence
+  const seen = new Set(bundled);
+  return [...bundled, ...user.filter(v => !seen.has(v.name)).map(v => v.name)];
 }
 
 // ProffieOS source path for a given version name (read-only when packaged).

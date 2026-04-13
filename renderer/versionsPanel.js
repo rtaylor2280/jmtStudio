@@ -423,41 +423,26 @@ async function _vpOpenFile(versionName, filePath, fileName, searchQuery) {
     fontSize: 13,
     lineNumbers: 'on',
     wordWrap: 'off',
+    find: { seedSearchStringFromSelection: 'always' },
   });
 
-  // If opened from a search result, pre-populate Monaco's find widget
+  // If opened from a search result, select first match so Monaco seeds the find widget from it.
   if (searchQuery) {
-    // Let the editor finish rendering before opening find
-    setTimeout(() => {
+    requestAnimationFrame(() => {
       if (!_vpFileViewer) return;
-      try {
-        const fc = _vpFileViewer.getContribution('editor.contrib.findController');
-        if (fc) {
-          // Scroll to first match before opening find
-          const firstMatch = _vpFileViewer.getModel().findFirstMatch(
-            searchQuery, { lineNumber: 1, column: 1 }, false, false, null, false
-          );
-          if (firstMatch) {
-            _vpFileViewer.setSelection(firstMatch.range);
-            _vpFileViewer.revealRangeInCenter(firstMatch.range);
-          }
-          // Open find widget with the query pre-filled via internal state
-          fc.getState().change({ searchString: searchQuery }, false);
-          fc.start({
-            forceRevealReplace: false,
-            seedSearchStringFromSelection: 'never',
-            shouldFocus: 2, // FocusFindInput = 2
-            shouldAnimate: false,
-            updateSearchScope: false,
-            loop: true,
-          });
-        }
-      } catch {
-        // Fallback: open standard find widget (Ctrl+F behavior)
-        _vpFileViewer.focus();
-        _vpFileViewer.trigger('', 'actions.find', null);
+      const editor = _vpFileViewer;
+      const model  = editor.getModel();
+      if (!model) return;
+
+      const matches = model.findMatches(searchQuery, true, false, false, null, false, 1);
+      const firstMatch = matches[0];
+      if (firstMatch) {
+        editor.setSelection(firstMatch.range);
+        editor.revealRangeInCenter(firstMatch.range);
       }
-    }, 120);
+      editor.focus();
+      editor.getAction('actions.find')?.run();
+    });
   }
 }
 
@@ -468,19 +453,10 @@ function _vpCloseFileModal() {
 
 // ── Version actions ────────────────────────────────────
 
-async function _vpDuplicate(v) {
-  const newName = prompt(`Duplicate "${v.name}" as:`, `${v.name} (copy)`);
-  if (newName === null) return;
-  const trimmed = newName.trim();
-  if (!trimmed) return;
-  const result = await window.electronAPI.duplicateVersion(v.name, trimmed);
-  if (result.ok) {
-    await vpRefresh();
-    // Select the new duplicate
-    const dup = _vpVersions.find(x => x.name === result.newName);
-    if (dup) _vpSelectVersion(dup);
-  } else {
-    alert(`Could not duplicate: ${result.error}`);
+function _vpDuplicate(v) {
+  // Hand off to the import modal running in duplicate mode
+  if (window.openImportVersionModalForDuplicate) {
+    window.openImportVersionModalForDuplicate(v.name);
   }
 }
 
@@ -523,3 +499,8 @@ async function _vpDelete(v) {
 window.initVersionsPanel = initVersionsPanel;
 window.vpRefresh         = vpRefresh;
 window.vpCloseFileModal  = _vpCloseFileModal;
+window.vpOpenFind        = () => { if (_vpFileViewer) _vpFileViewer.trigger('keyboard', 'actions.find', null); };
+window.vpSelectVersion   = (name) => {
+  const v = _vpVersions.find(x => x.name === name);
+  if (v) _vpSelectVersion(v);
+};
