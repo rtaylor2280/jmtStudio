@@ -30,8 +30,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   isDevMode:      ()             => ipcRenderer.invoke('app:isDevMode'),
   checkCache: (configContent, fqbn, usb) =>
     ipcRenderer.invoke('cache:check', { configContent, fqbn, usb }),
-  getCacheSize: () => ipcRenderer.invoke('cache:getSize'),
-  clearCache:   () => ipcRenderer.invoke('cache:clear'),
+  getCacheSize:    () => ipcRenderer.invoke('cache:getSize'),
+  clearCache:      () => ipcRenderer.invoke('cache:clear'),
+  getDataSize:     () => ipcRenderer.invoke('cache:getDataSize'),
 
   // ── Port detection ───────────────────────────────────
   listPorts:          () => ipcRenderer.invoke('ports:list'),

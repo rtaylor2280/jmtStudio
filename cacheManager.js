@@ -12,7 +12,10 @@
  *       manifest.json          ← human-readable build package identity
  *       {configHash}/
  *         <all build output files>
- *         metadata.json        ← both hashes + build context
+ *         metadata.json        ← both hashes + build context + configId
+ *
+ * Eviction policy: per-lineage LRU, keep last 5 slots per configId per buildPkg.
+ * Legacy entries (no configId) are treated as a single group and kept to 5.
  */
 
 const crypto  = require('crypto');
@@ -22,6 +25,8 @@ const { app } = require('electron');
 
 // Must stay in sync with CORE_VERSION in toolchain.js
 const CORE_VERSION = '4.6.0';
+
+const MAX_ENTRIES_PER_LINEAGE = 5;
 
 // ── Paths ──────────────────────────────────────────────
 
@@ -65,11 +70,85 @@ function computeBuildPackageHash(fqbn, usb, proffieOSHash) {
   return crypto.createHash('sha256').update(identity, 'utf8').digest('hex').slice(0, 16);
 }
 
+/**
+ * Extracts the @jmt:config_id from config content, if present.
+ * Returns the UUID string or null.
+ */
+function extractConfigId(content) {
+  const m = content.match(/^\/\/ @jmt:config_id\s+(\S+)/m);
+  return m ? m[1] : null;
+}
+
+// ── Eviction ───────────────────────────────────────────
+
+/**
+ * Reads all configHash subdirectories under a buildPkg directory,
+ * groups them by configId (null = legacy), and removes the oldest
+ * entries beyond MAX_ENTRIES_PER_LINEAGE within each group.
+ */
+function evictOldEntries(buildPkgHash) {
+  const pkgDir = path.join(getCacheRoot(), buildPkgHash);
+  if (!fs.existsSync(pkgDir)) return;
+
+  // Collect all valid config-hash entries with their metadata
+  const entries = [];
+  for (const entry of fs.readdirSync(pkgDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const metaPath = path.join(pkgDir, entry.name, 'metadata.json');
+    if (!fs.existsSync(metaPath)) continue;
+    try {
+      const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+      entries.push({
+        configHash: entry.name,
+        configId:   meta.configId || null,
+        compiledAt: meta.compiledAt || '',
+        dir:        path.join(pkgDir, entry.name),
+      });
+    } catch {
+      // Corrupt metadata — skip
+    }
+  }
+
+  // Group by configId (null entries share a single legacy group)
+  const groups = new Map();
+  for (const e of entries) {
+    const key = e.configId || '__legacy__';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(e);
+  }
+
+  // Within each group: sort newest-first, delete beyond the limit
+  for (const group of groups.values()) {
+    group.sort((a, b) => (b.compiledAt > a.compiledAt ? 1 : -1)); // newest first
+    const toDelete = group.slice(MAX_ENTRIES_PER_LINEAGE);
+    for (const e of toDelete) {
+      try { fs.rmSync(e.dir, { recursive: true, force: true }); } catch {}
+    }
+  }
+}
+
+/**
+ * Runs eviction across every buildPkg directory in the cache root.
+ * Called at app startup to clean up legacy entries and enforce limits.
+ */
+function startupEviction() {
+  const cacheRoot = getCacheRoot();
+  if (!fs.existsSync(cacheRoot)) return;
+  try {
+    for (const entry of fs.readdirSync(cacheRoot, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        evictOldEntries(entry.name);
+      }
+    }
+  } catch {}
+}
+
 // ── Cache write ────────────────────────────────────────
 
 /**
  * Copies all files from buildOutputPath into the cache directory
- * and writes a metadata.json with both identity hashes and build context.
+ * and writes a metadata.json with both identity hashes, configId, and build context.
+ * Evicts old entries for the same configId lineage after writing.
  */
 function saveToCache(buildOutputPath, configHash, buildPkgHash, meta) {
   const cacheDir = getCacheDir(buildPkgHash, configHash);
@@ -103,6 +182,7 @@ function saveToCache(buildOutputPath, configHash, buildPkgHash, meta) {
   const metadata = {
     configHash,
     buildPkgHash,
+    configId:      meta.configId || null,
     fqbn:          meta.fqbn,
     usb:           meta.usb,
     proffieOSHash: meta.proffieOSHash,
@@ -111,6 +191,9 @@ function saveToCache(buildOutputPath, configHash, buildPkgHash, meta) {
     toolVersion:   meta.toolVersion,
   };
   fs.writeFileSync(path.join(cacheDir, 'metadata.json'), JSON.stringify(metadata, null, 2), 'utf8');
+
+  // Evict oldest entries beyond MAX_ENTRIES_PER_LINEAGE for this configId
+  evictOldEntries(buildPkgHash);
 
   return { ok: true, cacheDir };
 }
@@ -174,13 +257,15 @@ function checkAndRestore(configContent, fqbn, usb, proffieOSHash) {
 
 /**
  * Saves a completed compile to the cache.
+ * Extracts configId from configContent automatically.
  * Called from toolchain.js after a successful compile.
  */
 function cacheCompileResult(buildOutputPath, configContent, fqbn, usb, proffieOSHash, compiledAt, toolVersion) {
   const configHash   = computeConfigHash(configContent);
   const buildPkgHash = computeBuildPackageHash(fqbn, usb, proffieOSHash);
+  const configId     = extractConfigId(configContent);
   return saveToCache(buildOutputPath, configHash, buildPkgHash, {
-    fqbn, usb, proffieOSHash, compiledAt, toolVersion,
+    fqbn, usb, proffieOSHash, compiledAt, toolVersion, configId,
   });
 }
 
@@ -189,4 +274,5 @@ module.exports = {
   computeBuildPackageHash,
   checkAndRestore,
   cacheCompileResult,
+  startupEviction,
 };

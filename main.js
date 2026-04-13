@@ -4,6 +4,7 @@ const fs          = require('fs');
 const toolchain   = require('./toolchain');
 const portDetect  = require('./portDetector');
 const proffie     = require('./proffieos');
+const cacheManager = require('./cacheManager');
 
 // ── Separate userData for dev vs prod ──────────────────
 if (!app.isPackaged) {
@@ -123,6 +124,9 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // Evict stale cache entries before window opens
+  try { cacheManager.startupEviction(); } catch {}
+
   // Initialize selected ProffieOS version from prefs before window opens
   const versions    = proffie.listVersions();
   const lastVersion = Store.get('lastVersion');
@@ -328,6 +332,22 @@ ipcMain.handle('cache:clear', () => {
   } catch (err) {
     return { ok: false, error: err.message };
   }
+});
+
+ipcMain.handle('cache:getDataSize', () => {
+  const userData = app.getPath('userData');
+  function dirSize(p) {
+    if (!fs.existsSync(p)) return 0;
+    return fs.readdirSync(p, { withFileTypes: true }).reduce((sum, e) => {
+      const full = path.join(p, e.name);
+      return sum + (e.isDirectory() ? dirSize(full) : fs.statSync(full).size);
+    }, 0);
+  }
+  return {
+    cache:       dirSize(path.join(userData, 'build-cache')),
+    arduinoData: dirSize(path.join(userData, 'arduino-data')),
+    versions:    dirSize(path.join(userData, 'ProffieOS-versions')),
+  };
 });
 
 ipcMain.handle('app:getVersion',      () => app.getVersion());

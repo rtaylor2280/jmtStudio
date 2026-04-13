@@ -1700,11 +1700,6 @@
         </div>
       </div>
     </div>
-    <div class="settings-item">
-      <span class="settings-item-label">Update Current Default OS Version (including JMT support)</span>
-      <button class="settings-item-btn" disabled>Update</button>
-    </div>
-
     <div class="about-section-heading">About</div>
 
     <div class="about-desc">Desktop tools for editing, compiling, and flashing ProffieOS configurations.</div>
@@ -1938,6 +1933,7 @@ let metaUpdated  = null;
 let metaCompiled = null;
 let metaFlashed  = null;
 let metaPort     = null;
+let metaConfigId = null;
 let toolVersion  = '1.0.0';
 
 // Baseline values — set on file load, used to detect divergence from stored state
@@ -1972,6 +1968,7 @@ function injectMetadata(content) {
   const version = document.getElementById('input-version').value.trim();
   const now     = nowIso();
   if (!metaCreated) metaCreated = now;
+  if (!metaConfigId) metaConfigId = crypto.randomUUID();
 
   const stripped = stripJmtLines(content);
   const lines = [
@@ -1989,6 +1986,7 @@ function injectMetadata(content) {
   if (metaFlashed)  lines.push(`// @jmt:flashed     ${metaFlashed}`);
   if (metaPort)     lines.push(`// @jmt:last_port   ${metaPort}`);
   lines.push(`// @jmt:tool_version ${toolVersion}`);
+  lines.push(`// @jmt:config_id   ${metaConfigId}`);
   return lines.join('\n') + '\n' + stripped;
 }
 
@@ -2005,13 +2003,14 @@ function extractMetadata(content) {
     flashed:  m(/^\/\/ @jmt:flashed\s+(.+)$/m),
     usb:      m(/^\/\/ @jmt:usb\s+(.+)$/m),
     port:     m(/^\/\/ @jmt:last_port\s+(.+)$/m),
+    configId: m(/^\/\/ @jmt:config_id\s+(\S+)$/m),
     clean:    stripJmtLines(content)
   };
 }
 
 // ── Load content ───────────────────────────────────────
 function loadContent(rawContent, filePath) {
-  const { desc, board, version, created, updated, compiled, flashed, usb, port, clean } = extractMetadata(rawContent);
+  const { desc, board, version, created, updated, compiled, flashed, usb, port, configId, clean } = extractMetadata(rawContent);
   const base = filePath ? filePath.split(/[\\/]/).pop().replace(/\.[^.]+$/, '') : null;
   document.getElementById('input-filename').value = base || 'my_config';
   document.getElementById('input-desc').value     = desc    || '';
@@ -2035,6 +2034,7 @@ function loadContent(rawContent, filePath) {
   metaCompiled = compiled || null;
   metaFlashed  = flashed  || null;
   metaPort     = port     || null;
+  metaConfigId = configId || null;
   baselineBoard   = board           || null;
   baselineVersion = resolvedVersion || null;
   baselineUsb     = usb     || null;
@@ -2062,7 +2062,7 @@ function clearMeta() {
     .forEach(id => document.getElementById(id).value = '');
   document.getElementById('input-board').value = '';
   document.getElementById('input-board').dispatchEvent(new Event('change'));
-  metaCreated = metaUpdated = metaCompiled = metaFlashed = metaPort = null;
+  metaCreated = metaUpdated = metaCompiled = metaFlashed = metaPort = metaConfigId = null;
   baselineBoard = baselineVersion = baselineUsb = null;
   // input-version stays at current selection (persistent compile setting)
   ['input-board','input-version'].forEach(id =>
@@ -2312,6 +2312,8 @@ async function doSaveAs() {
   // Update filename field BEFORE injecting metadata so @jmt:name is correct
   const base = savePath.split(/[\\/]/).pop().replace(/\.h$/i, '');
   document.getElementById('input-filename').value = base;
+  // New file path = new lineage — generate a fresh config_id
+  metaConfigId = null;
   const content = injectMetadata(window.getEditorContent());
   const res = await window.electronAPI.saveFile(savePath, content);
   if (res.ok) {
@@ -2685,10 +2687,11 @@ async function openAboutModal() {
   try { ver = await window.electronAPI.getAppVersion(); } catch {}
   document.getElementById('about-version-str').textContent = `v${ver}`;
   // Load cache size
-  if (window.electronAPI?.getCacheSize) {
+  if (window.electronAPI?.getDataSize) {
     try {
-      const bytes = await window.electronAPI.getCacheSize();
-      document.getElementById('cache-size-label').textContent = bytes > 0 ? `(${fmtBytes(bytes)})` : '(empty)';
+      const sizes = await window.electronAPI.getDataSize();
+      const cacheBytes = sizes.cache || 0;
+      document.getElementById('cache-size-label').textContent = cacheBytes > 0 ? `(${fmtBytes(cacheBytes)})` : '(empty)';
     } catch {}
   }
   // Sync theme selector active state
