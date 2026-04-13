@@ -2579,13 +2579,14 @@ function switchTab(name) {
     versionsView.classList.remove('active');
   } else {
     versionsView.classList.add('active');
-    // Lazy-init the panel on first switch
+    const activeVersion = document.getElementById('input-version')?.value || '';
     if (window.initVersionsPanel && !versionsView.dataset.loaded) {
+      // First visit — init the panel
       versionsView.dataset.loaded = '1';
-      const activeVersion = document.getElementById('input-version')?.value || '';
       window.initVersionsPanel(activeVersion);
-    } else if (window.vpRefresh && versionsView.dataset.loaded) {
-      // no auto-refresh on every switch; user can use import to trigger refresh
+    } else if (versionsView.dataset.loaded) {
+      // Subsequent visits — sync selection to current config manager version
+      if (window.vpSelectVersion && activeVersion) window.vpSelectVersion(activeVersion);
     }
   }
 }
