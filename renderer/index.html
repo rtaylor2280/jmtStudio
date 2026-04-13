@@ -332,6 +332,34 @@
   .diff-toggle.active { background: #1a2040; color: #88f; border-color: #4a4a8a; }
   .diff-toggle input { accent-color: #66f; cursor: pointer; }
   .diff-toggle:has(input:disabled) { opacity: 0.35; cursor: not-allowed; pointer-events: none; }
+  #btn-compare { border: none; }
+  #btn-compare:disabled { opacity: 0.35; cursor: not-allowed; pointer-events: none; }
+  #btn-compare.active { background: #1a3030; color: #4cf; border-color: #2a6060 !important; border: 1px solid; }
+  #btn-compare.active:hover { background: #1f3838; }
+  .compare-clear-btn {
+    background: none; border: none; color: inherit; cursor: pointer;
+    font-size: 0.85rem; padding: 0 0 0 6px; opacity: 0.7; line-height: 1;
+  }
+  .compare-clear-btn:hover { opacity: 1; color: #f88; }
+
+  /* ── Compare file picker modal ── */
+  #modal-compare-pick .modal { width: 460px; max-height: 72vh; display: flex; flex-direction: column; }
+  .compare-pick-body { overflow-y: auto; flex: 1; min-height: 0; margin: 0 -4px; }
+  .compare-pick-section-label {
+    font-size: 0.72rem; font-weight: 600; color: var(--c-text-muted);
+    text-transform: uppercase; letter-spacing: 0.06em;
+    padding: 10px 4px 4px;
+  }
+  .compare-pick-section-label:first-child { padding-top: 4px; }
+  .compare-pick-row {
+    display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+    border-radius: 4px; cursor: pointer; color: var(--c-text);
+  }
+  .compare-pick-row:hover { background: var(--c-bg-hover); }
+  .compare-pick-row.missing { opacity: 0.45; cursor: default; pointer-events: none; }
+  .compare-pick-name { font-size: 0.82rem; font-weight: 500; }
+  .compare-pick-path { font-size: 0.72rem; color: var(--c-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .compare-pick-empty { font-size: 0.78rem; color: var(--c-text-muted); padding: 4px 8px; font-style: italic; }
 
   .meta-bar {
     padding: 0 16px 8px;
@@ -1362,6 +1390,7 @@
           <input type="checkbox" id="chk-diff" />
           &#9776; Show Changes
         </label>
+        <button class="diff-toggle" id="btn-compare" disabled>&#8644; Compare File</button>
         <div class="fav-wrap">
           <button id="btn-fav">Favorites &#9662;</button>
           <div id="fav-dropdown">
@@ -1510,7 +1539,7 @@
   <div id="editor"></div>
   <div id="diff-editor"></div>
   <div id="diff-labels">
-    <div class="diff-label orig">Original (baseline)</div>
+    <div class="diff-label orig" id="diff-label-orig">Original (baseline)</div>
     <div class="diff-label curr">Current</div>
   </div>
 </div>
@@ -1675,6 +1704,27 @@
   </div>
 </div>
 
+<!-- ── Compare file picker modal ── -->
+<div class="modal-overlay" id="modal-compare-pick">
+  <div class="modal">
+    <h2>Compare With</h2>
+    <div class="compare-pick-body">
+      <div id="compare-pick-favs-section">
+        <div class="compare-pick-section-label">Favorites</div>
+        <div id="compare-pick-fav-list"></div>
+      </div>
+      <div id="compare-pick-recents-section">
+        <div class="compare-pick-section-label">Recent Files</div>
+        <div id="compare-pick-recent-list"></div>
+      </div>
+    </div>
+    <div class="modal-btns" style="margin-top:14px;flex-shrink:0;">
+      <button class="modal-btn-cancel" id="compare-pick-cancel">Cancel</button>
+      <button class="modal-btn-primary" id="compare-pick-browse">Browse...</button>
+    </div>
+  </div>
+</div>
+
 <input type="file" id="file-input" accept=".h,.txt" style="display:none" />
 
 <script src="./vs/loader.js"></script>
@@ -1709,6 +1759,8 @@ let currentFilePath = null;
 let fileIsOpen      = false;
 let favoritePaths   = new Set();
 let dragSrcPath     = null;
+let _compareMode    = false;
+let _compareFilePath = null;
 
 // ── Editor content accessor for buildPanel ─────────────
 window.getEditorContent = () => {
@@ -1728,7 +1780,9 @@ function setFileOpen(open) {
     if (el) el.disabled = !open;
   });
   document.getElementById('chk-diff').disabled = !open;
+  document.getElementById('btn-compare').disabled = !open;
   if (!open) {
+    _resetCompareUI();
     document.getElementById('config-banner').classList.remove('visible');
     if (isElectron) refreshEmptyStateFavs();
   } else {
@@ -1992,7 +2046,19 @@ function takeSnapshot(content) {
 }
 
 // ── Diff ───────────────────────────────────────────────
+
+// Resets compare-specific UI without touching the diff editor visibility.
+// Call this before switching to snapshot diff, or when file is closed.
+function _resetCompareUI() {
+  if (!_compareMode) return;
+  _compareMode     = false;
+  _compareFilePath = null;
+  document.getElementById('btn-compare').classList.remove('active');
+  document.getElementById('diff-label-orig').textContent = 'Original (baseline)';
+}
+
 function closeDiff() {
+  _resetCompareUI();
   diffVisible = false;
   document.getElementById('chk-diff').checked = false;
   document.getElementById('editor').style.display      = 'block';
@@ -2005,6 +2071,7 @@ function closeDiff() {
 }
 
 function showDiff(visible) {
+  if (visible) _resetCompareUI(); // switching to snapshot diff clears compare mode
   diffVisible = visible;
   if (visible) {
     document.getElementById('editor').style.display      = 'none';
@@ -2021,6 +2088,126 @@ function showDiff(visible) {
     closeDiff();
   }
 }
+
+// ── Compare file ────────────────────────────────────────
+
+async function startCompare(filePath) {
+  const res = await window.electronAPI.readFile(filePath);
+  if (!res) { alert('Could not read that file.'); return; }
+
+  _compareMode     = true;
+  _compareFilePath = filePath;
+
+  // Deactivate snapshot diff if active (without calling closeDiff which hides the editor)
+  document.getElementById('chk-diff').checked = false;
+  document.getElementById('diff-toggle-label').classList.remove('active');
+
+  document.getElementById('btn-compare').classList.add('active');
+
+  // Show diff editor
+  diffVisible = true;
+  document.getElementById('editor').style.display      = 'none';
+  document.getElementById('diff-editor').style.display = 'block';
+  document.getElementById('diff-labels').classList.add('visible');
+  document.getElementById('stat-diff-info').classList.add('visible');
+
+  // Update orig label with filename + clear button
+  const fname = filePath.split(/[\\/]/).pop();
+  const origLabel = document.getElementById('diff-label-orig');
+  origLabel.innerHTML = '';
+  const nameSpan = document.createElement('span');
+  nameSpan.textContent = fname;
+  origLabel.appendChild(nameSpan);
+  const clearBtn = document.createElement('button');
+  clearBtn.className   = 'compare-clear-btn';
+  clearBtn.title       = 'Clear compare';
+  clearBtn.textContent = '✕';
+  clearBtn.addEventListener('click', () => closeDiff());
+  origLabel.appendChild(clearBtn);
+
+  // Set diff model — compare file as original, current editor content as modified
+  const prev = diffEditorInstance.getModel();
+  const orig = monaco.editor.createModel(res.content, 'cpp');
+  const curr = monaco.editor.createModel(editor.getValue(), 'cpp');
+  diffEditorInstance.setModel({ original: orig, modified: curr });
+  if (prev) { prev.original?.dispose(); prev.modified?.dispose(); }
+  diffEditorInstance.getModifiedEditor().onDidChangeModelContent(() => {
+    if (diffVisible) setDirty(true);
+  });
+}
+
+async function openComparePicker() {
+  const favList    = document.getElementById('compare-pick-fav-list');
+  const recentList = document.getElementById('compare-pick-recent-list');
+  favList.innerHTML    = '<div class="compare-pick-empty">Loading…</div>';
+  recentList.innerHTML = '<div class="compare-pick-empty">Loading…</div>';
+  document.getElementById('modal-compare-pick').classList.add('active');
+
+  const [favs, recents] = await Promise.all([
+    window.electronAPI.getFavorites(),
+    window.electronAPI.getRecentFiles(),
+  ]);
+
+  function makeRow(filePath, label, exists) {
+    if (!exists) {
+      const row = document.createElement('div');
+      row.className = 'compare-pick-row missing';
+      row.innerHTML = `<div><div class="compare-pick-name">${label}</div>
+        <div class="compare-pick-path" style="color:#555">${filePath}</div></div>`;
+      return row;
+    }
+    const row = document.createElement('div');
+    row.className = 'compare-pick-row';
+    row.title = filePath;
+    row.innerHTML = `<div style="overflow:hidden;min-width:0;">
+      <div class="compare-pick-name">${label}</div>
+      <div class="compare-pick-path">${filePath}</div></div>`;
+    row.addEventListener('click', () => {
+      closeComparePicker();
+      startCompare(filePath);
+    });
+    return row;
+  }
+
+  // Favorites
+  favList.innerHTML = '';
+  const favVisible = favs.filter(f => f.filePath !== currentFilePath);
+  if (!favVisible.length) {
+    favList.innerHTML = '<div class="compare-pick-empty">No favorites</div>';
+  } else {
+    favVisible.forEach(({ filePath, desc, exists }) => {
+      const label = desc || filePath.split(/[\\/]/).pop().replace(/\.[^.]+$/, '');
+      favList.appendChild(makeRow(filePath, label, exists));
+    });
+  }
+
+  // Recents
+  recentList.innerHTML = '';
+  const recentVisible = recents.filter(f => f.filePath !== currentFilePath);
+  if (!recentVisible.length) {
+    recentList.innerHTML = '<div class="compare-pick-empty">No recent files</div>';
+  } else {
+    recentVisible.forEach(({ filePath, exists, desc }) => {
+      const label = desc || filePath.split(/[\\/]/).pop().replace(/\.[^.]+$/, '');
+      recentList.appendChild(makeRow(filePath, label, exists));
+    });
+  }
+}
+
+function closeComparePicker() {
+  document.getElementById('modal-compare-pick').classList.remove('active');
+}
+
+document.getElementById('btn-compare').addEventListener('click', () => {
+  if (_compareMode) { closeDiff(); return; }
+  openComparePicker();
+});
+document.getElementById('compare-pick-cancel').addEventListener('click', closeComparePicker);
+document.getElementById('compare-pick-browse').addEventListener('click', async () => {
+  closeComparePicker();
+  const res = await window.electronAPI.openFile();
+  if (res) startCompare(res.filePath);
+});
 
 function refreshDiff() {
   if (!diffEditorInstance) return;
