@@ -478,13 +478,8 @@ async function runDfuFlash(dfuPath, toolsDir, onLog) {
     });
 
     proc.stderr.on('data', d => {
-      // dfu-util uses bare \r to overwrite the progress line in a terminal.
-      // Split on \n boundaries first, then take only the last \r-segment of
-      // each chunk so we capture the final state of each overwritten line.
-      const lines = d.toString()
-        .split(/\n/)
-        .map(l => { const parts = l.split('\r'); return parts[parts.length - 1]; })
-        .filter(Boolean);
+      // dfu-util uses bare \r to overwrite progress lines; split on \r, \n, or \r\n
+      const lines = d.toString().split(/\r?\n|\r/).filter(Boolean);
       lines.forEach(l => {
         stderr += l + '\n';
         onLog(l, l.toLowerCase().includes('error'));
