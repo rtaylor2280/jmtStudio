@@ -640,7 +640,7 @@ function setBarMode(mode) {
     bar.style.position = 'absolute';
     bar.style.left     = '0';
     bar.style.width    = '0%';
-    bar.style.background = '#025192';
+    bar.style.background = getComputedStyle(document.documentElement).getPropertyValue('--jmt-blue').trim();
   }
   else if (mode === 'success') { bar.classList.add('bm-bar-success'); bar.style.left = '0'; }
   else if (mode === 'error')   { bar.classList.add('bm-bar-error');   bar.style.left = '0'; }
