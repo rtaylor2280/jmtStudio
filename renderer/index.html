@@ -66,6 +66,42 @@
   html.light-mode .diff-toggle:hover { background: #e4e4f4; }
   html.light-mode .diff-toggle.active { background: #d8d8f0; color: #3030a0; border-color: #7070c0; }
 
+  /* ── Toolbar action buttons — light mode ── */
+  html.light-mode #btn-clear,
+  html.light-mode #btn-close    { background: #fde8e8; color: #b82020; border-color: #f0b0b0; }
+  html.light-mode #btn-open     { background: #e8f0fe; color: #1a4a9a; border-color: #b0c8f0; }
+  html.light-mode #btn-save,
+  html.light-mode #btn-download { background: #e8f5e8; color: #1a6020; border-color: #a0d0a0; }
+  html.light-mode #btn-saveas   { background: #edf5ed; color: #286828; border-color: #a8d4a8; }
+  html.light-mode #btn-fav      { background: #f0f0f8; color: #444466; border-color: #c8c8e0; }
+
+  /* ── Build toolbar buttons — light mode ── */
+  html.light-mode .build-btn-compile              { background: #e8f0fe; color: #1a3a8a; border-color: #b0c8f0; }
+  html.light-mode .build-btn-compile:not(:disabled):hover { background: #d8e6ff; }
+  html.light-mode .build-btn-flash                { background: #e8f5e8; color: #1a5a1a; border-color: #a0d0a0; }
+  html.light-mode .build-btn-flash:not(:disabled):hover   { background: #d8f0d8; }
+
+  /* ── Config banner — light mode ── */
+  html.light-mode #config-banner  { background: #f0f8f0; border-bottom-color: #c0d8c0; }
+  html.light-mode #banner-desc    { color: #2a6a2a; }
+  html.light-mode #banner-name    { color: #4a7a4a; }
+
+  /* ── Empty state open button — light mode ── */
+  html.light-mode #btn-open-empty { background: #e8f0fe; color: #1a3a8a; border-color: #b0c8f0; }
+
+  /* ── Log toggle hover — light mode ── */
+  html.light-mode #bp-log-toggle:hover { background: var(--c-bg-hover); }
+
+  /* ── Recent / fav current item and hover-remove — light mode ── */
+  html.light-mode .recent-item.current      { background: #e8f5e8; }
+  html.light-mode .recent-remove:hover      { color: #b82020; background: #fde8e8; }
+  html.light-mode .fav-item.current         { background: #e8f5e8; }
+  html.light-mode .fav-remove:hover         { color: #b82020; background: #fde8e8; }
+  html.light-mode .fav-card-remove:hover    { color: #b82020 !important; background: rgba(200,30,30,0.10); }
+
+  /* ── DFU exit button — light mode ── */
+  html.light-mode #bp-btn-exit-dfu { background: #e8f5e8 !important; color: #1a5a1a !important; border-color: #a0d0a0 !important; }
+
   #dev-bar {
     display: none;
     background: #025192;
@@ -1437,6 +1473,7 @@ function loadContent(rawContent, filePath) {
   }
   if (isElectron && window.refreshPorts) window.refreshPorts();
   // refreshPorts triggers checkCacheForConfig once FQBN is resolved
+  window.clearBuildLog?.();
 }
 
 function clearMeta() {

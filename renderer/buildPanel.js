@@ -851,7 +851,7 @@ function startCompileTimer() {
 
 function stopCompileTimer() {
   if (compileTimerInterval) { clearInterval(compileTimerInterval); compileTimerInterval = null; }
-  document.getElementById('bm-timer-compile').style.display = 'none';
+  // Keep the frozen value visible — showBuildModal() hides it on next compile reset
 }
 
 function startFlashTimer() {
@@ -1142,6 +1142,7 @@ function onOsVersionChange() {
 // ── Expose init ────────────────────────────────────────
 window.initBuildPanel           = initBuildPanel;
 window.refreshPorts             = refreshPorts;
+window.clearBuildLog            = clearLog;
 window.checkCacheForConfig      = checkCacheForConfig;
 window.updateUsbChangedIndicator  = updateUsbChangedIndicator;
 window.updatePortChangedIndicator = updatePortChangedIndicator;
