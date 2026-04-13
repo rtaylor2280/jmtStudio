@@ -27,6 +27,71 @@ let selectedUsb = 'cdc_webusb'; // default Serial + WebUSB
 let compileTimerInterval  = null;
 let flashTimerInterval    = null;
 let contentDebounceTimer  = null;
+
+// ── Compile hint typewriter ────────────────────────────
+let _hintActive        = false;
+let _hintIndex         = 0;
+let _hintTimeout       = null;   // initial 60s delay
+let _hintTypingTimer   = null;   // setInterval for character typing
+let _hintFadeTimeout   = null;   // hold-then-fade timer
+let _hintNextTimeout   = null;   // gap between messages
+
+function startCompileHints() {
+  stopCompileHints();
+  _hintActive = true;
+  _hintIndex  = 0;
+  _hintTimeout = setTimeout(_showNextHint, 60000);
+}
+
+function stopCompileHints() {
+  _hintActive = false;
+  clearTimeout(_hintTimeout);
+  clearTimeout(_hintFadeTimeout);
+  clearTimeout(_hintNextTimeout);
+  clearInterval(_hintTypingTimer);
+  _hintTimeout = _hintFadeTimeout = _hintNextTimeout = _hintTypingTimer = null;
+  const el = document.getElementById('bm-hint');
+  if (el) { el.style.transition = 'none'; el.style.opacity = '0'; el.textContent = ''; }
+}
+
+function _showNextHint() {
+  if (!_hintActive) return;
+  const hints = (typeof COMPILE_HINTS !== 'undefined') ? COMPILE_HINTS : [];
+  if (_hintIndex >= hints.length) return; // list exhausted — stop quietly
+
+  const text = hints[_hintIndex++];
+  const el = document.getElementById('bm-hint');
+  if (!el) return;
+
+  // Reset for new message
+  el.style.transition = 'none';
+  el.style.opacity    = '1';
+  el.textContent      = '';
+
+  // Type one character at a time
+  let i = 0;
+  _hintTypingTimer = setInterval(() => {
+    if (!_hintActive) { clearInterval(_hintTypingTimer); _hintTypingTimer = null; return; }
+    el.textContent = text.slice(0, ++i);
+    if (i >= text.length) {
+      clearInterval(_hintTypingTimer);
+      _hintTypingTimer = null;
+      // Hold fully-typed for 2s, then fade out
+      _hintFadeTimeout = setTimeout(() => {
+        if (!_hintActive) return;
+        el.style.transition = 'opacity 400ms ease';
+        el.style.opacity = '0';
+        // After fade completes, wait ~22s then show next
+        _hintNextTimeout = setTimeout(() => {
+          if (!_hintActive) return;
+          el.style.transition = 'none';
+          el.textContent = '';
+          _showNextHint();
+        }, 22400); // 400ms fade + 22s gap ≈ 25s total cycle
+      }, 2000);
+    }
+  }, 28); // ~28ms/char ≈ 35 chars/sec
+}
 let isDfuMode       = false;   // true when bootloader (DFU) mode is active
 let dfuDeviceReady  = false;   // true after DFU device detected in waiting modal
 window._isFlashing = false;
@@ -180,6 +245,7 @@ async function doCompile() {
   await window.doSave();
 
   showBuildModal('⚙ Compiling...');
+  startCompileHints();
   setBusy(true);
   clearLog();
   compileSuccess = false;
@@ -220,6 +286,7 @@ async function doFlash() {
   }
 
   // Reuse modal in flash mode
+  stopCompileHints();
   stopCompileTimer();
   document.getElementById('bm-title').textContent = '⚡ Flashing...';
   document.getElementById('bm-title').style.color = '#eee';
@@ -536,6 +603,7 @@ function onBuildDone({ type, ok, error, aborted, retriable }) {
 
 // ── Build modal ────────────────────────────────────────
 function showBuildModal(title) {
+  stopCompileHints();
   const modal = document.getElementById('build-modal');
   modal.style.display = 'flex';
   document.getElementById('bm-title').textContent = title;
@@ -689,6 +757,7 @@ function showMultiBoardSelect(proffieports) {
 }
 
 function finishBuildModal(success, title, statusMsg, { retriable = false } = {}) {
+  stopCompileHints();
   stopPortWatch();
   stopCompileTimer();
   stopFlashTimer();
