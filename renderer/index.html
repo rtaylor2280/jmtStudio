@@ -1746,6 +1746,9 @@ function populateVersionSelect(sel, versions, selectedName) {
   versions.forEach(name => {
     const opt = document.createElement('option');
     opt.value = opt.textContent = name;
+    if (name.includes('(+JMT)')) {
+      opt.title = 'Includes an optional JMT prop and supporting components. No changes to standard ProffieOS behavior unless used.';
+    }
     sel.appendChild(opt);
   });
   // Sentinel option
