@@ -25,26 +25,47 @@ const _hashCache = new Map(); // versionName → hash string
 
 // ── Path helpers ───────────────────────────────────────
 
-// Root folder containing all ProffieOS version subfolders.
-function getVersionsRootPath() {
+// Bundled versions path (read-only when packaged in Program Files).
+function getBundledVersionsPath() {
   return app.isPackaged
     ? path.join(process.resourcesPath, 'proffieOS_versions')
     : path.join(__dirname, 'resources', 'proffieOS_versions');
 }
 
-// Returns sorted list of available version names (subfolder names).
+// User-imported versions path (always writable, survives reinstalls).
+function getUserVersionsPath() {
+  return path.join(app.getPath('userData'), 'proffieOS_versions');
+}
+
+// Legacy alias — kept for internal callers that haven't been updated.
+function getVersionsRootPath() { return getBundledVersionsPath(); }
+
+// Internal: resolves which root a version folder lives in.
+function _resolveVersionFolder(name) {
+  const userPath    = path.join(getUserVersionsPath(), name);
+  if (fs.existsSync(userPath)) return { folderPath: userPath, source: 'user' };
+  const bundledPath = path.join(getBundledVersionsPath(), name);
+  if (fs.existsSync(bundledPath)) return { folderPath: bundledPath, source: 'bundled' };
+  return null;
+}
+
+// Returns sorted list of available version names from both bundled and user paths.
 function listVersions() {
-  const root = getVersionsRootPath();
-  if (!fs.existsSync(root)) return [];
-  return fs.readdirSync(root, { withFileTypes: true })
-    .filter(e => e.isDirectory())
-    .map(e => e.name)
-    .sort();
+  const names = new Set();
+  [getBundledVersionsPath(), getUserVersionsPath()].forEach(root => {
+    if (fs.existsSync(root)) {
+      fs.readdirSync(root, { withFileTypes: true })
+        .filter(e => e.isDirectory())
+        .forEach(e => names.add(e.name));
+    }
+  });
+  return [...names].sort();
 }
 
 // ProffieOS source path for a given version name (read-only when packaged).
 function getVersionSourcePath(versionName) {
-  return path.join(getVersionsRootPath(), versionName, 'ProffieOS');
+  const resolved = _resolveVersionFolder(versionName);
+  return resolved ? path.join(resolved.folderPath, 'ProffieOS') : path.join(getBundledVersionsPath(), versionName, 'ProffieOS');
 }
 
 // ── Version selection ──────────────────────────────────
@@ -342,7 +363,7 @@ function importVersion(sourcePath, versionName) {
   if (!fs.existsSync(path.join(sourcePath, 'ProffieOS.ino'))) {
     return { ok: false, error: 'Selected folder does not contain ProffieOS.ino — is this a valid ProffieOS source?' };
   }
-  const dest = path.join(getVersionsRootPath(), name, 'ProffieOS');
+  const dest = path.join(getUserVersionsPath(), name, 'ProffieOS');
   if (fs.existsSync(dest)) {
     return { ok: false, error: `A version named "${name}" already exists.` };
   }
@@ -368,6 +389,200 @@ function getInfo() {
   };
 }
 
+// ── Version metadata ───────────────────────────────────
+
+function _dirSizeSync(p) {
+  if (!fs.existsSync(p)) return 0;
+  return fs.readdirSync(p, { withFileTypes: true }).reduce((sum, e) => {
+    const full = path.join(p, e.name);
+    return sum + (e.isDirectory() ? _dirSizeSync(full) : fs.statSync(full).size);
+  }, 0);
+}
+
+function getNotesPath(versionName) {
+  const resolved = _resolveVersionFolder(versionName);
+  return resolved ? path.join(resolved.folderPath, 'notes.txt') : null;
+}
+
+function readNotes(versionName) {
+  const p = getNotesPath(versionName);
+  if (!p || !fs.existsSync(p)) return null;
+  try { return fs.readFileSync(p, 'utf8'); } catch { return null; }
+}
+
+function writeNotes(versionName, content) {
+  const resolved = _resolveVersionFolder(versionName);
+  if (!resolved) return { ok: false, error: 'Version not found.' };
+  try {
+    fs.writeFileSync(path.join(resolved.folderPath, 'notes.txt'), content, 'utf8');
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+
+function listVersionsDetails() {
+  return listVersions().map(name => {
+    const resolved = _resolveVersionFolder(name);
+    if (!resolved) return null;
+    const { folderPath, source } = resolved;
+    // Only versions that ship with the app and carry the (+JMT) marker are
+    // treated as built-in (protected from rename/delete). Versions manually
+    // placed in the bundled folder during dev are treated as user versions.
+    const isBuiltIn = source === 'bundled' && name.includes('(+JMT)');
+    const notes = readNotes(name);
+    let modified = null;
+    try { modified = fs.statSync(folderPath).mtime.toISOString(); } catch {}
+    return {
+      name,
+      isBuiltIn,
+      source,
+      size: _dirSizeSync(folderPath),
+      modified,
+      notes,
+      notesPreview: notes ? notes.split('\n').find(l => l.trim()) || null : null,
+    };
+  }).filter(Boolean);
+}
+
+// ── Version operations ─────────────────────────────────
+
+function _validateVersionName(name) {
+  const trimmed = (name || '').trim();
+  if (!trimmed) return 'Name cannot be empty.';
+  if (/[<>:"/\\|?*\x00-\x1f]/.test(trimmed)) return 'Name contains invalid characters.';
+  return null;
+}
+
+function renameVersion(oldName, newName) {
+  const resolved = _resolveVersionFolder(oldName);
+  if (!resolved) return { ok: false, error: 'Version not found.' };
+  if (resolved.source === 'bundled' && oldName.includes('(+JMT)')) return { ok: false, error: 'Built-in versions cannot be renamed.' };
+  const err = _validateVersionName(newName);
+  if (err) return { ok: false, error: err };
+  const trimmed = newName.trim();
+  const destPath = path.join(getUserVersionsPath(), trimmed);
+  if (fs.existsSync(destPath)) return { ok: false, error: `A version named "${trimmed}" already exists.` };
+  try {
+    fs.renameSync(resolved.folderPath, destPath);
+    return { ok: true, newName: trimmed };
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+
+function duplicateVersion(versionName, newName) {
+  const resolved = _resolveVersionFolder(versionName);
+  if (!resolved) return { ok: false, error: 'Version not found.' };
+  const err = _validateVersionName(newName);
+  if (err) return { ok: false, error: err };
+  const trimmed = newName.trim();
+  if (_resolveVersionFolder(trimmed)) return { ok: false, error: `A version named "${trimmed}" already exists.` };
+  const destPath = path.join(getUserVersionsPath(), trimmed);
+  try {
+    copyDirSync(resolved.folderPath, destPath);
+    return { ok: true, newName: trimmed };
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+
+function deleteVersion(versionName) {
+  const resolved = _resolveVersionFolder(versionName);
+  if (!resolved) return { ok: false, error: 'Version not found.' };
+  if (resolved.source === 'bundled' && versionName.includes('(+JMT)')) return { ok: false, error: 'Built-in versions cannot be deleted.' };
+  try {
+    fs.rmSync(resolved.folderPath, { recursive: true, force: true });
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+
+function listVersionDir(versionName, subPath) {
+  const resolved = _resolveVersionFolder(versionName);
+  if (!resolved) return { ok: false, error: 'Version not found.' };
+  const fullPath = subPath ? path.join(resolved.folderPath, subPath) : resolved.folderPath;
+  if (!fullPath.startsWith(resolved.folderPath)) return { ok: false, error: 'Invalid path.' };
+  if (!fs.existsSync(fullPath)) return { ok: false, error: 'Path not found.' };
+  try {
+    const entries = fs.readdirSync(fullPath, { withFileTypes: true })
+      .map(e => ({
+        name: e.name,
+        type: e.isDirectory() ? 'dir' : 'file',
+        size: e.isFile() ? fs.statSync(path.join(fullPath, e.name)).size : null,
+      }))
+      .sort((a, b) => {
+        if (a.type !== b.type) return a.type === 'dir' ? -1 : 1;
+        return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+      });
+    return { ok: true, entries };
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+
+function readVersionFile(versionName, subPath) {
+  const resolved = _resolveVersionFolder(versionName);
+  if (!resolved) return { ok: false, error: 'Version not found.' };
+  const fullPath = path.join(resolved.folderPath, subPath);
+  if (!fullPath.startsWith(resolved.folderPath)) return { ok: false, error: 'Invalid path.' };
+  try {
+    const stats = fs.statSync(fullPath);
+    if (stats.size > 2 * 1024 * 1024) return { ok: false, error: 'File too large to preview (> 2 MB).' };
+    const content = fs.readFileSync(fullPath, 'utf8');
+    return { ok: true, content };
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+
+const _SEARCH_TEXT_EXTS = new Set([
+  'h','cpp','c','ino','cc','md','txt','py','sh','bat',
+  'json','yml','yaml','xml','html','css','js','ts',
+  'gitignore','gitattributes','mk','makefile',
+]);
+const _SEARCH_MAX_FILE_BYTES = 512 * 1024; // skip files > 512 KB
+
+function searchVersionFiles(versionName, query) {
+  const resolved = _resolveVersionFolder(versionName);
+  if (!resolved) return { ok: false, error: 'Version not found.' };
+  const searchRoot = path.join(resolved.folderPath, 'ProffieOS');
+  if (!fs.existsSync(searchRoot)) return { ok: false, error: 'ProffieOS directory not found.' };
+  const q = (query || '').toLowerCase().trim();
+  if (!q) return { ok: true, results: [] };
+  const results = [];
+  (function walk(dir, relPath) {
+    if (results.length >= 300) return;
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (results.length >= 300) return;
+      const rel = relPath ? `${relPath}/${e.name}` : e.name;
+      const fullEntry = path.join(dir, e.name);
+      const nameLower = e.name.toLowerCase();
+      const nameMatch = nameLower.includes(q);
+      if (e.isDirectory()) {
+        if (nameMatch) results.push({ name: e.name, path: `ProffieOS/${rel}`, type: 'dir', size: null, matchType: 'name', matchCount: 0, matchLine: null });
+        walk(fullEntry, rel);
+      } else {
+        let size = null;
+        try { size = fs.statSync(fullEntry).size; } catch {}
+        if (nameMatch) {
+          results.push({ name: e.name, path: `ProffieOS/${rel}`, type: 'file', size, matchType: 'name', matchCount: 0, matchLine: null });
+        } else {
+          // Content search — only for known text extensions within size limit
+          const ext = (nameLower.split('.').pop() || '').toLowerCase();
+          if (_SEARCH_TEXT_EXTS.has(ext) && size != null && size <= _SEARCH_MAX_FILE_BYTES) {
+            try {
+              const text = fs.readFileSync(fullEntry, 'utf8');
+              let matchCount = 0, firstLine = null;
+              for (const line of text.split('\n')) {
+                if (line.toLowerCase().includes(q)) {
+                  matchCount++;
+                  if (!firstLine) firstLine = line.trim().slice(0, 140);
+                }
+              }
+              if (matchCount > 0) {
+                results.push({ name: e.name, path: `ProffieOS/${rel}`, type: 'file', size, matchType: 'content', matchCount, matchLine: firstLine });
+              }
+            } catch {}
+          }
+        }
+      }
+    }
+  })(searchRoot, '');
+  return { ok: true, results };
+}
+
 // Returns the top-level resources directory (arduino-cli, tools, etc.)
 function getResourcesPath() {
   return app.isPackaged
@@ -391,5 +606,16 @@ module.exports = {
   readStagedConfig,
   importVersion,
   getInfo,
-  CONFIG_FILENAME
+  CONFIG_FILENAME,
+  listVersionsDetails,
+  readNotes,
+  writeNotes,
+  renameVersion,
+  duplicateVersion,
+  deleteVersion,
+  listVersionDir,
+  readVersionFile,
+  searchVersionFiles,
+  getBundledVersionsPath,
+  getUserVersionsPath,
 };

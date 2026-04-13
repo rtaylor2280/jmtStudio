@@ -920,6 +920,396 @@
   .fav-card[draggable="true"] { cursor: grab; }
   .fav-card.dragging { opacity: 0.35; border-style: dashed; }
   .fav-card.drag-over { border-color: var(--jmt-blue); box-shadow: 0 0 0 2px rgba(2,81,146,0.35); }
+
+  /* ── Tab bar ── */
+  .tab-bar {
+    display: flex;
+    align-items: stretch;
+    gap: 2px;
+    flex-shrink: 0;
+  }
+  .tab {
+    padding: 5px 14px;
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: var(--c-text-muted);
+    cursor: pointer;
+    border: 1px solid transparent;
+    border-radius: 4px 4px 0 0;
+    transition: color 0.15s, background 0.15s;
+    user-select: none;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    background: transparent;
+  }
+  .tab:hover { color: var(--c-text-sub); background: var(--c-bg-hover); opacity: 1; }
+  .tab.active {
+    color: var(--c-text-bright);
+    background: var(--c-bg-raised);
+    border-color: var(--c-border-input) var(--c-border-input) transparent;
+    font-weight: 600;
+  }
+  .tab svg { color: var(--jmt-blue); flex-shrink: 0; }
+  .tab-btns { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  #tab-btns-versions { display: none; }
+
+  /* ── Versions panel layout ── */
+  #versions-view {
+    display: none;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    flex-direction: column;
+  }
+  #versions-view.active { display: flex; }
+  .vp-layout {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .vp-sidebar {
+    width: 240px;
+    flex-shrink: 0;
+    border-right: 1px solid var(--c-border);
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    background: var(--c-bg-inset);
+  }
+  .vp-sidebar::-webkit-scrollbar { width: 6px; }
+  .vp-sidebar::-webkit-scrollbar-thumb { background: var(--c-border-strong); border-radius: 3px; }
+  .vp-sidebar-header {
+    padding: 10px 12px 8px;
+    border-bottom: 1px solid var(--c-border-faint);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+  }
+  .vp-sidebar-title {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    color: var(--c-text-muted);
+  }
+  #vp-list { flex: 1; overflow-y: auto; padding: 6px; }
+  #vp-list::-webkit-scrollbar { width: 6px; }
+  #vp-list::-webkit-scrollbar-thumb { background: var(--c-border-strong); border-radius: 3px; }
+
+  .vp-card {
+    background: var(--c-bg-card);
+    border: 1px solid var(--c-border);
+    border-radius: 5px;
+    padding: 10px 12px;
+    margin-bottom: 6px;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .vp-card:hover { background: var(--c-bg-hover); }
+  .vp-card.active {
+    border-color: var(--jmt-blue);
+    background: var(--c-bg-raised);
+    box-shadow: 0 0 0 1px rgba(2,81,146,0.2);
+  }
+  .vp-card-top { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+  .vp-card-name {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--c-text-bright);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+  }
+  .vp-badge {
+    font-size: 0.6rem;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    background: rgba(2,81,146,0.2);
+    color: #4a9edd;
+    border: 1px solid rgba(2,81,146,0.35);
+    border-radius: 3px;
+    padding: 1px 5px;
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+  .vp-card-meta {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    font-size: 0.7rem;
+    color: var(--c-text-muted);
+  }
+  .vp-card-notes-preview {
+    font-size: 0.7rem;
+    color: var(--c-text-dim);
+    margin-top: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-style: italic;
+  }
+  .vp-empty-list {
+    padding: 24px 12px;
+    text-align: center;
+    font-size: 0.8rem;
+    color: var(--c-text-dim);
+  }
+
+  .vp-detail {
+    flex: 1;
+    overflow-y: auto;
+    padding: 18px 22px;
+    min-width: 0;
+  }
+  .vp-detail::-webkit-scrollbar { width: 6px; }
+  .vp-detail::-webkit-scrollbar-thumb { background: var(--c-border-strong); border-radius: 3px; }
+  .vp-no-selection {
+    color: var(--c-text-dim);
+    font-size: 0.85rem;
+    text-align: center;
+    padding: 60px 20px;
+  }
+  .vp-detail-header {
+    margin-bottom: 16px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--c-border-faint);
+  }
+  .vp-detail-title-row { display: flex; align-items: center; gap: 10px; margin-bottom: 5px; }
+  .vp-detail-name { font-size: 1.05rem; font-weight: 700; color: var(--c-text-bright); }
+  .vp-badge.builtin-lg { font-size: 0.65rem; }
+  .vp-detail-stats {
+    font-size: 0.75rem;
+    color: var(--c-text-muted);
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .vp-detail-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
+
+  .vp-action-btn {
+    padding: 5px 12px;
+    background: var(--c-bg-card);
+    color: var(--c-text-sub);
+    border: 1px solid var(--c-border-heavy);
+    border-radius: 4px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.12s;
+  }
+  .vp-action-btn:hover { background: var(--c-bg-hover); opacity: 1; }
+  .vp-action-btn.danger { background: #2a1010; color: #e55; border-color: #5a2020; }
+  .vp-action-btn.danger:hover { background: #3a1818; }
+  .vp-action-btn.primary { background: var(--jmt-blue); color: #fff; border-color: #036bb8; }
+  .vp-action-btn.primary:hover { background: #036bb8; }
+  .vp-action-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+  .vp-section { margin-bottom: 22px; }
+  .vp-section-label {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--c-text-muted);
+    margin-bottom: 8px;
+    padding-bottom: 5px;
+    border-bottom: 1px solid var(--c-border-faint);
+  }
+  .vp-notes-editor {
+    width: 100%;
+    min-height: 80px;
+    max-height: 200px;
+    background: var(--c-bg-inset);
+    border: 1px solid var(--c-border-input);
+    border-radius: 4px;
+    color: var(--c-text);
+    font-size: 0.82rem;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    padding: 8px 10px;
+    resize: vertical;
+    outline: none;
+    line-height: 1.55;
+  }
+  .vp-notes-editor:focus { border-color: var(--jmt-blue); }
+  .vp-notes-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 6px; }
+  .vp-notes-status { font-size: 0.72rem; color: var(--c-text-muted); }
+
+  /* ── File tree ── */
+  .vp-tree { font-size: 0.8rem; }
+  .vp-tree-loading, .vp-tree-error, .vp-tree-empty {
+    font-size: 0.75rem;
+    color: var(--c-text-dim);
+    padding: 5px 10px;
+    font-style: italic;
+  }
+  .vp-tree-error { color: #e44; font-style: normal; }
+  .vp-tree-row {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 8px;
+    border-radius: 3px;
+    cursor: pointer;
+    min-height: 22px;
+    transition: background 0.1s;
+    user-select: none;
+  }
+  .vp-tree-row:hover { background: var(--c-bg-hover); }
+  .vp-tree-dir  .vp-tree-name { color: var(--c-text-sub); font-weight: 500; }
+  .vp-tree-file .vp-tree-name { color: var(--c-text); }
+  .vp-tree-toggle {
+    width: 12px;
+    flex-shrink: 0;
+    font-size: 0.55rem;
+    color: var(--c-text-dim);
+    text-align: center;
+  }
+  .vp-tree-icon { font-size: 0.85rem; flex-shrink: 0; line-height: 1; }
+  .vp-tree-file-icon {
+    width: 16px;
+    flex-shrink: 0;
+    font-size: 0.58rem;
+    font-weight: 700;
+    color: #5a7a9a;
+    font-family: monospace;
+    text-align: center;
+    background: rgba(2,81,146,0.15);
+    border-radius: 2px;
+    line-height: 14px;
+    height: 14px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .vp-tree-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.8rem; }
+  .vp-tree-size {
+    font-size: 0.65rem;
+    color: var(--c-text-dim);
+    margin-left: auto;
+    flex-shrink: 0;
+    font-family: monospace;
+  }
+
+  /* ── VP search bar ── */
+  .vp-search-wrap {
+    position: relative;
+    margin-bottom: 8px;
+  }
+  .vp-search-input {
+    width: 100%;
+    background: var(--c-bg-inset);
+    border: 1px solid var(--c-border-input);
+    border-radius: 4px;
+    color: var(--c-text);
+    font-size: 0.8rem;
+    padding: 5px 28px 5px 10px;
+    outline: none;
+    font-family: inherit;
+    transition: border-color 0.15s;
+  }
+  .vp-search-input:focus { border-color: var(--jmt-blue); }
+  .vp-search-clear {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 0.7rem;
+    color: var(--c-text-dim);
+    cursor: pointer;
+    line-height: 1;
+  }
+  .vp-search-clear:hover { color: var(--c-text-sub); }
+  .vp-tree-root { cursor: default; }
+  .vp-tree-root:hover { background: transparent; }
+  .vp-search-summary {
+    font-size: 0.68rem;
+    color: var(--c-text-dim);
+    padding: 3px 10px 6px;
+    letter-spacing: 0.02em;
+  }
+  .vp-search-result { align-items: flex-start; padding-top: 4px; padding-bottom: 4px; }
+  .vp-search-result-body { flex: 1; min-width: 0; }
+  .vp-search-result-top { display: flex; align-items: center; gap: 6px; }
+  .vp-search-badge {
+    font-size: 0.6rem;
+    background: rgba(2,81,146,0.2);
+    color: #4a9edd;
+    border: 1px solid rgba(2,81,146,0.3);
+    border-radius: 3px;
+    padding: 1px 5px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .vp-search-preview {
+    font-size: 0.68rem;
+    color: var(--c-text-dim);
+    font-family: 'Cascadia Code', Consolas, monospace;
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+  }
+
+  /* ── VP file viewer modal ── */
+  #vp-file-modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.85);
+    z-index: 200;
+    align-items: center;
+    justify-content: center;
+  }
+  #vp-file-modal.active { display: flex; }
+  .vp-file-modal-inner {
+    background: #111;
+    border: 1px solid var(--c-border-heavy);
+    border-radius: 6px;
+    width: 860px;
+    max-width: 96vw;
+    height: 80vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.6);
+    overflow: hidden;
+  }
+  .vp-file-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 9px 16px;
+    border-bottom: 1px solid var(--c-border);
+    background: var(--c-bg-toolbar);
+    flex-shrink: 0;
+  }
+  #vp-file-modal-title {
+    font-family: monospace;
+    font-size: 0.8rem;
+    color: var(--c-text-sub);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    margin-right: 12px;
+  }
+  .vp-file-modal-close {
+    background: none;
+    border: none;
+    color: var(--c-text-muted);
+    font-size: 1.1rem;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 3px;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+  .vp-file-modal-close:hover { color: var(--c-text); background: var(--c-bg-hover); opacity: 1; }
+  #vp-file-modal-editor { flex: 1; overflow: hidden; min-height: 0; }
 </style>
 </head>
 <body>
@@ -929,30 +1319,45 @@
 <!-- ── Header ── -->
 <header>
   <div class="header-top">
-    <div class="title-group">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
-      </svg>
-      <h1>Config Manager</h1>
+    <div class="tab-bar">
+      <button class="tab active" data-tab="config">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+        </svg>
+        Config Manager
+      </button>
+      <button class="tab" data-tab="versions">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/>
+          <polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/>
+          <path d="M4 4h7v7H4z" stroke-width="1.5"/>
+        </svg>
+        OS Versions
+      </button>
     </div>
-    <div class="btn-group">
-      <button id="btn-undo" title="Undo (Ctrl+Z)">&#8634;</button>
-      <button id="btn-redo" title="Redo (Ctrl+Y)">&#8635;</button>
-      <label class="diff-toggle" id="diff-toggle-label">
-        <input type="checkbox" id="chk-diff" />
-        &#9776; Show Changes
-      </label>
-      <div class="fav-wrap">
-        <button id="btn-fav">Favorites &#9662;</button>
-        <div id="fav-dropdown">
-          <div id="fav-list"></div>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <div class="tab-btns" id="tab-btns-config">
+        <button id="btn-undo" title="Undo (Ctrl+Z)">&#8634;</button>
+        <button id="btn-redo" title="Redo (Ctrl+Y)">&#8635;</button>
+        <label class="diff-toggle" id="diff-toggle-label">
+          <input type="checkbox" id="chk-diff" />
+          &#9776; Show Changes
+        </label>
+        <div class="fav-wrap">
+          <button id="btn-fav">Favorites &#9662;</button>
+          <div id="fav-dropdown">
+            <div id="fav-list"></div>
+          </div>
         </div>
+        <button id="btn-open">&#8593; Open</button>
+        <button id="btn-close">&#10005; Close</button>
+        <button id="btn-save"     style="display:none">&#8595; Save</button>
+        <button id="btn-saveas"   style="display:none">&#8595; Save As</button>
+        <button id="btn-download" style="display:none">&#8595; Download</button>
       </div>
-      <button id="btn-open">&#8593; Open</button>
-      <button id="btn-close">&#10005; Close</button>
-      <button id="btn-save"     style="display:none">&#8595; Save</button>
-      <button id="btn-saveas"   style="display:none">&#8595; Save As</button>
-      <button id="btn-download" style="display:none">&#8595; Download</button>
+      <div class="tab-btns" id="tab-btns-versions">
+        <button id="btn-vp-import" style="background:#1a2a3a;color:#6af;border:1px solid #2a3a5a;padding:5px 12px;border-radius:4px;font-size:0.8rem;font-weight:600;cursor:pointer;" title="Import a ProffieOS version folder">&#8593; Import Version</button>
+      </div>
       <button id="btn-settings" title="About JMT Studio">&#9881;</button>
     </div>
   </div>
@@ -992,6 +1397,21 @@
     </div>
   </div>
 </header>
+
+<!-- ── OS Versions view ── -->
+<div id="versions-view">
+  <div class="vp-layout">
+    <div class="vp-sidebar">
+      <div class="vp-sidebar-header">
+        <span class="vp-sidebar-title">Installed Versions</span>
+      </div>
+      <div id="vp-list"></div>
+    </div>
+    <div id="vp-detail" class="vp-detail">
+      <div class="vp-no-selection">Select a version to view details.</div>
+    </div>
+  </div>
+</div>
 
 <!-- ── Config banner ── -->
 <div id="config-banner">
@@ -1215,6 +1635,17 @@
     <div class="modal-btns" style="margin-top:18px;">
       <button class="modal-btn-cancel" id="about-close-btn">Close</button>
     </div>
+  </div>
+</div>
+
+<!-- ── VP file viewer modal ── -->
+<div id="vp-file-modal">
+  <div class="vp-file-modal-inner">
+    <div class="vp-file-modal-header">
+      <div id="vp-file-modal-title"></div>
+      <button class="vp-file-modal-close" id="vp-file-modal-close-btn" title="Close">&#10005;</button>
+    </div>
+    <div id="vp-file-modal-editor"></div>
   </div>
 </div>
 
@@ -1841,6 +2272,7 @@ function openImportVersionModal() {
 
 function closeImportVersionModal() {
   document.getElementById('modal-import-version').classList.remove('active');
+  _importFromVersionsTab = false;
 }
 
 function updateImportConfirmState() {
@@ -1905,12 +2337,25 @@ document.getElementById('import-confirm-btn').addEventListener('click', async ()
     return;
   }
 
-  // Success — refresh dropdown and select the new version
+  // Success — repopulate the dropdown in both cases; selection behavior differs
   closeImportVersionModal();
+  const fromVersionsTab = _importFromVersionsTab;
+  _importFromVersionsTab = false;
   const versions = await window.electronAPI.listProffieVersions();
   const verSel   = document.getElementById('input-version');
-  populateVersionSelect(verSel, versions, result.versionName);
-  verSel.dispatchEvent(new Event('change'));
+  if (fromVersionsTab) {
+    // Triggered from OS Versions tab — new version appears in dropdown but
+    // selection stays on whatever was already chosen
+    const currentSel = verSel.value || verSel.dataset.lastValue || '';
+    populateVersionSelect(verSel, versions, currentSel);
+    // no dispatchEvent — selection didn't change
+  } else {
+    // Triggered from Config Manager dropdown sentinel — new version becomes
+    // the active selection
+    populateVersionSelect(verSel, versions, result.versionName);
+    verSel.dispatchEvent(new Event('change'));
+  }
+  if (window.vpRefresh) window.vpRefresh();
 });
 
 // ── About / Settings modal ─────────────────────────────
@@ -2027,6 +2472,69 @@ document.getElementById('about-support-link').addEventListener('click', (e) => {
 document.getElementById('about-info-link').addEventListener('click', (e) => {
   e.preventDefault();
   if (window.electronAPI?.openExternal) window.electronAPI.openExternal('mailto:info@jedimastertech.com');
+});
+
+// ── Versions tab: Import button ────────────────────────
+let _importFromVersionsTab = false;
+document.getElementById('btn-vp-import')?.addEventListener('click', () => {
+  _importFromVersionsTab = true;
+  openImportVersionModal();
+});
+
+// ── VP file modal close ────────────────────────────────
+document.getElementById('vp-file-modal-close-btn')?.addEventListener('click', () => {
+  if (window.vpCloseFileModal) window.vpCloseFileModal();
+});
+document.getElementById('vp-file-modal')?.addEventListener('click', (e) => {
+  if (e.target === e.currentTarget && window.vpCloseFileModal) window.vpCloseFileModal();
+});
+
+// ── Tab switching ──────────────────────────────────────
+
+const _configOnlyEls = ['config-banner', 'build-toolbar', 'empty-state',
+                        'editor-container', 'build-log'];
+const _configOnlyClasses = ['.status-bar', '.meta-bar'];
+
+let _activeTab = 'config';
+
+function switchTab(name) {
+  if (_activeTab === name) return;
+  _activeTab = name;
+
+  document.querySelectorAll('.tab').forEach(t =>
+    t.classList.toggle('active', t.dataset.tab === name));
+
+  document.getElementById('tab-btns-config').style.display   = name === 'config'   ? 'flex' : 'none';
+  document.getElementById('tab-btns-versions').style.display = name === 'versions' ? 'flex' : 'none';
+
+  const showConfig = name === 'config';
+  _configOnlyEls.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = showConfig ? '' : 'none';
+  });
+  _configOnlyClasses.forEach(sel => {
+    document.querySelectorAll(sel).forEach(el => {
+      el.style.display = showConfig ? '' : 'none';
+    });
+  });
+
+  const versionsView = document.getElementById('versions-view');
+  if (showConfig) {
+    versionsView.classList.remove('active');
+  } else {
+    versionsView.classList.add('active');
+    // Lazy-init the panel on first switch
+    if (window.initVersionsPanel && !versionsView.dataset.loaded) {
+      versionsView.dataset.loaded = '1';
+      window.initVersionsPanel();
+    } else if (window.vpRefresh && versionsView.dataset.loaded) {
+      // no auto-refresh on every switch; user can use import to trigger refresh
+    }
+  }
+}
+
+document.querySelectorAll('.tab').forEach(t => {
+  t.addEventListener('click', () => switchTab(t.dataset.tab));
 });
 
 // ── Favorites ──────────────────────────────────────────
@@ -2345,15 +2853,21 @@ require(['vs/editor/editor.main'], function () {
     });
   }
 
-  // ── Load buildPanel ──
+  // ── Load buildPanel → versionsPanel ──
   if (isElectron) {
     const hintsScript = document.createElement('script');
     hintsScript.src = 'compile-hints.js';
     hintsScript.onload = () => {
-      const script = document.createElement('script');
-      script.src = 'buildPanel.js';
-      script.onload = () => window.initBuildPanel();
-      document.body.appendChild(script);
+      const bpScript = document.createElement('script');
+      bpScript.src = 'buildPanel.js';
+      bpScript.onload = () => {
+        window.initBuildPanel();
+        // Load versionsPanel after buildPanel is ready
+        const vpScript = document.createElement('script');
+        vpScript.src = 'versionsPanel.js';
+        document.body.appendChild(vpScript);
+      };
+      document.body.appendChild(bpScript);
     };
     document.body.appendChild(hintsScript);
 

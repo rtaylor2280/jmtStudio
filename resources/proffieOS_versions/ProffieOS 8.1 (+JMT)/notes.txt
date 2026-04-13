@@ -1,0 +1,1 @@
+This is the latest stable release version 8.10 and has the addition of the JMT prop which is a wrapper for Fett263's prop enabling advanced features. There are two supporting files for this version, but nothing else has been modified.

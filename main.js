@@ -420,6 +420,44 @@ ipcMain.handle('proffieOS:importVersion', (_, { sourcePath, versionName }) => {
   return proffie.importVersion(sourcePath, versionName);
 });
 
+ipcMain.handle('versions:listDetails', () => proffie.listVersionsDetails());
+ipcMain.handle('versions:readNotes',  (_, name) => proffie.readNotes(name));
+ipcMain.handle('versions:writeNotes', (_, { name, content }) => proffie.writeNotes(name, content));
+ipcMain.handle('versions:rename',     (_, { oldName, newName }) => proffie.renameVersion(oldName, newName));
+ipcMain.handle('versions:duplicate',  (_, { name, newName }) => proffie.duplicateVersion(name, newName));
+ipcMain.handle('versions:delete',     (_, name) => proffie.deleteVersion(name));
+ipcMain.handle('versions:listDir',    (_, { name, subPath }) => proffie.listVersionDir(name, subPath || ''));
+ipcMain.handle('versions:readFile',   (_, { name, subPath }) => proffie.readVersionFile(name, subPath));
+ipcMain.handle('versions:search',     (_, { name, query })   => proffie.searchVersionFiles(name, query));
+ipcMain.handle('versions:export', async (_, name) => {
+  const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+    title: `Export "${name}" to folder`,
+    properties: ['openDirectory', 'createDirectory'],
+    buttonLabel: 'Export Here',
+  });
+  if (canceled || !filePaths.length) return { ok: false, error: 'cancelled' };
+  const destFolder = filePaths[0];
+  const dest = path.join(destFolder, name);
+  if (fs.existsSync(dest)) return { ok: false, error: `"${name}" already exists in the selected folder.` };
+  const allVersions = proffie.listVersionsDetails();
+  const versionInfo = allVersions.find(v => v.name === name);
+  if (!versionInfo) return { ok: false, error: 'Version not found.' };
+  function cpDir(s, d) {
+    fs.mkdirSync(d, { recursive: true });
+    fs.readdirSync(s, { withFileTypes: true }).forEach(e => {
+      const sp = path.join(s, e.name), dp = path.join(d, e.name);
+      e.isDirectory() ? cpDir(sp, dp) : fs.copyFileSync(sp, dp);
+    });
+  }
+  try {
+    cpDir(versionInfo.source === 'bundled'
+      ? path.join(proffie.getBundledVersionsPath(), name)
+      : path.join(proffie.getUserVersionsPath(), name), dest);
+    shell.showItemInFolder(dest);
+    return { ok: true, dest };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
+
 // ── IPC: DFU ───────────────────────────────────────────
 ipcMain.handle('shell:openExternal', (_, url) => {
   shell.openExternal(url);

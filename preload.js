@@ -62,6 +62,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   selectFolder:        ()                        => ipcRenderer.invoke('dialog:selectFolder'),
   validateVersionSource: (sourcePath)            => ipcRenderer.invoke('proffieOS:validateSource', sourcePath),
   importVersion:       (sourcePath, versionName) => ipcRenderer.invoke('proffieOS:importVersion', { sourcePath, versionName }),
+  listVersionsDetails: ()                      => ipcRenderer.invoke('versions:listDetails'),
+  readVersionNotes:    (name)                  => ipcRenderer.invoke('versions:readNotes', name),
+  writeVersionNotes:   (name, content)         => ipcRenderer.invoke('versions:writeNotes', { name, content }),
+  renameVersion:       (oldName, newName)      => ipcRenderer.invoke('versions:rename', { oldName, newName }),
+  duplicateVersion:    (name, newName)         => ipcRenderer.invoke('versions:duplicate', { name, newName }),
+  deleteVersion:       (name)                  => ipcRenderer.invoke('versions:delete', name),
+  exportVersion:       (name)                  => ipcRenderer.invoke('versions:export', name),
+  listVersionDir:      (name, subPath)         => ipcRenderer.invoke('versions:listDir', { name, subPath }),
+  readVersionFile:     (name, subPath)         => ipcRenderer.invoke('versions:readFile', { name, subPath }),
+  searchVersionFiles:  (name, query)           => ipcRenderer.invoke('versions:search', { name, query }),
 
   // ── DFU ──────────────────────────────────────────────
   detectDFU:    () => ipcRenderer.invoke('dfu:detect'),
