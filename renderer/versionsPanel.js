@@ -505,3 +505,4 @@ window.vpSelectVersion   = (name) => {
   const v = _vpVersions.find(x => x.name === name);
   if (v) _vpSelectVersion(v);
 };
+window.vpSelectedName    = () => _vpSelected?.name || null;

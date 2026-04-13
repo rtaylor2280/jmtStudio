@@ -2585,8 +2585,10 @@ function switchTab(name) {
       versionsView.dataset.loaded = '1';
       window.initVersionsPanel(activeVersion);
     } else if (versionsView.dataset.loaded) {
-      // Subsequent visits — sync selection to current config manager version
-      if (window.vpSelectVersion && activeVersion) window.vpSelectVersion(activeVersion);
+      // Subsequent visits — sync selection only if version changed
+      if (window.vpSelectVersion && activeVersion && activeVersion !== window.vpSelectedName?.()) {
+        window.vpSelectVersion(activeVersion);
+      }
     }
   }
 }
