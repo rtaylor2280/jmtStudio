@@ -58,16 +58,17 @@ function _vpFileIcon(name) {
 
 // ── Init ───────────────────────────────────────────────
 
-async function initVersionsPanel() {
-  await vpRefresh();
+async function initVersionsPanel(initialName) {
+  await vpRefresh(initialName);
 }
 
-async function vpRefresh() {
+async function vpRefresh(preferName) {
   const versions = await window.electronAPI.listVersionsDetails();
   _vpVersions = versions;
   _vpRenderCards();
-  const still = _vpSelected ? versions.find(v => v.name === _vpSelected.name) : null;
-  _vpSelectVersion(still || versions[0] || null);
+  const preferred = preferName ? versions.find(v => v.name === preferName) : null;
+  const still     = _vpSelected ? versions.find(v => v.name === _vpSelected.name) : null;
+  _vpSelectVersion(preferred || still || versions[0] || null);
 }
 
 // ── Cards ──────────────────────────────────────────────
