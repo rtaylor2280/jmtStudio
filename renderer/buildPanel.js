@@ -796,6 +796,10 @@ function appendLog(line, isError) {
 
 function clearLog() {
   el('bp-log-content').innerHTML = '';
+  const body = el('bp-log-body');
+  const tog  = el('bp-log-toggle');
+  body.classList.remove('open');
+  tog.querySelector('span').textContent = '▼ Build Output';
 }
 
 function openLog() {
