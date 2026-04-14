@@ -46,7 +46,7 @@
 
 #ifdef CONFIG_FILE_TEST
 #undef CONFIG_FILE
-#define CONFIG_FILE CONFIG_FILE_TEST
+// #define CONFIG_FILE CONFIG_FILE_TEST // [JMT Studio: replaced]
 #endif
 
 #ifndef CONFIG_FILE

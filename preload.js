@@ -13,6 +13,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   clearLastFile:  ()                     => ipcRenderer.invoke('store:clearLastFile'),
   getRecentFiles:    ()           => ipcRenderer.invoke('store:getRecentFiles'),
   removeRecentFile:  (filePath)  => ipcRenderer.invoke('store:removeRecentFile', filePath),
+  getSetting: (key, def)         => ipcRenderer.invoke('store:getSetting', key, def),
+  setSetting: (key, value)       => ipcRenderer.invoke('store:setSetting', key, value),
+
+  // ── Style Library ──────────────────────────────────────
+  readStylesFile:   ()          => ipcRenderer.invoke('styles:read'),
+  writeStylesFile:  (content)   => ipcRenderer.invoke('styles:write', content),
+  exportStylesFile: ()          => ipcRenderer.invoke('styles:export'),
+  replaceStylesFile:()          => ipcRenderer.invoke('styles:replace'),
   getFavorites:      ()                        => ipcRenderer.invoke('favorites:get'),
   addFavorite:       (filePath)                => ipcRenderer.invoke('favorites:add', filePath),
   removeFavorite:    (filePath)                => ipcRenderer.invoke('favorites:remove', filePath),

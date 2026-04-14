@@ -149,7 +149,7 @@ function _vpRenderDetail(v) {
 
     <div class="vp-section">
       <div class="vp-section-label">Notes</div>
-      <textarea id="vp-notes" class="vp-notes-editor" placeholder="Add notes about this version — changes, known issues, source, etc.">${notesVal}</textarea>
+      <textarea id="vp-notes" class="vp-notes-editor" spellcheck="false" placeholder="Add notes about this version — changes, known issues, source, etc.">${notesVal}</textarea>
       <div class="vp-notes-footer">
         <span id="vp-notes-status" class="vp-notes-status"></span>
         <button class="vp-action-btn primary" id="vp-btn-save-notes" disabled>Save Notes</button>
@@ -170,6 +170,9 @@ function _vpRenderDetail(v) {
   const notesEl  = document.getElementById('vp-notes');
   const saveBtn  = document.getElementById('vp-btn-save-notes');
   const statusEl = document.getElementById('vp-notes-status');
+
+  notesEl.addEventListener('focus', () => { notesEl.spellcheck = true; });
+  notesEl.addEventListener('blur',  () => { notesEl.spellcheck = false; });
 
   notesEl.addEventListener('input', () => {
     const dirty = notesEl.value !== _vpNotesOriginal;

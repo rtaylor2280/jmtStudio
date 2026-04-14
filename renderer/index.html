@@ -34,6 +34,19 @@
     --c-text-faint:   #555555;
     --c-text-hint:    #444444;
     --c-overlay:      rgba(0,0,0,0.75);
+    /* semantic action colors */
+    --c-title-accent:   #4af;
+    --c-warn-text:      #fa0;
+    --c-danger-bg:      #3a1a1a;
+    --c-danger-text:    #e55;
+    --c-danger-border:  #5a2a2a;
+    --c-success-bg:     #1a3a1a;
+    --c-success-text:   #4d4;
+    --c-success-border: #2a5a2a;
+    /* compare banner & port tip */
+    --c-banner-compare-bg:   #0d1e28;
+    --c-banner-compare-text: #4bc;
+    --c-banner-compare-btn:  #2a8aaa;
   }
 
   html.light-mode {
@@ -61,6 +74,19 @@
     --c-text-faint:   #999999;
     --c-text-hint:    #aaaaaa;
     --c-overlay:      rgba(0,0,0,0.50);
+    /* semantic action colors */
+    --c-title-accent:   #1a5a9a;
+    --c-warn-text:      #a06000;
+    --c-danger-bg:      #fde8e8;
+    --c-danger-text:    #b82020;
+    --c-danger-border:  #f0b0b0;
+    --c-success-bg:     #e8f5e8;
+    --c-success-text:   #1a6020;
+    --c-success-border: #a0d0a0;
+    /* compare banner & port tip */
+    --c-banner-compare-bg:   #1a72a8;
+    --c-banner-compare-text: #e0f0ff;
+    --c-banner-compare-btn:  rgba(224,240,255,0.7);
   }
 
   html.light-mode .diff-toggle { background: #eeeef8; border-color: #b0b0d8; color: #6060a0; }
@@ -73,6 +99,8 @@
   html.light-mode #btn-open     { background: #e8f0fe; color: #1a4a9a; border-color: #b0c8f0; }
   html.light-mode #btn-save,
   html.light-mode #btn-download { background: #e8f5e8; color: #1a6020; border-color: #a0d0a0; }
+  html.light-mode #btn-styles-save    { background: #e8f5e8; color: #1a6020; border-color: #a0d0a0; }
+  html.light-mode #btn-styles-replace { background: #e8f0fe; color: #1a4a9a; border-color: #b0c8f0; }
   html.light-mode #btn-saveas   { background: #edf5ed; color: #286828; border-color: #a8d4a8; }
   html.light-mode #btn-fav      { background: #f0f0f8; color: #444466; border-color: #c8c8e0; }
 
@@ -103,6 +131,44 @@
 
   /* ── DFU exit button — light mode ── */
   html.light-mode #bp-btn-exit-dfu { background: #e8f5e8 !important; color: #1a5a1a !important; border-color: #a0d0a0 !important; }
+
+  /* ── Import Version button ── */
+  #btn-vp-import {
+    background: #1a2a3a; color: #6af; border: 1px solid #2a3a5a;
+    padding: 5px 12px; border-radius: 4px; font-size: 0.8rem; font-weight: 600; cursor: pointer;
+  }
+  #btn-vp-import:hover { background: #1e3040; }
+  html.light-mode #btn-vp-import { background: #e8f0fe; color: #1a4a9a; border-color: #b0c8f0; }
+  html.light-mode #btn-vp-import:hover { background: #d8e6ff; }
+
+  /* ── Build modal log ── */
+  #bm-log {
+    font-family: 'Cascadia Code', Consolas, monospace;
+    font-size: 0.72rem; line-height: 1.5;
+    color: var(--c-text-sub); background: var(--c-bg-deep);
+    border: 1px solid var(--c-border-faint); border-radius: 4px;
+    padding: 10px 12px; height: 220px;
+    overflow-y: auto; white-space: pre-wrap;
+    word-break: normal; overflow-wrap: break-word;
+    margin-bottom: 18px;
+  }
+
+  /* ── Port tip popover ── */
+  .port-tip-popover {
+    position: fixed; z-index: 9999;
+    background: var(--c-bg-elevated); border: 1px solid var(--c-border-heavy);
+    border-radius: 5px; padding: 8px 12px;
+    font-size: 0.75rem; color: var(--c-text-sub);
+    white-space: nowrap; pointer-events: auto;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4); display: none;
+  }
+  .port-tip-dfu-btn {
+    background: rgba(68,170,255,0.12); color: #4af;
+    border: 1px solid rgba(68,170,255,0.28);
+    border-radius: 3px; padding: 2px 8px;
+    font-size: 0.75rem; font-weight: 600; cursor: pointer; white-space: nowrap;
+  }
+  html.light-mode .port-tip-dfu-btn { background: #e8f0fe; color: #1a4a9a; border-color: #b0c8f0; }
 
   #dev-bar {
     display: none;
@@ -285,6 +351,7 @@
     transition: color 0.1s, background 0.1s;
   }
   .recent-remove:hover { color: #e44; background: #2a1a1a; }
+  #recent-list { max-height: 736px; overflow-y: auto; }
   .recent-empty {
     padding: 14px 12px;
     font-size: 0.78rem;
@@ -311,6 +378,10 @@
   #btn-save     { background: #1a3a1a; color: #4d4; border: 1px solid #2a5a2a; }
   #btn-saveas   { background: #1a2e1a; color: #3b3; border: 1px solid #254525; }
   #btn-download { background: #1a3a1a; color: #4d4; border: 1px solid #2a5a2a; }
+  /* Style Library toolbar buttons */
+  #btn-styles-save    { background: #1a3a1a; color: #4d4; border: 1px solid #2a5a2a; }
+  #btn-styles-replace { background: #1a2a3a; color: #6af; border: 1px solid #2a3a5a; }
+  #btn-styles-export  { background: var(--c-bg-card); color: var(--c-text-sub); border: 1px solid var(--c-border-strong); }
   #btn-undo     { background: var(--c-bg-card); color: var(--c-text-sub); border: 1px solid var(--c-border-strong); }
   #btn-redo     { background: var(--c-bg-card); color: var(--c-text-sub); border: 1px solid var(--c-border-strong); }
 
@@ -329,7 +400,7 @@
   .compare-clear-btn:hover { opacity: 1; color: #f88; }
 
   /* ── Compare file picker modal ── */
-  #modal-compare-pick .modal { width: 460px; max-height: 72vh; display: flex; flex-direction: column; }
+  #modal-compare-pick .modal { width: 500px; max-width: 95vw; max-height: 72vh; display: flex; flex-direction: column; }
   .compare-pick-body { overflow-y: auto; flex: 1; min-height: 0; margin: 0 -4px; }
   .compare-pick-section-label {
     font-size: 0.72rem; font-weight: 600; color: var(--c-text-muted);
@@ -337,6 +408,7 @@
     padding: 10px 4px 4px;
   }
   .compare-pick-section-label:first-child { padding-top: 4px; }
+  #compare-pick-recents-section { margin-top: 12px; border-top: 1px solid var(--c-border); padding-top: 4px; }
   .compare-pick-row {
     display: flex; align-items: center; gap: 8px; padding: 6px 8px;
     border-radius: 4px; cursor: pointer; color: var(--c-text);
@@ -374,11 +446,11 @@
   #input-version  { width: 160px; background:var(--c-bg-raised); border:1px solid var(--c-border-input); border-radius:3px; color:var(--c-text); font-size:0.78rem; padding:4px 6px; outline:none; cursor:pointer; }
 
   .field-error {
-    border-color: #e44 !important;
-    background: #2a1a1a !important;
+    border-color: var(--c-danger-text) !important;
+    background: var(--c-danger-bg) !important;
   }
-  .field-error:focus { border-color: #e66 !important; }
-  .field-warn { color: #e55 !important; }
+  .field-error:focus { border-color: var(--c-danger-text) !important; }
+  .field-warn { color: var(--c-danger-text) !important; }
 
   /* ── Config banner ── */
   #config-banner {
@@ -417,24 +489,26 @@
   #banner-compare-half {
     display: none; flex: 1; align-items: center; justify-content: space-between;
     gap: 8px; min-width: 0;
-    background: #0d1e28;
+    background: var(--c-banner-compare-bg);
     padding: 8px 10px 7px 16px;
   }
   #config-banner.comparing #banner-compare-half { display: flex; }
   #banner-split-divider { display: none; }
   #compare-banner-desc {
-    font-size: 1.15rem; font-weight: 700; color: #4bc;
+    font-size: 1.15rem; font-weight: 700; color: var(--c-banner-compare-text);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1;
   }
   #compare-banner-clear {
-    background: none; border: none; color: #2a8aaa; cursor: pointer;
+    background: none; border: none; color: var(--c-banner-compare-btn); cursor: pointer;
     font-size: 1.1rem; padding: 2px 6px; border-radius: 3px; flex-shrink: 0; line-height: 1;
   }
   #compare-banner-clear:hover { color: #f88; background: rgba(255,100,100,0.1); }
-  html.light-mode #config-banner.comparing #banner-current-half { background: #f0f8f0; }
-  html.light-mode #banner-compare-half  { background: #e0f0f8; }
-  html.light-mode #compare-banner-desc  { color: #1a6a8a; }
-  html.light-mode #compare-banner-clear { color: #3a7a9a; }
+  html.light-mode #config-banner.comparing #banner-current-half { background: #2d7d3a; }
+  html.light-mode #config-banner.comparing #banner-current-half #banner-desc { color: #e8ffe8; }
+  html.light-mode #config-banner.comparing #banner-current-half #banner-name { color: rgba(200,240,200,0.85); }
+  html.light-mode #config-banner.comparing #meta-timestamps span { color: rgba(180,225,180,0.8) !important; }
+  html.light-mode #btn-compare.active { background: #1a72a8; color: #fff; border-color: #155b88; }
+  html.light-mode #btn-compare.active:hover { background: #1e7fc0; }
 
   /* ── Build toolbar ── */
   #build-toolbar {
@@ -599,8 +673,8 @@
     text-transform: uppercase;
     padding: 3px 0;
   }
-  .diff-label.orig { color: #a55; background: rgba(80,20,20,0.55); }
-  .diff-label.curr { color: #4a4; background: rgba(20,60,20,0.55); }
+  .diff-label.orig { color: var(--c-danger-text);  background: var(--c-danger-bg);  }
+  .diff-label.curr { color: var(--c-success-text); background: var(--c-success-bg); }
   .diff-label.curr.pulse { animation: pulse-curr 1.8s ease-out forwards; }
   @keyframes pulse-curr {
     0%   { color: #fff; background: rgba(40,160,40,0.75); box-shadow: 0 0 12px rgba(80,255,80,0.6); }
@@ -726,6 +800,44 @@
 .bm-bar-success { background: var(--jmt-blue) !important; box-shadow: 0 0 8px rgba(2,81,146,0.6) !important; animation: none !important; width: 100% !important; }
   .bm-bar-error   { background: #e44 !important; box-shadow: 0 0 8px rgba(220,60,60,0.5) !important; animation: none !important; width: 100% !important; }
 
+  /* ── Build modal ── */
+  #build-modal {
+    position: fixed; inset: 0; z-index: 200;
+    background: var(--c-overlay);
+    align-items: center; justify-content: center;
+  }
+  #bm-inner {
+    background: var(--c-bg-elevated);
+    border: 1px solid var(--jmt-blue);
+    border-radius: 8px; padding: 28px 32px;
+    width: 640px; max-width: 92vw;
+    box-shadow: 0 0 40px rgba(2,81,146,0.3);
+  }
+  #bm-title       { font-size: 1.1rem; font-weight: 700; color: var(--c-text-bright); margin-bottom: 18px; letter-spacing: 0.04em; }
+  #bm-bar-track   { height: 6px; background: var(--c-bg-inset); border-radius: 3px; overflow: hidden; margin-bottom: 18px; position: relative; }
+  #bm-status      { font-size: 0.82rem; color: var(--c-text-soft); }
+  #bm-hint        { flex: 1; opacity: 0; font-style: italic; font-size: 0.78rem; color: var(--c-text-dim); padding: 0 12px; white-space: nowrap; overflow: hidden; }
+  #bm-timer-row   { display: flex; gap: 20px; justify-content: flex-end; margin-top: 10px; font-family: monospace; font-size: 0.72rem; color: var(--c-text-muted); }
+  #bm-board-select-wrap { align-items: center; gap: 10px; margin-bottom: 14px; }
+  #bm-board-select-wrap > span { font-size: 0.8rem; color: var(--c-text-sub); white-space: nowrap; }
+  /* Build modal buttons — shared base */
+  .bm-btn { padding: 6px 20px; border-radius: 4px; font-size: 0.82rem; font-weight: 600; cursor: pointer; }
+  #bm-board-flash { padding: 6px 16px; border-radius: 4px; font-size: 0.82rem; font-weight: 600; cursor: pointer;
+                    background: #1a2a3a; color: #4af; border: 1px solid #2a4a6a; }
+  #bm-abort       { background: var(--c-danger-bg);  color: var(--c-danger-text);  border: 1px solid var(--c-danger-border); }
+  #bm-close       { background: var(--c-success-bg); color: var(--c-success-text); border: 1px solid var(--c-success-border); }
+  #bm-dfu-setup   { background: var(--jmt-blue); color: #fff; border: 1px solid #0a6abf; }
+  #bm-retry       { background: #1a2a3a; color: #4af;  border: 1px solid #2a4a6a; }
+  #bm-dfu-manual,
+  #bm-zadig       { background: #1a1a2a; color: #8af;  border: 1px solid #2a3a5a; }
+  html.light-mode #bm-board-flash,
+  html.light-mode #bm-retry       { background: #e8f0fe; color: #1a4a9a; border-color: #b0c8f0; }
+  html.light-mode #bm-dfu-manual,
+  html.light-mode #bm-zadig       { background: #e8eeff; color: #1a3a8a; border-color: #b0bce0; }
+  /* DFU mode indicator */
+  #bp-dfu-mode-indicator > span:first-child { font-size: 0.78rem; color: #4af; font-weight: 600; }
+  html.light-mode #bp-dfu-mode-indicator > span:first-child { color: #1a4a9a; }
+
   /* ── Unsaved modal ── */
   .modal-overlay {
     display: none;
@@ -748,8 +860,8 @@
   .modal p  { font-size: 0.82rem; color: var(--c-text-sub); margin-bottom: 20px; line-height: 1.5; }
   .modal-btns { display: flex; justify-content: flex-end; gap: 8px; }
   .modal-btn-cancel  { background: var(--c-border); color: var(--c-text-sub); border: 1px solid var(--c-border-heavy); }
-  .modal-btn-discard { background: #3a1a1a; color: #e55; border: 1px solid #5a2a2a; }
-  .modal-btn-save    { background: #1a3a1a; color: #4d4; border: 1px solid #2a5a2a; }
+  .modal-btn-discard { background: var(--c-danger-bg);  color: var(--c-danger-text);  border: 1px solid var(--c-danger-border); }
+  .modal-btn-save    { background: var(--c-success-bg); color: var(--c-success-text); border: 1px solid var(--c-success-border); }
   .modal-btn-primary { background: var(--jmt-blue); color: #fff; border: 1px solid #036bb8; }
   .modal-btn-primary:hover { background: #036bb8; }
   .modal-btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
@@ -808,11 +920,21 @@
   #modal-about .settings-item-btn { background: var(--c-border); border: 1px solid var(--c-border-heavy); color: var(--c-text-sub); border-radius: 3px; padding: 4px 10px; font-size: 0.75rem; cursor: not-allowed; opacity: 0.5; }
   #modal-about .settings-item-btn.enabled { cursor: pointer; opacity: 1; }
   #modal-about .settings-item-btn.enabled:hover { background: var(--c-border-strong); }
-  #modal-about .settings-item-btn.danger { background: #3a1010; color: #e55; border-color: #6a2020; cursor: pointer; opacity: 1; }
-  #modal-about .settings-item-btn.danger:hover { background: #4a1818; }
+  #modal-about .settings-item-btn.danger { background: var(--c-danger-bg); color: var(--c-danger-text); border-color: var(--c-danger-border); cursor: pointer; opacity: 1; }
+  #modal-about .settings-item-btn.danger:hover { filter: brightness(0.9); }
   #modal-about .cache-warning { font-size: 0.78rem; color: var(--c-text-muted); background: var(--c-bg-inset); border: 1px solid var(--c-border); border-radius: 4px; padding: 10px 12px; margin-top: 6px; line-height: 1.5; }
   #modal-about .cache-warning strong { color: var(--c-text); }
   #modal-about .cache-warning-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; }
+  .settings-slider-row { display: flex; align-items: center; gap: 8px; }
+  .settings-slider { -webkit-appearance: none; appearance: none; width: 110px; height: 4px; border-radius: 2px; background: var(--c-bg-inset); outline: none; cursor: pointer; }
+  .settings-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border-radius: 50%; background: var(--jmt-blue); cursor: pointer; }
+  .settings-toggle { position: relative; width: 34px; height: 18px; flex-shrink: 0; display: inline-block; }
+  .settings-toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
+  .settings-toggle-track { position: absolute; inset: 0; background: var(--c-border-strong); border-radius: 9px; cursor: pointer; transition: background 200ms; }
+  .settings-toggle input:checked + .settings-toggle-track { background: var(--jmt-blue); }
+  .settings-toggle-track::after { content: ''; position: absolute; width: 12px; height: 12px; border-radius: 50%; background: #fff; top: 3px; left: 3px; transition: transform 200ms; }
+  .settings-toggle input:checked + .settings-toggle-track::after { transform: translateX(16px); }
+  .settings-slider-val { font-size: 0.8rem; color: var(--c-text); min-width: 18px; text-align: right; }
   .theme-selector { display: flex; background: var(--c-bg-raised); border: 1px solid var(--c-border-heavy); border-radius: 4px; overflow: hidden; }
   .theme-btn { background: transparent; border: none; border-right: 1px solid var(--c-border-heavy); color: var(--c-text-muted); padding: 4px 14px; font-size: 0.75rem; font-weight: 400; cursor: pointer; border-radius: 0; white-space: nowrap; }
   .theme-btn:last-child { border-right: none; }
@@ -1015,6 +1137,7 @@
   .tab svg { color: var(--jmt-blue); flex-shrink: 0; }
   .tab-btns { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
   #tab-btns-versions { display: none; }
+  #tab-btns-styles   { display: none; }
 
   /* ── Versions panel layout ── */
   #versions-view {
@@ -1164,8 +1287,8 @@
     transition: background 0.12s;
   }
   .vp-action-btn:hover { background: var(--c-bg-hover); opacity: 1; }
-  .vp-action-btn.danger { background: #2a1010; color: #e55; border-color: #5a2020; }
-  .vp-action-btn.danger:hover { background: #3a1818; }
+  .vp-action-btn.danger { background: var(--c-danger-bg); color: var(--c-danger-text); border-color: var(--c-danger-border); }
+  .vp-action-btn.danger:hover { filter: brightness(0.9); }
   .vp-action-btn.primary { background: var(--jmt-blue); color: #fff; border-color: #036bb8; }
   .vp-action-btn.primary:hover { background: #036bb8; }
   .vp-action-btn:disabled { opacity: 0.35; cursor: not-allowed; }
@@ -1328,7 +1451,7 @@
   }
   #vp-file-modal.active { display: flex; }
   .vp-file-modal-inner {
-    background: #111;
+    background: var(--c-bg-elevated);
     border: 1px solid var(--c-border-heavy);
     border-radius: 6px;
     width: 860px;
@@ -1384,6 +1507,42 @@
   }
   .vp-file-modal-close:hover { color: var(--c-text); background: var(--c-bg-hover); opacity: 1; }
   #vp-file-modal-editor { flex: 1; overflow: hidden; min-height: 0; }
+
+  /* ── Style Library panel ── */
+  #styles-view { display: none; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
+  #styles-view.active { display: flex; }
+  #styles-code-editor { flex: 1; min-height: 0; }
+  #styles-visual-view { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 20px 20px; display: flex; flex-direction: column; gap: 10px; }
+  .styles-search-bar { display: flex; align-items: center; gap: 8px; }
+  .styles-search-input { flex: 1; background: var(--c-bg-inset); border: 1px solid var(--c-border-input); border-radius: 4px; color: var(--c-text); padding: 5px 10px; font-size: 0.8rem; outline: none; max-width: 320px; }
+  .styles-search-input:focus { border-color: var(--jmt-blue); }
+  .styles-search-count { font-size: 0.72rem; color: var(--c-text-dim); }
+  .styles-view-toggle { display: flex; background: var(--c-bg-raised); border: 1px solid var(--c-border-heavy); border-radius: 4px; overflow: hidden; }
+  .styles-view-btn { background: transparent; border: none; border-right: 1px solid var(--c-border-heavy); color: var(--c-text-muted); padding: 4px 12px; font-size: 0.75rem; cursor: pointer; white-space: nowrap; }
+  .styles-view-btn:last-child { border-right: none; }
+  .styles-view-btn.active { background: var(--jmt-blue); color: #fff; font-weight: 600; }
+  .styles-empty { font-size: 0.82rem; color: var(--c-text-dim); padding: 32px 0; text-align: center; }
+  .style-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; align-content: start; }
+  .style-card { background: var(--c-bg-card); border: 1px solid var(--c-border); border-radius: 5px; padding: 10px 12px; cursor: pointer; transition: border-color 0.15s, background 0.15s; display: flex; flex-direction: column; gap: 3px; }
+  .style-card:hover { border-color: var(--jmt-blue); background: var(--c-bg-hover); }
+  .style-card-top { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+  .style-card-name { font-size: 0.84rem; font-weight: 600; color: var(--c-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
+  .style-card-os { font-size: 0.65rem; color: var(--jmt-blue); background: rgba(0,130,255,0.1); border: 1px solid rgba(0,130,255,0.25); border-radius: 3px; padding: 1px 5px; white-space: nowrap; flex-shrink: 0; }
+  .style-card-source { font-size: 0.71rem; color: var(--c-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .style-card-tags { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 2px; }
+  .style-tag { font-size: 0.63rem; color: var(--c-text-dim); background: var(--c-bg-raised); border: 1px solid var(--c-border-faint); border-radius: 3px; padding: 1px 5px; white-space: nowrap; }
+  /* Style detail modal */
+  #modal-style-detail .modal { width: 820px; max-width: 96vw; height: min(90vh, 680px); display: flex; flex-direction: column; padding-bottom: 16px; }
+  .style-detail-header { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; flex-shrink: 0; }
+  .style-detail-header h2 { margin: 0; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .style-detail-os-badge { font-size: 0.7rem; color: var(--jmt-blue); background: rgba(0,130,255,0.1); border: 1px solid rgba(0,130,255,0.25); border-radius: 4px; padding: 2px 8px; white-space: nowrap; flex-shrink: 0; }
+  #style-detail-meta { font-size: 0.75rem; color: var(--c-text-muted); background: var(--c-bg-inset); border: 1px solid var(--c-border-faint); border-radius: 4px; padding: 8px 12px; margin-bottom: 8px; display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; }
+  .style-meta-row { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+  .style-meta-label { color: var(--c-text-dim); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; flex-shrink: 0; min-width: 60px; }
+  .style-meta-val { color: var(--c-text-sub); }
+  .style-meta-tags { display: flex; flex-wrap: wrap; gap: 3px; }
+  .style-meta-tag { font-size: 0.68rem; color: var(--c-text-sub); background: var(--c-bg-raised); border: 1px solid var(--c-border); border-radius: 3px; padding: 1px 6px; }
+  #style-detail-editor { flex: 1; min-height: 0; border: 1px solid var(--c-border); border-radius: 4px; overflow: hidden; }
 </style>
 </head>
 <body>
@@ -1399,6 +1558,12 @@
           <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
         </svg>
         Config Manager
+      </button>
+      <button class="tab" data-tab="styles">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.22 4.22l2.12 2.12M17.66 17.66l2.12 2.12M2 12h3M19 12h3M4.22 19.78l2.12-2.12M17.66 6.34l2.12-2.12"/>
+        </svg>
+        Style Library
       </button>
       <button class="tab" data-tab="versions">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1429,7 +1594,17 @@
         <button id="btn-download" style="display:none">&#8595; Download</button>
       </div>
       <div class="tab-btns" id="tab-btns-versions">
-        <button id="btn-vp-import" style="background:#1a2a3a;color:#6af;border:1px solid #2a3a5a;padding:5px 12px;border-radius:4px;font-size:0.8rem;font-weight:600;cursor:pointer;" title="Import a ProffieOS version folder">&#8593; Import Version</button>
+        <button id="btn-vp-import" title="Import a ProffieOS version folder">&#8593; Import Version</button>
+      </div>
+      <div class="tab-btns" id="tab-btns-styles">
+        <button id="btn-styles-save" disabled title="Save Style Library">&#8595; Save</button>
+        <button id="btn-styles-replace" title="Replace with another file">&#8593; Replace</button>
+        <button id="btn-styles-export" title="Export a copy">&#8599; Export</button>
+        <div class="toolbar-divider"></div>
+        <div class="styles-view-toggle">
+          <button class="styles-view-btn active" id="btn-styles-view-code" title="Code view">&#x3C;/&#x3E; Code</button>
+          <button class="styles-view-btn" id="btn-styles-view-visual" title="Visual view">&#9776; Visual</button>
+        </div>
       </div>
       <button id="btn-settings" title="About JMT Studio">&#9881;</button>
     </div>
@@ -1482,6 +1657,34 @@
   </div>
 </div>
 
+<!-- ── Style Library view ── -->
+<div id="styles-view">
+  <div id="styles-code-editor"></div>
+  <div id="styles-visual-view" style="display:none">
+    <div class="styles-search-bar">
+      <input type="text" id="styles-search" class="styles-search-input" placeholder="Search styles…" autocomplete="off" spellcheck="false">
+      <span id="styles-search-count" class="styles-search-count"></span>
+    </div>
+    <div id="styles-visual-list" class="style-cards"></div>
+  </div>
+</div>
+
+<!-- ── Style detail modal ── -->
+<div class="modal-overlay" id="modal-style-detail">
+  <div class="modal">
+    <div class="style-detail-header">
+      <h2 id="style-detail-name"></h2>
+      <span id="style-detail-os-badge" class="style-detail-os-badge" style="display:none"></span>
+    </div>
+    <div id="style-detail-meta" style="display:none"></div>
+    <div id="style-detail-editor"></div>
+    <div class="modal-btns" style="margin-top:12px">
+      <button class="modal-btn-cancel" id="btn-style-detail-close">Close</button>
+      <button class="modal-btn-primary" id="btn-style-detail-save">&#8595; Save to Library</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── Config banner ── -->
 <div id="config-banner">
   <div id="banner-compare-half">
@@ -1515,8 +1718,8 @@
     <input type="text" id="bp-board-display" readonly placeholder="—" />
     <button id="bp-btn-refresh-ports" title="Refresh ports">↺</button>
     <div id="bp-dfu-mode-indicator" style="display:none;align-items:center;gap:8px;">
-      <span style="font-size:0.78rem;color:#4af;font-weight:600;">⚡ Bootloader Mode (DFU)</span>
-      <span style="font-size:0.72rem;color:#666;">· No port required</span>
+      <span>⚡ Bootloader Mode (DFU)</span>
+      <span style="font-size:0.72rem;color:var(--c-text-dim);">· No port required</span>
       <button id="bp-btn-exit-dfu" style="padding:3px 10px;background:#1a2a1a;color:#6d6;border:1px solid #2a4a2a;border-radius:3px;font-size:0.72rem;cursor:pointer;">Exit</button>
     </div>
     <label style="margin-left:8px">USB</label>
@@ -1684,6 +1887,23 @@
         </div>
       </div>
     </div>
+
+    <div class="settings-item">
+      <span class="settings-item-label">Recent Files</span>
+      <div class="settings-slider-row">
+        <input type="range" id="setting-recent-count" class="settings-slider" min="5" max="20" value="5" step="1">
+        <span class="settings-slider-val" id="setting-recent-count-val">5</span>
+      </div>
+    </div>
+
+    <div class="settings-item" id="setting-styles-item" style="display:none">
+      <span class="settings-item-label">Style Library <span style="font-size:0.7rem;color:var(--c-text-dim)">(dev only)</span></span>
+      <label class="settings-toggle">
+        <input type="checkbox" id="setting-styles-enabled">
+        <span class="settings-toggle-track"></span>
+      </label>
+    </div>
+
     <div class="about-section-heading">About</div>
 
     <div class="about-desc">Desktop tools for editing, compiling, and flashing ProffieOS configurations.</div>
@@ -2179,12 +2399,12 @@ async function openComparePicker() {
     window.electronAPI.getRecentFiles(),
   ]);
 
-  function makeRow(filePath, label, exists) {
+  function makeRow(filePath, label, exists, showPath = true) {
     if (!exists) {
       const row = document.createElement('div');
       row.className = 'compare-pick-row missing';
       row.innerHTML = `<div><div class="compare-pick-name">${label}</div>
-        <div class="compare-pick-path" style="color:#555">${filePath}</div></div>`;
+        ${showPath ? `<div class="compare-pick-path" style="color:#555">${filePath}</div>` : ''}</div>`;
       return row;
     }
     const row = document.createElement('div');
@@ -2192,7 +2412,7 @@ async function openComparePicker() {
     row.title = filePath;
     row.innerHTML = `<div style="overflow:hidden;min-width:0;">
       <div class="compare-pick-name">${label}</div>
-      <div class="compare-pick-path">${filePath}</div></div>`;
+      ${showPath ? `<div class="compare-pick-path">${filePath}</div>` : ''}</div>`;
     row.addEventListener('click', () => {
       closeComparePicker();
       startCompare(filePath);
@@ -2208,19 +2428,19 @@ async function openComparePicker() {
   } else {
     favVisible.forEach(({ filePath, desc, exists }) => {
       const label = desc || filePath.split(/[\\/]/).pop().replace(/\.[^.]+$/, '');
-      favList.appendChild(makeRow(filePath, label, exists));
+      favList.appendChild(makeRow(filePath, label, exists, false));
     });
   }
 
   // Recents
   recentList.innerHTML = '';
-  const recentVisible = recents.filter(f => f.filePath !== currentFilePath);
+  const recentVisible = recents.filter(f => f.filePath !== currentFilePath).slice(0, _recentFilesLimit);
   if (!recentVisible.length) {
     recentList.innerHTML = '<div class="compare-pick-empty">No recent files</div>';
   } else {
     recentVisible.forEach(({ filePath, exists, desc }) => {
       const label = desc || filePath.split(/[\\/]/).pop().replace(/\.[^.]+$/, '');
-      recentList.appendChild(makeRow(filePath, label, exists));
+      recentList.appendChild(makeRow(filePath, label, exists, true));
     });
   }
 }
@@ -2434,7 +2654,7 @@ async function buildRecentList() {
   // Auto-remove missing files silently
   const missing = items.filter(i => !i.exists);
   missing.forEach(i => window.electronAPI.removeRecentFile(i.filePath));
-  const present = items.filter(i => i.exists);
+  const present = items.filter(i => i.exists).slice(0, _recentFilesLimit);
 
   if (!present.length) {
     list.innerHTML = '<div class="recent-empty">No recent files yet</div>';
@@ -2730,6 +2950,21 @@ document.getElementById('theme-selector').addEventListener('click', (e) => {
   const btn = e.target.closest('.theme-btn');
   if (btn) applyTheme(btn.dataset.theme);
 });
+
+// ── Recent files count slider ──────────────────────────
+let _recentFilesLimit = 5;
+(async () => {
+  _recentFilesLimit = await window.electronAPI.getSetting('recentFilesLimit', 5);
+  const slider   = document.getElementById('setting-recent-count');
+  const valLabel = document.getElementById('setting-recent-count-val');
+  slider.value        = _recentFilesLimit;
+  valLabel.textContent = _recentFilesLimit;
+  slider.addEventListener('input', async () => {
+    _recentFilesLimit    = parseInt(slider.value, 10);
+    valLabel.textContent = _recentFilesLimit;
+    await window.electronAPI.setSetting('recentFilesLimit', _recentFilesLimit);
+  });
+})();
 document.getElementById('about-close-btn').addEventListener('click', () => {
   document.getElementById('modal-about').classList.remove('active');
 });
@@ -2779,6 +3014,344 @@ document.getElementById('vp-file-modal')?.addEventListener('click', (e) => {
   if (e.target === e.currentTarget && window.vpCloseFileModal) window.vpCloseFileModal();
 });
 
+// ── Style Library ──────────────────────────────────────
+
+let _stylesEditorInstance  = null;
+let _stylesDetailEditor    = null;
+let _isStylesDirtyFlag     = false;
+let _stylesViewMode        = 'code';
+let _detailOriginalCode    = '';
+let _detailName            = '';
+
+window._isStylesDirty = () => _isStylesDirtyFlag;
+window.saveStylesFile = async function() {
+  if (!_stylesEditorInstance) return;
+  await window.electronAPI.writeStylesFile(_stylesEditorInstance.getValue());
+  _setStylesDirty(false);
+};
+
+function _setStylesDirty(v) {
+  _isStylesDirtyFlag = v;
+  const btn = document.getElementById('btn-styles-save');
+  if (btn) btn.disabled = !v;
+}
+
+async function _loadStylesFile() {
+  const content = await window.electronAPI.readStylesFile();
+  if (_stylesEditorInstance) {
+    _stylesEditorInstance.setValue(content || '');
+    _stylesEditorInstance.setScrollPosition({ scrollTop: 0 });
+  }
+  _setStylesDirty(false);
+}
+
+function _switchStylesView(mode) {
+  _stylesViewMode = mode;
+  const codeEl   = document.getElementById('styles-code-editor');
+  const visualEl = document.getElementById('styles-visual-view');
+  codeEl.style.display   = mode === 'code'   ? '' : 'none';
+  visualEl.style.display = mode === 'visual' ? '' : 'none';
+  document.getElementById('btn-styles-view-code').classList.toggle('active',   mode === 'code');
+  document.getElementById('btn-styles-view-visual').classList.toggle('active', mode === 'visual');
+  if (mode === 'visual') _buildStylesVisual();
+  if (mode === 'code' && _stylesEditorInstance) _stylesEditorInstance.layout();
+}
+
+// ── ProffieOS style code formatter ──────────────────────────────────────────
+// Parses `FuncName<p1,p2,...>` expressions (depth-aware) into a tree,
+// then rebuilds them with 2-space indentation for Monaco folding.
+
+function _styleParseParams(params) {
+  const result = [];
+  let depth = 0, start = 0;
+  for (let i = 0; i < params.length; i++) {
+    const c = params[i];
+    if      (c === '<') depth++;
+    else if (c === '>') depth--;
+    else if (c === ',' && depth === 0) {
+      result.push(_styleParseExpr(params.slice(start, i).trim()));
+      start = i + 1;
+    }
+  }
+  const last = params.slice(start).trim();
+  if (last) result.push(_styleParseExpr(last));
+  return result;
+}
+
+function _styleParseExpr(expr) {
+  expr = expr.trim();
+  const ltIdx = expr.indexOf('<');
+  if (ltIdx === -1) return { type: 'value', value: expr };
+  const name = expr.slice(0, ltIdx).trim();
+  // Find matching >
+  let depth = 0, closeIdx = -1;
+  for (let i = ltIdx; i < expr.length; i++) {
+    if      (expr[i] === '<') depth++;
+    else if (expr[i] === '>') { depth--; if (depth === 0) { closeIdx = i; break; } }
+  }
+  if (closeIdx === -1) return { type: 'value', value: expr };
+  const inner = expr.slice(ltIdx + 1, closeIdx);
+  const parameters = inner.trim() ? _styleParseParams(inner) : [];
+  return { type: 'function', name, parameters };
+}
+
+function _styleBuildIndented(node, depth) {
+  const pad = '  '.repeat(depth);
+  if (node.type === 'value') return pad + node.value;
+  if (!node.parameters || node.parameters.length === 0) return `${pad}${node.name}<>`;
+
+  // Keep inline if all params are values and line is short
+  const allValues = node.parameters.every(p => p.type === 'value');
+  if (allValues) {
+    const inline = `${node.name}<${node.parameters.map(p => p.value).join(', ')}>`;
+    if (inline.length <= 72) return pad + inline;
+  }
+
+  const lines = node.parameters.map((p, i) =>
+    _styleBuildIndented(p, depth + 1) + (i < node.parameters.length - 1 ? ',' : ''));
+  return `${pad}${node.name}<\n${lines.join('\n')}\n${pad}>`;
+}
+
+// Format a compact `using NAME = Expr;` into indented multi-line form
+function _formatStyleCode(usingCode) {
+  const match = usingCode.match(/^using\s+(\w+)\s*=\s*([\s\S]+?)\s*;?\s*$/);
+  if (!match) return usingCode;
+  const varName = match[1];
+  // Collapse any existing whitespace so the parser sees a flat single-line expr
+  const expr = match[2].replace(/\s+/g, ' ').trim();
+  const tree = _styleParseExpr(expr);
+  const formatted = _styleBuildIndented(tree, 1);
+  return `using ${varName} =\n${formatted};`;
+}
+
+// Compact a formatted multi-line `using NAME = ...;` back to single-line
+function _compactStyleCode(formattedCode) {
+  const match = formattedCode.match(/^using\s+(\w+)\s*=\s*([\s\S]+?)\s*;?\s*$/);
+  if (!match) return formattedCode;
+  const varName = match[1];
+  const expr = match[2]
+    .replace(/\s*\n\s*/g, '')
+    .replace(/\s*<\s*/g, '<')
+    .replace(/\s*>\s*/g, '>')
+    .replace(/\s*,\s*/g, ',')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return `using ${varName} = ${expr};`;
+}
+
+// Parse `using NAME = ...;` blocks with surrounding comments
+function _parseStyleEntries(content) {
+  const entries  = [];
+  const usingRe  = /^using\s+(\w+)\s*=/mg;
+  const positions = [];
+  let m;
+  while ((m = usingRe.exec(content)) !== null) {
+    positions.push({ name: m[1], usingIdx: m.index });
+  }
+  for (let i = 0; i < positions.length; i++) {
+    const { name, usingIdx } = positions[i];
+    const nextIdx = i + 1 < positions.length ? positions[i + 1].usingIdx : content.length;
+
+    // Header comment: last /* ... */ block before the using statement
+    const before = content.slice(0, usingIdx);
+    const hEnd   = before.lastIndexOf('*/');
+    const hStart = hEnd !== -1 ? before.lastIndexOf('/*', hEnd) : -1;
+    const headerComment = hStart !== -1 ? before.slice(hStart, hEnd + 2) : '';
+
+    // The using statement — everything from `using NAME =` to the closing `;`
+    const usingBlock = content.slice(usingIdx, nextIdx);
+    const semiIdx    = usingBlock.indexOf(';');
+    const usingCode  = semiIdx !== -1 ? usingBlock.slice(0, semiIdx + 1).trim() : usingBlock.trim();
+
+    const meta = _parseStyleMeta(headerComment);
+    entries.push({ name, usingCode, headerComment, meta });
+  }
+  return entries;
+}
+
+// Extract structured metadata from the /*--- ... ---*/ header comment
+function _parseStyleMeta(comment) {
+  const meta = { source: '', osVersion: '', styleType: '', effectTypes: [] };
+  if (!comment) return meta;
+
+  const lines = comment
+    .replace(/^\/\*[-\s]*|[-\s]*\*\/$/g, '')   // strip /* ... */ delimiters
+    .split('\n')
+    .map(l => l.replace(/^\s*\*?\s?/, '').trim())
+    .filter(Boolean);
+
+  let inEffects = false;
+  for (const line of lines) {
+    if (line.startsWith('copyright ')) {
+      meta.source = line.replace(/^copyright\s+/, '');
+    } else if (/^OS\d+\.\d+/.test(line)) {
+      meta.osVersion = line.split(/\s+/).slice(0, 2).join(' '); // "OS7.14 v4.102"
+    } else if (/^(Single|Multi|Dual|Triple|Quad)\s+Style/.test(line)) {
+      meta.styleType = line;
+    } else if (line.startsWith('--Effects Included--')) {
+      inEffects = true;
+    } else if (inEffects && /Effect:/.test(line)) {
+      // "Ignition Effect: ..." → extract just the effect type word
+      const typeMatch = line.match(/^(\w[\w\s]*?)\s+Effect:/);
+      if (typeMatch) {
+        const tag = typeMatch[1].trim().replace(/\s+/g, ' ');
+        if (!meta.effectTypes.includes(tag)) meta.effectTypes.push(tag);
+      }
+    }
+  }
+  return meta;
+}
+
+function _applyStylesSearch() {
+  const q     = (document.getElementById('styles-search')?.value || '').toLowerCase();
+  const cards = document.querySelectorAll('#styles-visual-list .style-card');
+  let shown   = 0;
+  cards.forEach(card => {
+    const searchText = (card.dataset.name + ' ' + (card.dataset.source || '')).toLowerCase();
+    const vis = !q || searchText.includes(q);
+    card.style.display = vis ? '' : 'none';
+    if (vis) shown++;
+  });
+  const countEl = document.getElementById('styles-search-count');
+  if (countEl) countEl.textContent = q ? `${shown} of ${cards.length}` : `${cards.length} styles`;
+}
+
+function _buildStylesVisual() {
+  const list = document.getElementById('styles-visual-list');
+  if (!_stylesEditorInstance) {
+    list.innerHTML = '<div class="styles-empty">No file loaded.</div>';
+    return;
+  }
+  const entries = _parseStyleEntries(_stylesEditorInstance.getValue());
+  if (!entries.length) {
+    list.innerHTML = '<div class="styles-empty">No <code>using Name = ...;</code> definitions found.<br>Switch to Code view to edit.</div>';
+    document.getElementById('styles-search-count').textContent = '';
+    return;
+  }
+  list.innerHTML = '';
+  entries.forEach(entry => {
+    const { name, usingCode, meta } = entry;
+    const card = document.createElement('div');
+    card.className   = 'style-card';
+    card.dataset.name   = name;
+    card.dataset.source = meta.source;
+
+    const tagsHtml = meta.effectTypes.slice(0, 8)
+      .map(t => `<span class="style-tag">${t}</span>`).join('');
+
+    card.innerHTML = `
+      <div class="style-card-top">
+        <div class="style-card-name">${name}</div>
+        ${meta.osVersion ? `<span class="style-card-os">${meta.osVersion}</span>` : ''}
+      </div>
+      ${meta.source    ? `<div class="style-card-source">${meta.source}</div>` : ''}
+      ${meta.styleType ? `<div class="style-card-source" style="color:var(--c-text-dim)">${meta.styleType}</div>` : ''}
+      ${tagsHtml       ? `<div class="style-card-tags">${tagsHtml}</div>` : ''}`;
+
+    card.addEventListener('click', () => _openStyleDetail(entry));
+    list.appendChild(card);
+  });
+  _applyStylesSearch();
+}
+
+function _openStyleDetail(entry) {
+  const { name, usingCode, meta } = entry;
+  _detailName         = name;
+  _detailOriginalCode = usingCode;
+
+  // Header
+  document.getElementById('style-detail-name').textContent = name;
+  const badge = document.getElementById('style-detail-os-badge');
+  if (meta.osVersion) { badge.textContent = meta.osVersion; badge.style.display = ''; }
+  else                { badge.style.display = 'none'; }
+
+  // Metadata section
+  const metaEl = document.getElementById('style-detail-meta');
+  const rows = [];
+  if (meta.source)    rows.push(`<div class="style-meta-row"><span class="style-meta-label">Source</span><span class="style-meta-val">${meta.source}</span></div>`);
+  if (meta.styleType) rows.push(`<div class="style-meta-row"><span class="style-meta-label">Type</span><span class="style-meta-val">${meta.styleType}</span></div>`);
+  if (meta.effectTypes.length) {
+    const tags = meta.effectTypes.map(t => `<span class="style-meta-tag">${t}</span>`).join('');
+    rows.push(`<div class="style-meta-row"><span class="style-meta-label">Effects</span><div class="style-meta-tags">${tags}</div></div>`);
+  }
+  if (rows.length) { metaEl.innerHTML = rows.join(''); metaEl.style.display = ''; }
+  else             { metaEl.style.display = 'none'; }
+
+  // Code editor — format to indented multi-line for readability + Monaco folding
+  if (_stylesDetailEditor) {
+    _stylesDetailEditor.setValue(_formatStyleCode(usingCode));
+    _stylesDetailEditor.setScrollPosition({ scrollTop: 0 });
+  }
+  document.getElementById('modal-style-detail').classList.add('active');
+  setTimeout(() => _stylesDetailEditor?.layout(), 50);
+}
+
+async function _saveDetailToLibrary() {
+  if (!_stylesDetailEditor || !_stylesEditorInstance) return;
+  // Compact formatted code back to single-line before storing in the file
+  const compactCode = _compactStyleCode(_stylesDetailEditor.getValue());
+  const current     = _stylesEditorInstance.getValue();
+  const idx         = current.indexOf(_detailOriginalCode);
+  if (idx !== -1) {
+    _stylesEditorInstance.setValue(
+      current.slice(0, idx) + compactCode + current.slice(idx + _detailOriginalCode.length)
+    );
+    _detailOriginalCode = compactCode;
+    await window.saveStylesFile(); // write to disk immediately
+    _buildStylesVisual();
+  }
+  document.getElementById('modal-style-detail').classList.remove('active');
+}
+
+// Wire up styles buttons
+document.getElementById('btn-styles-save').addEventListener('click',    () => window.saveStylesFile());
+document.getElementById('btn-styles-replace').addEventListener('click', async () => {
+  const result = await window.electronAPI.replaceStylesFile();
+  if (!result.ok) return;
+  if (_stylesEditorInstance) {
+    _stylesEditorInstance.setValue(result.content);
+    _setStylesDirty(true);
+    if (_stylesViewMode === 'visual') _buildStylesVisual();
+  }
+});
+document.getElementById('btn-styles-export').addEventListener('click', async () => {
+  if (_stylesEditorInstance) await window.electronAPI.writeStylesFile(_stylesEditorInstance.getValue());
+  await window.electronAPI.exportStylesFile();
+});
+document.getElementById('btn-styles-view-code').addEventListener('click',   () => _switchStylesView('code'));
+document.getElementById('btn-styles-view-visual').addEventListener('click', () => _switchStylesView('visual'));
+document.getElementById('btn-style-detail-close').addEventListener('click', () => {
+  document.getElementById('modal-style-detail').classList.remove('active');
+});
+document.getElementById('btn-style-detail-save').addEventListener('click', _saveDetailToLibrary);
+document.getElementById('styles-search')?.addEventListener('input', _applyStylesSearch);
+
+// initStylesPanel called by switchTab on first visit (Monaco is ready by then)
+window.initStylesPanel = function() {
+  const theme = document.documentElement.classList.contains('light-mode') ? 'vs' : 'vs-dark';
+  const editorOpts = {
+    language: 'cpp', theme, fontSize: 13,
+    fontFamily: "'Cascadia Code', 'Fira Code', Consolas, monospace",
+    fontLigatures: true, lineNumbers: 'on', minimap: { enabled: false },
+    scrollBeyondLastLine: false, automaticLayout: true,
+    tabSize: 2, insertSpaces: true, wordWrap: 'off', folding: true,
+    scrollbar: { verticalScrollbarSize: 8, horizontalScrollbarSize: 8 }
+  };
+  _stylesEditorInstance = monaco.editor.create(
+    document.getElementById('styles-code-editor'), { value: '', ...editorOpts });
+  _stylesEditorInstance.onDidChangeModelContent(() => _setStylesDirty(true));
+  _stylesEditorInstance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS,
+    () => window.saveStylesFile());
+  window._stylesEditor = _stylesEditorInstance;
+
+  _stylesDetailEditor = monaco.editor.create(
+    document.getElementById('style-detail-editor'), { value: '', ...editorOpts,
+      lineNumbers: 'off', minimap: { enabled: false }, folding: true,
+      foldingStrategy: 'indentation' });
+
+  _loadStylesFile();
+};
+
 // ── Tab switching ──────────────────────────────────────
 
 const _configOnlyEls = ['config-banner', 'build-toolbar', 'empty-state',
@@ -2796,6 +3369,7 @@ function switchTab(name) {
 
   document.getElementById('tab-btns-config').style.display   = name === 'config'   ? 'flex' : 'none';
   document.getElementById('tab-btns-versions').style.display = name === 'versions' ? 'flex' : 'none';
+  document.getElementById('tab-btns-styles').style.display   = name === 'styles'   ? 'flex' : 'none';
 
   const showConfig = name === 'config';
   _configOnlyEls.forEach(id => {
@@ -2809,20 +3383,29 @@ function switchTab(name) {
   });
 
   const versionsView = document.getElementById('versions-view');
-  if (showConfig) {
-    versionsView.classList.remove('active');
-  } else {
-    versionsView.classList.add('active');
+  const stylesView   = document.getElementById('styles-view');
+
+  versionsView.classList.toggle('active', name === 'versions');
+  stylesView.classList.toggle('active',   name === 'styles');
+
+  if (name === 'versions') {
     const activeVersion = document.getElementById('input-version')?.value || '';
     if (window.initVersionsPanel && !versionsView.dataset.loaded) {
-      // First visit — init the panel
       versionsView.dataset.loaded = '1';
       window.initVersionsPanel(activeVersion);
     } else if (versionsView.dataset.loaded) {
-      // Subsequent visits — sync selection only if version changed
       if (window.vpSelectVersion && activeVersion && activeVersion !== window.vpSelectedName?.()) {
         window.vpSelectVersion(activeVersion);
       }
+    }
+  }
+
+  if (name === 'styles') {
+    if (window.initStylesPanel && !stylesView.dataset.loaded) {
+      stylesView.dataset.loaded = '1';
+      window.initStylesPanel();
+    } else if (window._stylesEditor) {
+      window._stylesEditor.layout();
     }
   }
 }
@@ -3112,9 +3695,27 @@ require(['vs/editor/editor.main'], function () {
   (async () => {
     if (isElectron) {
       toolVersion = await window.electronAPI.getAppVersion();
-      if (await window.electronAPI.isDevMode()) {
+      const _isDev = await window.electronAPI.isDevMode();
+      if (_isDev) {
         document.getElementById('dev-bar').style.display = 'block';
+        document.getElementById('setting-styles-item').style.display = 'flex';
       }
+
+      // Style Library enable/disable (default off; dev toggle only)
+      const _applyStylesTabVisible = (enabled) => {
+        const tabBtn = document.querySelector('.tab[data-tab="styles"]');
+        if (tabBtn) tabBtn.style.display = enabled ? '' : 'none';
+        // If currently on styles tab and being disabled, switch to config
+        if (!enabled && _activeTab === 'styles') switchTab('config');
+      };
+      const _stylesEnabled = await window.electronAPI.getSetting('stylesEnabled', false);
+      document.getElementById('setting-styles-enabled').checked = _stylesEnabled;
+      _applyStylesTabVisible(_stylesEnabled);
+      document.getElementById('setting-styles-enabled').addEventListener('change', async (e) => {
+        const val = e.target.checked;
+        await window.electronAPI.setSetting('stylesEnabled', val);
+        _applyStylesTabVisible(val);
+      });
       // Populate OS version dropdown
       const versions   = await window.electronAPI.listProffieVersions();
       const currentVer = await window.electronAPI.getSelectedVersion();
@@ -3142,6 +3743,11 @@ require(['vs/editor/editor.main'], function () {
         const choice = await promptUnsaved('Save before closing JMT Studio?');
         if (choice === 'cancel') return;
         if (choice === 'save') { await doSave(); }
+      }
+      if (window._isStylesDirty?.()) {
+        const choice = await promptUnsaved('Save Style Library before closing?');
+        if (choice === 'cancel') return;
+        if (choice === 'save') { await window.saveStylesFile(); }
       }
       window.electronAPI.doClose();
     });
@@ -3186,43 +3792,43 @@ require(['vs/editor/editor.main'], function () {
 </script>
 
 <!-- ── Build modal ── -->
-<div id="build-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:200;align-items:center;justify-content:center;">
-  <div style="background:#111;border:1px solid var(--jmt-blue);border-radius:8px;padding:28px 32px;width:640px;max-width:92vw;box-shadow:0 0 40px rgba(2,81,146,0.3);">
-    <div id="bm-title" style="font-size:1.1rem;font-weight:700;color:#eee;margin-bottom:18px;letter-spacing:0.04em;">Compiling...</div>
+<div id="build-modal" style="display:none;">
+  <div id="bm-inner">
+    <div id="bm-title">Compiling...</div>
 
     <!-- Knight Rider / progress bar -->
-    <div id="bm-bar-track" style="height:6px;background:#1a1a1a;border-radius:3px;overflow:hidden;margin-bottom:18px;position:relative;">
+    <div id="bm-bar-track">
       <div id="bm-bar" style="height:100%;width:30%;border-radius:3px;background:var(--jmt-blue);position:absolute;left:0;transition:background 0.4s;"></div>
     </div>
 
     <!-- Log output -->
-    <div id="bm-log" style="font-family:'Cascadia Code',Consolas,monospace;font-size:0.72rem;line-height:1.5;color:#aaa;background:#0d0d0d;border:1px solid var(--c-border-faint);border-radius:4px;padding:10px 12px;height:220px;overflow-y:auto;white-space:pre-wrap;word-break:break-word;margin-bottom:18px;"></div>
+    <div id="bm-log"></div>
 
     <!-- Multi-board port selector (shown when multiple Proffieboards detected) -->
-    <div id="bm-board-select-wrap" style="display:none;align-items:center;gap:10px;margin-bottom:14px;">
-      <span style="font-size:0.8rem;color:#aaa;white-space:nowrap;">Select board:</span>
+    <div id="bm-board-select-wrap" style="display:none;">
+      <span>Select board:</span>
       <select id="bm-board-port-select" style="flex:1;background:var(--c-bg-raised);border:1px solid var(--c-border-input);border-radius:3px;color:var(--c-text);font-size:0.78rem;padding:4px 8px;outline:none;cursor:pointer;"></select>
-      <button id="bm-board-flash" style="padding:6px 16px;background:#1a2a3a;color:#4af;border:1px solid #2a4a6a;border-radius:4px;font-size:0.82rem;font-weight:600;cursor:pointer;">⚡ Flash</button>
+      <button id="bm-board-flash">⚡ Flash</button>
     </div>
 
     <!-- Status / close -->
     <div style="display:flex;align-items:center;justify-content:space-between;padding-bottom:10px;border-bottom:1px solid var(--c-border-faint);">
-      <div id="bm-status" style="font-size:0.82rem;color:#999;"></div>
-      <div id="bm-hint" style="flex:1;opacity:0;font-style:italic;font-size:0.78rem;color:#777;padding:0 12px;white-space:nowrap;overflow:hidden;"></div>
+      <div id="bm-status"></div>
+      <div id="bm-hint"></div>
       <div style="display:flex;gap:8px;">
-        <button id="bm-abort"     style="padding:6px 20px;background:#3a1a1a;color:#e55;border:1px solid #5a2a2a;border-radius:4px;font-size:0.82rem;font-weight:600;cursor:pointer;">⊘ Abort</button>
-        <button id="bm-dfu-setup"   style="display:none;padding:6px 20px;background:var(--jmt-blue);color:#fff;border:1px solid #0a6abf;border-radius:4px;font-size:0.82rem;font-weight:600;cursor:pointer;">▶ Run DFU Setup</button>
-        <button id="bm-dfu-manual" style="display:none;padding:6px 20px;background:#1a1a2a;color:#8af;border:1px solid #2a3a5a;border-radius:4px;font-size:0.82rem;font-weight:600;cursor:pointer;">Manual Setup (proffie-dfu-setup.exe)</button>
-        <button id="bm-zadig"      style="display:none;padding:6px 20px;background:#1a1a2a;color:#8af;border:1px solid #2a3a5a;border-radius:4px;font-size:0.82rem;font-weight:600;cursor:pointer;">Manual Setup (Zadig)</button>
-        <button id="bm-retry"     style="display:none;padding:6px 20px;background:#1a2a3a;color:#4af;border:1px solid #2a4a6a;border-radius:4px;font-size:0.82rem;font-weight:600;cursor:pointer;">↺ Retry Flash</button>
-        <button id="bm-close"     style="display:none;padding:6px 20px;background:#1a3a1a;color:#4d4;border:1px solid #2a5a2a;border-radius:4px;font-size:0.82rem;font-weight:600;cursor:pointer;">Close</button>
+        <button id="bm-abort"      class="bm-btn">⊘ Abort</button>
+        <button id="bm-dfu-setup"  class="bm-btn" style="display:none;">▶ Run DFU Setup</button>
+        <button id="bm-dfu-manual" class="bm-btn" style="display:none;">Manual Setup (proffie-dfu-setup.exe)</button>
+        <button id="bm-zadig"      class="bm-btn" style="display:none;">Manual Setup (Zadig)</button>
+        <button id="bm-retry"      class="bm-btn" style="display:none;">↺ Retry Flash</button>
+        <button id="bm-close"      class="bm-btn" style="display:none;">Close</button>
       </div>
     </div>
 
     <!-- Elapsed time -->
-    <div style="display:flex;gap:20px;justify-content:flex-end;margin-top:10px;font-family:monospace;font-size:0.72rem;color:#888;">
+    <div id="bm-timer-row">
       <span id="bm-timer-compile" style="display:none;">Compile Time: <span id="bm-timer-compile-val">0:00</span></span>
-      <span id="bm-timer-flash" style="display:none;">Flash Time: <span id="bm-timer-flash-val">0:00</span></span>
+      <span id="bm-timer-flash"   style="display:none;">Flash Time: <span id="bm-timer-flash-val">0:00</span></span>
     </div>
   </div>
 </div>

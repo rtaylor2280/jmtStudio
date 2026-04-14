@@ -76,19 +76,19 @@ function _showNextHint() {
     if (i >= text.length) {
       clearInterval(_hintTypingTimer);
       _hintTypingTimer = null;
-      // Hold fully-typed for 2s, then fade out
+      // Hold fully-typed for 12s, then fade out
       _hintFadeTimeout = setTimeout(() => {
         if (!_hintActive) return;
         el.style.transition = 'opacity 400ms ease';
         el.style.opacity = '0';
-        // After fade completes, wait ~22s then show next
+        // After fade completes, wait ~11s then show next
         _hintNextTimeout = setTimeout(() => {
           if (!_hintActive) return;
           el.style.transition = 'none';
           el.textContent = '';
           _showNextHint();
-        }, 22400); // 400ms fade + 22s gap ≈ 25s total cycle
-      }, 2000);
+        }, 11400); // 400ms fade + 11s gap ≈ 25s total cycle
+      }, 12000);
     }
   }, 28); // ~28ms/char ≈ 35 chars/sec
 }
@@ -243,6 +243,7 @@ async function doCompile() {
 
   // Save to original location first
   await window.doSave();
+  if (window.saveStylesFile) await window.saveStylesFile();
 
   showBuildModal('⚙ Compiling...');
   startCompileHints();
@@ -256,7 +257,7 @@ async function doCompile() {
   setBusy(false);
   if (result.ok) {
     compileSuccess = true;
-    if (!isDfuMode) setFlashEnabled(!!selectedPort); // DFU mode: onBuildDone sets flash state
+    if (!isDfuMode) setFlashEnabled(selectedPortIsProffieboard && !!selectedPort); // DFU mode: onBuildDone sets flash state
     updateCompileButton();
   }
 }
@@ -289,7 +290,7 @@ async function doFlash() {
   stopCompileHints();
   stopCompileTimer();
   document.getElementById('bm-title').textContent = '⚡ Flashing...';
-  document.getElementById('bm-title').style.color = '#eee';
+  document.getElementById('bm-title').style.color = 'var(--c-text-bright)';
   document.getElementById('bm-abort').style.display = 'none';
   document.getElementById('bm-close').style.display = 'none';
   document.getElementById('build-modal').style.display = 'flex';
@@ -388,8 +389,13 @@ async function refreshPorts() {
     stopPortWatch();
   }
 
-  // After FQBN is resolved, check if a valid cache exists for the current config
-  if (!compileSuccess) await checkCacheForConfig();
+  // Reconcile flash state with current port + compile state
+  if (!compileSuccess) {
+    await checkCacheForConfig();          // may set compileSuccess + call setFlashEnabled
+  } else {
+    // compileSuccess already true — update button to reflect new port state
+    setFlashEnabled(selectedPortIsProffieboard && !!selectedPort);
+  }
 }
 
 // Adds the DFU mode sentinel as the last option in the port select
@@ -522,12 +528,13 @@ function onBuildDone({ type, ok, error, aborted, retriable }) {
       updateCompileButton();
       if (window.setCompiledTimestamp) window.setCompiledTimestamp();
       stopCompileTimer();
+      stopCompileHints();
       appendLog('\n✓ Firmware ready.', false);
 
       if (isDfuMode) {
         // DFU mode — don't watch serial ports
         document.getElementById('bm-title').textContent = '✓ Compile Successful';
-        document.getElementById('bm-title').style.color = '#4d4';
+        document.getElementById('bm-title').style.color = 'var(--c-success-text)';
         document.getElementById('bm-abort').style.display = 'none';
         setBarMode('success');
         if (dfuDeviceReady) {
@@ -545,7 +552,7 @@ function onBuildDone({ type, ok, error, aborted, retriable }) {
       } else if (selectedPortIsProffieboard && selectedPort) {
         // Board already connected — show success then flash immediately
         document.getElementById('bm-title').textContent = '✓ Compile Successful';
-        document.getElementById('bm-title').style.color = '#4d4';
+        document.getElementById('bm-title').style.color = 'var(--c-success-text)';
         document.getElementById('bm-abort').style.display = 'none';
         document.getElementById('bm-close').style.display = 'none';
         document.getElementById('bm-status').textContent = 'Board connected — flashing...';
@@ -556,7 +563,7 @@ function onBuildDone({ type, ok, error, aborted, retriable }) {
         // No board — show wait UI and start watcher
         setFlashEnabled(false);
         document.getElementById('bm-title').textContent = '✓ Compile Successful';
-        document.getElementById('bm-title').style.color = '#4d4';
+        document.getElementById('bm-title').style.color = 'var(--c-success-text)';
         document.getElementById('bm-abort').style.display = 'none';
         document.getElementById('bm-close').style.display = 'inline-block';
         document.getElementById('bm-status').textContent = 'Connect your Proffieboard to flash...';
@@ -586,7 +593,7 @@ function onBuildDone({ type, ok, error, aborted, retriable }) {
       // Post-DFU flash: wait for board to restart and re-enumerate as serial
       if (window.setFlashedTimestamp) window.setFlashedTimestamp(null);
       document.getElementById('bm-title').textContent = '✓ Flash Complete';
-      document.getElementById('bm-title').style.color = '#4d4';
+      document.getElementById('bm-title').style.color = 'var(--c-success-text)';
       document.getElementById('bm-abort').style.display = 'none';
       document.getElementById('bm-close').style.display = 'inline-block';
       document.getElementById('bm-status').textContent = 'Watching for board restart...';
@@ -607,7 +614,7 @@ function showBuildModal(title) {
   const modal = document.getElementById('build-modal');
   modal.style.display = 'flex';
   document.getElementById('bm-title').textContent = title;
-  document.getElementById('bm-title').style.color = '#eee';
+  document.getElementById('bm-title').style.color = 'var(--c-text-bright)';
   document.getElementById('bm-log').innerHTML = '';
   document.getElementById('bm-status').textContent = '';
   document.getElementById('bm-close').style.display = 'none';
@@ -725,7 +732,7 @@ function _selectPortAndFlash(port, result) {
 function showWaitForBoardInModal() {
   document.getElementById('build-modal').style.display = 'flex';
   document.getElementById('bm-title').textContent = '⚡ Connect Board';
-  document.getElementById('bm-title').style.color = '#eee';
+  document.getElementById('bm-title').style.color = 'var(--c-text-bright)';
   document.getElementById('bm-status').textContent = 'Connect your Proffieboard to continue...';
   document.getElementById('bm-abort').style.display = 'none';
   document.getElementById('bm-retry').style.display = 'none';
@@ -762,7 +769,7 @@ function finishBuildModal(success, title, statusMsg, { retriable = false } = {})
   stopCompileTimer();
   stopFlashTimer();
   document.getElementById('bm-title').textContent = title;
-  document.getElementById('bm-title').style.color = success ? '#4d4' : '#e44';
+  document.getElementById('bm-title').style.color = success ? 'var(--c-success-text)' : 'var(--c-danger-text)';
   document.getElementById('bm-status').textContent = statusMsg || '';
   document.getElementById('bm-abort').style.display = 'none';
   document.getElementById('bm-dfu-setup').style.display = 'none';
@@ -806,14 +813,14 @@ function openLog() {
   const body = el('bp-log-body');
   const tog  = el('bp-log-toggle');
   body.classList.add('open');
-  tog.textContent = '▲ Build Output';
+  tog.querySelector('span').textContent = '▲ Build Output';
 }
 
 function toggleLog() {
   const body = el('bp-log-body');
   const tog  = el('bp-log-toggle');
   const open = body.classList.toggle('open');
-  tog.textContent = open ? '▲ Build Output' : '▼ Build Output';
+  tog.querySelector('span').textContent = open ? '▲ Build Output' : '▼ Build Output';
 }
 
 // ── UI helpers ─────────────────────────────────────────
@@ -878,12 +885,51 @@ function stopFlashTimer() {
  * type: 'toolchain' | 'compile' | 'flash' | 'port'
  * state: 'ok' | 'error' | 'warn' | 'pending'
  */
-const PORT_DFU_TIP =
-  'No Proffieboard detected.\n' +
-  'Try Bootloader Mode (DFU):\n' +
-  '  • Hold the BOOT button while plugging in USB, or\n' +
-  '  • Double-tap the reset button on the board.\n' +
-  'Then click Flash — the app will detect it automatically.';
+// ── Port status DFU popover ────────────────────────────
+let _portTip = null;
+
+function _ensurePortTip() {
+  if (_portTip) return;
+  _portTip = document.createElement('div');
+  _portTip.className = 'port-tip-popover';
+  _portTip.innerHTML =
+    'No Proffieboard detected. &nbsp;' +
+    '<button class="port-tip-dfu-btn" id="port-tip-dfu-btn">⚡ Try Bootloader Mode (DFU)</button>';
+  document.body.appendChild(_portTip);
+  _portTip.querySelector('#port-tip-dfu-btn').addEventListener('click', () => {
+    _hidePortTip();
+    enterDfuMode();
+  });
+  // Keep tip visible while hovering it
+  _portTip.addEventListener('mouseenter', () => clearTimeout(_portTipHideTimer));
+  _portTip.addEventListener('mouseleave', _hidePortTip);
+}
+
+let _portTipHideTimer = null;
+let _portTipEnabled   = false;  // only true when no Proffieboard detected
+
+function _showPortTip(anchorEl) {
+  if (!_portTipEnabled) return;
+  _ensurePortTip();
+  const rect = anchorEl.getBoundingClientRect();
+  _portTip.style.display = 'block';
+  // Position above the anchor, right-aligned to it
+  _portTip.style.left = Math.max(4, rect.right - _portTip.offsetWidth) + 'px';
+  _portTip.style.top  = (rect.top - _portTip.offsetHeight - 6) + 'px';
+}
+
+function _hidePortTip() {
+  _portTipHideTimer = setTimeout(() => {
+    if (_portTip) _portTip.style.display = 'none';
+  }, 120);
+}
+
+function _attachPortTip(textEl) {
+  if (textEl._portTipAttached) return;
+  textEl._portTipAttached = true;
+  textEl.addEventListener('mouseenter', () => { clearTimeout(_portTipHideTimer); _showPortTip(textEl); });
+  textEl.addEventListener('mouseleave', _hidePortTip);
+}
 
 function setStatus(type, state, message) {
   const dot  = el(`bp-status-${type}-dot`);
@@ -893,12 +939,16 @@ function setStatus(type, state, message) {
   dot.className = `bp-status-dot bp-status-${state}`;
   text.textContent = message;
 
-  if (type === 'port' && (state === 'warn' || state === 'error')) {
-    text.title  = PORT_DFU_TIP;
-    text.style.cursor = 'help';
-  } else if (type === 'port') {
-    text.title  = '';
-    text.style.cursor = '';
+  if (type === 'port') {
+    if (state === 'warn' || state === 'error') {
+      _portTipEnabled = true;
+      text.style.cursor = 'default';
+      _attachPortTip(text);
+    } else {
+      _portTipEnabled = false;
+      text.style.cursor = '';
+      if (_portTip) _portTip.style.display = 'none';
+    }
   }
 }
 
@@ -925,7 +975,7 @@ async function checkCacheForConfig(missStatus) {
 
   if (result.hit) {
     compileSuccess = true;
-    setFlashEnabled(!!selectedPort);
+    setFlashEnabled(selectedPortIsProffieboard && !!selectedPort);
     updateCompileButton();
     setStatus('compile', 'ok', 'Compile restored from cache');
     if (window.setCompiledTimestamp) window.setCompiledTimestamp(result.metadata.compiledAt);
@@ -1047,7 +1097,7 @@ async function startDfuWaitModal() {
     }
 
     document.getElementById('bm-title').textContent = 'Fix DFU Driver';
-    document.getElementById('bm-title').style.color = '#fa0';
+    document.getElementById('bm-title').style.color = 'var(--c-warn-text)';
     document.getElementById('bm-status').textContent = 'Windows needs a driver update for Bootloader Mode';
     document.getElementById('bm-abort').style.display = 'none';
     document.getElementById('bm-dfu-setup').style.display = navigator.platform.startsWith('Win') ? 'inline-block' : 'none';
@@ -1071,7 +1121,7 @@ async function startDfuWaitModal() {
   document.getElementById('bm-abort').style.display = 'none';
   document.getElementById('bm-close').style.display = 'inline-block';
   document.getElementById('bm-title').textContent = '⚡ DFU Device Ready';
-  document.getElementById('bm-title').style.color = '#4af';
+  document.getElementById('bm-title').style.color = 'var(--c-title-accent)';
   setBarMode('success');
 
   if (compileSuccess) {
@@ -1101,7 +1151,7 @@ async function doFlashDFU() {
 
   // Device already detected — go straight to flash
   document.getElementById('bm-title').textContent = '⚡ Flashing (DFU)...';
-  document.getElementById('bm-title').style.color = '#eee';
+  document.getElementById('bm-title').style.color = 'var(--c-text-bright)';
   document.getElementById('bm-abort').style.display = 'none';
   document.getElementById('bm-retry').style.display = 'none';
   document.getElementById('bm-close').style.display = 'none';

@@ -1,1 +1,2 @@
-This is the latest stable release version 8.10 and has the addition of the JMT prop which is a wrapper for Fett263's prop enabling advanced features. There are two supporting files for this version, but nothing else has been modified.
+Includes an optional JMT prop and supporting components. Specifically, this adds: a custom prop (jmt_fett_prop.h), a charge state helper (charge_state.h), a style function helper (charge_full_prop.h). 
+These are additive only and do not modify any core ProffieOS files. Standard behavior is unchanged unless the JMT prop is explicitly used.

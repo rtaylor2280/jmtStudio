@@ -17,7 +17,8 @@ const fs     = require('fs');
 const crypto = require('crypto');
 
 // ── Constants ──────────────────────────────────────────
-const CONFIG_FILENAME = 'my_config.h';
+const CONFIG_FILENAME  = 'my_config.h';
+const STYLES_FILENAME  = 'my_styles.h';
 
 // ── Version state ──────────────────────────────────────
 let _selectedVersion = null;
@@ -206,6 +207,10 @@ function getConfigStagingPath() {
   return path.join(getProffieOSRoot(), 'config', CONFIG_FILENAME);
 }
 
+function getStylesStagingPath() {
+  return path.join(getProffieOSRoot(), 'config', STYLES_FILENAME);
+}
+
 function getInoPath() {
   return path.join(getProffieOSRoot(), 'ProffieOS.ino');
 }
@@ -340,6 +345,25 @@ function readStagedConfig() {
   const p = getConfigStagingPath();
   try { return fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : null; }
   catch { return null; }
+}
+
+// ── Styles staging ─────────────────────────────────────
+
+function stageStyles(content) {
+  const stagingPath = getStylesStagingPath();
+  try {
+    fs.mkdirSync(path.dirname(stagingPath), { recursive: true });
+    fs.writeFileSync(stagingPath, content || '', 'utf8');
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+function readStagedStyles() {
+  const p = getStylesStagingPath();
+  try { return fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : ''; }
+  catch { return ''; }
 }
 
 // ── Import ─────────────────────────────────────────────
@@ -604,6 +628,9 @@ module.exports = {
   ensureConfigFileRef,
   stageConfig,
   readStagedConfig,
+  stageStyles,
+  readStagedStyles,
+  STYLES_FILENAME,
   importVersion,
   getInfo,
   CONFIG_FILENAME,

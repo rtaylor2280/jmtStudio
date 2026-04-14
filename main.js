@@ -28,7 +28,7 @@ const Store = {
 
 function addRecentFile(filePath) {
   let files = Store.get('recentFiles') || [];
-  files = [filePath, ...files.filter(f => f !== filePath)].slice(0, 5);
+  files = [filePath, ...files.filter(f => f !== filePath)].slice(0, 20); // store up to max possible
   Store.set('recentFiles', files);
 }
 
@@ -241,6 +241,41 @@ ipcMain.handle('store:getRecentFiles', () => {
 ipcMain.handle('store:removeRecentFile', (_, filePath) => {
   const files = (Store.get('recentFiles') || []).filter(f => f !== filePath);
   Store.set('recentFiles', files);
+});
+// ── IPC: Style Library ─────────────────────────────────
+ipcMain.handle('styles:read', () => proffie.readStagedStyles());
+ipcMain.handle('styles:write', (_, content) => proffie.stageStyles(content));
+ipcMain.handle('styles:export', async () => {
+  const { canceled, filePath } = await dialog.showSaveDialog(win, {
+    title: 'Export Style Library',
+    defaultPath: proffie.STYLES_FILENAME,
+    filters: [{ name: 'Header File', extensions: ['h'] }]
+  });
+  if (canceled || !filePath) return { ok: false };
+  try {
+    fs.writeFileSync(filePath, proffie.readStagedStyles(), 'utf8');
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
+ipcMain.handle('styles:replace', async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+    title: 'Replace Style Library',
+    filters: [{ name: 'Header / Text', extensions: ['h', 'hpp', 'txt'] }],
+    properties: ['openFile']
+  });
+  if (canceled || !filePaths.length) return { ok: false };
+  try {
+    const content = fs.readFileSync(filePaths[0], 'utf8');
+    return { ok: true, content };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
+
+ipcMain.handle('store:getSetting', (_, key, def) => {
+  const val = Store.get(`settings.${key}`);
+  return val !== undefined ? val : def;
+});
+ipcMain.handle('store:setSetting', (_, key, value) => {
+  Store.set(`settings.${key}`, value);
 });
 ipcMain.on('title:set', (_, title) => win.setTitle(title));
 
