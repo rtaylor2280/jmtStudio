@@ -89,6 +89,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
 
   onAppClosing:    (cb) => ipcRenderer.on('app:closing', cb),
-  doClose:         () => ipcRenderer.send('app:doClose')
+  doClose:         () => ipcRenderer.send('app:doClose'),
+
+  // ── Dev-only ─────────────────────────────────────────
+  devGetRendererPath: () => ipcRenderer.invoke('dev:getRendererPath'),
+  devWriteFile:       (filePath, content) => ipcRenderer.invoke('dev:writeFile', { filePath, content })
 
 });

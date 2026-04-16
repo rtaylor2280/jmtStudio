@@ -9,6 +9,7 @@
 
   /* ── Theme variables ── */
   :root {
+    accent-color:     #025192;
     --jmt-blue:       #025192;
     --c-bg:           #111111;
     --c-bg-toolbar:   #0e0e0e;
@@ -1138,6 +1139,24 @@
   .tab-btns { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
   #tab-btns-versions { display: none; }
   #tab-btns-styles   { display: none; }
+  #tab-btns-sim      { display: none; }
+
+  /* ── Blade Simulator ── */
+  #sim-view { display: none; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
+  #sim-view.active { display: flex; }
+  .sim-blade-wrap { background: #030303; display: flex; align-items: center; justify-content: center; padding: 16px 20px; flex-shrink: 0; }
+  #sim-canvas { display: block; width: 100%; border-radius: 2px; }
+  .sim-bottom { border-top: 1px solid var(--c-border); padding: 8px 16px; flex-shrink: 0; }
+  .sim-controls-row { display: flex; gap: 6px; align-items: center; flex-wrap: nowrap; }
+  .sim-ctrl-btn { padding: 5px 12px; border-radius: 4px; border: 1px solid #2a4a6a; background: #0e1e2e; color: #6ab; font-size: 0.82rem; cursor: pointer; user-select: none; transition: filter 100ms; white-space: nowrap; flex-shrink: 0; }
+  .sim-ctrl-btn:hover { filter: brightness(1.3); }
+  .sim-ctrl-btn.sim-active { background: #2a1a0a; border-color: #8a4a20; color: #fa8; }
+  #sim-btn-power.sim-active  { background: #2a0a0a; border-color: #aa2020; color: #f66; }
+  #sim-btn-lockup.sim-active { background: #0a1a2a; border-color: #2060aa; color: #6af; }
+  .sim-sep { width: 1px; height: 20px; background: var(--c-border); flex-shrink: 0; margin: 0 2px; }
+  #sim-preset-select { background: var(--c-bg-raised); border: 1px solid var(--c-border-input); border-radius: 3px; color: var(--c-text); font-size: 0.78rem; padding: 4px 6px; cursor: pointer; max-width: 220px; display: none; }
+  #sim-blade-select  { background: var(--c-bg-raised); border: 1px solid var(--c-border-input); border-radius: 3px; color: var(--c-text); font-size: 0.78rem; padding: 4px 6px; cursor: pointer; display: none; }
+  #sim-status { font-size: 0.72rem; color: var(--c-text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
 
   /* ── Versions panel layout ── */
   #versions-view {
@@ -1565,6 +1584,12 @@
         </svg>
         Style Library
       </button>
+      <button class="tab" data-tab="sim" id="tab-sim" style="display:none">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="2" y="8" width="20" height="8" rx="2"/><circle cx="7" cy="12" r="1.5" fill="currentColor" stroke="none"/><line x1="11" y1="12" x2="19" y2="12" stroke-width="1.5"/>
+        </svg>
+        Simulator
+      </button>
       <button class="tab" data-tab="versions">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/>
@@ -1593,6 +1618,7 @@
         <button id="btn-saveas"   style="display:none">&#8595; Save As</button>
         <button id="btn-download" style="display:none">&#8595; Download</button>
       </div>
+      <div class="tab-btns" id="tab-btns-sim"></div>
       <div class="tab-btns" id="tab-btns-versions">
         <button id="btn-vp-import" title="Import a ProffieOS version folder">&#8593; Import Version</button>
       </div>
@@ -1666,6 +1692,34 @@
       <span id="styles-search-count" class="styles-search-count"></span>
     </div>
     <div id="styles-visual-list" class="style-cards"></div>
+  </div>
+</div>
+
+<!-- ── Blade Simulator view ── -->
+<div id="sim-view">
+  <div class="sim-blade-wrap">
+    <canvas id="sim-canvas"></canvas>
+  </div>
+  <div class="sim-bottom">
+    <div class="sim-controls-row">
+      <button class="sim-ctrl-btn" id="sim-btn-power">Power</button>
+      <button class="sim-ctrl-btn" id="sim-btn-clash">Clash</button>
+      <button class="sim-ctrl-btn" id="sim-btn-stab">Stab</button>
+      <button class="sim-ctrl-btn" id="sim-btn-blast">Blast</button>
+      <button class="sim-ctrl-btn" id="sim-btn-lockup">Lockup</button>
+      <button class="sim-ctrl-btn" id="sim-btn-force">Force</button>
+      <button class="sim-ctrl-btn" id="sim-btn-boot">Boot</button>
+      <button class="sim-ctrl-btn" id="sim-btn-preon">Preon</button>
+      <div class="sim-sep"></div>
+      <select id="sim-preset-select"></select>
+      <select id="sim-blade-select"></select>
+      <span id="sim-status"></span>
+      <div style="margin-left:auto;display:flex;align-items:center;gap:6px;flex-shrink:0">
+        <span style="font-size:0.72rem;color:var(--c-text-dim)">LEDs</span>
+        <input type="range" id="sim-height-slider" class="settings-slider" min="44" max="144" value="132" step="1" style="width:80px">
+        <span id="sim-height-val" style="font-size:0.72rem;color:var(--c-text-sub);width:26px">132</span>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -1904,6 +1958,11 @@
       </label>
     </div>
 
+    <div class="settings-item" id="setting-renderer-tuner-item" style="display:none">
+      <span class="settings-item-label">Renderer Tuner <span style="font-size:0.7rem;color:var(--c-text-dim)">(dev only)</span></span>
+      <button class="settings-item-btn enabled" id="btn-renderer-tuner">Open</button>
+    </div>
+
     <div class="about-section-heading">About</div>
 
     <div class="about-desc">Desktop tools for editing, compiling, and flashing ProffieOS configurations.</div>
@@ -1936,6 +1995,20 @@
     <div class="modal-btns" style="margin-top:18px;">
       <button class="modal-btn-cancel" id="about-close-btn">Close</button>
     </div>
+  </div>
+</div>
+
+<!-- ── Renderer Tuner modal (dev only) ── -->
+<div class="modal-overlay" id="modal-renderer-tuner">
+  <div class="modal" style="width:980px;max-width:98vw;height:90vh;display:flex;flex-direction:column;padding:0;overflow:hidden;">
+    <div style="display:flex;align-items:center;padding:10px 14px;background:var(--c-bg-panel);border-bottom:1px solid var(--c-border);flex-shrink:0;">
+      <span style="font-size:0.88rem;font-weight:600;color:var(--c-text-bright);flex:1;">Renderer Tuner</span>
+      <span style="font-size:0.72rem;color:var(--c-text-dim);margin-right:12px;">Dev only — saves to bladeRenderer.js</span>
+      <button class="modal-btn-cancel" id="renderer-tuner-close-btn" style="margin:0;padding:3px 10px;font-size:0.75rem;">&#10005;</button>
+    </div>
+    <iframe id="renderer-tuner-frame" src="rendererTuner.html"
+      style="flex:1;border:none;width:100%;background:transparent;"
+      sandbox="allow-scripts allow-same-origin"></iframe>
   </div>
 </div>
 
@@ -1974,6 +2047,9 @@
 
 <input type="file" id="file-input" accept=".h,.txt" style="display:none" />
 
+<script src="bladeRenderer.js"></script>
+<script src="bladeEval.js"></script>
+<script src="configParser.js"></script>
 <script src="./vs/loader.js"></script>
 <script>
 // ── Environment ────────────────────────────────────────
@@ -2990,6 +3066,162 @@ document.getElementById('about-info-link').addEventListener('click', (e) => {
   if (window.electronAPI?.openExternal) window.electronAPI.openExternal('mailto:info@jedimastertech.com');
 });
 
+// ── Renderer Tuner (dev only) ──────────────────────────
+{
+  // Mapping: tuner key → { constName, pattern to find+replace in bladeRenderer.js }
+  // constName=null means it uses the special HILT_PX_FULL pattern
+  const TUNER_MAP = {
+    gainR:          'GAIN_R',
+    gainG:          'GAIN_G',
+    gainB:          'GAIN_B',
+    gamma:          'GAMMA',
+    coreWidth:      'CORE_WIDTH',
+    edgeSoft:       'EDGE_SOFT',
+    saturation:     'SATURATION',
+    coreWhiten:     'CORE_WHITEN',
+    coreWhitenFade: 'CORE_WHITEN_FADE',
+    tipFalloff:     'TIP_FALLOFF',
+    tipCapRadius:   'TIP_CAP_RADIUS',
+    blendRadius:    'BLEND_RADIUS',
+    falloff:        'FALLOFF',
+    bloomRadius:    'BLOOM_RADIUS',
+    bloomIntensity: 'BLOOM_INTENSITY',
+    bloomSens:      'BLOOM_SENS',
+    hiltWidth:      'HILT_WIDTH',
+    hiltCapRadius:  'HILT_CAP_RADIUS',
+    hiltCurve:      'HILT_CURVE',
+    hiltCrescent:   'HILT_CRESCENT',
+    hiltGap:        'HILT_GAP',
+    // hiltLedLen is handled specially (it's the 35 in HILT_PX_FULL = 35 * PX_PER_LED)
+  };
+
+  function _parseRendererConstants(src) {
+    const vals = {};
+    for (const [key, constName] of Object.entries(TUNER_MAP)) {
+      const m = src.match(new RegExp(`const\\s+${constName}\\s*=\\s*([\\d.]+)`));
+      if (m) vals[key] = parseFloat(m[1]);
+    }
+    // hiltLedLen: extract the number from "HILT_PX_FULL = N * PX_PER_LED"
+    const hm = src.match(/const\s+HILT_PX_FULL\s*=\s*([\d.]+)\s*\*/);
+    if (hm) vals.hiltLedLen = parseFloat(hm[1]);
+    return vals;
+  }
+
+  function _applyRendererConstants(src, vals) {
+    let out = src;
+    for (const [key, constName] of Object.entries(TUNER_MAP)) {
+      if (vals[key] === undefined) continue;
+      out = out.replace(
+        new RegExp(`(const\\s+${constName}\\s*=\\s*)[\\d.]+`),
+        `$1${vals[key]}`
+      );
+    }
+    // hiltLedLen: rewrite HILT_PX_FULL = N * PX_PER_LED
+    if (vals.hiltLedLen !== undefined) {
+      out = out.replace(
+        /(const\s+HILT_PX_FULL\s*=\s*)[\d.]+(\s*\*\s*PX_PER_LED)/,
+        `$1${vals.hiltLedLen}$2`
+      );
+    }
+    return out;
+  }
+
+  let _tunerRendererPath = null;
+
+  async function openRendererTuner() {
+    if (!window.electronAPI?.devGetRendererPath) return;
+    document.getElementById('modal-about').classList.remove('active');
+
+    // Get the renderer dir path
+    _tunerRendererPath = await window.electronAPI.devGetRendererPath();
+    const rendererFilePath = _tunerRendererPath + '/bladeRenderer.js';
+
+    // Read current constants
+    const readResult = await window.electronAPI.readFile(rendererFilePath);
+    const src = readResult?.content || '';
+    const vals = _parseRendererConstants(src);
+
+    // Show the modal
+    document.getElementById('modal-renderer-tuner').classList.add('active');
+
+    // Post init to iframe (may need to wait for it to load)
+    const frame = document.getElementById('renderer-tuner-frame');
+    const doInit = () => {
+      frame.contentWindow.postMessage({ type: 'tuner:init', values: vals }, '*');
+    };
+    if (frame.contentDocument?.readyState === 'complete') {
+      doInit();
+    } else {
+      frame.addEventListener('load', doInit, { once: true });
+    }
+  }
+
+  function closeRendererTuner() {
+    document.getElementById('modal-renderer-tuner').classList.remove('active');
+  }
+
+  document.getElementById('btn-renderer-tuner').addEventListener('click', openRendererTuner);
+  document.getElementById('renderer-tuner-close-btn').addEventListener('click', closeRendererTuner);
+  document.getElementById('modal-renderer-tuner').addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) closeRendererTuner();
+  });
+
+  // Build a tuning override object keyed by const name from tuner key→constName map
+  function _tunerValuesToOverrides(values) {
+    const TUNER_KEY_MAP = {
+      gainR:'GAIN_R', gainG:'GAIN_G', gainB:'GAIN_B', gamma:'GAMMA',
+      coreWidth:'CORE_WIDTH', edgeSoft:'EDGE_SOFT', saturation:'SATURATION',
+      coreWhiten:'CORE_WHITEN', coreWhitenFade:'CORE_WHITEN_FADE',
+      tipFalloff:'TIP_FALLOFF', tipCapRadius:'TIP_CAP_RADIUS',
+      blendRadius:'BLEND_RADIUS', falloff:'FALLOFF',
+      bloomRadius:'BLOOM_RADIUS', bloomIntensity:'BLOOM_INTENSITY', bloomSens:'BLOOM_SENS',
+      hiltWidth:'HILT_WIDTH', hiltLedLen:'HILT_LED_LEN',
+      hiltCapRadius:'HILT_CAP_RADIUS', hiltCurve:'HILT_CURVE', hiltCrescent:'HILT_CRESCENT',
+      hiltGap:'HILT_GAP',
+    };
+    const out = {};
+    for (const [k, v] of Object.entries(values)) {
+      const cn = TUNER_KEY_MAP[k];
+      if (cn) out[cn] = v;
+    }
+    return out;
+  }
+
+  // Listen for messages from the iframe
+  window.addEventListener('message', async (e) => {
+    if (!e.data) return;
+    const { type, values } = e.data;
+
+    // Live preview — update the sim panel blade while tuner is open
+    if (type === 'tuner:change' && values && window.WS2812) {
+      WS2812.setTuning(_tunerValuesToOverrides(values));
+    }
+
+    if (type === 'tuner:cancel') {
+      if (window.WS2812) WS2812.setTuning({});
+      closeRendererTuner();
+    } else if (type === 'tuner:save') {
+      if (!_tunerRendererPath || !values) return;
+      const rendererFilePath   = _tunerRendererPath + '/bladeRenderer.js';
+      const saveRead = await window.electronAPI.readFile(rendererFilePath);
+      const src = saveRead?.content;
+      if (!src) return;
+      const updated = _applyRendererConstants(src, values);
+      const result = await window.electronAPI.devWriteFile(rendererFilePath, updated);
+      const frame  = document.getElementById('renderer-tuner-frame');
+      if (result?.ok) {
+        // _tuning already holds the correct override values from the slider session —
+        // they stay active so the sim reflects the saved constants immediately.
+        // The baked consts in bladeRenderer.js (now written to disk) will match on
+        // next app launch without any reload needed.
+        frame.contentWindow.postMessage({ type: 'tuner:status', msg: 'Saved — close to apply', cls: 'ok' }, '*');
+      } else {
+        frame.contentWindow.postMessage({ type: 'tuner:status', msg: 'Save failed: ' + (result?.error || 'unknown'), cls: 'err' }, '*');
+      }
+    }
+  });
+}
+
 // ── Versions tab: Import button ────────────────────────
 let _importFromVersionsTab = false;
 document.getElementById('btn-vp-import')?.addEventListener('click', () => {
@@ -3352,6 +3584,442 @@ window.initStylesPanel = function() {
   _loadStylesFile();
 };
 
+// ── Blade Simulator ─────────────────────────────────────────────────────────
+
+let _simAnimFrame  = null;
+let _simLastTs     = null;
+let _simLeds       = 132;
+let _simStyle      = null;   // parsed BladeEval style node
+let _simBlade      = null;   // BladeEval.Blade instance
+let _simUsingEval  = false;  // true = evaluator loop, false = test pattern loop
+let _simParsed      = null;   // last ConfigParser result
+let _simPresetIdx   = 0;
+let _simBladeIdx    = 0;
+let _simLastVersion = null;
+const _simIncludeCache = new Map();   // key: "version:path" → content|null
+
+// ── Include flattener ────────────────────────────────────────────────────────
+
+async function _fetchInclude(versionName, incPath) {
+  const key = `${versionName}:${incPath}`;
+  if (_simIncludeCache.has(key)) return _simIncludeCache.get(key);
+  try {
+    let content = null;
+    if (/^[A-Za-z]:[\\\/]/.test(incPath) || incPath.startsWith('/')) {
+      console.log('[sim] include (absolute):', incPath);
+      const r = await window.electronAPI.readFile(incPath);
+      content = r?.content ?? null;
+      console.log('[sim] include result:', content !== null ? `${content.length} chars` : 'NOT FOUND');
+    } else {
+      console.log('[sim] include (relative):', incPath, '  version:', versionName);
+      const r = await window.electronAPI.readVersionFile(versionName, incPath);
+      content = r?.ok ? (r.content ?? null) : null;
+      console.log('[sim] include result:', content !== null ? `${content.length} chars` : 'NOT FOUND', r);
+    }
+    _simIncludeCache.set(key, content);
+    return content;
+  } catch (err) {
+    console.error('[sim] include error for', incPath, err);
+    _simIncludeCache.set(key, null);
+    return null;
+  }
+}
+
+// Recursively replace #include "..." directives with file contents.
+// System includes (<...>) and already-visited paths are skipped.
+async function _flattenIncludes(text, versionName, visited = new Set(), depth = 0) {
+  if (depth > 10) return text;
+  const segments = [];
+  let last = 0;
+  const re = /#include\s+"([^"]+)"/g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const path = m[1];
+    segments.push(text.slice(last, m.index));
+    last = m.index + m[0].length;
+    if (!visited.has(path)) {
+      visited.add(path);
+      const content = await _fetchInclude(versionName, path);
+      if (content !== null) {
+        segments.push(await _flattenIncludes(content, versionName, visited, depth + 1));
+      } else {
+        segments.push(`// [sim: include not found — ${path}]\n`);
+      }
+    }
+  }
+  segments.push(text.slice(last));
+  return segments.join('');
+}
+
+// ── Config load ───────────────────────────────────────────────────────────────
+
+async function _simLoadConfig() {
+  const configText = typeof editor !== 'undefined' ? editor?.getValue?.() : null;
+  const row        = document.getElementById('sim-config-row');
+  const label      = document.getElementById('sim-config-label');
+  const presetSel  = document.getElementById('sim-preset-select');
+  const bladeSel   = document.getElementById('sim-blade-select');
+  const bladeLabel = document.getElementById('sim-blade-wrap-label');
+  const statusLbl  = document.getElementById('sim-status');
+
+  if (!configText?.trim()) {
+    console.warn('[sim] _simLoadConfig: no config text in editor');
+    _simParsed = null;
+    row?.classList.add('hidden');
+    if (statusLbl) statusLbl.textContent = 'No config loaded';
+    return;
+  }
+  if (!window.ConfigParser) {
+    console.error('[sim] _simLoadConfig: ConfigParser not loaded');
+    _simParsed = null;
+    if (statusLbl) statusLbl.textContent = 'Error: ConfigParser missing';
+    return;
+  }
+
+  // Show loading state while fetching includes
+  row?.classList.remove('hidden');
+  if (presetSel) { presetSel.disabled = true; presetSel.style.display = 'inline-block'; }
+  if (label) label.textContent = 'Loading…';
+  if (statusLbl) statusLbl.textContent = 'Loading config…';
+
+  // Get version; clear cache if version changed
+  const verObj = await window.electronAPI.getSelectedVersion().catch(err => {
+    console.error('[sim] getSelectedVersion failed:', err);
+    return null;
+  });
+  const versionName = verObj?.name || '';
+  console.log('[sim] version:', versionName || '(none)');
+  if (versionName !== _simLastVersion) {
+    _simIncludeCache.clear();
+    _simLastVersion = versionName;
+  }
+
+  // Flatten includes then parse
+  console.log('[sim] flattening includes…');
+  const flat   = await _flattenIncludes(configText, versionName);
+  console.log('[sim] flattened length:', flat.length, 'chars');
+
+  const parsed = window.ConfigParser.parse(flat);
+  _simParsed   = parsed || null;
+  console.log('[sim] parse result:', parsed
+    ? `${parsed.presets?.length} presets, ${parsed.blades?.length} blades, ${Object.keys(parsed.aliases||{}).length} aliases`
+    : 'null (no CONFIG_PRESETS block found)');
+
+  if (!parsed?.presets?.length) {
+    if (presetSel) { presetSel.style.display = 'none'; presetSel.disabled = false; }
+    if (bladeSel)  bladeSel.style.display = 'none';
+    if (statusLbl) statusLbl.textContent = parsed ? 'No presets found in config' : 'No CONFIG_PRESETS block found';
+    console.warn('[sim] no presets — sim will show demo patterns');
+    return;
+  }
+
+  if (presetSel) presetSel.disabled = false;
+
+  // Populate preset dropdown, restoring selection by name
+  const prevName = presetSel?.options[presetSel.selectedIndex]?.text;
+  presetSel.innerHTML = '';
+  parsed.presets.forEach((p, i) => {
+    const opt = document.createElement('option');
+    opt.value = i;
+    opt.textContent = p.name || `Preset ${i + 1}`;
+    presetSel.appendChild(opt);
+  });
+  const restoredIdx = parsed.presets.findIndex(p => p.name === prevName);
+  _simPresetIdx = restoredIdx >= 0 ? restoredIdx : Math.min(_simPresetIdx, parsed.presets.length - 1);
+  presetSel.value = _simPresetIdx;
+
+  // Blade dropdown — only shown when a preset has multiple blade styles
+  const styleCount = parsed.presets[_simPresetIdx]?.styles?.length || 1;
+  if (styleCount > 1) {
+    bladeSel.innerHTML = '';
+    for (let i = 0; i < styleCount; i++) {
+      const opt = document.createElement('option');
+      opt.value = i;
+      opt.textContent = parsed.blades[i]
+        ? `Blade ${i + 1} (${parsed.blades[i].ledCount} LEDs)`
+        : `Blade ${i + 1}`;
+      bladeSel.appendChild(opt);
+    }
+    _simBladeIdx = Math.min(_simBladeIdx, styleCount - 1);
+    bladeSel.value = _simBladeIdx;
+    bladeSel.style.display = 'inline-block';
+  } else {
+    bladeSel.style.display = 'none';
+    _simBladeIdx = 0;
+  }
+
+  presetSel.style.display = 'inline-block';
+  presetSel.disabled = false;
+  _simApplyPreset();
+}
+
+function _simApplyPreset() {
+  if (!_simParsed) { console.warn('[sim] _simApplyPreset: no parsed config'); return; }
+  const preset = _simParsed.presets[_simPresetIdx];
+  if (!preset) { console.warn('[sim] _simApplyPreset: no preset at index', _simPresetIdx); return; }
+  console.log('[sim] applying preset', _simPresetIdx, '"' + preset.name + '"', '— styles:', preset.styles.length);
+
+  // LED count from blade config
+  const blade = _simParsed.blades[_simBladeIdx] || _simParsed.blades[0];
+  if (blade && window.WS2812) {
+    _simLeds = blade.ledCount;
+    WS2812.setLedCount(_simLeds);
+    const slider = document.getElementById('sim-height-slider');
+    const val    = document.getElementById('sim-height-val');
+    if (slider) { slider.value = _simLeds; }
+    if (val)    { val.textContent = _simLeds; }
+  }
+
+  // Resolve style and load
+  const rawStyle = preset.styles[_simBladeIdx] || preset.styles[0];
+  if (!rawStyle) { console.warn('[sim] _simApplyPreset: no style for blade index', _simBladeIdx); return; }
+  console.log('[sim] raw style:', rawStyle.slice(0, 120));
+  const resolved = window.ConfigParser.resolveAliases(rawStyle, _simParsed.aliases);
+  console.log('[sim] resolved style:', resolved.slice(0, 120));
+  _simLoadStyle(resolved);
+}
+
+// ── FrameSource: test patterns ───────────────────────────────────────────────
+// Each pattern: { name, durationMs, fn(elapsedMs, n) → [[r,g,b], ...] 0-255 }
+
+function _patSolidRed(t, n) {
+  const c = [];
+  for (let i = 0; i < n; i++) c.push([255, 0, 0]);
+  return c;
+}
+
+function _patGradient(t, n) {
+  // Base = red, tip = blue, to verify texture direction
+  const c = [];
+  for (let i = 0; i < n; i++) {
+    const frac = i / (n - 1);
+    c.push([Math.round((1 - frac) * 255), 0, Math.round(frac * 255)]);
+  }
+  return c;
+}
+
+function _patFlicker(t, n) {
+  // Per-LED random noise to verify per-LED update
+  const seed = Math.floor(t / 40);
+  const c = [];
+  for (let i = 0; i < n; i++) {
+    const v = (Math.sin(seed * 127.1 + i * 311.7) * 0.5 + 0.5) * 0.6 + 0.4;
+    c.push([0, Math.round(0.55 * v * 255), Math.round(v * 255)]);
+  }
+  return c;
+}
+
+function _patIgnition(t, n) {
+  // Full ignition→hold→retraction cycle with soft tip
+  const IGN = 800, HOLD = 1000, RET = 800;
+  const total = IGN + HOLD + RET;
+  const phase = t % total;
+  let lit;
+  if (phase < IGN)           lit = phase / IGN;
+  else if (phase < IGN+HOLD) lit = 1;
+  else                       lit = 1 - (phase - IGN - HOLD) / RET;
+  const litLed = lit * (n - 1);
+  const FADE = 5;
+  const c = [];
+  for (let i = 0; i < n; i++) {
+    const dist = litLed - i;
+    if (dist <= 0) { c.push([0, 0, 0]); continue; }
+    const alpha = dist < FADE ? dist / FADE : 1;
+    c.push([0, Math.round(0.55 * alpha * 255), Math.round(alpha * 255)]);
+  }
+  return c;
+}
+
+function _patClash(t, n) {
+  // Repeating white flash every 600ms
+  const PERIOD = 600, FLASH = 120;
+  const phase = t % PERIOD;
+  const intensity = phase < FLASH ? 1 - phase / FLASH : 0;
+  const base = 0.2;
+  const v = Math.round((base + (1 - base) * intensity) * 255);
+  const c = [];
+  for (let i = 0; i < n; i++) c.push([v, v, v]);
+  return c;
+}
+
+function _patLockup(t, n) {
+  // Cyan blade with a bright mid-section pulse
+  const pulse = 0.5 + 0.5 * Math.sin(t / 120 * Math.PI * 2);
+  const c = [];
+  for (let i = 0; i < n; i++) {
+    const frac = i / (n - 1);
+    const center = Math.exp(-Math.pow((frac - 0.5) * 4, 2));
+    const bright = 0.6 + 0.4 * pulse * center;
+    c.push([0, Math.round(0.55 * bright * 255), Math.round(bright * 255)]);
+  }
+  return c;
+}
+
+const _TEST_PATTERNS = [
+  { name: 'Solid Red',    durationMs: 3000, fn: _patSolidRed  },
+  { name: 'Gradient',     durationMs: 3000, fn: _patGradient  },
+  { name: 'Flicker',      durationMs: 3000, fn: _patFlicker   },
+  { name: 'Ignition',     durationMs: 3600, fn: _patIgnition  },
+  { name: 'Clash Flash',  durationMs: 3000, fn: _patClash     },
+  { name: 'Lockup Pulse', durationMs: 3000, fn: _patLockup    },
+];
+
+let _patternIndex = 0;
+let _patternStart = null;
+
+function _nextTestFrame(ts, n) {
+  if (_patternStart === null) _patternStart = ts;
+  const elapsed = ts - _patternStart;
+  const pat = _TEST_PATTERNS[_patternIndex];
+  if (elapsed > pat.durationMs) {
+    _patternIndex = (_patternIndex + 1) % _TEST_PATTERNS.length;
+    _patternStart = ts;
+    const label = document.getElementById('sim-status');
+    if (label) label.textContent = _TEST_PATTERNS[_patternIndex].name;
+    return _nextTestFrame(ts, n);
+  }
+  return pat.fn(elapsed, n);
+}
+
+function _simLoop(ts) {
+  if (_simLastTs === null) _simLastTs = ts;
+  const dt = ts - _simLastTs;
+  _simLastTs = ts;
+
+  if (_simUsingEval && _simStyle && _simBlade) {
+    _simBlade._lastDeltaMs = dt;
+    _simBlade.micros += dt * 1000;
+    _simStyle.run(_simBlade);
+    const pixels = [];
+    for (let i = 0; i < _simLeds; i++) {
+      const c = _simStyle.getColor(i);
+      pixels.push([(c.r * 255) | 0, (c.g * 255) | 0, (c.b * 255) | 0]);
+    }
+    if (window.WS2812) WS2812.setPixels(pixels);
+  } else {
+    if (window.WS2812) WS2812.setPixels(_nextTestFrame(ts, _simLeds));
+  }
+
+  // Only reschedule if we're still supposed to be running.
+  // Guards against a frame that was already in-flight when _simStop() was called.
+  if (_simAnimFrame !== null) {
+    _simAnimFrame = requestAnimationFrame(_simLoop);
+  }
+}
+
+function _simStart() {
+  if (_simAnimFrame) cancelAnimationFrame(_simAnimFrame);
+  _simLastTs = null; _patternStart = null; _patternIndex = 0;
+  _simAnimFrame = requestAnimationFrame(_simLoop);
+}
+function _simStop() {
+  if (_simAnimFrame) { cancelAnimationFrame(_simAnimFrame); _simAnimFrame = null; }
+}
+
+function _simLoadStyle(text) {
+  if (!window.BladeEval) { console.error('[sim] BladeEval not loaded'); return; }
+  console.log('[sim] _simLoadStyle, length:', text?.length, 'preview:', text?.slice(0, 120));
+  try {
+    _simStyle    = BladeEval.parse(text.trim());
+    _simBlade    = new BladeEval.Blade(_simLeds);
+    _simUsingEval = true;
+    const label = document.getElementById('sim-status');
+    if (label) label.textContent = 'Style loaded';
+    console.log('[sim] style loaded OK');
+  } catch(e) {
+    const label = document.getElementById('sim-status');
+    const msg = e?.message || String(e);
+    console.error('[sim] style parse error:', msg);
+    console.error('[sim] style text that failed:', text?.slice(0, 300));
+    if (label) label.textContent = 'Parse error: ' + msg.slice(0, 80);
+  }
+}
+
+function _simClearStyle() {
+  _simStyle     = null;
+  _simBlade     = null;
+  _simUsingEval = false;
+  const label = document.getElementById('sim-status');
+  if (label) label.textContent = _TEST_PATTERNS[_patternIndex % _TEST_PATTERNS.length].name;
+  _simStart();
+}
+
+window.initSimPanel = function() {
+  const canvas = document.getElementById('sim-canvas');
+
+  function _initRenderer() {
+    if (!window.WS2812) return;
+    try {
+      WS2812.init(canvas);
+      WS2812.setLedCount(_simLeds);
+      const label = document.getElementById('sim-status');
+      if (label) label.textContent = _TEST_PATTERNS[0].name;
+    } catch(e) { console.error('[WS2812] init failed:', e); }
+  }
+
+  if (window.WS2812) { _initRenderer(); }
+  else { document.addEventListener('blade-renderer-ready', _initRenderer, { once: true }); }
+
+  // LED count slider
+  const heightSlider = document.getElementById('sim-height-slider');
+  const heightVal    = document.getElementById('sim-height-val');
+  heightSlider.min = 44; heightSlider.max = 144; heightSlider.step = 1;
+  heightSlider.value = _simLeds;
+  heightVal.textContent = _simLeds;
+  heightSlider.addEventListener('input', () => {
+    _simLeds = parseInt(heightSlider.value);
+    heightVal.textContent = _simLeds;
+    if (window.WS2812) WS2812.setLedCount(_simLeds);
+    if (_simBlade) _simBlade.ledCount = _simLeds;
+  });
+
+  // Config-driven preset/blade selectors
+  const presetSel = document.getElementById('sim-preset-select');
+  const bladeSel  = document.getElementById('sim-blade-select');
+  if (presetSel) presetSel.addEventListener('change', () => {
+    _simPresetIdx = parseInt(presetSel.value) || 0;
+    _simBladeIdx  = 0;
+    _simApplyPreset();
+  });
+  if (bladeSel) bladeSel.addEventListener('change', () => {
+    _simBladeIdx = parseInt(bladeSel.value) || 0;
+    _simApplyPreset();
+  });
+
+  _simLoadConfig().then(() => _simStart());
+
+  // Effect buttons — jmt_fett_prop.h / Fett263 layout (hardcoded until config parsing)
+  const btnPower  = document.getElementById('sim-btn-power');
+  const btnClash  = document.getElementById('sim-btn-clash');
+  const btnStab   = document.getElementById('sim-btn-stab');
+  const btnBlast  = document.getElementById('sim-btn-blast');
+  const btnLockup = document.getElementById('sim-btn-lockup');
+  const btnForce  = document.getElementById('sim-btn-force');
+  const btnBoot   = document.getElementById('sim-btn-boot');
+  const btnPreon  = document.getElementById('sim-btn-preon');
+
+  function _requireBlade() { return _simUsingEval && _simBlade; }
+
+  if (btnPower) btnPower.addEventListener('click', () => {
+    if (!_requireBlade()) return;
+    _simBlade.on = !_simBlade.on;
+    btnPower.classList.toggle('sim-active', _simBlade.on);
+  });
+  if (btnClash)  btnClash.addEventListener('click',  () => { if (_requireBlade()) _simBlade.addEffect('clash'); });
+  if (btnStab)   btnStab.addEventListener('click',   () => { if (_requireBlade()) _simBlade.addEffect('stab'); });
+  if (btnBlast)  btnBlast.addEventListener('click',  () => { if (_requireBlade()) _simBlade.addEffect('blast'); });
+  if (btnForce)  btnForce.addEventListener('click',  () => { if (_requireBlade()) _simBlade.addEffect('force'); });
+  if (btnBoot)   btnBoot.addEventListener('click',   () => { if (_requireBlade()) _simBlade.addEffect('boot'); });
+  if (btnPreon)  btnPreon.addEventListener('click',  () => { if (_requireBlade()) _simBlade.addEffect('preon'); });
+  if (btnLockup) btnLockup.addEventListener('click', () => {
+    if (!_requireBlade()) return;
+    _simBlade.lockup = !_simBlade.lockup;
+    btnLockup.classList.toggle('sim-active', _simBlade.lockup);
+  });
+};
+
+
+
 // ── Tab switching ──────────────────────────────────────
 
 const _configOnlyEls = ['config-banner', 'build-toolbar', 'empty-state',
@@ -3370,6 +4038,7 @@ function switchTab(name) {
   document.getElementById('tab-btns-config').style.display   = name === 'config'   ? 'flex' : 'none';
   document.getElementById('tab-btns-versions').style.display = name === 'versions' ? 'flex' : 'none';
   document.getElementById('tab-btns-styles').style.display   = name === 'styles'   ? 'flex' : 'none';
+  document.getElementById('tab-btns-sim').style.display      = name === 'sim'      ? 'flex' : 'none';
 
   const showConfig = name === 'config';
   _configOnlyEls.forEach(id => {
@@ -3384,9 +4053,11 @@ function switchTab(name) {
 
   const versionsView = document.getElementById('versions-view');
   const stylesView   = document.getElementById('styles-view');
+  const simView      = document.getElementById('sim-view');
 
   versionsView.classList.toggle('active', name === 'versions');
   stylesView.classList.toggle('active',   name === 'styles');
+  simView.classList.toggle('active',      name === 'sim');
 
   if (name === 'versions') {
     const activeVersion = document.getElementById('input-version')?.value || '';
@@ -3407,6 +4078,17 @@ function switchTab(name) {
     } else if (window._stylesEditor) {
       window._stylesEditor.layout();
     }
+  }
+
+  if (name === 'sim') {
+    if (window.initSimPanel && !simView.dataset.loaded) {
+      simView.dataset.loaded = '1';
+      window.initSimPanel();
+    } else {
+      _simLoadConfig().then(() => _simStart());
+    }
+  } else {
+    _simStop();
   }
 }
 
@@ -3699,6 +4381,8 @@ require(['vs/editor/editor.main'], function () {
       if (_isDev) {
         document.getElementById('dev-bar').style.display = 'block';
         document.getElementById('setting-styles-item').style.display = 'flex';
+        document.getElementById('setting-renderer-tuner-item').style.display = 'flex';
+        document.getElementById('tab-sim').style.display = '';
       }
 
       // Style Library enable/disable (default off; dev toggle only)

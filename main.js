@@ -392,6 +392,21 @@ ipcMain.handle('app:getVersion',      () => app.getVersion());
 ipcMain.handle('app:isDevMode',       () => !app.isPackaged);
 ipcMain.handle('toolchain:abort',     () => toolchain.abort());
 
+// ── IPC: Dev-only utilities (not available in packaged app) ──
+if (!app.isPackaged) {
+  ipcMain.handle('dev:getRendererPath', () => {
+    return path.join(__dirname, 'renderer');
+  });
+  ipcMain.handle('dev:writeFile', async (_, { filePath, content }) => {
+    try {
+      fs.writeFileSync(filePath, content, 'utf8');
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+}
+
 // ── IPC: Port detection ────────────────────────────────
 ipcMain.handle('ports:list', async () => {
   return await portDetect.listPorts();
