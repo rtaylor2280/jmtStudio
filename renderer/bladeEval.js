@@ -72,6 +72,48 @@ class PulsingNode {
   }
 }
 
+// ── StripesX<widthNode, speedNode, C1, C2, ...> ──────────────────────────────
+// Variable-width/speed Stripes — width and speed are value nodes.
+class StripesXNode {
+  constructor(widthNode, speedNode, colors) {
+    this._widthNode = widthNode;
+    this._speedNode = speedNode;
+    this._colors    = colors;
+    this._speed = 3000; this._t = 0; this._n = 132;
+  }
+  run(blade) {
+    this._n = blade.ledCount;
+    this._t = blade.micros / 1000000;
+    if (this._widthNode.run)  this._widthNode.run(blade);
+    if (this._speedNode.run)  this._speedNode.run(blade);
+    this._speed = this._speedNode.getValue ? this._speedNode.getValue(0) * 32768 : 3000;
+    this._colors.forEach(c => c.run(blade));
+  }
+  getColor(led) {
+    const n = this._colors.length;
+    if (n === 0) return BLACK;
+    const scroll = this._t * this._speed * 0.001 * this._n;
+    const posF   = ((led + scroll) % this._n + this._n) % this._n;
+    const t      = posF / Math.max(1, this._n - 1);
+    const seg    = Math.min(n - 2, Math.floor(t * (n - 1)));
+    const tSeg   = t * (n - 1) - seg;
+    return mixColors(this._colors[seg].getColor(led), this._colors[(seg + 1) % n].getColor(led), tSeg);
+  }
+}
+
+// ── AlphaMixL<alphaFn, C1, C2> ───────────────────────────────────────────────
+// Mixes C1 and C2 weighted by alphaFn.getValue(); result alpha = that weight.
+class AlphaMixLNode {
+  constructor(alphaFn, a, b) { this._alpha = alphaFn; this._a = a; this._b = b; }
+  run(blade) { this._a.run(blade); this._b.run(blade); this._alpha.run(blade); }
+  getColor(led) {
+    const t  = this._alpha.getValue ? this._alpha.getValue(led) : 0;
+    const ca = this._a.getColor(led);
+    const cb = this._b.getColor(led);
+    return mkColor(ca.r*(1-t)+cb.r*t, ca.g*(1-t)+cb.g*t, ca.b*(1-t)+cb.b*t, t);
+  }
+}
+
 // ── Stripes<width, speed, C1, C2, ...> ───────────────────────────────────────
 // Moving stripe pattern. Approximated as a scrolling gradient.
 class StripesNode {
@@ -508,6 +550,160 @@ class _StubVal {
   getColor(_l) { return mkColor(0, 0, 0, 0); }
 }
 
+// ── RandomFlicker<A, B> ───────────────────────────────────────────────────────
+// Each LED independently flickers between A and B each frame.
+class RandomFlickerNode {
+  constructor(a, b) { this._a = a; this._b = b; this._vals = []; }
+  run(blade) {
+    this._a.run(blade); this._b.run(blade);
+    const n = blade.ledCount;
+    if (this._vals.length !== n) this._vals = new Array(n).fill(0);
+    for (let i = 0; i < n; i++) this._vals[i] = Math.random();
+  }
+  getColor(led) {
+    return mixColors(this._a.getColor(led), this._b.getColor(led), this._vals[led] || 0);
+  }
+}
+
+// ── Ifon<A, B> ────────────────────────────────────────────────────────────────
+// Returns A when blade is on, B when off.
+class IfonNode {
+  constructor(a, b) { this._a = a; this._b = b; this._on = false; }
+  run(blade) { this._on = blade.on; this._a.run(blade); this._b.run(blade); }
+  getColor(led) { return (this._on ? this._a : this._b).getColor(led); }
+  getValue(led) {
+    const src = this._on ? this._a : this._b;
+    return src.getValue ? src.getValue(led) : 0;
+  }
+}
+
+// ── Sin<periodMs> / Saw<periodMs> ────────────────────────────────────────────
+// Oscillating scalar value nodes (0–1 range, normalised from ProffieOS 0–32768).
+class SinNode {
+  constructor(period) { this._ms = +period || 1000; this._t = 0; }
+  run(blade) { this._t = blade.micros / 1000; }
+  getValue(_l) { return 0.5 + 0.5 * Math.sin(this._t / this._ms * Math.PI * 2); }
+  getColor(_l) { return mkColor(0, 0, 0, 0); }
+}
+class SawNode {
+  constructor(period) { this._ms = +period || 1000; this._t = 0; }
+  run(blade) { this._t = blade.micros / 1000; }
+  getValue(_l) { return (this._t % this._ms) / this._ms; }
+  getColor(_l) { return mkColor(0, 0, 0, 0); }
+}
+
+// ── Subtract<A, B> ────────────────────────────────────────────────────────────
+// Scalar: A - B (clamped 0-1). Colour: pixel-wise subtract.
+function _makeSubtractNode(a, b) {
+  return {
+    run(bl) { a.run(bl); b.run(bl); },
+    getValue(l) { return Math.max(0, (a.getValue?.(l) ?? 0) - (b.getValue?.(l) ?? 0)); },
+    getColor(l) {
+      const ca = a.getColor(l), cb = b.getColor(l);
+      return mkColor(ca.r - cb.r, ca.g - cb.g, ca.b - cb.b, ca.a);
+    },
+  };
+}
+
+// ── OnSparkL<color, fadeMs> ───────────────────────────────────────────────────
+// White spark at tip on ignition, fades out quickly.
+class OnSparkLNode {
+  constructor(color, ms) { this._color = color; this._ms = +ms || 300; this._t = 0; this._fired = false; }
+  run(blade) {
+    const dt = blade._lastDeltaMs || 0;
+    this._color.run(blade);
+    if (blade.on && !this._fired) { this._t = 1; this._fired = true; }
+    if (!blade.on) this._fired = false;
+    this._t = Math.max(0, this._t - dt / this._ms);
+  }
+  getColor(led) {
+    if (this._t <= 0) return mkColor(0, 0, 0, 0);
+    const c = this._color.getColor(led);
+    return mkColor(c.r, c.g, c.b, c.a * this._t);
+  }
+}
+
+// ── SparkleL<color, density> ──────────────────────────────────────────────────
+// Layer version of Sparkle — adds sparks over whatever is below.
+class SparkleLNode {
+  constructor(color, density) {
+    this._color   = color;
+    this._density = density !== undefined ? +density : 200;
+    this._sparks  = [];
+  }
+  run(blade) {
+    this._color.run(blade);
+    const n    = blade.ledCount;
+    const prob = this._density / 32768;
+    if (this._sparks.length !== n) this._sparks = new Array(n).fill(0);
+    for (let i = 0; i < n; i++) {
+      this._sparks[i] = Math.max(0, this._sparks[i] - 0.08);
+      if (Math.random() < prob) this._sparks[i] = 0.7 + Math.random() * 0.3;
+    }
+  }
+  getColor(led) {
+    const s = this._sparks[led] || 0;
+    if (s <= 0) return mkColor(0, 0, 0, 0);
+    const c = this._color.getColor(led);
+    return mkColor(c.r, c.g, c.b, s);
+  }
+}
+
+// ── Strobe<A, B, rateHz, holdMs> ─────────────────────────────────────────────
+// Alternates between A and B. ProffieOS rateHz is flashes-per-second.
+class StrobeNode {
+  constructor(a, b, rate) {
+    this._a = a; this._b = b;
+    this._rateHz = +rate || 10;
+    this._phase = 0;
+  }
+  run(blade) {
+    this._a.run(blade); this._b.run(blade);
+    const periodMs = 1000 / this._rateHz;
+    this._phase = (blade.micros / 1000) % periodMs / periodMs;
+  }
+  getColor(led) {
+    return (this._phase < 0.5 ? this._a : this._b).getColor(led);
+  }
+}
+
+// ── StrobeL<color, rateHz> ────────────────────────────────────────────────────
+// Layer that strobes — returns color at full alpha or transparent.
+class StrobeLNode {
+  constructor(color, rate) { this._color = color; this._rateHz = +rate || 10; this._phase = 0; }
+  run(blade) {
+    this._color.run(blade);
+    const periodMs = 1000 / this._rateHz;
+    this._phase = (blade.micros / 1000) % periodMs / periodMs;
+  }
+  getColor(led) {
+    if (this._phase >= 0.5) return mkColor(0, 0, 0, 0);
+    return this._color.getColor(led);
+  }
+}
+
+// ── ResponsiveLockupL<color, beginFn, endFn, sizeNode> ────────────────────────
+// Shows color while lockup active, with size/position driven by motion.
+class ResponsiveLockupLNode {
+  constructor(color) { this._color = color; this._on = false; }
+  run(blade) { this._on = blade.lockup; this._color.run(blade); }
+  getColor(led) {
+    if (!this._on) return mkColor(0, 0, 0, 0);
+    return this._color.getColor(led);
+  }
+}
+
+// ── ResponsiveMeltL<color, sizeNode> ─────────────────────────────────────────
+// Shows color while melt/drag active.
+class ResponsiveMeltLNode {
+  constructor(color) { this._color = color; this._on = false; }
+  run(blade) { this._on = blade.melt || blade.drag; this._color.run(blade); }
+  getColor(led) {
+    if (!this._on) return mkColor(0, 0, 0, 0);
+    return this._color.getColor(led);
+  }
+}
+
 // ── Transition nodes (TrFade, TrWipe, etc.) ───────────────────────────────────
 // Carry a _ms duration so InOutTrL / LockupTrL can extract timing; otherwise
 // behave as transparent stubs.
@@ -750,14 +946,35 @@ function buildNodeByName(name, args) {
     // ── Sensor / motion stubs (no hardware in simulator) ──────────────────
     case 'BladeAngle':    return new _StubVal(0.5);
     case 'SwingSpeed':    return new _StubVal(0);
+    case 'SwingAcceleration': return new _StubVal(0);
     case 'TwistAngle':    return new _StubVal(0);
     case 'BatteryLevel':  return new _StubVal(0.8);
     case 'VolumeLevel':   return new _StubVal(0.7);
     case 'SlowNoise':     return new _StubVal(0.5);
     case 'NoisySoundLevel': return new _StubVal(0.5);
+    case 'ClashImpactF':  return new _StubVal(0);
+    case 'EffectRandomF': return new _StubVal(0.5);
+    case 'EffectPosition': return new _StubVal(0.5);
+    case 'HoldPeakF':     return new _StubVal(0);
+    case 'LockupPulseF':  return new _StubVal(0);
     case 'IsLessThan':    return new IsLessThanNode(buildNode(args[0]), buildNode(args[1]));
     case 'IsGreaterThan': return new IsLessThanNode(buildNode(args[1]), buildNode(args[0]));
     case 'Trigger':       return new _StubVal(0);
+    case 'WavLen':        return new _StubVal(500 / 32768);
+    case 'Sum': {
+      const a = args[0] ? buildNode(args[0]) : new _StubVal(0);
+      const b = args[1] ? buildNode(args[1]) : new _StubVal(0);
+      return { run(bl) { a.run(bl); b.run(bl); },
+               getValue(l) { return (a.getValue?.(l)??0) + (b.getValue?.(l)??0); },
+               getColor(_l) { return mkColor(0,0,0,0); } };
+    }
+    case 'Mult': {
+      const a = args[0] ? buildNode(args[0]) : new _StubVal(0);
+      const b = args[1] ? buildNode(args[1]) : new _StubVal(1);
+      return { run(bl) { a.run(bl); b.run(bl); },
+               getValue(l) { return (a.getValue?.(l)??0) * (b.getValue?.(l)??1); },
+               getColor(_l) { return mkColor(0,0,0,0); } };
+    }
 
     // ── Transition timing nodes ───────────────────────────────────────────
     case 'TrInstant':       return new TrNode(0);
@@ -766,6 +983,33 @@ function buildNodeByName(name, args) {
     case 'TrDelay':
     case 'TrWipe':
     case 'TrWipeIn':        return new TrNode(+args[0] || 300);
+    // Variable-time wipe — build the ms node and call getValue() for actual timing
+    case 'TrWipeX':
+    case 'TrWipeInX': {
+      if (!args[0]) return new TrNode(300);
+      try {
+        const n = buildNode(args[0]);
+        const ms = n.getValue ? n.getValue(0) : (n._ms || 300);
+        return new TrNode(Math.max(50, ms > 0 ? ms : 300));
+      } catch(_) { return new TrNode(300); }
+    }
+    // Timing utility nodes — must expose getValue() so TrWipeX can use them
+    case 'IgnitionTime': {
+      const ms = +args[0] || 300;
+      return { _ms: ms, run(){}, getValue(){ return ms; }, getColor(){ return mkColor(0,0,0,0); } };
+    }
+    case 'RetractionTime': {
+      const ms = +args[0] > 0 ? +args[0] : 800;
+      return { _ms: ms, run(){}, getValue(){ return ms; }, getColor(){ return mkColor(0,0,0,0); } };
+    }
+    case 'BendTimePowX': {
+      // BendTimePowX<msNode, powerNode> — apply power curve to timing; sim uses msNode directly
+      try {
+        const n = args[0] ? buildNode(args[0]) : null;
+        const ms = (n?.getValue?.(0) ?? n?._ms ?? 0);
+        return { _ms: Math.max(50, ms > 0 ? ms : 800), run(){}, getValue(){ return Math.max(50, ms > 0 ? ms : 800); }, getColor(){ return mkColor(0,0,0,0); } };
+      } catch(_) { return { _ms: 800, run(){}, getValue(){ return 800; }, getColor(){ return mkColor(0,0,0,0); } }; }
+    }
     case 'TrWipeSparkTip':
     case 'TrWipeInSparkTip':return new TrNode(+args[1] || +args[0] || 300);
     case 'TrBoing':         return new TrNode(+args[0] || 300);
@@ -823,6 +1067,8 @@ function buildNodeByName(name, args) {
     case 'Pulsing':          return new PulsingNode(buildNode(args[0]), buildNode(args[1]), +args[2] || 1000);
     case 'Gradient':         return new GradientNode(args.map(buildNode));
     case 'Stripes':          return new StripesNode(+args[0], +args[1], args.slice(2).map(buildNode));
+    case 'StripesX':         return new StripesXNode(args[0] ? buildNode(args[0]) : new _StubVal(0.3), args[1] ? buildNode(args[1]) : new _StubVal(0), args.slice(2).map(buildNode));
+    case 'AlphaMixL':        return new AlphaMixLNode(args[0] ? buildNode(args[0]) : new _StubVal(0), args[1] ? buildNode(args[1]) : TRANSPARENT, args[2] ? buildNode(args[2]) : TRANSPARENT);
     case 'Bump':             return new BumpNode(buildNode(args[0]), buildNode(args[1]));
     case 'Scale':            return new ScaleNode(buildNode(args[0]), buildNode(args[1]), buildNode(args[2]));
     case 'SmoothStep':       return new SmoothStepNode(buildNode(args[0]), buildNode(args[1]));
@@ -882,13 +1128,139 @@ function buildNodeByName(name, args) {
     case 'ResponsiveLightningBlockL':
       return TRANSPARENT;
 
-    // ── Nodes that wrap inner styles — pass through to first arg ──────────
-    // (OnSpark, Blast, LocalizedClash, Lockup, Strobe, etc.)
-    default:
-      if (args.length > 0) {
-        try { return buildNode(args[0]); } catch(_) {}
+    // ── Newly implemented: high-impact functions ───────────────────────────
+    case 'RandomFlicker':
+      return new RandomFlickerNode(buildNode(args[0]), buildNode(args[1]));
+    case 'Ifon':
+      return new IfonNode(
+        args[0] ? buildNode(args[0]) : TRANSPARENT,
+        args[1] ? buildNode(args[1]) : TRANSPARENT
+      );
+    case 'Sin':
+    case 'Saw': {
+      // Period arg is raw ms (Int<500> = 500ms), not a normalized 0-1 value.
+      // IntNode._v holds the raw integer before our /32768 normalization.
+      let ms = 1000;
+      if (args[0]) {
+        try {
+          const n = buildNode(args[0]);
+          ms = n._v !== undefined ? n._v        // IntNode raw value
+             : n._ms !== undefined ? n._ms       // timing node
+             : (n.getValue?.(0) ?? 0) * 32768 || 1000; // normalized → raw
+        } catch(_) { ms = +args[0] || 1000; }
       }
-      return TRANSPARENT; // was RgbNode(0,0,0) — opaque black broke Layers
+      return name === 'Sin' ? new SinNode(ms) : new SawNode(ms);
+    }
+    case 'Subtract': {
+      const a = args[0] ? buildNode(args[0]) : new _StubVal(0);
+      const b = args[1] ? buildNode(args[1]) : new _StubVal(0);
+      return _makeSubtractNode(a, b);
+    }
+    case 'OnSpark':
+    case 'OnSparkL': {
+      // OnSpark<base, color, fadeMs> / OnSparkL<color, fadeMs>
+      const isOnSpark = (name === 'OnSpark');
+      if (isOnSpark) {
+        // OnSpark<base, color, fadeMs> — wrap base with spark overlay
+        const base  = args[0] ? buildNode(args[0]) : TRANSPARENT;
+        const color = args[1] ? buildNode(args[1]) : new RgbNode(255, 255, 255);
+        const ms    = args[2] ? (+args[2] || 300) : 300;
+        const spark = new OnSparkLNode(color, ms);
+        return {
+          run(bl) { base.run(bl); spark.run(bl); },
+          getColor(l) {
+            const s = spark.getColor(l);
+            if (s.a <= 0) return base.getColor(l);
+            const b = base.getColor(l);
+            return mkColor(b.r*(1-s.a)+s.r*s.a, b.g*(1-s.a)+s.g*s.a, b.b*(1-s.a)+s.b*s.a);
+          },
+        };
+      }
+      return new OnSparkLNode(
+        args[0] ? buildNode(args[0]) : new RgbNode(255,255,255),
+        args[1] ? +args[1] : 300
+      );
+    }
+    case 'SparkleL':
+      return new SparkleLNode(
+        args[0] ? buildNode(args[0]) : new RgbNode(255,255,255),
+        args[1] !== undefined ? +args[1] : undefined
+      );
+    case 'Strobe': {
+      // Strobe<A, B, rateHz, holdMs> — rate in Hz
+      const a = args[0] ? buildNode(args[0]) : TRANSPARENT;
+      const b = args[1] ? buildNode(args[1]) : TRANSPARENT;
+      const rateHz = +args[2] || 10;
+      return new StrobeNode(a, b, 1000 / rateHz);
+    }
+    case 'StrobeF':
+    case 'StrobeL': {
+      const color = args[0] ? buildNode(args[0]) : new RgbNode(255,255,255);
+      const rateHz = args[1] ? (+args[1] || 10) : 10;
+      return new StrobeLNode(color, 1000 / rateHz);
+    }
+    case 'ResponsiveLockupL':
+      return new ResponsiveLockupLNode(args[0] ? buildNode(args[0]) : new RgbNode(255,255,255));
+    case 'ResponsiveMeltL':
+      return new ResponsiveMeltLNode(args[0] ? buildNode(args[0]) : new RgbNode(255,100,0));
+
+    // ── Tr* timing aliases — only carry ms, no colour state ───────────────
+    case 'TrBoingX':
+    case 'TrFadeX':
+    case 'TrSmoothFadeX':
+    case 'TrDelayX':
+    case 'TrBlink': {
+      if (!args[0]) return new TrNode(300);
+      try { const n = buildNode(args[0]); return new TrNode(n.getValue ? n.getValue(0) : (+args[0] || 300)); }
+      catch(_) { return new TrNode(300); }
+    }
+    case 'TrCenterWipe':
+    case 'TrCenterWipeIn':   return new TrNode(+args[0] || 300);
+    case 'TrCenterWipeX':
+    case 'TrCenterWipeInX': {
+      if (!args[0]) return new TrNode(300);
+      try { const n = buildNode(args[0]); return new TrNode(n.getValue ? n.getValue(0) : 300); }
+      catch(_) { return new TrNode(300); }
+    }
+    case 'TrCenterWipeSparkX':
+    case 'TrCenterWipeInSparkX':
+    case 'TrWipeInSparkTipX':
+    case 'TrWipeSparkTipX':
+    case 'TrSparkX':         return new TrNode(+args[0] || 300);
+    case 'TrExtendX': {
+      if (!args[0]) return new TrNode(300);
+      try { const n = buildNode(args[0]); return new TrNode(n.getValue ? n.getValue(0) : 300); }
+      catch(_) { return new TrNode(300); }
+    }
+    case 'TrColorCycle':
+    case 'TrColorCycleX':    return new TrNode(+args[0] || 800);
+    case 'TrJoinR':          return new TrNode(+args[0] || 300);
+    case 'TrLoopN':          return new TrNode((+args[0] || 1) * (+args[1] || 300));
+    case 'TrRandom':         return new TrNode(300);
+    case 'TrSelect':         return new TrNode(300);
+    case 'TrDoEffectAlways':
+    case 'TrDoEffectX': {
+      // TrDoEffectX<Tr, EFFECT> — carries Tr timing, fires effect as side-effect
+      if (args[0]) { try { return buildNode(args[0]); } catch(_) {} }
+      return new TrNode(300);
+    }
+    case 'TransitionLoop':   return new TrNode(+args[0] || 300);
+    case 'TransitionPulseL': return args[0] ? buildNode(args[0]) : TRANSPARENT;
+
+    // ── Registry-based fallback ────────────────────────────────────────────
+    default: {
+      const status = _FN_STATUS[name];
+      if (status === 'UNIMPLEMENTED') {
+        // Track for consolidated error reporting
+        if (_parseUnimplemented) _parseUnimplemented.add(name);
+        // Graceful visual fallback: pass through first arg so style isn't black
+        if (args.length > 0) { try { return buildNode(args[0]); } catch(_) {} }
+        return TRANSPARENT;
+      }
+      // UNKNOWN (JMT custom) or truly unrecognized — pass through silently
+      if (args.length > 0) { try { return buildNode(args[0]); } catch(_) {} }
+      return TRANSPARENT;
+    }
   }
 }
 
@@ -919,18 +1291,90 @@ function splitArgs(s) {
   return result;
 }
 
+// ── Function status registry ──────────────────────────────────────────────────
+// Four statuses for every function name we know about:
+//   IMPLEMENTED  — has real rendering logic
+//   STUB         — hardware/sensor dependent; silent neutral value, no error
+//   UNIMPLEMENTED — known ProffieOS function not yet supported; raises parse error
+//   UNKNOWN      — JMT custom wrapper; silently passes through first arg
+
+const _FN_STATUS = (() => {
+  const I = 'IMPLEMENTED', S = 'STUB', U = 'UNIMPLEMENTED', X = 'UNKNOWN';
+  return {
+    // Implemented
+    AlphaL:I, AlphaMixL:I, AudioFlicker:I, AudioFlickerL:I, BendTimePowX:I,
+    Blast:I, BlastL:I, Blinking:I, BlinkingL:I, BrownNoiseFlicker:I,
+    BrownNoiseFlickerL:I, Bump:I, EffectSequence:I, EasyBlade:I, FireConfig:I,
+    Gradient:I, HumpFlicker:I, HumpFlickerL:I, IgnitionDelay:I, IgnitionTime:I,
+    InOutFuncX:I, InOutHelper:I, InOutHelperL:I, InOutTrL:I, Int:I, IntArg:I,
+    IsGreaterThan:I, IsLessThan:I, Layers:I, LocalizedClashL:I, Lockup:I,
+    LockupTrL:I, Mix:I, Mult:I, Pulsing:I, RandomPerLEDFlicker:I,
+    ResponsiveBlastFadeL:I, ResponsiveBlastL:I, ResponsiveBlastWaveL:I,
+    ResponsiveClashL:I, ResponsiveStabL:I, RetractionDelay:I, RetractionTime:I,
+    Rgb:I, Rgb16:I, RgbArg:I, RotateColors:I, RotateColorsX:I, Scale:I,
+    SimpleClash:I, SimpleClashL:I, SmoothStep:I, Sparkle:I, Stripes:I,
+    StripesX:I, StyleFire:I, StyleFirePtr:I, StylePtr:I, Sum:I,
+    TransitionEffect:I, TransitionEffectL:I, TransitionLoop:I, TransitionLoopL:I,
+    TransitionPulseL:I, TrBling:I, TrBoing:I, TrBoingX:I,
+    TrCenterWipe:I, TrCenterWipeIn:I, TrCenterWipeInSparkX:I, TrCenterWipeInX:I,
+    TrCenterWipeSparkX:I, TrCenterWipeX:I, TrColorCycle:I, TrColorCycleX:I,
+    TrConcat:I, TrDelay:I, TrDelayX:I, TrDoEffectAlways:I, TrDoEffectX:I,
+    TrExtend:I, TrExtendX:I, TrFade:I, TrFadeX:I, TrInstant:I, TrJoin:I,
+    TrJoinR:I, TrLoopIf:I, TrLoopN:I, TrRandom:I, TrSelect:I,
+    TrSmoothFade:I, TrSmoothFadeX:I, TrSparkX:I, TrWaveX:I, TrWipe:I,
+    TrWipeIn:I, TrWipeInSparkTip:I, TrWipeInSparkTipX:I, TrWipeInX:I,
+    TrWipeSparkTip:I, TrWipeSparkTipX:I, TrWipeX:I,
+    // Newly implemented
+    Ifon:I, OnSpark:I, OnSparkL:I, RandomFlicker:I, ResponsiveLockupL:I,
+    ResponsiveMeltL:I, Saw:I, Sin:I, SparkleL:I, Strobe:I, StrobeF:I,
+    StrobeL:I, Subtract:I,
+    // Stubs (hardware/sensor — fixed neutral value, no error)
+    BatteryLevel:S, BladeAngle:S, ClashImpactF:S, EffectPosition:S,
+    EffectRandomF:S, HoldPeakF:S, LockupPulseF:S, NoisySoundLevel:S,
+    ResponsiveLightningBlockL:S, SlowNoise:S, SwingAcceleration:S, SwingSpeed:S,
+    Trigger:S, TwistAngle:S, Variation:S, VolumeLevel:S, WavLen:S,
+    // JMT custom wrappers — UNKNOWN in standard ProffieOS, pass through silently
+    BootAccelSpin:X, BootNormTime:X, ChargingAccentStyle:X,
+    ChristmasPixelSwitchWrapper:X, CrystalChamberAccelWrapper:X,
+    CrystalChamberHeartbeatWrapper:X, CrystalChamberWrapper:X,
+    HexSpiralStyle:X, PixelSwitchWrapper:X,
+    // Unimplemented ProffieOS functions
+    BendTimePowInvX:U, BlastF:U, BlastFadeoutL:U, BlinkingF:U, BlinkingX:U,
+    BrownNoiseF:U, CenterDistF:U, CircularSectionF:U, ColorChange:U,
+    ColorSelect:U, ColorSequence:U, Cylon:U, EffectPulseF:U,
+    IncrementWithReset:U, IsBetween:U, LayerFunctions:U, LocalizedClash:U,
+    MultiTransitionEffect:U, MultiTransitionEffectL:U,
+    Percentage:U, PulsingF:U, PulsingX:U, RandomBlink:U, RandomBlinkF:U,
+    RandomPerLEDFlickerL:U, Remap:U,
+    StaticFire:U, ThresholdPulseF:U, TimeSinceEffect:U, TrBlink:U, WavNum:U,
+  };
+})();
+
+// Collect which UNIMPLEMENTED names were hit during a single parse so the
+// caller can surface one consolidated error.
+let _parseUnimplemented = null; // null = not tracking; Set when tracking
+
+function _startParseTracking() { _parseUnimplemented = new Set(); }
+function _stopParseTracking()  { const s = _parseUnimplemented; _parseUnimplemented = null; return s; }
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 window.BladeEval = {
   Blade,
 
   /**
-   * Parse a StylePtr<...>() string into a runnable style object.
-   * @param {string} text
-   * @returns {{ run(blade): void, getColor(led): {r,g,b,a} }}
+   * Parse a style string.
+   * @returns {{ style: object, unimplemented: Set<string> }}
+   *   style    — runnable node (has run(blade) and getColor(led))
+   *   unimplemented — set of UNIMPLEMENTED function names hit during parse
    */
   parse(text) {
-    return parseStyle(text);
+    _startParseTracking();
+    let style;
+    try { style = parseStyle(text); }
+    finally { /* tracking stopped in the return path */ }
+    const unimplemented = _stopParseTracking();
+    return { style, unimplemented };
   },
 
   /**

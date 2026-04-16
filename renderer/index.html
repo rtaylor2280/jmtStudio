@@ -2335,6 +2335,8 @@ function loadContent(rawContent, filePath) {
   if (isElectron && window.refreshPorts) window.refreshPorts();
   // refreshPorts triggers checkCacheForConfig once FQBN is resolved
   window.clearBuildLog?.();
+  // Reload sim whenever a new config is opened (if panel has been visited)
+  if (_simPanelReady) _simReload();
 }
 
 function clearMeta() {
@@ -2578,6 +2580,7 @@ async function doSave() {
         if (usbEl) baselineUsb = usbEl.value || null;
         updateChangedIndicators();
         if (window.updateUsbChangedIndicator) window.updateUsbChangedIndicator();
+        if (_simPanelReady) _simReload();
       } else { alert('Save failed: ' + res.error); }
     } else { await doSaveAs(); }
   } else { doDownload(); }
@@ -2609,6 +2612,7 @@ async function doSaveAs() {
     if (usbEl) baselineUsb = usbEl.value || null;
     updateChangedIndicators();
     if (window.updateUsbChangedIndicator) window.updateUsbChangedIndicator();
+    if (_simPanelReady) _simReload();
   }
 }
 
@@ -3596,6 +3600,8 @@ let _simParsed      = null;   // last ConfigParser result
 let _simPresetIdx   = 0;
 let _simBladeIdx    = 0;
 let _simLastVersion = null;
+let _simPanelReady  = false;  // true after initSimPanel has run at least once
+let _simReloading   = false;  // debounce: prevent overlapping reloads
 const _simIncludeCache = new Map();   // key: "version:path" → content|null
 
 // ── Include flattener ────────────────────────────────────────────────────────
@@ -3757,7 +3763,7 @@ function _simApplyPreset() {
   if (!_simParsed) { console.warn('[sim] _simApplyPreset: no parsed config'); return; }
   const preset = _simParsed.presets[_simPresetIdx];
   if (!preset) { console.warn('[sim] _simApplyPreset: no preset at index', _simPresetIdx); return; }
-  console.log('[sim] applying preset', _simPresetIdx, '"' + preset.name + '"', '— styles:', preset.styles.length);
+  console.log('[sim] applying preset', _simPresetIdx, '"' + preset.name + '"', '— styles:', preset.styles.length, '— blade idx:', _simBladeIdx);
 
   // LED count from blade config
   const blade = _simParsed.blades[_simBladeIdx] || _simParsed.blades[0];
@@ -3887,15 +3893,22 @@ function _simLoop(ts) {
   _simLastTs = ts;
 
   if (_simUsingEval && _simStyle && _simBlade) {
-    _simBlade._lastDeltaMs = dt;
-    _simBlade.micros += dt * 1000;
-    _simStyle.run(_simBlade);
-    const pixels = [];
-    for (let i = 0; i < _simLeds; i++) {
-      const c = _simStyle.getColor(i);
-      pixels.push([(c.r * 255) | 0, (c.g * 255) | 0, (c.b * 255) | 0]);
+    try {
+      _simBlade._lastDeltaMs = dt;
+      _simBlade.micros += dt * 1000;
+      _simStyle.run(_simBlade);
+      const pixels = [];
+      for (let i = 0; i < _simLeds; i++) {
+        const c = _simStyle.getColor(i);
+        pixels.push([(c.r * 255) | 0, (c.g * 255) | 0, (c.b * 255) | 0]);
+      }
+      if (window.WS2812) WS2812.setPixels(pixels);
+    } catch(err) {
+      console.error('[sim] runtime error in style loop — switching to demo:', err);
+      _simUsingEval = false;
+      const label = document.getElementById('sim-status');
+      if (label) label.textContent = 'Runtime error: ' + (err?.message || err).toString().slice(0, 80);
     }
-    if (window.WS2812) WS2812.setPixels(pixels);
   } else {
     if (window.WS2812) WS2812.setPixels(_nextTestFrame(ts, _simLeds));
   }
@@ -3905,6 +3918,20 @@ function _simLoop(ts) {
   if (_simAnimFrame !== null) {
     _simAnimFrame = requestAnimationFrame(_simLoop);
   }
+}
+
+// ── _simReload — full re-parse from editor content ────────────────────────────
+// Only called on config file open and config save. Tab switches only start/stop
+// the loop; they do not re-parse.
+function _simReload() {
+  if (_simReloading) return;
+  _simReloading = true;
+  _simLoadConfig().then(() => {
+    _simReloading = false;
+    // Only start loop if panel is currently visible
+    const simView = document.getElementById('view-sim');
+    if (simView && !simView.classList.contains('hidden')) _simStart();
+  }).catch(() => { _simReloading = false; });
 }
 
 function _simStart() {
@@ -3919,19 +3946,25 @@ function _simStop() {
 function _simLoadStyle(text) {
   if (!window.BladeEval) { console.error('[sim] BladeEval not loaded'); return; }
   console.log('[sim] _simLoadStyle, length:', text?.length, 'preview:', text?.slice(0, 120));
+  const statusLbl = document.getElementById('sim-status');
   try {
-    _simStyle    = BladeEval.parse(text.trim());
-    _simBlade    = new BladeEval.Blade(_simLeds);
+    const { style, unimplemented } = BladeEval.parse(text.trim());
+    _simStyle     = style;
+    _simBlade     = new BladeEval.Blade(_simLeds);
     _simUsingEval = true;
-    const label = document.getElementById('sim-status');
-    if (label) label.textContent = 'Style loaded';
+    if (unimplemented && unimplemented.size > 0) {
+      const names = [...unimplemented].sort().join(', ');
+      console.warn('[sim] UNIMPLEMENTED functions (visual fallback applied):', names);
+      if (statusLbl) statusLbl.textContent = 'Partial: ' + names;
+    } else {
+      if (statusLbl) statusLbl.textContent = 'Style loaded';
+    }
     console.log('[sim] style loaded OK');
   } catch(e) {
-    const label = document.getElementById('sim-status');
     const msg = e?.message || String(e);
     console.error('[sim] style parse error:', msg);
     console.error('[sim] style text that failed:', text?.slice(0, 300));
-    if (label) label.textContent = 'Parse error: ' + msg.slice(0, 80);
+    if (statusLbl) statusLbl.textContent = 'Parse error: ' + msg.slice(0, 80);
   }
 }
 
@@ -3986,7 +4019,8 @@ window.initSimPanel = function() {
     _simApplyPreset();
   });
 
-  _simLoadConfig().then(() => _simStart());
+  _simPanelReady = true;
+  _simReload();
 
   // Effect buttons — jmt_fett_prop.h / Fett263 layout (hardcoded until config parsing)
   const btnPower  = document.getElementById('sim-btn-power');
@@ -4001,9 +4035,11 @@ window.initSimPanel = function() {
   function _requireBlade() { return _simUsingEval && _simBlade; }
 
   if (btnPower) btnPower.addEventListener('click', () => {
-    if (!_requireBlade()) return;
+    console.log('[sim] power clicked: _simUsingEval=', _simUsingEval, '_simBlade=', !!_simBlade);
+    if (!_requireBlade()) { console.warn('[sim] power: no blade ready, ignoring'); return; }
     _simBlade.on = !_simBlade.on;
     btnPower.classList.toggle('sim-active', _simBlade.on);
+    console.log('[sim] blade.on =', _simBlade.on);
   });
   if (btnClash)  btnClash.addEventListener('click',  () => { if (_requireBlade()) _simBlade.addEffect('clash'); });
   if (btnStab)   btnStab.addEventListener('click',   () => { if (_requireBlade()) _simBlade.addEffect('stab'); });
@@ -4085,7 +4121,9 @@ function switchTab(name) {
       simView.dataset.loaded = '1';
       window.initSimPanel();
     } else {
-      _simLoadConfig().then(() => _simStart());
+      // Panel already initialized — just resume the loop; do NOT re-parse.
+      // Re-parse only happens on config file open/save via _simReload().
+      _simStart();
     }
   } else {
     _simStop();
@@ -4094,6 +4132,14 @@ function switchTab(name) {
 
 document.querySelectorAll('.tab').forEach(t => {
   t.addEventListener('click', () => switchTab(t.dataset.tab));
+});
+
+// Stop sim loop when window loses focus (tab/app switch) — no background burn.
+window.addEventListener('blur', () => _simStop());
+// Resume if the sim tab is still active when focus returns.
+window.addEventListener('focus', () => {
+  const simView = document.getElementById('view-sim');
+  if (simView && !simView.classList.contains('hidden')) _simStart();
 });
 
 // ── Favorites ──────────────────────────────────────────
