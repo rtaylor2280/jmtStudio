@@ -3929,8 +3929,8 @@ function _simReload() {
   _simLoadConfig().then(() => {
     _simReloading = false;
     // Only start loop if panel is currently visible
-    const simView = document.getElementById('view-sim');
-    if (simView && !simView.classList.contains('hidden')) _simStart();
+    const simView = document.getElementById('sim-view');
+    if (simView && simView.classList.contains('active')) _simStart();
   }).catch(() => { _simReloading = false; });
 }
 
@@ -4138,8 +4138,8 @@ document.querySelectorAll('.tab').forEach(t => {
 window.addEventListener('blur', () => _simStop());
 // Resume if the sim tab is still active when focus returns.
 window.addEventListener('focus', () => {
-  const simView = document.getElementById('view-sim');
-  if (simView && !simView.classList.contains('hidden')) _simStart();
+  const simView = document.getElementById('sim-view');
+  if (simView && simView.classList.contains('active')) _simStart();
 });
 
 // ── Favorites ──────────────────────────────────────────
