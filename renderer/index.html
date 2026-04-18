@@ -3202,6 +3202,7 @@ window.saveStylesFile = async function() {
   if (!_stylesEditorInstance) return;
   await window.electronAPI.writeStylesFile(_stylesEditorInstance.getValue());
   _setStylesDirty(false);
+  if (_stylesViewMode === 'visual') _buildStylesVisual();
 };
 
 function _setStylesDirty(v) {
@@ -3426,10 +3427,10 @@ function _buildStylesVisual() {
   const fullStyles = allEntries.filter(e => !e.isHelper);
 
   // ── Helpers side panel ──────────────────────────────
+  const helpersPanel = document.getElementById('styles-helpers-panel');
   helpersList.innerHTML = '';
-  if (!helpers.length) {
-    helpersList.innerHTML = '<div class="styles-helpers-empty">None detected</div>';
-  } else {
+  helpersPanel.style.display = helpers.length ? '' : 'none';
+  if (helpers.length) {
     helpers.forEach(entry => {
       const row = document.createElement('div');
       row.className = 'styles-helper-row';
