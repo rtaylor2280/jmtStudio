@@ -1602,7 +1602,10 @@
       <div class="tab-btns" id="tab-btns-styles">
         <button id="btn-styles-save" disabled title="Save Style Library">&#8595; Save</button>
         <button id="btn-styles-replace" title="Replace with another file">&#8593; Replace</button>
+        <button id="btn-styles-delete" title="Remove Style Library from JMT Studio">&#128465; Delete</button>
         <button id="btn-styles-export" title="Export a copy">&#8599; Export</button>
+        <div class="toolbar-divider"></div>
+        <button id="btn-styles-tab-link" disabled title="Open a config file to link the Style Library">&#128279; Link Style Library</button>
         <div class="toolbar-divider"></div>
         <div class="styles-view-toggle">
           <button class="styles-view-btn active" id="btn-styles-view-code" title="Code view">&#x3C;/&#x3E; Code</button>
@@ -3030,25 +3033,43 @@ let _stylesFileImported = false;
 
 function _updateStylesLinkBtn() {
   const btn       = document.getElementById('btn-styles-link');
+  const tabBtn    = document.getElementById('btn-styles-tab-link');
   const importBtn = document.getElementById('btn-styles-import');
   const divider   = document.getElementById('divider-styles-ctrl');
-  if (!btn) return;
 
   if (!_stylesFileImported) {
-    // No styles file — only import button is relevant
-    btn.style.display = 'none';
+    if (btn) btn.style.display = 'none';
     if (importBtn && divider) divider.style.display = importBtn.style.display !== 'none' ? '' : 'none';
+    if (tabBtn) { tabBtn.disabled = true; tabBtn.textContent = '\u{1F517} Link Style Library'; tabBtn.title = 'Open a config file to link the Style Library'; }
     return;
   }
 
-  const content = window._getEditorContent ? window._getEditorContent() : '';
-  const linked  = fileIsOpen && content.includes('my_styles.h');
-  btn.style.display = linked ? 'none' : '';
-  btn.disabled = !fileIsOpen;
+  const content  = window._getEditorContent ? window._getEditorContent() : '';
+  const linked   = fileIsOpen && content.includes('my_styles.h');
+  const fileName = currentFilePath ? currentFilePath.split(/[\\/]/).pop() : '';
 
+  // Config toolbar button — hides once linked
+  if (btn) {
+    btn.style.display = linked ? 'none' : '';
+    btn.disabled = !fileIsOpen;
+  }
   if (divider && importBtn) {
-    const anyVisible = importBtn.style.display !== 'none' || !linked;
-    divider.style.display = anyVisible ? '' : 'none';
+    divider.style.display = (importBtn.style.display !== 'none' || !linked) ? '' : 'none';
+  }
+
+  // Styles tab button — stays, becomes placeholder when linked
+  if (tabBtn) {
+    if (linked) {
+      tabBtn.disabled = true;
+      tabBtn.textContent = '\u{1F517} Implemented';
+      tabBtn.title = `Already included in ${fileName}`;
+    } else {
+      tabBtn.disabled = !fileIsOpen;
+      tabBtn.textContent = '\u{1F517} Link Style Library';
+      tabBtn.title = fileIsOpen
+        ? 'Adds #include "my_styles.h" to your config so ProffieOS can use your saved styles'
+        : 'Open a config file to link the Style Library';
+    }
   }
 }
 
@@ -3060,14 +3081,22 @@ document.getElementById('btn-styles-import').addEventListener('click', async () 
   if (tabBtn) tabBtn.style.display = '';
 });
 
-document.getElementById('btn-styles-link').addEventListener('click', () => {
+document.getElementById('btn-styles-delete').addEventListener('click', async () => {
+  if (!confirm('Remove Style Library from JMT Studio? The file will be deleted from app storage. Your original file is unaffected.')) return;
+  const result = await window.electronAPI.deleteStylesFile();
+  if (!result.ok) return;
+  window._applyStylesImportButtons(false);
+  const tabBtn = document.querySelector('.tab[data-tab="styles"]');
+  if (tabBtn) { tabBtn.style.display = 'none'; }
+  if (_activeTab === 'styles') switchTab('config');
+});
+
+function _insertStylesInclude() {
   if (!fileIsOpen) return;
   const editor = window._monacoEditor;
   if (!editor) return;
-  const content = editor.getValue();
-  const lines = content.split('\n');
+  const lines = editor.getValue().split('\n');
 
-  // Find insertion point: after #ifdef CONFIG_PRESETS, else after CONFIG_PROP #endif
   let insertAfter = -1;
   const presetsIdx = lines.findIndex(l => /^\s*#ifdef\s+CONFIG_PRESETS/.test(l));
   if (presetsIdx !== -1) {
@@ -3085,6 +3114,14 @@ document.getElementById('btn-styles-link').addEventListener('click', () => {
   lines.splice(insertAfter + 1, 0, '#include "my_styles.h"');
   editor.setValue(lines.join('\n'));
   _updateStylesLinkBtn();
+}
+
+document.getElementById('btn-styles-link').addEventListener('click', () => {
+  _insertStylesInclude();
+});
+
+document.getElementById('btn-styles-tab-link').addEventListener('click', () => {
+  _insertStylesInclude();
 });
 
 // ── Style Library ──────────────────────────────────────

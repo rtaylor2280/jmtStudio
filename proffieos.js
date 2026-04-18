@@ -47,6 +47,16 @@ function importStylesFile(sourcePath) {
   }
 }
 
+function deleteUserStyles() {
+  try {
+    const p = getUserStylesPath();
+    if (fs.existsSync(p)) fs.unlinkSync(p);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
 // Internal: resolves a version folder in userData.
 function _resolveVersionFolder(name) {
   const userPath = path.join(getUserVersionsPath(), name);
@@ -625,6 +635,7 @@ module.exports = {
   readStagedStyles,
   hasUserStyles,
   importStylesFile,
+  deleteUserStyles,
   getUserStylesPath,
   STYLES_FILENAME,
   importVersion,
