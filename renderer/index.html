@@ -3010,6 +3010,7 @@ document.getElementById('vp-file-modal')?.addEventListener('click', (e) => {
 // ── Style Library toolbar (Config tab) ─────────────────
 
 let _stylesFileImported = false;
+let _stylesFilePath     = '';  // forward-slash absolute path to userData/my_styles.h
 
 function _updateStylesLinkBtn() {
   const btn       = document.getElementById('btn-styles-link');
@@ -3025,7 +3026,10 @@ function _updateStylesLinkBtn() {
   }
 
   const content  = window._getEditorContent ? window._getEditorContent() : '';
-  const linked   = fileIsOpen && /^\s*#include\s+"my_styles\.h"\s*$/m.test(content);
+  const _escaped = _stylesFilePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const linked   = fileIsOpen && _stylesFilePath
+    ? new RegExp(String.raw`^\s*#include\s+"${_escaped}"\s*$`, 'm').test(content)
+    : false;
   const fileName = currentFilePath ? currentFilePath.split(/[\\/]/).pop() : '';
 
   // Config toolbar button — hides once linked
@@ -3056,7 +3060,7 @@ function _updateStylesLinkBtn() {
 document.getElementById('btn-styles-import').addEventListener('click', async () => {
   const result = await window.electronAPI.importStylesFile();
   if (!result.ok) return;
-  window._applyStylesImportButtons(true);
+  await window._applyStylesImportButtons(true);
   const tabBtn = document.querySelector('.tab[data-tab="styles"]');
   if (tabBtn) tabBtn.style.display = '';
 });
@@ -3065,7 +3069,7 @@ document.getElementById('btn-styles-delete').addEventListener('click', async () 
   if (!confirm('Remove Style Library from JMT Studio? The file will be deleted from app storage. Your original file is unaffected.')) return;
   const result = await window.electronAPI.deleteStylesFile();
   if (!result.ok) return;
-  window._applyStylesImportButtons(false);
+  await window._applyStylesImportButtons(false);
   const tabBtn = document.querySelector('.tab[data-tab="styles"]');
   if (tabBtn) { tabBtn.style.display = 'none'; }
   if (_activeTab === 'styles') switchTab('config');
@@ -3091,7 +3095,7 @@ function _insertStylesInclude() {
   }
   if (insertAfter === -1) return;
 
-  lines.splice(insertAfter + 1, 0, '#include "my_styles.h"');
+  lines.splice(insertAfter + 1, 0, `#include "${_stylesFilePath}"`);
   editor.setValue(lines.join('\n'));
   _updateStylesLinkBtn();
 }
@@ -3801,14 +3805,20 @@ require(['vs/editor/editor.main'], function () {
         if (tabBtn) tabBtn.style.display = enabled ? '' : 'none';
         if (!enabled && _activeTab === 'styles') switchTab('config');
       };
-      window._applyStylesImportButtons = (hasFile) => {
+      window._applyStylesImportButtons = async (hasFile) => {
         _stylesFileImported = hasFile;
+        if (hasFile) {
+          const raw = await window.electronAPI.getStylesPath();
+          _stylesFilePath = raw.replace(/\\/g, '/');
+        } else {
+          _stylesFilePath = '';
+        }
         document.getElementById('btn-styles-import').style.display = hasFile ? 'none' : '';
         _updateStylesLinkBtn();
       };
       const _hasStyles = await window.electronAPI.stylesFileExists();
       _applyStylesTabVisible(_hasStyles);
-      window._applyStylesImportButtons(_hasStyles);
+      await window._applyStylesImportButtons(_hasStyles);
       // Populate OS version dropdown
       const versions   = await window.electronAPI.listProffieVersions();
       const currentVer = await window.electronAPI.getSelectedVersion();

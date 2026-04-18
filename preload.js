@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // ── Style Library ──────────────────────────────────────
   stylesFileExists: ()          => ipcRenderer.invoke('styles:exists'),
+  getStylesPath:    ()          => ipcRenderer.invoke('styles:getPath'),
   importStylesFile: ()          => ipcRenderer.invoke('styles:import'),
   deleteStylesFile: ()          => ipcRenderer.invoke('styles:delete'),
   readStylesFile:   ()          => ipcRenderer.invoke('styles:read'),

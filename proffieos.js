@@ -340,15 +340,6 @@ function stageConfig(configContent) {
   try {
     fs.mkdirSync(path.dirname(stagingPath), { recursive: true });
     fs.writeFileSync(stagingPath, configContent, 'utf8');
-    // Sync my_styles.h into config dir — copy if present, delete if not,
-    // so the workspace never has a stale copy after the user removes the file.
-    const userStyles  = getUserStylesPath();
-    const stagedStyles = path.join(path.dirname(stagingPath), STYLES_FILENAME);
-    if (fs.existsSync(userStyles)) {
-      fs.copyFileSync(userStyles, stagedStyles);
-    } else if (fs.existsSync(stagedStyles)) {
-      fs.unlinkSync(stagedStyles);
-    }
     return { ok: true, stagedPath: stagingPath };
   } catch (e) {
     return { ok: false, error: `Failed to stage config:\n${e.message}` };

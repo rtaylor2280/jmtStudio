@@ -244,6 +244,7 @@ ipcMain.handle('store:removeRecentFile', (_, filePath) => {
 });
 // ── IPC: Style Library ─────────────────────────────────
 ipcMain.handle('styles:exists', () => proffie.hasUserStyles());
+ipcMain.handle('styles:getPath', () => proffie.getUserStylesPath());
 ipcMain.handle('styles:delete', () => proffie.deleteUserStyles());
 ipcMain.handle('styles:import', async () => {
   const { canceled, filePaths } = await dialog.showOpenDialog(win, {
