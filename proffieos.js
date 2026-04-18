@@ -29,6 +29,24 @@ function getUserVersionsPath() {
   return path.join(app.getPath('userData'), 'proffieOS_versions');
 }
 
+// User's persistent my_styles.h — source of truth; copied to config dir at compile time.
+function getUserStylesPath() {
+  return path.join(app.getPath('userData'), STYLES_FILENAME);
+}
+
+function hasUserStyles() {
+  return fs.existsSync(getUserStylesPath());
+}
+
+function importStylesFile(sourcePath) {
+  try {
+    fs.copyFileSync(sourcePath, getUserStylesPath());
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
 // Internal: resolves a version folder in userData.
 function _resolveVersionFolder(name) {
   const userPath = path.join(getUserVersionsPath(), name);
@@ -190,9 +208,6 @@ function getConfigStagingPath() {
   return path.join(getProffieOSRoot(), 'config', CONFIG_FILENAME);
 }
 
-function getStylesStagingPath() {
-  return path.join(getProffieOSRoot(), 'config', STYLES_FILENAME);
-}
 
 function getInoPath() {
   return path.join(getProffieOSRoot(), 'ProffieOS.ino');
@@ -315,6 +330,11 @@ function stageConfig(configContent) {
   try {
     fs.mkdirSync(path.dirname(stagingPath), { recursive: true });
     fs.writeFileSync(stagingPath, configContent, 'utf8');
+    // Copy user styles alongside config so #include "my_styles.h" resolves
+    const userStyles = getUserStylesPath();
+    if (fs.existsSync(userStyles)) {
+      fs.copyFileSync(userStyles, path.join(path.dirname(stagingPath), STYLES_FILENAME));
+    }
     return { ok: true, stagedPath: stagingPath };
   } catch (e) {
     return { ok: false, error: `Failed to stage config:\n${e.message}` };
@@ -333,10 +353,8 @@ function readStagedConfig() {
 // ── Styles staging ─────────────────────────────────────
 
 function stageStyles(content) {
-  const stagingPath = getStylesStagingPath();
   try {
-    fs.mkdirSync(path.dirname(stagingPath), { recursive: true });
-    fs.writeFileSync(stagingPath, content || '', 'utf8');
+    fs.writeFileSync(getUserStylesPath(), content || '', 'utf8');
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e.message };
@@ -344,7 +362,7 @@ function stageStyles(content) {
 }
 
 function readStagedStyles() {
-  const p = getStylesStagingPath();
+  const p = getUserStylesPath();
   try { return fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : ''; }
   catch { return ''; }
 }
@@ -605,6 +623,9 @@ module.exports = {
   readStagedConfig,
   stageStyles,
   readStagedStyles,
+  hasUserStyles,
+  importStylesFile,
+  getUserStylesPath,
   STYLES_FILENAME,
   importVersion,
   getInfo,

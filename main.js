@@ -243,6 +243,16 @@ ipcMain.handle('store:removeRecentFile', (_, filePath) => {
   Store.set('recentFiles', files);
 });
 // ── IPC: Style Library ─────────────────────────────────
+ipcMain.handle('styles:exists', () => proffie.hasUserStyles());
+ipcMain.handle('styles:import', async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+    title: 'Import Style Library',
+    filters: [{ name: 'Header File', extensions: ['h', 'hpp'] }],
+    properties: ['openFile']
+  });
+  if (canceled || !filePaths.length) return { ok: false };
+  return proffie.importStylesFile(filePaths[0]);
+});
 ipcMain.handle('styles:read', () => proffie.readStagedStyles());
 ipcMain.handle('styles:write', (_, content) => proffie.stageStyles(content));
 ipcMain.handle('styles:export', async () => {

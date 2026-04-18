@@ -1592,6 +1592,9 @@
         <button id="btn-save"     style="display:none">&#8595; Save</button>
         <button id="btn-saveas"   style="display:none">&#8595; Save As</button>
         <button id="btn-download" style="display:none">&#8595; Download</button>
+        <div class="toolbar-divider" id="divider-styles-ctrl" style="display:none"></div>
+        <button id="btn-styles-import" style="display:none" title="Copy a my_styles.h into JMT Studio — enables the Style Library tab">&#8593; Import Style Library</button>
+        <button id="btn-styles-link"   style="display:none" title='Adds #include "my_styles.h" to your config so ProffieOS can use your saved styles'>&#128279; Link Style Library</button>
       </div>
       <div class="tab-btns" id="tab-btns-versions">
         <button id="btn-vp-import" title="Import a ProffieOS version folder">&#8593; Import Version</button>
@@ -2037,6 +2040,7 @@ function setFileOpen(open) {
     updateBanner();
   }
   if (isElectron) { updateFavButton(); window.updateCompileButton?.(); }
+  _updateStylesLinkBtn();
 }
 
 // ── Unsaved modal ──────────────────────────────────────
@@ -3020,6 +3024,52 @@ document.getElementById('vp-file-modal')?.addEventListener('click', (e) => {
   if (e.target === e.currentTarget && window.vpCloseFileModal) window.vpCloseFileModal();
 });
 
+// ── Style Library toolbar (Config tab) ─────────────────
+
+function _updateStylesLinkBtn() {
+  const btn = document.getElementById('btn-styles-link');
+  if (!btn || btn.style.display === 'none') return;
+  const content = window._getEditorContent ? window._getEditorContent() : '';
+  const linked = fileIsOpen && content.includes('my_styles.h');
+  btn.disabled = linked || !fileIsOpen;
+  btn.textContent = linked ? '\u{1F517} Library Linked' : '\u{1F517} Link Style Library';
+}
+
+document.getElementById('btn-styles-import').addEventListener('click', async () => {
+  const result = await window.electronAPI.importStylesFile();
+  if (!result.ok) return;
+  window._applyStylesImportButtons(true);
+  const tabBtn = document.querySelector('.tab[data-tab="styles"]');
+  if (tabBtn) tabBtn.style.display = '';
+});
+
+document.getElementById('btn-styles-link').addEventListener('click', () => {
+  if (!fileIsOpen) return;
+  const editor = window._monacoEditor;
+  if (!editor) return;
+  const content = editor.getValue();
+  const lines = content.split('\n');
+
+  // Find insertion point: after #ifdef CONFIG_PRESETS, else after CONFIG_PROP #endif
+  let insertAfter = -1;
+  const presetsIdx = lines.findIndex(l => /^\s*#ifdef\s+CONFIG_PRESETS/.test(l));
+  if (presetsIdx !== -1) {
+    insertAfter = presetsIdx;
+  } else {
+    const propIdx = lines.findIndex(l => /^\s*#ifdef\s+CONFIG_PROP/.test(l));
+    if (propIdx !== -1) {
+      for (let i = propIdx + 1; i < lines.length; i++) {
+        if (/^\s*#endif/.test(lines[i])) { insertAfter = i; break; }
+      }
+    }
+  }
+  if (insertAfter === -1) return;
+
+  lines.splice(insertAfter + 1, 0, '#include "my_styles.h"');
+  editor.setValue(lines.join('\n'));
+  _updateStylesLinkBtn();
+});
+
 // ── Style Library ──────────────────────────────────────
 
 let _stylesEditorInstance  = null;
@@ -3671,10 +3721,14 @@ require(['vs/editor/editor.main'], function () {
     scrollbar: { verticalScrollbarSize: 8, horizontalScrollbarSize: 8 }
   });
 
+  window._monacoEditor = editor;
+  window._getEditorContent = () => editor.getValue();
+
   editor.onDidChangeModelContent(() => {
     if (fileIsOpen) {
       setDirty(true);
       if (window.onEditorContentChanged) window.onEditorContentChanged();
+      _updateStylesLinkBtn();
     }
   });
 
@@ -3707,21 +3761,21 @@ require(['vs/editor/editor.main'], function () {
         document.getElementById('setting-styles-item').style.display = 'flex';
       }
 
-      // Style Library enable/disable (default off; dev toggle only)
+      // Style Library — tab and toolbar buttons driven by whether my_styles.h exists in userData
       const _applyStylesTabVisible = (enabled) => {
         const tabBtn = document.querySelector('.tab[data-tab="styles"]');
         if (tabBtn) tabBtn.style.display = enabled ? '' : 'none';
-        // If currently on styles tab and being disabled, switch to config
         if (!enabled && _activeTab === 'styles') switchTab('config');
       };
-      const _stylesEnabled = await window.electronAPI.getSetting('stylesEnabled', false);
-      document.getElementById('setting-styles-enabled').checked = _stylesEnabled;
-      _applyStylesTabVisible(_stylesEnabled);
-      document.getElementById('setting-styles-enabled').addEventListener('change', async (e) => {
-        const val = e.target.checked;
-        await window.electronAPI.setSetting('stylesEnabled', val);
-        _applyStylesTabVisible(val);
-      });
+      window._applyStylesImportButtons = (hasFile) => {
+        document.getElementById('divider-styles-ctrl').style.display = '';
+        document.getElementById('btn-styles-import').style.display = hasFile ? 'none' : '';
+        document.getElementById('btn-styles-link').style.display   = hasFile ? '' : 'none';
+        if (hasFile) _updateStylesLinkBtn();
+      };
+      const _hasStyles = await window.electronAPI.stylesFileExists();
+      _applyStylesTabVisible(_hasStyles);
+      window._applyStylesImportButtons(_hasStyles);
       // Populate OS version dropdown
       const versions   = await window.electronAPI.listProffieVersions();
       const currentVer = await window.electronAPI.getSelectedVersion();
