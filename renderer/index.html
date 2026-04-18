@@ -3028,11 +3028,20 @@ document.getElementById('vp-file-modal')?.addEventListener('click', (e) => {
 
 function _updateStylesLinkBtn() {
   const btn = document.getElementById('btn-styles-link');
-  if (!btn || btn.style.display === 'none') return;
+  if (!btn) return;
   const content = window._getEditorContent ? window._getEditorContent() : '';
   const linked = fileIsOpen && content.includes('my_styles.h');
-  btn.disabled = linked || !fileIsOpen;
-  btn.textContent = linked ? '\u{1F517} Library Linked' : '\u{1F517} Link Style Library';
+  // Hide once linked — nothing left to do
+  const visible = !linked;
+  btn.style.display = visible ? '' : 'none';
+  btn.disabled = !fileIsOpen;
+  // Keep divider visible only while at least one styles button is showing
+  const importBtn = document.getElementById('btn-styles-import');
+  const divider   = document.getElementById('divider-styles-ctrl');
+  if (divider && importBtn) {
+    const anyVisible = importBtn.style.display !== 'none' || visible;
+    divider.style.display = anyVisible ? '' : 'none';
+  }
 }
 
 document.getElementById('btn-styles-import').addEventListener('click', async () => {
@@ -3768,10 +3777,9 @@ require(['vs/editor/editor.main'], function () {
         if (!enabled && _activeTab === 'styles') switchTab('config');
       };
       window._applyStylesImportButtons = (hasFile) => {
-        document.getElementById('divider-styles-ctrl').style.display = '';
         document.getElementById('btn-styles-import').style.display = hasFile ? 'none' : '';
         document.getElementById('btn-styles-link').style.display   = hasFile ? '' : 'none';
-        if (hasFile) _updateStylesLinkBtn();
+        _updateStylesLinkBtn();
       };
       const _hasStyles = await window.electronAPI.stylesFileExists();
       _applyStylesTabVisible(_hasStyles);
