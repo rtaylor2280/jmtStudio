@@ -49,7 +49,7 @@ function getBuildOutputPath() {
  * Strips @jmt: metadata lines before hashing — timestamp/board changes
  * on save do not represent a meaningful config change.
  */
-function computeConfigHash(content) {
+function computeConfigHash(content, stylesContent = '') {
   const stripped = content
     .split('\n')
     .filter(l => {
@@ -58,7 +58,9 @@ function computeConfigHash(content) {
     })
     .join('\n')
     .trim();
-  return crypto.createHash('sha256').update(stripped, 'utf8').digest('hex').slice(0, 16);
+  const h = crypto.createHash('sha256').update(stripped, 'utf8');
+  if (stylesContent) h.update('\0styles\0').update(stylesContent, 'utf8');
+  return h.digest('hex').slice(0, 16);
 }
 
 /**
@@ -247,8 +249,8 @@ function restoreToOutput(configHash, buildPkgHash) {
  * Given config content + build parameters, checks the cache and restores if hit.
  * Returns { hit, buildPath?, metadata? }
  */
-function checkAndRestore(configContent, fqbn, usb, proffieOSHash) {
-  const configHash   = computeConfigHash(configContent);
+function checkAndRestore(configContent, fqbn, usb, proffieOSHash, stylesContent = '') {
+  const configHash   = computeConfigHash(configContent, stylesContent);
   const buildPkgHash = computeBuildPackageHash(fqbn, usb, proffieOSHash);
   const result       = restoreToOutput(configHash, buildPkgHash);
   if (!result.ok) return { hit: false };
@@ -260,8 +262,8 @@ function checkAndRestore(configContent, fqbn, usb, proffieOSHash) {
  * Extracts configId from configContent automatically.
  * Called from toolchain.js after a successful compile.
  */
-function cacheCompileResult(buildOutputPath, configContent, fqbn, usb, proffieOSHash, compiledAt, toolVersion) {
-  const configHash   = computeConfigHash(configContent);
+function cacheCompileResult(buildOutputPath, configContent, fqbn, usb, proffieOSHash, compiledAt, toolVersion, stylesContent = '') {
+  const configHash   = computeConfigHash(configContent, stylesContent);
   const buildPkgHash = computeBuildPackageHash(fqbn, usb, proffieOSHash);
   const configId     = extractConfigId(configContent);
   return saveToCache(buildOutputPath, configHash, buildPkgHash, {

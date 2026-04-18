@@ -248,8 +248,9 @@ async function compile(configContent, fqbn, buildOptions, onLog) {
     try {
       const { app } = require('electron');
       const proffieOSHash = proffie.hashVersion(proffie.getSelectedVersion());
+      const stylesContent = proffie.readStagedStyles();
       cache.cacheCompileResult(buildPath, configContent, fqbn, usb, proffieOSHash,
-        new Date().toISOString(), app.getVersion());
+        new Date().toISOString(), app.getVersion(), stylesContent);
     } catch {}
     return { ok: true, buildPath };
   } else {
@@ -632,7 +633,8 @@ function getStatus() {
 
 function checkCacheAndRestore(configContent, fqbn, usb) {
   const proffieOSHash = proffie.hashVersion(proffie.getSelectedVersion());
-  return cache.checkAndRestore(configContent, fqbn, usb, proffieOSHash);
+  const stylesContent = proffie.readStagedStyles();
+  return cache.checkAndRestore(configContent, fqbn, usb, proffieOSHash, stylesContent);
 }
 
 module.exports = {
