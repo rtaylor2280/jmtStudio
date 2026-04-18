@@ -3026,20 +3026,28 @@ document.getElementById('vp-file-modal')?.addEventListener('click', (e) => {
 
 // ── Style Library toolbar (Config tab) ─────────────────
 
+let _stylesFileImported = false;
+
 function _updateStylesLinkBtn() {
-  const btn = document.getElementById('btn-styles-link');
-  if (!btn) return;
-  const content = window._getEditorContent ? window._getEditorContent() : '';
-  const linked = fileIsOpen && content.includes('my_styles.h');
-  // Hide once linked — nothing left to do
-  const visible = !linked;
-  btn.style.display = visible ? '' : 'none';
-  btn.disabled = !fileIsOpen;
-  // Keep divider visible only while at least one styles button is showing
+  const btn       = document.getElementById('btn-styles-link');
   const importBtn = document.getElementById('btn-styles-import');
   const divider   = document.getElementById('divider-styles-ctrl');
+  if (!btn) return;
+
+  if (!_stylesFileImported) {
+    // No styles file — only import button is relevant
+    btn.style.display = 'none';
+    if (importBtn && divider) divider.style.display = importBtn.style.display !== 'none' ? '' : 'none';
+    return;
+  }
+
+  const content = window._getEditorContent ? window._getEditorContent() : '';
+  const linked  = fileIsOpen && content.includes('my_styles.h');
+  btn.style.display = linked ? 'none' : '';
+  btn.disabled = !fileIsOpen;
+
   if (divider && importBtn) {
-    const anyVisible = importBtn.style.display !== 'none' || visible;
+    const anyVisible = importBtn.style.display !== 'none' || !linked;
     divider.style.display = anyVisible ? '' : 'none';
   }
 }
@@ -3777,8 +3785,8 @@ require(['vs/editor/editor.main'], function () {
         if (!enabled && _activeTab === 'styles') switchTab('config');
       };
       window._applyStylesImportButtons = (hasFile) => {
+        _stylesFileImported = hasFile;
         document.getElementById('btn-styles-import').style.display = hasFile ? 'none' : '';
-        document.getElementById('btn-styles-link').style.display   = hasFile ? '' : 'none';
         _updateStylesLinkBtn();
       };
       const _hasStyles = await window.electronAPI.stylesFileExists();
