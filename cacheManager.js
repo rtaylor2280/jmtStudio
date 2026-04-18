@@ -60,7 +60,7 @@ function computeConfigHash(content, stylesContent = '') {
     .trim();
   const h = crypto.createHash('sha256').update(stripped, 'utf8');
   // Only factor in styles if this config actually includes my_styles.h
-  if (stylesContent && stripped.includes('my_styles.h')) {
+  if (stylesContent && /^\s*#include\s+"my_styles\.h"\s*$/m.test(stripped)) {
     h.update('\0styles\0').update(stylesContent, 'utf8');
   }
   return h.digest('hex').slice(0, 16);

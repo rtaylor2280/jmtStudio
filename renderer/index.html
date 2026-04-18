@@ -3025,7 +3025,7 @@ function _updateStylesLinkBtn() {
   }
 
   const content  = window._getEditorContent ? window._getEditorContent() : '';
-  const linked   = fileIsOpen && content.includes('my_styles.h');
+  const linked   = fileIsOpen && /^\s*#include\s+"my_styles\.h"\s*$/m.test(content);
   const fileName = currentFilePath ? currentFilePath.split(/[\\/]/).pop() : '';
 
   // Config toolbar button — hides once linked
