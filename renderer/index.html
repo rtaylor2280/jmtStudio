@@ -2709,12 +2709,16 @@ function closeRecentDropdown() {
 
 function populateVersionSelect(sel, versions, selectedName) {
   sel.innerHTML = '';
+  if (!versions.length) {
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'No versions installed';
+    placeholder.disabled = true;
+    sel.appendChild(placeholder);
+  }
   versions.forEach(name => {
     const opt = document.createElement('option');
     opt.value = opt.textContent = name;
-    if (name.includes('(+JMT)')) {
-      opt.title = 'Includes an optional JMT prop and supporting components. No changes to standard ProffieOS behavior unless used.';
-    }
     sel.appendChild(opt);
   });
   // Sentinel option
@@ -2728,6 +2732,8 @@ function populateVersionSelect(sel, versions, selectedName) {
     sel.value = selectedName;
   } else if (versions.length) {
     sel.value = versions[0];
+  } else {
+    sel.value = '';
   }
   sel.dataset.lastValue = sel.value;
 }
