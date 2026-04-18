@@ -51,8 +51,7 @@
         "to": ".",
         "filter": [
           "arduino-cli/**/*",
-          "tools/**/*",
-          "proffieOS_versions/ProffieOS 8.1 (+JMT)/**/*"
+          "tools/**/*"
         ]
       }
     ]

@@ -508,9 +508,7 @@ ipcMain.handle('versions:export', async (_, name) => {
     });
   }
   try {
-    cpDir(versionInfo.source === 'bundled'
-      ? path.join(proffie.getBundledVersionsPath(), name)
-      : path.join(proffie.getUserVersionsPath(), name), dest);
+    cpDir(path.join(proffie.getUserVersionsPath(), name), dest);
     shell.showItemInFolder(dest);
     return { ok: true, dest };
   } catch (e) { return { ok: false, error: e.message }; }

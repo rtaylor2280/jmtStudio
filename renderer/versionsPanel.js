@@ -90,7 +90,6 @@ function _vpRenderCards() {
     card.innerHTML = `
       <div class="vp-card-top">
         <span class="vp-card-name">${_vpEsc(v.name)}</span>
-        ${v.isBuiltIn ? '<span class="vp-badge">Built-in</span>' : ''}
       </div>
       <div class="vp-card-meta">
         <span class="vp-card-size">${_vpFmtBytes(v.size)}</span>
@@ -129,22 +128,18 @@ function _vpRenderDetail(v) {
     <div class="vp-detail-header">
       <div class="vp-detail-title-row">
         <h2 class="vp-detail-name">${_vpEsc(v.name)}</h2>
-        ${v.isBuiltIn ? '<span class="vp-badge builtin-lg" title="Bundled with JMT Studio — cannot be renamed or deleted">Built-in</span>' : ''}
       </div>
       <div class="vp-detail-stats">
         <span>${_vpFmtBytes(v.size)}</span>
         ${v.modified ? `<span>·</span><span>Modified ${_vpFmtDate(v.modified)}</span>` : ''}
-        <span>·</span><span class="vp-detail-source">${v.isBuiltIn ? 'Bundled' : 'User-imported'}</span>
       </div>
     </div>
 
     <div class="vp-detail-actions">
       <button class="vp-action-btn" id="vp-btn-duplicate" title="Create a copy of this version">⧉ Duplicate</button>
       <button class="vp-action-btn" id="vp-btn-export" title="Copy version folder to a location you choose">↗ Export</button>
-      ${!v.isBuiltIn ? `
-        <button class="vp-action-btn" id="vp-btn-rename" title="Rename this version">✎ Rename</button>
-        <button class="vp-action-btn danger" id="vp-btn-delete" title="Permanently delete this version">✕ Delete</button>
-      ` : ''}
+      <button class="vp-action-btn" id="vp-btn-rename" title="Rename this version">✎ Rename</button>
+      <button class="vp-action-btn danger" id="vp-btn-delete" title="Permanently delete this version">✕ Delete</button>
     </div>
 
     <div class="vp-section">

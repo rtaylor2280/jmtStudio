@@ -1,14 +1,12 @@
 /**
  * proffieos.js
- * Manages bundled ProffieOS source versions and config staging.
+ * Manages ProffieOS source versions and config staging.
  *
- * Versions live under resources/proffieOS_versions/{version_name}/ProffieOS/.
+ * Versions live under userData/proffieOS_versions/{version_name}/ProffieOS/.
  * One version is "selected" per session; its ProffieOS folder is hashed once
  * and cached in memory for cache validation.
  *
- * When packaged, ProffieOS source lives in process.resourcesPath (read-only
- * when installed to Program Files). initWorkspace() copies the selected version
- * to userData so the app can write my_config.h regardless of install location.
+ * No versions are bundled with the app — users import or download them.
  */
 
 const { app } = require('electron');
@@ -26,47 +24,32 @@ const _hashCache = new Map(); // versionName → hash string
 
 // ── Path helpers ───────────────────────────────────────
 
-// Bundled versions path (read-only when packaged in Program Files).
-function getBundledVersionsPath() {
-  return app.isPackaged
-    ? path.join(process.resourcesPath, 'proffieOS_versions')
-    : path.join(__dirname, 'resources', 'proffieOS_versions');
-}
-
-// User-imported versions path (always writable, survives reinstalls).
+// All versions live in userData — writable, survives reinstalls, not shipped with app.
 function getUserVersionsPath() {
   return path.join(app.getPath('userData'), 'proffieOS_versions');
 }
 
-// Legacy alias — kept for internal callers that haven't been updated.
-function getVersionsRootPath() { return getBundledVersionsPath(); }
-
-// Internal: resolves which root a version folder lives in.
+// Internal: resolves a version folder in userData.
 function _resolveVersionFolder(name) {
-  const userPath    = path.join(getUserVersionsPath(), name);
+  const userPath = path.join(getUserVersionsPath(), name);
   if (fs.existsSync(userPath)) return { folderPath: userPath, source: 'user' };
-  const bundledPath = path.join(getBundledVersionsPath(), name);
-  if (fs.existsSync(bundledPath)) return { folderPath: bundledPath, source: 'bundled' };
   return null;
 }
 
-// Returns alphabetically sorted list of available version names from both sources.
+// Returns alphabetically sorted list of available version names.
 function listVersions() {
-  const names = new Set();
-  [getBundledVersionsPath(), getUserVersionsPath()].forEach(root => {
-    if (fs.existsSync(root)) {
-      fs.readdirSync(root, { withFileTypes: true })
-        .filter(e => e.isDirectory())
-        .forEach(e => names.add(e.name));
-    }
-  });
-  return [...names].sort();
+  const root = getUserVersionsPath();
+  if (!fs.existsSync(root)) return [];
+  return fs.readdirSync(root, { withFileTypes: true })
+    .filter(e => e.isDirectory())
+    .map(e => e.name)
+    .sort();
 }
 
-// ProffieOS source path for a given version name (read-only when packaged).
+// ProffieOS source path for a given version name.
 function getVersionSourcePath(versionName) {
   const resolved = _resolveVersionFolder(versionName);
-  return resolved ? path.join(resolved.folderPath, 'ProffieOS') : path.join(getBundledVersionsPath(), versionName, 'ProffieOS');
+  return resolved ? path.join(resolved.folderPath, 'ProffieOS') : path.join(getUserVersionsPath(), versionName, 'ProffieOS');
 }
 
 // ── Version selection ──────────────────────────────────
@@ -224,7 +207,7 @@ function getInoPath() {
 function validateProffieOSSource() {
   const version = getSelectedVersion();
   if (!version) {
-    return { ok: false, error: `No ProffieOS versions found in:\n${getVersionsRootPath()}` };
+    return { ok: false, error: `No ProffieOS versions found. Please import or download a version first.` };
   }
 
   const root = getVersionSourcePath(version);
@@ -447,18 +430,12 @@ function listVersionsDetails() {
   return listVersions().map(name => {
     const resolved = _resolveVersionFolder(name);
     if (!resolved) return null;
-    const { folderPath, source } = resolved;
-    // Only versions that ship with the app and carry the (+JMT) marker are
-    // treated as built-in (protected from rename/delete). Versions manually
-    // placed in the bundled folder during dev are treated as user versions.
-    const isBuiltIn = source === 'bundled' && name.includes('(+JMT)');
+    const { folderPath } = resolved;
     const notes = readNotes(name);
     let modified = null;
     try { modified = fs.statSync(folderPath).mtime.toISOString(); } catch {}
     return {
       name,
-      isBuiltIn,
-      source,
       size: _dirSizeSync(folderPath),
       modified,
       notes,
@@ -479,7 +456,6 @@ function _validateVersionName(name) {
 function renameVersion(oldName, newName) {
   const resolved = _resolveVersionFolder(oldName);
   if (!resolved) return { ok: false, error: 'Version not found.' };
-  if (resolved.source === 'bundled' && oldName.includes('(+JMT)')) return { ok: false, error: 'Built-in versions cannot be renamed.' };
   const err = _validateVersionName(newName);
   if (err) return { ok: false, error: err };
   const trimmed = newName.trim();
@@ -508,7 +484,6 @@ function duplicateVersion(versionName, newName) {
 function deleteVersion(versionName) {
   const resolved = _resolveVersionFolder(versionName);
   if (!resolved) return { ok: false, error: 'Version not found.' };
-  if (resolved.source === 'bundled' && versionName.includes('(+JMT)')) return { ok: false, error: 'Built-in versions cannot be deleted.' };
   try {
     fs.rmSync(resolved.folderPath, { recursive: true, force: true });
     return { ok: true };
@@ -643,6 +618,5 @@ module.exports = {
   listVersionDir,
   readVersionFile,
   searchVersionFiles,
-  getBundledVersionsPath,
   getUserVersionsPath,
 };
