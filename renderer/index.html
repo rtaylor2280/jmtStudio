@@ -3134,6 +3134,17 @@ async function _insertStylesInclude() {
   if (!editor) return;
   const lines = editor.getValue().split('\n');
 
+  // If our include exists but is commented out, just uncomment it silently
+  const commentedIdx = lines.findIndex(l =>
+    /^\s*\/\/+\s*#include/.test(l) && l.includes(_stylesFilePath)
+  );
+  if (commentedIdx !== -1) {
+    lines[commentedIdx] = lines[commentedIdx].replace(/^(\s*)\/\/+\s*/, '$1');
+    editor.setValue(lines.join('\n'));
+    _updateStylesLinkBtn();
+    return;
+  }
+
   // Check for a conflicting my_styles.h include (any path except our own)
   const conflictIdx = lines.findIndex(l =>
     /^\s*#include\s+"[^"]*my_styles\.h"/.test(l) &&
