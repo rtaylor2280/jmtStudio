@@ -1492,7 +1492,20 @@
   #styles-view { display: none; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
   #styles-view.active { display: flex; }
   #styles-code-editor { flex: 1; min-height: 0; }
-  #styles-visual-view { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 20px 20px; display: flex; flex-direction: column; gap: 10px; }
+  #styles-visual-view { flex: 1; min-height: 0; display: flex; flex-direction: row; overflow: hidden; }
+  #styles-helpers-panel { width: 210px; flex-shrink: 0; border-right: 1px solid var(--c-border); overflow-y: auto; display: flex; flex-direction: column; }
+  .styles-helpers-title { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--c-text-muted); padding: 9px 12px 7px; border-bottom: 1px solid var(--c-border); flex-shrink: 0; }
+  .styles-helper-row { font-size: 0.78rem; color: var(--c-text-sub); padding: 5px 10px 5px 12px; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 4px; user-select: none; }
+  .styles-helper-row:hover { background: var(--c-bg-hover); color: var(--c-text); }
+  .styles-helper-row.open { color: var(--jmt-blue); background: var(--c-bg-card); }
+  .styles-helper-chevron { font-size: 0.6rem; color: var(--c-text-dim); transition: transform 0.15s; flex-shrink: 0; }
+  .styles-helper-row.open .styles-helper-chevron { transform: rotate(90deg); color: var(--jmt-blue); }
+  .styles-helper-uses { display: none; background: var(--c-bg-inset); border-bottom: 1px solid var(--c-border-faint); padding: 4px 0 6px 18px; }
+  .styles-helper-uses.open { display: block; }
+  .styles-helper-use-item { font-size: 0.72rem; color: var(--c-text-dim); padding: 2px 10px 2px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+  .styles-helper-use-item:hover { color: var(--jmt-blue); }
+  .styles-helpers-empty { font-size: 0.75rem; color: var(--c-text-faint); padding: 16px 12px; }
+  .styles-visual-main { flex: 1; min-width: 0; overflow-y: auto; padding: 12px 20px 20px; display: flex; flex-direction: column; gap: 10px; }
   .styles-search-bar { display: flex; align-items: center; gap: 8px; }
   .styles-search-input { flex: 1; background: var(--c-bg-inset); border: 1px solid var(--c-border-input); border-radius: 4px; color: var(--c-text); padding: 5px 10px; font-size: 0.8rem; outline: none; max-width: 320px; }
   .styles-search-input:focus { border-color: var(--jmt-blue); }
@@ -1505,6 +1518,7 @@
   .style-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; align-content: start; }
   .style-card { background: var(--c-bg-card); border: 1px solid var(--c-border); border-radius: 5px; padding: 10px 12px; cursor: pointer; transition: border-color 0.15s, background 0.15s; display: flex; flex-direction: column; gap: 3px; }
   .style-card:hover { border-color: var(--jmt-blue); background: var(--c-bg-hover); }
+  .style-card.highlight { border-color: var(--jmt-blue); background: var(--c-bg-hover); transition: none; }
   .style-card-top { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
   .style-card-name { font-size: 0.84rem; font-weight: 600; color: var(--c-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
   .style-card-os { font-size: 0.65rem; color: var(--jmt-blue); background: rgba(0,130,255,0.1); border: 1px solid rgba(0,130,255,0.25); border-radius: 3px; padding: 1px 5px; white-space: nowrap; flex-shrink: 0; }
@@ -1647,11 +1661,17 @@
 <div id="styles-view">
   <div id="styles-code-editor"></div>
   <div id="styles-visual-view" style="display:none">
-    <div class="styles-search-bar">
-      <input type="text" id="styles-search" class="styles-search-input" placeholder="Search styles…" autocomplete="off" spellcheck="false">
-      <span id="styles-search-count" class="styles-search-count"></span>
+    <div id="styles-helpers-panel">
+      <div class="styles-helpers-title">Helpers</div>
+      <div id="styles-helpers-list"></div>
     </div>
-    <div id="styles-visual-list" class="style-cards"></div>
+    <div class="styles-visual-main">
+      <div class="styles-search-bar">
+        <input type="text" id="styles-search" class="styles-search-input" placeholder="Search styles…" autocomplete="off" spellcheck="false">
+        <span id="styles-search-count" class="styles-search-count"></span>
+      </div>
+      <div id="styles-visual-list" class="style-cards"></div>
+    </div>
   </div>
 </div>
 
@@ -3370,23 +3390,86 @@ function _applyStylesSearch() {
   if (countEl) countEl.textContent = q ? `${shown} of ${cards.length}` : `${cards.length} styles`;
 }
 
+// Classifies entries as helpers (referenced by others) vs full styles (leaf nodes).
+// Returns entries with .isHelper flag; also builds reverse map on each helper.
+function _classifyStyleEntries(entries) {
+  for (const entry of entries) {
+    const re = new RegExp(`\\b${entry.name}\\b`);
+    entry.isHelper = entries.some(other => other.name !== entry.name && re.test(other.usingCode));
+  }
+  // For each helper, record which full styles directly reference it
+  for (const entry of entries) {
+    if (!entry.isHelper) continue;
+    const re = new RegExp(`\\b${entry.name}\\b`);
+    entry.usedBy = entries.filter(other => !other.isHelper && re.test(other.usingCode)).map(e => e.name);
+  }
+  return entries;
+}
+
 function _buildStylesVisual() {
-  const list = document.getElementById('styles-visual-list');
+  const list        = document.getElementById('styles-visual-list');
+  const helpersList = document.getElementById('styles-helpers-list');
   if (!_stylesEditorInstance) {
     list.innerHTML = '<div class="styles-empty">No file loaded.</div>';
+    helpersList.innerHTML = '';
     return;
   }
-  const entries = _parseStyleEntries(_stylesEditorInstance.getValue());
-  if (!entries.length) {
+  const allEntries = _classifyStyleEntries(_parseStyleEntries(_stylesEditorInstance.getValue()));
+  if (!allEntries.length) {
     list.innerHTML = '<div class="styles-empty">No <code>using Name = ...;</code> definitions found.<br>Switch to Code view to edit.</div>';
     document.getElementById('styles-search-count').textContent = '';
+    helpersList.innerHTML = '';
     return;
   }
+
+  const helpers    = allEntries.filter(e =>  e.isHelper);
+  const fullStyles = allEntries.filter(e => !e.isHelper);
+
+  // ── Helpers side panel ──────────────────────────────
+  helpersList.innerHTML = '';
+  if (!helpers.length) {
+    helpersList.innerHTML = '<div class="styles-helpers-empty">None detected</div>';
+  } else {
+    helpers.forEach(entry => {
+      const row = document.createElement('div');
+      row.className = 'styles-helper-row';
+      row.innerHTML = `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0">${entry.name}</span><span class="styles-helper-chevron">&#9658;</span>`;
+
+      const uses = document.createElement('div');
+      uses.className = 'styles-helper-uses';
+      if (entry.usedBy.length) {
+        entry.usedBy.forEach(styleName => {
+          const item = document.createElement('div');
+          item.className = 'styles-helper-use-item';
+          item.textContent = styleName;
+          item.title = styleName;
+          item.addEventListener('click', e => {
+            e.stopPropagation();
+            const card = list.querySelector(`.style-card[data-name="${CSS.escape(styleName)}"]`);
+            if (card) { card.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); card.classList.add('highlight'); setTimeout(() => card.classList.remove('highlight'), 1200); }
+          });
+          uses.appendChild(item);
+        });
+      } else {
+        uses.innerHTML = '<div class="styles-helper-use-item" style="opacity:0.5;cursor:default">Used outside file</div>';
+      }
+
+      row.addEventListener('click', () => {
+        const isOpen = row.classList.toggle('open');
+        uses.classList.toggle('open', isOpen);
+      });
+
+      helpersList.appendChild(row);
+      helpersList.appendChild(uses);
+    });
+  }
+
+  // ── Full styles main area ───────────────────────────
   list.innerHTML = '';
-  entries.forEach(entry => {
-    const { name, usingCode, meta } = entry;
+  fullStyles.forEach(entry => {
+    const { name, meta } = entry;
     const card = document.createElement('div');
-    card.className   = 'style-card';
+    card.className      = 'style-card';
     card.dataset.name   = name;
     card.dataset.source = meta.source;
 
