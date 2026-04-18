@@ -1803,6 +1803,20 @@
   </div>
 </div>
 
+<!-- ── Styles conflict modal ── -->
+<div class="modal-overlay" id="modal-styles-conflict">
+  <div class="modal">
+    <h2>Existing Style Library Include Found</h2>
+    <p>Your config already includes a different <code>my_styles.h</code>. To avoid conflicts it must be resolved before linking:</p>
+    <pre id="modal-styles-conflict-line" style="background:var(--c-bg-card);border:1px solid var(--c-border-strong);border-radius:4px;padding:8px 10px;font-size:0.78rem;overflow-x:auto;margin:10px 0;white-space:pre-wrap;word-break:break-all;"></pre>
+    <div class="modal-btns">
+      <button class="modal-btn-cancel"  id="modal-styles-conflict-cancel">Cancel</button>
+      <button class="modal-btn-discard" id="modal-styles-conflict-remove">Remove It</button>
+      <button class="modal-btn-save"    id="modal-styles-conflict-comment">Comment Out &amp; Link</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── Import ProffieOS Version modal ── -->
 <div class="modal-overlay" id="modal-import-version">
   <div class="modal">
@@ -3075,12 +3089,14 @@ document.getElementById('btn-styles-delete').addEventListener('click', async () 
   if (_activeTab === 'styles') switchTab('config');
 });
 
-function _insertStylesInclude() {
-  if (!fileIsOpen) return;
-  const editor = window._monacoEditor;
-  if (!editor) return;
-  const lines = editor.getValue().split('\n');
+function _doInsertStylesInclude(lines, conflictIdx, action) {
+  if (action === 'comment') {
+    lines[conflictIdx] = '//' + lines[conflictIdx];
+  } else if (action === 'remove') {
+    lines.splice(conflictIdx, 1);
+  }
 
+  // Find insertion point after splice
   let insertAfter = -1;
   const presetsIdx = lines.findIndex(l => /^\s*#ifdef\s+CONFIG_PRESETS/.test(l));
   if (presetsIdx !== -1) {
@@ -3096,8 +3112,41 @@ function _insertStylesInclude() {
   if (insertAfter === -1) return;
 
   lines.splice(insertAfter + 1, 0, `#include "${_stylesFilePath}"`);
-  editor.setValue(lines.join('\n'));
+  window._monacoEditor.setValue(lines.join('\n'));
   _updateStylesLinkBtn();
+}
+
+function _promptStylesConflict(lines, conflictIdx) {
+  return new Promise(resolve => {
+    document.getElementById('modal-styles-conflict-line').textContent = lines[conflictIdx].trim();
+    const overlay = document.getElementById('modal-styles-conflict');
+    overlay.classList.add('active');
+    const cleanup = r => { overlay.classList.remove('active'); resolve(r); };
+    document.getElementById('modal-styles-conflict-cancel').onclick  = () => cleanup(null);
+    document.getElementById('modal-styles-conflict-comment').onclick = () => cleanup('comment');
+    document.getElementById('modal-styles-conflict-remove').onclick  = () => cleanup('remove');
+  });
+}
+
+async function _insertStylesInclude() {
+  if (!fileIsOpen || !_stylesFilePath) return;
+  const editor = window._monacoEditor;
+  if (!editor) return;
+  const lines = editor.getValue().split('\n');
+
+  // Check for a conflicting my_styles.h include (any path except our own)
+  const conflictIdx = lines.findIndex(l =>
+    /^\s*#include\s+"[^"]*my_styles\.h"/.test(l) &&
+    !l.includes(_stylesFilePath)
+  );
+
+  if (conflictIdx !== -1) {
+    const action = await _promptStylesConflict(lines, conflictIdx);
+    if (!action) return;
+    _doInsertStylesInclude(lines, conflictIdx, action);
+  } else {
+    _doInsertStylesInclude(lines, -1, null);
+  }
 }
 
 document.getElementById('btn-styles-link').addEventListener('click', () => {
