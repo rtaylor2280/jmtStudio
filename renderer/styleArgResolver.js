@@ -11,18 +11,32 @@
 
   /**
    * Find all RgbArg/IntArg instances in a style expression, in order of
-   * appearance. Each entry has: { kind, name, width } where width is 3
-   * for RgbArg and 1 for IntArg.
+   * appearance. Each entry has: { kind, name, defaultExpr, width } where
+   * width is 3 for RgbArg and 1 for IntArg, and defaultExpr is the second
+   * template parameter (e.g. "Red" from RgbArg<BASE_COLOR_ARG, Red>).
    */
   function findArgs(expr) {
     if (!expr) return [];
-    const re = /\b(RgbArg|IntArg)\s*<\s*(\w+)\s*,\s*[^>]+>/g;
+    const re = /\b(RgbArg|IntArg)\s*</g;
     const args = [];
     let m;
     while ((m = re.exec(expr)) !== null) {
+      // Walk forward to find the matching closing '>' (handles nested templates)
+      let depth = 1, i = m.index + m[0].length;
+      while (i < expr.length && depth > 0) {
+        if (expr[i] === '<') depth++;
+        else if (expr[i] === '>') depth--;
+        i++;
+      }
+      const inner = expr.slice(m.index + m[0].length, i - 1);
+      const commaIdx = inner.indexOf(',');
+      if (commaIdx < 0) continue;
+      const name        = inner.slice(0, commaIdx).trim();
+      const defaultExpr = inner.slice(commaIdx + 1).trim();
       args.push({
-        kind:  m[1],
-        name:  m[2],
+        kind:        m[1],
+        name,
+        defaultExpr,
         width: m[1] === 'RgbArg' ? 3 : 1,
       });
     }

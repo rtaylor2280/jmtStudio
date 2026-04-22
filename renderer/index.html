@@ -2487,6 +2487,7 @@
 
 <script src="./effect-keywords.js"></script>
 <script src="./presetParser.js"></script>
+<script src="./effect-args.js"></script>
 <script src="./styleArgResolver.js"></script>
 <script src="./vs/loader.js"></script>
 <script>
@@ -7387,71 +7388,93 @@ require(['vs/editor/editor.main'], function () {
       if (exprSpan) exprSpan.replaceWith(ta);
       if (colorRow) colorRow.style.display = 'none';
 
-      // Resolve named args; for generic color try to look up arg name from library
-      const resolvedArgs = styleArgResolver.resolveStyleArgs(slot.expr || '', slot.colorArg || '');
-      const rgbArgs   = resolvedArgs.filter(a => a.kind === 'RgbArg');
-      const primary   = rgbArgs[0] || null;
-      const secondary = resolvedArgs.filter(a => a !== primary && a.kind === 'RgbArg');
-      const hasNamedColor   = primary !== null;
-      const hasGenericColor = !hasNamedColor && slot.colorArg &&
-        slot.colorArg.split(',').slice(0,3).every(s => Number.isFinite(parseInt(s,10)));
+      // Map expression args to registry entries (appearance order, registry-filtered)
+      const foundArgs    = styleArgResolver.findArgs(slot.expr || '');
+      const registryArgs = foundArgs.map(a => {
+        const reg = window.proffieArgs.registry.find(r => r.name === a.name);
+        return reg ? Object.assign({}, reg, { defaultExpr: a.defaultExpr }) : null;
+      }).filter(Boolean);
 
-      function lookupHelperArgName(expr) {
-        const text = _stylesEditorInstance ? _stylesEditorInstance.getValue() : (_silentStylesText || '');
-        if (!text || !expr) return null;
-        const helperName = (expr.match(/^(\w+)/) || [])[1];
-        if (!helperName) return null;
-        const re = new RegExp(`using\\s+${helperName}\\s*=([^\\n]+(?:\\n(?!using)[^\\n]*)*)`, 'm');
-        const m = re.exec(text);
-        if (!m) return null;
-        const am = /\bRgbArg\s*<\s*(\w+)/.exec(m[1]);
-        return am ? am[1] : null;
-      }
+      const currentParens = () => slot.colorArg || '';
 
-      // Build a color-arg row: [swatch] [label] — appended into body (not expand)
-      function makeColorRow(argName, proVals, onWrite) {
+      // Build a single arg row: [swatch|input] [label] [×]? — works for RgbArg and IntArg
+      function makeArgRow(regArg) {
         const row = document.createElement('div');
         row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:1px 0;';
-        const sw = document.createElement('span');
-        sw.style.cssText = 'width:12px;height:12px;border-radius:50%;flex-shrink:0;cursor:pointer;border:1px solid rgba(0,0,0,0.3);';
-        sw.style.background = styleArgResolver.proffieToCSS(proVals[0], proVals[1], proVals[2]);
-        sw.title = 'Edit color';
-        sw.addEventListener('click', e => {
-          e.stopPropagation();
-          _openColorPopup(sw, [...proVals], newVals => {
-            proVals[0]=newVals[0]; proVals[1]=newVals[1]; proVals[2]=newVals[2];
-            sw.style.background = styleArgResolver.proffieToCSS(newVals[0], newVals[1], newVals[2]);
-            onWrite(newVals);
+
+        const result  = window.proffieArgs.readRegistryArg(regArg.name, currentParens());
+        let curVals   = result.isDefault ? null : result.values.map(v => v != null ? v : 0);
+        const defVals = regArg.kind === 'RgbArg'
+          ? window.proffieArgs.resolveColorDefault(regArg.defaultExpr || '')
+          : [parseInt(regArg.defaultExpr, 10) || 0];
+        const dispVals = curVals || defVals;
+
+        let swatch = null, numInput = null;
+
+        if (regArg.kind === 'RgbArg') {
+          swatch = document.createElement('span');
+          swatch.style.cssText = 'width:12px;height:12px;border-radius:50%;flex-shrink:0;cursor:pointer;border:1px solid rgba(0,0,0,0.3);';
+          swatch.style.background = styleArgResolver.proffieToCSS(dispVals[0], dispVals[1], dispVals[2]);
+          swatch.title = 'Edit color';
+          swatch.addEventListener('click', e => {
+            e.stopPropagation();
+            const initVals = curVals ? [...curVals] : [...defVals];
+            _openColorPopup(swatch, initVals, newVals => {
+              swatch.style.background = styleArgResolver.proffieToCSS(newVals[0], newVals[1], newVals[2]);
+              const np = window.proffieArgs.writeRegistryArg(regArg.name, newVals, currentParens());
+              slot.colorArg = np; _modifySlotParens(slot, np);
+              curVals = [...newVals]; updateReset();
+            });
           });
-        });
+          row.appendChild(swatch);
+        } else {
+          numInput = document.createElement('input');
+          numInput.type = 'number';
+          numInput.min  = '0';
+          numInput.value = dispVals[0] || 0;
+          numInput.style.cssText = 'width:52px;font:inherit;font-size:0.68rem;background:var(--c-bg-card);color:var(--c-text);border:1px solid var(--c-border);border-radius:2px;padding:1px 3px;';
+          numInput.addEventListener('click', e => e.stopPropagation());
+          numInput.addEventListener('change', () => {
+            const val = parseInt(numInput.value, 10) || 0;
+            const np = window.proffieArgs.writeRegistryArg(regArg.name, [val], currentParens());
+            slot.colorArg = np; _modifySlotParens(slot, np);
+            curVals = [val]; updateReset();
+          });
+          row.appendChild(numInput);
+        }
+
         const lbl = document.createElement('span');
-        lbl.style.cssText = 'font-size:0.68rem;color:var(--c-text-muted);';
-        lbl.textContent = argName;
-        row.appendChild(sw); row.appendChild(lbl);
+        lbl.style.cssText = 'font-size:0.68rem;color:var(--c-text-muted);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+        lbl.textContent = regArg.name;
+        lbl.title = regArg.label ? `${regArg.name} — ${regArg.label}` : regArg.name;
+        row.appendChild(lbl);
+
+        let resetBtn = null;
+        function updateReset() {
+          if (curVals && !resetBtn) {
+            resetBtn = document.createElement('button');
+            resetBtn.style.cssText = 'all:unset;cursor:pointer;font-size:0.75rem;color:var(--c-text-dim);padding:0 2px;line-height:1;flex-shrink:0;';
+            resetBtn.innerHTML = '&times;';
+            resetBtn.title = 'Reset to default';
+            resetBtn.addEventListener('click', e => {
+              e.stopPropagation();
+              const np = window.proffieArgs.writeRegistryArg(regArg.name, null, currentParens());
+              slot.colorArg = np; _modifySlotParens(slot, np);
+              curVals = null;
+              if (swatch)   swatch.style.background = styleArgResolver.proffieToCSS(defVals[0], defVals[1], defVals[2]);
+              if (numInput) numInput.value = defVals[0] || 0;
+              updateReset();
+            });
+            row.appendChild(resetBtn);
+          } else if (!curVals && resetBtn) {
+            resetBtn.remove(); resetBtn = null;
+          }
+        }
+        updateReset();
         return row;
       }
 
-      // Primary color row — goes into body so it aligns with the textarea
-      let primaryColorRow = null;
-      if (hasNamedColor) {
-        const pv = [...(primary.values||[]), 0, 0, 0].slice(0,3).map(v=>+v||0);
-        primaryColorRow = makeColorRow(primary.name, pv, newVals => {
-          const newParens = styleArgResolver.writeArgValue(slot.expr, slot.colorArg||'', primary.name, newVals);
-          slot.colorArg = newParens;
-          _modifySlotParens(slot, newParens);
-        });
-      } else if (hasGenericColor) {
-        const pv = slot.colorArg.split(',').slice(0,3).map(s=>parseInt(s.trim(),10)||0);
-        const argName = lookupHelperArgName(slot.expr) || 'BASE_COLOR_ARG';
-        primaryColorRow = makeColorRow(argName, pv, newVals => {
-          const parts = (slot.colorArg||'').split(',');
-          parts[0]=String(newVals[0]); parts[1]=String(newVals[1]); parts[2]=String(newVals[2]);
-          slot.colorArg = parts.join(',');
-          _modifySlotParens(slot, slot.colorArg);
-        });
-      }
-
-      // Library combobox — shown only when a library is currently known to exist
+      // Library combobox — only when a style library is known to exist
       let comboWrap = null;
       if (_getLibraryHelpers().length > 0) {
         comboWrap = document.createElement('div');
@@ -7465,13 +7488,11 @@ require(['vs/editor/editor.main'], function () {
         comboArrow.innerHTML = '&#9660;';
         comboArrow.title = 'Browse style library';
         async function openCombo() {
-          // Always re-read so additions/deletions are reflected immediately
           if (!_stylesEditorInstance) {
             try { _silentStylesText = await window.electronAPI.readStylesFile() || ''; }
             catch { _silentStylesText = ''; }
           }
           _openLibComboDropdown(comboWrap, comboInput.value.trim(), name => {
-            // Commit the selection and reopen the editor on the refreshed slot
             _commitSlotEdit(slot, name);
             _reopenAfterRebuild = { presetIdx: _selectedPresetIndex, slotIdx };
             _closeSlotArgEdit();
@@ -7482,64 +7503,60 @@ require(['vs/editor/editor.main'], function () {
         comboInput.addEventListener('input', e => { e.stopPropagation(); openCombo(); });
         comboArrow.addEventListener('click', e => {
           e.stopPropagation();
-          if (_activeLibComboDropdown) { _closeLibComboDropdown(); } else { openCombo(); comboInput.focus(); }
+          if (_activeLibComboDropdown) _closeLibComboDropdown(); else { openCombo(); comboInput.focus(); }
         });
         comboWrap.appendChild(comboInput);
         comboWrap.appendChild(comboArrow);
-      }
-      if (comboWrap) body.appendChild(comboWrap);
-
-      if (primaryColorRow) {
-        primaryColorRow.style.marginTop = '6px';
-        body.appendChild(primaryColorRow);
+        body.appendChild(comboWrap);
       }
 
-      // Restore body to original state on close
+      // Advanced content (built before primary row so advBtn can reference it)
+      const advContent = document.createElement('div');
+      advContent.style.cssText = 'display:none;flex-direction:column;gap:2px;padding-left:4px;margin-top:2px;';
+      for (let i = 1; i < registryArgs.length; i++) advContent.appendChild(makeArgRow(registryArgs[i]));
+
+      // Primary arg row inline in body, with optional Advanced toggle
+      let primaryRow = null;
+      if (registryArgs.length > 0) {
+        primaryRow = makeArgRow(registryArgs[0]);
+        primaryRow.style.marginTop = '4px';
+        if (registryArgs.length > 1) {
+          let advOpen = false;
+          const advBtn = document.createElement('button');
+          advBtn.style.cssText = 'all:unset;cursor:pointer;font-size:0.65rem;color:var(--c-text-muted);padding:0 2px;flex-shrink:0;white-space:nowrap;';
+          advBtn.textContent = 'Advanced ▾';
+          advBtn.addEventListener('click', e => {
+            e.stopPropagation();
+            advOpen = !advOpen;
+            advContent.style.display = advOpen ? 'flex' : 'none';
+            advBtn.textContent = advOpen ? 'Advanced ▴' : 'Advanced ▾';
+          });
+          primaryRow.appendChild(advBtn);
+        }
+        body.appendChild(primaryRow);
+      }
+
       _restoreSlotBody = () => {
-        if (comboWrap && comboWrap.parentNode) comboWrap.parentNode.removeChild(comboWrap);
-        if (primaryColorRow && primaryColorRow.parentNode) primaryColorRow.parentNode.removeChild(primaryColorRow);
+        if (comboWrap  && comboWrap.parentNode)  comboWrap.parentNode.removeChild(comboWrap);
+        if (primaryRow && primaryRow.parentNode) primaryRow.parentNode.removeChild(primaryRow);
         if (ta.parentNode) ta.replaceWith(exprSpan || document.createElement('span'));
         if (colorRow) colorRow.style.display = '';
       };
 
-      // Expand strip: secondary args + footer only
+      // Expand strip: advanced args + footer
       const expand = document.createElement('div');
       expand.className = 'preset-slot-edit-expand';
       _activeSlotArgEditor = expand;
 
-      // Advanced toggle for secondary RgbArgs
-      if (secondary.length) {
-        let advOpen = false;
-        const advBtn = document.createElement('button');
-        advBtn.style.cssText = 'all:unset;font-size:0.65rem;color:var(--c-text-muted);cursor:pointer;display:block;';
-        advBtn.textContent = 'Advanced ▾';
-        const advContent = document.createElement('div');
-        advContent.style.cssText = 'display:none;flex-direction:column;gap:2px;padding-left:4px;margin-top:2px;';
-        secondary.forEach(arg => {
-          const pv = [...(arg.values||[]), 0, 0, 0].slice(0,3).map(v=>+v||0);
-          advContent.appendChild(makeColorRow(arg.name, pv, newVals => {
-            const newParens = styleArgResolver.writeArgValue(slot.expr, slot.colorArg||'', arg.name, newVals);
-            slot.colorArg = newParens;
-            _modifySlotParens(slot, newParens);
-          }));
-        });
-        advBtn.addEventListener('click', e => {
-          e.stopPropagation();
-          advOpen = !advOpen;
-          advContent.style.display = advOpen ? 'flex' : 'none';
-          advBtn.textContent = advOpen ? 'Advanced ▴' : 'Advanced ▾';
-        });
-        expand.appendChild(advBtn);
-        expand.appendChild(advContent);
-      }
+      if (registryArgs.length > 1) expand.appendChild(advContent);
 
       const footer = document.createElement('div');
       footer.className = 'preset-slot-edit-actions';
-      const okBtn = document.createElement('button');
+      const okBtn     = document.createElement('button');
       okBtn.className = 'preset-edit-confirm'; okBtn.innerHTML = '&#10003;'; okBtn.title = 'Apply (Ctrl+Enter)';
       const cancelBtn = document.createElement('button');
       cancelBtn.className = 'preset-edit-cancel'; cancelBtn.innerHTML = '&times;'; cancelBtn.title = 'Close (Esc)';
-      okBtn.addEventListener('click', e => { e.stopPropagation(); applyEdit(); });
+      okBtn.addEventListener('click',     e => { e.stopPropagation(); applyEdit(); });
       cancelBtn.addEventListener('click', e => { e.stopPropagation(); _closeSlotArgEdit(); });
       footer.appendChild(okBtn); footer.appendChild(cancelBtn);
       expand.appendChild(footer);
