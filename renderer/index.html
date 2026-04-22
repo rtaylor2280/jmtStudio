@@ -1801,11 +1801,17 @@
   .preset-slot-action.preset-slot-delete:hover { color: #e44 !important; border-color: #e44 !important; }
 
   /* Color popup (floats over everything) */
-  .preset-color-popup { position: fixed; z-index: 9999; background: var(--c-bg-raised); border: 1px solid var(--c-border); border-radius: 6px; padding: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.35); display: flex; flex-direction: column; gap: 6px; min-width: 188px; }
-  .preset-color-popup-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 3px; }
-  .preset-color-popup-cell { height: 20px; border-radius: 3px; border: 2px solid transparent; cursor: pointer; transition: transform 0.08s; }
-  .preset-color-popup-cell:hover { transform: scale(1.12); }
-  .preset-color-popup-cell.selected { border-color: var(--c-text); }
+  .preset-color-popup { position: fixed; z-index: 9999; background: var(--c-bg-raised); border: 1px solid var(--c-border); border-radius: 6px; padding: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.35); display: flex; flex-direction: column; gap: 6px; min-width: 220px; }
+  .preset-color-popup-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+  .preset-color-popup-cell { width: 48px; height: 48px; border-radius: 4px; cursor: pointer; transition: transform 0.08s; overflow: hidden; }
+  .preset-color-popup-cell:hover { transform: scale(1.06); }
+  .preset-color-popup-cell.selected { box-shadow: 0 0 0 2px var(--c-text); }
+  .preset-color-popup-nav { display: flex; align-items: center; justify-content: center; gap: 6px; }
+  .preset-color-popup-nav-btn { all: unset; cursor: pointer; font-size: 0.65rem; color: var(--c-text-muted); padding: 2px 5px; border-radius: 2px; line-height: 1; }
+  .preset-color-popup-nav-btn:hover { color: var(--c-text); background: var(--c-bg-hover); }
+  .preset-color-popup-dots { display: flex; gap: 4px; align-items: center; }
+  .preset-color-popup-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--c-text-hint); transition: background 0.15s; }
+  .preset-color-popup-dot.active { background: var(--c-text-muted); }
   .preset-color-popup-rgb { display: flex; gap: 4px; align-items: center; }
   .preset-color-popup-group { display: flex; align-items: center; gap: 2px; }
   .preset-color-rgb-label { font-size: 0.65rem; font-weight: 700; color: var(--c-text-muted); width: 10px; text-align: center; }
@@ -2487,6 +2493,7 @@
 
 <script src="./effect-keywords.js"></script>
 <script src="./presetParser.js"></script>
+<script src="./glow-swatch.js"></script>
 <script src="./effect-args.js"></script>
 <script src="./styleArgResolver.js"></script>
 <script src="./vs/loader.js"></script>
@@ -6868,6 +6875,7 @@ require(['vs/editor/editor.main'], function () {
     let _editingSlot            = false;
     let _activeSlotArgEditor    = null;
     let _activeColorPopup       = null;
+    let _activeSwatchControllers = [];
     let _activeLibComboDropdown = null;
     let _restoreSlotBody        = null;
     let _silentStylesText       = null;
@@ -7577,57 +7585,82 @@ require(['vs/editor/editor.main'], function () {
 
     // ── Color popup (fixed-position, appended to body) ─────────────────────────
 
+    // 12 quick colors, 3 pages of 4
     const _COMMON_COLORS = [
-      { label:'Red',      r:255,g:0,  b:0   }, { label:'Orange', r:255,g:128,b:0   },
-      { label:'Yellow',   r:255,g:255,b:0   }, { label:'Green',  r:0,  g:255,b:0   },
-      { label:'Cyan',     r:0,  g:255,b:255 }, { label:'Blue',   r:0,  g:0,  b:255 },
-      { label:'Magenta',  r:255,g:0,  b:255 }, { label:'Pink',   r:255,g:0,  b:128 },
-      { label:'Purple',   r:128,g:0,  b:255 }, { label:'Lt Blue',r:0,  g:128,b:255 },
-      { label:'White',    r:255,g:255,b:255 }, { label:'Off',    r:0,  g:0,  b:0   },
+      { label: 'Red',         r: 255, g:   0, b:   0 },
+      { label: 'Green',       r:   0, g: 255, b:   0 },
+      { label: 'Blue',        r:   0, g:   0, b: 255 },
+      { label: 'White',       r: 255, g: 255, b: 255 },
+      { label: 'Orange-Red',  r: 255, g:  40, b:   0 },
+      { label: 'Orange',      r: 255, g:  80, b:   0 },
+      { label: 'Amber',       r: 255, g: 180, b:   0 },
+      { label: 'Cyan',        r:   0, g: 255, b: 255 },
+      { label: 'Sky Blue',    r:   0, g: 180, b: 255 },
+      { label: 'Teal',        r:   0, g: 255, b: 120 },
+      { label: 'Deep Purple', r: 160, g:   0, b: 255 },
+      { label: 'Magenta',     r: 255, g:   0, b: 120 },
     ];
+    const _COLOR_PER_PAGE = 4;
+    const _COLOR_PAGES    = 3;
 
     function _openColorPopup(anchorEl, initProffieVals, onChange) {
       _closeColorPopup();
       let cr = Math.round((initProffieVals[0]||0)/257);
       let cg = Math.round((initProffieVals[1]||0)/257);
       let cb = Math.round((initProffieVals[2]||0)/257);
+      let currentPage = 0;
 
       function toHex() { return '#'+[cr,cg,cb].map(v=>v.toString(16).padStart(2,'0')).join(''); }
 
       const popup = document.createElement('div');
       popup.className = 'preset-color-popup';
 
-      function emit() {
-        updateCells();
-        wheelIn.value = toHex();
-        onChange(styleArgResolver.cssToProffie(cr, cg, cb));
-      }
-
-      // Quick color grid
+      // ── Grid: 4 fixed cell divs, re-skinned on page change ───────────
       const grid = document.createElement('div');
       grid.className = 'preset-color-popup-grid';
-      function updateCells() {
-        grid.querySelectorAll('.preset-color-popup-cell').forEach((cell, i) => {
-          const c = _COMMON_COLORS[i];
-          cell.classList.toggle('selected', c.r===cr && c.g===cg && c.b===cb);
-        });
-      }
-      _COMMON_COLORS.forEach(c => {
+      const cells = [];
+      for (let i = 0; i < _COLOR_PER_PAGE; i++) {
         const cell = document.createElement('div');
         cell.className = 'preset-color-popup-cell';
-        cell.style.background = `rgb(${c.r},${c.g},${c.b})`;
-        cell.title = c.label;
         cell.addEventListener('click', e => {
           e.stopPropagation();
+          const c = _COMMON_COLORS[currentPage * _COLOR_PER_PAGE + i];
           cr=c.r; cg=c.g; cb=c.b;
           rIn.value=cr; gIn.value=cg; bIn.value=cb;
           emit();
         });
+        cells.push(cell);
         grid.appendChild(cell);
-      });
+      }
       popup.appendChild(grid);
 
-      // RGB row + native wheel
+      // ── Page nav: ◄  • • •  ► ───────────────────────────────────────
+      const nav = document.createElement('div');
+      nav.className = 'preset-color-popup-nav';
+
+      const prevBtn = document.createElement('button');
+      prevBtn.className = 'preset-color-popup-nav-btn';
+      prevBtn.innerHTML = '&#9664;';
+      prevBtn.addEventListener('click', e => { e.stopPropagation(); goPage((currentPage - 1 + _COLOR_PAGES) % _COLOR_PAGES); });
+
+      const dotsWrap = document.createElement('div');
+      dotsWrap.className = 'preset-color-popup-dots';
+      const dots = Array.from({ length: _COLOR_PAGES }, () => {
+        const d = document.createElement('span');
+        d.className = 'preset-color-popup-dot';
+        dotsWrap.appendChild(d);
+        return d;
+      });
+
+      const nextBtn = document.createElement('button');
+      nextBtn.className = 'preset-color-popup-nav-btn';
+      nextBtn.innerHTML = '&#9654;';
+      nextBtn.addEventListener('click', e => { e.stopPropagation(); goPage((currentPage + 1) % _COLOR_PAGES); });
+
+      nav.appendChild(prevBtn); nav.appendChild(dotsWrap); nav.appendChild(nextBtn);
+      popup.appendChild(nav);
+
+      // ── RGB row + native color wheel ──────────────────────────────────
       const rgbRow = document.createElement('div');
       rgbRow.className = 'preset-color-popup-rgb';
 
@@ -7642,16 +7675,16 @@ require(['vs/editor/editor.main'], function () {
         inp.value=val; inp.className='preset-color-rgb-input';
         inp.addEventListener('input', e => {
           e.stopPropagation();
-          const v = Math.max(0,Math.min(255,parseInt(inp.value,10)||0));
+          const v = Math.max(0, Math.min(255, parseInt(inp.value, 10)||0));
           inp.value=v; onVal(v); emit();
         });
         inp.addEventListener('click', e => e.stopPropagation());
         grp.appendChild(l); grp.appendChild(inp);
         return { grp, inp };
       }
-      const {grp:rGrp,inp:rIn} = makeGroup('R',cr,v=>{cr=v;});
-      const {grp:gGrp,inp:gIn} = makeGroup('G',cg,v=>{cg=v;});
-      const {grp:bGrp,inp:bIn} = makeGroup('B',cb,v=>{cb=v;});
+      const {grp:rGrp, inp:rIn} = makeGroup('R', cr, v => { cr=v; });
+      const {grp:gGrp, inp:gIn} = makeGroup('G', cg, v => { cg=v; });
+      const {grp:bGrp, inp:bIn} = makeGroup('B', cb, v => { cb=v; });
 
       const wheelIn = document.createElement('input');
       wheelIn.type='color'; wheelIn.className='preset-color-wheel';
@@ -7669,20 +7702,52 @@ require(['vs/editor/editor.main'], function () {
       rgbRow.appendChild(wheelIn);
       popup.appendChild(rgbRow);
 
+      // ── Helpers ───────────────────────────────────────────────────────
+      function updateSelected() {
+        cells.forEach((cell, i) => {
+          const c = _COMMON_COLORS[currentPage * _COLOR_PER_PAGE + i];
+          cell.classList.toggle('selected', c.r===cr && c.g===cg && c.b===cb);
+        });
+      }
+
+      function emit() {
+        updateSelected();
+        wheelIn.value = toHex();
+        onChange(styleArgResolver.cssToProffie(cr, cg, cb));
+      }
+
+      function goPage(p) {
+        // Destroy previous swatch canvases
+        _activeSwatchControllers.forEach(c => c.destroy());
+        _activeSwatchControllers = [];
+        currentPage = p;
+        // Update cells and re-mount glow swatches
+        cells.forEach((cell, i) => {
+          const c = _COMMON_COLORS[p * _COLOR_PER_PAGE + i];
+          cell.style.background = `rgb(${c.r},${c.g},${c.b})`;
+          cell.title = c.label;
+        });
+        updateSelected();
+        dots.forEach((d, i) => d.classList.toggle('active', i === p));
+        _activeSwatchControllers = GlowSwatch.mountAll('.preset-color-popup-cell',
+          { width: 48, height: 48, root: popup });
+      }
+
+      // ── Mount + position ──────────────────────────────────────────────
       document.body.appendChild(popup);
       _activeColorPopup = popup;
-      updateCells();
+      goPage(0);
 
       requestAnimationFrame(() => {
         const rect = anchorEl.getBoundingClientRect();
-        const pw = popup.offsetWidth || 196;
-        const ph = popup.offsetHeight || 100;
+        const pw = popup.offsetWidth || 220;
+        const ph = popup.offsetHeight || 140;
         let left = rect.left;
         let top  = rect.bottom + 4;
-        if (left + pw > window.innerWidth - 4)  left = Math.max(4, window.innerWidth - pw - 8);
+        if (left + pw > window.innerWidth  - 4) left = Math.max(4, window.innerWidth  - pw - 8);
         if (top  + ph > window.innerHeight - 4) top  = Math.max(4, rect.top - ph - 4);
-        popup.style.left = left+'px';
-        popup.style.top  = top+'px';
+        popup.style.left = left + 'px';
+        popup.style.top  = top  + 'px';
       });
       setTimeout(() => document.addEventListener('click', _colorPopupOutside), 0);
     }
@@ -7691,6 +7756,8 @@ require(['vs/editor/editor.main'], function () {
       if (_activeColorPopup && !_activeColorPopup.contains(e.target)) _closeColorPopup();
     }
     function _closeColorPopup() {
+      _activeSwatchControllers.forEach(c => c.destroy());
+      _activeSwatchControllers = [];
       if (_activeColorPopup) {
         _activeColorPopup.remove();
         _activeColorPopup = null;
