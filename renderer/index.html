@@ -1499,7 +1499,7 @@
   #styles-view.active { display: flex; }
   #styles-code-editor { flex: 1; min-height: 0; }
   #styles-visual-view { flex: 1; min-height: 0; display: flex; flex-direction: row; overflow: hidden; }
-  #styles-helpers-panel { width: 210px; flex-shrink: 0; display: flex; flex-direction: column; overflow: hidden; transition: width 0.15s ease; }
+  #styles-helpers-panel { width: 200px; flex-shrink: 0; display: flex; flex-direction: column; overflow: hidden; transition: width 0.22s ease; }
   #styles-helpers-panel.collapsed { width: 18px !important; }
   #styles-helpers-panel.collapsed > *:not(#helpers-divider) { display: none; }
   #helpers-divider { width: 8px; flex-shrink: 0; cursor: col-resize; background: transparent; border-right: 1px solid var(--c-border); position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; }
@@ -1522,9 +1522,29 @@
   #btn-helper-save { background: #1a3a1a; color: #4d4; border-color: #2a5a2a; }
   #btn-helper-save:disabled { opacity: 0.45; cursor: default; }
   html.light-mode #btn-helper-save { background: #e8f5e8; color: #1a6020; border-color: #a0d0a0; }
+  .helper-name-group { flex: 1; min-width: 0; display: flex; align-items: center; gap: 3px; overflow: hidden; }
+  .helper-name-display { font-size: 0.72rem; font-weight: 700; color: var(--c-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  input.styles-helper-editor-name { background: var(--c-bg-inset); border: 1px solid var(--jmt-blue); border-radius: 3px; outline: none; padding: 1px 5px; font: inherit; color: inherit; flex: 1; min-width: 0; display: none; }
+  input.styles-helper-editor-name.editable { display: block; }
+  input.styles-helper-editor-name::placeholder { color: var(--c-text-faint); font-weight: 400; }
+  input.styles-helper-editor-name.invalid { border-color: #c44; }
+  #helper-name-error { font-size: 0.66rem; color: #c44; padding: 1px 8px 3px; display: none; }
+  #helper-name-error.visible { display: block; }
+  .helper-pencil-btn { font-size: 0.72rem; opacity: 0.35; background: none; border: none; cursor: pointer; padding: 1px 4px; border-radius: 3px; color: var(--c-text-muted); flex-shrink: 0; line-height: 1; }
+  .helper-pencil-btn:hover { opacity: 1; background: var(--c-bg-hover); }
+  #btn-helper-pencil-confirm { color: #4a4; opacity: 0.75; }
+  #helper-notes-row { flex-shrink: 0; padding: 3px 8px 4px; background: var(--c-bg-card); border-bottom: 1px solid var(--c-border); }
+  #btn-helper-notes-toggle { font-size: 0.66rem; color: var(--c-text-faint); text-transform: uppercase; letter-spacing: 0.05em; border: none; background: none; padding: 1px 0; cursor: pointer; user-select: none; }
+  #btn-helper-notes-toggle.has-notes { color: var(--c-text-sub); }
+  #btn-helper-notes-toggle:hover { color: var(--c-text-muted); }
+  #helper-notes-textarea { width: 100%; box-sizing: border-box; font-size: 0.74rem; background: var(--c-bg-inset); color: var(--c-text); border: 1px solid var(--c-border); border-radius: 3px; padding: 4px 6px; outline: none; resize: vertical; min-height: 44px; font-family: inherit; line-height: 1.4; margin-top: 3px; }
+  #helper-notes-textarea:focus { border-color: var(--jmt-blue); }
+  .styles-helper-row { flex-direction: column; align-items: stretch; gap: 0; }
+  .helper-row-main { display: flex; align-items: center; gap: 4px; padding: 5px 10px 3px 12px; }
+  .helper-row-notes-preview { font-size: 0.66rem; color: var(--c-text-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-style: italic; padding: 0 10px 3px 12px; }
   #styles-helper-monaco { flex: 1; min-height: 0; }
   .styles-helpers-title { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--c-text-muted); padding: 9px 12px 7px; border-bottom: 1px solid var(--c-border); flex-shrink: 0; }
-  .styles-helper-row { font-size: 0.78rem; color: var(--c-text-sub); padding: 5px 10px 5px 12px; cursor: pointer; display: flex; align-items: center; gap: 4px; user-select: none; }
+  .styles-helper-row { font-size: 0.78rem; color: var(--c-text-sub); padding: 0; cursor: pointer; display: flex; flex-direction: column; align-items: stretch; gap: 0; user-select: none; }
   .styles-helper-row.selected { background: var(--c-bg-hover); color: var(--c-text); }
   .helper-delete-btn { font-size: 0.65rem; opacity: 0; background: none; border: none; color: var(--c-text-muted); cursor: pointer; padding: 1px 3px; border-radius: 3px; flex-shrink: 0; }
   .styles-helper-row:hover .helper-delete-btn { opacity: 0.55; }
@@ -1544,7 +1564,8 @@
   .styles-visual-main { flex: 1; min-width: 0; overflow-y: auto; padding: 12px 20px 20px; display: flex; flex-direction: column; gap: 10px; }
   .styles-search-bar { display: flex; align-items: center; gap: 8px; position: sticky; top: 0; z-index: 5; background: var(--c-bg); padding: 8px 0 10px; margin: -8px 0 0; }
   .style-cards { isolation: isolate; }
-  .styles-legend { background: var(--c-bg); padding: 6px 20px 6px; justify-content: center; pointer-events: none; border-top: 1px solid var(--c-border); flex-shrink: 0; }
+  .styles-legend { background: var(--c-bg); padding: 6px 20px 6px; justify-content: center; pointer-events: none; border-top: 1px solid var(--c-border); flex-shrink: 0; position: relative; }
+  #styles-footer-meta { position: absolute; right: 20px; top: 50%; transform: translateY(-50%); font-size: 0.67rem; color: var(--c-text-faint); white-space: nowrap; pointer-events: none; }
   .styles-search-input { flex: 1; background: var(--c-bg-inset); border: 1px solid var(--c-border-input); border-radius: 4px; color: var(--c-text); padding: 5px 10px; font-size: 0.8rem; outline: none; max-width: 320px; }
   .styles-search-input:focus { border-color: var(--jmt-blue); }
   .styles-search-count { font-size: 0.72rem; color: var(--c-text-dim); }
@@ -1703,9 +1724,9 @@
       </div>
       <div class="tab-btns" id="tab-btns-styles">
         <button id="btn-styles-save"    class="btn-green"   disabled title="Save Style Library">&#8595; Save</button>
-        <button id="btn-styles-replace" class="btn-blue"    title="Replace with another file">&#8593; Replace</button>
-        <button id="btn-styles-append"  class="btn-blue"    title="Append another file to the current Style Library">&#8853; Append</button>
+        <button id="btn-styles-discard" class="btn-red"     disabled title="Discard all unsaved changes to the Style Library">&#8617; Discard</button>
         <button id="btn-styles-delete"  class="btn-red"     title="Remove Style Library from JMT Studio">&#128465; Delete</button>
+        <button id="btn-styles-append"  class="btn-blue"    title="Append another file to the current Style Library">&#8853; Append</button>
         <button id="btn-styles-export"  class="btn-neutral" title="Export a copy">&#8599; Export</button>
         <div class="toolbar-divider"></div>
         <button id="btn-styles-tab-link" class="btn-blue" disabled title="Open a config file to link the Style Library">&#128279; Link Style Library</button>
@@ -1777,10 +1798,22 @@
       <div id="styles-helpers-list"></div>
       <div id="styles-helper-editor-area">
         <div class="styles-helper-editor-header">
-          <span class="styles-helper-editor-name" id="styles-helper-editor-name"></span>
+          <div class="helper-name-group">
+            <span class="helper-name-display" id="helper-name-display"></span>
+            <input id="styles-helper-editor-name" class="styles-helper-editor-name" readonly>
+            <button id="btn-helper-pencil" class="helper-pencil-btn" title="Rename helper" style="display:none">&#9998;</button>
+            <button id="btn-helper-pencil-confirm" class="helper-pencil-btn" title="Confirm name" style="display:none">&#10003;</button>
+          </div>
           <div class="styles-helper-editor-btns">
             <button id="btn-helper-save" disabled>Save</button>
-            <button id="btn-helper-discard">Discard</button>
+            <button id="btn-helper-right">Close</button>
+          </div>
+        </div>
+        <div id="helper-name-error"></div>
+        <div id="helper-notes-row">
+          <button id="btn-helper-notes-toggle">&#9654; Notes</button>
+          <div id="helper-notes-body" style="display:none">
+            <textarea id="helper-notes-textarea" placeholder="Notes…"></textarea>
           </div>
         </div>
         <div id="styles-helper-monaco"></div>
@@ -1803,7 +1836,9 @@
         </div>
         <div id="styles-visual-list" class="style-cards"></div>
       </div>
-      <div id="styles-legend" class="styles-legend" style="display:none"></div>
+      <div id="styles-legend" class="styles-legend" style="display:none">
+        <span id="styles-footer-meta"></span>
+      </div>
     </div>
   </div>
 </div>
@@ -1992,6 +2027,31 @@
       <button class="modal-btn-cancel"  id="modal-unsaved-cancel">Cancel</button>
       <button class="modal-btn-discard" id="modal-unsaved-discard">Discard</button>
       <button class="modal-btn-save"    id="modal-unsaved-save">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Style Library discard confirm modal ── -->
+<div class="modal-overlay" id="modal-styles-discard">
+  <div class="modal" style="max-width:420px">
+    <h2>Discard Style Library Changes?</h2>
+    <p>This will reload the file from disk and discard all unsaved changes. This cannot be undone.</p>
+    <div class="modal-btns">
+      <button class="modal-btn-cancel"  id="modal-styles-discard-cancel">Cancel</button>
+      <button class="modal-btn-discard" id="modal-styles-discard-confirm">Discard</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Helper rename modal ── -->
+<div class="modal-overlay" id="modal-rename-helper">
+  <div class="modal" style="max-width:420px">
+    <h2>Helper referenced elsewhere</h2>
+    <p id="modal-rename-helper-msg"></p>
+    <div class="modal-btns">
+      <button class="modal-btn-cancel"  id="btn-rename-cancel">Cancel</button>
+      <button class="modal-btn-discard" id="btn-rename-ignore">Save anyway</button>
+      <button class="modal-btn-primary" id="btn-rename-update">Update everywhere</button>
     </div>
   </div>
 </div>
@@ -3369,9 +3429,16 @@ document.getElementById('btn-create-styles-import').addEventListener('click', as
   document.getElementById('modal-create-styles').classList.remove('active');
   const result = await window.electronAPI.importStylesFile();
   if (!result.ok) return;
-  const content = await window.electronAPI.readStylesFile();
-  await _activateStylesLibrary(content || '');
+  const raw = await window.electronAPI.readStylesFile();
+  await _activateStylesLibrary(raw || '');
   _collapseEditorContent();
+  // Apply JMT header + section structure on import
+  if (_stylesEditorInstance) {
+    const today = new Date().toISOString().slice(0, 10);
+    const structured = _applyStyleLibraryStructure(_stylesEditorInstance.getValue(), today);
+    _stylesEditorInstance.setValue(structured);
+    _setStylesDirty(true);
+  }
 });
 
 document.getElementById('btn-styles-delete').addEventListener('click', async () => {
@@ -3471,7 +3538,15 @@ let _stylesDetailEditor    = null;
 let _stylesHelperEditor    = null;
 let _helperEditorOrigCode    = '';
 let _helperEditorOrigDisplay = '';
-let _selectedHelperRow     = null;
+let _helperEditorOrigNotes   = '';
+let _helperEditorOrigName    = ''; // name at open time, for rename detection
+let _helperSyncingName       = false; // prevents circular name↔editor sync
+let _selectedHelperRow       = null;
+let _helperEditorMode        = 'edit'; // 'edit' | 'add'
+let _userDraggedThisSession   = false;
+let _userCollapsedHelpers     = false; // set true when user manually collapses; lets rebuilds respect that choice
+let _savedBrowseWidth         = 200;
+let _collapsedFromWidth       = null;  // panel width at the moment of collapse; restored on expand
 let _isStylesDirtyFlag     = false;
 let _stylesViewMode        = 'visual';
 let _detailEntry           = null;
@@ -3575,6 +3650,57 @@ function _scanEffects(usingCode) {
 }
 
 window._isStylesDirty = () => _isStylesDirtyFlag;
+
+// ── Style Library file structure ─────────────────────────────────────────────
+const _SL_HELPER_HEADER = '/*****************************\n    Helper functions\n*****************************/';
+const _SL_STYLE_HEADER  = '/*****************************\n    Using styles\n*****************************/';
+const _SL_JMT_HEADER_RE = /^\/\/ =+\r?\n\/\/ Style Library[^\n]*\r?\n(?:\/\/ @jmt:[^\n]*\r?\n)*\/\/ =+\r?\n?/m;
+
+function _buildStyleLibraryJmtHeader(createdDate) {
+  const today = new Date().toISOString().slice(0, 10);
+  const lines = [
+    '// ============================================================',
+    '// Style Library  —  JMT Studio (jedimastertech.com)',
+    `// @jmt:created     ${createdDate || today}`,
+    `// @jmt:updated     ${today}`,
+    '// ============================================================',
+  ];
+  return lines.join('\n');
+}
+
+function _extractStyleLibraryCreatedDate(content) {
+  const m = content.match(/^\/\/ @jmt:created\s+(.+)$/m);
+  return m ? m[1].trim() : null;
+}
+
+// Strip section headers and JMT header from content, returning clean body
+function _stripStyleLibraryStructure(content) {
+  return content
+    .replace(_SL_JMT_HEADER_RE, '')
+    .replace(/\/\*[*\s]*Helper\s+functions[*\s]*\*\/[ \t]*\r?\n?/gi, '')
+    .replace(/\/\*[*\s]*Using\s+styles[*\s]*\*\/[ \t]*\r?\n?/gi, '')
+    .replace(/^\s*\n/, '');
+}
+
+// Rebuild content with JMT header + section headers in correct positions
+function _applyStyleLibraryStructure(content, createdDate) {
+  const stripped = _stripStyleLibraryStructure(content);
+  const entries  = _classifyStyleEntries(_parseStyleEntries(stripped));
+  const jmtHeader = _buildStyleLibraryJmtHeader(createdDate);
+
+  if (!entries.length) return jmtHeader + '\n\n' + stripped.trimStart();
+
+  const { preamble, segments } = _buildSegments(stripped, entries);
+  const helperSegs = segments.filter(s =>  s.entry.isHelper);
+  const styleSegs  = segments.filter(s => !s.entry.isHelper);
+  const norm = segs => segs.map(s => s.text.replace(/\s+$/, '')).join('\n\n');
+
+  const parts = [jmtHeader, ''];
+  if (helperSegs.length) { parts.push(_SL_HELPER_HEADER, '', norm(helperSegs), ''); }
+  if (styleSegs.length)  { parts.push(_SL_STYLE_HEADER,  '', norm(styleSegs),  ''); }
+  return parts.join('\n');
+}
+
 // Normalises file: deduplicates identical templates, detects template conflicts,
 // then reorders so all helpers come before full styles.
 function _sortHelpersFirst(content) {
@@ -3651,8 +3777,11 @@ window.saveStylesFile = async function() {
   }
   const { content: sorted, conflicts: sortConflicts } = _sortHelpersFirst(_stylesEditorInstance.getValue());
   _conflictTemplateNames = sortConflicts;
-  if (sorted !== _stylesEditorInstance.getValue()) {
-    _stylesEditorInstance.setValue(sorted);
+  // Rebuild section structure and refresh @jmt:updated on every save
+  const createdDate = _extractStyleLibraryCreatedDate(sorted) || new Date().toISOString().slice(0, 10);
+  const structured = _applyStyleLibraryStructure(sorted, createdDate);
+  if (structured !== _stylesEditorInstance.getValue()) {
+    _stylesEditorInstance.setValue(structured);
   }
   await window.electronAPI.writeStylesFile(_stylesEditorInstance.getValue());
   _setStylesDirty(false);
@@ -3661,8 +3790,10 @@ window.saveStylesFile = async function() {
 
 function _setStylesDirty(v) {
   _isStylesDirtyFlag = v;
-  const btn = document.getElementById('btn-styles-save');
-  if (btn) btn.disabled = !v || _conflictStyleNames.size > 0 || _conflictTemplateNames.size > 0;
+  const saveBtn    = document.getElementById('btn-styles-save');
+  const discardBtn = document.getElementById('btn-styles-discard');
+  if (saveBtn)    saveBtn.disabled    = !v || _conflictStyleNames.size > 0 || _conflictTemplateNames.size > 0;
+  if (discardBtn) discardBtn.disabled = !v;
 }
 
 async function _loadStylesFile() {
@@ -3696,15 +3827,23 @@ function _switchStylesView(mode) {
   _stylesViewMode = mode;
   const codeEl   = document.getElementById('styles-code-editor');
   const visualEl = document.getElementById('styles-visual-view');
-  codeEl.style.display   = mode === 'code'   ? '' : 'none';
-  visualEl.style.display = mode === 'visual' ? '' : 'none';
-  document.getElementById('btn-styles-view-code').classList.toggle('active',   mode === 'code');
-  document.getElementById('btn-styles-view-visual').classList.toggle('active', mode === 'visual');
-  const show = mode === 'code' ? '' : 'none';
+  const showCode = mode === 'code';
+  if (showCode) {
+    codeEl.style.display   = '';
+    visualEl.style.display = 'none';
+  } else {
+    visualEl.style.display = '';
+    // Defer hiding code editor one frame — lets Monaco flush any pending render rAF
+    // before the container goes display:none, preventing prepareRender null crash
+    requestAnimationFrame(() => { codeEl.style.display = 'none'; });
+  }
+  document.getElementById('btn-styles-view-code').classList.toggle('active',   showCode);
+  document.getElementById('btn-styles-view-visual').classList.toggle('active', !showCode);
+  const show = showCode ? '' : 'none';
   document.getElementById('btn-styles-collapse').style.display = show;
   document.getElementById('btn-styles-expand').style.display   = show;
   if (mode === 'visual') _buildStylesVisual();
-  if (mode === 'code' && _stylesEditorInstance) {
+  if (showCode && _stylesEditorInstance) {
     _stylesEditorInstance.layout();
     _updateStyleErrorDecorations();
   }
@@ -4006,14 +4145,15 @@ function _applyStylesSearch() {
 }
 
 // Classifies entries as helpers vs full styles.
-// Priority: template prefix → always helper; implComment → always full style; else reference-based.
+// implComment → always full style; @jmt:helper tag or reference-based → helper.
 function _classifyStyleEntries(entries) {
   for (const entry of entries) {
     if (entry.implComment) {
-      entry.isHelper = false;          // explicit StylePtr impl comment → definitively a full style
+      entry.isHelper = false;
     } else {
+      const hasHelperTag = /\/\/\s*@jmt:helper/.test(entry.gapText || '');
       const re = new RegExp(`\\b${entry.name}\\b`);
-      entry.isHelper = entries.some(other => other.name !== entry.name && re.test(other.usingCode));
+      entry.isHelper = hasHelperTag || entries.some(other => other.name !== entry.name && re.test(other.usingCode));
     }
   }
   // For each helper, record which full styles directly reference it
@@ -4115,8 +4255,9 @@ function _updateStyleErrorDecorations() {
 }
 
 function _updateConflictBanner() {
-  const banner  = document.getElementById('styles-conflict-banner');
-  const saveBtn = document.getElementById('btn-styles-save');
+  const banner     = document.getElementById('styles-conflict-banner');
+  const saveBtn    = document.getElementById('btn-styles-save');
+  const discardBtn = document.getElementById('btn-styles-discard');
   const hasConflict = _conflictStyleNames.size > 0 || _conflictTemplateNames.size > 0;
   if (!hasConflict) {
     banner.style.display = 'none';
@@ -4129,6 +4270,7 @@ function _updateConflictBanner() {
     banner.style.display = '';
     if (saveBtn) saveBtn.disabled = true;
   }
+  if (discardBtn) discardBtn.disabled = !window._isStylesDirty?.();
 }
 
 // Build a sorted segments list from entries for reorder/delete operations.
@@ -4184,9 +4326,135 @@ function _reorderStylesInFile(srcIdx, tgtIdx) {
   fsTexts.splice(tgtIdx, 0, moved);
   fsIndices.forEach((segIdx, i) => { segments[segIdx].text = fsTexts[i]; });
 
-  _stylesEditorInstance.setValue(preamble + segments.map(s => s.text).join(''));
+  // Normalize: strip each segment's trailing whitespace then join with exactly
+  // one blank line, so dragging never creates double-blank or missing gaps.
+  const joined = segments
+    .map(s => s.text.replace(/\s+$/, ''))
+    .filter(t => t.length > 0)
+    .join('\n\n');
+  _stylesEditorInstance.setValue(preamble.replace(/\s+$/, '') + (joined ? '\n' + joined + '\n' : ''));
   _setStylesDirty(true);
   _buildStylesVisual();
+}
+
+// Sync the name input value into the Monaco editor's using statement
+function _syncHelperNameToEditor(newName) {
+  if (!_stylesHelperEditor || _helperSyncingName || !newName) return;
+  const raw = _stylesHelperEditor.getValue();
+  const { prefix, code } = _splitTemplatePrefix(raw);
+  const updated = code.replace(/^(using\s+)\w+(\s*=)/, `$1${newName}$2`);
+  if (updated === code) return;
+  _helperSyncingName = true;
+  _stylesHelperEditor.setValue(prefix ? `${prefix}\n${updated}` : updated);
+  _helperSyncingName = false;
+}
+
+// Sync the name from the Monaco editor's using statement into the name input
+function _syncEditorNameToInput() {
+  if (_helperSyncingName) return;
+  const m = (_stylesHelperEditor?.getValue() || '').match(/\busing\s+(\w+)\s*=/);
+  if (!m) return;
+  const nameInput = document.getElementById('styles-helper-editor-name');
+  if (nameInput.value === m[1]) return;
+  _helperSyncingName = true;
+  nameInput.value = m[1];
+  nameInput.classList.remove('invalid');
+  setTimeout(() => { _helperSyncingName = false; }, 0);
+}
+
+// Promise-based 3-button rename warning dialog
+function _showHelperRenameDialog(origName, newName, referencedBy) {
+  return new Promise(resolve => {
+    const modal = document.getElementById('modal-rename-helper');
+    const msg   = document.getElementById('modal-rename-helper-msg');
+    msg.textContent = `"${origName}" is referenced by: ${referencedBy.map(e => e.name).join(', ')}. Rename to "${newName}" everywhere, save with broken references, or cancel?`;
+    modal.classList.add('active');
+    function done(result) {
+      modal.classList.remove('active');
+      document.getElementById('btn-rename-cancel').onclick  = null;
+      document.getElementById('btn-rename-ignore').onclick  = null;
+      document.getElementById('btn-rename-update').onclick  = null;
+      resolve(result);
+    }
+    document.getElementById('btn-rename-cancel').onclick  = () => done('cancel');
+    document.getElementById('btn-rename-ignore').onclick  = () => done('ignore');
+    document.getElementById('btn-rename-update').onclick  = () => done('update');
+  });
+}
+
+function _getHelperNotes(entry) {
+  if (!entry.headerComment) return '';
+  const lines = entry.headerComment.split('\n');
+  return lines.slice(1, lines.length - 1).map(l => l.trim()).filter(Boolean).join('\n');
+}
+
+function _buildHelperBlock(name, notes, tmplPrefix, compactedUsing, keepHelperTag) {
+  const D = n => '-'.repeat(n);
+  const pad = Math.max(0, Math.floor((74 - name.length - 2) / 2));
+  const lines = [`/*${D(pad)} ${name} ${D(74 - pad - name.length - 2)}`];
+  if (notes && notes.trim()) notes.trim().split('\n').forEach(l => lines.push(l));
+  lines.push('*/');
+  if (keepHelperTag) lines.push('// @jmt:helper');
+  if (tmplPrefix) lines.push(tmplPrefix);
+  lines.push(compactedUsing);
+  lines.push(`/*${D(74)}*/`);
+  return '\n' + lines.join('\n') + '\n';
+}
+
+function _helperSetNotesUI(notes, open) {
+  document.getElementById('helper-notes-textarea').value = notes;
+  const toggle = document.getElementById('btn-helper-notes-toggle');
+  const body   = document.getElementById('helper-notes-body');
+  toggle.classList.toggle('has-notes', !!notes.trim());
+  body.style.display = open ? '' : 'none';
+  toggle.innerHTML = (open ? '&#9660;' : '&#9654;') + ' Notes';
+}
+
+function _openHelperAdd() {
+  _helperEditorMode = 'add';
+  if (_selectedHelperRow) {
+    _selectedHelperRow.classList.remove('selected', 'open');
+    const usesEl = _selectedHelperRow.nextElementSibling;
+    if (usesEl?.classList.contains('styles-helper-uses')) usesEl.classList.remove('open');
+    _selectedHelperRow = null;
+  }
+  _helperEditorOrigCode    = '';
+  _helperEditorOrigDisplay = '';
+  _helperEditorOrigNotes   = '';
+  _helperEditorOrigName    = '';
+  const nameInput     = document.getElementById('styles-helper-editor-name');
+  const nameDisplay   = document.getElementById('helper-name-display');
+  const pencilBtn     = document.getElementById('btn-helper-pencil');
+  const confirmBtn    = document.getElementById('btn-helper-pencil-confirm');
+  nameDisplay.textContent = '';
+  nameDisplay.style.display = 'none';
+  nameInput.readOnly = false;
+  nameInput.value = '';
+  nameInput.placeholder = 'HelperName';
+  nameInput.classList.add('editable');
+  nameInput.classList.remove('invalid');
+  _showHelperNameError('');
+  pencilBtn.style.display = 'none';
+  confirmBtn.style.display = 'none';
+  _helperSetNotesUI('', false);
+  document.getElementById('styles-helper-editor-area').classList.add('active');
+  if (_stylesHelperEditor) {
+    _stylesHelperEditor.setValue('');
+    _stylesHelperEditor.setScrollPosition({ scrollTop: 0 });
+    _stylesHelperEditor.layout();
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      _stylesHelperEditor?.focus();
+      // After window.confirm(), Electron can leave Monaco in ghost-focus (container
+      // div focused but textarea isn't). A brief timeout catches that case.
+      setTimeout(() => {
+        if (_stylesHelperEditor && !_stylesHelperEditor.hasTextFocus())
+          _stylesHelperEditor.focus();
+      }, 100);
+    }));
+  }
+  document.getElementById('btn-helper-save').disabled = true;
+  _onHelperEditorOpened();
+  _updateHelperEditorButtons();
 }
 
 function _openHelperEditor(entry, row) {
@@ -4197,8 +4465,22 @@ function _openHelperEditor(entry, row) {
   _selectedHelperRow = row;
   row.classList.add('selected');
 
-  const area = document.getElementById('styles-helper-editor-area');
-  document.getElementById('styles-helper-editor-name').textContent = entry.name;
+  _helperEditorMode = 'edit';
+  const nameInput   = document.getElementById('styles-helper-editor-name');
+  const nameDisplay = document.getElementById('helper-name-display');
+  const pencilBtn   = document.getElementById('btn-helper-pencil');
+  const confirmBtn  = document.getElementById('btn-helper-pencil-confirm');
+  nameInput.readOnly = true;
+  nameInput.classList.remove('editable', 'invalid');
+  nameInput.placeholder = '';
+  nameInput.value = entry.name;
+  nameDisplay.textContent = entry.name;
+  nameDisplay.style.display = '';
+  pencilBtn.style.display = '';
+  pencilBtn.classList.remove('active');
+  confirmBtn.style.display = 'none';
+
+  _helperEditorOrigName = entry.name;
   _helperEditorOrigCode = entry.usingCode;
   const _helperTmplPrefix = entry.meta.templatePrefix || '';
   const _helperEditorDisplay = _helperTmplPrefix
@@ -4206,13 +4488,27 @@ function _openHelperEditor(entry, row) {
     : _formatStyleCode(entry.usingCode);
   _helperEditorOrigDisplay = _helperEditorDisplay;
 
+  const notes = _getHelperNotes(entry);
+  _helperEditorOrigNotes = notes;
+  _helperSetNotesUI(notes, false);
+
+  const area = document.getElementById('styles-helper-editor-area');
   area.classList.add('active');
   if (_stylesHelperEditor) {
     _stylesHelperEditor.setValue(_helperEditorDisplay);
     _stylesHelperEditor.setScrollPosition({ scrollTop: 0 });
     _stylesHelperEditor.layout();
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      _stylesHelperEditor?.focus();
+      setTimeout(() => {
+        if (_stylesHelperEditor && !_stylesHelperEditor.hasTextFocus())
+          _stylesHelperEditor.focus();
+      }, 100);
+    }));
   }
   document.getElementById('btn-helper-save').disabled = true;
+  _onHelperEditorOpened();
+  _updateHelperEditorButtons();
 }
 
 document.getElementById('btn-helper-save').addEventListener('click', async () => {
@@ -4220,29 +4516,116 @@ document.getElementById('btn-helper-save').addEventListener('click', async () =>
   const rawEditor = _stylesHelperEditor.getValue();
   const { prefix: editorTmpl, code: editorUsing } = _splitTemplatePrefix(rawEditor);
   const compacted = _compactStyleCode(editorUsing);
-  const helperValErr = _validateCollapsedStyle(compacted, _helperEditorOrigCode.match(/^using\s+(\w+)/)?.[1] || 'helper');
-  if (helperValErr) { alert(`Save aborted — structural error in style:\n\n${helperValErr}`); return; }
+  const nameInput = document.getElementById('styles-helper-editor-name');
+  const notes = document.getElementById('helper-notes-textarea').value;
   let current = _stylesEditorInstance.getValue();
-  const idx = current.indexOf(_helperEditorOrigCode);
-  if (idx !== -1) {
-    // Strip any existing template line immediately before the using statement
-    const before = current.slice(0, idx);
-    const tmplLineMatch = before.match(/(template\s*<[^>]*>\s*\n?)$/);
-    const tmplStart = tmplLineMatch ? idx - tmplLineMatch[0].length : idx;
-    const templateLine = editorTmpl ? editorTmpl + '\n' : '';
-    current = current.slice(0, tmplStart) + templateLine + compacted + current.slice(idx + _helperEditorOrigCode.length);
-    _stylesEditorInstance.setValue(current);
-    _helperEditorOrigCode    = compacted;
-    _helperEditorOrigDisplay = editorTmpl ? `${editorTmpl}\n${_formatStyleCode(compacted)}` : _formatStyleCode(compacted);
-  }
-  await window.saveStylesFile();
-  document.getElementById('btn-helper-save').disabled = true;
-});
 
-document.getElementById('btn-helper-discard').addEventListener('click', () => {
-  if (!_stylesHelperEditor) return;
-  _stylesHelperEditor.setValue(_helperEditorOrigDisplay || _helperEditorOrigCode);
+  if (_helperEditorMode === 'add') {
+    // ── Add new helper ──────────────────────────────────
+    const newName = nameInput.value.trim();
+    if (!newName || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(newName)) {
+      nameInput.classList.add('invalid');
+      return;
+    }
+    const helperValErr = _validateCollapsedStyle(compacted, newName);
+    if (helperValErr) { alert(`Save aborted — structural error:\n\n${helperValErr}`); return; }
+    const allEntries = _classifyStyleEntries(_parseStyleEntries(current));
+    if (allEntries.find(e => e.name === newName)) {
+      _showHelperNameError(`"${newName}" already exists — choose a different name.`);
+      nameInput.focus();
+      nameInput.select();
+      return;
+    }
+    const newBlock = _buildHelperBlock(newName, notes, editorTmpl, compacted, true);
+    const { preamble, segments } = _buildSegments(current, allEntries);
+    const helperSegs = segments.filter(s => s.entry.isHelper);
+    if (helperSegs.length) {
+      // Insert right after the last helper's closing /*---*/, before any gap text
+      // (the gap text for the last helper includes the "Using styles" section header,
+      // so we must not splice a new segment — we'd land after that header).
+      const lastSeg = helperSegs[helperSegs.length - 1];
+      const closingRe = /\/\*-{74}\*\//;
+      const m = closingRe.exec(lastSeg.text);
+      if (m) {
+        const insertAt = m.index + m[0].length;
+        const before = lastSeg.text.slice(0, insertAt);
+        const after  = lastSeg.text.slice(insertAt).replace(/^\s*/, '');
+        const blockStr = newBlock.trim();
+        lastSeg.text = before + '\n\n' + blockStr + '\n\n' + after;
+      } else {
+        // Fallback: append to the segment
+        lastSeg.text = lastSeg.text.replace(/\s+$/, '') + '\n' + newBlock;
+      }
+    } else {
+      segments.unshift({ entry: null, text: newBlock });
+    }
+    _stylesEditorInstance.setValue(preamble + segments.map(s => s.text).join(''));
+    _setStylesDirty(true);
+    _closeHelperEditor();
+    _buildStylesVisual();
+    return;
+  }
+
+  // ── Edit existing helper ────────────────────────────
+  const targetName = nameInput.value.trim();
+  const helperValErr = _validateCollapsedStyle(compacted, targetName || 'helper');
+  if (helperValErr) { alert(`Save aborted — structural error in style:\n\n${helperValErr}`); return; }
+
+  // Lookup by original name (in case target was renamed)
+  const lookupName = _helperEditorOrigName || targetName;
+  const allEntries = _classifyStyleEntries(_parseStyleEntries(current));
+  const target = allEntries.find(e => e.name === lookupName);
+  if (!target) { alert(`Cannot locate helper "${lookupName}" in the file.`); return; }
+  const { preamble, segments } = _buildSegments(current, allEntries);
+  const targetSeg = segments.find(s => s.entry === target);
+  if (!targetSeg) return;
+
+  // Rename detection: if name changed, check for references
+  const nameChanged = _helperEditorOrigName && _helperEditorOrigName !== targetName;
+  if (nameChanged) {
+    const origRe = new RegExp(`\\b${_helperEditorOrigName}\\b`);
+    const referencedBy = allEntries.filter(e => e.name !== _helperEditorOrigName && origRe.test(e.usingCode));
+    if (referencedBy.length) {
+      const choice = await _showHelperRenameDialog(_helperEditorOrigName, targetName, referencedBy);
+      if (choice === 'cancel') return; // stay dirty, don't save
+      if (choice === 'update') {
+        // Build new block and do a global rename in the content
+        const keepHelperTag = /\/\/\s*@jmt:helper/.test(target.gapText || '');
+        const newBlock = _buildHelperBlock(targetName, notes, editorTmpl, compacted, keepHelperTag);
+        let newContent = preamble + segments.map(s => s === targetSeg ? newBlock : s.text).join('');
+        // Replace all remaining uses of origName (the new block already has newName)
+        newContent = newContent.replace(new RegExp(`\\b${_helperEditorOrigName}\\b`, 'g'), targetName);
+        _invalidateHelperWidth(lookupName);
+        _invalidateHelperWidth(targetName);
+        _helperEditorOrigCode    = compacted;
+        _helperEditorOrigDisplay = editorTmpl ? `${editorTmpl}\n${_formatStyleCode(compacted)}` : _formatStyleCode(compacted);
+        _helperEditorOrigNotes   = notes;
+        _helperEditorOrigName    = targetName;
+        _stylesEditorInstance.setValue(newContent);
+        _setStylesDirty(true);
+        document.getElementById('btn-helper-save').disabled = true;
+        _updateHelperEditorButtons();
+        return;
+      }
+      // 'ignore': fall through to normal save with new name, references stay broken
+    }
+  }
+
+  const keepHelperTag = /\/\/\s*@jmt:helper/.test(target.gapText || '');
+  const newBlock = _buildHelperBlock(targetName, notes, editorTmpl, compacted, keepHelperTag);
+  const newContent = preamble + segments.map(s => s === targetSeg ? newBlock : s.text).join('');
+
+  _invalidateHelperWidth(lookupName);
+  _invalidateHelperWidth(targetName);
+  _helperEditorOrigCode    = compacted;
+  _helperEditorOrigDisplay = editorTmpl ? `${editorTmpl}\n${_formatStyleCode(compacted)}` : _formatStyleCode(compacted);
+  _helperEditorOrigNotes   = notes;
+  _helperEditorOrigName    = targetName;
+
+  _stylesEditorInstance.setValue(newContent);
+  _setStylesDirty(true);
   document.getElementById('btn-helper-save').disabled = true;
+  _updateHelperEditorButtons();
 });
 
 function _buildStylesVisual() {
@@ -4269,17 +4652,36 @@ function _buildStylesVisual() {
   const fullStyles = allEntries.filter(e => !e.isHelper);
 
   // ── Helpers side panel ──────────────────────────────
+  // Preserve open helper so a background rebuild doesn't close the editor
+  // In add mode, don't try to re-open (there's nothing saved yet to re-open)
+  const openHelperName = (_helperEditorMode === 'edit' && _selectedHelperRow)
+    ? (document.getElementById('styles-helper-editor-name')?.value?.trim() || _selectedHelperRow.querySelector('.helper-row-main span')?.textContent?.trim()) : null;
   const helpersPanel = document.getElementById('styles-helpers-panel');
   helpersList.innerHTML = '';
   _selectedHelperRow = null;
   document.getElementById('styles-helper-editor-area').classList.remove('active');
-  helpersPanel.style.display = helpers.length ? '' : 'none';
+  helpersPanel.style.display = '';
+  if (!helpers.length) {
+    helpersPanel.classList.add('collapsed');
+    document.getElementById('helpers-collapse-btn').innerHTML = '&#8250;';
+    document.getElementById('helpers-collapse-btn').title = 'Expand helpers';
+  } else if (helpersPanel.classList.contains('collapsed') && !_userCollapsedHelpers) {
+    // Auto-expand: helpers exist and user hasn't manually collapsed this session
+    helpersPanel.classList.remove('collapsed');
+    _applySidebarWidth(_savedBrowseWidth, false);
+    document.getElementById('helpers-collapse-btn').innerHTML = '&#8249;';
+    document.getElementById('helpers-collapse-btn').title = 'Collapse helpers';
+  } else if (!helpersPanel.classList.contains('collapsed') && helpersPanel.offsetWidth < _SIDEBAR_MIN_W) {
+    // Panel isn't collapsed but has zero/tiny width from init timing — restore it
+    _applySidebarWidth(_savedBrowseWidth, false);
+  }
   if (helpers.length) {
     helpers.forEach(entry => {
       const row = document.createElement('div');
       const isTmplErr = _conflictTemplateNames.has(entry.name);
       row.className = 'styles-helper-row' + (isTmplErr ? ' helper-conflict' : '');
-      row.innerHTML = `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1">${entry.name}</span><button class="helper-delete-btn" title="Delete helper">&#10005;</button><span class="styles-helper-chevron">&#9658;</span>`;
+      const rowNotes = _getHelperNotes(entry);
+      row.innerHTML = `<div class="helper-row-main"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1">${entry.name}</span><button class="helper-delete-btn" title="Delete helper">&#10005;</button><span class="styles-helper-chevron">&#9658;</span></div>${rowNotes ? `<div class="helper-row-notes-preview">${rowNotes.split('\n')[0]}</div>` : ''}`;
       row.querySelector('.helper-delete-btn').addEventListener('click', e => {
         e.stopPropagation();
         _deleteStyleEntry(entry, true);
@@ -4316,7 +4718,8 @@ function _buildStylesVisual() {
         uses.innerHTML = `<div class="styles-helper-use-item" style="opacity:0.5;cursor:default">Used outside file</div>`;
       }
 
-      row.addEventListener('click', () => {
+      row.addEventListener('click', async () => {
+        if (!await _guardHelperAdd('Discard this new helper?')) return;
         const isOpen = row.classList.toggle('open');
         uses.classList.toggle('open', isOpen);
         _openHelperEditor(entry, row);
@@ -4325,6 +4728,20 @@ function _buildStylesVisual() {
       helpersList.appendChild(row);
       helpersList.appendChild(uses);
     });
+
+    // Re-open the helper that was open before the rebuild
+    if (openHelperName) {
+      const rows = helpersList.querySelectorAll('.styles-helper-row');
+      rows.forEach(r => {
+        if (r.querySelector('.helper-row-main span')?.textContent?.trim() === openHelperName) {
+          r.classList.add('open');
+          const usesEl = r.nextElementSibling;
+          if (usesEl) usesEl.classList.add('open');
+          const matchEntry = helpers.find(e => e.name === openHelperName);
+          if (matchEntry) _openHelperEditor(matchEntry, r);
+        }
+      });
+    }
   }
 
   // ── Full styles main area ───────────────────────────
@@ -4425,7 +4842,10 @@ function _buildStylesVisual() {
       _reorderStylesInFile(_styleDragSrcIdx, cardIdx);
     });
 
-    card.addEventListener('click', () => _openStyleDetail(entry));
+    card.addEventListener('click', async () => {
+      if (!await _guardHelperAdd('Discard this new helper?')) return;
+      _openStyleDetail(entry);
+    });
     list.appendChild(card);
   });
 
@@ -4437,7 +4857,24 @@ function _buildStylesVisual() {
   const hasError     = _errorStyleNames.size > 0;
   const hasBoth      = hasBroken && [..._brokenStyleNames].some(n => inUseNames.has(n));
 
-  if (!hasBroken && !hasInUse && !hasConflict && !hasError) {
+  // ── Footer metadata ───────────────────────────────────
+  const footerMeta = document.getElementById('styles-footer-meta');
+  const editorContent = _stylesEditorInstance.getValue();
+  const metaCreated = _extractStyleLibraryCreatedDate(editorContent);
+  const metaUpdatedMatch = editorContent.match(/^\/\/\s*@jmt:updated\s+(.+)$/m);
+  const metaUpdated = metaUpdatedMatch ? metaUpdatedMatch[1].trim() : null;
+  if (metaCreated || metaUpdated) {
+    const parts = [];
+    if (metaCreated) parts.push(`Created: ${metaCreated}`);
+    if (metaUpdated) parts.push(`Updated: ${metaUpdated}`);
+    footerMeta.textContent = parts.join('  ·  ');
+  } else {
+    footerMeta.textContent = '';
+  }
+
+  const hasLegendItems = hasBroken || hasInUse || hasConflict || hasError;
+  const hasFooter = footerMeta.textContent.length > 0;
+  if (!hasLegendItems && !hasFooter) {
     legendEl.style.display = 'none';
   } else {
     const items = [];
@@ -4446,8 +4883,12 @@ function _buildStylesVisual() {
     if (hasBoth)     items.push(`<span class="legend-item"><span class="legend-swatch both"></span>Both</span>`);
     if (hasConflict) items.push(`<span class="legend-item"><span class="legend-swatch yellow"></span>Duplicate name — resolve before saving</span>`);
     if (hasError)    items.push(`<span class="legend-item"><span class="legend-swatch error"></span>Unmatched brackets — syntax error</span>`);
-    legendEl.innerHTML = items.join('');
     legendEl.style.display = 'flex';
+    // Rebuild legend items without clobbering #styles-footer-meta
+    [...legendEl.querySelectorAll('.legend-item')].forEach(el => el.remove());
+    const frag = document.createDocumentFragment();
+    items.forEach(html => { const span = document.createElement('span'); span.innerHTML = html; frag.appendChild(span.firstChild); });
+    legendEl.insertBefore(frag, footerMeta);
   }
 
   _updateConflictBanner();
@@ -4781,16 +5222,20 @@ function _collapseEditorContent() {
   if (result !== content) _stylesEditorInstance.setValue(result);
 }
 
-document.getElementById('btn-styles-replace').addEventListener('click', async () => {
-  const result = await window.electronAPI.replaceStylesFile();
-  if (!result.ok) return;
-  if (_stylesEditorInstance) {
-    _conflictStyleNames.clear();
-    _stylesEditorInstance.setValue(result.content);
-    _collapseEditorContent();
-    _setStylesDirty(true);
-    if (_stylesViewMode === 'visual') _buildStylesVisual();
-  }
+function _confirmStylesDiscard() {
+  return new Promise(resolve => {
+    const overlay = document.getElementById('modal-styles-discard');
+    overlay.classList.add('active');
+    const cleanup = r => { overlay.classList.remove('active'); resolve(r); };
+    document.getElementById('modal-styles-discard-cancel').onclick  = () => cleanup(false);
+    document.getElementById('modal-styles-discard-confirm').onclick = () => cleanup(true);
+  });
+}
+document.getElementById('btn-styles-discard').addEventListener('click', async () => {
+  if (!await _confirmStylesDiscard()) return;
+  _closeHelperEditor();
+  await _loadStylesFile();
+  if (_stylesViewMode === 'visual') _buildStylesVisual();
 });
 document.getElementById('btn-styles-append').addEventListener('click', async () => {
   const result = await window.electronAPI.replaceStylesFile();
@@ -4875,91 +5320,380 @@ document.getElementById('btn-styles-expand').addEventListener('click', () => {
   _transformAllUsing(code => _formatStyleCode(_compactStyleCode(code)));
 });
 
-// Helpers panel — horizontal resize divider + collapse/expand
-(function() {
-  const panel    = document.getElementById('styles-helpers-panel');
-  const divider  = document.getElementById('helpers-divider');
-  const colBtn   = document.getElementById('helpers-collapse-btn');
-  const VIEW_KEY = 'jmt-helpers-panel-width';
-  const MIN_W = 150, MAX_FRAC = 0.4;
-  let preCollapseW = null;
+// Helpers panel — content-aware width, resize, collapse/expand
+const _SIDEBAR_KEY        = 'jmt.helpersPanel.browseWidth';
+const _SIDEBAR_BROWSE_DEF = 200;
+const _SIDEBAR_ADD_DEF    = 420; // default panel width when adding a new helper
+const _SIDEBAR_MIN_W      = 150;
+const _SIDEBAR_ANIM_MS    = 220;
+const _SIDEBAR_PAD        = 64;
+const _helperNaturalWidths = new Map(); // helperName -> cached computed px; invalidated on save/delete
 
-  // Restore saved width
-  const saved = parseInt(localStorage.getItem(VIEW_KEY), 10);
-  if (saved && saved >= MIN_W) panel.style.width = saved + 'px';
+function _invalidateHelperWidth(name) {
+  if (name) _helperNaturalWidths.delete(name);
+}
 
-  function setWidth(w) {
-    const max = Math.floor(document.getElementById('styles-visual-view').getBoundingClientRect().width * MAX_FRAC);
-    w = Math.min(Math.max(w, MIN_W), max);
-    panel.style.width = w + 'px';
-    localStorage.setItem(VIEW_KEY, w);
+function _sidebarMaxW() {
+  const view = document.getElementById('styles-visual-view');
+  return Math.floor((view ? view.getBoundingClientRect().width : window.innerWidth) * 0.4);
+}
+
+function _applySidebarWidth(px, animate) {
+  const panel = document.getElementById('styles-helpers-panel');
+  if (!panel || panel.classList.contains('collapsed')) return;
+  const maxW = _sidebarMaxW();
+  const w = maxW > 0 ? Math.min(Math.max(Math.round(px), _SIDEBAR_MIN_W), maxW) : Math.max(Math.round(px), _SIDEBAR_MIN_W);
+  if (!animate) {
+    panel.style.transition = 'none';
+    void panel.offsetWidth;
   }
+  panel.style.width = `${w}px`;
+  if (!animate) requestAnimationFrame(() => { panel.style.transition = ''; });
+}
 
-  function collapse() {
-    preCollapseW = parseInt(panel.style.width, 10) || parseInt(localStorage.getItem(VIEW_KEY), 10) || 210;
+function _computeHelpersSidebarWidth(helperName) {
+  if (helperName && _helperNaturalWidths.has(helperName)) {
+    return _helperNaturalWidths.get(helperName);
+  }
+  if (!_stylesHelperEditor) return _SIDEBAR_BROWSE_DEF;
+  const model = _stylesHelperEditor.getModel();
+  if (!model) return _SIDEBAR_BROWSE_DEF;
+  let maxChars = 0;
+  for (let i = 1; i <= model.getLineCount(); i++) {
+    maxChars = Math.max(maxChars, model.getLineLength(i));
+  }
+  if (!maxChars) return _SIDEBAR_BROWSE_DEF;
+  // Use Monaco's own measured character width so the estimate matches the rendered font exactly
+  const fontInfo = _stylesHelperEditor.getOption(monaco.editor.EditorOption.fontInfo);
+  const charPx = (fontInfo && fontInfo.typicalHalfwidthCharacterWidth) || 8;
+  const result = Math.min(Math.max(Math.ceil(maxChars * charPx) + _SIDEBAR_PAD, _SIDEBAR_MIN_W), _sidebarMaxW());
+  if (helperName) _helperNaturalWidths.set(helperName, result);
+  return result;
+}
+
+function _isHelperEditorOpen() {
+  return document.getElementById('styles-helper-editor-area').classList.contains('active');
+}
+
+function _onHelperEditorOpened() {
+  if (_userDraggedThisSession) return;
+  if (!_helperEditorOrigName) {
+    // Add mode: expand to a comfortable editing width, capped at half the available space
+    const target = Math.min(_SIDEBAR_ADD_DEF, Math.floor(_sidebarMaxW() * 0.5));
+    _applySidebarWidth(target, true);
+    return;
+  }
+  _applySidebarWidth(_computeHelpersSidebarWidth(_helperEditorOrigName), true);
+}
+
+function _onHelperEditorClosed() {
+  _userDraggedThisSession = false;
+  _applySidebarWidth(_savedBrowseWidth, false);
+}
+
+function _discardHelperChanges() {
+  if (!_stylesHelperEditor) return;
+  _stylesHelperEditor.setValue(_helperEditorOrigDisplay || _helperEditorOrigCode);
+  // Restore notes but keep collapsed — notes were closed on open, don't force them open on discard
+  _helperSetNotesUI(_helperEditorOrigNotes, false);
+  // Restore name display to original (may have been changed by pencil rename attempt that was cancelled)
+  const nameInput   = document.getElementById('styles-helper-editor-name');
+  const nameDisplay = document.getElementById('helper-name-display');
+  const pencilBtn   = document.getElementById('btn-helper-pencil');
+  const confirmBtn  = document.getElementById('btn-helper-pencil-confirm');
+  nameInput.value   = _helperEditorOrigName;
+  nameInput.classList.remove('editable', 'invalid');
+  nameInput.readOnly = true;
+  nameDisplay.textContent = _helperEditorOrigName;
+  nameDisplay.style.display = '';
+  pencilBtn.style.display = '';
+  confirmBtn.style.display = 'none';
+  document.getElementById('btn-helper-save').disabled = true;
+  _updateHelperEditorButtons();
+}
+
+// Returns true if add-helper panel has any unsaved content
+function _helperAddHasContent() {
+  if (_helperEditorMode !== 'add') return false;
+  const code = _stylesHelperEditor ? _stylesHelperEditor.getValue().trim() : '';
+  const name = (document.getElementById('styles-helper-editor-name')?.value || '').trim();
+  return !!(code || name);
+}
+
+// Returns true if the Add Style modal has any content
+function _addStyleModalHasContent() {
+  const code = _addStyleEditor ? _addStyleEditor.getValue().trim() : '';
+  const name = (document.getElementById('add-style-name')?.value || '').trim();
+  return !!(code || name);
+}
+
+// Shows the unsaved modal with only Discard/Cancel (no Save).
+// Resolves true = proceed (discard), false = cancel (stay).
+async function _promptDiscard(msg) {
+  const saveBtn = document.getElementById('modal-unsaved-save');
+  saveBtn.style.display = 'none';
+  const result = await promptUnsaved(msg);
+  saveBtn.style.display = '';
+  return result !== 'cancel';
+}
+
+// Guard: if add-helper panel has content, ask before proceeding. Returns true = ok to proceed.
+async function _guardHelperAdd(msg) {
+  if (!_helperAddHasContent()) return true;
+  return _promptDiscard(msg || 'Discard this new helper?');
+}
+
+// Guard: if add-style modal has content, ask before proceeding. Returns true = ok to proceed.
+async function _guardAddStyleModal(msg) {
+  if (!_addStyleModalHasContent()) return true;
+  return _promptDiscard(msg || 'Discard this new style?');
+}
+
+function _closeHelperEditor() {
+  _helperEditorMode = 'edit';
+  _helperEditorOrigName = '';
+  const nameInput   = document.getElementById('styles-helper-editor-name');
+  const nameDisplay = document.getElementById('helper-name-display');
+  const pencilBtn   = document.getElementById('btn-helper-pencil');
+  const confirmBtn  = document.getElementById('btn-helper-pencil-confirm');
+  nameInput.readOnly = true;
+  nameInput.classList.remove('editable', 'invalid');
+  nameInput.placeholder = '';
+  nameDisplay.textContent = '';
+  nameDisplay.style.display = 'none';
+  pencilBtn.style.display = 'none';
+  pencilBtn.classList.remove('active');
+  confirmBtn.style.display = 'none';
+  _showHelperNameError('');
+  _helperSetNotesUI('', false);
+  const _helperArea = document.getElementById('styles-helper-editor-area');
+  if (_helperArea.contains(document.activeElement)) document.activeElement.blur();
+  _helperArea.classList.remove('active');
+  if (_selectedHelperRow) {
+    _selectedHelperRow.classList.remove('selected', 'open');
+    const usesEl = _selectedHelperRow.nextElementSibling;
+    if (usesEl?.classList.contains('styles-helper-uses')) usesEl.classList.remove('open');
+    _selectedHelperRow = null;
+  }
+  _onHelperEditorClosed();
+}
+
+function _updateHelperEditorButtons() {
+  const isDirty = !document.getElementById('btn-helper-save').disabled;
+  const rightBtn = document.getElementById('btn-helper-right');
+  if (!rightBtn) return;
+  if (_helperEditorMode === 'add') {
+    rightBtn.textContent = 'Cancel';
+    rightBtn.onclick = _closeHelperEditor;
+    rightBtn.title = 'Cancel adding helper';
+  } else if (isDirty) {
+    rightBtn.textContent = 'Discard';
+    rightBtn.onclick = _discardHelperChanges;
+    rightBtn.title = 'Discard unsaved changes';
+  } else {
+    rightBtn.textContent = 'Close';
+    rightBtn.onclick = _closeHelperEditor;
+    rightBtn.title = 'Close the helper editor';
+  }
+}
+
+(function _initHelpersSidebar() {
+  const panel   = document.getElementById('styles-helpers-panel');
+  const divider = document.getElementById('helpers-divider');
+  const colBtn  = document.getElementById('helpers-collapse-btn');
+
+  // Init browse width from localStorage
+  const stored = parseInt(localStorage.getItem(_SIDEBAR_KEY), 10);
+  if (Number.isFinite(stored) && stored >= _SIDEBAR_MIN_W) _savedBrowseWidth = stored;
+  _applySidebarWidth(_savedBrowseWidth, false);
+
+  function _collapseHelpers() {
+    _collapsedFromWidth = panel.offsetWidth;
     panel.classList.add('collapsed');
+    _userCollapsedHelpers = true;
     colBtn.innerHTML = '&#8250;';
     colBtn.title = 'Expand helpers';
   }
-
-  function expand() {
+  function _expandHelpers() {
+    const restore = _collapsedFromWidth ?? _savedBrowseWidth;
+    _collapsedFromWidth = null;
     panel.classList.remove('collapsed');
-    if (preCollapseW) panel.style.width = preCollapseW + 'px';
+    _userCollapsedHelpers = false;
+    _applySidebarWidth(restore, false);
     colBtn.innerHTML = '&#8249;';
     colBtn.title = 'Collapse helpers';
   }
 
   colBtn.addEventListener('click', e => {
     e.stopPropagation();
-    panel.classList.contains('collapsed') ? expand() : collapse();
+    panel.classList.contains('collapsed') ? _expandHelpers() : _collapseHelpers();
   });
 
-  // Double-click divider to toggle collapse
+  // Double-click: refit to content (editor open) or reset to default (browse mode)
   divider.addEventListener('dblclick', () => {
-    panel.classList.contains('collapsed') ? expand() : collapse();
+    if (panel.classList.contains('collapsed')) { _expandHelpers(); return; }
+    if (_isHelperEditorOpen()) {
+      _userDraggedThisSession = false;
+      _invalidateHelperWidth(_helperEditorOrigName || null); // force fresh measurement on double-click refit
+      _applySidebarWidth(_computeHelpersSidebarWidth(_helperEditorOrigName || null), true);
+    } else {
+      _savedBrowseWidth = _SIDEBAR_BROWSE_DEF;
+      localStorage.setItem(_SIDEBAR_KEY, _SIDEBAR_BROWSE_DEF);
+      _applySidebarWidth(_SIDEBAR_BROWSE_DEF, true);
+    }
   });
 
-  // Drag divider to resize
+  // Drag to resize
   divider.addEventListener('mousedown', e => {
     if (e.target === colBtn) return;
-    if (panel.classList.contains('collapsed')) { expand(); return; }
+    if (panel.classList.contains('collapsed')) { _expandHelpers(); return; }
     const startX = e.clientX;
     const startW = panel.getBoundingClientRect().width;
     divider.classList.add('dragging');
     document.body.style.userSelect = 'none';
     document.body.style.cursor = 'col-resize';
-
-    function onMove(e) { setWidth(startW + (e.clientX - startX)); }
+    function onMove(ev) {
+      const w = Math.min(Math.max(startW + (ev.clientX - startX), _SIDEBAR_MIN_W), _sidebarMaxW());
+      panel.style.transition = 'none';
+      panel.style.width = `${w}px`;
+    }
     function onUp() {
       divider.classList.remove('dragging');
       document.body.style.userSelect = '';
       document.body.style.cursor = '';
+      panel.style.transition = '';
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
+      const w = panel.offsetWidth;
+      if (_isHelperEditorOpen()) {
+        _userDraggedThisSession = true;
+      } else {
+        _savedBrowseWidth = w;
+        localStorage.setItem(_SIDEBAR_KEY, w);
+      }
     }
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
     e.preventDefault();
   });
+
+  window.addEventListener('resize', () => {
+    if (!panel.classList.contains('collapsed')) _applySidebarWidth(panel.offsetWidth, false);
+  });
 })();
 
-// Add Helper — works exactly like Add Style; it becomes a helper once referenced
-document.getElementById('btn-add-helper').addEventListener('click', () => {
-  _openAddStyleModal();
-  // Pre-fill a hint in the name field placeholder
-  const nameInp = document.getElementById('add-style-name');
-  if (nameInp) nameInp.placeholder = 'HelperName (required)';
+function _showHelperNameError(msg) {
+  const el = document.getElementById('helper-name-error');
+  const inp = document.getElementById('styles-helper-editor-name');
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.toggle('visible', !!msg);
+  if (inp) inp.classList.toggle('invalid', !!msg);
+}
+
+// Add Helper — opens inline editor in add mode
+document.getElementById('btn-add-helper').addEventListener('click', async () => {
+  if (!await _guardHelperAdd('Discard this new helper?')) return;
+  const panel = document.getElementById('styles-helpers-panel');
+  if (panel.classList.contains('collapsed')) {
+    panel.classList.remove('collapsed');
+    _applySidebarWidth(_savedBrowseWidth, false);
+    document.getElementById('helpers-collapse-btn').innerHTML = '&#8249;';
+    document.getElementById('helpers-collapse-btn').title = 'Collapse helpers';
+  }
+  _openHelperAdd();
+});
+
+// Helper name input: sync to editor + update dirty state
+document.getElementById('styles-helper-editor-name').addEventListener('input', () => {
+  const nameInput = document.getElementById('styles-helper-editor-name');
+  const name = nameInput.value.trim();
+  nameInput.classList.remove('invalid');
+  _showHelperNameError('');
+  // Sync name → editor (add mode, or edit mode with pencil active)
+  if (_helperEditorMode === 'add' || !nameInput.readOnly) {
+    _syncHelperNameToEditor(name);
+  }
+  const saveBtn = document.getElementById('btn-helper-save');
+  if (_helperEditorMode === 'add') {
+    const code = _stylesHelperEditor ? _stylesHelperEditor.getValue().trim() : '';
+    saveBtn.disabled = !name || !code;
+  } else {
+    // In edit mode with pencil active, any name change marks dirty
+    saveBtn.disabled = false;
+  }
+  _updateHelperEditorButtons();
+});
+
+// Notes toggle
+document.getElementById('btn-helper-notes-toggle').addEventListener('click', () => {
+  const body    = document.getElementById('helper-notes-body');
+  const toggle  = document.getElementById('btn-helper-notes-toggle');
+  const willOpen = body.style.display === 'none';
+  body.style.display = willOpen ? '' : 'none';
+  const notes = document.getElementById('helper-notes-textarea').value;
+  toggle.innerHTML = (willOpen ? '&#9660;' : '&#9654;') + ' Notes';
+  toggle.classList.toggle('has-notes', !!notes.trim());
+});
+
+// Notes textarea: mark dirty in edit mode; update save state in add mode
+document.getElementById('helper-notes-textarea').addEventListener('input', () => {
+  const saveBtn = document.getElementById('btn-helper-save');
+  const toggle  = document.getElementById('btn-helper-notes-toggle');
+  const notes   = document.getElementById('helper-notes-textarea').value;
+  toggle.classList.toggle('has-notes', !!notes.trim());
+  if (_helperEditorMode === 'add') {
+    const name = document.getElementById('styles-helper-editor-name').value.trim();
+    const code = _stylesHelperEditor ? _stylesHelperEditor.getValue().trim() : '';
+    saveBtn.disabled = !name || !code;
+  } else {
+    saveBtn.disabled = false;
+  }
+  _updateHelperEditorButtons();
+});
+
+// Pencil — enter rename mode
+document.getElementById('btn-helper-pencil').addEventListener('click', () => {
+  const nameInput   = document.getElementById('styles-helper-editor-name');
+  const nameDisplay = document.getElementById('helper-name-display');
+  const pencilBtn   = document.getElementById('btn-helper-pencil');
+  const confirmBtn  = document.getElementById('btn-helper-pencil-confirm');
+  nameDisplay.style.display = 'none';
+  pencilBtn.style.display = 'none';
+  nameInput.classList.add('editable');
+  nameInput.readOnly = false;
+  confirmBtn.style.display = '';
+  nameInput.focus();
+  nameInput.select();
+});
+
+// Confirm (checkmark) — lock name, return to display mode
+document.getElementById('btn-helper-pencil-confirm').addEventListener('click', () => {
+  const nameInput   = document.getElementById('styles-helper-editor-name');
+  const nameDisplay = document.getElementById('helper-name-display');
+  const pencilBtn   = document.getElementById('btn-helper-pencil');
+  const confirmBtn  = document.getElementById('btn-helper-pencil-confirm');
+  nameDisplay.textContent = nameInput.value || nameInput.placeholder;
+  nameDisplay.style.display = '';
+  nameInput.classList.remove('editable');
+  nameInput.readOnly = true;
+  confirmBtn.style.display = 'none';
+  pencilBtn.style.display = '';
 });
 
 // Add Style modal
 document.getElementById('btn-add-style').addEventListener('click', _openAddStyleModal);
 ['btn-add-style-close','btn-add-style-cancel'].forEach(id => {
-  document.getElementById(id).addEventListener('click', () =>
-    document.getElementById('modal-add-style').classList.remove('active'));
-});
-document.getElementById('modal-add-style').addEventListener('click', e => {
-  if (e.target === document.getElementById('modal-add-style'))
+  document.getElementById(id).addEventListener('click', async () => {
+    if (!await _guardAddStyleModal('Discard this new style?')) return;
     document.getElementById('modal-add-style').classList.remove('active');
+  });
+});
+document.getElementById('modal-add-style').addEventListener('click', async e => {
+  if (e.target === document.getElementById('modal-add-style')) {
+    if (!await _guardAddStyleModal('Discard this new style?')) return;
+    document.getElementById('modal-add-style').classList.remove('active');
+  }
 });
 // Parse clipboard content into structured style fields
 function _parseClipboardStyle(text) {
@@ -5415,10 +6149,27 @@ window.initStylesPanel = function() {
       lineNumbers: 'off', minimap: { enabled: false }, folding: false,
       scrollBeyondLastLine: false, wordWrap: 'off' });
   _stylesHelperEditor.onDidChangeModelContent(() => {
-    if (_stylesHelperEditor && _helperEditorOrigCode !== undefined) {
-      document.getElementById('btn-helper-save').disabled =
-        _stylesHelperEditor.getValue() === _helperEditorOrigCode;
+    if (!_stylesHelperEditor) return;
+    const nameInput = document.getElementById('styles-helper-editor-name');
+    // Ghost-focus guard: if content changed by user action (not a sync op) and Monaco's
+    // textarea lost real browser focus, re-focus so character typing works
+    if (!_helperSyncingName &&
+        (_helperEditorMode === 'add' || !nameInput.readOnly) &&
+        !_stylesHelperEditor.hasTextFocus()) {
+      _stylesHelperEditor.focus();
     }
+    // Sync name from editor in add mode, or in edit mode when pencil is active
+    if (_helperEditorMode === 'add' || !nameInput.readOnly) {
+      _syncEditorNameToInput();
+    }
+    const saveBtn = document.getElementById('btn-helper-save');
+    if (_helperEditorMode === 'add') {
+      const name = nameInput.value.trim();
+      saveBtn.disabled = !name || !_stylesHelperEditor.getValue().trim();
+    } else {
+      saveBtn.disabled = _stylesHelperEditor.getValue() === _helperEditorOrigDisplay;
+    }
+    _updateHelperEditorButtons();
   });
 
   _addStyleEditor = monaco.editor.create(
@@ -5855,6 +6606,12 @@ require(['vs/editor/editor.main'], function () {
           if (choice === 'cancel') return;
           if (choice === 'save') { await window.saveStylesFile(); }
         }
+      }
+      if (_helperAddHasContent()) {
+        if (!await _promptDiscard('A new helper has unsaved content — discard and close?')) return;
+      }
+      if (_addStyleModalHasContent()) {
+        if (!await _promptDiscard('A new style has unsaved content — discard and close?')) return;
       }
       window.electronAPI.doClose();
     });
