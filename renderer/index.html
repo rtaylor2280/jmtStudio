@@ -634,6 +634,9 @@
     font-size: 0.9rem;
   }
 
+  /* ── Config editor row (sidecar + editor side-by-side) ── */
+  #config-editor-row { display: flex; flex-direction: row; flex: 1; min-height: 0; overflow: hidden; }
+
   /* ── Editor container ── */
   #editor-container { flex: 1; overflow: hidden; position: relative; display: none; min-height: 0; }
   #editor-container.visible { display: block; }
@@ -1666,6 +1669,133 @@
   #style-detail-editor { flex: 1; min-height: 0; border: 1px solid var(--c-border); border-radius: 4px; overflow: hidden; }
   .modal-btn-close { position: absolute; top: 12px; right: 14px; font-size: 1.1rem; background: none; border: none; color: var(--c-text-muted); cursor: pointer; padding: 2px 6px; border-radius: 3px; }
   .modal-btn-close:hover { color: var(--c-text); background: var(--c-bg-hover); }
+
+  /* ── Preset sidecar ── */
+  .preset-sidecar { display: flex; flex-direction: row; border-right: 1px solid var(--c-border); background: var(--c-bg); flex-shrink: 0; transition: width 0.2s ease; width: 338px; }
+  .preset-sidecar.collapsed { width: 20px; }
+  .preset-sidecar.collapsed .preset-sidecar-inner { display: none; }
+
+  /* Always-visible left strip */
+  .preset-sidecar-strip { width: 20px; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; padding-top: 6px; gap: 8px; border-right: 1px solid var(--c-border); }
+  .preset-sidecar.collapsed .preset-sidecar-strip { border-right: none; }
+  .preset-sidecar-toggle { background: none; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; color: var(--c-text-muted); font-size: 0.75rem; border-radius: 2px; padding: 0; flex-shrink: 0; }
+  .preset-sidecar-toggle:hover { background: var(--c-bg-hover); color: var(--c-text); }
+  .preset-sidecar.open .toggle-icon { display: inline-block; transform: rotate(180deg); }
+  .preset-strip-label { font-size: 0.58rem; font-weight: 900; letter-spacing: 0.08em; color: var(--c-text-muted); white-space: nowrap; writing-mode: vertical-lr; user-select: none; }
+
+  .preset-sidecar-inner { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; background: var(--c-bg-raised); }
+  .preset-sidecar-header { display: flex; align-items: center; gap: 4px; padding: 8px 10px 6px; border-bottom: 1px solid var(--c-border); flex-shrink: 0; }
+  .preset-sidecar-title { font-size: 0.7rem; font-weight: 700; color: var(--c-text); letter-spacing: 0.05em; }
+  .preset-add-btn { font-size: 0.7rem; padding: 1px 7px; line-height: 1; }
+  .preset-sidecar-close { margin-left: auto; background: none; border: none; cursor: pointer; color: var(--c-text-muted); font-size: 1rem; padding: 0 4px; }
+  .preset-sidecar-close:hover { color: var(--c-text); }
+
+  .preset-list-top { flex: 0 0 50%; overflow-y: auto; padding: 4px 0; border-bottom: 1px solid var(--c-border); }
+  .preset-list-top::-webkit-scrollbar,
+  .preset-detail::-webkit-scrollbar     { width: 6px; }
+  .preset-list-top::-webkit-scrollbar-track,
+  .preset-detail::-webkit-scrollbar-track { background: transparent; }
+  .preset-list-top::-webkit-scrollbar-thumb,
+  .preset-detail::-webkit-scrollbar-thumb { background: var(--c-border); border-radius: 3px; }
+
+  .preset-insert-zone { height: 4px; position: relative; cursor: pointer; flex-shrink: 0; z-index: 2; transition: height 0.12s ease 0.4s; }
+  .preset-insert-zone::before { content: ''; position: absolute; left: 8px; right: 8px; top: 50%; transform: translateY(-50%); height: 0; background: var(--jmt-blue); opacity: 0; transition: height 0.12s 0.4s, opacity 0.12s 0.4s; border-radius: 1px; }
+  .preset-insert-zone::after { content: '+'; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: 0.75rem; font-weight: 700; color: var(--jmt-blue); opacity: 0; transition: opacity 0.12s 0.4s; line-height: 1; }
+  .preset-insert-zone:hover { height: 20px; }
+  .preset-insert-zone:hover::before { height: 2px; opacity: 1; }
+  .preset-insert-zone:hover::after  { opacity: 1; }
+
+  .preset-row { position: relative; display: flex; align-items: center; gap: 6px; padding: 5px 28px 5px 6px; cursor: pointer; font-size: 0.78rem; color: var(--c-text-sub); transition: background 0.1s; user-select: none; }
+  .preset-row:hover { background: var(--c-bg-hover); }
+  .preset-row.selected { background: var(--jmt-blue); color: #fff; }
+  .preset-row.selected .preset-row-font { color: rgba(255,255,255,0.7); }
+  .preset-row.selected .preset-row-num  { color: rgba(255,255,255,0.6); }
+  .preset-row.dragging { opacity: 0.35; }
+  .preset-row.drag-over-top    { border-top: 2px solid var(--jmt-blue); }
+  .preset-row.drag-over-bottom { border-bottom: 2px solid var(--jmt-blue); }
+  .preset-row-drag { width: 14px; cursor: grab; color: var(--c-text-hint); opacity: 0.6; font-size: 0.85rem; text-align: center; user-select: none; }
+  .preset-row-drag:active { cursor: grabbing; }
+  .preset-row-num { width: 18px; text-align: right; color: var(--c-text-muted); font-variant-numeric: tabular-nums; }
+  .preset-row-name { font-weight: 600; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .preset-row-font { color: var(--c-text-muted); font-size: 0.68rem; margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100px; }
+  .preset-row-delete { position: absolute; top: 50%; right: 4px; transform: translateY(-50%); background: none; border: none; cursor: pointer; color: var(--c-text-muted); opacity: 0; padding: 2px 5px; font-size: 0.85rem; line-height: 1; border-radius: 3px; transition: opacity 0.1s, color 0.1s, background 0.1s; }
+  .preset-row:hover .preset-row-delete { opacity: 0.6; }
+  .preset-row-delete:hover { opacity: 1 !important; color: #e44; background: rgba(40,10,10,0.7); }
+
+  @keyframes preset-new-glow {
+    0%   { background: rgba(58,143,255,0.22); box-shadow: inset 0 0 0 1px var(--jmt-blue); }
+    100% { background: transparent; box-shadow: inset 0 0 0 0 transparent; }
+  }
+  .preset-row.new-preset { animation: preset-new-glow 0.55s ease-out forwards; }
+
+  .preset-detail { flex: 1 1 50%; overflow-y: auto; padding: 8px 10px 12px; font-size: 0.78rem; }
+  .preset-detail-empty { color: var(--c-text-hint); font-style: italic; padding: 12px 0; }
+  .preset-detail-heading { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+  .preset-detail-num { color: var(--c-text-muted); font-weight: 600; }
+  .preset-detail-name-wrap { display: inline-flex; align-items: center; gap: 3px; flex: 1; min-width: 0; }
+  .preset-detail-name { font-weight: 700; color: var(--c-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .preset-nav-btn, .preset-detail-delete { background: none; border: none; cursor: pointer; font-size: 0.85rem; line-height: 1; padding: 2px 5px; border-radius: 3px; opacity: 0.3; transition: opacity 0.1s, color 0.1s, background 0.1s; }
+  .preset-nav-btn { color: var(--c-text-muted); }
+  .preset-nav-btn:hover { opacity: 1; color: var(--jmt-blue); }
+  .preset-detail-delete { color: var(--c-text-muted); margin-left: 4px; }
+  .preset-detail-delete:hover { opacity: 1; color: #e44; background: rgba(40,10,10,0.7); }
+
+  .preset-detail-field { display: flex; align-items: center; gap: 8px; padding: 3px 0; min-height: 22px; }
+  .preset-detail-field-label { width: 90px; flex-shrink: 0; color: var(--c-text-muted); font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; cursor: help; }
+  .preset-detail-field-label.field-error { color: #e44; }
+  .preset-detail-field-value-wrap { display: inline-flex; align-items: center; gap: 3px; flex: 1; min-width: 0; }
+  .preset-detail-field-value { flex: 0 0 auto; min-width: 0; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--c-text); }
+  .preset-detail-field-value[data-placeholder]:empty::after { content: attr(data-placeholder); color: var(--c-text-hint); font-style: italic; }
+
+  .preset-common-toggle { display: inline-flex; align-items: center; gap: 3px; cursor: pointer; user-select: none; flex-shrink: 0; margin-left: 8px; font-size: 0.72rem; color: var(--c-text-muted); }
+  .preset-common-toggle input[type="checkbox"] { cursor: pointer; width: 11px; height: 11px; accent-color: var(--jmt-blue); margin: 0; }
+
+  .preset-edit-input { font: inherit; color: var(--c-text); background: var(--c-bg-card); border: 1px solid var(--jmt-blue); border-radius: 2px; padding: 1px 4px; outline: none; flex: 1; min-width: 60px; max-width: 220px; }
+  .preset-edit-input.invalid { border-color: #e44; }
+  .preset-edit-pencil, .preset-edit-confirm { background: none; border: none; cursor: pointer; font-size: 0.85rem; line-height: 1; padding: 1px 3px; color: var(--c-text-muted); opacity: 0.35; transition: opacity 0.1s, color 0.1s; }
+  .preset-edit-pencil:hover, .preset-edit-confirm:hover { opacity: 1; color: var(--jmt-blue); }
+  .preset-edit-cancel { background: none; border: none; cursor: pointer; font-size: 0.85rem; line-height: 1; padding: 1px 3px; color: var(--c-text-muted); opacity: 0.35; }
+  .preset-edit-cancel:hover { opacity: 1; color: #e44; }
+
+  .preset-detail-slots-label { font-size: 0.7rem; color: var(--c-text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; margin: 10px 0 4px; }
+  .preset-detail-slots-label.field-error { color: #e44; }
+  .preset-detail-slots { display: flex; flex-direction: column; gap: 4px; }
+
+  .preset-slot-tile { position: relative; display: flex; align-items: flex-start; gap: 6px; padding: 5px 7px; border-radius: 3px; font-size: 0.72rem; font-family: 'Cascadia Code', 'Consolas', monospace; border: 1px solid transparent; cursor: pointer; word-break: break-all; }
+  .preset-slot-tile:hover { border-color: var(--c-border); }
+  .preset-slot-tile.slot-helper  { background: rgba(58,143,255,0.10); color: var(--c-text); }
+  .preset-slot-tile.slot-ref     { background: rgba(40,180,170,0.12); color: var(--c-text); }
+  .preset-slot-tile.slot-inline  { background: rgba(220,170,40,0.10); color: var(--c-text); }
+  .preset-slot-tile.slot-missing, .preset-slot-tile.slot-excess { background: rgba(228,68,68,0.12); color: #e44; border-color: rgba(228,68,68,0.45); }
+
+  .preset-slot-num { flex-shrink: 0; width: 22px; text-align: center; color: var(--c-text-muted); font-weight: 600; font-size: 0.7rem; background: rgba(0,0,0,0.15); border-radius: 2px; padding: 1px 0; }
+  .preset-slot-tile.slot-missing .preset-slot-num, .preset-slot-tile.slot-excess .preset-slot-num { color: #e44; }
+  .preset-slot-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .preset-slot-expr { word-break: break-all; }
+  .preset-slot-color { display: inline-flex; align-items: center; gap: 4px; font-size: 0.68rem; color: var(--c-text-muted); }
+  .preset-slot-color-swatch { width: 8px; height: 8px; border-radius: 50%; border: 1px solid rgba(0,0,0,0.3); flex-shrink: 0; }
+
+  .preset-slot-actions { position: absolute; top: 3px; right: 3px; display: flex; gap: 2px; opacity: 0.3; transition: opacity 0.1s; }
+  .preset-slot-tile:hover .preset-slot-actions { opacity: 1; }
+  .preset-slot-action { background: var(--c-bg-card); border: 1px solid var(--c-border); border-radius: 2px; cursor: pointer; font-size: 0.7rem; padding: 1px 4px; color: var(--c-text-muted); }
+  .preset-slot-action:hover { color: var(--jmt-blue); border-color: var(--jmt-blue); }
+
+  .preset-slot-edit-wrap { display: flex; flex-direction: column; gap: 4px; }
+  .preset-slot-edit-textarea { font: inherit; font-family: 'Cascadia Code', 'Consolas', monospace; font-size: 0.72rem; background: var(--c-bg-card); color: var(--c-text); border: 1px solid var(--jmt-blue); border-radius: 2px; padding: 4px 6px; outline: none; resize: vertical; min-height: 50px; }
+  .preset-slot-edit-textarea.invalid { border-color: #e44; }
+  .preset-slot-edit-actions { display: flex; gap: 4px; }
+
+  .preset-library-picker { position: fixed; z-index: 100; background: var(--c-bg-card); border: 1px solid var(--c-border); border-radius: 4px; box-shadow: 0 4px 16px rgba(0,0,0,0.4); min-width: 240px; max-width: 320px; max-height: 280px; display: flex; flex-direction: column; overflow: hidden; }
+  .preset-library-search { font: inherit; background: var(--c-bg); color: var(--c-text); border: none; border-bottom: 1px solid var(--c-border); padding: 6px 8px; outline: none; }
+  .preset-library-list { flex: 1; overflow-y: auto; min-height: 0; }
+  .preset-library-item { padding: 5px 10px; cursor: pointer; font-size: 0.78rem; color: var(--c-text); }
+  .preset-library-item:hover, .preset-library-item.highlighted { background: var(--c-bg-hover); color: var(--jmt-blue); }
+  .preset-library-empty { padding: 8px 10px; color: var(--c-text-hint); font-style: italic; font-size: 0.75rem; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .preset-row.new-preset, .preset-insert-zone, .preset-insert-zone::before, .preset-insert-zone::after, .preset-sidecar { transition: none; animation: none; }
+  }
 </style>
 </head>
 <body>
@@ -1983,14 +2113,40 @@
   <div id="fav-cards"></div>
 </div>
 
-<!-- ── Editor ── -->
-<div id="editor-container">
-  <div id="editor"></div>
-  <div id="diff-labels">
-    <div class="diff-label orig" id="diff-label-orig">Original (baseline)</div>
-    <div class="diff-label curr">Current</div>
+<!-- ── Config editor row (preset sidecar + Monaco editor) ── -->
+<div id="config-editor-row">
+
+  <div id="preset-sidecar" class="preset-sidecar collapsed">
+    <!-- Always-visible left strip: toggle chevron + rotated label -->
+    <div class="preset-sidecar-strip">
+      <button id="btn-preset-sidecar-toggle" class="preset-sidecar-toggle" title="Toggle preset sidecar">
+        <span class="toggle-icon">&#10095;</span>
+      </button>
+      <span class="preset-strip-label">PRESETS</span>
+    </div>
+
+    <!-- Main content: hidden when collapsed -->
+    <div class="preset-sidecar-inner">
+      <div class="preset-sidecar-header">
+        <span class="preset-sidecar-title">PRESET STYLES</span>
+        <button id="btn-preset-add" class="btn-blue preset-add-btn" title="Add preset to end">+</button>
+        <button id="btn-preset-sidecar-close" class="preset-sidecar-close" title="Close">&times;</button>
+      </div>
+
+      <div id="preset-list-top" class="preset-list-top"></div>
+      <div id="preset-detail" class="preset-detail"></div>
+    </div>
   </div>
-  <div id="diff-editor"></div>
+
+  <div id="editor-container">
+    <div id="editor"></div>
+    <div id="diff-labels">
+      <div class="diff-label orig" id="diff-label-orig">Original (baseline)</div>
+      <div class="diff-label curr">Current</div>
+    </div>
+    <div id="diff-editor"></div>
+  </div>
+
 </div>
 
 <!-- ── Log panel ── -->
@@ -2290,6 +2446,7 @@
 <input type="file" id="file-input" accept=".h,.txt" style="display:none" />
 
 <script src="./effect-keywords.js"></script>
+<script src="./presetParser.js"></script>
 <script src="./vs/loader.js"></script>
 <script>
 // ── Environment ────────────────────────────────────────
@@ -6195,7 +6352,7 @@ window.initStylesPanel = function() {
 // ── Tab switching ──────────────────────────────────────
 
 const _configOnlyEls = ['config-banner', 'build-toolbar', 'empty-state',
-                        'editor-container', 'build-log'];
+                        'config-editor-row', 'build-log'];
 const _configOnlyClasses = ['.status-bar', '.meta-bar'];
 
 let _activeTab = 'config';
@@ -6652,6 +6809,807 @@ require(['vs/editor/editor.main'], function () {
       }
     });
   }
+
+  // ── Preset Sidecar ────────────────────────────────────────────────────────
+  (function presetSidecarModule() {
+    'use strict';
+
+    let _sidecarOpen         = false;
+    let _parseResult         = null;
+    let _activeArrayIndex    = 0;
+    let _selectedPresetIndex = 0;
+    let _rebuildTimer        = null;
+    let _isDragging          = false;
+    let _activeLibraryPicker = null;
+
+    function _navigateToLine(startLine, endLine) {
+      if (!editor) return;
+      editor.revealLinesInCenterIfOutsideViewport(startLine, endLine || startLine);
+      editor.setPosition({ lineNumber: startLine, column: 1 });
+    }
+
+    function _openSidecar() {
+      _sidecarOpen = true;
+      const el = document.getElementById('preset-sidecar');
+      el.classList.add('open');
+      el.classList.remove('collapsed');
+      _rebuildSidecar();
+      const arr = _parseResult?.arrays[_activeArrayIndex];
+      if (arr?.presets.length) {
+        const idx = Math.max(0, Math.min(_selectedPresetIndex, arr.presets.length - 1));
+        const p = arr.presets[idx];
+        if (p) _navigateToLine(p.startLine, p.endLine);
+      }
+    }
+    function _closeSidecar() {
+      _sidecarOpen = false;
+      const el = document.getElementById('preset-sidecar');
+      el.classList.remove('open');
+      el.classList.add('collapsed');
+    }
+    function _toggleSidecar() { _sidecarOpen ? _closeSidecar() : _openSidecar(); }
+
+    function _rebuildSidecar() {
+      if (!_sidecarOpen || !editor) return;
+      _parseResult = presetParser.parsePresets(editor.getValue());
+      const arr = _parseResult.arrays[_activeArrayIndex];
+      _renderPresetList(arr);
+      _renderDetail();
+    }
+    function _scheduleRebuild() {
+      clearTimeout(_rebuildTimer);
+      _rebuildTimer = setTimeout(_rebuildSidecar, 50);
+    }
+    function _renderEmpty(msg) {
+      document.getElementById('preset-list-top').innerHTML =
+        `<div class="preset-detail-empty" style="padding:12px 14px">${msg}</div>`;
+      document.getElementById('preset-detail').innerHTML = '';
+    }
+
+    // ── List ──────────────────────────────────────────────────────────────────
+    function _renderPresetList(arr) {
+      const listEl = document.getElementById('preset-list-top');
+      if (!arr || !arr.presets.length) { _renderEmpty('No presets found.'); return; }
+      listEl.innerHTML = '';
+      arr.presets.forEach((preset, i) => {
+        listEl.appendChild(_buildInsertZone(_activeArrayIndex, i));
+        listEl.appendChild(_buildPresetRow(preset, i));
+      });
+      listEl.appendChild(_buildInsertZone(_activeArrayIndex, arr.presets.length));
+      const toSelect = Math.max(0, Math.min(_selectedPresetIndex, arr.presets.length - 1));
+      _selectPreset(arr, toSelect);
+    }
+
+    function _buildInsertZone(arrayIndex, insertAtIndex) {
+      const zone = document.createElement('div');
+      zone.className = 'preset-insert-zone';
+      zone.title = insertAtIndex === 0 ? 'Insert preset at top' : `Insert after preset #${insertAtIndex}`;
+      zone.addEventListener('click', () => { if (!_isDragging) _addPreset(arrayIndex, insertAtIndex); });
+      return zone;
+    }
+
+    function _buildPresetRow(preset, idx) {
+      const row = document.createElement('div');
+      row.className = 'preset-row';
+      row.draggable = true;
+
+      const drag = document.createElement('span');
+      drag.className = 'preset-row-drag';
+      drag.textContent = '⋮⋮';
+      drag.title = 'Drag to reorder';
+      row.appendChild(drag);
+
+      const num = document.createElement('span');
+      num.className = 'preset-row-num';
+      num.textContent = preset.index;
+      row.appendChild(num);
+
+      const name = document.createElement('span');
+      name.className = 'preset-row-name';
+      name.textContent = preset.displayName || '(unnamed)';
+      row.appendChild(name);
+
+      const font = document.createElement('span');
+      font.className = 'preset-row-font';
+      font.textContent = (preset.font || '').split(';').filter(p => p.trim() !== 'common').join(';');
+      row.appendChild(font);
+
+      const del = document.createElement('button');
+      del.className = 'preset-row-delete';
+      del.innerHTML = '&times;';
+      del.title = 'Delete preset';
+      del.addEventListener('click', e => { e.stopPropagation(); _deletePreset(_activeArrayIndex, idx); });
+      row.appendChild(del);
+
+      row.addEventListener('click', () => {
+        const arr = _parseResult?.arrays[_activeArrayIndex];
+        if (arr) _selectPreset(arr, idx);
+        _navigateToLine(preset.startLine, preset.endLine);
+      });
+
+      row.addEventListener('dragstart', e => {
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', String(idx));
+        _isDragging = true;
+        setTimeout(() => row.classList.add('dragging'), 0);
+      });
+      row.addEventListener('dragend', () => {
+        _isDragging = false;
+        row.classList.remove('dragging');
+        document.querySelectorAll('.preset-row').forEach(r =>
+          r.classList.remove('drag-over-top', 'drag-over-bottom'));
+      });
+      row.addEventListener('dragover', e => {
+        e.preventDefault();
+        const rect = row.getBoundingClientRect();
+        const after = (e.clientY - rect.top) > rect.height / 2;
+        row.classList.toggle('drag-over-bottom', after);
+        row.classList.toggle('drag-over-top', !after);
+      });
+      row.addEventListener('dragleave', () => {
+        row.classList.remove('drag-over-top', 'drag-over-bottom');
+      });
+      row.addEventListener('drop', e => {
+        e.preventDefault();
+        const fromIdx = parseInt(e.dataTransfer.getData('text/plain'), 10);
+        if (Number.isNaN(fromIdx)) return;
+        const rect = row.getBoundingClientRect();
+        const after = (e.clientY - rect.top) > rect.height / 2;
+        const insertPos = after ? idx + 1 : idx;
+        if (insertPos === fromIdx || insertPos === fromIdx + 1) return;
+        const toIdx = fromIdx < insertPos ? insertPos - 1 : insertPos;
+        _reorderPresets(_activeArrayIndex, fromIdx, toIdx);
+      });
+
+      return row;
+    }
+
+    function _selectPreset(arr, idx) {
+      _selectedPresetIndex = idx;
+      document.querySelectorAll('#preset-list-top .preset-row').forEach((r, i) =>
+        r.classList.toggle('selected', i === idx));
+      _renderDetail();
+    }
+
+    // ── Detail ────────────────────────────────────────────────────────────────
+    function _renderDetail() {
+      const detail = document.getElementById('preset-detail');
+      detail.innerHTML = '';
+      const arr = _parseResult?.arrays[_activeArrayIndex];
+      if (!arr || !arr.presets.length) return;
+      const idx = Math.max(0, Math.min(_selectedPresetIndex, arr.presets.length - 1));
+      const preset = arr.presets[idx];
+      if (!preset) return;
+
+      const heading = document.createElement('div');
+      heading.className = 'preset-detail-heading';
+
+      const hNum = document.createElement('span');
+      hNum.className = 'preset-detail-num';
+      hNum.textContent = preset.index;
+      heading.appendChild(hNum);
+
+      const nameWrap = document.createElement('span');
+      nameWrap.className = 'preset-detail-name-wrap';
+      const nameVal = document.createElement('span');
+      nameVal.className = 'preset-detail-name';
+      nameVal.textContent = preset.displayName || '';
+      nameVal.dataset.placeholder = preset.displayName ? '' : 'Preset name';
+      nameWrap.appendChild(nameVal);
+      nameWrap.appendChild(_makePencil(() =>
+        _startFieldEdit(nameVal, preset.displayNameRange, preset.displayName || '')));
+      heading.appendChild(nameWrap);
+
+      const navBtn = document.createElement('button');
+      navBtn.className = 'preset-nav-btn';
+      navBtn.innerHTML = '&#8594;';
+      navBtn.title = `Go to line ${preset.startLine}`;
+      navBtn.addEventListener('click', () => _navigateToLine(preset.startLine, preset.endLine));
+      heading.appendChild(navBtn);
+
+      const delBtn = document.createElement('button');
+      delBtn.className = 'preset-detail-delete';
+      delBtn.innerHTML = '&times;';
+      delBtn.title = 'Delete this preset';
+      delBtn.addEventListener('click', () => _deletePreset(_activeArrayIndex, idx));
+      heading.appendChild(delBtn);
+
+      detail.appendChild(heading);
+      detail.appendChild(_buildFontField(preset));
+      detail.appendChild(_buildTrackField(preset));
+      detail.appendChild(_buildSlotsSection(preset));
+
+      if (preset._autoOpenEmpty) {
+        delete preset._autoOpenEmpty;
+        _autoOpenEmptyFields(detail);
+      }
+    }
+
+    function _makePencil(onClick) {
+      const btn = document.createElement('button');
+      btn.className = 'preset-edit-pencil';
+      btn.innerHTML = '&#9998;';
+      btn.title = 'Edit';
+      btn.addEventListener('click', onClick);
+      return btn;
+    }
+
+    function _buildFontField(preset) {
+      const wrap = document.createElement('div');
+      wrap.className = 'preset-detail-field';
+      const label = document.createElement('span');
+      label.className = 'preset-detail-field-label';
+      label.textContent = 'Font Folder';
+      label.title = 'Case-sensitive font folder name on the SD card.';
+      wrap.appendChild(label);
+
+      const valueWrap = document.createElement('span');
+      valueWrap.className = 'preset-detail-field-value-wrap';
+      const fontVal = document.createElement('span');
+      fontVal.className = 'preset-detail-field-value';
+      const displayFont = (preset.font || '').split(';').filter(p => p.trim() !== 'common').join(';');
+      fontVal.textContent = displayFont;
+      fontVal.dataset.placeholder = displayFont ? '' : '(empty)';
+      valueWrap.appendChild(fontVal);
+
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = (preset.font || '').split(';').some(p => p.trim() === 'common');
+
+      valueWrap.appendChild(_makePencil(() => {
+        _startFieldEdit(fontVal, preset.fontRange, displayFont, undefined, newPath => {
+          const full = cb.checked ? (newPath ? newPath + ';common' : 'common') : newPath;
+          _commitFieldEdit(preset.fontRange, full);
+        });
+      }));
+
+      const cbWrap = document.createElement('label');
+      cbWrap.className = 'preset-common-toggle';
+      cb.addEventListener('change', () => {
+        const path = fontVal.textContent;
+        const full = cb.checked ? (path ? path + ';common' : 'common') : path;
+        _commitFieldEdit(preset.fontRange, full);
+        _scheduleRebuild();
+      });
+      cbWrap.appendChild(cb);
+      cbWrap.appendChild(document.createTextNode('common'));
+      valueWrap.appendChild(cbWrap);
+      wrap.appendChild(valueWrap);
+      return wrap;
+    }
+
+    function _buildTrackField(preset) {
+      const wrap = document.createElement('div');
+      wrap.className = 'preset-detail-field';
+      const label = document.createElement('span');
+      label.className = 'preset-detail-field-label';
+      label.textContent = 'Track';
+      wrap.appendChild(label);
+      const valueWrap = document.createElement('span');
+      valueWrap.className = 'preset-detail-field-value-wrap';
+      const val = document.createElement('span');
+      val.className = 'preset-detail-field-value';
+      val.textContent = preset.track || '';
+      val.dataset.placeholder = preset.track ? '' : '(empty)';
+      valueWrap.appendChild(val);
+      if (preset.trackRange) {
+        valueWrap.appendChild(_makePencil(() =>
+          _startFieldEdit(val, preset.trackRange, preset.track || '')));
+      }
+      wrap.appendChild(valueWrap);
+      return wrap;
+    }
+
+    function _buildSlotsSection(preset) {
+      const wrap = document.createElement('div');
+      const expected = _parseResult?.bladeCount || 0;
+      const actual   = preset.styles.length;
+      const mismatch = expected > 0 && actual !== expected;
+
+      const label = document.createElement('div');
+      label.className = 'preset-detail-slots-label' + (mismatch ? ' field-error' : '');
+      label.textContent = expected
+        ? `Styles (${actual}/${expected} blades)`
+        : `Styles (${actual} blades)`;
+      if (mismatch) label.title = `NUM_BLADES is ${expected}, this preset has ${actual} style(s)`;
+      wrap.appendChild(label);
+
+      const slots = document.createElement('div');
+      slots.className = 'preset-detail-slots';
+      preset.styles.forEach((slot, i) => {
+        const excess = expected > 0 && i >= expected;
+        slots.appendChild(_buildSlotTile(preset, slot, i, false, excess));
+      });
+      if (expected > 0 && actual < expected) {
+        for (let i = actual; i < expected; i++) {
+          const missing = document.createElement('div');
+          missing.className = 'preset-slot-tile slot-missing';
+          missing.title = `Missing — required by NUM_BLADES (${expected})`;
+          const num = document.createElement('span');
+          num.className = 'preset-slot-num';
+          num.textContent = `B${i + 1}`;
+          const body = document.createElement('span');
+          body.className = 'preset-slot-body';
+          body.innerHTML = '<span class="preset-slot-expr">Missing — required by NUM_BLADES</span>';
+          missing.appendChild(num);
+          missing.appendChild(body);
+          slots.appendChild(missing);
+        }
+      }
+      wrap.appendChild(slots);
+      return wrap;
+    }
+
+    function _buildSlotTile(preset, slot, slotIdx, isMissing, isExcess) {
+      const tile = document.createElement('div');
+      tile.className = 'preset-slot-tile';
+      if      (isMissing)                    tile.classList.add('slot-missing');
+      else if (isExcess)                     tile.classList.add('slot-excess');
+      else if (slot.styleClass === 'helper') tile.classList.add('slot-helper');
+      else if (slot.styleClass === 'ref')    tile.classList.add('slot-ref');
+      else                                   tile.classList.add('slot-inline');
+      if (isExcess) tile.title = `Excess slot — NUM_BLADES is ${_parseResult.bladeCount}, this is blade ${slotIdx + 1}`;
+
+      const num = document.createElement('span');
+      num.className = 'preset-slot-num';
+      num.textContent = `B${slotIdx + 1}`;
+      tile.appendChild(num);
+
+      const body = document.createElement('span');
+      body.className = 'preset-slot-body';
+      const expr = document.createElement('span');
+      expr.className = 'preset-slot-expr';
+      expr.textContent = slot.type === 'ref' ? `&${slot.expr}` : slot.expr;
+      body.appendChild(expr);
+
+      if (slot.colorArg) {
+        const colorRow = document.createElement('span');
+        colorRow.className = 'preset-slot-color';
+        const swatch = document.createElement('span');
+        swatch.className = 'preset-slot-color-swatch';
+        swatch.style.background = _colorArgToCSS(slot.colorArg);
+        colorRow.appendChild(swatch);
+        colorRow.appendChild(document.createTextNode(slot.colorArg));
+        body.appendChild(colorRow);
+      }
+      tile.appendChild(body);
+
+      const actions = document.createElement('span');
+      actions.className = 'preset-slot-actions';
+      const editBtn = document.createElement('button');
+      editBtn.className = 'preset-slot-action';
+      editBtn.innerHTML = '&#9998;';
+      editBtn.title = 'Edit inline';
+      editBtn.addEventListener('click', e => { e.stopPropagation(); _startSlotEdit(tile, preset, slot, slotIdx); });
+      actions.appendChild(editBtn);
+      const libBtn = document.createElement('button');
+      libBtn.className = 'preset-slot-action';
+      libBtn.innerHTML = '&#8862;';
+      libBtn.title = 'Pick from library';
+      libBtn.addEventListener('click', e => { e.stopPropagation(); _openLibraryPickerForSlot(tile, preset, slot, slotIdx); });
+      actions.appendChild(libBtn);
+      tile.appendChild(actions);
+
+      tile.addEventListener('click', () => {
+        if (slot.startLine) _navigateToLine(slot.startLine, slot.endLine);
+      });
+      return tile;
+    }
+
+    function _colorArgToCSS(arg) {
+      const parts = arg.split(',').map(s => parseInt(s.trim(), 10));
+      if (parts.length === 3 && parts.every(n => Number.isFinite(n))) {
+        return `rgb(${Math.round(parts[0]/257)},${Math.round(parts[1]/257)},${Math.round(parts[2]/257)})`;
+      }
+      return arg;
+    }
+
+    // ── Field editing ──────────────────────────────────────────────────────────
+    function _startFieldEdit(valEl, range, currentValue, inputClass, onConfirm) {
+      if (!range) return;
+      const wrap = valEl.parentNode;
+      const placeholder = document.createElement('span');
+      wrap.replaceChild(placeholder, valEl);
+
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'preset-edit-input' + (inputClass ? ' ' + inputClass : '');
+      input.value = currentValue;
+
+      const confirm = document.createElement('button');
+      confirm.className = 'preset-edit-confirm';
+      confirm.innerHTML = '&#10003;';
+      confirm.title = 'Confirm';
+
+      const cancel = document.createElement('button');
+      cancel.className = 'preset-edit-cancel';
+      cancel.innerHTML = '&times;';
+      cancel.title = 'Cancel';
+
+      placeholder.replaceWith(input);
+      input.insertAdjacentElement('afterend', cancel);
+      input.insertAdjacentElement('afterend', confirm);
+
+      function restore() { confirm.remove(); cancel.remove(); input.replaceWith(valEl); }
+      function apply() {
+        const v = input.value;
+        if (!_validateFieldValue(v)) { input.classList.add('invalid'); return; }
+        valEl.textContent = v;
+        if (onConfirm) onConfirm(v);
+        else _commitFieldEdit(range, v);
+        restore();
+        _scheduleRebuild();
+      }
+      input.addEventListener('keydown', e => {
+        if (e.key === 'Enter')  { e.preventDefault(); apply(); }
+        else if (e.key === 'Escape') { e.preventDefault(); restore(); }
+        else input.classList.remove('invalid');
+      });
+      input.addEventListener('input', () => input.classList.remove('invalid'));
+      confirm.addEventListener('click', apply);
+      cancel.addEventListener('click', restore);
+      setTimeout(() => { input.focus(); input.select(); }, 0);
+    }
+
+    function _validateFieldValue(v) { return !v.includes('"'); }
+
+    function _commitFieldEdit(range, newValue) {
+      if (!range || !editor) return;
+      editor.executeEdits('preset-field-edit', [{
+        range: {
+          startLineNumber: range.startLine, startColumn: range.startCol + 1,
+          endLineNumber:   range.endLine,   endColumn:   range.endCol + 1,
+        },
+        text: '"' + newValue + '"',
+      }]);
+      editor.focus();
+    }
+
+    function _autoOpenEmptyFields(detailEl) {
+      detailEl.querySelectorAll('.preset-detail-field-value').forEach(val => {
+        if (!val.textContent) {
+          const pencil = val.parentNode.querySelector('.preset-edit-pencil');
+          if (pencil) pencil.click();
+        }
+      });
+      const nameVal = detailEl.querySelector('.preset-detail-name');
+      if (nameVal && !nameVal.textContent) {
+        const pencil = nameVal.parentNode.querySelector('.preset-edit-pencil');
+        if (pencil) pencil.click();
+      }
+    }
+
+    // ── Slot editing ───────────────────────────────────────────────────────────
+    function _startSlotEdit(tile, preset, slot, slotIdx) {
+      const original = slot.type === 'ref' ? `&${slot.expr}` : slot.expr;
+      const wrap = document.createElement('div');
+      wrap.className = 'preset-slot-edit-wrap';
+
+      const ta = document.createElement('textarea');
+      ta.className = 'preset-slot-edit-textarea';
+      ta.value = original;
+
+      const actionsEl = document.createElement('div');
+      actionsEl.className = 'preset-slot-edit-actions';
+
+      const confirm = document.createElement('button');
+      confirm.className = 'preset-edit-confirm';
+      confirm.innerHTML = '&#10003;';
+      confirm.title = 'Confirm (Ctrl+Enter)';
+
+      const cancel = document.createElement('button');
+      cancel.className = 'preset-edit-cancel';
+      cancel.innerHTML = '&times;';
+      cancel.title = 'Cancel (Esc)';
+
+      const lib = document.createElement('button');
+      lib.className = 'preset-edit-confirm';
+      lib.innerHTML = '&#8862;';
+      lib.title = 'Pick from library';
+      lib.addEventListener('click', e => { e.stopPropagation(); _openLibraryPickerForTextarea(lib, ta); });
+
+      actionsEl.appendChild(confirm);
+      actionsEl.appendChild(cancel);
+      actionsEl.appendChild(lib);
+      wrap.appendChild(ta);
+      wrap.appendChild(actionsEl);
+
+      const tileParent = tile.parentNode;
+      tileParent.replaceChild(wrap, tile);
+
+      function restore() { tileParent.replaceChild(tile, wrap); }
+      function apply() {
+        const v = ta.value.trim();
+        if (!_validateSlotExpression(v)) { ta.classList.add('invalid'); return; }
+        _commitSlotEdit(slot, v);
+        _scheduleRebuild();
+      }
+      ta.addEventListener('keydown', e => {
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); apply(); }
+        else if (e.key === 'Escape') { e.preventDefault(); restore(); }
+        else ta.classList.remove('invalid');
+      });
+      confirm.addEventListener('click', apply);
+      cancel.addEventListener('click', restore);
+      setTimeout(() => { ta.focus(); ta.select(); }, 0);
+    }
+
+    function _validateSlotExpression(v) {
+      if (!v) return false;
+      let angle = 0, paren = 0;
+      for (const ch of v) {
+        if      (ch === '<') angle++;
+        else if (ch === '>') angle--;
+        else if (ch === '(') paren++;
+        else if (ch === ')') paren--;
+        if (angle < 0 || paren < 0) return false;
+      }
+      return angle === 0 && paren === 0;
+    }
+
+    function _commitSlotEdit(slot, newExpr) {
+      if (!editor) return;
+      let replacement;
+      if (newExpr.startsWith('&')) {
+        replacement = newExpr;
+      } else {
+        replacement = /^\w*StylePtr\s*</.test(newExpr) ? newExpr : `StylePtr<${newExpr}>()`;
+      }
+      editor.executeEdits('preset-slot-edit', [{
+        range: {
+          startLineNumber: slot.startLine, startColumn: slot.startCol + 1,
+          endLineNumber:   slot.endLine,   endColumn:   slot.endCol + 1,
+        },
+        text: replacement,
+      }]);
+      editor.focus();
+    }
+
+    // ── Library picker ─────────────────────────────────────────────────────────
+    function _getLibraryHelpers() {
+      if (typeof _stylesEditorInstance === 'undefined' || !_stylesEditorInstance) return [];
+      const text = _stylesEditorInstance.getValue();
+      const re = /^using\s+(\w+)\s*=/mg;
+      const names = [];
+      let m;
+      while ((m = re.exec(text)) !== null) names.push(m[1]);
+      return names;
+    }
+
+    function _openLibraryPickerForSlot(tile, preset, slot) {
+      const helpers = _getLibraryHelpers();
+      const picker = _buildLibraryPicker(helpers, name => {
+        _commitSlotEdit(slot, name);
+        _closeLibraryPicker();
+        _scheduleRebuild();
+      });
+      _showLibraryPicker(picker, tile);
+    }
+
+    function _openLibraryPickerForTextarea(anchorBtn, textarea) {
+      const helpers = _getLibraryHelpers();
+      const picker = _buildLibraryPicker(helpers, name => {
+        const start = textarea.selectionStart;
+        const end   = textarea.selectionEnd;
+        textarea.value = textarea.value.slice(0, start) + name + textarea.value.slice(end);
+        textarea.focus();
+        textarea.selectionStart = textarea.selectionEnd = start + name.length;
+        _closeLibraryPicker();
+      });
+      _showLibraryPicker(picker, anchorBtn);
+    }
+
+    function _buildLibraryPicker(helpers, onPick) {
+      const picker = document.createElement('div');
+      picker.className = 'preset-library-picker';
+
+      const search = document.createElement('input');
+      search.className = 'preset-library-search';
+      search.placeholder = 'Search…';
+      picker.appendChild(search);
+
+      const list = document.createElement('div');
+      list.className = 'preset-library-list';
+      picker.appendChild(list);
+
+      let highlighted = 0;
+      function render(filter) {
+        list.innerHTML = '';
+        const filtered = helpers.filter(n => n.toLowerCase().includes(filter.toLowerCase()));
+        if (!filtered.length) {
+          const empty = document.createElement('div');
+          empty.className = 'preset-library-empty';
+          empty.textContent = helpers.length ? 'No matches.' : 'No styles available. Open a Style Library first.';
+          list.appendChild(empty);
+          return;
+        }
+        filtered.forEach((name, i) => {
+          const item = document.createElement('div');
+          item.className = 'preset-library-item' + (i === highlighted ? ' highlighted' : '');
+          item.textContent = name;
+          item.addEventListener('click', () => onPick(name));
+          list.appendChild(item);
+        });
+      }
+      render('');
+
+      search.addEventListener('input', () => { highlighted = 0; render(search.value); });
+      search.addEventListener('keydown', e => {
+        const items = list.querySelectorAll('.preset-library-item');
+        if      (e.key === 'Enter')     { e.preventDefault(); if (items[highlighted]) items[highlighted].click(); }
+        else if (e.key === 'Escape')    { e.preventDefault(); _closeLibraryPicker(); }
+        else if (e.key === 'ArrowDown') { e.preventDefault(); highlighted = Math.min(highlighted + 1, items.length - 1); render(search.value); }
+        else if (e.key === 'ArrowUp')   { e.preventDefault(); highlighted = Math.max(highlighted - 1, 0); render(search.value); }
+      });
+      setTimeout(() => search.focus(), 0);
+      return picker;
+    }
+
+    function _showLibraryPicker(picker, anchor) {
+      _closeLibraryPicker();
+      document.body.appendChild(picker);
+      const rect = anchor.getBoundingClientRect();
+      picker.style.left = `${rect.left}px`;
+      picker.style.top  = `${rect.bottom + 4}px`;
+      _activeLibraryPicker = picker;
+      setTimeout(() => { document.addEventListener('mousedown', _libPickerOutside); }, 0);
+    }
+    function _libPickerOutside(e) {
+      if (_activeLibraryPicker && !_activeLibraryPicker.contains(e.target)) _closeLibraryPicker();
+    }
+    function _closeLibraryPicker() {
+      if (_activeLibraryPicker) {
+        _activeLibraryPicker.remove();
+        _activeLibraryPicker = null;
+        document.removeEventListener('mousedown', _libPickerOutside);
+      }
+    }
+
+    // ── Add preset ─────────────────────────────────────────────────────────────
+    function _addPreset(arrayIndex, insertAtIndex) {
+      if (!editor) return;
+      const result = presetParser.parsePresets(editor.getValue());
+      const arr = result.arrays[arrayIndex];
+      if (!arr || !arr.presets.length) return;
+
+      const bladeCount = result.bladeCount || 1;
+      const presetNum  = arr.presets.length + 1;
+      const lines      = editor.getValue().split('\n');
+      const refIdx     = Math.max(0, Math.min(insertAtIndex, arr.presets.length - 1));
+      const refLine    = lines[arr.presets[refIdx].startLine - 1] || '';
+      const indent     = (refLine.match(/^(\s*)/) || ['', '  '])[1] || '  ';
+      const inner      = indent + '  ';
+
+      const styleLines = [];
+      for (let i = 0; i < bladeCount; i++) styleLines.push(`${inner}StylePtr<Black>(),`);
+      const newText = [
+        `${indent}{ "", "",`,
+        ...styleLines,
+        `${inner}"Preset ${presetNum}" },`,
+      ].join('\n') + '\n';
+
+      let insertLine;
+      if (insertAtIndex >= arr.presets.length) {
+        insertLine = arr.presets[arr.presets.length - 1].endLine + 1;
+        while (insertLine <= lines.length && lines[insertLine - 1].trim() === '') insertLine++;
+      } else {
+        insertLine = arr.presets[insertAtIndex].startLine;
+      }
+
+      editor.executeEdits('preset-add', [{
+        range: { startLineNumber: insertLine, startColumn: 1, endLineNumber: insertLine, endColumn: 1 },
+        text: newText,
+      }]);
+      editor.focus();
+      _selectedPresetIndex = Math.min(insertAtIndex, arr.presets.length);
+
+      clearTimeout(_rebuildTimer);
+      setTimeout(() => {
+        _rebuildSidecar();
+        const newArr = _parseResult?.arrays[_activeArrayIndex];
+        const newPreset = newArr?.presets[_selectedPresetIndex];
+        if (newPreset) {
+          newPreset._autoOpenEmpty = true;
+          _renderDetail();
+          setTimeout(() => {
+            const rows = document.querySelectorAll('#preset-list-top .preset-row');
+            const row = rows[_selectedPresetIndex];
+            if (row) {
+              row.classList.add('new-preset');
+              row.addEventListener('animationend', () => row.classList.remove('new-preset'), { once: true });
+              row.scrollIntoView({ block: 'nearest' });
+            }
+          }, 30);
+        }
+      }, 50);
+    }
+
+    // ── Delete preset ──────────────────────────────────────────────────────────
+    function _deletePreset(arrayIndex, presetIndex) {
+      if (!editor) return;
+      const result = presetParser.parsePresets(editor.getValue());
+      const preset = result.arrays[arrayIndex]?.presets[presetIndex];
+      if (!preset) return;
+      editor.executeEdits('preset-delete', [{
+        range: {
+          startLineNumber: preset.startLine, startColumn: 1,
+          endLineNumber:   preset.endLine + 1, endColumn: 1,
+        },
+        text: '',
+      }]);
+      editor.focus();
+      _scheduleRebuild();
+    }
+
+    // ── Reorder presets ────────────────────────────────────────────────────────
+    function _reorderPresets(arrayIndex, fromIdx, toIdx) {
+      if (!editor) return;
+      const result  = presetParser.parsePresets(editor.getValue());
+      const presets = result.arrays[arrayIndex]?.presets;
+      if (!presets || presets.length < 2) return;
+
+      const lines     = editor.getValue().split('\n');
+      const firstLine = presets[0].startLine;
+      const lastLine  = presets[presets.length - 1].endLine;
+      const blocks    = presets.map(p => lines.slice(p.startLine - 1, p.endLine));
+      const gaps      = [];
+      for (let i = 0; i < presets.length - 1; i++)
+        gaps.push(lines.slice(presets[i].endLine, presets[i + 1].startLine - 1));
+
+      const newBlocks = [...blocks];
+      const [moved] = newBlocks.splice(fromIdx, 1);
+      newBlocks.splice(toIdx, 0, moved);
+
+      const newLines = [];
+      for (let i = 0; i < newBlocks.length; i++) {
+        newLines.push(...newBlocks[i]);
+        if (i < gaps.length) newLines.push(...gaps[i]);
+      }
+
+      const model = editor.getModel();
+      editor.executeEdits('preset-reorder', [{
+        range: {
+          startLineNumber: firstLine, startColumn: 1,
+          endLineNumber:   lastLine,  endColumn: model.getLineMaxColumn(lastLine),
+        },
+        text: newLines.join('\n'),
+      }]);
+      editor.focus();
+      _selectedPresetIndex = toIdx;
+      _scheduleRebuild();
+    }
+
+    // ── Wire controls ──────────────────────────────────────────────────────────
+    document.getElementById('btn-preset-sidecar-toggle').addEventListener('click', e => {
+      e.stopPropagation();
+      _toggleSidecar();
+    });
+    document.getElementById('btn-preset-sidecar-close').addEventListener('click', e => {
+      e.stopPropagation();
+      _closeSidecar();
+    });
+    // Clicking the collapsed strip (outside the toggle button) also opens
+    document.getElementById('preset-sidecar').addEventListener('click', e => {
+      if (document.getElementById('preset-sidecar').classList.contains('collapsed') &&
+          !document.getElementById('btn-preset-sidecar-toggle').contains(e.target)) {
+        _openSidecar();
+      }
+    });
+    document.getElementById('btn-preset-add').addEventListener('click', () => {
+      const arr = _parseResult?.arrays[_activeArrayIndex];
+      _addPreset(_activeArrayIndex, arr ? arr.presets.length : 0);
+    });
+
+    editor.onDidChangeModelContent(e => {
+      if ((e.isUndoing || e.isRedoing) && e.changes.length) {
+        editor.revealLineInCenter(e.changes[0].range.startLineNumber);
+      }
+      if (_sidecarOpen) _scheduleRebuild();
+    });
+
+    window._presetSidecar = { open: _openSidecar, close: _closeSidecar, rebuild: _rebuildSidecar };
+  })();
+
 });
 </script>
 

@@ -45,9 +45,55 @@ function getBuildOutputPath() {
 // ── Hashing ────────────────────────────────────────────
 
 /**
+ * Extracts only the `using Name = Code;` definitions from stylesContent that are
+ * directly referenced in configContent, plus any helpers those styles depend on
+ * transitively. Returns a stable sorted string for hashing.
+ *
+ * This ensures that adding or modifying styles not used in a specific config
+ * does not invalidate that config's cache entry.
+ */
+function computeRelevantStylesContent(configContent, stylesContent) {
+  if (!stylesContent) return '';
+
+  // Parse all `using Name = Code;` from the styles file (compacted single-line form)
+  const usingsMap = {};
+  const usingRe = /^using\s+(\w+)\s*=\s*(.+);[ \t]*$/gm;
+  let m;
+  while ((m = usingRe.exec(stylesContent)) !== null) {
+    usingsMap[m[1]] = m[2].trim();
+  }
+
+  const allNames = Object.keys(usingsMap);
+  if (!allNames.length) return stylesContent; // unparseable — fall back to full content
+
+  // Find style names directly referenced in the config
+  const directRefs = allNames.filter(name => new RegExp(`\\b${name}\\b`).test(configContent));
+  if (!directRefs.length) return '';
+
+  // Resolve transitive helper dependencies
+  const resolved = new Set(directRefs);
+  const queue = [...directRefs];
+  while (queue.length) {
+    const name = queue.shift();
+    const code = usingsMap[name];
+    if (!code) continue;
+    for (const n of allNames) {
+      if (!resolved.has(n) && new RegExp(`\\b${n}\\b`).test(code)) {
+        resolved.add(n);
+        queue.push(n);
+      }
+    }
+  }
+
+  // Stable sorted output: name=code pairs
+  return [...resolved].sort().map(n => `${n}=${usingsMap[n]}`).join('\n');
+}
+
+/**
  * Computes a stable hash of config content.
  * Strips @jmt: metadata lines before hashing — timestamp/board changes
  * on save do not represent a meaningful config change.
+ * Only styles referenced by the config (and their helpers) contribute to the hash.
  */
 function computeConfigHash(content, stylesContent = '') {
   const stripped = content
@@ -61,7 +107,8 @@ function computeConfigHash(content, stylesContent = '') {
   const h = crypto.createHash('sha256').update(stripped, 'utf8');
   // Only factor in styles if this config actually includes my_styles.h
   if (stylesContent && /^\s*#include\s+"[^"]*my_styles\.h"\s*$/m.test(stripped)) {
-    h.update('\0styles\0').update(stylesContent, 'utf8');
+    const relevant = computeRelevantStylesContent(stripped, stylesContent);
+    if (relevant) h.update('\0styles\0').update(relevant, 'utf8');
   }
   return h.digest('hex').slice(0, 16);
 }
