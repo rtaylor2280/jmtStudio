@@ -1762,8 +1762,9 @@
   .preset-detail-slots-label.field-error { color: #e44; }
   .preset-detail-slots { display: flex; flex-direction: column; gap: 4px; }
 
-  .preset-slot-tile { position: relative; display: flex; align-items: flex-start; gap: 6px; padding: 5px 7px; border-radius: 3px; font-size: 0.72rem; font-family: 'Cascadia Code', 'Consolas', monospace; border: 1px solid transparent; cursor: pointer; word-break: break-all; }
+  .preset-slot-tile { position: relative; display: flex; align-items: flex-start; flex-wrap: wrap; gap: 6px; padding: 5px 7px; border-radius: 3px; font-size: 0.72rem; font-family: 'Cascadia Code', 'Consolas', monospace; border: 1px solid transparent; cursor: pointer; word-break: break-all; }
   .preset-slot-tile:hover { border-color: var(--c-border); }
+  .preset-slot-tile.editing { border-color: var(--jmt-blue) !important; cursor: default; }
   .preset-slot-tile.slot-helper  { background: rgba(58,143,255,0.10); color: var(--c-text); }
   .preset-slot-tile.slot-ref     { background: rgba(40,180,170,0.12); color: var(--c-text); }
   .preset-slot-tile.slot-inline  { background: rgba(220,170,40,0.10); color: var(--c-text); }
@@ -1785,6 +1786,45 @@
   .preset-slot-edit-textarea { font: inherit; font-family: 'Cascadia Code', 'Consolas', monospace; font-size: 0.72rem; background: var(--c-bg-card); color: var(--c-text); border: 1px solid var(--jmt-blue); border-radius: 2px; padding: 4px 6px; outline: none; resize: vertical; min-height: 50px; }
   .preset-slot-edit-textarea.invalid { border-color: #e44; }
   .preset-slot-edit-actions { display: flex; gap: 4px; }
+
+  /* Slot inline edit — expands inside the tile */
+  .preset-slot-inline-input { flex: 1; min-width: 0; font: inherit; font-family: 'Cascadia Code','Consolas',monospace; font-size: 0.72rem; background: var(--c-bg-card); color: var(--c-text); border: 1px solid var(--jmt-blue); border-radius: 2px; padding: 1px 5px; outline: none; word-break: break-all; }
+  .preset-slot-inline-input.invalid { border-color: #e44; }
+  .preset-slot-edit-expand { width: 100%; flex-basis: 100%; box-sizing: border-box; padding-top: 5px; display: flex; flex-direction: column; gap: 4px; }
+  .preset-slot-edit-library { display: flex; flex-direction: column; max-height: 130px; overflow-y: auto; border: 1px solid var(--c-border); border-radius: 3px; background: var(--c-bg-card); }
+  .preset-slot-edit-lib-item { padding: 3px 7px; font-size: 0.7rem; cursor: pointer; color: var(--c-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: 'Cascadia Code','Consolas',monospace; }
+  .preset-slot-edit-lib-item:hover, .preset-slot-edit-lib-item.highlighted { background: rgba(58,143,255,0.15); color: var(--jmt-blue); }
+  .preset-slot-edit-lib-empty { padding: 5px 7px; font-size: 0.7rem; color: var(--c-text-muted); font-style: italic; }
+  .preset-slot-edit-footer { display: flex; gap: 4px; justify-content: flex-end; }
+
+  /* Delete button */
+  .preset-slot-action.preset-slot-delete:hover { color: #e44 !important; border-color: #e44 !important; }
+
+  /* Color popup (floats over everything) */
+  .preset-color-popup { position: fixed; z-index: 9999; background: var(--c-bg-raised); border: 1px solid var(--c-border); border-radius: 6px; padding: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.35); display: flex; flex-direction: column; gap: 6px; min-width: 188px; }
+  .preset-color-popup-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 3px; }
+  .preset-color-popup-cell { height: 20px; border-radius: 3px; border: 2px solid transparent; cursor: pointer; transition: transform 0.08s; }
+  .preset-color-popup-cell:hover { transform: scale(1.12); }
+  .preset-color-popup-cell.selected { border-color: var(--c-text); }
+  .preset-color-popup-rgb { display: flex; gap: 4px; align-items: center; }
+  .preset-color-popup-group { display: flex; align-items: center; gap: 2px; }
+  .preset-color-rgb-label { font-size: 0.65rem; font-weight: 700; color: var(--c-text-muted); width: 10px; text-align: center; }
+  .preset-color-rgb-input { width: 42px; padding: 2px 3px; border: 1px solid var(--c-border); border-radius: 2px; background: var(--c-bg-card); color: var(--c-text); font-size: 0.7rem; text-align: center; }
+  .preset-color-rgb-input:focus { border-color: var(--jmt-blue); outline: none; }
+  .preset-color-wheel { width: 24px; height: 24px; padding: 0; border: 1px solid var(--c-border); border-radius: 3px; cursor: pointer; flex-shrink: 0; background: none; margin-left: auto; }
+  .preset-color-wheel::-webkit-color-swatch-wrapper { padding: 2px; }
+  .preset-color-wheel::-webkit-color-swatch { border: none; border-radius: 1px; }
+
+  /* Library combobox inside slot editor */
+  .preset-lib-combo { display: flex; align-items: center; border: 1px solid var(--c-border); border-radius: 2px; background: var(--c-bg-card); margin-top: 1px; }
+  .preset-lib-combo-input { flex: 1; min-width: 0; font: inherit; font-size: 0.7rem; background: transparent; color: var(--c-text); border: none; outline: none; padding: 3px 6px; }
+  .preset-lib-combo-input::placeholder { color: var(--c-text-muted); font-style: italic; }
+  .preset-lib-combo-arrow { flex-shrink: 0; background: none; border: none; border-left: 1px solid var(--c-border); color: var(--c-text-muted); cursor: pointer; padding: 2px 6px; font-size: 0.62rem; line-height: 1; }
+  .preset-lib-combo-arrow:hover { color: var(--c-text); }
+  .preset-lib-combo-dropdown { position: fixed; z-index: 9999; background: var(--c-bg-raised); border: 1px solid var(--c-border); border-radius: 4px; box-shadow: 0 4px 16px rgba(0,0,0,0.4); max-height: 200px; overflow-y: auto; }
+  .preset-lib-combo-item { padding: 4px 8px; font-size: 0.72rem; font-family: 'Cascadia Code','Consolas',monospace; cursor: pointer; color: var(--c-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .preset-lib-combo-item:hover, .preset-lib-combo-item.highlighted { background: rgba(58,143,255,0.15); color: var(--jmt-blue); }
+  .preset-lib-combo-empty { padding: 6px 8px; font-size: 0.7rem; color: var(--c-text-muted); font-style: italic; }
 
   .preset-library-picker { position: fixed; z-index: 100; background: var(--c-bg-card); border: 1px solid var(--c-border); border-radius: 4px; box-shadow: 0 4px 16px rgba(0,0,0,0.4); min-width: 240px; max-width: 320px; max-height: 280px; display: flex; flex-direction: column; overflow: hidden; }
   .preset-library-search { font: inherit; background: var(--c-bg); color: var(--c-text); border: none; border-bottom: 1px solid var(--c-border); padding: 6px 8px; outline: none; }
@@ -2447,6 +2487,7 @@
 
 <script src="./effect-keywords.js"></script>
 <script src="./presetParser.js"></script>
+<script src="./styleArgResolver.js"></script>
 <script src="./vs/loader.js"></script>
 <script>
 // ── Environment ────────────────────────────────────────
@@ -3603,6 +3644,7 @@ document.getElementById('btn-styles-delete').addEventListener('click', async () 
   const result = await window.electronAPI.deleteStylesFile();
   if (!result.ok) return;
   _setStylesDirty(false);
+  if (window._presetSidecar) { window._presetSidecar.closeSlotEdit?.(); window._presetSidecar.clearLibraryCache?.(); }
   await window._applyStylesImportButtons(false);
   const tabBtn = document.querySelector('.tab[data-tab="styles"]');
   if (tabBtn) { tabBtn.style.display = 'none'; }
@@ -6359,6 +6401,7 @@ let _activeTab = 'config';
 
 function switchTab(name) {
   if (_activeTab === name) return;
+  if (_activeTab === 'config' && window._presetSidecar) window._presetSidecar.closeSlotEdit?.();
   _activeTab = name;
 
   document.querySelectorAll('.tab').forEach(t =>
@@ -6821,6 +6864,13 @@ require(['vs/editor/editor.main'], function () {
     let _rebuildTimer        = null;
     let _isDragging          = false;
     let _activeLibraryPicker = null;
+    let _editingSlot            = false;
+    let _activeSlotArgEditor    = null;
+    let _activeColorPopup       = null;
+    let _activeLibComboDropdown = null;
+    let _restoreSlotBody        = null;
+    let _silentStylesText       = null;
+    let _reopenAfterRebuild     = null; // { presetIdx, slotIdx }
 
     function _navigateToLine(startLine, endLine) {
       if (!editor) return;
@@ -6828,8 +6878,15 @@ require(['vs/editor/editor.main'], function () {
       editor.setPosition({ lineNumber: startLine, column: 1 });
     }
 
+    async function _ensureStylesLoaded() {
+      if (_stylesEditorInstance || _silentStylesText !== null) return;
+      try { _silentStylesText = await window.electronAPI.readStylesFile() || ''; }
+      catch (e) { _silentStylesText = ''; }
+    }
+
     function _openSidecar() {
       _sidecarOpen = true;
+      _ensureStylesLoaded();
       const el = document.getElementById('preset-sidecar');
       el.classList.add('open');
       el.classList.remove('collapsed');
@@ -6850,13 +6907,22 @@ require(['vs/editor/editor.main'], function () {
     function _toggleSidecar() { _sidecarOpen ? _closeSidecar() : _openSidecar(); }
 
     function _rebuildSidecar() {
-      if (!_sidecarOpen || !editor) return;
+      if (!_sidecarOpen || !editor || _editingSlot) return;
       _parseResult = presetParser.parsePresets(editor.getValue());
       const arr = _parseResult.arrays[_activeArrayIndex];
       _renderPresetList(arr);
       _renderDetail();
+      if (_reopenAfterRebuild !== null) {
+        const { presetIdx, slotIdx } = _reopenAfterRebuild;
+        _reopenAfterRebuild = null;
+        const preset = arr?.presets[presetIdx];
+        const slot   = preset?.styles[slotIdx];
+        const tile   = document.querySelector(`.preset-slot-tile[data-slot-idx="${slotIdx}"]`);
+        if (tile && preset && slot) _startSlotArgEdit(tile, preset, slot, slotIdx);
+      }
     }
     function _scheduleRebuild() {
+      if (_editingSlot) return;
       clearTimeout(_rebuildTimer);
       _rebuildTimer = setTimeout(_rebuildSidecar, 50);
     }
@@ -7143,6 +7209,7 @@ require(['vs/editor/editor.main'], function () {
     function _buildSlotTile(preset, slot, slotIdx, isMissing, isExcess) {
       const tile = document.createElement('div');
       tile.className = 'preset-slot-tile';
+      tile.dataset.slotIdx = slotIdx;
       if      (isMissing)                    tile.classList.add('slot-missing');
       else if (isExcess)                     tile.classList.add('slot-excess');
       else if (slot.styleClass === 'helper') tile.classList.add('slot-helper');
@@ -7150,9 +7217,15 @@ require(['vs/editor/editor.main'], function () {
       else                                   tile.classList.add('slot-inline');
       if (isExcess) tile.title = `Excess slot — NUM_BLADES is ${_parseResult.bladeCount}, this is blade ${slotIdx + 1}`;
 
+      // B-number badge — click navigates, rest of tile click toggles editor
       const num = document.createElement('span');
       num.className = 'preset-slot-num';
       num.textContent = `B${slotIdx + 1}`;
+      num.title = 'Go to line';
+      num.addEventListener('click', e => {
+        e.stopPropagation();
+        if (slot.startLine) _navigateToLine(slot.startLine, slot.endLine);
+      });
       tile.appendChild(num);
 
       const body = document.createElement('span');
@@ -7176,23 +7249,24 @@ require(['vs/editor/editor.main'], function () {
 
       const actions = document.createElement('span');
       actions.className = 'preset-slot-actions';
-      const editBtn = document.createElement('button');
-      editBtn.className = 'preset-slot-action';
-      editBtn.innerHTML = '&#9998;';
-      editBtn.title = 'Edit inline';
-      editBtn.addEventListener('click', e => { e.stopPropagation(); _startSlotEdit(tile, preset, slot, slotIdx); });
-      actions.appendChild(editBtn);
-      const libBtn = document.createElement('button');
-      libBtn.className = 'preset-slot-action';
-      libBtn.innerHTML = '&#8862;';
-      libBtn.title = 'Pick from library';
-      libBtn.addEventListener('click', e => { e.stopPropagation(); _openLibraryPickerForSlot(tile, preset, slot, slotIdx); });
-      actions.appendChild(libBtn);
+      const resetBtn = document.createElement('button');
+      resetBtn.className = 'preset-slot-action preset-slot-delete';
+      resetBtn.innerHTML = '&times;';
+      resetBtn.title = 'Reset slot to Black';
+      resetBtn.addEventListener('click', e => { e.stopPropagation(); _resetSlot(slot); });
+      actions.appendChild(resetBtn);
       tile.appendChild(actions);
 
-      tile.addEventListener('click', () => {
-        if (slot.startLine) _navigateToLine(slot.startLine, slot.endLine);
-      });
+      // Clicking the tile body toggles the inline editor
+      if (!isMissing) {
+        tile.addEventListener('click', () => {
+          if (tile.classList.contains('editing')) {
+            _closeSlotArgEdit();
+          } else {
+            _startSlotArgEdit(tile, preset, slot, slotIdx);
+          }
+        });
+      }
       return tile;
     }
 
@@ -7279,59 +7353,446 @@ require(['vs/editor/editor.main'], function () {
       }
     }
 
-    // ── Slot editing ───────────────────────────────────────────────────────────
-    function _startSlotEdit(tile, preset, slot, slotIdx) {
-      const original = slot.type === 'ref' ? `&${slot.expr}` : slot.expr;
-      const wrap = document.createElement('div');
-      wrap.className = 'preset-slot-edit-wrap';
+    // ── Slot inline editor ─────────────────────────────────────────────────────
 
+    function _startSlotArgEdit(tile, preset, slot, slotIdx) {
+      _closeSlotArgEdit();
+      _editingSlot = true;
+      tile.classList.add('editing');
+
+      const body     = tile.querySelector('.preset-slot-body');
+      const exprSpan = tile.querySelector('.preset-slot-expr');
+      const colorRow = tile.querySelector('.preset-slot-color');
+
+      // Textarea replaces the expr span in-place inside body
       const ta = document.createElement('textarea');
       ta.className = 'preset-slot-edit-textarea';
-      ta.value = original;
+      ta.rows = 3;
+      ta.style.cssText = 'width:100%;box-sizing:border-box;margin-bottom:0;';
+      ta.value = slot.type === 'ref' ? `&${slot.expr}` : slot.expr;
+      ta.addEventListener('click', e => e.stopPropagation());
 
-      const actionsEl = document.createElement('div');
-      actionsEl.className = 'preset-slot-edit-actions';
-
-      const confirm = document.createElement('button');
-      confirm.className = 'preset-edit-confirm';
-      confirm.innerHTML = '&#10003;';
-      confirm.title = 'Confirm (Ctrl+Enter)';
-
-      const cancel = document.createElement('button');
-      cancel.className = 'preset-edit-cancel';
-      cancel.innerHTML = '&times;';
-      cancel.title = 'Cancel (Esc)';
-
-      const lib = document.createElement('button');
-      lib.className = 'preset-edit-confirm';
-      lib.innerHTML = '&#8862;';
-      lib.title = 'Pick from library';
-      lib.addEventListener('click', e => { e.stopPropagation(); _openLibraryPickerForTextarea(lib, ta); });
-
-      actionsEl.appendChild(confirm);
-      actionsEl.appendChild(cancel);
-      actionsEl.appendChild(lib);
-      wrap.appendChild(ta);
-      wrap.appendChild(actionsEl);
-
-      const tileParent = tile.parentNode;
-      tileParent.replaceChild(wrap, tile);
-
-      function restore() { tileParent.replaceChild(tile, wrap); }
-      function apply() {
+      function applyEdit() {
         const v = ta.value.trim();
-        if (!_validateSlotExpression(v)) { ta.classList.add('invalid'); return; }
+        if (!v || !_validateSlotExpression(v)) { ta.classList.add('invalid'); return; }
         _commitSlotEdit(slot, v);
-        _scheduleRebuild();
+        _closeSlotArgEdit();
       }
       ta.addEventListener('keydown', e => {
-        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); apply(); }
-        else if (e.key === 'Escape') { e.preventDefault(); restore(); }
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); applyEdit(); }
+        else if (e.key === 'Escape') { e.preventDefault(); _closeSlotArgEdit(); }
         else ta.classList.remove('invalid');
       });
-      confirm.addEventListener('click', apply);
-      cancel.addEventListener('click', restore);
+
+      if (exprSpan) exprSpan.replaceWith(ta);
+      if (colorRow) colorRow.style.display = 'none';
+
+      // Resolve named args; for generic color try to look up arg name from library
+      const resolvedArgs = styleArgResolver.resolveStyleArgs(slot.expr || '', slot.colorArg || '');
+      const rgbArgs   = resolvedArgs.filter(a => a.kind === 'RgbArg');
+      const primary   = rgbArgs[0] || null;
+      const secondary = resolvedArgs.filter(a => a !== primary && a.kind === 'RgbArg');
+      const hasNamedColor   = primary !== null;
+      const hasGenericColor = !hasNamedColor && slot.colorArg &&
+        slot.colorArg.split(',').slice(0,3).every(s => Number.isFinite(parseInt(s,10)));
+
+      function lookupHelperArgName(expr) {
+        const text = _stylesEditorInstance ? _stylesEditorInstance.getValue() : (_silentStylesText || '');
+        if (!text || !expr) return null;
+        const helperName = (expr.match(/^(\w+)/) || [])[1];
+        if (!helperName) return null;
+        const re = new RegExp(`using\\s+${helperName}\\s*=([^\\n]+(?:\\n(?!using)[^\\n]*)*)`, 'm');
+        const m = re.exec(text);
+        if (!m) return null;
+        const am = /\bRgbArg\s*<\s*(\w+)/.exec(m[1]);
+        return am ? am[1] : null;
+      }
+
+      // Build a color-arg row: [swatch] [label] — appended into body (not expand)
+      function makeColorRow(argName, proVals, onWrite) {
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:1px 0;';
+        const sw = document.createElement('span');
+        sw.style.cssText = 'width:12px;height:12px;border-radius:50%;flex-shrink:0;cursor:pointer;border:1px solid rgba(0,0,0,0.3);';
+        sw.style.background = styleArgResolver.proffieToCSS(proVals[0], proVals[1], proVals[2]);
+        sw.title = 'Edit color';
+        sw.addEventListener('click', e => {
+          e.stopPropagation();
+          _openColorPopup(sw, [...proVals], newVals => {
+            proVals[0]=newVals[0]; proVals[1]=newVals[1]; proVals[2]=newVals[2];
+            sw.style.background = styleArgResolver.proffieToCSS(newVals[0], newVals[1], newVals[2]);
+            onWrite(newVals);
+          });
+        });
+        const lbl = document.createElement('span');
+        lbl.style.cssText = 'font-size:0.68rem;color:var(--c-text-muted);';
+        lbl.textContent = argName;
+        row.appendChild(sw); row.appendChild(lbl);
+        return row;
+      }
+
+      // Primary color row — goes into body so it aligns with the textarea
+      let primaryColorRow = null;
+      if (hasNamedColor) {
+        const pv = [...(primary.values||[]), 0, 0, 0].slice(0,3).map(v=>+v||0);
+        primaryColorRow = makeColorRow(primary.name, pv, newVals => {
+          const newParens = styleArgResolver.writeArgValue(slot.expr, slot.colorArg||'', primary.name, newVals);
+          slot.colorArg = newParens;
+          _modifySlotParens(slot, newParens);
+        });
+      } else if (hasGenericColor) {
+        const pv = slot.colorArg.split(',').slice(0,3).map(s=>parseInt(s.trim(),10)||0);
+        const argName = lookupHelperArgName(slot.expr) || 'BASE_COLOR_ARG';
+        primaryColorRow = makeColorRow(argName, pv, newVals => {
+          const parts = (slot.colorArg||'').split(',');
+          parts[0]=String(newVals[0]); parts[1]=String(newVals[1]); parts[2]=String(newVals[2]);
+          slot.colorArg = parts.join(',');
+          _modifySlotParens(slot, slot.colorArg);
+        });
+      }
+
+      // Library combobox — shown only when a library is currently known to exist
+      let comboWrap = null;
+      if (_getLibraryHelpers().length > 0) {
+        comboWrap = document.createElement('div');
+        comboWrap.className = 'preset-lib-combo';
+        const comboInput = document.createElement('input');
+        comboInput.type = 'text';
+        comboInput.className = 'preset-lib-combo-input';
+        comboInput.placeholder = 'Select from Style Library…';
+        const comboArrow = document.createElement('button');
+        comboArrow.className = 'preset-lib-combo-arrow';
+        comboArrow.innerHTML = '&#9660;';
+        comboArrow.title = 'Browse style library';
+        async function openCombo() {
+          // Always re-read so additions/deletions are reflected immediately
+          if (!_stylesEditorInstance) {
+            try { _silentStylesText = await window.electronAPI.readStylesFile() || ''; }
+            catch { _silentStylesText = ''; }
+          }
+          _openLibComboDropdown(comboWrap, comboInput.value.trim(), name => {
+            // Commit the selection and reopen the editor on the refreshed slot
+            _commitSlotEdit(slot, name);
+            _reopenAfterRebuild = { presetIdx: _selectedPresetIndex, slotIdx };
+            _closeSlotArgEdit();
+          });
+        }
+        comboInput.addEventListener('click', e => e.stopPropagation());
+        comboInput.addEventListener('focus', () => openCombo());
+        comboInput.addEventListener('input', e => { e.stopPropagation(); openCombo(); });
+        comboArrow.addEventListener('click', e => {
+          e.stopPropagation();
+          if (_activeLibComboDropdown) { _closeLibComboDropdown(); } else { openCombo(); comboInput.focus(); }
+        });
+        comboWrap.appendChild(comboInput);
+        comboWrap.appendChild(comboArrow);
+      }
+      if (comboWrap) body.appendChild(comboWrap);
+
+      if (primaryColorRow) {
+        primaryColorRow.style.marginTop = '6px';
+        body.appendChild(primaryColorRow);
+      }
+
+      // Restore body to original state on close
+      _restoreSlotBody = () => {
+        if (comboWrap && comboWrap.parentNode) comboWrap.parentNode.removeChild(comboWrap);
+        if (primaryColorRow && primaryColorRow.parentNode) primaryColorRow.parentNode.removeChild(primaryColorRow);
+        if (ta.parentNode) ta.replaceWith(exprSpan || document.createElement('span'));
+        if (colorRow) colorRow.style.display = '';
+      };
+
+      // Expand strip: secondary args + footer only
+      const expand = document.createElement('div');
+      expand.className = 'preset-slot-edit-expand';
+      _activeSlotArgEditor = expand;
+
+      // Advanced toggle for secondary RgbArgs
+      if (secondary.length) {
+        let advOpen = false;
+        const advBtn = document.createElement('button');
+        advBtn.style.cssText = 'all:unset;font-size:0.65rem;color:var(--c-text-muted);cursor:pointer;display:block;';
+        advBtn.textContent = 'Advanced ▾';
+        const advContent = document.createElement('div');
+        advContent.style.cssText = 'display:none;flex-direction:column;gap:2px;padding-left:4px;margin-top:2px;';
+        secondary.forEach(arg => {
+          const pv = [...(arg.values||[]), 0, 0, 0].slice(0,3).map(v=>+v||0);
+          advContent.appendChild(makeColorRow(arg.name, pv, newVals => {
+            const newParens = styleArgResolver.writeArgValue(slot.expr, slot.colorArg||'', arg.name, newVals);
+            slot.colorArg = newParens;
+            _modifySlotParens(slot, newParens);
+          }));
+        });
+        advBtn.addEventListener('click', e => {
+          e.stopPropagation();
+          advOpen = !advOpen;
+          advContent.style.display = advOpen ? 'flex' : 'none';
+          advBtn.textContent = advOpen ? 'Advanced ▴' : 'Advanced ▾';
+        });
+        expand.appendChild(advBtn);
+        expand.appendChild(advContent);
+      }
+
+      const footer = document.createElement('div');
+      footer.className = 'preset-slot-edit-actions';
+      const okBtn = document.createElement('button');
+      okBtn.className = 'preset-edit-confirm'; okBtn.innerHTML = '&#10003;'; okBtn.title = 'Apply (Ctrl+Enter)';
+      const cancelBtn = document.createElement('button');
+      cancelBtn.className = 'preset-edit-cancel'; cancelBtn.innerHTML = '&times;'; cancelBtn.title = 'Close (Esc)';
+      okBtn.addEventListener('click', e => { e.stopPropagation(); applyEdit(); });
+      cancelBtn.addEventListener('click', e => { e.stopPropagation(); _closeSlotArgEdit(); });
+      footer.appendChild(okBtn); footer.appendChild(cancelBtn);
+      expand.appendChild(footer);
+      tile.appendChild(expand);
+
       setTimeout(() => { ta.focus(); ta.select(); }, 0);
+    }
+
+    function _closeSlotArgEdit() {
+      _closeColorPopup();
+      _closeLibComboDropdown();
+      if (_restoreSlotBody) { _restoreSlotBody(); _restoreSlotBody = null; }
+      if (_activeSlotArgEditor) { _activeSlotArgEditor.remove(); _activeSlotArgEditor = null; }
+      document.querySelectorAll('.preset-slot-tile.editing').forEach(t => t.classList.remove('editing'));
+      _editingSlot = false;
+      _scheduleRebuild();
+    }
+
+    // ── Color popup (fixed-position, appended to body) ─────────────────────────
+
+    const _COMMON_COLORS = [
+      { label:'Red',      r:255,g:0,  b:0   }, { label:'Orange', r:255,g:128,b:0   },
+      { label:'Yellow',   r:255,g:255,b:0   }, { label:'Green',  r:0,  g:255,b:0   },
+      { label:'Cyan',     r:0,  g:255,b:255 }, { label:'Blue',   r:0,  g:0,  b:255 },
+      { label:'Magenta',  r:255,g:0,  b:255 }, { label:'Pink',   r:255,g:0,  b:128 },
+      { label:'Purple',   r:128,g:0,  b:255 }, { label:'Lt Blue',r:0,  g:128,b:255 },
+      { label:'White',    r:255,g:255,b:255 }, { label:'Off',    r:0,  g:0,  b:0   },
+    ];
+
+    function _openColorPopup(anchorEl, initProffieVals, onChange) {
+      _closeColorPopup();
+      let cr = Math.round((initProffieVals[0]||0)/257);
+      let cg = Math.round((initProffieVals[1]||0)/257);
+      let cb = Math.round((initProffieVals[2]||0)/257);
+
+      function toHex() { return '#'+[cr,cg,cb].map(v=>v.toString(16).padStart(2,'0')).join(''); }
+
+      const popup = document.createElement('div');
+      popup.className = 'preset-color-popup';
+
+      function emit() {
+        updateCells();
+        wheelIn.value = toHex();
+        onChange(styleArgResolver.cssToProffie(cr, cg, cb));
+      }
+
+      // Quick color grid
+      const grid = document.createElement('div');
+      grid.className = 'preset-color-popup-grid';
+      function updateCells() {
+        grid.querySelectorAll('.preset-color-popup-cell').forEach((cell, i) => {
+          const c = _COMMON_COLORS[i];
+          cell.classList.toggle('selected', c.r===cr && c.g===cg && c.b===cb);
+        });
+      }
+      _COMMON_COLORS.forEach(c => {
+        const cell = document.createElement('div');
+        cell.className = 'preset-color-popup-cell';
+        cell.style.background = `rgb(${c.r},${c.g},${c.b})`;
+        cell.title = c.label;
+        cell.addEventListener('click', e => {
+          e.stopPropagation();
+          cr=c.r; cg=c.g; cb=c.b;
+          rIn.value=cr; gIn.value=cg; bIn.value=cb;
+          emit();
+        });
+        grid.appendChild(cell);
+      });
+      popup.appendChild(grid);
+
+      // RGB row + native wheel
+      const rgbRow = document.createElement('div');
+      rgbRow.className = 'preset-color-popup-rgb';
+
+      function makeGroup(lbl, val, onVal) {
+        const grp = document.createElement('div');
+        grp.className = 'preset-color-popup-group';
+        const l = document.createElement('span');
+        l.className = 'preset-color-rgb-label';
+        l.textContent = lbl;
+        const inp = document.createElement('input');
+        inp.type='number'; inp.min=0; inp.max=255; inp.step=1;
+        inp.value=val; inp.className='preset-color-rgb-input';
+        inp.addEventListener('input', e => {
+          e.stopPropagation();
+          const v = Math.max(0,Math.min(255,parseInt(inp.value,10)||0));
+          inp.value=v; onVal(v); emit();
+        });
+        inp.addEventListener('click', e => e.stopPropagation());
+        grp.appendChild(l); grp.appendChild(inp);
+        return { grp, inp };
+      }
+      const {grp:rGrp,inp:rIn} = makeGroup('R',cr,v=>{cr=v;});
+      const {grp:gGrp,inp:gIn} = makeGroup('G',cg,v=>{cg=v;});
+      const {grp:bGrp,inp:bIn} = makeGroup('B',cb,v=>{cb=v;});
+
+      const wheelIn = document.createElement('input');
+      wheelIn.type='color'; wheelIn.className='preset-color-wheel';
+      wheelIn.title='Full color wheel'; wheelIn.value=toHex();
+      wheelIn.addEventListener('input', e => {
+        e.stopPropagation();
+        const h=wheelIn.value;
+        cr=parseInt(h.slice(1,3),16); cg=parseInt(h.slice(3,5),16); cb=parseInt(h.slice(5,7),16);
+        rIn.value=cr; gIn.value=cg; bIn.value=cb;
+        emit();
+      });
+      wheelIn.addEventListener('click', e => e.stopPropagation());
+
+      rgbRow.appendChild(rGrp); rgbRow.appendChild(gGrp); rgbRow.appendChild(bGrp);
+      rgbRow.appendChild(wheelIn);
+      popup.appendChild(rgbRow);
+
+      document.body.appendChild(popup);
+      _activeColorPopup = popup;
+      updateCells();
+
+      requestAnimationFrame(() => {
+        const rect = anchorEl.getBoundingClientRect();
+        const pw = popup.offsetWidth || 196;
+        const ph = popup.offsetHeight || 100;
+        let left = rect.left;
+        let top  = rect.bottom + 4;
+        if (left + pw > window.innerWidth - 4)  left = Math.max(4, window.innerWidth - pw - 8);
+        if (top  + ph > window.innerHeight - 4) top  = Math.max(4, rect.top - ph - 4);
+        popup.style.left = left+'px';
+        popup.style.top  = top+'px';
+      });
+      setTimeout(() => document.addEventListener('click', _colorPopupOutside), 0);
+    }
+
+    function _colorPopupOutside(e) {
+      if (_activeColorPopup && !_activeColorPopup.contains(e.target)) _closeColorPopup();
+    }
+    function _closeColorPopup() {
+      if (_activeColorPopup) {
+        _activeColorPopup.remove();
+        _activeColorPopup = null;
+        document.removeEventListener('click', _colorPopupOutside);
+      }
+    }
+
+    function _libComboOutside(e) {
+      if (_activeLibComboDropdown && !_activeLibComboDropdown.contains(e.target) &&
+          !e.target.closest('.preset-lib-combo')) {
+        _closeLibComboDropdown();
+      }
+    }
+    function _closeLibComboDropdown() {
+      if (_activeLibComboDropdown) {
+        _activeLibComboDropdown.remove();
+        _activeLibComboDropdown = null;
+        document.removeEventListener('click', _libComboOutside);
+      }
+    }
+    function _openLibComboDropdown(anchorEl, filter, onSelect) {
+      _closeLibComboDropdown();
+      const helpers = _getLibraryHelpers();
+      const matches = filter
+        ? helpers.filter(h => h.toLowerCase().includes(filter.toLowerCase()))
+        : helpers;
+
+      const drop = document.createElement('div');
+      drop.className = 'preset-lib-combo-dropdown';
+
+      if (!matches.length) {
+        const empty = document.createElement('div');
+        empty.className = 'preset-lib-combo-empty';
+        empty.textContent = helpers.length ? 'No matches' : 'No library loaded';
+        drop.appendChild(empty);
+      } else {
+        matches.forEach(name => {
+          const item = document.createElement('div');
+          item.className = 'preset-lib-combo-item';
+          item.textContent = name;
+          item.addEventListener('mousedown', e => {
+            e.preventDefault();
+            onSelect(name);
+            _closeLibComboDropdown();
+          });
+          drop.appendChild(item);
+        });
+      }
+
+      document.body.appendChild(drop);
+      _activeLibComboDropdown = drop;
+
+      requestAnimationFrame(() => {
+        const rect = anchorEl.getBoundingClientRect();
+        const dw = drop.offsetWidth || 200;
+        let left = rect.left;
+        let top  = rect.bottom + 2;
+        if (left + dw > window.innerWidth - 4) left = Math.max(4, window.innerWidth - dw - 8);
+        if (top + (drop.offsetHeight || 200) > window.innerHeight - 4) top = Math.max(4, rect.top - (drop.offsetHeight || 200) - 2);
+        drop.style.left  = left + 'px';
+        drop.style.top   = top  + 'px';
+        drop.style.minWidth = rect.width + 'px';
+      });
+      setTimeout(() => document.addEventListener('click', _libComboOutside), 0);
+    }
+
+    function _modifySlotParens(slot, newParensStr) {
+      if (!editor || !slot.startLine) return;
+      const model = editor.getModel();
+      const searchEnd = Math.min(model.getLineCount(), slot.startLine + 6);
+      const slotStart = { lineNumber: slot.startLine, column: slot.startCol + 1 };
+      const slotText = model.getValueInRange({
+        startLineNumber: slotStart.lineNumber, startColumn: slotStart.column,
+        endLineNumber:   searchEnd,            endColumn:   10000,
+      });
+
+      const strMatch = slotText.match(/"([^"]*)"/);
+      if (strMatch) {
+        const matchOffset = slotText.indexOf(strMatch[0]);
+        const baseOffset  = model.getOffsetAt(slotStart);
+        const repStart    = model.getPositionAt(baseOffset + matchOffset);
+        const repEnd      = model.getPositionAt(baseOffset + matchOffset + strMatch[0].length);
+        editor.executeEdits('slot-parens', [{
+          range: {
+            startLineNumber: repStart.lineNumber, startColumn: repStart.column,
+            endLineNumber:   repEnd.lineNumber,   endColumn:   repEnd.column,
+          },
+          text: `"${newParensStr}"`,
+        }]);
+      } else {
+        // No string yet — find empty parens and insert
+        const parenMatch = slotText.match(/\(\s*\)/);
+        if (parenMatch) {
+          const matchOffset = slotText.indexOf(parenMatch[0]);
+          const baseOffset  = model.getOffsetAt(slotStart);
+          const repStart    = model.getPositionAt(baseOffset + matchOffset);
+          const repEnd      = model.getPositionAt(baseOffset + matchOffset + parenMatch[0].length);
+          editor.executeEdits('slot-parens', [{
+            range: {
+              startLineNumber: repStart.lineNumber, startColumn: repStart.column,
+              endLineNumber:   repEnd.lineNumber,   endColumn:   repEnd.column,
+            },
+            text: `("${newParensStr}")`,
+          }]);
+        }
+      }
+    }
+
+    function _resetSlot(slot) {
+      if (!editor || !slot.startLine) return;
+      editor.executeEdits('slot-reset', [{
+        range: {
+          startLineNumber: slot.startLine, startColumn: slot.startCol + 1,
+          endLineNumber:   slot.endLine,   endColumn:   slot.endCol + 1,
+        },
+        text: 'StylePtr<Black>()',
+      }]);
+      editor.focus();
+      _closeSlotArgEdit();
     }
 
     function _validateSlotExpression(v) {
@@ -7367,23 +7828,13 @@ require(['vs/editor/editor.main'], function () {
 
     // ── Library picker ─────────────────────────────────────────────────────────
     function _getLibraryHelpers() {
-      if (typeof _stylesEditorInstance === 'undefined' || !_stylesEditorInstance) return [];
-      const text = _stylesEditorInstance.getValue();
+      const text = _stylesEditorInstance ? _stylesEditorInstance.getValue() : (_silentStylesText || '');
+      if (!text) return [];
       const re = /^using\s+(\w+)\s*=/mg;
       const names = [];
       let m;
       while ((m = re.exec(text)) !== null) names.push(m[1]);
       return names;
-    }
-
-    function _openLibraryPickerForSlot(tile, preset, slot) {
-      const helpers = _getLibraryHelpers();
-      const picker = _buildLibraryPicker(helpers, name => {
-        _commitSlotEdit(slot, name);
-        _closeLibraryPicker();
-        _scheduleRebuild();
-      });
-      _showLibraryPicker(picker, tile);
     }
 
     function _openLibraryPickerForTextarea(anchorBtn, textarea) {
@@ -7607,7 +8058,7 @@ require(['vs/editor/editor.main'], function () {
       if (_sidecarOpen) _scheduleRebuild();
     });
 
-    window._presetSidecar = { open: _openSidecar, close: _closeSidecar, rebuild: _rebuildSidecar };
+    window._presetSidecar = { open: _openSidecar, close: _closeSidecar, rebuild: _rebuildSidecar, closeSlotEdit: _closeSlotArgEdit, clearLibraryCache: () => { _silentStylesText = null; } };
   })();
 
 });
