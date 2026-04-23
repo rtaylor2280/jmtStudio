@@ -7800,6 +7800,11 @@ require(['vs/editor/editor.main'], function () {
         fullSlotText = slot.type === 'ref' ? `&${slot.expr}` : `StylePtr<${slot.expr}>()`;
       }
 
+      // Preserve non-standard wrappers; everything else normalises to StylePtr
+      const _KNOWN_WRAPPERS = new Set(['ChargingStylePtr','StyleNormalPtr','StyleFirePtr','StyleRainbowPtr','StyleStrobePtr']);
+      const _wm = fullSlotText.match(/^(\w+StylePtr)\s*</);
+      const originalWrapper = (_wm && _KNOWN_WRAPPERS.has(_wm[1])) ? _wm[1] : 'StylePtr';
+
       const body     = tile.querySelector('.preset-slot-body');
       const exprSpan = tile.querySelector('.preset-slot-expr');
       const colorRow = tile.querySelector('.preset-slot-color');
@@ -8112,7 +8117,7 @@ require(['vs/editor/editor.main'], function () {
             startLineNumber: slot.startLine, startColumn: slot.startCol + 1,
             endLineNumber:   slot.endLine,   endColumn:   slot.endCol + 1,
           },
-          text: `StylePtr<${newExpr}>${parens}`,
+          text: `${originalWrapper}<${newExpr}>${parens}`,
         }]);
         editor.focus();
         _reopenAfterRebuild = { presetIdx: _selectedPresetIndex, slotIdx };
@@ -8220,7 +8225,7 @@ require(['vs/editor/editor.main'], function () {
               catch { _silentStylesText = ''; }
             }
             _openLibComboDropdown(comboWrap, filter, name => {
-              _commitSlotEdit(slot, name);
+              _commitSlotEdit(slot, `${originalWrapper}<${name}>()`);
               _reopenAfterRebuild = { presetIdx: _selectedPresetIndex, slotIdx };
               _closeSlotArgEdit();
             }, _getLibraryStyles());
@@ -8552,7 +8557,8 @@ require(['vs/editor/editor.main'], function () {
       tile.appendChild(expand);
 
       // ── Set initial mode ───────────────────────────────────────────────────
-      if (hasModes && isLibrarySlot) showLibraryMode();
+      const isBlackPlaceholder = (slot.expr || '').trim() === 'Black';
+      if (hasModes && (isLibrarySlot || (isBlackPlaceholder && helpers.length > 0))) showLibraryMode();
       else showCustomMode();
     }
 
