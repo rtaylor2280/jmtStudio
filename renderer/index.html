@@ -1687,6 +1687,9 @@
   .preset-split-resizer:hover, .preset-split-resizer.dragging { background: rgba(58,143,255,0.15); border-color: var(--jmt-blue); }
   .preset-sidecar.collapsed { width: 20px; }
   .preset-sidecar.collapsed .preset-sidecar-inner { display: none; }
+  /* Selected-preset highlight in Monaco */
+  .preset-active-line { background: rgba(2,81,146,0.18); }
+  html.light-mode .preset-active-line { background: rgba(2,81,146,0.12); }
 
   /* Always-visible left strip */
   .preset-sidecar-strip { width: 20px; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; padding-top: 6px; gap: 8px; border-right: 1px solid var(--c-border); }
@@ -1789,7 +1792,7 @@
   .preset-slot-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
   .preset-slot-expr { word-break: break-all; }
   .preset-slot-color { display: inline-flex; align-items: center; gap: 4px; font-size: 0.68rem; color: var(--c-text-muted); }
-  .preset-slot-color-swatch { width: 8px; height: 8px; border-radius: 50%; border: 1px solid rgba(0,0,0,0.3); flex-shrink: 0; }
+  .preset-slot-color-swatch { flex-shrink: 0; }
 
   .preset-slot-actions { position: absolute; top: 3px; right: 3px; display: flex; gap: 2px; opacity: 0.3; transition: opacity 0.1s; }
   .preset-slot-tile:hover .preset-slot-actions { opacity: 1; }
@@ -1836,6 +1839,7 @@
   .preset-color-wheel { width: 24px; height: 24px; padding: 0; border: 1px solid var(--c-border); border-radius: 3px; cursor: pointer; flex-shrink: 0; background: none; margin-left: auto; }
   .preset-color-wheel::-webkit-color-swatch-wrapper { padding: 2px; }
   .preset-color-wheel::-webkit-color-swatch { border: none; border-radius: 1px; }
+  .color-indicator-circle canvas, .preset-slot-color-swatch canvas { pointer-events: none; }
 
   /* Library combobox inside slot editor */
   .preset-lib-combo { display: flex; align-items: center; border: 1px solid var(--c-border); border-radius: 2px; background: var(--c-bg-card); margin-top: 1px; }
@@ -6898,6 +6902,7 @@ require(['vs/editor/editor.main'], function () {
     let _parseResult         = null;
     let _activeArrayIndex    = 0;
     let _selectedPresetIndex = 0;
+    let _presetDecorations   = [];
     let _rebuildTimer        = null;
     let _isDragging          = false;
     let _activeLibraryPicker = null;
@@ -6905,6 +6910,8 @@ require(['vs/editor/editor.main'], function () {
     let _activeSlotArgEditor    = null;
     let _activeColorPopup       = null;
     let _activeSwatchControllers = [];
+    let _activeArgSwatchControllers = [];
+    let _activePreviewSwatchCtrl = null;
     let _activeLibComboDropdown = null;
     let _restoreSlotBody        = null;
     let _silentStylesText       = null;
@@ -6912,8 +6919,25 @@ require(['vs/editor/editor.main'], function () {
 
     function _navigateToLine(startLine, endLine) {
       if (!editor) return;
-      editor.revealLinesInCenterIfOutsideViewport(startLine, endLine || startLine);
+      editor.setScrollPosition({ scrollTop: editor.getTopForLineNumber(startLine) });
       editor.setPosition({ lineNumber: startLine, column: 1 });
+    }
+
+    function _highlightPreset(preset) {
+      if (!editor || !preset) return;
+      const decorations = [];
+      for (let ln = preset.startLine; ln <= preset.endLine; ln++) {
+        decorations.push({
+          range: new monaco.Range(ln, 1, ln, 1),
+          options: { isWholeLine: true, className: 'preset-active-line' }
+        });
+      }
+      _presetDecorations = editor.deltaDecorations(_presetDecorations, decorations);
+    }
+
+    function _clearPresetHighlight() {
+      if (!editor) return;
+      _presetDecorations = editor.deltaDecorations(_presetDecorations, []);
     }
 
     async function _ensureStylesLoaded() {
@@ -6933,11 +6957,13 @@ require(['vs/editor/editor.main'], function () {
       if (arr?.presets.length) {
         const idx = Math.max(0, Math.min(_selectedPresetIndex, arr.presets.length - 1));
         const p = arr.presets[idx];
-        if (p) _navigateToLine(p.startLine, p.endLine);
+        if (p) { _navigateToLine(p.startLine, p.endLine); _highlightPreset(p); }
       }
     }
     function _closeSidecar() {
       _sidecarOpen = false;
+      _closeSlotArgEdit();
+      _clearPresetHighlight();
       const el = document.getElementById('preset-sidecar');
       el.classList.remove('open');
       el.classList.add('collapsed');
@@ -6949,7 +6975,8 @@ require(['vs/editor/editor.main'], function () {
     function _toggleSidecar() { _sidecarOpen ? _closeSidecar() : _openSidecar(); }
 
     function _rebuildSidecar() {
-      if (!_sidecarOpen || !editor || _editingSlot) return;
+      if (!_sidecarOpen || !editor) return;
+      if (_editingSlot) { _refreshBladeSectionLabel(); return; }
       _parseResult = presetParser.parsePresets(editor.getValue());
       const arr = _parseResult.arrays[_activeArrayIndex];
       _renderPresetList(arr);
@@ -6964,10 +6991,33 @@ require(['vs/editor/editor.main'], function () {
       }
     }
     function _scheduleRebuild() {
-      if (_editingSlot) return;
       clearTimeout(_rebuildTimer);
       _rebuildTimer = setTimeout(_rebuildSidecar, 50);
     }
+
+    // Lightweight update used while the slot editor is open — updates only the
+    // "Styles (X/Y blades)" label so NUM_BLADES changes are visible without
+    // destroying the slot editor DOM.
+    function _refreshBladeSectionLabel() {
+      if (!editor) return;
+      const fresh    = presetParser.parsePresets(editor.getValue());
+      const arr      = fresh.arrays[_activeArrayIndex];
+      const preset   = arr?.presets[_selectedPresetIndex];
+      if (!preset) return;
+      const expected = fresh.bladeCount || 0;
+      const actual   = preset.styles.length;
+      const mismatch = expected > 0 && actual !== expected;
+      const label    = document.querySelector('#preset-detail .preset-detail-slots-label');
+      if (!label) return;
+      label.className   = 'preset-detail-slots-label' + (mismatch ? ' field-error' : '');
+      label.textContent = expected
+        ? `Styles (${actual}/${expected} blades)`
+        : `Styles (${actual} blades)`;
+      label.title = mismatch
+        ? `NUM_BLADES is ${expected}, this preset has ${actual} style(s)`
+        : '';
+    }
+
     function _renderEmpty(msg) {
       document.getElementById('preset-list-top').innerHTML =
         `<div class="preset-detail-empty" style="padding:12px 14px">${msg}</div>`;
@@ -7076,6 +7126,7 @@ require(['vs/editor/editor.main'], function () {
       _selectedPresetIndex = idx;
       document.querySelectorAll('#preset-list-top .preset-row').forEach((r, i) =>
         r.classList.toggle('selected', i === idx));
+      _highlightPreset(arr?.presets[idx]);
       _renderDetail();
     }
 
@@ -7238,16 +7289,42 @@ require(['vs/editor/editor.main'], function () {
         for (let i = actual; i < expected; i++) {
           const missing = document.createElement('div');
           missing.className = 'preset-slot-tile slot-missing';
-          missing.title = `Missing — required by NUM_BLADES (${expected})`;
+          missing.title = 'Click to add style';
+          missing.style.cursor = 'pointer';
+          missing.dataset.slotIdx = i;
           const num = document.createElement('span');
           num.className = 'preset-slot-num';
           num.textContent = abbrs[i] || `B${i + 1}`;
           if (arrLabels[i + 1]) num.title = arrLabels[i + 1];
           const body = document.createElement('span');
           body.className = 'preset-slot-body';
-          body.innerHTML = '<span class="preset-slot-expr">Missing — required by NUM_BLADES</span>';
+          body.innerHTML = '<span class="preset-slot-expr">Missing — click to add</span>';
           missing.appendChild(num);
           missing.appendChild(body);
+          missing.addEventListener('click', () => {
+            if (!editor) return;
+            const model = editor.getModel();
+            // Determine insertion line and indentation
+            let insertLine, indent;
+            if (preset.styles.length > 0) {
+              const lastSlot = preset.styles[preset.styles.length - 1];
+              insertLine = lastSlot.endLine + 1;
+              indent = (model.getLineContent(lastSlot.endLine).match(/^(\s*)/) || ['',''])[1];
+            } else if (preset.displayNameRange) {
+              insertLine = preset.displayNameRange.startLine;
+              indent = (model.getLineContent(insertLine).match(/^(\s*)/) || ['',''])[1];
+            } else {
+              insertLine = preset.startLine + 1;
+              indent = '  ';
+            }
+            editor.executeEdits('add-missing-style', [{
+              range: { startLineNumber: insertLine, startColumn: 1,
+                       endLineNumber:   insertLine, endColumn: 1 },
+              text: `${indent}StylePtr<Black>(),\n`,
+            }]);
+            editor.focus();
+            _reopenAfterRebuild = { presetIdx: _selectedPresetIndex, slotIdx: i };
+          });
           slots.appendChild(missing);
         }
       }
@@ -7319,7 +7396,23 @@ require(['vs/editor/editor.main'], function () {
         colorRow.className = 'preset-slot-color';
         const swatch = document.createElement('span');
         swatch.className = 'preset-slot-color-swatch';
-        swatch.style.background = _colorArgToCSS(slot.colorArg);
+        swatch.style.cssText = 'width:14px;height:14px;border-radius:50%;display:inline-block;overflow:hidden;flex-shrink:0;';
+        const _parts = slot.colorArg.split(',').map(s => parseInt(s.trim(), 10));
+        const _rgb14 = _parts.length === 3 && _parts.every(n => Number.isFinite(n))
+          ? [Math.round(_parts[0]/257), Math.round(_parts[1]/257), Math.round(_parts[2]/257)]
+          : null;
+        if (_rgb14) {
+          try {
+            const _tc = GlowSwatch.create({ animated: false, width: 14, height: 14, color: _rgb14 });
+            _tc.element.style.clipPath = 'circle(50% at 50% 50%)';
+            swatch.appendChild(_tc.element);
+            swatch._gsCtrl = _tc;
+          } catch(e) {
+            swatch.style.background = _colorArgToCSS(slot.colorArg);
+          }
+        } else {
+          swatch.style.background = _colorArgToCSS(slot.colorArg);
+        }
         colorRow.appendChild(swatch);
         colorRow.appendChild(document.createTextNode(slot.colorArg));
         body.appendChild(colorRow);
@@ -7798,18 +7891,32 @@ require(['vs/editor/editor.main'], function () {
           ? window.proffieArgs.resolveColorDefault(regArg.defaultExpr || '')
           : [parseInt(regArg.defaultExpr, 10) || 0];
         const dispVals = curVals || defVals;
-        let swatch = null, numInput = null;
+        let swatch = null, numInput = null, swatchCtrl = null;
 
         if (regArg.kind === 'RgbArg') {
+          // Host span is the click target and anchor for the color popup.
           swatch = document.createElement('span');
-          swatch.style.cssText = 'width:12px;height:12px;border-radius:50%;flex-shrink:0;cursor:pointer;border:1px solid rgba(0,0,0,0.3);';
-          swatch.style.background = styleArgResolver.proffieToCSS(dispVals[0], dispVals[1], dispVals[2]);
+          swatch.style.cssText = 'width:20px;height:20px;border-radius:50%;display:inline-block;overflow:hidden;flex-shrink:0;cursor:pointer;';
           swatch.title = 'Edit color';
+          const _r8 = Math.round((dispVals[0]||0)/257);
+          const _g8 = Math.round((dispVals[1]||0)/257);
+          const _b8 = Math.round((dispVals[2]||0)/257);
+          swatch.style.background = styleArgResolver.proffieToCSS(dispVals[0], dispVals[1], dispVals[2]);
+          try {
+            const _ctrl = GlowSwatch.create({ animated: false, width: 20, height: 20, color: [_r8, _g8, _b8] });
+            _ctrl.element.style.clipPath = 'circle(50% at 50% 50%)';
+            _ctrl.element.style.pointerEvents = 'none';
+            swatch.appendChild(_ctrl.element);
+            swatch.style.background = 'none';
+            swatchCtrl = _ctrl;
+            _activeArgSwatchControllers.push(swatchCtrl);
+          } catch(e) {}
           swatch.addEventListener('click', e => {
             e.stopPropagation();
             const initVals = curVals ? [...curVals] : [...defVals];
             _openColorPopup(swatch, initVals, newVals => {
-              swatch.style.background = styleArgResolver.proffieToCSS(newVals[0], newVals[1], newVals[2]);
+              if (swatchCtrl) swatchCtrl.setColor([Math.round((newVals[0]||0)/257), Math.round((newVals[1]||0)/257), Math.round((newVals[2]||0)/257)]);
+              else swatch.style.background = styleArgResolver.proffieToCSS(newVals[0], newVals[1], newVals[2]);
               const np = window.proffieArgs.writeRegistryArg(regArg.name, newVals, currentParens());
               slot.colorArg = np; _modifySlotParens(slot, np);
               curVals = [...newVals]; updateReset();
@@ -7850,7 +7957,10 @@ require(['vs/editor/editor.main'], function () {
               const np = window.proffieArgs.writeRegistryArg(regArg.name, null, currentParens());
               slot.colorArg = np; _modifySlotParens(slot, np);
               curVals = null;
-              if (swatch)   swatch.style.background = styleArgResolver.proffieToCSS(defVals[0], defVals[1], defVals[2]);
+              if (swatch) {
+                if (swatchCtrl) swatchCtrl.setColor([Math.round((defVals[0]||0)/257), Math.round((defVals[1]||0)/257), Math.round((defVals[2]||0)/257)]);
+                else swatch.style.background = styleArgResolver.proffieToCSS(defVals[0], defVals[1], defVals[2]);
+              }
               if (numInput) numInput.value = defVals[0] || 0;
               updateReset();
             });
@@ -8290,9 +8400,16 @@ require(['vs/editor/editor.main'], function () {
 
         const currentColorArg = slot.colorArg || null;
         if (currentColorArg) {
+          const _updateTileSwatch = (sw) => {
+            const _p = currentColorArg.split(',').map(s => parseInt(s.trim(), 10));
+            const _c = _p.length === 3 && _p.every(n => Number.isFinite(n))
+              ? [Math.round(_p[0]/257), Math.round(_p[1]/257), Math.round(_p[2]/257)] : null;
+            if (sw._gsCtrl && _c) sw._gsCtrl.setColor(_c);
+            else sw.style.background = _colorArgToCSS(currentColorArg);
+          };
           if (colorRow) {
             const sw = colorRow.querySelector('.preset-slot-color-swatch');
-            if (sw) sw.style.background = _colorArgToCSS(currentColorArg);
+            if (sw) _updateTileSwatch(sw);
             const tn = colorRow.lastChild;
             if (tn && tn.nodeType === Node.TEXT_NODE) tn.textContent = currentColorArg;
             else colorRow.appendChild(document.createTextNode(currentColorArg));
@@ -8336,6 +8453,8 @@ require(['vs/editor/editor.main'], function () {
     function _closeSlotArgEdit() {
       _closeColorPopup();
       _closeLibComboDropdown();
+      _activeArgSwatchControllers.forEach(c => c.destroy());
+      _activeArgSwatchControllers = [];
       if (_restoreSlotBody) { _restoreSlotBody(); _restoreSlotBody = null; }
       if (_activeSlotArgEditor) { _activeSlotArgEditor.remove(); _activeSlotArgEditor = null; }
       document.querySelectorAll('.preset-slot-tile.editing').forEach(t => t.classList.remove('editing'));
@@ -8449,6 +8568,7 @@ require(['vs/editor/editor.main'], function () {
       const wheelIn = document.createElement('input');
       wheelIn.type='color'; wheelIn.className='preset-color-wheel';
       wheelIn.title='Full color wheel'; wheelIn.value=toHex();
+      wheelIn.style.cssText = 'position:absolute;width:0;height:0;opacity:0;pointer-events:none;';
       wheelIn.addEventListener('input', e => {
         e.stopPropagation();
         const h=wheelIn.value;
@@ -8456,10 +8576,23 @@ require(['vs/editor/editor.main'], function () {
         rIn.value=cr; gIn.value=cg; bIn.value=cb;
         emit();
       });
-      wheelIn.addEventListener('click', e => e.stopPropagation());
+
+      // ── GlowSwatch preview — replaces native color swatch button ─────
+      const previewHost = document.createElement('div');
+      previewHost.style.cssText = 'width:24px;height:24px;border-radius:3px;overflow:hidden;flex-shrink:0;cursor:pointer;margin-left:auto;';
+      previewHost.title = 'Full color wheel';
+      if (_activePreviewSwatchCtrl) { _activePreviewSwatchCtrl.destroy(); _activePreviewSwatchCtrl = null; }
+      try {
+        _activePreviewSwatchCtrl = GlowSwatch.create({ animated: true, width: 24, height: 24, color: [cr, cg, cb] });
+        previewHost.appendChild(_activePreviewSwatchCtrl.element);
+      } catch(e) {
+        previewHost.style.background = `rgb(${cr},${cg},${cb})`;
+      }
+      previewHost.addEventListener('click', e => { e.stopPropagation(); wheelIn.click(); });
 
       rgbRow.appendChild(rGrp); rgbRow.appendChild(gGrp); rgbRow.appendChild(bGrp);
       rgbRow.appendChild(wheelIn);
+      rgbRow.appendChild(previewHost);
       popup.appendChild(rgbRow);
 
       // ── Helpers ───────────────────────────────────────────────────────
@@ -8473,6 +8606,8 @@ require(['vs/editor/editor.main'], function () {
       function emit() {
         updateSelected();
         wheelIn.value = toHex();
+        if (_activePreviewSwatchCtrl) _activePreviewSwatchCtrl.setColor([cr, cg, cb]);
+        else previewHost.style.background = `rgb(${cr},${cg},${cb})`;
         onChange(styleArgResolver.cssToProffie(cr, cg, cb));
       }
 
@@ -8532,6 +8667,7 @@ require(['vs/editor/editor.main'], function () {
     function _closeColorPopup() {
       _activeSwatchControllers.forEach(c => c.destroy());
       _activeSwatchControllers = [];
+      if (_activePreviewSwatchCtrl) { _activePreviewSwatchCtrl.destroy(); _activePreviewSwatchCtrl = null; }
       if (_activeColorPopup) {
         _activeColorPopup.remove();
         _activeColorPopup = null;
