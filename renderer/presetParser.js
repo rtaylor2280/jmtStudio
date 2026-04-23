@@ -382,6 +382,29 @@
     };
   }
 
+  // ── Blade label extraction ─────────────────────────────────────────────────
+
+  /**
+   * Scans an array body for a `// @jmt-labels:` comment and parses Bn="label" pairs.
+   * Returns { labels: { [n]: string }, labelBodyOffset: number|null }.
+   * labelBodyOffset is the char offset within bodyContent where the comment starts.
+   * Malformed comments are ignored gracefully.
+   */
+  function extractLabels(bodyContent) {
+    const re = /\/\/\s*@jmt-labels:\s*(.*)/;
+    const match = re.exec(bodyContent);
+    if (!match) return { labels: {}, labelBodyOffset: null };
+    const labels = {};
+    try {
+      const pairRe = /B(\d+)\s*=\s*"([^"]*)"/g;
+      let pm;
+      while ((pm = pairRe.exec(match[1])) !== null) {
+        labels[parseInt(pm[1], 10)] = pm[2];
+      }
+    } catch (_) { /* ignore malformed */ }
+    return { labels, labelBodyOffset: match.index };
+  }
+
   // ── Preset array detection ─────────────────────────────────────────────────
 
   /**
@@ -503,11 +526,17 @@
         });
       });
 
+      const labelData = extractLabels(decl.bodyContent);
       return {
-        name:      decl.name,
-        startLine: lineAt(text, decl.declarationStart),
-        endLine:   lineAt(text, decl.bodyStart + decl.bodyContent.length),
+        name:          decl.name,
+        startLine:     lineAt(text, decl.declarationStart),
+        endLine:       lineAt(text, decl.bodyStart + decl.bodyContent.length),
+        bodyStartLine: lineAt(text, decl.bodyStart),
         presets,
+        labels:        labelData.labels,
+        labelLine:     labelData.labelBodyOffset !== null
+                         ? lineAt(text, decl.bodyStart + labelData.labelBodyOffset)
+                         : null,
       };
     });
 
