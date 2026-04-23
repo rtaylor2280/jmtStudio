@@ -8090,6 +8090,19 @@ require(['vs/editor/editor.main'], function () {
         ? _parseCurrentTemplateArgs(slot.expr, helperBaseName) : [];
       const editTemplateArgs = liveTemplateArgs.slice();
 
+      // Pre-populate empty INNER params from B1 when editing B2+, if B1 is a library style
+      if (slotIdx > 0 && helpers.length > 0 && preset.styles?.[0]) {
+        const b1 = preset.styles[0];
+        const b1Base = (b1.expr || '').match(/^(\w+)/)?.[1];
+        if (b1Base && helperNames.has(b1Base)) {
+          templateParams.forEach((param, idx) => {
+            if (param.type === 'class' && param.name === 'INNER' && !editTemplateArgs[idx]) {
+              editTemplateArgs[idx] = b1.expr;
+            }
+          });
+        }
+      }
+
       function composeHelperExpr() {
         if (!helperBaseName) return '';
         if (templateParams.length === 0) return helperBaseName;
@@ -9210,6 +9223,7 @@ require(['vs/editor/editor.main'], function () {
         if (newPreset) {
           newPreset._autoOpenEmpty = true;
           _renderDetail();
+          _navigateToLine(newPreset.startLine, newPreset.endLine);
           setTimeout(() => {
             const rows = document.querySelectorAll('#preset-list-top .preset-row');
             const row = rows[_selectedPresetIndex];
@@ -9218,7 +9232,7 @@ require(['vs/editor/editor.main'], function () {
               row.addEventListener('animationend', () => row.classList.remove('new-preset'), { once: true });
               row.scrollIntoView({ block: 'nearest' });
             }
-          }, 30);
+          }, 50);
         }
       }, 50);
     }
@@ -9229,10 +9243,16 @@ require(['vs/editor/editor.main'], function () {
       const result = presetParser.parsePresets(editor.getValue());
       const preset = result.arrays[arrayIndex]?.presets[presetIndex];
       if (!preset) return;
+      const model    = editor.getModel();
+      const lastLine = model.getLineCount();
+      // Eat the blank line after the preset so spacing stays consistent
+      const afterLine  = preset.endLine + 1;
+      const eatExtra   = afterLine <= lastLine && model.getLineContent(afterLine).trim() === '';
+      const endLine    = eatExtra ? afterLine + 1 : afterLine;
       editor.executeEdits('preset-delete', [{
         range: {
           startLineNumber: preset.startLine, startColumn: 1,
-          endLineNumber:   preset.endLine + 1, endColumn: 1,
+          endLineNumber:   Math.min(endLine, lastLine + 1), endColumn: 1,
         },
         text: '',
       }]);
