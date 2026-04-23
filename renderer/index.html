@@ -1821,9 +1821,6 @@
 
   /* Delete button */
   .preset-slot-action.preset-slot-delete:hover { color: #e44 !important; border-color: #e44 !important; }
-  .preset-slot-drag { width: 10px; flex-shrink: 0; cursor: grab; color: var(--c-text-hint); opacity: 0; font-size: 0.7rem; text-align: center; user-select: none; transition: opacity 0.1s; }
-  .preset-slot-tile:hover .preset-slot-drag { opacity: 0.5; }
-  .preset-slot-drag:active { cursor: grabbing; }
   .preset-slot-tile.slot-drag-over-top    { border-top: 2px solid var(--jmt-blue); }
   .preset-slot-tile.slot-drag-over-bottom { border-bottom: 2px solid var(--jmt-blue); }
 
@@ -7436,25 +7433,20 @@ require(['vs/editor/editor.main'], function () {
       else                                   tile.classList.add('slot-inline');
       if (isExcess) tile.title = `Excess slot — NUM_BLADES is ${_parseResult.bladeCount}, this is blade ${slotIdx + 1}`;
 
-      // Drag handle (normal slots only)
-      if (!isMissing && !isExcess) {
-        const drag = document.createElement('span');
-        drag.className = 'preset-slot-drag';
-        drag.textContent = '⠿';
-        drag.title = 'Drag to reorder';
-        drag.addEventListener('mousedown', e => e.stopPropagation());
-        tile.appendChild(drag);
-      }
-
-      // Badge: abbreviation (or default Bn) — click navigates, tooltip shows full label
+      // Badge: abbreviation (or default Bn) — click navigates; mousedown initiates drag for normal slots
       const num = document.createElement('span');
       num.className = 'preset-slot-num';
       num.textContent = abbr || `B${slotIdx + 1}`;
-      num.title = fullLabel ? `${fullLabel} — go to line` : 'Go to line';
+      num.title = fullLabel ? `${fullLabel} — go to line / drag to reorder` : 'Go to line / drag to reorder';
       num.addEventListener('click', e => {
         e.stopPropagation();
         if (slot.startLine) _navigateToLine(slot.startLine, slot.endLine);
       });
+      if (!isMissing && !isExcess) {
+        num.style.cursor = 'grab';
+        num.addEventListener('mousedown', e => { if (!_editingSlot) { e.stopPropagation(); tile.draggable = true; } });
+        num.addEventListener('mouseup', () => { tile.draggable = false; });
+      }
       tile.appendChild(num);
 
       const body = document.createElement('span');
@@ -7509,9 +7501,9 @@ require(['vs/editor/editor.main'], function () {
 
       // Clicking the tile body toggles the inline editor (excess tiles are navigate-only)
       if (!isMissing && !isExcess) {
-        tile.addEventListener('click', () => {
-          // Let popup outside-click handlers dismiss themselves; don't close the slot editor too
+        tile.addEventListener('click', e => {
           if (_activeColorPopup || _activeLibComboDropdown) return;
+          e.stopPropagation(); // prevent outside-click handler from closing the editor we just opened
           if (tile.classList.contains('editing')) {
             _closeSlotArgEdit();
           } else {
@@ -7519,14 +7511,15 @@ require(['vs/editor/editor.main'], function () {
           }
         });
 
-        // Drag to reorder
-        tile.draggable = true;
+        // Drag to reorder (draggable enabled only via badge mousedown, blocked during editing)
         tile.addEventListener('dragstart', e => {
+          if (_editingSlot) { e.preventDefault(); tile.draggable = false; return; }
           e.dataTransfer.effectAllowed = 'move';
           e.dataTransfer.setData('text/plain', `slot:${slotIdx}`);
           setTimeout(() => tile.classList.add('dragging'), 0);
         });
         tile.addEventListener('dragend', () => {
+          tile.draggable = false;
           tile.classList.remove('dragging');
           document.querySelectorAll('.preset-slot-tile').forEach(t =>
             t.classList.remove('slot-drag-over-top', 'slot-drag-over-bottom'));
