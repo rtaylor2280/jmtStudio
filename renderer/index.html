@@ -7398,10 +7398,20 @@ require(['vs/editor/editor.main'], function () {
 
       // Map expression args to registry entries (appearance order, registry-filtered)
       const foundArgs    = styleArgResolver.findArgs(slot.expr || '');
-      const registryArgs = foundArgs.map(a => {
-        const reg = window.proffieArgs.registry.find(r => r.name === a.name);
+      let registryArgs = foundArgs.map(a => {
+        const reg = window.proffieArgs && window.proffieArgs.registry.find(r => r.name === a.name);
         return reg ? Object.assign({}, reg, { defaultExpr: a.defaultExpr }) : null;
       }).filter(Boolean);
+
+      // Fallback: if expression has no named args but colorArg has values at positions 0-2,
+      // show BASE_COLOR_ARG so the color popup is reachable (handles generic/ref styles)
+      if (registryArgs.length === 0 && slot.colorArg) {
+        const raw = slot.colorArg.split(',').slice(0, 3).map(s => parseInt(s.trim(), 10));
+        if (raw.length === 3 && raw.every(v => Number.isFinite(v))) {
+          const base = window.proffieArgs && window.proffieArgs.registry.find(r => r.name === 'BASE_COLOR_ARG');
+          if (base) registryArgs = [Object.assign({}, base, { defaultExpr: 'Red' })];
+        }
+      }
 
       const currentParens = () => slot.colorArg || '';
 
@@ -7729,8 +7739,12 @@ require(['vs/editor/editor.main'], function () {
         });
         updateSelected();
         dots.forEach((d, i) => d.classList.toggle('active', i === p));
-        _activeSwatchControllers = GlowSwatch.mountAll('.preset-color-popup-cell',
-          { width: 48, height: 48, root: popup });
+        try {
+          _activeSwatchControllers = GlowSwatch.mountAll('.preset-color-popup-cell',
+            { width: 48, height: 48, root: popup });
+        } catch(e) {
+          // GlowSwatch unavailable — cells remain as flat CSS color blocks
+        }
       }
 
       // ── Mount + position ──────────────────────────────────────────────
