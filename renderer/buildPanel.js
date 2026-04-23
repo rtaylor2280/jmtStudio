@@ -504,6 +504,11 @@ function onBuildStatus({ type, ok, message }) {
   if (type === 'toolchain') {
     toolchainReady = ok;
     setStatus('toolchain', ok ? 'ok' : 'error', message);
+    const showSecondary = ok !== false;
+    ['port', 'compile', 'flash'].forEach(t => {
+      const item = document.getElementById(`bp-status-${t}-item`);
+      if (item) item.style.display = showSecondary ? '' : 'none';
+    });
   } else if (type === 'compile') {
     if (ok === null) {
       setStatus('compile', 'pending', message);

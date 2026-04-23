@@ -618,14 +618,24 @@
   #empty-state {
     display: none;
     flex: 1;
+    min-height: 0;
+    flex-direction: column;
+    align-items: center;
+    color: var(--c-text-dim);
+    position: relative;
+    overflow: hidden;
+  }
+  #empty-state.visible { display: flex; }
+  #empty-state-center {
+    flex: 1;
+    min-height: 0;
+    display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     gap: 16px;
-    color: var(--c-text-dim);
-    position: relative;
+    width: 100%;
   }
-  #empty-state.visible { display: flex; }
   #empty-state svg { color: var(--c-text-faint); }
   #empty-state p { font-size: 0.9rem; }
   #btn-open-empty {
@@ -1029,16 +1039,14 @@
   /* Favorites cards in empty state */
   #fav-cards {
     display: none;
-    position: absolute;
-    bottom: 24px;
-    left: 50%;
-    transform: translateX(-50%);
     width: min(620px, calc(100% - 48px));
     flex-wrap: wrap;
     justify-content: center;
     gap: 8px;
-    max-height: 360px;
+    max-height: 200px;
     overflow-y: auto;
+    flex-shrink: 1;
+    padding-bottom: 24px;
   }
   #fav-cards::-webkit-scrollbar { width: 6px; }
   #fav-cards::-webkit-scrollbar-thumb { background: var(--c-border-strong); border-radius: 3px; }
@@ -2142,15 +2150,15 @@
       <div class="bp-status-dot bp-status-pending" id="bp-status-toolchain-dot"></div>
       <span class="bp-status-text" id="bp-status-toolchain-text">Toolchain</span>
     </div>
-    <div class="bp-status-item">
+    <div class="bp-status-item" id="bp-status-port-item">
       <div class="bp-status-dot bp-status-pending" id="bp-status-port-dot"></div>
       <span class="bp-status-text" id="bp-status-port-text">Port</span>
     </div>
-    <div class="bp-status-item">
+    <div class="bp-status-item" id="bp-status-compile-item">
       <div class="bp-status-dot" id="bp-status-compile-dot"></div>
       <span class="bp-status-text" id="bp-status-compile-text">Not compiled</span>
     </div>
-    <div class="bp-status-item">
+    <div class="bp-status-item" id="bp-status-flash-item">
       <div class="bp-status-dot" id="bp-status-flash-dot"></div>
       <span class="bp-status-text" id="bp-status-flash-text">Not flashed</span>
     </div>
@@ -2159,16 +2167,18 @@
 
 <!-- ── Empty state ── -->
 <div id="empty-state">
-  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
-    <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
-  </svg>
-  <p>No config file open</p>
-  <button id="btn-open-empty" class="btn-blue">&#8593; Open Config File</button>
+  <div id="empty-state-center">
+    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
+      <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+    </svg>
+    <p>No config file open</p>
+    <button id="btn-open-empty" class="btn-blue">&#8593; Open Config File</button>
+  </div>
   <div id="fav-cards"></div>
 </div>
 
 <!-- ── Config editor row (preset sidecar + Monaco editor) ── -->
-<div id="config-editor-row">
+<div id="config-editor-row" style="display:none">
 
   <div id="preset-sidecar" class="preset-sidecar collapsed">
     <!-- Always-visible left strip: toggle chevron + rotated label -->
@@ -2552,6 +2562,7 @@ window.getEditorContent = () => {
 function setFileOpen(open) {
   fileIsOpen = open;
   document.getElementById('empty-state').classList.toggle('visible', !open);
+  document.getElementById('config-editor-row').style.display = open ? '' : 'none';
   document.getElementById('editor-container').classList.toggle('visible', open);
   ['btn-close','btn-save','btn-saveas','btn-download','btn-undo','btn-redo',
    'input-desc','input-board','input-version','bp-usb-select'].forEach(id => {
@@ -2662,7 +2673,10 @@ document.getElementById('input-version').addEventListener('change', () => {
   updateStatusMeta();
   if (fileIsOpen) setDirty(true);
   const name = verSel.value;
-  if (name && window.electronAPI) window.electronAPI.selectVersion(name);
+  if (name && window.electronAPI) {
+    window.electronAPI.selectVersion(name);
+    window.electronAPI.initToolchain();
+  }
 });
 
 // ── Metadata ───────────────────────────────────────────
@@ -6432,7 +6446,12 @@ function switchTab(name) {
   const showConfig = name === 'config';
   _configOnlyEls.forEach(id => {
     const el = document.getElementById(id);
-    if (el) el.style.display = showConfig ? '' : 'none';
+    if (!el) return;
+    if (id === 'config-editor-row') {
+      el.style.display = (showConfig && fileIsOpen) ? '' : 'none';
+    } else {
+      el.style.display = showConfig ? '' : 'none';
+    }
   });
   _configOnlyClasses.forEach(sel => {
     document.querySelectorAll(sel).forEach(el => {
