@@ -650,7 +650,7 @@
   /* ── Editor container ── */
   #editor-container { flex: 1; overflow: hidden; position: relative; display: none; min-height: 0; }
   #editor-container.visible { display: block; }
-  .minimap-jump-bar { position: absolute; right: 8px; width: 120px; height: 20px; display: flex; align-items: center; justify-content: center; cursor: pointer; background: rgba(40,40,60,0.55); color: #d0d0e8; opacity: 0.35; z-index: 20; transition: opacity 0.15s, background 0.1s, color 0.1s; user-select: none; font-size: 0.74rem; letter-spacing: 0.03em; pointer-events: auto; overflow: hidden; white-space: nowrap; }
+  .minimap-jump-bar { position: absolute; right: 8px; width: 120px; height: 20px; display: flex; align-items: center; justify-content: center; cursor: pointer; background: rgba(40,40,60,0.55); color: #d0d0e8; opacity: 0.05; z-index: 20; transition: opacity 0.15s, background 0.1s, color 0.1s; user-select: none; font-size: 0.74rem; letter-spacing: 0.03em; pointer-events: auto; overflow: hidden; white-space: nowrap; }
   .minimap-jump-bar:hover { opacity: 0.8; background: rgba(30, 30, 30, 0.8); color: #fff; }
   .minimap-jump-bar.top { top: 0; }
   .minimap-jump-bar.bottom { bottom: 0; }
@@ -1724,7 +1724,7 @@
   .preset-insert-zone:hover::before { height: 2px; opacity: 1; }
   .preset-insert-zone:hover::after  { opacity: 1; }
 
-  .preset-row { position: relative; display: flex; align-items: center; gap: 6px; padding: 5px 28px 5px 6px; cursor: pointer; font-size: 0.78rem; color: var(--c-text-sub); transition: background 0.1s; user-select: none; }
+  .preset-row { position: relative; display: flex; align-items: center; gap: 6px; padding: 5px 48px 5px 6px; cursor: pointer; font-size: 0.78rem; color: var(--c-text-sub); transition: background 0.1s; user-select: none; }
   .preset-row:hover { background: var(--c-bg-hover); }
   .preset-row.selected { background: var(--jmt-blue); color: #fff; }
   .preset-row.selected .preset-row-font { color: rgba(255,255,255,0.7); }
@@ -1740,6 +1740,14 @@
   .preset-row-delete { position: absolute; top: 50%; right: 4px; transform: translateY(-50%); background: none; border: none; cursor: pointer; color: var(--c-text-muted); opacity: 0; padding: 2px 5px; font-size: 0.85rem; line-height: 1; border-radius: 3px; transition: opacity 0.1s, color 0.1s, background 0.1s; }
   .preset-row:hover .preset-row-delete { opacity: 0.6; }
   .preset-row-delete:hover { opacity: 1 !important; color: #e44; background: rgba(40,10,10,0.7); }
+  .preset-row-toggle { position: absolute; top: 50%; right: 20px; transform: translateY(-50%); background: none; border: none; cursor: pointer; color: var(--c-text-muted); opacity: 0; padding: 2px 2.5px; font-size: 0.85rem; line-height: 1; border-radius: 3px; transition: opacity 0.1s, color 0.1s, background 0.1s; }
+  .preset-row:hover .preset-row-toggle { opacity: 0.6; }
+  .preset-row-toggle:hover { opacity: 1 !important; color: var(--jmt-blue); background: rgba(10,30,60,0.7); }
+  .preset-row.preset-disabled .preset-row-toggle:hover { color: #4c4; background: rgba(10,40,10,0.7); }
+  .preset-row.preset-disabled { color: var(--c-text-hint); font-style: italic; }
+  .preset-row.preset-disabled.selected { background: rgba(100,100,120,0.4); color: var(--c-text-muted); }
+  .preset-disabled-banner { font-size: 0.65rem; color: var(--c-text-hint); font-style: italic; padding: 4px 10px 2px; letter-spacing: 0.03em; }
+  .preset-detail-disabled-slots { opacity: 0.4; pointer-events: none; filter: grayscale(0.5); }
 
   @keyframes preset-new-glow {
     0%   { background: rgba(58,143,255,0.22); box-shadow: inset 0 0 0 1px var(--jmt-blue); }
@@ -6971,6 +6979,8 @@ require(['vs/editor/editor.main'], function () {
     let _restoreSlotBody        = null;
     let _silentStylesText       = null;
     let _reopenAfterRebuild     = null; // { presetIdx, slotIdx }
+    let _disabledPresets        = [];   // scanned /* @jmt-disabled */ blocks
+    let _selectedDisabledPreset = null; // currently selected disabled preset object
 
     function _navigateToLine(startLine, endLine) {
       if (!editor) return;
@@ -7027,10 +7037,43 @@ require(['vs/editor/editor.main'], function () {
     }
     function _toggleSidecar() { _sidecarOpen ? _closeSidecar() : _openSidecar(); }
 
+    function _scanDisabledPresets(text) {
+      const lines = text.split('\n');
+      const result = [];
+      for (let i = 0; i < lines.length; i++) {
+        if (/^[ \t]*\/\* @jmt-disabled\s*$/.test(lines[i])) {
+          const startLine = i + 1;
+          let endLine = startLine;
+          for (let j = i + 1; j < lines.length; j++) {
+            if (/^[ \t]*\*\/\s*$/.test(lines[j])) { endLine = j + 1; break; }
+          }
+          const innerLines = lines.slice(i + 1, endLine - 1);
+          const innerText  = innerLines.join('\n');
+          const nameMatch  = innerText.match(/"([^"]*)"\s*\}?\s*,?\s*$/m);
+          const fontMatch  = innerText.match(/^\s*"([^"]*?)(?:;[^"]*)?"\s*,/m);
+          const styleLines = innerLines.filter(l => /StylePtr/.test(l)).map(l => l.trim());
+          result.push({
+            startLine, endLine,
+            displayName: nameMatch ? nameMatch[1] : '(disabled)',
+            font: fontMatch ? fontMatch[1].split(';').filter(p => p.trim() !== 'common').join(';') : '',
+            styleLines,
+          });
+          i = endLine - 1;
+        }
+      }
+      return result;
+    }
+
     function _rebuildSidecar() {
       if (!_sidecarOpen || !editor) return;
       if (_editingSlot) { _refreshBladeSectionLabel(); return; }
-      _parseResult = presetParser.parsePresets(editor.getValue());
+      _parseResult    = presetParser.parsePresets(editor.getValue());
+      _disabledPresets = _scanDisabledPresets(editor.getValue());
+      // Re-find the selected disabled preset by startLine after a rebuild
+      if (_selectedDisabledPreset) {
+        const sl = _selectedDisabledPreset.startLine;
+        _selectedDisabledPreset = _disabledPresets.find(dp => dp.startLine === sl) || null;
+      }
       const arr = _parseResult.arrays[_activeArrayIndex];
       _renderPresetList(arr);
       _renderDetail();
@@ -7080,15 +7123,80 @@ require(['vs/editor/editor.main'], function () {
     // ── List ──────────────────────────────────────────────────────────────────
     function _renderPresetList(arr) {
       const listEl = document.getElementById('preset-list-top');
-      if (!arr || !arr.presets.length) { _renderEmpty('No presets found.'); return; }
+      const livePresets    = arr?.presets || [];
+      const disabledBlocks = _disabledPresets || [];
+      if (!livePresets.length && !disabledBlocks.length) { _renderEmpty('No presets found.'); return; }
       listEl.innerHTML = '';
-      arr.presets.forEach((preset, i) => {
-        listEl.appendChild(_buildInsertZone(_activeArrayIndex, i));
-        listEl.appendChild(_buildPresetRow(preset, i));
+
+      // Merge live and disabled by startLine
+      const liveItems     = livePresets.map((p, i) => ({ live: true, preset: p, idx: i }));
+      const disabledItems = disabledBlocks.map(dp  => ({ live: false, dp }));
+      const merged = [...liveItems, ...disabledItems].sort((a, b) => {
+        const aL = a.live ? a.preset.startLine : a.dp.startLine;
+        const bL = b.live ? b.preset.startLine : b.dp.startLine;
+        return aL - bL;
       });
-      listEl.appendChild(_buildInsertZone(_activeArrayIndex, arr.presets.length));
-      const toSelect = Math.max(0, Math.min(_selectedPresetIndex, arr.presets.length - 1));
-      _selectPreset(arr, toSelect);
+
+      let liveCount = 0;
+      merged.forEach(item => {
+        if (item.live) {
+          listEl.appendChild(_buildInsertZone(_activeArrayIndex, liveCount));
+          listEl.appendChild(_buildPresetRow(item.preset, liveCount));
+          liveCount++;
+        } else {
+          listEl.appendChild(_buildDisabledPresetRow(item.dp));
+        }
+      });
+      listEl.appendChild(_buildInsertZone(_activeArrayIndex, liveCount));
+
+      if (arr && livePresets.length) {
+        const toSelect = Math.max(0, Math.min(_selectedPresetIndex, livePresets.length - 1));
+        _selectPreset(arr, toSelect);
+      }
+    }
+
+    function _buildDisabledPresetRow(dp) {
+      const row = document.createElement('div');
+      row.className = 'preset-row preset-disabled';
+      if (_selectedDisabledPreset?.startLine === dp.startLine) row.classList.add('selected');
+
+      const num = document.createElement('span');
+      num.className = 'preset-row-num';
+      num.textContent = '—';
+      row.appendChild(num);
+
+      const name = document.createElement('span');
+      name.className = 'preset-row-name';
+      name.textContent = dp.displayName || '(disabled)';
+      row.appendChild(name);
+
+      const font = document.createElement('span');
+      font.className = 'preset-row-font';
+      font.textContent = dp.font || '';
+      row.appendChild(font);
+
+      const toggleBtn = document.createElement('button');
+      toggleBtn.className = 'preset-row-toggle';
+      toggleBtn.innerHTML = '&#9650;';
+      toggleBtn.title = 'Enable preset';
+      toggleBtn.addEventListener('click', e => { e.stopPropagation(); _enablePreset(dp); });
+      row.appendChild(toggleBtn);
+
+      const del = document.createElement('button');
+      del.className = 'preset-row-delete';
+      del.innerHTML = '&times;';
+      del.title = 'Delete preset';
+      del.addEventListener('click', e => { e.stopPropagation(); _deleteDisabledPreset(dp); });
+      row.appendChild(del);
+
+      row.addEventListener('click', () => {
+        _selectedDisabledPreset = dp;
+        document.querySelectorAll('#preset-list-top .preset-row').forEach(r => r.classList.remove('selected'));
+        row.classList.add('selected');
+        _navigateToLine(dp.startLine, dp.endLine);
+        _renderDetail();
+      });
+      return row;
     }
 
     function _buildInsertZone(arrayIndex, insertAtIndex) {
@@ -7102,6 +7210,7 @@ require(['vs/editor/editor.main'], function () {
     function _buildPresetRow(preset, idx) {
       const row = document.createElement('div');
       row.className = 'preset-row';
+      row.dataset.liveIdx = idx;
       row.draggable = true;
 
       const drag = document.createElement('span');
@@ -7124,6 +7233,13 @@ require(['vs/editor/editor.main'], function () {
       font.className = 'preset-row-font';
       font.textContent = (preset.font || '').split(';').filter(p => p.trim() !== 'common').join(';');
       row.appendChild(font);
+
+      const toggleBtn = document.createElement('button');
+      toggleBtn.className = 'preset-row-toggle';
+      toggleBtn.innerHTML = '&#9660;';
+      toggleBtn.title = 'Disable preset';
+      toggleBtn.addEventListener('click', e => { e.stopPropagation(); _disablePreset(_activeArrayIndex, idx); });
+      row.appendChild(toggleBtn);
 
       const del = document.createElement('button');
       del.className = 'preset-row-delete';
@@ -7177,8 +7293,9 @@ require(['vs/editor/editor.main'], function () {
 
     function _selectPreset(arr, idx) {
       _selectedPresetIndex = idx;
-      document.querySelectorAll('#preset-list-top .preset-row').forEach((r, i) =>
-        r.classList.toggle('selected', i === idx));
+      _selectedDisabledPreset = null;
+      document.querySelectorAll('#preset-list-top .preset-row').forEach(r =>
+        r.classList.toggle('selected', r.dataset.liveIdx === String(idx)));
       _highlightPreset(arr?.presets[idx]);
       _renderDetail();
     }
@@ -7190,9 +7307,83 @@ require(['vs/editor/editor.main'], function () {
       if (!_activeSlotArgEditor.contains(e.target)) _closeSlotArgEdit();
     });
 
+    function _renderDisabledDetail(dp) {
+      const detail = document.getElementById('preset-detail');
+      detail.innerHTML = '';
+
+      const heading = document.createElement('div');
+      heading.className = 'preset-detail-heading';
+
+      const hNum = document.createElement('span');
+      hNum.className = 'preset-detail-num';
+      hNum.style.color = 'var(--c-text-hint)';
+      hNum.textContent = '—';
+      heading.appendChild(hNum);
+
+      const nameEl = document.createElement('span');
+      nameEl.className = 'preset-detail-name';
+      nameEl.style.cssText = 'color:var(--c-text-hint);font-style:italic;';
+      nameEl.textContent = dp.displayName || '(disabled)';
+      heading.appendChild(nameEl);
+
+      const navBtn = document.createElement('button');
+      navBtn.className = 'preset-nav-btn';
+      navBtn.innerHTML = '&#8594;';
+      navBtn.title = `Go to line ${dp.startLine}`;
+      navBtn.addEventListener('click', () => _navigateToLine(dp.startLine, dp.endLine));
+      heading.appendChild(navBtn);
+
+      const enableBtn = document.createElement('button');
+      enableBtn.className = 'preset-nav-btn';
+      enableBtn.innerHTML = '&#9650; Enable';
+      enableBtn.title = 'Remove comment wrapper and re-enable this preset';
+      enableBtn.style.cssText = 'font-size:0.65rem;padding:2px 6px;color:var(--c-text-muted);';
+      enableBtn.addEventListener('click', () => _enablePreset(dp));
+      heading.appendChild(enableBtn);
+
+      detail.appendChild(heading);
+
+      const banner = document.createElement('div');
+      banner.className = 'preset-disabled-banner';
+      banner.textContent = 'This preset is disabled (commented out)';
+      detail.appendChild(banner);
+
+      if (dp.styleLines.length) {
+        const slotsWrap = document.createElement('div');
+        slotsWrap.className = 'preset-detail-slots-wrap preset-detail-disabled-slots';
+        const label = document.createElement('div');
+        label.className = 'preset-detail-slots-label';
+        label.textContent = `Styles (${dp.styleLines.length} blades)`;
+        slotsWrap.appendChild(label);
+        const slotsEl = document.createElement('div');
+        slotsEl.className = 'preset-detail-slots';
+        dp.styleLines.forEach((line, i) => {
+          const tile = document.createElement('div');
+          tile.className = 'preset-slot-tile';
+          const num = document.createElement('span');
+          num.className = 'preset-slot-num';
+          num.textContent = `B${i + 1}`;
+          const body = document.createElement('span');
+          body.className = 'preset-slot-body';
+          const expr = document.createElement('span');
+          expr.className = 'preset-slot-expr';
+          // Extract inner expression for display
+          const m = line.match(/\b\w*StylePtr\s*<([\s\S]*)>\s*\(/);
+          expr.textContent = m ? m[1].trim() : line;
+          body.appendChild(expr);
+          tile.appendChild(num);
+          tile.appendChild(body);
+          slotsEl.appendChild(tile);
+        });
+        slotsWrap.appendChild(slotsEl);
+        detail.appendChild(slotsWrap);
+      }
+    }
+
     function _renderDetail() {
       const detail = document.getElementById('preset-detail');
       detail.innerHTML = '';
+      if (_selectedDisabledPreset) { _renderDisabledDetail(_selectedDisabledPreset); return; }
       const arr = _parseResult?.arrays[_activeArrayIndex];
       if (!arr || !arr.presets.length) return;
       const idx = Math.max(0, Math.min(_selectedPresetIndex, arr.presets.length - 1));
@@ -9257,6 +9448,67 @@ require(['vs/editor/editor.main'], function () {
         text: '',
       }]);
       editor.focus();
+      _scheduleRebuild();
+    }
+
+    // ── Disable / enable preset ───────────────────────────────────────────────
+    function _disablePreset(arrayIndex, presetIndex) {
+      if (!editor) return;
+      const result = presetParser.parsePresets(editor.getValue());
+      const preset = result.arrays[arrayIndex]?.presets[presetIndex];
+      if (!preset) return;
+      const model = editor.getModel();
+      const inner = model.getValueInRange({
+        startLineNumber: preset.startLine, startColumn: 1,
+        endLineNumber:   preset.endLine,   endColumn: model.getLineMaxColumn(preset.endLine),
+      });
+      editor.executeEdits('preset-disable', [{
+        range: {
+          startLineNumber: preset.startLine, startColumn: 1,
+          endLineNumber:   preset.endLine,   endColumn: model.getLineMaxColumn(preset.endLine),
+        },
+        text: `/* @jmt-disabled\n${inner}\n*/`,
+      }]);
+      editor.focus();
+      _selectedPresetIndex = Math.max(0, presetIndex - 1);
+      _scheduleRebuild();
+    }
+
+    function _enablePreset(dp) {
+      if (!editor) return;
+      const model = editor.getModel();
+      const inner = model.getValueInRange({
+        startLineNumber: dp.startLine + 1, startColumn: 1,
+        endLineNumber:   dp.endLine - 1,   endColumn: model.getLineMaxColumn(dp.endLine - 1),
+      });
+      editor.executeEdits('preset-enable', [{
+        range: {
+          startLineNumber: dp.startLine, startColumn: 1,
+          endLineNumber:   dp.endLine,   endColumn: model.getLineMaxColumn(dp.endLine),
+        },
+        text: inner,
+      }]);
+      editor.focus();
+      _selectedDisabledPreset = null;
+      _scheduleRebuild();
+    }
+
+    function _deleteDisabledPreset(dp) {
+      if (!editor) return;
+      const model    = editor.getModel();
+      const lastLine = model.getLineCount();
+      const afterLine = dp.endLine + 1;
+      const eatExtra  = afterLine <= lastLine && model.getLineContent(afterLine).trim() === '';
+      const endLine   = eatExtra ? afterLine + 1 : afterLine;
+      editor.executeEdits('disabled-preset-delete', [{
+        range: {
+          startLineNumber: dp.startLine, startColumn: 1,
+          endLineNumber:   Math.min(endLine, lastLine + 1), endColumn: 1,
+        },
+        text: '',
+      }]);
+      editor.focus();
+      _selectedDisabledPreset = null;
       _scheduleRebuild();
     }
 
