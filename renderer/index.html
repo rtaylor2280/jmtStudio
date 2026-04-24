@@ -2116,6 +2116,9 @@
     <div id="style-detail-editor"></div>
     <div id="detail-error-banner" class="styles-conflict-banner" style="display:none;margin-top:8px;color:#e44;border-color:#c44;background:rgba(180,40,40,0.1)"></div>
     <div class="modal-btns" style="margin-top:12px">
+      <button class="modal-btn-cancel" id="btn-style-detail-copy" title="Copy full function block to clipboard">Copy Function</button>
+      <button class="modal-btn-cancel" id="btn-style-detail-copy-style" title="Copy as StylePtr for use in a preset">Copy Style</button>
+      <div style="flex:1"></div>
       <button class="modal-btn-cancel" id="btn-style-detail-discard">Discard</button>
       <button class="modal-btn-primary" id="btn-style-detail-save" disabled>&#8595; Save</button>
     </div>
@@ -3611,6 +3614,7 @@ document.getElementById('vp-file-modal')?.addEventListener('click', (e) => {
 
 let _stylesFileImported = false;
 let _stylesFilePath     = '';  // forward-slash absolute path to userData/my_styles.h
+let _stylesLinked       = false; // true when config contains #include for the library
 
 function _updateStylesLinkBtn() {
   const btn       = document.getElementById('btn-styles-link');
@@ -3630,6 +3634,7 @@ function _updateStylesLinkBtn() {
   const linked   = fileIsOpen && _stylesFilePath
     ? new RegExp(String.raw`^\s*#include\s+"${_escaped}"\s*$`, 'm').test(content)
     : false;
+  _stylesLinked = linked;
   const fileName = currentFilePath ? currentFilePath.split(/[\\/]/).pop() : '';
 
   // Config toolbar button — hides once linked
@@ -3881,8 +3886,15 @@ function _buildStyleBlock(name, expr, source, tags, url = '', notes = '') {
   return '\n' + lines.join('\n') + '\n';
 }
 
-let _addStyleEditor      = null;
-let _addStyleCurrentName = ''; // tracks name for live sync between field and editor
+let _addStyleEditor          = null;
+let _addStyleCurrentName     = ''; // tracks name for live sync between field and editor
+let _addStyleConfirmCallback = null; // set by _openAddStyleModalWithExpr, called on confirm
+
+function _styleNameFromDisplay(s) {
+  return (s || '').replace(/[\s\-]+(.?)/g, (_, c) => c ? c.toUpperCase() : '')
+    .replace(/[^a-zA-Z0-9_]/g, '')
+    .replace(/^[0-9]/, '_$&');
+}
 
 function _openAddStyleModal() {
   document.getElementById('add-style-name').value   = '';
@@ -3903,6 +3915,33 @@ function _openAddStyleModal() {
     setTimeout(() => _addStyleEditor.layout(), 50);
   }
   document.getElementById('modal-add-style').classList.add('active');
+}
+
+function _openAddStyleModalWithExpr(exprText, defaultName, onConfirm) {
+  if (!_addStyleEditor) window.initStylesPanel?.();
+  _addStyleConfirmCallback = onConfirm || null;
+  _openAddStyleModal();
+  const raw   = (exprText || '').replace(/,\s*$/, '').trim();
+  const inner = _extractStylePtrInner(raw);
+  const editorContent = inner || raw;
+  if (!editorContent) return;
+  if (defaultName) {
+    document.getElementById('add-style-name').value = defaultName;
+    _addStyleCurrentName = defaultName;
+  }
+  document.getElementById('add-style-code-section').style.display = 'flex';
+  document.getElementById('add-style-code-hint').textContent = defaultName ? 'editable — name field syncs live' : 'enter a name above to complete';
+  if (_addStyleEditor) {
+    _addStyleEditor.setValue(defaultName ? `using ${defaultName} = ${editorContent};` : editorContent);
+    _addStyleEditor.setScrollPosition({ scrollTop: 0 });
+    _addStyleEditor.layout();
+  }
+  _updateAddStyleConfirmBtn();
+  if (defaultName) {
+    document.getElementById('btn-add-style-confirm').focus();
+  } else {
+    document.getElementById('add-style-name').focus();
+  }
 }
 
 function _scanEffects(usingCode) {
@@ -5955,12 +5994,14 @@ document.getElementById('btn-add-style').addEventListener('click', _openAddStyle
 ['btn-add-style-close','btn-add-style-cancel'].forEach(id => {
   document.getElementById(id).addEventListener('click', () => {
     document.getElementById('modal-add-style').classList.remove('active');
+    _addStyleConfirmCallback = null;
   });
 });
 document.getElementById('modal-add-style').addEventListener('click', async e => {
   if (e.target === document.getElementById('modal-add-style')) {
     if (!await _guardAddStyleModal('Discard this new style?')) return;
     document.getElementById('modal-add-style').classList.remove('active');
+    _addStyleConfirmCallback = null;
   }
 });
 // Parse clipboard content into structured style fields
@@ -5968,11 +6009,15 @@ function _parseClipboardStyle(text) {
   const raw = text.trim();
   const result = { name: '', expr: '', source: '', url: '', osVersion: '', notes: '' };
 
-  // Full fett263 format: /*--- NAME ---\n body \n*/ ... using NAME = EXPR; ...
-  const blockMatch = raw.match(/\/\*-+\s*([A-Za-z0-9_]+)[^\n]*\n([\s\S]*?)\*\//);
+  // Parse any /* ... */ block comment for metadata; extract name only if /*--- NAME --- format
+  const blockMatch = raw.match(/\/\*(-*)\s*([^\n]*)\n([\s\S]*?)\*\//);
   if (blockMatch) {
-    result.name = blockMatch[1].trim();
-    const bodyLines = blockMatch[2].split('\n').map(l => l.trim()).filter(Boolean);
+    const hasDashes = blockMatch[1].length > 0;
+    const firstWord = blockMatch[2].trim().match(/^([A-Za-z0-9_]+)/)?.[1] || '';
+    if (hasDashes && firstWord) result.name = firstWord;
+    // For no-dashes format, first line (group 2) may contain copyright/url — include it
+    const firstLine = hasDashes ? '' : blockMatch[2].trim();
+    const bodyLines = [firstLine, ...blockMatch[3].split('\n').map(l => l.trim())].filter(Boolean);
     const noteLines = [];
     for (const line of bodyLines) {
       if (line.startsWith('copyright ')) {
@@ -6083,19 +6128,40 @@ async function _runPasteAndParse() {
   }
 
   _updateAddStyleConfirmBtn();
-  if (!parsed.name) document.getElementById('add-style-name').focus();
+  const _confirmBtn = document.getElementById('btn-add-style-confirm');
+  if (!_confirmBtn.disabled) {
+    _confirmBtn.focus();
+  } else {
+    document.getElementById('add-style-name').focus();
+  }
 }
 
 document.getElementById('btn-add-style-paste').addEventListener('click', _runPasteAndParse);
 
 document.addEventListener('keydown', e => {
-  if (e.key !== 'v' || !e.ctrlKey) return;
   if (!document.getElementById('modal-add-style').classList.contains('active')) return;
   const tag = document.activeElement?.tagName;
-  if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-  if (document.activeElement?.closest('.monaco-editor')) return;
-  e.preventDefault();
-  _runPasteAndParse();
+  const inMonaco = document.activeElement?.closest('.monaco-editor');
+
+  if (e.key === 'v' && e.ctrlKey) {
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || inMonaco) return;
+    e.preventDefault();
+    _runPasteAndParse();
+    return;
+  }
+
+  if (e.key === 'Enter') {
+    if (tag === 'TEXTAREA' || inMonaco || tag === 'BUTTON') return;
+    const _TAB_ORDER = ['add-style-name','add-style-source','add-style-url','add-style-tags'];
+    const idx = _TAB_ORDER.indexOf(document.activeElement?.id);
+    if (idx !== -1 && idx < _TAB_ORDER.length - 1) {
+      e.preventDefault();
+      document.getElementById(_TAB_ORDER[idx + 1]).focus();
+    } else {
+      e.preventDefault();
+      document.getElementById('btn-add-style-confirm').click();
+    }
+  }
 });
 
 document.getElementById('btn-add-style-confirm').addEventListener('click', () => {
@@ -6147,10 +6213,82 @@ document.getElementById('btn-add-style-confirm').addEventListener('click', () =>
   _setStylesDirty(true);
   _buildStylesVisual();
   document.getElementById('modal-add-style').classList.remove('active');
+  if (_addStyleConfirmCallback) {
+    const cb = _addStyleConfirmCallback;
+    _addStyleConfirmCallback = null;
+    cb(name);
+  }
 });
 
-// Style detail modal — close / save / discard
+// Style detail modal — close / save / discard / copy
 document.getElementById('btn-style-detail-close').addEventListener('click', _closeDetailModal);
+
+document.getElementById('btn-style-detail-copy').addEventListener('click', () => {
+  if (!_detailEntry || !_stylesEditorInstance) return;
+  const text = _stylesEditorInstance.getValue();
+  const start = _detailEntry.blockStart;
+  const end = _detailEntry.implComment
+    ? _detailEntry.implStart + _detailEntry.implComment.length
+    : _detailEntry.blockEnd;
+  const block = text.slice(start, end).trim();
+  navigator.clipboard.writeText(block).then(() => {
+    const btn = document.getElementById('btn-style-detail-copy');
+    btn.textContent = '✓ Copied';
+    setTimeout(() => { btn.textContent = 'Copy Function'; }, 1500);
+  });
+});
+
+document.getElementById('btn-style-detail-copy-style').addEventListener('click', () => {
+  if (!_detailEntry || !_stylesEditorInstance) return;
+  const text = _stylesEditorInstance.getValue();
+  const usingIdx = _detailEntry.usingIdx;
+
+  // Find the last /* ... */ block before the using statement — no size cap
+  const before = text.slice(0, usingIdx);
+  const hEnd   = before.lastIndexOf('*/');
+  const hStart = hEnd !== -1 ? before.lastIndexOf('/*', hEnd) : -1;
+  const rawComment = hStart !== -1 ? before.slice(hStart, hEnd + 2) : '';
+
+  let comment = '';
+  if (rawComment.startsWith('/*-')) {
+    const nl = rawComment.indexOf('\n');
+    if (nl !== -1) {
+      // Multi-line fett263 format stored directly — strip name+dashes first line
+      comment = '/*\n' + rawComment.slice(nl + 1);
+    } else {
+      // Single-line /*--- NAME ---*/: style was stored via our format.
+      // Reconstruct fett263-style comment from gap metadata.
+      const meta = _detailEntry.meta;
+      const source = meta.userSource || meta.source;
+      const url    = meta.userUrl    || meta.url;
+      const osTags = (meta.userTags  || []).filter(t => /^OS\d/.test(t));
+      const notes  = meta.userNotes;
+      const lines  = source ? [`/* copyright ${source}`] : ['/*'];
+      if (url)    lines.push(url);
+      if (osTags.length) lines.push(osTags[0]);
+      if (notes)  lines.push(...notes.split('\n'));
+      lines.push('*/');
+      comment = lines.join('\n');
+    }
+  } else if (rawComment) {
+    comment = rawComment;
+  }
+
+  // Extract bare expression from `using NAME = EXPR;`
+  const expr = _detailEntry.usingCode
+    .replace(/^using\s+\w+\s*=\s*/, '')
+    .replace(/;\s*$/, '')
+    .trim();
+
+  const parts = [];
+  if (comment) parts.push(comment);
+  parts.push(`StylePtr<${expr}>(),`);
+  navigator.clipboard.writeText(parts.join('\n')).then(() => {
+    const btn = document.getElementById('btn-style-detail-copy-style');
+    btn.textContent = '✓ Copied';
+    setTimeout(() => { btn.textContent = 'Copy Style'; }, 1500);
+  });
+});
 // Discard: explicit intent, close without prompting
 document.getElementById('btn-style-detail-discard').addEventListener('click', () => {
   document.getElementById('modal-style-detail').classList.remove('active');
@@ -6376,6 +6514,7 @@ document.getElementById('styles-search-clear')?.addEventListener('click', () => 
 
 // initStylesPanel called by switchTab on first visit (Monaco is ready by then)
 window.initStylesPanel = function() {
+  if (_addStyleEditor) return; // already initialized
   const theme = document.documentElement.classList.contains('light-mode') ? 'vs' : 'vs-dark';
   const editorOpts = {
     language: 'cpp', theme, fontSize: 13,
@@ -8609,6 +8748,9 @@ require(['vs/editor/editor.main'], function () {
       okBtn.addEventListener('click', e => { e.stopPropagation(); applyEdit(); });
       body.appendChild(ta);
 
+      const customBtnRow = document.createElement('div');
+      customBtnRow.style.cssText = 'display:flex;gap:4px;align-items:center;';
+
       const pickLibLink = hasModes ? document.createElement('button') : null;
       if (pickLibLink) {
         pickLibLink.className = 'preset-mode-switch';
@@ -8617,8 +8759,28 @@ require(['vs/editor/editor.main'], function () {
           e.stopPropagation();
           showLibraryMode();
         });
-        body.appendChild(pickLibLink);
+        customBtnRow.appendChild(pickLibLink);
       }
+
+      const addToLibBtn = _stylesLinked ? document.createElement('button') : null;
+      if (addToLibBtn) {
+        addToLibBtn.className = 'preset-mode-switch';
+        addToLibBtn.style.marginLeft = 'auto';
+        addToLibBtn.textContent = 'Add to Library';
+        addToLibBtn.title = 'Save this expression as a new style in your Style Library';
+        addToLibBtn.addEventListener('click', e => {
+          e.stopPropagation();
+          const defaultName = _styleNameFromDisplay(preset.displayName || '');
+          _openAddStyleModalWithExpr(ta.value.trim(), defaultName, newStyleName => {
+            _commitSlotEdit(slot, `${originalWrapper}<${newStyleName}>()`);
+            _reopenAfterRebuild = { presetIdx: _selectedPresetIndex, slotIdx };
+            _closeSlotArgEdit();
+          });
+        });
+        customBtnRow.appendChild(addToLibBtn);
+      }
+
+      body.appendChild(customBtnRow);
 
       // ── LIBRARY MODE elements ──────────────────────────────────────────────
       const libLabel = hasModes ? document.createElement('span') : null;
@@ -8897,7 +9059,7 @@ require(['vs/editor/editor.main'], function () {
       function showLibraryMode() {
         if (customLabel) customLabel.style.display = 'none';
                          ta.style.display          = 'none';
-        if (pickLibLink) pickLibLink.style.display  = 'none';
+        customBtnRow.style.display = 'none';
 
         if (libLabel)    libLabel.style.display     = 'block';
         if (comboWrap)   comboWrap.style.display    = '';       // CSS rule provides display:flex
@@ -8914,7 +9076,7 @@ require(['vs/editor/editor.main'], function () {
 
         if (customLabel) customLabel.style.display  = 'block';
                          ta.style.display           = '';
-        if (pickLibLink) pickLibLink.style.display  = 'block';
+        customBtnRow.style.display = 'flex';
 
         if (libLabel)    libLabel.style.display     = 'none';
         if (comboWrap)   comboWrap.style.display    = 'none';
@@ -8930,7 +9092,7 @@ require(['vs/editor/editor.main'], function () {
       // ── _restoreSlotBody ───────────────────────────────────────────────────
       _restoreSlotBody = () => {
         if (numBadge) numBadge.style.display = '';
-        [labelRow, labelErrorEl, customLabel, ta, pickLibLink, libLabel, comboWrap, tpSection, customLink, primaryRow, advBtn]
+        [labelRow, labelErrorEl, customLabel, ta, customBtnRow, libLabel, comboWrap, tpSection, customLink, primaryRow, advBtn]
           .forEach(el => { if (el && el.parentNode) el.parentNode.removeChild(el); });
         if (exprSpan) exprSpan.style.display = '';
 
