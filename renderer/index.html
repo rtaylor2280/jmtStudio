@@ -1724,11 +1724,11 @@
   .preset-insert-zone:hover::before { height: 2px; opacity: 1; }
   .preset-insert-zone:hover::after  { opacity: 1; }
 
-  .preset-row { position: relative; display: flex; align-items: center; gap: 6px; padding: 5px 48px 5px 6px; cursor: pointer; font-size: 0.78rem; color: var(--c-text-sub); transition: background 0.1s; user-select: none; }
+  .preset-row { position: relative; display: flex; align-items: center; gap: 6px; padding: 5px 42px 5px 6px; cursor: pointer; font-size: 0.78rem; color: var(--c-text-sub); transition: background 0.1s; user-select: none; }
   .preset-row:hover { background: var(--c-bg-hover); }
-  .preset-row.selected { background: var(--jmt-blue); color: #fff; }
-  .preset-row.selected .preset-row-font { color: rgba(255,255,255,0.7); }
-  .preset-row.selected .preset-row-num  { color: rgba(255,255,255,0.6); }
+  .preset-row.selected { background: var(--sel-bg, var(--jmt-blue)); color: var(--sel-color, #fff); }
+  .preset-row.selected .preset-row-font { color: var(--sel-sub, rgba(255,255,255,0.7)); }
+  .preset-row.selected .preset-row-num  { color: var(--sel-sub, rgba(255,255,255,0.6)); }
   .preset-row.dragging { opacity: 0.35; }
   .preset-row.drag-over-top    { border-top: 2px solid var(--jmt-blue); }
   .preset-row.drag-over-bottom { border-bottom: 2px solid var(--jmt-blue); }
@@ -1745,9 +1745,17 @@
   .preset-row-toggle:hover { opacity: 1 !important; color: var(--jmt-blue); background: rgba(10,30,60,0.7); }
   .preset-row.preset-disabled .preset-row-toggle:hover { color: #4c4; background: rgba(10,40,10,0.7); }
   .preset-row.preset-disabled { color: var(--c-text-hint); font-style: italic; }
-  .preset-row.preset-disabled.selected { background: rgba(100,100,120,0.4); color: var(--c-text-muted); }
+  .preset-row.preset-disabled.selected { background: rgba(40,70,100,0.65); color: #c0d4e8; }
+  /* When a disabled preset is the active item, suppress live-row selection highlight */
+  #preset-list-top[data-disabled-active] .preset-row[data-live-idx].selected { background: transparent !important; color: var(--c-text-sub) !important; }
   .preset-disabled-banner { font-size: 0.65rem; color: var(--c-text-hint); font-style: italic; padding: 4px 10px 2px; letter-spacing: 0.03em; }
   .preset-detail-disabled-slots { opacity: 0.4; pointer-events: none; filter: grayscale(0.5); }
+  .preset-ctx-menu { position: fixed; background: var(--c-bg-card); border: 1px solid var(--c-border); border-radius: 6px; padding: 4px 0; min-width: 150px; z-index: 9999; box-shadow: 0 4px 20px rgba(0,0,0,0.7); display: none; }
+  .preset-ctx-label { padding: 4px 12px 2px; font-size: 0.68rem; color: var(--c-text-hint); letter-spacing: 0.04em; }
+  .preset-ctx-separator { height: 1px; background: var(--c-border); margin: 3px 0; }
+  .preset-ctx-item { padding: 6px 14px; cursor: pointer; font-size: 0.78rem; color: var(--c-text-sub); transition: background 0.1s, color 0.1s; white-space: nowrap; }
+  .preset-ctx-item:hover { background: var(--c-bg-hover); color: var(--c-text); }
+  .preset-ctx-item.danger:hover { background: rgba(40,10,10,0.7); color: #e44; }
 
   @keyframes preset-new-glow {
     0%   { background: rgba(58,143,255,0.22); box-shadow: inset 0 0 0 1px var(--jmt-blue); }
@@ -6981,6 +6989,9 @@ require(['vs/editor/editor.main'], function () {
     let _reopenAfterRebuild     = null; // { presetIdx, slotIdx }
     let _disabledPresets        = [];   // scanned /* @jmt-disabled */ blocks
     let _selectedDisabledPreset = null; // currently selected disabled preset object
+    let _selectedLive           = new Set(); // live preset indices in multi-selection
+    let _selectedDisabled       = new Set(); // disabled preset startLines in multi-selection
+    let _lastClickedRow         = null;      // for shift-range selection
 
     function _navigateToLine(startLine, endLine) {
       if (!editor) return;
@@ -7149,7 +7160,7 @@ require(['vs/editor/editor.main'], function () {
       });
       listEl.appendChild(_buildInsertZone(_activeArrayIndex, liveCount));
 
-      if (arr && livePresets.length) {
+      if (arr && livePresets.length && !_selectedDisabledPreset) {
         const toSelect = Math.max(0, Math.min(_selectedPresetIndex, livePresets.length - 1));
         _selectPreset(arr, toSelect);
       }
@@ -7158,7 +7169,8 @@ require(['vs/editor/editor.main'], function () {
     function _buildDisabledPresetRow(dp) {
       const row = document.createElement('div');
       row.className = 'preset-row preset-disabled';
-      if (_selectedDisabledPreset?.startLine === dp.startLine) row.classList.add('selected');
+      row.dataset.disabledLine = dp.startLine;
+      if (_selectedDisabled.has(dp.startLine)) row.classList.add('selected');
 
       const num = document.createElement('span');
       num.className = 'preset-row-num';
@@ -7189,12 +7201,53 @@ require(['vs/editor/editor.main'], function () {
       del.addEventListener('click', e => { e.stopPropagation(); _deleteDisabledPreset(dp); });
       row.appendChild(del);
 
-      row.addEventListener('click', () => {
-        _selectedDisabledPreset = dp;
-        document.querySelectorAll('#preset-list-top .preset-row').forEach(r => r.classList.remove('selected'));
-        row.classList.add('selected');
-        _navigateToLine(dp.startLine, dp.endLine);
-        _renderDetail();
+      row.addEventListener('click', e => {
+        if (e.target === toggleBtn || e.target === del) return;
+        if (e.shiftKey && _lastClickedRow) {
+          _selectedDisabled.add(dp.startLine);
+          _shiftSelectTo(row);
+          _lastClickedRow = row;
+        } else if (e.ctrlKey || e.metaKey) {
+          if (_selectedDisabled.has(dp.startLine)) {
+            _selectedDisabled.delete(dp.startLine);
+            if (_selectedDisabledPreset?.startLine === dp.startLine) {
+              const nextLine = [..._selectedDisabled][0];
+              _selectedDisabledPreset = nextLine !== undefined
+                ? (_disabledPresets.find(d => d.startLine === nextLine) || null) : null;
+            }
+          } else {
+            _selectedDisabled.add(dp.startLine);
+            _selectedDisabledPreset = dp;
+          }
+          _lastClickedRow = row;
+          _applySelectionClasses();
+          _renderDetail();
+        } else {
+          e.stopPropagation();
+          _selectedLive.clear();
+          _selectedDisabled.clear();
+          _selectedDisabled.add(dp.startLine);
+          _selectedDisabledPreset = dp;
+          _clearPresetHighlight();
+          // Rebuild list: guarantees fresh DOM with no stale .selected on live rows
+          const arr = _parseResult?.arrays[_activeArrayIndex];
+          _renderPresetList(arr);
+          _lastClickedRow = document.querySelector(`#preset-list-top .preset-row[data-disabled-line="${dp.startLine}"]`);
+          _navigateToLine(dp.startLine, dp.endLine);
+          _renderDetail();
+        }
+      });
+      row.addEventListener('contextmenu', e => {
+        if (!_selectedDisabled.has(dp.startLine)) {
+          _selectedLive.clear();
+          _selectedDisabled.clear();
+          _selectedDisabled.add(dp.startLine);
+          _selectedDisabledPreset = dp;
+          _lastClickedRow = row;
+          _applySelectionClasses();
+          _renderDetail();
+        }
+        _showPresetContextMenu(e);
       });
       return row;
     }
@@ -7248,10 +7301,56 @@ require(['vs/editor/editor.main'], function () {
       del.addEventListener('click', e => { e.stopPropagation(); _deletePreset(_activeArrayIndex, idx); });
       row.appendChild(del);
 
-      row.addEventListener('click', () => {
+      row.addEventListener('click', e => {
+        if (e.target === toggleBtn || e.target === del) return;
         const arr = _parseResult?.arrays[_activeArrayIndex];
-        if (arr) _selectPreset(arr, idx);
-        _navigateToLine(preset.startLine, preset.endLine);
+        if (e.shiftKey && _lastClickedRow) {
+          _selectedLive.add(idx);
+          _shiftSelectTo(row);
+          _lastClickedRow = row;
+        } else if (e.ctrlKey || e.metaKey) {
+          if (_selectedLive.has(idx)) {
+            _selectedLive.delete(idx);
+            if (_selectedPresetIndex === idx) {
+              const next = [..._selectedLive][0];
+              if (next !== undefined) _selectedPresetIndex = next;
+            }
+          } else {
+            _selectedLive.add(idx);
+            _selectedPresetIndex = idx;
+            _selectedDisabledPreset = null;
+          }
+          _lastClickedRow = row;
+          _applySelectionClasses();
+          _renderDetail();
+        } else {
+          _selectedLive.clear();
+          _selectedDisabled.clear();
+          _selectedLive.add(idx);
+          _selectedPresetIndex = idx;
+          _selectedDisabledPreset = null;
+          _lastClickedRow = row;
+          document.getElementById('preset-list-top').removeAttribute('data-disabled-active');
+          _restoreLiveSelection();
+          document.querySelectorAll('#preset-list-top .preset-row').forEach(r => r.style.background = '');
+          _applySelectionClasses();
+          if (arr) _highlightPreset(arr.presets[idx]);
+          _navigateToLine(preset.startLine, preset.endLine);
+          _renderDetail();
+        }
+      });
+      row.addEventListener('contextmenu', e => {
+        if (!_selectedLive.has(idx)) {
+          _selectedLive.clear();
+          _selectedDisabled.clear();
+          _selectedLive.add(idx);
+          _selectedPresetIndex = idx;
+          _selectedDisabledPreset = null;
+          _lastClickedRow = row;
+          _applySelectionClasses();
+          _renderDetail();
+        }
+        _showPresetContextMenu(e);
       });
 
       row.addEventListener('dragstart', e => {
@@ -7294,11 +7393,119 @@ require(['vs/editor/editor.main'], function () {
     function _selectPreset(arr, idx) {
       _selectedPresetIndex = idx;
       _selectedDisabledPreset = null;
-      document.querySelectorAll('#preset-list-top .preset-row').forEach(r =>
-        r.classList.toggle('selected', r.dataset.liveIdx === String(idx)));
+      _selectedLive.clear();
+      _selectedDisabled.clear();
+      _selectedLive.add(idx);
+      document.getElementById('preset-list-top').removeAttribute('data-disabled-active');
+      _restoreLiveSelection();
+      _applySelectionClasses();
       _highlightPreset(arr?.presets[idx]);
       _renderDetail();
     }
+
+    function _suppressLiveSelection() {
+      const el = document.getElementById('preset-list-top');
+      el.style.setProperty('--sel-bg',    'transparent');
+      el.style.setProperty('--sel-color', 'var(--c-text-sub)');
+      el.style.setProperty('--sel-sub',   'var(--c-text-muted)');
+    }
+    function _restoreLiveSelection() {
+      const el = document.getElementById('preset-list-top');
+      el.style.removeProperty('--sel-bg');
+      el.style.removeProperty('--sel-color');
+      el.style.removeProperty('--sel-sub');
+    }
+
+    function _applySelectionClasses() {
+      document.querySelectorAll('#preset-list-top .preset-row').forEach(r => {
+        if (r.hasAttribute('data-live-idx')) {
+          // Suppress live selection while a disabled preset is the active item
+          const isSelected = !_selectedDisabledPreset && _selectedLive.has(parseInt(r.dataset.liveIdx, 10));
+          r.classList.toggle('selected', isSelected);
+        } else if (r.hasAttribute('data-disabled-line')) {
+          r.classList.toggle('selected', _selectedDisabled.has(parseInt(r.dataset.disabledLine, 10)));
+        } else {
+          r.classList.remove('selected');
+        }
+      });
+    }
+
+    function _shiftSelectTo(targetRow) {
+      const allRows = [...document.querySelectorAll('#preset-list-top .preset-row')];
+      const fromIdx = _lastClickedRow ? allRows.indexOf(_lastClickedRow) : 0;
+      const toIdx   = allRows.indexOf(targetRow);
+      if (toIdx < 0) return;
+      const [lo, hi] = fromIdx <= toIdx ? [fromIdx, toIdx] : [toIdx, fromIdx];
+      for (let i = lo; i <= hi; i++) {
+        const r = allRows[i];
+        if (r.dataset.liveIdx !== undefined) _selectedLive.add(parseInt(r.dataset.liveIdx, 10));
+        else if (r.dataset.disabledLine !== undefined) _selectedDisabled.add(parseInt(r.dataset.disabledLine, 10));
+      }
+      _applySelectionClasses();
+      _renderDetail();
+    }
+
+    function _showPresetContextMenu(e) {
+      e.preventDefault();
+      const menu         = document.getElementById('preset-ctx-menu');
+      const liveCount    = _selectedLive.size;
+      const disabledCount = _selectedDisabled.size;
+      const total        = liveCount + disabledCount;
+      menu.innerHTML = '';
+
+      const lbl = document.createElement('div');
+      lbl.className = 'preset-ctx-label';
+      lbl.textContent = `${total} preset${total !== 1 ? 's' : ''} selected`;
+      menu.appendChild(lbl);
+
+      const sep1 = document.createElement('div');
+      sep1.className = 'preset-ctx-separator';
+      menu.appendChild(sep1);
+
+      if (liveCount > 0) {
+        const item = document.createElement('div');
+        item.className = 'preset-ctx-item';
+        item.textContent = `▼ Disable${liveCount > 1 ? ` (${liveCount})` : ''}`;
+        item.addEventListener('mousedown', e2 => { e2.stopPropagation(); _hidePresetContextMenu(); _batchDisable(); });
+        menu.appendChild(item);
+      }
+      if (disabledCount > 0) {
+        const item = document.createElement('div');
+        item.className = 'preset-ctx-item';
+        item.textContent = `▲ Enable${disabledCount > 1 ? ` (${disabledCount})` : ''}`;
+        item.addEventListener('mousedown', e2 => { e2.stopPropagation(); _hidePresetContextMenu(); _batchEnable(); });
+        menu.appendChild(item);
+      }
+
+      const sep2 = document.createElement('div');
+      sep2.className = 'preset-ctx-separator';
+      menu.appendChild(sep2);
+
+      const delItem = document.createElement('div');
+      delItem.className = 'preset-ctx-item danger';
+      delItem.textContent = `× Delete${total > 1 ? ` (${total})` : ''}`;
+      delItem.addEventListener('mousedown', e2 => { e2.stopPropagation(); _hidePresetContextMenu(); _batchDelete(); });
+      menu.appendChild(delItem);
+
+      const x = Math.min(e.clientX, window.innerWidth - 170);
+      const y = Math.min(e.clientY, window.innerHeight - 140);
+      menu.style.left = x + 'px';
+      menu.style.top  = y + 'px';
+      menu.style.display = 'block';
+    }
+
+    function _hidePresetContextMenu() {
+      const menu = document.getElementById('preset-ctx-menu');
+      if (menu) menu.style.display = 'none';
+    }
+
+    document.addEventListener('mousedown', e => {
+      const menu = document.getElementById('preset-ctx-menu');
+      if (menu && menu.style.display !== 'none' && !menu.contains(e.target)) _hidePresetContextMenu();
+    });
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape') _hidePresetContextMenu();
+    });
 
     // ── Detail ────────────────────────────────────────────────────────────────
     document.getElementById('preset-detail').addEventListener('click', e => {
@@ -9512,6 +9719,98 @@ require(['vs/editor/editor.main'], function () {
       _scheduleRebuild();
     }
 
+    // ── Batch disable / enable / delete ──────────────────────────────────────
+    function _batchDisable() {
+      if (!editor || !_selectedLive.size) return;
+      const result = presetParser.parsePresets(editor.getValue());
+      const arr    = result.arrays[_activeArrayIndex];
+      if (!arr) return;
+      const model = editor.getModel();
+      const edits = [];
+      for (const idx of _selectedLive) {
+        const preset = arr.presets[idx];
+        if (!preset) continue;
+        const inner = model.getValueInRange({
+          startLineNumber: preset.startLine, startColumn: 1,
+          endLineNumber:   preset.endLine,   endColumn: model.getLineMaxColumn(preset.endLine),
+        });
+        edits.push({
+          range: { startLineNumber: preset.startLine, startColumn: 1, endLineNumber: preset.endLine, endColumn: model.getLineMaxColumn(preset.endLine) },
+          text:  `/* @jmt-disabled\n${inner}\n*/`,
+        });
+      }
+      if (!edits.length) return;
+      edits.sort((a, b) => a.range.startLineNumber - b.range.startLineNumber);
+      editor.executeEdits('batch-disable', edits);
+      _selectedLive.clear();
+      _selectedPresetIndex = 0;
+      editor.focus();
+      _scheduleRebuild();
+    }
+
+    function _batchEnable() {
+      if (!editor || !_selectedDisabled.size) return;
+      const model = editor.getModel();
+      const edits = [];
+      for (const startLine of _selectedDisabled) {
+        const dp = _disabledPresets.find(d => d.startLine === startLine);
+        if (!dp) continue;
+        const inner = model.getValueInRange({
+          startLineNumber: dp.startLine + 1, startColumn: 1,
+          endLineNumber:   dp.endLine - 1,   endColumn: model.getLineMaxColumn(dp.endLine - 1),
+        });
+        edits.push({
+          range: { startLineNumber: dp.startLine, startColumn: 1, endLineNumber: dp.endLine, endColumn: model.getLineMaxColumn(dp.endLine) },
+          text:  inner,
+        });
+      }
+      if (!edits.length) return;
+      edits.sort((a, b) => a.range.startLineNumber - b.range.startLineNumber);
+      editor.executeEdits('batch-enable', edits);
+      _selectedDisabled.clear();
+      _selectedDisabledPreset = null;
+      editor.focus();
+      _scheduleRebuild();
+    }
+
+    function _batchDelete() {
+      if (!editor) return;
+      const result   = presetParser.parsePresets(editor.getValue());
+      const arr      = result.arrays[_activeArrayIndex];
+      const model    = editor.getModel();
+      const lastLine = model.getLineCount();
+      const edits    = [];
+      for (const idx of _selectedLive) {
+        const preset = arr?.presets[idx];
+        if (!preset) continue;
+        const afterLine = preset.endLine + 1;
+        const eatExtra  = afterLine <= lastLine && model.getLineContent(afterLine).trim() === '';
+        edits.push({
+          range: { startLineNumber: preset.startLine, startColumn: 1, endLineNumber: Math.min(eatExtra ? afterLine + 1 : afterLine, lastLine + 1), endColumn: 1 },
+          text:  '',
+        });
+      }
+      for (const startLine of _selectedDisabled) {
+        const dp = _disabledPresets.find(d => d.startLine === startLine);
+        if (!dp) continue;
+        const afterLine = dp.endLine + 1;
+        const eatExtra  = afterLine <= lastLine && model.getLineContent(afterLine).trim() === '';
+        edits.push({
+          range: { startLineNumber: dp.startLine, startColumn: 1, endLineNumber: Math.min(eatExtra ? afterLine + 1 : afterLine, lastLine + 1), endColumn: 1 },
+          text:  '',
+        });
+      }
+      if (!edits.length) return;
+      edits.sort((a, b) => a.range.startLineNumber - b.range.startLineNumber);
+      editor.executeEdits('batch-delete', edits);
+      _selectedLive.clear();
+      _selectedDisabled.clear();
+      _selectedPresetIndex = 0;
+      _selectedDisabledPreset = null;
+      editor.focus();
+      _scheduleRebuild();
+    }
+
     // ── Reorder presets ────────────────────────────────────────────────────────
     function _reorderPresets(arrayIndex, fromIdx, toIdx) {
       if (!editor) return;
@@ -9726,5 +10025,6 @@ require(['vs/editor/editor.main'], function () {
   </div>
 </div>
 
+<div id="preset-ctx-menu" class="preset-ctx-menu"></div>
 </body>
 </html>
