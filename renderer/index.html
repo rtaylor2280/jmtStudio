@@ -7854,31 +7854,50 @@ require(['vs/editor/editor.main'], function () {
       expr.textContent = slot.type === 'ref' ? `&${slot.expr}` : slot.expr;
       body.appendChild(expr);
 
-      if (slot.colorArg) {
-        const colorRow = document.createElement('span');
-        colorRow.className = 'preset-slot-color';
-        const swatch = document.createElement('span');
-        swatch.className = 'preset-slot-color-swatch';
-        swatch.style.cssText = 'width:14px;height:14px;border-radius:50%;display:inline-block;overflow:hidden;flex-shrink:0;';
-        const _parts = slot.colorArg.split(',').map(s => parseInt(s.trim(), 10));
-        const _rgb14 = _parts.length === 3 && _parts.every(n => Number.isFinite(n))
-          ? [Math.round(_parts[0]/257), Math.round(_parts[1]/257), Math.round(_parts[2]/257)]
-          : null;
-        if (_rgb14) {
+      {
+        // Resolve color to display: explicit arg or registry default
+        let _rgb16 = null; // [r16, g16, b16] ProffieOS values
+        let _colorText = '';
+        let _colorIsDefault = false;
+
+        if (slot.colorArg) {
+          const _p = slot.colorArg.split(',').map(s => parseInt(s.trim(), 10));
+          if (_p.length === 3 && _p.every(n => Number.isFinite(n))) {
+            _rgb16 = _p;
+            _colorText = slot.colorArg;
+          }
+        } else if (window.proffieArgs && window.styleArgResolver) {
+          const _fa = styleArgResolver.findArgs(slot.expr || '');
+          const _cr = _fa.map(a => {
+            const r = window.proffieArgs.registry.find(x => x.name === a.name);
+            return r ? Object.assign({}, r, { defaultExpr: a.defaultExpr }) : null;
+          }).filter(Boolean).find(a => a.kind === 'RgbArg');
+          if (_cr) {
+            _rgb16 = window.proffieArgs.resolveColorDefault(_cr.defaultExpr || '');
+            _colorText = `${_rgb16[0]},${_rgb16[1]},${_rgb16[2]}`;
+            _colorIsDefault = true;
+          }
+        }
+
+        if (_rgb16) {
+          const colorRow = document.createElement('span');
+          colorRow.className = 'preset-slot-color';
+          const swatch = document.createElement('span');
+          swatch.className = 'preset-slot-color-swatch';
+          swatch.style.cssText = 'width:14px;height:14px;border-radius:50%;display:inline-block;overflow:hidden;flex-shrink:0;';
+          const _rgb8 = [Math.round(_rgb16[0]/257), Math.round(_rgb16[1]/257), Math.round(_rgb16[2]/257)];
           try {
-            const _tc = GlowSwatch.create({ animated: false, width: 14, height: 14, color: _rgb14 });
+            const _tc = GlowSwatch.create({ animated: false, width: 14, height: 14, color: _rgb8 });
             _tc.element.style.clipPath = 'circle(50% at 50% 50%)';
             swatch.appendChild(_tc.element);
             swatch._gsCtrl = _tc;
           } catch(e) {
-            swatch.style.background = _colorArgToCSS(slot.colorArg);
+            swatch.style.background = `rgb(${_rgb8.join(',')})`;
           }
-        } else {
-          swatch.style.background = _colorArgToCSS(slot.colorArg);
+          colorRow.appendChild(swatch);
+          colorRow.appendChild(document.createTextNode(_colorText + (_colorIsDefault ? ' (default)' : '')));
+          body.appendChild(colorRow);
         }
-        colorRow.appendChild(swatch);
-        colorRow.appendChild(document.createTextNode(slot.colorArg));
-        body.appendChild(colorRow);
       }
       tile.appendChild(body);
 
