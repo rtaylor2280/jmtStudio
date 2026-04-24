@@ -5728,8 +5728,9 @@ function _helperAddHasContent() {
   return !!(code || name);
 }
 
-// Returns true if the Add Style modal has any content
+// Returns true if the Add Style modal is open and has any content
 function _addStyleModalHasContent() {
+  if (!document.getElementById('modal-add-style').classList.contains('active')) return false;
   const code = _addStyleEditor ? _addStyleEditor.getValue().trim() : '';
   const name = (document.getElementById('add-style-name')?.value || '').trim();
   return !!(code || name);
