@@ -149,6 +149,13 @@
     return parts.join(',');
   }
 
-  root.proffieArgs = { registry, resolveColorDefault, readRegistryArg, writeRegistryArg };
+  function colorLabel(r16, g16, b16) {
+    for (const [name, vals] of Object.entries(NAMED_COLORS)) {
+      if (vals[0] === r16 && vals[1] === g16 && vals[2] === b16) return name;
+    }
+    return `Rgb<${Math.round(r16/257)},${Math.round(g16/257)},${Math.round(b16/257)}>`;
+  }
+
+  root.proffieArgs = { registry, resolveColorDefault, readRegistryArg, writeRegistryArg, colorLabel };
 
 })(window);
