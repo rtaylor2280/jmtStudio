@@ -852,6 +852,7 @@
     z-index: 100;
   }
   .modal-overlay.active { display: flex; }
+  #modal-unsaved { z-index: 110; }
   .modal {
     background: var(--c-bg-card);
     border: 1px solid var(--c-border-heavy);
@@ -3835,13 +3836,12 @@ let _detailTagFilter       = null;
 function _extractStylePtrInner(text) {
   const m = text.match(/\b\w*StylePtr\s*</);
   if (!m) return null;
-  const idx = m.index + m[0].length - 1; // position of '<'
-  let depth = 0, i = idx;
-  for (; i < text.length; i++) {
+  const start = m.index + m[0].length; // first char after '<'
+  let depth = 1;
+  for (let i = start; i < text.length; i++) {
     if      (text[i] === '<') depth++;
     else if (text[i] === '>') {
-      if (depth === 0) return text.slice(idx + 'StylePtr<'.length, i).trim();
-      depth--;
+      if (--depth === 0) return text.slice(start, i).trim();
     }
   }
   return null;
@@ -5953,8 +5953,7 @@ document.getElementById('btn-helper-pencil-confirm').addEventListener('click', (
 // Add Style modal
 document.getElementById('btn-add-style').addEventListener('click', _openAddStyleModal);
 ['btn-add-style-close','btn-add-style-cancel'].forEach(id => {
-  document.getElementById(id).addEventListener('click', async () => {
-    if (!await _guardAddStyleModal('Discard this new style?')) return;
+  document.getElementById(id).addEventListener('click', () => {
     document.getElementById('modal-add-style').classList.remove('active');
   });
 });
@@ -5970,7 +5969,7 @@ function _parseClipboardStyle(text) {
   const result = { name: '', expr: '', source: '', url: '', osVersion: '', notes: '' };
 
   // Full fett263 format: /*--- NAME ---\n body \n*/ ... using NAME = EXPR; ...
-  const blockMatch = raw.match(/\/\*[-\s]*([A-Za-z0-9_]+)[^\n]*\n([\s\S]*?)\*\//);
+  const blockMatch = raw.match(/\/\*-+\s*([A-Za-z0-9_]+)[^\n]*\n([\s\S]*?)\*\//);
   if (blockMatch) {
     result.name = blockMatch[1].trim();
     const bodyLines = blockMatch[2].split('\n').map(l => l.trim()).filter(Boolean);
@@ -6049,7 +6048,7 @@ document.getElementById('add-style-name').addEventListener('input', () => {
 });
 
 // Paste & Parse
-document.getElementById('btn-add-style-paste').addEventListener('click', async () => {
+async function _runPasteAndParse() {
   let text = '';
   try { text = await navigator.clipboard.readText(); } catch { return; }
   if (!text.trim()) return;
@@ -6057,15 +6056,8 @@ document.getElementById('btn-add-style-paste').addEventListener('click', async (
   const parsed = _parseClipboardStyle(text);
   if (!parsed.expr) return;
 
-  // Determine what to show in editor:
-  // - Has name (from using or comment block): show full `using NAME = expr;`
-  // - No name: show just the raw expression so we don't imply a fake name
-  let editorContent;
-  if (parsed.name) {
-    editorContent = `using ${parsed.name} = ${parsed.expr};`;
-  } else {
-    editorContent = parsed.expr;
-  }
+  // Has name: show full `using NAME = expr;`; no name: show raw expr
+  const editorContent = parsed.name ? `using ${parsed.name} = ${parsed.expr};` : parsed.expr;
 
   if (_addStyleEditor) {
     _addStyleEditor.setValue(editorContent);
@@ -6073,13 +6065,11 @@ document.getElementById('btn-add-style-paste').addEventListener('click', async (
     setTimeout(() => _addStyleEditor.layout(), 20);
   }
 
-  // Reveal the code section
   const codeSection = document.getElementById('add-style-code-section');
   codeSection.style.display = 'flex';
   const hint = document.getElementById('add-style-code-hint');
   hint.textContent = parsed.name ? 'editable — name field syncs live' : 'enter a name above to complete';
 
-  // Fill meta fields
   _addStyleCurrentName = parsed.name || '';
   document.getElementById('add-style-name').value   = parsed.name || '';
   if (parsed.source) document.getElementById('add-style-source').value = parsed.source;
@@ -6094,6 +6084,18 @@ document.getElementById('btn-add-style-paste').addEventListener('click', async (
 
   _updateAddStyleConfirmBtn();
   if (!parsed.name) document.getElementById('add-style-name').focus();
+}
+
+document.getElementById('btn-add-style-paste').addEventListener('click', _runPasteAndParse);
+
+document.addEventListener('keydown', e => {
+  if (e.key !== 'v' || !e.ctrlKey) return;
+  if (!document.getElementById('modal-add-style').classList.contains('active')) return;
+  const tag = document.activeElement?.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+  if (document.activeElement?.closest('.monaco-editor')) return;
+  e.preventDefault();
+  _runPasteAndParse();
 });
 
 document.getElementById('btn-add-style-confirm').addEventListener('click', () => {
