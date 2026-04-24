@@ -9119,8 +9119,10 @@ require(['vs/editor/editor.main'], function () {
       previewHost.title = 'Full color wheel';
       if (_activePreviewSwatchCtrl) { _activePreviewSwatchCtrl.destroy(); _activePreviewSwatchCtrl = null; }
       try {
-        _activePreviewSwatchCtrl = GlowSwatch.create({ animated: true, width: 24, height: 24, color: [cr, cg, cb] });
+        _activePreviewSwatchCtrl = GlowSwatch.create({ animated: false, width: 24, height: 24, color: [cr, cg, cb] });
         previewHost.appendChild(_activePreviewSwatchCtrl.element);
+        previewHost.addEventListener('mouseenter', () => _activePreviewSwatchCtrl?.setAnimated(true));
+        previewHost.addEventListener('mouseleave', () => _activePreviewSwatchCtrl?.setAnimated(false));
       } catch(e) {
         previewHost.style.background = `rgb(${cr},${cg},${cb})`;
       }
@@ -9157,6 +9159,7 @@ require(['vs/editor/editor.main'], function () {
           emit();
         });
         nameSel.addEventListener('click', e => e.stopPropagation());
+        nameSel.addEventListener('wheel', e => e.stopPropagation());
         popup.appendChild(nameSel);
       }
 
@@ -9195,7 +9198,13 @@ require(['vs/editor/editor.main'], function () {
         dots.forEach((d, i) => d.classList.toggle('active', i === p));
         try {
           _activeSwatchControllers = GlowSwatch.mountAll('.preset-color-popup-cell',
-            { width: 48, height: 48, root: popup });
+            { width: 48, height: 48, animated: false, root: popup });
+          cells.forEach((cell, i) => {
+            const ctrl = _activeSwatchControllers[i];
+            if (!ctrl) return;
+            cell.addEventListener('mouseenter', () => ctrl.setAnimated(true));
+            cell.addEventListener('mouseleave', () => ctrl.setAnimated(false));
+          });
         } catch(e) {
           // GlowSwatch unavailable — cells remain as flat CSS color blocks
         }
