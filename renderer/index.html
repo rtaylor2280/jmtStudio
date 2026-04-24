@@ -8046,7 +8046,7 @@ require(['vs/editor/editor.main'], function () {
     function _isColorExpr(expr) {
       if (!expr) return false;
       const s = expr.trim();
-      if (/^(Red|Green|Blue|White|Black|Yellow|Cyan|Magenta|Orange|Purple|Pink)$/.test(s)) return true;
+      if (window.proffieArgs?.isNamedColor(s)) return true;
       if (/^Rgb\s*</.test(s)) return true;
       if (/^Rgb16\s*</.test(s)) return true;
       return false;
@@ -9023,6 +9023,7 @@ require(['vs/editor/editor.main'], function () {
       let cg = Math.round((initProffieVals[1]||0)/257);
       let cb = Math.round((initProffieVals[2]||0)/257);
       let currentPage = 0;
+      let nameSel = null;
 
       function toHex() { return '#'+[cr,cg,cb].map(v=>v.toString(16).padStart(2,'0')).join(''); }
 
@@ -9130,6 +9131,35 @@ require(['vs/editor/editor.main'], function () {
       rgbRow.appendChild(previewHost);
       popup.appendChild(rgbRow);
 
+      // ── Named-color dropdown ──────────────────────────────────────────
+      if (window.proffieArgs?.namedColors) {
+        nameSel = document.createElement('select');
+        nameSel.style.cssText = 'width:100%;font:inherit;font-size:0.68rem;background:var(--c-bg-card);color:var(--c-text);border:1px solid var(--c-border);border-radius:2px;padding:2px 4px;cursor:pointer;';
+        const placeholder = document.createElement('option');
+        placeholder.value = ''; placeholder.textContent = '— Named color —';
+        nameSel.appendChild(placeholder);
+        // Only include canonical names (skip aliases with duplicate RGB)
+        Object.entries(window.proffieArgs.namedColors).forEach(([name, vals]) => {
+          if (window.proffieArgs.colorLabel(vals[0], vals[1], vals[2]) !== name) return;
+          const opt = document.createElement('option');
+          opt.value = name; opt.textContent = name;
+          nameSel.appendChild(opt);
+        });
+        // Pre-select if current color matches
+        const initLbl = window.proffieArgs.colorLabel(cr*257, cg*257, cb*257);
+        nameSel.value = window.proffieArgs.isNamedColor(initLbl) ? initLbl : '';
+        nameSel.addEventListener('change', e => {
+          e.stopPropagation();
+          const vals = window.proffieArgs.namedColors[nameSel.value];
+          if (!vals) return;
+          cr = Math.round(vals[0]/257); cg = Math.round(vals[1]/257); cb = Math.round(vals[2]/257);
+          rIn.value = cr; gIn.value = cg; bIn.value = cb;
+          emit();
+        });
+        nameSel.addEventListener('click', e => e.stopPropagation());
+        popup.appendChild(nameSel);
+      }
+
       // ── Helpers ───────────────────────────────────────────────────────
       function updateSelected() {
         cells.forEach((cell, i) => {
@@ -9143,6 +9173,10 @@ require(['vs/editor/editor.main'], function () {
         wheelIn.value = toHex();
         if (_activePreviewSwatchCtrl) _activePreviewSwatchCtrl.setColor([cr, cg, cb]);
         else previewHost.style.background = `rgb(${cr},${cg},${cb})`;
+        if (nameSel && window.proffieArgs) {
+          const lbl = window.proffieArgs.colorLabel(cr*257, cg*257, cb*257);
+          nameSel.value = window.proffieArgs.isNamedColor(lbl) ? lbl : '';
+        }
         onChange(styleArgResolver.cssToProffie(cr, cg, cb));
       }
 

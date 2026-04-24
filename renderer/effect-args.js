@@ -57,18 +57,110 @@
 
   // ── Color default resolver ─────────────────────────────────────────────────
 
+  // Values stored as 16-bit ProffieOS (0–65535). Proper-case entries come first
+  // so reverse lookup (colorLabel) returns the canonical name, not an alias.
+  const C = (r, g, b) => [r * 257, g * 257, b * 257];
   const NAMED_COLORS = {
-    Red:     [65535,     0,     0],
-    Green:   [    0, 65535,     0],
-    Blue:    [    0,     0, 65535],
-    White:   [65535, 65535, 65535],
-    Black:   [    0,     0,     0],
-    Yellow:  [65535, 65535,     0],
-    Cyan:    [    0, 65535, 65535],
-    Magenta: [65535,     0, 65535],
-    Orange:  [65535, 16383,     0],
-    Purple:  [32767,     0, 65535],
-    Pink:    [65535,     0, 32767],
+    // ── Core ──────────────────────────────────────────────────────────────────
+    Red:               C(255,   0,   0),
+    Green:             C(  0, 255,   0),
+    Blue:              C(  0,   0, 255),
+    Yellow:            C(255, 255,   0),
+    Cyan:              C(  0, 255, 255),
+    Magenta:           C(255,   0, 255),
+    White:             C(255, 255, 255),
+    Black:             C(  0,   0,   0),
+    Orange:            C(255,  97,   0),
+    Pink:              C(255, 136, 154),
+    Purple:            C(127,   0, 255),  // legacy alias → same as ElectricPurple
+    // ── Extended ──────────────────────────────────────────────────────────────
+    AliceBlue:         C(223, 239, 255),
+    Aqua:              C(  0, 255, 255),  // alias for Cyan
+    Aquamarine:        C( 55, 255, 169),
+    Azure:             C(223, 255, 255),
+    Bisque:            C(255, 199, 142),
+    BlanchedAlmond:    C(255, 213, 157),
+    Chartreuse:        C( 55, 255,   0),
+    Coral:             C(255,  55,  19),
+    Cornsilk:          C(255, 239, 184),
+    DarkOrange:        C(255,  68,   0),
+    DeepPink:          C(255,   0,  75),
+    DeepSkyBlue:       C(  0, 135, 255),
+    DodgerBlue:        C(  2,  72, 255),
+    FloralWhite:       C(255, 244, 223),
+    Fuchsia:           C(255,   0, 255),  // alias for Magenta
+    GhostWhite:        C(239, 239, 255),
+    GreenYellow:       C(108, 255,   6),
+    HoneyDew:          C(223, 255, 223),
+    HotPink:           C(255,  36, 118),
+    Ivory:             C(255, 255, 223),
+    LavenderBlush:     C(255, 223, 233),
+    LemonChiffon:      C(255, 244, 157),
+    LightCyan:         C(191, 255, 255),
+    LightPink:         C(255, 121, 138),
+    LightSalmon:       C(255,  91,  50),
+    LightYellow:       C(255, 255, 191),
+    Lime:              C(  0, 255,   0),  // alias for Green
+    MintCream:         C(233, 255, 244),
+    MistyRose:         C(255, 199, 193),
+    Moccasin:          C(255, 199, 119),
+    NavajoWhite:       C(255, 187, 108),
+    OrangeRed:         C(255,  14,   0),
+    PapayaWhip:        C(255, 221, 171),
+    PeachPuff:         C(255, 180, 125),
+    SeaShell:          C(255, 233, 219),
+    Snow:              C(255, 244, 244),
+    SpringGreen:       C(  0, 255,  55),
+    SteelBlue:         C( 14,  57, 118),
+    Tomato:            C(255,  31,  15),
+    // ── ProffieOS 8.x ─────────────────────────────────────────────────────────
+    ElectricPurple:    C(127,   0, 255),
+    ElectricViolet:    C( 71,   0, 255),
+    ElectricLime:      C(156, 255,   0),
+    Amber:             C(255, 135,   0),
+    CyberYellow:       C(255, 168,   0),
+    CanaryYellow:      C(255, 221,   0),
+    PaleGreen:         C( 28, 255,  28),
+    Flamingo:          C(255,  80, 154),
+    VividViolet:       C( 90,   0, 255),
+    PsychedelicPurple: C(186,   0, 255),
+    HotMagenta:        C(255,   0, 156),
+    BrutalPink:        C(255,   0, 128),
+    NeonRose:          C(255,   0,  55),
+    VividRaspberry:    C(255,   0,  38),
+    HaltRed:           C(255,   0,  19),
+    MoltenCore:        C(255,  24,   0),
+    SafetyOrange:      C(255,  33,   0),
+    OrangeJuice:       C(255,  55,   0),
+    ImperialYellow:    C(255, 115,   0),
+    SchoolBus:         C(255, 176,   0),
+    SuperSaiyan:       C(255, 186,   0),
+    Star:              C(255, 201,   0),
+    Lemon:             C(255, 237,   0),
+    ElectricBanana:    C(246, 255,   0),
+    BusyBee:           C(231, 255,   0),
+    ZeusBolt:          C(219, 255,   0),
+    LimeZest:          C(186, 255,   0),
+    Limoncello:        C(135, 255,   0),
+    CathodeGreen:      C(  0, 255,  22),
+    MintyParadise:     C(  0, 255, 128),
+    PlungePool:        C(  0, 255, 156),
+    VibrantMint:       C(  0, 255, 201),
+    MasterSwordBlue:   C(  0, 255, 219),
+    BrainFreeze:       C(  0, 219, 255),
+    BlueRibbon:        C(  0,  33, 255),
+    RareBlue:          C(  0,  13, 255),
+    OverdueBlue:       C( 13,   0, 255),
+    ViolentViolet:     C( 55,   0, 255),
+    // ── ALL_CAPS aliases (end = lower reverse-lookup priority) ────────────────
+    RED:               C(255,   0,   0),
+    GREEN:             C(  0, 255,   0),
+    BLUE:              C(  0,   0, 255),
+    YELLOW:            C(255, 255,   0),
+    CYAN:              C(  0, 255, 255),
+    MAGENTA:           C(255,   0, 255),
+    WHITE:             C(255, 255, 255),
+    BLACK:             C(  0,   0,   0),
   };
 
   /**
@@ -149,6 +241,10 @@
     return parts.join(',');
   }
 
+  function isNamedColor(s) {
+    return Object.prototype.hasOwnProperty.call(NAMED_COLORS, s);
+  }
+
   function colorLabel(r16, g16, b16) {
     for (const [name, vals] of Object.entries(NAMED_COLORS)) {
       if (vals[0] === r16 && vals[1] === g16 && vals[2] === b16) return name;
@@ -156,6 +252,6 @@
     return `Rgb<${Math.round(r16/257)},${Math.round(g16/257)},${Math.round(b16/257)}>`;
   }
 
-  root.proffieArgs = { registry, resolveColorDefault, readRegistryArg, writeRegistryArg, colorLabel };
+  root.proffieArgs = { registry, resolveColorDefault, readRegistryArg, writeRegistryArg, colorLabel, isNamedColor, namedColors: NAMED_COLORS };
 
 })(window);
