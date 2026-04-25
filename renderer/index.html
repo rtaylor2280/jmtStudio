@@ -2879,19 +2879,6 @@ function clearMeta() {
   if (window.updateUsbChangedIndicator)  window.updateUsbChangedIndicator();
 }
 
-function validateFields() {
-  let valid = true;
-  const versionEl = document.getElementById('input-version');
-  const val = versionEl.value.trim();
-  if (false) { // select is always valid — kept for structure
-    versionEl.classList.add('field-error');
-    valid = false;
-  } else {
-    versionEl.classList.remove('field-error');
-  }
-  return valid;
-}
-window.validateFields = validateFields;
 
 // ── Snapshot ───────────────────────────────────────────
 function takeSnapshot(content) {
