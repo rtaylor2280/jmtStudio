@@ -95,6 +95,7 @@ function _vpRenderCards() {
         <span class="vp-card-size">${_vpFmtBytes(v.size)}</span>
         ${v.modified ? `<span class="vp-card-date">${_vpFmtDate(v.modified)}</span>` : ''}
       </div>
+      ${v.proffieVersion ? `<div class="vp-card-proffie-ver">ProffieOS ${_vpEsc(v.proffieVersion)}</div>` : ''}
       ${v.notesPreview ? `<div class="vp-card-notes-preview">${_vpEsc(v.notesPreview)}</div>` : ''}
     `;
     card.addEventListener('click', () => _vpSelectVersion(v));
@@ -132,6 +133,7 @@ function _vpRenderDetail(v) {
       <div class="vp-detail-stats">
         <span>${_vpFmtBytes(v.size)}</span>
         ${v.modified ? `<span>·</span><span>Modified ${_vpFmtDate(v.modified)}</span>` : ''}
+        <span>·</span><span style="color:${v.proffieVersion ? 'var(--c-text-sub)' : 'var(--c-text-dim)'}">ProffieOS ${v.proffieVersion || 'version unknown'}</span>
       </div>
     </div>
 

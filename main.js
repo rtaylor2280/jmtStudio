@@ -486,8 +486,8 @@ ipcMain.handle('proffieOS:validateSource', (_, sourcePath) => {
   return { ok: true };
 });
 
-ipcMain.handle('proffieOS:importVersion', (_, { sourcePath, versionName }) => {
-  return proffie.importVersion(sourcePath, versionName);
+ipcMain.handle('proffieOS:importVersion', (_, { sourcePath, versionName, proffieVersion }) => {
+  return proffie.importVersion(sourcePath, versionName, proffieVersion);
 });
 
 ipcMain.handle('versions:listDetails', () => proffie.listVersionsDetails());
@@ -524,6 +524,134 @@ ipcMain.handle('versions:export', async (_, name) => {
     shell.showItemInFolder(dest);
     return { ok: true, dest };
   } catch (e) { return { ok: false, error: e.message }; }
+});
+
+// ── IPC: GitHub releases ───────────────────────────────
+let _releasesCache    = null;
+let _releasesCachedAt = 0;
+const RELEASES_CACHE_TTL = 60 * 1000; // 1 minute
+
+function _httpsGet(url, headers, onData, redirectDepth = 0) {
+  return new Promise((resolve, reject) => {
+    if (redirectDepth > 5) return reject(new Error('Too many redirects'));
+    const https   = require('https');
+    const parsed  = new URL(url);
+    const opts    = { hostname: parsed.hostname, path: parsed.pathname + parsed.search, headers };
+    https.get(opts, res => {
+      if (res.statusCode === 301 || res.statusCode === 302) {
+        return _httpsGet(res.headers.location, headers, onData, redirectDepth + 1)
+          .then(resolve).catch(reject);
+      }
+      if (res.statusCode !== 200) return reject(new Error(`HTTP ${res.statusCode}`));
+      let buf = '';
+      res.on('data', chunk => { buf += chunk; if (onData) onData(chunk, res); });
+      res.on('end', () => resolve(buf));
+      res.on('error', reject);
+    }).on('error', reject);
+  });
+}
+
+ipcMain.handle('versions:fetchReleases', async () => {
+  const now = Date.now();
+  if (_releasesCache && (now - _releasesCachedAt < RELEASES_CACHE_TTL)) {
+    return { ok: true, releases: _releasesCache };
+  }
+  try {
+    const body = await _httpsGet(
+      'https://api.github.com/repos/profezzorn/ProffieOS/releases?per_page=100',
+      { 'User-Agent': 'JMT-Studio' }
+    );
+    const all = JSON.parse(body);
+    const releases = all
+      .filter(r => {
+        const major = parseFloat((r.tag_name || '').replace(/^v/, ''));
+        return major >= 6 && r.assets && r.assets.length > 0;
+      })
+      .map(r => ({
+        tag:         r.tag_name,
+        version:     r.tag_name.replace(/^v/, ''),
+        name:        r.name || r.tag_name,
+        published:   r.published_at,
+        prerelease:  r.prerelease,
+        downloadUrl: r.assets[0].browser_download_url,
+      }));
+    _releasesCache    = releases;
+    _releasesCachedAt = Date.now();
+    return { ok: true, releases };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+function _findProffieOSFolder(dir) {
+  const queue = [dir];
+  while (queue.length) {
+    const current = queue.shift();
+    try {
+      for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        const full = path.join(current, entry.name);
+        if (entry.name === 'ProffieOS' && fs.existsSync(path.join(full, 'ProffieOS.ino'))) return full;
+        queue.push(full);
+      }
+    } catch {}
+  }
+  return null;
+}
+
+ipcMain.handle('versions:downloadRelease', async (event, { downloadUrl, versionName, proffieVersion }) => {
+  const os   = require('os');
+  const { execFile } = require('child_process');
+  const tmpDir     = path.join(os.tmpdir(), `jmt-proffie-${Date.now()}`);
+  const zipPath    = path.join(tmpDir, 'release.zip');
+  const extractDir = path.join(tmpDir, 'extracted');
+  try {
+    fs.mkdirSync(extractDir, { recursive: true });
+
+    // Download with progress
+    const file = fs.createWriteStream(zipPath);
+    let downloaded = 0;
+    await new Promise((resolve, reject) => {
+      _httpsGet(
+        downloadUrl,
+        { 'User-Agent': 'JMT-Studio' },
+        (chunk, res) => {
+          const total = parseInt(res.headers['content-length'] || '0', 10);
+          downloaded += chunk.length;
+          const pct = total ? Math.round((downloaded / total) * 100) : 0;
+          win.webContents.send('versions:downloadProgress', { phase: 'downloading', percent: pct });
+          file.write(chunk);
+        }
+      ).then(() => file.end()).catch(reject);
+      file.on('finish', resolve);
+      file.on('error', reject);
+    });
+
+    // Extract
+    win.webContents.send('versions:downloadProgress', { phase: 'extracting' });
+    await new Promise((resolve, reject) => {
+      if (process.platform === 'win32') {
+        execFile('powershell.exe', [
+          '-NoProfile', '-NonInteractive', '-Command',
+          `Expand-Archive -LiteralPath '${zipPath}' -DestinationPath '${extractDir}' -Force`
+        ], { timeout: 120000 }, err => err ? reject(err) : resolve());
+      } else {
+        execFile('unzip', ['-q', zipPath, '-d', extractDir], { timeout: 120000 }, err => err ? reject(err) : resolve());
+      }
+    });
+
+    // Find ProffieOS folder inside the extracted tree
+    const proffieFolder = _findProffieOSFolder(extractDir);
+    if (!proffieFolder) throw new Error('Could not find ProffieOS folder in downloaded zip.');
+
+    // Import
+    win.webContents.send('versions:downloadProgress', { phase: 'importing' });
+    return proffie.importVersion(proffieFolder, versionName, proffieVersion);
+  } catch (e) {
+    return { ok: false, error: e.message };
+  } finally {
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+  }
 });
 
 // ── IPC: DFU ───────────────────────────────────────────

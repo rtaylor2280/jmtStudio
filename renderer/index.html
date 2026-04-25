@@ -879,6 +879,7 @@
   .import-folder-row input { flex: 1; background: var(--c-bg-raised); border: 1px solid var(--c-border-strong); border-radius: 3px; color: var(--c-text); font-size: 0.8rem; padding: 5px 8px; outline: none; }
   .import-folder-row button { flex-shrink: 0; background: var(--c-border); color: var(--c-text); border: 1px solid var(--c-border-heavy); border-radius: 3px; padding: 5px 10px; font-size: 0.78rem; cursor: pointer; white-space: nowrap; }
   .import-folder-row button:hover { background: var(--c-border-strong); }
+  .import-field-hint { font-size: 0.72rem; color: var(--c-text-dim); margin-top: 3px; }
   #import-version-name { width: 100%; box-sizing: border-box; background: var(--c-bg-raised); border: 1px solid var(--c-border-strong); border-radius: 3px; color: var(--c-text); font-size: 0.8rem; padding: 5px 8px; outline: none; }
   #import-version-name:focus { border-color: var(--jmt-blue); }
   #import-version-error { font-size: 0.78rem; color: #e55; min-height: 18px; margin-top: 2px; }
@@ -1229,6 +1230,11 @@
     align-items: center;
     font-size: 0.7rem;
     color: var(--c-text-muted);
+  }
+  .vp-card-proffie-ver {
+    font-size: 0.68rem;
+    color: var(--c-text-dim);
+    margin-top: 2px;
   }
   .vp-card-notes-preview {
     font-size: 0.7rem;
@@ -1947,7 +1953,8 @@
         <button id="btn-styles-link"   class="btn-blue"  style="display:none" title='Adds #include "my_styles.h" to your config so ProffieOS can use your saved styles'>&#128279; Link Style Library</button>
       </div>
       <div class="tab-btns" id="tab-btns-versions">
-        <button id="btn-vp-import" class="btn-blue" title="Import a ProffieOS version folder">&#8593; Import Version</button>
+        <button id="btn-vp-download" class="btn-neutral" title="Download a ProffieOS version from GitHub">&#8595; Download Version</button>
+        <button id="btn-vp-import"   class="btn-blue"    title="Import a ProffieOS version folder">&#8593; Import Version</button>
       </div>
       <div class="tab-btns" id="tab-btns-styles">
         <button id="btn-styles-save"    class="btn-green"   disabled title="Save Style Library">&#8595; Save</button>
@@ -2408,14 +2415,22 @@
         <input type="text" id="import-folder-path" placeholder="Select a folder named ProffieOS..." readonly />
         <button id="import-browse-btn">Browse...</button>
       </div>
+      <div style="margin-top:6px;">
+        <button id="import-switch-to-download" style="background:none;border:none;color:var(--jmt-blue);font-size:0.75rem;cursor:pointer;padding:0;">&#8595; Download from GitHub instead</button>
+      </div>
     </div>
     <div class="import-field" id="import-source-field" style="display:none;">
       <label>Duplicating From</label>
       <div style="padding:5px 8px;font-size:0.8rem;color:var(--c-text-sub);background:var(--c-bg-inset);border:1px solid var(--c-border);border-radius:3px;" id="import-source-name"></div>
     </div>
+    <div class="import-field" id="import-proffie-ver-field">
+      <label>ProffieOS Version</label>
+      <input type="text" id="import-proffie-version" placeholder="e.g. 8.10" maxlength="20" autocomplete="off" />
+      <div class="import-field-hint">Format: major.minor (e.g. 7.14, 8.10)</div>
+    </div>
     <div class="import-field">
       <label>Version Name</label>
-      <input type="text" id="import-version-name" placeholder="e.g. ProffieOS 8.2" maxlength="64" />
+      <input type="text" id="import-version-name" placeholder="e.g. ProffieOS 8.10" maxlength="64" />
     </div>
     <div id="import-version-error"></div>
     <div id="import-progress-wrap">
@@ -2425,6 +2440,40 @@
     <div class="modal-btns" style="margin-top:18px;">
       <button class="modal-btn-cancel" id="import-cancel-btn">Cancel</button>
       <button class="modal-btn-primary" id="import-confirm-btn" disabled>Import</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Download ProffieOS Version modal ── -->
+<div class="modal-overlay" id="modal-download-version">
+  <div class="modal">
+    <h2>Download ProffieOS Version</h2>
+    <div id="dl-releases-loading" style="color:var(--c-text-sub);font-size:0.85rem;padding:8px 0;">Loading available versions…</div>
+    <div id="dl-releases-error"  style="display:none;color:#e44;font-size:0.85rem;padding:8px 0;"></div>
+    <div id="dl-releases-body"   style="display:none;">
+      <div class="import-field">
+        <label>ProffieOS Release</label>
+        <select id="dl-release-select" style="width:100%;padding:5px 7px;background:var(--c-bg-inset);border:1px solid var(--c-border);border-radius:4px;color:var(--c-text);font-size:0.85rem;"></select>
+      </div>
+      <div class="import-field">
+        <label>ProffieOS Version</label>
+        <div id="dl-proffie-version-display" style="padding:5px 8px;font-size:0.82rem;color:var(--c-text-sub);background:var(--c-bg-inset);border:1px solid var(--c-border);border-radius:3px;"></div>
+      </div>
+      <div class="import-field">
+        <label>Version Name</label>
+        <input type="text" id="dl-version-name" placeholder="e.g. ProffieOS 8.10" maxlength="64" autocomplete="off" />
+      </div>
+    </div>
+    <div id="dl-version-error" style="color:#e44;font-size:0.82rem;min-height:1.2em;margin-top:4px;"></div>
+    <div id="dl-progress-wrap" style="display:none;margin-top:10px;">
+      <span id="dl-progress-label" style="font-size:0.82rem;color:var(--c-text-sub);">Downloading…</span>
+      <div id="dl-progress-track" style="margin-top:6px;height:6px;background:var(--c-bg-inset);border-radius:3px;overflow:hidden;">
+        <div id="dl-progress-bar"  style="height:100%;width:0%;background:var(--jmt-blue);transition:width 0.15s;border-radius:3px;"></div>
+      </div>
+    </div>
+    <div class="modal-btns" style="margin-top:18px;">
+      <button class="modal-btn-cancel"  id="dl-cancel-btn">Cancel</button>
+      <button class="modal-btn-primary" id="dl-confirm-btn" disabled>Download</button>
     </div>
   </div>
 </div>
@@ -3337,13 +3386,15 @@ function openImportVersionModal(duplicateFrom) {
 
   const isDupe = !!_importDuplicateFrom;
   document.getElementById('import-modal-title').textContent  = isDupe ? 'Duplicate Version' : 'Import ProffieOS Version';
-  document.getElementById('import-folder-field').style.display = isDupe ? 'none' : '';
-  document.getElementById('import-source-field').style.display = isDupe ? '' : 'none';
+  document.getElementById('import-folder-field').style.display    = isDupe ? 'none' : '';
+  document.getElementById('import-source-field').style.display    = isDupe ? '' : 'none';
+  document.getElementById('import-proffie-ver-field').style.display = isDupe ? 'none' : '';
   if (isDupe) document.getElementById('import-source-name').textContent = _importDuplicateFrom;
-  document.getElementById('import-folder-path').value = '';
-  document.getElementById('import-version-name').value = isDupe ? `${_importDuplicateFrom} (copy)` : '';
+  document.getElementById('import-folder-path').value    = '';
+  document.getElementById('import-proffie-version').value = '';
+  document.getElementById('import-version-name').value   = isDupe ? `${_importDuplicateFrom} (copy)` : '';
   document.getElementById('import-version-error').textContent = '';
-  document.getElementById('import-confirm-btn').disabled = isDupe ? false : true;
+  document.getElementById('import-confirm-btn').disabled  = isDupe ? false : true;
   document.getElementById('import-confirm-btn').textContent = isDupe ? 'Duplicate' : 'Import';
   document.getElementById('import-progress-label').textContent = isDupe ? 'Duplicating files...' : 'Copying files...';
   document.getElementById('import-progress-wrap').style.display = 'none';
@@ -3361,9 +3412,12 @@ function closeImportVersionModal() {
 }
 
 function updateImportConfirmState() {
-  const hasFolder = _importDuplicateFrom ? true : !!_importFolderPath;
+  const isDupe    = !!_importDuplicateFrom;
+  const hasFolder = isDupe ? true : !!_importFolderPath;
   const hasName   = document.getElementById('import-version-name').value.trim().length > 0;
-  document.getElementById('import-confirm-btn').disabled = !(hasFolder && hasName);
+  const ver       = document.getElementById('import-proffie-version').value.trim();
+  const hasVer    = isDupe || /^\d+\.\d+$/.test(ver);
+  document.getElementById('import-confirm-btn').disabled = !(hasFolder && hasName && hasVer);
 }
 
 document.getElementById('import-browse-btn').addEventListener('click', async () => {
@@ -3398,7 +3452,17 @@ document.getElementById('import-version-name').addEventListener('input', () => {
   updateImportConfirmState();
 });
 
+document.getElementById('import-proffie-version').addEventListener('input', () => {
+  document.getElementById('import-version-error').textContent = '';
+  updateImportConfirmState();
+});
+
 document.getElementById('import-cancel-btn').addEventListener('click', closeImportVersionModal);
+
+document.getElementById('import-switch-to-download').addEventListener('click', () => {
+  closeImportVersionModal();
+  openDownloadVersionModal();
+});
 
 document.getElementById('import-confirm-btn').addEventListener('click', async () => {
   const name     = document.getElementById('import-version-name').value.trim();
@@ -3412,9 +3476,10 @@ document.getElementById('import-confirm-btn').addEventListener('click', async ()
   document.getElementById('import-cancel-btn').disabled = true;
   document.getElementById('import-progress-wrap').style.display = 'block';
 
+  const proffieVer = document.getElementById('import-proffie-version').value.trim() || null;
   const result = isDupe
     ? await window.electronAPI.duplicateVersion(_importDuplicateFrom, name)
-    : await window.electronAPI.importVersion(_importFolderPath, name);
+    : await window.electronAPI.importVersion(_importFolderPath, name, proffieVer);
 
   document.getElementById('import-progress-wrap').style.display = 'none';
   document.getElementById('import-cancel-btn').disabled = false;
@@ -3596,6 +3661,128 @@ let _importFromVersionsTab = false;
 document.getElementById('btn-vp-import')?.addEventListener('click', () => {
   _importFromVersionsTab = true;
   openImportVersionModal();
+});
+
+// ── Versions tab: Download button ──────────────────────
+let _dlReleases = [];
+let _dlProgressUnsub = null;
+
+function _dlUpdateConfirm() {
+  const sel   = document.getElementById('dl-release-select');
+  const name  = document.getElementById('dl-version-name')?.value.trim();
+  document.getElementById('dl-confirm-btn').disabled = !sel?.value || !name;
+}
+
+function _dlOnSelectChange() {
+  const sel  = document.getElementById('dl-release-select');
+  const rel  = _dlReleases.find(r => r.tag === sel.value);
+  if (!rel) return;
+  document.getElementById('dl-proffie-version-display').textContent = rel.version;
+  document.getElementById('dl-version-name').value = `ProffieOS ${rel.version}`;
+  _dlUpdateConfirm();
+}
+
+async function openDownloadVersionModal() {
+  const overlay = document.getElementById('modal-download-version');
+  document.getElementById('dl-releases-loading').style.display = '';
+  document.getElementById('dl-releases-error').style.display   = 'none';
+  document.getElementById('dl-releases-body').style.display    = 'none';
+  document.getElementById('dl-version-error').textContent      = '';
+  document.getElementById('dl-progress-wrap').style.display    = 'none';
+  document.getElementById('dl-confirm-btn').disabled           = true;
+  document.getElementById('dl-cancel-btn').disabled            = false;
+  overlay.classList.add('active');
+
+  const result = await window.electronAPI.fetchReleases();
+  document.getElementById('dl-releases-loading').style.display = 'none';
+
+  if (!result.ok || !result.releases.length) {
+    const errEl = document.getElementById('dl-releases-error');
+    errEl.textContent = result.error || 'No releases found.';
+    errEl.style.display = '';
+    return;
+  }
+
+  _dlReleases = result.releases;
+  const sel   = document.getElementById('dl-release-select');
+  sel.innerHTML = '';
+  _dlReleases.forEach(r => {
+    const opt = document.createElement('option');
+    opt.value = r.tag;
+    const label = r.prerelease ? `${r.version} (pre-release)` : r.version;
+    opt.textContent = label;
+    sel.appendChild(opt);
+  });
+  sel.onchange = _dlOnSelectChange;
+  document.getElementById('dl-version-name').oninput = _dlUpdateConfirm;
+  document.getElementById('dl-releases-body').style.display = '';
+  _dlOnSelectChange();
+}
+
+document.getElementById('btn-vp-download')?.addEventListener('click', openDownloadVersionModal);
+
+document.getElementById('dl-cancel-btn').addEventListener('click', () => {
+  document.getElementById('modal-download-version').classList.remove('active');
+  if (_dlProgressUnsub) { _dlProgressUnsub(); _dlProgressUnsub = null; }
+});
+
+document.getElementById('dl-confirm-btn').addEventListener('click', async () => {
+  const sel        = document.getElementById('dl-release-select');
+  const rel        = _dlReleases.find(r => r.tag === sel.value);
+  const name       = document.getElementById('dl-version-name').value.trim();
+  const errorEl    = document.getElementById('dl-version-error');
+  const confirmBtn = document.getElementById('dl-confirm-btn');
+  const cancelBtn  = document.getElementById('dl-cancel-btn');
+  if (!rel || !name) return;
+
+  errorEl.textContent      = '';
+  confirmBtn.disabled      = true;
+  cancelBtn.disabled       = true;
+  document.getElementById('dl-releases-body').style.opacity  = '0.5';
+  document.getElementById('dl-progress-wrap').style.display  = '';
+  document.getElementById('dl-progress-bar').style.width     = '0%';
+  document.getElementById('dl-progress-label').textContent   = 'Connecting…';
+
+  _dlProgressUnsub = window.electronAPI.onDownloadProgress(({ phase, percent }) => {
+    const bar   = document.getElementById('dl-progress-bar');
+    const label = document.getElementById('dl-progress-label');
+    if (phase === 'downloading') {
+      label.textContent = percent ? `Downloading… ${percent}%` : 'Downloading…';
+      bar.style.width = `${percent || 0}%`;
+    } else if (phase === 'extracting') {
+      label.textContent = 'Extracting…';
+      bar.style.width = '90%';
+    } else if (phase === 'importing') {
+      label.textContent = 'Importing…';
+      bar.style.width = '97%';
+    }
+  });
+
+  const result = await window.electronAPI.downloadRelease(rel.downloadUrl, name, rel.version);
+
+  if (_dlProgressUnsub) { _dlProgressUnsub(); _dlProgressUnsub = null; }
+
+  document.getElementById('dl-releases-body').style.opacity = '1';
+  document.getElementById('dl-progress-wrap').style.display = 'none';
+  cancelBtn.disabled = false;
+
+  if (!result.ok) {
+    errorEl.textContent = result.error;
+    confirmBtn.disabled = false;
+    return;
+  }
+
+  document.getElementById('modal-download-version').classList.remove('active');
+
+  // Refresh version dropdown and panel
+  const versions = await window.electronAPI.listProffieVersions();
+  const verSel   = document.getElementById('input-version');
+  const currentSel = verSel.value || verSel.dataset.lastValue || '';
+  populateVersionSelect(verSel, versions, currentSel);
+  if (window.vpRefresh) {
+    await window.vpRefresh();
+    if (result.versionName && window.vpSelectVersion) window.vpSelectVersion(result.versionName);
+  }
 });
 
 // Expose duplicate entry point for versionsPanel.js

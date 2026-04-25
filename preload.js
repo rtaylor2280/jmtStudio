@@ -74,7 +74,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   selectVersion:       (name)                    => ipcRenderer.invoke('proffieOS:selectVersion', name),
   selectFolder:        ()                        => ipcRenderer.invoke('dialog:selectFolder'),
   validateVersionSource: (sourcePath)            => ipcRenderer.invoke('proffieOS:validateSource', sourcePath),
-  importVersion:       (sourcePath, versionName) => ipcRenderer.invoke('proffieOS:importVersion', { sourcePath, versionName }),
+  importVersion:       (sourcePath, versionName, proffieVersion) => ipcRenderer.invoke('proffieOS:importVersion', { sourcePath, versionName, proffieVersion }),
   listVersionsDetails: ()                      => ipcRenderer.invoke('versions:listDetails'),
   readVersionNotes:    (name)                  => ipcRenderer.invoke('versions:readNotes', name),
   writeVersionNotes:   (name, content)         => ipcRenderer.invoke('versions:writeNotes', { name, content }),
@@ -85,6 +85,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listVersionDir:      (name, subPath)         => ipcRenderer.invoke('versions:listDir', { name, subPath }),
   readVersionFile:     (name, subPath)         => ipcRenderer.invoke('versions:readFile', { name, subPath }),
   searchVersionFiles:  (name, query)           => ipcRenderer.invoke('versions:search', { name, query }),
+  fetchReleases:       ()                       => ipcRenderer.invoke('versions:fetchReleases'),
+  downloadRelease:     (downloadUrl, versionName, proffieVersion) => ipcRenderer.invoke('versions:downloadRelease', { downloadUrl, versionName, proffieVersion }),
+  onDownloadProgress:  (cb) => {
+    const handler = (_, data) => cb(data);
+    ipcRenderer.on('versions:downloadProgress', handler);
+    return () => ipcRenderer.removeListener('versions:downloadProgress', handler);
+  },
 
   // ── DFU ──────────────────────────────────────────────
   detectDFU:    () => ipcRenderer.invoke('dfu:detect'),

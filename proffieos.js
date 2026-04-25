@@ -379,7 +379,7 @@ function readStagedStyles() {
  * under a user-supplied name. sourcePath must be a folder named "ProffieOS"
  * containing ProffieOS.ino.
  */
-function importVersion(sourcePath, versionName) {
+function importVersion(sourcePath, versionName, proffieVersion) {
   if (path.basename(sourcePath) !== 'ProffieOS') {
     return { ok: false, error: 'Selected folder must be named "ProffieOS".' };
   }
@@ -400,6 +400,14 @@ function importVersion(sourcePath, versionName) {
   try {
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     copyDirSync(sourcePath, dest);
+    const ver = (proffieVersion || '').trim();
+    if (ver) {
+      fs.writeFileSync(
+        path.join(path.dirname(dest), '.jmt_meta.json'),
+        JSON.stringify({ proffieVersion: ver, source: 'import' }, null, 2),
+        'utf8'
+      );
+    }
     return { ok: true, versionName: name };
   } catch (e) {
     return { ok: false, error: `Import failed: ${e.message}` };
@@ -434,6 +442,31 @@ function getNotesPath(versionName) {
   return resolved ? path.join(resolved.folderPath, 'notes.txt') : null;
 }
 
+function _getMetaPath(versionName) {
+  const resolved = _resolveVersionFolder(versionName);
+  return resolved ? path.join(resolved.folderPath, '.jmt_meta.json') : null;
+}
+
+function readVersionMeta(versionName) {
+  const p = _getMetaPath(versionName);
+  if (!p || !fs.existsSync(p)) return {};
+  try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return {}; }
+}
+
+function writeVersionMeta(versionName, updates) {
+  const resolved = _resolveVersionFolder(versionName);
+  if (!resolved) return { ok: false, error: 'Version not found.' };
+  try {
+    const existing = readVersionMeta(versionName);
+    fs.writeFileSync(
+      path.join(resolved.folderPath, '.jmt_meta.json'),
+      JSON.stringify({ ...existing, ...updates }, null, 2),
+      'utf8'
+    );
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+
 function readNotes(versionName) {
   const p = getNotesPath(versionName);
   if (!p || !fs.existsSync(p)) return null;
@@ -455,6 +488,7 @@ function listVersionsDetails() {
     if (!resolved) return null;
     const { folderPath } = resolved;
     const notes = readNotes(name);
+    const meta  = readVersionMeta(name);
     let modified = null;
     try { modified = fs.statSync(folderPath).mtime.toISOString(); } catch {}
     return {
@@ -462,7 +496,8 @@ function listVersionsDetails() {
       size: _dirSizeSync(folderPath),
       modified,
       notes,
-      notesPreview: notes ? notes.split('\n').find(l => l.trim()) || null : null,
+      notesPreview:   notes ? notes.split('\n').find(l => l.trim()) || null : null,
+      proffieVersion: meta.proffieVersion || null,
     };
   }).filter(Boolean);
 }
@@ -639,6 +674,8 @@ module.exports = {
   listVersionsDetails,
   readNotes,
   writeNotes,
+  readVersionMeta,
+  writeVersionMeta,
   renameVersion,
   duplicateVersion,
   deleteVersion,
