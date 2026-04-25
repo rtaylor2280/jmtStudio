@@ -1,3 +1,5 @@
+This tool is free and fully transparent, but not open for redistribution or modification of the application itself. This ensures consistency and allows me to properly support and troubleshoot it.
+
 Permission is granted to use JMT Studio for personal and commercial purposes,
 including managing, configuring, and building lightsabers using ProffieOS. Use
 of this software in the creation or sale of physical products is permitted.
@@ -6,7 +8,8 @@ You may not:
 - redistribute this software
 - sell or sublicense this software as a standalone product
 - modify and distribute modified versions
-- reverse engineer, decompile, or attempt to extract source code from this software
+- attempt to extract or reuse internal application code or assets for redistribution
+- use any portion of the application source code in your own projects or products
 - remove or alter any copyright, branding, or attribution
 
 This software is provided "as is", without warranty of any kind, express or
@@ -16,5 +19,9 @@ for any claim, damages, or other liability arising from the use of this software
 
 JMT Studio is a product of Jedi Master Tech and is not affiliated with or
 endorsed by ProffieOS or its contributors.
+
+This tool does not include ProffieOS. Users must supply their own copy.
+
+Generated configurations remain fully accessible and editable by the user.
 
 Copyright © 2026 Jedi Master Tech. All rights reserved.

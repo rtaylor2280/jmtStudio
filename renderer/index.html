@@ -1514,7 +1514,8 @@
   /* ── Style Library panel ── */
   #styles-view { display: none; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
   #styles-view.active { display: flex; }
-  #styles-code-editor { flex: 1; min-height: 0; }
+  #styles-code-wrap { flex: 1; min-height: 0; position: relative; overflow: hidden; }
+  #styles-code-editor { width: 100%; height: 100%; }
   #styles-visual-view { flex: 1; min-height: 0; display: flex; flex-direction: row; overflow: hidden; }
   #styles-helpers-panel { width: 200px; flex-shrink: 0; display: flex; flex-direction: column; overflow: hidden; transition: width 0.22s ease; }
   #styles-helpers-panel.collapsed { width: 18px !important; }
@@ -1560,7 +1561,7 @@
   .helper-row-main { display: flex; align-items: center; gap: 4px; padding: 5px 10px 3px 12px; }
   .helper-row-notes-preview { font-size: 0.66rem; color: var(--c-text-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-style: italic; padding: 0 10px 3px 12px; }
   #styles-helper-monaco { flex: 1; min-height: 0; }
-  .styles-helpers-title { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--c-text-muted); padding: 9px 12px 7px; border-bottom: 1px solid var(--c-border); flex-shrink: 0; }
+  .styles-helpers-title { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--c-text-muted); padding: 0 12px; display: flex; align-items: center; box-sizing: border-box; height: 42px; border-bottom: 1px solid var(--c-border); flex-shrink: 0; }
   .styles-helper-row { font-size: 0.78rem; color: var(--c-text-sub); padding: 0; cursor: pointer; display: flex; flex-direction: column; align-items: stretch; gap: 0; user-select: none; }
   .styles-helper-row.selected { background: var(--c-bg-hover); color: var(--c-text); }
   .helper-delete-btn { font-size: 0.65rem; opacity: 0; background: none; border: none; color: var(--c-text-muted); cursor: pointer; padding: 1px 3px; border-radius: 3px; flex-shrink: 0; }
@@ -1578,8 +1579,8 @@
   .styles-helper-use-item { font-size: 0.72rem; color: var(--c-text-dim); padding: 2px 10px 2px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
   .styles-helper-use-item:hover { color: var(--jmt-blue); }
   .styles-helpers-empty { font-size: 0.75rem; color: var(--c-text-faint); padding: 16px 12px; }
-  .styles-visual-main { flex: 1; min-width: 0; overflow-y: auto; padding: 12px 20px 20px; display: flex; flex-direction: column; gap: 10px; }
-  .styles-search-bar { display: flex; align-items: center; gap: 8px; position: sticky; top: 0; z-index: 5; background: var(--c-bg); padding: 8px 0 10px; margin: -8px 0 0; }
+  .styles-visual-main { flex: 1; min-width: 0; overflow-y: auto; padding: 10px 20px 20px; display: flex; flex-direction: column; gap: 10px; }
+  .styles-search-bar { display: flex; align-items: center; gap: 8px; flex-shrink: 0; background: var(--c-bg); padding: 0 20px; box-sizing: border-box; height: 42px; border-bottom: 1px solid var(--c-border); }
   .style-cards { isolation: isolate; }
   .styles-legend { background: var(--c-bg); padding: 6px 20px 6px; justify-content: center; pointer-events: none; border-top: 1px solid var(--c-border); flex-shrink: 0; position: relative; }
   #styles-footer-meta { position: absolute; right: 20px; top: 50%; transform: translateY(-50%); font-size: 0.67rem; color: var(--c-text-faint); white-space: nowrap; pointer-events: none; }
@@ -1784,7 +1785,8 @@
   .preset-detail-field-value { flex: 0 0 auto; min-width: 0; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--c-text); }
   .preset-detail-field-value[data-placeholder]:empty::after { content: attr(data-placeholder); color: var(--c-text-hint); font-style: italic; }
 
-  .preset-common-toggle { display: inline-flex; align-items: center; gap: 3px; cursor: pointer; user-select: none; flex-shrink: 0; margin-left: 8px; font-size: 0.72rem; color: var(--c-text-muted); }
+  .preset-common-toggle { display: inline-flex; align-items: center; gap: 3px; cursor: default; user-select: none; flex-shrink: 0; margin-left: 8px; font-size: 0.72rem; color: var(--c-text-muted); }
+  .preset-common-toggle-label { cursor: help; }
   .preset-common-toggle input[type="checkbox"] { cursor: pointer; width: 11px; height: 11px; accent-color: var(--jmt-blue); margin: 0; }
 
   .preset-edit-input { font: inherit; color: var(--c-text); background: var(--c-bg-card); border: 1px solid var(--jmt-blue); border-radius: 2px; padding: 1px 4px; outline: none; flex: 1; min-width: 60px; max-width: 220px; }
@@ -1795,7 +1797,7 @@
   .preset-edit-cancel { background: none; border: none; cursor: pointer; font-size: 0.85rem; line-height: 1; padding: 1px 3px; color: var(--c-text-muted); opacity: 0.35; }
   .preset-edit-cancel:hover { opacity: 1; color: #e44; }
 
-  .preset-detail-slots-label { font-size: 0.7rem; color: var(--c-text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; margin: 10px 0 4px; }
+  .preset-detail-slots-label { font-size: 0.7rem; color: var(--c-text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; margin: 10px 0 4px; cursor: help; }
   .preset-detail-slots-label.field-error { color: #e44; }
   .preset-detail-slots { display: flex; flex-direction: column; gap: 4px; }
 
@@ -1805,17 +1807,19 @@
   .preset-slot-tile.slot-helper  { background: rgba(58,143,255,0.10); color: var(--c-text); }
   .preset-slot-tile.slot-ref     { background: rgba(40,180,170,0.12); color: var(--c-text); }
   .preset-slot-tile.slot-inline  { background: rgba(220,170,40,0.10); color: var(--c-text); }
-  .preset-slot-tile.slot-missing, .preset-slot-tile.slot-excess { background: rgba(228,68,68,0.12); color: #e44; border-color: rgba(228,68,68,0.45); }
+  .preset-slot-tile.slot-missing, .preset-slot-tile.slot-excess, .preset-slot-tile.slot-unlinked { background: rgba(228,68,68,0.12); color: #e44; border-color: rgba(228,68,68,0.45); }
 
   .preset-slot-num { flex-shrink: 0; width: 22px; text-align: center; color: var(--c-text-muted); font-weight: 600; font-size: 0.7rem; background: rgba(0,0,0,0.15); border-radius: 2px; padding: 1px 0; }
-  .preset-slot-tile.slot-missing .preset-slot-num, .preset-slot-tile.slot-excess .preset-slot-num { color: #e44; }
+  .preset-slot-tile.slot-missing .preset-slot-num, .preset-slot-tile.slot-excess .preset-slot-num, .preset-slot-tile.slot-unlinked .preset-slot-num { color: #e44; }
   .preset-slot-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-  .preset-slot-expr { word-break: break-all; }
+  .preset-slot-expr { word-break: break-all; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; line-clamp: 3; overflow: hidden; }
+  .preset-slot-unlinked-label { font-size: 0.62rem; color: #e44; font-style: italic; opacity: 0.85; }
   .preset-slot-color { display: inline-flex; align-items: center; gap: 4px; font-size: 0.68rem; color: var(--c-text-muted); }
   .preset-slot-color-swatch { flex-shrink: 0; }
 
   .preset-slot-actions { position: absolute; top: 3px; right: 3px; display: flex; gap: 2px; opacity: 0.3; transition: opacity 0.1s; }
   .preset-slot-tile:hover .preset-slot-actions { opacity: 1; }
+  .preset-slot-tile.slot-excess .preset-slot-actions { opacity: 1; }
   .preset-slot-action { background: var(--c-bg-card); border: 1px solid var(--c-border); border-radius: 2px; cursor: pointer; font-size: 0.7rem; padding: 1px 4px; color: var(--c-text-muted); }
   .preset-slot-action:hover { color: var(--jmt-blue); border-color: var(--jmt-blue); }
 
@@ -2014,7 +2018,11 @@
 
 <!-- ── Style Library view ── -->
 <div id="styles-view">
-  <div id="styles-code-editor"></div>
+  <div id="styles-code-wrap">
+    <div id="styles-code-editor"></div>
+    <div class="minimap-jump-bar top"    id="styles-jump-top">Jump to Top</div>
+    <div class="minimap-jump-bar bottom" id="styles-jump-bottom">Jump to Bottom</div>
+  </div>
   <div id="styles-visual-view" style="display:none">
     <div id="styles-helpers-panel">
       <div class="styles-helpers-title">Helpers <button id="btn-add-helper" class="btn-blue" style="font-size:0.7rem;padding:1px 7px;margin-left:auto" title="Add a new helper">&#43;</button></div>
@@ -2047,16 +2055,16 @@
       <button id="helpers-collapse-btn" title="Collapse/expand helpers">&#8249;</button>
     </div>
     <div style="flex:1;min-width:0;display:flex;flex-direction:column;min-height:0;">
+      <div class="styles-search-bar">
+        <span style="position:relative;flex:1;max-width:320px;display:flex;align-items:center;">
+          <input type="text" id="styles-search" class="styles-search-input" placeholder="Search styles…" autocomplete="off" spellcheck="false" style="max-width:unset;width:100%;padding-right:22px;">
+          <span id="styles-search-clear" class="vp-search-clear" style="display:none" title="Clear">&#x2715;</span>
+        </span>
+        <span id="styles-search-count" class="styles-search-count"></span>
+        <button id="btn-add-style" class="btn-blue" style="margin-left:auto;flex-shrink:0">&#43; Add Style</button>
+      </div>
       <div class="styles-visual-main">
         <div id="styles-conflict-banner" class="styles-conflict-banner"></div>
-      <div class="styles-search-bar">
-          <span style="position:relative;flex:1;max-width:320px;display:flex;align-items:center;">
-            <input type="text" id="styles-search" class="styles-search-input" placeholder="Search styles…" autocomplete="off" spellcheck="false" style="max-width:unset;width:100%;padding-right:22px;">
-            <span id="styles-search-clear" class="vp-search-clear" style="display:none" title="Clear">&#x2715;</span>
-          </span>
-          <span id="styles-search-count" class="styles-search-count"></span>
-          <button id="btn-add-style" class="btn-blue" style="margin-left:auto;flex-shrink:0">&#43; Add Style</button>
-        </div>
         <div id="styles-visual-list" class="style-cards"></div>
       </div>
       <div id="styles-legend" class="styles-legend" style="display:none">
@@ -2499,9 +2507,12 @@
     </div>
 
     <div class="about-footer">
-      <span id="about-restriction-text">&copy; 2026 Jedi Master Tech. All rights reserved.<br>
+      <span id="about-restriction-text">This tool is free and fully transparent, but not open for redistribution or modification of the application itself. This ensures consistency and allows me to properly support and troubleshoot it.<br><br>
+      &copy; 2026 Jedi Master Tech. All rights reserved.<br>
       JMT Studio may be used for personal and commercial purposes, including managing, configuring, and building lightsabers using ProffieOS.<br>
-      Unauthorized copying, modification, distribution, or resale is prohibited.</span>
+      Unauthorized copying, modification, distribution, or resale is prohibited. Application code and assets may not be extracted or reused in other projects.<br>
+      This tool does not include ProffieOS. Users must supply their own copy.<br>
+      Generated configurations remain fully accessible and editable by the user.</span>
       <button class="about-license-toggle" id="about-license-toggle">View License</button>
       <div class="about-license-body" id="about-license-body"></div>
     </div>
@@ -3453,18 +3464,25 @@ document.getElementById('import-confirm-btn').addEventListener('click', async ()
 });
 
 // ── About / Settings modal ─────────────────────────────
-const LICENSE_TEXT = `Permission is granted to use JMT Studio for personal and commercial purposes, including managing, configuring, and building lightsabers using ProffieOS. Use of this software in the creation or sale of physical products is permitted.
+const LICENSE_TEXT = `This tool is free and fully transparent, but not open for redistribution or modification of the application itself. This ensures consistency and allows me to properly support and troubleshoot it.
+
+Permission is granted to use JMT Studio for personal and commercial purposes, including managing, configuring, and building lightsabers using ProffieOS. Use of this software in the creation or sale of physical products is permitted.
 
 You may not:
 - redistribute this software
 - sell or sublicense this software as a standalone product
 - modify and distribute modified versions
-- reverse engineer, decompile, or attempt to extract source code from this software
+- attempt to extract or reuse internal application code or assets for redistribution
+- use any portion of the application source code in your own projects or products
 - remove or alter any copyright, branding, or attribution
 
 This software is provided "as is", without warranty of any kind, express or implied, including but not limited to the warranties of merchantability and fitness for a particular purpose. In no event shall Jedi Master Tech be liable for any claim, damages, or other liability arising from the use of this software.
 
 JMT Studio is a product of Jedi Master Tech and is not affiliated with or endorsed by ProffieOS or its contributors.
+
+This tool does not include ProffieOS. Users must supply their own copy.
+
+Generated configurations remain fully accessible and editable by the user.
 
 Copyright © 2026 Jedi Master Tech. All rights reserved.`;
 
@@ -4133,7 +4151,7 @@ async function _loadStylesFile() {
 
 function _switchStylesView(mode) {
   _stylesViewMode = mode;
-  const codeEl   = document.getElementById('styles-code-editor');
+  const codeEl   = document.getElementById('styles-code-wrap');
   const visualEl = document.getElementById('styles-visual-view');
   const showCode = mode === 'code';
   if (showCode) {
@@ -4751,12 +4769,15 @@ function _openHelperAdd() {
     _stylesHelperEditor.setScrollPosition({ scrollTop: 0 });
     _stylesHelperEditor.layout();
     requestAnimationFrame(() => requestAnimationFrame(() => {
-      _stylesHelperEditor?.focus();
+      const _ni = document.getElementById('styles-helper-editor-name');
+      if (!_ni?.classList.contains('editable')) _stylesHelperEditor?.focus();
       // After window.confirm(), Electron can leave Monaco in ghost-focus (container
       // div focused but textarea isn't). A brief timeout catches that case.
       setTimeout(() => {
-        if (_stylesHelperEditor && !_stylesHelperEditor.hasTextFocus())
-          _stylesHelperEditor.focus();
+        if (_stylesHelperEditor && !_stylesHelperEditor.hasTextFocus()) {
+          const _ni2 = document.getElementById('styles-helper-editor-name');
+          if (!_ni2?.classList.contains('editable')) _stylesHelperEditor.focus();
+        }
       }, 100);
     }));
   }
@@ -6094,27 +6115,19 @@ document.getElementById('add-style-name').addEventListener('input', () => {
 });
 
 // Paste & Parse
-async function _runPasteAndParse() {
-  let text = '';
-  try { text = await navigator.clipboard.readText(); } catch { return; }
-  if (!text.trim()) return;
-
-  const parsed = _parseClipboardStyle(text);
+function _applyParsedStyleResult(parsed) {
   if (!parsed.expr) return;
 
-  // Has name: show full `using NAME = expr;`; no name: show raw expr
   const editorContent = parsed.name ? `using ${parsed.name} = ${parsed.expr};` : parsed.expr;
-
   if (_addStyleEditor) {
     _addStyleEditor.setValue(editorContent);
     _addStyleEditor.setScrollPosition({ scrollTop: 0 });
     setTimeout(() => _addStyleEditor.layout(), 20);
   }
 
-  const codeSection = document.getElementById('add-style-code-section');
-  codeSection.style.display = 'flex';
-  const hint = document.getElementById('add-style-code-hint');
-  hint.textContent = parsed.name ? 'editable — name field syncs live' : 'enter a name above to complete';
+  document.getElementById('add-style-code-section').style.display = 'flex';
+  document.getElementById('add-style-code-hint').textContent =
+    parsed.name ? 'editable — name field syncs live' : 'enter a name above to complete';
 
   _addStyleCurrentName = parsed.name || '';
   document.getElementById('add-style-name').value   = parsed.name || '';
@@ -6129,12 +6142,17 @@ async function _runPasteAndParse() {
   }
 
   _updateAddStyleConfirmBtn();
-  const _confirmBtn = document.getElementById('btn-add-style-confirm');
-  if (!_confirmBtn.disabled) {
-    _confirmBtn.focus();
-  } else {
-    document.getElementById('add-style-name').focus();
-  }
+  const confirmBtn = document.getElementById('btn-add-style-confirm');
+  if (!confirmBtn.disabled) confirmBtn.focus();
+  else document.getElementById('add-style-name').focus();
+}
+
+async function _runPasteAndParse() {
+  let text = '';
+  try { text = await navigator.clipboard.readText(); } catch { return; }
+  if (!text.trim()) return;
+  const parsed = _parseClipboardStyle(text);
+  _applyParsedStyleResult(parsed);
 }
 
 document.getElementById('btn-add-style-paste').addEventListener('click', _runPasteAndParse);
@@ -6165,7 +6183,7 @@ document.addEventListener('keydown', e => {
   }
 });
 
-document.getElementById('btn-add-style-confirm').addEventListener('click', () => {
+document.getElementById('btn-add-style-confirm').addEventListener('click', async () => {
   if (!_addStyleEditor || !_stylesEditorInstance) return;
   const { expr } = _normalizeStyleInput(_addStyleEditor.getValue());
   const name   = document.getElementById('add-style-name').value.trim();
@@ -6209,6 +6227,9 @@ document.getElementById('btn-add-style-confirm').addEventListener('click', () =>
     }
   }
 
+  const wasAlreadyDirty = _isStylesDirtyFlag;
+  const hadCallback     = !!_addStyleConfirmCallback;
+
   const block = _buildStyleBlock(name, expr, source, tags, url, notes);
   _stylesEditorInstance.setValue(_stylesEditorInstance.getValue() + block);
   _setStylesDirty(true);
@@ -6218,6 +6239,12 @@ document.getElementById('btn-add-style-confirm').addEventListener('click', () =>
     const cb = _addStyleConfirmCallback;
     _addStyleConfirmCallback = null;
     cb(name);
+  }
+
+  // When invoked from "Add to Library" and the file was clean, auto-save so the
+  // user isn't prompted about a change they already intentionally committed.
+  if (hadCallback && !wasAlreadyDirty) {
+    await window.saveStylesFile();
   }
 });
 
@@ -6325,7 +6352,7 @@ document.getElementById('btn-detail-name-edit').addEventListener('click', () => 
   const confirm = document.getElementById('btn-detail-name-confirm');
   inp.value = h2.textContent;
   h2.style.display  = 'none';
-  inp.style.display = '';
+  inp.style.display = 'block';
   pencil.style.display  = 'none';
   confirm.style.display = '';
   inp.focus();
@@ -6334,6 +6361,10 @@ document.getElementById('btn-detail-name-edit').addEventListener('click', () => 
 document.getElementById('btn-detail-name-confirm').addEventListener('click', _commitDetailName);
 document.getElementById('style-detail-name-input').addEventListener('input', () => {
   _setDetailDirty(true);
+});
+document.getElementById('style-detail-name-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter')  { e.preventDefault(); _commitDetailName(); }
+  if (e.key === 'Escape') { e.preventDefault(); document.getElementById('style-detail-name-input').value = _detailName; _commitDetailName(); }
 });
 
 function _commitDetailSource() {
@@ -6528,7 +6559,7 @@ window.initStylesPanel = function() {
     guides: { bracketPairs: true, bracketPairsHorizontal: true },
   };
   _stylesEditorInstance = monaco.editor.create(
-    document.getElementById('styles-code-editor'), { value: '', ...editorOpts });
+    document.getElementById('styles-code-editor'), { value: '', ...editorOpts, minimap: { enabled: true } });
   _stylesEditorInstance.onDidChangeModelContent(() => {
     _setStylesDirty(true);
     // Re-check conflicts live so resolving a name in code view clears the warning
@@ -6545,6 +6576,11 @@ window.initStylesPanel = function() {
   _stylesEditorInstance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS,
     () => window.saveStylesFile());
   window._stylesEditor = _stylesEditorInstance;
+  window._initMinimapJumpBars?.(
+    _stylesEditorInstance,
+    document.getElementById('styles-jump-top'),
+    document.getElementById('styles-jump-bottom')
+  );
 
   _stylesDetailEditor = monaco.editor.create(
     document.getElementById('style-detail-editor'), { value: '', ...editorOpts,
@@ -6563,10 +6599,12 @@ window.initStylesPanel = function() {
     if (!_stylesHelperEditor) return;
     const nameInput = document.getElementById('styles-helper-editor-name');
     // Ghost-focus guard: if content changed by user action (not a sync op) and Monaco's
-    // textarea lost real browser focus, re-focus so character typing works
+    // textarea lost real browser focus, re-focus so character typing works.
+    // Skip if nameInput is in pencil/rename mode (it has focus intentionally).
     if (!_helperSyncingName &&
         (_helperEditorMode === 'add' || !nameInput.readOnly) &&
-        !_stylesHelperEditor.hasTextFocus()) {
+        !_stylesHelperEditor.hasTextFocus() &&
+        document.activeElement !== nameInput) {
       _stylesHelperEditor.focus();
     }
     // Sync name from editor in add mode, or in edit mode when pencil is active
@@ -6896,7 +6934,7 @@ require(['vs/editor/editor.main'], function () {
     automaticLayout: true,
     tabSize: 2,
     insertSpaces: true,
-    wordWrap: 'off',
+    wordWrap: 'on',
     folding: true,
     foldingStrategy: 'indentation',
     showFoldingControls: 'always',
@@ -6925,18 +6963,15 @@ require(['vs/editor/editor.main'], function () {
   window._monacoEditor = editor;
   window._getEditorContent = () => editor.getValue();
 
-  // ── Minimap jump bars ─────────────────────────────────────────────────────
-  (function () {
-    const _jTop = document.getElementById('minimap-jump-top');
-    const _jBot = document.getElementById('minimap-jump-bottom');
-
-    _jTop.addEventListener('click', () => editor.setScrollTop(0, monaco.editor.ScrollType.Smooth));
-    _jBot.addEventListener('click', () => editor.setScrollTop(editor.getScrollHeight(), monaco.editor.ScrollType.Smooth));
+  // ── Minimap jump bars (reusable) ─────────────────────────────────────────
+  function _initMinimapJumpBars(ed, jTop, jBot) {
+    jTop.addEventListener('click', () => ed.setScrollTop(0, monaco.editor.ScrollType.Smooth));
+    jBot.addEventListener('click', () => ed.setScrollTop(ed.getScrollHeight(), monaco.editor.ScrollType.Smooth));
 
     function _positionBars() {
-      const layout = editor.getLayoutInfo();
+      const layout = ed.getLayoutInfo();
       if (layout.minimapWidth <= 0) return;
-      [_jTop, _jBot].forEach(el => {
+      [jTop, jBot].forEach(el => {
         el.style.right = '';
         el.style.left  = layout.minimapLeft + 'px';
         el.style.width = layout.minimapWidth + 'px';
@@ -6944,23 +6979,30 @@ require(['vs/editor/editor.main'], function () {
     }
 
     function _updateVisibility() {
-      const st = editor.getScrollTop();
-      const sh = editor.getScrollHeight();
-      const vh = editor.getLayoutInfo().height;
+      const st = ed.getScrollTop();
+      const sh = ed.getScrollHeight();
+      const vh = ed.getLayoutInfo().height;
       if (vh <= 0 || sh <= 0) return;
-      _jTop.classList.toggle('hidden', st <= 0);
-      _jBot.classList.toggle('hidden', st + vh >= sh - 2);
+      jTop.classList.toggle('hidden', st <= 0);
+      jBot.classList.toggle('hidden', st + vh >= sh - 2);
     }
 
     function _refresh() { _positionBars(); _updateVisibility(); }
-    window._jumpBarRefresh = _refresh;
 
-    editor.onDidLayoutChange(_refresh);
-    editor.onDidScrollChange(_updateVisibility);
-    editor.onDidChangeModelContent(_refresh);
-    editor.onDidChangeModel(() => setTimeout(_refresh, 50));
+    ed.onDidLayoutChange(_refresh);
+    ed.onDidScrollChange(_updateVisibility);
+    ed.onDidChangeModelContent(_refresh);
+    ed.onDidChangeModel(() => setTimeout(_refresh, 50));
     setTimeout(_refresh, 300);
-  })();
+    return _refresh;
+  }
+
+  window._initMinimapJumpBars = _initMinimapJumpBars;
+  window._jumpBarRefresh = _initMinimapJumpBars(
+    editor,
+    document.getElementById('minimap-jump-top'),
+    document.getElementById('minimap-jump-bottom')
+  );
 
   editor.onDidChangeModelContent(() => {
     if (fileIsOpen) {
@@ -7162,6 +7204,30 @@ require(['vs/editor/editor.main'], function () {
       catch (e) { _silentStylesText = ''; }
     }
 
+    // Returns the 1-based start line of any /* ... */ comment block immediately
+    // above the slot (skipping blank lines). Returns slot.startLine if none found.
+    function _slotCommentStartLine(slot) {
+      if (!editor || !slot.startLine) return slot.startLine;
+      const lines = editor.getModel().getLinesContent(); // 0-indexed
+      let i = slot.startLine - 2; // 0-based index of line above
+      while (i >= 0 && !lines[i].trim()) i--;
+      if (i >= 0 && lines[i].trimEnd().endsWith('*/')) {
+        while (i >= 0 && !lines[i].includes('/*')) i--;
+        if (i >= 0) return i + 1; // 1-based
+      }
+      return slot.startLine;
+    }
+
+    // Returns the full text for a slot from the Monaco editor, including any
+    // immediately-preceding /* ... */ comment block (e.g. Fett263 copyright headers).
+    function _getFullSlotTextFromEditor(slot) {
+      if (!editor || !slot.startLine) return null;
+      return editor.getModel().getValueInRange({
+        startLineNumber: _slotCommentStartLine(slot), startColumn: 1,
+        endLineNumber:   slot.endLine,                endColumn:   slot.endCol + 1,
+      }).trim();
+    }
+
     function _openSidecar() {
       _sidecarOpen = true;
       _ensureStylesLoaded();
@@ -7264,7 +7330,7 @@ require(['vs/editor/editor.main'], function () {
         : `Styles (${actual} blades)`;
       label.title = mismatch
         ? `NUM_BLADES is ${expected}, this preset has ${actual} style(s)`
-        : '';
+        : 'This indicates the preset includes one style for each blade defined by NUM_BLADES, covering all outputs defined in the BladeConfig such as main blade, crystal chamber, or accent LEDs.';
     }
 
     function _renderEmpty(msg) {
@@ -7574,14 +7640,20 @@ require(['vs/editor/editor.main'], function () {
 
     function _shiftSelectTo(targetRow) {
       const allRows = [...document.querySelectorAll('#preset-list-top .preset-row')];
-      const fromIdx = _lastClickedRow ? allRows.indexOf(_lastClickedRow) : 0;
+      let fromIdx   = _lastClickedRow ? allRows.indexOf(_lastClickedRow) : 0;
       const toIdx   = allRows.indexOf(targetRow);
       if (toIdx < 0) return;
+      if (fromIdx < 0) fromIdx = toIdx; // stale anchor — collapse to single-item selection
       const [lo, hi] = fromIdx <= toIdx ? [fromIdx, toIdx] : [toIdx, fromIdx];
       for (let i = lo; i <= hi; i++) {
         const r = allRows[i];
-        if (r.dataset.liveIdx !== undefined) _selectedLive.add(parseInt(r.dataset.liveIdx, 10));
-        else if (r.dataset.disabledLine !== undefined) _selectedDisabled.add(parseInt(r.dataset.disabledLine, 10));
+        if (!r) continue;
+        if (r.dataset.liveIdx !== undefined) {
+          _selectedLive.add(parseInt(r.dataset.liveIdx, 10));
+          _selectedDisabledPreset = null; // mixed range — no single disabled primary
+        } else if (r.dataset.disabledLine !== undefined) {
+          _selectedDisabled.add(parseInt(r.dataset.disabledLine, 10));
+        }
       }
       _applySelectionClasses();
       _renderDetail();
@@ -7589,48 +7661,45 @@ require(['vs/editor/editor.main'], function () {
 
     function _showPresetContextMenu(e) {
       e.preventDefault();
-      const menu         = document.getElementById('preset-ctx-menu');
-      const liveCount    = _selectedLive.size;
+      const menu          = document.getElementById('preset-ctx-menu');
+      const liveCount     = _selectedLive.size;
       const disabledCount = _selectedDisabled.size;
-      const total        = liveCount + disabledCount;
+      const total         = liveCount + disabledCount;
       menu.innerHTML = '';
 
-      const lbl = document.createElement('div');
-      lbl.className = 'preset-ctx-label';
-      lbl.textContent = `${total} preset${total !== 1 ? 's' : ''} selected`;
-      menu.appendChild(lbl);
+      const result        = presetParser.parsePresets(editor?.getValue() || '');
+      const arr           = result.arrays[_activeArrayIndex];
+      const totalLive     = arr?.presets.length || 0;
 
-      const sep1 = document.createElement('div');
-      sep1.className = 'preset-ctx-separator';
-      menu.appendChild(sep1);
+      const mkSep  = () => { const s = document.createElement('div'); s.className = 'preset-ctx-separator'; menu.appendChild(s); };
+      const mkItem = (text, cls, fn) => { const d = document.createElement('div'); d.className = 'preset-ctx-item' + (cls ? ' ' + cls : ''); d.textContent = text; d.addEventListener('mousedown', e2 => { e2.stopPropagation(); _hidePresetContextMenu(); fn(); }); menu.appendChild(d); };
 
-      if (liveCount > 0) {
-        const item = document.createElement('div');
-        item.className = 'preset-ctx-item';
-        item.textContent = `▼ Disable${liveCount > 1 ? ` (${liveCount})` : ''}`;
-        item.addEventListener('mousedown', e2 => { e2.stopPropagation(); _hidePresetContextMenu(); _batchDisable(); });
-        menu.appendChild(item);
-      }
-      if (disabledCount > 0) {
-        const item = document.createElement('div');
-        item.className = 'preset-ctx-item';
-        item.textContent = `▲ Enable${disabledCount > 1 ? ` (${disabledCount})` : ''}`;
-        item.addEventListener('mousedown', e2 => { e2.stopPropagation(); _hidePresetContextMenu(); _batchEnable(); });
-        menu.appendChild(item);
+      // Label only when multiple selected
+      if (total > 1) {
+        const lbl = document.createElement('div');
+        lbl.className = 'preset-ctx-label';
+        lbl.textContent = `${total} presets selected`;
+        menu.appendChild(lbl);
+        mkSep();
       }
 
-      const sep2 = document.createElement('div');
-      sep2.className = 'preset-ctx-separator';
-      menu.appendChild(sep2);
+      // Per-selection and contextual actions (one section)
+      if (liveCount > 0)     mkItem(`▼ Disable${liveCount > 1 ? ` (${liveCount})` : ''}`, '', _batchDisable);
+      if (disabledCount > 0) mkItem(`▲ Enable${disabledCount > 1 ? ` (${disabledCount})` : ''}`, '', _batchEnable);
 
-      const delItem = document.createElement('div');
-      delItem.className = 'preset-ctx-item danger';
-      delItem.textContent = `× Delete${total > 1 ? ` (${total})` : ''}`;
-      delItem.addEventListener('mousedown', e2 => { e2.stopPropagation(); _hidePresetContextMenu(); _batchDelete(); });
-      menu.appendChild(delItem);
+      // Enable All: single-select only, and only when other disabled presets exist beyond the selection
+      if (total === 1 && _disabledPresets.length > _selectedDisabled.size) mkItem('▲ Enable All', '', _enableAll);
+
+      // Isolate: hide when all selected are live AND they already cover every live preset (nothing left to disable)
+      const alreadyIsolated = disabledCount === 0 && liveCount > 0 && liveCount === totalLive;
+      if (!alreadyIsolated) mkItem('◎ Isolate', '', _isolateSelected);
+
+      mkSep();
+
+      mkItem(`× Delete${total > 1 ? ` (${total})` : ''}`, 'danger', _batchDelete);
 
       const x = Math.min(e.clientX, window.innerWidth - 170);
-      const y = Math.min(e.clientY, window.innerHeight - 140);
+      const y = Math.min(e.clientY, window.innerHeight - 160);
       menu.style.left = x + 'px';
       menu.style.top  = y + 'px';
       menu.style.display = 'block';
@@ -7703,6 +7772,7 @@ require(['vs/editor/editor.main'], function () {
         const label = document.createElement('div');
         label.className = 'preset-detail-slots-label';
         label.textContent = `Styles (${dp.styleLines.length} blades)`;
+        label.title = 'This indicates the preset includes one style for each blade defined by NUM_BLADES, covering all outputs defined in the BladeConfig such as main blade, crystal chamber, or accent LEDs.';
         slotsWrap.appendChild(label);
         const slotsEl = document.createElement('div');
         slotsEl.className = 'preset-detail-slots';
@@ -7830,7 +7900,11 @@ require(['vs/editor/editor.main'], function () {
         _scheduleRebuild();
       });
       cbWrap.appendChild(cb);
-      cbWrap.appendChild(document.createTextNode('common'));
+      const _cbLbl = document.createElement('span');
+      _cbLbl.className = 'preset-common-toggle-label';
+      _cbLbl.title = 'Consider enabling the common folder so missing or shared sound files automatically fall back to a central common folder, reducing duplication and making fonts easier to maintain.';
+      _cbLbl.textContent = 'common';
+      cbWrap.appendChild(_cbLbl);
       valueWrap.appendChild(cbWrap);
       wrap.appendChild(valueWrap);
       return wrap;
@@ -7842,6 +7916,7 @@ require(['vs/editor/editor.main'], function () {
       const label = document.createElement('span');
       label.className = 'preset-detail-field-label';
       label.textContent = 'Track';
+      label.title = 'The track entry defines which audio file is used for background playback, while the prop determines when and how it plays.';
       wrap.appendChild(label);
       const valueWrap = document.createElement('span');
       valueWrap.className = 'preset-detail-field-value-wrap';
@@ -7875,7 +7950,9 @@ require(['vs/editor/editor.main'], function () {
       label.textContent = expected
         ? `Styles (${actual}/${expected} blades)`
         : `Styles (${actual} blades)`;
-      if (mismatch) label.title = `NUM_BLADES is ${expected}, this preset has ${actual} style(s)`;
+      label.title = mismatch
+        ? `NUM_BLADES is ${expected}, this preset has ${actual} style(s)`
+        : 'This indicates the preset includes one style for each blade defined by NUM_BLADES, covering all outputs defined in the BladeConfig such as main blade, crystal chamber, or accent LEDs. You can set custom names for each blade below.';
       wrap.appendChild(label);
 
       const slots = document.createElement('div');
@@ -7966,12 +8043,15 @@ require(['vs/editor/editor.main'], function () {
       const tile = document.createElement('div');
       tile.className = 'preset-slot-tile';
       tile.dataset.slotIdx = slotIdx;
-      if      (isMissing)                    tile.classList.add('slot-missing');
-      else if (isExcess)                     tile.classList.add('slot-excess');
+      const isUnlinked = slot.styleClass === 'helper' && !_stylesLinked;
+      if      (isMissing)    tile.classList.add('slot-missing');
+      else if (isExcess)     tile.classList.add('slot-excess');
+      else if (isUnlinked)   tile.classList.add('slot-unlinked');
       else if (slot.styleClass === 'helper') tile.classList.add('slot-helper');
       else if (slot.styleClass === 'ref')    tile.classList.add('slot-ref');
       else                                   tile.classList.add('slot-inline');
-      if (isExcess) tile.title = `Excess slot — NUM_BLADES is ${_parseResult.bladeCount}, this is blade ${slotIdx + 1}`;
+      if (isExcess)    tile.title = `Excess slot — NUM_BLADES is ${_parseResult.bladeCount}, this is blade ${slotIdx + 1}`;
+      if (isUnlinked)  tile.title = `"${slot.expr?.match(/^\w+/)?.[0] || slot.expr}" looks like a library style but my_styles.h is not linked in this config — it will be undefined at compile time`;
 
       // Badge: abbreviation (or default Bn) — click navigates; mousedown initiates drag for normal slots
       const num = document.createElement('span');
@@ -8001,15 +8081,78 @@ require(['vs/editor/editor.main'], function () {
         let _rgb16 = null; // [r16, g16, b16] ProffieOS values
         let _colorText = '';
         let _colorIsDefault = false;
+        let _hardcodedInfo = null; // { matchStr, matchIndex } when color is hardcoded in expr
 
         if (slot.colorArg) {
-          const _p = slot.colorArg.split(',').map(s => parseInt(s.trim(), 10));
-          if (_p.length === 3 && _p.every(n => Number.isFinite(n))) _rgb16 = _p;
-        } else if (window.proffieArgs) {
+          // Expression-aware: find the first RgbArg by scanning the expression so
+          // IntArg slots before the color are skipped correctly.
+          const _resolved = styleArgResolver.resolveStyleArgs(slot.expr || '', slot.colorArg);
+          const _rgbEntry = _resolved.find(a => a.kind === 'RgbArg');
+          if (_rgbEntry && _rgbEntry.values.length >= 3) {
+            _rgb16 = _rgbEntry.values.slice(0, 3).map(v => v || 0);
+          }
+          if (!_rgb16) {
+            // Legacy fallback: treat first three CSV values as R,G,B
+            const _p = slot.colorArg.split(',').map(s => parseInt(s.trim(), 10));
+            if (_p.length >= 3 && _p.slice(0,3).every(n => Number.isFinite(n))) _rgb16 = _p.slice(0,3);
+          }
+        }
+        if (!_rgb16 && window.proffieArgs) {
+          // Registry default for named helper styles
           const _baseName = slot.expr ? (slot.expr.match(/^(\w+)/) || [])[1] : null;
           const _regArgs  = _baseName ? _getHelperRegistryArgs(_baseName) : [];
           const _cr = _regArgs.find(a => a.kind === 'RgbArg');
           if (_cr) _rgb16 = window.proffieArgs.resolveColorDefault(_cr.defaultExpr || '');
+        }
+        if (!_rgb16 && window.proffieArgs) {
+          // Library definition hardcoded color: library styles using hardcoded colors instead of RgbArg
+          const _bn2 = slot.expr ? (slot.expr.match(/^(\w+)/) || [])[1] : null;
+          if (_bn2) {
+            const _defTxt = _getHelperDefinitionText(_bn2);
+            const _dre = /\b([A-Z][A-Za-z]*)\b/g;
+            let _dm;
+            while ((_dm = _dre.exec(_defTxt)) !== null) {
+              const _dr = window.proffieArgs.resolveColorDefault(_dm[1]);
+              if (_dr[0] || _dr[1] || _dr[2]) { _rgb16 = _dr; break; }
+            }
+          }
+        }
+        if (!_rgb16 && window.proffieArgs) {
+          // Inline expressions: scan for RgbArg directly and use its default
+          const _inlineArgs = styleArgResolver.findArgs(slot.expr || '');
+          const _firstRgb   = _inlineArgs.find(a => a.kind === 'RgbArg');
+          if (_firstRgb) _rgb16 = window.proffieArgs.resolveColorDefault(_firstRgb.defaultExpr || '');
+        }
+        if (!_rgb16 && window.proffieArgs) {
+          // Hardcoded color fallback: scan expression for Rgb16<>/Rgb<>/named color, pick earliest
+          const _he   = slot.expr || '';
+          const _hm16 = /\bRgb16\s*<\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*>/.exec(_he);
+          const _hm8  = /\bRgb\s*<\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*>/.exec(_he);
+          // Named color scan: try each capitalized word token via resolveColorDefault
+          let _namedColor = null, _namedPos = Infinity, _namedRgb16 = null;
+          const _colorWordRe = /\b([A-Z][A-Za-z]*)\b/g;
+          let _cwm;
+          while ((_cwm = _colorWordRe.exec(_he)) !== null) {
+            if (_cwm.index >= _namedPos) break;
+            const _res = window.proffieArgs.resolveColorDefault(_cwm[1]);
+            if (_res[0] || _res[1] || _res[2]) { _namedColor = _cwm[1]; _namedPos = _cwm.index; _namedRgb16 = _res; break; }
+          }
+          const _p16 = _hm16 ? _hm16.index : Infinity;
+          const _p8  = _hm8  ? _hm8.index  : Infinity;
+          const _pMin = Math.min(_p16, _p8, _namedPos);
+          if (_pMin < Infinity) {
+            if (_pMin === _p16) {
+              _rgb16 = [parseInt(_hm16[1],10), parseInt(_hm16[2],10), parseInt(_hm16[3],10)];
+              _hardcodedInfo = { matchStr: _hm16[0], matchIndex: _hm16.index };
+            } else if (_pMin === _p8) {
+              _rgb16 = window.proffieArgs.resolveColorDefault(`Rgb<${_hm8[1]},${_hm8[2]},${_hm8[3]}>`);
+              _hardcodedInfo = { matchStr: _hm8[0], matchIndex: _hm8.index };
+            } else {
+              _rgb16 = _namedRgb16;
+              _hardcodedInfo = { matchStr: _namedColor, matchIndex: _namedPos };
+            }
+            _colorIsDefault = true;
+          }
         }
 
         if (_rgb16) {
@@ -8032,6 +8175,12 @@ require(['vs/editor/editor.main'], function () {
           body.appendChild(colorRow);
         }
       }
+      if (isUnlinked) {
+        const errLabel = document.createElement('span');
+        errLabel.className = 'preset-slot-unlinked-label';
+        errLabel.textContent = 'library not linked';
+        body.appendChild(errLabel);
+      }
       tile.appendChild(body);
 
       const actions = document.createElement('span');
@@ -8049,7 +8198,16 @@ require(['vs/editor/editor.main'], function () {
       actions.appendChild(resetBtn);
       tile.appendChild(actions);
 
-      // Clicking the tile body toggles the inline editor (excess tiles are navigate-only)
+      // Clicking an excess tile deletes it directly
+      if (isExcess) {
+        tile.addEventListener('click', e => {
+          if (e.target === resetBtn || resetBtn.contains(e.target)) return; // × already handled
+          e.stopPropagation();
+          _deleteExcessSlot(slot);
+        });
+      }
+
+      // Clicking the tile body toggles the inline editor (missing tiles are navigate-only)
       if (!isMissing && !isExcess) {
         tile.addEventListener('click', e => {
           if (_activeColorPopup || _activeLibComboDropdown) return;
@@ -8253,6 +8411,27 @@ require(['vs/editor/editor.main'], function () {
 
     function _helperHasClassInner(helperName) {
       return _getHelperTemplateParams(helperName).some(p => p.type === 'class');
+    }
+
+    function _getHelperDefinitionText(helperName) {
+      const text = _stylesEditorInstance ? _stylesEditorInstance.getValue() : (_silentStylesText || '');
+      if (!text || !helperName) return '';
+      const usingRe = new RegExp(`\\busing\\s+${helperName}\\s*=`);
+      const usingIdx = text.search(usingRe);
+      if (usingIdx < 0) return '';
+      let i = usingIdx;
+      while (i < text.length && text[i] !== '=') i++;
+      i++;
+      let depth = 0, defText = '';
+      while (i < text.length) {
+        const ch = text[i];
+        if      (ch === '<') depth++;
+        else if (ch === '>') depth--;
+        else if (ch === ';' && depth === 0) break;
+        defText += ch;
+        i++;
+      }
+      return defText;
     }
 
     function _getHelperRegistryArgs(helperName) {
@@ -8500,8 +8679,8 @@ require(['vs/editor/editor.main'], function () {
       const helperBaseName = slot.expr ? (slot.expr.match(/^(\w+)/) || [])[1] : null;
       // Identifier-like: bare name or name<args> — could be a library reference even without library loaded
       const looksLikeIdentifier = !!(helperBaseName && /^\w+(<[\s\S]*>)?$/.test((slot.expr || '').trim()));
-      // Show mode-switch UI when library is loaded OR expr looks like a potential library reference
-      const hasModes    = helpers.length > 0 || looksLikeIdentifier;
+      // Show mode-switch UI only when library is linked AND loaded or expr looks like a library reference
+      const hasModes    = _stylesLinked && (helpers.length > 0 || looksLikeIdentifier);
       // Open in library mode if: name confirmed in library, OR no library loaded but expr is identifier-like
       const isLibrarySlot = looksLikeIdentifier && (helpers.length === 0 || helperNames.has(helperBaseName));
 
@@ -8532,21 +8711,46 @@ require(['vs/editor/editor.main'], function () {
         if (registryArgs.length > 1) registryArgs.sort((a, b) => a.pos - b.pos);
       }
 
-      if (registryArgs.length === 0 && slot.colorArg) {
-        const raw = slot.colorArg.split(',').slice(0, 3).map(s => parseInt(s.trim(), 10));
-        if (raw.length === 3 && raw.every(v => Number.isFinite(v))) {
-          const base = window.proffieArgs && window.proffieArgs.registry.find(r => r.name === 'BASE_COLOR_ARG');
-          if (base) registryArgs = [Object.assign({}, base, { defaultExpr: 'Red' })];
+      // Inline fallback: build arg rows directly from RgbArg/IntArg in the expression,
+      // bypassing the registry entirely and using styleArgResolver for positional read/write.
+      let _inlineArgReadFn  = null;
+      let _inlineArgWriteFn = null;
+      if (registryArgs.length === 0) {
+        const _directArgs = styleArgResolver.findArgs(slot.expr || '');
+        if (_directArgs.length > 0) {
+          registryArgs = _directArgs.map(a => ({ kind: a.kind, name: a.name, defaultExpr: a.defaultExpr, label: '' }));
+          _inlineArgReadFn = (name, parens) => {
+            const resolved = styleArgResolver.resolveStyleArgs(slot.expr, parens);
+            const entry = resolved.find(a => a.name === name);
+            if (!entry || !entry.values.length) return { isDefault: true, values: [] };
+            return { isDefault: entry.values.every(v => !v), values: entry.values.map(v => v || 0) };
+          };
+          _inlineArgWriteFn = (name, newVals, parens) => {
+            if (newVals === null) {
+              const arg = _directArgs.find(a => a.name === name);
+              return styleArgResolver.writeArgValue(slot.expr, parens, name, Array(arg ? arg.width : 1).fill(0));
+            }
+            return styleArgResolver.writeArgValue(slot.expr, parens, name, newVals);
+          };
+        } else if (slot.colorArg) {
+          // Legacy: parens present but no discoverable arg names — treat first 3 values as a color
+          const raw = slot.colorArg.split(',').slice(0, 3).map(s => parseInt(s.trim(), 10));
+          if (raw.length === 3 && raw.every(v => Number.isFinite(v))) {
+            const base = window.proffieArgs && window.proffieArgs.registry.find(r => r.name === 'BASE_COLOR_ARG');
+            if (base) registryArgs = [Object.assign({}, base, { defaultExpr: 'Red' })];
+          }
         }
       }
 
       const currentParens = () => slot.colorArg || '';
 
       // ── makeArgRow ─────────────────────────────────────────────────────────
-      function makeArgRow(regArg) {
+      function makeArgRow(regArg, readFn, writeFn) {
+        const _argRead  = readFn  || ((n, p) => window.proffieArgs.readRegistryArg(n, p));
+        const _argWrite = writeFn || ((n, v, p) => window.proffieArgs.writeRegistryArg(n, v, p));
         const row = document.createElement('div');
         row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:1px 0;';
-        const result  = window.proffieArgs.readRegistryArg(regArg.name, currentParens());
+        const result  = _argRead(regArg.name, currentParens());
         let curVals   = result.isDefault ? null : result.values.map(v => v != null ? v : 0);
         const defVals = regArg.kind === 'RgbArg'
           ? window.proffieArgs.resolveColorDefault(regArg.defaultExpr || '')
@@ -8580,7 +8784,7 @@ require(['vs/editor/editor.main'], function () {
               if (swatchCtrl) swatchCtrl.setColor([_nr8, _ng8, _nb8]);
               else swatch.style.background = styleArgResolver.proffieToCSS(newVals[0], newVals[1], newVals[2]);
               swatch.title = window.proffieArgs ? window.proffieArgs.colorLabel(newVals[0]||0, newVals[1]||0, newVals[2]||0) : `Rgb<${_nr8},${_ng8},${_nb8}>`;
-              const np = window.proffieArgs.writeRegistryArg(regArg.name, newVals, currentParens());
+              const np = _argWrite(regArg.name, newVals, currentParens());
               slot.colorArg = np; _modifySlotParens(slot, np);
               curVals = [...newVals]; updateReset();
             });
@@ -8595,7 +8799,7 @@ require(['vs/editor/editor.main'], function () {
           numInput.addEventListener('click', e => e.stopPropagation());
           numInput.addEventListener('change', () => {
             const val = parseInt(numInput.value, 10) || 0;
-            const np = window.proffieArgs.writeRegistryArg(regArg.name, [val], currentParens());
+            const np = _argWrite(regArg.name, [val], currentParens());
             slot.colorArg = np; _modifySlotParens(slot, np);
             curVals = [val]; updateReset();
           });
@@ -8608,6 +8812,8 @@ require(['vs/editor/editor.main'], function () {
         row.appendChild(lbl);
 
         let resetBtn = null;
+        row._isChanged = false;
+        row._onStateChange = null;
         function updateReset() {
           lbl.textContent = curVals ? regArg.name : `${regArg.name} (default)`;
           if (curVals && !resetBtn) {
@@ -8617,7 +8823,7 @@ require(['vs/editor/editor.main'], function () {
             resetBtn.title = 'Clear runtime override';
             resetBtn.addEventListener('click', e => {
               e.stopPropagation();
-              const np = window.proffieArgs.writeRegistryArg(regArg.name, null, currentParens());
+              const np = _argWrite(regArg.name, null, currentParens());
               slot.colorArg = np; _modifySlotParens(slot, np);
               curVals = null;
               if (swatch) {
@@ -8628,8 +8834,10 @@ require(['vs/editor/editor.main'], function () {
               updateReset();
             });
             row.appendChild(resetBtn);
+            if (!row._isChanged) { row._isChanged = true; row._onStateChange?.(); }
           } else if (!curVals && resetBtn) {
             resetBtn.remove(); resetBtn = null;
+            if (row._isChanged) { row._isChanged = false; row._onStateChange?.(); }
           }
         }
         updateReset();
@@ -8701,16 +8909,19 @@ require(['vs/editor/editor.main'], function () {
       const originalExpr = fullSlotText;
 
       function updateApplyState() {
-        const v = ta.value.trim();
-        if (!v || v === originalExpr) {
+        const raw = ta.value.trim();
+        if (!raw || raw === originalExpr) {
           okBtn.disabled = true;
-          okBtn.title = v === originalExpr ? 'No changes to apply' : 'Enter an expression';
-        } else if (!_validateSlotExpression(v)) {
-          okBtn.disabled = true;
-          okBtn.title = 'Check bracket balance';
+          okBtn.title = raw === originalExpr ? 'No changes to apply' : 'Enter an expression';
         } else {
-          okBtn.disabled = false;
-          okBtn.title = 'Apply (Ctrl+Enter)';
+          const norm = _normalizeCustomExpr(raw);
+          if (!norm || !_validateSlotExpression(norm)) {
+            okBtn.disabled = true;
+            okBtn.title = 'Check bracket balance';
+          } else {
+            okBtn.disabled = false;
+            okBtn.title = 'Apply (Ctrl+Enter)';
+          }
         }
       }
 
@@ -8730,10 +8941,12 @@ require(['vs/editor/editor.main'], function () {
       ta.addEventListener('click', e => e.stopPropagation());
 
       function applyEdit() {
-        const v = ta.value.trim();
-        if (!v || v === originalExpr) return;
+        const raw = ta.value.trim();
+        if (!raw || raw === originalExpr) return;
+        const leadingComment = _extractLeadingComment(raw);
+        const v = _normalizeCustomExpr(raw);
         if (!_validateSlotExpression(v)) { ta.classList.add('invalid'); return; }
-        _commitSlotEdit(slot, v);
+        _commitSlotEdit(slot, v, leadingComment);
         // Reopen only if expression resolves to a known library name
         const innerName = (v.match(/^(\w+)/) || [])[1];
         if (innerName && helperNames.has(innerName)) {
@@ -8771,12 +8984,20 @@ require(['vs/editor/editor.main'], function () {
         addToLibBtn.title = 'Save this expression as a new style in your Style Library';
         addToLibBtn.addEventListener('click', e => {
           e.stopPropagation();
-          const defaultName = _styleNameFromDisplay(preset.displayName || '');
-          _openAddStyleModalWithExpr(ta.value.trim(), defaultName, newStyleName => {
+          if (!_addStyleEditor) window.initStylesPanel?.();
+          _addStyleConfirmCallback = newStyleName => {
             _commitSlotEdit(slot, `${originalWrapper}<${newStyleName}>()`);
             _reopenAfterRebuild = { presetIdx: _selectedPresetIndex, slotIdx };
             _closeSlotArgEdit();
-          });
+          };
+          _openAddStyleModal();
+          // Pull the full text from the editor (includes leading /* comment */ if present)
+          const fullText = _getFullSlotTextFromEditor(slot);
+          if (!fullText) return;
+          const parsed = _parseClipboardStyle(fullText);
+          // Fall back to preset display name if the comment didn't supply one
+          if (!parsed.name) parsed.name = _styleNameFromDisplay(preset.displayName || '');
+          _applyParsedStyleResult(parsed);
         });
         customBtnRow.appendChild(addToLibBtn);
       }
@@ -9031,28 +9252,146 @@ require(['vs/editor/editor.main'], function () {
 
       // Args panel (shown in library mode, hidden in custom mode)
       const advContent = document.createElement('div');
-      advContent.style.cssText = 'display:none;flex-direction:column;gap:2px;margin-top:2px;';
-      for (let i = 1; i < registryArgs.length; i++) advContent.appendChild(makeArgRow(registryArgs[i]));
+      advContent.style.cssText = 'display:flex;flex-direction:column;gap:2px;margin-top:2px;';
+      const _advRows = [];
+      for (let i = 1; i < registryArgs.length; i++) {
+        const _ar = makeArgRow(registryArgs[i], _inlineArgReadFn, _inlineArgWriteFn);
+        _ar._onStateChange = () => _refreshAdvVisibility();
+        _advRows.push(_ar);
+        advContent.appendChild(_ar);
+      }
+      let advOpen = false;
+      function _refreshAdvVisibility() {
+        _advRows.forEach(r => { r.style.display = (advOpen || r._isChanged) ? 'flex' : 'none'; });
+      }
+      _refreshAdvVisibility();
 
       let primaryRow = null;
       let advBtn     = null;
       if (registryArgs.length > 0) {
-        primaryRow = makeArgRow(registryArgs[0]);
+        primaryRow = makeArgRow(registryArgs[0], _inlineArgReadFn, _inlineArgWriteFn);
         primaryRow.style.marginTop = '4px';
         body.appendChild(primaryRow);
 
         if (registryArgs.length > 1) {
-          let advOpen = false;
           advBtn = document.createElement('button');
           advBtn.style.cssText = 'all:unset;cursor:pointer;font-size:0.65rem;color:var(--c-text-muted);padding:0 2px;white-space:nowrap;display:block;margin-top:1px;';
           advBtn.textContent = 'Advanced ▾';
           advBtn.addEventListener('click', e => {
             e.stopPropagation();
             advOpen = !advOpen;
-            advContent.style.display = advOpen ? 'flex' : 'none';
+            _refreshAdvVisibility();
             advBtn.textContent = advOpen ? 'Advanced ▴' : 'Advanced ▾';
           });
           body.appendChild(advBtn);
+        }
+      } else if (window.proffieArgs) {
+        // No RgbArg — look for a hardcoded color in the library definition (read-only)
+        // or directly in slot.expr for custom expressions (editable).
+        let _hcRgb16 = null, _isLibHardcoded = false;
+        let _hcMatchStr = null, _hcMatchIndex = null;
+
+        // 1. Library style: scan its definition text
+        if (helperBaseName) {
+          const _defTxt2 = _getHelperDefinitionText(helperBaseName);
+          if (_defTxt2) {
+            const _hcRe = /\b([A-Z][A-Za-z]*)\b/g;
+            let _hcm;
+            while ((_hcm = _hcRe.exec(_defTxt2)) !== null) {
+              const _hcr = window.proffieArgs.resolveColorDefault(_hcm[1]);
+              if (_hcr[0] || _hcr[1] || _hcr[2]) { _hcRgb16 = _hcr; _isLibHardcoded = true; break; }
+            }
+          }
+        }
+
+        // 2. Custom expression: scan slot.expr directly (editable result)
+        if (!_hcRgb16 && !isLibrarySlot) {
+          const _he = slot.expr || '';
+          const _hm16 = /\bRgb16\s*<\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*>/.exec(_he);
+          const _hm8  = /\bRgb\s*<\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*>/.exec(_he);
+          let _namedPos = Infinity, _namedRgb16 = null, _namedStr = null;
+          const _cwRe = /\b([A-Z][A-Za-z]*)\b/g;
+          let _cwm;
+          while ((_cwm = _cwRe.exec(_he)) !== null) {
+            const _res = window.proffieArgs.resolveColorDefault(_cwm[1]);
+            if (_res[0] || _res[1] || _res[2]) { _namedRgb16 = _res; _namedPos = _cwm.index; _namedStr = _cwm[1]; break; }
+          }
+          const _p16 = _hm16 ? _hm16.index : Infinity;
+          const _p8  = _hm8  ? _hm8.index  : Infinity;
+          const _pMin = Math.min(_p16, _p8, _namedPos);
+          if (_pMin < Infinity) {
+            if (_pMin === _p16) {
+              _hcRgb16 = [parseInt(_hm16[1],10), parseInt(_hm16[2],10), parseInt(_hm16[3],10)];
+              _hcMatchStr = _hm16[0]; _hcMatchIndex = _hm16.index;
+            } else if (_pMin === _p8) {
+              _hcRgb16 = window.proffieArgs.resolveColorDefault(`Rgb<${_hm8[1]},${_hm8[2]},${_hm8[3]}>`);
+              _hcMatchStr = _hm8[0]; _hcMatchIndex = _hm8.index;
+            } else {
+              _hcRgb16 = _namedRgb16;
+              _hcMatchStr = _namedStr; _hcMatchIndex = _namedPos;
+            }
+          }
+        }
+
+        if (_hcRgb16) {
+          const _hcRow = document.createElement('div');
+          _hcRow.style.cssText = 'display:flex;align-items:center;gap:6px;padding:1px 0;margin-top:4px;';
+          const _hcSwatch = document.createElement('span');
+          _hcSwatch.style.cssText = `width:20px;height:20px;border-radius:50%;display:inline-block;overflow:hidden;flex-shrink:0;cursor:${_isLibHardcoded ? 'default' : 'pointer'};`;
+          const _hcR8 = Math.round((_hcRgb16[0]||0)/257), _hcG8 = Math.round((_hcRgb16[1]||0)/257), _hcB8 = Math.round((_hcRgb16[2]||0)/257);
+          _hcSwatch.title = window.proffieArgs ? window.proffieArgs.colorLabel(_hcRgb16[0], _hcRgb16[1], _hcRgb16[2]) : `Rgb<${_hcR8},${_hcG8},${_hcB8}>`;
+          let _hcSwCtrl = null;
+          try {
+            _hcSwCtrl = GlowSwatch.create({ animated: false, width: 18, height: 18, color: [_hcR8, _hcG8, _hcB8] });
+            _hcSwCtrl.element.style.clipPath = 'circle(50% at 50% 50%)';
+            _hcSwCtrl.element.style.pointerEvents = 'none';
+            _hcSwatch.appendChild(_hcSwCtrl.element);
+          } catch(e) { _hcSwatch.style.background = `rgb(${_hcR8},${_hcG8},${_hcB8})`; }
+          _hcRow.appendChild(_hcSwatch);
+          const _hcLbl = document.createElement('span');
+          _hcLbl.style.cssText = 'font-size:0.68rem;color:var(--c-text-muted);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+          _hcLbl.textContent = 'Detected Base Color' + (_isLibHardcoded ? ' (Style Library)' : '');
+          if (!_isLibHardcoded) _hcLbl.title = 'Changing this updates matching color values in the style, but complex styles may require manual edits for consistent results.';
+          _hcRow.appendChild(_hcLbl);
+
+          if (_isLibHardcoded) {
+            _hcRow.title = 'Color is set in the Style Library and cannot be changed here — write a custom expression to override it';
+          } else {
+            const _initRgb2  = _hcRgb16.slice();
+            const _matchStr2 = _hcMatchStr;
+            _hcSwatch.addEventListener('click', e => {
+              e.stopPropagation();
+              _openColorPopup(_hcSwatch, _initRgb2, newVals => {
+                const _nr8 = Math.round((newVals[0]||0)/257);
+                const _ng8 = Math.round((newVals[1]||0)/257);
+                const _nb8 = Math.round((newVals[2]||0)/257);
+                const _lbl = window.proffieArgs?.colorLabel(newVals[0]||0, newVals[1]||0, newVals[2]||0);
+                const _tok = (_lbl && window.proffieArgs?.isNamedColor?.(_lbl)) ? _lbl : `Rgb<${_nr8},${_ng8},${_nb8}>`;
+                if (_hcSwCtrl) _hcSwCtrl.setColor([_nr8, _ng8, _nb8]);
+                else _hcSwatch.style.background = `rgb(${_nr8},${_ng8},${_nb8})`;
+                _hcSwatch.title = window.proffieArgs ? window.proffieArgs.colorLabel(newVals[0]||0, newVals[1]||0, newVals[2]||0) : `Rgb<${_nr8},${_ng8},${_nb8}>`;
+                const _model = editor?.getModel();
+                if (!_model) return;
+                const _freshText = _model.getValueInRange({
+                  startLineNumber: slot.startLine, startColumn: slot.startCol + 1,
+                  endLineNumber:   slot.endLine,   endColumn:   slot.endCol + 1,
+                });
+                if (_freshText.indexOf(_matchStr2) < 0) return;
+                const _newFull = _matchStr2.includes('<')
+                  ? _freshText.split(_matchStr2).join(_tok)
+                  : _freshText.replace(new RegExp('\\b' + _matchStr2.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'g'), _tok);
+                editor.executeEdits('preset-slot-edit', [{
+                  range: { startLineNumber: slot.startLine, startColumn: slot.startCol + 1,
+                           endLineNumber: slot.endLine, endColumn: slot.endCol + 1 },
+                  text: _newFull,
+                }]);
+                editor.focus();
+              }, { disclaimer: true });
+            });
+          }
+
+          body.appendChild(_hcRow);
+          primaryRow = _hcRow;
         }
       }
 
@@ -9083,9 +9422,8 @@ require(['vs/editor/editor.main'], function () {
         if (comboWrap)   comboWrap.style.display    = 'none';
         if (tpSection)   tpSection.style.display    = 'none';
         if (customLink)  customLink.style.display   = 'none';
-        if (primaryRow)  primaryRow.style.display   = 'none';
-        if (advBtn)      advBtn.style.display       = 'none';
-                         advContent.style.display   = 'none'; // close Advanced if open
+        if (primaryRow)  primaryRow.style.display   = 'flex';
+        if (advBtn)      advBtn.style.display       = 'block';
                          okBtn.style.display        = '';
         setTimeout(() => { ta.focus(); ta.select(); }, 0);
       }
@@ -9182,7 +9520,7 @@ require(['vs/editor/editor.main'], function () {
     const _COLOR_PER_PAGE = 4;
     const _COLOR_PAGES    = 3;
 
-    function _openColorPopup(anchorEl, initProffieVals, onChange) {
+    function _openColorPopup(anchorEl, initProffieVals, onChange, opts) {
       _closeColorPopup();
       let cr = Math.round((initProffieVals[0]||0)/257);
       let cg = Math.round((initProffieVals[1]||0)/257);
@@ -9326,6 +9664,13 @@ require(['vs/editor/editor.main'], function () {
         nameSel.addEventListener('click', e => e.stopPropagation());
         nameSel.addEventListener('wheel', e => e.stopPropagation());
         popup.appendChild(nameSel);
+      }
+
+      if (opts?.disclaimer) {
+        const disc = document.createElement('div');
+        disc.style.cssText = 'font-size:0.6rem;color:var(--c-text-muted);margin-top:5px;line-height:1.3;opacity:0.75;text-align:center;width:100%;box-sizing:border-box;overflow-wrap:break-word;';
+        disc.textContent = 'Best effort update but complex styles may still need manual changes';
+        popup.appendChild(disc);
       }
 
       // ── Helpers ───────────────────────────────────────────────────────
@@ -9558,6 +9903,37 @@ require(['vs/editor/editor.main'], function () {
       _closeSlotArgEdit();
     }
 
+    // Extracts the leading /* ... */ comment block(s) from pasted text (e.g. Fett263 headers).
+    function _extractLeadingComment(v) {
+      const m = v.match(/^(\s*\/\*[\s\S]*?\*\/\s*)+/);
+      return m ? m[0].trim() : null;
+    }
+
+    function _normalizeCustomExpr(v) {
+      if (!v) return v;
+      // Ref style — use as-is
+      if (v.startsWith('&')) return v;
+      // Strip trailing comma (common when copying from an array context)
+      v = v.replace(/\s*,\s*$/, '').trim();
+      // Already a recognised StylePtr wrapper — use as-is
+      if (/^\w*StylePtr\s*</.test(v)) return v;
+      // Strip leading and trailing /* ... */ block comments (Fett263 headers/footers)
+      v = v.replace(/^(\s*\/\*[\s\S]*?\*\/\s*)+/, '').trim();
+      v = v.replace(/(\s*\/\*[\s\S]*?\*\/\s*)+$/, '').trim();
+      // Re-check after stripping comments
+      if (/^\w*StylePtr\s*</.test(v)) return v;
+      // Strip 'using Name = expr;' → keep the expression only
+      const um = v.match(/^using\s+\w+\s*=\s*([\s\S]*?)\s*;?\s*$/);
+      if (um) {
+        const extracted = um[1].trim();
+        if (/^\w*StylePtr\s*</.test(extracted)) return extracted;
+        v = extracted;
+      }
+      // Strip trailing () — StylePtr<T>() supplies its own parens
+      v = v.replace(/\(\s*\)\s*$/, '').trim();
+      return v;
+    }
+
     function _validateSlotExpression(v) {
       if (!v) return false;
       let angle = 0, paren = 0;
@@ -9571,21 +9947,31 @@ require(['vs/editor/editor.main'], function () {
       return angle === 0 && paren === 0;
     }
 
-    function _commitSlotEdit(slot, newExpr) {
+    function _commitSlotEdit(slot, newExpr, leadingComment) {
       if (!editor) return;
-      let replacement;
-      if (newExpr.startsWith('&')) {
-        replacement = newExpr;
+      const exprText = newExpr.startsWith('&') ? newExpr
+        : /^\w*StylePtr\s*</.test(newExpr) ? newExpr : `StylePtr<${newExpr}>()`;
+
+      if (leadingComment) {
+        // Replace any existing comment above the slot together with the slot itself,
+        // inserting the new comment followed by the expression at the slot's indent.
+        const indent = ' '.repeat(slot.startCol);
+        editor.executeEdits('preset-slot-edit', [{
+          range: {
+            startLineNumber: _slotCommentStartLine(slot), startColumn: 1,
+            endLineNumber:   slot.endLine,                endColumn:   slot.endCol + 1,
+          },
+          text: leadingComment + '\n' + indent + exprText,
+        }]);
       } else {
-        replacement = /^\w*StylePtr\s*</.test(newExpr) ? newExpr : `StylePtr<${newExpr}>()`;
+        editor.executeEdits('preset-slot-edit', [{
+          range: {
+            startLineNumber: slot.startLine, startColumn: slot.startCol + 1,
+            endLineNumber:   slot.endLine,   endColumn:   slot.endCol + 1,
+          },
+          text: exprText,
+        }]);
       }
-      editor.executeEdits('preset-slot-edit', [{
-        range: {
-          startLineNumber: slot.startLine, startColumn: slot.startCol + 1,
-          endLineNumber:   slot.endLine,   endColumn:   slot.endCol + 1,
-        },
-        text: replacement,
-      }]);
       editor.focus();
     }
 
@@ -10026,6 +10412,71 @@ require(['vs/editor/editor.main'], function () {
       _selectedLive.clear();
       _selectedDisabled.clear();
       _selectedPresetIndex = 0;
+      _selectedDisabledPreset = null;
+      editor.focus();
+      _scheduleRebuild();
+    }
+
+    function _isolateSelected() {
+      if (!editor) return;
+      const result = presetParser.parsePresets(editor.getValue());
+      const arr    = result.arrays[_activeArrayIndex];
+      if (!arr) return;
+      const model = editor.getModel();
+      const edits = [];
+      // Disable live presets NOT in selection
+      for (let idx = 0; idx < arr.presets.length; idx++) {
+        if (_selectedLive.has(idx)) continue;
+        const preset = arr.presets[idx];
+        if (!preset) continue;
+        const inner = model.getValueInRange({
+          startLineNumber: preset.startLine, startColumn: 1,
+          endLineNumber:   preset.endLine,   endColumn: model.getLineMaxColumn(preset.endLine),
+        });
+        edits.push({
+          range: { startLineNumber: preset.startLine, startColumn: 1, endLineNumber: preset.endLine, endColumn: model.getLineMaxColumn(preset.endLine) },
+          text:  `/* @jmt-disabled\n${inner}\n*/`,
+        });
+      }
+      // Enable disabled presets IN selection
+      for (const startLine of _selectedDisabled) {
+        const dp = _disabledPresets.find(d => d.startLine === startLine);
+        if (!dp) continue;
+        const inner = model.getValueInRange({
+          startLineNumber: dp.startLine + 1, startColumn: 1,
+          endLineNumber:   dp.endLine - 1,   endColumn: model.getLineMaxColumn(dp.endLine - 1),
+        });
+        edits.push({
+          range: { startLineNumber: dp.startLine, startColumn: 1, endLineNumber: dp.endLine, endColumn: model.getLineMaxColumn(dp.endLine) },
+          text:  inner,
+        });
+      }
+      if (!edits.length) return;
+      edits.sort((a, b) => a.range.startLineNumber - b.range.startLineNumber);
+      editor.executeEdits('isolate-preset', edits);
+      _selectedDisabled.clear();
+      _selectedDisabledPreset = null;
+      editor.focus();
+      _scheduleRebuild();
+    }
+
+    function _enableAll() {
+      if (!editor || !_disabledPresets.length) return;
+      const model = editor.getModel();
+      const edits = [];
+      for (const dp of _disabledPresets) {
+        const inner = model.getValueInRange({
+          startLineNumber: dp.startLine + 1, startColumn: 1,
+          endLineNumber:   dp.endLine - 1,   endColumn: model.getLineMaxColumn(dp.endLine - 1),
+        });
+        edits.push({
+          range: { startLineNumber: dp.startLine, startColumn: 1, endLineNumber: dp.endLine, endColumn: model.getLineMaxColumn(dp.endLine) },
+          text:  inner,
+        });
+      }
+      edits.sort((a, b) => a.range.startLineNumber - b.range.startLineNumber);
+      editor.executeEdits('enable-all', edits);
+      _selectedDisabled.clear();
       _selectedDisabledPreset = null;
       editor.focus();
       _scheduleRebuild();
