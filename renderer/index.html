@@ -880,8 +880,12 @@
   .import-folder-row button { flex-shrink: 0; background: var(--c-border); color: var(--c-text); border: 1px solid var(--c-border-heavy); border-radius: 3px; padding: 5px 10px; font-size: 0.78rem; cursor: pointer; white-space: nowrap; }
   .import-folder-row button:hover { background: var(--c-border-strong); }
   .import-field-hint { font-size: 0.72rem; color: var(--c-text-dim); margin-top: 3px; }
-  #import-version-name { width: 100%; box-sizing: border-box; background: var(--c-bg-raised); border: 1px solid var(--c-border-strong); border-radius: 3px; color: var(--c-text); font-size: 0.8rem; padding: 5px 8px; outline: none; }
-  #import-version-name:focus { border-color: var(--jmt-blue); }
+  #import-version-name,
+  #import-proffie-version,
+  #dl-version-name { width: 100%; box-sizing: border-box; background: var(--c-bg-raised); border: 1px solid var(--c-border-strong); border-radius: 3px; color: var(--c-text); font-size: 0.8rem; padding: 5px 8px; outline: none; }
+  #import-version-name:focus,
+  #import-proffie-version:focus,
+  #dl-version-name:focus { border-color: var(--jmt-blue); }
   #import-version-error { font-size: 0.78rem; color: #e55; min-height: 18px; margin-top: 2px; }
   #import-progress-wrap { display: none; margin-top: 14px; }
   #import-progress-wrap span { font-size: 0.75rem; color: var(--c-text-muted); display: block; margin-bottom: 5px; }
@@ -1955,7 +1959,7 @@
         <button id="btn-styles-link"   class="btn-blue"  style="display:none" title='Adds #include "my_styles.h" to your config so ProffieOS can use your saved styles'>&#128279; Link Style Library</button>
       </div>
       <div class="tab-btns" id="tab-btns-versions">
-        <button id="btn-vp-download" class="btn-neutral" title="Download a ProffieOS version from GitHub">&#8595; Download Version</button>
+        <button id="btn-vp-download" class="btn-neutral" title="Download an official ProffieOS version from GitHub">&#8595; Download Version</button>
         <button id="btn-vp-import"   class="btn-blue"    title="Import a ProffieOS version folder">&#8593; Import Version</button>
       </div>
       <div class="tab-btns" id="tab-btns-styles">
@@ -2418,7 +2422,7 @@
         <button id="import-browse-btn">Browse...</button>
       </div>
       <div style="margin-top:6px;">
-        <button id="import-switch-to-download" style="background:none;border:none;color:var(--jmt-blue);font-size:0.75rem;cursor:pointer;padding:0;">&#8595; Download from GitHub instead</button>
+        <button id="import-switch-to-download" style="background:none;border:none;color:var(--jmt-blue);font-size:0.75rem;cursor:pointer;padding:0;">&#8595; Download from the official ProffieOS GitHub</button>
       </div>
     </div>
     <div class="import-field" id="import-source-field" style="display:none;">
@@ -2736,6 +2740,10 @@ document.getElementById('input-filename').addEventListener('input', updateBanner
 document.getElementById('input-desc').addEventListener('input', () => { updateBanner(); if (fileIsOpen) { setDirty(true); checkDescDupe(); } });
 
 // ── Status meta ────────────────────────────────────────
+function fmtDate(iso) {
+  if (!iso) return '';
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
 function fmtTimestamp(iso) {
   if (!iso) return '';
   const d = new Date(iso);
@@ -2759,7 +2767,7 @@ function updateStatusMeta() {
   const ts = document.getElementById('meta-timestamps');
   if (metaCreated || metaUpdated) {
     ts.style.display = '';
-    document.getElementById('meta-created-val').textContent = metaCreated ? fmtTimestamp(metaCreated) : '—';
+    document.getElementById('meta-created-val').textContent = metaCreated ? fmtDate(metaCreated) : '—';
     document.getElementById('meta-updated-val').textContent = metaUpdated ? fmtTimestamp(metaUpdated) : '—';
   } else {
     ts.style.display = 'none';
@@ -2801,10 +2809,20 @@ let baselineUsb     = null;
 function updateChangedIndicators() {
   const boardSel  = document.getElementById('input-board');
   const versionEl = document.getElementById('input-version');
-  boardSel.classList.toggle('field-changed',
-    baselineBoard !== null && boardSel.value !== baselineBoard);
-  versionEl.classList.toggle('field-changed',
-    baselineVersion !== null && versionEl.value !== baselineVersion);
+
+  const boardChanged = baselineBoard !== null && boardSel.value !== baselineBoard;
+  boardSel.classList.toggle('field-changed', boardChanged);
+  boardSel.title = boardChanged
+    ? (boardSel.value
+        ? `Board changed since last compile (was: ${baselineBoard}) — recompile before flashing`
+        : 'No board selected — select a board before compiling')
+    : '';
+
+  const versionChanged = baselineVersion !== null && versionEl.value !== baselineVersion;
+  versionEl.classList.toggle('field-changed', versionChanged);
+  versionEl.title = versionChanged
+    ? `OS version changed since last compile (was: ${baselineVersion}) — recompile before flashing`
+    : '';
 }
 window.getBaselineUsb = () => baselineUsb;
 
@@ -3955,8 +3973,26 @@ function _doInsertStylesInclude(lines, conflictIdx, action) {
   }
   if (insertAfter === -1) return;
 
+  // If JMT add-on includes exist within the same section as the insertion point,
+  // place my_styles.h after the last one so it can use the symbols they define.
+  // Only scan within the section (up to its closing #endif) — never cross sections.
+  const jmtFilePattern = /charge_state\.h|charge_full_prop\.h|jmt_fett263_wrapper\.h/;
+  const sectionEnd = lines.findIndex((l, i) => i > insertAfter && /^\s*#endif/.test(l));
+  const scanLimit  = sectionEnd !== -1 ? sectionEnd : lines.length;
+  let lastJmtIdx = -1;
+  for (let i = insertAfter; i < scanLimit; i++) {
+    if (/^\s*#include\s+/.test(lines[i]) && jmtFilePattern.test(lines[i])) {
+      lastJmtIdx = i;
+    }
+  }
+  if (lastJmtIdx !== -1) insertAfter = lastJmtIdx;
+
   lines.splice(insertAfter + 1, 0, `#include "${_stylesFilePath}"`);
+  const insertedLine = insertAfter + 2; // 1-based
   window._monacoEditor.setValue(lines.join('\n'));
+  window._monacoEditor.revealLineInCenter(insertedLine);
+  window._monacoEditor.setPosition({ lineNumber: insertedLine, column: 1 });
+  window._monacoEditor.focus();
   _updateStylesLinkBtn();
 }
 
@@ -4210,6 +4246,8 @@ function _applyStyleLibraryStructure(content, createdDate) {
   const norm = segs => segs.map(s => s.text.replace(/\s+$/, '')).join('\n\n');
 
   const parts = [jmtHeader, ''];
+  const preambleTrimmed = preamble.trim();
+  if (preambleTrimmed) { parts.push(preambleTrimmed, ''); }
   if (helperSegs.length) { parts.push(_SL_HELPER_HEADER, '', norm(helperSegs), ''); }
   if (styleSegs.length)  { parts.push(_SL_STYLE_HEADER,  '', norm(styleSegs),  ''); }
   return parts.join('\n');
@@ -6344,6 +6382,20 @@ async function _runPasteAndParse() {
 }
 
 document.getElementById('btn-add-style-paste').addEventListener('click', _runPasteAndParse);
+
+// Redirect Ctrl+A to Monaco when the config tab is active and no input has focus
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'a' && _activeTab === 'config' && window._monacoEditor) {
+    const tag = document.activeElement?.tagName;
+    const inInput = tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement?.isContentEditable;
+    const inMonaco = !!document.activeElement?.closest('.monaco-editor');
+    if (!inInput && !inMonaco) {
+      e.preventDefault();
+      window._monacoEditor.focus();
+      window._monacoEditor.trigger('keyboard', 'editor.action.selectAll', null);
+    }
+  }
+});
 
 document.addEventListener('keydown', e => {
   if (!document.getElementById('modal-add-style').classList.contains('active')) return;

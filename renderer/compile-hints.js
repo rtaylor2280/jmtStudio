@@ -6,7 +6,7 @@ const COMPILE_HINTS = [
 
   // 01:00 – 02:40
   "Hang in there, this can sometimes take a while\u2026",
-  "Compiling ProffieOS. Large configs take longer to process.",
+  "No errors so far. That\u2019s a good sign.",
   "Building blade styles and effects\u2026",
   "Optimizing memory usage for your config\u2026",
   "Your blade styles are being resolved into optimized machine code.",
@@ -14,7 +14,7 @@ const COMPILE_HINTS = [
   // 03:05 – 04:45
   "Good things take time\u2026 especially lightsabers.",
   "The compiler is resolving template parameters across your entire config.",
-  "No errors so far. That\u2019s a good sign.",
+  "Compiling ProffieOS. Large configs take longer to process.",
   "ProffieOS uses extensive C++ templates. Complex configs compile slowly by design.",
   "Each preset is being individually optimized.",
 

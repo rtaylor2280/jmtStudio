@@ -423,16 +423,35 @@ function updateBoardDisplay(name) {
   if (disp) disp.value = name || '';
 }
 
+const USB_LABELS = {
+  cdc:         'Serial',
+  cdc_msc:     'Serial + Mass Storage',
+  cdc_hid:     'Serial + Keyboard + Mouse',
+  cdc_msc_hid: 'Serial + Mass Storage + Keyboard + Mouse',
+  cdc_dap:     'Serial + CMSIS-DAP',
+  cdc_msc_dap: 'Serial + Mass Storage + CMSIS-DAP',
+  cdc_webusb:  'Serial + WebUSB',
+  none:        'No USB',
+};
+
 function updateUsbChangedIndicator() {
   const baseline = window.getBaselineUsb ? window.getBaselineUsb() : null;
-  el('bp-usb-select').classList.toggle('field-changed',
-    baseline !== null && selectedUsb !== baseline);
+  const changed  = baseline !== null && selectedUsb !== baseline;
+  const usbEl    = el('bp-usb-select');
+  usbEl.classList.toggle('field-changed', changed);
+  usbEl.title = changed
+    ? `USB mode changed since last compile (was: ${USB_LABELS[baseline] || baseline}) — recompile before flashing`
+    : '';
 }
 
 function updatePortChangedIndicator() {
   const lastPort = window.getLastPort ? window.getLastPort() : null;
-  el('bp-port-select').classList.toggle('field-changed',
-    lastPort !== null && selectedPort !== null && selectedPort !== lastPort);
+  const changed  = lastPort !== null && selectedPort !== null && selectedPort !== lastPort;
+  const portEl   = el('bp-port-select');
+  portEl.classList.toggle('field-changed', changed);
+  portEl.title = changed
+    ? `Port changed since last compile (was: ${lastPort}) — verify the correct board is connected`
+    : '';
 }
 
 // Auto-selects the meta bar board dropdown if it is currently empty

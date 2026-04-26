@@ -523,7 +523,17 @@ function renameVersion(oldName, newName) {
   try {
     fs.renameSync(resolved.folderPath, destPath);
     return { ok: true, newName: trimmed };
-  } catch (e) { return { ok: false, error: e.message }; }
+  } catch (e) {
+    if (e.code === 'EPERM' || e.code === 'EACCES') {
+      const hint = process.platform === 'darwin'
+        ? 'Close any Finder windows showing this folder and try again.'
+        : process.platform === 'win32'
+          ? 'Close any Explorer windows showing this folder and try again.'
+          : 'Close any file manager windows showing this folder and try again.';
+      return { ok: false, error: `Couldn't rename the folder — it may be open or briefly locked by the system. ${hint}` };
+    }
+    return { ok: false, error: e.message };
+  }
 }
 
 function duplicateVersion(versionName, newName) {
