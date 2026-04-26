@@ -537,13 +537,16 @@ let _releasesCache    = null;
 let _releasesCachedAt = 0;
 const RELEASES_CACHE_TTL = 60 * 1000; // 1 minute
 
+const _NETWORK_ERRORS = new Set(['ENOTFOUND', 'ECONNREFUSED', 'ETIMEDOUT', 'ECONNRESET', 'ENETUNREACH', 'EADDRNOTAVAIL']);
+
 function _httpsGet(url, headers, onData, redirectDepth = 0) {
   return new Promise((resolve, reject) => {
     if (redirectDepth > 5) return reject(new Error('Too many redirects'));
-    const https   = require('https');
-    const parsed  = new URL(url);
-    const opts    = { hostname: parsed.hostname, path: parsed.pathname + parsed.search, headers };
-    https.get(opts, res => {
+    const https  = require('https');
+    const parsed = new URL(url);
+    const opts   = { hostname: parsed.hostname, path: parsed.pathname + parsed.search, headers };
+
+    const req = https.get(opts, res => {
       if (res.statusCode === 301 || res.statusCode === 302) {
         return _httpsGet(res.headers.location, headers, onData, redirectDepth + 1)
           .then(resolve).catch(reject);
@@ -553,7 +556,17 @@ function _httpsGet(url, headers, onData, redirectDepth = 0) {
       res.on('data', chunk => { buf += chunk; if (onData) onData(chunk, res); });
       res.on('end', () => resolve(buf));
       res.on('error', reject);
-    }).on('error', reject);
+    });
+
+    req.setTimeout(15000, () => {
+      req.destroy(new Error('Request timed out — check your internet connection.'));
+    });
+
+    req.on('error', err => {
+      reject(_NETWORK_ERRORS.has(err.code)
+        ? new Error('No internet connection.')
+        : err);
+    });
   });
 }
 
