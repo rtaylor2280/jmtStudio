@@ -56,6 +56,19 @@ function _vpFileIcon(name) {
   return map[ext] || '·';
 }
 
+// ── Semver helpers ─────────────────────────────────────
+
+function _semverCompare(a, b) {
+  const pa = String(a).split('.').map(Number);
+  const pb = String(b).split('.').map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const na = pa[i] || 0, nb = pb[i] || 0;
+    if (na > nb) return  1;
+    if (na < nb) return -1;
+  }
+  return 0;
+}
+
 // ── Init ───────────────────────────────────────────────
 
 async function initVersionsPanel(initialName) {
@@ -142,7 +155,15 @@ function _vpRenderDetail(v) {
       <button class="vp-action-btn" id="vp-btn-export" title="Copy version folder to a location you choose">↗ Export</button>
       <button class="vp-action-btn" id="vp-btn-rename" title="Rename this version">✎ Rename</button>
       <button class="vp-action-btn danger" id="vp-btn-delete" title="Permanently delete this version">✕ Delete</button>
+      <div style="margin-left:auto;display:flex;align-items:center;gap:10px;">
+        ${v.jmtVersion ? `<span id="vp-jmt-version-label" style="font-size:0.75rem;color:var(--c-text-dim);">Includes JMT Add-ons v${_vpEsc(v.jmtVersion)}</span>` : '<span id="vp-jmt-version-label" style="display:none;font-size:0.75rem;color:var(--c-text-dim);"></span>'}
+        <button class="vp-action-btn vp-jmt-btn" id="vp-btn-jmt" title="${v.jmtVersion ? 'Check for updates to JMT add-on files' : 'Add JMT add-on files to this version'}">
+          ${v.jmtVersion ? '⚙ Check for Updates' : '⚙ Add JMT Features'}
+        </button>
+      </div>
     </div>
+
+    <div id="vp-jmt-panel" style="display:none;margin-bottom:18px;padding:12px;background:var(--c-bg-inset);border:1px solid var(--c-border);border-radius:5px;font-size:0.82rem;"></div>
 
     <div class="vp-section">
       <div class="vp-section-label">Notes</div>
@@ -154,7 +175,10 @@ function _vpRenderDetail(v) {
     </div>
 
     <div class="vp-section">
-      <div class="vp-section-label">File Browser</div>
+      <div class="vp-section-label" style="display:flex;align-items:center;gap:6px;">
+        File Browser
+        <button id="vp-btn-open-folder" title="Open in system folder" style="background:none;border:none;padding:1px 3px;cursor:pointer;font-size:0.85rem;opacity:0.5;line-height:1;border-radius:3px;filter:grayscale(1);" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.5'">📂</button>
+      </div>
       <div class="vp-search-wrap">
         <input type="text" id="vp-search" class="vp-search-input" placeholder="Search files and folders…" autocomplete="off" spellcheck="false" />
         <span id="vp-search-clear" class="vp-search-clear" style="display:none;">&#10005;</span>
@@ -197,9 +221,11 @@ function _vpRenderDetail(v) {
 
   // Action buttons
   document.getElementById('vp-btn-duplicate')?.addEventListener('click', () => _vpDuplicate(v));
+  document.getElementById('vp-btn-open-folder')?.addEventListener('click', () => window.electronAPI.openVersionFolder(v.name));
   document.getElementById('vp-btn-export')?.addEventListener('click', () => _vpExport(v));
   document.getElementById('vp-btn-rename')?.addEventListener('click', () => _vpRename(v));
   document.getElementById('vp-btn-delete')?.addEventListener('click', () => _vpDelete(v));
+  document.getElementById('vp-btn-jmt')?.addEventListener('click', () => _vpJmtFlow(v));
 
   // File tree — start inside ProffieOS/
   const treeEl = document.getElementById('vp-tree');
@@ -469,30 +495,252 @@ async function _vpExport(v) {
   // On success, shell.showItemInFolder is called from main process
 }
 
-async function _vpRename(v) {
-  const newName = prompt(`Rename "${v.name}" to:`, v.name);
-  if (newName === null || newName.trim() === v.name) return;
-  const result = await window.electronAPI.renameVersion(v.name, newName.trim());
-  if (result.ok) {
-    _vpSelected = { ...v, name: result.newName };
-    await vpRefresh();
-  } else {
-    alert(`Could not rename: ${result.error}`);
-  }
+function _vpRename(v) {
+  const nameEl = document.querySelector('.vp-detail-name');
+  if (!nameEl || nameEl.dataset.renaming) return;
+  nameEl.dataset.renaming = '1';
+
+  const original = v.name;
+  const wrap = nameEl.parentElement;
+
+  const input = document.createElement('input');
+  input.value = original;
+  input.style.cssText = 'flex:1;font-size:1.05rem;font-weight:700;padding:2px 6px;background:var(--c-bg-inset);border:1px solid var(--c-border-strong);border-radius:3px;color:var(--c-text-bright);outline:none;min-width:0;';
+
+  const confirm = document.createElement('button');
+  confirm.textContent = '✓';
+  confirm.className   = 'vp-action-btn primary';
+  confirm.style.cssText = 'padding:2px 8px;font-size:0.8rem;';
+
+  const cancel = document.createElement('button');
+  cancel.textContent = '✕';
+  cancel.className   = 'vp-action-btn';
+  cancel.style.cssText = 'padding:2px 8px;font-size:0.8rem;';
+
+  const errEl = document.createElement('span');
+  errEl.style.cssText = 'font-size:0.75rem;color:#e44;margin-left:6px;';
+
+  nameEl.replaceWith(input);
+  wrap.appendChild(confirm);
+  wrap.appendChild(cancel);
+  wrap.appendChild(errEl);
+  input.focus();
+  input.select();
+
+  const finish = () => {
+    confirm.remove(); cancel.remove(); errEl.remove();
+    input.replaceWith(nameEl);
+    delete nameEl.dataset.renaming;
+  };
+
+  const doRename = async () => {
+    const trimmed = input.value.trim();
+    if (!trimmed || trimmed === original) { finish(); return; }
+    confirm.disabled = cancel.disabled = true;
+    const result = await window.electronAPI.renameVersion(original, trimmed);
+    if (result.ok) {
+      _vpSelected = { ...v, name: result.newName };
+      finish();
+      await vpRefresh();
+      window.vpSelectVersion(result.newName);
+    } else {
+      errEl.textContent = result.error;
+      confirm.disabled = cancel.disabled = false;
+      input.focus();
+    }
+  };
+
+  confirm.addEventListener('click', doRename);
+  cancel.addEventListener('click', finish);
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter')  doRename();
+    if (e.key === 'Escape') finish();
+  });
 }
 
-async function _vpDelete(v) {
-  const confirmed = confirm(
-    `Delete "${v.name}"?\n\nThis will permanently remove the version folder and cannot be undone.`
-  );
-  if (!confirmed) return;
-  const result = await window.electronAPI.deleteVersion(v.name);
-  if (result.ok) {
-    _vpSelected = null;
-    await vpRefresh();
-  } else {
-    alert(`Could not delete: ${result.error}`);
+function _vpDelete(v) {
+  const panel = document.getElementById('vp-jmt-panel');
+  if (!panel) return;
+
+  panel.style.display = '';
+  panel.innerHTML = `
+    <div style="margin-bottom:10px;"><strong>Delete "${_vpEsc(v.name)}"?</strong></div>
+    <div style="font-size:0.8rem;color:var(--c-text-sub);margin-bottom:12px;">This will permanently remove the version folder and cannot be undone.</div>
+    <div style="display:flex;gap:8px;">
+      <button id="vp-del-confirm" class="vp-action-btn danger">Delete</button>
+      <button id="vp-del-cancel"  class="vp-action-btn">Cancel</button>
+      <span   id="vp-del-error"   style="font-size:0.78rem;color:#e44;"></span>
+    </div>
+  `;
+
+  document.getElementById('vp-del-cancel').addEventListener('click', () => {
+    panel.style.display = 'none';
+    panel.innerHTML = '';
+  });
+
+  document.getElementById('vp-del-confirm').addEventListener('click', async () => {
+    document.getElementById('vp-del-confirm').disabled = true;
+    document.getElementById('vp-del-cancel').disabled  = true;
+    const result = await window.electronAPI.deleteVersion(v.name);
+    if (result.ok) {
+      _vpSelected = null;
+      await vpRefresh();
+    } else {
+      document.getElementById('vp-del-error').textContent = result.error;
+      document.getElementById('vp-del-confirm').disabled = false;
+      document.getElementById('vp-del-cancel').disabled  = false;
+    }
+  });
+}
+
+// ── JMT Features flow ──────────────────────────────────
+
+function _vpJmtWireConfirm(v, btn, panel, isFirstTime) {
+  document.getElementById('vp-jmt-cancel')?.addEventListener('click', () => {
+    panel.style.display = 'none';
+    panel.innerHTML     = '';
+    btn.disabled        = false;
+  });
+
+  document.getElementById('vp-jmt-confirm')?.addEventListener('click', async () => {
+    document.getElementById('vp-jmt-confirm').disabled = true;
+    document.getElementById('vp-jmt-cancel').disabled  = true;
+    const statusEl = document.getElementById('vp-jmt-status');
+
+    const unsub = window.electronAPI.onJmtProgress(({ file, done, total }) => {
+      if (statusEl) statusEl.textContent = `${done}/${total} — ${file}`;
+    });
+
+    const applyResult = await window.electronAPI.applyJmtFeatures(v.name);
+    unsub();
+
+    if (!applyResult.ok) {
+      panel.innerHTML = `<span style="color:#e44;">Failed: ${_vpEsc(applyResult.error)}</span>`;
+      btn.disabled = false;
+      return;
+    }
+
+    v.jmtVersion    = applyResult.jmtVersion;
+    btn.disabled    = false;
+    btn.textContent = '⚙ Check for Updates';
+
+    const labelEl = document.getElementById('vp-jmt-version-label');
+    if (labelEl) {
+      labelEl.textContent = `Includes JMT Add-ons v${applyResult.jmtVersion}`;
+      labelEl.style.display = '';
+    }
+
+    if (isFirstTime && !v.name.includes('+JMT')) {
+      const newName      = `${v.name} +JMT`;
+      const renameResult = await window.electronAPI.renameVersion(v.name, newName);
+      if (renameResult.ok) {
+        _vpSelected = { ...v, name: renameResult.newName, jmtVersion: applyResult.jmtVersion };
+        await vpRefresh();
+        window.vpSelectVersion(renameResult.newName);
+        const versions = await window.electronAPI.listProffieVersions();
+        const verSel   = document.getElementById('input-version');
+        if (verSel && window.populateVersionSelect) {
+          window.populateVersionSelect(verSel, versions, verSel.value || verSel.dataset.lastValue || '');
+        }
+      }
+    }
+
+    panel.innerHTML = `<span style="color:#4a4;">✓ JMT Add-ons v${_vpEsc(applyResult.jmtVersion)} ${isFirstTime ? 'added' : 'updated'} successfully.</span>`;
+    setTimeout(() => { panel.style.display = 'none'; panel.innerHTML = ''; }, 3000);
+  });
+}
+
+async function _vpJmtFlow(v) {
+  const panel  = document.getElementById('vp-jmt-panel');
+  const btn    = document.getElementById('vp-btn-jmt');
+  if (!panel || !btn) return;
+
+  btn.disabled   = true;
+  panel.style.display = '';
+  panel.innerHTML = '<span style="color:var(--c-text-sub);">Fetching manifest…</span>';
+
+  const result = await window.electronAPI.fetchJmtManifest();
+  if (!result.ok) {
+    panel.innerHTML = `<span style="color:#e44;">Could not fetch JMT manifest: ${_vpEsc(result.error)}</span>`;
+    btn.disabled = false;
+    return;
   }
+
+  const manifest      = result.manifest;
+  const installedVer  = v.jmtVersion || null;
+  const hasUpdate     = installedVer && _semverCompare(manifest.version, installedVer) > 0;
+  const isFirstTime   = !installedVer;
+  const proffieVer    = v.proffieVersion || null;
+
+  // Compatibility
+  let compatHtml = '';
+  if (!proffieVer) {
+    compatHtml = `<div style="color:var(--c-text-dim);margin-bottom:8px;">⚠ ProffieOS version unknown — cannot verify compatibility.</div>`;
+  } else if (_semverCompare(proffieVer, manifest.minProffieVersion) < 0) {
+    panel.innerHTML = `<span style="color:#e44;">⛔ Requires ProffieOS ${_vpEsc(manifest.minProffieVersion)} or higher. This version is ${_vpEsc(proffieVer)}.</span>`;
+    btn.disabled = false;
+    return;
+  } else if (_semverCompare(proffieVer, manifest.testedUpTo) > 0) {
+    compatHtml = `<div style="color:#c90;margin-bottom:8px;">⚠ Not yet tested with ProffieOS ${_vpEsc(proffieVer)} (tested up to ${_vpEsc(manifest.testedUpTo)}). Proceed at your own risk.</div>`;
+  } else {
+    compatHtml = `<div style="color:#4a4;margin-bottom:8px;">✓ Compatible with ProffieOS ${_vpEsc(proffieVer)}.</div>`;
+  }
+
+  if (!isFirstTime && !hasUpdate) {
+    if (manifest.files.some(f => f.sha256)) {
+      const integrity = await window.electronAPI.checkJmtIntegrity(v.name, manifest.files);
+      const bad = integrity.ok ? integrity.results.filter(r => r.status !== 'ok') : [];
+      if (bad.length > 0) {
+        const badList = bad.map(r => `<li style="color:var(--c-text-sub);margin:2px 0;">${_vpEsc(r.path)} <span style="color:#e44;">(${r.status})</span></li>`).join('');
+        panel.innerHTML = `
+          ${compatHtml}
+          <div style="color:#c90;margin-bottom:8px;">⚠ ${bad.length} JMT file${bad.length > 1 ? 's have' : ' has'} been modified or is missing:</div>
+          <ul style="margin:0 0 12px 16px;padding:0;font-size:0.78rem;">${badList}</ul>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <button id="vp-jmt-confirm" class="vp-action-btn primary">Reinstall</button>
+            <button id="vp-jmt-cancel"  class="vp-action-btn">Cancel</button>
+            <span   id="vp-jmt-status"  style="font-size:0.78rem;color:var(--c-text-sub);"></span>
+          </div>`;
+        _vpJmtWireConfirm(v, btn, panel, false);
+        return;
+      }
+    }
+    panel.innerHTML = `${compatHtml}<span style="color:var(--c-text-sub);">JMT Add-ons v${_vpEsc(installedVer)} is up to date.</span>`;
+    btn.disabled = false;
+    return;
+  }
+
+  const action   = isFirstTime ? 'Add' : 'Update';
+  const fromTo   = isFirstTime ? `v${_vpEsc(manifest.version)}` : `v${_vpEsc(installedVer)} → v${_vpEsc(manifest.version)}`;
+  const fileList = manifest.files.map(f => `<li style="color:var(--c-text-sub);margin:2px 0;">${_vpEsc(f.path)}</li>`).join('');
+
+  const installedMajor = installedVer ? parseInt(installedVer.split('.')[0], 10) : null;
+  const manifestMajor  = parseInt(manifest.version.split('.')[0], 10);
+  const isMajorUpdate  = !isFirstTime && installedMajor !== null && manifestMajor > installedMajor;
+
+  const majorWarnHtml = isMajorUpdate
+    ? `<div style="color:#c90;margin-bottom:8px;font-size:0.8rem;">⚠ This is a major version update. Your existing configs may reference features that have changed — review them after updating.</div>`
+    : '';
+
+  const overwriteNote = !isFirstTime
+    ? `<div style="margin-bottom:12px;font-size:0.75rem;color:var(--c-text-dim);font-style:italic;">Existing JMT files will be overwritten. Your ProffieOS source files are not modified.</div>`
+    : `<div style="margin-bottom:12px;font-size:0.75rem;color:var(--c-text-dim);font-style:italic;">These files do not modify existing ProffieOS source files and are only used if included in a config. Any existing copies will be replaced.</div>`;
+
+  panel.innerHTML = `
+    ${compatHtml}
+    ${majorWarnHtml}
+    <div style="margin-bottom:8px;"><strong>${action} JMT Add-ons ${fromTo}</strong></div>
+    <div style="margin-bottom:8px;color:var(--c-text-dim);font-size:0.78rem;">The following files will be ${isFirstTime ? 'added to' : 'updated in'} this ProffieOS version:</div>
+    <ul style="margin:0 0 8px 16px;padding:0;font-size:0.78rem;">${fileList}</ul>
+    ${overwriteNote}
+    <div style="display:flex;gap:8px;align-items:center;">
+      <button id="vp-jmt-confirm" class="vp-action-btn primary">${action}</button>
+      <button id="vp-jmt-cancel"  class="vp-action-btn">Cancel</button>
+      <span   id="vp-jmt-status"  style="font-size:0.78rem;color:var(--c-text-sub);"></span>
+    </div>
+  `;
+
+  _vpJmtWireConfirm(v, btn, panel, isFirstTime);
 }
 
 // ── Exports ────────────────────────────────────────────

@@ -71,7 +71,7 @@ function listVersions() {
   return fs.readdirSync(root, { withFileTypes: true })
     .filter(e => e.isDirectory())
     .map(e => e.name)
-    .sort();
+    .sort().reverse();
 }
 
 // ProffieOS source path for a given version name.
@@ -498,6 +498,7 @@ function listVersionsDetails() {
       notes,
       notesPreview:   notes ? notes.split('\n').find(l => l.trim()) || null : null,
       proffieVersion: meta.proffieVersion || null,
+      jmtVersion:     meta.jmtVersion     || null,
     };
   }).filter(Boolean);
 }

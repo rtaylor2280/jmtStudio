@@ -1282,7 +1282,9 @@
     align-items: center;
     flex-wrap: wrap;
   }
-  .vp-detail-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
+  .vp-detail-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; align-items: center; }
+  .vp-jmt-btn { border-color: var(--jmt-blue) !important; color: var(--jmt-blue) !important; }
+  .vp-jmt-btn:hover { background: rgba(2,81,146,0.08) !important; }
 
   .vp-action-btn {
     padding: 5px 12px;
@@ -2425,8 +2427,9 @@
     </div>
     <div class="import-field" id="import-proffie-ver-field">
       <label>ProffieOS Version</label>
-      <input type="text" id="import-proffie-version" placeholder="e.g. 8.10" maxlength="20" autocomplete="off" />
+      <input type="text" id="import-proffie-version" placeholder="e.g. 8.10" maxlength="5" autocomplete="off" />
       <div class="import-field-hint">Format: major.minor (e.g. 7.14, 8.10)</div>
+      <div id="import-proffie-ver-error" style="display:none;font-size:0.75rem;color:#e44;margin-top:3px;"></div>
     </div>
     <div class="import-field">
       <label>Version Name</label>
@@ -3374,6 +3377,7 @@ function populateVersionSelect(sel, versions, selectedName) {
   }
   sel.dataset.lastValue = sel.value;
 }
+window.populateVersionSelect = populateVersionSelect;
 
 // ── Import version modal ────────────────────────────────
 
@@ -3391,7 +3395,10 @@ function openImportVersionModal(duplicateFrom) {
   document.getElementById('import-proffie-ver-field').style.display = isDupe ? 'none' : '';
   if (isDupe) document.getElementById('import-source-name').textContent = _importDuplicateFrom;
   document.getElementById('import-folder-path').value    = '';
-  document.getElementById('import-proffie-version').value = '';
+  const _ipv = document.getElementById('import-proffie-version');
+  _ipv.value = '';
+  _ipv.style.borderColor = '';
+  document.getElementById('import-proffie-ver-error').style.display = 'none';
   document.getElementById('import-version-name').value   = isDupe ? `${_importDuplicateFrom} (copy)` : '';
   document.getElementById('import-version-error').textContent = '';
   document.getElementById('import-confirm-btn').disabled  = isDupe ? false : true;
@@ -3416,7 +3423,7 @@ function updateImportConfirmState() {
   const hasFolder = isDupe ? true : !!_importFolderPath;
   const hasName   = document.getElementById('import-version-name').value.trim().length > 0;
   const ver       = document.getElementById('import-proffie-version').value.trim();
-  const hasVer    = isDupe || /^\d+\.\d+$/.test(ver);
+  const hasVer    = isDupe || /^\d{1,2}\.\d{2}$/.test(ver);
   document.getElementById('import-confirm-btn').disabled = !(hasFolder && hasName && hasVer);
 }
 
@@ -3454,6 +3461,13 @@ document.getElementById('import-version-name').addEventListener('input', () => {
 
 document.getElementById('import-proffie-version').addEventListener('input', () => {
   document.getElementById('import-version-error').textContent = '';
+  const verEl    = document.getElementById('import-proffie-version');
+  const errEl    = document.getElementById('import-proffie-ver-error');
+  const val      = verEl.value.trim();
+  const valid    = /^\d{1,2}\.\d{2}$/.test(val);
+  verEl.style.borderColor = (val && !valid) ? '#e44' : '';
+  errEl.style.display     = (val && !valid) ? '' : 'none';
+  errEl.textContent       = (val && !valid) ? 'Use format major.minor with 2 decimal digits (e.g. 8.10)' : '';
   updateImportConfirmState();
 });
 

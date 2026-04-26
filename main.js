@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path        = require('path');
 const fs          = require('fs');
+const crypto      = require('crypto');
 const toolchain   = require('./toolchain');
 const portDetect  = require('./portDetector');
 const proffie     = require('./proffieos');
@@ -496,6 +497,11 @@ ipcMain.handle('versions:writeNotes', (_, { name, content }) => proffie.writeNot
 ipcMain.handle('versions:rename',     (_, { oldName, newName }) => proffie.renameVersion(oldName, newName));
 ipcMain.handle('versions:duplicate',  (_, { name, newName }) => proffie.duplicateVersion(name, newName));
 ipcMain.handle('versions:delete',     (_, name) => proffie.deleteVersion(name));
+ipcMain.handle('versions:openFolder',  (_, name) => {
+  const proffieSubdir = path.join(proffie.getUserVersionsPath(), name, 'ProffieOS');
+  const target = fs.existsSync(proffieSubdir) ? proffieSubdir : path.join(proffie.getUserVersionsPath(), name);
+  return shell.openPath(target);
+});
 ipcMain.handle('versions:listDir',    (_, { name, subPath }) => proffie.listVersionDir(name, subPath || ''));
 ipcMain.handle('versions:readFile',   (_, { name, subPath }) => proffie.readVersionFile(name, subPath));
 ipcMain.handle('versions:search',     (_, { name, query })   => proffie.searchVersionFiles(name, query));
@@ -651,6 +657,71 @@ ipcMain.handle('versions:downloadRelease', async (event, { downloadUrl, versionN
     return { ok: false, error: e.message };
   } finally {
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+  }
+});
+
+// ── IPC: JMT add-ons ──────────────────────────────────
+const JMT_MANIFEST_URL = 'https://raw.githubusercontent.com/rtaylor2280/jmt-proffie-addons/main/manifest.json';
+const JMT_RAW_BASE     = 'https://raw.githubusercontent.com/rtaylor2280/jmt-proffie-addons/main/';
+let _jmtManifestCache    = null;
+let _jmtManifestCachedAt = 0;
+
+async function _getJmtManifest() {
+  const now = Date.now();
+  if (_jmtManifestCache && (now - _jmtManifestCachedAt < RELEASES_CACHE_TTL)) {
+    return { ok: true, manifest: _jmtManifestCache };
+  }
+  try {
+    const body = await _httpsGet(JMT_MANIFEST_URL, { 'User-Agent': 'JMT-Studio' });
+    const manifest = JSON.parse(body);
+    _jmtManifestCache    = manifest;
+    _jmtManifestCachedAt = Date.now();
+    return { ok: true, manifest };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+ipcMain.handle('versions:fetchJmtManifest', () => _getJmtManifest());
+
+ipcMain.handle('versions:checkJmtIntegrity', (_, { versionName, files }) => {
+  const proffieRoot = path.join(proffie.getUserVersionsPath(), versionName, 'ProffieOS');
+  const results = files.map(file => {
+    const filePath = path.join(proffieRoot, file.path);
+    if (!fs.existsSync(filePath)) return { path: file.path, status: 'missing' };
+    try {
+      const content = fs.readFileSync(filePath, 'utf8').replace(/\r\n/g, '\n');
+      const hash    = crypto.createHash('sha256').update(content, 'utf8').digest('hex');
+      return { path: file.path, status: hash === file.sha256 ? 'ok' : 'modified' };
+    } catch { return { path: file.path, status: 'error' }; }
+  });
+  return { ok: true, results };
+});
+
+ipcMain.handle('versions:applyJmtFeatures', async (event, versionName) => {
+  const manifestResult = await _getJmtManifest();
+  if (!manifestResult.ok) return manifestResult;
+  const { manifest } = manifestResult;
+
+  const proffieRoot = path.join(proffie.getUserVersionsPath(), versionName, 'ProffieOS');
+  if (!fs.existsSync(proffieRoot)) return { ok: false, error: 'ProffieOS folder not found.' };
+
+  const total = manifest.files.length;
+  let done = 0;
+  try {
+    for (const file of manifest.files) {
+      win.webContents.send('versions:jmtProgress', { file: file.path, done, total });
+      const content = await _httpsGet(JMT_RAW_BASE + file.path, { 'User-Agent': 'JMT-Studio' });
+      const dest = path.join(proffieRoot, file.path);
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.writeFileSync(dest, content, 'utf8');
+      done++;
+      win.webContents.send('versions:jmtProgress', { file: file.path, done, total });
+    }
+    proffie.writeVersionMeta(versionName, { jmtVersion: manifest.version });
+    return { ok: true, jmtVersion: manifest.version };
+  } catch (e) {
+    return { ok: false, error: e.message };
   }
 });
 

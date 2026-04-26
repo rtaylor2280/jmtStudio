@@ -81,6 +81,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   renameVersion:       (oldName, newName)      => ipcRenderer.invoke('versions:rename', { oldName, newName }),
   duplicateVersion:    (name, newName)         => ipcRenderer.invoke('versions:duplicate', { name, newName }),
   deleteVersion:       (name)                  => ipcRenderer.invoke('versions:delete', name),
+  openVersionFolder:   (name)                  => ipcRenderer.invoke('versions:openFolder', name),
   exportVersion:       (name)                  => ipcRenderer.invoke('versions:export', name),
   listVersionDir:      (name, subPath)         => ipcRenderer.invoke('versions:listDir', { name, subPath }),
   readVersionFile:     (name, subPath)         => ipcRenderer.invoke('versions:readFile', { name, subPath }),
@@ -91,6 +92,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const handler = (_, data) => cb(data);
     ipcRenderer.on('versions:downloadProgress', handler);
     return () => ipcRenderer.removeListener('versions:downloadProgress', handler);
+  },
+  fetchJmtManifest:    ()                    => ipcRenderer.invoke('versions:fetchJmtManifest'),
+  checkJmtIntegrity:   (versionName, files)  => ipcRenderer.invoke('versions:checkJmtIntegrity', { versionName, files }),
+  applyJmtFeatures:    (name)                => ipcRenderer.invoke('versions:applyJmtFeatures', name),
+  onJmtProgress:       (cb) => {
+    const handler = (_, data) => cb(data);
+    ipcRenderer.on('versions:jmtProgress', handler);
+    return () => ipcRenderer.removeListener('versions:jmtProgress', handler);
   },
 
   // ── DFU ──────────────────────────────────────────────
