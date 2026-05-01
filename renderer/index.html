@@ -1074,11 +1074,11 @@
   /* Favorites cards in empty state */
   #fav-cards {
     display: none;
-    width: min(620px, calc(100% - 48px));
+    max-width: calc(100% - 48px);
     flex-wrap: wrap;
     justify-content: center;
     gap: 8px;
-    max-height: 200px;
+    max-height: 300px;
     overflow-y: auto;
     flex-shrink: 1;
     padding-bottom: 24px;
@@ -1886,6 +1886,10 @@
   .preset-slot-tile.slot-drag-over-bottom { border-bottom: 2px solid var(--jmt-blue); }
 
   /* Color popup (floats over everything) */
+  .preset-color-overlay { position: fixed; inset: 0; z-index: 9998; background: transparent; }
+  .preset-color-popup-close { all: unset; position: absolute; top: 0; right: 0; z-index: 1; cursor: pointer; font-size: 0.75rem; color: var(--c-text-faint); line-height: 1; padding: 3px 6px; border-radius: 0 6px 0 3px; transition: color 0.1s, background 0.1s; }
+  .preset-color-popup-close:hover { color: #e44; background: #2a1a1a; }
+  html.light-mode .preset-color-popup-close:hover { color: #b82020; background: #fde8e8; }
   .preset-color-popup { position: fixed; z-index: 9999; background: var(--c-bg-raised); border: 1px solid var(--c-border); border-radius: 6px; padding: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.35); display: flex; flex-direction: column; gap: 6px; min-width: 220px; }
   .preset-color-popup-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
   .preset-color-popup-cell { width: 48px; height: 48px; border-radius: 4px; cursor: pointer; transition: transform 0.08s; overflow: hidden; }
@@ -7594,6 +7598,13 @@ async function refreshEmptyStateFavs() {
   container.innerHTML = '';
   if (!items.length) { container.style.display = 'none'; return; }
   container.style.display = 'flex';
+  const cardW = 180, gap = 8;
+  const maxCols = Math.floor((window.innerWidth - 48) / (cardW + gap));
+  const idealCols = Math.min(
+    Math.max(Math.ceil(Math.sqrt(items.length)), Math.ceil(items.length / 3)),
+    Math.max(maxCols, 1)
+  );
+  container.style.maxWidth = (idealCols * cardW + (idealCols - 1) * gap) + 'px';
   const present = items.filter(i => i.exists);
   const sorted = [...present, ...items.filter(i => !i.exists)];
   sorted.forEach(({ filePath, name, desc, exists }) => {
@@ -7953,6 +7964,7 @@ require(['vs/editor/editor.main'], function () {
     let _editingSlot            = false;
     let _activeSlotArgEditor    = null;
     let _activeColorPopup       = null;
+    let _activeColorOverlay     = null;
     let _activeSwatchControllers = [];
     let _activeArgSwatchControllers = [];
     let _activePreviewSwatchCtrl = null;
@@ -10458,8 +10470,22 @@ require(['vs/editor/editor.main'], function () {
 
       function toHex() { return '#'+[cr,cg,cb].map(v=>v.toString(16).padStart(2,'0')).join(''); }
 
+      const overlay = document.createElement('div');
+      overlay.className = 'preset-color-overlay';
+      overlay.addEventListener('click', () => _closeColorPopup());
+      document.body.appendChild(overlay);
+      _activeColorOverlay = overlay;
+
       const popup = document.createElement('div');
       popup.className = 'preset-color-popup';
+
+      // ── Close button ──────────────────────────────────────────────────
+      const closeBtn = document.createElement('button');
+      closeBtn.className = 'preset-color-popup-close';
+      closeBtn.textContent = '✕';
+      closeBtn.title = 'Close';
+      closeBtn.addEventListener('click', e => { e.stopPropagation(); _closeColorPopup(); });
+      popup.appendChild(closeBtn);
 
       // ── Grid: 4 fixed cell divs, re-skinned on page change ───────────
       const grid = document.createElement('div');
@@ -10727,21 +10753,13 @@ require(['vs/editor/editor.main'], function () {
         popup.style.left = left + 'px';
         popup.style.top  = top  + 'px';
       });
-      setTimeout(() => document.addEventListener('click', _colorPopupOutside), 0);
-    }
-
-    function _colorPopupOutside(e) {
-      if (_activeColorPopup && !_activeColorPopup.contains(e.target)) _closeColorPopup();
     }
     function _closeColorPopup() {
       _activeSwatchControllers.forEach(c => c.destroy());
       _activeSwatchControllers = [];
       if (_activePreviewSwatchCtrl) { _activePreviewSwatchCtrl.destroy(); _activePreviewSwatchCtrl = null; }
-      if (_activeColorPopup) {
-        _activeColorPopup.remove();
-        _activeColorPopup = null;
-        document.removeEventListener('click', _colorPopupOutside);
-      }
+      if (_activeColorOverlay) { _activeColorOverlay.remove(); _activeColorOverlay = null; }
+      if (_activeColorPopup) { _activeColorPopup.remove(); _activeColorPopup = null; }
     }
 
     function _libComboOutside(e) {
