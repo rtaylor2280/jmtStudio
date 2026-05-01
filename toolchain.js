@@ -231,9 +231,12 @@ async function compile(configContent, fqbn, buildOptions, onLog) {
   const buildPath  = getBuildOutputPath();
   fs.mkdirSync(buildPath, { recursive: true });
 
+  // dosfs=sdmmc1 uses SDIO high-speed on V3 (L452RE); V1/V2 only support sdspi
+  const dosfs = fqbn.includes('L452') ? 'sdmmc1' : 'sdspi';
+
   const args = [
     'compile',
-    '--fqbn', `${fqbn}:usb=${usb},dosfs=sdmmc1,speed=80,opt=os,pclk=2`,
+    '--fqbn', `${fqbn}:usb=${usb},dosfs=${dosfs},speed=80,opt=os,pclk=2`,
     '--build-path', buildPath,
     '--warnings', 'none',
     '--verbose',

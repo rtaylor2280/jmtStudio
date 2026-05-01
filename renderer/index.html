@@ -215,7 +215,7 @@
     font-size: 0.78rem;
     padding: 4px 6px;
     outline: none;
-    width: 160px;
+    width: 140px;
     cursor: default;
   }
 
@@ -789,6 +789,25 @@
     color: var(--c-text-dim); font-family: monospace; font-size: 0.68rem;
     max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
+  #stat-update { color: #4a9edd; display: none; cursor: pointer; }
+  #stat-update.visible { display: inline; }
+  #stat-update:hover { text-decoration: underline; }
+  .settings-btn-wrap { position: relative; display: inline-flex; }
+  .settings-update-dot {
+    position: absolute; top: 2px; right: 2px;
+    width: 7px; height: 7px;
+    background: #4a9edd; border-radius: 50%;
+    border: 1.5px solid var(--c-bg);
+    display: none; pointer-events: none;
+  }
+  .settings-update-dot.visible { display: block; }
+  .update-notes-body {
+    white-space: pre-wrap; max-height: 180px; overflow-y: auto;
+    padding: 6px 8px; background: var(--c-bg-input);
+    border: 1px solid var(--c-border); border-radius: 4px;
+    font-family: monospace; font-size: 0.74rem; line-height: 1.5;
+    color: var(--c-text-muted); margin-bottom: 8px;
+  }
 
   /* ── Knight Rider animation  ── */
   @keyframes knightrider {
@@ -832,12 +851,17 @@
   #bm-close       { background: var(--c-success-bg); color: var(--c-success-text); border: 1px solid var(--c-success-border); }
   #bm-dfu-setup   { background: var(--jmt-blue); color: #fff; border: 1px solid #0a6abf; }
   #bm-retry       { background: #1a2a3a; color: #4af;  border: 1px solid #2a4a6a; }
-  #bm-dfu-manual,
-  #bm-zadig       { background: #1a1a2a; color: #8af;  border: 1px solid #2a3a5a; }
   html.light-mode #bm-board-flash,
   html.light-mode #bm-retry       { background: #e8f0fe; color: #1a4a9a; border-color: #b0c8f0; }
+  #bm-dfu-manual,
+  #bm-zadig       { background: none; border: none; padding: 0; color: #8af; font-size: 0.8rem;
+                    cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+  #bm-dfu-manual:hover,
+  #bm-zadig:hover { color: #adf; }
   html.light-mode #bm-dfu-manual,
-  html.light-mode #bm-zadig       { background: #e8eeff; color: #1a3a8a; border-color: #b0bce0; }
+  html.light-mode #bm-zadig       { color: #1a5abf; }
+  html.light-mode #bm-dfu-manual:hover,
+  html.light-mode #bm-zadig:hover { color: #0a3a9a; }
   /* DFU mode indicator */
   #bp-dfu-mode-indicator > span:first-child { font-size: 0.78rem; color: #4af; font-weight: 600; }
   html.light-mode #bp-dfu-mode-indicator > span:first-child { color: #1a4a9a; }
@@ -1111,6 +1135,10 @@
   .fav-card[draggable="true"] { cursor: grab; }
   .fav-card.dragging { opacity: 0.35; border-style: dashed; }
   .fav-card.drag-over { border-color: var(--jmt-blue); box-shadow: 0 0 0 2px rgba(2,81,146,0.35); }
+  .fav-card--missing { cursor: default; opacity: 0.55; border-color: var(--c-danger-border); border-style: dashed; }
+  .fav-card--missing:hover { background: var(--c-bg-raised); border-color: var(--c-danger-text); }
+  .fav-card--missing .fav-card-name { color: var(--c-text-muted); }
+  .fav-card--missing:hover .fav-card-remove { opacity: 1; color: #e44; }
 
   /* ── Tab bar ── */
   .tab-bar {
@@ -1648,7 +1676,7 @@
   .style-card-name { font-size: 0.84rem; font-weight: 600; color: var(--c-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
   .style-card-os { font-size: 0.65rem; color: var(--jmt-blue); background: rgba(0,130,255,0.1); border: 1px solid rgba(0,130,255,0.25); border-radius: 3px; padding: 1px 5px; white-space: nowrap; flex-shrink: 0; }
   .style-card-source { font-size: 0.71rem; color: var(--c-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .style-card-source-link { cursor: pointer; color: var(--jmt-blue); text-decoration: underline; text-underline-offset: 2px; }
+  .style-card-source-link { background: none; border: none; padding: 0; font: inherit; cursor: pointer; color: var(--jmt-blue); text-decoration: underline; text-underline-offset: 2px; }
   .style-card-source-link:hover { opacity: 0.8; }
   .style-card-tags { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 2px; }
   .style-tag { font-size: 0.63rem; color: var(--c-text-dim); background: var(--c-bg-raised); border: 1px solid var(--c-border-faint); border-radius: 3px; padding: 1px 5px; white-space: nowrap; cursor: pointer; }
@@ -1680,7 +1708,7 @@
   .detail-link-btn:hover { opacity: 1; background: var(--c-bg-hover); }
   .detail-link-btn.has-url { opacity: 0.7; color: var(--jmt-blue); }
   .detail-link-btn.has-url:hover { opacity: 1; }
-  .detail-url-display { font-size: 0.75rem; color: var(--jmt-blue); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; cursor: pointer; }
+  .detail-url-display { background: none; border: none; padding: 0; font-size: 0.75rem; font-family: inherit; color: var(--jmt-blue); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; max-width: 100%; }
   .detail-url-display:hover { text-decoration: underline; }
   .detail-url-input { font-size: 0.73rem; background: var(--c-bg-inset); color: var(--c-text); border: 1px solid var(--jmt-blue); border-radius: 3px; padding: 1px 6px; outline: none; flex: 1; min-width: 0; font-family: monospace; }
   .detail-url-input.url-invalid { border-color: #c44; color: #e44; }
@@ -1963,6 +1991,9 @@
         <button id="btn-vp-import"   class="btn-blue"    title="Import a ProffieOS version folder">&#8593; Import Version</button>
       </div>
       <div class="tab-btns" id="tab-btns-styles">
+        <button id="btn-styles-undo"    class="btn-neutral" title="Undo (Ctrl+Z)" style="display:none">&#8634;</button>
+        <button id="btn-styles-redo"    class="btn-neutral" title="Redo (Ctrl+Y)" style="display:none">&#8635;</button>
+        <div class="toolbar-divider" id="toolbar-divider-undoredo" style="display:none"></div>
         <button id="btn-styles-save"    class="btn-green"   disabled title="Save Style Library">&#8595; Save</button>
         <button id="btn-styles-discard" class="btn-red"     disabled title="Discard all unsaved changes to the Style Library">&#8617; Discard</button>
         <button id="btn-styles-delete"  class="btn-red"     title="Remove Style Library from JMT Studio">&#128465; Delete</button>
@@ -1974,11 +2005,14 @@
         <button id="btn-styles-collapse" class="btn-neutral" title="Condense — rewrites every style to a single line. Comments are preserved as /* */ blocks. File becomes smaller and easier to diff." style="display:none">&#8644; Condense</button>
         <button id="btn-styles-expand"   class="btn-neutral" title="Expand — rewrites every style to indented multi-line for readability. Comments are preserved." style="display:none">&#8645; Expand</button>
         <div class="styles-view-toggle">
-          <button class="styles-view-btn active" id="btn-styles-view-code" title="Code view">&#x3C;/&#x3E; Code</button>
-          <button class="styles-view-btn" id="btn-styles-view-visual" title="Visual view">&#9776; Visual</button>
+          <button class="styles-view-btn" id="btn-styles-view-code" title="Code view">&#x3C;/&#x3E; Code</button>
+          <button class="styles-view-btn active" id="btn-styles-view-visual" title="Visual view">&#9776; Visual</button>
         </div>
       </div>
-      <button id="btn-settings" title="About JMT Studio">&#9881;</button>
+      <div class="settings-btn-wrap">
+        <button id="btn-settings" title="About JMT Studio">&#9881;</button>
+        <span id="settings-update-dot" class="settings-update-dot"></span>
+      </div>
     </div>
   </div>
   <div class="meta-bar">
@@ -1995,11 +2029,23 @@
       </div>
     </div>
     <div class="meta-field">
-      <label>Description</label>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;">
+        <label>Description</label>
+        <span id="desc-dupe-warning" style="display:none;color:#c8a020;font-size:0.67rem;cursor:default;letter-spacing:0.04em;"
+              title="A favorited file already uses this description. Descriptions should be unique so favorites are easy to tell apart.">
+          ⚠ duplicate
+        </span>
+      </div>
       <input type="text" id="input-desc" placeholder="e.g. Graflex v2.2" spellcheck="false" />
     </div>
     <div class="meta-field">
-      <label>Board</label>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;">
+        <label>Board</label>
+        <span id="v1-warning" style="display:none;color:#c8a020;font-size:0.67rem;cursor:default;letter-spacing:0.04em;"
+              title="JMT Studio has not been tested with Proffieboard V1 and may not work as expected. If you try it, please let us know how it goes. Your feedback helps! Contact: jmtstudio@jedimastertech.com">
+          ⚠ V1 untested
+        </span>
+      </div>
       <select id="input-board">
         <option value="">Select board...</option>
         <option value="Proffieboard V3" data-fqbn="proffieboard:stm32l4:ProffieboardV3-L452RE">Proffieboard V3</option>
@@ -2011,6 +2057,7 @@
       <label>OS Version</label>
       <select id="input-version"></select>
     </div>
+    <span id="txt-convert-notice" style="display:none;margin-left:auto;font-size:0.7rem;color:#4caf50;white-space:nowrap;padding-bottom:6px;align-self:flex-end;"></span>
   </div>
 </header>
 
@@ -2110,7 +2157,7 @@
       </div>
       <div class="style-meta-row" id="detail-url-display-row" style="display:none">
         <span class="style-meta-label"></span>
-        <a id="detail-url-display" class="detail-url-display" href="#"></a>
+        <span style="min-width:0;overflow:hidden;flex:1"><button id="detail-url-display" class="detail-url-display"></button></span>
       </div>
       <div class="style-meta-row" id="detail-url-edit-row" style="display:none">
         <span class="style-meta-label"></span>
@@ -2135,10 +2182,12 @@
       </div>
     </div>
     <div id="style-detail-editor"></div>
-    <div id="detail-error-banner" class="styles-conflict-banner" style="display:none;margin-top:8px;color:#e44;border-color:#c44;background:rgba(180,40,40,0.1)"></div>
+    <div id="detail-error-banner" style="display:none;font-size:0.78rem;color:#e44;margin-top:6px;flex-shrink:0"></div>
     <div class="modal-btns" style="margin-top:12px">
       <button class="modal-btn-cancel" id="btn-style-detail-copy" title="Copy full function block to clipboard">Copy Function</button>
       <button class="modal-btn-cancel" id="btn-style-detail-copy-style" title="Copy as StylePtr for use in a preset">Copy Style</button>
+      <button class="modal-btn-cancel" id="btn-detail-undo" title="Undo (Ctrl+Z)">&#8634;</button>
+      <button class="modal-btn-cancel" id="btn-detail-redo" title="Redo (Ctrl+Y)">&#8635;</button>
       <div style="flex:1"></div>
       <button class="modal-btn-cancel" id="btn-style-detail-discard">Discard</button>
       <button class="modal-btn-primary" id="btn-style-detail-save" disabled>&#8595; Save</button>
@@ -2294,6 +2343,7 @@
   <span id="stat-flashed"></span>
   <span id="stat-dirty">&#9679; unsaved</span>
   <span id="stat-diff-info">&#9776; diff view</span>
+  <span id="stat-update" title="Update available — click to open Settings"></span>
   <span id="stat-filepath"></span>
 </div>
 
@@ -2377,6 +2427,7 @@
     <div id="add-style-msg" style="display:none;font-size:0.78rem;color:#c9960e;margin-top:6px;flex-shrink:0"></div>
     <div class="modal-btns" style="margin-top:12px">
       <button class="modal-btn-cancel" id="btn-add-style-cancel">Cancel</button>
+      <button class="modal-btn-cancel" id="btn-add-style-clear" style="margin-left:auto;margin-right:8px">Clear</button>
       <button class="modal-btn-primary" id="btn-add-style-confirm" disabled>&#43; Add to Library</button>
     </div>
   </div>
@@ -2547,7 +2598,11 @@
 
     <div class="about-grid">
       <div class="about-grid-label">Version</div>
-      <div class="about-grid-val" id="about-version-str">—</div>
+      <div class="about-grid-val" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span id="about-version-str">—</span>
+        <button class="settings-item-btn enabled" id="btn-check-updates">Check for Updates</button>
+        <span id="update-status-msg" style="display:none;font-size:0.78rem"></span>
+      </div>
 
       <div class="about-grid-label">Website</div>
       <div class="about-grid-val"><a href="#" id="about-website-link">jedimastertech.com</a></div>
@@ -2560,6 +2615,23 @@
 
       <div class="about-grid-label">General Inquiries</div>
       <div class="about-grid-val"><a href="#" id="about-info-link">info@jedimastertech.com</a></div>
+    </div>
+
+    <div id="update-available-panel" style="display:none;margin-bottom:16px;padding:10px 12px;background:rgba(74,158,221,0.08);border:1px solid rgba(74,158,221,0.25);border-radius:6px">
+      <div id="update-available-title" style="font-size:0.84rem;font-weight:600;color:#4a9edd;margin-bottom:6px"></div>
+      <button id="btn-update-notes-toggle" class="about-license-toggle" style="font-size:0.74rem;padding:2px 0;margin-bottom:4px">&#9654; Release Notes</button>
+      <div id="update-notes-body" class="update-notes-body" style="display:none"></div>
+      <div id="update-download-row" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:6px">
+        <button class="settings-item-btn enabled" id="btn-download-update">Download Update</button>
+        <div id="update-progress-wrap" style="display:none;flex:1;min-width:120px;align-items:center;gap:8px">
+          <div style="flex:1;height:4px;background:var(--c-border);border-radius:2px;overflow:hidden">
+            <div id="update-progress-fill" style="height:100%;width:0%;background:#4a9edd;transition:width 0.2s"></div>
+          </div>
+          <span id="update-progress-text" style="font-size:0.74rem;color:var(--c-text-dim);white-space:nowrap">0%</span>
+        </div>
+        <button class="settings-item-btn" id="btn-install-update" style="display:none;background:rgba(0,180,80,0.15);color:#3db366;border-color:rgba(0,180,80,0.3)">Install Now</button>
+      </div>
+      <div id="update-error-msg" style="display:none;font-size:0.74rem;color:#e44;margin-top:6px"></div>
     </div>
 
     <div class="about-footer">
@@ -2773,7 +2845,14 @@ function updateStatusMeta() {
     ts.style.display = 'none';
   }
 }
-document.getElementById('input-board').addEventListener('change', () => { updateChangedIndicators(); updateStatusMeta(); if (fileIsOpen) setDirty(true); });
+document.getElementById('input-board').addEventListener('change', () => {
+  updateChangedIndicators();
+  updateStatusMeta();
+  if (fileIsOpen) setDirty(true);
+  const v = document.getElementById('input-board').value;
+  document.getElementById('v1-warning').style.display =
+    (v === 'Proffieboard') ? 'flex' : 'none';
+});
 document.getElementById('input-version').addEventListener('change', () => {
   const verSel = document.getElementById('input-version');
   if (verSel.value === '__add_version__') {
@@ -2785,6 +2864,7 @@ document.getElementById('input-version').addEventListener('change', () => {
   updateChangedIndicators();
   updateStatusMeta();
   if (fileIsOpen) setDirty(true);
+  window.updateCompileButton?.();
   const name = verSel.value;
   if (name && window.electronAPI) {
     window.electronAPI.selectVersion(name);
@@ -2795,8 +2875,10 @@ document.getElementById('input-version').addEventListener('change', () => {
 // ── Metadata ───────────────────────────────────────────
 let metaCreated  = null;
 let metaUpdated  = null;
-let metaCompiled = null;
-let metaFlashed  = null;
+let metaCompiled        = null;
+let metaCompileDuration = null;  // seconds, persisted in @jmt:compile_duration
+let metaFlashed         = null;
+let metaBoardSN  = null;
 let metaPort     = null;
 let metaConfigId = null;
 let toolVersion  = '1.0.0';
@@ -2823,8 +2905,26 @@ function updateChangedIndicators() {
   versionEl.title = versionChanged
     ? `OS version changed since last compile (was: ${baselineVersion}) — recompile before flashing`
     : '';
+
 }
 window.getBaselineUsb = () => baselineUsb;
+window.updateChangedIndicators = updateChangedIndicators;
+
+// SN indicator is kept separate — it must only fire after port detection has confirmed
+// the current board, not during file-load transitions where metaBoardSN is mid-update.
+function updateSnIndicator() {
+  const snDisplay      = document.getElementById('bp-board-display');
+  const rawConnectedSN = (snDisplay?.value || '').replace(/^SN:\s*/i, '');
+  const lastFlashedSN  = window.getLastFlashedSN?.() || window.getMetaBoardSN?.() || null;
+  const snMismatch = lastFlashedSN && rawConnectedSN && rawConnectedSN !== lastFlashedSN;
+  if (snDisplay) {
+    snDisplay.classList.toggle('field-changed', !!snMismatch);
+    snDisplay.title = snMismatch
+      ? `Last flashed: SN: ${lastFlashedSN} — connected: SN: ${rawConnectedSN}`
+      : '';
+  }
+}
+window.updateSnIndicator = updateSnIndicator;
 
 function nowIso() {
   const d = new Date(), p = n => String(n).padStart(2, '0');
@@ -2857,8 +2957,10 @@ function injectMetadata(content) {
   metaUpdated = now;
   lines.push(`// @jmt:created     ${metaCreated}`);
   lines.push(`// @jmt:updated     ${now}`);
-  if (metaCompiled) lines.push(`// @jmt:compiled    ${metaCompiled}`);
+  if (metaCompiled)         lines.push(`// @jmt:compiled        ${metaCompiled}`);
+  if (metaCompileDuration) lines.push(`// @jmt:compile_duration ${metaCompileDuration}`);
   if (metaFlashed)  lines.push(`// @jmt:flashed     ${metaFlashed}`);
+  if (metaBoardSN)  lines.push(`// @jmt:board_sn    ${metaBoardSN}`);
   if (metaPort)     lines.push(`// @jmt:last_port   ${metaPort}`);
   lines.push(`// @jmt:tool_version ${toolVersion}`);
   lines.push(`// @jmt:config_id   ${metaConfigId}`);
@@ -2874,8 +2976,10 @@ function extractMetadata(content) {
     version:  m(/^\/\/ @jmt:os_version\s+(.+)$/m)  || m(/^\/\/ @jmt:version\s+(.+)$/m),
     created:  m(/^\/\/ @jmt:created\s+(.+)$/m),
     updated:  m(/^\/\/ @jmt:updated\s+(.+)$/m),
-    compiled: m(/^\/\/ @jmt:compiled\s+(.+)$/m),
+    compiled:        m(/^\/\/ @jmt:compiled\s+(.+)$/m),
+    compileDuration: m(/^\/\/ @jmt:compile_duration\s+(\d+)$/m),
     flashed:  m(/^\/\/ @jmt:flashed\s+(.+)$/m),
+    boardSn:  m(/^\/\/ @jmt:board_sn\s+(.+)$/m),
     usb:      m(/^\/\/ @jmt:usb\s+(.+)$/m),
     port:     m(/^\/\/ @jmt:last_port\s+(.+)$/m),
     configId: m(/^\/\/ @jmt:config_id\s+(\S+)$/m),
@@ -2885,7 +2989,7 @@ function extractMetadata(content) {
 
 // ── Load content ───────────────────────────────────────
 function loadContent(rawContent, filePath) {
-  const { desc, board, version, created, updated, compiled, flashed, usb, port, configId, clean } = extractMetadata(rawContent);
+  const { desc, board, version, created, updated, compiled, compileDuration, flashed, boardSn, usb, port, configId, clean } = extractMetadata(rawContent);
   const base = filePath ? filePath.split(/[\\/]/).pop().replace(/\.[^.]+$/, '') : null;
   document.getElementById('input-filename').value = base || 'my_config';
   document.getElementById('input-desc').value     = desc    || '';
@@ -2906,8 +3010,10 @@ function loadContent(rawContent, filePath) {
   }
   metaCreated  = created  || null;
   metaUpdated  = updated  || null;
-  metaCompiled = compiled || null;
+  metaCompiled        = compiled || null;
+  metaCompileDuration = compileDuration ? parseInt(compileDuration, 10) : null;
   metaFlashed  = flashed  || null;
+  metaBoardSN  = boardSn  || null;
   metaPort     = port     || null;
   metaConfigId = configId || null;
   baselineBoard   = board           || null;
@@ -2937,7 +3043,7 @@ function clearMeta() {
     .forEach(id => document.getElementById(id).value = '');
   document.getElementById('input-board').value = '';
   document.getElementById('input-board').dispatchEvent(new Event('change'));
-  metaCreated = metaUpdated = metaCompiled = metaFlashed = metaPort = metaConfigId = null;
+  metaCreated = metaUpdated = metaCompiled = metaCompileDuration = metaFlashed = metaBoardSN = metaPort = metaConfigId = null;
   baselineBoard = baselineVersion = baselineUsb = null;
   // input-version stays at current selection (persistent compile setting)
   ['input-board','input-version'].forEach(id =>
@@ -3145,22 +3251,46 @@ document.getElementById('diff-toggle-label').addEventListener('click', () => {
 });
 
 // ── Save / Download ────────────────────────────────────
+function _showTxtConvertNotice(msg) {
+  const el = document.getElementById('txt-convert-notice');
+  if (el) { el.textContent = msg; el.style.display = ''; }
+}
+function _hideTxtConvertNotice() {
+  const el = document.getElementById('txt-convert-notice');
+  if (el) { el.style.display = 'none'; el.textContent = ''; }
+}
+
 async function doSave() {
   const content = injectMetadata(window.getEditorContent());
   if (isElectron) {
     if (currentFilePath) {
-      const res = await window.electronAPI.saveFile(currentFilePath, content);
-      if (res.ok) {
-        setDirty(false);
-        updateStatusMeta();
-        // Baselines now match the saved file — clear changed indicators
-        baselineBoard   = document.getElementById('input-board').value   || null;
-        baselineVersion = document.getElementById('input-version').value || null;
-        const usbEl = document.getElementById('bp-usb-select');
-        if (usbEl) baselineUsb = usbEl.value || null;
-        updateChangedIndicators();
-        if (window.updateUsbChangedIndicator) window.updateUsbChangedIndicator();
-      } else { alert('Save failed: ' + res.error); }
+      const isTxt = /\.txt$/i.test(currentFilePath);
+      if (isTxt) {
+        // .txt files: save .txt first (non-destructive), then save as .h and use that going forward
+        const txtRes = await window.electronAPI.saveFile(currentFilePath, content);
+        if (!txtRes.ok) { alert('Save failed: ' + txtRes.error); return; }
+        const hPath = currentFilePath.replace(/\.txt$/i, '.h');
+        const hRes = await window.electronAPI.saveFile(hPath, content);
+        if (!hRes.ok) { alert('Save as .h failed: ' + hRes.error); return; }
+        await window.electronAPI.removeRecentFile(currentFilePath);
+        setFilePath(hPath);  // clears notice as side-effect, we re-show below
+        document.getElementById('input-filename').value = hPath.split(/[\\/]/).pop().replace(/\.h$/i, '');
+        window.electronAPI.setLastFile(hPath);
+        _showTxtConvertNotice('Saved as .h — original .txt preserved');
+      } else {
+        const res = await window.electronAPI.saveFile(currentFilePath, content);
+        if (!res.ok) { alert('Save failed: ' + res.error); return; }
+        _hideTxtConvertNotice();
+      }
+      setDirty(false);
+      updateStatusMeta();
+      // Baselines now match the saved file — clear changed indicators
+      baselineBoard   = document.getElementById('input-board').value   || null;
+      baselineVersion = document.getElementById('input-version').value || null;
+      const usbEl = document.getElementById('bp-usb-select');
+      if (usbEl) baselineUsb = usbEl.value || null;
+      updateChangedIndicators();
+      if (window.updateUsbChangedIndicator) window.updateUsbChangedIndicator();
     } else { await doSaveAs(); }
   } else { doDownload(); }
 }
@@ -3209,6 +3339,7 @@ function setFilePath(p) {
   window._currentFilePath = p;
   document.getElementById('stat-filepath').textContent = p || '';
   updateWindowTitle();
+  _hideTxtConvertNotice();
 }
 
 document.getElementById('btn-save')    ?.addEventListener('click', doSave);
@@ -3256,6 +3387,7 @@ document.getElementById('btn-close').addEventListener('click', async () => {
   setFilePath(null);
   setFileOpen(false);
   setDirty(false);
+  window.clearBuildLog?.();
   if (isElectron) {
     await window.electronAPI.clearLastFile();
     window.electronAPI.setTitle('JMT Studio');
@@ -3279,18 +3411,22 @@ document.getElementById('btn-download').style.display = isElectron ? 'none' : ''
 
 // ── Compile/flash timestamp setters (called from buildPanel) ──
 // isoString: pass cached timestamp on restore; omit for a fresh compile (saves file)
-window.setCompiledTimestamp = async (isoString) => {
+window.setCompiledTimestamp = async (isoString, durationSec) => {
   metaCompiled = isoString || nowIso();
+  if (durationSec) metaCompileDuration = durationSec;
   updateStatusMeta();
   if (!isoString && currentFilePath) await doSave();
 };
-window.setFlashedTimestamp = async (port) => {
+window.getLastCompileDuration = () => metaCompileDuration;
+window.setFlashedTimestamp = async (port, sn) => {
   metaFlashed = nowIso();
   if (port) metaPort = port;
+  if (sn)   metaBoardSN = sn;
   updateStatusMeta();
   if (currentFilePath) await doSave();
 };
-window.getLastPort = () => metaPort;
+window.getLastPort    = () => metaPort;
+window.getMetaBoardSN = () => metaBoardSN;
 
 // ── Recent files dropdown ──────────────────────────────
 async function openRecent(filePath) {
@@ -3397,6 +3533,14 @@ function populateVersionSelect(sel, versions, selectedName) {
 }
 window.populateVersionSelect = populateVersionSelect;
 
+async function _refreshVersionDropdown(preferName) {
+  const versions = await window.electronAPI.listProffieVersions();
+  const verSel = document.getElementById('input-version');
+  const sel = preferName !== undefined ? preferName : verSel.value;
+  populateVersionSelect(verSel, versions, sel);
+}
+window.refreshVersionDropdown = _refreshVersionDropdown;
+
 // ── Import version modal ────────────────────────────────
 
 let _importFolderPath  = null;
@@ -3456,7 +3600,7 @@ document.getElementById('import-browse-btn').addEventListener('click', async () 
   const check = await window.electronAPI.validateVersionSource(folderPath);
   if (!check.ok) {
     _importFolderPath = null;
-    document.getElementById('import-folder-path').value = folderPath;
+    document.getElementById('import-folder-path').value = '';
     errorEl.textContent = check.error;
     updateImportConfirmState();
     return;
@@ -3479,10 +3623,25 @@ document.getElementById('import-version-name').addEventListener('input', () => {
 
 document.getElementById('import-proffie-version').addEventListener('input', () => {
   document.getElementById('import-version-error').textContent = '';
-  const verEl    = document.getElementById('import-proffie-version');
-  const errEl    = document.getElementById('import-proffie-ver-error');
-  const val      = verEl.value.trim();
-  const valid    = /^\d{1,2}\.\d{2}$/.test(val);
+  const verEl = document.getElementById('import-proffie-version');
+  const errEl = document.getElementById('import-proffie-ver-error');
+  verEl.style.borderColor = '';
+  errEl.style.display     = 'none';
+  errEl.textContent       = '';
+  updateImportConfirmState();
+});
+document.getElementById('import-proffie-version').addEventListener('focus', () => {
+  const verEl = document.getElementById('import-proffie-version');
+  const errEl = document.getElementById('import-proffie-ver-error');
+  verEl.style.borderColor = '';
+  errEl.style.display     = 'none';
+  errEl.textContent       = '';
+});
+document.getElementById('import-proffie-version').addEventListener('blur', () => {
+  const verEl  = document.getElementById('import-proffie-version');
+  const errEl  = document.getElementById('import-proffie-ver-error');
+  const val    = verEl.value.trim();
+  const valid  = /^\d{1,2}\.\d{2}$/.test(val);
   verEl.style.borderColor = (val && !valid) ? '#e44' : '';
   errEl.style.display     = (val && !valid) ? '' : 'none';
   errEl.textContent       = (val && !valid) ? 'Use format major.minor with 2 decimal digits (e.g. 8.10)' : '';
@@ -3602,6 +3761,8 @@ async function openAboutModal() {
     btn.classList.toggle('active', btn.dataset.theme === current);
   });
   document.getElementById('modal-about').classList.add('active');
+  // Reset update section to match current known state
+  _refreshUpdateSection();
 }
 
 document.getElementById('btn-clear-cache').addEventListener('click', () => {
@@ -3621,11 +3782,16 @@ document.getElementById('btn-cache-confirm').addEventListener('click', async () 
   cancelBtn.disabled  = true;
   confirmBtn.textContent = 'Deleting…';
   try {
-    const result = await window.electronAPI.clearCache();
+    const timeout = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('timeout')), 15000));
+    const result = await Promise.race([window.electronAPI.clearCache(), timeout]);
     if (result.ok) {
       document.getElementById('cache-confirm-panel').style.display = 'none';
       document.getElementById('btn-clear-cache').disabled = false;
       document.getElementById('btn-clear-cache').textContent = 'Clear';
+      confirmBtn.textContent = 'Yes, Delete Cache';
+      confirmBtn.disabled = false;
+      cancelBtn.disabled  = false;
       const freed = fmtBytes(result.bytesCleared);
       document.getElementById('cache-size-label').textContent =
         result.bytesCleared > 0 ? `✓ Cleared (${freed} freed)` : '✓ Cleared';
@@ -3686,6 +3852,166 @@ document.getElementById('about-support-link').addEventListener('click', (e) => {
 document.getElementById('about-info-link').addEventListener('click', (e) => {
   e.preventDefault();
   if (window.electronAPI?.openExternal) window.electronAPI.openExternal('mailto:info@jedimastertech.com');
+});
+
+// ── Self-update ────────────────────────────────────────
+let _updateInfo    = null;
+let _updateExeReady = false;
+
+function _showUpdateIndicators(version) {
+  const pill = document.getElementById('stat-update');
+  if (pill) { pill.textContent = `↑ v${version} available`; pill.classList.add('visible'); }
+  const dot = document.getElementById('settings-update-dot');
+  if (dot) dot.classList.add('visible');
+}
+
+function _hideUpdateIndicators() {
+  const pill = document.getElementById('stat-update');
+  if (pill) { pill.textContent = ''; pill.classList.remove('visible'); }
+  const dot = document.getElementById('settings-update-dot');
+  if (dot) dot.classList.remove('visible');
+}
+
+function _renderUpdateAvailablePanel(info) {
+  document.getElementById('update-available-title').textContent = `↑ JMT Studio v${info.latestVersion} is available`;
+  document.getElementById('update-notes-body').textContent = info.releaseNotes || '(No release notes provided)';
+  document.getElementById('update-notes-body').style.display = 'none';
+  document.getElementById('btn-update-notes-toggle').textContent = '▶ Release Notes';
+  document.getElementById('update-error-msg').style.display = 'none';
+  const dlBtn = document.getElementById('btn-download-update');
+  dlBtn.style.display  = 'inline-block';
+  dlBtn.disabled       = !info.downloadUrl;
+  dlBtn.title          = info.downloadUrl ? '' : 'No installer available for this release';
+  document.getElementById('update-progress-wrap').style.display = 'none';
+  document.getElementById('btn-install-update').style.display   = _updateExeReady ? 'inline-block' : 'none';
+  if (_updateExeReady) dlBtn.style.display = 'none';
+  document.getElementById('update-available-panel').style.display = 'block';
+}
+
+function _refreshUpdateSection() {
+  document.getElementById('update-status-msg').style.display = 'none';
+  document.getElementById('btn-check-updates').disabled = false;
+  document.getElementById('btn-check-updates').textContent = 'Check for Updates';
+  if (_updateInfo?.hasUpdate) {
+    _renderUpdateAvailablePanel(_updateInfo);
+  } else {
+    document.getElementById('update-available-panel').style.display = 'none';
+  }
+}
+
+document.getElementById('stat-update').addEventListener('click', () => openAboutModal());
+
+// Silent check on launch
+(async () => {
+  if (!window.electronAPI?.checkForUpdate) return;
+  try {
+    const info = await window.electronAPI.checkForUpdate();
+    if (info?.ok && info.hasUpdate) {
+      _updateInfo = info;
+      _showUpdateIndicators(info.latestVersion);
+    }
+  } catch {}
+})();
+
+document.getElementById('btn-check-updates').addEventListener('click', async () => {
+  const btn   = document.getElementById('btn-check-updates');
+  const msg   = document.getElementById('update-status-msg');
+  const panel = document.getElementById('update-available-panel');
+  btn.disabled = true;
+  btn.textContent = 'Checking…';
+  msg.style.display   = 'none';
+  panel.style.display = 'none';
+  try {
+    const info = await window.electronAPI.checkForUpdate(true);
+    if (!info.ok) {
+      msg.textContent  = `⚠ ${info.error}`;
+      msg.style.color  = '#cb6';
+      msg.style.display = 'inline';
+    } else if (!info.hasUpdate) {
+      _updateInfo = null;
+      _updateExeReady = false;
+      _hideUpdateIndicators();
+      msg.textContent  = `✓ Up to date`;
+      msg.style.color  = 'var(--c-text-sub)';
+      msg.style.display = 'inline';
+    } else {
+      _updateInfo = info;
+      _showUpdateIndicators(info.latestVersion);
+      _renderUpdateAvailablePanel(info);
+    }
+  } catch (e) {
+    msg.textContent  = `⚠ ${e.message}`;
+    msg.style.color  = '#cb6';
+    msg.style.display = 'inline';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Check for Updates';
+  }
+});
+
+document.getElementById('btn-update-notes-toggle').addEventListener('click', () => {
+  const body = document.getElementById('update-notes-body');
+  const btn  = document.getElementById('btn-update-notes-toggle');
+  const open = body.style.display === 'none';
+  body.style.display = open ? 'block' : 'none';
+  btn.textContent    = (open ? '▼' : '▶') + ' Release Notes';
+});
+
+document.getElementById('btn-download-update').addEventListener('click', async () => {
+  if (!_updateInfo?.downloadUrl) return;
+  const dlBtn  = document.getElementById('btn-download-update');
+  const wrap   = document.getElementById('update-progress-wrap');
+  const fill   = document.getElementById('update-progress-fill');
+  const pctTxt = document.getElementById('update-progress-text');
+  const errMsg = document.getElementById('update-error-msg');
+  dlBtn.style.display  = 'none';
+  wrap.style.display   = 'flex';
+  errMsg.style.display = 'none';
+  fill.style.width     = '0%';
+  pctTxt.textContent   = '0%';
+
+  const unsub = window.electronAPI.onUpdateProgress(({ percent }) => {
+    fill.style.width   = `${percent}%`;
+    pctTxt.textContent = `${percent}%`;
+  });
+
+  try {
+    const result = await window.electronAPI.downloadUpdate(_updateInfo.downloadUrl, _updateInfo.assetName);
+    unsub();
+    if (result.ok) {
+      _updateExeReady = true;
+      fill.style.width   = '100%';
+      pctTxt.textContent = '100%';
+      wrap.style.display = 'none';
+      document.getElementById('btn-install-update').style.display = 'inline-block';
+    } else {
+      wrap.style.display  = 'none';
+      dlBtn.style.display = 'inline-block';
+      errMsg.textContent  = `Download failed: ${result.error}`;
+      errMsg.style.display = 'block';
+    }
+  } catch (e) {
+    unsub();
+    wrap.style.display  = 'none';
+    dlBtn.style.display = 'inline-block';
+    errMsg.textContent  = `Download failed: ${e.message}`;
+    errMsg.style.display = 'block';
+  }
+});
+
+document.getElementById('btn-install-update').addEventListener('click', async () => {
+  if (isDirty) {
+    const fileName = currentFilePath ? currentFilePath.split(/[\\/]/).pop() : 'config file';
+    const choice = await promptUnsaved(`Save changes to "${fileName}" before installing the update?`);
+    if (choice === 'cancel') return;
+    if (choice === 'save') await doSave();
+  }
+  const result = await window.electronAPI.installUpdate();
+  if (!result.ok) {
+    document.getElementById('update-error-msg').textContent  = `Install failed: ${result.error}`;
+    document.getElementById('update-error-msg').style.display = 'block';
+  }
+  // main process calls app.quit() after launching installer
 });
 
 // ── Versions tab: Import button ────────────────────────
@@ -3913,13 +4239,8 @@ document.getElementById('modal-create-styles').addEventListener('click', e => {
 });
 document.getElementById('btn-create-styles-blank').addEventListener('click', async () => {
   document.getElementById('modal-create-styles').classList.remove('active');
-  const now = new Date().toISOString().slice(0, 10);
-  const content =
-    '// ============================================================\n' +
-    '// JMT Studio — Style Library\n' +
-    `// Created: ${now}\n` +
-    '// Add styles below this header.\n' +
-    '// ============================================================\n\n';
+  const today = new Date().toISOString().slice(0, 10);
+  const content = _buildStyleLibraryJmtHeader(today) + '\n\n';
   await window.electronAPI.writeStylesFile(content);
   await _activateStylesLibrary(content);
 });
@@ -4138,7 +4459,7 @@ function _styleNameFromDisplay(s) {
     .replace(/^[0-9]/, '_$&');
 }
 
-function _openAddStyleModal() {
+function _clearAddStyleForm() {
   document.getElementById('add-style-name').value   = '';
   document.getElementById('add-style-source').value = '';
   document.getElementById('add-style-url').value    = '';
@@ -4154,8 +4475,14 @@ function _openAddStyleModal() {
   if (msg) { msg.textContent = ''; msg.style.display = 'none'; }
   if (_addStyleEditor) {
     _addStyleEditor.setValue('');
+    const _m = _addStyleEditor.getModel();
+    if (_m) monaco.editor.setModelMarkers(_m, 'bracket-check', []);
     setTimeout(() => _addStyleEditor.layout(), 50);
   }
+}
+
+function _openAddStyleModal() {
+  _clearAddStyleForm();
   document.getElementById('modal-add-style').classList.add('active');
 }
 
@@ -4227,6 +4554,8 @@ function _extractStyleLibraryCreatedDate(content) {
 function _stripStyleLibraryStructure(content) {
   return content
     .replace(_SL_JMT_HEADER_RE, '')
+    // Strip legacy blank-creation header format (old "JMT Studio — Style Library" / "Created:" block)
+    .replace(/^\/\/ =+\r?\n\/\/ JMT Studio[^\n]*\r?\n(?:\/\/[^\n]*\r?\n)*\/\/ =+\r?\n?/m, '')
     .replace(/\/\*[*\s]*Helper\s+functions[*\s]*\*\/[ \t]*\r?\n?/gi, '')
     .replace(/\/\*[*\s]*Using\s+styles[*\s]*\*\/[ \t]*\r?\n?/gi, '')
     .replace(/^\s*\n/, '');
@@ -4392,8 +4721,11 @@ function _switchStylesView(mode) {
   document.getElementById('btn-styles-view-code').classList.toggle('active',   showCode);
   document.getElementById('btn-styles-view-visual').classList.toggle('active', !showCode);
   const show = showCode ? '' : 'none';
-  document.getElementById('btn-styles-collapse').style.display = show;
-  document.getElementById('btn-styles-expand').style.display   = show;
+  document.getElementById('btn-styles-collapse').style.display       = show;
+  document.getElementById('btn-styles-expand').style.display         = show;
+  document.getElementById('btn-styles-undo').style.display           = show;
+  document.getElementById('btn-styles-redo').style.display           = show;
+  document.getElementById('toolbar-divider-undoredo').style.display  = show;
   if (mode === 'visual') _buildStylesVisual();
   if (showCode && _stylesEditorInstance) {
     _stylesEditorInstance.layout();
@@ -4725,7 +5057,9 @@ function _scheduleStylesInUseRebuild() {
   }, 400);
 }
 
-let _styleDragSrcIdx    = null;
+let _styleDragSrcIdx        = null;
+let _styleReorderUndoStack  = [];
+let _styleReorderRedoStack  = [];
 let _brokenStyleNames      = new Set();
 let _conflictStyleNames    = new Set();  // duplicate names after append
 let _conflictTemplateNames = new Set();  // template entries with same name but different bodies
@@ -4819,7 +5153,7 @@ function _updateConflictBanner() {
     if (_conflictStyleNames.size)    msgs.push(`duplicate names: ${[..._conflictStyleNames].map(n=>`"${n}"`).join(', ')}`);
     if (_conflictTemplateNames.size) msgs.push(`conflicting templates: ${[..._conflictTemplateNames].map(n=>`"${n}"`).join(', ')}`);
     banner.textContent = `⚠ Resolve before saving — ${msgs.join(' · ')}`;
-    banner.style.display = '';
+    banner.style.display = 'block';
     if (saveBtn) saveBtn.disabled = true;
   }
   if (discardBtn) discardBtn.disabled = !window._isStylesDirty?.();
@@ -5158,6 +5492,7 @@ document.getElementById('btn-helper-save').addEventListener('click', async () =>
         _helperEditorOrigName    = targetName;
         _stylesEditorInstance.setValue(newContent);
         _setStylesDirty(true);
+        _exitHelperPencilMode();
         document.getElementById('btn-helper-save').disabled = true;
         _updateHelperEditorButtons();
         return;
@@ -5179,6 +5514,7 @@ document.getElementById('btn-helper-save').addEventListener('click', async () =>
 
   _stylesEditorInstance.setValue(newContent);
   _setStylesDirty(true);
+  _exitHelperPencilMode();
   document.getElementById('btn-helper-save').disabled = true;
   _updateHelperEditorButtons();
 });
@@ -5254,18 +5590,21 @@ function _buildStylesVisual() {
             e.stopPropagation();
             const card = list.querySelector(`.style-card[data-name="${CSS.escape(styleName)}"]`);
             if (!card) return;
+            const doHighlight = () => {
+              card.classList.remove('highlight');
+              void card.offsetWidth;
+              card.classList.add('highlight');
+              setTimeout(() => card.classList.remove('highlight'), 1200);
+            };
             const container = document.querySelector('.styles-visual-main');
             if (container) {
               const cr = container.getBoundingClientRect();
               const cd = card.getBoundingClientRect();
-              container.scrollTo({ top: container.scrollTop + (cd.top - cr.top) - (container.clientHeight - cd.height) / 2, behavior: 'smooth' });
+              container.scrollTo({ top: container.scrollTop + (cd.top - cr.top) - (container.clientHeight - cd.height) / 2, behavior: 'instant' });
             } else {
-              card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              card.scrollIntoView({ behavior: 'instant', block: 'center' });
             }
-            card.classList.remove('highlight');
-            void card.offsetWidth;
-            card.classList.add('highlight');
-            setTimeout(() => card.classList.remove('highlight'), 1200);
+            doHighlight();
           });
           uses.appendChild(item);
         });
@@ -5340,7 +5679,7 @@ function _buildStylesVisual() {
         <div class="style-card-name">${name}</div>
       </div>
       ${displaySource ? `<div class="style-card-source">${displaySource}</div>` : ''}
-      ${cardUrl       ? `<div class="style-card-source style-card-source-link" title="${cardUrl}">${urlLabel}</div>` : ''}
+      ${cardUrl       ? `<div class="style-card-source"><button class="style-card-source-link" title="${cardUrl}">${urlLabel}</button></div>` : ''}
       ${userTagsHtml  ? `<div class="style-card-tags">${userTagsHtml}</div>` : ''}
       ${effectsHtml   ? `<div class="style-card-effects">${effectsHtml}</div>` : ''}`;
 
@@ -5394,6 +5733,9 @@ function _buildStylesVisual() {
       e.preventDefault();
       card.classList.remove('drag-over');
       if (_styleDragSrcIdx === null || _styleDragSrcIdx === cardIdx) return;
+      _closeHelperEditor();
+      _styleReorderUndoStack.push(_stylesEditorInstance.getValue());
+      _styleReorderRedoStack = [];
       _reorderStylesInFile(_styleDragSrcIdx, cardIdx);
     });
 
@@ -5454,14 +5796,19 @@ function _updateDetailErrorMarkers(revealError = false) {
   if (!_stylesDetailEditor) return;
   const model = _stylesDetailEditor.getModel();
   if (!model) return;
-  const code = _stylesDetailEditor.getValue();
-  const err  = _findBracketError(_compactStyleCode(code));
-  const banner = document.getElementById('detail-error-banner');
+  const code    = _stylesDetailEditor.getValue();
+  const compact = _compactStyleCode(code);
+  const banner  = document.getElementById('detail-error-banner');
+
+  // Primary detection on compacted editor content.
+  // Fallback: if the compacted path misses it, use the raw usingCode — the exact
+  // source _updateStyleErrorDecorations uses, so the banner always matches the card.
+  const err = _findBracketError(compact)
+    || (_detailEntry ? _findBracketError(_detailEntry.usingCode) : null);
 
   if (err) {
-    // Find position in the *formatted* code the editor shows
-    const formattedCode = code;
-    const formattedErr  = _findBracketError(formattedCode) || err;
+    // Re-run on non-compacted editor content for accurate Monaco line/column
+    const formattedErr = _findBracketError(code) || err;
     const pos = model.getPositionAt(formattedErr.offsetInCode);
     monaco.editor.setModelMarkers(model, 'proffie-style', [{
       severity: monaco.MarkerSeverity.Error,
@@ -5471,8 +5818,28 @@ function _updateDetailErrorMarkers(revealError = false) {
       endLineNumber:   pos.lineNumber,
       endColumn:       pos.column + 1,
     }]);
-    banner.textContent = `✕ ${formattedErr.message} on line ${pos.lineNumber} — fix before saving`;
-    banner.style.display = '';
+    // Context snippet: strip template prefix first so offsets align with _findBracketError's output
+    const { code: usingPart } = _splitTemplatePrefix(compact);
+    const usingPfxM = usingPart.match(/^using\s+[\w+]+\s*=\s*/);
+    const exprStart = usingPfxM ? usingPfxM[0].length : 0;
+    const exprCode  = usingPart.slice(exprStart);
+    const exprOff   = err.offsetInCode - exprStart;
+    const R = 22;
+    const s   = Math.max(0, exprOff - R);
+    const e   = Math.min(exprCode.length, exprOff + R + 1);
+    const ctx = (s > 0 ? '…' : '') + exprCode.slice(s, e) + (e < exprCode.length ? '…' : '');
+    // Heuristic hint based on what precedes the error character
+    let hint = '';
+    const before = exprCode.slice(0, exprOff);
+    if (err.message === 'Unmatched >') {
+      const wm = before.match(/([A-Za-z_]\w*)(\d+)$/);
+      if (wm) hint = ` — missing \`<\` after \`${wm[1]}\`?`;
+    } else if (err.message === 'Unmatched <') {
+      const wm = before.match(/([A-Za-z_]\w*)$/);
+      if (wm) hint = ` — closing \`>\` missing for \`${wm[1]}\`?`;
+    }
+    banner.textContent = `✕ ${err.message} near “${ctx}”${hint} — fix before saving`;
+    banner.style.display = 'block';
     if (revealError) {
       _stylesDetailEditor.revealLineInCenter(pos.lineNumber);
       _stylesDetailEditor.setSelection(new monaco.Range(
@@ -5488,7 +5855,9 @@ function _updateDetailErrorMarkers(revealError = false) {
 
 function _detailHasError() {
   if (!_stylesDetailEditor) return false;
-  return !!_findBracketError(_compactStyleCode(_stylesDetailEditor.getValue()));
+  const compact = _compactStyleCode(_stylesDetailEditor.getValue());
+  return !!(_findBracketError(compact)
+    || (_detailEntry ? _findBracketError(_detailEntry.usingCode) : null));
 }
 
 function _setDetailDirty(val) {
@@ -5824,6 +6193,10 @@ document.getElementById('btn-styles-export').addEventListener('click', async () 
   if (_stylesEditorInstance) await window.electronAPI.writeStylesFile(_stylesEditorInstance.getValue());
   await window.electronAPI.exportStylesFile();
 });
+document.getElementById('btn-styles-undo').addEventListener('click', () => _stylesEditorInstance?.trigger('keyboard', 'undo', null));
+document.getElementById('btn-styles-redo').addEventListener('click', () => _stylesEditorInstance?.trigger('keyboard', 'redo', null));
+document.getElementById('btn-detail-undo').addEventListener('click', () => _stylesDetailEditor?.trigger('keyboard', 'undo', null));
+document.getElementById('btn-detail-redo').addEventListener('click', () => _stylesDetailEditor?.trigger('keyboard', 'redo', null));
 document.getElementById('btn-styles-view-code').addEventListener('click',   () => _switchStylesView('code'));
 document.getElementById('btn-styles-view-visual').addEventListener('click', () => _switchStylesView('visual'));
 
@@ -6208,6 +6581,20 @@ document.getElementById('helper-notes-textarea').addEventListener('input', () =>
   _updateHelperEditorButtons();
 });
 
+function _exitHelperPencilMode() {
+  const nameInput   = document.getElementById('styles-helper-editor-name');
+  const nameDisplay = document.getElementById('helper-name-display');
+  const pencilBtn   = document.getElementById('btn-helper-pencil');
+  const confirmBtn  = document.getElementById('btn-helper-pencil-confirm');
+  if (confirmBtn.style.display === 'none') return; // already in display mode
+  nameDisplay.textContent = nameInput.value || nameInput.placeholder;
+  nameDisplay.style.display = '';
+  nameInput.classList.remove('editable');
+  nameInput.readOnly = true;
+  confirmBtn.style.display = 'none';
+  pencilBtn.style.display = '';
+}
+
 // Pencil — enter rename mode
 document.getElementById('btn-helper-pencil').addEventListener('click', () => {
   const nameInput   = document.getElementById('styles-helper-editor-name');
@@ -6221,6 +6608,20 @@ document.getElementById('btn-helper-pencil').addEventListener('click', () => {
   confirmBtn.style.display = '';
   nameInput.focus();
   nameInput.select();
+});
+
+// Name input blur — cancel rename if focus leaves to anywhere except the confirm or save buttons
+document.getElementById('styles-helper-editor-name').addEventListener('blur', e => {
+  const confirmBtn = document.getElementById('btn-helper-pencil-confirm');
+  if (confirmBtn.style.display === 'none') return;                             // not in pencil mode
+  if (e.relatedTarget === confirmBtn) return;                                  // let confirm handler run
+  if (e.relatedTarget === document.getElementById('btn-helper-save')) return;  // let save handler commit
+  // Revert name to original and exit pencil mode
+  const nameInput = document.getElementById('styles-helper-editor-name');
+  nameInput.value = _helperEditorOrigName;
+  nameInput.classList.remove('invalid');
+  document.getElementById('helper-name-error').classList.remove('visible');
+  _exitHelperPencilMode();
 });
 
 // Confirm (checkmark) — lock name, return to display mode
@@ -6245,6 +6646,7 @@ document.getElementById('btn-add-style').addEventListener('click', _openAddStyle
     _addStyleConfirmCallback = null;
   });
 });
+document.getElementById('btn-add-style-clear').addEventListener('click', _clearAddStyleForm);
 document.getElementById('modal-add-style').addEventListener('click', async e => {
   if (e.target === document.getElementById('modal-add-style')) {
     if (!await _guardAddStyleModal('Discard this new style?')) return;
@@ -6261,7 +6663,7 @@ function _parseClipboardStyle(text) {
   const blockMatch = raw.match(/\/\*(-*)\s*([^\n]*)\n([\s\S]*?)\*\//);
   if (blockMatch) {
     const hasDashes = blockMatch[1].length > 0;
-    const firstWord = blockMatch[2].trim().match(/^([A-Za-z0-9_]+)/)?.[1] || '';
+    const firstWord = blockMatch[2].trim().match(/^([A-Za-z0-9_+]+)/)?.[1] || '';
     if (hasDashes && firstWord) result.name = firstWord;
     // For no-dashes format, first line (group 2) may contain copyright/url — include it
     const firstLine = hasDashes ? '' : blockMatch[2].trim();
@@ -6282,7 +6684,7 @@ function _parseClipboardStyle(text) {
   }
 
   // Extract expression — try using first, then StylePtr, then raw
-  const usingM = raw.match(/\busing\s+(\w+)\s*=\s*([\s\S]+?)\s*;/);
+  const usingM = raw.match(/\busing\s+([\w+]+)\s*=\s*([\s\S]+?)\s*;/);
   if (usingM) {
     if (!result.name) result.name = usingM[1];
     result.expr = usingM[2].replace(/\s+/g, ' ').trim();
@@ -6290,7 +6692,8 @@ function _parseClipboardStyle(text) {
     const inner = _extractStylePtrInner(raw);
     if (inner) result.expr = inner.replace(/\s+/g, ' ').trim();
   } else {
-    result.expr = raw.replace(/;\s*$/, '').replace(/\s+/g, ' ').trim();
+    const candidate = raw.replace(/;\s*$/, '').replace(/\s+/g, ' ').trim();
+    if (/\b\w+</.test(candidate)) result.expr = candidate;
   }
 
   return result;
@@ -6310,8 +6713,42 @@ document.getElementById('add-style-notes-toggle').addEventListener('click', () =
 function _updateAddStyleConfirmBtn() {
   const name = document.getElementById('add-style-name').value.trim();
   const hasCode = _addStyleEditor && !!_normalizeStyleInput(_addStyleEditor.getValue()).expr;
-  document.getElementById('btn-add-style-confirm').disabled = !name || !hasCode;
+  let hasErr = false;
+  if (_addStyleEditor) {
+    const content = _addStyleEditor.getValue();
+    const hasUsing = /\busing\s+[\w+]+\s*=/.test(content.trim());
+    const checkContent = content.trim()
+      ? (hasUsing ? content : `using _check_ = ${content.replace(/;\s*$/, '')};`)
+      : '';
+    hasErr = checkContent ? !!_findBracketError(_compactStyleCode(checkContent)) : false;
+  }
+  document.getElementById('btn-add-style-confirm').disabled = !name || !hasCode || hasErr;
 }
+
+// Style name inputs must not contain spaces (invalid C++ using alias).
+// This wires silent space→underscore replacement to any name field.
+function _wireStyleNameSanitize(el) {
+  el.addEventListener('keydown', e => {
+    if (e.key === ' ') {
+      e.preventDefault();
+      const s = el.selectionStart, end = el.selectionEnd;
+      el.value = el.value.slice(0, s) + '_' + el.value.slice(end);
+      el.setSelectionRange(s + 1, s + 1);
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  });
+  el.addEventListener('paste', e => {
+    e.preventDefault();
+    const text = (e.clipboardData || window.clipboardData).getData('text').replace(/\s+/g, '_');
+    const s = el.selectionStart, end = el.selectionEnd;
+    el.value = el.value.slice(0, s) + text + el.value.slice(end);
+    el.setSelectionRange(s + text.length, s + text.length);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+_wireStyleNameSanitize(document.getElementById('add-style-name'));
+_wireStyleNameSanitize(document.getElementById('style-detail-name-input'));
+_wireStyleNameSanitize(document.getElementById('styles-helper-editor-name'));
 
 // Live sync: name field → editor
 document.getElementById('add-style-name').addEventListener('input', () => {
@@ -6344,7 +6781,8 @@ document.getElementById('add-style-name').addEventListener('input', () => {
 function _applyParsedStyleResult(parsed) {
   if (!parsed.expr) return;
 
-  const editorContent = parsed.name ? `using ${parsed.name} = ${parsed.expr};` : parsed.expr;
+  const rawContent    = parsed.name ? `using ${parsed.name} = ${parsed.expr};` : parsed.expr;
+  const editorContent = _formatStyleCode(rawContent);
   if (_addStyleEditor) {
     _addStyleEditor.setValue(editorContent);
     _addStyleEditor.setScrollPosition({ scrollTop: 0 });
@@ -6355,8 +6793,8 @@ function _applyParsedStyleResult(parsed) {
   document.getElementById('add-style-code-hint').textContent =
     parsed.name ? 'editable — name field syncs live' : 'enter a name above to complete';
 
-  _addStyleCurrentName = parsed.name || '';
-  document.getElementById('add-style-name').value   = parsed.name || '';
+  _addStyleCurrentName = (parsed.name || '').replace(/\s+/g, '_');
+  document.getElementById('add-style-name').value   = _addStyleCurrentName;
   if (parsed.source) document.getElementById('add-style-source').value = parsed.source;
   if (parsed.url)    document.getElementById('add-style-url').value    = parsed.url;
   const tags = parsed.osVersion ? [parsed.osVersion] : [];
@@ -6378,10 +6816,67 @@ async function _runPasteAndParse() {
   try { text = await navigator.clipboard.readText(); } catch { return; }
   if (!text.trim()) return;
   const parsed = _parseClipboardStyle(text);
+  const msg = document.getElementById('add-style-msg');
+  if (!parsed.expr) {
+    // Allow but inform — show raw content so user can fix it manually
+    document.getElementById('add-style-code-section').style.display = 'flex';
+    document.getElementById('add-style-code-hint').textContent = 'no style detected — edit to fix or Clear to start over';
+    if (_addStyleEditor) {
+      _addStyleEditor.setValue(text.trim());
+      _addStyleEditor.setScrollPosition({ scrollTop: 0 });
+      _addStyleEditor.layout();
+    }
+    if (msg) {
+      msg.textContent = 'No style found in clipboard — edit to fix or Clear to start over.';
+      msg.style.color = '#e44';
+      msg.style.display = '';
+    }
+    _updateAddStyleConfirmBtn();
+    return;
+  }
+  if (msg) { msg.style.display = 'none'; msg.textContent = ''; }
   _applyParsedStyleResult(parsed);
 }
 
 document.getElementById('btn-add-style-paste').addEventListener('click', _runPasteAndParse);
+
+// Global Ctrl+S — save from anywhere on the config tab (Monaco handles it internally when focused)
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 's' && _activeTab === 'config' && fileIsOpen) {
+    const inMonaco = !!document.activeElement?.closest('.monaco-editor');
+    if (!inMonaco) {
+      e.preventDefault();
+      isElectron ? doSave() : doDownload();
+    }
+  }
+});
+
+// Ctrl+Z / Ctrl+Y in Style Library visual view — undo/redo drag reorder
+document.addEventListener('keydown', e => {
+  if (_activeTab !== 'styles' || _stylesViewMode !== 'visual') return;
+  const isUndo = (e.ctrlKey || e.metaKey) && e.key === 'z';
+  const isRedo = (e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.shiftKey && e.key === 'z'));
+  if (!isUndo && !isRedo) return;
+  const tag = document.activeElement?.tagName;
+  const inInput = tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement?.isContentEditable;
+  const inMonaco = !!document.activeElement?.closest('.monaco-editor');
+  if (inInput || inMonaco) return;
+  if (isUndo && _styleReorderUndoStack.length) {
+    e.preventDefault();
+    _closeHelperEditor();
+    _styleReorderRedoStack.push(_stylesEditorInstance.getValue());
+    _stylesEditorInstance.setValue(_styleReorderUndoStack.pop());
+    _setStylesDirty(true);
+    _buildStylesVisual();
+  } else if (isRedo && _styleReorderRedoStack.length) {
+    e.preventDefault();
+    _closeHelperEditor();
+    _styleReorderUndoStack.push(_stylesEditorInstance.getValue());
+    _stylesEditorInstance.setValue(_styleReorderRedoStack.pop());
+    _setStylesDirty(true);
+    _buildStylesVisual();
+  }
+});
 
 // Redirect Ctrl+A to Monaco when the config tab is active and no input has focus
 document.addEventListener('keydown', e => {
@@ -6744,8 +7239,7 @@ document.getElementById('detail-url-input').addEventListener('input', e => {
   e.target.classList.remove('url-invalid');
   e.target.title = '';
 });
-document.getElementById('detail-url-display').addEventListener('click', e => {
-  e.preventDefault();
+document.getElementById('detail-url-display').addEventListener('click', () => {
   if (_detailUrl) window.electronAPI?.openExternal(_detailUrl);
 });
 document.getElementById('btn-detail-url-clear').addEventListener('click', () => {
@@ -6868,13 +7362,62 @@ window.initStylesPanel = function() {
   // Editor → name field: if editor contains `using NAME =`, sync to name input
   _addStyleEditor.onDidChangeModelContent(() => {
     const content = _addStyleEditor.getValue();
-    const m = content.match(/\busing\s+(\w+)\s*=/);
+    const m = content.match(/\busing\s+([\w+]+)\s*=/);
     if (m && m[1] !== _addStyleCurrentName) {
       _addStyleCurrentName = m[1];
       document.getElementById('add-style-name').value = m[1];
     }
     const msg = document.getElementById('add-style-msg');
-    if (msg) { msg.textContent = ''; msg.style.display = 'none'; }
+    const model = _addStyleEditor.getModel();
+    // Synthesize `using` prefix if needed so bracket check works on raw expressions too
+    const hasUsing = /\busing\s+[\w+]+\s*=/.test(content.trim());
+    const PREFIX = 'using _check_ = ';
+    const checkContent = content.trim()
+      ? (hasUsing ? content : `${PREFIX}${content.replace(/;\s*$/, '')};`)
+      : '';
+    const compact = checkContent ? _compactStyleCode(checkContent) : '';
+    const err = compact ? _findBracketError(compact) : null;
+    if (model) {
+      if (err) {
+        // Re-run on non-compacted content to get a position in the editor's actual lines
+        const formattedErr = _findBracketError(checkContent) || err;
+        const editorOffset = hasUsing ? formattedErr.offsetInCode
+          : Math.max(0, formattedErr.offsetInCode - PREFIX.length);
+        const pos = model.getPositionAt(editorOffset);
+        monaco.editor.setModelMarkers(model, 'bracket-check', [{
+          severity: monaco.MarkerSeverity.Error,
+          message:  formattedErr.message,
+          startLineNumber: pos.lineNumber, startColumn: pos.column,
+          endLineNumber:   pos.lineNumber, endColumn:   pos.column + 1,
+        }]);
+        // Context snippet from compact expression (strip `using NAME = ` prefix)
+        const usingPfxM = compact.match(/^using\s+[\w+]+\s*=\s*/);
+        const exprStart = usingPfxM ? usingPfxM[0].length : 0;
+        const exprCode  = compact.slice(exprStart);
+        const exprOff   = err.offsetInCode - exprStart;
+        const R = 22;
+        const s = Math.max(0, exprOff - R), e = Math.min(exprCode.length, exprOff + R + 1);
+        const ctx = (s > 0 ? '…' : '') + exprCode.slice(s, e) + (e < exprCode.length ? '…' : '');
+        // Simple "what specifically is wrong" heuristic
+        let hint = '';
+        const before = exprCode.slice(0, exprOff);
+        if (err.message === 'Unmatched >') {
+          const wm = before.match(/([A-Za-z_]\w*)(\d+)$/);
+          if (wm) hint = ` — missing \`<\` after \`${wm[1]}\`?`;
+        } else if (err.message === 'Unmatched <') {
+          const wm = before.match(/([A-Za-z_]\w*)$/);
+          if (wm) hint = ` — closing \`>\` missing for \`${wm[1]}\`?`;
+        }
+        if (msg) {
+          msg.textContent = `✕ ${err.message} near "${ctx}"${hint} — fix before saving`;
+          msg.style.color = '#e44';
+          msg.style.display = '';
+        }
+      } else {
+        monaco.editor.setModelMarkers(model, 'bracket-check', []);
+        if (msg) { msg.textContent = ''; msg.style.display = 'none'; }
+      }
+    }
     _updateAddStyleConfirmBtn();
   });
 
@@ -6971,15 +7514,18 @@ function closeFavDropdown() {
 
 async function checkDescDupe() {
   const descEl = document.getElementById('input-desc');
-  if (!fileIsOpen) { descEl.classList.remove('field-warn'); return; }
+  const warnEl = document.getElementById('desc-dupe-warning');
+  if (!fileIsOpen) { descEl.classList.remove('field-warn'); descEl.title = ''; if (warnEl) warnEl.style.display = 'none'; return; }
   const desc = descEl.value.trim();
-  if (!desc) { descEl.classList.remove('field-warn'); return; }
+  if (!desc) { descEl.classList.remove('field-warn'); descEl.title = ''; if (warnEl) warnEl.style.display = 'none'; return; }
   const items = await window.electronAPI.getFavorites();
   const isDupe = items.some(f => {
     if (f.filePath === currentFilePath) return false;
     return (f.desc || f.name || f.filePath.split(/[\\/]/).pop().replace(/\.[^.]+$/, '')) === desc;
   });
   descEl.classList.toggle('field-warn', isDupe);
+  descEl.title = isDupe ? 'A favorited file already uses this description. Descriptions should be unique so favorites are easy to tell apart.' : '';
+  if (warnEl) warnEl.style.display = isDupe ? '' : 'none';
 }
 
 async function buildFavDropdown() {
@@ -7037,6 +7583,7 @@ async function openFavorite(filePath) {
   if (!await guardUnsaved('Save current file before opening another?')) return;
   const res = await window.electronAPI.readFile(filePath);
   if (res) loadContent(res.content, res.filePath);
+  else await refreshEmptyStateFavs();
 }
 
 async function refreshEmptyStateFavs() {
@@ -7044,14 +7591,15 @@ async function refreshEmptyStateFavs() {
   if (!container) return;
   const items = await window.electronAPI.getFavorites();
   favoritePaths = new Set(items.map(i => i.filePath));
-  const present = items.filter(i => i.exists);
   container.innerHTML = '';
-  if (!present.length) { container.style.display = 'none'; return; }
+  if (!items.length) { container.style.display = 'none'; return; }
   container.style.display = 'flex';
-  present.forEach(({ filePath, name, desc }) => {
+  const present = items.filter(i => i.exists);
+  const sorted = [...present, ...items.filter(i => !i.exists)];
+  sorted.forEach(({ filePath, name, desc, exists }) => {
     const card = document.createElement('div');
-    card.className = 'fav-card';
-    card.title = filePath;
+    card.className = 'fav-card' + (exists ? '' : ' fav-card--missing');
+    card.title = exists ? filePath : `File not found:\n${filePath}`;
     const displayName = desc || filePath.split(/[\\/]/).pop().replace(/\.[^.]+$/, '');
     card.innerHTML = `<div class="fav-card-name">${displayName}</div>`;
 
@@ -7069,51 +7617,53 @@ async function refreshEmptyStateFavs() {
         if (!container.querySelector('.fav-card')) container.style.display = 'none';
         return;
       }
-      openFavorite(filePath);
+      if (exists) openFavorite(filePath);
     });
 
-    card.draggable = true;
-    card.addEventListener('dragstart', (e) => {
-      if (xBtn.contains(e.target)) { e.preventDefault(); return; }
-      dragSrcPath = filePath;
-      e.dataTransfer.effectAllowed = 'move';
-      setTimeout(() => card.classList.add('dragging'), 0);
-    });
-    card.addEventListener('dragend', () => {
-      dragSrcPath = null;
-      card.classList.remove('dragging');
-      container.querySelectorAll('.fav-card').forEach(c => c.classList.remove('drag-over'));
-    });
-    card.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-      if (filePath !== dragSrcPath) {
+    if (exists) {
+      card.draggable = true;
+      card.addEventListener('dragstart', (e) => {
+        if (xBtn.contains(e.target)) { e.preventDefault(); return; }
+        dragSrcPath = filePath;
+        e.dataTransfer.effectAllowed = 'move';
+        setTimeout(() => card.classList.add('dragging'), 0);
+      });
+      card.addEventListener('dragend', () => {
+        dragSrcPath = null;
+        card.classList.remove('dragging');
         container.querySelectorAll('.fav-card').forEach(c => c.classList.remove('drag-over'));
-        card.classList.add('drag-over');
-      }
-    });
-    card.addEventListener('dragleave', () => card.classList.remove('drag-over'));
-    card.addEventListener('drop', async (e) => {
-      e.preventDefault();
-      if (!dragSrcPath || dragSrcPath === filePath) return;
-      card.classList.remove('drag-over');
+      });
+      card.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        if (filePath !== dragSrcPath) {
+          container.querySelectorAll('.fav-card').forEach(c => c.classList.remove('drag-over'));
+          card.classList.add('drag-over');
+        }
+      });
+      card.addEventListener('dragleave', () => card.classList.remove('drag-over'));
+      card.addEventListener('drop', async (e) => {
+        e.preventDefault();
+        if (!dragSrcPath || dragSrcPath === filePath) return;
+        card.classList.remove('drag-over');
 
-      const srcIdx = present.findIndex(p => p.filePath === dragSrcPath);
-      const tgtIdx = present.findIndex(p => p.filePath === filePath);
-      if (srcIdx === -1 || tgtIdx === -1) return;
+        const srcIdx = present.findIndex(p => p.filePath === dragSrcPath);
+        const tgtIdx = present.findIndex(p => p.filePath === filePath);
+        if (srcIdx === -1 || tgtIdx === -1) return;
 
-      const reordered = [...present];
-      const [moved] = reordered.splice(srcIdx, 1);
-      reordered.splice(tgtIdx, 0, moved);
+        const reordered = [...present];
+        const [moved] = reordered.splice(srcIdx, 1);
+        reordered.splice(tgtIdx, 0, moved);
 
-      const allItems = await window.electronAPI.getFavorites();
-      const missingPaths = allItems.filter(i => !i.exists).map(i => i.filePath);
-      await window.electronAPI.reorderFavorites([
-        ...reordered.map(p => p.filePath),
-        ...missingPaths
-      ]);
-      await refreshEmptyStateFavs();
-    });
+        const allItems = await window.electronAPI.getFavorites();
+        const missingPaths = allItems.filter(i => !i.exists).map(i => i.filePath);
+        await window.electronAPI.reorderFavorites([
+          ...reordered.map(p => p.filePath),
+          ...missingPaths
+        ]);
+        await refreshEmptyStateFavs();
+      });
+    }
 
     container.appendChild(card);
   });
@@ -7416,6 +7966,7 @@ require(['vs/editor/editor.main'], function () {
     let _selectedLive           = new Set(); // live preset indices in multi-selection
     let _selectedDisabled       = new Set(); // disabled preset startLines in multi-selection
     let _lastClickedRow         = null;      // for shift-range selection
+    let _openActivePresetNameEdit = null;    // set by detail renderer; called by row Ctrl+V
 
     function _navigateToLine(startLine, endLine) {
       if (!editor) return;
@@ -7713,6 +8264,16 @@ require(['vs/editor/editor.main'], function () {
       row.className = 'preset-row';
       row.dataset.liveIdx = idx;
       row.draggable = true;
+      row.tabIndex = 0;
+      row.addEventListener('keydown', e => {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'v' && _openActivePresetNameEdit) {
+          e.preventDefault();
+          electronAPI.readClipboard().then(text => {
+            const clipped = text.trim().slice(0, 30);
+            if (clipped) _openActivePresetNameEdit(clipped);
+          }).catch(() => {});
+        }
+      });
 
       const drag = document.createElement('span');
       drag.className = 'preset-row-drag';
@@ -7785,6 +8346,7 @@ require(['vs/editor/editor.main'], function () {
           if (arr) _highlightPreset(arr.presets[idx]);
           _navigateToLine(preset.startLine, preset.endLine);
           _renderDetail();
+          row.focus();
         }
       });
       row.addEventListener('contextmenu', e => {
@@ -8064,8 +8626,134 @@ require(['vs/editor/editor.main'], function () {
       nameVal.textContent = preset.displayName || '';
       nameVal.dataset.placeholder = preset.displayName ? '' : 'Preset name';
       nameWrap.appendChild(nameVal);
-      nameWrap.appendChild(_makePencil(() =>
-        _startFieldEdit(nameVal, preset.displayNameRange, preset.displayName || '')));
+
+      const _insertNameCallback = newName => {
+            if (!newName || !editor) return;
+            const model = editor.getModel();
+            const endContent = model.getLineContent(preset.endLine);
+            const closeIdx = endContent.indexOf('}');
+            if (closeIdx < 0) return;
+            const endLeading = (endContent.match(/^(\s*)/) || ['', ''])[1].length;
+            const styleContent = endContent.slice(endLeading, closeIdx); // style text, no leading spaces
+            const afterClose = endContent.slice(closeIdx + 1);           // usually ","
+            const edits = [];
+
+            // Replace endLine wholesale: properly indented style + blank line + name + closing }
+            edits.push({
+              range: {
+                startLineNumber: preset.endLine, startColumn: 1,
+                endLineNumber:   preset.endLine, endColumn:   endContent.length + 1,
+              },
+              text: '  ' + styleContent + ',\n\n  "' + newName + '"\n  }' + afterClose,
+            });
+
+            // Normalize content lines startLine+1 … endLine-1 to 2-space indent
+            for (let ln = preset.startLine + 1; ln < preset.endLine; ln++) {
+              const lc = model.getLineContent(ln);
+              if (lc.trim() === '') continue;
+              const ei = (lc.match(/^(\s*)/) || ['', ''])[1].length;
+              if (ei > 0 && ei !== 2) {
+                edits.push({
+                  range: { startLineNumber: ln, startColumn: 1, endLineNumber: ln, endColumn: ei + 1 },
+                  text: '  ',
+                });
+              }
+            }
+
+            // Enforce single clean blank line after preset
+            const lineCount = model.getLineCount();
+            if (preset.endLine < lineCount) {
+              const nextLine = model.getLineContent(preset.endLine + 1);
+              if (nextLine.trim() !== '') {
+                edits.push({
+                  range: {
+                    startLineNumber: preset.endLine, startColumn: endContent.length + 1,
+                    endLineNumber:   preset.endLine, endColumn:   endContent.length + 1,
+                  },
+                  text: '\n',
+                });
+              } else if (nextLine.length > 0) {
+                edits.push({
+                  range: {
+                    startLineNumber: preset.endLine + 1, startColumn: 1,
+                    endLineNumber:   preset.endLine + 1, endColumn:   nextLine.length + 1,
+                  },
+                  text: '',
+                });
+              }
+            }
+
+            // Enforce single clean blank line before + strip leading spaces from opening {
+            const startContent = model.getLineContent(preset.startLine);
+            const leadingLen = (startContent.match(/^(\s+)/) || ['', ''])[1].length;
+            if (preset.startLine > 1) {
+              const prevLine = model.getLineContent(preset.startLine - 1);
+              if (prevLine.trim() !== '') {
+                edits.push({
+                  range: {
+                    startLineNumber: preset.startLine, startColumn: 1,
+                    endLineNumber:   preset.startLine, endColumn:   leadingLen + 1,
+                  },
+                  text: '\n',
+                });
+              } else {
+                if (prevLine.length > 0) {
+                  edits.push({
+                    range: {
+                      startLineNumber: preset.startLine - 1, startColumn: 1,
+                      endLineNumber:   preset.startLine - 1, endColumn:   prevLine.length + 1,
+                    },
+                    text: '',
+                  });
+                }
+                if (leadingLen > 0) {
+                  edits.push({
+                    range: {
+                      startLineNumber: preset.startLine, startColumn: 1,
+                      endLineNumber:   preset.startLine, endColumn:   leadingLen + 1,
+                    },
+                    text: '',
+                  });
+                }
+              }
+            } else if (leadingLen > 0) {
+              edits.push({
+                range: {
+                  startLineNumber: preset.startLine, startColumn: 1,
+                  endLineNumber:   preset.startLine, endColumn:   leadingLen + 1,
+                },
+                text: '',
+              });
+            }
+
+            edits.sort((a, b) =>
+              a.range.startLineNumber !== b.range.startLineNumber
+                ? a.range.startLineNumber - b.range.startLineNumber
+                : a.range.startColumn - b.range.startColumn
+            );
+            editor.executeEdits('preset-field-edit', edits);
+            editor.focus();
+      };
+
+      function openNameEdit(initialValue) {
+        if (preset.displayNameRange) {
+          _startFieldEdit(nameVal, preset.displayNameRange, initialValue !== undefined ? initialValue : (preset.displayName || ''));
+        } else {
+          _startFieldEdit(nameVal, null, initialValue || '', undefined, _insertNameCallback);
+        }
+      }
+      function applyNameDirect(name) {
+        if (!name) return;
+        if (preset.displayNameRange) {
+          _commitFieldEdit(preset.displayNameRange, name);
+        } else {
+          _insertNameCallback(name);
+        }
+        _scheduleRebuild();
+      }
+      _openActivePresetNameEdit = applyNameDirect;
+
+      nameWrap.appendChild(_makePencil(() => openNameEdit()));
       heading.appendChild(nameWrap);
 
       const navBtn = document.createElement('button');
@@ -8508,7 +9196,7 @@ require(['vs/editor/editor.main'], function () {
 
     // ── Field editing ──────────────────────────────────────────────────────────
     function _startFieldEdit(valEl, range, currentValue, inputClass, onConfirm) {
-      if (!range) return;
+      if (!range && !onConfirm) return;
       const wrap = valEl.parentNode;
       const placeholder = document.createElement('span');
       wrap.replaceChild(placeholder, valEl);
@@ -9766,7 +10454,7 @@ require(['vs/editor/editor.main'], function () {
       let cg = Math.round((initProffieVals[1]||0)/257);
       let cb = Math.round((initProffieVals[2]||0)/257);
       let currentPage = 0;
-      let nameSel = null;
+      let _setNameDisplay = null;
 
       function toHex() { return '#'+[cr,cg,cb].map(v=>v.toString(16).padStart(2,'0')).join(''); }
 
@@ -9876,34 +10564,90 @@ require(['vs/editor/editor.main'], function () {
       rgbRow.appendChild(previewHost);
       popup.appendChild(rgbRow);
 
-      // ── Named-color dropdown ──────────────────────────────────────────
+      // ── Named-color dropdown (custom — color swatch per row) ─────────
       if (window.proffieArgs?.namedColors) {
-        nameSel = document.createElement('select');
-        nameSel.style.cssText = 'width:100%;font:inherit;font-size:0.68rem;background:var(--c-bg-card);color:var(--c-text);border:1px solid var(--c-border);border-radius:2px;padding:2px 4px;cursor:pointer;';
-        const placeholder = document.createElement('option');
-        placeholder.value = ''; placeholder.textContent = '— Named color —';
-        nameSel.appendChild(placeholder);
-        // Only include canonical names (skip aliases with duplicate RGB)
-        Object.entries(window.proffieArgs.namedColors).forEach(([name, vals]) => {
-          if (window.proffieArgs.colorLabel(vals[0], vals[1], vals[2]) !== name) return;
-          const opt = document.createElement('option');
-          opt.value = name; opt.textContent = name;
-          nameSel.appendChild(opt);
+        const _pa = window.proffieArgs;
+        const nameEntries = Object.entries(_pa.namedColors).filter(
+          ([name, vals]) => _pa.colorLabel(vals[0], vals[1], vals[2]) === name
+        );
+        const _dot = (r, g, b) =>
+          `display:inline-block;width:10px;height:10px;border-radius:50%;flex-shrink:0;` +
+          `margin-right:5px;background:rgb(${r},${g},${b});border:1px solid rgba(128,128,128,0.35);` +
+          `box-sizing:border-box;vertical-align:middle;`;
+
+        const nameWrap = document.createElement('div');
+        nameWrap.style.cssText = 'width:100%;position:relative;';
+
+        const trigger = document.createElement('div');
+        trigger.style.cssText = 'display:flex;align-items:center;width:100%;box-sizing:border-box;' +
+          'font:inherit;font-size:0.68rem;background:var(--c-bg-card);color:var(--c-text);' +
+          'border:1px solid var(--c-border);border-radius:2px;padding:2px 4px;cursor:pointer;user-select:none;';
+
+        const trigSwatch = document.createElement('span');
+        trigSwatch.style.cssText = _dot(0,0,0) + 'visibility:hidden;';
+        const trigLabel = document.createElement('span');
+        trigLabel.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+        trigLabel.textContent = '— Named color —';
+        const trigCaret = document.createElement('span');
+        trigCaret.style.cssText = 'margin-left:4px;font-size:0.55rem;opacity:0.55;flex-shrink:0;';
+        trigCaret.textContent = '▾';
+        trigger.appendChild(trigSwatch); trigger.appendChild(trigLabel); trigger.appendChild(trigCaret);
+
+        const list = document.createElement('div');
+        list.style.cssText = 'position:absolute;top:100%;left:0;right:0;max-height:150px;overflow-y:auto;' +
+          'background:var(--c-bg-raised);border:1px solid var(--c-border);border-radius:2px;' +
+          'z-index:10000;display:none;box-shadow:0 4px 12px rgba(0,0,0,0.35);';
+
+        const phRow = document.createElement('div');
+        phRow.style.cssText = 'padding:3px 6px;font-size:0.68rem;color:var(--c-text-muted);cursor:pointer;white-space:nowrap;';
+        phRow.textContent = '— Named color —';
+        phRow.addEventListener('mouseenter', () => { phRow.style.background = 'var(--c-bg-hover)'; });
+        phRow.addEventListener('mouseleave', () => { phRow.style.background = ''; });
+        phRow.addEventListener('click', e => { e.stopPropagation(); list.style.display = 'none'; });
+        list.appendChild(phRow);
+
+        nameEntries.forEach(([name, vals]) => {
+          const r = Math.round(vals[0]/257), g = Math.round(vals[1]/257), b = Math.round(vals[2]/257);
+          const row = document.createElement('div');
+          row.style.cssText = 'display:flex;align-items:center;padding:3px 6px;font-size:0.68rem;cursor:pointer;white-space:nowrap;';
+          const sw = document.createElement('span'); sw.style.cssText = _dot(r,g,b);
+          const lbl = document.createElement('span'); lbl.textContent = name;
+          row.appendChild(sw); row.appendChild(lbl);
+          row.addEventListener('mouseenter', () => { row.style.background = 'var(--c-bg-hover)'; });
+          row.addEventListener('mouseleave', () => { row.style.background = ''; });
+          row.addEventListener('click', e => {
+            e.stopPropagation();
+            cr = r; cg = g; cb = b;
+            rIn.value = cr; gIn.value = cg; bIn.value = cb;
+            list.style.display = 'none';
+            emit();
+          });
+          list.appendChild(row);
         });
-        // Pre-select if current color matches
-        const initLbl = window.proffieArgs.colorLabel(cr*257, cg*257, cb*257);
-        nameSel.value = window.proffieArgs.isNamedColor(initLbl) ? initLbl : '';
-        nameSel.addEventListener('change', e => {
+
+        trigger.addEventListener('click', e => {
           e.stopPropagation();
-          const vals = window.proffieArgs.namedColors[nameSel.value];
-          if (!vals) return;
-          cr = Math.round(vals[0]/257); cg = Math.round(vals[1]/257); cb = Math.round(vals[2]/257);
-          rIn.value = cr; gIn.value = cg; bIn.value = cb;
-          emit();
+          list.style.display = list.style.display === 'none' ? 'block' : 'none';
         });
-        nameSel.addEventListener('click', e => e.stopPropagation());
-        nameSel.addEventListener('wheel', e => e.stopPropagation());
-        popup.appendChild(nameSel);
+        trigger.addEventListener('wheel', e => e.stopPropagation());
+        list.addEventListener('click', e => e.stopPropagation());
+        list.addEventListener('wheel', e => e.stopPropagation());
+
+        nameWrap.appendChild(trigger); nameWrap.appendChild(list);
+        popup.appendChild(nameWrap);
+
+        _setNameDisplay = (r8, g8, b8) => {
+          const lbl = _pa.colorLabel(r8*257, g8*257, b8*257);
+          if (_pa.isNamedColor(lbl)) {
+            trigLabel.textContent = lbl;
+            trigSwatch.style.cssText = _dot(r8, g8, b8);
+            trigSwatch.style.visibility = 'visible';
+          } else {
+            trigLabel.textContent = '— Named color —';
+            trigSwatch.style.visibility = 'hidden';
+          }
+        };
+        _setNameDisplay(cr, cg, cb);
       }
 
       if (opts?.disclaimer) {
@@ -9926,10 +10670,7 @@ require(['vs/editor/editor.main'], function () {
         wheelIn.value = toHex();
         if (_activePreviewSwatchCtrl) _activePreviewSwatchCtrl.setColor([cr, cg, cb]);
         else previewHost.style.background = `rgb(${cr},${cg},${cb})`;
-        if (nameSel && window.proffieArgs) {
-          const lbl = window.proffieArgs.colorLabel(cr*257, cg*257, cb*257);
-          nameSel.value = window.proffieArgs.isNamedColor(lbl) ? lbl : '';
-        }
+        if (_setNameDisplay) _setNameDisplay(cr, cg, cb);
         onChange(styleArgResolver.cssToProffie(cr, cg, cb));
       }
 
@@ -10917,15 +11658,28 @@ require(['vs/editor/editor.main'], function () {
     <!-- Status / close -->
     <div style="display:flex;align-items:center;justify-content:space-between;padding-bottom:10px;border-bottom:1px solid var(--c-border-faint);">
       <div id="bm-status"></div>
+      <div id="bm-v1-feedback" style="display:none;font-size:0.78rem;color:#c8a020;">
+        🎉 First known V1 flash! <a id="bm-v1-feedback-link" href="#" style="color:#c8a020;">Tell us how it went →</a>
+      </div>
       <div id="bm-hint"></div>
       <div style="display:flex;gap:8px;">
-        <button id="bm-abort"      class="bm-btn">⊘ Abort</button>
-        <button id="bm-dfu-setup"  class="bm-btn" style="display:none;">▶ Run DFU Setup</button>
-        <button id="bm-dfu-manual" class="bm-btn" style="display:none;">Manual Setup (proffie-dfu-setup.exe)</button>
-        <button id="bm-zadig"      class="bm-btn" style="display:none;">Manual Setup (Zadig)</button>
-        <button id="bm-retry"      class="bm-btn" style="display:none;">↺ Retry Flash</button>
-        <button id="bm-close"      class="bm-btn" style="display:none;">Close</button>
+        <button id="bm-abort"     class="bm-btn">⊘ Abort</button>
+        <button id="bm-dfu-setup" class="bm-btn" style="display:none;">⬇ Download DFU Tool</button>
+        <button id="bm-retry"     class="bm-btn" style="display:none;">↺ Retry Flash</button>
+        <button id="bm-close"     class="bm-btn" style="display:none;">Close</button>
       </div>
+    </div>
+    <!-- Manual driver options — secondary row, only shown during driver-required state -->
+    <div id="bm-manual-row" style="display:none;align-items:center;justify-content:flex-end;gap:8px;padding-top:8px;">
+      <span style="font-size:0.75rem;color:var(--c-text-dim);">or install manually:</span>
+      <button id="bm-dfu-manual">Proffieboard Setup Tool</button>
+      <button id="bm-zadig">Zadig</button>
+    </div>
+    <!-- DFU feedback note — shown only during driver fix flow -->
+    <div id="bm-dfu-note" style="display:none;padding-top:10px;font-size:0.7rem;color:var(--c-text-dim);line-height:1.4;">
+      DFU/Bootloader mode setup varies by system. We've done our best to simplify this process —
+      <a id="bm-dfu-feedback-link" href="#" style="color:var(--c-text-dim);text-decoration:underline;text-underline-offset:2px;">share your feedback</a>
+      to help us improve it.
     </div>
 
     <!-- Elapsed time -->

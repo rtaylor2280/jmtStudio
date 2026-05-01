@@ -543,6 +543,11 @@ function _vpRename(v) {
       finish();
       await vpRefresh();
       window.vpSelectVersion(result.newName);
+      if (window.refreshVersionDropdown) {
+        const verSel = document.getElementById('input-version');
+        const currentSel = verSel?.value;
+        await window.refreshVersionDropdown(currentSel === original ? result.newName : currentSel);
+      }
     } else {
       errEl.textContent = result.error;
       confirm.disabled = cancel.disabled = false;
@@ -585,6 +590,7 @@ function _vpDelete(v) {
     if (result.ok) {
       _vpSelected = null;
       await vpRefresh();
+      if (window.refreshVersionDropdown) await window.refreshVersionDropdown();
     } else {
       document.getElementById('vp-del-error').textContent = result.error;
       document.getElementById('vp-del-confirm').disabled = false;
@@ -595,59 +601,98 @@ function _vpDelete(v) {
 
 // ── JMT Features flow ──────────────────────────────────
 
-function _vpJmtWireConfirm(v, btn, panel, isFirstTime) {
+function _vpJmtWireConfirm(v, btn, panel, isFirstTime, isMajorUpdate) {
+  const _setAllDisabled = (disabled) => {
+    ['vp-jmt-copy-update', 'vp-jmt-confirm', 'vp-jmt-cancel'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.disabled = disabled;
+    });
+  };
+
   document.getElementById('vp-jmt-cancel')?.addEventListener('click', () => {
     panel.style.display = 'none';
     panel.innerHTML     = '';
     btn.disabled        = false;
   });
 
-  document.getElementById('vp-jmt-confirm')?.addEventListener('click', async () => {
-    document.getElementById('vp-jmt-confirm').disabled = true;
-    document.getElementById('vp-jmt-cancel').disabled  = true;
-    const statusEl = document.getElementById('vp-jmt-status');
-
-    const unsub = window.electronAPI.onJmtProgress(({ file, done, total }) => {
-      if (statusEl) statusEl.textContent = `${done}/${total} — ${file}`;
+  if (isMajorUpdate) {
+    document.getElementById('vp-jmt-copy-update')?.addEventListener('click', async () => {
+      const statusEl = document.getElementById('vp-jmt-status');
+      _setAllDisabled(true);
+      if (statusEl) statusEl.textContent = 'Creating backup...';
+      const backupName = v.name + ' (backup)';
+      const dupResult = await window.electronAPI.duplicateVersion(v.name, backupName);
+      if (!dupResult.ok) {
+        if (statusEl) statusEl.textContent = 'Backup failed: ' + dupResult.error;
+        _setAllDisabled(false);
+        return;
+      }
+      if (statusEl) statusEl.textContent = 'Backup created. Applying update...';
+      _vpDoApply(v, btn, panel, isFirstTime, (applyResult) => {
+        panel.innerHTML = `<span style="color:#4a4;">✓ Backup created and JMT Add-ons v${_vpEsc(applyResult.jmtVersion)} applied successfully.</span>`;
+        setTimeout(async () => {
+          panel.style.display = 'none';
+          panel.innerHTML = '';
+          if (window.vpRefresh) await window.vpRefresh();
+          if (window.refreshVersionDropdown) await window.refreshVersionDropdown();
+        }, 3000);
+      });
     });
+  }
 
-    const applyResult = await window.electronAPI.applyJmtFeatures(v.name);
-    unsub();
+  document.getElementById('vp-jmt-confirm')?.addEventListener('click', () => {
+    _setAllDisabled(true);
+    _vpDoApply(v, btn, panel, isFirstTime);
+  });
+}
 
-    if (!applyResult.ok) {
-      panel.innerHTML = `<span style="color:#e44;">Failed: ${_vpEsc(applyResult.error)}</span>`;
-      btn.disabled = false;
-      return;
-    }
+async function _vpDoApply(v, btn, panel, isFirstTime, onSuccess) {
+  const statusEl = document.getElementById('vp-jmt-status');
 
-    v.jmtVersion    = applyResult.jmtVersion;
-    btn.disabled    = false;
-    btn.textContent = '⚙ Check for Updates';
+  const unsub = window.electronAPI.onJmtProgress(({ file, done, total }) => {
+    if (statusEl) statusEl.textContent = `${done}/${total} — ${file}`;
+  });
 
-    const labelEl = document.getElementById('vp-jmt-version-label');
-    if (labelEl) {
-      labelEl.textContent = `Includes JMT Add-ons v${applyResult.jmtVersion}`;
-      labelEl.style.display = '';
-    }
+  const applyResult = await window.electronAPI.applyJmtFeatures(v.name);
+  unsub();
 
-    if (isFirstTime && !v.name.includes('+JMT')) {
-      const newName      = `${v.name} +JMT`;
-      const renameResult = await window.electronAPI.renameVersion(v.name, newName);
-      if (renameResult.ok) {
-        _vpSelected = { ...v, name: renameResult.newName, jmtVersion: applyResult.jmtVersion };
-        await vpRefresh();
-        window.vpSelectVersion(renameResult.newName);
-        const versions = await window.electronAPI.listProffieVersions();
-        const verSel   = document.getElementById('input-version');
-        if (verSel && window.populateVersionSelect) {
-          window.populateVersionSelect(verSel, versions, verSel.value || verSel.dataset.lastValue || '');
-        }
+  if (!applyResult.ok) {
+    panel.innerHTML = `<span style="color:#e44;">Failed: ${_vpEsc(applyResult.error)}</span>`;
+    btn.disabled = false;
+    return;
+  }
+
+  v.jmtVersion    = applyResult.jmtVersion;
+  btn.disabled    = false;
+  btn.textContent = '⚙ Check for Updates';
+
+  const labelEl = document.getElementById('vp-jmt-version-label');
+  if (labelEl) {
+    labelEl.textContent = `Includes JMT Add-ons v${applyResult.jmtVersion}`;
+    labelEl.style.display = '';
+  }
+
+  if (isFirstTime && !v.name.includes('+JMT')) {
+    const newName      = `${v.name} +JMT`;
+    const renameResult = await window.electronAPI.renameVersion(v.name, newName);
+    if (renameResult.ok) {
+      _vpSelected = { ...v, name: renameResult.newName, jmtVersion: applyResult.jmtVersion };
+      await vpRefresh();
+      window.vpSelectVersion(renameResult.newName);
+      if (window.refreshVersionDropdown) {
+        const verSel = document.getElementById('input-version');
+        const currentSel = verSel?.value;
+        await window.refreshVersionDropdown(currentSel === v.name ? renameResult.newName : currentSel);
       }
     }
+  }
 
+  if (onSuccess) {
+    onSuccess(applyResult);
+  } else {
     panel.innerHTML = `<span style="color:#4a4;">✓ JMT Add-ons v${_vpEsc(applyResult.jmtVersion)} ${isFirstTime ? 'added' : 'updated'} successfully.</span>`;
     setTimeout(() => { panel.style.display = 'none'; panel.innerHTML = ''; }, 3000);
-  });
+  }
 }
 
 async function _vpJmtFlow(v) {
@@ -734,13 +779,14 @@ async function _vpJmtFlow(v) {
     <ul style="margin:0 0 8px 16px;padding:0;font-size:0.78rem;">${fileList}</ul>
     ${overwriteNote}
     <div style="display:flex;gap:8px;align-items:center;">
-      <button id="vp-jmt-confirm" class="vp-action-btn primary">${action}</button>
+      ${isMajorUpdate ? `<button id="vp-jmt-copy-update" class="vp-action-btn primary">Copy &amp; Update</button>` : ''}
+      <button id="vp-jmt-confirm" class="vp-action-btn${isMajorUpdate ? '' : ' primary'}">${action}</button>
       <button id="vp-jmt-cancel"  class="vp-action-btn">Cancel</button>
       <span   id="vp-jmt-status"  style="font-size:0.78rem;color:var(--c-text-sub);"></span>
     </div>
   `;
 
-  _vpJmtWireConfirm(v, btn, panel, isFirstTime);
+  _vpJmtWireConfirm(v, btn, panel, isFirstTime, isMajorUpdate);
 }
 
 // ── Exports ────────────────────────────────────────────

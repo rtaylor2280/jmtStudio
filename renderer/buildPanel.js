@@ -16,6 +16,8 @@ const KNOWN_BOARDS = [
 // ── State ──────────────────────────────────────────────
 let selectedPort              = null;
 let selectedPortIsProffieboard = false;
+let selectedPortSN            = null;   // serial number of the currently selected port
+let lastFlashedSN             = null;   // SN of the board we last flashed this session
 let selectedFqbn              = null;
 let compileSuccess      = false;   // true after successful compile this session
 let cacheCheckPending   = false;   // true while cache check is in flight
@@ -24,22 +26,49 @@ let isBusy          = false;   // true while compile/flash running
 let unsubs          = [];      // IPC listener cleanup functions
 let cachedPorts = [];
 let selectedUsb = 'cdc_webusb'; // default Serial + WebUSB
+let _userChosePort     = false;   // true after user manually picks a port
+let _userChosenPortPath = null;   // the path they chose
 let compileTimerInterval  = null;
 let flashTimerInterval    = null;
 let contentDebounceTimer  = null;
+let _compileStartTime     = 0;
 
 // ── Compile hint typewriter ────────────────────────────
-let _hintActive        = false;
-let _hintIndex         = 0;
-let _hintTimeout       = null;   // initial 60s delay
-let _hintTypingTimer   = null;   // setInterval for character typing
-let _hintFadeTimeout   = null;   // hold-then-fade timer
-let _hintNextTimeout   = null;   // gap between messages
+let _hintActive          = false;
+let _hintIndex           = 0;
+let _hintTimeout         = null;   // initial 60s delay
+let _hintTypingTimer     = null;   // setInterval for character typing
+let _hintFadeTimeout     = null;   // hold-then-fade timer
+let _hintNextTimeout     = null;   // gap between messages
+let _hintDurationTimeout = null;   // clears last-compile duration before first hint
+
+function _formatCompileDuration(seconds) {
+  if (seconds < 60) return `${seconds} second${seconds !== 1 ? 's' : ''}`;
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return s === 0 ? `${m} minute${m !== 1 ? 's' : ''}` : `${m}m ${s}s`;
+}
 
 function startCompileHints() {
   stopCompileHints();
   _hintActive = true;
   _hintIndex  = 0;
+
+  const lastDuration = window.getLastCompileDuration?.();
+  if (lastDuration) {
+    const el = document.getElementById('bm-hint');
+    if (el) {
+      el.style.transition = 'none';
+      el.style.opacity = '1';
+      el.textContent = `Last compile of this config took about ${_formatCompileDuration(lastDuration)}.`;
+    }
+    // Clear 15s before the first hint appears
+    _hintDurationTimeout = setTimeout(() => {
+      const el = document.getElementById('bm-hint');
+      if (el && _hintActive) { el.style.opacity = '0'; setTimeout(() => { if (el) el.textContent = ''; }, 400); }
+    }, 45000);
+  }
+
   _hintTimeout = setTimeout(_showNextHint, 60000);
 }
 
@@ -48,8 +77,9 @@ function stopCompileHints() {
   clearTimeout(_hintTimeout);
   clearTimeout(_hintFadeTimeout);
   clearTimeout(_hintNextTimeout);
+  clearTimeout(_hintDurationTimeout);
   clearInterval(_hintTypingTimer);
-  _hintTimeout = _hintFadeTimeout = _hintNextTimeout = _hintTypingTimer = null;
+  _hintTimeout = _hintFadeTimeout = _hintNextTimeout = _hintTypingTimer = _hintDurationTimeout = null;
   const el = document.getElementById('bm-hint');
   if (el) { el.style.transition = 'none'; el.style.opacity = '0'; el.textContent = ''; }
 }
@@ -94,6 +124,9 @@ function _showNextHint() {
 }
 let isDfuMode       = false;   // true when bootloader (DFU) mode is active
 let dfuDeviceReady  = false;   // true after DFU device detected in waiting modal
+let _portsBeforeDfu = [];      // port paths present before entering DFU — used to identify the newly-appeared board after flash
+let _dfuRetryRecheck     = false;  // retry button should re-poll (not restart flash flow)
+let _dfuRetryAutoFlash   = true;   // whether to auto-flash when retry re-poll succeeds
 window._isFlashing = false;
 window.onEditorContentChanged = () => {
   if (compileSuccess) {
@@ -156,7 +189,12 @@ async function initBuildPanel() {
   document.getElementById('bm-close').addEventListener('click', () => {
     stopPortWatch();
     document.getElementById('build-modal').style.display = 'none';
-    if (isDfuMode && !dfuDeviceReady) exitDfuMode();
+  });
+  document.getElementById('bm-v1-feedback-link').addEventListener('click', e => {
+    e.preventDefault();
+    const subject = encodeURIComponent('JMT Studio — Proffieboard V1 Flash Feedback');
+    const body    = encodeURIComponent('Hi,\n\nI just flashed a Proffieboard V1 using JMT Studio. Here\'s what happened:\n\n');
+    window.electronAPI?.openExternal(`mailto:jmtstudio@jedimastertech.com?subject=${subject}&body=${body}`);
   });
   document.getElementById('bm-board-flash').addEventListener('click', () => {
     const port = document.getElementById('bm-board-port-select').value;
@@ -172,26 +210,83 @@ async function initBuildPanel() {
     portSelect.value = port;
     setFlashEnabled(true);
     updatePortChangedIndicator();
-    if (found) {
-      const name = detectedBoardName(found.variants);
-      updateBoardDisplay(name);
-      autoSelectMetaBoard(name);
-    }
-    setStatus('port', 'ok', `Proffieboard on ${port}`);
+    if (found) applyDetectedBoard(found);
+    else setStatus('port', 'ok', `Proffieboard on ${port}`);
     stopPortWatch();
     document.getElementById('bm-board-select-wrap').style.display = 'none';
     doFlash();
   });
   document.getElementById('bm-dfu-setup').addEventListener('click', async () => {
-    const btn = document.getElementById('bm-dfu-setup');
-    btn.disabled = true;
-    btn.textContent = 'Launching...';
-    const result = await window.electronAPI.runDfuSetup();
-    btn.disabled = false;
-    btn.textContent = '▶ Run DFU Setup';
-    if (!result.ok) {
-      appendModalLog(`Could not launch DFU Setup: ${result.error}`, true);
-      appendModalLog('Try one of the manual options below.', true);
+    const setupBtn  = document.getElementById('bm-dfu-setup');
+    const manualRow = document.getElementById('bm-manual-row');
+
+    if (setupBtn.dataset.phase === 'install') {
+      // Phase 2: Install the downloaded file
+      setupBtn.disabled    = true;
+      setupBtn.textContent = 'Installing...';
+      manualRow.style.display = 'none';
+      document.getElementById('bm-close').style.display = 'none';
+      document.getElementById('bm-status').textContent = 'Installing driver...';
+      setBarMode('knightrider');
+      appendModalLog('', false);
+      appendModalLog('──────────────────────────────────', false);
+
+      const unsub = window.electronAPI.onDfuSetupStatus(msg => appendModalLog(msg, false));
+      const result = await window.electronAPI.installDfuSetup();
+      unsub();
+
+      delete setupBtn.dataset.phase;
+      setupBtn.disabled = false;
+
+      if (result.ok) {
+        appendModalLog('✓ Driver installed successfully.', false);
+        appendModalLog('Waiting for Windows to register the driver...', false);
+        await new Promise(r => setTimeout(r, 2000));
+        appendModalLog('──────────────────────────────────', false);
+        startDfuWaitModal(true, _dfuRetryAutoFlash);
+      } else {
+        appendModalLog('', false);
+        appendModalLog(result.error || 'Installation was cancelled or failed.', true);
+        appendModalLog('Click Download DFU Tool to try again, or use a manual option below.', false);
+        setupBtn.textContent = '⬇ Download DFU Tool';
+        delete setupBtn.dataset.phase;
+        manualRow.style.display = 'flex';
+        document.getElementById('bm-close').style.display = 'inline-block';
+      }
+      return;
+    }
+
+    // Phase 1: Download
+    setupBtn.disabled    = true;
+    setupBtn.textContent = 'Downloading...';
+    manualRow.style.display = 'none';
+    document.getElementById('bm-close').style.display = 'none';
+    appendModalLog('', false);
+    appendModalLog('──────────────────────────────────', false);
+
+    const unsub = window.electronAPI.onDfuSetupStatus(msg => appendModalLog(msg, false));
+    const result = await window.electronAPI.downloadDfuSetup();
+    unsub();
+
+    setupBtn.disabled = false;
+
+    if (result.ok) {
+      appendModalLog('✓ proffie-dfu-setup.exe downloaded.', false);
+      appendModalLog('', false);
+      appendModalLog('Windows will ask for permission to run the installer — click Yes.', false);
+      appendModalLog('Click Install DFU Tool to continue.', false);
+      setupBtn.textContent = '▶ Install DFU Tool';
+      setupBtn.dataset.phase = 'install';
+      manualRow.style.display = 'flex';
+      document.getElementById('bm-close').style.display = 'inline-block';
+    } else {
+      appendModalLog('', false);
+      appendModalLog(result.error || 'Download failed.', true);
+      appendModalLog('Try a manual option below, or check your internet connection.', false);
+      setupBtn.textContent = '⬇ Download DFU Tool';
+      setupBtn.style.display = 'inline-block';
+      manualRow.style.display = 'flex';
+      document.getElementById('bm-close').style.display = 'inline-block';
     }
   });
   document.getElementById('bm-dfu-manual').addEventListener('click', () => {
@@ -199,6 +294,12 @@ async function initBuildPanel() {
   });
   document.getElementById('bm-zadig').addEventListener('click', () => {
     window.electronAPI.openExternal('https://zadig.akeo.ie');
+  });
+  document.getElementById('bm-dfu-feedback-link').addEventListener('click', e => {
+    e.preventDefault();
+    const subject = encodeURIComponent('JMT Studio — DFU Setup Feedback');
+    const body    = encodeURIComponent('Hi,\n\nHere\'s my experience with the DFU/Bootloader mode setup in JMT Studio:\n\n');
+    window.electronAPI.openExternal(`mailto:jmtstudio@jedimastertech.com?subject=${subject}&body=${body}`);
   });
   document.getElementById('bm-abort').addEventListener('click', async () => {
     if (isDfuMode && !isBusy) return; // DFU waiting: cancel handled by startDfuWaitModal's own handler
@@ -208,6 +309,11 @@ async function initBuildPanel() {
   });
   document.getElementById('bm-retry').addEventListener('click', () => {
     document.getElementById('build-modal').style.display = 'none';
+    if (_dfuRetryRecheck) {
+      _dfuRetryRecheck = false;
+      startDfuWaitModal(true, _dfuRetryAutoFlash);
+      return;
+    }
     doFlash();
   });
 
@@ -230,7 +336,7 @@ async function doCompile() {
     return;
   }
   if (!selectedFqbn) {
-    appendLog('No board selected. Choose a board from the Board dropdown.', true);
+    appendLog('No board selected. Select a board type or connect a Proffieboard to compile.', true);
     return;
   }
 
@@ -245,6 +351,7 @@ async function doCompile() {
   await window.doSave();
   if (window.saveStylesFile) await window.saveStylesFile();
 
+  if (isDfuMode) exitDfuMode();
   showBuildModal('⚙ Compiling...');
   startCompileHints();
   setBusy(true);
@@ -291,8 +398,10 @@ async function doFlash() {
   stopCompileTimer();
   document.getElementById('bm-title').textContent = '⚡ Flashing...';
   document.getElementById('bm-title').style.color = 'var(--c-text-bright)';
+  document.getElementById('bm-status').textContent = '';
   document.getElementById('bm-abort').style.display = 'none';
   document.getElementById('bm-close').style.display = 'none';
+  document.getElementById('bm-retry').style.display = 'none';
   document.getElementById('build-modal').style.display = 'flex';
   startFlashTimer();
   setBarMode('flash');
@@ -307,6 +416,7 @@ async function doFlash() {
 
 // ── Port detection ─────────────────────────────────────
 async function refreshPorts() {
+  if (isDfuMode) return; // port selection is locked while in DFU mode
   const result = await window.electronAPI.getRecommendedPort();
 
   const portSelect = el('bp-port-select');
@@ -316,7 +426,7 @@ async function refreshPorts() {
     portSelect.innerHTML = '<option value="">No ports detected</option>';
     selectedPort = null;
     selectedPortIsProffieboard = false;
-    updateBoardDisplay('');
+    clearDetectedBoard();
     setStatus('port', 'error', 'No device detected');
     setFlashEnabled(false);
     return;
@@ -334,32 +444,33 @@ async function refreshPorts() {
     portSelect.value = result.port.path;
     selectedPort = result.port.path;
     selectedPortIsProffieboard = true;
-    const detectedName = detectedBoardName(result.port.variants);
-    updateBoardDisplay(detectedName);
-    autoSelectMetaBoard(detectedName);
-    setStatus('port', 'ok', `Proffieboard on ${result.port.path}`);
+    applyDetectedBoard(result.port);
   } else if (result.proffieports.length > 1) {
-    // Multiple Proffieboards — try to restore last used
+    // Multiple Proffieboards — prefer: user's manual choice > SN match > last COM path
     result.proffieports.forEach(p => {
       const opt = document.createElement('option');
       opt.value = p.path; opt.textContent = p.path;
       portSelect.appendChild(opt);
     });
-    const lastPort  = window.getLastPort ? window.getLastPort() : null;
-    const preferred = lastPort ? result.proffieports.find(p => p.path === lastPort) : null;
+    const lastPort  = window.getLastPort?.()    || null;
+    const metaSN    = window.getMetaBoardSN?.() || null;
+    const manualPath = (_userChosePort && _userChosenPortPath) ? _userChosenPortPath : null;
+    const preferred =
+      (manualPath ? result.proffieports.find(p => p.path       === manualPath) : null) ||
+      (metaSN     ? result.proffieports.find(p => p.serialNumber === metaSN)    : null) ||
+      (lastPort   ? result.proffieports.find(p => p.path       === lastPort)   : null);
     if (preferred) {
       portSelect.value = preferred.path;
       selectedPort = preferred.path;
       selectedPortIsProffieboard = true;
-      const detectedName = detectedBoardName(preferred.variants);
-      updateBoardDisplay(detectedName);
-      autoSelectMetaBoard(detectedName);
-      setStatus('port', 'ok', `Proffieboard on ${preferred.path}`);
+      applyDetectedBoard(preferred);
     } else {
+      _userChosePort      = false;
+      _userChosenPortPath = null;
       portSelect.value = '';
       selectedPort = null;
       selectedPortIsProffieboard = false;
-      updateBoardDisplay('');
+      clearDetectedBoard();
       setStatus('port', 'warn', `${result.proffieports.length} Proffieboards — select port`);
     }
   } else {
@@ -375,7 +486,7 @@ async function refreshPorts() {
     portSelect.value = '';
     selectedPort = null;
     selectedPortIsProffieboard = false;
-    updateBoardDisplay('');
+    clearDetectedBoard();
     setStatus('port', 'warn', result.message);
   }
 
@@ -410,12 +521,6 @@ function addDfuSentinel() {
   portSelect.appendChild(opt);
 }
 
-// Returns the best human-readable board name from a variants array
-function detectedBoardName(variants) {
-  if (!variants || variants.length === 0) return '';
-  const sorted = [...variants].sort((a, b) => (b.boardName.includes('V3') ? 1 : 0) - (a.boardName.includes('V3') ? 1 : 0));
-  return sorted[0].boardName.replace(/^Serial Port \(USB\)\s*/i, '').trim();
-}
 
 // Updates the read-only toolbar board display
 function updateBoardDisplay(name) {
@@ -454,19 +559,24 @@ function updatePortChangedIndicator() {
     : '';
 }
 
-// Auto-selects the meta bar board dropdown if it is currently empty
-function autoSelectMetaBoard(boardName) {
-  if (!boardName) return;
-  const sel = document.getElementById('input-board');
-  if (!sel || sel.value) return; // already selected — don't override user choice
-  const clean = boardName.replace(/^Serial Port \(USB\)\s*/i, '').trim().toLowerCase();
-  const opt = Array.from(sel.options).find(o =>
-    o.value && (o.value.toLowerCase().includes(clean) || clean.includes(o.value.toLowerCase()))
-  );
-  if (opt) {
-    sel.value = opt.value;
-    sel.dispatchEvent(new Event('change'));
-  }
+// Marks the Detected field when a Proffieboard is on the selected port.
+// Version (V2/V3) cannot be determined from USB data — user selects it via the Board dropdown.
+function applyDetectedBoard(port) {
+  if (!port) return;
+  selectedPortSN = port.serialNumber || null;
+  updateBoardDisplay(port.serialNumber ? `SN: ${port.serialNumber}` : 'Proffieboard');
+  window.updateSnIndicator?.();
+  setStatus('port', 'ok', `Proffieboard on ${port.path}`);
+  updateCompileButton();
+  if (selectedFqbn) { cacheCheckPending = true; checkCacheForConfig(); }
+}
+
+// Clears the Detected field when no Proffieboard is on the selected port.
+function clearDetectedBoard() {
+  selectedPortSN = null;
+  updateBoardDisplay('');
+  window.updateSnIndicator?.();
+  updateCompileButton();
 }
 
 function onPortChange(e) {
@@ -475,26 +585,26 @@ function onPortChange(e) {
     return;
   }
   selectedPort = e.target.value || null;
+  _userChosePort      = !!selectedPort;
+  _userChosenPortPath = selectedPort;
   const port = selectedPort ? cachedPorts.find(p => p.path === selectedPort) : null;
   selectedPortIsProffieboard = port ? port.isProffieboard : false;
   updatePortChangedIndicator();
   if (!selectedPort) {
-    updateBoardDisplay('');
+    clearDetectedBoard();
     setFlashEnabled(false);
     setStatus('port', 'error', 'No port selected');
     return;
   }
   if (port) {
-    const name = detectedBoardName(port.variants);
-    updateBoardDisplay(port.isProffieboard ? name : '');
-    if (port.isProffieboard) autoSelectMetaBoard(name);
-    setStatus('port', port.isProffieboard ? 'ok' : 'warn',
-      port.isProffieboard ? `Proffieboard on ${selectedPort}` : `Port: ${selectedPort}`);
+    if (port.isProffieboard) applyDetectedBoard(port);
+    else { clearDetectedBoard(); setStatus('port', 'warn', `Port: ${selectedPort}`); }
   }
   setFlashEnabled(selectedPortIsProffieboard && compileSuccess);
 }
 
-// Driven by the meta bar board <select> — this is the single source of truth for selectedFqbn
+// Driven by the meta bar board <select> — sets selectedFqbn.
+// User always selects V2/V3 manually; detection only confirms a Proffieboard is present.
 function onInputBoardChange() {
   const sel    = document.getElementById('input-board');
   const opt    = sel ? sel.options[sel.selectedIndex] : null;
@@ -550,7 +660,8 @@ function onBuildDone({ type, ok, error, aborted, retriable }) {
     if (ok) {
       compileSuccess = true;
       updateCompileButton();
-      if (window.setCompiledTimestamp) window.setCompiledTimestamp();
+      const durationSec = _compileStartTime ? Math.round((Date.now() - _compileStartTime) / 1000) : null;
+      if (window.setCompiledTimestamp) window.setCompiledTimestamp(undefined, durationSec);
       stopCompileTimer();
       stopCompileHints();
       appendLog('\n✓ Firmware ready.', false);
@@ -562,16 +673,14 @@ function onBuildDone({ type, ok, error, aborted, retriable }) {
         document.getElementById('bm-abort').style.display = 'none';
         setBarMode('success');
         if (dfuDeviceReady) {
-          // DFU device already detected from earlier — auto-flash
           document.getElementById('bm-close').style.display = 'none';
           document.getElementById('bm-status').textContent = 'DFU device ready — flashing...';
           setFlashEnabled(true);
           setTimeout(() => doFlash(), 1200);
         } else {
-          // DFU device not yet detected — close modal, let user click Flash to detect
-          document.getElementById('bm-close').style.display = 'inline-block';
-          document.getElementById('bm-status').textContent = 'Click Flash to enter Bootloader Mode...';
-          setFlashEnabled(false);
+          // Auto-proceed to DFU detection/driver flow — don't make them close and restart
+          document.getElementById('bm-status').textContent = 'Checking for DFU device...';
+          setTimeout(() => startDfuWaitModal(), 1200);
         }
       } else if (selectedPortIsProffieboard && selectedPort) {
         // Board already connected — show success then flash immediately
@@ -614,8 +723,7 @@ function onBuildDone({ type, ok, error, aborted, retriable }) {
       return;
     }
     if (isDfuMode) {
-      // Post-DFU flash: wait for board to restart and re-enumerate as serial
-      if (window.setFlashedTimestamp) window.setFlashedTimestamp(null);
+      // Post-DFU flash: lastFlashedSN + setFlashedTimestamp set in watchForSerialAfterDfu once real port is known
       document.getElementById('bm-title').textContent = '✓ Flash Complete';
       document.getElementById('bm-title').style.color = 'var(--c-success-text)';
       document.getElementById('bm-abort').style.display = 'none';
@@ -625,9 +733,10 @@ function onBuildDone({ type, ok, error, aborted, retriable }) {
       appendModalLog('Flash complete. Waiting for board to restart...', false);
       watchForSerialAfterDfu();
     } else {
-      if (window.setFlashedTimestamp) window.setFlashedTimestamp(selectedPort);
+      lastFlashedSN = selectedPortSN;
+      if (window.setFlashedTimestamp) window.setFlashedTimestamp(selectedPort, selectedPortSN);
       updatePortChangedIndicator();
-      finishBuildModal(true, '✓ Flash Complete', 'Firmware uploaded successfully.');
+      finishBuildModal(true, '✓ Flash Complete', 'Firmware flashed successfully.', { isFlash: true });
     }
   }
 }
@@ -644,9 +753,12 @@ function showBuildModal(title) {
   document.getElementById('bm-close').style.display = 'none';
   document.getElementById('bm-retry').style.display = 'none';
   document.getElementById('bm-retry').textContent = '↺ Retry Flash';
-  document.getElementById('bm-dfu-setup').style.display = 'none';
-  document.getElementById('bm-dfu-manual').style.display = 'none';
-  document.getElementById('bm-zadig').style.display = 'none';
+  const _dfuSetupBtn = document.getElementById('bm-dfu-setup');
+  _dfuSetupBtn.style.display = 'none';
+  _dfuSetupBtn.textContent = '⬇ Download DFU Tool';
+  delete _dfuSetupBtn.dataset.phase;
+  document.getElementById('bm-manual-row').style.display = 'none';
+  document.getElementById('bm-dfu-note').style.display = 'none';
   document.getElementById('bm-board-select-wrap').style.display = 'none';
   const abortBtn = document.getElementById('bm-abort');
   abortBtn.style.display = 'inline-block';
@@ -744,10 +856,7 @@ function _selectPortAndFlash(port, result) {
   portSelect.value = port.path;
   setFlashEnabled(true);
   updatePortChangedIndicator();
-  const name = detectedBoardName(port.variants);
-  updateBoardDisplay(name);
-  autoSelectMetaBoard(name);
-  setStatus('port', 'ok', `Proffieboard on ${port.path}`);
+  applyDetectedBoard(port);
   document.getElementById('bm-board-select-wrap').style.display = 'none';
   document.getElementById('bm-status').textContent = 'Board detected — flashing...';
   setTimeout(() => doFlash(), 1200);
@@ -787,7 +896,7 @@ function showMultiBoardSelect(proffieports) {
   document.getElementById('bm-board-select-wrap').style.display = 'flex';
 }
 
-function finishBuildModal(success, title, statusMsg, { retriable = false } = {}) {
+function finishBuildModal(success, title, statusMsg, { retriable = false, isFlash = false } = {}) {
   stopCompileHints();
   stopPortWatch();
   stopCompileTimer();
@@ -797,10 +906,11 @@ function finishBuildModal(success, title, statusMsg, { retriable = false } = {})
   document.getElementById('bm-status').textContent = statusMsg || '';
   document.getElementById('bm-abort').style.display = 'none';
   document.getElementById('bm-dfu-setup').style.display = 'none';
-  document.getElementById('bm-dfu-manual').style.display = 'none';
-  document.getElementById('bm-zadig').style.display = 'none';
+  document.getElementById('bm-manual-row').style.display = 'none';
   document.getElementById('bm-retry').style.display = retriable ? 'inline-block' : 'none';
   document.getElementById('bm-close').style.display = 'inline-block';
+  const isV1 = selectedFqbn && selectedFqbn.includes('Proffieboard-L433CC') && !selectedFqbn.includes('V2');
+  document.getElementById('bm-v1-feedback').style.display = (success && isFlash && isV1) ? 'block' : 'none';
   setBarMode(success ? 'success' : 'error');
 }
 
@@ -861,9 +971,12 @@ function setBusy(busy) {
 }
 
 function updateCompileButton() {
-  if (!isBusy) el('bp-btn-compile').disabled = !selectedFqbn || compileSuccess || !window._currentFilePath || cacheCheckPending;
+  const version = document.getElementById('input-version')?.value;
+  const hasVersion = version && version !== '__add_version__';
+  if (!isBusy) el('bp-btn-compile').disabled = !selectedFqbn || !hasVersion || compileSuccess || !window._currentFilePath || cacheCheckPending;
 }
 window.updateCompileButton = updateCompileButton;
+window.getLastFlashedSN    = () => lastFlashedSN;
 
 function setFlashEnabled(enabled) {
   if (isDfuMode) {
@@ -874,9 +987,10 @@ function setFlashEnabled(enabled) {
 }
 
 function startCompileTimer() {
+  _compileStartTime = Date.now();
   document.getElementById('bm-timer-compile').style.display = 'inline';
   document.getElementById('bm-timer-compile-val').textContent = '0:00';
-  const start = Date.now();
+  const start = _compileStartTime;
   compileTimerInterval = setInterval(() => {
     const s = Math.floor((Date.now() - start) / 1000);
     document.getElementById('bm-timer-compile-val').textContent =
@@ -933,7 +1047,7 @@ let _portTipHideTimer = null;
 let _portTipEnabled   = false;  // only true when no Proffieboard detected
 
 function _showPortTip(anchorEl) {
-  if (!_portTipEnabled) return;
+  if (!_portTipEnabled || isDfuMode) return;
   _ensurePortTip();
   const rect = anchorEl.getBoundingClientRect();
   _portTip.style.display = 'block';
@@ -1013,21 +1127,21 @@ async function checkCacheForConfig(missStatus) {
 
 // ── DFU mode ───────────────────────────────────────────
 function enterDfuMode() {
-  isDfuMode      = true;
-  dfuDeviceReady = false;
+  isDfuMode        = true;
+  dfuDeviceReady   = false;
+  _portsBeforeDfu  = cachedPorts.map(p => p.path);
   stopPortWatch();
 
   // Hide normal port elements
   ['bp-port-select', 'bp-board-display', 'bp-btn-refresh-ports',
     'bp-label-port', 'bp-label-detected'].forEach(id => {
-    el(id).style.display = 'none';
+    const e = el(id); if (e) e.style.display = 'none';
   });
   el('bp-dfu-mode-indicator').style.display = 'inline-flex';
 
   setStatus('port', 'warn', 'Checking for DFU device...');
-  setFlashEnabled(false);
+  setFlashEnabled(compileSuccess);
 
-  // Quick check first — if board is already in DFU mode, skip the modal entirely
   _checkDfuOnEntry();
 }
 
@@ -1035,13 +1149,15 @@ async function _checkDfuOnEntry() {
   const result = await window.electronAPI.detectDFU();
 
   if (result.found && result.accessible) {
-    // Already connected — show ready state silently, no modal needed
     dfuDeviceReady = true;
     setStatus('port', 'ok', 'DFU device ready');
     setFlashEnabled(compileSuccess);
+  } else if (result.found && !result.accessible) {
+    // Board in DFU but driver missing — skip boot instructions, go straight to driver fix
+    startDfuWaitModal(true, false);
   } else {
-    // Not found or driver issue — open the waiting/guidance modal
-    startDfuWaitModal();
+    // Board not yet in DFU — show boot instructions and poll
+    startDfuWaitModal(false, false);
   }
 }
 
@@ -1052,7 +1168,7 @@ function exitDfuMode() {
   // Restore normal port elements
   ['bp-port-select', 'bp-board-display', 'bp-btn-refresh-ports',
     'bp-label-port', 'bp-label-detected'].forEach(id => {
-    el(id).style.display = '';
+    const e = el(id); if (e) e.style.display = '';
   });
   el('bp-dfu-mode-indicator').style.display = 'none';
 
@@ -1063,20 +1179,38 @@ function exitDfuMode() {
 }
 
 // Shows the waiting modal and polls for DFU device.
-// Called immediately on enterDfuMode(), and again when Flash is clicked before device is ready.
-async function startDfuWaitModal() {
-  showBuildModal('⚡ Bootloader Mode (DFU)');
+// autoFlash: true when triggered by Flash click; false when triggered by mode entry.
+async function startDfuWaitModal(isRetry = false, autoFlash = true) {
+  if (!isRetry) {
+    showBuildModal('⚡ Bootloader Mode (DFU)');
+    appendModalLog('Put the board into Bootloader Mode:', false);
+    appendModalLog('  1. Hold the BOOT button', false);
+    appendModalLog('  2. Tap the RESET button', false);
+    appendModalLog('  3. Release RESET', false);
+    appendModalLog('  4. Release BOOT', false);
+    appendModalLog('──────────────────────────────────', false);
+    appendModalLog('Waiting for DFU device to appear...', false);
+    document.getElementById('bm-status').textContent = 'Waiting for DFU device...';
+  } else {
+    // Board already in DFU mode — skip boot instructions, just re-poll
+    const modal = document.getElementById('build-modal');
+    modal.style.display = 'flex';
+    document.getElementById('bm-title').textContent = '⚡ Bootloader Mode (DFU)';
+    document.getElementById('bm-title').style.color = 'var(--c-text-bright)';
+    document.getElementById('bm-dfu-setup').style.display = 'none';
+    document.getElementById('bm-manual-row').style.display = 'none';
+    document.getElementById('bm-dfu-note').style.display = 'none';
+    document.getElementById('bm-retry').style.display = 'none';
+    document.getElementById('bm-close').style.display = 'none';
+    document.getElementById('bm-abort').style.display = 'inline-block';
+    setBarMode('knightrider');
+    appendModalLog('Verifying DFU connection...', false);
+    document.getElementById('bm-status').textContent = 'Verifying connection...';
+  }
   stopCompileTimer();
+  document.getElementById('bm-timer-compile').style.display = 'none';
+  document.getElementById('bm-timer-flash').style.display = 'none';
   document.getElementById('bm-abort').textContent = '⊘ Cancel';
-  document.getElementById('bm-status').textContent = 'Waiting for DFU device...';
-
-  appendModalLog('Put the board into Bootloader Mode:', false);
-  appendModalLog('  1. Hold the BOOT button', false);
-  appendModalLog('  2. Tap the RESET button', false);
-  appendModalLog('  3. Release RESET', false);
-  appendModalLog('  4. Release BOOT', false);
-  appendModalLog('──────────────────────────────────', false);
-  appendModalLog('Waiting for DFU device to appear...', false);
 
   let cancelled = false;
   const abortBtn = document.getElementById('bm-abort');
@@ -1084,37 +1218,68 @@ async function startDfuWaitModal() {
   abortBtn.addEventListener('click', cancelHandler, { once: true });
 
   let dfuResult = { found: false, accessible: false };
+  let retryTimedOut    = false;
+  let notAccessibleStart = null;
+  const retryStart  = isRetry ? Date.now() : null;
+
   while (!cancelled) {
     dfuResult = await window.electronAPI.detectDFU();
-    if (dfuResult.found) break;
+
+    if (dfuResult.found && dfuResult.accessible) break;  // fully ready — always stop
+
+    if (!isRetry && dfuResult.found) break;  // boot-wait: break on found regardless of driver
+
+    if (isRetry && dfuResult.found && !dfuResult.accessible) {
+      // Device found but driver not yet active — give Windows up to 10s to finish applying it
+      if (!notAccessibleStart) notAccessibleStart = Date.now();
+      if (Date.now() - notAccessibleStart > 10000) break;  // give up, show error
+    } else {
+      notAccessibleStart = null;  // device disappeared — reset grace timer
+    }
+
+    // If board exited DFU mode during driver install, prompt re-entry after 8s
+    if (retryStart && !retryTimedOut && Date.now() - retryStart > 8000) {
+      retryTimedOut = true;
+      appendModalLog('', false);
+      appendModalLog('Board may have exited Bootloader Mode.', false);
+      appendModalLog('Re-enter it: hold BOOT, tap RESET, release both.', false);
+    }
     await new Promise(r => setTimeout(r, 500));
   }
   abortBtn.removeEventListener('click', cancelHandler);
 
   if (cancelled) {
     document.getElementById('build-modal').style.display = 'none';
-    exitDfuMode();
+    // Stay in DFU mode — user can compile and Flash later to resume
+    setStatus('port', 'warn', (dfuResult.found && !dfuResult.accessible)
+      ? 'STM32 driver required'
+      : 'Put board in Bootloader Mode to flash');
     return;
   }
 
   if (!dfuResult.accessible) {
+    _dfuRetryAutoFlash = autoFlash; // preserve so install handler and Try Again carry the right intent
     document.getElementById('bm-log').innerHTML = '';
+    const driverStillLoading = notAccessibleStart !== null;
 
     if (navigator.platform.startsWith('Win')) {
-      appendModalLog('Windows needs a driver update for Bootloader Mode (DFU).', true);
-      appendModalLog('This is usually a one-time setup, but may be needed again if USB ports or drivers change.', false);
-      appendModalLog('', false);
-      appendModalLog('  Detected:  STM32 Bootloader (0483:df11)', false);
-      appendModalLog('', false);
-      appendModalLog('─────────────────────────────────────────', false);
-      appendModalLog('', false);
-      appendModalLog('  Option 1: Click "Run DFU Setup" — runs the installer automatically (recommended).', false);
-      appendModalLog('  Option 2: Click "Manual Setup (proffie-dfu-setup.exe)" — download and run yourself.', false);
-      appendModalLog('  Option 3: Click "Manual Setup (Zadig)" — alternative driver tool.', false);
-      appendModalLog('', false);
-      appendModalLog('After setup completes, click Retry Detection.', false);
-      appendModalLog('', false);
-      appendModalLog('  Need help? proffieboard-setup.html#os-specific-setup', false);
+      if (driverStillLoading) {
+        appendModalLog('The driver was installed but Windows has not activated it yet.', false);
+        appendModalLog('', false);
+        appendModalLog('  Detected: STM32 Bootloader (0483:df11)', false);
+        appendModalLog('', false);
+        appendModalLog('Unplug the board, reconnect it in Bootloader Mode, then click Try Again.', false);
+        appendModalLog('If it still fails, use Download DFU Tool or a manual option below.', false);
+      } else {
+        appendModalLog('A Windows driver is required to communicate with the STM32 Bootloader.', false);
+        appendModalLog('', false);
+        appendModalLog('  Detected: STM32 Bootloader (0483:df11)', false);
+        appendModalLog('', false);
+        appendModalLog('JMT Studio will download the official Proffie DFU setup tool and run', false);
+        appendModalLog('it unchanged. You will be asked by Windows before anything is installed.', false);
+        appendModalLog('', false);
+        appendModalLog('Click Download DFU Tool, or use a manual option below.', false);
+      }
     } else {
       appendModalLog('DFU device found but could not be opened.', true);
       appendModalLog('Check USB permissions and reconnect the board.', false);
@@ -1122,40 +1287,63 @@ async function startDfuWaitModal() {
 
     document.getElementById('bm-title').textContent = 'Fix DFU Driver';
     document.getElementById('bm-title').style.color = 'var(--c-warn-text)';
-    document.getElementById('bm-status').textContent = 'Windows needs a driver update for Bootloader Mode';
     document.getElementById('bm-abort').style.display = 'none';
-    document.getElementById('bm-dfu-setup').style.display = navigator.platform.startsWith('Win') ? 'inline-block' : 'none';
-    document.getElementById('bm-dfu-manual').style.display = navigator.platform.startsWith('Win') ? 'inline-block' : 'none';
-    document.getElementById('bm-zadig').style.display = navigator.platform.startsWith('Win') ? 'inline-block' : 'none';
-    document.getElementById('bm-retry').style.display = 'inline-block';
-    document.getElementById('bm-retry').textContent = '↺ Retry Detection';
     document.getElementById('bm-close').style.display = 'inline-block';
     document.getElementById('bm-close').textContent = 'Cancel';
+    document.getElementById('bm-dfu-note').style.display = 'block';
+    const dfuSetupBtn = document.getElementById('bm-dfu-setup');
+    dfuSetupBtn.textContent = '⬇ Download DFU Tool';
+    delete dfuSetupBtn.dataset.phase;
+    if (driverStillLoading) {
+      // Primary: Try Again (re-poll without re-downloading)
+      const retryBtn = document.getElementById('bm-retry');
+      retryBtn.textContent = '↺ Try Again';
+      retryBtn.style.display = 'inline-block';
+      _dfuRetryRecheck   = true;
+      _dfuRetryAutoFlash = autoFlash;
+      document.getElementById('bm-status').textContent = 'Driver pending — replug board';
+      dfuSetupBtn.style.display = 'none'; // driver already installed, no need to re-download
+    } else {
+      document.getElementById('bm-status').textContent = 'Windows driver required';
+      dfuSetupBtn.style.display = navigator.platform.startsWith('Win') ? 'inline-block' : 'none';
+    }
+    document.getElementById('bm-manual-row').style.display = navigator.platform.startsWith('Win') ? 'flex' : 'none';
     setBarMode('error');
     return;
   }
 
-  // DFU device detected and accessible — show clean ready state
+  // DFU device detected and accessible
   dfuDeviceReady = true;
   setStatus('port', 'ok', 'DFU device ready');
 
   document.getElementById('bm-log').innerHTML = '';
   appendModalLog('✓ Proffieboard detected in Bootloader Mode (DFU)', false);
-
   document.getElementById('bm-abort').style.display = 'none';
-  document.getElementById('bm-close').style.display = 'inline-block';
   document.getElementById('bm-title').textContent = '⚡ DFU Device Ready';
   document.getElementById('bm-title').style.color = 'var(--c-title-accent)';
   setBarMode('success');
 
-  if (compileSuccess) {
-    document.getElementById('bm-status').textContent = 'Firmware ready — flash when you\'re ready.';
-    document.getElementById('bm-retry').textContent = '⚡ Flash Now';
-    document.getElementById('bm-retry').style.display = 'inline-block';
-    setFlashEnabled(true);
+  if (autoFlash && compileSuccess) {
+    appendModalLog('Firmware ready — flashing now...', false);
+    doFlashDFU();
   } else {
-    document.getElementById('bm-status').textContent = 'Compile your config to continue.';
-    setFlashEnabled(false);
+    appendModalLog('', false);
+    if (compileSuccess) {
+      appendModalLog('A compiled firmware is ready. If your configuration is verified,', false);
+      appendModalLog('click Flash Now to upload it to the board.', false);
+    } else {
+      appendModalLog('Verify your configuration and compile to flash the board.', false);
+    }
+    document.getElementById('bm-status').textContent = 'Connection successful.';
+    const closeBtn = document.getElementById('bm-close');
+    closeBtn.style.display = 'inline-block';
+    closeBtn.textContent = 'Close';
+    if (compileSuccess) {
+      const flashBtn = document.getElementById('bm-retry');
+      flashBtn.textContent = '⚡ Flash Now';
+      flashBtn.style.display = 'inline-block';
+    }
+    setFlashEnabled(compileSuccess);
   }
 }
 
@@ -1173,7 +1361,17 @@ async function doFlashDFU() {
     return;
   }
 
-  // Device already detected — go straight to flash
+  // Verify the device is still connected before committing to flash
+  const liveCheck = await window.electronAPI.detectDFU();
+  if (!liveCheck.found || !liveCheck.accessible) {
+    dfuDeviceReady = false;
+    // found=true but not accessible → driver issue, skip boot instructions
+    // found=false → board gone, show full boot instructions so user knows to replug
+    await startDfuWaitModal(liveCheck.found && !liveCheck.accessible, true);
+    return;
+  }
+
+  // Device confirmed present — go straight to flash
   document.getElementById('bm-title').textContent = '⚡ Flashing (DFU)...';
   document.getElementById('bm-title').style.color = 'var(--c-text-bright)';
   document.getElementById('bm-abort').style.display = 'none';
@@ -1194,14 +1392,23 @@ async function doFlashDFU() {
 }
 
 async function watchForSerialAfterDfu() {
-  const timeout = 10000;
-  const start   = Date.now();
+  const timeout    = 10000;
+  const start      = Date.now();
+  const preDfuPaths = new Set(_portsBeforeDfu);
 
   while (Date.now() - start < timeout) {
     await new Promise(r => setTimeout(r, 500));
     const result = await window.electronAPI.getRecommendedPort();
     if (result.ok && result.proffieports && result.proffieports.length > 0) {
-      appendModalLog('✓ Board restarted and detected on serial.', false);
+      // Prefer the port that wasn't present before the DFU flash
+      const newPort = result.proffieports.find(p => !preDfuPaths.has(p.path))
+                   || result.proffieports[0];
+      _userChosePort      = true;
+      _userChosenPortPath = newPort.path;
+      _portsBeforeDfu     = [];
+      lastFlashedSN       = newPort.serialNumber || null;
+      if (window.setFlashedTimestamp) window.setFlashedTimestamp(newPort.path, lastFlashedSN);
+      appendModalLog(`✓ Board restarted on ${newPort.path}.`, false);
       document.getElementById('bm-status').textContent = 'Board is back online.';
       setTimeout(() => {
         document.getElementById('build-modal').style.display = 'none';
@@ -1211,8 +1418,8 @@ async function watchForSerialAfterDfu() {
     }
   }
 
-  // Reset dfuDeviceReady so Close button exits DFU mode
-  dfuDeviceReady = false;
+  _portsBeforeDfu = [];
+  exitDfuMode();
   document.getElementById('bm-status').textContent =
     'Flash complete — board not yet detected. Try power cycling.';
   appendModalLog('Board not detected after restart. Try power cycling or reconnecting.', true);

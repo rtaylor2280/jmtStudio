@@ -61,11 +61,11 @@ function parseBoardList(raw) {
       fqbn:      b.fqbn || ''
     }));
 
-    const primary = variants.find(v =>
-      v.fqbn.includes('proffieboard') ||
-      v.boardName.toLowerCase().includes('proffieboard') ||
-      v.boardName.toLowerCase().includes('butterfly')
-    ) || variants[0] || { boardName: 'Unknown', fqbn: '' };
+    const primary =
+      variants.find(v => v.fqbn.includes('proffieboard')) ||
+      variants.find(v => v.boardName.toLowerCase().includes('proffieboard')) ||
+      variants.find(v => v.boardName.toLowerCase().includes('butterfly')) ||
+      variants[0] || { boardName: 'Unknown', fqbn: '' };
 
     const isProffieboard = variants.some(v =>
       v.fqbn.includes('proffieboard') ||
@@ -80,6 +80,7 @@ function parseBoardList(raw) {
       boardName:     primary.boardName   || 'Unknown',
       fqbn:          primary.fqbn        || '',
       core:          '',
+      serialNumber:  (port.properties || {}).serialNumber || '',
       isProffieboard,
       variants
     };

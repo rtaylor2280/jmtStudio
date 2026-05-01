@@ -6,6 +6,7 @@ const toolchain   = require('./toolchain');
 const portDetect  = require('./portDetector');
 const proffie     = require('./proffieos');
 const cacheManager = require('./cacheManager');
+const backup      = require('./backup');
 
 // ── Separate userData for dev vs prod ──────────────────
 if (!app.isPackaged) {
@@ -122,11 +123,28 @@ function createWindow() {
     e.preventDefault();
     win.webContents.send('app:closing');
   });
+
+  // ── Block renderer reload shortcuts (Ctrl+R, Ctrl+Shift+R, F5) ──
+  win.webContents.on('before-input-event', (e, input) => {
+    if (input.type !== 'keyDown') return;
+    const ctrl = input.control || input.meta;
+    if (input.key === 'F5' || (ctrl && input.key === 'r') || (ctrl && input.shift && input.key === 'r')) {
+      e.preventDefault();
+    }
+  });
 }
 
 app.whenReady().then(() => {
   // Evict stale cache entries before window opens
   try { cacheManager.startupEviction(); } catch {}
+
+  // If launched via "Open With", override lastFile so the renderer loads it
+  const argFile = process.argv.slice(1)
+    .find(a => !a.startsWith('-') && /\.(h|txt)$/i.test(a) && fs.existsSync(a));
+  if (argFile) {
+    Store.set('lastFile', argFile);
+    addRecentFile(argFile);
+  }
 
   // Initialize selected ProffieOS version from prefs before window opens
   const versions    = proffie.listVersions();
@@ -364,7 +382,7 @@ ipcMain.handle('cache:getSize', () => {
   return dirSize(cacheRoot);
 });
 
-ipcMain.handle('cache:clear', () => {
+ipcMain.handle('cache:clear', async () => {
   const userData    = app.getPath('userData');
   const cacheRoot   = path.join(userData, 'build-cache');
   const buildOutput = path.join(userData, 'build-output');
@@ -377,8 +395,8 @@ ipcMain.handle('cache:clear', () => {
   }
   const bytes = dirSize(cacheRoot) + dirSize(buildOutput);
   try {
-    if (fs.existsSync(cacheRoot))   fs.rmSync(cacheRoot,   { recursive: true, force: true });
-    if (fs.existsSync(buildOutput)) fs.rmSync(buildOutput, { recursive: true, force: true });
+    if (fs.existsSync(cacheRoot))   await fs.promises.rm(cacheRoot,   { recursive: true, force: true });
+    if (fs.existsSync(buildOutput)) await fs.promises.rm(buildOutput, { recursive: true, force: true });
     return { ok: true, bytesCleared: bytes };
   } catch (err) {
     return { ok: false, error: err.message };
@@ -403,6 +421,104 @@ ipcMain.handle('cache:getDataSize', () => {
 
 ipcMain.handle('app:getVersion',      () => app.getVersion());
 ipcMain.handle('app:isDevMode',       () => !app.isPackaged);
+ipcMain.handle('clipboard:read',      () => require('electron').clipboard.readText());
+
+// ── IPC: App self-update ───────────────────────────────
+const JMT_STUDIO_REPO = 'rtaylor2280/jmtStudio';
+let _updateInfoCache    = null;
+let _updateInfoCachedAt = 0;
+const UPDATE_INFO_CACHE_TTL = 10 * 60 * 1000;
+
+function _semverGt(a, b) {
+  const pa = a.split('.').map(Number);
+  const pb = b.split('.').map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const na = pa[i] || 0, nb = pb[i] || 0;
+    if (na > nb) return true;
+    if (na < nb) return false;
+  }
+  return false;
+}
+
+ipcMain.handle('app:checkForUpdate', async (_, { force = false } = {}) => {
+  const now = Date.now();
+  if (!force && _updateInfoCache && (now - _updateInfoCachedAt < UPDATE_INFO_CACHE_TTL)) {
+    return _updateInfoCache;
+  }
+  try {
+    const body = await _httpsGet(
+      `https://api.github.com/repos/${JMT_STUDIO_REPO}/releases/latest`,
+      { 'User-Agent': 'JMT-Studio' }
+    );
+    const release        = JSON.parse(body);
+    const latestVersion  = (release.tag_name || '').replace(/^v/, '');
+    const currentVersion = app.getVersion();
+    const hasUpdate      = _semverGt(latestVersion, currentVersion);
+    const asset          = (release.assets || []).find(a => a.name.endsWith('.exe'));
+    const result = {
+      ok: true,
+      hasUpdate,
+      currentVersion,
+      latestVersion,
+      releaseNotes: release.body || '',
+      downloadUrl:  asset?.browser_download_url || null,
+      assetName:    asset?.name || null,
+    };
+    _updateInfoCache    = result;
+    _updateInfoCachedAt = Date.now();
+    return result;
+  } catch (e) {
+    if (e.message === 'HTTP 404') {
+      return { ok: true, hasUpdate: false, currentVersion: app.getVersion(), latestVersion: null };
+    }
+    return { ok: false, error: e.message };
+  }
+});
+
+let _pendingUpdateExePath = null;
+let _dfuSetupExePath      = null;
+
+ipcMain.handle('app:downloadUpdate', async (_, { downloadUrl, assetName }) => {
+  const os      = require('os');
+  const exePath = path.join(os.tmpdir(), assetName);
+  _pendingUpdateExePath = null;
+  try {
+    const file = fs.createWriteStream(exePath);
+    let downloaded = 0;
+    await new Promise((resolve, reject) => {
+      _httpsGet(
+        downloadUrl,
+        { 'User-Agent': 'JMT-Studio' },
+        (chunk, res) => {
+          const total = parseInt(res.headers['content-length'] || '0', 10);
+          downloaded += chunk.length;
+          const pct = total ? Math.round((downloaded / total) * 100) : 0;
+          if (win && !win.isDestroyed()) {
+            win.webContents.send('app:updateProgress', { percent: pct, downloaded, total });
+          }
+          file.write(chunk);
+        }
+      ).then(() => file.end()).catch(reject);
+      file.on('finish', resolve);
+      file.on('error', reject);
+    });
+    _pendingUpdateExePath = exePath;
+    return { ok: true };
+  } catch (e) {
+    try { fs.unlinkSync(exePath); } catch {}
+    return { ok: false, error: e.message };
+  }
+});
+
+ipcMain.handle('app:installUpdate', async () => {
+  if (!_pendingUpdateExePath || !fs.existsSync(_pendingUpdateExePath)) {
+    return { ok: false, error: 'Installer not found.' };
+  }
+  const error = await shell.openPath(_pendingUpdateExePath);
+  if (error) return { ok: false, error };
+  setTimeout(() => app.quit(), 500);
+  return { ok: true };
+});
 ipcMain.handle('toolchain:abort',     () => toolchain.abort());
 
 // ── IPC: Port detection ────────────────────────────────
@@ -685,7 +801,7 @@ async function _getJmtManifest() {
     return { ok: true, manifest: _jmtManifestCache };
   }
   try {
-    const body = await _httpsGet(JMT_MANIFEST_URL, { 'User-Agent': 'JMT-Studio' });
+    const body = await _httpsGet(JMT_MANIFEST_URL + '?_=' + Date.now(), { 'User-Agent': 'JMT-Studio', 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' });
     const manifest = JSON.parse(body);
     _jmtManifestCache    = manifest;
     _jmtManifestCachedAt = Date.now();
@@ -732,6 +848,7 @@ ipcMain.handle('versions:applyJmtFeatures', async (event, versionName) => {
       win.webContents.send('versions:jmtProgress', { file: file.path, done, total });
     }
     proffie.writeVersionMeta(versionName, { jmtVersion: manifest.version });
+    _jmtManifestCache = null;  // force fresh fetch on next check
     return { ok: true, jmtVersion: manifest.version };
   } catch (e) {
     return { ok: false, error: e.message };
@@ -747,10 +864,53 @@ ipcMain.handle('dfu:detect', async () => {
   return await toolchain.detectDFU();
 });
 
-ipcMain.handle('dfu:runSetup', async () => {
-  const setupExe = path.join(proffie.getResourcesPath(), 'tools', 'windows', 'proffie-dfu-setup.exe');
-  const error = await shell.openPath(setupExe);
-  return { ok: !error, error: error || null };
+ipcMain.handle('dfu:downloadSetup', async () => {
+  const os = require('os');
+  const DFU_SETUP_URL = 'https://fredrik.hubbe.net/lightsaber/proffie-dfu-setup.exe';
+  const exePath = path.join(os.tmpdir(), 'proffie-dfu-setup.exe');
+  const sendStatus = (msg) => {
+    if (win && !win.isDestroyed()) win.webContents.send('dfu:setupStatus', msg);
+  };
+  try {
+    sendStatus('Downloading proffie-dfu-setup.exe from fredrik.hubbe.net...');
+    const file = fs.createWriteStream(exePath);
+    await new Promise((resolve, reject) => {
+      _httpsGet(DFU_SETUP_URL, { 'User-Agent': 'JMT-Studio' }, (chunk) => {
+        file.write(chunk);
+      }).then(() => file.end()).catch(reject);
+      file.on('finish', resolve);
+      file.on('error',  reject);
+    });
+    _dfuSetupExePath = exePath;
+    return { ok: true };
+  } catch (e) {
+    try { fs.unlinkSync(exePath); } catch {}
+    _dfuSetupExePath = null;
+    const noNet = /ENOTFOUND|ECONNREFUSED|ETIMEDOUT/i.test(e.message);
+    return { ok: false, error: noNet ? 'No internet connection.' : `Download failed: ${e.message}` };
+  }
+});
+
+ipcMain.handle('dfu:installSetup', async () => {
+  const { execFile } = require('child_process');
+  const exePath = _dfuSetupExePath;
+  if (!exePath) return { ok: false, error: 'No downloaded installer found. Try downloading again.' };
+  const sendStatus = (msg) => {
+    if (win && !win.isDestroyed()) win.webContents.send('dfu:setupStatus', msg);
+  };
+  sendStatus('Running proffie-dfu-setup.exe...');
+  const safe = exePath.replace(/'/g, "''");
+  const psCmd = `$p = Start-Process -FilePath '${safe}' -ArgumentList '/S' -Verb RunAs -PassThru; if ($p) { $p.WaitForExit(); exit $p.ExitCode } else { exit 1 }`;
+  return new Promise(resolve => {
+    execFile('powershell', ['-NoProfile', '-NonInteractive', '-Command', psCmd],
+      { timeout: 120000 }, (error) => {
+        try { fs.unlinkSync(exePath); } catch {}
+        _dfuSetupExePath = null;
+        resolve(error
+          ? { ok: false, error: 'Installation was cancelled. Accept the Windows security prompt to install.' }
+          : { ok: true });
+      });
+  });
 });
 
 ipcMain.handle('dfu:flash', async () => {

@@ -105,10 +105,27 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ── DFU ──────────────────────────────────────────────
   detectDFU:    () => ipcRenderer.invoke('dfu:detect'),
   flashDFU:     () => ipcRenderer.invoke('dfu:flash'),
-  runDfuSetup:  () => ipcRenderer.invoke('dfu:runSetup'),
+  downloadDfuSetup: () => ipcRenderer.invoke('dfu:downloadSetup'),
+  installDfuSetup:  () => ipcRenderer.invoke('dfu:installSetup'),
+  onDfuSetupStatus: (cb) => {
+    const handler = (_, msg) => cb(msg);
+    ipcRenderer.on('dfu:setupStatus', handler);
+    return () => ipcRenderer.removeListener('dfu:setupStatus', handler);
+  },
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
 
+  checkForUpdate:  (force) => ipcRenderer.invoke('app:checkForUpdate', { force: !!force }),
+  downloadUpdate:  (downloadUrl, assetName) => ipcRenderer.invoke('app:downloadUpdate', { downloadUrl, assetName }),
+  installUpdate:   () => ipcRenderer.invoke('app:installUpdate'),
+  onUpdateProgress: (cb) => {
+    const handler = (_, data) => cb(data);
+    ipcRenderer.on('app:updateProgress', handler);
+    return () => ipcRenderer.removeListener('app:updateProgress', handler);
+  },
+
   onAppClosing:    (cb) => ipcRenderer.on('app:closing', cb),
-  doClose:         () => ipcRenderer.send('app:doClose')
+  doClose:         () => ipcRenderer.send('app:doClose'),
+
+  readClipboard:   () => ipcRenderer.invoke('clipboard:read'),
 
 });

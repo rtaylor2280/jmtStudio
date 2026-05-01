@@ -268,14 +268,23 @@ function ensureConfigFileRef(onLog) {
   try { content = fs.readFileSync(inoPath, 'utf8'); }
   catch (e) { return { ok: false, error: `Cannot read ProffieOS.ino: ${e.message}` }; }
 
-  const targetDefine  = `#define CONFIG_FILE "config/${CONFIG_FILENAME}"`;
-  const lineEnding    = content.includes('\r\n') ? '\r\n' : '\n';
-  const lines         = content.split(/\r?\n/);
+  const targetDefine = `#define CONFIG_FILE "config/${CONFIG_FILENAME}"`;
+  const lineEnding   = content.includes('\r\n') ? '\r\n' : '\n';
+  const lines        = content.split(/\r?\n/);
 
   const isDefine  = l => /^\s*#\s*define\s+CONFIG_FILE\b/.test(l);
   const isCorrect = l => /^\s*#\s*define\s+CONFIG_FILE\s+"config\/my_config\.h"\s*$/.test(l);
 
-  const defineIdxs = lines.reduce((acc, l, i) => { if (isDefine(l)) acc.push(i); return acc; }, []);
+  // Only track defines at the top level — skip anything inside #if/#ifdef blocks.
+  // ProffieOS.ino has #define CONFIG_FILE inside #ifdef CONFIG_FILE_TEST which must not
+  // be mistaken for an unconditional define.
+  let depth = 0;
+  const defineIdxs = [];
+  lines.forEach((l, i) => {
+    if (/^\s*#\s*if(?:def|ndef)?\b/.test(l)) { depth++; return; }
+    if (/^\s*#\s*endif\b/.test(l))            { depth--; return; }
+    if (depth === 0 && isDefine(l)) defineIdxs.push(i);
+  });
   const correctIdx = defineIdxs.find(i => isCorrect(lines[i]));
 
   // Already exactly right — nothing to do
@@ -284,7 +293,7 @@ function ensureConfigFileRef(onLog) {
   const newLines = [...lines];
   let changed = false;
 
-  // Comment out all wrong CONFIG_FILE defines
+  // Comment out all wrong top-level CONFIG_FILE defines
   defineIdxs.forEach(i => {
     if (!isCorrect(newLines[i])) {
       newLines[i] = `// ${newLines[i].trim()} // [JMT Studio: replaced]`;
@@ -292,22 +301,16 @@ function ensureConfigFileRef(onLog) {
     }
   });
 
-  // Insert correct define if missing
+  // Insert correct define if missing — place it just before the #ifndef CONFIG_FILE guard
   if (correctIdx === undefined) {
     let insertAt;
-    if (defineIdxs.length > 0) {
-      insertAt = defineIdxs[0]; // before first existing (now-commented) define
+    const ndefIdx = lines.findIndex(l => /^\s*#\s*ifndef\s+CONFIG_FILE\b/.test(l));
+    if (ndefIdx >= 0) {
+      insertAt = ndefIdx;
+    } else if (defineIdxs.length > 0) {
+      insertAt = defineIdxs[0];
     } else {
-      // No existing defines — insert after opening comment block
       insertAt = 0;
-      for (let i = 0; i < newLines.length; i++) {
-        const t = newLines[i].trim();
-        if (t === '' || t.startsWith('//') || t.startsWith('/*') || t.startsWith('*')) {
-          insertAt = i + 1;
-        } else {
-          break;
-        }
-      }
     }
     newLines.splice(insertAt, 0, targetDefine);
     changed = true;
