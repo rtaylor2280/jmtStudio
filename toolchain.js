@@ -475,33 +475,57 @@ async function runDfuFlash(dfuPath, toolsDir, onLog) {
     ], { cwd: toolsDir });
 
     let stdout = '', stderr = '';
-    // Buffer partial lines — data chunks don't align with line boundaries
-    let stderrBuf = '';
 
-    function flushStderrLine(line) {
+    // dfu-util uses bare \r as cursor-to-column-0 throughout output, on both
+    // stdout and stderr depending on the build. Apply terminal emulator semantics
+    // to both streams so chunk boundaries never produce partial log lines.
+    function makeTermEmu(onFlush) {
+      let line = '', pos = 0;
+      return {
+        write(str) {
+          for (let i = 0; i < str.length; i++) {
+            const ch = str[i];
+            if (ch === '\n') {
+              onFlush(line);
+              line = '';
+              pos = 0;
+            } else if (ch === '\r') {
+              if (line.trim()) onFlush(line);
+              line = '';
+              pos = 0;
+            } else {
+              if (pos < line.length) {
+                line = line.slice(0, pos) + ch + line.slice(pos + 1);
+              } else {
+                line += ch;
+              }
+              pos++;
+            }
+          }
+        },
+        flush() {
+          if (line.trim()) { onFlush(line); line = ''; pos = 0; }
+        }
+      };
+    }
+
+    const outEmu = makeTermEmu(line => {
+      if (!line) return;
+      stdout += line + '\n';
+      onLog(line, false);
+    });
+    const errEmu = makeTermEmu(line => {
       if (!line) return;
       stderr += line + '\n';
       onLog(line, line.toLowerCase().includes('error'));
-    }
-
-    proc.stdout.on('data', d => {
-      const lines = d.toString().split(/\r?\n/).filter(Boolean);
-      lines.forEach(l => { stdout += l + '\n'; onLog(l, false); });
     });
 
-    proc.stderr.on('data', d => {
-      stderrBuf += d.toString();
-      // Extract every complete line (terminated by \r\n, \n, or bare \r)
-      let match;
-      while ((match = stderrBuf.match(/^([^\r\n]*)(\r\n|\r|\n)/)) !== null) {
-        flushStderrLine(match[1]);
-        stderrBuf = stderrBuf.slice(match[0].length);
-      }
-    });
+    proc.stdout.on('data', d => outEmu.write(d.toString()));
+    proc.stderr.on('data', d => errEmu.write(d.toString()));
 
     proc.on('close', code => {
-      // Flush any remaining partial line
-      if (stderrBuf.trim()) flushStderrLine(stderrBuf.trim());
+      outEmu.flush();
+      errEmu.flush();
       resolve({ ok: code === 0, stdout, stderr });
     });
     proc.on('error', e => resolve({ ok: false, error: e.message }));
