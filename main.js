@@ -6,7 +6,6 @@ const toolchain   = require('./toolchain');
 const portDetect  = require('./portDetector');
 const proffie     = require('./proffieos');
 const cacheManager = require('./cacheManager');
-const backup      = require('./backup');
 
 // ── Separate userData for dev vs prod ──────────────────
 if (!app.isPackaged) {
