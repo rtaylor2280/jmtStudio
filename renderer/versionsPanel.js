@@ -9,6 +9,27 @@ let _vpVersions       = [];
 let _vpSelected       = null;
 let _vpFileViewer     = null; // Monaco editor instance for file viewer
 let _vpNotesOriginal  = '';   // tracks saved state for dirty detection
+let _vpNotesDirty     = false;
+
+async function _vpDoSaveNotes() {
+  const notesEl  = document.getElementById('vp-notes');
+  const saveBtn  = document.getElementById('vp-btn-save-notes');
+  const statusEl = document.getElementById('vp-notes-status');
+  if (!_vpSelected || !notesEl) return;
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
+  const result = await window.electronAPI.writeVersionNotes(_vpSelected.name, notesEl.value);
+  if (result.ok) {
+    _vpNotesOriginal = notesEl.value;
+    _vpNotesDirty    = false;
+    _vpSelected.notes       = notesEl.value;
+    _vpSelected.notesPreview = notesEl.value.split('\n').find(l => l.trim()) || null;
+    if (statusEl) { statusEl.textContent = 'Saved'; setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 2000); }
+    _vpRenderCards();
+  } else {
+    if (statusEl) statusEl.textContent = `Error: ${result.error}`;
+  }
+  if (saveBtn) { saveBtn.textContent = 'Save Notes'; saveBtn.disabled = notesEl.value === _vpNotesOriginal; }
+}
 
 // ── Helpers ────────────────────────────────────────────
 
@@ -111,7 +132,14 @@ function _vpRenderCards() {
       ${v.proffieVersion ? `<div class="vp-card-proffie-ver">ProffieOS ${_vpEsc(v.proffieVersion)}</div>` : ''}
       ${v.notesPreview ? `<div class="vp-card-notes-preview">${_vpEsc(v.notesPreview)}</div>` : ''}
     `;
-    card.addEventListener('click', () => _vpSelectVersion(v));
+    card.addEventListener('click', async () => {
+      if (_vpNotesDirty) {
+        const choice = await (window.promptUnsaved?.('Unsaved notes — save before switching versions?') ?? Promise.resolve('discard'));
+        if (choice === 'cancel') return;
+        if (choice === 'save') await _vpDoSaveNotes();
+      }
+      _vpSelectVersion(v);
+    });
     list.appendChild(card);
   });
 }
@@ -192,11 +220,18 @@ function _vpRenderDetail(v) {
   const saveBtn  = document.getElementById('vp-btn-save-notes');
   const statusEl = document.getElementById('vp-notes-status');
 
+  _vpNotesDirty = false;
+
   notesEl.addEventListener('focus', () => { notesEl.spellcheck = true; });
   notesEl.addEventListener('blur',  () => { notesEl.spellcheck = false; });
 
+  notesEl.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); saveBtn.click(); }
+  });
+
   notesEl.addEventListener('input', () => {
     const dirty = notesEl.value !== _vpNotesOriginal;
+    _vpNotesDirty = dirty;
     saveBtn.disabled = !dirty;
     statusEl.textContent = dirty ? 'Unsaved changes' : '';
   });
@@ -207,6 +242,7 @@ function _vpRenderDetail(v) {
     const result = await window.electronAPI.writeVersionNotes(v.name, notesEl.value);
     if (result.ok) {
       _vpNotesOriginal = notesEl.value;
+      _vpNotesDirty = false;
       v.notes = notesEl.value;
       v.notesPreview = notesEl.value.split('\n').find(l => l.trim()) || null;
       statusEl.textContent = 'Saved';
@@ -800,3 +836,5 @@ window.vpSelectVersion   = (name) => {
   if (v) _vpSelectVersion(v);
 };
 window.vpSelectedName    = () => _vpSelected?.name || null;
+window.vpHasUnsavedNotes = () => _vpNotesDirty;
+window.vpSaveCurrentNotes = _vpDoSaveNotes;

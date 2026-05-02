@@ -60,7 +60,7 @@ function startCompileHints() {
     if (el) {
       el.style.transition = 'none';
       el.style.opacity = '1';
-      el.textContent = `Last compile of this config took about ${_formatCompileDuration(lastDuration)}.`;
+      el.textContent = `Last compiled version of this config took about ${_formatCompileDuration(lastDuration)}.`;
     }
     // Clear 15s before the first hint appears
     _hintDurationTimeout = setTimeout(() => {
@@ -189,6 +189,7 @@ async function initBuildPanel() {
   document.getElementById('bm-close').addEventListener('click', () => {
     stopPortWatch();
     document.getElementById('build-modal').style.display = 'none';
+    window.electronAPI.cleanupDfuSetup();
   });
   document.getElementById('bm-v1-feedback-link').addEventListener('click', e => {
     e.preventDefault();
@@ -243,13 +244,13 @@ async function initBuildPanel() {
         appendModalLog('Waiting for Windows to register the driver...', false);
         await new Promise(r => setTimeout(r, 2000));
         appendModalLog('──────────────────────────────────', false);
-        startDfuWaitModal(true, _dfuRetryAutoFlash);
+        startDfuWaitModal(true, _dfuRetryAutoFlash, true);
       } else {
         appendModalLog('', false);
         appendModalLog(result.error || 'Installation was cancelled or failed.', true);
-        appendModalLog('Click Download DFU Tool to try again, or use a manual option below.', false);
-        setupBtn.textContent = '⬇ Download DFU Tool';
-        delete setupBtn.dataset.phase;
+        appendModalLog('Click Install DFU Tool to try again, or use a manual option below.', false);
+        setupBtn.textContent = '▶ Install DFU Tool';
+        setupBtn.dataset.phase = 'install';
         manualRow.style.display = 'flex';
         document.getElementById('bm-close').style.display = 'inline-block';
       }
@@ -272,11 +273,40 @@ async function initBuildPanel() {
 
     if (result.ok) {
       appendModalLog('✓ proffie-dfu-setup.exe downloaded.', false);
+      appendModalLog('✓ SHA256 verified.', false);
       appendModalLog('', false);
       appendModalLog('Windows will ask for permission to run the installer — click Yes.', false);
       appendModalLog('Click Install DFU Tool to continue.', false);
       setupBtn.textContent = '▶ Install DFU Tool';
       setupBtn.dataset.phase = 'install';
+      manualRow.style.display = 'flex';
+      document.getElementById('bm-close').style.display = 'inline-block';
+    } else if (result.hashMismatch) {
+      appendModalLog('', false);
+      appendModalLog('Downloaded file does not match our records.', true);
+      appendModalLog('Verify the current hash at the official setup page:', false);
+      const _hashLog = document.getElementById('bm-log');
+      const _hashLink = document.createElement('a');
+      _hashLink.textContent = 'pod.hubbe.net/proffieboard-setup.html';
+      _hashLink.href = '#';
+      _hashLink.style.cssText = 'color:#4af;text-decoration:underline;cursor:pointer;';
+      _hashLink.addEventListener('click', e => {
+        e.preventDefault();
+        window.electronAPI.openExternal('https://pod.hubbe.net/proffieboard-setup.html#os-specific-setup');
+      });
+      const _hashLinkWrap = document.createElement('span');
+      _hashLinkWrap.appendChild(_hashLink);
+      _hashLinkWrap.appendChild(document.createTextNode('\n'));
+      _hashLog.appendChild(_hashLinkWrap);
+      _hashLog.scrollTop = _hashLog.scrollHeight;
+      appendModalLog('', false);
+      appendModalLog(`  Expected:   ${result.expected}`, false);
+      appendModalLog(`  Downloaded: ${result.actual}`, false);
+      appendModalLog('', false);
+      appendModalLog('If the downloaded hash matches the site, you can proceed.', false);
+      setupBtn.style.display = 'none';
+      setupBtn.dataset.phase = 'install';
+      document.getElementById('bm-install-anyway').style.display = 'inline-block';
       manualRow.style.display = 'flex';
       document.getElementById('bm-close').style.display = 'inline-block';
     } else {
@@ -288,6 +318,12 @@ async function initBuildPanel() {
       manualRow.style.display = 'flex';
       document.getElementById('bm-close').style.display = 'inline-block';
     }
+  });
+  document.getElementById('bm-install-anyway').addEventListener('click', () => {
+    document.getElementById('bm-install-anyway').style.display = 'none';
+    const setupBtn = document.getElementById('bm-dfu-setup');
+    setupBtn.dataset.phase = 'install';
+    setupBtn.click();
   });
   document.getElementById('bm-dfu-manual').addEventListener('click', () => {
     window.electronAPI.openExternal('https://pod.hubbe.net/proffieboard-setup.html#os-specific-setup');
@@ -351,7 +387,6 @@ async function doCompile() {
   await window.doSave();
   if (window.saveStylesFile) await window.saveStylesFile();
 
-  if (isDfuMode) exitDfuMode();
   showBuildModal('⚙ Compiling...');
   startCompileHints();
   setBusy(true);
@@ -757,6 +792,7 @@ function showBuildModal(title) {
   _dfuSetupBtn.style.display = 'none';
   _dfuSetupBtn.textContent = '⬇ Download DFU Tool';
   delete _dfuSetupBtn.dataset.phase;
+  document.getElementById('bm-install-anyway').style.display = 'none';
   document.getElementById('bm-manual-row').style.display = 'none';
   document.getElementById('bm-dfu-note').style.display = 'none';
   document.getElementById('bm-board-select-wrap').style.display = 'none';
@@ -906,6 +942,7 @@ function finishBuildModal(success, title, statusMsg, { retriable = false, isFlas
   document.getElementById('bm-status').textContent = statusMsg || '';
   document.getElementById('bm-abort').style.display = 'none';
   document.getElementById('bm-dfu-setup').style.display = 'none';
+  document.getElementById('bm-install-anyway').style.display = 'none';
   document.getElementById('bm-manual-row').style.display = 'none';
   document.getElementById('bm-retry').style.display = retriable ? 'inline-block' : 'none';
   document.getElementById('bm-close').style.display = 'inline-block';
@@ -1180,7 +1217,8 @@ function exitDfuMode() {
 
 // Shows the waiting modal and polls for DFU device.
 // autoFlash: true when triggered by Flash click; false when triggered by mode entry.
-async function startDfuWaitModal(isRetry = false, autoFlash = true) {
+// justInstalled: true only when coming from a successful driver install — enables Try Again after replug.
+async function startDfuWaitModal(isRetry = false, autoFlash = true, justInstalled = false) {
   if (!isRetry) {
     showBuildModal('⚡ Bootloader Mode (DFU)');
     appendModalLog('Put the board into Bootloader Mode:', false);
@@ -1195,9 +1233,11 @@ async function startDfuWaitModal(isRetry = false, autoFlash = true) {
     // Board already in DFU mode — skip boot instructions, just re-poll
     const modal = document.getElementById('build-modal');
     modal.style.display = 'flex';
+    document.getElementById('bm-log').innerHTML = '';
     document.getElementById('bm-title').textContent = '⚡ Bootloader Mode (DFU)';
     document.getElementById('bm-title').style.color = 'var(--c-text-bright)';
     document.getElementById('bm-dfu-setup').style.display = 'none';
+    document.getElementById('bm-install-anyway').style.display = 'none';
     document.getElementById('bm-manual-row').style.display = 'none';
     document.getElementById('bm-dfu-note').style.display = 'none';
     document.getElementById('bm-retry').style.display = 'none';
@@ -1237,8 +1277,10 @@ async function startDfuWaitModal(isRetry = false, autoFlash = true) {
       notAccessibleStart = null;  // device disappeared — reset grace timer
     }
 
-    // If board exited DFU mode during driver install, prompt re-entry after 8s
-    if (retryStart && !retryTimedOut && Date.now() - retryStart > 8000) {
+    // If board is no longer detected after 8s, prompt re-entry — but only if it's
+    // genuinely gone (found=false). If it's still found but driver can't access it,
+    // the board IS connected; don't tell the user to re-enter bootloader mode.
+    if (retryStart && !retryTimedOut && Date.now() - retryStart > 8000 && !dfuResult.found) {
       retryTimedOut = true;
       appendModalLog('', false);
       appendModalLog('Board may have exited Bootloader Mode.', false);
@@ -1251,25 +1293,38 @@ async function startDfuWaitModal(isRetry = false, autoFlash = true) {
   if (cancelled) {
     document.getElementById('build-modal').style.display = 'none';
     // Stay in DFU mode — user can compile and Flash later to resume
-    setStatus('port', 'warn', (dfuResult.found && !dfuResult.accessible)
-      ? 'STM32 driver required'
-      : 'Put board in Bootloader Mode to flash');
+    if (dfuResult.found && !dfuResult.accessible) {
+      const driverStatusMsg = navigator.platform.startsWith('Linux')
+        ? 'udev rules required'
+        : 'STM32 driver required';
+      setStatus('port', 'warn', driverStatusMsg);
+    } else {
+      setStatus('port', 'warn', 'Put board in Bootloader Mode to flash');
+    }
     return;
   }
 
   if (!dfuResult.accessible) {
-    _dfuRetryAutoFlash = autoFlash; // preserve so install handler and Try Again carry the right intent
+    _dfuRetryAutoFlash = autoFlash;
     document.getElementById('bm-log').innerHTML = '';
     const driverStillLoading = notAccessibleStart !== null;
+    const isWin   = navigator.platform.startsWith('Win');
+    const isLinux = navigator.platform.startsWith('Linux');
 
-    if (navigator.platform.startsWith('Win')) {
+    // ── Messages ──────────────────────────────────────────
+    if (isWin) {
       if (driverStillLoading) {
-        appendModalLog('The driver was installed but Windows has not activated it yet.', false);
+        appendModalLog('STM32 Bootloader detected but the WinUSB driver cannot access it.', false);
         appendModalLog('', false);
         appendModalLog('  Detected: STM32 Bootloader (0483:df11)', false);
         appendModalLog('', false);
-        appendModalLog('Unplug the board, reconnect it in Bootloader Mode, then click Try Again.', false);
-        appendModalLog('If it still fails, use Download DFU Tool or a manual option below.', false);
+        if (justInstalled) {
+          appendModalLog('Unplug the board, reconnect it in Bootloader Mode, then click Try Again.', false);
+          appendModalLog('If it still fails, download and reinstall the DFU Tool below.', false);
+        } else {
+          appendModalLog('The WinUSB driver may be missing, outdated, or installed by another tool.', false);
+          appendModalLog('Download and install the DFU Tool below to fix it.', false);
+        }
       } else {
         appendModalLog('A Windows driver is required to communicate with the STM32 Bootloader.', false);
         appendModalLog('', false);
@@ -1280,34 +1335,71 @@ async function startDfuWaitModal(isRetry = false, autoFlash = true) {
         appendModalLog('', false);
         appendModalLog('Click Download DFU Tool, or use a manual option below.', false);
       }
+    } else if (isLinux) {
+      appendModalLog('DFU device detected but cannot be accessed.', true);
+      appendModalLog('Linux requires udev rules to allow USB access.', false);
+      appendModalLog('', false);
+      appendModalLog('Run the following in a terminal, then replug the board:', false);
+      appendModalLog('', false);
+      appendModalLog('  sudo cp ~/.arduino15/packages/profezzorn/hardware/stm32l4/*/drivers/linux/*.rules /etc/udev/rules.d/', false);
+      appendModalLog('  sudo udevadm control --reload-rules', false);
+      appendModalLog('', false);
+      appendModalLog('Visit pod.hubbe.net for full setup instructions.', false);
     } else {
-      appendModalLog('DFU device found but could not be opened.', true);
-      appendModalLog('Check USB permissions and reconnect the board.', false);
+      // Mac — DFU should work without any setup; this state is unexpected
+      appendModalLog('DFU device could not be accessed.', true);
+      appendModalLog('Try reconnecting the board.', false);
+      appendModalLog('If the issue persists, visit pod.hubbe.net for setup help.', false);
     }
 
+    // ── Title and shared button state ─────────────────────
     document.getElementById('bm-title').textContent = 'Fix DFU Driver';
     document.getElementById('bm-title').style.color = 'var(--c-warn-text)';
     document.getElementById('bm-abort').style.display = 'none';
     document.getElementById('bm-close').style.display = 'inline-block';
     document.getElementById('bm-close').textContent = 'Cancel';
     document.getElementById('bm-dfu-note').style.display = 'block';
+
     const dfuSetupBtn = document.getElementById('bm-dfu-setup');
     dfuSetupBtn.textContent = '⬇ Download DFU Tool';
     delete dfuSetupBtn.dataset.phase;
-    if (driverStillLoading) {
-      // Primary: Try Again (re-poll without re-downloading)
-      const retryBtn = document.getElementById('bm-retry');
+
+    const retryBtn = document.getElementById('bm-retry');
+
+    // ── Per-OS button and status logic ────────────────────
+    if (isWin) {
+      if (driverStillLoading) {
+        if (justInstalled) {
+          retryBtn.textContent = '↺ Try Again';
+          retryBtn.style.display = 'inline-block';
+          _dfuRetryRecheck   = true;
+          _dfuRetryAutoFlash = autoFlash;
+        } else {
+          retryBtn.style.display = 'none';
+        }
+        document.getElementById('bm-status').textContent = justInstalled ? 'Driver installed - replug board to activate' : 'WinUSB driver unavailable';
+      } else {
+        retryBtn.style.display = 'none';
+        document.getElementById('bm-status').textContent = 'Windows driver required';
+      }
+      dfuSetupBtn.style.display = 'inline-block';
+      document.getElementById('bm-manual-row').style.display = 'flex';
+    } else if (isLinux) {
       retryBtn.textContent = '↺ Try Again';
       retryBtn.style.display = 'inline-block';
       _dfuRetryRecheck   = true;
       _dfuRetryAutoFlash = autoFlash;
-      document.getElementById('bm-status').textContent = 'Driver pending — replug board';
-      dfuSetupBtn.style.display = 'none'; // driver already installed, no need to re-download
+      document.getElementById('bm-status').textContent = 'USB permission required';
+      dfuSetupBtn.style.display = 'none';
+      document.getElementById('bm-manual-row').style.display = 'none';
     } else {
-      document.getElementById('bm-status').textContent = 'Windows driver required';
-      dfuSetupBtn.style.display = navigator.platform.startsWith('Win') ? 'inline-block' : 'none';
+      // Mac
+      retryBtn.style.display = 'none';
+      document.getElementById('bm-status').textContent = 'DFU access failed';
+      dfuSetupBtn.style.display = 'none';
+      document.getElementById('bm-manual-row').style.display = 'none';
     }
-    document.getElementById('bm-manual-row').style.display = navigator.platform.startsWith('Win') ? 'flex' : 'none';
+
     setBarMode('error');
     return;
   }
@@ -1410,10 +1502,7 @@ async function watchForSerialAfterDfu() {
       if (window.setFlashedTimestamp) window.setFlashedTimestamp(newPort.path, lastFlashedSN);
       appendModalLog(`✓ Board restarted on ${newPort.path}.`, false);
       document.getElementById('bm-status').textContent = 'Board is back online.';
-      setTimeout(() => {
-        document.getElementById('build-modal').style.display = 'none';
-        exitDfuMode();
-      }, 1500);
+      setTimeout(() => exitDfuMode(), 1500);
       return;
     }
   }
@@ -1447,6 +1536,16 @@ window.resetCompileState        = () => {
   compileSuccess = false;
   setFlashEnabled(false);
   setStatus('compile', 'warn', 'Cache cleared — recompile needed');
+  updateCompileButton();
+};
+window.getToolchainReady        = () => toolchainReady;
+window.resetToolchainStatus     = () => {
+  toolchainReady = false;
+  setStatus('toolchain', 'error', 'No ProffieOS versions found. Please import or download a version first.');
+  ['port', 'compile', 'flash'].forEach(t => {
+    const item = document.getElementById(`bp-status-${t}-item`);
+    if (item) item.style.display = 'none';
+  });
   updateCompileButton();
 };
 window.checkCacheForConfig      = checkCacheForConfig;

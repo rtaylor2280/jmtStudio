@@ -679,7 +679,7 @@
   }
   .diff-label.orig { color: var(--c-danger-text);  background: var(--c-danger-bg);  }
   .diff-label.curr { color: var(--c-success-text); background: var(--c-success-bg); }
-  .diff-label.curr.pulse { animation: pulse-curr 1.8s ease-out forwards; }
+.diff-label.curr.pulse { animation: pulse-curr 1.8s ease-out forwards; }
   @keyframes pulse-curr {
     0%   { color: #fff; background: rgba(40,160,40,0.75); box-shadow: 0 0 12px rgba(80,255,80,0.6); }
     40%  { color: #8f8; background: rgba(20,100,20,0.65); box-shadow: 0 0 6px rgba(80,255,80,0.3); }
@@ -849,7 +849,9 @@
                     background: #1a2a3a; color: #4af; border: 1px solid #2a4a6a; }
   #bm-abort       { background: var(--c-danger-bg);  color: var(--c-danger-text);  border: 1px solid var(--c-danger-border); }
   #bm-close       { background: var(--c-success-bg); color: var(--c-success-text); border: 1px solid var(--c-success-border); }
-  #bm-dfu-setup   { background: var(--jmt-blue); color: #fff; border: 1px solid #0a6abf; }
+  #bm-dfu-setup      { background: var(--jmt-blue); color: #fff; border: 1px solid #0a6abf; }
+  #bm-install-anyway { background: #3a2800; color: #fa0; border: 1px solid #6a4800; }
+  html.light-mode #bm-install-anyway { background: #fff3cd; color: #a06000; border: 1px solid #d4a800; }
   #bm-retry       { background: #1a2a3a; color: #4af;  border: 1px solid #2a4a6a; }
   html.light-mode #bm-board-flash,
   html.light-mode #bm-retry       { background: #e8f0fe; color: #1a4a9a; border-color: #b0c8f0; }
@@ -2087,6 +2089,11 @@
     <div class="minimap-jump-bar top"    id="styles-jump-top">Jump to Top</div>
     <div class="minimap-jump-bar bottom" id="styles-jump-bottom">Jump to Bottom</div>
   </div>
+  <div class="status-bar" id="styles-status-bar" style="display:none">
+    <span>Ln <span id="sl-stat-ln">1</span>, Col <span id="sl-stat-col">1</span></span>
+    <span class="hl">C++</span>
+    <span id="sl-stat-dirty" style="color:#cb6;display:none">&#9679; unsaved</span>
+  </div>
   <div id="styles-visual-view" style="display:none">
     <div id="styles-helpers-panel">
       <div class="styles-helpers-title">Helpers <button id="btn-add-helper" class="btn-blue" style="font-size:0.7rem;padding:1px 7px;margin-left:auto" title="Add a new helper">&#43;</button></div>
@@ -2318,7 +2325,7 @@
     <div class="minimap-jump-bar bottom" id="minimap-jump-bottom">Jump to Bottom</div>
     <div id="diff-labels">
       <div class="diff-label orig" id="diff-label-orig">Original (baseline)</div>
-      <div class="diff-label curr">Current</div>
+<div class="diff-label curr">Current</div>
     </div>
     <div id="diff-editor"></div>
   </div>
@@ -2337,7 +2344,7 @@
 </div>
 
 <!-- ── Status bar ── -->
-<div class="status-bar">
+<div class="status-bar config-status-bar">
   <span>Ln <span id="stat-ln">1</span>, Col <span id="stat-col">1</span></span>
   <span id="stat-sel"></span>
   <span class="hl">C++</span>
@@ -2781,6 +2788,7 @@ function promptUnsaved(msg) {
     document.getElementById('modal-unsaved-save').onclick    = () => cleanup('save');
   });
 }
+window.promptUnsaved = promptUnsaved;
 
 // ── Dirty ──────────────────────────────────────────────
 function setDirty(v) {
@@ -3542,6 +3550,14 @@ async function _refreshVersionDropdown(preferName) {
   const verSel = document.getElementById('input-version');
   const sel = preferName !== undefined ? preferName : verSel.value;
   populateVersionSelect(verSel, versions, sel);
+  // If a real version is selected, reinit toolchain — dropdown value may not
+  // have changed (no change event fires) even though the version was just installed
+  const name = verSel.value;
+  if (name && name !== '__add_version__' && window.electronAPI) {
+    window.electronAPI.selectVersion(name);
+    window.electronAPI.initToolchain();
+  }
+  window.updateCompileButton?.();
 }
 window.refreshVersionDropdown = _refreshVersionDropdown;
 
@@ -4675,6 +4691,8 @@ window.saveStylesFile = async function() {
 
 function _setStylesDirty(v) {
   _isStylesDirtyFlag = v;
+  const slDirty = document.getElementById('sl-stat-dirty');
+  if (slDirty) slDirty.style.display = v ? 'inline' : 'none';
   const saveBtn    = document.getElementById('btn-styles-save');
   const discardBtn = document.getElementById('btn-styles-discard');
   if (saveBtn)    saveBtn.disabled    = !v || _conflictStyleNames.size > 0 || _conflictTemplateNames.size > 0;
@@ -4724,6 +4742,7 @@ function _switchStylesView(mode) {
   }
   document.getElementById('btn-styles-view-code').classList.toggle('active',   showCode);
   document.getElementById('btn-styles-view-visual').classList.toggle('active', !showCode);
+  document.getElementById('styles-status-bar').style.display = showCode ? '' : 'none';
   const show = showCode ? '' : 'none';
   document.getElementById('btn-styles-collapse').style.display       = show;
   document.getElementById('btn-styles-expand').style.display         = show;
@@ -7298,6 +7317,10 @@ window.initStylesPanel = function() {
   };
   _stylesEditorInstance = monaco.editor.create(
     document.getElementById('styles-code-editor'), { value: '', ...editorOpts, minimap: { enabled: true } });
+  _stylesEditorInstance.onDidChangeCursorPosition(e => {
+    document.getElementById('sl-stat-ln').textContent = e.position.lineNumber;
+    document.getElementById('sl-stat-col').textContent = e.position.column;
+  });
   _stylesEditorInstance.onDidChangeModelContent(() => {
     _setStylesDirty(true);
     // Re-check conflicts live so resolving a name in code view clears the warning
@@ -7432,12 +7455,17 @@ window.initStylesPanel = function() {
 
 const _configOnlyEls = ['config-banner', 'build-toolbar', 'empty-state',
                         'config-editor-row', 'build-log'];
-const _configOnlyClasses = ['.status-bar', '.meta-bar'];
+const _configOnlyClasses = ['.config-status-bar', '.meta-bar'];
 
 let _activeTab = 'config';
 
-function switchTab(name) {
+async function switchTab(name) {
   if (_activeTab === name) return;
+  if (_activeTab === 'versions' && window.vpHasUnsavedNotes?.()) {
+    const choice = await promptUnsaved('Unsaved OS version notes — save before switching?');
+    if (choice === 'cancel') return;
+    if (choice === 'save') await window.vpSaveCurrentNotes?.();
+  }
   if (_activeTab === 'config' && window._presetSidecar) window._presetSidecar.closeSlotEdit?.();
   _activeTab = name;
 
@@ -7469,6 +7497,15 @@ function switchTab(name) {
 
   versionsView.classList.toggle('active', name === 'versions');
   stylesView.classList.toggle('active',   name === 'styles');
+
+  if (name === 'config') {
+    const v = document.getElementById('input-version')?.value;
+    if (!v || v === '__add_version__') {
+      window.resetToolchainStatus?.();
+    } else if (!window.getToolchainReady?.()) {
+      window.electronAPI?.initToolchain();
+    }
+  }
 
   if (name === 'versions') {
     const activeVersion = document.getElementById('input-version')?.value || '';
@@ -7758,6 +7795,7 @@ require(['vs/editor/editor.main'], function () {
     renderSideBySide: true,
     ignoreTrimWhitespace: false,
     renderIndicators: true,
+    glyphMargin: true,
     scrollbar: { verticalScrollbarSize: 8, horizontalScrollbarSize: 8 }
   });
 
@@ -7903,6 +7941,11 @@ require(['vs/editor/editor.main'], function () {
           if (choice === 'cancel') return;
           if (choice === 'save') { await window.saveStylesFile(); }
         }
+      }
+      if (window.vpHasUnsavedNotes?.()) {
+        const choice = await promptUnsaved('Unsaved OS version notes — save before closing?');
+        if (choice === 'cancel') return;
+        if (choice === 'save') await window.vpSaveCurrentNotes?.();
       }
       if (_helperAddHasContent()) {
         if (!await _promptDiscard('A new helper has unsaved content — discard and close?')) return;
@@ -11681,10 +11724,11 @@ require(['vs/editor/editor.main'], function () {
       </div>
       <div id="bm-hint"></div>
       <div style="display:flex;gap:8px;">
-        <button id="bm-abort"     class="bm-btn">⊘ Abort</button>
-        <button id="bm-dfu-setup" class="bm-btn" style="display:none;">⬇ Download DFU Tool</button>
-        <button id="bm-retry"     class="bm-btn" style="display:none;">↺ Retry Flash</button>
-        <button id="bm-close"     class="bm-btn" style="display:none;">Close</button>
+        <button id="bm-abort"          class="bm-btn">⊘ Abort</button>
+        <button id="bm-dfu-setup"      class="bm-btn" style="display:none;">⬇ Download DFU Tool</button>
+        <button id="bm-install-anyway" class="bm-btn" style="display:none;">⚠ Install Anyway</button>
+        <button id="bm-retry"          class="bm-btn" style="display:none;">↺ Retry Flash</button>
+        <button id="bm-close"          class="bm-btn" style="display:none;">Close</button>
       </div>
     </div>
     <!-- Manual driver options — secondary row, only shown during driver-required state -->

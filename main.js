@@ -865,8 +865,10 @@ ipcMain.handle('dfu:detect', async () => {
 });
 
 ipcMain.handle('dfu:downloadSetup', async () => {
-  const os = require('os');
-  const DFU_SETUP_URL = 'https://fredrik.hubbe.net/lightsaber/proffie-dfu-setup.exe';
+  const os     = require('os');
+  const crypto = require('crypto');
+  const DFU_SETUP_URL  = 'https://fredrik.hubbe.net/lightsaber/proffie-dfu-setup.exe';
+  const DFU_SETUP_HASH = '4773c8693cf62777cd8da4c95441690e7ae7c4171e8c1d533b1f6225f3bdc29e';
   const exePath = path.join(os.tmpdir(), 'proffie-dfu-setup.exe');
   const sendStatus = (msg) => {
     if (win && !win.isDestroyed()) win.webContents.send('dfu:setupStatus', msg);
@@ -881,6 +883,12 @@ ipcMain.handle('dfu:downloadSetup', async () => {
       file.on('finish', resolve);
       file.on('error',  reject);
     });
+    sendStatus('Verifying file integrity...');
+    const actualHash = crypto.createHash('sha256').update(fs.readFileSync(exePath)).digest('hex');
+    if (actualHash !== DFU_SETUP_HASH) {
+      _dfuSetupExePath = exePath;
+      return { ok: false, hashMismatch: true, expected: DFU_SETUP_HASH, actual: actualHash };
+    }
     _dfuSetupExePath = exePath;
     return { ok: true };
   } catch (e) {
@@ -888,6 +896,13 @@ ipcMain.handle('dfu:downloadSetup', async () => {
     _dfuSetupExePath = null;
     const noNet = /ENOTFOUND|ECONNREFUSED|ETIMEDOUT/i.test(e.message);
     return { ok: false, error: noNet ? 'No internet connection.' : `Download failed: ${e.message}` };
+  }
+});
+
+ipcMain.handle('dfu:cleanupSetup', () => {
+  if (_dfuSetupExePath) {
+    try { fs.unlinkSync(_dfuSetupExePath); } catch {}
+    _dfuSetupExePath = null;
   }
 });
 
@@ -904,11 +919,13 @@ ipcMain.handle('dfu:installSetup', async () => {
   return new Promise(resolve => {
     execFile('powershell', ['-NoProfile', '-NonInteractive', '-Command', psCmd],
       { timeout: 120000 }, (error) => {
-        try { fs.unlinkSync(exePath); } catch {}
-        _dfuSetupExePath = null;
-        resolve(error
-          ? { ok: false, error: 'Installation was cancelled. Accept the Windows security prompt to install.' }
-          : { ok: true });
+        if (error) {
+          resolve({ ok: false, error: 'Installation was cancelled. Accept the Windows security prompt to install.' });
+        } else {
+          try { fs.unlinkSync(exePath); } catch {}
+          _dfuSetupExePath = null;
+          resolve({ ok: true });
+        }
       });
   });
 });

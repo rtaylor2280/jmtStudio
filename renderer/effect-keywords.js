@@ -46,14 +46,17 @@ window.PROFFIE_EFFECT_KEYWORDS = [
 
   // ── Lightning Block ──────────────────────────────────────────────────
   { pattern: 'LockupType::LIGHTNING_BLOCK', effect: 'Lightning Block' },
+  { pattern: 'LOCKUP_LIGHTNING_BLOCK',      effect: 'Lightning Block' }, // SaberBase::LOCKUP_LIGHTNING_BLOCK
   { pattern: 'ResponsiveLightningBlock',    effect: 'Lightning Block' }, // ResponsiveLightningBlockL
 
   // ── Drag ─────────────────────────────────────────────────────────────
   { pattern: 'LockupType::DRAG',    effect: 'Drag'             },
+  { pattern: 'LOCKUP_DRAG',         effect: 'Drag'             }, // LockupTrL<..., LOCKUP_DRAG>
   { pattern: 'ResponsiveDrag',      effect: 'Drag'             }, // ResponsiveDragL
 
   // ── Melt ─────────────────────────────────────────────────────────────
   { pattern: 'LockupType::MELT',    effect: 'Melt'             },
+  { pattern: 'LOCKUP_MELT',         effect: 'Melt'             }, // LockupTrL<..., LOCKUP_MELT>
   { pattern: 'ResponsiveMelt',      effect: 'Melt'             }, // ResponsiveMeltL
 
   // ── Stab ─────────────────────────────────────────────────────────────
@@ -66,11 +69,13 @@ window.PROFFIE_EFFECT_KEYWORDS = [
   { pattern: 'BlastFadeout',        effect: 'Blast'            }, // BlastFadeout, BlastFadeoutL
   { pattern: 'OriginalBlast',       effect: 'Blast'            }, // OriginalBlast, OriginalBlastL
   { pattern: 'ResponsiveBlast',     effect: 'Blast'            }, // ResponsiveBlastL/WaveL/FadeL
+  { pattern: 'EFFECT_BLAST',        effect: 'Blast'            }, // TransitionEffectL<..., EFFECT_BLAST>
 
   // ── Clash ────────────────────────────────────────────────────────────
   { pattern: 'SimpleClash',         effect: 'Clash'            }, // SimpleClash, SimpleClashL
   { pattern: 'LocalizedClash',      effect: 'Clash'            }, // LocalizedClash, LocalizedClashL
   { pattern: 'ResponsiveClash',     effect: 'Clash'            }, // ResponsiveClashL
+  { pattern: 'EFFECT_CLASH',        effect: 'Clash'            }, // TransitionEffectL<..., EFFECT_CLASH>
 
   // ── Force Push ───────────────────────────────────────────────────────
   { pattern: 'EFFECT_FORCE',        effect: 'Force'            },
@@ -84,5 +89,11 @@ window.PROFFIE_EFFECT_KEYWORDS = [
 
   // ── Battery ──────────────────────────────────────────────────────────
   { pattern: 'BatteryLevel',        effect: 'Battery'          },
+
+  // ── PowerSave ────────────────────────────────────────────────────────
+  { pattern: 'EFFECT_POWERSAVE',    effect: 'PowerSave'        }, // EffectSequence<EFFECT_POWERSAVE, ...>
+
+  // ── Volume ───────────────────────────────────────────────────────────
+  { pattern: 'EFFECT_VOLUME_LEVEL', effect: 'Volume'           }, // TransitionEffectL<..., EFFECT_VOLUME_LEVEL>
 
 ];
