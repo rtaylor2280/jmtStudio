@@ -459,7 +459,10 @@ ipcMain.handle('app:checkForUpdate', async (_, { force = false } = {}) => {
     const latestVersion  = (release.tag_name || '').replace(/^v/, '');
     const currentVersion = app.getVersion();
     const hasUpdate      = _semverGt(latestVersion, currentVersion);
-    const asset          = (release.assets || []).find(a => a.name.endsWith('.exe'));
+    const assetExt = process.platform === 'win32' ? '.exe'
+                   : process.platform === 'darwin' ? '.dmg'
+                   : '.AppImage';
+    const asset = (release.assets || []).find(a => a.name.endsWith(assetExt));
     const result = {
       ok: true,
       hasUpdate,
