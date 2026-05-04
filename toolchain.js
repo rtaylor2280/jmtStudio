@@ -69,6 +69,7 @@ function validateCli() {
   if (!fs.existsSync(cliPath)) {
     return { ok: false, error: `arduino-cli not found at:\n${cliPath}\n\nCheck that the binary is included in resources/arduino-cli/` };
   }
+  ensureExecutable(cliPath);
   return { ok: true, cliPath };
 }
 
@@ -284,8 +285,16 @@ function extractCompileError(raw) {
 
 // ── Tools path ─────────────────────────────────────────
 function getToolsPath() {
-  const platform = process.platform === 'win32' ? 'windows' : 'mac';
+  const platform = process.platform === 'win32' ? 'windows'
+                 : process.platform === 'darwin'  ? 'mac'
+                 : 'linux';
   return path.join(proffie.getResourcesPath(), 'tools', platform);
+}
+
+function ensureExecutable(filePath) {
+  if (process.platform !== 'win32' && fs.existsSync(filePath)) {
+    try { fs.chmodSync(filePath, 0o755); } catch {}
+  }
 }
 
 function getDfuUtilPath() {
@@ -349,6 +358,7 @@ function waitForDfu(onLog, timeoutMs = 10000) {
     const start    = Date.now();
     const dfuUtil  = getDfuUtilPath();
     const toolsDir = getToolsPath();
+    ensureExecutable(dfuUtil);
 
     const check = () => {
       const { execFile } = require('child_process');
@@ -404,7 +414,9 @@ async function prepareFirmware(onLog) {
     getArduinoDataPath(),
     process.platform === 'win32'
       ? path.join(process.env.LOCALAPPDATA || '', 'Arduino15')
-      : path.join(process.env.HOME || '', 'Library', 'Arduino15')
+      : process.platform === 'darwin'
+        ? path.join(process.env.HOME || '', 'Library', 'Arduino15')
+        : path.join(process.env.HOME || '', '.arduino15')
   ];
 
   let objcopy = null;
@@ -441,6 +453,7 @@ async function prepareFirmware(onLog) {
   // Add DFU suffix
   onLog('Adding DFU suffix...', false);
   fs.copyFileSync(binPath, dfuPath);
+  ensureExecutable(getDfuSuffixPath());
 
   const suffixResult = await new Promise(resolve => {
     const { execFile } = require('child_process');
@@ -465,6 +478,7 @@ async function prepareFirmware(onLog) {
 // ── Run dfu-util flash (shared by flash and flashDFU) ─
 async function runDfuFlash(dfuPath, toolsDir, onLog) {
   onLog('Flashing firmware...', false);
+  ensureExecutable(getDfuUtilPath());
 
   const flashResult = await new Promise(resolve => {
     const proc = spawn(getDfuUtilPath(), [
@@ -549,6 +563,7 @@ function detectDFU() {
   const dfuUtil  = getDfuUtilPath();
   const toolsDir = getToolsPath();
 
+  ensureExecutable(getDfuUtilPath());
   return new Promise(resolve => {
     execFile(dfuUtil, ['-l'], { timeout: 5000, cwd: toolsDir }, (_err, stdout, stderr) => {
       const output = (stdout || '') + (stderr || '');
