@@ -1341,7 +1341,8 @@ async function startDfuWaitModal(isRetry = false, autoFlash = true, justInstalle
       appendModalLog('', false);
       appendModalLog('Run the following in a terminal, then replug the board:', false);
       appendModalLog('', false);
-      appendModalLog('  sudo cp ~/.arduino15/packages/profezzorn/hardware/stm32l4/*/drivers/linux/*.rules /etc/udev/rules.d/', false);
+      const arduinoDataPath = await window.electronAPI.getArduinoDataPath();
+      appendModalLog(`  sudo cp "${arduinoDataPath}/packages/profezzorn/hardware/stm32l4/"*/drivers/linux/*.rules /etc/udev/rules.d/`, false);
       appendModalLog('  sudo udevadm control --reload-rules', false);
       appendModalLog('', false);
       appendModalLog('Visit pod.hubbe.net for full setup instructions.', false);

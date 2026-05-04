@@ -35,6 +35,10 @@
       "target": "dmg",
       "icon": "assets/icon.icns"
     },
+    "linux": {
+      "target": "AppImage",
+      "icon": "assets/logo.png"
+    },
     "files": [
       "main.js",
       "preload.js",

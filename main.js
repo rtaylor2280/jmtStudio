@@ -89,7 +89,7 @@ function createWindow() {
     minHeight: 500,
     backgroundColor: '#111111',
     titleBarStyle: 'default',
-    icon: path.join(__dirname, 'assets', 'icon.ico'),
+    ...(process.platform !== 'darwin' ? { icon: path.join(__dirname, 'assets', 'icon.ico') } : {}),
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -420,6 +420,12 @@ ipcMain.handle('cache:getDataSize', () => {
 
 ipcMain.handle('app:getVersion',      () => app.getVersion());
 ipcMain.handle('app:isDevMode',       () => !app.isPackaged);
+ipcMain.handle('app:getArduinoDataPath', () => {
+  const base = app.isPackaged
+    ? app.getPath('userData')
+    : path.join(app.getPath('appData'), 'jmt-studio');
+  return path.join(base, 'arduino-data');
+});
 ipcMain.handle('clipboard:read',      () => require('electron').clipboard.readText());
 
 // ── IPC: App self-update ───────────────────────────────

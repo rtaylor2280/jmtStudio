@@ -11,8 +11,11 @@ const path         = require('path');
 
 // ── CLI path ───────────────────────────────────────────
 function getCliPath() {
+  const platform = process.platform === 'win32' ? 'windows'
+                 : process.platform === 'darwin'  ? 'mac'
+                 : 'linux';
   const bin = process.platform === 'win32' ? 'arduino-cli.exe' : 'arduino-cli';
-  return path.join(proffie.getResourcesPath(), 'arduino-cli', bin);
+  return path.join(proffie.getResourcesPath(), 'arduino-cli', platform, bin);
 }
 
 function getArduinoDataPath() {
