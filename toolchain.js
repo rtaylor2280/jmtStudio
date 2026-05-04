@@ -9,6 +9,28 @@ const path      = require('path');
 const fs        = require('fs');
 const { spawn } = require('child_process');
 const proffie   = require('./proffieos');
+const cache     = require('./cacheManager');
+
+// ── Abort state ───────────────────────────────────────
+let _currentProc = null;
+let _aborted     = false;
+
+function clearPartialBuild(buildPath) {
+  ['ProffieOS.elf', 'ProffieOS.bin', 'ProffieOS.dfu'].forEach(f => {
+    const fp = path.join(buildPath, f);
+    try { if (fs.existsSync(fp)) fs.unlinkSync(fp); } catch {}
+  });
+}
+
+function abort() {
+  if (_currentProc) {
+    _aborted = true;
+    _currentProc.kill();
+    _currentProc = null;
+    return { ok: true };
+  }
+  return { ok: false, error: 'No active process to abort' };
+}
 
 // ── Constants ──────────────────────────────────────────
 const CORE_ID       = 'proffieboard:stm32l4';
@@ -26,9 +48,14 @@ function getCliPath() {
 }
 
 function getArduinoDataPath() {
-  // Isolated data dir inside userData so we don't pollute system Arduino install
+  // Always use the prod userData path for arduino-data so installed packages are
+  // shared between dev and prod builds. In dev mode, app.getPath('userData') is
+  // overridden to 'jmt-studio-dev', which would be missing the board packages.
   const { app } = require('electron');
-  return path.join(app.getPath('userData'), 'arduino-data');
+  const base = app.isPackaged
+    ? app.getPath('userData')
+    : path.join(app.getPath('appData'), 'jmt-studio');
+  return path.join(base, 'arduino-data');
 }
 
 function getBuildOutputPath() {
@@ -71,6 +98,7 @@ function runCli(args, onLog) {
     onLog(`> arduino-cli ${fullArgs.join(' ')}`, false);
 
     const proc = spawn(v.cliPath, fullArgs, { cwd: dataPath });
+    _currentProc = proc;
 
     let stdout = '', stderr = '';
 
@@ -85,10 +113,12 @@ function runCli(args, onLog) {
     });
 
     proc.on('close', code => {
+      _currentProc = null;
       resolve({ ok: code === 0, code, stdout, stderr });
     });
 
     proc.on('error', e => {
+      _currentProc = null;
       const msg = `Failed to start arduino-cli: ${e.message}`;
       onLog(msg, true);
       resolve({ ok: false, code: -1, stdout: '', stderr: msg });
@@ -120,10 +150,19 @@ async function ensureCliConfig(onLog) {
 
 // ── First-run: install core if not present ─────────────
 async function ensureCore(onLog) {
-  const dataPath   = getArduinoDataPath();
-  const corePath   = path.join(dataPath, 'packages', 'proffieboard');
+  const dataPath    = getArduinoDataPath();
+  const hardwarePath = path.join(dataPath, 'packages', 'proffieboard', 'hardware', 'stm32l4');
 
-  if (fs.existsSync(corePath)) {
+  // Check for boards.txt inside any installed version — this file only exists after
+  // a complete successful install. The top-level packages/proffieboard dir is not
+  // a reliable check because arduino-cli creates it during core update-index.
+  // Note: arduino-cli installs 4.6.0 as directory "4.6", so we check version-agnostically.
+  const isInstalled = fs.existsSync(hardwarePath) &&
+    fs.readdirSync(hardwarePath).some(v =>
+      fs.existsSync(path.join(hardwarePath, v, 'boards.txt'))
+    );
+
+  if (isInstalled) {
     onLog(`Core ${CORE_ID}@${CORE_VERSION} already installed.`, false);
     return { ok: true };
   }
@@ -157,7 +196,10 @@ async function initialize(onLog) {
 
   const sourceCheck = proffie.validateProffieOSSource();
   if (!sourceCheck.ok) return { ok: false, error: sourceCheck.error };
-  onLog(`ProffieOS v${proffie.PROFFIE_VERSION} source validated.`, false);
+  onLog(`ProffieOS source validated (${proffie.getSelectedVersion()}).`, false);
+
+  const wsResult = proffie.initWorkspace(onLog);
+  if (!wsResult.ok) return { ok: false, error: wsResult.error };
 
   await ensureCliConfig(onLog);
   const coreResult = await ensureCore(onLog);
@@ -178,6 +220,9 @@ async function compile(configContent, fqbn, buildOptions, onLog) {
 
   const usb = (buildOptions && buildOptions.usb) || 'cdc_webusb';
 
+  const refCheck = proffie.ensureConfigFileRef(onLog);
+  if (!refCheck.ok) { onLog(refCheck.error, true); return { ok: false, error: refCheck.error }; }
+
   const staged = proffie.stageConfig(configContent);
   if (!staged.ok) { onLog(staged.error, true); return { ok: false, error: staged.error }; }
   onLog(`Config staged to: ${staged.stagedPath}`, false);
@@ -186,11 +231,15 @@ async function compile(configContent, fqbn, buildOptions, onLog) {
   const buildPath  = getBuildOutputPath();
   fs.mkdirSync(buildPath, { recursive: true });
 
+  // dosfs=sdmmc1 uses SDIO high-speed on V3 (L452RE); V1/V2 only support sdspi
+  const dosfs = fqbn.includes('L452') ? 'sdmmc1' : 'sdspi';
+
   const args = [
     'compile',
-    '--fqbn', `${fqbn}:usb=${usb},dosfs=sdmmc1,speed=80,opt=os,pclk=2`,
+    '--fqbn', `${fqbn}:usb=${usb},dosfs=${dosfs},speed=80,opt=os,pclk=2`,
     '--build-path', buildPath,
     '--warnings', 'none',
+    '--verbose',
     sketchPath
   ];
 
@@ -198,8 +247,23 @@ async function compile(configContent, fqbn, buildOptions, onLog) {
 
   if (result.ok) {
     onLog('--- Compile successful ---', false);
+    // Save to persistent cache
+    try {
+      const { app } = require('electron');
+      const proffieOSHash = proffie.hashVersion(proffie.getSelectedVersion());
+      const stylesContent = proffie.readStagedStyles();
+      cache.cacheCompileResult(buildPath, configContent, fqbn, usb, proffieOSHash,
+        new Date().toISOString(), app.getVersion(), stylesContent);
+    } catch {}
     return { ok: true, buildPath };
   } else {
+    const wasAborted = _aborted;
+    _aborted = false;
+    if (wasAborted) {
+      onLog('--- Compile aborted ---', true);
+      clearPartialBuild(buildPath);
+      return { ok: false, aborted: true, error: 'Compile aborted' };
+    }
     onLog('--- Compile failed ---', true);
     const cleanError = extractCompileError(result.stderr + result.stdout);
     return { ok: false, error: cleanError };
@@ -234,20 +298,44 @@ function getDfuSuffixPath() {
   return path.join(getToolsPath(), bin);
 }
 
+// ── Arduino IDE process check ──────────────────────────
+function checkArduinoRunning() {
+  return new Promise(resolve => {
+    if (process.platform !== 'win32') { resolve(false); return; }
+    const { execFile } = require('child_process');
+    execFile('tasklist', ['/FO', 'CSV', '/NH'], { timeout: 3000 }, (err, stdout) => {
+      if (err) { resolve(false); return; }
+      resolve(stdout.toLowerCase().includes('arduino'));
+    });
+  });
+}
+
 // ── 1200-bps touch reset ───────────────────────────────
+// Resolves { ok, retriable } — retriable=true means port was locked, user can fix and retry
 function touchReset(port, onLog) {
   return new Promise((resolve) => {
     onLog(`Sending 1200-bps touch reset on ${port}...`, false);
     const { SerialPort } = require('serialport');
     const sp = new SerialPort({ path: port, baudRate: 1200, autoOpen: false });
-    sp.open(err => {
+    sp.open(async err => {
       if (err) {
-        onLog(`Touch reset open error: ${err.message}`, true);
-        return resolve(false);
+        const isAccessDenied = err.message.toLowerCase().includes('access denied')
+                            || err.message.toLowerCase().includes('cannot open');
+        if (isAccessDenied) {
+          const arduinoOpen = await checkArduinoRunning();
+          if (arduinoOpen) {
+            onLog(`Arduino IDE is open and is likely holding ${port}. Close Arduino IDE and retry.`, true);
+          } else {
+            onLog(`Port ${port} is in use by another application. Close it and retry.`, true);
+          }
+          return resolve({ ok: false, retriable: true });
+        }
+        onLog(`Touch reset error: ${err.message}`, true);
+        return resolve({ ok: false, retriable: false });
       }
       sp.set({ dtr: false }, () => {
         setTimeout(() => {
-          sp.close(() => resolve(true));
+          sp.close(() => resolve({ ok: true, retriable: false }));
         }, 200);
       });
     });
@@ -266,7 +354,11 @@ function waitForDfu(onLog, timeoutMs = 10000) {
       const { execFile } = require('child_process');
       execFile(dfuUtil, ['-l'], { timeout: 3000, cwd: toolsDir }, (err, stdout, stderr) => {
         const output = (stdout || '') + (stderr || '');
-        const found  = output.includes('1209:6668') || output.includes('0483:df11');
+        const lines  = output.split(/\r?\n/);
+        const found  = lines.some(l =>
+          l.trim().startsWith('Found DFU:') &&
+          (l.includes('0483:df11') || l.includes('1209:6668'))
+        );
         if (found) {
           onLog('DFU device detected.', false);
           return resolve(true);
@@ -282,23 +374,9 @@ function waitForDfu(onLog, timeoutMs = 10000) {
   });
 }
 
-// ── Flash ──────────────────────────────────────────────
-/**
- * Uploads compiled firmware to connected Proffieboard.
- * port: serial port string e.g. 'COM3' or '/dev/ttyUSB0'
- * onLog(line, isError) streams output back to renderer.
- * Returns { ok, error? }
- */
-async function flash(port, fqbn, onLog) {
-  onLog('--- Flash started ---', false);
-
-  if (!port) {
-    const msg = 'No port selected.';
-    onLog(msg, true);
-    return { ok: false, error: msg };
-  }
-
-  // Check build output
+// ── Prepare firmware (shared by flash and flashDFU) ───
+// Converts .elf → .bin → .dfu and returns { ok, dfuPath, toolsDir }
+async function prepareFirmware(onLog) {
   const buildPath = getBuildOutputPath();
   if (!fs.existsSync(buildPath)) {
     const msg = 'No compiled firmware found. Run Compile before flashing.';
@@ -306,7 +384,6 @@ async function flash(port, fqbn, onLog) {
     return { ok: false, error: msg };
   }
 
-  // Find .elf file
   const elfFiles = fs.readdirSync(buildPath).filter(f => f.endsWith('.elf'));
   if (!elfFiles.length) {
     const msg = 'No .elf file found in build output. Run Compile before flashing.';
@@ -319,21 +396,29 @@ async function flash(port, fqbn, onLog) {
   const dfuPath  = path.join(buildPath, 'ProffieOS.dfu');
   const toolsDir = getToolsPath();
 
-  // ── Step 1: Convert .elf to .bin ──
+  // Convert .elf to .bin
   onLog('Converting firmware to binary...', false);
-  const dataPath = getArduinoDataPath();
 
-  const corePath = path.join(dataPath, 'packages', 'proffieboard', 'tools', 'arm-none-eabi-gcc');
+  const objcopyBin = process.platform === 'win32' ? 'arm-none-eabi-objcopy.exe' : 'arm-none-eabi-objcopy';
+  const searchBases = [
+    getArduinoDataPath(),
+    process.platform === 'win32'
+      ? path.join(process.env.LOCALAPPDATA || '', 'Arduino15')
+      : path.join(process.env.HOME || '', 'Library', 'Arduino15')
+  ];
+
   let objcopy = null;
-  if (fs.existsSync(corePath)) {
-    const versions = fs.readdirSync(corePath);
-    if (versions.length) {
-      objcopy = path.join(corePath, versions[0], 'bin',
-        process.platform === 'win32' ? 'arm-none-eabi-objcopy.exe' : 'arm-none-eabi-objcopy');
+  for (const base of searchBases) {
+    const toolPath = path.join(base, 'packages', 'proffieboard', 'tools', 'arm-none-eabi-gcc');
+    if (!fs.existsSync(toolPath)) continue;
+    for (const ver of fs.readdirSync(toolPath)) {
+      const candidate = path.join(toolPath, ver, 'bin', objcopyBin);
+      if (fs.existsSync(candidate)) { objcopy = candidate; break; }
     }
+    if (objcopy) break;
   }
 
-  if (!objcopy || !fs.existsSync(objcopy)) {
+  if (!objcopy) {
     const msg = 'arm-none-eabi-objcopy not found. Core may not be installed correctly.';
     onLog(msg, true);
     return { ok: false, error: msg };
@@ -353,7 +438,7 @@ async function flash(port, fqbn, onLog) {
   }
   onLog('Binary created.', false);
 
-  // ── Step 2: Add DFU suffix ──
+  // Add DFU suffix
   onLog('Adding DFU suffix...', false);
   fs.copyFileSync(binPath, dfuPath);
 
@@ -374,19 +459,11 @@ async function flash(port, fqbn, onLog) {
   }
   onLog('DFU suffix added.', false);
 
-  // ── Step 3: 1200-bps touch reset ──
-  await touchReset(port, onLog);
-  await new Promise(r => setTimeout(r, 1000));
+  return { ok: true, dfuPath, toolsDir };
+}
 
-  // ── Step 4: Wait for DFU device ──
-  const dfuFound = await waitForDfu(onLog);
-  if (!dfuFound) {
-    const msg = 'DFU device not detected. Try pressing the reset button or reconnecting.';
-    onLog(msg, true);
-    return { ok: false, error: msg };
-  }
-
-  // ── Step 5: Flash via dfu-util ──
+// ── Run dfu-util flash (shared by flash and flashDFU) ─
+async function runDfuFlash(dfuPath, toolsDir, onLog) {
   onLog('Flashing firmware...', false);
 
   const flashResult = await new Promise(resolve => {
@@ -399,20 +476,58 @@ async function flash(port, fqbn, onLog) {
 
     let stdout = '', stderr = '';
 
-    proc.stdout.on('data', d => {
-      const lines = d.toString().split(/\r?\n/).filter(Boolean);
-      lines.forEach(l => { stdout += l + '\n'; onLog(l, false); });
+    // dfu-util uses bare \r as cursor-to-column-0 throughout output, on both
+    // stdout and stderr depending on the build. Apply terminal emulator semantics
+    // to both streams so chunk boundaries never produce partial log lines.
+    function makeTermEmu(onFlush) {
+      let line = '', pos = 0;
+      return {
+        write(str) {
+          for (let i = 0; i < str.length; i++) {
+            const ch = str[i];
+            if (ch === '\n') {
+              onFlush(line);
+              line = '';
+              pos = 0;
+            } else if (ch === '\r') {
+              if (line.trim()) onFlush(line);
+              line = '';
+              pos = 0;
+            } else {
+              if (pos < line.length) {
+                line = line.slice(0, pos) + ch + line.slice(pos + 1);
+              } else {
+                line += ch;
+              }
+              pos++;
+            }
+          }
+        },
+        flush() {
+          if (line.trim()) { onFlush(line); line = ''; pos = 0; }
+        }
+      };
+    }
+
+    const outEmu = makeTermEmu(line => {
+      if (!line) return;
+      stdout += line + '\n';
+      onLog(line, false);
+    });
+    const errEmu = makeTermEmu(line => {
+      if (!line) return;
+      stderr += line + '\n';
+      onLog(line, line.toLowerCase().includes('error'));
     });
 
-    proc.stderr.on('data', d => {
-      const lines = d.toString().split(/\r?\n/).filter(Boolean);
-      lines.forEach(l => {
-        stderr += l + '\n';
-        onLog(l, l.toLowerCase().includes('error'));
-      });
-    });
+    proc.stdout.on('data', d => outEmu.write(d.toString()));
+    proc.stderr.on('data', d => errEmu.write(d.toString()));
 
-    proc.on('close', code => resolve({ ok: code === 0, stdout, stderr }));
+    proc.on('close', code => {
+      outEmu.flush();
+      errEmu.flush();
+      resolve({ ok: code === 0, stdout, stderr });
+    });
     proc.on('error', e => resolve({ ok: false, error: e.message }));
   });
 
@@ -423,6 +538,94 @@ async function flash(port, fqbn, onLog) {
     onLog('--- Flash failed ---', true);
     return { ok: false, error: extractFlashError(flashResult.stderr + flashResult.stdout) };
   }
+}
+
+// ── Detect DFU device ──────────────────────────────────
+// Returns { found, accessible }
+// found: DFU device is visible on USB
+// accessible: driver is set up correctly (false = Windows driver issue)
+function detectDFU() {
+  const { execFile } = require('child_process');
+  const dfuUtil  = getDfuUtilPath();
+  const toolsDir = getToolsPath();
+
+  return new Promise(resolve => {
+    execFile(dfuUtil, ['-l'], { timeout: 5000, cwd: toolsDir }, (_err, stdout, stderr) => {
+      const output = (stdout || '') + (stderr || '');
+      const lines  = output.split(/\r?\n/);
+
+      // Proffieboard DFU accessible: appears in a "Found DFU:" line with matching VID:PID
+      const accessible = lines.some(l =>
+        l.trim().startsWith('Found DFU:') &&
+        (l.includes('0483:df11') || l.includes('1209:6668'))
+      );
+      if (accessible) return resolve({ found: true, accessible: true });
+
+      // Proffieboard mentioned but not accessible (wrong driver on Windows)
+      const mentioned = output.includes('0483:df11') || output.includes('1209:6668');
+      if (mentioned) return resolve({ found: true, accessible: false });
+
+      resolve({ found: false });
+    });
+  });
+}
+
+// ── Flash ──────────────────────────────────────────────
+/**
+ * Uploads compiled firmware via 1200-bps touch reset → DFU → dfu-util.
+ * port: serial port string e.g. 'COM3' or '/dev/ttyUSB0'
+ * onLog(line, isError) streams output back to renderer.
+ * Returns { ok, error? }
+ */
+async function flash(port, fqbn, onLog) {
+  onLog('--- Flash started ---', false);
+
+  if (!port) {
+    const msg = 'No port selected.';
+    onLog(msg, true);
+    return { ok: false, error: msg };
+  }
+
+  const prep = await prepareFirmware(onLog);
+  if (!prep.ok) return prep;
+
+  const { dfuPath, toolsDir } = prep;
+
+  // 1200-bps touch reset
+  const resetResult = await touchReset(port, onLog);
+  if (!resetResult.ok) {
+    const msg = resetResult.retriable
+      ? 'Flash stopped — free the port and click Retry Flash.'
+      : 'Touch reset failed. Try pressing the reset button manually.';
+    return { ok: false, error: msg, retriable: resetResult.retriable };
+  }
+  await new Promise(r => setTimeout(r, 1000));
+
+  // Wait for DFU device
+  const dfuFound = await waitForDfu(onLog);
+  if (!dfuFound) {
+    const msg = 'DFU device not detected. Try pressing the reset button or reconnecting.';
+    onLog(msg, true);
+    return { ok: false, error: msg };
+  }
+
+  return await runDfuFlash(dfuPath, toolsDir, onLog);
+}
+
+// ── Flash DFU ──────────────────────────────────────────
+/**
+ * Uploads compiled firmware directly via dfu-util (board already in bootloader mode).
+ * No serial port or touch reset required.
+ * onLog(line, isError) streams output back to renderer.
+ * Returns { ok, error? }
+ */
+async function flashDFU(onLog) {
+  onLog('--- DFU Flash started ---', false);
+
+  const prep = await prepareFirmware(onLog);
+  if (!prep.ok) return prep;
+
+  return await runDfuFlash(prep.dfuPath, prep.toolsDir, onLog);
 }
 
 // ── Extract readable flash error ───────────────────────
@@ -455,11 +658,21 @@ function getStatus() {
   };
 }
 
+function checkCacheAndRestore(configContent, fqbn, usb) {
+  const proffieOSHash = proffie.hashVersion(proffie.getSelectedVersion());
+  const stylesContent = proffie.readStagedStyles();
+  return cache.checkAndRestore(configContent, fqbn, usb, proffieOSHash, stylesContent);
+}
+
 module.exports = {
   initialize,
   compile,
   flash,
+  flashDFU,
+  detectDFU,
+  abort,
   getStatus,
+  checkCacheAndRestore,
   validateCli,
   CORE_ID,
   CORE_VERSION

@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    background: transparent;
+    width: 100%; height: 100%;
+    overflow: hidden;
+    user-select: none;
+  }
+  body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  img {
+    width: 360px;
+    height: 360px;
+    object-fit: contain;
+    opacity: 0;
+    animation: fadein 0.3s ease forwards;
+  }
+  @keyframes fadein {
+    to { opacity: 1; }
+  }
+</style>
+</head>
+<body>
+  <img src="../assets/jmt-logo-white.png" />
+</body>
+</html>

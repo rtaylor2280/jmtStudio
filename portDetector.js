@@ -16,8 +16,14 @@ function getCliPath() {
 }
 
 function getArduinoDataPath() {
+  // Always use the prod userData path for arduino-data so installed packages are
+  // shared between dev and prod builds. In dev mode, app.getPath('userData') is
+  // overridden to 'jmt-studio-dev', which would be missing the board packages.
   const { app } = require('electron');
-  return path.join(app.getPath('userData'), 'arduino-data');
+  const base = app.isPackaged
+    ? app.getPath('userData')
+    : path.join(app.getPath('appData'), 'jmt-studio');
+  return path.join(base, 'arduino-data');
 }
 
 // ── Run arduino-cli board list ─────────────────────────
@@ -26,7 +32,7 @@ function runBoardList() {
     const cli      = getCliPath();
     const dataPath = getArduinoDataPath();
     const yamlPath = path.join(dataPath, 'arduino-cli.yaml');
-    const args     = ['board', 'list', '--config-file', yamlPath];
+    const args     = ['board', 'list', '--json', '--config-file', yamlPath];
 
     execFile(cli, args, { timeout: 10000 }, (err, stdout, stderr) => {
       if (err) {
@@ -38,69 +44,47 @@ function runBoardList() {
   });
 }
 
-// ── Parse board list output ────────────────────────────
-// arduino-cli board list output format:
-// Port         Protocol Type              Board Name                    FQBN                                          Core
-// COM6         serial   Serial Port (USB) Proffieboard V3               proffieboard:stm32l4:Proffieboard-L433CC      proffieboard:stm32l4
-// COM4         serial   Serial Port (USB) Unknown
+// ── Parse board list JSON output ───────────────────────
+// arduino-cli board list --json emits structured data; no regex needed.
 function parseBoardList(raw) {
-  const lines = raw.split(/\r?\n/).filter(Boolean);
-  const ports = [];
-  let current = null;
+  let data;
+  try { data = JSON.parse(raw); } catch { return []; }
 
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i];
-    if (!line.trim()) continue;
+  const detected = data.detected_ports || [];
+  return detected.map(entry => {
+    const port     = entry.port || {};
+    const address  = port.address || '';
+    if (!address || (!address.startsWith('COM') && !address.startsWith('/dev/'))) return null;
 
-    // Match port line — starts with COM or /dev/
-    const portMatch = line.match(/^(COM\d+|\/dev\/\S+)\s+(\S+)\s+(.+?)(?:\s{2,}(\S.*?))?(?:\s{2,}(\S+:\S+:\S+))?(?:\s{2,}(\S+:\S+))?\s*$/);
+    const variants = (entry.matching_boards || []).map(b => ({
+      boardName: b.name || '',
+      fqbn:      b.fqbn || ''
+    }));
 
-    if (portMatch) {
-      if (current) ports.push(current);
-      const boardName = portMatch[4] ? portMatch[4].trim() : 'Unknown';
-      const fqbn = portMatch[5] ? portMatch[5].split(/\s+/)[0].trim() : '';
-      current = {
-        path:           portMatch[1].trim(),
-        protocol:       portMatch[2].trim(),
-        type:           portMatch[3].trim(),
-        boardName,
-        fqbn,
-        core:           portMatch[6] ? portMatch[6].trim() : '',
-        isProffieboard: false,
-        variants:       []
-      };
-      if (boardName !== 'Unknown' && fqbn) {
-        current.variants.push({ boardName, fqbn });
-      }
-    } else if (current && line.match(/^\s+\S/)) {
-        const cols = line.trim().split(/\s{2,}/).map(c => c.trim()).filter(Boolean);
-        const fqbnIdx = cols.findIndex(c => c.includes(':') && c.split(':').length >= 3);
-        if (fqbnIdx > 0) {
-            const boardName = cols[fqbnIdx - 1];
-            const fqbn      = cols[fqbnIdx].split(/\s+/)[0].trim();
-            current.variants.push({ boardName, fqbn });
-            if (boardName.toLowerCase().includes('proffieboard')) {
-                current.boardName = boardName;
-                current.fqbn      = fqbn;
-            }
-        }
-    }
-  }
-  if (current) ports.push(current);
+    const primary =
+      variants.find(v => v.fqbn.includes('proffieboard')) ||
+      variants.find(v => v.boardName.toLowerCase().includes('proffieboard')) ||
+      variants.find(v => v.boardName.toLowerCase().includes('butterfly')) ||
+      variants[0] || { boardName: 'Unknown', fqbn: '' };
 
-  // Mark Proffieboard ports
-  ports.forEach(p => {
-    p.isProffieboard =
-      p.fqbn.includes('proffieboard') ||
-      p.boardName.toLowerCase().includes('proffieboard') ||
-      p.boardName.toLowerCase().includes('butterfly') ||
-      p.variants.some(v =>
-        v.fqbn.includes('proffieboard') ||
-        v.boardName.toLowerCase().includes('proffieboard')
-      );
-  });
+    const isProffieboard = variants.some(v =>
+      v.fqbn.includes('proffieboard') ||
+      v.boardName.toLowerCase().includes('proffieboard') ||
+      v.boardName.toLowerCase().includes('butterfly')
+    );
 
-  return ports.filter(p => p.path && (p.path.startsWith('COM') || p.path.startsWith('/dev/')));
+    return {
+      path:          address,
+      protocol:      port.protocol       || 'serial',
+      type:          port.protocol_label || '',
+      boardName:     primary.boardName   || 'Unknown',
+      fqbn:          primary.fqbn        || '',
+      core:          '',
+      serialNumber:  (port.properties || {}).serialNumber || '',
+      isProffieboard,
+      variants
+    };
+  }).filter(Boolean);
 }
 
 // ── List ports ─────────────────────────────────────────
