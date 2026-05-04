@@ -35,16 +35,17 @@ function abort() {
 // ── Constants ──────────────────────────────────────────
 const CORE_ID       = 'proffieboard:stm32l4';
 const CORE_VERSION  = '4.6.0';
-const CLI_WIN       = 'arduino-cli.exe';
-const CLI_MAC       = 'arduino-cli';
 
 // Additional URL needed for proffieboard core
 const BOARD_MANAGER_URL = 'https://profezzorn.github.io/arduino-proffieboard/package_proffieboard_index.json';
 
 // ── CLI path resolution ────────────────────────────────
 function getCliPath() {
-  const bin = process.platform === 'win32' ? CLI_WIN : CLI_MAC;
-  return path.join(proffie.getResourcesPath(), 'arduino-cli', bin);
+  const platform = process.platform === 'win32' ? 'windows'
+                 : process.platform === 'darwin'  ? 'mac'
+                 : 'linux';
+  const bin = process.platform === 'win32' ? 'arduino-cli.exe' : 'arduino-cli';
+  return path.join(proffie.getResourcesPath(), 'arduino-cli', platform, bin);
 }
 
 function getArduinoDataPath() {
