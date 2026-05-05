@@ -37,7 +37,12 @@ function runBoardList() {
     const cli      = getCliPath();
     const dataPath = getArduinoDataPath();
     const yamlPath = path.join(dataPath, 'arduino-cli.yaml');
-    const args     = ['board', 'list', '--json', `--additional-urls=${BOARD_MANAGER_URL}`];
+    // On Windows, use our config file so arduino-cli finds the toolchain-installed core.
+    // On Mac/Linux, omit --config-file and let arduino-cli use the system default path,
+    // which correctly finds cores installed by Arduino IDE or our toolchain.
+    const args = process.platform === 'win32'
+      ? ['board', 'list', '--json', `--config-file=${yamlPath}`, `--additional-urls=${BOARD_MANAGER_URL}`]
+      : ['board', 'list', '--json', `--additional-urls=${BOARD_MANAGER_URL}`];
 
     // Ensure the binary is executable on Mac/Linux (git may store without execute bit)
     if (process.platform !== 'win32') {
