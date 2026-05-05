@@ -37,7 +37,7 @@ function runBoardList() {
     const cli      = getCliPath();
     const dataPath = getArduinoDataPath();
     const yamlPath = path.join(dataPath, 'arduino-cli.yaml');
-    const args     = ['board', 'list', '--json', `--config-file=${yamlPath}`, `--additional-urls=${BOARD_MANAGER_URL}`];
+    const args     = ['board', 'list', '--json', `--additional-urls=${BOARD_MANAGER_URL}`];
 
     // Ensure the binary is executable on Mac/Linux (git may store without execute bit)
     if (process.platform !== 'win32') {
