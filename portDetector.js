@@ -72,7 +72,8 @@ function runBoardList() {
 // arduino-cli board list --json emits structured data; no regex needed.
 function parseBoardList(raw) {
   let data;
-  try { data = JSON.parse(raw); } catch { return []; }
+  try { data = JSON.parse(raw); } catch { console.error('[portDetector] JSON parse failed:', raw); return []; }
+  console.log('[portDetector] board list result:', JSON.stringify(data, null, 2));
 
   const detected = data.detected_ports || [];
   return detected.map(entry => {
