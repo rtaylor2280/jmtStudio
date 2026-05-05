@@ -537,7 +537,15 @@ ipcMain.handle('ports:list', async () => {
 ipcMain.handle('ports:listRaw', async () => {
   const { SerialPort } = require('serialport');
   const ports = await SerialPort.list();
-  return ports.map(p => ({ path: p.path }));
+  return ports.map(p => {
+    // On Mac, serialport returns /dev/tty.* but arduino-cli uses /dev/cu.*
+    // Normalize to cu.* so path comparisons succeed.
+    let portPath = p.path;
+    if (process.platform === 'darwin' && portPath.startsWith('/dev/tty.')) {
+      portPath = '/dev/cu.' + portPath.slice('/dev/tty.'.length);
+    }
+    return { path: portPath };
+  });
 });
 
 ipcMain.handle('ports:getRecommended', async () => {
