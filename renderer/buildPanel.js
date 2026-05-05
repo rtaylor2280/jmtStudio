@@ -1150,7 +1150,7 @@ async function checkCacheForConfig(missStatus) {
 
   if (result.hit) {
     compileSuccess = true;
-    setFlashEnabled(selectedPortIsProffieboard && !!selectedPort);
+    setFlashEnabled(isDfuMode ? compileSuccess : (selectedPortIsProffieboard && !!selectedPort));
     updateCompileButton();
     setStatus('compile', 'ok', 'Compile restored from cache');
     if (window.setCompiledTimestamp) window.setCompiledTimestamp(result.metadata.compiledAt);
@@ -1189,6 +1189,7 @@ async function _checkDfuOnEntry() {
     dfuDeviceReady = true;
     setStatus('port', 'ok', 'DFU device ready');
     setFlashEnabled(compileSuccess);
+    updateCompileButton();
   } else if (result.found && !result.accessible) {
     // Board in DFU but driver missing — skip boot instructions, go straight to driver fix
     startDfuWaitModal(true, false);
@@ -1408,6 +1409,7 @@ async function startDfuWaitModal(isRetry = false, autoFlash = true, justInstalle
   // DFU device detected and accessible
   dfuDeviceReady = true;
   setStatus('port', 'ok', 'DFU device ready');
+  updateCompileButton();
 
   document.getElementById('bm-log').innerHTML = '';
   appendModalLog('✓ Proffieboard detected in Bootloader Mode (DFU)', false);
