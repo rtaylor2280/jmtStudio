@@ -152,13 +152,19 @@ async function ensureCliConfig(onLog) {
 
 // ── First-run: install core if not present ─────────────
 async function ensureCore(onLog) {
-  const dataPath    = getArduinoDataPath();
-  const hardwarePath = path.join(dataPath, 'packages', 'proffieboard', 'hardware', 'stm32l4');
+  const dataPath     = getArduinoDataPath();
+  const sentinelPath = path.join(dataPath, '.core-installed');
 
-  // Check for boards.txt inside any installed version — this file only exists after
-  // a complete successful install. The top-level packages/proffieboard dir is not
-  // a reliable check because arduino-cli creates it during core update-index.
-  // Note: arduino-cli installs 4.6.0 as directory "4.6", so we check version-agnostically.
+  // Sentinel file written after any successful install (including "already installed" via Arduino IDE).
+  // Avoids re-running the index download on every startup for users who have the core installed
+  // via Arduino IDE rather than our own arduino-data directory.
+  if (fs.existsSync(sentinelPath) && fs.readFileSync(sentinelPath, 'utf8').trim() === CORE_VERSION) {
+    onLog(`Core ${CORE_ID}@${CORE_VERSION} already installed.`, false);
+    return { ok: true };
+  }
+
+  // Also check our own arduino-data directory directly
+  const hardwarePath = path.join(dataPath, 'packages', 'proffieboard', 'hardware', 'stm32l4');
   const isInstalled = fs.existsSync(hardwarePath) &&
     fs.readdirSync(hardwarePath).some(v =>
       fs.existsSync(path.join(hardwarePath, v, 'boards.txt'))
@@ -166,11 +172,12 @@ async function ensureCore(onLog) {
 
   if (isInstalled) {
     onLog(`Core ${CORE_ID}@${CORE_VERSION} already installed.`, false);
+    fs.writeFileSync(sentinelPath, CORE_VERSION, 'utf8');
     return { ok: true };
   }
 
   onLog(`Installing core ${CORE_ID}@${CORE_VERSION} — this may take a few minutes on first run...`, false);
-  
+
   // Update index first — pass URL directly so it works regardless of config file parsing
   const update = await runCli(['core', 'update-index', `--additional-urls=${BOARD_MANAGER_URL}`], onLog);
   if (!update.ok) return { ok: false, error: 'Failed to update board index.' };
@@ -178,6 +185,9 @@ async function ensureCore(onLog) {
   // Install core
   const install = await runCli(['core', 'install', `${CORE_ID}@${CORE_VERSION}`, `--additional-urls=${BOARD_MANAGER_URL}`], onLog);
   if (!install.ok) return { ok: false, error: `Failed to install core ${CORE_ID}@${CORE_VERSION}.` };
+
+  // Write sentinel so subsequent startups skip this flow
+  fs.writeFileSync(sentinelPath, CORE_VERSION, 'utf8');
 
   onLog(`Core installed successfully.`, false);
   return { ok: true };
