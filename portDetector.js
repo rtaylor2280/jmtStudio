@@ -5,7 +5,7 @@
  * matching the same logic Arduino IDE uses.
  */
 
-const { execFile } = require('child_process');
+const { spawn }    = require('child_process');
 const proffie      = require('./proffieos');
 const path         = require('path');
 
@@ -44,12 +44,26 @@ function runBoardList() {
       try { require('fs').chmodSync(cli, 0o755); } catch {}
     }
 
-    execFile(cli, args, { timeout: 10000 }, (err, stdout, stderr) => {
-      if (err) {
-        resolve({ ok: false, error: err.message, raw: stderr });
+    let stdout = '';
+    let stderr = '';
+    const proc = spawn(cli, args, { cwd: dataPath });
+    const timer = setTimeout(() => { proc.kill(); resolve({ ok: false, error: 'board list timed out' }); }, 10000);
+
+    proc.stdout.on('data', d => { stdout += d; });
+    proc.stderr.on('data', d => { stderr += d; });
+    proc.on('close', code => {
+      clearTimeout(timer);
+      if (code !== 0) {
+        console.error('[portDetector] arduino-cli board list failed:', stderr);
+        resolve({ ok: false, error: stderr || `exit code ${code}` });
         return;
       }
       resolve({ ok: true, raw: stdout });
+    });
+    proc.on('error', e => {
+      clearTimeout(timer);
+      console.error('[portDetector] spawn error:', e.message);
+      resolve({ ok: false, error: e.message });
     });
   });
 }
