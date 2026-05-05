@@ -171,12 +171,12 @@ async function ensureCore(onLog) {
 
   onLog(`Installing core ${CORE_ID}@${CORE_VERSION} — this may take a few minutes on first run...`, false);
   
-  // Update index first
-  const update = await runCli(['core', 'update-index'], onLog);
+  // Update index first — pass URL directly so it works regardless of config file parsing
+  const update = await runCli(['core', 'update-index', `--additional-urls=${BOARD_MANAGER_URL}`], onLog);
   if (!update.ok) return { ok: false, error: 'Failed to update board index.' };
 
   // Install core
-  const install = await runCli(['core', 'install', `${CORE_ID}@${CORE_VERSION}`], onLog);
+  const install = await runCli(['core', 'install', `${CORE_ID}@${CORE_VERSION}`, `--additional-urls=${BOARD_MANAGER_URL}`], onLog);
   if (!install.ok) return { ok: false, error: `Failed to install core ${CORE_ID}@${CORE_VERSION}.` };
 
   onLog(`Core installed successfully.`, false);
