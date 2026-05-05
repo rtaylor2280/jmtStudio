@@ -9,6 +9,8 @@ const { execFile } = require('child_process');
 const proffie      = require('./proffieos');
 const path         = require('path');
 
+const BOARD_MANAGER_URL = 'https://profezzorn.github.io/arduino-proffieboard/package_proffieboard_index.json';
+
 // ── CLI path ───────────────────────────────────────────
 function getCliPath() {
   const platform = process.platform === 'win32' ? 'windows'
@@ -35,7 +37,7 @@ function runBoardList() {
     const cli      = getCliPath();
     const dataPath = getArduinoDataPath();
     const yamlPath = path.join(dataPath, 'arduino-cli.yaml');
-    const args     = ['board', 'list', '--json', '--config-file', yamlPath];
+    const args     = ['board', 'list', '--json', '--config-file', yamlPath, '--additional-urls', BOARD_MANAGER_URL];
 
     execFile(cli, args, { timeout: 10000 }, (err, stdout, stderr) => {
       if (err) {
