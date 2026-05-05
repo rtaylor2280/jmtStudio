@@ -461,25 +461,34 @@ async function prepareFirmware(onLog) {
   }
   onLog('Binary created.', false);
 
-  // Add DFU suffix
+  // Add DFU suffix (pure Node.js — no dfu-suffix binary needed)
   onLog('Adding DFU suffix...', false);
-  fs.copyFileSync(binPath, dfuPath);
-  ensureExecutable(getDfuSuffixPath());
-
-  const suffixResult = await new Promise(resolve => {
-    const { execFile } = require('child_process');
-    execFile(getDfuSuffixPath(),
-      ['-v', '0x1209', '-p', '0x6668', '-d', '0xffff', '-a', dfuPath],
-      { cwd: toolsDir },
-      (err) => {
-        if (err) resolve({ ok: false, error: err.message });
-        else resolve({ ok: true });
-      });
-  });
-
-  if (!suffixResult.ok) {
-    onLog(`dfu-suffix failed: ${suffixResult.error}`, true);
-    return { ok: false, error: suffixResult.error };
+  try {
+    const bin = fs.readFileSync(binPath);
+    const suffix = Buffer.alloc(16);
+    suffix.writeUInt16LE(0xffff, 0);  // bcdDevice
+    suffix.writeUInt16LE(0x6668, 2);  // idProduct
+    suffix.writeUInt16LE(0x1209, 4);  // idVendor
+    suffix.writeUInt16LE(0x0100, 6);  // bcdDFU (DFU 1.0)
+    suffix[8]  = 0x55;                // 'U'
+    suffix[9]  = 0x46;                // 'F'
+    suffix[10] = 0x44;                // 'D'
+    suffix[11] = 16;                  // bLength
+    // CRC32 over binary + first 12 suffix bytes (everything except dwCRC)
+    let crc = 0xFFFFFFFF;
+    for (let i = 0; i < bin.length; i++) {
+      crc ^= bin[i];
+      for (let j = 0; j < 8; j++) crc = (crc & 1) ? ((crc >>> 1) ^ 0xEDB88320) : (crc >>> 1);
+    }
+    for (let i = 0; i < 12; i++) {
+      crc ^= suffix[i];
+      for (let j = 0; j < 8; j++) crc = (crc & 1) ? ((crc >>> 1) ^ 0xEDB88320) : (crc >>> 1);
+    }
+    suffix.writeUInt32LE(crc >>> 0, 12);
+    fs.writeFileSync(dfuPath, Buffer.concat([bin, suffix]));
+  } catch (e) {
+    onLog(`DFU suffix failed: ${e.message}`, true);
+    return { ok: false, error: e.message };
   }
   onLog('DFU suffix added.', false);
 
