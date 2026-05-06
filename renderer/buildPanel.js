@@ -173,7 +173,10 @@ async function initBuildPanel() {
   el('bp-log-toggle').addEventListener('click', toggleLog);
   el('bp-log-clear').addEventListener('click', clearLog);
   document.getElementById('input-board').addEventListener('change', onInputBoardChange);
-  onInputBoardChange();
+  // Seed selectedFqbn from dropdown without triggering a cache check (no file open yet)
+  const _initBoardSel = document.getElementById('input-board');
+  const _initBoardOpt = _initBoardSel ? _initBoardSel.options[_initBoardSel.selectedIndex] : null;
+  selectedFqbn = (_initBoardOpt && _initBoardOpt.dataset.fqbn) ? _initBoardOpt.dataset.fqbn : null;
   el('bp-usb-select').addEventListener('change', e => {
     selectedUsb = e.target.value;
     updateUsbChangedIndicator();
@@ -1199,7 +1202,9 @@ async function _checkDfuOnEntry() {
     dfuDeviceReady = true;
     setStatus('port', 'ok', 'DFU device ready');
     setFlashEnabled(compileSuccess);
+    cacheCheckPending = true;
     updateCompileButton();
+    checkCacheForConfig();
   } else if (result.found && !result.accessible) {
     // Board in DFU but driver missing — skip boot instructions, go straight to driver fix
     startDfuWaitModal(true, false);
