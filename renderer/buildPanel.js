@@ -1397,11 +1397,8 @@ async function startDfuWaitModal(isRetry = false, autoFlash = true, justInstalle
       dfuSetupBtn.style.display = 'inline-block';
       document.getElementById('bm-manual-row').style.display = 'flex';
     } else if (isLinux) {
-      retryBtn.textContent = '↺ Try Again';
-      retryBtn.style.display = 'inline-block';
-      _dfuRetryRecheck   = true;
-      _dfuRetryAutoFlash = autoFlash;
-      document.getElementById('bm-status').textContent = 'USB permission required';
+      retryBtn.style.display = 'none';
+      document.getElementById('bm-status').textContent = 'Reboot required';
       document.getElementById('bm-manual-row').style.display = 'none';
       dfuSetupBtn.textContent        = 'Copy Commands';
       dfuSetupBtn.dataset.phase      = 'copy-linux';
