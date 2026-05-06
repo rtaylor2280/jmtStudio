@@ -39,7 +39,8 @@
     "linux": {
       "target": ["AppImage", "deb"],
       "icon": "assets/logo.png",
-      "category": "Utility"
+      "category": "Utility",
+      "executableName": "jmt-studio"
     },
     "files": [
       "main.js",
