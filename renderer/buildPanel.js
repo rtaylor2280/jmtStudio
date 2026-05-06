@@ -173,6 +173,7 @@ async function initBuildPanel() {
   el('bp-log-toggle').addEventListener('click', toggleLog);
   el('bp-log-clear').addEventListener('click', clearLog);
   document.getElementById('input-board').addEventListener('change', onInputBoardChange);
+  onInputBoardChange();
   el('bp-usb-select').addEventListener('change', e => {
     selectedUsb = e.target.value;
     updateUsbChangedIndicator();
