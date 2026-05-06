@@ -42,6 +42,10 @@
       "category": "Utility",
       "executableName": "jmt-studio"
     },
+    "deb": {
+      "fpm": ["--prefix", "/opt/jmt-studio"],
+      "afterInstall": "build/linux-after-install.sh"
+    },
     "files": [
       "main.js",
       "preload.js",
