@@ -1343,7 +1343,7 @@ async function startDfuWaitModal(isRetry = false, autoFlash = true, justInstalle
       appendModalLog('Run the following in a terminal, then reboot:', false);
       appendModalLog('', false);
       const arduinoDataPath = await window.electronAPI.getArduinoDataPath();
-      appendModalLog(`  cd "${arduinoDataPath}/packages/profezzorn/hardware/stm32l4"`, false);
+      appendModalLog(`  cd "${arduinoDataPath}/packages/proffieboard/hardware/stm32l4"`, false);
       appendModalLog('  cd */drivers/linux', false);
       appendModalLog('  sudo cp *.rules /etc/udev/rules.d', false);
       appendModalLog('  sudo reboot', false);

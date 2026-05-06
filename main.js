@@ -424,7 +424,12 @@ ipcMain.handle('app:getArduinoDataPath', () => {
   const base = app.isPackaged
     ? app.getPath('userData')
     : path.join(app.getPath('appData'), 'jmt-studio');
-  return path.join(base, 'arduino-data');
+  const appPath = path.join(base, 'arduino-data');
+  if (fs.existsSync(path.join(appPath, 'packages', 'proffieboard'))) return appPath;
+  const systemPath = process.platform === 'darwin'
+    ? path.join(os.homedir(), 'Library', 'Arduino15')
+    : path.join(os.homedir(), '.arduino15');
+  return systemPath;
 });
 ipcMain.handle('clipboard:read',      () => require('electron').clipboard.readText());
 
