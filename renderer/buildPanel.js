@@ -221,6 +221,14 @@ async function initBuildPanel() {
     const setupBtn  = document.getElementById('bm-dfu-setup');
     const manualRow = document.getElementById('bm-manual-row');
 
+    if (setupBtn.dataset.phase === 'copy-linux') {
+      navigator.clipboard.writeText(setupBtn.dataset.command).then(() => {
+        setupBtn.textContent = 'Copied!';
+        setTimeout(() => { setupBtn.textContent = 'Copy Commands'; }, 2000);
+      });
+      return;
+    }
+
     if (setupBtn.dataset.phase === 'install') {
       // Phase 2: Install the downloaded file
       setupBtn.disabled    = true;
@@ -1340,15 +1348,18 @@ async function startDfuWaitModal(isRetry = false, autoFlash = true, justInstalle
       appendModalLog('DFU device detected but cannot be accessed.', true);
       appendModalLog('Linux requires a udev rule to allow USB access.', false);
       appendModalLog('', false);
-      appendModalLog('Run the following in a terminal, then reboot:', false);
+      appendModalLog('Paste the following into a terminal, then reboot:', false);
       appendModalLog('', false);
       const arduinoDataPath = await window.electronAPI.getArduinoDataPath();
-      appendModalLog(`  cd "${arduinoDataPath}/packages/proffieboard/hardware/stm32l4"`, false);
-      appendModalLog('  cd */drivers/linux', false);
-      appendModalLog('  sudo cp *.rules /etc/udev/rules.d', false);
-      appendModalLog('  sudo reboot', false);
+      const linuxCmd = `cd "${arduinoDataPath}/packages/proffieboard/hardware/stm32l4" && cd */drivers/linux && sudo cp *.rules /etc/udev/rules.d && sudo reboot`;
+      appendModalLog(`  ${linuxCmd}`, false);
       appendModalLog('', false);
       appendModalLog('After rebooting, replug the board in bootloader mode and click Try Again.', false);
+      const dfuSetupBtnLinux = document.getElementById('bm-dfu-setup');
+      dfuSetupBtnLinux.textContent = 'Copy Commands';
+      dfuSetupBtnLinux.dataset.phase   = 'copy-linux';
+      dfuSetupBtnLinux.dataset.command = linuxCmd;
+      dfuSetupBtnLinux.style.display   = 'inline-block';
     } else {
       // Mac — DFU should work without any setup; this state is unexpected
       appendModalLog('DFU device could not be accessed.', true);
@@ -1394,7 +1405,6 @@ async function startDfuWaitModal(isRetry = false, autoFlash = true, justInstalle
       _dfuRetryRecheck   = true;
       _dfuRetryAutoFlash = autoFlash;
       document.getElementById('bm-status').textContent = 'USB permission required';
-      dfuSetupBtn.style.display = 'none';
       document.getElementById('bm-manual-row').style.display = 'none';
     } else {
       // Mac
