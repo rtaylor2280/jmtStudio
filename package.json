@@ -9,12 +9,12 @@
     "start": "electron .",
     "build": "electron-builder --win --x64",
     "build:mac": "electron-builder --mac",
-    "build:linux": "electron-builder --linux --x64 --config electron-builder-linux.yml",
+    "build:linux": "electron-builder --linux --x64",
     "postinstall": "node scripts/copy-monaco.js"
   },
   "build": {
     "appId": "com.jmt.proffieos-editor",
-    "productName": "JMT Studio",
+    "productName": "JMT-Studio",
     "npmRebuild": true,
     "directories": {
       "output": "dist"
@@ -34,7 +34,22 @@
     },
     "mac": {
       "target": "dmg",
-      "icon": "assets/icon.icns"
+      "icon": "assets/icon.icns",
+      "extendInfo": {
+        "CFBundleDisplayName": "JMT Studio"
+      }
+    },
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "icon": "assets/logo.png",
+      "category": "Utility",
+      "executableName": "jmt-studio",
+      "desktop": {
+        "Name": "JMT Studio"
+      }
+    },
+    "deb": {
+      "afterInstall": "build/linux-after-install.sh"
     },
     "files": [
       "main.js",
