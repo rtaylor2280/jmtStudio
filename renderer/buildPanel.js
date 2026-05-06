@@ -1320,6 +1320,7 @@ async function startDfuWaitModal(isRetry = false, autoFlash = true, justInstalle
     const driverStillLoading = notAccessibleStart !== null;
     const isWin   = navigator.platform.startsWith('Win');
     const isLinux = navigator.platform.startsWith('Linux');
+    let linuxCopyCmd = '';
 
     // ── Messages ──────────────────────────────────────────
     if (isWin) {
@@ -1352,15 +1353,10 @@ async function startDfuWaitModal(isRetry = false, autoFlash = true, justInstalle
       appendModalLog('Paste the following into a terminal, then reboot:', false);
       appendModalLog('', false);
       const arduinoDataPath = await window.electronAPI.getArduinoDataPath();
-      const linuxCmd = `cd "${arduinoDataPath}/packages/proffieboard/hardware/stm32l4" && cd */drivers/linux && sudo cp *.rules /etc/udev/rules.d && sudo reboot`;
-      appendModalLog(`  ${linuxCmd}`, false);
+      linuxCopyCmd = `cd "${arduinoDataPath}/packages/proffieboard/hardware/stm32l4" && cd */drivers/linux && sudo cp *.rules /etc/udev/rules.d && sudo reboot`;
+      appendModalLog(`  ${linuxCopyCmd}`, false);
       appendModalLog('', false);
       appendModalLog('After rebooting, replug the board in bootloader mode and click Try Again.', false);
-      const dfuSetupBtnLinux = document.getElementById('bm-dfu-setup');
-      dfuSetupBtnLinux.textContent = 'Copy Commands';
-      dfuSetupBtnLinux.dataset.phase   = 'copy-linux';
-      dfuSetupBtnLinux.dataset.command = linuxCmd;
-      dfuSetupBtnLinux.style.display   = 'inline-block';
     } else {
       // Mac — DFU should work without any setup; this state is unexpected
       appendModalLog('DFU device could not be accessed.', true);
@@ -1407,6 +1403,10 @@ async function startDfuWaitModal(isRetry = false, autoFlash = true, justInstalle
       _dfuRetryAutoFlash = autoFlash;
       document.getElementById('bm-status').textContent = 'USB permission required';
       document.getElementById('bm-manual-row').style.display = 'none';
+      dfuSetupBtn.textContent        = 'Copy Commands';
+      dfuSetupBtn.dataset.phase      = 'copy-linux';
+      dfuSetupBtn.dataset.command    = linuxCopyCmd;
+      dfuSetupBtn.style.display      = 'inline-block';
     } else {
       // Mac
       retryBtn.style.display = 'none';
