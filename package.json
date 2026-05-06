@@ -36,15 +36,6 @@
       "target": "dmg",
       "icon": "assets/icon.icns"
     },
-    "linux": {
-      "target": ["AppImage", "deb"],
-      "icon": "assets/logo.png",
-      "category": "Utility",
-      "executableName": "jmt-studio"
-    },
-    "deb": {
-      "afterInstall": "build/linux-after-install.sh"
-    },
     "files": [
       "main.js",
       "preload.js",

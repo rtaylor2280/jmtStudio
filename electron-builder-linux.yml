@@ -1,4 +1,12 @@
 productName: "JMT-Studio"
 linux:
+  target:
+    - AppImage
+    - deb
+  icon: "assets/logo.png"
+  category: "Utility"
+  executableName: "jmt-studio"
   desktop:
     Name: "JMT Studio"
+deb:
+  afterInstall: "build/linux-after-install.sh"
