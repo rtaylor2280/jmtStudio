@@ -36,8 +36,9 @@
       "icon": "assets/icon.icns"
     },
     "linux": {
-      "target": "AppImage",
-      "icon": "assets/logo.png"
+      "target": ["AppImage", "deb"],
+      "icon": "assets/logo.png",
+      "category": "Utility"
     },
     "files": [
       "main.js",
