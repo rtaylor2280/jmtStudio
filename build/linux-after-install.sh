@@ -1,2 +1,6 @@
 #!/bin/bash
-chmod 4755 /opt/jmt-studio/chrome-sandbox
+SANDBOX="/opt/JMT Studio/chrome-sandbox"
+if [ -f "$SANDBOX" ]; then
+    chown root:root "$SANDBOX"
+    chmod 4755 "$SANDBOX"
+fi
