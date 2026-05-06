@@ -308,6 +308,17 @@ function ensureExecutable(filePath) {
   }
 }
 
+// On Linux, bundled dfu-util links against libusb-1.0.so.0 which we bundle
+// in the same tools directory. Set LD_LIBRARY_PATH so the dynamic linker finds it.
+function getDfuEnv(toolsDir) {
+  if (process.platform !== 'linux') return undefined;
+  const existing = process.env.LD_LIBRARY_PATH || '';
+  return {
+    ...process.env,
+    LD_LIBRARY_PATH: existing ? `${toolsDir}:${existing}` : toolsDir
+  };
+}
+
 function getDfuUtilPath() {
   const bin = process.platform === 'win32' ? 'dfu-util.exe' : 'dfu-util';
   return path.join(getToolsPath(), bin);
@@ -373,7 +384,7 @@ function waitForDfu(onLog, timeoutMs = 10000) {
 
     const check = () => {
       const { execFile } = require('child_process');
-      execFile(dfuUtil, ['-l'], { timeout: 3000, cwd: toolsDir }, (err, stdout, stderr) => {
+      execFile(dfuUtil, ['-l'], { timeout: 3000, cwd: toolsDir, env: getDfuEnv(toolsDir) }, (err, stdout, stderr) => {
         const output = (stdout || '') + (stderr || '');
         const lines  = output.split(/\r?\n/);
         const found  = lines.some(l =>
@@ -506,7 +517,7 @@ async function runDfuFlash(dfuPath, toolsDir, onLog) {
       '-a', '0',
       '-s', '0x08000000:leave',
       '-D', dfuPath
-    ], { cwd: toolsDir });
+    ], { cwd: toolsDir, env: getDfuEnv(toolsDir) });
 
     let stdout = '', stderr = '';
 
@@ -585,7 +596,7 @@ function detectDFU() {
 
   ensureExecutable(getDfuUtilPath());
   return new Promise(resolve => {
-    execFile(dfuUtil, ['-l'], { timeout: 5000, cwd: toolsDir }, (_err, stdout, stderr) => {
+    execFile(dfuUtil, ['-l'], { timeout: 5000, cwd: toolsDir, env: getDfuEnv(toolsDir) }, (_err, stdout, stderr) => {
       const output = (stdout || '') + (stderr || '');
       const lines  = output.split(/\r?\n/);
 
