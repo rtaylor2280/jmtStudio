@@ -421,6 +421,7 @@ ipcMain.handle('cache:getDataSize', () => {
 ipcMain.handle('app:getVersion',      () => app.getVersion());
 ipcMain.handle('app:isDevMode',       () => !app.isPackaged);
 ipcMain.handle('app:getArduinoDataPath', () => {
+  const os   = require('os');
   const base = app.isPackaged
     ? app.getPath('userData')
     : path.join(app.getPath('appData'), 'jmt-studio');
