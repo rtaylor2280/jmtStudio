@@ -1338,15 +1338,17 @@ async function startDfuWaitModal(isRetry = false, autoFlash = true, justInstalle
       }
     } else if (isLinux) {
       appendModalLog('DFU device detected but cannot be accessed.', true);
-      appendModalLog('Linux requires udev rules to allow USB access.', false);
+      appendModalLog('Linux requires a udev rule to allow USB access.', false);
       appendModalLog('', false);
-      appendModalLog('Run the following in a terminal, then replug the board:', false);
+      appendModalLog('Run the following in a terminal, then reboot:', false);
       appendModalLog('', false);
       const arduinoDataPath = await window.electronAPI.getArduinoDataPath();
-      appendModalLog(`  sudo cp "${arduinoDataPath}/packages/profezzorn/hardware/stm32l4/"*/drivers/linux/*.rules /etc/udev/rules.d/`, false);
-      appendModalLog('  sudo udevadm control --reload-rules', false);
+      appendModalLog(`  cd "${arduinoDataPath}/packages/profezzorn/hardware/stm32l4"`, false);
+      appendModalLog('  cd */drivers/linux', false);
+      appendModalLog('  sudo cp *.rules /etc/udev/rules.d', false);
+      appendModalLog('  sudo reboot', false);
       appendModalLog('', false);
-      appendModalLog('Visit pod.hubbe.net for full setup instructions.', false);
+      appendModalLog('After rebooting, replug the board in bootloader mode and click Try Again.', false);
     } else {
       // Mac — DFU should work without any setup; this state is unexpected
       appendModalLog('DFU device could not be accessed.', true);
