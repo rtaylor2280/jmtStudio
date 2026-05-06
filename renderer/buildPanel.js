@@ -1353,7 +1353,7 @@ async function startDfuWaitModal(isRetry = false, autoFlash = true, justInstalle
       appendModalLog('Paste the following into a terminal, then reboot:', false);
       appendModalLog('', false);
       const arduinoDataPath = await window.electronAPI.getArduinoDataPath();
-      linuxCopyCmd = `cd "${arduinoDataPath}/packages/proffieboard/hardware/stm32l4" && cd */drivers/linux && sudo cp *.rules /etc/udev/rules.d && sudo reboot`;
+      linuxCopyCmd = `cd "${arduinoDataPath}/packages/proffieboard/hardware/stm32l4" && cd */drivers/linux && sudo cp *.rules /etc/udev/rules.d && sudo systemctl reboot -i`;
       appendModalLog(`  ${linuxCopyCmd}`, false);
       appendModalLog('', false);
       appendModalLog('After rebooting, replug the board in bootloader mode and click Try Again.', false);
