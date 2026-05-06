@@ -472,6 +472,7 @@ async function refreshPorts() {
     clearDetectedBoard();
     setStatus('port', 'error', 'No device detected');
     setFlashEnabled(false);
+    addDfuSentinel();
     return;
   }
 
