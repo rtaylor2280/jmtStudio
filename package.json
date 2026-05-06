@@ -2,7 +2,7 @@
   "name": "jmt-studio",
   "version": "1.6.5",
   "description": "ProffieOS Configuration Tool by Jedi Master Tech",
-  "author": "Jedi Master Tech",
+  "author": "Jedi Master Tech <rtaylor2280@gmail.com>",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
