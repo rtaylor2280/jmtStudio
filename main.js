@@ -89,7 +89,9 @@ function createWindow() {
     minHeight: 500,
     backgroundColor: '#111111',
     titleBarStyle: 'default',
-    ...(process.platform !== 'darwin' ? { icon: path.join(__dirname, 'assets', 'icon.ico') } : {}),
+    ...(process.platform === 'win32'  ? { icon: path.join(__dirname, 'assets', 'icon.ico') }
+      : process.platform === 'linux'  ? { icon: path.join(__dirname, 'assets', 'logo.png') }
+      : {}),
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
