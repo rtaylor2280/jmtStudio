@@ -1350,13 +1350,13 @@ async function startDfuWaitModal(isRetry = false, autoFlash = true, justInstalle
       appendModalLog('DFU device detected but cannot be accessed.', true);
       appendModalLog('Linux requires a udev rule to allow USB access.', false);
       appendModalLog('', false);
-      appendModalLog('Paste the following into a terminal, then reboot:', false);
+      appendModalLog('Paste the following into a terminal:', false);
       appendModalLog('', false);
       const arduinoDataPath = await window.electronAPI.getArduinoDataPath();
-      linuxCopyCmd = `cd "${arduinoDataPath}/packages/proffieboard/hardware/stm32l4" && cd */drivers/linux && sudo cp *.rules /etc/udev/rules.d && sudo systemctl reboot -i`;
+      linuxCopyCmd = `cd "${arduinoDataPath}/packages/proffieboard/hardware/stm32l4" && cd */drivers/linux && sudo cp *.rules /etc/udev/rules.d`;
       appendModalLog(`  ${linuxCopyCmd}`, false);
       appendModalLog('', false);
-      appendModalLog('After rebooting, replug the board in bootloader mode and click Try Again.', false);
+      appendModalLog('Then reboot your computer, replug the board in bootloader mode, and click Try Again.', false);
     } else {
       // Mac — DFU should work without any setup; this state is unexpected
       appendModalLog('DFU device could not be accessed.', true);
