@@ -12,6 +12,12 @@ if (!app.isPackaged) {
   app.setPath('userData', path.join(app.getPath('appData'), 'jmt-studio-dev'));
 }
 
+// Chrome sandbox requires SUID root inside a FUSE mount, which Linux distros
+// disallow. This app loads no untrusted content, so disabling is safe.
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('no-sandbox');
+}
+
 // ── Persist last file path ─────────────────────────────
 const Store = {
   _path: path.join(app.getPath('userData'), 'prefs.json'),
