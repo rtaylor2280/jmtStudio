@@ -32,13 +32,13 @@
       "shortcutName": "JMT Studio",
       "include": "build/installer.nsh"
     },
+    "afterSign": "build/notarize.js",
     "mac": {
       "target": "dmg",
       "icon": "assets/icon.icns",
       "extendInfo": {
         "CFBundleDisplayName": "JMT Studio"
-      },
-      "afterSign": "build/notarize.js"
+      }
     },
     "linux": {
       "target": ["AppImage", "deb"],
