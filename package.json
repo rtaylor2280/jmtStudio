@@ -38,7 +38,8 @@
       "icon": "assets/icon.icns",
       "extendInfo": {
         "CFBundleDisplayName": "JMT Studio"
-      }
+      },
+      "notarize": false
     },
     "linux": {
       "target": ["AppImage", "deb"],
