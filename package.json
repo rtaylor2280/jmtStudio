@@ -38,9 +38,7 @@
       "extendInfo": {
         "CFBundleDisplayName": "JMT Studio"
       },
-      "notarize": {
-        "teamId": "MJ2AAJ6PK5"
-      }
+      "afterSign": "build/notarize.js"
     },
     "linux": {
       "target": ["AppImage", "deb"],
