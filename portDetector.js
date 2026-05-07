@@ -5,14 +5,19 @@
  * matching the same logic Arduino IDE uses.
  */
 
-const { execFile } = require('child_process');
+const { spawn }    = require('child_process');
 const proffie      = require('./proffieos');
 const path         = require('path');
 
+const BOARD_MANAGER_URL = 'https://profezzorn.github.io/arduino-proffieboard/package_proffieboard_index.json';
+
 // ── CLI path ───────────────────────────────────────────
 function getCliPath() {
+  const platform = process.platform === 'win32' ? 'windows'
+                 : process.platform === 'darwin'  ? 'mac'
+                 : 'linux';
   const bin = process.platform === 'win32' ? 'arduino-cli.exe' : 'arduino-cli';
-  return path.join(proffie.getResourcesPath(), 'arduino-cli', bin);
+  return path.join(proffie.getResourcesPath(), 'arduino-cli', platform, bin);
 }
 
 function getArduinoDataPath() {
@@ -32,14 +37,38 @@ function runBoardList() {
     const cli      = getCliPath();
     const dataPath = getArduinoDataPath();
     const yamlPath = path.join(dataPath, 'arduino-cli.yaml');
-    const args     = ['board', 'list', '--json', '--config-file', yamlPath];
+    // On Windows, use our config file so arduino-cli finds the toolchain-installed core.
+    // On Mac/Linux, omit --config-file and let arduino-cli use the system default path,
+    // which correctly finds cores installed by Arduino IDE or our toolchain.
+    const args = process.platform === 'win32'
+      ? ['board', 'list', '--json', `--config-file=${yamlPath}`, `--additional-urls=${BOARD_MANAGER_URL}`]
+      : ['board', 'list', '--json', `--additional-urls=${BOARD_MANAGER_URL}`];
 
-    execFile(cli, args, { timeout: 10000 }, (err, stdout, stderr) => {
-      if (err) {
-        resolve({ ok: false, error: err.message, raw: stderr });
+    // Ensure the binary is executable on Mac/Linux (git may store without execute bit)
+    if (process.platform !== 'win32') {
+      try { require('fs').chmodSync(cli, 0o755); } catch {}
+    }
+
+    let stdout = '';
+    let stderr = '';
+    const proc = spawn(cli, args, { cwd: dataPath });
+    const timer = setTimeout(() => { proc.kill(); resolve({ ok: false, error: 'board list timed out' }); }, 10000);
+
+    proc.stdout.on('data', d => { stdout += d; });
+    proc.stderr.on('data', d => { stderr += d; });
+    proc.on('close', code => {
+      clearTimeout(timer);
+      if (code !== 0) {
+        console.error('[portDetector] arduino-cli board list failed:', stderr);
+        resolve({ ok: false, error: stderr || `exit code ${code}` });
         return;
       }
       resolve({ ok: true, raw: stdout });
+    });
+    proc.on('error', e => {
+      clearTimeout(timer);
+      console.error('[portDetector] spawn error:', e.message);
+      resolve({ ok: false, error: e.message });
     });
   });
 }
@@ -48,8 +77,7 @@ function runBoardList() {
 // arduino-cli board list --json emits structured data; no regex needed.
 function parseBoardList(raw) {
   let data;
-  try { data = JSON.parse(raw); } catch { return []; }
-
+  try { data = JSON.parse(raw); } catch { console.error('[portDetector] JSON parse failed:', raw); return []; }
   const detected = data.detected_ports || [];
   return detected.map(entry => {
     const port     = entry.port || {};

@@ -38,8 +38,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   flash:   (port, fqbn)          => ipcRenderer.invoke('toolchain:flash', { port, fqbn }),
   getToolStatus:  ()             => ipcRenderer.invoke('toolchain:getStatus'),
   abortCompile:   ()             => ipcRenderer.invoke('toolchain:abort'),
-  getAppVersion:  ()             => ipcRenderer.invoke('app:getVersion'),
-  isDevMode:      ()             => ipcRenderer.invoke('app:isDevMode'),
+  getAppVersion:      ()         => ipcRenderer.invoke('app:getVersion'),
+  isDevMode:          ()         => ipcRenderer.invoke('app:isDevMode'),
+  getArduinoDataPath: ()         => ipcRenderer.invoke('app:getArduinoDataPath'),
   checkCache: (configContent, fqbn, usb) =>
     ipcRenderer.invoke('cache:check', { configContent, fqbn, usb }),
   getCacheSize:    () => ipcRenderer.invoke('cache:getSize'),

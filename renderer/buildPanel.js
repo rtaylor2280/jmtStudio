@@ -173,6 +173,10 @@ async function initBuildPanel() {
   el('bp-log-toggle').addEventListener('click', toggleLog);
   el('bp-log-clear').addEventListener('click', clearLog);
   document.getElementById('input-board').addEventListener('change', onInputBoardChange);
+  // Seed selectedFqbn from dropdown without triggering a cache check (no file open yet)
+  const _initBoardSel = document.getElementById('input-board');
+  const _initBoardOpt = _initBoardSel ? _initBoardSel.options[_initBoardSel.selectedIndex] : null;
+  selectedFqbn = (_initBoardOpt && _initBoardOpt.dataset.fqbn) ? _initBoardOpt.dataset.fqbn : null;
   el('bp-usb-select').addEventListener('change', e => {
     selectedUsb = e.target.value;
     updateUsbChangedIndicator();
@@ -220,6 +224,14 @@ async function initBuildPanel() {
   document.getElementById('bm-dfu-setup').addEventListener('click', async () => {
     const setupBtn  = document.getElementById('bm-dfu-setup');
     const manualRow = document.getElementById('bm-manual-row');
+
+    if (setupBtn.dataset.phase === 'copy-linux') {
+      navigator.clipboard.writeText(setupBtn.dataset.command).then(() => {
+        setupBtn.textContent = 'Copied!';
+        setTimeout(() => { setupBtn.textContent = 'Copy Commands'; }, 2000);
+      });
+      return;
+    }
 
     if (setupBtn.dataset.phase === 'install') {
       // Phase 2: Install the downloaded file
@@ -464,6 +476,7 @@ async function refreshPorts() {
     clearDetectedBoard();
     setStatus('port', 'error', 'No device detected');
     setFlashEnabled(false);
+    addDfuSentinel();
     return;
   }
 
@@ -1150,7 +1163,7 @@ async function checkCacheForConfig(missStatus) {
 
   if (result.hit) {
     compileSuccess = true;
-    setFlashEnabled(selectedPortIsProffieboard && !!selectedPort);
+    setFlashEnabled(isDfuMode ? compileSuccess : (selectedPortIsProffieboard && !!selectedPort));
     updateCompileButton();
     setStatus('compile', 'ok', 'Compile restored from cache');
     if (window.setCompiledTimestamp) window.setCompiledTimestamp(result.metadata.compiledAt);
@@ -1189,6 +1202,9 @@ async function _checkDfuOnEntry() {
     dfuDeviceReady = true;
     setStatus('port', 'ok', 'DFU device ready');
     setFlashEnabled(compileSuccess);
+    cacheCheckPending = true;
+    updateCompileButton();
+    checkCacheForConfig();
   } else if (result.found && !result.accessible) {
     // Board in DFU but driver missing — skip boot instructions, go straight to driver fix
     startDfuWaitModal(true, false);
@@ -1310,6 +1326,7 @@ async function startDfuWaitModal(isRetry = false, autoFlash = true, justInstalle
     const driverStillLoading = notAccessibleStart !== null;
     const isWin   = navigator.platform.startsWith('Win');
     const isLinux = navigator.platform.startsWith('Linux');
+    let linuxCopyCmd = '';
 
     // ── Messages ──────────────────────────────────────────
     if (isWin) {
@@ -1337,14 +1354,15 @@ async function startDfuWaitModal(isRetry = false, autoFlash = true, justInstalle
       }
     } else if (isLinux) {
       appendModalLog('DFU device detected but cannot be accessed.', true);
-      appendModalLog('Linux requires udev rules to allow USB access.', false);
+      appendModalLog('Linux requires a udev rule to allow USB access.', false);
       appendModalLog('', false);
-      appendModalLog('Run the following in a terminal, then replug the board:', false);
+      appendModalLog('Paste the following into a terminal:', false);
       appendModalLog('', false);
-      appendModalLog('  sudo cp ~/.arduino15/packages/profezzorn/hardware/stm32l4/*/drivers/linux/*.rules /etc/udev/rules.d/', false);
-      appendModalLog('  sudo udevadm control --reload-rules', false);
+      const arduinoDataPath = await window.electronAPI.getArduinoDataPath();
+      linuxCopyCmd = `cd "${arduinoDataPath}/packages/proffieboard/hardware/stm32l4" && cd */drivers/linux && sudo cp *.rules /etc/udev/rules.d`;
+      appendModalLog(`  ${linuxCopyCmd}`, false);
       appendModalLog('', false);
-      appendModalLog('Visit pod.hubbe.net for full setup instructions.', false);
+      appendModalLog('Then reboot your computer, replug the board in bootloader mode, and click Try Again.', false);
     } else {
       // Mac — DFU should work without any setup; this state is unexpected
       appendModalLog('DFU device could not be accessed.', true);
@@ -1385,13 +1403,13 @@ async function startDfuWaitModal(isRetry = false, autoFlash = true, justInstalle
       dfuSetupBtn.style.display = 'inline-block';
       document.getElementById('bm-manual-row').style.display = 'flex';
     } else if (isLinux) {
-      retryBtn.textContent = '↺ Try Again';
-      retryBtn.style.display = 'inline-block';
-      _dfuRetryRecheck   = true;
-      _dfuRetryAutoFlash = autoFlash;
-      document.getElementById('bm-status').textContent = 'USB permission required';
-      dfuSetupBtn.style.display = 'none';
+      retryBtn.style.display = 'none';
+      document.getElementById('bm-status').textContent = 'Reboot required';
       document.getElementById('bm-manual-row').style.display = 'none';
+      dfuSetupBtn.textContent        = 'Copy Commands';
+      dfuSetupBtn.dataset.phase      = 'copy-linux';
+      dfuSetupBtn.dataset.command    = linuxCopyCmd;
+      dfuSetupBtn.style.display      = 'inline-block';
     } else {
       // Mac
       retryBtn.style.display = 'none';
@@ -1407,6 +1425,7 @@ async function startDfuWaitModal(isRetry = false, autoFlash = true, justInstalle
   // DFU device detected and accessible
   dfuDeviceReady = true;
   setStatus('port', 'ok', 'DFU device ready');
+  updateCompileButton();
 
   document.getElementById('bm-log').innerHTML = '';
   appendModalLog('✓ Proffieboard detected in Bootloader Mode (DFU)', false);

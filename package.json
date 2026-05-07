@@ -1,8 +1,9 @@
 {
   "name": "jmt-studio",
-  "version": "1.6.4",
+  "version": "1.6.5",
   "description": "ProffieOS Configuration Tool by Jedi Master Tech",
-  "author": "Jedi Master Tech",
+  "author": "Jedi Master Tech <jmtstudio@jedimastertech.com>",
+  "homepage": "https://jedimastertech.com",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -13,7 +14,7 @@
   },
   "build": {
     "appId": "com.jmt.proffieos-editor",
-    "productName": "JMT Studio",
+    "productName": "JMT-Studio",
     "npmRebuild": true,
     "directories": {
       "output": "dist"
@@ -31,9 +32,26 @@
       "shortcutName": "JMT Studio",
       "include": "build/installer.nsh"
     },
+    "afterSign": "build/notarize.js",
     "mac": {
       "target": "dmg",
-      "icon": "assets/icon.icns"
+      "icon": "assets/icon.icns",
+      "extendInfo": {
+        "CFBundleDisplayName": "JMT Studio"
+      },
+      "notarize": false
+    },
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "icon": "build/icons/512x512.png",
+      "category": "Utility",
+      "executableName": "jmt-studio",
+      "desktop": {
+        "Name": "JMT Studio"
+      }
+    },
+    "deb": {
+      "afterInstall": "build/linux-after-install.sh"
     },
     "files": [
       "main.js",

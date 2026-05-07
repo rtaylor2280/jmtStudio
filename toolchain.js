@@ -35,16 +35,17 @@ function abort() {
 // ── Constants ──────────────────────────────────────────
 const CORE_ID       = 'proffieboard:stm32l4';
 const CORE_VERSION  = '4.6.0';
-const CLI_WIN       = 'arduino-cli.exe';
-const CLI_MAC       = 'arduino-cli';
 
 // Additional URL needed for proffieboard core
 const BOARD_MANAGER_URL = 'https://profezzorn.github.io/arduino-proffieboard/package_proffieboard_index.json';
 
 // ── CLI path resolution ────────────────────────────────
 function getCliPath() {
-  const bin = process.platform === 'win32' ? CLI_WIN : CLI_MAC;
-  return path.join(proffie.getResourcesPath(), 'arduino-cli', bin);
+  const platform = process.platform === 'win32' ? 'windows'
+                 : process.platform === 'darwin'  ? 'mac'
+                 : 'linux';
+  const bin = process.platform === 'win32' ? 'arduino-cli.exe' : 'arduino-cli';
+  return path.join(proffie.getResourcesPath(), 'arduino-cli', platform, bin);
 }
 
 function getArduinoDataPath() {
@@ -69,6 +70,7 @@ function validateCli() {
   if (!fs.existsSync(cliPath)) {
     return { ok: false, error: `arduino-cli not found at:\n${cliPath}\n\nCheck that the binary is included in resources/arduino-cli/` };
   }
+  ensureExecutable(cliPath);
   return { ok: true, cliPath };
 }
 
@@ -150,13 +152,19 @@ async function ensureCliConfig(onLog) {
 
 // ── First-run: install core if not present ─────────────
 async function ensureCore(onLog) {
-  const dataPath    = getArduinoDataPath();
-  const hardwarePath = path.join(dataPath, 'packages', 'proffieboard', 'hardware', 'stm32l4');
+  const dataPath     = getArduinoDataPath();
+  const sentinelPath = path.join(dataPath, '.core-installed');
 
-  // Check for boards.txt inside any installed version — this file only exists after
-  // a complete successful install. The top-level packages/proffieboard dir is not
-  // a reliable check because arduino-cli creates it during core update-index.
-  // Note: arduino-cli installs 4.6.0 as directory "4.6", so we check version-agnostically.
+  // Sentinel file written after any successful install (including "already installed" via Arduino IDE).
+  // Avoids re-running the index download on every startup for users who have the core installed
+  // via Arduino IDE rather than our own arduino-data directory.
+  if (fs.existsSync(sentinelPath) && fs.readFileSync(sentinelPath, 'utf8').trim() === CORE_VERSION) {
+    onLog(`Core ${CORE_ID}@${CORE_VERSION} already installed.`, false);
+    return { ok: true };
+  }
+
+  // Also check our own arduino-data directory directly
+  const hardwarePath = path.join(dataPath, 'packages', 'proffieboard', 'hardware', 'stm32l4');
   const isInstalled = fs.existsSync(hardwarePath) &&
     fs.readdirSync(hardwarePath).some(v =>
       fs.existsSync(path.join(hardwarePath, v, 'boards.txt'))
@@ -164,18 +172,22 @@ async function ensureCore(onLog) {
 
   if (isInstalled) {
     onLog(`Core ${CORE_ID}@${CORE_VERSION} already installed.`, false);
+    fs.writeFileSync(sentinelPath, CORE_VERSION, 'utf8');
     return { ok: true };
   }
 
   onLog(`Installing core ${CORE_ID}@${CORE_VERSION} — this may take a few minutes on first run...`, false);
-  
-  // Update index first
-  const update = await runCli(['core', 'update-index'], onLog);
+
+  // Update index first — pass URL directly so it works regardless of config file parsing
+  const update = await runCli(['core', 'update-index', `--additional-urls=${BOARD_MANAGER_URL}`], onLog);
   if (!update.ok) return { ok: false, error: 'Failed to update board index.' };
 
   // Install core
-  const install = await runCli(['core', 'install', `${CORE_ID}@${CORE_VERSION}`], onLog);
+  const install = await runCli(['core', 'install', `${CORE_ID}@${CORE_VERSION}`, `--additional-urls=${BOARD_MANAGER_URL}`], onLog);
   if (!install.ok) return { ok: false, error: `Failed to install core ${CORE_ID}@${CORE_VERSION}.` };
+
+  // Write sentinel so subsequent startups skip this flow
+  fs.writeFileSync(sentinelPath, CORE_VERSION, 'utf8');
 
   onLog(`Core installed successfully.`, false);
   return { ok: true };
@@ -284,8 +296,27 @@ function extractCompileError(raw) {
 
 // ── Tools path ─────────────────────────────────────────
 function getToolsPath() {
-  const platform = process.platform === 'win32' ? 'windows' : 'mac';
+  const platform = process.platform === 'win32' ? 'windows'
+                 : process.platform === 'darwin'  ? 'mac'
+                 : 'linux';
   return path.join(proffie.getResourcesPath(), 'tools', platform);
+}
+
+function ensureExecutable(filePath) {
+  if (process.platform !== 'win32' && fs.existsSync(filePath)) {
+    try { fs.chmodSync(filePath, 0o755); } catch {}
+  }
+}
+
+// On Linux, bundled dfu-util links against libusb-1.0.so.0 which we bundle
+// in the same tools directory. Set LD_LIBRARY_PATH so the dynamic linker finds it.
+function getDfuEnv(toolsDir) {
+  if (process.platform !== 'linux') return undefined;
+  const existing = process.env.LD_LIBRARY_PATH || '';
+  return {
+    ...process.env,
+    LD_LIBRARY_PATH: existing ? `${toolsDir}:${existing}` : toolsDir
+  };
 }
 
 function getDfuUtilPath() {
@@ -349,10 +380,11 @@ function waitForDfu(onLog, timeoutMs = 10000) {
     const start    = Date.now();
     const dfuUtil  = getDfuUtilPath();
     const toolsDir = getToolsPath();
+    ensureExecutable(dfuUtil);
 
     const check = () => {
       const { execFile } = require('child_process');
-      execFile(dfuUtil, ['-l'], { timeout: 3000, cwd: toolsDir }, (err, stdout, stderr) => {
+      execFile(dfuUtil, ['-l'], { timeout: 3000, cwd: toolsDir, env: getDfuEnv(toolsDir) }, (err, stdout, stderr) => {
         const output = (stdout || '') + (stderr || '');
         const lines  = output.split(/\r?\n/);
         const found  = lines.some(l =>
@@ -404,7 +436,9 @@ async function prepareFirmware(onLog) {
     getArduinoDataPath(),
     process.platform === 'win32'
       ? path.join(process.env.LOCALAPPDATA || '', 'Arduino15')
-      : path.join(process.env.HOME || '', 'Library', 'Arduino15')
+      : process.platform === 'darwin'
+        ? path.join(process.env.HOME || '', 'Library', 'Arduino15')
+        : path.join(process.env.HOME || '', '.arduino15')
   ];
 
   let objcopy = null;
@@ -438,24 +472,34 @@ async function prepareFirmware(onLog) {
   }
   onLog('Binary created.', false);
 
-  // Add DFU suffix
+  // Add DFU suffix (pure Node.js — no dfu-suffix binary needed)
   onLog('Adding DFU suffix...', false);
-  fs.copyFileSync(binPath, dfuPath);
-
-  const suffixResult = await new Promise(resolve => {
-    const { execFile } = require('child_process');
-    execFile(getDfuSuffixPath(),
-      ['-v', '0x1209', '-p', '0x6668', '-d', '0xffff', '-a', dfuPath],
-      { cwd: toolsDir },
-      (err) => {
-        if (err) resolve({ ok: false, error: err.message });
-        else resolve({ ok: true });
-      });
-  });
-
-  if (!suffixResult.ok) {
-    onLog(`dfu-suffix failed: ${suffixResult.error}`, true);
-    return { ok: false, error: suffixResult.error };
+  try {
+    const bin = fs.readFileSync(binPath);
+    const suffix = Buffer.alloc(16);
+    suffix.writeUInt16LE(0xffff, 0);  // bcdDevice
+    suffix.writeUInt16LE(0x6668, 2);  // idProduct
+    suffix.writeUInt16LE(0x1209, 4);  // idVendor
+    suffix.writeUInt16LE(0x0100, 6);  // bcdDFU (DFU 1.0)
+    suffix[8]  = 0x55;                // 'U'
+    suffix[9]  = 0x46;                // 'F'
+    suffix[10] = 0x44;                // 'D'
+    suffix[11] = 16;                  // bLength
+    // CRC32 over binary + first 12 suffix bytes (everything except dwCRC)
+    let crc = 0xFFFFFFFF;
+    for (let i = 0; i < bin.length; i++) {
+      crc ^= bin[i];
+      for (let j = 0; j < 8; j++) crc = (crc & 1) ? ((crc >>> 1) ^ 0xEDB88320) : (crc >>> 1);
+    }
+    for (let i = 0; i < 12; i++) {
+      crc ^= suffix[i];
+      for (let j = 0; j < 8; j++) crc = (crc & 1) ? ((crc >>> 1) ^ 0xEDB88320) : (crc >>> 1);
+    }
+    suffix.writeUInt32LE(crc >>> 0, 12);
+    fs.writeFileSync(dfuPath, Buffer.concat([bin, suffix]));
+  } catch (e) {
+    onLog(`DFU suffix failed: ${e.message}`, true);
+    return { ok: false, error: e.message };
   }
   onLog('DFU suffix added.', false);
 
@@ -465,6 +509,7 @@ async function prepareFirmware(onLog) {
 // ── Run dfu-util flash (shared by flash and flashDFU) ─
 async function runDfuFlash(dfuPath, toolsDir, onLog) {
   onLog('Flashing firmware...', false);
+  ensureExecutable(getDfuUtilPath());
 
   const flashResult = await new Promise(resolve => {
     const proc = spawn(getDfuUtilPath(), [
@@ -472,7 +517,7 @@ async function runDfuFlash(dfuPath, toolsDir, onLog) {
       '-a', '0',
       '-s', '0x08000000:leave',
       '-D', dfuPath
-    ], { cwd: toolsDir });
+    ], { cwd: toolsDir, env: getDfuEnv(toolsDir) });
 
     let stdout = '', stderr = '';
 
@@ -549,8 +594,9 @@ function detectDFU() {
   const dfuUtil  = getDfuUtilPath();
   const toolsDir = getToolsPath();
 
+  ensureExecutable(getDfuUtilPath());
   return new Promise(resolve => {
-    execFile(dfuUtil, ['-l'], { timeout: 5000, cwd: toolsDir }, (_err, stdout, stderr) => {
+    execFile(dfuUtil, ['-l'], { timeout: 5000, cwd: toolsDir, env: getDfuEnv(toolsDir) }, (_err, stdout, stderr) => {
       const output = (stdout || '') + (stderr || '');
       const lines  = output.split(/\r?\n/);
 

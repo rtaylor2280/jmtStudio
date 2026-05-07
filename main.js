@@ -89,7 +89,9 @@ function createWindow() {
     minHeight: 500,
     backgroundColor: '#111111',
     titleBarStyle: 'default',
-    icon: path.join(__dirname, 'assets', 'icon.ico'),
+    ...(process.platform === 'win32'  ? { icon: path.join(__dirname, 'assets', 'icon.ico') }
+      : process.platform === 'linux'  ? { icon: path.join(__dirname, 'assets', 'logo.png') }
+      : {}),
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -155,7 +157,7 @@ app.whenReady().then(() => {
 
   createWindow();
 });
-app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+app.on('window-all-closed', () => app.quit());
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 
 // ── Log forwarder ──────────────────────────────────────
@@ -420,6 +422,18 @@ ipcMain.handle('cache:getDataSize', () => {
 
 ipcMain.handle('app:getVersion',      () => app.getVersion());
 ipcMain.handle('app:isDevMode',       () => !app.isPackaged);
+ipcMain.handle('app:getArduinoDataPath', () => {
+  const os   = require('os');
+  const base = app.isPackaged
+    ? app.getPath('userData')
+    : path.join(app.getPath('appData'), 'jmt-studio');
+  const appPath = path.join(base, 'arduino-data');
+  if (fs.existsSync(path.join(appPath, 'packages', 'proffieboard'))) return appPath;
+  const systemPath = process.platform === 'darwin'
+    ? path.join(os.homedir(), 'Library', 'Arduino15')
+    : path.join(os.homedir(), '.arduino15');
+  return systemPath;
+});
 ipcMain.handle('clipboard:read',      () => require('electron').clipboard.readText());
 
 // ── IPC: App self-update ───────────────────────────────
@@ -453,7 +467,10 @@ ipcMain.handle('app:checkForUpdate', async (_, { force = false } = {}) => {
     const latestVersion  = (release.tag_name || '').replace(/^v/, '');
     const currentVersion = app.getVersion();
     const hasUpdate      = _semverGt(latestVersion, currentVersion);
-    const asset          = (release.assets || []).find(a => a.name.endsWith('.exe'));
+    const assetExt = process.platform === 'win32' ? '.exe'
+                   : process.platform === 'darwin' ? '.dmg'
+                   : '.AppImage';
+    const asset = (release.assets || []).find(a => a.name.endsWith(assetExt));
     const result = {
       ok: true,
       hasUpdate,
@@ -528,7 +545,15 @@ ipcMain.handle('ports:list', async () => {
 ipcMain.handle('ports:listRaw', async () => {
   const { SerialPort } = require('serialport');
   const ports = await SerialPort.list();
-  return ports.map(p => ({ path: p.path }));
+  return ports.map(p => {
+    // On Mac, serialport returns /dev/tty.* but arduino-cli uses /dev/cu.*
+    // Normalize to cu.* so path comparisons succeed.
+    let portPath = p.path;
+    if (process.platform === 'darwin' && portPath.startsWith('/dev/tty.')) {
+      portPath = '/dev/cu.' + portPath.slice('/dev/tty.'.length);
+    }
+    return { path: portPath };
+  });
 });
 
 ipcMain.handle('ports:getRecommended', async () => {
