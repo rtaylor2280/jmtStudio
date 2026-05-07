@@ -466,16 +466,25 @@ ipcMain.handle('app:checkForUpdate', async (_, { force = false } = {}) => {
     const release        = JSON.parse(body);
     const latestVersion  = (release.tag_name || '').replace(/^v/, '');
     const currentVersion = app.getVersion();
-    const hasUpdate      = _semverGt(latestVersion, currentVersion);
-    const assetExt = process.platform === 'win32' ? '.exe'
-                   : process.platform === 'darwin' ? '.dmg'
-                   : '.AppImage';
-    const asset = (release.assets || []).find(a => a.name.endsWith(assetExt));
+    const hasUpdate = _semverGt(latestVersion, currentVersion);
+    let asset;
+    if (process.platform === 'win32') {
+      asset = (release.assets || []).find(a => a.name.endsWith('.exe'));
+    } else if (process.platform === 'darwin') {
+      if (process.arch === 'arm64') {
+        asset = (release.assets || []).find(a => a.name.endsWith('-arm64.dmg'));
+      } else {
+        asset = (release.assets || []).find(a => a.name.endsWith('.dmg') && !a.name.includes('arm64'));
+      }
+    } else {
+      asset = (release.assets || []).find(a => a.name.endsWith('.AppImage'));
+    }
     const result = {
       ok: true,
       hasUpdate,
       currentVersion,
       latestVersion,
+      platform:     process.platform,
       releaseNotes: release.body || '',
       downloadUrl:  asset?.browser_download_url || null,
       assetName:    asset?.name || null,

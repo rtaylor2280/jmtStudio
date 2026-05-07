@@ -3909,12 +3909,14 @@ function _renderUpdateAvailablePanel(info) {
   document.getElementById('btn-update-notes-toggle').textContent = '▶ Release Notes';
   document.getElementById('update-error-msg').style.display = 'none';
   const dlBtn = document.getElementById('btn-download-update');
+  const isWin = info.platform === 'win32';
+  dlBtn.textContent    = isWin ? 'Download Update' : 'Get Update';
   dlBtn.style.display  = 'inline-block';
-  dlBtn.disabled       = !info.downloadUrl;
-  dlBtn.title          = info.downloadUrl ? '' : 'No installer available for this release';
+  dlBtn.disabled       = false;
+  dlBtn.title          = '';
   document.getElementById('update-progress-wrap').style.display = 'none';
-  document.getElementById('btn-install-update').style.display   = _updateExeReady ? 'inline-block' : 'none';
-  if (_updateExeReady) dlBtn.style.display = 'none';
+  document.getElementById('btn-install-update').style.display   = (isWin && _updateExeReady) ? 'inline-block' : 'none';
+  if (isWin && _updateExeReady) dlBtn.style.display = 'none';
   document.getElementById('update-available-panel').style.display = 'block';
 }
 
@@ -3988,7 +3990,14 @@ document.getElementById('btn-update-notes-toggle').addEventListener('click', () 
 });
 
 document.getElementById('btn-download-update').addEventListener('click', async () => {
-  if (!_updateInfo?.downloadUrl) return;
+  if (!_updateInfo) return;
+
+  if (_updateInfo.platform !== 'win32') {
+    window.electronAPI.openExternal('https://jedimastertech.com/jmtstudio/');
+    return;
+  }
+
+  if (!_updateInfo.downloadUrl) return;
   const dlBtn  = document.getElementById('btn-download-update');
   const wrap   = document.getElementById('update-progress-wrap');
   const fill   = document.getElementById('update-progress-fill');
