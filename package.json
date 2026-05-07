@@ -37,6 +37,9 @@
       "icon": "assets/icon.icns",
       "extendInfo": {
         "CFBundleDisplayName": "JMT Studio"
+      },
+      "notarize": {
+        "teamId": "MJ2AAJ6PK5"
       }
     },
     "linux": {
