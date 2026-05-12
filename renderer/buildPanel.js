@@ -158,6 +158,7 @@ async function initBuildPanel() {
   unsubs.push(window.electronAPI.onBuildLog(onBuildLog));
   unsubs.push(window.electronAPI.onBuildStatus(onBuildStatus));
   unsubs.push(window.electronAPI.onBuildDone(onBuildDone));
+  unsubs.push(window.electronAPI.onPortsChanged(() => refreshPorts()));
 
   // Wire buttons
   el('bp-btn-compile').addEventListener('click', doCompile);
@@ -170,6 +171,12 @@ async function initBuildPanel() {
   });
   el('bp-port-select').addEventListener('change', onPortChange);
   el('bp-btn-exit-dfu').addEventListener('click', exitDfuMode);
+  document.getElementById('linux-serial-copy')?.addEventListener('click', (e) => {
+    navigator.clipboard.writeText('sudo usermod -aG dialout $USER').then(() => {
+      e.target.textContent = 'Copied!';
+      setTimeout(() => { e.target.textContent = 'Copy Commands'; }, 2000);
+    });
+  });
   el('bp-log-toggle').addEventListener('click', toggleLog);
   el('bp-log-clear').addEventListener('click', clearLog);
   document.getElementById('input-board').addEventListener('change', onInputBoardChange);
@@ -462,9 +469,15 @@ async function doFlash() {
 }
 
 // ── Port detection ─────────────────────────────────────
+function _setLinuxSerialNotice(show) {
+  const notice = document.getElementById('linux-serial-notice');
+  if (notice) notice.style.display = show ? 'block' : 'none';
+}
+
 async function refreshPorts() {
   if (isDfuMode) return; // port selection is locked while in DFU mode
   const result = await window.electronAPI.getRecommendedPort();
+  _setLinuxSerialNotice(result.linuxSerialPermissionIssue || false);
 
   const portSelect = el('bp-port-select');
   portSelect.innerHTML = '';
@@ -541,12 +554,7 @@ async function refreshPorts() {
   updatePortChangedIndicator();
   addDfuSentinel();
 
-  // Start background port watcher when no Proffieboard is connected
-  if (!selectedPortIsProffieboard) {
-    startPortWatch('monitor');
-  } else {
-    stopPortWatch();
-  }
+  stopPortWatch();
 
   // Reconcile flash state with current port + compile state
   if (!compileSuccess) {
@@ -678,9 +686,16 @@ function onBuildLog({ line, isError }) {
 }
 
 function onBuildStatus({ type, ok, message }) {
-  if (type === 'toolchain') {
+  if (type === 'toolchain-setup') {
+    setStatus('toolchain', 'pending', 'Setting up build tools...');
+    openLog();
+    const notice = document.getElementById('bp-setup-notice');
+    if (notice) notice.style.display = '';
+  } else if (type === 'toolchain') {
     toolchainReady = ok;
     setStatus('toolchain', ok ? 'ok' : 'error', message);
+    const notice = document.getElementById('bp-setup-notice');
+    if (notice) notice.style.display = 'none';
     const showSecondary = ok !== false;
     ['port', 'compile', 'flash'].forEach(t => {
       const item = document.getElementById(`bp-status-${t}-item`);
@@ -840,7 +855,8 @@ function setBarMode(mode) {
 
 // ── Port watcher ───────────────────────────────────────
 // Polls SerialPort.list() cheaply every 1s; on change fires getRecommendedPort().
-// context: 'monitor' (main UI) | 'wait-flash' (modal waiting for board)
+// Only used for 'wait-flash' context (active flash operation waiting for board).
+// Passive board detection is handled by the background poller in main.js.
 
 let _portWatchInterval = null;
 let _portWatchContext  = null;
@@ -864,7 +880,10 @@ function startPortWatch(context) {
 }
 
 function stopPortWatch() {
-  if (_portWatchInterval) { clearInterval(_portWatchInterval); _portWatchInterval = null; }
+  if (_portWatchInterval) {
+    clearInterval(_portWatchInterval);
+    _portWatchInterval = null;
+  }
   _lastRawPortKey   = null;
   _portWatchContext = null;
 }
@@ -872,12 +891,7 @@ function stopPortWatch() {
 async function handlePortWatchResult(result) {
   const proffieports = result.ok ? (result.proffieports || []) : [];
 
-  if (_portWatchContext === 'monitor') {
-    if (proffieports.length === 0) return; // still no board, keep watching
-    stopPortWatch();
-    await refreshPorts(); // board appeared — full UI refresh
-
-  } else if (_portWatchContext === 'wait-flash') {
+  if (_portWatchContext === 'wait-flash') {
     if (proffieports.length === 0) return; // still waiting
 
     if (proffieports.length === 1 || result.autoSelected) {

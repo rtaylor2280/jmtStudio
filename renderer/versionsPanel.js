@@ -183,11 +183,14 @@ function _vpRenderDetail(v) {
       <button class="vp-action-btn" id="vp-btn-export" title="Copy version folder to a location you choose">↗ Export</button>
       <button class="vp-action-btn" id="vp-btn-rename" title="Rename this version">✎ Rename</button>
       <button class="vp-action-btn danger" id="vp-btn-delete" title="Permanently delete this version">✕ Delete</button>
-      <div style="margin-left:auto;display:flex;align-items:center;gap:10px;">
-        ${v.jmtVersion ? `<span id="vp-jmt-version-label" style="font-size:0.75rem;color:var(--c-text-dim);">Includes JMT Add-ons v${_vpEsc(v.jmtVersion)}</span>` : '<span id="vp-jmt-version-label" style="display:none;font-size:0.75rem;color:var(--c-text-dim);"></span>'}
-        <button class="vp-action-btn vp-jmt-btn" id="vp-btn-jmt" title="${v.jmtVersion ? 'Check for updates to JMT add-on files' : 'Add JMT add-on files to this version'}">
-          ${v.jmtVersion ? '⚙ Check for Updates' : '⚙ Add JMT Features'}
-        </button>
+      <div style="margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          ${v.jmtVersion ? `<span id="vp-jmt-version-label" style="font-size:0.75rem;color:var(--c-text-dim);">Includes JMT Add-ons v${_vpEsc(v.jmtVersion)}</span>` : '<span id="vp-jmt-version-label" style="display:none;font-size:0.75rem;color:var(--c-text-dim);"></span>'}
+          <button class="vp-action-btn vp-jmt-btn" id="vp-btn-jmt" title="${v.jmtVersion ? 'Check for updates to JMT add-on files' : 'Add JMT add-on files to this version'}">
+            ${v.jmtVersion ? '⚙ Check for Updates' : '⚙ Add JMT Features'}
+          </button>
+        </div>
+        <a href="#" id="vp-jmt-learn-more" title="https://www.jedimastertech.com/jmt-addons" style="font-size:0.74rem;color:#4a9edd;text-decoration:underline;">Learn more</a>
       </div>
     </div>
 
@@ -262,6 +265,10 @@ function _vpRenderDetail(v) {
   document.getElementById('vp-btn-rename')?.addEventListener('click', () => _vpRename(v));
   document.getElementById('vp-btn-delete')?.addEventListener('click', () => _vpDelete(v));
   document.getElementById('vp-btn-jmt')?.addEventListener('click', () => _vpJmtFlow(v));
+  document.getElementById('vp-jmt-learn-more')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    window.electronAPI?.openExternal?.('https://www.jedimastertech.com/jmt-addons');
+  });
 
   // File tree — start inside ProffieOS/
   const treeEl = document.getElementById('vp-tree');

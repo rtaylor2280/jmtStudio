@@ -119,6 +119,9 @@ function createWindow() {
   win.on('resize', saveBounds);
   win.on('move',   saveBounds);
 
+  win.on('blur',  () => stopPortPolling());
+  win.on('focus', () => { if (_portPollingWanted) { startPortPolling(); _pollPortsNow(); } });
+
   // ── Close handler ──
   win.on('close', (e) => {
     e.preventDefault();
@@ -156,6 +159,7 @@ app.whenReady().then(() => {
   if (initVersion) proffie.setSelectedVersion(initVersion);
 
   createWindow();
+  startPortPolling();
 });
 app.on('window-all-closed', () => app.quit());
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
@@ -314,6 +318,15 @@ ipcMain.on('title:set', (_, title) => win.setTitle(title));
 // ── IPC: Toolchain ─────────────────────────────────────
 ipcMain.handle('toolchain:initialize', async () => {
   const log = makeLogger();
+
+  if (toolchain.needsCoreInstall() && win && !win.isDestroyed()) {
+    win.webContents.send('build:status', {
+      type: 'toolchain-setup',
+      ok: null,
+      message: 'Setting up build tools...'
+    });
+  }
+
   const result = await toolchain.initialize(log);
   if (win && !win.isDestroyed()) {
     win.webContents.send('build:status', {
@@ -545,6 +558,52 @@ ipcMain.handle('app:installUpdate', async () => {
   return { ok: true };
 });
 ipcMain.handle('toolchain:abort',     () => toolchain.abort());
+
+// ── Port polling ───────────────────────────────────────
+// Cheap SerialPort.list() every 4.5s; only fires the expensive arduino-cli
+// call (via renderer refreshPorts) when the port path set actually changes.
+// Polls only when config tab is active AND window is focused.
+let _portPollTimer    = null;
+let _portPollBusy     = false;
+let _lastPortPaths    = null;
+let _portPollingWanted = false; // true when renderer is on config tab
+
+ipcMain.on('ports:setPolling', (_, enabled) => {
+  _portPollingWanted = enabled;
+  if (enabled) { startPortPolling(); _pollPortsNow(); }
+  else stopPortPolling();
+});
+
+async function _pollPortsNow() {
+  if (_portPollBusy) return;
+  _portPollBusy = true;
+  try {
+    const { SerialPort } = require('serialport');
+    const raw   = await SerialPort.list();
+    const paths = raw.map(p => p.path).sort().join('\0');
+    if (_lastPortPaths === null) {
+      _lastPortPaths = paths;
+      return;
+    }
+    if (paths !== _lastPortPaths) {
+      _lastPortPaths = paths;
+      if (win && !win.isDestroyed()) win.webContents.send('ports:changed');
+    }
+  } catch {}
+  finally { _portPollBusy = false; }
+}
+
+function startPortPolling() {
+  if (_portPollTimer) return;
+  _portPollTimer = setInterval(() => _pollPortsNow(), 4500);
+}
+
+function stopPortPolling() {
+  if (_portPollTimer) {
+    clearInterval(_portPollTimer);
+    _portPollTimer = null;
+  }
+}
 
 // ── IPC: Port detection ────────────────────────────────
 ipcMain.handle('ports:list', async () => {

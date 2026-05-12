@@ -251,6 +251,8 @@
     padding-right: 22px;
   }
   #input-filename:hover { border-color: #4d9; opacity: 1; }
+  .filename-wrap.editing #input-filename { opacity: 1; cursor: text; padding-right: 6px; }
+  .filename-wrap.editing .filename-chevron { display: none; }
   .filename-chevron {
     position: absolute;
     right: 6px;
@@ -638,7 +640,8 @@
   }
   #empty-state svg { color: var(--c-text-faint); }
   #empty-state p { font-size: 0.9rem; }
-  #btn-open-empty {
+  .empty-state-actions { display: grid; gap: 12px; }
+  #btn-open-empty, #btn-new-empty {
     padding: 10px 28px;
     border-radius: 5px;
     font-size: 0.9rem;
@@ -751,6 +754,14 @@
 
   #bp-log-body { display: none; }
   #bp-log-body.open { display: block; }
+  #bp-setup-notice {
+    padding: 8px 16px;
+    background: #0d1a26;
+    border-bottom: 1px solid #1a3550;
+    color: #7ab8d8;
+    font-size: 0.72rem;
+    line-height: 1.5;
+  }
   #bp-log-content {
     font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;
     font-size: 0.72rem;
@@ -1747,7 +1758,25 @@
   .preset-sidecar-toggle { background: none; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; color: var(--c-text-muted); font-size: 0.75rem; border-radius: 2px; padding: 0; flex-shrink: 0; }
   .preset-sidecar-toggle:hover { background: var(--c-bg-hover); color: var(--c-text); }
   .preset-sidecar.open .toggle-icon { display: inline-block; transform: rotate(180deg); }
-  .preset-strip-label { font-size: 0.58rem; font-weight: 900; letter-spacing: 0.08em; color: var(--c-text-muted); white-space: nowrap; writing-mode: vertical-lr; user-select: none; }
+  .preset-strip-banks { display: flex; flex-direction: column; align-items: center; gap: 0; flex: 1; min-height: 0; width: 100%; overflow-y: auto; overflow-x: hidden; }
+  .preset-strip-banks::-webkit-scrollbar { width: 0; height: 0; }
+  .preset-strip-label { font-size: 0.58rem; font-weight: 900; letter-spacing: 0.08em; color: var(--c-text-muted); white-space: nowrap; writing-mode: vertical-lr; user-select: none; cursor: pointer; padding: 6px 2px; border-radius: 2px; flex-shrink: 0; }
+  .preset-strip-label:hover { color: var(--c-text); background: var(--c-bg-hover); }
+  .preset-strip-label.active { color: var(--jmt-blue); }
+  html.light-mode .preset-strip-label.active { color: #036bb8; }
+  .preset-strip-divider { width: 12px; height: 1px; background: var(--c-border); flex-shrink: 0; margin: 2px 0; }
+  .preset-strip-add { background: none; border: none; cursor: pointer; color: var(--c-text-muted); font-size: 1rem; font-weight: 700; line-height: 1; padding: 4px 0; width: 18px; border-radius: 2px; flex-shrink: 0; opacity: 0.5; }
+  .preset-strip-add:hover { background: var(--c-bg-hover); color: var(--c-text); opacity: 1; }
+  .preset-array-pencil { font-size: 0.78rem; opacity: 0.45; background: none; border: none; cursor: pointer; padding: 1px 5px; border-radius: 3px; color: var(--c-text-muted); flex-shrink: 0; line-height: 1; }
+  .preset-array-pencil:hover { opacity: 1; background: var(--c-bg-hover); }
+  #preset-array-rename-row { display: none; padding: 5px 8px; gap: 5px; align-items: center; border-bottom: 1px solid var(--c-border); background: var(--c-bg-inset); }
+  #preset-array-rename-row.active { display: flex; }
+  #preset-array-rename-input { flex: 1; min-width: 0; font-family: 'Cascadia Code', 'Consolas', monospace; font-size: 0.78rem; background: var(--c-bg); color: var(--c-text); border: 1px solid var(--c-border); border-radius: 3px; padding: 3px 6px; outline: none; }
+  #preset-array-rename-input:focus { border-color: var(--jmt-blue); }
+  .preset-array-rename-btn { font-size: 0.9rem; opacity: 0.55; background: none; border: none; cursor: pointer; padding: 1px 6px; border-radius: 3px; color: var(--c-text-muted); flex-shrink: 0; line-height: 1; }
+  .preset-array-rename-btn:hover { opacity: 1; background: var(--c-bg-hover); }
+  .preset-array-rename-btn.confirm { color: #4a4; opacity: 0.75; }
+  .preset-array-rename-btn.confirm:hover { opacity: 1; }
 
   .preset-sidecar-inner { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; background: var(--c-bg-raised); }
   .preset-sidecar-header { display: flex; align-items: center; gap: 4px; padding: 8px 10px 6px; border-bottom: 1px solid var(--c-border); flex-shrink: 0; }
@@ -1820,6 +1849,7 @@
   .preset-nav-btn, .preset-detail-delete { background: none; border: none; cursor: pointer; font-size: 0.85rem; line-height: 1; padding: 2px 5px; border-radius: 3px; opacity: 0.3; transition: opacity 0.1s, color 0.1s, background 0.1s; }
   .preset-nav-btn { color: var(--c-text-muted); }
   .preset-nav-btn:hover { opacity: 1; color: var(--jmt-blue); }
+  .preset-nav-btn:disabled { opacity: 0.12; cursor: default; pointer-events: none; }
   .preset-detail-delete { color: var(--c-text-muted); margin-left: 4px; }
   .preset-detail-delete:hover { opacity: 1; color: #e44; background: rgba(40,10,10,0.7); }
 
@@ -1986,6 +2016,7 @@
             <div id="fav-list"></div>
           </div>
         </div>
+        <button id="btn-new"      class="btn-neutral">&#43; New</button>
         <button id="btn-open"     class="btn-blue">&#8593; Open</button>
         <button id="btn-close"    class="btn-red">&#10005; Close</button>
         <button id="btn-save"     class="btn-green" style="display:none">&#8595; Save</button>
@@ -1994,6 +2025,7 @@
         <div class="toolbar-divider" id="divider-styles-ctrl" style="display:none"></div>
         <button id="btn-styles-create" class="btn-blue"  style="display:none" title="Create or import a Style Library">&#43; Create Style Library</button>
         <button id="btn-styles-link"   class="btn-blue"  style="display:none" title='Adds #include "my_styles.h" to your config so ProffieOS can use your saved styles'>&#128279; Link Style Library</button>
+        <button id="btn-jmt-link"      class="btn-blue"  style="display:none" title='Adds the JMT Prop Addons include to your config so the wrapper features can be opted in via #defines'>&#128279; Link JMT Add-ons</button>
       </div>
       <div class="tab-btns" id="tab-btns-versions">
         <button id="btn-vp-download" class="btn-neutral" title="Download an official ProffieOS version from GitHub">&#8595; Download Version</button>
@@ -2290,7 +2322,10 @@
       <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
     </svg>
     <p>No config file open</p>
-    <button id="btn-open-empty" class="btn-blue">&#8593; Open Config File</button>
+    <div class="empty-state-actions">
+      <button id="btn-open-empty" class="btn-blue">&#8593; Open Config File</button>
+      <button id="btn-new-empty"  class="btn-neutral">&#43; Create New Config</button>
+    </div>
   </div>
   <div id="fav-cards"></div>
 </div>
@@ -2299,12 +2334,12 @@
 <div id="config-editor-row" style="display:none">
 
   <div id="preset-sidecar" class="preset-sidecar collapsed">
-    <!-- Always-visible left strip: toggle chevron + rotated label -->
+    <!-- Always-visible left strip: toggle chevron + per-array vertical labels + add button -->
     <div class="preset-sidecar-strip">
       <button id="btn-preset-sidecar-toggle" class="preset-sidecar-toggle" title="Toggle preset sidecar">
         <span class="toggle-icon">&#10095;</span>
       </button>
-      <span class="preset-strip-label">PRESETS</span>
+      <div id="preset-strip-banks" class="preset-strip-banks"></div>
     </div>
 
     <!-- Main content: hidden when collapsed -->
@@ -2312,7 +2347,14 @@
       <div class="preset-sidecar-header">
         <span class="preset-sidecar-title">PRESET STYLES</span>
         <button id="btn-preset-add" class="btn-blue preset-add-btn" title="Add preset to end">+</button>
+        <button id="btn-preset-array-rename" class="preset-array-pencil" title="Rename preset array">&#9998;</button>
         <button id="btn-preset-sidecar-close" class="preset-sidecar-close" title="Close">&times;</button>
+      </div>
+
+      <div id="preset-array-rename-row">
+        <input id="preset-array-rename-input" type="text" autocomplete="off" spellcheck="false">
+        <button id="btn-preset-array-rename-confirm" class="preset-array-rename-btn confirm" title="Save (Enter)">&#10003;</button>
+        <button id="btn-preset-array-rename-cancel"  class="preset-array-rename-btn"         title="Cancel (Esc)">&times;</button>
       </div>
 
       <div id="preset-list-top" class="preset-list-top"></div>
@@ -2335,6 +2377,14 @@
 
 </div>
 
+<!-- ── Linux serial permissions notice ── -->
+<div id="linux-serial-notice" style="display:none;padding:7px 14px;background:#1a1200;border-top:1px solid #5a3800;border-bottom:1px solid #5a3800;font-size:0.72rem;color:#c89010;line-height:1.7;">
+  Proffieboard detected via USB but serial port access is blocked. Add yourself to the <code style="font-family:monospace;color:#e8b040;">dialout</code> group, then reboot:
+  <br>
+  <code id="linux-serial-cmd" style="font-family:monospace;color:#e8b040;margin-left:12px;">sudo usermod -aG dialout $USER</code>
+  &nbsp;<button id="linux-serial-copy" style="background:rgba(200,150,10,0.15);color:#c89010;border:1px solid rgba(200,150,10,0.35);border-radius:3px;padding:2px 9px;font-size:0.7rem;cursor:pointer;vertical-align:middle;">Copy Commands</button>
+</div>
+
 <!-- ── Log panel ── -->
 <div id="build-log">
   <button id="bp-log-toggle">
@@ -2342,6 +2392,7 @@
     <button id="bp-log-clear">✕ clear</button>
   </button>
   <div id="bp-log-body">
+    <div id="bp-setup-notice" style="display:none">First-time setup: downloading and installing required build tools. This only happens once and may take several minutes on slower connections. Compile and flash will be available when setup is complete.</div>
     <div id="bp-log-content"></div>
   </div>
 </div>
@@ -2370,6 +2421,18 @@
       <button class="modal-btn-cancel"  id="modal-unsaved-cancel">Cancel</button>
       <button class="modal-btn-discard" id="modal-unsaved-discard">Discard</button>
       <button class="modal-btn-save"    id="modal-unsaved-save">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Reusable confirm modal (replaces native window.confirm for in-app confirmations) ── -->
+<div class="modal-overlay" id="modal-confirm">
+  <div class="modal">
+    <h2 id="modal-confirm-title">Confirm</h2>
+    <p id="modal-confirm-msg"></p>
+    <div class="modal-btns">
+      <button class="modal-btn-cancel"  id="modal-confirm-cancel">Cancel</button>
+      <button class="modal-btn-discard" id="modal-confirm-ok">OK</button>
     </div>
   </div>
 </div>
@@ -2463,6 +2526,20 @@
 </div>
 
 <!-- ── Styles conflict modal ── -->
+<!-- ── JMT prop wrapper conflict modal ── -->
+<div class="modal-overlay" id="modal-jmt-conflict">
+  <div class="modal">
+    <h2>Existing Prop Include Found</h2>
+    <p>Your config already includes a different prop. The JMT Add-ons wrapper is itself a prop — only one prop can compile at a time, so the existing line must be resolved before linking:</p>
+    <pre id="modal-jmt-conflict-line" style="background:var(--c-bg-card);border:1px solid var(--c-border-strong);border-radius:4px;padding:8px 10px;font-size:0.78rem;overflow-x:auto;margin:10px 0;white-space:pre-wrap;word-break:break-all;"></pre>
+    <div class="modal-btns">
+      <button class="modal-btn-cancel"  id="modal-jmt-conflict-cancel">Cancel</button>
+      <button class="modal-btn-discard" id="modal-jmt-conflict-remove">Remove It</button>
+      <button class="modal-btn-save"    id="modal-jmt-conflict-comment">Comment Out &amp; Link</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="modal-styles-conflict">
   <div class="modal">
     <h2>Existing Style Library Include Found</h2>
@@ -2629,6 +2706,9 @@
 
       <div class="about-grid-label">General Inquiries</div>
       <div class="about-grid-val"><a href="#" id="about-info-link">info@jedimastertech.com</a></div>
+
+      <div class="about-grid-label">Tip Jar</div>
+      <div class="about-grid-val"><a href="#" id="about-kofi-link">ko-fi.com/jedimastertech</a></div>
     </div>
 
     <div id="update-available-panel" style="display:none;margin-bottom:16px;padding:10px 12px;background:rgba(74,158,221,0.08);border:1px solid rgba(74,158,221,0.25);border-radius:6px">
@@ -2723,9 +2803,9 @@ function applyTheme(mode) {
     btn.classList.toggle('active', btn.dataset.theme === mode);
   });
 }
-applyTheme(localStorage.getItem('jmt-theme') || 'dark');
+applyTheme(localStorage.getItem('jmt-theme') || 'system');
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-  if ((localStorage.getItem('jmt-theme') || 'dark') === 'system') applyTheme('system');
+  if ((localStorage.getItem('jmt-theme') || 'system') === 'system') applyTheme('system');
 });
 
 // ── State ──────────────────────────────────────────────
@@ -2765,6 +2845,7 @@ function setFileOpen(open) {
     _resetCompareUI();
     document.getElementById('config-banner').classList.remove('visible');
     if (isElectron) refreshEmptyStateFavs();
+    _restoreFilenameReadonly();
   } else {
     updateBanner();
   }
@@ -2776,6 +2857,7 @@ function setFileOpen(open) {
   }
   if (isElectron) { updateFavButton(); window.updateCompileButton?.(); }
   _updateStylesLinkBtn();
+  _updateJmtLinkBtn();
   _scheduleStylesInUseRebuild();
 }
 
@@ -2792,6 +2874,45 @@ function promptUnsaved(msg) {
   });
 }
 window.promptUnsaved = promptUnsaved;
+
+// Reusable confirm dialog using the in-app modal style (replaces window.confirm).
+// Resolves true if user confirms, false if cancelled or dismissed.
+//   opts.title       — modal heading (default: 'Confirm')
+//   opts.message     — body text; newlines render as line breaks
+//   opts.confirmText — primary button label (default: 'OK')
+//   opts.confirmKind — 'danger' (default, red) | 'save' (green) | 'primary' (blue)
+//   opts.cancelText  — secondary button label (default: 'Cancel')
+function promptConfirm(opts) {
+  return new Promise(resolve => {
+    const {
+      title       = 'Confirm',
+      message     = 'Are you sure?',
+      confirmText = 'OK',
+      confirmKind = 'danger',
+      cancelText  = 'Cancel',
+    } = opts || {};
+    document.getElementById('modal-confirm-title').textContent = title;
+    const msgEl = document.getElementById('modal-confirm-msg');
+    msgEl.textContent = '';
+    String(message).split('\n').forEach((line, i) => {
+      if (i > 0) msgEl.appendChild(document.createElement('br'));
+      msgEl.appendChild(document.createTextNode(line));
+    });
+    const okBtn = document.getElementById('modal-confirm-ok');
+    okBtn.textContent = confirmText;
+    okBtn.className = confirmKind === 'primary' ? 'modal-btn-primary'
+                    : confirmKind === 'save'    ? 'modal-btn-save'
+                    : 'modal-btn-discard';
+    const cancelBtn = document.getElementById('modal-confirm-cancel');
+    cancelBtn.textContent = cancelText;
+    const overlay = document.getElementById('modal-confirm');
+    overlay.classList.add('active');
+    const cleanup = (r) => { overlay.classList.remove('active'); resolve(r); };
+    okBtn.onclick     = () => cleanup(true);
+    cancelBtn.onclick = () => cleanup(false);
+  });
+}
+window.promptConfirm = promptConfirm;
 
 // ── Dirty ──────────────────────────────────────────────
 function setDirty(v) {
@@ -2886,6 +3007,7 @@ document.getElementById('input-version').addEventListener('change', () => {
     window.electronAPI.selectVersion(name);
     window.electronAPI.initToolchain();
   }
+  _refreshSelectedVersionJmtState();
 });
 
 // ── Metadata ───────────────────────────────────────────
@@ -3356,6 +3478,7 @@ function setFilePath(p) {
   document.getElementById('stat-filepath').textContent = p || '';
   updateWindowTitle();
   _hideTxtConvertNotice();
+  if (p) _restoreFilenameReadonly();
 }
 
 document.getElementById('btn-save')    ?.addEventListener('click', doSave);
@@ -3371,6 +3494,24 @@ async function guardUnsaved(msg) {
   return true;
 }
 
+// ── New ────────────────────────────────────────────────
+async function doNew() {
+  if (!await guardUnsaved('Save current file before creating a new config?')) return;
+  loadContent('', null);
+  const fn = document.getElementById('input-filename');
+  fn.removeAttribute('readonly');
+  fn.title = 'Enter a name for your new config';
+  document.querySelector('.filename-wrap').classList.add('editing');
+  fn.select();
+}
+
+function _restoreFilenameReadonly() {
+  const fn = document.getElementById('input-filename');
+  fn.setAttribute('readonly', '');
+  fn.title = 'Click to see recent files';
+  document.querySelector('.filename-wrap').classList.remove('editing');
+}
+
 // ── Open ───────────────────────────────────────────────
 async function doOpen() {
   if (!await guardUnsaved('Save current file before opening another?')) return;
@@ -3382,6 +3523,8 @@ async function doOpen() {
   }
 }
 
+document.getElementById('btn-new').addEventListener('click', doNew);
+document.getElementById('btn-new-empty').addEventListener('click', doNew);
 document.getElementById('btn-open').addEventListener('click', doOpen);
 document.getElementById('btn-open-empty').addEventListener('click', doOpen);
 document.getElementById('file-input').addEventListener('change', function () {
@@ -3547,6 +3690,9 @@ function populateVersionSelect(sel, versions, selectedName) {
   }
   sel.dataset.lastValue = sel.value;
   sel.title = sel.value || '';
+  // Any path that sets the dropdown value (boot, refresh, import success) should
+  // also refresh the JMT-installed state for the now-selected version.
+  window._refreshSelectedVersionJmtState?.();
 }
 window.populateVersionSelect = populateVersionSelect;
 
@@ -3563,6 +3709,8 @@ async function _refreshVersionDropdown(preferName) {
     window.electronAPI.initToolchain();
   }
   window.updateCompileButton?.();
+  // JMT state can change without the dropdown value changing (rename, JMT apply, etc.)
+  window._refreshSelectedVersionJmtState?.();
 }
 window.refreshVersionDropdown = _refreshVersionDropdown;
 
@@ -3882,6 +4030,10 @@ document.getElementById('about-support-link').addEventListener('click', (e) => {
 document.getElementById('about-info-link').addEventListener('click', (e) => {
   e.preventDefault();
   if (window.electronAPI?.openExternal) window.electronAPI.openExternal('mailto:info@jedimastertech.com');
+});
+document.getElementById('about-kofi-link').addEventListener('click', (e) => {
+  e.preventDefault();
+  if (window.electronAPI?.openExternal) window.electronAPI.openExternal('https://ko-fi.com/jedimastertech');
 });
 
 // ── Self-update ────────────────────────────────────────
@@ -4226,10 +4378,9 @@ function _updateStylesLinkBtn() {
   _stylesLinked = linked;
   const fileName = currentFilePath ? currentFilePath.split(/[\\/]/).pop() : '';
 
-  // Config toolbar button — hides once linked
+  // Config toolbar button — hidden when no file open, when already linked, or when library missing
   if (btn) {
-    btn.style.display = linked ? 'none' : '';
-    btn.disabled = !fileIsOpen;
+    btn.style.display = (linked || !fileIsOpen) ? 'none' : '';
   }
   if (divider && importBtn) {
     divider.style.display = (importBtn.style.display !== 'none' || !linked) ? '' : 'none';
@@ -4300,7 +4451,11 @@ document.getElementById('btn-create-styles-import').addEventListener('click', as
 });
 
 document.getElementById('btn-styles-delete').addEventListener('click', async () => {
-  if (!confirm('Remove Style Library from JMT Studio? Any changes made since importing will be lost.')) return;
+  if (!await promptConfirm({
+    title:       'Remove Style Library',
+    message:     'Remove Style Library from JMT Studio?\n\nAny changes made since importing will be lost.',
+    confirmText: 'Remove',
+  })) return;
   const result = await window.electronAPI.deleteStylesFile();
   if (!result.ok) return;
   _setStylesDirty(false);
@@ -4311,11 +4466,61 @@ document.getElementById('btn-styles-delete').addEventListener('click', async () 
   if (_activeTab === 'styles') switchTab('config');
 });
 
+// Ensures a `#ifdef CONFIG_PRESETS` / `#endif` section exists. Mutates `lines` in place.
+//   • Bare `Preset NAME[] = {...};` (and adjacent `BladeConfig NAME[] = {...};`) → wrap them.
+//   • No Preset block at all → append a fresh empty CONFIG_PRESETS scaffold at end of file.
+function _wrapBarePresetsInIfdef(lines) {
+  const closeAt = (from) => {
+    let depth = 0;
+    let opened = false;
+    for (let i = from; i < lines.length; i++) {
+      for (const ch of lines[i]) {
+        if (ch === '{') { depth++; opened = true; }
+        else if (ch === '}') depth--;
+      }
+      if (opened && depth === 0) return i;
+    }
+    return -1;
+  };
+
+  const startIdx = lines.findIndex(l => /^\s*Preset\s+\w+\s*\[\s*\]\s*=\s*\{/.test(l));
+
+  if (startIdx === -1) {
+    // No Preset block — append a fresh empty CONFIG_PRESETS scaffold so the include has a home
+    if (lines.length && lines[lines.length - 1].trim() !== '') lines.push('');
+    lines.push('#ifdef CONFIG_PRESETS', '', 'Preset presets[] = {', '};', '', '#endif', '');
+    return;
+  }
+
+  let endIdx = closeAt(startIdx);
+  if (endIdx === -1) return;
+
+  // Sweep across any adjacent BladeConfig block (whitespace-separated, no other code between)
+  for (let i = endIdx + 1; i < lines.length; i++) {
+    const t = lines[i].trim();
+    if (t === '') continue;
+    if (/^BladeConfig\s+\w+\s*\[\s*\]\s*=\s*\{/.test(t)) {
+      const bcEnd = closeAt(i);
+      if (bcEnd !== -1) endIdx = bcEnd;
+    }
+    break;
+  }
+
+  lines.splice(endIdx + 1, 0, '', '#endif');
+  lines.splice(startIdx, 0, '#ifdef CONFIG_PRESETS', '');
+}
+
 function _doInsertStylesInclude(lines, conflictIdx, action) {
   if (action === 'comment') {
     lines[conflictIdx] = '//' + lines[conflictIdx];
   } else if (action === 'remove') {
     lines.splice(conflictIdx, 1);
+  }
+
+  // If there's no CONFIG_PRESETS ifdef but bare Preset/BladeConfig blocks exist,
+  // wrap them so the include has a sensible home.
+  if (!lines.some(l => /^\s*#ifdef\s+CONFIG_PRESETS/.test(l))) {
+    _wrapBarePresetsInIfdef(lines);
   }
 
   // Find insertion point after splice
@@ -4349,10 +4554,15 @@ function _doInsertStylesInclude(lines, conflictIdx, action) {
 
   lines.splice(insertAfter + 1, 0, `#include "${_stylesFilePath}"`);
   const insertedLine = insertAfter + 2; // 1-based
-  window._monacoEditor.setValue(lines.join('\n'));
-  window._monacoEditor.revealLineInCenter(insertedLine);
-  window._monacoEditor.setPosition({ lineNumber: insertedLine, column: 1 });
-  window._monacoEditor.focus();
+  const ed       = window._monacoEditor;
+  const model    = ed.getModel();
+  ed.executeEdits('styles-link', [{
+    range: model.getFullModelRange(),
+    text:  lines.join('\n'),
+  }]);
+  ed.revealLineInCenter(insertedLine);
+  ed.setPosition({ lineNumber: insertedLine, column: 1 });
+  ed.focus();
   _updateStylesLinkBtn();
 }
 
@@ -4380,7 +4590,10 @@ async function _insertStylesInclude() {
   );
   if (commentedIdx !== -1) {
     lines[commentedIdx] = lines[commentedIdx].replace(/^(\s*)\/\/+\s*/, '$1');
-    editor.setValue(lines.join('\n'));
+    editor.executeEdits('styles-link-uncomment', [{
+      range: editor.getModel().getFullModelRange(),
+      text:  lines.join('\n'),
+    }]);
     _updateStylesLinkBtn();
     return;
   }
@@ -4406,6 +4619,145 @@ document.getElementById('btn-styles-link').addEventListener('click', () => {
 
 document.getElementById('btn-styles-tab-link').addEventListener('click', () => {
   _insertStylesInclude();
+});
+
+// ── JMT Add-ons prop wrapper link ─────────────────────
+// Visible only when the selected OS version has `jmtVersion` set in `.jmt_meta.json`
+// AND the open config doesn't already include the wrapper. Inserts the wrapper inside
+// CONFIG_PROP (creates the block if missing); conflicts with other prop includes are
+// resolved by the user via Cancel / Comment Out / Remove It modal.
+
+let _selectedVersionJmtVersion = null;       // installed JMT version on the SELECTED OS version, or null
+const _JMT_PROP_INCLUDE_PATH   = '../props/jmt_fett_prop.h';
+const _JMT_PROP_INCLUDE_RE     = /^\s*#include\s+"[^"]*jmt_fett_prop\.h"/m;
+const _PROP_INCLUDE_RE         = /^\s*#include\s+"[^"]*\/props\/[^"]+\.h"/;
+
+async function _refreshSelectedVersionJmtState() {
+  const verSel = document.getElementById('input-version');
+  const name = verSel?.value;
+  if (!name || name === '__add_version__') {
+    _selectedVersionJmtVersion = null;
+    _updateJmtLinkBtn();
+    return;
+  }
+  try {
+    const details = await window.electronAPI.listVersionsDetails();
+    const v = (details || []).find(d => d.name === name);
+    _selectedVersionJmtVersion = v?.jmtVersion || null;
+  } catch {
+    _selectedVersionJmtVersion = null;
+  }
+  _updateJmtLinkBtn();
+}
+window._refreshSelectedVersionJmtState = _refreshSelectedVersionJmtState;
+
+function _updateJmtLinkBtn() {
+  const btn = document.getElementById('btn-jmt-link');
+  if (!btn) return;
+  if (!_selectedVersionJmtVersion || !fileIsOpen) {
+    btn.style.display = 'none';
+    return;
+  }
+  const content = window._getEditorContent ? window._getEditorContent() : '';
+  const linked  = _JMT_PROP_INCLUDE_RE.test(content);
+  btn.style.display = linked ? 'none' : '';
+}
+window._updateJmtLinkBtn = _updateJmtLinkBtn;
+
+function _promptJmtConflict(lines, conflictIdx) {
+  return new Promise(resolve => {
+    document.getElementById('modal-jmt-conflict-line').textContent = lines[conflictIdx].trim();
+    const overlay = document.getElementById('modal-jmt-conflict');
+    overlay.classList.add('active');
+    const cleanup = r => { overlay.classList.remove('active'); resolve(r); };
+    document.getElementById('modal-jmt-conflict-cancel').onclick  = () => cleanup(null);
+    document.getElementById('modal-jmt-conflict-comment').onclick = () => cleanup('comment');
+    document.getElementById('modal-jmt-conflict-remove').onclick  = () => cleanup('remove');
+  });
+}
+
+function _doInsertJmtPropInclude(lines, conflictIdx, action) {
+  if (action === 'comment')     lines[conflictIdx] = '//' + lines[conflictIdx];
+  else if (action === 'remove') lines.splice(conflictIdx, 1);
+
+  let insertedLine; // 1-based
+  const propIdx = lines.findIndex(l => /^\s*#ifdef\s+CONFIG_PROP/.test(l));
+
+  if (propIdx !== -1) {
+    let endifIdx = -1;
+    for (let i = propIdx + 1; i < lines.length; i++) {
+      if (/^\s*#endif/.test(lines[i])) { endifIdx = i; break; }
+    }
+    if (endifIdx === -1) return;
+    lines.splice(endifIdx, 0, `#include "${_JMT_PROP_INCLUDE_PATH}"`);
+    insertedLine = endifIdx + 1;
+  } else {
+    // No CONFIG_PROP — insert a fresh scaffold. Conventional ProffieOS ordering is
+    // CONFIG_TOP → CONFIG_PROP → CONFIG_PRESETS → CONFIG_BUTTONS, so when a
+    // CONFIG_PRESETS block exists, the new CONFIG_PROP must land BEFORE it.
+    const presetsIdx = lines.findIndex(l => /^\s*#ifdef\s+CONFIG_PRESETS/.test(l));
+    if (presetsIdx !== -1) {
+      const block = ['#ifdef CONFIG_PROP', `#include "${_JMT_PROP_INCLUDE_PATH}"`, '#endif', ''];
+      const needLeadingBlank = presetsIdx > 0 && lines[presetsIdx - 1].trim() !== '';
+      if (needLeadingBlank) block.unshift('');
+      const includeIdxInBlock = block.indexOf(`#include "${_JMT_PROP_INCLUDE_PATH}"`);
+      lines.splice(presetsIdx, 0, ...block);
+      insertedLine = presetsIdx + includeIdxInBlock + 1; // 1-based
+    } else {
+      // No CONFIG_PRESETS either — safe to append at end of file
+      if (lines.length && lines[lines.length - 1].trim() !== '') lines.push('');
+      lines.push('#ifdef CONFIG_PROP', `#include "${_JMT_PROP_INCLUDE_PATH}"`, '#endif');
+      insertedLine = lines.length - 1; // line of the #include
+    }
+  }
+
+  const ed    = window._monacoEditor;
+  const model = ed.getModel();
+  ed.executeEdits('jmt-link', [{
+    range: model.getFullModelRange(),
+    text:  lines.join('\n'),
+  }]);
+  ed.revealLineInCenter(insertedLine);
+  ed.setPosition({ lineNumber: insertedLine, column: 1 });
+  ed.focus();
+  _updateJmtLinkBtn();
+}
+
+async function _insertJmtPropInclude() {
+  if (!fileIsOpen) return;
+  const editor = window._monacoEditor;
+  if (!editor) return;
+  const lines = editor.getValue().split('\n');
+
+  // If the wrapper is present but commented out, just uncomment it
+  const commentedIdx = lines.findIndex(l =>
+    /^\s*\/\/+\s*#include/.test(l) && l.includes('jmt_fett_prop.h')
+  );
+  if (commentedIdx !== -1) {
+    lines[commentedIdx] = lines[commentedIdx].replace(/^(\s*)\/\/+\s*/, '$1');
+    editor.executeEdits('jmt-link-uncomment', [{
+      range: editor.getModel().getFullModelRange(),
+      text:  lines.join('\n'),
+    }]);
+    _updateJmtLinkBtn();
+    return;
+  }
+
+  // Conflict: any other `#include "../props/*.h"` that isn't our wrapper
+  const conflictIdx = lines.findIndex(l =>
+    _PROP_INCLUDE_RE.test(l) && !l.includes('jmt_fett_prop.h')
+  );
+  if (conflictIdx !== -1) {
+    const action = await _promptJmtConflict(lines, conflictIdx);
+    if (!action) return;
+    _doInsertJmtPropInclude(lines, conflictIdx, action);
+  } else {
+    _doInsertJmtPropInclude(lines, -1, null);
+  }
+}
+
+document.getElementById('btn-jmt-link').addEventListener('click', () => {
+  _insertJmtPropInclude();
 });
 
 // ── Style Library ──────────────────────────────────────
@@ -5051,12 +5403,7 @@ function _applyStylesSearch() {
   const cards = document.querySelectorAll('#styles-visual-list .style-card');
   let shown   = 0;
   cards.forEach(card => {
-    const tags    = [...card.querySelectorAll('.style-tag')].map(el => el.textContent).join(' ');
-    const effects = [...card.querySelectorAll('.style-effect-chip')].map(el => el.textContent).join(' ');
-    const searchText = (card.dataset.name + ' '
-      + (card.querySelector('.style-card-source')?.textContent || '') + ' '
-      + tags + ' ' + effects).toLowerCase();
-    const matchesQ   = !q || searchText.includes(q);
+    const matchesQ   = !q || (card.dataset.searchBlob || '').includes(q);
     const matchesTag = !_detailTagFilter || !!card.querySelector(`.style-tag[data-tag="${_detailTagFilter}"]`);
     const vis = matchesQ && matchesTag;
     card.style.display = vis ? '' : 'none';
@@ -5219,10 +5566,18 @@ async function _deleteStyleEntry(entry, isHelper) {
     const msg = affected.length
       ? `Delete helper "${entry.name}"?\n\nThese styles reference it and will be marked broken:\n• ${affected.join('\n• ')}`
       : `Delete helper "${entry.name}"? It has no known dependents in this file.`;
-    if (!window.confirm(msg)) return;
+    if (!await promptConfirm({
+      title:       `Delete Helper`,
+      message:     msg,
+      confirmText: 'Delete',
+    })) return;
     if (affected.length) affected.forEach(n => _brokenStyleNames.add(n));
   } else {
-    if (!window.confirm(`Delete style "${entry.name}"? This will remove it from your style library.`)) return;
+    if (!await promptConfirm({
+      title:       'Delete Style',
+      message:     `Delete style "${entry.name}"?\n\nThis will remove it from your style library.`,
+      confirmText: 'Delete',
+    })) return;
   }
 
   const content    = _stylesEditorInstance.getValue();
@@ -5701,6 +6056,15 @@ function _buildStylesVisual() {
     const displaySource  = meta.userSource || meta.source || '';
     const userTags       = meta.userTags || [];
     const effects        = _scanEffects(entry.usingCode);
+    card.dataset.searchBlob = [
+      name,
+      displaySource,
+      meta.userUrl || meta.url || '',
+      (userTags || []).join(' '),
+      effects.join(' '),
+      meta.userNotes || '',
+      entry.usingCode || ''
+    ].join(' ').toLowerCase();
     const userTagsHtml = userTags.slice(0, 8).map(t => {
       const active = _detailTagFilter === t ? ' active' : '';
       return `<span class="style-tag${active}" data-tag="${t}">${t}</span>`;
@@ -7487,6 +7851,7 @@ async function switchTab(name) {
   }
   if (_activeTab === 'config' && window._presetSidecar) window._presetSidecar.closeSlotEdit?.();
   _activeTab = name;
+  window.electronAPI?.setPortPolling?.(name === 'config');
 
   document.querySelectorAll('.tab').forEach(t =>
     t.classList.toggle('active', t.dataset.tab === name));
@@ -7738,6 +8103,7 @@ async function refreshEmptyStateFavs() {
 
 if (isElectron) {
   document.getElementById('input-filename').addEventListener('click', async (e) => {
+    if (!document.getElementById('input-filename').readOnly) return;
     e.stopPropagation();
     closeFavDropdown();
     const dd = document.getElementById('recent-dropdown');
@@ -7867,6 +8233,7 @@ require(['vs/editor/editor.main'], function () {
       setDirty(true);
       if (window.onEditorContentChanged) window.onEditorContentChanged();
       _updateStylesLinkBtn();
+      _updateJmtLinkBtn();
     }
     _scheduleStylesInUseRebuild();
   });
@@ -8111,9 +8478,13 @@ require(['vs/editor/editor.main'], function () {
       _sidecarOpen = false;
       _closeSlotArgEdit();
       _clearPresetHighlight();
+      document.getElementById('preset-array-rename-row')?.classList.remove('active');
+      const pencil = document.getElementById('btn-preset-array-rename');
+      if (pencil) pencil.style.display = '';
       const el = document.getElementById('preset-sidecar');
       el.classList.remove('open');
       el.classList.add('collapsed');
+      _refreshStrip();
       // Reset temporary resize state
       el.style.width = '';
       el.style.transition = '';
@@ -8148,10 +8519,150 @@ require(['vs/editor/editor.main'], function () {
       return result;
     }
 
+    function _refreshStrip() {
+      const container = document.getElementById('preset-strip-banks');
+      if (!container) return;
+      const arrays = _parseResult?.arrays || [];
+      // Clamp active index to the available range
+      if (_activeArrayIndex >= arrays.length) _activeArrayIndex = Math.max(0, arrays.length - 1);
+      // "Active" highlight only matters when distinguishing between multiple banks
+      // AND the sidecar is open. Single-bank or closed-sidecar → no blue.
+      const showActive = _sidecarOpen && arrays.length > 1;
+      container.innerHTML = '';
+      arrays.forEach((arr, idx) => {
+        if (idx > 0) {
+          const sep = document.createElement('div');
+          sep.className = 'preset-strip-divider';
+          container.appendChild(sep);
+        }
+        const label = document.createElement('span');
+        label.className = 'preset-strip-label' + (showActive && idx === _activeArrayIndex ? ' active' : '');
+        label.textContent = (arr.name || 'presets').toUpperCase();
+        label.title = arr.name;
+        label.dataset.arrayIndex = String(idx);
+        label.addEventListener('click', (e) => {
+          e.stopPropagation();
+          _onStripLabelClick(idx);
+        });
+        label.addEventListener('contextmenu', (e) => {
+          e.stopPropagation();
+          _showBankContextMenu(e, idx);
+        });
+        container.appendChild(label);
+      });
+      // Show a single fallback label when there are no arrays at all (always neutral —
+      // there's nothing to distinguish, same rule as the single-bank case)
+      if (!arrays.length) {
+        const stub = document.createElement('span');
+        stub.className = 'preset-strip-label';
+        stub.textContent = 'PRESETS';
+        container.appendChild(stub);
+      }
+      // `+` add-bank button always sits at the end of the list (scrolls with it)
+      const addBtn = document.createElement('button');
+      addBtn.className = 'preset-strip-add';
+      addBtn.title = 'Add another preset bank';
+      addBtn.textContent = '+';
+      addBtn.addEventListener('click', (e) => { e.stopPropagation(); _addPresetBank(); });
+      container.appendChild(addBtn);
+    }
+
+    // Click a bank label: switch active bank + open sidecar (or close if already open + active).
+    function _onStripLabelClick(idx) {
+      if (_sidecarOpen && idx === _activeArrayIndex) {
+        _closeSidecar();
+        return;
+      }
+      _activeArrayIndex      = idx;
+      _selectedPresetIndex   = 0;
+      _selectedDisabledPreset = null;
+      if (!_sidecarOpen) _openSidecar();
+      else _rebuildSidecar();
+    }
+
+    // Create a new `Preset presetsN[]` bank (next available name) pre-populated with one
+    // `Preset 1` entry. Switch to it, open the sidecar (if collapsed), enter rename mode.
+    function _addPresetBank() {
+      if (!editor) return;
+      const result  = presetParser.parsePresets(editor.getValue());
+      const arrays  = result.arrays;
+      const used    = new Set(arrays.map(a => a.name));
+      let newName   = 'presets';
+      let n = 2;
+      while (used.has(newName)) { newName = 'presets' + (n++); }
+
+      const bladeCount = result.bladeCount || 1;
+      const indent     = '  ';
+      const styleLines = [];
+      for (let i = 0; i < bladeCount; i++) styleLines.push(`${indent}StylePtr<Black>(),`);
+      const entryText = [
+        `{ "", "",`,
+        ...styleLines,
+        '',
+        `${indent}"Preset 1" },`,
+      ].join('\n');
+
+      const model = editor.getModel();
+      if (arrays.length === 0) {
+        // No bank yet — append a fresh CONFIG_PRESETS scaffold with new bank + first preset
+        const lastLine   = model.getLineCount();
+        const lastCol    = model.getLineMaxColumn(lastLine);
+        const tailEmpty  = model.getLineContent(lastLine).length === 0;
+        const lead       = tailEmpty ? '' : '\n\n';
+        const blockText  = lead + [
+          '#ifdef CONFIG_PRESETS',
+          '',
+          `Preset ${newName}[] = {`,
+          '',
+          entryText,
+          '',
+          '};',
+          '',
+          '#endif',
+          '',
+        ].join('\n');
+        editor.executeEdits('preset-add-bank', [{
+          range: { startLineNumber: lastLine, startColumn: lastCol, endLineNumber: lastLine, endColumn: lastCol },
+          text: blockText,
+        }]);
+      } else {
+        // Append after the last existing array's closing `};`
+        const lastArr  = arrays[arrays.length - 1];
+        const insertLn = lastArr.endLine + 1;
+        const block    = '\n' + [
+          `Preset ${newName}[] = {`,
+          '',
+          entryText,
+          '',
+          '};',
+          '',
+        ].join('\n');
+        editor.executeEdits('preset-add-bank', [{
+          range: { startLineNumber: insertLn, startColumn: 1, endLineNumber: insertLn, endColumn: 1 },
+          text: block,
+        }]);
+      }
+
+      // Re-parse immediately so we can find the index of the new bank
+      _parseResult = presetParser.parsePresets(editor.getValue());
+      const newIdx = _parseResult.arrays.findIndex(a => a.name === newName);
+      if (newIdx === -1) { _refreshStrip(); return; }
+      _activeArrayIndex     = newIdx;
+      _selectedPresetIndex  = 0;
+      _selectedDisabledPreset = null;
+      _refreshStrip();
+      if (!_sidecarOpen) _openSidecar();
+      else _rebuildSidecar();
+      // Defer rename-mode entry until DOM has the new pencil button rendered
+      setTimeout(() => _startPresetArrayRename(), 50);
+    }
+
     function _rebuildSidecar() {
-      if (!_sidecarOpen || !editor) return;
-      if (_editingSlot) { _refreshBladeSectionLabel(); return; }
+      if (!editor) return;
       _parseResult    = presetParser.parsePresets(editor.getValue());
+      _refreshStrip();
+      if (!_sidecarOpen) return;
+      if (_editingSlot) { _refreshBladeSectionLabel(); return; }
       _disabledPresets = _scanDisabledPresets(editor.getValue());
       // Re-find the selected disabled preset by startLine after a rebuild
       if (_selectedDisabledPreset) {
@@ -8830,6 +9341,32 @@ require(['vs/editor/editor.main'], function () {
       nameWrap.appendChild(_makePencil(() => openNameEdit()));
       heading.appendChild(nameWrap);
 
+      const total = arr.presets.length;
+
+      const prevBtn = document.createElement('button');
+      prevBtn.className = 'preset-nav-btn';
+      prevBtn.innerHTML = '&#9665;';
+      prevBtn.title = 'Previous preset';
+      prevBtn.disabled = idx === 0;
+      prevBtn.addEventListener('click', () => {
+        _selectPreset(arr, idx - 1);
+        document.querySelector(`#preset-list-top .preset-row[data-live-idx="${idx - 1}"]`)
+          ?.scrollIntoView({ block: 'nearest' });
+      });
+      heading.appendChild(prevBtn);
+
+      const nextBtn = document.createElement('button');
+      nextBtn.className = 'preset-nav-btn';
+      nextBtn.innerHTML = '&#9655;';
+      nextBtn.title = 'Next preset';
+      nextBtn.disabled = idx === total - 1;
+      nextBtn.addEventListener('click', () => {
+        _selectPreset(arr, idx + 1);
+        document.querySelector(`#preset-list-top .preset-row[data-live-idx="${idx + 1}"]`)
+          ?.scrollIntoView({ block: 'nearest' });
+      });
+      heading.appendChild(nextBtn);
+
       const navBtn = document.createElement('button');
       navBtn.className = 'preset-nav-btn';
       navBtn.innerHTML = '&#8594;';
@@ -9045,10 +9582,16 @@ require(['vs/editor/editor.main'], function () {
       const tile = document.createElement('div');
       tile.className = 'preset-slot-tile';
       tile.dataset.slotIdx = slotIdx;
-      const isUnlinked = slot.styleClass === 'helper' && !_stylesLinked;
-      if      (isMissing)    tile.classList.add('slot-missing');
-      else if (isExcess)     tile.classList.add('slot-excess');
-      else if (isUnlinked)   tile.classList.add('slot-unlinked');
+      // Built-in named colors (Black, Red, Cyan, etc.) look syntactically like library
+      // references — single identifier, no angles — so the parser tags them 'helper'.
+      // They are NOT library styles, so suppress the unlinked warning for them.
+      const _exprLeadName  = slot.expr?.match(/^[A-Za-z_]\w*/)?.[0] || '';
+      const _isNamedColor  = !!window.proffieArgs?.isNamedColor?.(_exprLeadName);
+      const isUnlinked = slot.styleClass === 'helper' && !_stylesLinked && !_isNamedColor;
+      if      (isMissing)     tile.classList.add('slot-missing');
+      else if (isExcess)      tile.classList.add('slot-excess');
+      else if (isUnlinked)    tile.classList.add('slot-unlinked');
+      else if (_isNamedColor) tile.classList.add('slot-inline');           // built-in color → inline-style tile
       else if (slot.styleClass === 'helper') tile.classList.add('slot-helper');
       else if (slot.styleClass === 'ref')    tile.classList.add('slot-ref');
       else                                   tile.classList.add('slot-inline');
@@ -11243,7 +11786,17 @@ require(['vs/editor/editor.main'], function () {
       if (!editor) return;
       const result = presetParser.parsePresets(editor.getValue());
       const arr = result.arrays[arrayIndex];
-      if (!arr || !arr.presets.length) return;
+      if (!arr) {
+        // No array at this index — create a fresh scaffold (handles "no banks at all")
+        _addFirstPreset(result.bladeCount || 1);
+        return;
+      }
+      if (!arr.presets.length) {
+        // Active array exists but is empty — insert the first entry into THIS specific array
+        // (not into whatever Preset block appears first in source)
+        _insertFirstEntryIntoArray(arr, arrayIndex, result.bladeCount || 1);
+        return;
+      }
 
       const bladeCount = result.bladeCount || 1;
       const presetNum  = arr.presets.length + 1;
@@ -11292,6 +11845,115 @@ require(['vs/editor/editor.main'], function () {
           setTimeout(() => {
             const rows = document.querySelectorAll('#preset-list-top .preset-row');
             const row = rows[_selectedPresetIndex];
+            if (row) {
+              row.classList.add('new-preset');
+              row.addEventListener('animationend', () => row.classList.remove('new-preset'), { once: true });
+              row.scrollIntoView({ block: 'nearest' });
+            }
+          }, 50);
+        }
+      }, 50);
+    }
+
+    // ── Insert the first entry into a specific (empty) Preset array ───────────
+    // Used when the active bank exists but has no entries — picks THAT bank specifically
+    // rather than falling back to a regex match (which would find the first Preset block).
+    function _insertFirstEntryIntoArray(arr, arrayIndex, bladeCount) {
+      const indent = '  ';
+      const styleLines = [];
+      for (let i = 0; i < bladeCount; i++) styleLines.push(`${indent}StylePtr<Black>(),`);
+      const entryText = [
+        `{ "", "",`,
+        ...styleLines,
+        '',
+        `${indent}"Preset 1" },`,
+      ].join('\n');
+      const insertLine = arr.bodyStartLine + 1;
+      editor.executeEdits('preset-add-first-in-bank', [{
+        range: { startLineNumber: insertLine, startColumn: 1, endLineNumber: insertLine, endColumn: 1 },
+        text:  entryText + '\n\n',
+      }]);
+      editor.focus();
+      _selectedPresetIndex = 0;
+      clearTimeout(_rebuildTimer);
+      setTimeout(() => {
+        _rebuildSidecar();
+        const newArr    = _parseResult?.arrays[arrayIndex];
+        const newPreset = newArr?.presets[0];
+        if (newPreset) {
+          newPreset._autoOpenEmpty = true;
+          _renderDetail();
+          _navigateToLine(newPreset.startLine, newPreset.endLine);
+        }
+      }, 50);
+    }
+
+    // ── Add first preset when no Preset[] block exists or it's empty ───────────
+    function _addFirstPreset(bladeCount) {
+      if (!editor) return;
+      const indent = '  ';
+      const styleLines = [];
+      for (let i = 0; i < bladeCount; i++) styleLines.push(`${indent}StylePtr<Black>(),`);
+      const entryText = [
+        `{ "", "",`,
+        ...styleLines,
+        '',
+        `${indent}"Preset 1" },`,
+      ].join('\n');
+
+      const text  = editor.getValue();
+      const model = editor.getModel();
+
+      // Existing empty/contentless `Preset NAME[] = { ... };` block?
+      const m = /\bPreset\s+\w+\s*\[\s*\]\s*=\s*\{/.exec(text);
+
+      if (m) {
+        // Insert the entry on the line right after the opening `{`
+        const opensAt    = m.index + m[0].length;
+        const openLine   = (text.slice(0, opensAt).match(/\n/g) || []).length + 1;
+        const insertLine = openLine + 1;
+        editor.executeEdits('preset-add-first', [{
+          range: { startLineNumber: insertLine, startColumn: 1, endLineNumber: insertLine, endColumn: 1 },
+          text: entryText + '\n\n',
+        }]);
+      } else {
+        // No block at all — append a fresh CONFIG_PRESETS scaffold with our Preset block
+        const lastLine    = model.getLineCount();
+        const lastCol     = model.getLineMaxColumn(lastLine);
+        const tailEmpty   = model.getLineContent(lastLine).length === 0;
+        const lead        = tailEmpty ? '' : '\n\n';
+        const blockText   = lead + [
+          '#ifdef CONFIG_PRESETS',
+          '',
+          'Preset presets[] = {',
+          '',
+          entryText,
+          '',
+          '};',
+          '',
+          '#endif',
+          '',
+        ].join('\n');
+        editor.executeEdits('preset-add-first', [{
+          range: { startLineNumber: lastLine, startColumn: lastCol, endLineNumber: lastLine, endColumn: lastCol },
+          text: blockText,
+        }]);
+      }
+
+      editor.focus();
+      _selectedPresetIndex = 0;
+      clearTimeout(_rebuildTimer);
+      setTimeout(() => {
+        _rebuildSidecar();
+        const newArr    = _parseResult?.arrays[0];
+        const newPreset = newArr?.presets[0];
+        if (newPreset) {
+          _activeArrayIndex = 0;
+          newPreset._autoOpenEmpty = true;
+          _renderDetail();
+          _navigateToLine(newPreset.startLine, newPreset.endLine);
+          setTimeout(() => {
+            const row = document.querySelector('#preset-list-top .preset-row');
             if (row) {
               row.classList.add('new-preset');
               row.addEventListener('animationend', () => row.classList.remove('new-preset'), { once: true });
@@ -11696,6 +12358,169 @@ require(['vs/editor/editor.main'], function () {
         _openSidecar();
       }
     });
+    // ── Rename preset array (pencil) ──────────────────────────────────────────
+    function _startPresetArrayRename() {
+      const arr = _parseResult?.arrays[_activeArrayIndex];
+      if (!arr) return;
+      const row     = document.getElementById('preset-array-rename-row');
+      const input   = document.getElementById('preset-array-rename-input');
+      const pencil  = document.getElementById('btn-preset-array-rename');
+      input.value = arr.name;
+      input.dataset.origValue = arr.name;
+      row.classList.add('active');
+      pencil.style.display = 'none';
+      setTimeout(() => { input.focus(); input.select(); }, 0);
+    }
+    function _exitPresetArrayRename() {
+      document.getElementById('preset-array-rename-row').classList.remove('active');
+      document.getElementById('btn-preset-array-rename').style.display = '';
+    }
+    function _commitPresetArrayRename() {
+      const input   = document.getElementById('preset-array-rename-input');
+      const newName = input.value.trim();
+      const oldName = input.dataset.origValue || '';
+      if (!newName || newName === oldName) { _exitPresetArrayRename(); return; }
+      const arr = _parseResult?.arrays[_activeArrayIndex];
+      if (!arr) { _exitPresetArrayRename(); return; }
+      const model       = editor.getModel();
+      const lineContent = model.getLineContent(arr.startLine);
+      const escaped     = oldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const re          = new RegExp(`(\\bPreset\\s+)(${escaped})(\\s*\\[)`);
+      const m           = re.exec(lineContent);
+      if (!m) { _exitPresetArrayRename(); return; }
+      const startCol = m.index + m[1].length + 1; // 1-based
+      const endCol   = startCol + oldName.length;
+      editor.executeEdits('preset-array-rename', [{
+        range: { startLineNumber: arr.startLine, startColumn: startCol, endLineNumber: arr.startLine, endColumn: endCol },
+        text: newName,
+      }]);
+      _exitPresetArrayRename();
+    }
+    document.getElementById('btn-preset-array-rename').addEventListener('click', _startPresetArrayRename);
+    document.getElementById('btn-preset-array-rename-confirm').addEventListener('click', _commitPresetArrayRename);
+    document.getElementById('btn-preset-array-rename-cancel').addEventListener('click', _exitPresetArrayRename);
+    const _presetArrayRenameInput = document.getElementById('preset-array-rename-input');
+    _presetArrayRenameInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter')       { e.preventDefault(); _commitPresetArrayRename(); }
+      else if (e.key === 'Escape') { e.preventDefault(); _exitPresetArrayRename();   }
+    });
+    _presetArrayRenameInput.addEventListener('blur', e => {
+      const row = document.getElementById('preset-array-rename-row');
+      if (!row.classList.contains('active')) return;
+      // Let the explicit confirm/cancel button handlers fire if focus moved there
+      if (e.relatedTarget?.id === 'btn-preset-array-rename-confirm') return;
+      if (e.relatedTarget?.id === 'btn-preset-array-rename-cancel')  return;
+      _exitPresetArrayRename();
+    });
+    _wireStyleNameSanitize(_presetArrayRenameInput);
+
+    // Right-click context menu on a bank label — Duplicate / Delete.
+    // Uses the same #preset-ctx-menu element & classes as the preset row menu.
+    function _showBankContextMenu(e, arrayIndex) {
+      e.preventDefault();
+      const menu = document.getElementById('preset-ctx-menu');
+      if (!menu) return;
+      menu.innerHTML = '';
+      const mkItem = (text, cls, fn) => {
+        const d = document.createElement('div');
+        d.className = 'preset-ctx-item' + (cls ? ' ' + cls : '');
+        d.textContent = text;
+        d.addEventListener('mousedown', e2 => { e2.stopPropagation(); _hidePresetContextMenu(); fn(); });
+        menu.appendChild(d);
+      };
+      mkItem('⧉ Duplicate', '',       () => _duplicatePresetBank(arrayIndex));
+      mkItem('× Delete',    'danger', () => _deletePresetBank(arrayIndex));
+      const x = Math.min(e.clientX, window.innerWidth - 170);
+      const y = Math.min(e.clientY, window.innerHeight - 80);
+      menu.style.left = x + 'px';
+      menu.style.top  = y + 'px';
+      menu.style.display = 'block';
+    }
+
+    // Duplicate a preset bank — copies the entire `Preset NAME[] = { … };` block,
+    // renames the declaration to a unique `NAME_copy[N]`, inserts after the source.
+    // Single executeEdits so Ctrl+Z reverts the duplication.
+    function _duplicatePresetBank(arrayIndex) {
+      if (!editor) return;
+      const result = presetParser.parsePresets(editor.getValue());
+      const arr    = result.arrays[arrayIndex];
+      if (!arr) return;
+
+      const used  = new Set(result.arrays.map(a => a.name));
+      let newName = arr.name + '_copy';
+      let n = 2;
+      while (used.has(newName)) { newName = arr.name + '_copy' + (n++); }
+
+      const model = editor.getModel();
+      const bankText = model.getValueInRange({
+        startLineNumber: arr.startLine, startColumn: 1,
+        endLineNumber:   arr.endLine,
+        endColumn:       model.getLineMaxColumn(arr.endLine) + 1, // include the closing line's newline
+      });
+      // Replace only the declaration name (first `Preset oldName[`)
+      const escaped = arr.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const declRe  = new RegExp(`(\\bPreset\\s+)${escaped}(\\s*\\[)`);
+      const newBankText = bankText.replace(declRe, `$1${newName}$2`);
+
+      const insertLn = arr.endLine + 1;
+      editor.executeEdits('preset-bank-duplicate', [{
+        range: { startLineNumber: insertLn, startColumn: 1, endLineNumber: insertLn, endColumn: 1 },
+        text:  '\n' + newBankText + '\n',
+      }]);
+
+      _parseResult = presetParser.parsePresets(editor.getValue());
+      const newIdx = _parseResult.arrays.findIndex(a => a.name === newName);
+      if (newIdx === -1) { _refreshStrip(); return; }
+      _activeArrayIndex     = newIdx;
+      _selectedPresetIndex  = 0;
+      _selectedDisabledPreset = null;
+      _refreshStrip();
+      if (!_sidecarOpen) _openSidecar();
+      else _rebuildSidecar();
+      // Drop straight into rename mode so the user can name it immediately
+      setTimeout(() => _startPresetArrayRename(), 50);
+    }
+
+    // Right-click delete an entire preset bank — hidden feature, confirmation required.
+    // Single executeEdits so Ctrl+Z restores the bank intact.
+    async function _deletePresetBank(arrayIndex) {
+      if (!editor) return;
+      const result = presetParser.parsePresets(editor.getValue());
+      const arr    = result.arrays[arrayIndex];
+      if (!arr) return;
+      const count = arr.presets.length;
+      const tail = count
+        ? ` along with its ${count} preset${count === 1 ? '' : 's'}.`
+        : '.';
+      const ok = await promptConfirm({
+        title:       'Delete Preset Bank',
+        message:     `Delete preset bank "${arr.name}"? This will remove the bank${tail}`,
+        confirmText: 'Delete',
+      });
+      if (!ok) return;
+      const model    = editor.getModel();
+      const lastLine = model.getLineCount();
+      // Eat the blank line after the closing }; for clean spacing
+      const afterLine = arr.endLine + 1;
+      const eatExtra  = afterLine <= lastLine && model.getLineContent(afterLine).trim() === '';
+      const endLine   = eatExtra ? afterLine + 1 : afterLine;
+      editor.executeEdits('preset-bank-delete', [{
+        range: {
+          startLineNumber: arr.startLine, startColumn: 1,
+          endLineNumber:   Math.min(endLine, lastLine + 1), endColumn: 1,
+        },
+        text: '',
+      }]);
+      // After deleting, adjust active index so we stay on a valid bank
+      if (_activeArrayIndex >= arrayIndex) {
+        _activeArrayIndex = Math.max(0, _activeArrayIndex - 1);
+      }
+      _selectedPresetIndex = 0;
+      _selectedDisabledPreset = null;
+      editor.focus();
+      _scheduleRebuild();
+    }
+
     document.getElementById('btn-preset-add').addEventListener('click', () => {
       const arr = _parseResult?.arrays[_activeArrayIndex];
       _addPreset(_activeArrayIndex, arr ? arr.presets.length : 0);
@@ -11706,7 +12531,9 @@ require(['vs/editor/editor.main'], function () {
         editor.revealLineInCenter(e.changes[0].range.startLineNumber);
         if (_editingSlot) _closeSlotArgEdit(); // stale slot editor — close and let rebuild reflect undo/redo
       }
-      if (_sidecarOpen) _scheduleRebuild();
+      // Always schedule a rebuild — _rebuildSidecar updates the strip label even
+      // when the sidecar is collapsed, and bails before the expensive list/detail work.
+      _scheduleRebuild();
     });
 
     window._presetSidecar = { open: _openSidecar, close: _closeSidecar, rebuild: _rebuildSidecar, closeSlotEdit: _closeSlotArgEdit, clearLibraryCache: () => { _silentStylesText = null; } };

@@ -115,6 +115,26 @@ function parseBoardList(raw) {
   }).filter(Boolean);
 }
 
+// ── Linux USB presence check ───────────────────────────
+// Reads /sys/bus/usb/devices without needing any group membership.
+// Returns true if a Proffieboard (VID 1209, PID 6668) is visible at the USB layer.
+function checkLinuxUsbPresence() {
+  if (process.platform !== 'linux') return false;
+  const fs = require('fs');
+  try {
+    const base = '/sys/bus/usb/devices';
+    for (const dev of fs.readdirSync(base)) {
+      try {
+        const vendor = fs.readFileSync(`${base}/${dev}/idVendor`,  'utf8').trim();
+        if (vendor !== '1209') continue;
+        const product = fs.readFileSync(`${base}/${dev}/idProduct`, 'utf8').trim();
+        if (product === '6668') return true;
+      } catch {}
+    }
+  } catch {}
+  return false;
+}
+
 // ── List ports ─────────────────────────────────────────
 async function listPorts() {
   const result = await runBoardList();
@@ -155,15 +175,19 @@ async function getRecommendedPort() {
   const { proffieports, ports } = result;
 
   if (proffieports.length === 0) {
+    const linuxSerialPermissionIssue = ports.length === 0 && checkLinuxUsbPresence();
     return {
       ok: true,
       autoSelected: false,
       port: null,
       ports,
       proffieports: [],
-      message: ports.length === 0
-        ? 'No serial ports detected. Connect your Proffieboard.'
-        : `No Proffieboard detected. ${ports.length} other port(s) available.`
+      linuxSerialPermissionIssue,
+      message: linuxSerialPermissionIssue
+        ? 'Proffieboard detected via USB but serial access is blocked.'
+        : ports.length === 0
+          ? 'No serial ports detected. Connect your Proffieboard.'
+          : `No Proffieboard detected. ${ports.length} other port(s) available.`
     };
   }
 

@@ -332,12 +332,18 @@ function getDfuSuffixPath() {
 // ── Arduino IDE process check ──────────────────────────
 function checkArduinoRunning() {
   return new Promise(resolve => {
-    if (process.platform !== 'win32') { resolve(false); return; }
-    const { execFile } = require('child_process');
-    execFile('tasklist', ['/FO', 'CSV', '/NH'], { timeout: 3000 }, (err, stdout) => {
-      if (err) { resolve(false); return; }
-      resolve(stdout.toLowerCase().includes('arduino'));
-    });
+    const { execFile, exec } = require('child_process');
+    if (process.platform === 'win32') {
+      execFile('tasklist', ['/FO', 'CSV', '/NH'], { timeout: 3000 }, (err, stdout) => {
+        if (err) { resolve(false); return; }
+        resolve(stdout.toLowerCase().includes('arduino'));
+      });
+    } else {
+      exec('ps aux', { timeout: 3000 }, (err, stdout) => {
+        if (err) { resolve(false); return; }
+        resolve(stdout.toLowerCase().includes('arduino'));
+      });
+    }
   });
 }
 
@@ -351,7 +357,9 @@ function touchReset(port, onLog) {
     sp.open(async err => {
       if (err) {
         const isAccessDenied = err.message.toLowerCase().includes('access denied')
-                            || err.message.toLowerCase().includes('cannot open');
+                            || err.message.toLowerCase().includes('cannot open')
+                            || err.message.toLowerCase().includes('resource busy')
+                            || err.message.toLowerCase().includes('ebusy');
         if (isAccessDenied) {
           const arduinoOpen = await checkArduinoRunning();
           if (arduinoOpen) {
@@ -710,6 +718,13 @@ function checkCacheAndRestore(configContent, fqbn, usb) {
   return cache.checkAndRestore(configContent, fqbn, usb, proffieOSHash, stylesContent);
 }
 
+function needsCoreInstall() {
+  const dataPath     = getArduinoDataPath();
+  const sentinelPath = path.join(dataPath, '.core-installed');
+  if (!fs.existsSync(sentinelPath)) return true;
+  return fs.readFileSync(sentinelPath, 'utf8').trim() !== CORE_VERSION;
+}
+
 module.exports = {
   initialize,
   compile,
@@ -719,6 +734,7 @@ module.exports = {
   abort,
   getStatus,
   checkCacheAndRestore,
+  needsCoreInstall,
   validateCli,
   CORE_ID,
   CORE_VERSION

@@ -51,6 +51,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listPorts:          () => ipcRenderer.invoke('ports:list'),
   listPortsRaw:       () => ipcRenderer.invoke('ports:listRaw'),
   getRecommendedPort: () => ipcRenderer.invoke('ports:getRecommended'),
+  setPortPolling: (enabled) => ipcRenderer.send('ports:setPolling', enabled),
+  onPortsChanged: (cb) => {
+    const handler = () => cb();
+    ipcRenderer.on('ports:changed', handler);
+    return () => ipcRenderer.removeListener('ports:changed', handler);
+  },
 
   // ── Build events (main → renderer) ──────────────────
   // Each returns an unsubscribe function — call it to clean up

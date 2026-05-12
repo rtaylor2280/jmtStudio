@@ -419,7 +419,9 @@
       const bodyStart = m.index + m[0].length - 1;
       const group = readBraceGroup(text, bodyStart);
       if (!group) continue;
-      if (!/\b\w*StylePtr\s*</i.test(group.content) && !/&\w+/.test(group.content)) continue;
+      // Accept any `Preset NAME[]` regardless of body content (so empty banks show up too).
+      // Also keep content-based detection so non-`Preset`-typed arrays still parse if they hold styles.
+      if (m[1] !== 'Preset' && !/\b\w*StylePtr\s*</i.test(group.content) && !/&\w+/.test(group.content)) continue;
       results.push({
         name:             m[2],
         typeName:         m[1],
