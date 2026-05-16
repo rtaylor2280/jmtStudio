@@ -348,7 +348,10 @@ function checkArduinoRunning() {
 }
 
 // ── 1200-bps touch reset ───────────────────────────────
-// Resolves { ok, retriable } — retriable=true means port was locked, user can fix and retry
+// Resolves { ok, retriable, cause }
+//   cause: 'port-locked' (Arduino IDE / other app holds the port)
+//        | 'driver'      (driver-layer failure — often a flaky cable, marginal USB port, or stuck COM driver)
+//        | undefined     (success path)
 function touchReset(port, onLog) {
   return new Promise((resolve) => {
     onLog(`Sending 1200-bps touch reset on ${port}...`, false);
@@ -367,10 +370,11 @@ function touchReset(port, onLog) {
           } else {
             onLog(`Port ${port} is in use by another application. Close it and retry.`, true);
           }
-          return resolve({ ok: false, retriable: true });
+          return resolve({ ok: false, retriable: true, cause: 'port-locked' });
         }
         onLog(`Touch reset error: ${err.message}`, true);
-        return resolve({ ok: false, retriable: false });
+        onLog('This is sometimes a flaky USB cable, a marginal USB port, or a stuck COM driver. Try a different cable or USB port, then retry.', false);
+        return resolve({ ok: false, retriable: true, cause: 'driver' });
       }
       sp.set({ dtr: false }, () => {
         setTimeout(() => {
@@ -648,9 +652,14 @@ async function flash(port, fqbn, onLog) {
   // 1200-bps touch reset
   const resetResult = await touchReset(port, onLog);
   if (!resetResult.ok) {
-    const msg = resetResult.retriable
-      ? 'Flash stopped — free the port and click Retry Flash.'
-      : 'Touch reset failed. Try pressing the reset button manually.';
+    let msg;
+    if (resetResult.cause === 'port-locked') {
+      msg = 'Flash stopped — free the port and click Retry Flash.';
+    } else if (resetResult.cause === 'driver') {
+      msg = 'Touch reset didn\'t complete. Sometimes a different USB cable or port is enough — worth trying before pressing reset on the board.';
+    } else {
+      msg = 'Touch reset failed. Try pressing the reset button manually.';
+    }
     return { ok: false, error: msg, retriable: resetResult.retriable };
   }
   await new Promise(r => setTimeout(r, 1000));
@@ -658,9 +667,22 @@ async function flash(port, fqbn, onLog) {
   // Wait for DFU device
   const dfuFound = await waitForDfu(onLog);
   if (!dfuFound) {
-    const msg = 'DFU device not detected. Try pressing the reset button or reconnecting.';
-    onLog(msg, true);
-    return { ok: false, error: msg };
+    // Touch reset succeeded — the board IS in DFU. dfu-util may not see it for two reasons:
+    //   1. Late enumeration race (now accessible) — proceed straight to flash.
+    //   2. Driver state on this USB instance (wrong driver bound, OR no driver bound at all
+    //      after a Device Manager uninstall, OR on Linux, missing udev rules). In all of
+    //      these we hand off to the renderer's bootloader-wait flow, which can offer
+    //      the driver/permission setup and keep polling.
+    const dfuState = await detectDFU();
+
+    if (dfuState.accessible) {
+      onLog('DFU device detected (late). Proceeding with flash.', false);
+      return await runDfuFlash(dfuPath, toolsDir, onLog);
+    }
+
+    const msg = 'DFU device not accessible. Switching to Bootloader Mode to recover.';
+    onLog(msg, false);
+    return { ok: false, error: msg, needsDfuDriver: true };
   }
 
   return await runDfuFlash(dfuPath, toolsDir, onLog);

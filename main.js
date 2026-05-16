@@ -384,6 +384,137 @@ ipcMain.handle('toolchain:getStatus', () => toolchain.getStatus());
 ipcMain.handle('cache:check', (_, { configContent, fqbn, usb }) =>
   toolchain.checkCacheAndRestore(configContent, fqbn, usb));
 
+// ── Config template (user-editable in a future release) ──────────────────────
+// Read the default-config template from `userData/templates/default.h`. Create it on first
+// request with the V3 scaffold below if it doesn't exist yet, then return the file contents.
+// Future: a Settings UI will let the user edit the same file, and this handler picks up
+// whatever the file currently contains — no further code change required.
+const DEFAULT_CONFIG_TEMPLATE = [
+  '#ifdef CONFIG_TOP',
+  '#include "proffieboard_v3_config.h"',
+  '#define NUM_BLADES 1                           \t// Number of blade definitions in CONFIG_PRESETS',
+  '#define NUM_BUTTONS 2                          \t// Number of physical buttons',
+  '#define VOLUME 1500                            \t// Master volume (0–2047)',
+  'const unsigned int maxLedsPerStrip = 144;      \t// Max LEDs per strip (important for memory allocation)',
+  '#define CLASH_THRESHOLD_G 1.0                  \t// Clash sensitivity (lower = more sensitive)',
+  '#define ENABLE_AUDIO                           \t// Enables audio playback',
+  '#define ENABLE_MOTION                          \t// Enables motion sensing (gyro/accel)',
+  '#define ENABLE_WS2811                          \t// Enables NeoPixel (WS2811) LED output',
+  '#define ENABLE_SD                              \t// Enables SD card support for sound fonts',
+  '#define MOTION_TIMEOUT (60 * 6 * 1000)        \t// Time (ms) to shut down after inactivity (6 minutes)',
+  '#define IDLE_OFF_TIME (60 * 7 * 1000)         \t// Time (ms) to power down completely after idle (7 minutes)',
+  '',
+  '#endif',
+  '',
+  '#ifdef CONFIG_PROP',
+  '#include "../props/saber_fett263_buttons.h"',
+  '#endif',
+  '',
+  '#ifdef CONFIG_PRESETS',
+  '',
+  'Preset presets[] = {',
+  '',
+  '{ "", "",',
+  '  StylePtr<Black>(),',
+  '',
+  '  "Preset 1" },',
+  '',
+  '};',
+  '',
+  'BladeConfig blades[] = {',
+  '',
+  '{ 0, ',
+  'WS281XBladePtr<128, bladePin, Color8::GRB, PowerPINS<bladePowerPin2, bladePowerPin3>>(),',
+  'CONFIGARRAY(presets)',
+  '},',
+  '',
+  '};',
+  '#endif',
+  '',
+  '#ifdef CONFIG_BUTTONS',
+  'Button PowerButton(BUTTON_POWER, powerButtonPin, "pow");',
+  'Button AuxButton(BUTTON_AUX, auxPin, "aux");',
+  '#endif',
+  '',
+].join('\n');
+
+ipcMain.handle('template:readDefault', () => {
+  try {
+    const dir  = path.join(app.getPath('userData'), 'templates');
+    const file = path.join(dir, 'default.h');
+    if (!fs.existsSync(file)) {
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(file, DEFAULT_CONFIG_TEMPLATE, 'utf8');
+    }
+    const content = fs.readFileSync(file, 'utf8');
+    return { ok: true, content, path: file };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+// Overwrite the template file with the shipped default. Used by the Settings → Reset
+// Default Template action and by users who want to revert custom edits.
+ipcMain.handle('template:resetDefault', () => {
+  try {
+    const dir  = path.join(app.getPath('userData'), 'templates');
+    const file = path.join(dir, 'default.h');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(file, DEFAULT_CONFIG_TEMPLATE, 'utf8');
+    return { ok: true, path: file };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+// Report status of the template file. `isDefault` is true when the current file's content
+// matches DEFAULT_CONFIG_TEMPLATE byte-for-byte — used by the Settings UI to disable
+// "Reset to Default" when there's nothing to reset.
+ipcMain.handle('template:getStatus', () => {
+  try {
+    const dir  = path.join(app.getPath('userData'), 'templates');
+    const file = path.join(dir, 'default.h');
+    if (!fs.existsSync(file)) {
+      return { ok: true, exists: false, isDefault: true, path: file };
+    }
+    const content = fs.readFileSync(file, 'utf8');
+    return { ok: true, exists: true, isDefault: content === DEFAULT_CONFIG_TEMPLATE, path: file };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+// Open a file picker and replace the template file with the selected `.h` file's content.
+ipcMain.handle('template:import', async () => {
+  try {
+    const res = await dialog.showOpenDialog({
+      title: 'Import Default Template',
+      filters: [{ name: 'Header Files', extensions: ['h'] }, { name: 'All Files', extensions: ['*'] }],
+      properties: ['openFile'],
+    });
+    if (res.canceled || !res.filePaths.length) {
+      return { ok: false, cancelled: true };
+    }
+    const sourcePath = res.filePaths[0];
+    const raw        = fs.readFileSync(sourcePath, 'utf8');
+    // Strip JMT metadata — templates should be neutral starting points, not carry
+    // the imported config's identity (config_id, name, dates, board pin, etc.).
+    // Mirrors the renderer's stripJmtLines helper; kept inline here so the main
+    // process doesn't need to require the renderer module.
+    const content    = raw
+      .replace(/^\/\/ Configuration edited with JMT Studio[^\n]*\n?/m, '')
+      .replace(/^\/\/ @jmt:\S+[^\n]*\n?/gm, '')
+      .replace(/^\n+/, '');                // trim leading blank lines left by the strip
+    const dir        = path.join(app.getPath('userData'), 'templates');
+    const file       = path.join(dir, 'default.h');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(file, content, 'utf8');
+    return { ok: true, path: file, sourcePath };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
 ipcMain.handle('cache:getSize', () => {
   const cacheRoot = path.join(app.getPath('userData'), 'build-cache');
   function dirSize(p) {

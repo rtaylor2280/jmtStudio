@@ -886,10 +886,14 @@
     background: var(--c-overlay);
     align-items: center;
     justify-content: center;
-    z-index: 100;
+    /* Above the transient color popup (z-index 9998/9999) so a modal that opens
+       while a color is being edited captures clicks directly — otherwise the
+       color overlay would swallow the first click (closing the popup) and the
+       user would have to click the modal button a second time. */
+    z-index: 10000;
   }
   .modal-overlay.active { display: flex; }
-  #modal-unsaved { z-index: 110; }
+  #modal-unsaved { z-index: 10010; }
   .modal {
     background: var(--c-bg-card);
     border: 1px solid var(--c-border-heavy);
@@ -1769,10 +1773,14 @@
   .preset-strip-add:hover { background: var(--c-bg-hover); color: var(--c-text); opacity: 1; }
   .preset-array-pencil { font-size: 0.78rem; opacity: 0.45; background: none; border: none; cursor: pointer; padding: 1px 5px; border-radius: 3px; color: var(--c-text-muted); flex-shrink: 0; line-height: 1; }
   .preset-array-pencil:hover { opacity: 1; background: var(--c-bg-hover); }
-  #preset-array-rename-row { display: none; padding: 5px 8px; gap: 5px; align-items: center; border-bottom: 1px solid var(--c-border); background: var(--c-bg-inset); }
+  #preset-array-rename-row { display: none; flex-direction: column; padding: 5px 8px; gap: 4px; border-bottom: 1px solid var(--c-border); background: var(--c-bg-inset); }
   #preset-array-rename-row.active { display: flex; }
+  .preset-array-rename-inner { display: flex; gap: 5px; align-items: center; }
   #preset-array-rename-input { flex: 1; min-width: 0; font-family: 'Cascadia Code', 'Consolas', monospace; font-size: 0.78rem; background: var(--c-bg); color: var(--c-text); border: 1px solid var(--c-border); border-radius: 3px; padding: 3px 6px; outline: none; }
   #preset-array-rename-input:focus { border-color: var(--jmt-blue); }
+  .preset-array-rename-error { display: none; color: var(--c-danger-text); font-size: 0.7rem; line-height: 1.2; padding-left: 2px; }
+  .preset-array-rename-error.visible { display: block; }
+  #btn-preset-array-rename-confirm:disabled { opacity: 0.4; cursor: not-allowed; }
   .preset-array-rename-btn { font-size: 0.9rem; opacity: 0.55; background: none; border: none; cursor: pointer; padding: 1px 6px; border-radius: 3px; color: var(--c-text-muted); flex-shrink: 0; line-height: 1; }
   .preset-array-rename-btn:hover { opacity: 1; background: var(--c-bg-hover); }
   .preset-array-rename-btn.confirm { color: #4a4; opacity: 0.75; }
@@ -1782,7 +1790,7 @@
   .preset-sidecar-header { display: flex; align-items: center; gap: 4px; padding: 8px 10px 6px; border-bottom: 1px solid var(--c-border); flex-shrink: 0; }
   .preset-sidecar-title { font-size: 0.7rem; font-weight: 700; color: var(--c-text); letter-spacing: 0.05em; }
   .preset-add-btn { font-size: 0.7rem; padding: 1px 7px; line-height: 1; }
-  .preset-sidecar-close { margin-left: auto; background: none; border: none; cursor: pointer; color: var(--c-text-muted); font-size: 1rem; padding: 0 4px; }
+  .preset-sidecar-close { margin-left: auto; background: none; border: none; cursor: pointer; color: var(--c-text-muted); font-size: 1.25rem; line-height: 1; padding: 0 4px; }
   .preset-sidecar-close:hover { color: var(--c-text); }
 
   .preset-list-top { flex: 0 0 38%; min-height: 60px; overflow-y: auto; padding: 4px 0; }
@@ -1811,8 +1819,12 @@
   .preset-row-drag { width: 14px; cursor: grab; color: var(--c-text-hint); opacity: 0.6; font-size: 0.85rem; text-align: center; user-select: none; }
   .preset-row-drag:active { cursor: grabbing; }
   .preset-row-num { width: 18px; text-align: right; color: var(--c-text-muted); font-variant-numeric: tabular-nums; }
-  .preset-row-name { font-weight: 600; flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .preset-row-font { color: var(--c-text-muted); font-size: 0.68rem; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 90px; }
+  .preset-row-name { font-weight: 600; flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 8px; }
+  /* Font folder shows full natural width when there's room. Name's `flex: 1 1 0` means
+     when the row overflows, the shrinkage weight on name is zero (basis × shrink = 0),
+     so font shrinks first — "name always wins" while still allowing font to truncate
+     gracefully on a narrow row. The 8px margin on name gives a minimum padded gap. */
+  .preset-row-font { color: var(--c-text-muted); font-size: 0.68rem; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .preset-row-delete { position: absolute; top: 50%; right: 4px; transform: translateY(-50%); background: none; border: none; cursor: pointer; color: var(--c-text-muted); opacity: 0; padding: 2px 5px; font-size: 0.85rem; line-height: 1; border-radius: 3px; transition: opacity 0.1s, color 0.1s, background 0.1s; }
   .preset-row:hover .preset-row-delete { opacity: 0.6; }
   .preset-row-delete:hover { opacity: 1 !important; color: #e44; background: rgba(40,10,10,0.7); }
@@ -1827,6 +1839,52 @@
   .preset-disabled-banner { font-size: 0.65rem; color: var(--c-text-hint); font-style: italic; padding: 4px 10px 2px; letter-spacing: 0.03em; }
   .preset-detail-disabled-slots { opacity: 0.4; pointer-events: none; filter: grayscale(0.5); }
   .preset-ctx-menu { position: fixed; background: var(--c-bg-card); border: 1px solid var(--c-border); border-radius: 6px; padding: 4px 0; min-width: 150px; z-index: 9999; box-shadow: 0 4px 20px rgba(0,0,0,0.7); display: none; }
+
+  /* ── Toast notifications ── */
+  #toast-host {
+    position: fixed;
+    bottom: 36px;
+    right: 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 8px;
+    z-index: 10000;
+    pointer-events: none;
+  }
+  .toast {
+    background: var(--c-bg-card);
+    color: var(--c-text-bright);
+    border: 1px solid var(--c-border-heavy);
+    border-left: 3px solid var(--jmt-blue);
+    border-radius: 6px;
+    padding: 9px 14px;
+    font-size: 0.82rem;
+    line-height: 1.35;
+    box-shadow: 0 6px 22px rgba(0,0,0,0.5);
+    max-width: 360px;
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity 160ms ease-out, transform 160ms ease-out;
+    pointer-events: auto;
+  }
+  .toast.visible { opacity: 1; transform: translateY(0); }
+  .toast.toast-info  { border-left-color: var(--jmt-blue); }
+  .toast.toast-warn  { border-left-color: #c8a020; }
+  .toast.toast-error { border-left-color: #e44; }
+
+  /* ── Editor line flash (Monaco decoration) ──
+     Single class drives the whole animation: solid hold for ~1s then 3s ease-out fade.
+     Using @keyframes avoids the class-swap pitfall where the transition rule lives on the
+     class being removed and the browser ends up not animating at all. */
+  @keyframes flash-board {
+    0%   { background: rgba(74, 158, 221, 0.32); }
+    25%  { background: rgba(74, 158, 221, 0.32); }
+    100% { background: rgba(74, 158, 221, 0);    }
+  }
+  .line-flash-board {
+    animation: flash-board 4000ms ease-out forwards;
+  }
   .preset-ctx-label { padding: 4px 12px 2px; font-size: 0.68rem; color: var(--c-text-hint); letter-spacing: 0.04em; }
   .preset-ctx-separator { height: 1px; background: var(--c-border); margin: 3px 0; }
   .preset-ctx-item { padding: 6px 14px; cursor: pointer; font-size: 0.78rem; color: var(--c-text-sub); transition: background 0.1s, color 0.1s; white-space: nowrap; }
@@ -2348,13 +2406,16 @@
         <span class="preset-sidecar-title">PRESET STYLES</span>
         <button id="btn-preset-add" class="btn-blue preset-add-btn" title="Add preset to end">+</button>
         <button id="btn-preset-array-rename" class="preset-array-pencil" title="Rename preset array">&#9998;</button>
-        <button id="btn-preset-sidecar-close" class="preset-sidecar-close" title="Close">&times;</button>
+        <button id="btn-preset-sidecar-close" class="preset-sidecar-close" title="Close">&lsaquo;</button>
       </div>
 
       <div id="preset-array-rename-row">
-        <input id="preset-array-rename-input" type="text" autocomplete="off" spellcheck="false">
-        <button id="btn-preset-array-rename-confirm" class="preset-array-rename-btn confirm" title="Save (Enter)">&#10003;</button>
-        <button id="btn-preset-array-rename-cancel"  class="preset-array-rename-btn"         title="Cancel (Esc)">&times;</button>
+        <div class="preset-array-rename-inner">
+          <input id="preset-array-rename-input" type="text" autocomplete="off" spellcheck="false">
+          <button id="btn-preset-array-rename-confirm" class="preset-array-rename-btn confirm" title="Save (Enter)">&#10003;</button>
+          <button id="btn-preset-array-rename-cancel"  class="preset-array-rename-btn"         title="Cancel (Esc)">&times;</button>
+        </div>
+        <div id="preset-array-rename-error" class="preset-array-rename-error"></div>
       </div>
 
       <div id="preset-list-top" class="preset-list-top"></div>
@@ -2420,6 +2481,7 @@
     <div class="modal-btns">
       <button class="modal-btn-cancel"  id="modal-unsaved-cancel">Cancel</button>
       <button class="modal-btn-discard" id="modal-unsaved-discard">Discard</button>
+      <button class="modal-btn-save"    id="modal-unsaved-saveas" style="display:none">Save As</button>
       <button class="modal-btn-save"    id="modal-unsaved-save">Save</button>
     </div>
   </div>
@@ -2506,6 +2568,21 @@
       <button class="modal-btn-cancel" id="btn-add-style-cancel">Cancel</button>
       <button class="modal-btn-cancel" id="btn-add-style-clear" style="margin-left:auto;margin-right:8px">Clear</button>
       <button class="modal-btn-primary" id="btn-add-style-confirm" disabled>&#43; Add to Library</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── New Config choice modal (Blank vs Template) ── -->
+<div class="modal-overlay" id="modal-new-config">
+  <div class="modal" style="width:380px;max-width:96vw">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+      <h2 style="margin:0;flex:1">New Config</h2>
+      <button class="modal-btn-close" id="btn-new-config-close">&#10005;</button>
+    </div>
+    <p style="margin:0 0 16px;font-size:0.82rem;color:var(--c-text-muted)">Start with a blank file or use the default config template (can be modified in Settings).</p>
+    <div class="modal-btns" style="justify-content:stretch;gap:10px">
+      <button class="modal-btn-primary" id="btn-new-config-blank"    style="flex:1">&#43; Blank</button>
+      <button class="modal-btn-primary" id="btn-new-config-template" style="flex:1">&#128203; Use Template</button>
     </div>
   </div>
 </div>
@@ -2675,6 +2752,25 @@
       </div>
     </div>
 
+    <div class="settings-item">
+      <span class="settings-item-label">Default Config Template</span>
+      <div style="display:flex;gap:6px">
+        <button class="settings-item-btn enabled" id="btn-import-template">Import</button>
+        <button class="settings-item-btn enabled" id="btn-reset-template">Reset to Default</button>
+      </div>
+    </div>
+    <div id="template-confirm-panel" style="display:none;">
+      <div class="cache-warning">
+        <strong>Reset to default template?</strong><br>
+        Any customizations you made to the template file will be lost.<br><br>
+        This does <strong>not</strong> affect saved config files.
+        <div class="cache-warning-actions">
+          <button class="settings-item-btn enabled" id="btn-template-cancel">Cancel</button>
+          <button class="settings-item-btn danger" id="btn-template-confirm">Yes, Reset</button>
+        </div>
+      </div>
+    </div>
+
     <div class="settings-item" id="setting-styles-item" style="display:none">
       <span class="settings-item-label">Style Library <span style="font-size:0.7rem;color:var(--c-text-dim)">(dev only)</span></span>
       <label class="settings-toggle">
@@ -2723,7 +2819,7 @@
           </div>
           <span id="update-progress-text" style="font-size:0.74rem;color:var(--c-text-dim);white-space:nowrap">0%</span>
         </div>
-        <button class="settings-item-btn" id="btn-install-update" style="display:none;background:rgba(0,180,80,0.15);color:#3db366;border-color:rgba(0,180,80,0.3)">Install Now</button>
+        <button class="settings-item-btn enabled" id="btn-install-update" style="display:none;background:rgba(0,180,80,0.15);color:#3db366;border-color:rgba(0,180,80,0.3)">Install Now</button>
       </div>
       <div id="update-error-msg" style="display:none;font-size:0.74rem;color:#e44;margin-top:6px"></div>
     </div>
@@ -2862,14 +2958,24 @@ function setFileOpen(open) {
 }
 
 // ── Unsaved modal ──────────────────────────────────────
-function promptUnsaved(msg) {
+// Resolves to one of: 'cancel' | 'discard' | 'saveas' | 'save'.
+// opts.saveAs  (default false) — show the Save As button (config flows).
+// opts.discard (default true)  — show the Discard button. Compile passes false because
+//   discarding mid-compile would build from the on-disk (un-edited) content, which is
+//   almost never what the user wants — Cancel / Save / Save As are the meaningful options.
+function promptUnsaved(msg, opts) {
   return new Promise(resolve => {
     document.getElementById('modal-unsaved-msg').textContent = msg || 'You have unsaved changes.';
-    const overlay = document.getElementById('modal-unsaved');
+    const overlay    = document.getElementById('modal-unsaved');
+    const saveAsBtn  = document.getElementById('modal-unsaved-saveas');
+    const discardBtn = document.getElementById('modal-unsaved-discard');
+    saveAsBtn.style.display  = opts?.saveAs ? '' : 'none';
+    discardBtn.style.display = (opts?.discard === false) ? 'none' : '';
     overlay.classList.add('active');
     const cleanup = r => { overlay.classList.remove('active'); resolve(r); };
     document.getElementById('modal-unsaved-cancel').onclick  = () => cleanup('cancel');
-    document.getElementById('modal-unsaved-discard').onclick = () => cleanup('discard');
+    discardBtn.onclick                                       = () => cleanup('discard');
+    saveAsBtn.onclick                                        = () => cleanup('saveas');
     document.getElementById('modal-unsaved-save').onclick    = () => cleanup('save');
   });
 }
@@ -2918,6 +3024,12 @@ window.promptConfirm = promptConfirm;
 function setDirty(v) {
   isDirty = v;
   document.getElementById('stat-dirty').classList.toggle('visible', v);
+  // Save button enable: dirty → yes; clean WITH a path → no (nothing to save);
+  // clean WITHOUT a path → yes (fresh new config that hasn't been written to disk
+  // yet — user may want to save the loaded template content as-is). Save delegates
+  // to Save As when there's no path. Save As stays always-enabled separately.
+  const saveBtn = document.getElementById('btn-save');
+  if (saveBtn) saveBtn.disabled = !v && !!currentFilePath;
   updateWindowTitle();
 }
 
@@ -2981,10 +3093,120 @@ function updateStatusMeta() {
     ts.style.display = 'none';
   }
 }
+// User-initiated dropdown changes rewrite the include line in the editor (single Monaco
+// edit, undoable). Programmatic dispatches from loadContent / auto-detect set event.isTrusted
+// to false — we skip them here.
+//
+// If the file has no recognizable board include, we ask via the standard confirm modal
+// (Cancel / Insert) — same pattern as Link Style Library. On confirm, placement follows
+// the established rule: insert at the top of an existing `#ifdef CONFIG_TOP` block if one
+// exists; otherwise create a fresh CONFIG_TOP block at the very top of the file, AFTER any
+// leading comments (preserved verbatim).
+const _BOARD_INCLUDE_RE = /^([ \t]*)#include\s+["']proffieboard_v(\d)_config\.h["'][ \t]*(\r?\n)?/m;
+const _BOARD_INCLUDE_FILE_BY_DROPDOWN = {
+  'Proffieboard':    'proffieboard_v1_config.h',
+  'Proffieboard V2': 'proffieboard_v2_config.h',
+  'Proffieboard V3': 'proffieboard_v3_config.h',
+};
+
+// Returns the 0-based line index of the first non-comment, non-blank line in `text`.
+// Handles `// line comments`, `/* block comments */`, and multi-line block comments.
+function _findFirstNonCommentLineIdx(text) {
+  const lines = text.split('\n');
+  let inBlockComment = false;
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    if (inBlockComment) {
+      if (/\*\//.test(trimmed)) inBlockComment = false;
+      continue;
+    }
+    if (trimmed === '') continue;
+    if (trimmed.startsWith('//')) continue;
+    if (trimmed.startsWith('/*')) {
+      if (!/\*\//.test(trimmed.slice(2))) inBlockComment = true;
+      continue;
+    }
+    return i;
+  }
+  return lines.length;
+}
+
+document.getElementById('input-board').addEventListener('change', async (e) => {
+  if (!e.isTrusted) return;
+  if (!editor) return;
+  const sel    = document.getElementById('input-board');
+  const choice = sel?.value;
+  if (!choice) return;
+  const targetFile = _BOARD_INCLUDE_FILE_BY_DROPDOWN[choice];
+  if (!targetFile) return;
+  const text  = editor.getValue();
+  const match = _BOARD_INCLUDE_RE.exec(text);
+
+  if (match) {
+    // No-op fast path: include already matches the choice (covers auto-detect ping-pong).
+    const currentDigit = match[2];
+    const targetDigit  = targetFile.match(/_v(\d)_/)?.[1];
+    if (currentDigit === targetDigit) return;
+
+    // Rewrite the include line in place — single undoable Monaco edit, preserving indent.
+    const model     = editor.getModel();
+    const startPos  = model.getPositionAt(match.index);
+    const endPos    = model.getPositionAt(match.index + match[0].length);
+    const indent    = match[1] || '';
+    const newlineCh = match[3] || '\n';
+    const newLine   = `${indent}#include "${targetFile}"${newlineCh}`;
+    _atomicEdit(editor,'board-dropdown-sync', [{
+      range: new monaco.Range(startPos.lineNumber, startPos.column, endPos.lineNumber, endPos.column),
+      text:  newLine,
+    }]);
+    showToast(`Board changed to ${choice} (include updated).`);
+    flashEditorLine(startPos.lineNumber);
+    return;
+  }
+
+  // No board include present — ask before inserting.
+  const ok = await promptConfirm({
+    title:       'Insert Board Include?',
+    message:     `Your config has no board include yet.\n\nAdd #include "${targetFile}" to make ${choice} part of the config?`,
+    confirmText: 'Insert',
+    confirmKind: 'save',
+  });
+  if (!ok) return;
+
+  const model = editor.getModel();
+  const lines = text.split('\n');
+  // Placement: into existing CONFIG_TOP if present, else fresh block at top of file
+  // (after leading comments). Single undoable Monaco edit either way.
+  const ifdefLineIdx = lines.findIndex(l => /^[ \t]*#ifdef\s+CONFIG_TOP\b/.test(l));
+  let insertLineNum, insertText, flashLine;
+  if (ifdefLineIdx !== -1) {
+    insertLineNum = ifdefLineIdx + 2; // 1-based; the line right after #ifdef CONFIG_TOP
+    insertText    = `#include "${targetFile}"\n`;
+    flashLine     = insertLineNum;
+  } else {
+    const startIdx = _findFirstNonCommentLineIdx(text);
+    insertLineNum  = startIdx + 1; // 1-based
+    insertText = [
+      '#ifdef CONFIG_TOP',
+      `#include "${targetFile}"`,
+      '#endif',
+      '',
+      '',
+    ].join('\n');
+    flashLine = insertLineNum + 1; // the include line within the new block
+  }
+  _atomicEdit(editor,'board-include-insert', [{
+    range: new monaco.Range(insertLineNum, 1, insertLineNum, 1),
+    text:  insertText,
+  }]);
+  showToast(`Board include added (${choice}).`);
+  flashEditorLine(flashLine);
+});
+
 document.getElementById('input-board').addEventListener('change', () => {
   updateChangedIndicators();
   updateStatusMeta();
-  if (fileIsOpen) setDirty(true);
+  if (fileIsOpen && !_suppressBoardDirty) setDirty(true);
   const v = document.getElementById('input-board').value;
   document.getElementById('v1-warning').style.display =
     (v === 'Proffieboard') ? 'flex' : 'none';
@@ -3105,6 +3327,115 @@ function injectMetadata(content) {
   return lines.join('\n') + '\n' + stripped;
 }
 
+// Show a transient toast notification. Auto-dismisses after `durationMs` (default 4500ms).
+// kind: 'info' (blue, default), 'warn' (amber), 'error' (red). Bottom-right, stacks.
+// opts.id: optional logical-toast identifier. When supplied, repeat calls with the same
+// id REPLACE the existing toast in place (update content + reset the dismiss timer)
+// instead of stacking another one. Useful when rapid successive events shouldn't
+// produce a flickering toast cascade — they collapse into one persistent toast.
+function showToast(message, opts = {}) {
+  const { kind = 'info', durationMs = 4500, id } = opts;
+  const host = document.getElementById('toast-host');
+  if (!host) return;
+  // Reuse existing toast with same id if present.
+  if (id) {
+    const existing = host.querySelector(`[data-toast-id="${id}"]`);
+    if (existing) {
+      existing.textContent = message;
+      existing.className = 'toast toast-' + kind + ' visible';
+      existing.dataset.toastId = id; // re-set in case className wipe affected it
+      clearTimeout(existing._dismissTimer);
+      existing._dismissTimer = setTimeout(() => {
+        existing.classList.remove('visible');
+        setTimeout(() => existing.remove(), 200);
+      }, durationMs);
+      return;
+    }
+  }
+  const t = document.createElement('div');
+  t.className = 'toast toast-' + kind;
+  t.textContent = message;
+  if (id) t.dataset.toastId = id;
+  host.appendChild(t);
+  // Force reflow so the transition kicks in
+  requestAnimationFrame(() => t.classList.add('visible'));
+  t._dismissTimer = setTimeout(() => {
+    t.classList.remove('visible');
+    setTimeout(() => t.remove(), 200);
+  }, durationMs);
+}
+window.showToast = showToast;
+
+// Run a Monaco editor edit as a single atomic undo step. Use this for ANY button- or
+// menu-initiated source modification (Add Preset, Delete, Rename, Reorder, dropdown
+// sync, scaffold inserts, etc.) so Ctrl+Z reverts exactly one user action per press.
+// Without the surrounding `pushUndoStop` calls, Monaco's default coalescing window
+// merges nearby `executeEdits` invocations — and can even merge them with adjacent
+// typing — into a single undo unit, which produces the surprising "one undo reverted
+// three things" behavior. Calling pushUndoStop before AND after isolates the edit
+// from whatever came before it and whatever comes next.
+function _atomicEdit(monacoEditor, source, edits) {
+  monacoEditor.pushUndoStop();
+  monacoEditor.executeEdits(source, edits);
+  monacoEditor.pushUndoStop();
+}
+window._atomicEdit = _atomicEdit;
+
+// Apply a brief background highlight to a Monaco line. CSS keyframes drive the timing:
+// ~1s solid hold then ~3s ease-out fade (4s total). Clean up the decoration shortly after
+// the animation completes so it doesn't linger in Monaco's decoration list.
+function flashEditorLine(lineNumber) {
+  if (!editor || !lineNumber) return;
+  const ids = editor.deltaDecorations([], [{
+    range: new monaco.Range(lineNumber, 1, lineNumber, 1),
+    options: { isWholeLine: true, className: 'line-flash-board' },
+  }]);
+  setTimeout(() => { editor.deltaDecorations(ids, []); }, 4100);
+}
+
+// Map a `#include "proffieboard_vN_config.h"` directive in the content to a board
+// dropdown value. Returns null if no matching include is present. Comments out the
+// commented-include case by requiring the `#include` directive to start the line
+// (after optional whitespace) — `// #include ...` won't match.
+function _detectBoardFromInclude(content) {
+  const m = /^[ \t]*#include\s+["']proffieboard_v(\d)_config\.h["']/m.exec(content || '');
+  if (!m) return null;
+  switch (m[1]) {
+    case '1': return 'Proffieboard';
+    case '2': return 'Proffieboard V2';
+    case '3': return 'Proffieboard V3';
+    default:  return null;
+  }
+}
+
+// Live auto-detect from editor content while the user is editing.
+// The `#include "proffieboard_vN_config.h"` line is the source of truth — the dropdown is
+// a mirror. On every edit:
+//   - If an include line is present and differs from the current dropdown value → sync.
+//   - If no include line is present → leave the dropdown alone (don't clear a prior pick;
+//     a brand-new config might not have its include yet).
+// Debounced 250ms so it doesn't spam regex matches on every keystroke.
+let _autoDetectBoardTimer = null;
+let _suppressBoardDirty   = false; // set during programmatic board sync so the change
+                                   // handler doesn't dirty-flag — auto-detect mirrors
+                                   // the source-of-truth include, not a user edit.
+function _scheduleAutoDetectBoard() {
+  clearTimeout(_autoDetectBoardTimer);
+  _autoDetectBoardTimer = setTimeout(() => {
+    const boardSel = document.getElementById('input-board');
+    if (!boardSel) return;
+    const content  = (typeof editor !== 'undefined' && editor) ? editor.getValue() : '';
+    const detected = _detectBoardFromInclude(content);
+    if (!detected) return; // no include in content yet — preserve current dropdown value
+    if (detected === boardSel.value) return; // already in sync
+    if (!Array.from(boardSel.options).some(o => o.value === detected)) return;
+    _suppressBoardDirty = true;
+    boardSel.value = detected;
+    boardSel.dispatchEvent(new Event('change'));
+    _suppressBoardDirty = false;
+  }, 250);
+}
+
 function extractMetadata(content) {
   const m = (re) => { const r = content.match(re); return r ? r[1].trim() : null; };
   return {
@@ -3132,7 +3463,12 @@ function loadContent(rawContent, filePath) {
   document.getElementById('input-filename').value = base || 'my_config';
   document.getElementById('input-desc').value     = desc    || '';
   const boardSel = document.getElementById('input-board');
-  boardSel.value = board ? (Array.from(boardSel.options).find(o => o.value === board) ? board : '') : '';
+  // Resolution order — the `#include "proffieboard_vN_config.h"` line is the actual source
+  // of truth for the compiler, so it wins. `@jmt:board` metadata is a defensive fallback
+  // for configs lacking a recognizable include.
+  let resolvedBoard = _detectBoardFromInclude(rawContent);
+  if (!resolvedBoard) resolvedBoard = board;
+  boardSel.value = resolvedBoard ? (Array.from(boardSel.options).find(o => o.value === resolvedBoard) ? resolvedBoard : '') : '';
   boardSel.dispatchEvent(new Event('change'));
   if (usb && window.setSelectedUsb) window.setSelectedUsb(usb);
   const versionSel  = document.getElementById('input-version');
@@ -3229,7 +3565,22 @@ function closeDiff() {
   document.getElementById('diff-labels').classList.remove('visible');
   document.getElementById('stat-diff-info').classList.remove('visible');
   document.getElementById('diff-toggle-label').classList.remove('active');
-  if (diffEditorInstance) editor.setValue(diffEditorInstance.getModifiedEditor().getValue());
+  // Merge any edits made in the diff view back into the main editor. Using setValue here
+  // would wipe the main editor's undo stack (documented Monaco behavior — setValue discards
+  // history). Instead, do an executeEdits over the full model range so:
+  //   1. Pre-diff undo history is preserved (Ctrl+Z still walks back through earlier edits).
+  //   2. Any edits made WITHIN the diff view collapse into a single undoable step.
+  //   3. If the user just viewed the diff without editing, the contents match → no-op edit.
+  if (diffEditorInstance) {
+    const newContent = diffEditorInstance.getModifiedEditor().getValue();
+    const model      = editor.getModel();
+    if (model.getValue() !== newContent) {
+      _atomicEdit(editor, 'diff-close-merge', [{
+        range: model.getFullModelRange(),
+        text:  newContent,
+      }]);
+    }
+  }
   editor.focus();
 }
 
@@ -3278,12 +3629,18 @@ async function startCompare(filePath) {
   document.getElementById('config-banner').classList.add('comparing');
   document.getElementById('diff-label-orig').textContent = 'Compare file (baseline)';
 
-  // Set diff model — strip @jmt: metadata from compare file so only real content diffs show
+  // Set diff model — strip @jmt: metadata from compare file so only real content diffs show.
+  // Share the main editor's model as the "modified" pane so edits in the diff go directly
+  // into the main editor's model + undo stack (unified undo across the transition).
   const prev = diffEditorInstance.getModel();
   const orig = monaco.editor.createModel(_stripJmtMeta(res.content), 'cpp');
-  const curr = monaco.editor.createModel(editor.getValue(), 'cpp');
+  const curr = editor.getModel();
   diffEditorInstance.setModel({ original: orig, modified: curr });
-  if (prev) { prev.original?.dispose(); prev.modified?.dispose(); }
+  if (prev) {
+    prev.original?.dispose();
+    // Guard: do NOT dispose prev.modified if it's the shared main-editor model.
+    if (prev.modified && prev.modified !== curr) prev.modified.dispose();
+  }
   diffEditorInstance.getModifiedEditor().onDidChangeModelContent(() => {
     if (diffVisible) setDirty(true);
   });
@@ -3373,12 +3730,18 @@ document.getElementById('compare-pick-browse').addEventListener('click', async (
 
 function refreshDiff() {
   if (!diffEditorInstance) return;
-  // Dispose old models to prevent accumulation
+  // Share the main editor's model as the "modified" pane so edits in the diff go straight
+  // into the main editor's model and undo stack — Ctrl+Z works seamlessly across the
+  // transition. The `original` pane uses a fresh snapshot model that gets disposed cleanly.
   const prev = diffEditorInstance.getModel();
   const orig = monaco.editor.createModel(snapshot, 'cpp');
-  const curr = monaco.editor.createModel(editor.getValue(), 'cpp');
+  const curr = editor.getModel();
   diffEditorInstance.setModel({ original: orig, modified: curr });
-  if (prev) { prev.original?.dispose(); prev.modified?.dispose(); }
+  if (prev) {
+    prev.original?.dispose();
+    // Guard: do NOT dispose prev.modified if it's the shared main-editor model.
+    if (prev.modified && prev.modified !== curr) prev.modified.dispose();
+  }
   diffEditorInstance.getModifiedEditor().onDidChangeModelContent(() => {
     if (diffVisible) setDirty(true);
   });
@@ -3398,6 +3761,200 @@ function _hideTxtConvertNotice() {
   if (el) { el.style.display = 'none'; el.textContent = ''; }
 }
 
+// Per-position snapshot of `Preset NAME[]` declaration names in source order. Used to
+// detect renames between rebuild ticks: if the count is stable and a name changed at
+// position `i`, the matching `CONFIGARRAY(oldName)` references are rewritten to the
+// new name in the same tick. Insertion / deletion is detected by count change and skips
+// the rename pass — orphaned refs surface as marker errors instead.
+let _lastPresetNames = [];
+
+// Scan source for `Preset NAME[]` declarations, return names in source order. Mirrors
+// the parser's `findPresetArrayDeclarations` shape (required `\s+`, permissive `[\w-]*`
+// name capture) so the position-based pairing in `_syncConfigArrayRefs` stays aligned
+// with `_parseResult.arrays`. Empty name (`Preset [] = {`) is accepted as "".
+function _collectPresetDeclarationNames(text) {
+  const names = [];
+  const re = /\bPreset\s+([\w-]*)\s*\[\s*\]\s*=\s*\{/g;
+  let m;
+  while ((m = re.exec(text)) !== null) names.push(m[1] || '');
+  return names;
+}
+
+// Find every empty `CONFIGARRAY()` ref in `text`. Returns array of { start, end }
+// inner-range offsets — the zero/whitespace span between `(` and `)`. Used by both
+// the live mirror and the pencil rename to recover from a previous empty rename
+// (Preset[] → empty produced CONFIGARRAY() — typing a new name has to refill it).
+function _findEmptyConfigArrayRefs(text) {
+  const re = /\bCONFIGARRAY\s*\(\s*\)/g;
+  const refs = [];
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const openOffset  = m[0].indexOf('(');
+    const closeOffset = m[0].lastIndexOf(')');
+    refs.push({ start: m.index + openOffset + 1, end: m.index + closeOffset });
+  }
+  return refs;
+}
+
+// Live mirror: when a `Preset NAME[]` declaration is renamed (same source position,
+// different name), rewrite every matching `CONFIGARRAY(NAME)` reference to the new
+// name in the same render cycle. One-way only — Preset[] is the source of truth, the
+// CONFIGARRAY refs receive only. No debounce, no auto-correct, no toasts. Bails when
+// the bank count differs (insertion / deletion makes position-based pairing unreliable),
+// in which case orphaned refs become marker errors. Empty→named recovery is handled
+// separately: an `empty → name` transition fills exactly-one matching `CONFIGARRAY()`,
+// otherwise the user resolves ambiguity via the marker / pencil.
+function _syncConfigArrayRefs() {
+  if (!editor) return;
+  const text    = editor.getValue();
+  const current = _collectPresetDeclarationNames(text);
+  // Count differs → positions can't be paired safely. Snapshot and exit; the validator
+  // will mark any orphaned refs.
+  if (current.length !== _lastPresetNames.length) { _lastPresetNames = current; return; }
+  const renames    = [];
+  const currentSet = new Set(current);
+  let emptyRecoveryName = null; // exactly-one empty→named transition; false if multiple
+  for (let i = 0; i < current.length; i++) {
+    if (current[i] === _lastPresetNames[i]) continue;
+    const oldName = _lastPresetNames[i];
+    const newName = current[i];
+    if (!oldName) {
+      // Empty → non-empty. Defer to empty-recovery (run after the loop) so we can
+      // refuse ambiguous multi-transition cases without polluting the main rename list.
+      emptyRecoveryName = emptyRecoveryName === null ? newName : false;
+      continue;
+    }
+    if (currentSet.has(oldName)) continue; // moved / duplicated, not a true rename
+    renames.push({ oldName, newName });
+  }
+  _lastPresetNames = current;
+  const model = editor.getModel();
+  const edits = [];
+  renames.forEach(({ oldName, newName }) => {
+    const escaped = oldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const refRe   = new RegExp(`(\\bCONFIGARRAY\\s*\\(\\s*)${escaped}(\\s*\\))`, 'g');
+    let rm;
+    while ((rm = refRe.exec(text)) !== null) {
+      const start = rm.index + rm[1].length;
+      const end   = start + oldName.length;
+      const sp = model.getPositionAt(start);
+      const ep = model.getPositionAt(end);
+      edits.push({
+        range: new monaco.Range(sp.lineNumber, sp.column, ep.lineNumber, ep.column),
+        text:  newName,
+      });
+    }
+  });
+  // Empty→named recovery: only act if exactly one Preset[] transitioned out of empty
+  // AND exactly one `CONFIGARRAY()` empty ref exists. Anything else is ambiguous — let
+  // the marker errors guide the user.
+  if (emptyRecoveryName && emptyRecoveryName !== false) {
+    const emptyRefs = _findEmptyConfigArrayRefs(text);
+    if (emptyRefs.length === 1) {
+      const r  = emptyRefs[0];
+      const sp = model.getPositionAt(r.start);
+      const ep = model.getPositionAt(r.end);
+      edits.push({
+        range: new monaco.Range(sp.lineNumber, sp.column, ep.lineNumber, ep.column),
+        text:  emptyRecoveryName,
+      });
+    }
+  }
+  if (edits.length) _atomicEdit(editor, 'sync-configarray-refs', edits);
+}
+
+// Marker-based validation. Two error classes that the user otherwise wouldn't see until
+// compile time:
+//   (1) A `Preset NAME[]` declaration whose name isn't a valid C++ identifier (hyphens,
+//       spaces, leading digits) or is missing entirely.
+//   (2) A `CONFIGARRAY(name)` reference with no matching `Preset[]` declaration —
+//       commonly produced when a bank is renamed via the editor (sync handles same-
+//       position renames; insertions / deletions leave orphans) or when the user types
+//       a CONFIGARRAY name directly. CONFIGARRAY is allowed to be edited freely; only
+//       orphans are flagged.
+// Markers attach a red squiggle plus tooltip. The `_atomicEdit` machinery for sync
+// already keeps the in-source declarations stable; markers are pure feedback, no edits.
+function _validatePresetIdentifiers() {
+  if (!editor || !window.monaco) return;
+  const model = editor.getModel();
+  if (!model) return;
+  const text = editor.getValue();
+  const validIdent = /^[A-Za-z_]\w*$/;
+  const markers = [];
+
+  // (1) Preset[] declarations with invalid or missing names.
+  const presetRe = /\bPreset(\s+)([\w-]*)\s*\[\s*\]\s*=\s*\{/g;
+  let m;
+  while ((m = presetRe.exec(text)) !== null) {
+    const name = m[2];
+    if (name && validIdent.test(name)) continue;
+    const leadStart = m.index + 'Preset'.length;
+    const nameStart = leadStart + m[1].length;
+    // If the name is empty, mark the whitespace + `[]` so there's something to hover.
+    const markStart = name ? nameStart : leadStart;
+    const markEnd   = name ? nameStart + name.length : nameStart + 2; // span the `[]`
+    const sp = model.getPositionAt(markStart);
+    const ep = model.getPositionAt(markEnd);
+    markers.push({
+      severity: monaco.MarkerSeverity.Error,
+      message:  name
+        ? 'Invalid preset bank name. Use letters, digits, and underscores; must not start with a digit.'
+        : 'Preset bank is missing a name.',
+      startLineNumber: sp.lineNumber, startColumn: sp.column,
+      endLineNumber:   ep.lineNumber, endColumn:   ep.column,
+    });
+  }
+
+  // `Preset[] = {` (no whitespace between keyword and `[]`) — name is absent entirely.
+  const presetNoSpaceRe = /\bPreset\[\s*\]\s*=\s*\{/g;
+  while ((m = presetNoSpaceRe.exec(text)) !== null) {
+    const sp = model.getPositionAt(m.index);
+    const ep = model.getPositionAt(m.index + 'Preset[]'.length);
+    markers.push({
+      severity: monaco.MarkerSeverity.Error,
+      message:  'Preset bank is missing a name.',
+      startLineNumber: sp.lineNumber, startColumn: sp.column,
+      endLineNumber:   ep.lineNumber, endColumn:   ep.column,
+    });
+  }
+
+  // (2) CONFIGARRAY refs without a matching Preset[].
+  const declaredNames = new Set(_collectPresetDeclarationNames(text).filter(Boolean));
+  const refRe = /(\bCONFIGARRAY\s*\(\s*)([\w-]*)(\s*\))/g;
+  while ((m = refRe.exec(text)) !== null) {
+    const refName = m[2];
+    if (!refName) {
+      const sp = model.getPositionAt(m.index);
+      const ep = model.getPositionAt(m.index + m[0].length);
+      markers.push({
+        severity: monaco.MarkerSeverity.Error,
+        message:  'CONFIGARRAY reference is missing a name.',
+        startLineNumber: sp.lineNumber, startColumn: sp.column,
+        endLineNumber:   ep.lineNumber, endColumn:   ep.column,
+      });
+      continue;
+    }
+    if (declaredNames.has(refName)) continue;
+    const start = m.index + m[1].length;
+    const end   = start + refName.length;
+    const sp = model.getPositionAt(start);
+    const ep = model.getPositionAt(end);
+    markers.push({
+      severity: monaco.MarkerSeverity.Error,
+      message:  `No Preset[] declaration named "${refName}". Add one or update this reference.`,
+      startLineNumber: sp.lineNumber, startColumn: sp.column,
+      endLineNumber:   ep.lineNumber, endColumn:   ep.column,
+    });
+  }
+
+  monaco.editor.setModelMarkers(model, 'preset-validator', markers);
+}
+
+// Returns true when a save actually happened (write succeeded). Returns false on
+// write failure or when delegating to doSaveAs and the user cancels the dialog.
+// Callers (compile / close guards) use this to bail instead of continuing under
+// the assumption it saved. Browser-mode (doDownload) returns true since download
+// is always initiated.
 async function doSave() {
   const content = injectMetadata(window.getEditorContent());
   if (isElectron) {
@@ -3406,10 +3963,10 @@ async function doSave() {
       if (isTxt) {
         // .txt files: save .txt first (non-destructive), then save as .h and use that going forward
         const txtRes = await window.electronAPI.saveFile(currentFilePath, content);
-        if (!txtRes.ok) { alert('Save failed: ' + txtRes.error); return; }
+        if (!txtRes.ok) { alert('Save failed: ' + txtRes.error); return false; }
         const hPath = currentFilePath.replace(/\.txt$/i, '.h');
         const hRes = await window.electronAPI.saveFile(hPath, content);
-        if (!hRes.ok) { alert('Save as .h failed: ' + hRes.error); return; }
+        if (!hRes.ok) { alert('Save as .h failed: ' + hRes.error); return false; }
         await window.electronAPI.removeRecentFile(currentFilePath);
         setFilePath(hPath);  // clears notice as side-effect, we re-show below
         document.getElementById('input-filename').value = hPath.split(/[\\/]/).pop().replace(/\.h$/i, '');
@@ -3417,7 +3974,7 @@ async function doSave() {
         _showTxtConvertNotice('Saved as .h — original .txt preserved');
       } else {
         const res = await window.electronAPI.saveFile(currentFilePath, content);
-        if (!res.ok) { alert('Save failed: ' + res.error); return; }
+        if (!res.ok) { alert('Save failed: ' + res.error); return false; }
         _hideTxtConvertNotice();
       }
       setDirty(false);
@@ -3429,16 +3986,23 @@ async function doSave() {
       if (usbEl) baselineUsb = usbEl.value || null;
       updateChangedIndicators();
       if (window.updateUsbChangedIndicator) window.updateUsbChangedIndicator();
-    } else { await doSaveAs(); }
-  } else { doDownload(); }
+      return true;
+    }
+    return await doSaveAs();
+  }
+  doDownload();
+  return true;
 }
 
 window.doSave = doSave;
 
+// Returns true when a save actually happened (savePath chosen + write succeeded).
+// Returns false on dialog-cancel or write failure — callers (compile / close guards)
+// use this to bail out instead of proceeding under the assumption it saved.
 async function doSaveAs() {
   const name     = document.getElementById('input-filename').value.trim() || 'my_config';
   const savePath = await window.electronAPI.getSavePath(name + '.h');
-  if (!savePath) return;
+  if (!savePath) return false;
   // Update filename field BEFORE injecting metadata so @jmt:name is correct
   const base = savePath.split(/[\\/]/).pop().replace(/\.h$/i, '');
   document.getElementById('input-filename').value = base;
@@ -3446,21 +4010,24 @@ async function doSaveAs() {
   metaConfigId = null;
   const content = injectMetadata(window.getEditorContent());
   const res = await window.electronAPI.saveFile(savePath, content);
-  if (res.ok) {
-    setFilePath(savePath);
-    updateBanner();
-    setDirty(false);
-    updateStatusMeta();
-    updateFavButton();
-    // Baselines now match the saved file — clear changed indicators
-    baselineBoard   = document.getElementById('input-board').value   || null;
-    baselineVersion = document.getElementById('input-version').value || null;
-    const usbEl = document.getElementById('bp-usb-select');
-    if (usbEl) baselineUsb = usbEl.value || null;
-    updateChangedIndicators();
-    if (window.updateUsbChangedIndicator) window.updateUsbChangedIndicator();
-  }
+  if (!res.ok) return false;
+  setFilePath(savePath);
+  updateBanner();
+  setDirty(false);
+  updateStatusMeta();
+  updateFavButton();
+  // Baselines now match the saved file — clear changed indicators
+  baselineBoard   = document.getElementById('input-board').value   || null;
+  baselineVersion = document.getElementById('input-version').value || null;
+  const usbEl = document.getElementById('bp-usb-select');
+  if (usbEl) baselineUsb = usbEl.value || null;
+  updateChangedIndicators();
+  if (window.updateUsbChangedIndicator) window.updateUsbChangedIndicator();
+  return true;
 }
+
+window.doSaveAs  = doSaveAs;
+window.getIsDirty = () => isDirty;
 
 function doDownload() {
   const raw  = document.getElementById('input-filename').value.trim() || 'my_config';
@@ -3488,16 +4055,50 @@ document.getElementById('btn-download')?.addEventListener('click', doDownload);
 // ── Guard unsaved ──────────────────────────────────────
 async function guardUnsaved(msg) {
   if (!isDirty) return true;
-  const choice = await promptUnsaved(msg);
+  const choice = await promptUnsaved(msg, { saveAs: true });
   if (choice === 'cancel')  return false;
-  if (choice === 'save')    { await doSave(); return true; }
+  // Treat a cancelled Save / Save As (user dismissed the file picker, or write
+  // failed) the same as Cancel — don't let the surrounding action proceed under
+  // the assumption that the file got saved.
+  if (choice === 'save')    return await doSave();
+  if (choice === 'saveas')  return await doSaveAs();
   return true;
 }
 
 // ── New ────────────────────────────────────────────────
+function _promptNewConfigKind() {
+  return new Promise(resolve => {
+    const overlay = document.getElementById('modal-new-config');
+    overlay.classList.add('active');
+    const cleanup = r => { overlay.classList.remove('active'); resolve(r); };
+    document.getElementById('btn-new-config-blank').onclick    = () => cleanup('blank');
+    document.getElementById('btn-new-config-template').onclick = () => cleanup('template');
+    document.getElementById('btn-new-config-close').onclick    = () => cleanup('cancel');
+  });
+}
+
 async function doNew() {
   if (!await guardUnsaved('Save current file before creating a new config?')) return;
-  loadContent('', null);
+  const choice = await _promptNewConfigKind();
+  if (choice === 'cancel') return;
+
+  let content = '';
+  if (choice === 'template') {
+    if (window.electronAPI?.readDefaultTemplate) {
+      const result = await window.electronAPI.readDefaultTemplate();
+      if (result && result.ok) {
+        content = result.content;
+      } else {
+        // Template read failed — fall back to blank so the user isn't stuck
+        console.error('Template read failed:', result?.error);
+      }
+    }
+  }
+
+  loadContent(content, null);
+  // Don't mark dirty — the user just loaded a template, they haven't edited anything.
+  // The Save button stays enabled via the no-path branch in setDirty so they can save
+  // the loaded content as a new file without first having to make a token edit.
   const fn = document.getElementById('input-filename');
   fn.removeAttribute('readonly');
   fn.title = 'Enter a name for your new config';
@@ -3939,11 +4540,101 @@ async function openAboutModal() {
   document.getElementById('modal-about').classList.add('active');
   // Reset update section to match current known state
   _refreshUpdateSection();
+  _refreshTemplateResetState();
+}
+
+// Pull current template status and toggle the Reset button's enabled state based on
+// whether the user's file content matches the shipped default. Called when the Settings
+// modal opens and after any template Reset/Import action.
+async function _refreshTemplateResetState() {
+  const resetBtn = document.getElementById('btn-reset-template');
+  if (!resetBtn || !window.electronAPI?.getTemplateStatus) return;
+  try {
+    const status = await window.electronAPI.getTemplateStatus();
+    if (status?.ok && !status.isDefault) {
+      resetBtn.disabled = false;
+      resetBtn.classList.add('enabled');
+    } else {
+      resetBtn.disabled = true;
+      resetBtn.classList.remove('enabled');
+    }
+  } catch {
+    // On error, leave button as-is — user can still try clicking
+  }
 }
 
 document.getElementById('btn-clear-cache').addEventListener('click', () => {
   document.getElementById('cache-confirm-panel').style.display = 'block';
   document.getElementById('btn-clear-cache').disabled = true;
+});
+
+document.getElementById('btn-reset-template').addEventListener('click', () => {
+  document.getElementById('template-confirm-panel').style.display = 'block';
+  document.getElementById('btn-reset-template').disabled = true;
+});
+
+document.getElementById('btn-template-cancel').addEventListener('click', () => {
+  document.getElementById('template-confirm-panel').style.display = 'none';
+  _refreshTemplateResetState();
+});
+
+document.getElementById('btn-template-confirm').addEventListener('click', async () => {
+  const confirmBtn = document.getElementById('btn-template-confirm');
+  const cancelBtn  = document.getElementById('btn-template-cancel');
+  confirmBtn.disabled    = true;
+  cancelBtn.disabled     = true;
+  confirmBtn.textContent = 'Resetting…';
+  try {
+    const result = await window.electronAPI.resetDefaultTemplate();
+    if (result.ok) {
+      document.getElementById('template-confirm-panel').style.display = 'none';
+      confirmBtn.textContent = 'Yes, Reset';
+      confirmBtn.disabled    = false;
+      cancelBtn.disabled     = false;
+      _refreshTemplateResetState();
+    } else {
+      confirmBtn.textContent = '✗ Failed';
+      setTimeout(() => {
+        confirmBtn.textContent = 'Yes, Reset';
+        confirmBtn.disabled    = false;
+        cancelBtn.disabled     = false;
+      }, 2200);
+      console.error('Template reset failed:', result.error);
+    }
+  } catch (e) {
+    confirmBtn.textContent = '✗ Failed';
+    setTimeout(() => {
+      confirmBtn.textContent = 'Yes, Reset';
+      confirmBtn.disabled    = false;
+      cancelBtn.disabled     = false;
+    }, 2200);
+    console.error('Template reset failed:', e);
+  }
+});
+
+document.getElementById('btn-import-template').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-import-template');
+  btn.disabled    = true;
+  btn.textContent = 'Importing…';
+  try {
+    const result = await window.electronAPI.importTemplate();
+    if (result?.ok) {
+      btn.textContent = '✓ Imported';
+      setTimeout(() => { btn.textContent = 'Import'; btn.disabled = false; _refreshTemplateResetState(); }, 1800);
+    } else if (result?.cancelled) {
+      // User cancelled the file picker — silent reset, no feedback
+      btn.textContent = 'Import';
+      btn.disabled = false;
+    } else {
+      btn.textContent = '✗ Failed';
+      setTimeout(() => { btn.textContent = 'Import'; btn.disabled = false; }, 2200);
+      console.error('Template import failed:', result?.error);
+    }
+  } catch (e) {
+    btn.textContent = '✗ Failed';
+    setTimeout(() => { btn.textContent = 'Import'; btn.disabled = false; }, 2200);
+    console.error('Template import failed:', e);
+  }
 });
 
 document.getElementById('btn-cache-cancel').addEventListener('click', () => {
@@ -4037,8 +4728,9 @@ document.getElementById('about-kofi-link').addEventListener('click', (e) => {
 });
 
 // ── Self-update ────────────────────────────────────────
-let _updateInfo    = null;
-let _updateExeReady = false;
+let _updateInfo            = null;
+let _updateExeReady        = false;
+let _updateInstallPending  = false;  // true once installUpdate IPC is in flight; suppresses re-prompts in close handler
 
 function _showUpdateIndicators(version) {
   const pill = document.getElementById('stat-update');
@@ -4191,14 +4883,11 @@ document.getElementById('btn-download-update').addEventListener('click', async (
 });
 
 document.getElementById('btn-install-update').addEventListener('click', async () => {
-  if (isDirty) {
-    const fileName = currentFilePath ? currentFilePath.split(/[\\/]/).pop() : 'config file';
-    const choice = await promptUnsaved(`Save changes to "${fileName}" before installing the update?`);
-    if (choice === 'cancel') return;
-    if (choice === 'save') await doSave();
-  }
+  if (window._runQuitGuards && !await window._runQuitGuards('installing the update')) return;
+  _updateInstallPending = true;
   const result = await window.electronAPI.installUpdate();
   if (!result.ok) {
+    _updateInstallPending = false;
     document.getElementById('update-error-msg').textContent  = `Install failed: ${result.error}`;
     document.getElementById('update-error-msg').style.display = 'block';
   }
@@ -4486,9 +5175,22 @@ function _wrapBarePresetsInIfdef(lines) {
   const startIdx = lines.findIndex(l => /^\s*Preset\s+\w+\s*\[\s*\]\s*=\s*\{/.test(l));
 
   if (startIdx === -1) {
-    // No Preset block — append a fresh empty CONFIG_PRESETS scaffold so the include has a home
-    if (lines.length && lines[lines.length - 1].trim() !== '') lines.push('');
-    lines.push('#ifdef CONFIG_PRESETS', '', 'Preset presets[] = {', '};', '', '#endif', '');
+    // No Preset block — insert a fresh empty CONFIG_PRESETS scaffold so the include
+    // has a home. ProffieOS section order is CONFIG_TOP → CONFIG_PROP → CONFIG_PRESETS
+    // → CONFIG_BUTTONS, so when CONFIG_BUTTONS exists the new block lands BEFORE it
+    // (not at end of file).
+    const buttonsIdx = lines.findIndex(l => /^\s*#ifdef\s+CONFIG_BUTTONS/.test(l));
+    const block = ['#ifdef CONFIG_PRESETS', '', 'Preset presets[] = {', '};', '', '#endif', ''];
+    if (buttonsIdx !== -1) {
+      // Add a leading blank line so the new block doesn't run flush against the
+      // content immediately above CONFIG_BUTTONS (skip if there's already a blank).
+      const needsBlankBefore = buttonsIdx > 0 && lines[buttonsIdx - 1].trim() !== '';
+      if (needsBlankBefore) block.unshift('');
+      lines.splice(buttonsIdx, 0, ...block);
+    } else {
+      if (lines.length && lines[lines.length - 1].trim() !== '') lines.push('');
+      lines.push(...block);
+    }
     return;
   }
 
@@ -4556,7 +5258,7 @@ function _doInsertStylesInclude(lines, conflictIdx, action) {
   const insertedLine = insertAfter + 2; // 1-based
   const ed       = window._monacoEditor;
   const model    = ed.getModel();
-  ed.executeEdits('styles-link', [{
+  _atomicEdit(ed, 'styles-link', [{
     range: model.getFullModelRange(),
     text:  lines.join('\n'),
   }]);
@@ -4590,7 +5292,7 @@ async function _insertStylesInclude() {
   );
   if (commentedIdx !== -1) {
     lines[commentedIdx] = lines[commentedIdx].replace(/^(\s*)\/\/+\s*/, '$1');
-    editor.executeEdits('styles-link-uncomment', [{
+    _atomicEdit(editor,'styles-link-uncomment', [{
       range: editor.getModel().getFullModelRange(),
       text:  lines.join('\n'),
     }]);
@@ -4628,8 +5330,8 @@ document.getElementById('btn-styles-tab-link').addEventListener('click', () => {
 // resolved by the user via Cancel / Comment Out / Remove It modal.
 
 let _selectedVersionJmtVersion = null;       // installed JMT version on the SELECTED OS version, or null
-const _JMT_PROP_INCLUDE_PATH   = '../props/jmt_fett_prop.h';
-const _JMT_PROP_INCLUDE_RE     = /^\s*#include\s+"[^"]*jmt_fett_prop\.h"/m;
+const _JMT_PROP_INCLUDE_PATH   = '../props/jmt_fett263_wrapper.h';
+const _JMT_PROP_INCLUDE_RE     = /^\s*#include\s+"[^"]*jmt_fett263_wrapper\.h"/m;
 const _PROP_INCLUDE_RE         = /^\s*#include\s+"[^"]*\/props\/[^"]+\.h"/;
 
 async function _refreshSelectedVersionJmtState() {
@@ -4713,7 +5415,7 @@ function _doInsertJmtPropInclude(lines, conflictIdx, action) {
 
   const ed    = window._monacoEditor;
   const model = ed.getModel();
-  ed.executeEdits('jmt-link', [{
+  _atomicEdit(ed, 'jmt-link', [{
     range: model.getFullModelRange(),
     text:  lines.join('\n'),
   }]);
@@ -4731,21 +5433,38 @@ async function _insertJmtPropInclude() {
 
   // If the wrapper is present but commented out, just uncomment it
   const commentedIdx = lines.findIndex(l =>
-    /^\s*\/\/+\s*#include/.test(l) && l.includes('jmt_fett_prop.h')
+    /^\s*\/\/+\s*#include/.test(l) && l.includes('jmt_fett263_wrapper.h')
   );
   if (commentedIdx !== -1) {
-    lines[commentedIdx] = lines[commentedIdx].replace(/^(\s*)\/\/+\s*/, '$1');
-    editor.executeEdits('jmt-link-uncomment', [{
-      range: editor.getModel().getFullModelRange(),
-      text:  lines.join('\n'),
+    const targetLine  = commentedIdx + 1; // 1-based
+    const original    = lines[commentedIdx];
+    const uncommented = original.replace(/^(\s*)\/\/+\s*/, '$1');
+    // Targeted single-line edit — replacing the full model range was causing Monaco
+    // to scroll the viewport back to line 1 after the edit (the post-edit layout
+    // update overrode our revealLineInCenter). Editing just the affected line keeps
+    // the viewport stable and lets the reveal call land at the right spot.
+    _atomicEdit(editor, 'jmt-link-uncomment', [{
+      range: {
+        startLineNumber: targetLine, startColumn: 1,
+        endLineNumber:   targetLine, endColumn:   original.length + 1,
+      },
+      text: uncommented,
     }]);
+    editor.setPosition({ lineNumber: targetLine, column: 1 });
+    editor.focus();
+    // Known limitation: Monaco's post-edit layout pass scrolls the viewport to the
+    // cursor's pre-edit position (often line 1 when the user clicked the toolbar
+    // while scrolled to top), and that scroll wins over any `revealLineInCenter` /
+    // explicit `setScrollTop` we attempt here — including deferred-via-setTimeout
+    // calls. Cursor position is correct (visible on the minimap), but the user has
+    // to scroll manually to see the now-uncommented line.
     _updateJmtLinkBtn();
     return;
   }
 
   // Conflict: any other `#include "../props/*.h"` that isn't our wrapper
   const conflictIdx = lines.findIndex(l =>
-    _PROP_INCLUDE_RE.test(l) && !l.includes('jmt_fett_prop.h')
+    _PROP_INCLUDE_RE.test(l) && !l.includes('jmt_fett263_wrapper.h')
   );
   if (conflictIdx !== -1) {
     const action = await _promptJmtConflict(lines, conflictIdx);
@@ -4920,9 +5639,16 @@ function _scanEffects(usingCode) {
 window._isStylesDirty = () => _isStylesDirtyFlag;
 
 // ── Style Library file structure ─────────────────────────────────────────────
-const _SL_HELPER_HEADER = '/*****************************\n    Helper functions\n*****************************/';
-const _SL_STYLE_HEADER  = '/*****************************\n    Using styles\n*****************************/';
-const _SL_JMT_HEADER_RE = /^\/\/ =+\r?\n\/\/ Style Library[^\n]*\r?\n(?:\/\/ @jmt:[^\n]*\r?\n)*\/\/ =+\r?\n?/m;
+const _SL_HELPER_HEADER   = '/*****************************\n    Helper functions\n*****************************/';
+const _SL_CHARGING_HEADER = '/*****************************\n    Charging Styles\n*****************************/';
+const _SL_STYLE_HEADER    = '/*****************************\n    Using styles\n*****************************/';
+const _SL_JMT_HEADER_RE   = /^\/\/ =+\r?\n\/\/ Style Library[^\n]*\r?\n(?:\/\/ @jmt:[^\n]*\r?\n)*\/\/ =+\r?\n?/m;
+// Symbols that require the JMT charge-full prop functions include. Currently just one — list
+// is the single source of truth for both detection (which entries go in the Charging section)
+// and the guard wrap that's emitted around the section.
+const _SL_CHARGING_GUARD            = 'FUNCTIONS_CHARGE_FULL_PROP_H';
+const _SL_JMT_DEPENDENT_SYMBOLS     = ['ChargeFullPropF'];
+const _SL_CHARGING_SYMBOL_RE        = new RegExp(`\\b(?:${_SL_JMT_DEPENDENT_SYMBOLS.join('|')})\\b`);
 
 function _buildStyleLibraryJmtHeader(createdDate) {
   const today = new Date().toISOString().slice(0, 10);
@@ -4941,15 +5667,29 @@ function _extractStyleLibraryCreatedDate(content) {
   return m ? m[1].trim() : null;
 }
 
-// Strip section headers and JMT header from content, returning clean body
+// Strip section headers and JMT header from content, returning clean body.
+// Also strips the Charging Styles `#ifdef FUNCTIONS_CHARGE_FULL_PROP_H` / `#endif` pair so
+// the entries inside parse cleanly — they get re-wrapped by _applyStyleLibraryStructure.
 function _stripStyleLibraryStructure(content) {
-  return content
+  let result = content
     .replace(_SL_JMT_HEADER_RE, '')
     // Strip legacy blank-creation header format (old "JMT Studio — Style Library" / "Created:" block)
     .replace(/^\/\/ =+\r?\n\/\/ JMT Studio[^\n]*\r?\n(?:\/\/[^\n]*\r?\n)*\/\/ =+\r?\n?/m, '')
     .replace(/\/\*[*\s]*Helper\s+functions[*\s]*\*\/[ \t]*\r?\n?/gi, '')
-    .replace(/\/\*[*\s]*Using\s+styles[*\s]*\*\/[ \t]*\r?\n?/gi, '')
-    .replace(/^\s*\n/, '');
+    .replace(/\/\*[*\s]*Charging\s+Styles[*\s]*\*\/[ \t]*\r?\n?/gi, '')
+    .replace(/\/\*[*\s]*Using\s+styles[*\s]*\*\/[ \t]*\r?\n?/gi, '');
+
+  // Unwrap `#ifdef FUNCTIONS_CHARGE_FULL_PROP_H` ... `#endif` blocks as a pair, preserving the
+  // content between. Match the first #endif after each #ifdef (non-greedy) — guard against
+  // accidentally swallowing an unrelated #endif by requiring the labeled trailing comment when
+  // present, but accept a bare #endif too since user-written files may not have the label.
+  const blockRe = new RegExp(
+    `^#ifdef\\s+${_SL_CHARGING_GUARD}[ \\t]*\\r?\\n([\\s\\S]*?)^#endif(?:[ \\t]*//[^\\n]*)?[ \\t]*\\r?\\n?`,
+    'gm'
+  );
+  result = result.replace(blockRe, '$1');
+
+  return result.replace(/^\s*\n/, '');
 }
 
 // Rebuild content with JMT header + section headers in correct positions
@@ -4961,15 +5701,27 @@ function _applyStyleLibraryStructure(content, createdDate) {
   if (!entries.length) return jmtHeader + '\n\n' + stripped.trimStart();
 
   const { preamble, segments } = _buildSegments(stripped, entries);
-  const helperSegs = segments.filter(s =>  s.entry.isHelper);
-  const styleSegs  = segments.filter(s => !s.entry.isHelper);
+  // Charging takes precedence over helper/style classification — anything that requires the
+  // JMT prop functions include must sit inside the `#ifdef` guard, whether it's a helper or
+  // a top-level using style.
+  const chargingSegs = segments.filter(s =>  s.entry.isCharging);
+  const helperSegs   = segments.filter(s => !s.entry.isCharging &&  s.entry.isHelper);
+  const styleSegs    = segments.filter(s => !s.entry.isCharging && !s.entry.isHelper);
   const norm = segs => segs.map(s => s.text.replace(/\s+$/, '')).join('\n\n');
 
   const parts = [jmtHeader, ''];
   const preambleTrimmed = preamble.trim();
   if (preambleTrimmed) { parts.push(preambleTrimmed, ''); }
-  if (helperSegs.length) { parts.push(_SL_HELPER_HEADER, '', norm(helperSegs), ''); }
-  if (styleSegs.length)  { parts.push(_SL_STYLE_HEADER,  '', norm(styleSegs),  ''); }
+  if (helperSegs.length)   { parts.push(_SL_HELPER_HEADER, '', norm(helperSegs), ''); }
+  if (chargingSegs.length) {
+    parts.push(
+      _SL_CHARGING_HEADER, '',
+      `#ifdef ${_SL_CHARGING_GUARD}`, '',
+      norm(chargingSegs), '',
+      `#endif // ${_SL_CHARGING_GUARD}`, ''
+    );
+  }
+  if (styleSegs.length)    { parts.push(_SL_STYLE_HEADER, '', norm(styleSegs), ''); }
   return parts.join('\n');
 }
 
@@ -5417,10 +6169,15 @@ function _applyStylesSearch() {
   if (countEl) countEl.textContent = shown < cards.length ? `${shown} of ${cards.length}` : `${cards.length} styles`;
 }
 
-// Classifies entries as helpers vs full styles.
+// Classifies entries as helpers vs full styles, and marks JMT-dependent entries (currently:
+// any entry whose using-code references ChargeFullPropF — see _SL_JMT_DEPENDENT_SYMBOLS).
 // implComment → always full style; @jmt:helper tag or reference-based → helper.
+// isCharging takes precedence over section assignment: a charging entry lands in the
+// Charging Styles section regardless of helper status, so the #ifdef guard wraps everything
+// that won't compile without the JMT prop functions header.
 function _classifyStyleEntries(entries) {
   for (const entry of entries) {
+    entry.isCharging = _SL_CHARGING_SYMBOL_RE.test(entry.usingCode || '');
     if (entry.implComment) {
       entry.isHelper = false;
     } else {
@@ -7131,11 +7888,19 @@ function _updateAddStyleConfirmBtn() {
   document.getElementById('btn-add-style-confirm').disabled = !name || !hasCode || hasErr;
 }
 
-// Style name inputs must not contain spaces (invalid C++ using alias).
-// This wires silent space→underscore replacement to any name field.
+// Style names and preset bank names become C++ `using` aliases / array names. They
+// must contain only word characters (`[A-Za-z0-9_]`). This wires silent auto-conversion
+// of the two most common typos: SPACE → underscore, HYPHEN → underscore.
+//
+// Hyphen was added after a user-found bug where `Preset no-blade[]` parsed cleanly via
+// the rename UI but then the parser regex `\b(\w+)` couldn't match the hyphenated name,
+// so on next file load the bank silently disappeared from the visual view and an "Add
+// Preset" click scaffolded a duplicate `Preset presets[]` underneath. The "permissive,
+// compile-will-error" stance for hyphens (original TC-688) didn't account for the
+// visual view breakage. Auto-converting at input time is more honest.
 function _wireStyleNameSanitize(el) {
   el.addEventListener('keydown', e => {
-    if (e.key === ' ') {
+    if (e.key === ' ' || e.key === '-') {
       e.preventDefault();
       const s = el.selectionStart, end = el.selectionEnd;
       el.value = el.value.slice(0, s) + '_' + el.value.slice(end);
@@ -7145,7 +7910,8 @@ function _wireStyleNameSanitize(el) {
   });
   el.addEventListener('paste', e => {
     e.preventDefault();
-    const text = (e.clipboardData || window.clipboardData).getData('text').replace(/\s+/g, '_');
+    // Collapse runs of whitespace and/or hyphens to a single underscore.
+    const text = (e.clipboardData || window.clipboardData).getData('text').replace(/[\s-]+/g, '_');
     const s = el.selectionStart, end = el.selectionEnd;
     el.value = el.value.slice(0, s) + text + el.value.slice(end);
     el.setSelectionRange(s + text.length, s + text.length);
@@ -8234,6 +9000,7 @@ require(['vs/editor/editor.main'], function () {
       if (window.onEditorContentChanged) window.onEditorContentChanged();
       _updateStylesLinkBtn();
       _updateJmtLinkBtn();
+      _scheduleAutoDetectBoard();
     }
     _scheduleStylesInUseRebuild();
   });
@@ -8303,42 +9070,58 @@ require(['vs/editor/editor.main'], function () {
     } else { setFileOpen(false); }
   })();
 
+  // Run every unsaved-state guard before a teardown (close or update install).
+  // verb appears in prompts ("save before {verb}?"). Returns true if user opted to proceed.
+  async function _runQuitGuards(verb) {
+    if (window._isFlashing) {
+      alert('Cannot ' + (verb === 'closing' ? 'close' : 'install update') + ' while flashing. Wait for flash to complete.');
+      return false;
+    }
+    if (isDirty) {
+      const fileName = currentFilePath ? currentFilePath.split(/[\\/]/).pop() : 'config file';
+      const choice = await promptUnsaved(`Unsaved changes in "${fileName}" — save before ${verb}?`, { saveAs: true });
+      if (choice === 'cancel') return false;
+      // Treat a cancelled Save / Save As (file picker dismissed, write failed) as
+      // a hard stop — don't tear down under the assumption that it saved.
+      if (choice === 'save')   { if (!await doSave())   return false; }
+      if (choice === 'saveas') { if (!await doSaveAs()) return false; }
+    }
+    if (window._isStylesDirty?.()) {
+      if (_conflictStyleNames.size > 0) {
+        const names = [..._conflictStyleNames].join(', ');
+        const choice = await promptUnsaved(`Style Library has unsaved changes and unresolved duplicate names (${names}). Discard changes, or cancel to fix?`);
+        if (choice === 'cancel') return false;
+        // discard — proceed without saving
+      } else {
+        const choice = await promptUnsaved(`Unsaved changes in Style Library (my_styles.h) — save before ${verb}?`);
+        if (choice === 'cancel') return false;
+        if (choice === 'save') { await window.saveStylesFile(); }
+      }
+    }
+    if (window.vpHasUnsavedNotes?.()) {
+      const choice = await promptUnsaved(`Unsaved OS version notes — save before ${verb}?`);
+      if (choice === 'cancel') return false;
+      if (choice === 'save') await window.vpSaveCurrentNotes?.();
+    }
+    if (_helperAddHasContent()) {
+      if (!await _promptDiscard(`A new helper has unsaved content — discard and ${verb === 'closing' ? 'close' : 'continue'}?`)) return false;
+    }
+    if (_addStyleModalHasContent()) {
+      if (!await _promptDiscard(`A new style has unsaved content — discard and ${verb === 'closing' ? 'close' : 'continue'}?`)) return false;
+    }
+    return true;
+  }
+  window._runQuitGuards = _runQuitGuards;
+
   // ── App close handler ──
   if (isElectron) {
     window.electronAPI.onAppClosing(async () => {
-      if (window._isFlashing) {
-        alert('Cannot close while flashing. Wait for flash to complete.');
+      // Update install path already ran the guards — don't re-ask.
+      if (_updateInstallPending) {
+        window.electronAPI.doClose();
         return;
       }
-      if (isDirty) {
-        const fileName = currentFilePath ? currentFilePath.split(/[\\/]/).pop() : 'config file';
-        const choice = await promptUnsaved(`Unsaved changes in "${fileName}" — save before closing?`);
-        if (choice === 'cancel') return;
-        if (choice === 'save') { await doSave(); }
-      }
-      if (window._isStylesDirty?.()) {
-        if (_conflictStyleNames.size > 0) {
-          const names = [..._conflictStyleNames].join(', ');
-          const choice = await promptUnsaved(`Style Library has unsaved changes and unresolved duplicate names (${names}). Discard changes, or cancel to fix?`);
-          if (choice === 'cancel') return;
-          // discard — just close without saving
-        } else {
-          const choice = await promptUnsaved('Unsaved changes in Style Library (my_styles.h) — save before closing?');
-          if (choice === 'cancel') return;
-          if (choice === 'save') { await window.saveStylesFile(); }
-        }
-      }
-      if (window.vpHasUnsavedNotes?.()) {
-        const choice = await promptUnsaved('Unsaved OS version notes — save before closing?');
-        if (choice === 'cancel') return;
-        if (choice === 'save') await window.vpSaveCurrentNotes?.();
-      }
-      if (_helperAddHasContent()) {
-        if (!await _promptDiscard('A new helper has unsaved content — discard and close?')) return;
-      }
-      if (_addStyleModalHasContent()) {
-        if (!await _promptDiscard('A new style has unsaved content — discard and close?')) return;
-      }
+      if (!await _runQuitGuards('closing')) return;
       window.electronAPI.doClose();
     });
   }
@@ -8391,6 +9174,8 @@ require(['vs/editor/editor.main'], function () {
     let _isDragging          = false;
     let _activeLibraryPicker = null;
     let _editingSlot            = false;
+    let _editingField           = false; // a Name/Font/Track field-edit input is active — gate rebuild detail re-render
+    let _keyboardNavInProgress  = false; // Common checkbox keyboard-nav focused — gate rebuild while moving between fields
     let _activeSlotArgEditor    = null;
     let _activeColorPopup       = null;
     let _activeColorOverlay     = null;
@@ -8504,13 +9289,33 @@ require(['vs/editor/editor.main'], function () {
           }
           const innerLines = lines.slice(i + 1, endLine - 1);
           const innerText  = innerLines.join('\n');
-          const nameMatch  = innerText.match(/"([^"]*)"\s*\}?\s*,?\s*$/m);
-          const fontMatch  = innerText.match(/^\s*"([^"]*?)(?:;[^"]*)?"\s*,/m);
+          // Mirror the parser's entry shape: { "font", "track", style..., "displayName" }.
+          // The previous line-based regexes mis-extracted because the first quoted token
+          // ending a line is typically the track, not the display name — leading rows
+          // to render the track string in the name slot (and "(disabled)" otherwise).
+          const stringRe = /"([^"]*)"/g;
+          const strings  = [];
+          let sm;
+          while ((sm = stringRe.exec(innerText)) !== null) {
+            strings.push({ value: sm[1], start: sm.index });
+          }
+          const slotRe   = /\b\w*StylePtr\s*</g;
+          const slotStarts = [];
+          while ((sm = slotRe.exec(innerText)) !== null) slotStarts.push(sm.index);
+          const lastSlotPos = slotStarts.length ? slotStarts[slotStarts.length - 1] : -1;
+          const font  = strings[0]?.value || '';
+          // displayName = last string that appears AFTER the last StylePtr
+          let displayName = '';
+          for (let k = strings.length - 1; k >= 0; k--) {
+            if (strings[k].start > lastSlotPos) { displayName = strings[k].value; break; }
+          }
+          // Fallback (no styles in entry — extremely unusual): take the last string overall
+          if (!displayName && strings.length > 1) displayName = strings[strings.length - 1].value;
           const styleLines = innerLines.filter(l => /StylePtr/.test(l)).map(l => l.trim());
           result.push({
             startLine, endLine,
-            displayName: nameMatch ? nameMatch[1] : '(disabled)',
-            font: fontMatch ? fontMatch[1].split(';').filter(p => p.trim() !== 'common').join(';') : '',
+            displayName: displayName || '(disabled)',
+            font: font.split(';').filter(p => p.trim() !== 'common').join(';'),
             styleLines,
           });
           i = endLine - 1;
@@ -8537,8 +9342,10 @@ require(['vs/editor/editor.main'], function () {
         }
         const label = document.createElement('span');
         label.className = 'preset-strip-label' + (showActive && idx === _activeArrayIndex ? ' active' : '');
-        label.textContent = (arr.name || 'presets').toUpperCase();
-        label.title = arr.name;
+        // Empty / null bank name renders as a visible placeholder so the user sees the
+        // unnamed bank in the strip (and notices the marker error in source).
+        label.textContent = arr.name ? arr.name.toUpperCase() : '(UNNAMED)';
+        label.title = arr.name || '(unnamed)';
         label.dataset.arrayIndex = String(idx);
         label.addEventListener('click', (e) => {
           e.stopPropagation();
@@ -8565,6 +9372,18 @@ require(['vs/editor/editor.main'], function () {
       addBtn.textContent = '+';
       addBtn.addEventListener('click', (e) => { e.stopPropagation(); _addPresetBank(); });
       container.appendChild(addBtn);
+
+      // Sidecar header title mirrors the active bank's name (same source as the
+      // vertical rail label), so it's always clear which bank's styles are open
+      // — and the rename pencil sits right next to the name it edits.
+      const titleEl = document.querySelector('.preset-sidecar-title');
+      if (titleEl) {
+        const active = arrays[_activeArrayIndex];
+        const bankName = active?.name
+          ? active.name.toUpperCase()
+          : (arrays.length ? '(UNNAMED)' : 'PRESETS');
+        titleEl.textContent = bankName + ' STYLES';
+      }
     }
 
     // Click a bank label: switch active bank + open sidecar (or close if already open + active).
@@ -8578,6 +9397,227 @@ require(['vs/editor/editor.main'], function () {
       _selectedDisabledPreset = null;
       if (!_sidecarOpen) _openSidecar();
       else _rebuildSidecar();
+    }
+
+    // Walk backwards from `lineIdx` (0-based) past any contiguous attached comment lines.
+    // Recognized comment shapes:
+    //   • `// line comment`
+    //   • `/* single-line block comment */`
+    //   • Multi-line `/* … */` block (closing `*/` on one line, body, opening `/*` above)
+    // Returns the 0-based index of the FIRST attached comment, or `lineIdx` itself if
+    // there are none. Stops at the first blank line or non-comment line — those mean the
+    // comments above are NOT attached to lineIdx.
+    function _findAttachedCommentsStart(allLines, lineIdx) {
+      let start = lineIdx;
+      let i = lineIdx - 1;
+      while (i >= 0) {
+        const t = allLines[i].trim();
+        if (t === '') break;                                // blank line breaks attachment
+        if (t.startsWith('//'))                          { start = i; i--; continue; }
+        if (t.startsWith('/*') && t.endsWith('*/'))      { start = i; i--; continue; }
+        // Multi-line block comment: this line closes it (`… */`). Walk further back to
+        // find the line that opens it (contains `/*`). Bail if structure is malformed.
+        if (t.endsWith('*/')) {
+          let opener = -1;
+          for (let j = i - 1; j >= 0; j--) {
+            const tj = allLines[j].trim();
+            if (tj.includes('/*')) { opener = j; break; }
+            // Safety: hitting another `*/` or a blank line first means we're not inside
+            // a single valid block comment — abandon attachment.
+            if (tj.includes('*/') || tj === '') break;
+          }
+          if (opener === -1) break;
+          start = opener;
+          i = opener - 1;
+          continue;
+        }
+        break;
+      }
+      return start;
+    }
+
+    // Shared scaffolder: inserts a complete `Preset NAME[] = {entry};` block in the right
+    // place when no Preset array currently exists. Strategy (priority order):
+    //   (a) Existing `#ifdef CONFIG_PRESETS` → insert inside it, BEFORE any BladeConfig
+    //       already inside (Preset-first per ProffieOS convention). Else before `#endif`.
+    //       Any comments immediately above BladeConfig are treated as "attached" to it and
+    //       stay with it — new Preset block lands ABOVE the attached comments.
+    //   (b) Bare BladeConfig outside any ifdef → replace its declaration in-place with a
+    //       wrapped block: `#ifdef CONFIG_PRESETS` + Preset entry + original BladeConfig
+    //       + `#endif`. BladeConfig (and its attached comments) keep their original
+    //       relative position inside the new wrap.
+    //   (c) Neither exists → append a fresh `#ifdef CONFIG_PRESETS / Preset / #endif` at EOF.
+    // Used by both `_addFirstPreset` (default name 'presets') and `_addPresetBank` (next
+    // available `presetsN`). Returns true if any insertion ran.
+    function _insertNewPresetScaffold(editor, model, newName, entryText, editSource) {
+      const text       = model.getValue();
+      const allLines   = text.split('\n');
+      const ifdefRe    = /^[ \t]*#ifdef\s+CONFIG_PRESETS\b/m;
+      const ifdefMatch = ifdefRe.exec(text);
+
+      if (ifdefMatch) {
+        const ifdefLineIdx = (text.slice(0, ifdefMatch.index).match(/\n/g) || []).length;
+        let endifLineIdx = -1;
+        let bcLineIdx    = -1;
+        for (let i = ifdefLineIdx + 1; i < allLines.length; i++) {
+          if (bcLineIdx === -1 && /^[ \t]*BladeConfig\s+\w+\s*\[\s*\]\s*=\s*\{/.test(allLines[i])) {
+            bcLineIdx = i;
+          }
+          if (/^[ \t]*#endif\b/.test(allLines[i])) { endifLineIdx = i; break; }
+        }
+        if (endifLineIdx !== -1) {
+          // If inserting before BladeConfig, walk back past attached comments so the new
+          // block lands ABOVE the comment-and-BladeConfig pair.
+          const targetLine = bcLineIdx !== -1
+            ? _findAttachedCommentsStart(allLines, bcLineIdx)
+            : endifLineIdx;
+          const insertLineNum = targetLine + 1;
+          const presetBlock = [
+            `Preset ${newName}[] = {`,
+            '',
+            entryText,
+            '',
+            '};',
+            '',
+            '',
+          ].join('\n');
+          _atomicEdit(editor,editSource, [{
+            range: { startLineNumber: insertLineNum, startColumn: 1, endLineNumber: insertLineNum, endColumn: 1 },
+            text: presetBlock,
+          }]);
+          return true;
+        }
+      }
+
+      // Sub-case (b): bare `Preset NAME[]` block(s) and/or bare `BladeConfig` outside any
+      // ifdef. Wrap the existing declarations + new bank in a fresh #ifdef CONFIG_PRESETS /
+      // #endif. Ordering rules:
+      //   - Bare Presets stay in their original source order.
+      //   - New bank lands AFTER the last bare Preset (existing presets first).
+      //   - If no bare Presets but BladeConfig exists, new bank lands BEFORE BladeConfig
+      //     (preset-first convention, matches the older single-case-(b) behavior).
+      //   - Attached comments above any wrapped element come inside the wrap with it.
+      const _findBlockEnd = (startIdx) => {
+        let depth = 0, opened = false;
+        for (let i = startIdx; i < allLines.length; i++) {
+          for (const ch of allLines[i]) {
+            if (ch === '{') { depth++; opened = true; }
+            else if (ch === '}') depth--;
+          }
+          if (opened && depth === 0) return i;
+        }
+        return -1;
+      };
+      const barePresetRanges = [];
+      for (let i = 0; i < allLines.length; i++) {
+        if (/^[ \t]*Preset\s+[\w-]*\s*\[\s*\]\s*=\s*\{/.test(allLines[i])) {
+          const endLine = _findBlockEnd(i);
+          if (endLine !== -1) {
+            barePresetRanges.push({ start: i, end: endLine });
+            i = endLine;
+          }
+        }
+      }
+      let bcStartLine = -1, bcEndLine = -1;
+      for (let i = 0; i < allLines.length; i++) {
+        if (/^[ \t]*BladeConfig\s+\w+\s*\[\s*\]\s*=\s*\{/.test(allLines[i])) {
+          bcStartLine = i;
+          bcEndLine   = _findBlockEnd(i);
+          break;
+        }
+      }
+      if (barePresetRanges.length > 0 || (bcStartLine !== -1 && bcEndLine !== -1)) {
+        const allStarts = [
+          ...barePresetRanges.map(r => r.start),
+          ...(bcStartLine !== -1 ? [bcStartLine] : []),
+        ];
+        const allEnds = [
+          ...barePresetRanges.map(r => r.end),
+          ...(bcEndLine !== -1 ? [bcEndLine] : []),
+        ];
+        const wrapStartLine = _findAttachedCommentsStart(allLines, Math.min(...allStarts));
+        const wrapEndLine   = Math.max(...allEnds);
+        // splitAt = last line index that belongs to the BEFORE section (existing presets);
+        // anything after splitAt goes into the AFTER section (BladeConfig + its comments).
+        const splitAt = barePresetRanges.length > 0
+          ? barePresetRanges[barePresetRanges.length - 1].end
+          : _findAttachedCommentsStart(allLines, bcStartLine) - 1;
+        const beforeContent = splitAt >= wrapStartLine
+          ? allLines.slice(wrapStartLine, splitAt + 1).join('\n')
+          : '';
+        const afterContent  = splitAt + 1 <= wrapEndLine
+          ? allLines.slice(splitAt + 1, wrapEndLine + 1).join('\n')
+          : '';
+        const parts = ['#ifdef CONFIG_PRESETS', ''];
+        if (beforeContent) { parts.push(beforeContent); parts.push(''); }
+        parts.push(`Preset ${newName}[] = {`);
+        parts.push('');
+        parts.push(entryText);
+        parts.push('');
+        parts.push('};');
+        if (afterContent) { parts.push(''); parts.push(afterContent); }
+        parts.push('');
+        parts.push('#endif');
+        const blockText = parts.join('\n');
+        const startLine = wrapStartLine + 1;
+        const endLine   = wrapEndLine + 1;
+        const endCol    = model.getLineMaxColumn(endLine);
+        _atomicEdit(editor, editSource, [{
+          range: { startLineNumber: startLine, startColumn: 1, endLineNumber: endLine, endColumn: endCol },
+          text: blockText,
+        }]);
+        return true;
+      }
+
+      // Sub-case (c): no `#ifdef CONFIG_PRESETS` and no BladeConfig anywhere. Place a fresh
+      // `#ifdef CONFIG_PRESETS` block in the right structural position. ProffieOS section order
+      // is TOP → PROP → PRESETS → BUTTONS, so when `#ifdef CONFIG_BUTTONS` exists we must
+      // land PRESETS BEFORE it (not at end of file, where the previous version put it).
+      const buttonsLineIdx = allLines.findIndex(l => /^[ \t]*#ifdef\s+CONFIG_BUTTONS\b/.test(l));
+      if (buttonsLineIdx !== -1) {
+        const insertLineNum = buttonsLineIdx + 1; // 1-based; line of `#ifdef CONFIG_BUTTONS`
+        const blockText = [
+          '#ifdef CONFIG_PRESETS',
+          '',
+          `Preset ${newName}[] = {`,
+          '',
+          entryText,
+          '',
+          '};',
+          '',
+          '#endif',
+          '',
+          '',
+        ].join('\n');
+        _atomicEdit(editor,editSource, [{
+          range: { startLineNumber: insertLineNum, startColumn: 1, endLineNumber: insertLineNum, endColumn: 1 },
+          text: blockText,
+        }]);
+        return true;
+      }
+
+      // No CONFIG_BUTTONS either — safe to append at end of file
+      const lastLine    = model.getLineCount();
+      const lastCol     = model.getLineMaxColumn(lastLine);
+      const tailEmpty   = model.getLineContent(lastLine).length === 0;
+      const lead        = tailEmpty ? '' : '\n\n';
+      const blockText   = lead + [
+        '#ifdef CONFIG_PRESETS',
+        '',
+        `Preset ${newName}[] = {`,
+        '',
+        entryText,
+        '',
+        '};',
+        '',
+        '#endif',
+        '',
+      ].join('\n');
+      _atomicEdit(editor,editSource, [{
+        range: { startLineNumber: lastLine, startColumn: lastCol, endLineNumber: lastLine, endColumn: lastCol },
+        text: blockText,
+      }]);
+      return true;
     }
 
     // Create a new `Preset presetsN[]` bank (next available name) pre-populated with one
@@ -8603,45 +9643,15 @@ require(['vs/editor/editor.main'], function () {
       ].join('\n');
 
       const model = editor.getModel();
-      if (arrays.length === 0) {
-        // No bank yet — append a fresh CONFIG_PRESETS scaffold with new bank + first preset
-        const lastLine   = model.getLineCount();
-        const lastCol    = model.getLineMaxColumn(lastLine);
-        const tailEmpty  = model.getLineContent(lastLine).length === 0;
-        const lead       = tailEmpty ? '' : '\n\n';
-        const blockText  = lead + [
-          '#ifdef CONFIG_PRESETS',
-          '',
-          `Preset ${newName}[] = {`,
-          '',
-          entryText,
-          '',
-          '};',
-          '',
-          '#endif',
-          '',
-        ].join('\n');
-        editor.executeEdits('preset-add-bank', [{
-          range: { startLineNumber: lastLine, startColumn: lastCol, endLineNumber: lastLine, endColumn: lastCol },
-          text: blockText,
-        }]);
-      } else {
-        // Append after the last existing array's closing `};`
-        const lastArr  = arrays[arrays.length - 1];
-        const insertLn = lastArr.endLine + 1;
-        const block    = '\n' + [
-          `Preset ${newName}[] = {`,
-          '',
-          entryText,
-          '',
-          '};',
-          '',
-        ].join('\n');
-        editor.executeEdits('preset-add-bank', [{
-          range: { startLineNumber: insertLn, startColumn: 1, endLineNumber: insertLn, endColumn: 1 },
-          text: block,
-        }]);
-      }
+      // Always use the shared scaffolder for placement. It handles all four shapes the
+      // file can be in (existing #ifdef CONFIG_PRESETS, bare BladeConfig, CONFIG_BUTTONS-only,
+      // or empty) and always lands the new bank in the structurally correct location: inside
+      // CONFIG_PRESETS, BEFORE any BladeConfig (so the order is banks → blade configs → endif).
+      // The previous "append after last array's endLine" optimization for the multi-bank case
+      // was vulnerable to source corruption: if any Preset[] block ended up outside CONFIG_PRESETS
+      // (e.g. from an earlier bug), the new bank would track that bad position instead of the
+      // structurally-correct one. Always using the scaffolder is robust.
+      _insertNewPresetScaffold(editor, model, newName, entryText, 'preset-add-bank');
 
       // Re-parse immediately so we can find the index of the new bank
       _parseResult = presetParser.parsePresets(editor.getValue());
@@ -8659,10 +9669,21 @@ require(['vs/editor/editor.main'], function () {
 
     function _rebuildSidecar() {
       if (!editor) return;
+      // Live mirror + validation. Both run on every 50ms rebuild — no debounce, no
+      // heuristics. `_syncConfigArrayRefs` propagates same-position Preset[] renames
+      // into matching CONFIGARRAY refs. `_validatePresetIdentifiers` paints red
+      // squiggles on invalid Preset[] names and orphan CONFIGARRAY refs.
+      if (typeof _syncConfigArrayRefs === 'function')      _syncConfigArrayRefs();
+      if (typeof _validatePresetIdentifiers === 'function') _validatePresetIdentifiers();
       _parseResult    = presetParser.parsePresets(editor.getValue());
       _refreshStrip();
       if (!_sidecarOpen) return;
       if (_editingSlot) { _refreshBladeSectionLabel(); return; }
+      // Skip the destructive detail re-render while a field input is open OR the Common
+      // checkbox has keyboard focus mid-navigation — would otherwise wipe out the
+      // user's in-flight typing / lose the checkbox focus. The next Monaco edit at
+      // commit / blur time will trigger another rebuild that completes the render.
+      if (_editingField || _keyboardNavInProgress) return;
       _disabledPresets = _scanDisabledPresets(editor.getValue());
       // Re-find the selected disabled preset by startLine after a rebuild
       if (_selectedDisabledPreset) {
@@ -9316,15 +10337,20 @@ require(['vs/editor/editor.main'], function () {
                 ? a.range.startLineNumber - b.range.startLineNumber
                 : a.range.startColumn - b.range.startColumn
             );
-            editor.executeEdits('preset-field-edit', edits);
+            _atomicEdit(editor,'preset-field-edit', edits);
             editor.focus();
       };
 
       function openNameEdit(initialValue) {
+        // Initial value: prefer the live `nameVal.textContent` (kept current by apply())
+        // over the render-time `preset.displayName`. Without this, opening a pencil after
+        // a sibling field's edit reads the STALE render-time value — rebuilds are
+        // suppressed during navigation, so `preset.displayName` doesn't catch up.
+        const liveValue = nameVal.textContent || '';
         if (preset.displayNameRange) {
-          _startFieldEdit(nameVal, preset.displayNameRange, initialValue !== undefined ? initialValue : (preset.displayName || ''));
+          _startFieldEdit(nameVal, preset.displayNameRange, initialValue !== undefined ? initialValue : liveValue, undefined, undefined, 'name');
         } else {
-          _startFieldEdit(nameVal, null, initialValue || '', undefined, _insertNameCallback);
+          _startFieldEdit(nameVal, null, initialValue || '', undefined, _insertNameCallback, 'name');
         }
       }
       function applyNameDirect(name) {
@@ -9343,8 +10369,11 @@ require(['vs/editor/editor.main'], function () {
 
       const total = arr.presets.length;
 
+      // Heading buttons (◁ ▷ → ×) are mouse-only navigation aids — exclude from the
+      // Tab cycle so keyboard users land on Name → Font → Common → Track in order.
       const prevBtn = document.createElement('button');
       prevBtn.className = 'preset-nav-btn';
+      prevBtn.tabIndex  = -1;
       prevBtn.innerHTML = '&#9665;';
       prevBtn.title = 'Previous preset';
       prevBtn.disabled = idx === 0;
@@ -9357,6 +10386,7 @@ require(['vs/editor/editor.main'], function () {
 
       const nextBtn = document.createElement('button');
       nextBtn.className = 'preset-nav-btn';
+      nextBtn.tabIndex  = -1;
       nextBtn.innerHTML = '&#9655;';
       nextBtn.title = 'Next preset';
       nextBtn.disabled = idx === total - 1;
@@ -9369,6 +10399,7 @@ require(['vs/editor/editor.main'], function () {
 
       const navBtn = document.createElement('button');
       navBtn.className = 'preset-nav-btn';
+      navBtn.tabIndex  = -1;
       navBtn.innerHTML = '&#8594;';
       navBtn.title = `Go to line ${preset.startLine}`;
       navBtn.addEventListener('click', () => _navigateToLine(preset.startLine, preset.endLine));
@@ -9376,6 +10407,7 @@ require(['vs/editor/editor.main'], function () {
 
       const delBtn = document.createElement('button');
       delBtn.className = 'preset-detail-delete';
+      delBtn.tabIndex  = -1;
       delBtn.innerHTML = '&times;';
       delBtn.title = 'Delete this preset';
       delBtn.addEventListener('click', () => _deletePreset(_activeArrayIndex, idx));
@@ -9386,9 +10418,12 @@ require(['vs/editor/editor.main'], function () {
       detail.appendChild(_buildTrackField(preset));
       detail.appendChild(_buildSlotsSection(preset));
 
+      // Add Preset / Add Bank set `_autoOpenEmpty` on the new preset so the Name input
+      // opens automatically with the default "Preset N" pre-selected. From there the
+      // user controls flow via Tab (advance) / Enter (commit + back to editor) / Esc.
       if (preset._autoOpenEmpty) {
         delete preset._autoOpenEmpty;
-        _autoOpenEmptyFields(detail);
+        _openNameForNewPreset(detail);
       }
     }
 
@@ -9424,10 +10459,12 @@ require(['vs/editor/editor.main'], function () {
       cb.checked = (preset.font || '').split(';').some(p => p.trim() === 'common');
 
       valueWrap.appendChild(_makePencil(() => {
-        _startFieldEdit(fontVal, preset.fontRange, displayFont, undefined, newPath => {
+        // Read live display value at click time — apply() keeps fontVal.textContent
+        // current across nav, but the closure-captured displayFont is stale.
+        _startFieldEdit(fontVal, preset.fontRange, fontVal.textContent || '', undefined, newPath => {
           const full = cb.checked ? (newPath ? newPath + ';common' : 'common') : newPath;
-          _commitFieldEdit(preset.fontRange, full);
-        });
+          _commitFieldEdit(_getFreshFieldRange('font') || preset.fontRange, full);
+        }, 'font');
       }));
 
       const cbWrap = document.createElement('label');
@@ -9435,8 +10472,35 @@ require(['vs/editor/editor.main'], function () {
       cb.addEventListener('change', () => {
         const path = fontVal.textContent;
         const full = cb.checked ? (path ? path + ';common' : 'common') : path;
-        _commitFieldEdit(preset.fontRange, full);
+        _commitFieldEdit(_getFreshFieldRange('font') || preset.fontRange, full);
         _scheduleRebuild();
+      });
+      // Keyboard nav: while the checkbox has focus, suppress destructive rebuilds so a
+      // pending Monaco edit from a sibling field doesn't yank the checkbox out from under
+      // the user mid-navigation.
+      cb.addEventListener('focus', () => { _keyboardNavInProgress = true; });
+      cb.addEventListener('blur',  () => { _keyboardNavInProgress = false; });
+      cb.addEventListener('keydown', e => {
+        if (e.key === ' ') {
+          // Explicit toggle + change dispatch — relying on browser default was flaky
+          // when chained with focus-stealing edits in the change handler. preventDefault
+          // suppresses the synthetic click + browser toggle so we don't double-toggle.
+          e.preventDefault();
+          cb.checked = !cb.checked;
+          cb.dispatchEvent(new Event('change', { bubbles: true }));
+          setTimeout(() => _openFieldByName('track'), 0);
+        } else if (e.key === 'Tab') {
+          e.preventDefault();
+          _openFieldByName(_nextFieldName('common', e.shiftKey));
+        } else if (e.key === 'Enter' || e.key === 'Escape') {
+          e.preventDefault();
+          if (editor) editor.focus();
+        }
+      });
+      cb.addEventListener('click', e => {
+        // Mouse click only (Space's preventDefault above stops the synthetic click).
+        // Browser default already toggled — just route focus back to the editor.
+        setTimeout(() => { if (editor) editor.focus(); }, 0);
       });
       cbWrap.appendChild(cb);
       const _cbLbl = document.createElement('span');
@@ -9466,7 +10530,14 @@ require(['vs/editor/editor.main'], function () {
       valueWrap.appendChild(val);
       if (preset.trackRange) {
         valueWrap.appendChild(_makePencil(() =>
-          _startFieldEdit(val, preset.trackRange, preset.track || '')));
+          // Read live display value at click time — see Font pencil comment.
+          _startFieldEdit(val, preset.trackRange, val.textContent || '', undefined, trackValue => {
+            // Auto-append `.wav` for non-empty tracks that don't already have it.
+            const final = (trackValue && !/\.wav$/i.test(trackValue)) ? trackValue + '.wav' : trackValue;
+            _commitFieldEdit(_getFreshFieldRange('track') || preset.trackRange, final);
+            // Sync the displayed value so the user sees what got saved.
+            val.textContent = final;
+          }, 'track')));
       }
       wrap.appendChild(valueWrap);
       return wrap;
@@ -9533,7 +10604,7 @@ require(['vs/editor/editor.main'], function () {
               insertLine = preset.startLine + 1;
               indent = '  ';
             }
-            editor.executeEdits('add-missing-style', [{
+            _atomicEdit(editor,'add-missing-style', [{
               range: { startLineNumber: insertLine, startColumn: 1,
                        endLineNumber:   insertLine, endColumn: 1 },
               text: `${indent}StylePtr<Black>(),\n`,
@@ -9650,16 +10721,15 @@ require(['vs/editor/editor.main'], function () {
           if (_cr) _rgb16 = window.proffieArgs.resolveColorDefault(_cr.defaultExpr || '');
         }
         if (!_rgb16 && window.proffieArgs) {
-          // Library definition hardcoded color: library styles using hardcoded colors instead of RgbArg
+          // Library definition hardcoded color: scan the helper's definition for the
+          // EARLIEST color (Rgb16<>, Rgb<>, or named) — same logic the expanded slot
+          // editor uses for "Detected Base Color (Style Library)". Old version only
+          // looked for named tokens, so a library style starting with
+          // `Rgb<180,130,0>` reported a later `White` deep inside an `AlphaL<…>`.
           const _bn2 = slot.expr ? (slot.expr.match(/^(\w+)/) || [])[1] : null;
           if (_bn2) {
-            const _defTxt = _getHelperDefinitionText(_bn2);
-            const _dre = /\b([A-Z][A-Za-z]*)\b/g;
-            let _dm;
-            while ((_dm = _dre.exec(_defTxt)) !== null) {
-              const _dr = window.proffieArgs.resolveColorDefault(_dm[1]);
-              if (_dr[0] || _dr[1] || _dr[2]) { _rgb16 = _dr; break; }
-            }
+            const _hit = _earliestColorInText(_getHelperDefinitionText(_bn2));
+            if (_hit) _rgb16 = _hit.rgb16;
           }
         }
         if (!_rgb16 && window.proffieArgs) {
@@ -9669,33 +10739,11 @@ require(['vs/editor/editor.main'], function () {
           if (_firstRgb) _rgb16 = window.proffieArgs.resolveColorDefault(_firstRgb.defaultExpr || '');
         }
         if (!_rgb16 && window.proffieArgs) {
-          // Hardcoded color fallback: scan expression for Rgb16<>/Rgb<>/named color, pick earliest
-          const _he   = slot.expr || '';
-          const _hm16 = /\bRgb16\s*<\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*>/.exec(_he);
-          const _hm8  = /\bRgb\s*<\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*>/.exec(_he);
-          // Named color scan: try each capitalized word token via resolveColorDefault
-          let _namedColor = null, _namedPos = Infinity, _namedRgb16 = null;
-          const _colorWordRe = /\b([A-Z][A-Za-z]*)\b/g;
-          let _cwm;
-          while ((_cwm = _colorWordRe.exec(_he)) !== null) {
-            if (_cwm.index >= _namedPos) break;
-            const _res = window.proffieArgs.resolveColorDefault(_cwm[1]);
-            if (_res[0] || _res[1] || _res[2]) { _namedColor = _cwm[1]; _namedPos = _cwm.index; _namedRgb16 = _res; break; }
-          }
-          const _p16 = _hm16 ? _hm16.index : Infinity;
-          const _p8  = _hm8  ? _hm8.index  : Infinity;
-          const _pMin = Math.min(_p16, _p8, _namedPos);
-          if (_pMin < Infinity) {
-            if (_pMin === _p16) {
-              _rgb16 = [parseInt(_hm16[1],10), parseInt(_hm16[2],10), parseInt(_hm16[3],10)];
-              _hardcodedInfo = { matchStr: _hm16[0], matchIndex: _hm16.index };
-            } else if (_pMin === _p8) {
-              _rgb16 = window.proffieArgs.resolveColorDefault(`Rgb<${_hm8[1]},${_hm8[2]},${_hm8[3]}>`);
-              _hardcodedInfo = { matchStr: _hm8[0], matchIndex: _hm8.index };
-            } else {
-              _rgb16 = _namedRgb16;
-              _hardcodedInfo = { matchStr: _namedColor, matchIndex: _namedPos };
-            }
+          // Hardcoded color in the slot expression itself — same earliest-match logic.
+          const _hit = _earliestColorInText(slot.expr || '');
+          if (_hit) {
+            _rgb16 = _hit.rgb16;
+            _hardcodedInfo = { matchStr: _hit.matchStr, matchIndex: _hit.matchIndex };
             _colorIsDefault = true;
           }
         }
@@ -9732,6 +10780,7 @@ require(['vs/editor/editor.main'], function () {
       actions.className = 'preset-slot-actions';
       const resetBtn = document.createElement('button');
       resetBtn.className = 'preset-slot-action preset-slot-delete';
+      resetBtn.tabIndex  = -1; // not a tab stop — slot tiles are mouse-driven
       resetBtn.innerHTML = '&times;';
       if (isExcess) {
         resetBtn.title = 'Remove excess blade';
@@ -9811,10 +10860,59 @@ require(['vs/editor/editor.main'], function () {
       return arg;
     }
 
+    // Find the EARLIEST hardcoded color expression in `text` — an `Rgb16<…>`, `Rgb<…>`,
+    // or a named color token (Red, Cyan, etc.). Returns { rgb16, matchStr, matchIndex }
+    // or null. "Earliest by source position" matters because library styles often use a
+    // base color near the top and later mention `White` inside an `AlphaL<…>` modifier —
+    // we want the base, not the modifier. Shared by the collapsed slot tile's swatch and
+    // the expanded slot editor's "Detected Base Color" so both views agree.
+    function _earliestColorInText(text) {
+      if (!text || !window.proffieArgs) return null;
+      const m16 = /\bRgb16\s*<\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*>/.exec(text);
+      const m8  = /\bRgb\s*<\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*>/.exec(text);
+      let namedPos = Infinity, namedRgb16 = null, namedStr = null;
+      const cwRe = /\b([A-Z][A-Za-z]*)\b/g;
+      let cwm;
+      while ((cwm = cwRe.exec(text)) !== null) {
+        const res = window.proffieArgs.resolveColorDefault(cwm[1]);
+        if (res[0] || res[1] || res[2]) { namedRgb16 = res; namedPos = cwm.index; namedStr = cwm[1]; break; }
+      }
+      const p16 = m16 ? m16.index : Infinity;
+      const p8  = m8  ? m8.index  : Infinity;
+      const pMin = Math.min(p16, p8, namedPos);
+      if (pMin === Infinity) return null;
+      if (pMin === p16) {
+        return { rgb16: [parseInt(m16[1],10), parseInt(m16[2],10), parseInt(m16[3],10)], matchStr: m16[0], matchIndex: m16.index };
+      }
+      if (pMin === p8) {
+        return { rgb16: window.proffieArgs.resolveColorDefault(`Rgb<${m8[1]},${m8[2]},${m8[3]}>`), matchStr: m8[0], matchIndex: m8.index };
+      }
+      return { rgb16: namedRgb16, matchStr: namedStr, matchIndex: namedPos };
+    }
+
     // ── Field editing ──────────────────────────────────────────────────────────
-    function _startFieldEdit(valEl, range, currentValue, inputClass, onConfirm) {
+    // Keyboard model for the three text fields (Name / Font / Track):
+    //   Enter            → save, focus editor
+    //   ✓ click          → save, focus editor
+    //   Tab              → save, advance to the next field in [Name, Font, Common, Track] (Track loops to Name)
+    //   Shift+Tab        → save, advance backward in the same loop
+    //   Esc              → cancel, focus editor
+    //   ✕ click          → cancel, focus editor
+    //   Click elsewhere  → save (blur), focus follows the click
+    // `fieldId` ('name' | 'font' | 'track') drives the Tab loop.
+    function _startFieldEdit(valEl, range, currentValue, inputClass, onConfirm, fieldId) {
       if (!range && !onConfirm) return;
+      // Re-entry guard: if valEl is already detached (e.g. the user clicked the same
+      // pencil twice in rapid succession, or a concurrent click+blur race fired the
+      // handler twice), the second call has no valid parentNode and would corrupt
+      // the DOM. Bail cleanly.
+      if (!valEl.parentNode) return;
       const wrap = valEl.parentNode;
+      // Hide the field's own pencil while the edit is in progress — same pattern as the
+      // preset-bank pencil rename row. Pencil isn't useful while the input is open AND
+      // would otherwise sit in the tab cycle / take focus on click.
+      const pencil = wrap.querySelector('.preset-edit-pencil');
+      if (pencil) pencil.style.display = 'none';
       const placeholder = document.createElement('span');
       wrap.replaceChild(placeholder, valEl);
 
@@ -9827,34 +10925,108 @@ require(['vs/editor/editor.main'], function () {
       confirm.className = 'preset-edit-confirm';
       confirm.innerHTML = '&#10003;';
       confirm.title = 'Confirm';
+      confirm.tabIndex = -1; // not a tab stop; Enter on the input applies
 
       const cancel = document.createElement('button');
       cancel.className = 'preset-edit-cancel';
       cancel.innerHTML = '&times;';
       cancel.title = 'Cancel';
+      cancel.tabIndex = -1; // not a tab stop; Esc on the input cancels
 
       placeholder.replaceWith(input);
       input.insertAdjacentElement('afterend', cancel);
       input.insertAdjacentElement('afterend', confirm);
 
-      function restore() { confirm.remove(); cancel.remove(); input.replaceWith(valEl); }
+      _editingField = true;
+      let _closed = false; // restore() is idempotent — blur + Esc + click ✕ can all race
+      let _applyInProgress = false; // re-entry guard for apply()
+
+      function restore() {
+        if (_closed) return;
+        _closed = true;
+        confirm.remove();
+        cancel.remove();
+        input.replaceWith(valEl);
+        if (pencil) pencil.style.display = '';
+        _editingField = false;
+      }
       function apply() {
-        const v = input.value;
-        if (!_validateFieldValue(v)) { input.classList.add('invalid'); return; }
-        valEl.textContent = v;
-        if (onConfirm) onConfirm(v);
-        else _commitFieldEdit(range, v);
+        // Re-entry guard: `_commitFieldEdit` calls `editor.focus()` after the Monaco edit,
+        // which fires the field input's `blur` synchronously — blur handler would then
+        // call apply() again, firing a SECOND Monaco edit with the now-stale range and
+        // corrupting the source. Bail out of the recursive call cleanly.
+        if (_applyInProgress) return false;
+        _applyInProgress = true;
+        try {
+          const v = input.value;
+          if (!_validateFieldValue(v)) { input.classList.add('invalid'); return false; }
+          valEl.textContent = v;
+          // Dirty check: only commit when the value actually changed. Tabbing past an
+          // untouched field shouldn't leave a no-op edit in the Monaco undo stack —
+          // user would have to Ctrl+Z once per field they passed through.
+          if (v !== currentValue) {
+            if (onConfirm) onConfirm(v);
+            else {
+              // Use a fresh range — captured `range` may be stale if a sibling field was
+              // edited during keyboard nav (rebuild detail-render was suppressed).
+              const freshRange = (fieldId && _getFreshFieldRange(fieldId)) || range;
+              _commitFieldEdit(freshRange, v);
+            }
+            _scheduleRebuild();
+          }
+          restore();
+          return true;
+        } finally {
+          _applyInProgress = false;
+        }
+      }
+      function applyAndFocusEditor() {
+        if (!apply()) return;
+        if (editor) editor.focus();
+      }
+      function applyAndAdvance(reverse) {
+        if (!apply()) return;
+        if (!fieldId) { if (editor) editor.focus(); return; }
+        _openFieldByName(_nextFieldName(fieldId, reverse));
+      }
+      function cancelAndExit() {
+        // Esc / ✕ / cancel-on-invalid-blur path. Refocus Monaco so Ctrl+Z works
+        // without an extra click.
         restore();
+        if (editor) editor.focus();
         _scheduleRebuild();
       }
       input.addEventListener('keydown', e => {
-        if (e.key === 'Enter')  { e.preventDefault(); apply(); }
-        else if (e.key === 'Escape') { e.preventDefault(); restore(); }
+        if (e.key === 'Enter')       { e.preventDefault(); applyAndFocusEditor(); }
+        else if (e.key === 'Tab')    { e.preventDefault(); applyAndAdvance(e.shiftKey); }
+        else if (e.key === 'Escape') { e.preventDefault(); cancelAndExit(); }
         else input.classList.remove('invalid');
       });
       input.addEventListener('input', () => input.classList.remove('invalid'));
-      confirm.addEventListener('click', apply);
-      cancel.addEventListener('click', restore);
+      input.addEventListener('blur', e => {
+        // Let the explicit confirm / cancel button click handlers fire if focus moved
+        // to one of them — they'll close the edit themselves.
+        if (e.relatedTarget === confirm || e.relatedTarget === cancel) return;
+        if (_closed) return;
+        // Blur = save (matches user expectation: "clicking elsewhere keeps what I typed").
+        // If the value is invalid, the apply guard would leave the input in a stranded
+        // "invalid + blurred" state — close cleanly via cancelAndExit instead.
+        if (!_validateFieldValue(input.value)) { cancelAndExit(); return; }
+        const nextPencil = e.relatedTarget?.classList?.contains('preset-edit-pencil')
+          ? e.relatedTarget : null;
+        apply();
+        // When blurring to another field's pencil, the natural click event sometimes
+        // doesn't reach the pencil (DOM mutations from restore() during the mousedown
+        // sequence can intercept it). Manually trigger the pencil's click so the user
+        // gets the destination edit open from a single physical click. _startFieldEdit
+        // has a parentNode re-entry guard, so if the natural click does land we won't
+        // double-open.
+        if (nextPencil && document.body.contains(nextPencil)) {
+          nextPencil.click();
+        }
+      });
+      confirm.addEventListener('click', applyAndFocusEditor);
+      cancel.addEventListener('click', cancelAndExit);
       setTimeout(() => { input.focus(); input.select(); }, 0);
     }
 
@@ -9862,28 +11034,75 @@ require(['vs/editor/editor.main'], function () {
 
     function _commitFieldEdit(range, newValue) {
       if (!range || !editor) return;
-      editor.executeEdits('preset-field-edit', [{
+      _atomicEdit(editor,'preset-field-edit', [{
         range: {
           startLineNumber: range.startLine, startColumn: range.startCol + 1,
           endLineNumber:   range.endLine,   endColumn:   range.endCol + 1,
         },
         text: '"' + newValue + '"',
       }]);
-      editor.focus();
+      // No editor.focus() here. Callers handle focus routing — applyAndFocusEditor
+      // calls editor.focus() at the end (Enter/✓), applyAndAdvance opens the next
+      // field, blur path lets focus follow the user's click. Calling editor.focus()
+      // here previously stole focus during the click sequence (mousedown → blur on
+      // old input → my handler called editor.focus() → click on new pencil arrived
+      // but focus was already redirected), forcing users to click pencils twice
+      // when leaving a dirty field.
     }
 
-    function _autoOpenEmptyFields(detailEl) {
-      detailEl.querySelectorAll('.preset-detail-field-value').forEach(val => {
-        if (!val.textContent) {
-          const pencil = val.parentNode.querySelector('.preset-edit-pencil');
-          if (pencil) pencil.click();
-        }
-      });
+    // After Add Preset / Add Bank, the new entry's Name input opens automatically with
+    // the default "Preset N" pre-selected so the user can immediately type-replace it.
+    // No auto-chain — keyboard navigation (Tab to advance, Enter to commit+exit, Esc
+    // to cancel+exit, Shift+Tab to go back) handles moving through fields.
+    function _openNameForNewPreset(detailEl) {
       const nameVal = detailEl.querySelector('.preset-detail-name');
-      if (nameVal && !nameVal.textContent) {
-        const pencil = nameVal.parentNode.querySelector('.preset-edit-pencil');
-        if (pencil) pencil.click();
+      if (!nameVal) return;
+      const pencil = nameVal.parentNode.querySelector('.preset-edit-pencil');
+      if (pencil) pencil.click();
+    }
+
+    // Programmatic helpers to open / focus a specific field — used by the Tab loop and
+    // Common's keyboard handlers. Returns true if the target was found and acted on.
+    function _openFieldByName(name) {
+      const detail = document.getElementById('preset-detail');
+      if (!detail) return false;
+      if (name === 'name') {
+        const pencil = detail.querySelector('.preset-detail-name-wrap .preset-edit-pencil');
+        if (pencil) { pencil.click(); return true; }
+      } else if (name === 'common') {
+        const cb = detail.querySelector('.preset-common-toggle input[type="checkbox"]');
+        if (cb) { cb.focus(); return true; }
+      } else if (name === 'font' || name === 'track') {
+        const wraps  = detail.querySelectorAll('.preset-detail-field-value-wrap');
+        const wrap   = name === 'font' ? wraps[0] : wraps[1];
+        const pencil = wrap?.querySelector('.preset-edit-pencil');
+        if (pencil) { pencil.click(); return true; }
       }
+      return false;
+    }
+    function _nextFieldName(current, reverse) {
+      const order = ['name', 'font', 'common', 'track'];
+      const i = order.indexOf(current);
+      if (i < 0) return null;
+      const n = order.length;
+      return order[(i + (reverse ? -1 : 1) + n) % n];
+    }
+    // Re-parse to fetch the active preset's CURRENT field range. The closure-captured
+    // `preset.xRange` from the last _renderDetail goes stale during Tab navigation —
+    // rebuild's destructive re-render is suppressed via _editingField / _keyboardNavInProgress,
+    // so each commit needs a fresh range derived from the current Monaco source. Without
+    // this, the second commit in a Tab chain writes to the WRONG byte range and corrupts
+    // the file ("No presets found").
+    function _getFreshFieldRange(fieldName) {
+      if (!editor) return null;
+      const fresh  = presetParser.parsePresets(editor.getValue());
+      const arr    = fresh.arrays[_activeArrayIndex];
+      const preset = arr?.presets[_selectedPresetIndex];
+      if (!preset) return null;
+      if (fieldName === 'name')  return preset.displayNameRange;
+      if (fieldName === 'font')  return preset.fontRange;
+      if (fieldName === 'track') return preset.trackRange;
+      return null;
     }
 
     // ── Slot inline editor helpers ─────────────────────────────────────────────
@@ -10313,6 +11532,9 @@ require(['vs/editor/editor.main'], function () {
           swatch.title = window.proffieArgs ? window.proffieArgs.colorLabel(dispVals[0]||0, dispVals[1]||0, dispVals[2]||0) : `Rgb<${_r8},${_g8},${_b8}>`;
           swatch.style.background = styleArgResolver.proffieToCSS(dispVals[0], dispVals[1], dispVals[2]);
           try {
+            // Static by default — animate only on hover. An expanded slot can contain
+            // multiple RgbArg rows, so animating them all at once is expensive.
+            // Listeners die with the row's DOM when the slot closes (no cleanup needed).
             const _ctrl = GlowSwatch.create({ animated: false, width: 18, height: 18, color: [_r8, _g8, _b8] });
             _ctrl.element.style.clipPath = 'circle(50% at 50% 50%)';
             _ctrl.element.style.pointerEvents = 'none';
@@ -10320,6 +11542,8 @@ require(['vs/editor/editor.main'], function () {
             swatch.style.background = 'none';
             swatchCtrl = _ctrl;
             _activeArgSwatchControllers.push(swatchCtrl);
+            swatch.addEventListener('mouseenter', () => _ctrl.setAnimated(true));
+            swatch.addEventListener('mouseleave', () => _ctrl.setAnimated(false));
           } catch(e) {}
           swatch.addEventListener('click', e => {
             e.stopPropagation();
@@ -10430,7 +11654,7 @@ require(['vs/editor/editor.main'], function () {
         const newExpr = composeHelperExpr();
         if (!newExpr || !editor || !slot.startLine) return;
         const parens = slot.colorArg ? `("${slot.colorArg}")` : '()';
-        editor.executeEdits('preset-tp-edit', [{
+        _atomicEdit(editor,'preset-tp-edit', [{
           range: {
             startLineNumber: slot.startLine, startColumn: slot.startCol + 1,
             endLineNumber:   slot.endLine,   endColumn:   slot.endCol + 1,
@@ -10832,49 +12056,29 @@ require(['vs/editor/editor.main'], function () {
         }
       } else if (window.proffieArgs) {
         // No RgbArg — look for a hardcoded color in the library definition (read-only)
-        // or directly in slot.expr for custom expressions (editable).
+        // or directly in slot.expr for custom expressions (editable). Shared earliest-
+        // match helper keeps this in sync with the collapsed-tile swatch logic.
         let _hcRgb16 = null, _isLibHardcoded = false;
         let _hcMatchStr = null, _hcMatchIndex = null;
 
         // 1. Library style: scan its definition text
         if (helperBaseName) {
-          const _defTxt2 = _getHelperDefinitionText(helperBaseName);
-          if (_defTxt2) {
-            const _hcRe = /\b([A-Z][A-Za-z]*)\b/g;
-            let _hcm;
-            while ((_hcm = _hcRe.exec(_defTxt2)) !== null) {
-              const _hcr = window.proffieArgs.resolveColorDefault(_hcm[1]);
-              if (_hcr[0] || _hcr[1] || _hcr[2]) { _hcRgb16 = _hcr; _isLibHardcoded = true; break; }
-            }
+          const _hit = _earliestColorInText(_getHelperDefinitionText(helperBaseName));
+          if (_hit) {
+            _isLibHardcoded = true;
+            _hcRgb16        = _hit.rgb16;
+            _hcMatchStr     = _hit.matchStr;
+            _hcMatchIndex   = _hit.matchIndex;
           }
         }
 
         // 2. Custom expression: scan slot.expr directly (editable result)
         if (!_hcRgb16 && !isLibrarySlot) {
-          const _he = slot.expr || '';
-          const _hm16 = /\bRgb16\s*<\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*>/.exec(_he);
-          const _hm8  = /\bRgb\s*<\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*>/.exec(_he);
-          let _namedPos = Infinity, _namedRgb16 = null, _namedStr = null;
-          const _cwRe = /\b([A-Z][A-Za-z]*)\b/g;
-          let _cwm;
-          while ((_cwm = _cwRe.exec(_he)) !== null) {
-            const _res = window.proffieArgs.resolveColorDefault(_cwm[1]);
-            if (_res[0] || _res[1] || _res[2]) { _namedRgb16 = _res; _namedPos = _cwm.index; _namedStr = _cwm[1]; break; }
-          }
-          const _p16 = _hm16 ? _hm16.index : Infinity;
-          const _p8  = _hm8  ? _hm8.index  : Infinity;
-          const _pMin = Math.min(_p16, _p8, _namedPos);
-          if (_pMin < Infinity) {
-            if (_pMin === _p16) {
-              _hcRgb16 = [parseInt(_hm16[1],10), parseInt(_hm16[2],10), parseInt(_hm16[3],10)];
-              _hcMatchStr = _hm16[0]; _hcMatchIndex = _hm16.index;
-            } else if (_pMin === _p8) {
-              _hcRgb16 = window.proffieArgs.resolveColorDefault(`Rgb<${_hm8[1]},${_hm8[2]},${_hm8[3]}>`);
-              _hcMatchStr = _hm8[0]; _hcMatchIndex = _hm8.index;
-            } else {
-              _hcRgb16 = _namedRgb16;
-              _hcMatchStr = _namedStr; _hcMatchIndex = _namedPos;
-            }
+          const _hit = _earliestColorInText(slot.expr || '');
+          if (_hit) {
+            _hcRgb16      = _hit.rgb16;
+            _hcMatchStr   = _hit.matchStr;
+            _hcMatchIndex = _hit.matchIndex;
           }
         }
 
@@ -10891,6 +12095,11 @@ require(['vs/editor/editor.main'], function () {
             _hcSwCtrl.element.style.clipPath = 'circle(50% at 50% 50%)';
             _hcSwCtrl.element.style.pointerEvents = 'none';
             _hcSwatch.appendChild(_hcSwCtrl.element);
+            // Register for destruction in _closeSlotArgEdit even though we're not
+            // animating by default — hover may briefly add it to the rAF loop.
+            _activeArgSwatchControllers.push(_hcSwCtrl);
+            _hcSwatch.addEventListener('mouseenter', () => _hcSwCtrl.setAnimated(true));
+            _hcSwatch.addEventListener('mouseleave', () => _hcSwCtrl.setAnimated(false));
           } catch(e) { _hcSwatch.style.background = `rgb(${_hcR8},${_hcG8},${_hcB8})`; }
           _hcRow.appendChild(_hcSwatch);
           const _hcLbl = document.createElement('span');
@@ -10925,7 +12134,7 @@ require(['vs/editor/editor.main'], function () {
                 const _newFull = _matchStr2.includes('<')
                   ? _freshText.split(_matchStr2).join(_tok)
                   : _freshText.replace(new RegExp('\\b' + _matchStr2.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'g'), _tok);
-                editor.executeEdits('preset-slot-edit', [{
+                _atomicEdit(editor,'preset-slot-edit', [{
                   range: { startLineNumber: slot.startLine, startColumn: slot.startCol + 1,
                            endLineNumber: slot.endLine, endColumn: slot.endCol + 1 },
                   text: _newFull,
@@ -11072,8 +12281,23 @@ require(['vs/editor/editor.main'], function () {
       let cb = Math.round((initProffieVals[2]||0)/257);
       let currentPage = 0;
       let _setNameDisplay = null;
+      // Index of the currently-hovered grid cell, or -1 if none. While a cell is
+      // hovered, only that cell animates — every other swatch (selected cell,
+      // preview) is paused so there's never more than one swatch animating.
+      let _hoveredCellIdx = -1;
 
       function toHex() { return '#'+[cr,cg,cb].map(v=>v.toString(16).padStart(2,'0')).join(''); }
+
+      function _colorMatchesQuickSelect() {
+        return _COMMON_COLORS.some(c => c.r === cr && c.g === cg && c.b === cb);
+      }
+      function _findPageForCurrentColor() {
+        for (let i = 0; i < _COMMON_COLORS.length; i++) {
+          const c = _COMMON_COLORS[i];
+          if (c.r === cr && c.g === cg && c.b === cb) return Math.floor(i / _COLOR_PER_PAGE);
+        }
+        return 0;
+      }
 
       const overlay = document.createElement('div');
       overlay.className = 'preset-color-overlay';
@@ -11181,10 +12405,11 @@ require(['vs/editor/editor.main'], function () {
       previewHost.title = 'Full color wheel';
       if (_activePreviewSwatchCtrl) { _activePreviewSwatchCtrl.destroy(); _activePreviewSwatchCtrl = null; }
       try {
-        _activePreviewSwatchCtrl = GlowSwatch.create({ animated: false, width: 24, height: 24, color: [cr, cg, cb] });
+        // Preview animates only when the current color doesn't match any quick-select —
+        // when it does, the matching grid cell is the live preview. applyAnimationState()
+        // reconciles this on every change.
+        _activePreviewSwatchCtrl = GlowSwatch.create({ animated: !_colorMatchesQuickSelect(), width: 24, height: 24, color: [cr, cg, cb] });
         previewHost.appendChild(_activePreviewSwatchCtrl.element);
-        previewHost.addEventListener('mouseenter', () => _activePreviewSwatchCtrl?.setAnimated(true));
-        previewHost.addEventListener('mouseleave', () => _activePreviewSwatchCtrl?.setAnimated(false));
       } catch(e) {
         previewHost.style.background = `rgb(${cr},${cg},${cb})`;
       }
@@ -11258,7 +12483,28 @@ require(['vs/editor/editor.main'], function () {
 
         trigger.addEventListener('click', e => {
           e.stopPropagation();
-          list.style.display = list.style.display === 'none' ? 'block' : 'none';
+          if (list.style.display === 'none' || !list.style.display) {
+            // Open below by default, then measure: if the list extends past the
+            // viewport bottom, flip above. Measuring is more reliable than predicting
+            // by max-height — the list's real height depends on item count.
+            list.style.bottom = '';
+            list.style.top    = '100%';
+            list.style.display = 'block';
+            const belowRect = list.getBoundingClientRect();
+            if (belowRect.bottom > window.innerHeight - 4) {
+              list.style.top    = '';
+              list.style.bottom = '100%';
+              const aboveRect = list.getBoundingClientRect();
+              // Last-resort: if flipping above ALSO clips at the top, fall back to
+              // below — at least the user can scroll the list.
+              if (aboveRect.top < 4) {
+                list.style.bottom = '';
+                list.style.top    = '100%';
+              }
+            }
+          } else {
+            list.style.display = 'none';
+          }
         });
         trigger.addEventListener('wheel', e => e.stopPropagation());
         list.addEventListener('click', e => e.stopPropagation());
@@ -11292,8 +12538,31 @@ require(['vs/editor/editor.main'], function () {
       function updateSelected() {
         cells.forEach((cell, i) => {
           const c = _COMMON_COLORS[currentPage * _COLOR_PER_PAGE + i];
-          cell.classList.toggle('selected', c.r===cr && c.g===cg && c.b===cb);
+          const isSelected = c.r===cr && c.g===cg && c.b===cb;
+          cell.classList.toggle('selected', isSelected);
         });
+        applyAnimationState();
+      }
+
+      // Single source of truth for "what's allowed to animate right now". Invariant:
+      // at most one swatch animates at a time — hovered cell wins, else the selected
+      // cell, else the preview (only when no quick-select matches the current color).
+      function applyAnimationState() {
+        const hovering = _hoveredCellIdx >= 0;
+        const matchesQuickSelect = _colorMatchesQuickSelect();
+        cells.forEach((cell, i) => {
+          const ctrl = _activeSwatchControllers[i];
+          if (!ctrl) return;
+          if (hovering) {
+            ctrl.setAnimated(i === _hoveredCellIdx);
+          } else {
+            const c = _COMMON_COLORS[currentPage * _COLOR_PER_PAGE + i];
+            ctrl.setAnimated(c.r===cr && c.g===cg && c.b===cb);
+          }
+        });
+        if (_activePreviewSwatchCtrl) {
+          _activePreviewSwatchCtrl.setAnimated(!matchesQuickSelect && !hovering);
+        }
       }
 
       function emit() {
@@ -11305,8 +12574,23 @@ require(['vs/editor/editor.main'], function () {
         onChange(styleArgResolver.cssToProffie(cr, cg, cb));
       }
 
+      // Track currently-bound mouseenter / mouseleave handlers per cell so we can
+      // remove them before re-binding on the next page. Without this, paging through
+      // colors accumulates stale listeners that each reference a previous (destroyed)
+      // controller — hovering then crashes inside glow-swatch.js trying to read the
+      // null `seeds` array of a destroyed swatch.
+      const cellHoverHandlers = [];
       function goPage(p) {
-        // Destroy previous swatch canvases
+        // Any hover state from the previous page is meaningless after we destroy its
+        // controllers — clear it so applyAnimationState doesn't try to address a
+        // freed swatch on the new page.
+        _hoveredCellIdx = -1;
+        // Drop previous hover handlers AND destroy previous swatch canvases
+        cellHoverHandlers.forEach(({ cell, enter, leave }) => {
+          cell.removeEventListener('mouseenter', enter);
+          cell.removeEventListener('mouseleave', leave);
+        });
+        cellHoverHandlers.length = 0;
         _activeSwatchControllers.forEach(c => c.destroy());
         _activeSwatchControllers = [];
         currentPage = p;
@@ -11324,9 +12608,26 @@ require(['vs/editor/editor.main'], function () {
           cells.forEach((cell, i) => {
             const ctrl = _activeSwatchControllers[i];
             if (!ctrl) return;
-            cell.addEventListener('mouseenter', () => ctrl.setAnimated(true));
-            cell.addEventListener('mouseleave', () => ctrl.setAnimated(false));
+            const enter = () => { _hoveredCellIdx = i; applyAnimationState(); };
+            // Defer the "no longer hovered" reset by a frame so a mouse moving
+            // directly from cell A → cell B doesn't briefly flash everything off.
+            // The follow-up mouseenter will overwrite _hoveredCellIdx first; if it
+            // doesn't (cursor left the grid), we reset.
+            const leave = () => {
+              const wasIdx = i;
+              requestAnimationFrame(() => {
+                if (_hoveredCellIdx === wasIdx) {
+                  _hoveredCellIdx = -1;
+                  applyAnimationState();
+                }
+              });
+            };
+            cell.addEventListener('mouseenter', enter);
+            cell.addEventListener('mouseleave', leave);
+            cellHoverHandlers.push({ cell, enter, leave });
           });
+          // Apply current selection's animation state once everything's mounted.
+          updateSelected();
         } catch(e) {
           // GlowSwatch unavailable — cells remain as flat CSS color blocks
         }
@@ -11335,7 +12636,7 @@ require(['vs/editor/editor.main'], function () {
       // ── Mount + position ──────────────────────────────────────────────
       document.body.appendChild(popup);
       _activeColorPopup = popup;
-      goPage(0);
+      goPage(_findPageForCurrentColor());
 
       let _wheelDebounce = false;
       popup.addEventListener('wheel', e => {
@@ -11443,7 +12744,7 @@ require(['vs/editor/editor.main'], function () {
         const baseOffset  = model.getOffsetAt(slotStart);
         const repStart    = model.getPositionAt(baseOffset + matchOffset);
         const repEnd      = model.getPositionAt(baseOffset + matchOffset + strMatch[0].length);
-        editor.executeEdits('slot-parens', [{
+        _atomicEdit(editor,'slot-parens', [{
           range: {
             startLineNumber: repStart.lineNumber, startColumn: repStart.column,
             endLineNumber:   repEnd.lineNumber,   endColumn:   repEnd.column,
@@ -11459,7 +12760,7 @@ require(['vs/editor/editor.main'], function () {
           const baseOffset  = model.getOffsetAt(slotStart);
           const repStart    = model.getPositionAt(baseOffset + matchOffset);
           const repEnd      = model.getPositionAt(baseOffset + matchOffset + parenMatch[0].length);
-          editor.executeEdits('slot-parens', [{
+          _atomicEdit(editor,'slot-parens', [{
             range: {
               startLineNumber: repStart.lineNumber, startColumn: repStart.column,
               endLineNumber:   repEnd.lineNumber,   endColumn:   repEnd.column,
@@ -11472,7 +12773,7 @@ require(['vs/editor/editor.main'], function () {
 
     function _resetSlot(slot) {
       if (!editor || !slot.startLine) return;
-      editor.executeEdits('slot-reset', [{
+      _atomicEdit(editor,'slot-reset', [{
         range: {
           startLineNumber: slot.startLine, startColumn: slot.startCol + 1,
           endLineNumber:   slot.endLine,   endColumn:   slot.endCol + 1,
@@ -11496,7 +12797,7 @@ require(['vs/editor/editor.main'], function () {
       if (k >= 0 && full[k] === ',') delStart = k;
       const startPos = model.getPositionAt(delStart);
       const endPos   = model.getPositionAt(slotEndOff);
-      editor.executeEdits('slot-delete', [{
+      _atomicEdit(editor,'slot-delete', [{
         range: {
           startLineNumber: startPos.lineNumber, startColumn: startPos.column,
           endLineNumber:   endPos.lineNumber,   endColumn:   endPos.column,
@@ -11560,7 +12861,7 @@ require(['vs/editor/editor.main'], function () {
         // Replace any existing comment above the slot together with the slot itself,
         // inserting the new comment followed by the expression at the slot's indent.
         const indent = ' '.repeat(slot.startCol);
-        editor.executeEdits('preset-slot-edit', [{
+        _atomicEdit(editor,'preset-slot-edit', [{
           range: {
             startLineNumber: _slotCommentStartLine(slot), startColumn: 1,
             endLineNumber:   slot.endLine,                endColumn:   slot.endCol + 1,
@@ -11568,7 +12869,7 @@ require(['vs/editor/editor.main'], function () {
           text: leadingComment + '\n' + indent + exprText,
         }]);
       } else {
-        editor.executeEdits('preset-slot-edit', [{
+        _atomicEdit(editor,'preset-slot-edit', [{
           range: {
             startLineNumber: slot.startLine, startColumn: slot.startCol + 1,
             endLineNumber:   slot.endLine,   endColumn:   slot.endCol + 1,
@@ -11626,7 +12927,7 @@ require(['vs/editor/editor.main'], function () {
         const lineIdx  = arr.labelLine - 1;
         const oldText  = lines[lineIdx] || '';
         const newText  = _updateLabelPairInLine(oldText, bladeNum, newLabel);
-        editor.executeEdits('blade-label', [{
+        _atomicEdit(editor,'blade-label', [{
           range: { startLineNumber: arr.labelLine, startColumn: 1,
                    endLineNumber:   arr.labelLine, endColumn: oldText.length + 1 },
           text: newText,
@@ -11636,7 +12937,7 @@ require(['vs/editor/editor.main'], function () {
         const insertLine = arr.presets.length > 0
           ? arr.presets[0].startLine
           : arr.bodyStartLine + 1;
-        editor.executeEdits('blade-label', [{
+        _atomicEdit(editor,'blade-label', [{
           range: { startLineNumber: insertLine, startColumn: 1,
                    endLineNumber:   insertLine,  endColumn: 1 },
           text: `// @jmt-labels: B${bladeNum}="${newLabel}"\n\n`,
@@ -11670,13 +12971,13 @@ require(['vs/editor/editor.main'], function () {
         const endLine  = (nextLine !== undefined && nextLine.trim() === '')
           ? arr.labelLine + 2
           : arr.labelLine + 1;
-        editor.executeEdits('blade-label', [{
+        _atomicEdit(editor,'blade-label', [{
           range: { startLineNumber: arr.labelLine, startColumn: 1,
                    endLineNumber:   endLine,        endColumn: 1 },
           text: '',
         }]);
       } else {
-        editor.executeEdits('blade-label', [{
+        _atomicEdit(editor,'blade-label', [{
           range: { startLineNumber: arr.labelLine, startColumn: 1,
                    endLineNumber:   arr.labelLine, endColumn: oldText.length + 1 },
           text: newText,
@@ -11826,7 +13127,7 @@ require(['vs/editor/editor.main'], function () {
         '',
       ].join('\n') + '\n';
 
-      editor.executeEdits('preset-add', [{
+      _atomicEdit(editor,'preset-add', [{
         range: { startLineNumber: insertLine, startColumn: 1, endLineNumber: insertLine, endColumn: 1 },
         text: newText,
       }]);
@@ -11868,11 +13169,40 @@ require(['vs/editor/editor.main'], function () {
         '',
         `${indent}"Preset 1" },`,
       ].join('\n');
-      const insertLine = arr.bodyStartLine + 1;
-      editor.executeEdits('preset-add-first-in-bank', [{
-        range: { startLineNumber: insertLine, startColumn: 1, endLineNumber: insertLine, endColumn: 1 },
-        text:  entryText + '\n\n',
-      }]);
+
+      // Locate THIS bank by name in the source via a name-scoped regex. The parsePresets
+      // result doesn't expose declarationStart / bodyEnd / bodyContent, so we re-scan.
+      // If the body is whitespace-only (the typical empty-bank shape), do a whole-block
+      // replacement so spacing matches the "fresh scaffold" path. Otherwise fall back to
+      // inserting at the top of the body.
+      const text          = editor.getValue();
+      const model         = editor.getModel();
+      const escapedName   = arr.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const emptyBlockRe  = new RegExp(`\\bPreset\\s+${escapedName}\\s*\\[\\s*\\]\\s*=\\s*\\{\\s*\\};`);
+      const ebm           = emptyBlockRe.exec(text);
+      if (ebm) {
+        const replacement = [
+          `Preset ${arr.name}[] = {`,
+          '',
+          entryText,
+          '',
+          '};',
+        ].join('\n');
+        const startPos = model.getPositionAt(ebm.index);
+        const endPos   = model.getPositionAt(ebm.index + ebm[0].length);
+        _atomicEdit(editor,'preset-add-first-in-bank', [{
+          range: new monaco.Range(startPos.lineNumber, startPos.column, endPos.lineNumber, endPos.column),
+          text:  replacement,
+        }]);
+      } else {
+        // Defensive: array reports zero entries but the body has non-whitespace content
+        // (comments, whitespace the parser didn't classify as entries). Insert at top of body.
+        const insertLine = arr.bodyStartLine + 1;
+        _atomicEdit(editor,'preset-add-first-in-bank', [{
+          range: { startLineNumber: insertLine, startColumn: 1, endLineNumber: insertLine, endColumn: 1 },
+          text:  entryText + '\n\n',
+        }]);
+      }
       editor.focus();
       _selectedPresetIndex = 0;
       clearTimeout(_rebuildTimer);
@@ -11904,40 +13234,47 @@ require(['vs/editor/editor.main'], function () {
       const text  = editor.getValue();
       const model = editor.getModel();
 
-      // Existing empty/contentless `Preset NAME[] = { ... };` block?
-      const m = /\bPreset\s+\w+\s*\[\s*\]\s*=\s*\{/.exec(text);
+      // Empty `Preset NAME[] = { ...whitespace only... };` block — replace it ENTIRELY with
+      // a properly-formatted populated version. Doing a whole-block replacement (rather than
+      // inserting at the line after `{`) avoids inheriting whatever stray blank lines the
+      // user had inside the empty block, which previously produced lopsided spacing
+      // (no blank above the entry, two blanks below).
+      const emptyBlockRe = /\bPreset\s+(\w+)\s*\[\s*\]\s*=\s*\{\s*\};/;
+      const ebm = emptyBlockRe.exec(text);
+      // Match a non-empty Preset NAME[] block too — used only as a defensive fallback.
+      const m   = /\bPreset\s+\w+\s*\[\s*\]\s*=\s*\{/.exec(text);
 
-      if (m) {
-        // Insert the entry on the line right after the opening `{`
-        const opensAt    = m.index + m[0].length;
-        const openLine   = (text.slice(0, opensAt).match(/\n/g) || []).length + 1;
-        const insertLine = openLine + 1;
-        editor.executeEdits('preset-add-first', [{
-          range: { startLineNumber: insertLine, startColumn: 1, endLineNumber: insertLine, endColumn: 1 },
-          text: entryText + '\n\n',
-        }]);
-      } else {
-        // No block at all — append a fresh CONFIG_PRESETS scaffold with our Preset block
-        const lastLine    = model.getLineCount();
-        const lastCol     = model.getLineMaxColumn(lastLine);
-        const tailEmpty   = model.getLineContent(lastLine).length === 0;
-        const lead        = tailEmpty ? '' : '\n\n';
-        const blockText   = lead + [
-          '#ifdef CONFIG_PRESETS',
-          '',
-          'Preset presets[] = {',
+      if (ebm) {
+        const arrayName = ebm[1];
+        const replacement = [
+          `Preset ${arrayName}[] = {`,
           '',
           entryText,
           '',
           '};',
-          '',
-          '#endif',
-          '',
         ].join('\n');
-        editor.executeEdits('preset-add-first', [{
-          range: { startLineNumber: lastLine, startColumn: lastCol, endLineNumber: lastLine, endColumn: lastCol },
-          text: blockText,
+        const startPos = model.getPositionAt(ebm.index);
+        const endPos   = model.getPositionAt(ebm.index + ebm[0].length);
+        _atomicEdit(editor,'preset-add-first', [{
+          range: new monaco.Range(startPos.lineNumber, startPos.column, endPos.lineNumber, endPos.column),
+          text:  replacement,
         }]);
+      } else if (m) {
+        // Defensive: Preset[] declaration exists but isn't empty (shouldn't happen for
+        // _addFirstPreset — that's _insertFirstEntryIntoArray's job — but keep the path
+        // alive in case parser state and source state momentarily disagree). Insert at top.
+        const opensAt    = m.index + m[0].length;
+        const openLine   = (text.slice(0, opensAt).match(/\n/g) || []).length + 1;
+        const insertLine = openLine + 1;
+        _atomicEdit(editor,'preset-add-first', [{
+          range: { startLineNumber: insertLine, startColumn: 1, endLineNumber: insertLine, endColumn: 1 },
+          text: entryText + '\n\n',
+        }]);
+      } else {
+        // No `Preset NAME[]` declaration — use the shared scaffolder so Add Preset and Add
+        // Preset Bank produce identical results (existing #ifdef → insert before BladeConfig,
+        // bare BladeConfig → wrap in place, else → fresh scaffold at EOF).
+        _insertNewPresetScaffold(editor, model, 'presets', entryText, 'preset-add-first');
       }
 
       editor.focus();
@@ -11976,7 +13313,7 @@ require(['vs/editor/editor.main'], function () {
       const afterLine  = preset.endLine + 1;
       const eatExtra   = afterLine <= lastLine && model.getLineContent(afterLine).trim() === '';
       const endLine    = eatExtra ? afterLine + 1 : afterLine;
-      editor.executeEdits('preset-delete', [{
+      _atomicEdit(editor,'preset-delete', [{
         range: {
           startLineNumber: preset.startLine, startColumn: 1,
           endLineNumber:   Math.min(endLine, lastLine + 1), endColumn: 1,
@@ -11998,7 +13335,7 @@ require(['vs/editor/editor.main'], function () {
         startLineNumber: preset.startLine, startColumn: 1,
         endLineNumber:   preset.endLine,   endColumn: model.getLineMaxColumn(preset.endLine),
       });
-      editor.executeEdits('preset-disable', [{
+      _atomicEdit(editor,'preset-disable', [{
         range: {
           startLineNumber: preset.startLine, startColumn: 1,
           endLineNumber:   preset.endLine,   endColumn: model.getLineMaxColumn(preset.endLine),
@@ -12017,7 +13354,7 @@ require(['vs/editor/editor.main'], function () {
         startLineNumber: dp.startLine + 1, startColumn: 1,
         endLineNumber:   dp.endLine - 1,   endColumn: model.getLineMaxColumn(dp.endLine - 1),
       });
-      editor.executeEdits('preset-enable', [{
+      _atomicEdit(editor,'preset-enable', [{
         range: {
           startLineNumber: dp.startLine, startColumn: 1,
           endLineNumber:   dp.endLine,   endColumn: model.getLineMaxColumn(dp.endLine),
@@ -12036,7 +13373,7 @@ require(['vs/editor/editor.main'], function () {
       const afterLine = dp.endLine + 1;
       const eatExtra  = afterLine <= lastLine && model.getLineContent(afterLine).trim() === '';
       const endLine   = eatExtra ? afterLine + 1 : afterLine;
-      editor.executeEdits('disabled-preset-delete', [{
+      _atomicEdit(editor,'disabled-preset-delete', [{
         range: {
           startLineNumber: dp.startLine, startColumn: 1,
           endLineNumber:   Math.min(endLine, lastLine + 1), endColumn: 1,
@@ -12070,7 +13407,7 @@ require(['vs/editor/editor.main'], function () {
       }
       if (!edits.length) return;
       edits.sort((a, b) => a.range.startLineNumber - b.range.startLineNumber);
-      editor.executeEdits('batch-disable', edits);
+      _atomicEdit(editor,'batch-disable', edits);
       _selectedLive.clear();
       _selectedPresetIndex = 0;
       editor.focus();
@@ -12095,7 +13432,7 @@ require(['vs/editor/editor.main'], function () {
       }
       if (!edits.length) return;
       edits.sort((a, b) => a.range.startLineNumber - b.range.startLineNumber);
-      editor.executeEdits('batch-enable', edits);
+      _atomicEdit(editor,'batch-enable', edits);
       _selectedDisabled.clear();
       _selectedDisabledPreset = null;
       editor.focus();
@@ -12131,7 +13468,7 @@ require(['vs/editor/editor.main'], function () {
       }
       if (!edits.length) return;
       edits.sort((a, b) => a.range.startLineNumber - b.range.startLineNumber);
-      editor.executeEdits('batch-delete', edits);
+      _atomicEdit(editor,'batch-delete', edits);
       _selectedLive.clear();
       _selectedDisabled.clear();
       _selectedPresetIndex = 0;
@@ -12176,11 +13513,15 @@ require(['vs/editor/editor.main'], function () {
       }
       if (!edits.length) return;
       edits.sort((a, b) => a.range.startLineNumber - b.range.startLineNumber);
-      editor.executeEdits('isolate-preset', edits);
+      _atomicEdit(editor,'isolate-preset', edits);
       _selectedDisabled.clear();
       _selectedDisabledPreset = null;
-      editor.focus();
       _scheduleRebuild();
+      // Defer the focus to next tick — synchronous editor.focus() inside a context
+      // menu mousedown handler doesn't always stick (browser's right-click focus on
+      // the originating row competes with our focus call). Deferring lands it after
+      // those focus events settle, so Ctrl+Z reaches Monaco without an extra click.
+      setTimeout(() => { if (editor) editor.focus(); }, 0);
     }
 
     function _enableAll() {
@@ -12198,7 +13539,7 @@ require(['vs/editor/editor.main'], function () {
         });
       }
       edits.sort((a, b) => a.range.startLineNumber - b.range.startLineNumber);
-      editor.executeEdits('enable-all', edits);
+      _atomicEdit(editor,'enable-all', edits);
       _selectedDisabled.clear();
       _selectedDisabledPreset = null;
       editor.focus();
@@ -12231,7 +13572,7 @@ require(['vs/editor/editor.main'], function () {
       }
 
       const model = editor.getModel();
-      editor.executeEdits('preset-reorder', [{
+      _atomicEdit(editor,'preset-reorder', [{
         range: {
           startLineNumber: firstLine, startColumn: 1,
           endLineNumber:   lastLine,  endColumn: model.getLineMaxColumn(lastLine),
@@ -12269,7 +13610,7 @@ require(['vs/editor/editor.main'], function () {
       }
       const startPos = model.getPositionAt(offs[0].start);
       const endPos   = model.getPositionAt(offs[offs.length - 1].end);
-      editor.executeEdits('slot-reorder', [{
+      _atomicEdit(editor,'slot-reorder', [{
         range: {
           startLineNumber: startPos.lineNumber, startColumn: startPos.column,
           endLineNumber:   endPos.lineNumber,   endColumn:   endPos.column,
@@ -12359,6 +13700,35 @@ require(['vs/editor/editor.main'], function () {
       }
     });
     // ── Rename preset array (pencil) ──────────────────────────────────────────
+    // Pencil rename is the "validated path" — space/hyphen auto-convert to underscore
+    // (via _wireStyleNameSanitize on the input), but anything else outside the C++
+    // identifier rule blocks save with an inline error. The Monaco source can hold
+    // invalid Preset[] names freely; the pencil is the trustworthy "definitely compiles"
+    // gate. Markers in the editor cover the source-side feedback.
+    function _validatePencilName(value) {
+      const trimmed = value.trim();
+      if (trimmed.length === 0)               return 'Name is required';
+      if (/^\d/.test(trimmed))                return 'Name cannot start with a digit';
+      if (!/^[A-Za-z0-9_]+$/.test(trimmed))   return 'Only letters, digits, and underscores allowed';
+      return null;
+    }
+    function _updatePencilValidationUI() {
+      const input   = document.getElementById('preset-array-rename-input');
+      const err     = document.getElementById('preset-array-rename-error');
+      const confirm = document.getElementById('btn-preset-array-rename-confirm');
+      const msg     = _validatePencilName(input.value);
+      if (msg) {
+        err.textContent = msg;
+        err.classList.add('visible');
+        input.classList.add('field-error');
+        confirm.disabled = true;
+      } else {
+        err.textContent = '';
+        err.classList.remove('visible');
+        input.classList.remove('field-error');
+        confirm.disabled = false;
+      }
+    }
     function _startPresetArrayRename() {
       const arr = _parseResult?.arrays[_activeArrayIndex];
       if (!arr) return;
@@ -12369,40 +13739,115 @@ require(['vs/editor/editor.main'], function () {
       input.dataset.origValue = arr.name;
       row.classList.add('active');
       pencil.style.display = 'none';
+      _updatePencilValidationUI();
       setTimeout(() => { input.focus(); input.select(); }, 0);
     }
-    function _exitPresetArrayRename() {
+    function _exitPresetArrayRename(opts) {
       document.getElementById('preset-array-rename-row').classList.remove('active');
       document.getElementById('btn-preset-array-rename').style.display = '';
+      // Clear error state so the next open starts clean.
+      const input   = document.getElementById('preset-array-rename-input');
+      const err     = document.getElementById('preset-array-rename-error');
+      const confirm = document.getElementById('btn-preset-array-rename-confirm');
+      err.textContent = '';
+      err.classList.remove('visible');
+      input.classList.remove('field-error');
+      confirm.disabled = false;
+      // Return focus to Monaco only on explicit "done with form" exits (Enter, ✓, Esc,
+      // ×). The blur path skips this — the user clicked something else and we shouldn't
+      // steal focus from their intended target. Without refocus, Ctrl+Z in the global
+      // scope wouldn't reach Monaco since the input had focus.
+      if (opts?.refocusEditor && editor) editor.focus();
     }
     function _commitPresetArrayRename() {
       const input   = document.getElementById('preset-array-rename-input');
+      // Invalid input never commits — error is already visible. Cancel via Esc / × only.
+      if (_validatePencilName(input.value) !== null) return;
       const newName = input.value.trim();
       const oldName = input.dataset.origValue || '';
-      if (!newName || newName === oldName) { _exitPresetArrayRename(); return; }
-      const arr = _parseResult?.arrays[_activeArrayIndex];
-      if (!arr) { _exitPresetArrayRename(); return; }
-      const model       = editor.getModel();
-      const lineContent = model.getLineContent(arr.startLine);
-      const escaped     = oldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const re          = new RegExp(`(\\bPreset\\s+)(${escaped})(\\s*\\[)`);
-      const m           = re.exec(lineContent);
-      if (!m) { _exitPresetArrayRename(); return; }
-      const startCol = m.index + m[1].length + 1; // 1-based
-      const endCol   = startCol + oldName.length;
-      editor.executeEdits('preset-array-rename', [{
-        range: { startLineNumber: arr.startLine, startColumn: startCol, endLineNumber: arr.startLine, endColumn: endCol },
-        text: newName,
-      }]);
-      _exitPresetArrayRename();
+      if (newName === oldName) { _exitPresetArrayRename({ refocusEditor: true }); return; }
+      if (!_parseResult || _activeArrayIndex < 0 || _activeArrayIndex >= _parseResult.arrays.length) {
+        _exitPresetArrayRename(); return;
+      }
+      const model    = editor.getModel();
+      const fullText = model.getValue();
+      // Locate the i-th `Preset NAME[]` declaration in source order — matches the order
+      // the parser returns arrays in, so `_activeArrayIndex` picks the right one. Working
+      // from absolute text (not single-line regex) makes the lookup robust against
+      // indentation, multi-line declarations, and the empty-name case where the previous
+      // line-content match was fragile.
+      const declRe = /\bPreset(\s+)([\w-]*)\s*\[\s*\]\s*=\s*\{/g;
+      let match = null;
+      let count = 0;
+      let dm;
+      while ((dm = declRe.exec(fullText)) !== null) {
+        if (count === _activeArrayIndex) { match = dm; break; }
+        count++;
+      }
+      if (!match) { _exitPresetArrayRename(); return; }
+      const nameOffsetStart = match.index + 'Preset'.length + match[1].length;
+      const nameOffsetEnd   = nameOffsetStart + match[2].length;
+      const sp = model.getPositionAt(nameOffsetStart);
+      const ep = model.getPositionAt(nameOffsetEnd);
+
+      // Build the rename edit for the declaration name token, PLUS edits for every
+      // `CONFIGARRAY(oldName)` reference in the file. All in one atomic Monaco edit so
+      // Ctrl+Z reverts the rename + every linked reference as one step. Without the
+      // reference sync, the file would compile-fail because BladeConfig entries point
+      // to a name that no longer exists.
+      const edits = [{
+        range: new monaco.Range(sp.lineNumber, sp.column, ep.lineNumber, ep.column),
+        text:  newName,
+      }];
+      if (oldName) {
+        const escaped = oldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const refRe   = new RegExp(`(\\bCONFIGARRAY\\s*\\(\\s*)${escaped}(\\s*\\))`, 'g');
+        let rm;
+        while ((rm = refRe.exec(fullText)) !== null) {
+          const refNameStart = rm.index + rm[1].length;
+          const refNameEnd   = refNameStart + oldName.length;
+          const startPos = model.getPositionAt(refNameStart);
+          const endPos   = model.getPositionAt(refNameEnd);
+          edits.push({
+            range: new monaco.Range(startPos.lineNumber, startPos.column, endPos.lineNumber, endPos.column),
+            text:  newName,
+          });
+        }
+      } else {
+        // Empty oldName: only fill if there's exactly one empty `CONFIGARRAY()` in the
+        // file. Multiple is ambiguous; the marker errors will guide the user.
+        const emptyRefs = _findEmptyConfigArrayRefs(fullText);
+        if (emptyRefs.length === 1) {
+          const r   = emptyRefs[0];
+          const rsp = model.getPositionAt(r.start);
+          const rep = model.getPositionAt(r.end);
+          edits.push({
+            range: new monaco.Range(rsp.lineNumber, rsp.column, rep.lineNumber, rep.column),
+            text:  newName,
+          });
+        }
+      }
+      _atomicEdit(editor, 'preset-array-rename', edits);
+      // No toast — pencil rename is explicit user action; the visible strip label and
+      // source-line change ARE the feedback. CONFIGARRAY ref updates happen silently
+      // alongside (back-fed). The pencil's atomic edit covers both the declaration and
+      // its refs, so the live-mirror in `_syncConfigArrayRefs` has nothing left to do
+      // on the next rebuild tick.
+      _exitPresetArrayRename({ refocusEditor: true });
     }
     document.getElementById('btn-preset-array-rename').addEventListener('click', _startPresetArrayRename);
     document.getElementById('btn-preset-array-rename-confirm').addEventListener('click', _commitPresetArrayRename);
-    document.getElementById('btn-preset-array-rename-cancel').addEventListener('click', _exitPresetArrayRename);
+    document.getElementById('btn-preset-array-rename-cancel').addEventListener('click', () => _exitPresetArrayRename({ refocusEditor: true }));
     const _presetArrayRenameInput = document.getElementById('preset-array-rename-input');
+    _presetArrayRenameInput.addEventListener('input', _updatePencilValidationUI);
     _presetArrayRenameInput.addEventListener('keydown', e => {
-      if (e.key === 'Enter')       { e.preventDefault(); _commitPresetArrayRename(); }
-      else if (e.key === 'Escape') { e.preventDefault(); _exitPresetArrayRename();   }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        if (_validatePencilName(_presetArrayRenameInput.value) === null) _commitPresetArrayRename();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        _exitPresetArrayRename({ refocusEditor: true });
+      }
     });
     _presetArrayRenameInput.addEventListener('blur', e => {
       const row = document.getElementById('preset-array-rename-row');
@@ -12463,7 +13908,7 @@ require(['vs/editor/editor.main'], function () {
       const newBankText = bankText.replace(declRe, `$1${newName}$2`);
 
       const insertLn = arr.endLine + 1;
-      editor.executeEdits('preset-bank-duplicate', [{
+      _atomicEdit(editor,'preset-bank-duplicate', [{
         range: { startLineNumber: insertLn, startColumn: 1, endLineNumber: insertLn, endColumn: 1 },
         text:  '\n' + newBankText + '\n',
       }]);
@@ -12504,7 +13949,7 @@ require(['vs/editor/editor.main'], function () {
       const afterLine = arr.endLine + 1;
       const eatExtra  = afterLine <= lastLine && model.getLineContent(afterLine).trim() === '';
       const endLine   = eatExtra ? afterLine + 1 : afterLine;
-      editor.executeEdits('preset-bank-delete', [{
+      _atomicEdit(editor,'preset-bank-delete', [{
         range: {
           startLineNumber: arr.startLine, startColumn: 1,
           endLineNumber:   Math.min(endLine, lastLine + 1), endColumn: 1,
@@ -12599,5 +14044,8 @@ require(['vs/editor/editor.main'], function () {
 </div>
 
 <div id="preset-ctx-menu" class="preset-ctx-menu"></div>
+
+<!-- ── Toast host: lightweight transient notifications ── -->
+<div id="toast-host" aria-live="polite"></div>
 </body>
 </html>

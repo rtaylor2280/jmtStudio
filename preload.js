@@ -15,6 +15,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   removeRecentFile:  (filePath)  => ipcRenderer.invoke('store:removeRecentFile', filePath),
   getSetting: (key, def)         => ipcRenderer.invoke('store:getSetting', key, def),
   setSetting: (key, value)       => ipcRenderer.invoke('store:setSetting', key, value),
+  readDefaultTemplate: ()        => ipcRenderer.invoke('template:readDefault'),
+  resetDefaultTemplate: ()       => ipcRenderer.invoke('template:resetDefault'),
+  getTemplateStatus: ()          => ipcRenderer.invoke('template:getStatus'),
+  importTemplate: ()             => ipcRenderer.invoke('template:import'),
 
   // ── Style Library ──────────────────────────────────────
   stylesFileExists: ()          => ipcRenderer.invoke('styles:exists'),

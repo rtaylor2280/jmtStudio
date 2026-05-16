@@ -395,16 +395,44 @@ async function doCompile() {
     return;
   }
 
-  const content = window.getEditorContent();
-  if (!content || content.trim() === '') {
+  const initialContent = window.getEditorContent();
+  if (!initialContent || initialContent.trim() === '') {
     appendLog('Cannot compile: editor is empty.', true);
     setStatus('compile', 'error', 'No config loaded');
     return;
   }
 
-  // Save to original location first
-  await window.doSave();
-  if (window.saveStylesFile) await window.saveStylesFile();
+  // Dirty checks — prompt the user instead of auto-saving. Config first (Save As is
+  // offered since the user may want to compile a copy at a new path), then Style
+  // Library if applicable (fixed path, no Save As). Cancel from either bails out.
+  if (window.getIsDirty?.()) {
+    const fileName = window._currentFilePath
+      ? window._currentFilePath.split(/[\\/]/).pop()
+      : 'this config';
+    // Hide Discard for compile — discarding would build from on-disk content (the
+    // un-edited version), which is almost never what the user wants. Cancel / Save
+    // / Save As are the meaningful options.
+    const choice = await window.promptUnsaved(
+      `Unsaved changes in "${fileName}" — save before compiling?`,
+      { saveAs: true, discard: false }
+    );
+    if (choice === 'cancel') return;
+    // Cancelling the Save / Save As file picker (or a write failure) bails the
+    // compile — same effect as picking Cancel on the dirty modal.
+    if (choice === 'save'   && !await window.doSave())   return;
+    if (choice === 'saveas' && !await window.doSaveAs()) return;
+  }
+  if (window._isStylesDirty?.()) {
+    const choice = await window.promptUnsaved(
+      'Unsaved changes in Style Library (my_styles.h) — save before compiling?',
+      { discard: false }
+    );
+    if (choice === 'cancel') return;
+    if (choice === 'save')   await window.saveStylesFile();
+  }
+
+  // Re-read content in case Save As changed the path / metadata.
+  const content = window.getEditorContent();
 
   showBuildModal('⚙ Compiling...');
   startCompileHints();
@@ -447,11 +475,13 @@ async function doFlash() {
     return;
   }
 
-  // Reuse modal in flash mode
+  // Reuse modal in flash mode — clear prior attempt's log so retries (watcher-triggered
+  // or manual Retry) don't pile up. Persistent build-output panel keeps full history.
   stopCompileHints();
   stopCompileTimer();
   document.getElementById('bm-title').textContent = '⚡ Flashing...';
   document.getElementById('bm-title').style.color = 'var(--c-text-bright)';
+  document.getElementById('bm-log').innerHTML = '';
   document.getElementById('bm-status').textContent = '';
   document.getElementById('bm-abort').style.display = 'none';
   document.getElementById('bm-close').style.display = 'none';
@@ -718,7 +748,7 @@ function onBuildStatus({ type, ok, message }) {
   }
 }
 
-function onBuildDone({ type, ok, error, aborted, retriable }) {
+function onBuildDone({ type, ok, error, aborted, retriable, needsDfuDriver }) {
   if (type === 'compile') {
     if (ok) {
       compileSuccess = true;
@@ -781,6 +811,15 @@ function onBuildDone({ type, ok, error, aborted, retriable }) {
     window._isFlashing = false;
     stopFlashTimer();
     if (!ok) {
+      // Auto-recovery: touch reset succeeded and the board IS in DFU, but the WinUSB
+      // driver isn't bound on this USB instance. Switch to DFU mode and run the driver
+      // install flow with autoFlash=true so the flash continues once the driver lands.
+      if (needsDfuDriver) {
+        if (error) appendLog(`\n⚠ ${error}`, true);
+        _setupDfuModeUI();
+        startDfuWaitModal(true, true, false);
+        return;
+      }
       finishBuildModal(false, '✗ Flash Failed', error, { retriable: !!retriable });
       if (error) appendLog(`\n⚠ ${error}`, true);
       return;
@@ -1157,10 +1196,17 @@ function setStatus(type, state, message) {
 // ── Cache check ────────────────────────────────────────
 // missStatus: message to show on miss; false = don't update status on miss
 async function checkCacheForConfig(missStatus) {
-  if (!window.electronAPI || !window.getEditorContent) return;
-  if (!selectedFqbn) return;
-  const content = window.getEditorContent();
-  if (!content || content.trim() === '') return;
+  // Callers (board change, USB change, OS version change, etc.) pre-set cacheCheckPending=true
+  // to disable Compile immediately. If this run can't proceed (no API, no FQBN, empty editor),
+  // we must clear that flag here — otherwise Compile stays disabled forever after a + New flow
+  // where loadContent dispatches a board='' change while content/FQBN are still unset.
+  const content = (window.electronAPI && window.getEditorContent) ? window.getEditorContent() : null;
+  const canCheck = !!(window.electronAPI && selectedFqbn && content && content.trim());
+
+  if (!canCheck) {
+    if (cacheCheckPending) { cacheCheckPending = false; updateCompileButton(); }
+    return;
+  }
 
   cacheCheckPending = true;
   updateCompileButton();
@@ -1190,22 +1236,24 @@ async function checkCacheForConfig(missStatus) {
 }
 
 // ── DFU mode ───────────────────────────────────────────
-function enterDfuMode() {
-  isDfuMode        = true;
-  dfuDeviceReady   = false;
-  _portsBeforeDfu  = cachedPorts.map(p => p.path);
+// Sets DFU-mode UI state without driving any detection flow — caller decides what comes next.
+function _setupDfuModeUI() {
+  isDfuMode       = true;
+  dfuDeviceReady  = false;
+  _portsBeforeDfu = cachedPorts.map(p => p.path);
   stopPortWatch();
 
-  // Hide normal port elements
   ['bp-port-select', 'bp-board-display', 'bp-btn-refresh-ports',
     'bp-label-port', 'bp-label-detected'].forEach(id => {
     const e = el(id); if (e) e.style.display = 'none';
   });
   el('bp-dfu-mode-indicator').style.display = 'inline-flex';
-
-  setStatus('port', 'warn', 'Checking for DFU device...');
   setFlashEnabled(compileSuccess);
+}
 
+function enterDfuMode() {
+  _setupDfuModeUI();
+  setStatus('port', 'warn', 'Checking for DFU device...');
   _checkDfuOnEntry();
 }
 
@@ -1358,6 +1406,7 @@ async function startDfuWaitModal(isRetry = false, autoFlash = true, justInstalle
         }
       } else {
         appendModalLog('A Windows driver is required to communicate with the STM32 Bootloader.', false);
+        appendModalLog('Windows binds this driver per USB port — you may need to re-run this when switching ports or after some Windows updates.', false);
         appendModalLog('', false);
         appendModalLog('  Detected: STM32 Bootloader (0483:df11)', false);
         appendModalLog('', false);

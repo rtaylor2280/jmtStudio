@@ -716,9 +716,22 @@ async function _vpDoApply(v, btn, panel, isFirstTime, onSuccess) {
   }
 
   if (isFirstTime && !v.name.includes('+JMT')) {
-    const newName      = `${v.name} +JMT`;
-    const renameResult = await window.electronAPI.renameVersion(v.name, newName);
-    if (renameResult.ok) {
+    // Pick the first available `+JMT` / `+JMT2` / `+JMT3` … name. If the user already
+    // has a folder named `<v.name> +JMT` (e.g. an earlier copy of the same version
+    // that's already JMT-tagged), the rename collides — fall forward to a numbered
+    // suffix instead of silently failing and leaving the version with its original
+    // un-tagged name (which previously caused the toolbar "Link JMT Add-ons" button
+    // to not pick up the new state on the next config switch).
+    let renameResult = null;
+    for (let n = 1; n <= 99; n++) {
+      const candidate = n === 1 ? `${v.name} +JMT` : `${v.name} +JMT${n}`;
+      renameResult    = await window.electronAPI.renameVersion(v.name, candidate);
+      if (renameResult.ok) break;
+      // Only retry on name-collision errors — bail on permission / validation issues
+      // where another attempt won't help.
+      if (!/already exists/i.test(renameResult.error || '')) break;
+    }
+    if (renameResult?.ok) {
       _vpSelected = { ...v, name: renameResult.newName, jmtVersion: applyResult.jmtVersion };
       await vpRefresh();
       window.vpSelectVersion(renameResult.newName);

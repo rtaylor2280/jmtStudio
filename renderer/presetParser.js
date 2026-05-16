@@ -128,29 +128,80 @@
   // ── Blade count extraction ─────────────────────────────────────────────────
 
   /**
+   * Splits a text segment by commas at depth 0, respecting <>, (), {}, strings, and
+   * line/block comments. Trims items and drops empties. Used to break apart a
+   * BladeConfig entry's items so each can be classified independently.
+   */
+  function splitTopLevelCommas(text) {
+    const items = [];
+    let depth = 0;
+    let start = 0;
+    let i = 0;
+    while (i < text.length) {
+      const ch = text[i];
+      if (ch === '"') {
+        const s = readString(text, i);
+        if (s) { i = s.end; continue; }
+      }
+      if (ch === '/' && text[i+1] === '/') { while (i < text.length && text[i] !== '\n') i++; continue; }
+      if (ch === '/' && text[i+1] === '*') { i += 2; while (i < text.length && !(text[i-1] === '*' && text[i] === '/')) i++; i++; continue; }
+      if (ch === '<' || ch === '(' || ch === '{') depth++;
+      else if (ch === '>' || ch === ')' || ch === '}') depth--;
+      else if (ch === ',' && depth === 0) {
+        items.push(text.slice(start, i));
+        start = i + 1;
+      }
+      i++;
+    }
+    if (start < text.length) items.push(text.slice(start));
+    return items.map(s => s.trim()).filter(s => s.length > 0);
+  }
+
+  /**
    * Extracts blade count from a config.
    * Primary: `#define NUM_BLADES N`
-   * Fallback: count blade-type entries in the first BladeConfig entry.
+   * Fallback: count top-level blade-type expressions in the first BladeConfig entry.
+   *   Correctly handles: leading whitespace/comments before the first entry,
+   *   DimBlade-wrapped blades (count once, not twice), and CONFIGARRAY/trigger value
+   *   items that aren't blade declarations.
    */
   function extractBladeCount(text) {
     const m = text.match(/#define\s+NUM_BLADES\s+(\d+)/);
     if (m) return parseInt(m[1], 10);
 
-    // Fallback: count WS281XBladePtr / SubBlade / DimBlade etc in first BladeConfig entry
     const bcMatch = text.match(/BladeConfig\s+\w+\s*\[\s*\]\s*=\s*\{/);
-    if (bcMatch) {
-      const bodyStart = bcMatch.index + bcMatch[0].length - 1;
-      const body = readBraceGroup(text, bodyStart);
-      if (body) {
-        const firstEntry = readBraceGroup(body.content, 1);
-        if (firstEntry) {
-          const bladeRe = /\b(WS281XBladePtr|SubBlade|SubBladeReverse|SubBladeWithStride|SimpleBladePtr|DimBlade|SSD1306Blade)\s*[<(]/g;
-          const hits = firstEntry.content.match(bladeRe);
-          if (hits) return hits.length;
-        }
-      }
+    if (!bcMatch) return null;
+
+    const bodyStart = bcMatch.index + bcMatch[0].length - 1;
+    const body = readBraceGroup(text, bodyStart);
+    if (!body) return null;
+
+    // body.content = `{ ...entries... }`. Find the first nested `{` (start of first entry),
+    // skipping leading whitespace, line comments, and block comments. The previous
+    // implementation hardcoded position 1, which failed whenever a blank line or comment
+    // sat between the outer `{` and the first entry.
+    const inner = body.content;
+    let i = 1; // skip the outer opening `{`
+    while (i < inner.length) {
+      const ch = inner[i];
+      if (ch === '/' && inner[i+1] === '/') { while (i < inner.length && inner[i] !== '\n') i++; continue; }
+      if (ch === '/' && inner[i+1] === '*') { i += 2; while (i < inner.length && !(inner[i-1] === '*' && inner[i] === '/')) i++; i++; continue; }
+      if (ch === '{') break;
+      i++;
     }
-    return null;
+    if (i >= inner.length) return null;
+
+    const firstEntry = readBraceGroup(inner, i);
+    if (!firstEntry) return null;
+
+    // Split the entry by top-level commas, count items whose leading identifier is a
+    // blade type. This treats `DimBlade(WS281XBladePtr<...>())` as a single blade (not
+    // two), and skips the trigger value and `CONFIGARRAY(presets)` which aren't blades.
+    const entryBody = firstEntry.content.slice(1, -1);
+    const items     = splitTopLevelCommas(entryBody);
+    const bladeRe   = /^(WS281XBladePtr|SubBlade|SubBladeReverse|SubBladeWithStride|SimpleBladePtr|DimBlade|SSD1306Blade)\b/;
+    const count     = items.filter(it => bladeRe.test(it)).length;
+    return count > 0 ? count : null;
   }
 
   // ── StylePtr extraction ────────────────────────────────────────────────────
@@ -409,19 +460,27 @@
 
   /**
    * Finds all preset array declarations in `text`.
-   * Matches: `TypeName name[] = {` blocks containing StylePtr.
+   * Matches: `TypeName name[] = {` blocks containing StylePtr. The name capture is
+   * permissive — accepts hyphens in addition to word chars, and accepts the empty
+   * name (`Preset [] = {`) — so a user-typed invalid-but-meaningful declaration still
+   * parses into the visual view. The compiler will surface the actual identifier-
+   * validity error when the user tries to compile, and Monaco markers flag it in
+   * real time; meanwhile the visual editor doesn't silently lose the bank.
    */
   function findPresetArrayDeclarations(text) {
-    const re = /\b(\w+)\s+(\w+)\s*\[\s*\]\s*=\s*\{/g;
+    const re = /\b(\w+)\s+([\w-]*)\s*\[\s*\]\s*=\s*\{/g;
     const results = [];
     let m;
     while ((m = re.exec(text)) !== null) {
+      // ProffieOS only recognizes `Preset NAME[] = { ... }` as a preset bank. Other
+      // typenames (including `BladeConfig` and any random user-defined types) are not
+      // preset arrays even if their body happens to contain StylePtr / &ref expressions.
+      // The previous content-based fallback protected against nothing real and risked
+      // surfacing stray bank labels for unrelated arrays.
+      if (m[1] !== 'Preset') continue;
       const bodyStart = m.index + m[0].length - 1;
       const group = readBraceGroup(text, bodyStart);
       if (!group) continue;
-      // Accept any `Preset NAME[]` regardless of body content (so empty banks show up too).
-      // Also keep content-based detection so non-`Preset`-typed arrays still parse if they hold styles.
-      if (m[1] !== 'Preset' && !/\b\w*StylePtr\s*</i.test(group.content) && !/&\w+/.test(group.content)) continue;
       results.push({
         name:             m[2],
         typeName:         m[1],

@@ -46,37 +46,57 @@
   // ============================================================
   const TUNING = {
     angle: -25,
-    ledCount: 50,
+    ledCount: 20,
     sourceH: 200,
 
-    brightness: 1.35,
-    saturation: 1.4,
-    coreWhiten: 0.60,
-    whitenThresh: 0.40,
+    brightness: 1.6,
+    saturation: 1.2,
+    coreWhiten: 1,
+    whitenThresh: 0.4,
     coreWidth: 0.47,
     edgeSoft: 1.4,
     tubeWidth: 0.55,
     tubeOpacity: 0.75,
     blendRadius: 3,
-    falloff: 0.8,
+    falloff: 0.65,
 
-    bloomIntensity: 0.3,
-    bloomRadius: 37,
-    bloomSens: 1.0,
+    bloomIntensity: 1,
+    bloomRadius: 40,
+    bloomSens: 1,
     bloomHBlur: 30,
 
     ambientWash: 0.14,
     ambientRadius: 600,
     linearColor: 1,
 
-    flickerDepth: 0.40,
-    flickerSpeed: 2.3,
-    pulseLowMix: 0.75,
-    pulseSpeed: 2.1,
-    coreWidthBoost: 0.5,
+    intensity: 1,
 
     targetFps: 30,
   };
+
+  // Scrolling rotoscope band pattern. Energy scales with TUNING.intensity.
+  const BAND_LEVELS = [1.00, 1.00, 0.235, 1.00, 0.588];
+  const BAND_WIDTH_UNITS = 14000;
+  const BAND_GRAIN = 0.15;
+  const BAND_REFERENCE_SCROLL = 1000;
+
+  function bandLevelForPhase(p, periodLen) {
+    const spacing = periodLen / BAND_LEVELS.length;
+    const windowSize = spacing * 1.5;
+    let total = 0;
+    for (let i = 0; i < BAND_LEVELS.length; i++) {
+      const center = spacing * (i + 0.5);
+      let d = p - center;
+      if (d > periodLen / 2) d -= periodLen;
+      if (d < -periodLen / 2) d += periodLen;
+      const ad = Math.abs(d);
+      if (ad < windowSize / 2) {
+        const w = Math.cos((ad / (windowSize / 2)) * (Math.PI / 2));
+        total += BAND_LEVELS[i] * w * w;
+      }
+    }
+    return total;
+  }
 
   // ============================================================
   // COLOR HELPERS — accept hex string, {r,g,b} object, or [r,g,b]
@@ -164,10 +184,11 @@
       for (let i = 0; i < 300; i++) {
         this.seeds[i] = Math.random() * Math.PI * 2;
       }
-      // Pulse phase synced across all swatches (= 0)
-      this.pulsePhase = 0;
-      this.currentPulse = 0.5;
       this.leds = null;
+      // Random per-instance start position desyncs swatches in a grid so the
+      // rotoscope bands don't all march in lockstep.
+      this.scrollPos = Math.random() * BAND_WIDTH_UNITS;
+      this.lastBandT = 0;
 
       this.cssW = width;
       this.cssH = height;
@@ -214,33 +235,31 @@
       this.colLum = new Float32Array(W);
     }
 
-    // ledNoise — 3-sine combo, port of original
-    _noise(i, t) {
-      const s = this.seeds[i % 300];
-      const sp = TUNING.flickerSpeed;
-      return 0.5 + 0.5 * (
-        0.5 * Math.sin(t * sp * 3.7 + s) +
-        0.3 * Math.sin(t * sp * 7.1 + s * 1.3) +
-        0.2 * Math.sin(t * sp * 13.3 + s * 0.7)
-      );
-    }
-
-    // Solid pattern + Proffie-style Pulsing lerp between color and color*pulseLowMix
     _generateLEDs(t) {
       const n = TUNING.ledCount;
       if (!this.leds || this.leds.length !== n * 3) {
         this.leds = new Float32Array(n * 3);
       }
-      const fd = TUNING.flickerDepth;
       const c = this.color;
-      const pulseT = 0.5 + 0.5 * Math.sin(t * TUNING.pulseSpeed + this.pulsePhase);
-      const pulseScale = TUNING.pulseLowMix + (1 - TUNING.pulseLowMix) * pulseT;
-      this.currentPulse = pulseT;
+      const intensity = Math.max(0, TUNING.intensity);
+      const bandMix = Math.min(0.9, intensity);
+      const scrollPerSec = BAND_REFERENCE_SCROLL * intensity;
+      if (this.lastBandT === 0) this.lastBandT = t;
+      const dt = t - this.lastBandT;
+      this.lastBandT = t;
+      this.scrollPos += dt * scrollPerSec;
+      const periodLen = Math.max(2, BAND_WIDTH_UNITS / 1000);
       for (let i = 0; i < n; i++) {
-        const sc = (1 - fd + fd * this._noise(i, t)) * pulseScale;
-        this.leds[i * 3] = c.r * sc;
-        this.leds[i * 3 + 1] = c.g * sc;
-        this.leds[i * 3 + 2] = c.b * sc;
+        let p = ((i + this.scrollPos) % periodLen);
+        if (p < 0) p += periodLen;
+        const bandLvl = bandLevelForPhase(p, periodLen);
+        const grainSeed = this.seeds[i % 300];
+        const grain = 1 - BAND_GRAIN + BAND_GRAIN * (0.5 + 0.5 * Math.sin(t * 7.3 + grainSeed * 5.7 + i * 0.91));
+        const lvl = (1 - bandMix) + bandMix * bandLvl;
+        const finalLvl = lvl * grain;
+        this.leds[i * 3]     = c.r * finalLvl;
+        this.leds[i * 3 + 1] = c.g * finalLvl;
+        this.leds[i * 3 + 2] = c.b * finalLvl;
       }
     }
 
@@ -273,8 +292,7 @@
       const H = this.srcH;
       const cy = H / 2;
       const halfH = H / 2;
-      // Core widens with current pulse phase — bright phase = wider core
-      const cw = TUNING.coreWidth * (1 + TUNING.coreWidthBoost * this.currentPulse);
+      const cw = TUNING.coreWidth;
       const es = TUNING.edgeSoft;
       const bri = TUNING.brightness;
       const cWh = TUNING.coreWhiten;
