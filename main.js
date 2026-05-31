@@ -37,9 +37,15 @@ function addRecentFile(filePath) {
 let win;
 
 function showSplash(parentWin) {
-  const [cx, cy] = parentWin.getContentBounds
-    ? (() => { const b = parentWin.getBounds(); return [b.x + b.width / 2, b.y + b.height / 2]; })()
-    : [960, 540];
+  // Center on the primary display's work area, NOT on parentWin.getBounds().
+  // On Linux/X11+Wayland, maximize() is async — parent bounds reflect the
+  // pre-maximize size when showSplash runs immediately after maximize, which
+  // (combined with the `height: 1` constructor trick anchoring the window mid-
+  // screen) pushes the splash off the bottom edge of the display.
+  const { screen } = require('electron');
+  const display = screen.getPrimaryDisplay();
+  const cx = display.workArea.x + display.workArea.width  / 2;
+  const cy = display.workArea.y + display.workArea.height / 2;
 
   const splash = new BrowserWindow({
     width: 400,
