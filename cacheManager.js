@@ -42,6 +42,34 @@ function getBuildOutputPath() {
   return path.join(app.getPath('userData'), 'build-output');
 }
 
+// Provenance sidecar — records which proffieOS source hash produced the binary
+// currently sitting in build-output. Written on cache save AND cache restore so it
+// reflects the build the user is about to flash. Read at flash time to verify the
+// source hasn't changed externally since this build was made.
+//
+// Separate file (not metadata.json) so the cache stays the authoritative cache
+// store and this file stays a small, single-purpose flash safety net.
+const BUILD_PROVENANCE_FILE = '_jmt_build_meta.json';
+
+function writeBuildProvenance(buildOutputPath, proffieOSHash) {
+  try {
+    fs.mkdirSync(buildOutputPath, { recursive: true });
+    fs.writeFileSync(
+      path.join(buildOutputPath, BUILD_PROVENANCE_FILE),
+      JSON.stringify({ proffieOSHash, writtenAt: new Date().toISOString() }, null, 2),
+      'utf8'
+    );
+  } catch { /* sidecar is advisory — failure shouldn't abort a successful compile */ }
+}
+
+function readBuildProvenance(buildOutputPath) {
+  try {
+    const p = path.join(buildOutputPath, BUILD_PROVENANCE_FILE);
+    if (!fs.existsSync(p)) return null;
+    return JSON.parse(fs.readFileSync(p, 'utf8'));
+  } catch { return null; }
+}
+
 // ── Hashing ────────────────────────────────────────────
 
 /**
@@ -244,6 +272,10 @@ function saveToCache(buildOutputPath, configHash, buildPkgHash, meta) {
   };
   fs.writeFileSync(path.join(cacheDir, 'metadata.json'), JSON.stringify(metadata, null, 2), 'utf8');
 
+  // Mirror the source hash into build-output so flash can verify what's about
+  // to be sent matches the current OS source state.
+  writeBuildProvenance(buildOutputPath, meta.proffieOSHash);
+
   // Evict oldest entries beyond MAX_ENTRIES_PER_LINEAGE for this configId
   evictOldEntries(buildPkgHash);
 
@@ -290,6 +322,9 @@ function restoreToOutput(configHash, buildPkgHash) {
     }
   }
 
+  // Restored build's provenance comes from the cache entry's metadata.
+  writeBuildProvenance(buildOutputPath, entry.metadata.proffieOSHash);
+
   return { ok: true, buildPath: buildOutputPath, metadata: entry.metadata };
 }
 
@@ -326,5 +361,6 @@ module.exports = {
   computeBuildPackageHash,
   checkAndRestore,
   cacheCompileResult,
+  readBuildProvenance,
   startupEviction,
 };

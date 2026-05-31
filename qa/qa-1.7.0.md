@@ -42,6 +42,7 @@ Log failures in the **Bug Log** at the bottom with TC reference.
 - **Touch reset error path — retriable with hedged hint** — `touchReset` in `toolchain.js` now tags failures with a `cause` (`'port-locked'` vs `'driver'`). Driver-layer failures (e.g. Windows `SetCommState` error 121, often a flaky USB cable, marginal USB port, or wedged COM driver) are now retriable and emit a softly-worded suggestion in the build log; the modal subtitle hints at trying a different cable/port before pressing the reset button. Existing port-locked path (Arduino IDE detection) is unchanged.
 - **DFU auto-recovery after touch reset** — when touch reset succeeds (board enters DFU) but `waitForDfu` can't reach the device, `flash` in `toolchain.js` now calls `detectDFU` and: if accessible (late race) → proceeds to flash; otherwise returns `needsDfuDriver: true`. The renderer detects the flag in `onBuildDone`, switches to DFU mode UI, and opens the bootloader-wait modal in `isRetry=true, autoFlash=true` mode — driver install flow with no boot instructions (board's already in DFU), and the flash continues automatically once the driver binds. Recovers the common "WinUSB not bound on this USB port" case without dead-ending the user.
 - **Style Library — Charging Styles section** — third file section alongside Helper functions and Using styles. Entries whose using-code references any JMT-dependent symbol (currently `ChargeFullPropF`, single source of truth at `_SL_JMT_DEPENDENT_SYMBOLS`) are auto-classified as `isCharging` and emitted inside the section, which is wrapped in `#ifdef FUNCTIONS_CHARGE_FULL_PROP_H` / `#endif`. Configs without the JMT functions include compile cleanly (preprocessor skips the block); configs with it pick up the styles. Existing libraries migrate automatically on next save or load via the same machinery that organizes helpers today.
+- **Serial Monitor — smart auto-scroll, jump-pill, focus restore** — log tail-follows the latest line by default, but pauses snap-to-bottom while the user is scrolled up reading history (Discord/Slack pattern, fixes the Arduino IDE pet peeve). A `↓ N new` pill overlays the bottom-right of the log when scrolled up with new lines arriving; click to jump back to the tail. Manual scroll back to within ~20px of the bottom re-engages auto-scroll. Sending a command, clearing the log, or pressing End (when serial tab active and no input is focused) all snap to bottom and re-engage. Window-focus listener restores `bp-serial-input` focus on alt-tab return so the user can keep typing without clicking. Pill count caps at `99+`. Behavior preserved across pause/resume, tab switching, board reconnect after flash.
 
 ---
 
@@ -91,7 +92,7 @@ Log failures in the **Bug Log** at the bottom with TC reference.
 - [x] TC-488: New config state → editing the editor marks file as dirty (● in title bar) ✅
 - [x] TC-489: New config state → close (X) → unsaved guard fires if any content was added ✅
 - [x] TC-490: New config state → close (X) with no edits made → closes cleanly without guard ✅
-- [ ] TC-490a: After a successful compile of file A, click `+ New` → re-select the board → pick an OS version → type content → Compile button becomes enabled (status shows "Not compiled" or "Config changed — recompile needed", NOT stuck "Board changed — recompile needed" with disabled button) — regression for BUG-005
+- [x] TC-490a: After a successful compile of file A, click `+ New` → re-select the board → pick an OS version → type content → Compile button becomes enabled (status shows "Not compiled" or "Config changed — recompile needed", NOT stuck "Board changed — recompile needed" with disabled button) — regression for BUG-005. Two related bugs surfaced and fixed during retest: (1) the prior file's flash status ("Flash successful") carried into the new file because `loadContent` didn't scrub it — added `window.resetBuildStatusForFileLoad` and called it from `loadContent`. (2) After `+ New` → Save with no manual typing, the new file path was set via `setFilePath` but `updateCompileButton` wasn't re-evaluated, so the button stayed disabled by its `!window._currentFilePath` gate — added a `window.updateCompileButton?.()` call inside `setFilePath` so any path mutation re-evaluates. ✅
 
 ---
 
@@ -173,7 +174,7 @@ Log failures in the **Bug Log** at the bottom with TC reference.
 - [x] TC-523: Compile successfully, disconnect board mid-wait (board was there, went away) → watcher continues waiting; reconnect → flash proceeds ✅
 - [x] TC-524: Abort post-compile wait (close modal or cancel) → wait-flash watcher stops cleanly; reopening compile flow starts a fresh watcher only when the no-board branch is hit again ✅
 - [x] TC-525: After flash completes, no residual port-watcher activity (plug/unplug after flash does not trigger a phantom flash retry) ✅
-- [ ] TC-525a: Trigger a flash failure that causes the wait-flash watcher to auto-retry (e.g. flaky touch reset, board disconnect during flash) → on each retry attempt the build modal log clears to show only the CURRENT attempt's output (no piled-up prior-attempt errors above the new "--- Flash started ---"); persistent build-output panel below the editor still preserves the full history — regression for BUG-006
+- [x] TC-525a: Trigger a flash failure that causes the wait-flash watcher to auto-retry (e.g. flaky touch reset, board disconnect during flash) → on each retry attempt the build modal log clears to show only the CURRENT attempt's output (no piled-up prior-attempt errors above the new "--- Flash started ---"); persistent build-output panel below the editor still preserves the full history — regression for BUG-006 ✅
 
 ---
 
@@ -233,6 +234,9 @@ Log failures in the **Bug Log** at the bottom with TC reference.
 
 - [x] TC-552: Compile a valid config → builds successfully ✅
 - [x] TC-553: Compile fails → error shown in build log; retry or fix-and-recompile works ✅
+- [x] TC-553a: Compile fails on a C++ template error (e.g. `StylePtr<SomeWrapperAlias>(...)` where the wrapper is a `template using` not a class) → modal "✗ Compile Failed" status box shows at most 3 short error lines in `basename:line — message` format (no absolute paths, no thousand-character template expansions). If more than 3 errors exist, a `…and N more (full output in Build Output panel)` footer appears. Full verbose output remains visible in the persistent Build Output panel below the editor. ✅
+- [x] TC-553b: Same scenario — Close button MUST remain visible and clickable on the right side of the modal regardless of how long any individual error line is. If the summary still exceeds the status box (very long single message even after truncation), the status area scrolls internally — buttons never pushed off-screen. ✅
+- [x] TC-553c: While a compile is running (bm-status empty), the bm-hint text ("Last compiled version of this config took about Xs.") MUST be left-aligned in the row below the build log — NOT shoved to the right under the Abort button. Regression check on the `#bm-status` flex sizing: with `flex-grow: 0`, the empty status doesn't compete with bm-hint for free space. ✅
 
 ### Flash — serial
 
@@ -967,27 +971,27 @@ Log failures in the **Bug Log** at the bottom with TC reference.
 
 ### 55.1 First launch behavior
 
-- [ ] TC-808: Fresh install (no `.core-installed` sentinel, or sentinel doesn't match current `CORE_VERSION`) → on app launch, toolchain status shows "Setting up build tools..." with pending (yellow/dim) indicator
-- [ ] TC-809: First launch → Build Output panel auto-opens (does NOT stay collapsed) so the user sees install progress
-- [ ] TC-810: First launch → blue notice `#bp-setup-notice` is visible inside Build Output: "First-time setup: downloading and installing required build tools. This only happens once and may take several minutes on slower connections. Compile and flash will be available when setup is complete."
-- [ ] TC-811: While toolchain-setup status is pending, port/compile/flash status indicators are hidden (no broken Compile button visible)
+- [x] TC-808: Fresh install (no `.core-installed` sentinel, or sentinel doesn't match current `CORE_VERSION`) → on app launch, toolchain status shows "Setting up build tools..." with pending (yellow/dim) indicator. **Caveat observed during QA**: on a truly fresh install with NO ProffieOS version available, `toolchain.initialize()` bails at `validateProffieOSSource()` BEFORE the setup banner gets to render. The user first sees a red "No ProffieOS versions found" error; only after installing/downloading a ProffieOS version does the setup banner appear. Logged to backlog as a first-run UX gap (banner should appear from the moment the app launches, regardless of whether a ProffieOS version is present). ✅
+- [x] TC-809: First launch → Build Output panel auto-opens (does NOT stay collapsed) so the user sees install progress ✅
+- [x] TC-810: First launch → blue notice `#bp-setup-notice` is visible inside Build Output: "First-time setup: downloading and installing required build tools. This only happens once and may take several minutes on slower connections. Compile and flash will be available when setup is complete." (Same caveat as TC-808 — appears once core install actually begins.) ✅
+- [x] TC-811: While toolchain-setup status is pending, port/compile/flash status indicators are hidden (no broken Compile button visible) ✅
 
 ### 55.2 Completion behavior
 
-- [ ] TC-812: After core install completes, toolchain status flips to "Toolchain ready" (green/ok); `bp-setup-notice` hides automatically
-- [ ] TC-813: After completion, port/compile/flash indicators reappear and behave normally
-- [ ] TC-814: Sentinel `.core-installed` is now written to disk with the current `CORE_VERSION` string
+- [x] TC-812: After core install completes, toolchain status flips to "Toolchain ready" (green/ok); `bp-setup-notice` hides automatically ✅
+- [x] TC-813: After completion, port/compile/flash indicators reappear and behave normally ✅
+- [x] TC-814: Sentinel `.core-installed` is now written to disk with the current `CORE_VERSION` string. Verified at `C:\Users\<user>\AppData\Roaming\jmt-studio\arduino-data\.core-installed`. ✅
 
 ### 55.3 Subsequent launches
 
-- [ ] TC-815: Relaunch app after successful first-run → `needsCoreInstall()` returns false (sentinel matches version) → no toolchain-setup banner, Build Output stays collapsed, toolchain ready immediately
-- [ ] TC-816: Manually delete the `.core-installed` sentinel → relaunch → first-run flow fires again (banner shown, Build Output opens)
+- [x] TC-815: Relaunch app after successful first-run → `needsCoreInstall()` returns false (sentinel matches version) → no toolchain-setup banner, Build Output stays collapsed, toolchain ready immediately. Confirmed in VM: log on expand shows "Core proffieboard:stm32l4@4.6.0 already installed." → "Toolchain ready." ✅
+- [x] TC-816: Manually delete the `.core-installed` sentinel → relaunch → first-run flow fires again (banner shown, Build Output opens). Verified on Win VM. ✅
 - [ ] TC-817: Bump `CORE_VERSION` constant (simulated via dev build) → relaunch → first-run flow fires again (version mismatch detected)
 
 ### 55.4 Error handling
 
-- [ ] TC-818: First launch with no internet → toolchain install fails → status flips to error with a meaningful message; `bp-setup-notice` hides; Build Output stays open so user can see the error log
-- [ ] TC-819: First launch is interrupted (user closes app mid-install) → on next launch, `needsCoreInstall()` correctly detects the install is incomplete (sentinel never written) → first-run flow re-fires
+- [x] TC-818: First launch with no internet → toolchain install fails → status flips to error with a meaningful message; `bp-setup-notice` hides; Build Output stays open so user can see the error log. Verified on Win VM with network disconnected: status reads "Failed to update board index" (red), Build Output stays open showing DNS lookup failures ("no such host") for downloads.arduino.cc and profezzorn.github.io. App did not crash. ✅
+- [x] TC-819: First launch is interrupted (user closes app mid-install) → on next launch, `needsCoreInstall()` correctly detects the install is incomplete (sentinel never written) → first-run flow re-fires. Verified on Win VM. ✅
 
 ---
 
@@ -997,29 +1001,42 @@ Log failures in the **Bug Log** at the bottom with TC reference.
 
 ### 56.1 Style Library — Remove Style Library button
 
-- [ ] TC-820: Style Library tab → click "Delete" (toolbar) → in-app modal opens with title "Remove Style Library" and body "Remove Style Library from JMT Studio? Any changes made since importing will be lost." Confirm button labeled "Remove" with destructive (red) styling
-- [ ] TC-821: Cancel → modal closes, library untouched, all tabs/state preserved
-- [ ] TC-822: Confirm → library is deleted; Style Library tab hides; tab focus falls back to Config Manager
-- [ ] TC-823: Modal renders correctly in both light and dark mode
+- [x] TC-820: Style Library tab → click "Delete" (toolbar) → in-app modal opens with title "Remove Style Library" and body "Remove Style Library from JMT Studio? Any changes made since importing will be lost." Confirm button labeled "Remove" with destructive (red) styling ✅
+- [x] TC-821: Cancel → modal closes, library untouched, all tabs/state preserved ✅
+- [x] TC-822: Confirm → library is deleted; Style Library tab hides; tab focus falls back to Config Manager ✅
+- [x] TC-823: Modal renders correctly in both light and dark mode ✅
 
 ### 56.2 Style Library — Delete Style (visual view, card delete)
 
-- [ ] TC-824: Click × on a style card → in-app modal opens with title "Delete Style" and body `Delete style "NAME"? This will remove it from your style library.` Confirm button labeled "Delete" (red)
-- [ ] TC-825: Cancel → card remains, library state unchanged
-- [ ] TC-826: Confirm → style removed from library, card disappears from grid, library marked dirty
-- [ ] TC-827: Style name is quoted exactly as it appears in source (no escaping/transformation)
+- [x] TC-824: Click × on a style card → in-app modal opens with title "Delete Style" and body `Delete style "NAME"? This will remove it from your style library.` Confirm button labeled "Delete" (red) ✅
+- [x] TC-825: Cancel → card remains, library state unchanged ✅
+- [x] TC-826: Confirm → style removed from library, card disappears from grid, library marked dirty ✅
+- [x] TC-827: Style name is quoted exactly as it appears in source (no escaping/transformation) ✅
+- [x] TC-827a: After confirming a delete, press Ctrl+Z (while still on the Style Library tab in visual view). The deleted card MUST reappear in its original position. Ctrl+Y after that restores the deletion. Mirrors the existing drag-reorder undo/redo behavior. (Regression: previously the visual-view undo stack only captured drag-reorders; deletes bypassed it and Ctrl+Z did nothing.) ✅
 
 ### 56.3 Style Library — Delete Helper (helpers panel)
 
-- [ ] TC-828: Delete a helper that has NO dependents → in-app modal opens with title "Delete Helper" and body `Delete helper "NAME"? It has no known dependents in this file.`
-- [ ] TC-829: Delete a helper that HAS dependents → modal body lists every affected style (`• Style1\n• Style2\n...`); Confirm marks those dependents as broken (red) in the visual view
-- [ ] TC-830: Confirm message text formats line breaks correctly (each dependent on its own line)
-- [ ] TC-831: Cancel → helper and dependents all preserved
+- [x] TC-828: Delete a helper that has NO dependents → in-app modal opens with title "Delete Helper" and body `Delete helper "NAME"? It has no known dependents in this file.` ✅
+- [x] TC-829: Delete a helper that HAS dependents → modal body lists every affected style (`• Style1\n• Style2\n...`); Confirm marks those dependents as broken (red) in the visual view ✅
+- [x] TC-830: Confirm message text formats line breaks correctly (each dependent on its own line) ✅
+- [x] TC-831: Cancel → helper and dependents all preserved ✅
+> Error feedback shape: red border on the offending field (name input or Monaco body container) shows WHERE the problem is; **hovering the disabled Save button reveals the tooltip explaining WHY** it's disabled. There's no inline error text — the Save button stays disabled while any error holds, so a tooltip is the only surface the user can reach.
+
+- [x] TC-831a: Raw-body auto-wrap via live sync — open Add Helper. **Tab into the body editor first** (skip the name field), type `Red`. Then click back into the name field and type "MyHelper". The body live-syncs to `using MyHelper = Red;` (Case 3 raw-expression wrap). Save commits and the helper appears in the list. Without the wrap, the parser's `using NAME =` regex couldn't find it and the helper would "disappear." ✅
+- [x] TC-831b: Name/body live re-sync (was: mismatch error). Mismatch is now structurally impossible because both fields sync in real time. Test the sync: in add mode with name "MyHelper" already typed (body shows `using MyHelper = ;`), edit the body's `using` line to `using SomeOtherName = ;` → the name field updates to "SomeOtherName" automatically. Reverse: change the name field back to "MyHelper" → body's `using …` updates to match. ✅
+- [x] TC-831c: Live name validation — start typing in the name field. The instant you type an invalid identifier (e.g. starts with a digit), red border appears on the name input and Save is disabled. Hover Save → tooltip explains the identifier rules. Fix the name → red + tooltip clear on next keystroke. ✅
+- [x] TC-831d: Empty body after a valid name — type "MyHelper" (body prefills `using MyHelper = ;`). Now select-all in the body editor and delete → body is truly empty. **Body editor red border**, Save disabled. Hover Save → tooltip: "Helper body is empty — paste a style expression or type one between `=` and `;`." Type or paste anything → red border updates per the new state (skeleton-only triggers TC-831g, real expression clears). ✅
+- [x] TC-831e: Live duplicate check — start typing a name that already exists. The instant the existing name is fully typed: red border on name input, Save disabled, hover-tooltip: `"<name>" already exists — choose a different name.` ✅
+- [x] TC-831f: Name → body live sync — open Add Helper with empty body. Type a name; body prefills with `using NewName = ;` and the caret lands between `=` and `;`. Edit name → body's `using <name> = ;` updates to match. Type an expression between `=` and `;` (e.g. `Red`) → body becomes `using NewName = Red;`. Save works. Mirrors Add Style's name↔body sync. ✅
+- [x] TC-831g: Empty-expression guard — type a name (body prefills `using NAME = ;`). Save is **disabled** immediately (no body expression yet). Hover Save → tooltip: `"Helper expression is empty — fill in something between '=' and ';'."` Body editor shows red border. Type an expression between `=` and `;` → red clears, tooltip clears, Save enables. Erase the expression again → state restores live. ✅
+- [x] TC-831h: Tab/Enter order on Add Helper — click `+` to open Add Helper. **Initial focus is the name (title) field.** Type a name (body prefills `using NAME = ;`). Press **Enter** → focus moves into the body editor and the caret lands just after `= ` (right before the `;`). Type an expression, press **Tab** → focus follows the normal page order (does NOT jump back to the name field), Save commits when valid. ✅
+- [x] TC-831i: Bracket / `<>` live check — same as Add Style. With a valid name, type `Red<` in the body → red squiggle marker under the `<`, body editor gets a red border, Save is disabled, hover Save → tooltip mentions "Unmatched <". Close the bracket → marker + border + tooltip clear, Save enables. Mirrors Add Style's `_findBracketError` behavior so the helper Monaco isn't a special case. ✅
+- [x] TC-831j: Save-button tooltip actually shows when disabled — Chromium's default kills hover events on `:disabled` buttons. Confirm the tooltip is visible by hovering the disabled Save button in any of TC-831c / TC-831e / TC-831g / TC-831i. If the tooltip doesn't appear, the `pointer-events: auto` rule on `#btn-helper-save:disabled` regressed. ✅
 
 ### 56.4 Regression — no native `window.confirm` calls remain
 
-- [ ] TC-832: Grep the renderer for `window.confirm(` or bare `confirm(` → no callsites should remain except inside the `_wireStyleNameSanitize` history comment
-- [ ] TC-833: All four sites (bank delete, remove library, delete style, delete helper) use the same modal element (`#modal-confirm`) — never two modals open at the same time
+- [x] TC-832: Grep the renderer for `window.confirm(` or bare `confirm(` → no callsites remain. All call paths funnel through `promptConfirm()` (renderer/index.html:3260). ✅
+- [x] TC-833: All four sites use `#modal-confirm` via `promptConfirm`: Remove Library (5443), Delete Helper (6647), Delete Style (6654), Bank delete (14857). Each await blocks until the modal resolves, so two can't open concurrently. ✅
 
 ---
 
@@ -1029,26 +1046,27 @@ Log failures in the **Bug Log** at the bottom with TC reference.
 
 ### 57.1 Detection still works on all platforms
 
-- [ ] TC-834: *(Windows)* Connect Proffieboard V3 → detected; port path (`COM3` etc.) shown in port dropdown
+- [x] TC-834: *(Windows)* Connect Proffieboard V3 → detected; port path (`COM3` etc.) shown in port dropdown ✅
 - [ ] TC-835: *(Mac)* Connect Proffieboard → detected; `/dev/cu.*` path shown (not `/dev/tty.*` — tty→cu normalization preserved)
 - [ ] TC-836: *(Linux)* Connect Proffieboard → detected; `/dev/ttyACM*` path shown
-- [ ] TC-837: Detected board name and SN displayed correctly (no garbled characters from JSON parsing)
+- [x] TC-837: Detected board name and SN displayed correctly (no garbled characters from JSON parsing) ✅
 
 ### 57.2 Multi-board scenarios
 
-- [ ] TC-838: Two Proffieboards plugged in simultaneously → both appear in port dropdown with their SNs
-- [ ] TC-839: Mix of Proffieboard + other USB serial devices (e.g. an Arduino Uno) → only the Proffieboard(s) are tagged as recommended; other devices appear but are not selected by default
+- [x] TC-838: Two Proffieboards plugged in simultaneously → both appear in port dropdown with their SNs ✅
+- [x] TC-839: Mix of Proffieboard + other USB serial devices (e.g. an Arduino Uno) → only the Proffieboard(s) are tagged as recommended; other devices appear but are not selected by default ✅
 
 ### 57.3 No board / edge cases
 
-- [ ] TC-840: No board connected → JSON output is empty array `[]`; port dropdown shows "—", no parse errors logged
-- [ ] TC-841: arduino-cli returns malformed JSON (simulated corruption) → graceful failure, no crash; "—" shown
-- [ ] TC-842: arduino-cli not installed yet (mid-toolchain-install) → falls through without crashing; refresh after install succeeds populates correctly
+- [x] TC-840: No board connected → JSON output is empty array `[]`; port dropdown shows "—", no parse errors logged ✅
+- [x] TC-841: arduino-cli returns malformed JSON (simulated corruption) → graceful failure, no crash; "—" shown ✅
+- [x] TC-842: arduino-cli not installed yet (mid-toolchain-install) → falls through without crashing; refresh after install succeeds populates correctly ✅
 
 ### 57.4 Behavioral parity with the old regex parser
 
-- [ ] TC-843: Detected field shows the same information format as 1.6.5 (SN displayed, no V2/V3 inference since that's not derivable from USB data — see qa-1.6.3 BUG-035)
-- [ ] TC-844: Recommended port auto-selection preserved (single Proffieboard auto-selects; multi-board cases require user choice)
+- [x] TC-843: Detected field shows the same information format as 1.6.5 (SN displayed, no V2/V3 inference since that's not derivable from USB data — see qa-1.6.3 BUG-035) ✅
+- [x] TC-844: Recommended port auto-selection preserved (single Proffieboard auto-selects; multi-board cases require user choice) ✅
+- [x] TC-844a: Polling survives a blur→focus cycle. With a Proffieboard plugged in on the Config tab, click into another app so JMT Studio loses focus. Unplug the board while JMT Studio is unfocused. Click back to JMT Studio. After up to one polling tick (≤5s), the port dropdown clears to "—" without needing a manual refresh. Plug the board back in → dropdown re-detects it automatically. Regression guard: `_portPollingWanted` defaulted to false, so the focus handler's `if (_portPollingWanted)` gate left polling dead after the first blur/focus. ✅
 
 ---
 
@@ -1061,6 +1079,7 @@ Log failures in the **Bug Log** at the bottom with TC reference.
 - [x] TC-845: Add to Library on a style that contains `ChargeFullPropF` anywhere in its expression → on next save the entry lands inside the Charging Styles section, between Helper functions and Using styles ✅
 - [x] TC-846: Add to Library on a style that does NOT contain any JMT-dependent symbol → entry lands in Using styles section as before, no Charging Styles section emitted unless other charging entries exist ✅
 - [x] TC-847: Detection is word-boundary based — a comment or string literal containing the word `ChargeFullPropF` would trigger classification (acceptable: user could comment-disable a charging entry and it'd still be guarded; doesn't break anything) ✅
+- [x] TC-847a: Add a new style via "Add to Library" with the library scrolled to the top (lots of existing entries below). On confirm, the modal closes and the **visual list scrolls so the new card is visible** (centered in viewport) with the orange highlight pulse — same animation used for "jump to card" navigation. Without the scroll, the new card lands at the bottom of a long list and the user can't tell the add succeeded. ✅
 
 ### 58.2 Section banner and ifdef wrap
 
@@ -1165,7 +1184,7 @@ Log failures in the **Bug Log** at the bottom with TC reference.
 ### 59.9 Dev / prod path separation
 
 - [x] TC-893: In dev mode (`npm start`), template file lives at `%APPDATA%/jmt-studio-dev/templates/default.h` ✅
-- [ ] TC-894: In a packaged production build, template file lives at `%APPDATA%/jmt-studio/templates/default.h` (separate from dev — they don't share state)
+- [x] TC-894: In a packaged production build, template file lives at `%APPDATA%/jmt-studio/templates/default.h` (separate from dev — they don't share state). Verified on VM: lazy-created on first "+ New → Use Template" click. ✅
 - [ ] TC-895: *(Mac)* Template path is `~/Library/Application Support/jmt-studio/templates/default.h` (or `jmt-studio-dev/...` in dev)
 - [ ] TC-896: *(Linux)* Template path is `~/.config/jmt-studio/templates/default.h`
 
@@ -1263,6 +1282,7 @@ Log failures in the **Bug Log** at the bottom with TC reference.
 - [x] TC-940: Edit a preset's display name, commit → same atomic-undo behavior ✅
 - [x] TC-941: Open the slot editor on a style tile, change a template parameter, save → Ctrl+Z reverts the whole slot save in one step ✅
 - [x] TC-942: Slot editor — replace an entire slot expression (library style ↔ custom expression) → Ctrl+Z reverts in one step ✅
+- [x] TC-942a: Click the X on a collapsed slot tile (reset to default StylePtr<Black>() OR excess-slot delete). Without moving the mouse or clicking anywhere else, press Ctrl+Z. The slot reverts in one step. (Regression: previously a sync `editor.focus()` inside the click handler was reasserted back onto the X button when the click event completed, so Ctrl+Z went to the button and did nothing until the user manually clicked into the Monaco editor.) ✅
 
 ### 61.4 Preset list operations
 
@@ -1290,7 +1310,8 @@ Log failures in the **Bug Log** at the bottom with TC reference.
 
 - [x] TC-955: Existing `#include "proffieboard_v3_config.h"` + click dropdown V2 → include rewrites to V2 → Ctrl+Z reverts to V3 in one step (the rewrite is a single Monaco edit by design — TC-910 covered the basic case; this verifies undo isolation from other edits) ✅
 - [x] TC-956: No include + click dropdown V3 + confirm Insert → new `#ifdef CONFIG_TOP` block with include inserted → Ctrl+Z removes the entire scaffolded block in one step ✅
-- [ ] TC-957: Existing CONFIG_TOP + no board include + click dropdown V3 + confirm Insert → include inserted into existing CONFIG_TOP → Ctrl+Z removes just that line, CONFIG_TOP's other content intact
+- [x] TC-957: Existing CONFIG_TOP + no board include + click dropdown V3 + confirm Insert → include inserted into existing CONFIG_TOP → Ctrl+Z removes just that line, CONFIG_TOP's other content intact ✅
+- [x] TC-957a: Live re-sync when include is removed — open a config with `#include "proffieboard_v3_config.h"` (dropdown shows Proffieboard V3). Manually delete the include line in the editor. After the 250ms debounce, the **board dropdown resets to "Select a board"** (blank). Re-paste the include → dropdown re-syncs to V3. Compile-time would catch a missing include anyway, but the dropdown shouldn't lie about the current config state. ✅
 
 ### 61.8 Coalescing-prevention edge cases
 
@@ -1304,7 +1325,7 @@ Log failures in the **Bug Log** at the bottom with TC reference.
 > Any change to executeEdits wrapping has a non-zero risk of breaking the underlying behavior. Spot-check each operation type still produces correct source.
 
 - [x] TC-962: Each operation in §61.2-§61.7 still produces the same source output as before the atomic-undo refactor (no shifted insertion points, no malformed output, no off-by-one line numbers) ✅
-- [ ] TC-963: Operations that fire multiple internal `executeEdits` in a single user action (e.g. Link Style Library with conflict → 2 edits: comment-out + insert) still work correctly. Either both edits land OR neither does. Ctrl+Z reverts both as one user-perceived step.
+- [x] TC-963: Operations that fire multiple internal `executeEdits` in a single user action (e.g. Link Style Library with conflict → 2 edits: comment-out + insert) still work correctly. Either both edits land OR neither does. Ctrl+Z reverts both as one user-perceived step. ✅
 
 ### 61.10 Attached-comment preservation (scaffolder)
 
@@ -1373,6 +1394,241 @@ Log failures in the **Bug Log** at the bottom with TC reference.
 
 ---
 
+## 63. SLOT EDITOR — MATCH B1 COLOR + SIDECAR SELF-HEAL
+
+> Refinement (2026-05-16): tedium-buster for multi-blade configs — slots B2+ get a "Match B1" link next to the BASE_COLOR_ARG (and other RgbArg) swatches that pulls B1's effective base color in one click. Plus a defensive rebuild guard that self-heals when `_editingField` / `_keyboardNavInProgress` flags get stuck (caused stale list/detail until sidecar reopen).
+
+### 63.1 Match B1 button — visibility
+
+- [x] TC-1035: Slot tile B1 (index 0) opened in expanded editor → no Match button shown on any RgbArg row (you can't match yourself). ✅
+- [x] TC-1036: Slot tile B2 (or later) opened → for each RgbArg row, a small blue "Match B1" link appears between the arg label and the reset (×) button. ✅
+- [x] TC-1037: Button hidden when the current effective color already equals B1's effective color (whether the match comes from the default value or an explicit override). ✅
+- [x] TC-1038: B1 has no resolvable color (no explicit colorArg, no registry default, no hardcoded literal in expression, no library hardcoded color) → button is not rendered. ✅
+
+### 63.2 Match B1 button — dynamic label
+
+- [x] TC-1039: B1 has no custom blade label → button reads **"Match B1"** (matches the default badge text). ✅
+- [x] TC-1040: B1 renamed via the blade-label pencil (e.g. label "Main") → button reads **"Match MA"** — same abbreviation the slot-tile badge shows, so the affordance stays in sync. ✅
+- [x] TC-1041: Hover tooltip on the button shows the full label (e.g. "Set this color to match Main (DeepSkyBlue)") — abbreviation in the button, full name + resolved color name in the tooltip. ✅
+
+### 63.3 Match B1 button — apply behavior
+
+- [x] TC-1042: Click Match B1 → the current arg's color is set to B1's effective base color in one atomic Monaco edit (single Ctrl+Z reverts). The slot tile swatch + the in-row swatch both reflect the new color immediately. ✅
+- [x] TC-1043: After clicking Match B1, the button hides (current color now matches). Changing the color via the color picker brings the button back. ✅
+- [x] TC-1044: B1 color resolved through the full fallback chain — explicit colorArg → registry default → library hardcoded → inline RgbArg default → hardcoded literal — same logic as the slot tile swatch (extracted into a shared `_resolveSlotColor()` helper so both views agree). ✅
+
+### 63.4 Sidecar rebuild self-heal (stuck-flag defense)
+
+- [x] TC-1045: Edit Monaco source to delete a preset entry → sidecar list updates within ~50ms without needing to close + reopen the sidecar. Previously the `_editingField` / `_keyboardNavInProgress` guards could leave the list rendering pre-edit data if one of those flags got stuck. ✅
+- [x] TC-1046: Defensive self-heal: if either flag is true at rebuild time but no `.preset-edit-input` is in the DOM AND no Common checkbox currently has focus, the flags are reset and the render proceeds. Genuinely-open inputs still get the original skip behavior — no destructive re-render mid-typing. ✅
+
+---
+
+## §64 — Serial Monitor (BUG-015)
+
+Build-output panel is now a tabbed container with two panes: **Build Output** (existing) and **Serial Monitor** (new). Serial Monitor connects to the selected COM port at 115200 8N1 and provides send / pause / clear, releasing the port automatically during flash.
+
+### 64.1 Tab visibility & switching
+
+- [x] TC-1050: Build-output panel header shows two tabs: "Build Output" (active by default) and "Serial Monitor". Chevron toggle button on the far left still expands/collapses the body. ✅
+- [x] TC-1051: Clicking "Serial Monitor" tab switches to the serial pane: build content hidden, serial log + input row visible, action area changes from `✕ clear` to `<status> ⏸ pause ✕ clear`. ✅
+- [x] TC-1052: Clicking "Build Output" tab returns to the build pane: serial log hidden, build content visible, action area shows only `✕ clear`. ✅
+- [x] TC-1053: Switching to the Serial Monitor tab auto-opens the panel body (no need to click chevron first). ✅
+- [x] TC-1054: Chevron click still collapses/expands the body regardless of which tab is active. ✅
+
+### 64.2 Auto-connect lifecycle
+
+- [x] TC-1055: With a Proffieboard selected in the port dropdown, click Serial Monitor tab → status changes to `connecting <port>...` then `<port> @ 115200` (green). Input + Send become enabled. ✅
+- [x] TC-1056: With no port selected, click Serial Monitor tab → status reads `no port selected` (gray italic). Send and input remain disabled. ✅
+- [x] TC-1057: With a Proffieboard powered on and idle, opening the monitor produces no spurious data (or only the board's startup banner if it just booted). ✅
+- [x] TC-1058: Port handle is released when leaving the Serial Monitor pane. Two ways to verify:
+    1. **In-app round-trip:** With the monitor connected, switch to Build Output, then back to Serial Monitor. The status briefly shows `disconnected` then re-connects cleanly with `<port> @ 115200`. A clean re-open proves the handle was released — if it were still held, the re-open would fail with "Access denied" / EBUSY.
+    2. **External tool (optional):** While on Build Output, open the same COM port in Arduino IDE Serial Monitor or PuTTY. It opens cleanly. Switch JMT back to Serial Monitor → JMT re-acquires the port (Arduino/PuTTY will then fail to read until you close them). ✅
+- [x] TC-1059: Switch ports in the port dropdown while Serial Monitor tab is active → old connection closes and new port auto-connects (status reflects new path). ✅
+- [x] TC-1060: Pull USB cable while connected → status updates to `disconnected: <reason>` within ~1s, Send button disables, input disables. ✅
+- [x] TC-1061: Replug board, re-select port → reopening Serial Monitor tab reconnects without app restart. ✅
+- [x] TC-1061a: Pause-button repurposes as retry when disconnected. When the monitor is connected the button reads `⏸ pause`. Trigger any disconnect (unplug cable, PuTTY-style port contention causing "Access denied", or just `closeSerialMonitor` via tab-switch). The button label changes to `↺ retry` and its tooltip becomes "Try to connect to the selected port again." Click it → `connecting <port>...` then either `<port> @ 115200` on success or `error: ...` on failure (label stays `↺ retry` until a successful open). Gives users an explicit recovery path without having to leave the tab or restart the app. ✅
+- [x] TC-1061b: Explicit `⏏ close` button. While connected, a `⏏ close` button appears in the serial actions row between `pause` and `clear`. Click it → tab switches to Build Output (releasing the port via existing `closeSerialMonitor` path), then the log body collapses. Button hides when disconnected (nothing to close). Surfaces the "I'm done with serial" intent that was previously hidden behind the tab switch, without adding a separate close-port IPC path. ✅
+- [x] TC-1061c: Pause-button icon renders in the same monochrome weight as the other action symbols (`⏏ close`, `✕ clear`, `↺ retry`, `▶ resume`). The original `⏸` triggered Windows' colored emoji glyph and looked foreign in the row; swapped to `❚❚` (two HEAVY VERTICAL BAR from Dingbats) which renders mono by default. Verify by opening Serial Monitor: the pause bars should be the same color as the surrounding icons, no blue tint. ✅
+
+### 64.3 Incoming data display
+
+- [x] TC-1062: Type `version` in the input field (or use TC-1065 send) → multi-line response (firmware version, config name, prop type, install time) renders with newlines preserved, no extra blank lines (CRLF → LF normalization). (Note: ProffieOS has no `help` command — it replies `whut help` for unknown commands. `version` is the canonical short multi-line test; `list_presets` works as a longer alternative. `effects` was not recognized on the tested OS 8.10 build — likely OS/prop dependent, not reliable as a generic test command.) ✅
+- [x] TC-1063: Long bursts (e.g., `list_presets` output) scroll smoothly and the view auto-scrolls to bottom. Manually scrolling up while data arrives — verify the view still auto-scrolls (acceptable trade-off; if not desired, document as known UX). ✅
+- [x] TC-1064: Very large output (>200K chars) is capped — earliest text is trimmed, latest remains. No browser lockup or memory blow-up. ✅
+
+### 64.4 Send
+
+- [x] TC-1065: Type `version` into the input field → press Enter → command echoes locally as `> version`, then board's response streams in. Input field clears after send. ✅
+- [x] TC-1066: Click `Send` button with text in the field → same behavior as Enter. ✅
+- [x] TC-1067: Empty input + Enter / Send → no-op (no extra newline sent, no crash). ✅
+- [x] TC-1068: Send with port closed (after disconnect) → button is disabled. Re-enabling only after reconnect. ✅
+
+### 64.5 Pause
+
+- [x] TC-1069: Click `⏸ pause` while data is streaming → button text changes to `▶ resume`, incoming data continues to be buffered (not shown). Send and clear remain functional. ✅
+- [x] TC-1070: Click `▶ resume` → buffered data appears at once, view scrolls to bottom, button reverts to `⏸ pause`. ✅
+- [x] TC-1071: Pause across long quiet stretches doesn't leak memory: paused buffer is capped at ~150K chars (oldest trimmed). Verified by code review (buildPanel.js:1473-1480) — only one growth path (`_serialPausedBuf += text` in the rx callback), immediate cap on every chunk, bounded between 150K and ~200K + max chunk size. ✅
+- [x] TC-1072: Disconnect while paused → status updates to disconnected; clicking resume flushes whatever was buffered up to the disconnect moment. ✅
+- [x] TC-1072a: Collapse the log body via the chevron while serial is streaming → button label flips to `▶ resume`, data buffers (DOM not updated while hidden). Expand → resumes automatically, buffered data flushes to log. ✅
+- [x] TC-1072b: Manually click `⏸ pause`, then collapse, then expand → on expand, serial auto-resumes (overriding the manual pause) so the visible state matches the expectation that "opening the panel shows live data". Documented as predictable-over-precise. ✅
+- ~~TC-1072c~~: *Dropped — collapse-while-disconnected is structurally a no-op (port closed on tab switch, no data flowing, no buffer state to manage). The Serial→Build round-trip behavior is already covered by TC-1058.*
+
+### 64.6 Clear
+
+- [x] TC-1073: Click `✕ clear` (serial actions) → serial log empties. Paused buffer (if any) is also cleared. Input field unaffected. Status unchanged. ✅
+- [x] TC-1074: Build Output `✕ clear` button is unaffected — it only clears the build log content (verify by running a compile then clearing only the serial side). ✅
+
+### 64.7 Flash coordination (BUG-015)
+
+- [x] TC-1075: Serial Monitor open and streaming. Click `⚡ Compile` → compile runs normally, serial output continues during compile (compile doesn't touch the port). ✅
+- [x] TC-1076: Serial Monitor open. Click `⚡ Flash` (post-compile) → log shows `— port released for flash —`, status flips to `disconnected`, flash proceeds without "port in use" / EBUSY error. ✅
+- [x] TC-1077: After flash completes and board re-enumerates, Serial Monitor auto-reconnects within ~800ms (status returns to `<port> @ 115200`). Board's startup banner appears in the log. ✅
+- [x] TC-1078: Flash failure (board pulled mid-flash) → after failure modal, serial does NOT auto-reconnect to a dead port — auto-reconnect only fires when serial tab is still active AND `_isFlashing` has cleared. Tested informally; no spurious reconnect or error observed. ✅
+- ~~TC-1079~~: *Dropped — DFU flash uses the bootloader (the board is not running ProffieOS), so there is no serial port to monitor during the operation. The "serial open during DFU flash" state is structurally unreachable.*
+- [x] TC-1080: Switch AWAY from Serial Monitor tab during a flash → no spurious reconnect attempt when flash completes. Not reachable through normal UI (flash modal limits interaction) but the guard is verified by code review at [buildPanel.js:619](renderer/buildPanel.js#L619) and [:1653](renderer/buildPanel.js#L1653) — both reconnect paths gate on `!_isFlashing`, and the post-flash setTimeout re-checks the flag at fire time. ✅
+- [x] TC-1081: Open Serial Monitor tab DURING an active flash → tab switch never opens the port while `window._isFlashing === true`. Not reachable through normal UI but verified by code review at [buildPanel.js:1532](renderer/buildPanel.js#L1532): `_switchLogTab` only calls `openSerialMonitor` when `!window._isFlashing`. ✅
+
+### 64.8 Regressions
+
+- [x] TC-1082: Existing build-output behavior preserved: compile log streams into the build pane, `--- ... ---` and `✓` lines highlighted, errors red, auto-scroll works, `✕ clear` empties the build log. ✅
+- [x] TC-1083: Chevron text shows only `▼` (collapsed) / `▲` (expanded) — no stale "Build Output" label embedded in the chevron (the tab strip now carries that label). ✅
+- [x] TC-1084: Port polling, auto-detect, Proffieboard banner, DFU sentinel — all unchanged. Adding the serial monitor did not alter port-list handling. ✅
+- [x] TC-1085: Style Library, presets, Monaco editing, all unrelated flows — sanity sweep that nothing else broke from the build-log DOM restructure. ✅
+
+### 64.9 Line suppression — entry / context menu
+
+- [x] TC-1086: Empty Serial Monitor log shows italic tip "Right-click a noisy line to suppress similar lines. Active filters appear next to ⏸ pause." The tip disappears as soon as any line lands in the log. ✅
+- [x] TC-1087: Right-click a line of the form `ID: 12345678` → context menu appears with two options: `Suppress lines starting with "ID:"` and `Suppress exact: "ID: 12345678"`. Same for `Battery voltage: 4.123`. ✅
+- [x] TC-1088: Right-click a line with no label/colon (e.g. `splode!`) → menu offers `Suppress lines starting with "splode!"` and `Suppress exact: "splode!"` (no label option). ✅
+- [x] TC-1089: Right-click a very long line (>60 chars) → exact option preview truncates with `…`. The stored rule still holds the full text (verified: pasting an identical line still gets suppressed). ✅
+- [x] TC-1090: Right-click near the right or bottom edge of the screen → menu clamps inside viewport (no scrollbars triggered). ✅
+- [x] TC-1091: Press Esc with context menu open → menu dismisses. Click outside → menu dismisses. Click an option → menu dismisses and rule is applied. ✅
+- [x] TC-1092: Right-click outside the serial log (e.g. on the input row or build pane) → no custom menu appears (native browser menu still suppressed only on `.serial-line` elements). ✅
+
+### 64.10 Filter badge
+
+- [x] TC-1093: With 0 filters: badge `funnel-icon + N` is hidden and the `clear filters` link is hidden. ✅
+- [x] TC-1094: After adding 1 filter: badge shows `🔇 1`, `clear filters` link still hidden (per spec — single-filter cleanup happens via popover ✕). ✅
+- [x] TC-1095: After adding a 2nd filter: badge shows `🔇 2`, `clear filters` link visible. Clicking `clear filters` empties the rule list, badge and link both hide. ✅
+- [x] TC-1096: Click the badge `funnel-icon + N` → popover opens above the badge listing each filter with its type ("starts with" / "exact") and text, plus a per-filter `✕` button. Click outside or Esc → popover dismisses. ✅
+- [x] TC-1097: Click a per-filter `✕` → that single filter is removed, popover content refreshes in place (does not close). Badge count decrements. Last filter removed → popover shows "No active filters". ✅
+
+### 64.11 Suppression effect on the log
+
+- [x] TC-1098: Add a `starts with "ID:"` filter while ID lines are streaming → all currently-displayed `ID:` lines disappear from the log, and incoming `ID:` lines never appear. Other content scrolls normally. ✅
+- [x] TC-1099: Remove the filter → previously-suppressed lines reappear in their original positions (they were `display: none`, not deleted). Scroll position is preserved within reason. ✅
+- [x] TC-1100: An `exact` filter only hides lines that match byte-for-byte. e.g. `Battery voltage: 4.123` filter does NOT hide `Battery voltage: 4.124`. ✅
+- [x] TC-1101: A `prefix` filter is case-sensitive (matches "ID:" but not "id:"). Verified by code review ([buildPanel.js:1150](renderer/buildPanel.js#L1150)): `lineText.startsWith(r.text)` is byte-equal with no case fold. ✅
+- [x] TC-1102: Suppression survives Pause/Resume — pause, add a filter, resume → resumed buffer is filtered through the rules on display. ✅
+- [x] TC-1103: `✕ clear` (serial action) empties the log entirely, including currently-hidden suppressed lines. Filters themselves remain active. ✅
+
+### 64.12 Session-scoped (intentionally NOT persisted)
+
+- [x] TC-1104: Add 2 filters, close the app, reopen → on the next Serial Monitor tab visit, the badge is HIDDEN and incoming `ID:` / `Battery voltage:` lines are visible again. Filters are debug-session scoped and reset on every launch. ✅
+- [x] TC-1105: No `serial.suppress` setting key is written to the user-data store at any point (filters live in memory only). ✅
+
+### 64.13 Auto-clear on board / port change
+
+- [x] TC-1106: With 2 filters active, change the port dropdown to a different path → badge and `clear filters` link both disappear. Filters do NOT carry over across user-initiated board switches. ✅
+- [x] TC-1107: With 2 filters active, flash the board → port may re-enumerate to a different COM path → filters are PRESERVED (refreshPorts does not auto-clear; only the dropdown handler does). Confirms the heuristic: user action → wipe; auto re-enumerate → keep. ✅
+- [x] TC-1108: With 2 filters active, unplug the board → status flips to disconnected, badge remains visible (rules still in memory). Replug same board → refreshPorts auto-selects, filters still apply. Pull cable then plug in a DIFFERENT board → filters auto-clear (no manual dropdown action needed; the auto-select triggers it because the new board's SN differs from the one the filters were scoped to). Earlier failure was because `refreshPorts` set the dropdown via `portSelect.value = …` programmatically, which doesn't fire `change`, so `onPortChange` and its clear logic never ran. Fixed by tracking filters by **board SN** (not COM path) and calling the clear helper from the auto-select branches in `refreshPorts`. Same SN re-enumeration (flash case, TC-1107) still preserves filters because the SN matches. ✅
+
+### 64.14 Smart auto-scroll + jump-pill + focus restore
+
+> Setup: compile+flash a config, open Serial Monitor with a board producing periodic output (10+ lines/sec works well — e.g. `monitor swings` or any verbose effect probe).
+
+- [x] TC-1110: Default tail-follow — open serial tab, watch lines arrive. View scrolls to bottom on every new line. No pill visible. ✅
+- [x] TC-1111: Scroll up at least 30px from bottom while data is streaming → lines keep arriving in DOM but view stays put. Pill appears at bottom-right: `↓ N new`. ✅
+- [x] TC-1112: Pill count increments — continue watching while scrolled up. Pill's number updates as new lines arrive. ✅
+- [x] TC-1113: Pill caps at `99+` — wait until many lines have arrived (>99). Pill shows `↓ 99+ new` instead of the full count. ✅
+- [x] TC-1114: Click the pill → view snaps to bottom, pill disappears, new lines auto-follow again. ✅
+- [x] TC-1115: Manual scroll back to tail — scroll down to within ~20px of the bottom. Pill disappears, auto-scroll resumes. ✅
+- [x] TC-1116: Near-bottom tolerance — scroll up just ~10px from absolute bottom. Should still count as "at bottom" — pill should NOT appear on next incoming line. ✅
+- [x] TC-1117: Far-up tolerance — scroll up ~30+ px from bottom. Pill DOES appear on next incoming line. ✅
+- [x] TC-1118: Send command while scrolled up — scroll up, type a command in send input, press Enter. Auto-scroll re-engages, pill disappears, view snaps to bottom showing your echoed `> ...` line. ✅
+- [x] TC-1119: Clear log while scrolled up — scroll up while pill is showing, click Clear. Log empties, pill disappears, next incoming line auto-follows from the top. ✅
+- [x] TC-1120: End key with no input focus — scroll up. Click somewhere on the serial pane background (not the input). Press End. View jumps to bottom, pill disappears, auto-scroll resumes. ✅
+- [x] TC-1121: End key inside send input — type text in send input, press Home then End. Cursor moves to end of input text (browser default). Pill state unchanged. ✅
+- [x] TC-1122: End key when serial tab inactive — switch to Build Output tab. Press End. Nothing happens to serial (no interference with build pane). ✅
+- [x] TC-1123: Pause while scrolled up — scroll up so pill is showing. Click Pause. Pill count stops incrementing (buffer captures lines silently). Pill stays at last count. ✅
+- [x] TC-1124: Resume from pause while scrolled up — from TC-1123, click Resume. Buffered lines flush into log. Pill count jumps to reflect the flushed lines. View still doesn't auto-scroll. ✅
+- [x] TC-1125: Tab switch round-trip — scroll up while pill visible. Switch to Build Output tab, switch back to Serial Monitor. Pill still visible with prior count, scroll position preserved. ✅
+- [x] TC-1126: Window focus return — scroll up so pill visible. Alt-tab away to another app. Alt-tab back to JMT Studio. Send input re-receives focus (cursor in send field without clicking). Scroll position and pill preserved. ✅
+- [x] TC-1127: SERIAL_MAX_LINES trim while scrolled up — scroll up, then wait for >1000 lines to arrive. Oldest lines get trimmed from top. View position adjusts naturally (visible content shifts). Pill keeps incrementing until you return to tail. ✅
+- [x] TC-1128: Flash mid-scroll-up — scroll up while pill visible. Trigger a Flash. Serial pauses ("port released for flash" appears as a new line), flash runs, serial reconnects ~800ms after. Pill state and scroll position preserved across the cycle. ✅
+- [x] TC-1129: Empty log → first line — click Clear so log is empty. Wait for first incoming line. Line appears at top of empty log. No pill (auto-scroll true post-clear). ✅
+- [x] TC-1130: Visual placement — at minimum panel height, the pill must not overlap the send-input row. Pill uses JMT blue and brightens on hover. Fix: the global `button:hover { opacity: 0.82 }` rule was overriding the pill's `filter: brightness()` lift and reading as darken. Added `opacity: 1` to the pill's hover rule so the brightness filter reads cleanly. ✅
+- [x] TC-1131: No console errors — run TC-1110 through TC-1129 with DevTools open. No errors logged during any scenario. ✅
+- [x] TC-1132: Auto-connect on board arrival — start the app with NO board connected, switch to the Serial Monitor tab (status shows "no port selected"). Plug in the board. Once `refreshPorts` auto-selects the port, the serial monitor should auto-connect (`port @ 115200`), the send input should be focused, and incoming data should begin streaming. No manual dropdown bump or tab toggle required. ✅
+- [x] TC-1133: Persistent connect hint — open Serial Monitor with a board that streams welcome text immediately on connect (ProffieOS does this — "Welcome to ProffieOS vX.Y", URL, "Battery voltage:"). The first line in the log should be a styled hint with a JMT-blue left border: "💡 Right-click any line to suppress similar lines. Active filters appear in the toolbar above." It must appear ABOVE the welcome text, not after it. Scroll up after data arrives to confirm the hint is still in scrollback. ✅
+- [x] TC-1134: Hint does not accumulate across reconnects — with the monitor connected and data flowing, switch to Build Output tab and back to Serial Monitor (closes and reopens the monitor). The log should NOT have a second hint entry. Same after a flash cycle (pauseSerialBeforeFlash → resumeSerialAfterFlash) — exactly one hint at the top of scrollback regardless of reconnect count. ✅
+- [x] TC-1135: Hint reappears after clear → reconnect — with the monitor connected, click Clear. Log is empty; CSS empty-state hint shows briefly. Switch to Build Output tab, then back to Serial Monitor (forces reconnect). The persistent hint entry should reappear at the top of the now-fresh log. ✅
+
+### 64.15d Slot-based ArgumentName parens format
+
+> Setup: Test against a few different OS versions to exercise the version-aware enum lookup (e.g. an older ProffieOS where RETRACTION_OPTION2_ARG doesn't exist alongside a newer one where it does).
+
+> Debug tooling added: console logs `[slotMap] refresh requested … loaded vX.Y — N args` on every refresh, `[slotMap] invalidated (had N args)` on invalidate. Open DevTools console; call `window.debugSlotMap()` at any time to print the current version, count, and full sorted name→slot table.
+
+- [x] TC-1159: New-format read — a slot's parens string is `"65535,0,0 ~ ~ ~ ~ ~ ~ ~ 0,65535,0"`. Opening that slot in the editor shows BASE_COLOR_ARG (slot 1) = Red and BLAST_COLOR_ARG (slot 9) = Green. All intermediate slots show as default. Verified on-device. ✅
+- [x] TC-1160: Legacy-format backward read — a slot's parens string is in pure CSV form (e.g. `"65535,0,0,32768,16384,0,..."`). Opening the slot still resolves each named arg's value correctly — no visible regression for configs written by older JMT Studio builds. Verified on-device. ✅
+- [x] TC-1161: Write produces new format — set BASE_COLOR_ARG via the color picker. Source updates to `"65535,0,0"` (single slot token), not `"65535,0,0"` followed by trailing zeros from older args. Verified by code review: `writeRegistryArg` → `_serializeSlots` ([effect-args.js:297](renderer/effect-args.js#L297)) always emits modern format and trims trailing empties. ✅
+- [x] TC-1162: Sparse write — clear BASE_COLOR_ARG, then set only BLAST_COLOR_ARG (slot 9). Source becomes `"~ ~ ~ ~ ~ ~ ~ ~ 65535,0,0"` with `~` for skipped slots. Verified by code review: `_serializeSlots` iterates `1 … lastSet`, emitting `~` for every unset slot ([effect-args.js:304-307](renderer/effect-args.js#L304-L307)). ✅
+- [x] TC-1163: Auto-migration on first edit — open a config saved by an older JMT Studio build (pure CSV parens). Change one arg value. Save the config. The parens string is now space-separated with `~` for empty slots — the comma-list format is gone. Verified by code review: `_parseAnyParens` ([effect-args.js:291](renderer/effect-args.js#L291)) detects legacy CSV via `csvOffset` and writes always go through `_serializeSlots` (modern), so any write through `writeRegistryArg` migrates the parens. ✅
+- [x] TC-1164: OS version change refreshes the slot map — switch the OS version dropdown. Console should log `[slotMap] invalidated …` then (on next Advanced open) `[slotMap] refresh requested for version: <new>` followed by `[slotMap] loaded vX.Y — N args`. Confirmed in console: `invalidated (had 0 args)` → `refresh requested for version: (default)` → `loaded vProffieOS 6.9 — 32 args. Sample: BASE_COLOR_ARG@1, ALT_COLOR_ARG@2, …`. ✅
+- [x] TC-1165: Unsupported arg in older OS — verified via OS 6.9 slot map dump (`debugSlotMap()` output, 32 args, none of which are the six 8.10-only args: `ALT_COLOR2_ARG`, `ALT_COLOR3_ARG`, `STYLE_OPTION2_ARG`, `STYLE_OPTION3_ARG`, `IGNITION_OPTION2_ARG`, `RETRACTION_OPTION2_ARG`). Path: `_slotFor` ([effect-args.js:233](renderer/effect-args.js#L233)) — when slotMap is loaded but the arg name isn't in it, returns null (the pre-IPC legacy-table fallback only fires when slotMap is empty). `writeRegistryArg` then returns the original parens unchanged. **Required code fix:** the original `_slotFor` had no "loaded" guard around the legacy fallback, so an unsupported arg would silently corrupt the parens via the legacy `pos`. Fix applied so the fallback is bootstrap-only, matching the function's own comment. ✅
+- [x] TC-1166: Enum-comment tooltip — hover the BASE_COLOR_ARG label in the expanded slot editor. Tooltip reads just `Primary Base Color` (the enum line-comment, with no redundant arg-name prefix — the row already shows the name). Hover RETRACTION_OPTION2_ARG → tooltip from that arg's enum comment. ✅
+- [x] TC-1166a: Clickable label — click the BASE_COLOR_ARG label text (NOT the swatch). The color picker opens, same as clicking the swatch. The slot edit does NOT close. Same for any other RgbArg row in the Advanced section. ✅
+- [x] TC-1166b: IntArg label click — click an IntArg label (e.g. STYLE_OPTION_ARG). The number input gets focus and its contents are selected, ready to type-replace. Slot edit does NOT close. ✅
+- [x] TC-1167: JMT apply invalidates the slot-name cache — apply a JMT add-on to the active OS version. Console should log `[slotMap] invalidated …`. Then open Advanced or call `window.debugSlotMap()` → triggers `[slotMap] refresh requested …` and reload. Verified: post-apply log shows `invalidated (had 38 args)`. **Required code fix:** `versionsPanel.js` was comparing `getSelectedVersion()`'s `{name: …}` object to a bare string (`modifiedName`), which is always false. The post-apply `onOsVersionChange` hook had been silently dead since written. Fixed by extracting `activeSel.name` before the comparison. ✅
+- [x] TC-1168: Lazy enum load — start the app with a config open. Console should show NO `[slotMap] refresh requested` on startup. Open a preset's slot editor and click Advanced for the first time → console fires `[slotMap] refresh requested … loaded …`. Confirmed: no startup refresh log; first refresh only fired after Advanced was opened. ✅
+- [x] TC-1168a: OS version change drops the cached enum — switch the OS version dropdown. Console fires `[slotMap] invalidated …`. NO refresh until you open Advanced or call `window.debugSlotMap()`, at which point the new version loads. Confirmed: `invalidated (had 32 args)` fired on version flip; refresh waited for the next read and then loaded the new 38-arg map. ✅
+- [x] TC-1169: Initial slot-tile color render — close the app fully, reopen with a config that uses library helper styles (not just inline expressions). When the preset sidecar opens, each B1 (and any other non-wrapper) slot tile shows its color swatch on the very first paint — NOT after a visible re-render jump. `_openSidecar` awaits the styles file load before its first `_rebuildSidecar`, so the preset list paints once with everything in place. Brief delay (~50ms) between the sidebar visually appearing and the preset list rendering is acceptable; a re-render that shifts tile heights is NOT acceptable. ✅
+
+### 64.15c Wrapper-vs-inner color mismatch disclosure
+
+> Setup: a preset whose slot uses a template wrapper that defines its own `RgbArg<BASE_COLOR_ARG, ...>` default different from the inner style's first RgbArg default. Test case: `StylePtr<PixelSwitchWrapper<MainHyperResponsiveRotoscopeVader>>()` — wrapper paints white, Vader paints red, no colorArg in source.
+
+- [x] TC-1148: Expanded view BASE_COLOR_ARG row shows the **wrapper's** default (e.g. white for PixelSwitchWrapper), NOT the inner's color. Label reads "BASE_COLOR_ARG (default)". ✅
+- [x] TC-1149: Below the Inner Style row, an indented disclosure row appears with a ⚠ icon, a small swatch of the **inner's** color (red for Vader), and the text "Inner BASE_COLOR_ARG". Hovering the swatch shows just the color label as the tooltip — e.g. "Red", "Green", or "Rgb<118,42,200>" for custom values. No prose explanation, no style name. The swatch + tooltip is purely a "what color is the inner" surface. No "Match inner" button — the existing Match B1 + the swatch picker already cover the resolution paths. ✅
+- [x] TC-1150a: Live show/hide — set a colorArg via the BASE_COLOR_ARG swatch picker (any non-matching color is fine). The disclosure row hides IMMEDIATELY without needing to close/reopen the slot. Click the BASE_COLOR_ARG row's X to clear → disclosure REAPPEARS in place IMMEDIATELY (regression test for the build-once-show-always vs build-conditionally bug). ✅
+- [x] TC-1150b: Match B1 also hides the disclosure live — click Match B1, disclosure goes away (same updateReset hook that drives the swatch picker path). ✅
+- [x] TC-1151: When wrapper-default = inner-color (e.g. both happen to be white), NO disclosure row appears. No false-positive warnings. ✅
+- [x] TC-1152: When source already has a colorArg (`StylePtr<PixelSwitchWrapper<Vader>>("65535,0,0")`), NO disclosure row appears — the user has pinned a color so both wrapper and inner paint it (no mismatch by definition). ✅
+- [x] TC-1153: For a NON-wrapper slot (e.g. just `MainHyperResponsiveRotoscopeVader` directly), NO disclosure row appears — only wrappers-with-INNER-class-param qualify. ✅
+- [x] TC-1154: For a wrapper WITHOUT its own RgbArg (pure passthrough like `Quiet<Vader>`), NO disclosure row appears — there's no wrapper-default to mismatch against. ✅
+- [x] TC-1155: Collapsed slot swatch in a mismatched wrapper case shows a small ⚠ icon overlaid at the top-right of the color dot. Hovering the icon shows a tooltip explaining the mismatch. ✅
+- [x] TC-1156: Resolving the mismatch clears the collapsed tile's ⚠ icon — via any of the available paths (Match B1, BASE_COLOR_ARG swatch picker, or setting a colorArg in source). The icon hides live without needing to close/reopen the slot. ✅
+- [x] TC-1157: Inner Style dropdown — clicking the field auto-selects existing text so typing replaces it (parallel to the outer Style Library dropdown behavior). ✅
+
+### 64.15b Collapsed-slot color detection through wrapper INNER
+
+> Setup: a preset where one blade slot uses a template wrapper with a class INNER parameter (e.g. `PixelSwitchWrapper<SomeColoredHelper>`), and the inner helper has a distinctive color in its definition (e.g. purple via `Rgb<118,0,194>`).
+
+- [x] TC-1144: Color detection prefers leaf style — collapse the slot. The color dot/swatch on the tile MUST reflect the INNER helper's color (purple in this example), NOT a stray literal from the wrapper's own body (e.g. `White` baked into the wrapper's TransitionEffect machinery). Clarification from QA: when the wrapper has its own legitimate `RgbArg<BASE_COLOR_ARG, …>` default, the collapsed swatch shows the wrapper's default (e.g. White for PixelSwitchWrapper) and the ⚠ icon flags the mismatch. Leaf-resolve is the fallback path that prevents stray-literal pickups when the wrapper has no RgbArg. ✅
+- [x] TC-1145: Same result when slot has no `colorArg` set — default state shows inner's color. ✅
+- [x] TC-1146: Plain (non-wrapper) helper slots still detect their own color correctly — no regression from the leaf-resolve change. ✅
+- [x] TC-1147: Two-level wrap (if ever encountered): `OuterWrap<InnerWrap<RealStyle>>` should resolve to `RealStyle`'s color. Recursion is capped at 5 levels defensively; normal usage is 0–1 levels. ✅
+
+### 64.15a Close-button label after flash completion
+
+- [x] TC-1140: Regular serial flash → "✓ Flash Complete" modal — the action button on the right MUST read "Close", not "Cancel". (Nothing to cancel once the flash is done.) ✅
+- [x] TC-1141: DFU-driver-fix flow that proceeds to a successful flash → "✓ Flash Complete" modal — label must be "Close" even though the same button was labeled "Cancel" earlier in the flow. The reset happens in `finishBuildModal`, so any terminal state (success or failure) clears stale labels. **Re-verified after fix**: was originally marked done without on-device verification; real DFU flow on Windows VM exposed that the `isDfuMode === true` success path at [buildPanel.js:896-911](renderer/buildPanel.js#L896-L911) doesn't call `finishBuildModal`, so the "Cancel" label set during driver-fix UI persisted into the success modal. Added explicit `bm-close.textContent = 'Close'` in the DFU success branch. Confirmed on VM. ✅
+- [x] TC-1142: Failed flash → "✗ Flash Failed" modal — label is "Close". A failed run also reaches a terminal state and shouldn't inherit "Cancel" from a prior driver-fix interaction. ✅
+- [x] TC-1143: Compile-only success (no flash) → modal close button reads "Close". ✅
+
+### 64.15 Inner Style auto-commit on slot open
+
+> Setup: a preset with at least 2 blades where B1 uses a library style (helper) and B2 uses a template helper that has an `INNER` class parameter (e.g. `PixelSwitchWrapper`).
+
+- [x] TC-1136: Auto-commit on B2 open — start with B2's source written as `StylePtr<PixelSwitchWrapper>("...")` (no inner style in the angle brackets). Click B2 to open the slot editor. Source should automatically update to `StylePtr<PixelSwitchWrapper<{B1's style name}>>("...")` within ~50ms (a "blink" as the slot re-opens with committed state). Inner Style dropdown shows the B1 style name. No manual interaction required. ✅
+- [x] TC-1137: No overwrite when source already has a value — start with B2's source already specifying an INNER style different from B1's (e.g. `StylePtr<PixelSwitchWrapper<SomeOtherStyle>>("...")`). Click B2 to open the slot editor. Source MUST NOT change. Inner Style dropdown shows `SomeOtherStyle`, not B1's style. The pre-populate path is gated on `!editTemplateArgs[idx]` so an existing value wins. ✅
+- [x] TC-1138: No auto-commit on B1 — open the B1 slot editor (the first blade). No pre-populate logic runs (it's gated on `slotIdx > 0`). Source unchanged, dropdown shows whatever B1 already has. ✅
+- [x] TC-1139: Single undoable edit — perform TC-1136. Press Ctrl+Z once. Source should revert to bare `StylePtr<PixelSwitchWrapper>("...")` (no inner) in a single undo step. The auto-commit IS a real user-visible change and should be reversible like any other slot edit. ✅
+
+---
+
 ## Bug Log
 
 | ID | TC | Severity | Description | Status |
@@ -1390,7 +1646,22 @@ Log failures in the **Bug Log** at the bottom with TC reference.
 | BUG-011 | §59 (TC-865 through TC-899) | New capability (not a regression) | `+ New` was a single-action button that always produced an empty editor — no starting point for new users. Added a two-button choice modal (Blank vs Use Template) mirroring the Style Library create modal, and an on-demand template file at `userData/templates/default.h` containing a V3 scaffold with all four ProffieOS sections (CONFIG_TOP / CONFIG_PROP / CONFIG_PRESETS / CONFIG_BUTTONS) and a populated Preset + BladeConfig. File is created on first request via `template:readDefault` IPC and read fresh each subsequent click — so any user modifications stick automatically. Settings → "Default Config Template" row exposes Import (file picker, replaces template) and Reset to Default (overwrites with shipped default). Reset uses the inline-panel confirmation pattern (matching Clear Cache); button is auto-disabled when current template content matches DEFAULT_CONFIG_TEMPLATE byte-for-byte (nothing to reset). Designed as a stepping stone toward 2.0's guided config generator — the file-based mechanism is the same, only the editing UX changes when we later add an in-app template editor. | Fixed |
 | BUG-014 | §51 (TC-688 updated) | P2 | Hyphenated bank names (and style/helper names) broke the parser silently. Pencil rename → user types `my-bank` → original "permissive, commits as-is" design (TC-688) wrote `Preset my-bank[]` to source. The parser's identifier regex `\b(\w+)` doesn't match `my-bank` (hyphen isn't `\w`), so on next file load (or save/close/reopen) the bank disappeared from the visual view as if it didn't exist. Clicking "+ Add Preset" then scaffolded a duplicate `Preset presets[]` underneath, leaving the original `my-bank` bank orphaned. Worse: the rename UI updated the source in real time, so the visual view briefly looked correct while typing the partial name, then "broke" once the full hyphenated name committed. Fixed by extending `_wireStyleNameSanitize` (which already auto-converted spaces to underscores at input time) to also auto-convert hyphens — a typed `-` keystroke or hyphen in a paste becomes `_` immediately. Same function services style names, helper names, and preset bank renames, so the fix covers all entry points. Existing files with hyphenated names need manual one-time correction in source; future renames via the UI are protected. | Fixed |
 | BUG-013 | §61 (TC-931 through TC-972) | P2 | Ctrl+Z reverted multiple user actions per press because Monaco's `executeEdits` coalesces nearby edits — including across different source strings, and including with adjacent typing — into a single undo step. Reproduction: click + Add Preset twice, type a few characters, click + Add Preset twice more → only 2 Ctrl+Z presses needed to fully revert all 5 actions. Fix: defined `_atomicEdit(monacoEditor, source, edits)` helper that wraps `executeEdits` with `editor.pushUndoStop()` before AND after, then converted all 23 button-initiated `executeEdits` callsites in `renderer/index.html` to use it. Covers every preset operation (add, delete, disable/enable, reorder, rename, duplicate, slot edits, field edits, template parameters), every bank operation, board dropdown rewrite + include insert, Link Style Library, and Link JMT Add-ons. Risk surface: 23 touched callsites — full regression coverage in §61. | Fixed |
+| BUG-016 | §64.9–64.13 (TC-1086 through TC-1109) | New capability (not a regression) | Serial monitor's first cut showed every line — Proffie's `ID:` and `Battery voltage:` polling lines (plus user-added debug prints) made the log unreadable. Added line-by-line suppression: right-click any line opens a context menu offering "Suppress lines starting with '<label>:'" (auto-detected for `Label: value` shape), "Suppress lines starting with '<first 24 chars>'" (fallback), and "Suppress exact: '<line>'" — no regex-typing required. Each rule is `{type: 'prefix'\|'exact', text: '...'}` stored in user settings under `serial.suppress` so they persist across launches. Display-time filtering only — suppressed lines get `display:none` rather than being dropped, so removing a rule un-hides them in place. Badge `funnel-icon + N` appears next to ⏸ pause when ≥1 filter; a separate `clear filters` link appears only at ≥2 filters (so the cleanup button doesn't clutter the bar for the common single-filter case). Click the badge to open a popover with one ✕ per filter for individual removal. Auto-clear fires only on user-initiated port-dropdown change (not on refreshPorts auto-detect after flash re-enumeration, since that's the same board with a new COM path). Empty-state hint in the log surfaces the right-click affordance the first time the user opens the tab. | Fixed |
+| BUG-015 | §64 (TC-1050 through TC-1085) | New capability (not a regression) | JMT Studio shipped without a serial monitor — users had to install Arduino IDE alongside JMT Studio just to talk to the board (read effect probes, run `help`, configure WS281X parameters, etc.). Added a second tab to the existing build-output panel ("Serial Monitor"), wired through the existing `serialport` dep in `main.js`. Tab switch auto-connects to the selected COM port at 115200 8N1; switching away or pulling the cable releases the port cleanly. Send field with Enter/Send button echoes locally as `> <cmd>` then streams board response. Pause buffers incoming data (capped ~150K chars) without losing it. Clear empties the log. Critically, flash is coordinated: before `electronAPI.flash` / `flashDFU` is invoked, the renderer calls `pauseSerialBeforeFlash()` which closes the port (avoiding Windows port-in-use); after `build:done(type:'flash')` fires, `resumeSerialAfterFlash()` reopens it ~800ms later if the user is still on the serial tab. CSS-only context switching: `#build-log.serial-active` class hides build actions, shows serial actions (status / pause / clear). Trade-offs documented: auto-scroll always follows tail (no scroll-lock-on-manual-scroll), and `_serialAutoPaused` resume only fires when the user is still on the serial tab — preventing background reconnects to a dead port after a failed flash. | Fixed |
 | BUG-012 | §60 (TC-900 through TC-930) | New capability (not a regression) | Board dropdown (V1/V2/V3) had been an independent UI selector — could disagree with the `#include "proffieboard_vN_config.h"` line, which is meaningless because the compiler reads the include, not the dropdown. Reversed the precedence: `#include` line is the source of truth, `@jmt:board` metadata is defensive fallback. Live auto-detect on edit (250ms debounce) syncs the dropdown when the include line changes. User dropdown click rewrites the include line in place as a single undoable Monaco edit, with a toast ("Board changed to X (include updated).") and ~2.7s line flash. `event.isTrusted` guards the rewrite handler so programmatic dispatches from loadContent / auto-detect don't trigger phantom rewrites. When no include exists, a confirm modal asks before inserting one — placement: into existing `#ifdef CONFIG_TOP` at top of block if present, else fresh CONFIG_TOP scaffold at top of file (after leading comments, preserved verbatim). Misspelled / malformed directives correctly fail to match (by design — we don't guess from typos). Design validated with Proffie Pro before shipping; established the "scoped, visible, reversible" triad as a portable no-confirm-required green-light test for user-initiated source modifications. | Fixed |
+| BUG-029 | §56.3 (TC-831a through TC-831e) | P2 | Adding a new helper silently failed when the user typed just the expression body (e.g. `Red`) instead of a full `using NAME = …;` statement: `_buildHelperBlock` wrapped the body verbatim in `/*--- NAME ---*/` headers, the parser then couldn't locate the entry via its `using NAME =` regex, and the helper "disappeared" from the visual view. The first attempt at this fix added save-time validation but the error wasn't visually clear (no red highlight on the offending field, error message tucked under the name even when the problem was in the body) and validation only fired on Save click, not as the user typed — Ryan called out that it wasn't "transparent" like Add Style's name validation. **Comprehensive fix.** Save handler: in Add mode, auto-wrap when the body lacks `using` (parallel to `_buildStyleBlock`); refuse the save when name/code names don't match; surface every error inline. Generalized `_showHelperNameError` into `_showHelperError(msg, where)` where `where ∈ {'name', 'body'}` so the right field gets the `invalid` red-border treatment. New `#styles-helper-monaco.invalid` CSS rule paints a red inset border on the body editor for body-side errors. Name input's existing `input` event now runs LIVE validation (identifier rules + duplicate-name check against the current styles) so the error appears as the user types, not after Save. Body editor's `onDidChangeModelContent` clears the body-invalid border as soon as the user edits — the user sees feedback that they're addressing the problem. Save button stays disabled while any error condition holds. | Fixed |
+| BUG-028 | §56.2 (TC-827a) | P3 | Ctrl+Z in the Style Library visual view didn't bring back a card deleted via the × → confirm flow. The visual-view undo stack (`_styleReorderUndoStack` in `renderer/index.html`) only captured drag-reorder snapshots — the keydown handler that pops from this stack on Ctrl+Z had nothing to restore after a card delete. `_deleteStyleEntry` ran setValue on the styles editor (which clears Monaco's internal undo stack too), so neither path worked. Fixed by snapshotting the pre-delete styles content into `_styleReorderUndoStack` and clearing `_styleReorderRedoStack` right before the setValue, parallel to how drag-reorder does it at line 7214. Helpers go through the same `_deleteStyleEntry` function so this fix covers both card-delete and helper-delete. Stack also drives Ctrl+Y (redo) via the existing handler. | Fixed |
+| BUG-027 | §61.3 (TC-942a) | P3 | Ctrl+Z was no-op after clicking the X on a collapsed slot tile (`_resetSlot` / `_deleteExcessSlot`) until the user clicked into the Monaco editor first. Both functions already called `editor.focus()` synchronously after `_atomicEdit`, but some browsers reassert focus on the just-clicked button when the click event finishes — overriding our focus call. Result: Ctrl+Z went to the (now-removed-from-DOM but still document.activeElement) button and dropped silently. Fixed by deferring the focus via `setTimeout(() => editor.focus(), 0)` so it runs after the click event has fully resolved and the browser's default focus management has played out. Did NOT centralize the fix in `_atomicEdit` because that function is also called from background flows (`_syncConfigArrayRefs` during rebuild) where stealing focus from the user's active edit would be worse than the bug it solves. | Fixed |
+| BUG-026 | §64.15d (TC-1168, TC-1168a, TC-1169) | P3 | B1 (and any non-wrapper) slot's color swatch was missing on the very first sidecar render and only appeared after the user opened/closed a slot or switched presets. Root cause: `_openSidecar` called `_ensureStylesLoaded()` fire-and-forget, then `_rebuildSidecar()` ran synchronously — slot tiles built during that window saw `_silentStylesText` as null and `_getHelperRegistryArgs` returned empty, so no swatch rendered. The first attempted fix had `_ensureStylesLoaded` auto-trigger a second `_rebuildSidecar` after the styles text resolved, but the second render shifted tile heights and read as a "jumpy reload." Replaced with: `_openSidecar` now `await`s `_ensureStylesLoaded` BEFORE its first `_rebuildSidecar`, so the preset list paints once with everything in place. Sidebar visually opens immediately via the class toggles; preset content paints ~50ms later — clean single-pass render. In the same pass, the ArgumentName enum load was made fully lazy: removed from `initBuildPanel`, removed from `onOsVersionChange` (replaced with an invalidate via a new `invalidateSlotMap` helper on `proffieArgs`), triggered only on first Advanced-section open in any slot. Base-color swatches don't need the enum at all (they come from the styles file via `_getHelperRegistryArgs`); the legacy hardcoded table covers the common args until the enum loads. Saves an IPC roundtrip when the user never touches Advanced. | Fixed |
+| BUG-025 | §64.15d (TC-1159 through TC-1168) | P1 | Style argument parens strings (`StylePtr<MyStyle>("65535,0,0,32768,…")`) were serialized as a comma-only flat CSV positioned by a hardcoded `csvOffset` registry. ProffieOS actually expects space-separated SLOTS keyed by the `enum ArgumentName` order in `styles/edit_mode.h`, with `~` for empty slots and comma-joined values inside Rgb slots. The hardcoded approach broke sparse args (couldn't skip slots) and version differences (e.g. `RETRACTION_OPTION2_ARG` slot index varies across OS versions). **Three-layer fix.** Main process: `proffieos.js getArgumentNames(versionName)` reads `<versionPath>/ProffieOS/styles/edit_mode.h`, parses `enum ArgumentName { … }` line-by-line, returns `[{name, comment, slot}]` ordered by slot. Cached per-version, invalidated alongside `_hashCache` on JMT apply. IPC handler `proffieOS:getArgumentNames`. Renderer: `proffieArgs.refreshSlotMap()` fetches the map and populates synchronous globals `slotMap` (name→slot) and `slotComments` (name→enum line-comment, used for tooltips). Wired into `initBuildPanel` and `onOsVersionChange` so the map stays current. Format: `effect-args.js readRegistryArg/writeRegistryArg` rewritten — `_isNewFormat` detects modern vs legacy (presence of space or `~` → new), `_parseNewSlots`/`_parseOldSlots` produce a 1-indexed slot array from either format, `_serializeSlots` emits the modern format with trailing-empty trim. Every write produces modern format; reads of legacy configs auto-migrate on first save. `styleArgResolver.js` resolveStyleArgs/writeArgValue now delegate parens read/write to `proffieArgs`. Tooltip on arg labels in the expanded slot editor now uses the enum's `//` comment (e.g. "Primary Base Color") when present. Args missing from the selected version's enum are reported as `unsupported: true` from readRegistryArg and ignored by writeRegistryArg rather than written to a wrong slot. | Fixed |
+| BUG-024 | §64.15c (TC-1148 through TC-1158) | P2 | Wrapper slots with a class INNER parameter (e.g. `StylePtr<PixelSwitchWrapper<Vader>>()`, no colorArg) displayed the **inner's** BASE_COLOR_ARG defaultExpr in the expanded BASE_COLOR_ARG row instead of the **wrapper's** own — because of an "Merge INNER args first" priority in `renderer/index.html` (the makeArgRow registryArgs construction). On the saber this is a real two-color situation: wrapper paints its default during preon/postoff/transitions, inner paints its default during the active blade. Without disclosure, the user couldn't tell what was actually happening. **Three-phase fix.** Phase A: flipped merge priority so the outer (wrapper) helper's args land first; inner serves as fallback only for args the wrapper doesn't define. PixelSwitchWrapper's `Rgb<255,255,255>` now wins for BASE_COLOR_ARG; pure passthrough wrappers (no own RgbArg) still surface the inner's default. Phase B: new helper `_detectInnerColorMismatch(slot)` detects the wrapper-vs-inner color disagreement; expanded view appends an indented read-only disclosure row under Inner Style with the inner's swatch, color name, a ⚠ icon, and a one-click "Match inner" button that writes BASE_COLOR_ARG to the inner's color (parallel to existing Match B1). Disappears when colors align or a colorArg is set. Phase C: collapsed-slot swatch overlays a small ⚠ at top-right when the mismatch exists, providing at-a-glance signal. Also restored the Inner Style dropdown's select-all-on-focus behavior (parallel to the outer Style Library dropdown). | Fixed |
+| BUG-023 | §64.15b (TC-1144 through TC-1147) | P3 | Collapsed-slot color swatch reported the wrong color for any slot using a template wrapper with a class INNER parameter. Example: B2 in source as `StylePtr<PixelSwitchWrapper<MainHyperResponsiveRotoscopePrequelsBaseColor>>("...")` — the helper resolves to a purple style (`Rgb<118,0,194>`), but the tile displayed a white dot labeled "White". Root cause in `renderer/index.html`: both color-detection sites (the inline collapsed-tile renderer near line 11050 and the shared `_resolveSlotColor` near line 11253) took the OUTER name from `slot.expr` and scanned that helper's body. For a wrapper like `PixelSwitchWrapper`, that body contains color literals from the wrapper's own machinery (TransitionEffect/AlphaL boilerplate), so an early `White` won over the user-visible color which actually comes from the inner style's body. Fixed by adding a `_resolveLeafStyleName(expr)` helper that walks down through wrapper INNER class params (using existing `_getHelperTemplateParams` / `_parseCurrentTemplateArgs`) to find the leaf style name, then scanning the LEAF's body for the earliest color. Both detection sites now use the leaf. Plain non-wrapper helpers are unaffected (no INNER param → leaf is themselves). Recursion capped at 5 levels defensively. | Fixed |
+| BUG-022 | §64.15a (TC-1140 through TC-1143) | P3 | Build modal's close button still read "Cancel" after "✓ Flash Complete" (and after other terminal states once the user had passed through a flow that renamed it). Root cause: the DFU driver-fix screen at `renderer/buildPanel.js:2068` correctly sets `bm-close.textContent = 'Cancel'` because the user CAN cancel that intermediate step — but `finishBuildModal` (the terminal-state helper at line 1041) never reset the label, so the rename persisted into subsequent success/failure modals where there's nothing to cancel. Fixed by adding `_closeBtn.textContent = 'Close'` to `finishBuildModal` right after the show-button line, so every terminal modal state clears stale labels. Mid-flow labels (DFU "Cancel") still work because those code paths set the text after `finishBuildModal` isn't running. | Fixed |
+| BUG-021 | §64.15 (TC-1136 through TC-1139) | P2 | Opening a B2+ slot whose template helper has an empty INNER class param (e.g. `StylePtr<PixelSwitchWrapper>("...")` in source) showed the Inner Style dropdown filled in with B1's style name as a default — but the source was NEVER actually updated until the user manually bumped the dropdown (even selecting the same value worked). The pre-populate code at `renderer/index.html:12058-12069` wrote the inferred default into `editTemplateArgs[idx]` (in-memory state) so the UI rendered it, but no `commitTemplateArgs()` call followed. Result: dropdown lied about a value the config didn't have, so compiles failed with `error: no matching function for call to 'StylePtr<template<class INNER> using PixelSwitchWrapper = ...'>` (cascading into `cannot convert 'Preset*' to 'BladeBase*'`) — the bare template-alias form is illegal as a `StylePtr<>` argument. Fixed by adding a `_prepopulatedFromB1` flag in the pre-populate loop and, when set, calling `commitTemplateArgs()` immediately, then returning early from `_startSlotArgEdit`. The commit triggers the standard atomicEdit + `_reopenAfterRebuild` flow, so the slot reopens (~50ms later) with the committed state — same pattern every dropdown change already uses. Gating: only fires when (a) editing B2 or higher, (b) B1 is a library helper, (c) the INNER slot is empty in source. Existing values are preserved (TC-1137). | Fixed |
+| BUG-020 | §41 Build / Compile (TC-553a, TC-553b) | P2 | "✗ Compile Failed" modal overflowed and pushed the Close button off-screen on C++ template-instantiation errors. GCC fully expands template aliases inline, so a single error line for `StylePtr<PixelSwitchWrapper>` (where `PixelSwitchWrapper` is a `template<class INNER> using ... = TransitionEffect<...>`) can be several KB on one line. The modal status box (`#bm-status`) had no width or height constraint and lived in a `display:flex; justify-content:space-between` row — long content expanded the box, shoving the action buttons off the visible area. Two fixes: (1) `toolchain.js extractCompileError` rewritten to peel the leading absolute path (`C:\Users\Ryan\AppData\Roaming\…\config\`) and keep just `basename:line`, then cap the error message itself at 180 chars per line with an ellipsis, then cap total errors at 3 with a `…and N more (full output in Build Output panel)` footer pointing the user at the persistent verbose log. (2) `#bm-status` CSS gained `flex: 1 1 auto; min-width: 0; max-height: 5.4em; overflow-y: auto; word-break: break-word; white-space: pre-wrap` so it can't push siblings AND scrolls internally if any single line still doesn't fit. Buttons are now always reachable. | Fixed |
+| BUG-019 | §64.14 (TC-1133 through TC-1135) | P3 | The CSS empty-state hint (`#bp-serial-log:empty::before`) vanished the instant ProffieOS streamed its welcome text on connect, so users never had a chance to read the right-click → suppress affordance. Pre-existing `::before` is fine when the log is genuinely empty (tab open, board not yet connected) but useless once data lands. Fixed by adding a persistent in-log hint entry via `_serialAppendHint()` called from `openSerialMonitor` after `_serialOpen = true`. Hint is a real DOM `.serial-line.serial-hint` element with JMT-blue left border, sits at top of scrollback, and survives the welcome flood. Gated to only emit when `log.children.length === 0`, so multiple open/close cycles (tab switch, flash reconnect) don't accumulate hints. Cleared logs are also "empty" — manual clear followed by a reconnect re-emits the hint. Subject to SERIAL_MAX_LINES trim but only after ~1000 lines, by which point the user has either internalized the affordance or doesn't need it. | Fixed |
+| BUG-018 | §64.14 (TC-1132) | P2 | Opening the Serial Monitor tab BEFORE a board was connected left the tab stuck at "no port selected" forever. When the user later plugged in the board, port detection auto-selected the port (`refreshPorts` set `selectedPort`), but no listener tied that auto-detection to opening the monitor — the user had to bump the port dropdown or switch tabs to trigger the connect, which is not discoverable. The user-driven `onPortChange` handler already had the right logic (`if _serialActive && !window._isFlashing → reopen monitor`), but it only fires on dropdown clicks, not on auto-detection. Fixed in `renderer/buildPanel.js refreshPorts` by adding an auto-open trigger at the end of the function: if `_serialActive && !_serialOpen && selectedPort && !window._isFlashing && !_serialAutoPaused`, await `openSerialMonitor()` and refocus the send input. The `_serialAutoPaused` guard prevents racing with `resumeSerialAfterFlash`, which owns the post-flash reopen with its own 800ms delay. | Fixed |
+| BUG-017 | §64.14 (TC-1110 through TC-1131) | New capability (not a regression) | Serial Monitor first cut always auto-scrolled the log to the latest line — Arduino IDE behavior, hostile to reading history. Independently, alt-tabbing back to JMT Studio with the serial tab open didn't restore document focus to the send input, so the user had to click something before typing. Two changes, both in `renderer/buildPanel.js`: (1) Smart auto-scroll — added `_serialAutoScroll` flag and scroll listener with 20px tolerance (loose enough that touchpad momentum doesn't kick the user out of auto-follow). `_serialAppendLine` only does `scrollTop = scrollHeight` when the flag is true; otherwise increments `_serialPendingNewLines` and surfaces a floating `↓ N new` pill at the bottom-right of the log (HTML + CSS in `renderer/index.html`). Click the pill, scroll back to bottom, send a command, clear the log, or press End (outside an input, serial tab active) → all snap to bottom + re-engage. Count caps at `99+`. (2) Focus restoration — `window.addEventListener('focus', ...)` in `wireSerialMonitor` calls `el('bp-serial-input').focus()` via `setTimeout(0)` when `_serialActive && _serialOpen`, so the send input is ready to receive keystrokes the moment the window regains focus. Defers past Electron's own focus bookkeeping. State preserved across pause/resume, tab switch, board reconnect after flash — verified explicitly in TC-1123 through TC-1128. | Fixed |
 
 **Severity:** P1 Blocker · P2 Major · P3 Minor · P4 Cosmetic
 

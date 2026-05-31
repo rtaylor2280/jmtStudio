@@ -43,35 +43,33 @@
     return args;
   }
 
-  /**
-   * Parse the parens string ("65535,0,0") into an array of integers.
-   */
-  function parseParens(parensStr) {
-    if (!parensStr) return [];
-    return parensStr.split(',').map(s => {
-      const v = parseInt(s.trim(), 10);
-      return Number.isFinite(v) ? v : 0;
-    });
-  }
+  // ── Parens helpers — delegate to window.proffieArgs for slot-based format ──
+  //
+  // Read/write all go through proffieArgs.readRegistryArg / writeRegistryArg so
+  // the slot-map-aware logic lives in one place (effect-args.js). styleArgResolver
+  // adds the value of starting from a STYLE EXPRESSION (extracting the arg names
+  // it actually uses), then per-arg read/write are slot-keyed.
 
   /**
-   * Resolve each arg to its values in the parens string.
-   * Returns an array of { kind, name, width, startPos, values }.
+   * Resolve each arg used by the expression to its current values in the parens
+   * string. Returns array of { kind, name, width, slot, values } in order of
+   * appearance in the expression. `slot` is the ArgumentName enum slot number
+   * (or null when the arg isn't recognised by the current OS version).
    */
   function resolveStyleArgs(expr, parensStr) {
     const args = findArgs(expr);
-    const vals = parseParens(parensStr);
-    let pos = 0;
+    const proffie = (typeof window !== 'undefined' ? window.proffieArgs : null);
     return args.map(arg => {
-      const startPos = pos;
-      pos += arg.width;
-      return {
-        kind:     arg.kind,
-        name:     arg.name,
-        width:    arg.width,
-        startPos,
-        values:   vals.slice(startPos, pos),
-      };
+      let values = [];
+      let slot   = null;
+      if (proffie && typeof proffie.readRegistryArg === 'function') {
+        const res = proffie.readRegistryArg(arg.name, parensStr);
+        if (res) {
+          values = res.values.map(v => v == null ? 0 : v);
+          slot   = (proffie.slotMap && proffie.slotMap[arg.name] != null) ? proffie.slotMap[arg.name] : null;
+        }
+      }
+      return { kind: arg.kind, name: arg.name, width: arg.width, slot, values };
     });
   }
 
@@ -83,23 +81,16 @@
   }
 
   /**
-   * Write new values for one arg into the parens string.
-   * Returns the updated parens string.
+   * Write new values for one arg into the parens string. Returns the updated
+   * parens string (modern slot-based format). No-ops when the arg isn't used by
+   * the style expression OR isn't in the current OS version's ArgumentName enum.
    */
   function writeArgValue(expr, parensStr, argName, newValues) {
     const args = findArgs(expr);
-    const vals = parseParens(parensStr);
-    let pos = 0;
-    for (const arg of args) {
-      if (arg.name === argName) {
-        for (let i = 0; i < arg.width; i++) {
-          vals[pos + i] = newValues[i] != null ? newValues[i] : 0;
-        }
-        break;
-      }
-      pos += arg.width;
-    }
-    return vals.join(',');
+    if (!args.some(a => a.name === argName)) return parensStr || '';
+    const proffie = (typeof window !== 'undefined' ? window.proffieArgs : null);
+    if (!proffie || typeof proffie.writeRegistryArg !== 'function') return parensStr || '';
+    return proffie.writeRegistryArg(argName, newValues, parensStr || '');
   }
 
   /**

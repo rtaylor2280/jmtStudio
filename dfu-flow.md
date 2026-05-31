@@ -249,7 +249,7 @@ Try a manual option below, or check your internet connection.
 User clicked `▶ Install DFU Tool`.
 
 **Button changes to:** `Installing...` (disabled)
-**Status bar:** `Installing driver...`
+**Status bar:** `Installing driver utility...`
 **Manual row:** hidden
 **Cancel:** hidden
 **Progress bar:** Knightrider animation

@@ -725,24 +725,53 @@
     flex-direction: column;
     max-height: 260px;
   }
-  #bp-log-toggle {
-    background: var(--c-bg);
-    border: none;
-    border-bottom: 1px solid var(--c-border-mid);
-    color: var(--c-text-soft);
-    font-size: 0.72rem;
-    font-weight: 600;
-    padding: 4px 16px;
-    cursor: pointer;
-    text-align: left;
-    letter-spacing: 0.06em;
+  /* Header row: chevron + tab strip + context-sensitive actions. Flex layout puts
+     the chevron flush left, tabs centered-ish, action buttons flush right. */
+  #bp-log-header {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    width: 100%;
+    background: var(--c-bg);
+    border-bottom: 1px solid var(--c-border-mid);
+    padding: 0 8px 0 0;
   }
-  #bp-log-toggle:hover { color: var(--c-text-sub); background: #161616; }
-  #bp-log-clear {
+  #bp-log-toggle {
+    background: none;
+    border: none;
+    color: var(--c-text-soft);
+    font-size: 0.85rem;
+    padding: 4px 10px;
+    cursor: pointer;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+  #bp-log-toggle:hover { color: var(--c-text-sub); }
+  #bp-log-tabs {
+    display: flex;
+    gap: 0;
+    flex: 1;
+    min-width: 0;
+  }
+  .bp-log-tab {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--c-text-dim);
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 4px 12px;
+    cursor: pointer;
+    letter-spacing: 0.04em;
+    transition: color 0.1s, border-color 0.1s, background 0.1s;
+  }
+  .bp-log-tab:hover { color: var(--c-text-sub); background: #161616; }
+  .bp-log-tab.active { color: var(--c-text); border-bottom-color: var(--jmt-blue); }
+  #bp-log-actions {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    flex-shrink: 0;
+  }
+  .bp-log-action {
     background: none;
     border: none;
     color: var(--c-text-dim);
@@ -750,10 +779,193 @@
     cursor: pointer;
     padding: 0 4px;
   }
-  #bp-log-clear:hover { color: var(--c-text-sub); }
+  .bp-log-action:hover { color: var(--c-text-sub); }
+  #bp-serial-status { cursor: default; color: var(--c-text-faint); font-style: italic; }
+  #bp-serial-status.connected { color: #4d4; font-style: normal; }
+  /* Tab visibility is JS-driven (toggles 'active' class on tab buttons and panes,
+     and toggles `style.display` on the action groups via .bp-action-build /
+     .bp-action-serial selectors). Default hides serial actions until that tab is active. */
+  .bp-action-serial { display: none; }
+  #build-log.serial-active .bp-action-build  { display: none; }
+  #build-log.serial-active .bp-action-serial { display: inline-block; }
 
   #bp-log-body { display: none; }
   #bp-log-body.open { display: block; }
+  .bp-log-pane { display: none; }
+  .bp-log-pane.active { display: block; }
+
+  /* Serial Monitor pane: log fills available height, input row pinned to bottom. */
+  #bp-pane-serial {
+    display: none;
+    flex-direction: column;
+    height: 200px;
+    position: relative; /* anchor for the jump-to-bottom pill overlay */
+  }
+  #bp-pane-serial.active { display: flex; }
+  /* Jump-to-bottom pill — overlays the log, only shown when user has scrolled up
+     while new data is arriving. Click snaps to bottom and re-engages auto-scroll. */
+  #bp-serial-jump-pill {
+    position: absolute;
+    right: 16px;
+    bottom: 48px; /* clears the input row */
+    z-index: 5;
+    display: none;
+    align-items: center;
+    gap: 4px;
+    background: var(--jmt-blue);
+    color: #fff;
+    border: none;
+    border-radius: 14px;
+    padding: 4px 12px;
+    font: inherit;
+    font-size: 0.7rem;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+    user-select: none;
+  }
+  #bp-serial-jump-pill.visible { display: inline-flex; }
+  /* `button:hover { opacity: 0.82 }` is a global rule that ends up DARKENING the
+     pill on hover (lower alpha against the dark log background). Force opacity
+     back to 1 here so the brightness lift actually reads as a lift. */
+  #bp-serial-jump-pill:hover { opacity: 1; filter: brightness(1.12); }
+  #bp-serial-log {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 16px;
+    font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;
+    font-size: 0.72rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-all;
+    color: var(--c-text-sub);
+    user-select: text;
+  }
+  #bp-serial-log::-webkit-scrollbar { width: 6px; }
+  #bp-serial-log::-webkit-scrollbar-thumb { background: var(--c-border-strong); border-radius: 3px; }
+  #bp-serial-input-row {
+    display: flex;
+    gap: 6px;
+    padding: 6px 10px;
+    border-top: 1px solid var(--c-border-mid);
+    background: var(--c-bg);
+    flex-shrink: 0;
+  }
+  #bp-serial-input {
+    flex: 1;
+    min-width: 0;
+    font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;
+    font-size: 0.72rem;
+    background: var(--c-bg-card);
+    color: var(--c-text);
+    border: 1px solid var(--c-border);
+    border-radius: 3px;
+    padding: 3px 8px;
+    outline: none;
+  }
+  #bp-serial-input:focus { border-color: var(--jmt-blue); }
+  #bp-serial-input:disabled { opacity: 0.5; }
+  #bp-serial-send {
+    background: var(--jmt-blue);
+    color: #fff;
+    border: 1px solid #036bb8;
+    border-radius: 3px;
+    padding: 3px 12px;
+    font-size: 0.72rem;
+    cursor: pointer;
+  }
+  #bp-serial-send:disabled { opacity: 0.4; cursor: not-allowed; }
+  #bp-serial-send:not(:disabled):hover { background: #036bb8; }
+
+  /* Suppression filter badge (next to pause) — click to open per-filter manager.
+     Visibility is driven by classes on #build-log:
+       - hidden by default (and on the build-output tab via .bp-action-serial)
+       - shown only when serial tab is active AND at least one filter exists
+       - "clear filters" link only shows at 2+ filters */
+  #bp-serial-filters { cursor: pointer; padding: 0 4px; color: var(--c-text-dim); align-items: center; gap: 4px; }
+  #bp-serial-filters:hover { color: var(--c-text-sub); }
+  #bp-serial-filters-count { font-variant-numeric: tabular-nums; }
+  .bp-filter-icon { width: 11px; height: 11px; fill: currentColor; vertical-align: -1px; }
+  /* Default: filter badge + clearall hidden, even when serial tab is active */
+  #build-log.serial-active #bp-serial-filters,
+  #build-log.serial-active #bp-serial-filters-clearall { display: none; }
+  /* Reveal badge when serial tab active AND has filters */
+  #build-log.serial-active.has-filters #bp-serial-filters { display: inline-flex; }
+  /* Reveal clearall only with 2+ filters */
+  #build-log.serial-active.has-many-filters #bp-serial-filters-clearall { display: inline-block; }
+
+  /* Each serial log entry is a line div so right-click works on a row */
+  .serial-line { white-space: pre-wrap; word-break: break-all; }
+  .serial-line.suppressed { display: none; }
+  .serial-line:hover { background: rgba(255,255,255,0.03); }
+
+  /* Empty-state tip — shows before the monitor connects (no data yet). Once
+     connected, openSerialMonitor appends a real .serial-hint entry so the tip
+     survives the welcome flood that ProffieOS streams immediately on connect. */
+  #bp-serial-log:empty::before {
+    content: 'Right-click a noisy line to suppress similar lines. Active filters appear in the toolbar above.';
+    color: var(--c-text-faint);
+    font-style: italic;
+    display: block;
+    padding: 4px 0;
+  }
+  /* Persistent in-log hint — same message, but as a real entry so it stays in
+     scrollback after data arrives. User can scroll up to re-read. Visually
+     distinct from real serial lines via the JMT-blue left border. */
+  .serial-line.serial-hint {
+    color: var(--c-text-faint);
+    font-style: italic;
+    border-left: 2px solid var(--jmt-blue);
+    padding-left: 8px;
+    margin-bottom: 4px;
+  }
+  .serial-line.serial-hint:hover { background: transparent; }
+
+  /* Right-click context menu */
+  .serial-ctx-menu {
+    position: fixed;
+    z-index: 10001;
+    background: var(--c-bg-card);
+    border: 1px solid var(--c-border-strong);
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    font-size: 0.72rem;
+    min-width: 220px;
+    padding: 4px 0;
+  }
+  .serial-ctx-item {
+    padding: 6px 12px;
+    cursor: pointer;
+    color: var(--c-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 380px;
+  }
+  .serial-ctx-item:hover { background: var(--c-bg-hover); }
+  .serial-ctx-sep { height: 1px; background: var(--c-border-mid); margin: 4px 0; }
+
+  /* Filter management popover */
+  .serial-suppress-popover {
+    position: fixed;
+    z-index: 10001;
+    background: var(--c-bg-card);
+    border: 1px solid var(--c-border-strong);
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    font-size: 0.72rem;
+    min-width: 240px;
+    max-width: 400px;
+    max-height: 280px;
+    overflow-y: auto;
+    padding: 4px 0;
+  }
+  .serial-suppress-row { display: flex; align-items: center; gap: 6px; padding: 4px 8px; }
+  .serial-suppress-row:hover { background: var(--c-bg-hover); }
+  .serial-suppress-type { color: var(--c-text-dim); font-size: 0.65rem; text-transform: uppercase; min-width: 64px; flex-shrink: 0; }
+  .serial-suppress-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--c-text); font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace; }
+  .serial-suppress-remove { background: none; border: none; color: var(--c-text-dim); cursor: pointer; padding: 0 4px; }
+  .serial-suppress-remove:hover { color: #e66; }
+  .serial-suppress-empty { padding: 8px 12px; color: var(--c-text-faint); font-style: italic; text-align: center; }
   #bp-setup-notice {
     padding: 8px 16px;
     background: #0d1a26;
@@ -849,7 +1061,30 @@
   }
   #bm-title       { font-size: 1.1rem; font-weight: 700; color: var(--c-text-bright); margin-bottom: 18px; letter-spacing: 0.04em; }
   #bm-bar-track   { height: 6px; background: var(--c-bg-inset); border-radius: 3px; overflow: hidden; margin-bottom: 18px; position: relative; }
-  #bm-status      { font-size: 0.82rem; color: var(--c-text-soft); }
+  /* Status box sits in a flex row with bm-hint (flex:1) and the action buttons.
+     Sizing:
+       flex-grow: 0  → don't compete with bm-hint for free space; when empty
+                      (during compile) the hint text reclaims the full row and
+                      stays left-aligned. When filled (compile failed), takes
+                      its content's natural width.
+       flex-shrink: 1 + min-width: 0  → can shrink if a long error message would
+                      otherwise push the action buttons off-screen.
+       max-height: 20em + overflow-y: auto  → tall enough for the typical
+                      3-error summary without scrolling; reserves an internal
+                      scrollbar for truly egregious cases.
+     Vertical growth is preferred over horizontal — the modal width stays fixed
+     so the modal doesn't dominate the screen. */
+  #bm-status      {
+    font-size: 0.82rem;
+    color: var(--c-text-soft);
+    flex: 0 1 auto;
+    min-width: 0;
+    max-height: 20em;
+    overflow-y: auto;
+    word-break: break-word;
+    white-space: pre-wrap;
+    padding-right: 8px;
+  }
   #bm-hint        { flex: 1; opacity: 0; font-style: italic; font-size: 0.78rem; color: var(--c-text-dim); padding: 0 12px; white-space: nowrap; overflow: hidden; }
   #bm-timer-row   { display: flex; gap: 20px; justify-content: flex-end; margin-top: 10px; font-family: monospace; font-size: 0.72rem; color: var(--c-text-muted); }
   #bm-board-select-wrap { align-items: center; gap: 10px; margin-bottom: 14px; }
@@ -1608,6 +1843,13 @@
   input.styles-helper-editor-name.invalid { border-color: #c44; }
   #helper-name-error { font-size: 0.66rem; color: #c44; padding: 1px 8px 3px; display: none; }
   #helper-name-error.visible { display: block; }
+  /* Body invalid: red border around the helper Monaco container so the user
+     sees WHERE the problem is (name field has its own .invalid border above). */
+  #styles-helper-monaco.invalid { box-shadow: inset 0 0 0 1px #c44; }
+  /* Chromium suppresses native title tooltips on disabled buttons (implicit
+     pointer-events: none). Re-enable hover so the Save button's tooltip — the
+     channel we use to explain WHY save is disabled — actually shows. */
+  #btn-helper-save:disabled { pointer-events: auto; cursor: not-allowed; }
   .helper-pencil-btn { font-size: 0.72rem; opacity: 0.35; background: none; border: none; cursor: pointer; padding: 1px 4px; border-radius: 3px; color: var(--c-text-muted); flex-shrink: 0; line-height: 1; }
   .helper-pencil-btn:hover { opacity: 1; background: var(--c-bg-hover); }
   #btn-helper-pencil-confirm { color: #4a4; opacity: 0.75; }
@@ -2446,15 +2688,46 @@
   &nbsp;<button id="linux-serial-copy" style="background:rgba(200,150,10,0.15);color:#c89010;border:1px solid rgba(200,150,10,0.35);border-radius:3px;padding:2px 9px;font-size:0.7rem;cursor:pointer;vertical-align:middle;">Copy Commands</button>
 </div>
 
-<!-- ── Log panel ── -->
+<!-- ── Log panel (tabbed: Build Output / Serial Monitor) ── -->
 <div id="build-log">
-  <button id="bp-log-toggle">
-    <span>▼ Build Output</span>
-    <button id="bp-log-clear">✕ clear</button>
-  </button>
+  <div id="bp-log-header">
+    <button id="bp-log-toggle" title="Expand / collapse panel">▼</button>
+    <div id="bp-log-tabs">
+      <button class="bp-log-tab active" data-tab="build">Build Output</button>
+      <button class="bp-log-tab" data-tab="serial">Serial Monitor</button>
+    </div>
+    <div id="bp-log-actions">
+      <!-- Build tab actions -->
+      <button class="bp-log-action bp-action-build" id="bp-log-clear">✕ clear</button>
+      <!-- Serial tab actions (hidden by default, shown when serial tab active) -->
+      <span class="bp-log-action bp-action-serial" id="bp-serial-status">disconnected</span>
+      <span class="bp-log-action bp-action-serial" id="bp-serial-filters" title="Click to manage active filters">
+        <svg class="bp-filter-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 2.5h13a.5.5 0 0 1 .4.8l-4.9 6.5v4.7a.5.5 0 0 1-.7.45l-2.6-1.2a.5.5 0 0 1-.3-.46V9.8L1.1 3.3a.5.5 0 0 1 .4-.8z"/></svg>
+        <span id="bp-serial-filters-count">0</span>
+      </span>
+      <button class="bp-log-action bp-action-serial" id="bp-serial-filters-clearall" title="Clear all filters">clear filters</button>
+      <button class="bp-log-action bp-action-serial" id="bp-serial-pause" title="Pause incoming data (still buffered)">❚❚ pause</button>
+      <button class="bp-log-action bp-action-serial" id="bp-serial-close" title="Close the connection and return to Build Output" style="display:none">⏏ close</button>
+      <button class="bp-log-action bp-action-serial" id="bp-serial-clear">✕ clear</button>
+    </div>
+  </div>
   <div id="bp-log-body">
-    <div id="bp-setup-notice" style="display:none">First-time setup: downloading and installing required build tools. This only happens once and may take several minutes on slower connections. Compile and flash will be available when setup is complete.</div>
-    <div id="bp-log-content"></div>
+    <!-- Build Output pane -->
+    <div class="bp-log-pane active" id="bp-pane-build">
+      <div id="bp-setup-notice" style="display:none">First-time setup: downloading and installing required build tools. This only happens once and may take several minutes on slower connections. Compile and flash will be available when setup is complete.</div>
+      <div id="bp-log-content"></div>
+    </div>
+    <!-- Serial Monitor pane -->
+    <div class="bp-log-pane" id="bp-pane-serial">
+      <div id="bp-serial-log"></div>
+      <button id="bp-serial-jump-pill" type="button" title="Jump to bottom and re-enable auto-scroll">
+        &#x2193; <span id="bp-serial-jump-count">0</span> new
+      </button>
+      <div id="bp-serial-input-row">
+        <input type="text" id="bp-serial-input" placeholder="Send to board..." autocomplete="off" spellcheck="false">
+        <button id="bp-serial-send" disabled>Send</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -3409,11 +3682,12 @@ function _detectBoardFromInclude(content) {
 }
 
 // Live auto-detect from editor content while the user is editing.
-// The `#include "proffieboard_vN_config.h"` line is the source of truth — the dropdown is
-// a mirror. On every edit:
-//   - If an include line is present and differs from the current dropdown value → sync.
-//   - If no include line is present → leave the dropdown alone (don't clear a prior pick;
-//     a brand-new config might not have its include yet).
+// The `#include "proffieboard_vN_config.h"` line is the source of truth — the dropdown
+// is a mirror. On every edit:
+//   - Include line present and differs from dropdown → sync to it.
+//   - Include line absent and dropdown has a value → clear back to "Select a board" so
+//     the UI doesn't lie about what the config would compile to. The compiler can't
+//     build without the include, so a stale selection is worse than no selection.
 // Debounced 250ms so it doesn't spam regex matches on every keystroke.
 let _autoDetectBoardTimer = null;
 let _suppressBoardDirty   = false; // set during programmatic board sync so the change
@@ -3426,13 +3700,20 @@ function _scheduleAutoDetectBoard() {
     if (!boardSel) return;
     const content  = (typeof editor !== 'undefined' && editor) ? editor.getValue() : '';
     const detected = _detectBoardFromInclude(content);
-    if (!detected) return; // no include in content yet — preserve current dropdown value
-    if (detected === boardSel.value) return; // already in sync
-    if (!Array.from(boardSel.options).some(o => o.value === detected)) return;
-    _suppressBoardDirty = true;
-    boardSel.value = detected;
-    boardSel.dispatchEvent(new Event('change'));
-    _suppressBoardDirty = false;
+    if (detected) {
+      if (detected === boardSel.value) return; // already in sync
+      if (!Array.from(boardSel.options).some(o => o.value === detected)) return;
+      _suppressBoardDirty = true;
+      boardSel.value = detected;
+      boardSel.dispatchEvent(new Event('change'));
+      _suppressBoardDirty = false;
+    } else if (boardSel.value) {
+      // Include was removed (user deleted/commented the line) — reset dropdown.
+      _suppressBoardDirty = true;
+      boardSel.value = '';
+      boardSel.dispatchEvent(new Event('change'));
+      _suppressBoardDirty = false;
+    }
   }, 250);
 }
 
@@ -3510,6 +3791,10 @@ function loadContent(rawContent, filePath) {
   if (isElectron && window.refreshPorts) window.refreshPorts();
   // refreshPorts triggers checkCacheForConfig once FQBN is resolved
   window.clearBuildLog?.();
+  // Scrub stale "Flash successful" / "Compile successful" status text from the
+  // previously-loaded file so the new file's bar accurately reflects "nothing
+  // done yet" rather than inheriting the prior terminal state.
+  window.resetBuildStatusForFileLoad?.();
 }
 
 function clearMeta() {
@@ -4046,6 +4331,12 @@ function setFilePath(p) {
   updateWindowTitle();
   _hideTxtConvertNotice();
   if (p) _restoreFilenameReadonly();
+  // Re-evaluate Compile button — `updateCompileButton` gates on
+  // `!window._currentFilePath`, so a fresh path needs to be observed to
+  // clear the disabled state after `+ New` + Save (loadContent + setValue
+  // fires before fileIsOpen=true so the content-change handler skips the
+  // post-load button refresh).
+  window.updateCompileButton?.();
 }
 
 document.getElementById('btn-save')    ?.addEventListener('click', doSave);
@@ -4824,6 +5115,37 @@ document.getElementById('btn-check-updates').addEventListener('click', async () 
     btn.textContent = 'Check for Updates';
   }
 });
+
+// ── Dev-mode unlock: Android-style 7-tap on the version string in Settings.
+// Session-only — app restart clears it. Once unlocked, the addon-branch toggle
+// becomes visible in the versions panel, and the version label shows "(DEV)".
+(function _wireDevModeUnlock() {
+  const verEl = document.getElementById('about-version-str');
+  if (!verEl) return;
+  let _devClicks = 0;
+  let _devClicksTimer = null;
+  verEl.style.cursor = 'default';
+  verEl.style.userSelect = 'none';
+  verEl.addEventListener('click', () => {
+    if (window._jmtDevMode) return;
+    clearTimeout(_devClicksTimer);
+    _devClicks++;
+    _devClicksTimer = setTimeout(() => { _devClicks = 0; }, 3000);
+    if (_devClicks >= 7) {
+      _devClicks = 0;
+      clearTimeout(_devClicksTimer);
+      window._jmtDevMode = true;
+      const badge = document.createElement('span');
+      badge.id = 'about-dev-badge';
+      badge.textContent = '(DEV)';
+      badge.style.cssText = 'color:#e44;font-weight:700;font-size:0.72rem;margin-left:6px;letter-spacing:0.05em;';
+      verEl.parentNode.insertBefore(badge, verEl.nextSibling);
+      // Re-render the versions panel so the branch toggle shows up immediately
+      // even if the user already had a version open in that panel.
+      if (typeof window.vpRefresh === 'function') window.vpRefresh();
+    }
+  });
+})();
 
 document.getElementById('btn-update-notes-toggle').addEventListener('click', () => {
   const body = document.getElementById('update-notes-body');
@@ -5639,16 +5961,22 @@ function _scanEffects(usingCode) {
 window._isStylesDirty = () => _isStylesDirtyFlag;
 
 // ── Style Library file structure ─────────────────────────────────────────────
-const _SL_HELPER_HEADER   = '/*****************************\n    Helper functions\n*****************************/';
-const _SL_CHARGING_HEADER = '/*****************************\n    Charging Styles\n*****************************/';
-const _SL_STYLE_HEADER    = '/*****************************\n    Using styles\n*****************************/';
-const _SL_JMT_HEADER_RE   = /^\/\/ =+\r?\n\/\/ Style Library[^\n]*\r?\n(?:\/\/ @jmt:[^\n]*\r?\n)*\/\/ =+\r?\n?/m;
+const _SL_HELPER_HEADER      = '/*****************************\n    Helper functions\n*****************************/';
+const _SL_CHARGING_HEADER    = '/*****************************\n    Charging Styles\n*****************************/';
+const _SL_PIXEL_RELAY_HEADER = '/*****************************\n    Pixel Relay Styles\n*****************************/';
+const _SL_STYLE_HEADER       = '/*****************************\n    Using styles\n*****************************/';
+const _SL_JMT_HEADER_RE      = /^\/\/ =+\r?\n\/\/ Style Library[^\n]*\r?\n(?:\/\/ @jmt:[^\n]*\r?\n)*\/\/ =+\r?\n?/m;
 // Symbols that require the JMT charge-full prop functions include. Currently just one — list
 // is the single source of truth for both detection (which entries go in the Charging section)
 // and the guard wrap that's emitted around the section.
 const _SL_CHARGING_GUARD            = 'FUNCTIONS_CHARGE_FULL_PROP_H';
 const _SL_JMT_DEPENDENT_SYMBOLS     = ['ChargeFullPropF'];
 const _SL_CHARGING_SYMBOL_RE        = new RegExp(`\\b(?:${_SL_JMT_DEPENDENT_SYMBOLS.join('|')})\\b`);
+// Symbols that require the JMT pixel-relay styles include. Same shape as charging:
+// list drives both detection and the #ifdef wrap.
+const _SL_PIXEL_RELAY_GUARD         = 'STYLES_PIXEL_RELAY_H';
+const _SL_PIXEL_RELAY_SYMBOLS       = ['PixelRelay'];
+const _SL_PIXEL_RELAY_SYMBOL_RE     = new RegExp(`\\b(?:${_SL_PIXEL_RELAY_SYMBOLS.join('|')})\\b`);
 
 function _buildStyleLibraryJmtHeader(createdDate) {
   const today = new Date().toISOString().slice(0, 10);
@@ -5677,17 +6005,19 @@ function _stripStyleLibraryStructure(content) {
     .replace(/^\/\/ =+\r?\n\/\/ JMT Studio[^\n]*\r?\n(?:\/\/[^\n]*\r?\n)*\/\/ =+\r?\n?/m, '')
     .replace(/\/\*[*\s]*Helper\s+functions[*\s]*\*\/[ \t]*\r?\n?/gi, '')
     .replace(/\/\*[*\s]*Charging\s+Styles[*\s]*\*\/[ \t]*\r?\n?/gi, '')
+    .replace(/\/\*[*\s]*Pixel\s+Relay\s+Styles[*\s]*\*\/[ \t]*\r?\n?/gi, '')
     .replace(/\/\*[*\s]*Using\s+styles[*\s]*\*\/[ \t]*\r?\n?/gi, '');
 
-  // Unwrap `#ifdef FUNCTIONS_CHARGE_FULL_PROP_H` ... `#endif` blocks as a pair, preserving the
-  // content between. Match the first #endif after each #ifdef (non-greedy) — guard against
-  // accidentally swallowing an unrelated #endif by requiring the labeled trailing comment when
-  // present, but accept a bare #endif too since user-written files may not have the label.
-  const blockRe = new RegExp(
-    `^#ifdef\\s+${_SL_CHARGING_GUARD}[ \\t]*\\r?\\n([\\s\\S]*?)^#endif(?:[ \\t]*//[^\\n]*)?[ \\t]*\\r?\\n?`,
-    'gm'
-  );
-  result = result.replace(blockRe, '$1');
+  // Unwrap `#ifdef <GUARD>` ... `#endif` blocks as pairs, preserving the content between.
+  // Match the first #endif after each #ifdef (non-greedy). Same routine for each known
+  // guard so entries inside parse cleanly — they get re-wrapped by _applyStyleLibraryStructure.
+  for (const guard of [_SL_CHARGING_GUARD, _SL_PIXEL_RELAY_GUARD]) {
+    const blockRe = new RegExp(
+      `^#ifdef\\s+${guard}[ \\t]*\\r?\\n([\\s\\S]*?)^#endif(?:[ \\t]*//[^\\n]*)?[ \\t]*\\r?\\n?`,
+      'gm'
+    );
+    result = result.replace(blockRe, '$1');
+  }
 
   return result.replace(/^\s*\n/, '');
 }
@@ -5701,12 +6031,15 @@ function _applyStyleLibraryStructure(content, createdDate) {
   if (!entries.length) return jmtHeader + '\n\n' + stripped.trimStart();
 
   const { preamble, segments } = _buildSegments(stripped, entries);
-  // Charging takes precedence over helper/style classification — anything that requires the
-  // JMT prop functions include must sit inside the `#ifdef` guard, whether it's a helper or
-  // a top-level using style.
-  const chargingSegs = segments.filter(s =>  s.entry.isCharging);
-  const helperSegs   = segments.filter(s => !s.entry.isCharging &&  s.entry.isHelper);
-  const styleSegs    = segments.filter(s => !s.entry.isCharging && !s.entry.isHelper);
+  // Guarded sections take precedence over helper/style classification — anything that requires
+  // a JMT include must sit inside the matching `#ifdef` guard, whether it's a helper or a
+  // top-level using style. Precedence: Charging > Pixel Relay > Helper > Style. A combo entry
+  // (needs both Charging and Pixel Relay defines) lands in Charging; the user must define both
+  // headers themselves — this is rare and intentional.
+  const chargingSegs   = segments.filter(s =>  s.entry.isCharging);
+  const pixelRelaySegs = segments.filter(s => !s.entry.isCharging &&  s.entry.isPixelRelay);
+  const helperSegs     = segments.filter(s => !s.entry.isCharging && !s.entry.isPixelRelay &&  s.entry.isHelper);
+  const styleSegs      = segments.filter(s => !s.entry.isCharging && !s.entry.isPixelRelay && !s.entry.isHelper);
   const norm = segs => segs.map(s => s.text.replace(/\s+$/, '')).join('\n\n');
 
   const parts = [jmtHeader, ''];
@@ -5719,6 +6052,14 @@ function _applyStyleLibraryStructure(content, createdDate) {
       `#ifdef ${_SL_CHARGING_GUARD}`, '',
       norm(chargingSegs), '',
       `#endif // ${_SL_CHARGING_GUARD}`, ''
+    );
+  }
+  if (pixelRelaySegs.length) {
+    parts.push(
+      _SL_PIXEL_RELAY_HEADER, '',
+      `#ifdef ${_SL_PIXEL_RELAY_GUARD}`, '',
+      norm(pixelRelaySegs), '',
+      `#endif // ${_SL_PIXEL_RELAY_GUARD}`, ''
     );
   }
   if (styleSegs.length)    { parts.push(_SL_STYLE_HEADER, '', norm(styleSegs), ''); }
@@ -6169,15 +6510,17 @@ function _applyStylesSearch() {
   if (countEl) countEl.textContent = shown < cards.length ? `${shown} of ${cards.length}` : `${cards.length} styles`;
 }
 
-// Classifies entries as helpers vs full styles, and marks JMT-dependent entries (currently:
-// any entry whose using-code references ChargeFullPropF — see _SL_JMT_DEPENDENT_SYMBOLS).
+// Classifies entries as helpers vs full styles, and marks JMT-dependent entries:
+//   - isCharging   → using-code references ChargeFullPropF  (needs FUNCTIONS_CHARGE_FULL_PROP_H)
+//   - isPixelRelay → using-code references PixelRelay       (needs STYLES_PIXEL_RELAY_H)
 // implComment → always full style; @jmt:helper tag or reference-based → helper.
-// isCharging takes precedence over section assignment: a charging entry lands in the
-// Charging Styles section regardless of helper status, so the #ifdef guard wraps everything
-// that won't compile without the JMT prop functions header.
+// Guarded sections take precedence over helper/style classification — an entry needing a JMT
+// include lands inside the matching #ifdef regardless of helper status, so the guard wraps
+// everything that won't compile without the corresponding header.
 function _classifyStyleEntries(entries) {
   for (const entry of entries) {
-    entry.isCharging = _SL_CHARGING_SYMBOL_RE.test(entry.usingCode || '');
+    entry.isCharging   = _SL_CHARGING_SYMBOL_RE.test(entry.usingCode || '');
+    entry.isPixelRelay = _SL_PIXEL_RELAY_SYMBOL_RE.test(entry.usingCode || '');
     if (entry.implComment) {
       entry.isHelper = false;
     } else {
@@ -6342,6 +6685,13 @@ async function _deleteStyleEntry(entry, isHelper) {
   const target     = allEntries.find(e => e.name === entry.name);
   if (!target) return;
 
+  // Snapshot for Ctrl+Z in the visual view. The keydown handler at the bottom
+  // of the file pops from this stack on undo; without this push, Ctrl+Z had
+  // nothing to restore after a card delete (drag-reorder was the only operation
+  // that captured snapshots). Clear the redo stack since this is a fresh action.
+  _styleReorderUndoStack.push(content);
+  _styleReorderRedoStack = [];
+
   const { preamble, segments } = _buildSegments(content, allEntries);
   const kept = segments.filter(s => s.entry.name !== entry.name);
   _stylesEditorInstance.setValue(preamble + kept.map(s => s.text).join(''));
@@ -6382,11 +6732,42 @@ function _syncHelperNameToEditor(newName) {
   if (!_stylesHelperEditor || _helperSyncingName || !newName) return;
   const raw = _stylesHelperEditor.getValue();
   const { prefix, code } = _splitTemplatePrefix(raw);
-  const updated = code.replace(/^(using\s+)\w+(\s*=)/, `$1${newName}$2`);
-  if (updated === code) return;
-  _helperSyncingName = true;
-  _stylesHelperEditor.setValue(prefix ? `${prefix}\n${updated}` : updated);
-  _helperSyncingName = false;
+  const trimmed = code.trim();
+  const writeBody = (newCode) => {
+    _helperSyncingName = true;
+    _stylesHelperEditor.setValue(prefix ? `${prefix}\n${newCode}` : newCode);
+    _helperSyncingName = false;
+  };
+
+  // Case 1: body already has `using OLD = …;` — replace OLD with newName.
+  if (/^using\s+\w+\s*=/.test(trimmed)) {
+    const updated = code.replace(/^(\s*using\s+)\w+(\s*=)/, `$1${newName}$2`);
+    if (updated !== code) writeBody(updated);
+    return;
+  }
+
+  // Case 2: body is empty — write `using newName = ;` so the user sees the
+  // expected structure as soon as they type a name (matches Add Style's behavior
+  // when there's content; here we go a step further and prefill the skeleton
+  // because helpers always need the `using …;` wrapper).
+  if (!trimmed) {
+    writeBody(`using ${newName} = ;`);
+    // Drop the caret between `= ` and `;` so the user can start typing the
+    // expression without manually positioning.
+    const finalValue = _stylesHelperEditor.getValue();
+    const eqOffset = finalValue.lastIndexOf('= ;');
+    if (eqOffset >= 0) {
+      const pos = _stylesHelperEditor.getModel().getPositionAt(eqOffset + 2);
+      _stylesHelperEditor.setPosition(pos);
+    }
+    return;
+  }
+
+  // Case 3: body has a raw expression with no `using` prefix (e.g. user pasted
+  // `Red`). Wrap it as `using newName = EXPR;` — same shape Add Style produces
+  // when its name+raw-expression case fires.
+  const expr = trimmed.replace(/;\s*$/, '');
+  writeBody(`using ${newName} = ${expr};`);
 }
 
 // Sync the name from the Monaco editor's using statement into the name input
@@ -6482,17 +6863,11 @@ function _openHelperAdd() {
     _stylesHelperEditor.setValue('');
     _stylesHelperEditor.setScrollPosition({ scrollTop: 0 });
     _stylesHelperEditor.layout();
+    // In add mode, focus starts in the name (title) field. The user types the
+    // name first, presses Enter to jump into the body editor (handler below
+    // places the cursor after `=`), then Tab moves on to the Notes / Save row.
     requestAnimationFrame(() => requestAnimationFrame(() => {
-      const _ni = document.getElementById('styles-helper-editor-name');
-      if (!_ni?.classList.contains('editable')) _stylesHelperEditor?.focus();
-      // After window.confirm(), Electron can leave Monaco in ghost-focus (container
-      // div focused but textarea isn't). A brief timeout catches that case.
-      setTimeout(() => {
-        if (_stylesHelperEditor && !_stylesHelperEditor.hasTextFocus()) {
-          const _ni2 = document.getElementById('styles-helper-editor-name');
-          if (!_ni2?.classList.contains('editable')) _stylesHelperEditor.focus();
-        }
-      }, 100);
+      nameInput.focus();
     }));
   }
   document.getElementById('btn-helper-save').disabled = true;
@@ -6568,10 +6943,42 @@ document.getElementById('btn-helper-save').addEventListener('click', async () =>
     const newName = nameInput.value.trim();
     if (!newName || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(newName)) {
       nameInput.classList.add('invalid');
+      _showHelperNameError('Name must be a valid identifier (letters, digits, underscores; can\'t start with a digit).');
+      nameInput.focus();
       return;
     }
-    const helperValErr = _validateCollapsedStyle(compacted, newName);
-    if (helperValErr) { alert(`Save aborted — structural error:\n\n${helperValErr}`); return; }
+    // Require the code to be a proper `using NAME = ...;` statement. If the user
+    // typed just the expression body (mirrors Add Style's input convention), wrap
+    // it; if they typed a using statement with a different name, refuse the save
+    // with a clear error rather than letting it write a malformed block whose
+    // parser-mismatched form would "disappear" from the visual view.
+    let codeToWrite = compacted.trim();
+    const usingM = codeToWrite.match(/^using\s+(\w+)\s*=/);
+    if (!usingM) {
+      if (!codeToWrite) {
+        _showHelperError('Helper body is empty — enter an expression.', 'body');
+        return;
+      }
+      // Auto-wrap as `using newName = body;` (also strip any trailing semicolon
+      // the user may have typed before re-adding our own).
+      codeToWrite = `using ${newName} = ${codeToWrite.replace(/;\s*$/, '')};`;
+    } else if (usingM[1] !== newName) {
+      _showHelperError(`Code declares "${usingM[1]}" but the name field says "${newName}". They must match (or type just the expression body and the name field will be used).`, 'body');
+      return;
+    }
+    // Reject empty-expression bodies like `using NewHelper = ;` (the placeholder
+    // we prefill when the user starts with an empty body). Saving that produces
+    // a non-compiling helper that does nothing.
+    const exprPart = codeToWrite.match(/^using\s+\w+\s*=\s*([\s\S]*?)\s*;?\s*$/);
+    if (!exprPart || !exprPart[1].trim()) {
+      _showHelperError('Helper expression is empty — fill in something between "=" and ";".', 'body');
+      return;
+    }
+    const helperValErr = _validateCollapsedStyle(codeToWrite, newName);
+    if (helperValErr) {
+      _showHelperError(`Structural error: ${helperValErr}`, 'body');
+      return;
+    }
     const allEntries = _classifyStyleEntries(_parseStyleEntries(current));
     if (allEntries.find(e => e.name === newName)) {
       _showHelperNameError(`"${newName}" already exists — choose a different name.`);
@@ -6579,7 +6986,7 @@ document.getElementById('btn-helper-save').addEventListener('click', async () =>
       nameInput.select();
       return;
     }
-    const newBlock = _buildHelperBlock(newName, notes, editorTmpl, compacted, true);
+    const newBlock = _buildHelperBlock(newName, notes, editorTmpl, codeToWrite, true);
     const { preamble, segments } = _buildSegments(current, allEntries);
     const helperSegs = segments.filter(s => s.entry.isHelper);
     if (helperSegs.length) {
@@ -7027,6 +7434,11 @@ function _setDetailDirty(val) {
   _detailDirty = val;
   const hasErr = _updateDetailErrorMarkers();
   document.getElementById('btn-style-detail-save').disabled = !val || hasErr;
+  // Button label tracks intent: "Close" when nothing to lose, "Discard" once the
+  // user has unsaved edits. Avoids the "Discard … what?" confusion when Save is
+  // disabled because the modal is still pristine.
+  const closeBtn = document.getElementById('btn-style-detail-discard');
+  if (closeBtn) closeBtn.textContent = val ? 'Discard' : 'Close';
 }
 
 function _renderDetailTags() {
@@ -7674,13 +8086,126 @@ function _updateHelperEditorButtons() {
   });
 })();
 
-function _showHelperNameError(msg) {
-  const el = document.getElementById('helper-name-error');
-  const inp = document.getElementById('styles-helper-editor-name');
-  if (!el) return;
-  el.textContent = msg;
-  el.classList.toggle('visible', !!msg);
-  if (inp) inp.classList.toggle('invalid', !!msg);
+// Surface a validation error: red-border the offending field and set the
+// reason as the Save button's tooltip (`title`). The Save button is disabled
+// whenever there's an error to surface, so the user can't click through to a
+// modal error — but hovering the disabled button reveals what's wrong. The
+// red border tells them WHERE; the tooltip tells them WHY.
+//
+// `where` is 'name' (red border on the name input) or 'body' (red border on
+// the Monaco container). Passing an empty message clears both borders and the
+// tooltip.
+function _showHelperError(msg, where) {
+  const inp     = document.getElementById('styles-helper-editor-name');
+  const monaco  = document.getElementById('styles-helper-monaco');
+  const saveBtn = document.getElementById('btn-helper-save');
+  if (inp)     inp.classList.toggle('invalid', !!msg && where === 'name');
+  if (monaco)  monaco.classList.toggle('invalid', !!msg && where === 'body');
+  if (saveBtn) saveBtn.title = msg || '';
+}
+
+// Backward-compat wrapper — kept as an alias for callers that only set name errors.
+function _showHelperNameError(msg) { _showHelperError(msg, 'name'); }
+
+// Returns true when the body has a real expression. `using NAME = ;` (the
+// auto-prefilled skeleton with nothing between `=` and `;`) is NOT a valid
+// helper — it's just the scaffolding the name-sync wrote. Raw expressions
+// (no `using` prefix) count as long as they have any non-whitespace content.
+function _helperBodyHasExpression(body) {
+  if (!body || !body.trim()) return false;
+  const m = body.match(/\busing\s+\w+\s*=\s*([\s\S]*?)\s*;?\s*$/);
+  if (m) return !!m[1].trim();
+  return true;
+}
+
+// Single source of truth for Add-Helper validation state. Re-evaluates name
+// rules, empty-expression, and bracket balance, then sets the red border, the
+// Save-button tooltip, the Monaco markers, and the Save disabled state. Called
+// from both the name input handler and the body change handler so the two
+// fields stay in sync. Priority: name error → empty body → bracket error.
+// Mirrors Add Style's bracket-check behavior (synthesizes `using NAME = ` when
+// the body is a raw expression so the parser sees a balanced statement).
+function _updateHelperBodyValidation() {
+  if (!_stylesHelperEditor) return;
+  const nameInput = document.getElementById('styles-helper-editor-name');
+  const monacoCtr = document.getElementById('styles-helper-monaco');
+  const saveBtn   = document.getElementById('btn-helper-save');
+  const model     = _stylesHelperEditor.getModel();
+  const name      = (nameInput?.value || '').trim();
+  const code      = _stylesHelperEditor.getValue();
+  const trimmed   = code.trim();
+
+  // ── Name-side errors (only meaningful in add mode or pencil-rename) ──
+  let nameError = '';
+  if (_helperEditorMode === 'add' || !nameInput.readOnly) {
+    if (name && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+      nameError = 'Name must start with a letter or underscore. Only letters, digits, and underscores allowed.';
+    } else if (name && (_helperEditorMode === 'add' || (_helperEditorOrigName && name !== _helperEditorOrigName)) && _stylesEditorInstance) {
+      const allEntries = _classifyStyleEntries(_parseStyleEntries(_stylesEditorInstance.getValue()));
+      if (allEntries.find(e => e.name === name)) {
+        nameError = `"${name}" already exists — choose a different name.`;
+      }
+    }
+  }
+
+  // ── Body-side errors: empty expression + bracket balance ──
+  const hasExpr = _helperBodyHasExpression(trimmed);
+  let bracketErr = null;
+  let bracketCheckContent = '';
+  let prefixLen = 0;
+  if (trimmed && hasExpr) {
+    const hasUsing = /\busing\s+\w+\s*=/.test(trimmed);
+    const PREFIX = 'using _check_ = ';
+    bracketCheckContent = hasUsing ? code : `${PREFIX}${trimmed.replace(/;\s*$/, '')};`;
+    prefixLen = hasUsing ? 0 : PREFIX.length;
+    const compact = _compactStyleCode(bracketCheckContent);
+    bracketErr = compact ? _findBracketError(compact) : null;
+  }
+
+  // ── Monaco bracket marker (clear-or-set) ──
+  if (model) {
+    if (bracketErr) {
+      // Re-run on non-compacted code so the marker lands at the visible line/col
+      const formatted = _findBracketError(bracketCheckContent) || bracketErr;
+      const editorOff = Math.max(0, formatted.offsetInCode - prefixLen);
+      const pos = model.getPositionAt(editorOff);
+      monaco.editor.setModelMarkers(model, 'bracket-check', [{
+        severity: monaco.MarkerSeverity.Error,
+        message:  formatted.message,
+        startLineNumber: pos.lineNumber, startColumn: pos.column,
+        endLineNumber:   pos.lineNumber, endColumn:   pos.column + 1,
+      }]);
+    } else {
+      monaco.editor.setModelMarkers(model, 'bracket-check', []);
+    }
+  }
+
+  // ── Pick the message to surface (name takes priority) ──
+  if (nameError) {
+    _showHelperError(nameError, 'name');
+  } else if (_helperEditorMode === 'add' && name && !trimmed) {
+    _showHelperError('Helper body is empty — paste a style expression or type one between `=` and `;`.', 'body');
+  } else if (_helperEditorMode === 'add' && name && trimmed && !hasExpr) {
+    _showHelperError("Helper expression is empty — fill in something between '=' and ';'.", 'body');
+  } else if (bracketErr) {
+    _showHelperError(`${bracketErr.message} — fix before saving.`, 'body');
+  } else {
+    _showHelperError('', null);
+  }
+
+  // ── Save disabled state ──
+  if (!saveBtn) return;
+  if (_helperEditorMode === 'add') {
+    saveBtn.disabled = !name || !trimmed || !!nameError || !hasExpr || !!bracketErr;
+  } else {
+    // Edit mode: dirty when code, name (pencil active), OR notes changed.
+    const notes      = (document.getElementById('helper-notes-textarea')?.value) || '';
+    const codeDirty  = code !== _helperEditorOrigDisplay;
+    const notesDirty = notes !== _helperEditorOrigNotes;
+    const nameDirty  = !nameInput.readOnly && name !== _helperEditorOrigName;
+    const dirty      = codeDirty || notesDirty || nameDirty;
+    saveBtn.disabled = !!nameError || !!bracketErr || !dirty;
+  }
 }
 
 // Add Helper — opens inline editor in add mode
@@ -7696,24 +8221,19 @@ document.getElementById('btn-add-helper').addEventListener('click', async () => 
   _openHelperAdd();
 });
 
-// Helper name input: sync to editor + update dirty state
+// Helper name input: live validate + sync to editor + update dirty state.
+// Validates AS THE USER TYPES (not just on Save click) so identifier-rule errors
+// or duplicate-name conflicts surface immediately rather than landing on the user
+// after they've clicked Save. Matches Add Style's pattern: bad input gets
+// visible feedback in the field's existing red-border + inline error path.
 document.getElementById('styles-helper-editor-name').addEventListener('input', () => {
   const nameInput = document.getElementById('styles-helper-editor-name');
-  const name = nameInput.value.trim();
-  nameInput.classList.remove('invalid');
-  _showHelperNameError('');
-  // Sync name → editor (add mode, or edit mode with pencil active)
+  // Sync name → editor (add mode, or edit mode with pencil active) BEFORE we
+  // re-validate so the just-synced skeleton/expression is what we evaluate.
   if (_helperEditorMode === 'add' || !nameInput.readOnly) {
-    _syncHelperNameToEditor(name);
+    _syncHelperNameToEditor(nameInput.value.trim());
   }
-  const saveBtn = document.getElementById('btn-helper-save');
-  if (_helperEditorMode === 'add') {
-    const code = _stylesHelperEditor ? _stylesHelperEditor.getValue().trim() : '';
-    saveBtn.disabled = !name || !code;
-  } else {
-    // In edit mode with pencil active, any name change marks dirty
-    saveBtn.disabled = false;
-  }
+  _updateHelperBodyValidation();
   _updateHelperEditorButtons();
 });
 
@@ -7728,19 +8248,14 @@ document.getElementById('btn-helper-notes-toggle').addEventListener('click', () 
   toggle.classList.toggle('has-notes', !!notes.trim());
 });
 
-// Notes textarea: mark dirty in edit mode; update save state in add mode
+// Notes textarea: mark dirty in edit mode; update save state in add mode.
+// Re-runs full body validation so a notes edit can't bypass an outstanding
+// name / expression / bracket error.
 document.getElementById('helper-notes-textarea').addEventListener('input', () => {
-  const saveBtn = document.getElementById('btn-helper-save');
-  const toggle  = document.getElementById('btn-helper-notes-toggle');
-  const notes   = document.getElementById('helper-notes-textarea').value;
+  const toggle = document.getElementById('btn-helper-notes-toggle');
+  const notes  = document.getElementById('helper-notes-textarea').value;
   toggle.classList.toggle('has-notes', !!notes.trim());
-  if (_helperEditorMode === 'add') {
-    const name = document.getElementById('styles-helper-editor-name').value.trim();
-    const code = _stylesHelperEditor ? _stylesHelperEditor.getValue().trim() : '';
-    saveBtn.disabled = !name || !code;
-  } else {
-    saveBtn.disabled = false;
-  }
+  _updateHelperBodyValidation();
   _updateHelperEditorButtons();
 });
 
@@ -7771,6 +8286,31 @@ document.getElementById('btn-helper-pencil').addEventListener('click', () => {
   confirmBtn.style.display = '';
   nameInput.focus();
   nameInput.select();
+});
+
+// Enter in the name field jumps into the body editor with the cursor placed
+// just after the `=` of the `using NAME = ;` skeleton (or after `= ` when the
+// body already has content). Tab is intentionally NOT intercepted — it still
+// follows the normal browser focus order to the next control.
+document.getElementById('styles-helper-editor-name').addEventListener('keydown', e => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  if (!_stylesHelperEditor) return;
+  const model = _stylesHelperEditor.getModel();
+  if (!model) return;
+  const text  = _stylesHelperEditor.getValue();
+  // Prefer `= ` (existing expression) so cursor lands before the value, but
+  // fall back to just `=` for the empty-skeleton case (`using NAME = ;`).
+  let off = text.indexOf('= ');
+  let after = off >= 0 ? off + 2 : -1;
+  if (after < 0) {
+    off = text.indexOf('=');
+    after = off >= 0 ? off + 1 : text.length;
+  }
+  _stylesHelperEditor.focus();
+  const pos = model.getPositionAt(after);
+  _stylesHelperEditor.setPosition(pos);
+  _stylesHelperEditor.revealPositionInCenterIfOutsideViewport(pos);
 });
 
 // Name input blur — cancel rename if focus leaves to anywhere except the confirm or save buttons
@@ -8142,6 +8682,23 @@ document.getElementById('btn-add-style-confirm').addEventListener('click', async
   _setStylesDirty(true);
   _buildStylesVisual();
   document.getElementById('modal-add-style').classList.remove('active');
+  // Surface the newly-added card. Without this, the new style is appended to
+  // the end of the (possibly long) list and stays below the fold — the user
+  // can't tell from the in-modal close alone that the add actually committed.
+  // RAF defers until after _buildStylesVisual's DOM writes are painted.
+  requestAnimationFrame(() => {
+    const list    = document.getElementById('styles-visual-list');
+    const newCard = list?.querySelector(`.style-card[data-name="${CSS.escape(name)}"]`);
+    if (newCard) {
+      newCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      // Re-use the existing card-highlight-pulse animation (also used by the
+      // "jump to card" flow). Re-trigger reliably by removing first.
+      newCard.classList.remove('highlight');
+      void newCard.offsetWidth; // force reflow so re-add restarts the animation
+      newCard.classList.add('highlight');
+      setTimeout(() => newCard.classList.remove('highlight'), 1300);
+    }
+  });
   if (_addStyleConfirmCallback) {
     const cb = _addStyleConfirmCallback;
     _addStyleConfirmCallback = null;
@@ -8510,8 +9067,12 @@ window.initStylesPanel = function() {
     const nameInput = document.getElementById('styles-helper-editor-name');
     // Ghost-focus guard: if content changed by user action (not a sync op) and Monaco's
     // textarea lost real browser focus, re-focus so character typing works.
-    // Skip if nameInput is in pencil/rename mode (it has focus intentionally).
+    // Skip when: a sync op is in flight, name input has focus (it's the initial
+    // focus target in add mode — don't steal it), OR the editor is empty (open
+    // sequence does `setValue('')` before focusing the name field; we shouldn't
+    // race the RAF that sets name focus).
     if (!_helperSyncingName &&
+        _stylesHelperEditor.getValue().trim() &&
         (_helperEditorMode === 'add' || !nameInput.readOnly) &&
         !_stylesHelperEditor.hasTextFocus() &&
         document.activeElement !== nameInput) {
@@ -8521,13 +9082,7 @@ window.initStylesPanel = function() {
     if (_helperEditorMode === 'add' || !nameInput.readOnly) {
       _syncEditorNameToInput();
     }
-    const saveBtn = document.getElementById('btn-helper-save');
-    if (_helperEditorMode === 'add') {
-      const name = nameInput.value.trim();
-      saveBtn.disabled = !name || !_stylesHelperEditor.getValue().trim();
-    } else {
-      saveBtn.disabled = _stylesHelperEditor.getValue() === _helperEditorOrigDisplay;
-    }
+    _updateHelperBodyValidation();
     _updateHelperEditorButtons();
   });
 
@@ -8655,6 +9210,10 @@ async function switchTab(name) {
     } else if (!window.getToolchainReady?.()) {
       window.electronAPI?.initToolchain();
     }
+    // Other tabs (Style Library, OS Versions) can mutate inputs that drive the
+    // compile-cache key. Re-validate on return so a now-stale "Compile restored
+    // from cache" doesn't linger.
+    window.recheckOnConfigReturn?.();
   }
 
   if (name === 'versions') {
@@ -8681,6 +9240,15 @@ async function switchTab(name) {
 
 document.querySelectorAll('.tab').forEach(t => {
   t.addEventListener('click', () => switchTab(t.dataset.tab));
+});
+
+// Window focus → re-validate the compile-cache claim when on the Config Manager.
+// Catches the case where the user alt-tabbed away, edited something externally
+// (or in another window of the app), and came back. Cheap when nothing changed
+// (cache check uses memoized OS-source hash; on hit, status stays "restored from
+// cache"; on miss, downgrades).
+window.addEventListener('focus', () => {
+  if (_activeTab === 'config') window.recheckOnConfigReturn?.();
 });
 
 // ── Favorites ──────────────────────────────────────────
@@ -9245,12 +9813,19 @@ require(['vs/editor/editor.main'], function () {
       }).trim();
     }
 
-    function _openSidecar() {
+    async function _openSidecar() {
       _sidecarOpen = true;
-      _ensureStylesLoaded();
       const el = document.getElementById('preset-sidecar');
       el.classList.add('open');
       el.classList.remove('collapsed');
+      // Styles file feeds the slot-tile color swatch (helper RgbArg defaults).
+      // Await it BEFORE the first render so swatches paint correctly on first
+      // pass — no second rebuild, no "swatches pop in" jump. Sub-50ms file
+      // read; the sidebar visually opens immediately via the class toggles
+      // above, then the preset list paints once the styles are in hand. This
+      // is independent of the ArgumentName enum, which loads lazily later.
+      await _ensureStylesLoaded();
+      if (!_sidecarOpen) return; // user closed during the brief load window
       _rebuildSidecar();
       const arr = _parseResult?.arrays[_activeArrayIndex];
       if (arr?.presets.length) {
@@ -9683,7 +10258,19 @@ require(['vs/editor/editor.main'], function () {
       // checkbox has keyboard focus mid-navigation — would otherwise wipe out the
       // user's in-flight typing / lose the checkbox focus. The next Monaco edit at
       // commit / blur time will trigger another rebuild that completes the render.
-      if (_editingField || _keyboardNavInProgress) return;
+      if (_editingField || _keyboardNavInProgress) {
+        // Self-heal — if the flags claim "edit in progress" but no field input is in
+        // the DOM AND no Common checkbox currently has focus, the flags are stale
+        // (typical cause: user closed the sidecar or focus moved to Monaco without
+        // routing through the normal blur/restore path). Reset and continue rendering
+        // instead of leaving the list stuck on pre-edit data until the next sidecar
+        // open.
+        const liveFieldInput = document.querySelector('.preset-edit-input');
+        const liveCbFocus    = document.activeElement?.matches?.('.preset-common-toggle input[type="checkbox"]');
+        if (liveFieldInput || liveCbFocus) return;
+        _editingField           = false;
+        _keyboardNavInProgress  = false;
+      }
       _disabledPresets = _scanDisabledPresets(editor.getValue());
       // Re-find the selected disabled preset by startLine after a rebuild
       if (_selectedDisabledPreset) {
@@ -10721,14 +11308,15 @@ require(['vs/editor/editor.main'], function () {
           if (_cr) _rgb16 = window.proffieArgs.resolveColorDefault(_cr.defaultExpr || '');
         }
         if (!_rgb16 && window.proffieArgs) {
-          // Library definition hardcoded color: scan the helper's definition for the
-          // EARLIEST color (Rgb16<>, Rgb<>, or named) — same logic the expanded slot
-          // editor uses for "Detected Base Color (Style Library)". Old version only
-          // looked for named tokens, so a library style starting with
-          // `Rgb<180,130,0>` reported a later `White` deep inside an `AlphaL<…>`.
-          const _bn2 = slot.expr ? (slot.expr.match(/^(\w+)/) || [])[1] : null;
-          if (_bn2) {
-            const _hit = _earliestColorInText(_getHelperDefinitionText(_bn2));
+          // Library definition hardcoded color: walk down through any wrapper INNER
+          // params to the leaf style, then scan ITS definition for the earliest
+          // color. Without leaf resolution, `PixelSwitchWrapper<MyPurpleStyle>`
+          // scans PixelSwitchWrapper's body and picks up a White literal deep in
+          // its TransitionEffect machinery, masking the user-visible purple from
+          // MyPurpleStyle. The wrapper just delegates color to its inner.
+          const _leafName = _resolveLeafStyleName(slot.expr);
+          if (_leafName) {
+            const _hit = _earliestColorInText(_getHelperDefinitionText(_leafName));
             if (_hit) _rgb16 = _hit.rgb16;
           }
         }
@@ -10752,9 +11340,13 @@ require(['vs/editor/editor.main'], function () {
           const _rgb8 = [Math.round(_rgb16[0]/257), Math.round(_rgb16[1]/257), Math.round(_rgb16[2]/257)];
           const colorRow = document.createElement('span');
           colorRow.className = 'preset-slot-color';
+          // Swatch wrapper exists so the mismatch ⚠ can sit at the corner via absolute
+          // positioning without disturbing the existing swatch layout.
+          const _swWrap = document.createElement('span');
+          _swWrap.style.cssText = 'position:relative;display:inline-block;line-height:0;flex-shrink:0;';
           const swatch = document.createElement('span');
           swatch.className = 'preset-slot-color-swatch';
-          swatch.style.cssText = 'width:14px;height:14px;border-radius:50%;display:inline-block;overflow:hidden;flex-shrink:0;';
+          swatch.style.cssText = 'width:14px;height:14px;border-radius:50%;display:inline-block;overflow:hidden;';
           try {
             const _tc = GlowSwatch.create({ animated: false, width: 14, height: 14, color: _rgb8 });
             _tc.element.style.clipPath = 'circle(50% at 50% 50%)';
@@ -10763,7 +11355,29 @@ require(['vs/editor/editor.main'], function () {
           } catch(e) {
             swatch.style.background = `rgb(${_rgb8.join(',')})`;
           }
-          colorRow.appendChild(swatch);
+          _swWrap.appendChild(swatch);
+          // Phase C: wrapper-vs-inner color mismatch warning. When the user hasn't
+          // specified a colorArg AND the wrapper's default ≠ the inner's default
+          // color, the saber will paint two different colors (wrapper during
+          // preon/postoff, inner during active blade). Surface that at-a-glance so
+          // the user knows there's something to investigate in the expanded view.
+          const _mismatch = _detectInnerColorMismatch(slot);
+          if (_mismatch && window.proffieArgs) {
+            const _innerLbl = window.proffieArgs.colorLabel(_mismatch.innerColor[0], _mismatch.innerColor[1], _mismatch.innerColor[2]);
+            const _wrapLbl  = window.proffieArgs.colorLabel(_mismatch.wrapperDefault[0], _mismatch.wrapperDefault[1], _mismatch.wrapperDefault[2]);
+            const _warn = document.createElement('span');
+            _warn.textContent = '⚠';
+            _warn.style.cssText = 'position:absolute;top:-4px;right:-4px;font-size:0.72rem;color:#e0a020;background:var(--c-bg-card);border-radius:50%;line-height:1;padding:0 1px;text-shadow:0 0 2px rgba(0,0,0,0.5);';
+            // Tooltip messaging differs by inner kind. RgbArg-resolved inner is
+            // overridable (Match B1 / colorArg / swatch picker on the wrapper).
+            // Hardcoded-literal inner has no override surface — the user has to
+            // either set a wrapper colorArg to mask both, or change the inner.
+            _warn.title = _mismatch.innerHasArg
+              ? `Wrapper paints ${_wrapLbl} during preon, inner paints ${_innerLbl} when ignited. Open this slot to set a single color and resolve the mismatch.`
+              : `Wrapper paints ${_wrapLbl} during preon, inner paints ${_innerLbl} (hardcoded) when ignited. Set a colorArg on the wrapper to override both, or change the inner style.`;
+            _swWrap.appendChild(_warn);
+          }
+          colorRow.appendChild(_swWrap);
           colorRow.appendChild(document.createTextNode(window.proffieArgs ? window.proffieArgs.colorLabel(_rgb16[0], _rgb16[1], _rgb16[2]) : `Rgb<${_rgb8.join(',')}>`));
           body.appendChild(colorRow);
         }
@@ -10888,6 +11502,145 @@ require(['vs/editor/editor.main'], function () {
         return { rgb16: window.proffieArgs.resolveColorDefault(`Rgb<${m8[1]},${m8[2]},${m8[3]}>`), matchStr: m8[0], matchIndex: m8.index };
       }
       return { rgb16: namedRgb16, matchStr: namedStr, matchIndex: namedPos };
+    }
+
+    // Wrapper-vs-inner color mismatch. When a slot is a wrapper template with a
+    // class INNER parameter (e.g. PixelSwitchWrapper), the saber paints two
+    // colors at different moments: the wrapper's BASE_COLOR_ARG default during
+    // preon/postoff/transitions, and the inner's BASE_COLOR_ARG default during
+    // the active blade.
+    //
+    // The structural ("could ever mismatch") check is split from the runtime
+    // ("is currently mismatching") check so the disclosure UI can be built once
+    // when the slot opens and just toggle visibility as `slot.colorArg` changes
+    // mid-edit. Without that split, the warning DOM wouldn't exist when the
+    // user RE-creates the mismatch by clicking X to clear colorArg — there'd
+    // be nothing to re-show until close+reopen.
+    function _canHaveInnerMismatch(slot) {
+      if (!slot || !slot.expr || !window.proffieArgs) return null;
+      const baseName = (slot.expr.match(/^(\w+)/) || [])[1];
+      if (!baseName) return null;
+      const tParams = (typeof _getHelperTemplateParams === 'function'
+        ? _getHelperTemplateParams(baseName) : []) || [];
+      const innerIdx = tParams.findIndex(p => p.type === 'class' && p.name === 'INNER');
+      if (innerIdx < 0) return null;
+      const tArgs = (typeof _parseCurrentTemplateArgs === 'function'
+        ? _parseCurrentTemplateArgs(slot.expr, baseName) : []) || [];
+      const innerExpr = (tArgs[innerIdx] || '').trim();
+      if (!innerExpr) return null;
+      const innerBase = (innerExpr.match(/^(\w+)/) || [])[1];
+      if (!innerBase) return null;
+      // Inner color resolution: prefer the inner's own RgbArg<BASE_COLOR_ARG, …>
+      // default; fall back to the earliest hardcoded color literal in the inner's
+      // definition body (`using Test = Red;` — no RgbArg but still a determined
+      // steady-state color). Mirrors the leaf-resolve path in `_resolveSlotColor`
+      // so the mismatch warning fires consistently with what the tile paints.
+      // `innerHasArg` flags which path resolved the color — callers use it to
+      // explain to the user whether the inner is overridable (RgbArg) or pinned
+      // (hardcoded literal, can only be changed by editing the inner style).
+      let innerColor = null;
+      let innerHasArg = false;
+      const innerRegArgs = _getHelperRegistryArgs(innerBase) || [];
+      const innerRgb = innerRegArgs.find(a => a.kind === 'RgbArg');
+      if (innerRgb) {
+        innerColor = window.proffieArgs.resolveColorDefault(innerRgb.defaultExpr || '');
+        innerHasArg = true;
+      } else {
+        const _hit = _earliestColorInText(_getHelperDefinitionText(innerBase));
+        if (_hit) innerColor = _hit.rgb16;
+      }
+      if (!innerColor) return null;
+      const wrapperRegArgs = _getHelperRegistryArgs(baseName) || [];
+      const wrapperRgb = wrapperRegArgs.find(a => a.kind === 'RgbArg');
+      if (!wrapperRgb) return null;
+      const wrapperDefault = window.proffieArgs.resolveColorDefault(wrapperRgb.defaultExpr || '');
+      const same = innerColor[0] === wrapperDefault[0]
+                && innerColor[1] === wrapperDefault[1]
+                && innerColor[2] === wrapperDefault[2];
+      if (same) return null;
+      return { innerColor, wrapperDefault, innerName: innerBase, innerHasArg };
+    }
+
+    // Runtime check: returns the structural info only if the user hasn't pinned
+    // a colorArg (since a set colorArg means both wrapper and inner paint the
+    // same value — no visible mismatch). Used by the collapsed-tile ⚠ icon and
+    // the live disclosure visibility toggle in the expanded view.
+    function _detectInnerColorMismatch(slot) {
+      if (slot && slot.colorArg) return null;
+      return _canHaveInnerMismatch(slot);
+    }
+
+    // Walk down through wrapper templates with a class INNER param to find the
+    // leaf style. For `PixelSwitchWrapper<MyStyle>`, returns `MyStyle`. For a
+    // plain helper without an INNER param, returns the helper's own name. Used
+    // by the color detection so the user-visible color (from the inner style's
+    // body) wins over deep literals inside the wrapper's machinery — without
+    // this, `PixelSwitchWrapper<MyPurpleStyle>` reports `White` because the
+    // wrapper's own body has a White literal inside its TransitionEffect plumbing.
+    // Depth cap is defensive; in practice nesting is 0–1 levels.
+    function _resolveLeafStyleName(expr) {
+      let cur = (expr || '').trim();
+      for (let depth = 0; depth < 5; depth++) {
+        const baseName = (cur.match(/^(\w+)/) || [])[1];
+        if (!baseName) return null;
+        const tp = (typeof _getHelperTemplateParams === 'function')
+          ? (_getHelperTemplateParams(baseName) || []) : [];
+        const innerIdx = tp.findIndex(p => p.type === 'class' && p.name === 'INNER');
+        if (innerIdx < 0) return baseName;
+        const args = (typeof _parseCurrentTemplateArgs === 'function')
+          ? (_parseCurrentTemplateArgs(cur, baseName) || []) : [];
+        const innerVal = (args[innerIdx] || '').trim();
+        if (!innerVal) return baseName;
+        cur = innerVal;
+      }
+      return (cur.match(/^(\w+)/) || [])[1] || null;
+    }
+
+    // Resolve a slot's effective base color (Rgb16 triple) using the same fallback
+    // chain as `_buildSlotTile`: explicit colorArg → registry helper default →
+    // library hardcoded definition → inline RgbArg default → hardcoded literal in
+    // expression. Returns null if no color can be determined. Shared by the slot
+    // tile's swatch render and the "Match B1" affordance in the expanded slot
+    // editor.
+    function _resolveSlotColor(slot) {
+      if (!slot) return null;
+      let rgb16 = null;
+      if (slot.colorArg) {
+        const _resolved = styleArgResolver.resolveStyleArgs(slot.expr || '', slot.colorArg);
+        const _rgbEntry = _resolved.find(a => a.kind === 'RgbArg');
+        if (_rgbEntry && _rgbEntry.values.length >= 3) {
+          rgb16 = _rgbEntry.values.slice(0, 3).map(v => v || 0);
+        }
+        if (!rgb16) {
+          const _p = slot.colorArg.split(',').map(s => parseInt(s.trim(), 10));
+          if (_p.length >= 3 && _p.slice(0, 3).every(n => Number.isFinite(n))) rgb16 = _p.slice(0, 3);
+        }
+      }
+      if (!rgb16 && window.proffieArgs) {
+        const _baseName = slot.expr ? (slot.expr.match(/^(\w+)/) || [])[1] : null;
+        const _regArgs  = _baseName ? _getHelperRegistryArgs(_baseName) : [];
+        const _cr = _regArgs.find(a => a.kind === 'RgbArg');
+        if (_cr) rgb16 = window.proffieArgs.resolveColorDefault(_cr.defaultExpr || '');
+      }
+      if (!rgb16 && window.proffieArgs) {
+        // Leaf-resolve through wrapper INNER params so `Wrapper<RealStyle>`
+        // detects RealStyle's color (parallel to the inline tile renderer above).
+        const _leafName = _resolveLeafStyleName(slot.expr);
+        if (_leafName) {
+          const _hit = _earliestColorInText(_getHelperDefinitionText(_leafName));
+          if (_hit) rgb16 = _hit.rgb16;
+        }
+      }
+      if (!rgb16 && window.proffieArgs) {
+        const _inlineArgs = styleArgResolver.findArgs(slot.expr || '');
+        const _firstRgb   = _inlineArgs.find(a => a.kind === 'RgbArg');
+        if (_firstRgb) rgb16 = window.proffieArgs.resolveColorDefault(_firstRgb.defaultExpr || '');
+      }
+      if (!rgb16 && window.proffieArgs) {
+        const _hit = _earliestColorInText(slot.expr || '');
+        if (_hit) rgb16 = _hit.rgb16;
+      }
+      return rgb16;
     }
 
     // ── Field editing ──────────────────────────────────────────────────────────
@@ -11448,6 +12201,12 @@ require(['vs/editor/editor.main'], function () {
       // Open in library mode if: name confirmed in library, OR no library loaded but expr is identifier-like
       const isLibrarySlot = looksLikeIdentifier && (helpers.length === 0 || helperNames.has(helperBaseName));
 
+      // Live-refresh hook for the inner-vs-wrapper mismatch disclosure. Set by the
+      // disclosure builder later in this function (when a mismatch exists); invoked
+      // from makeArgRow's updateReset on every colorArg change so the warning row
+      // hides immediately when the user resolves the mismatch.
+      let _refreshInnerMismatchUI = null;
+
       // ── Registry args ──────────────────────────────────────────────────────
       const foundArgs = styleArgResolver.findArgs(slot.expr || '');
       let registryArgs = foundArgs.map(a => {
@@ -11466,12 +12225,18 @@ require(['vs/editor/editor.main'], function () {
         }
         const _tParams = _getHelperTemplateParams(helperBaseName);
         const _tArgs   = _tParams.length > 0 ? _parseCurrentTemplateArgs(slot.expr, helperBaseName) : [];
-        // Merge INNER args first so their defaults take priority over outer
+        // Merge the OUTER (wrapper) args first so that if the wrapper defines its own
+        // RgbArg defaultExpr (e.g. PixelSwitchWrapper has `RgbArg<BASE_COLOR_ARG,
+        // Rgb<255,255,255>>` = white), that intent wins. Inner args fill in gaps —
+        // pure passthrough wrappers (no RgbArg of their own) still get the inner's
+        // default surfaced as the editable BASE_COLOR_ARG default. The inner's
+        // distinct color, when different from the wrapper's, gets a separate
+        // read-only disclosure row below.
+        _mergeHelperArgs(helperBaseName);
         _tParams.forEach((param, idx) => {
           const tExpr = ((_tArgs[idx] || param.defaultExpr) || '').trim();
           if (tExpr && !_isColorExpr(tExpr)) _mergeHelperArgs(tExpr);
         });
-        _mergeHelperArgs(helperBaseName);
         if (registryArgs.length > 1) registryArgs.sort((a, b) => a.pos - b.pos);
       }
 
@@ -11576,9 +12341,78 @@ require(['vs/editor/editor.main'], function () {
         }
 
         const lbl = document.createElement('span');
-        lbl.style.cssText = 'font-size:0.68rem;color:var(--c-text-muted);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
-        lbl.title = regArg.label ? `${regArg.name} — ${regArg.label}` : regArg.name;
+        lbl.style.cssText = 'font-size:0.68rem;color:var(--c-text-muted);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;';
+        // Tooltip is just the human description (enum line-comment or legacy
+        // label). The arg name is already visible in the row, so repeating it in
+        // the tooltip is noise.
+        lbl.title = (window.proffieArgs?.slotComments?.[regArg.name] || regArg.label || '');
+        // Clicking the label is equivalent to clicking the value control: for an
+        // RgbArg row, open the color picker; for an IntArg row, focus the number
+        // input. Stop propagation so the outer tile click handler (which closes
+        // the slot edit when clicked outside controls) doesn't fire.
+        lbl.addEventListener('click', e => {
+          e.stopPropagation();
+          if (regArg.kind === 'RgbArg' && swatch) {
+            swatch.click();
+          } else if (numInput) {
+            numInput.focus();
+            numInput.select();
+          }
+        });
         row.appendChild(lbl);
+
+        // "Match B1" affordance — for RgbArg rows in slots B2 and beyond, a small
+        // clickable text pulls B1's effective base color into this arg. Mirrors how
+        // a user would manually copy B1's color through the picker, just shortened
+        // to one click. Only shown when B1's color is resolvable AND the current arg
+        // value doesn't already equal it (no point offering "Match B1" if we already
+        // match). Visibility updated whenever the effective color changes.
+        let matchBtn = null;
+        let b1Rgb    = null;
+        function _updateMatchBtnVisibility() {
+          if (!matchBtn || !b1Rgb) return;
+          const eff = curVals || defVals;
+          const matches = (eff[0]||0) === (b1Rgb[0]||0) &&
+                          (eff[1]||0) === (b1Rgb[1]||0) &&
+                          (eff[2]||0) === (b1Rgb[2]||0);
+          matchBtn.style.display = matches ? 'none' : '';
+        }
+        if (regArg.kind === 'RgbArg' && slotIdx > 0 && preset?.styles?.[0]) {
+          b1Rgb = _resolveSlotColor(preset.styles[0]);
+          if (b1Rgb) {
+            // Use the SAME abbreviation logic the slot tiles use — if the user
+            // renamed B1 to "Main" (badge "MA") or similar, the button shows
+            // "Match MA" instead of "Match B1". Keeps the affordance in sync with
+            // the visible badge.
+            const _arr        = _parseResult?.arrays[_activeArrayIndex];
+            const _labels     = _arr?.labels || {};
+            const _totalSlots = preset.styles.length;
+            const _abbrs      = _computeAbbreviations(_labels, _totalSlots);
+            const _b1Label    = _abbrs[0] || 'B1';
+            const _b1FullLbl  = _labels[1] || _b1Label;
+            matchBtn = document.createElement('button');
+            matchBtn.style.cssText = 'all:unset;cursor:pointer;font-size:0.65rem;color:var(--jmt-blue);padding:0 4px;white-space:nowrap;flex-shrink:0;';
+            matchBtn.textContent = `Match ${_b1Label}`;
+            matchBtn.title = `Set this color to match ${_b1FullLbl} (${window.proffieArgs ? window.proffieArgs.colorLabel(b1Rgb[0]||0, b1Rgb[1]||0, b1Rgb[2]||0) : ''})`;
+            matchBtn.addEventListener('click', e => {
+              e.stopPropagation();
+              const np = _argWrite(regArg.name, b1Rgb, currentParens());
+              slot.colorArg = np; _modifySlotParens(slot, np);
+              curVals = b1Rgb.slice();
+              if (swatch) {
+                const _r8 = Math.round((b1Rgb[0]||0)/257);
+                const _g8 = Math.round((b1Rgb[1]||0)/257);
+                const _b8 = Math.round((b1Rgb[2]||0)/257);
+                if (swatchCtrl) swatchCtrl.setColor([_r8, _g8, _b8]);
+                else swatch.style.background = styleArgResolver.proffieToCSS(b1Rgb[0], b1Rgb[1], b1Rgb[2]);
+                swatch.title = window.proffieArgs ? window.proffieArgs.colorLabel(b1Rgb[0]||0, b1Rgb[1]||0, b1Rgb[2]||0) : `Rgb<${_r8},${_g8},${_b8}>`;
+              }
+              updateReset();
+            });
+            row.appendChild(matchBtn);
+            _updateMatchBtnVisibility();
+          }
+        }
 
         let resetBtn = null;
         row._isChanged = false;
@@ -11608,6 +12442,14 @@ require(['vs/editor/editor.main'], function () {
             resetBtn.remove(); resetBtn = null;
             if (row._isChanged) { row._isChanged = false; row._onStateChange?.(); }
           }
+          // Re-check Match B1 visibility — every effective-color change in this row
+          // flows through updateReset, so this single hook covers swatch picker,
+          // reset button, and the Match B1 button itself.
+          _updateMatchBtnVisibility();
+          // Same hook for the inner-vs-wrapper mismatch disclosure (if built). When
+          // the user sets a colorArg via any path, the mismatch resolves and we
+          // hide the disclosure immediately without waiting for close+reopen.
+          _refreshInnerMismatchUI?.();
         }
         updateReset();
         return row;
@@ -11620,6 +12462,7 @@ require(['vs/editor/editor.main'], function () {
       const editTemplateArgs = liveTemplateArgs.slice();
 
       // Pre-populate empty INNER params from B1 when editing B2+, if B1 is a library style
+      let _prepopulatedFromB1 = false;
       if (slotIdx > 0 && helpers.length > 0 && preset.styles?.[0]) {
         const b1 = preset.styles[0];
         const b1Base = (b1.expr || '').match(/^(\w+)/)?.[1];
@@ -11627,9 +12470,22 @@ require(['vs/editor/editor.main'], function () {
           templateParams.forEach((param, idx) => {
             if (param.type === 'class' && param.name === 'INNER' && !editTemplateArgs[idx]) {
               editTemplateArgs[idx] = b1.expr;
+              _prepopulatedFromB1 = true;
             }
           });
         }
+      }
+
+      // If we filled in an INNER from B1, the dropdown would show a value that
+      // isn't actually in source — user had to bump the field (even to the same
+      // value) to land it. Commit the pre-populated state now via the standard
+      // atomicEdit + _reopenAfterRebuild flow so the source reflects what the UI
+      // claims. The slot reopens with the committed state ~50ms later (same flow
+      // every dropdown change uses), so the user just experiences "click → slot
+      // opens with the right values."
+      if (_prepopulatedFromB1) {
+        commitTemplateArgs();
+        return;
       }
 
       function composeHelperExpr() {
@@ -11808,11 +12664,17 @@ require(['vs/editor/editor.main'], function () {
               _closeSlotArgEdit();
             }, _getLibraryStyles());
           }
-          comboInput.addEventListener('focus', () => openCombo(''));
+          comboInput.addEventListener('focus', () => {
+            openCombo('');
+            // Defer selection past the browser's default click-positioning so a
+            // click on the input still selects all existing text — type to replace.
+            setTimeout(() => comboInput.select(), 0);
+          });
           comboInput.addEventListener('input', e => { e.stopPropagation(); openCombo(comboInput.value.trim()); });
           comboArrow.addEventListener('click', e => {
             e.stopPropagation();
-            if (_activeLibComboDropdown) _closeLibComboDropdown(); else { openCombo(); comboInput.focus(); }
+            if (_activeLibComboDropdown) _closeLibComboDropdown();
+            else { openCombo(); comboInput.focus(); }
           });
         } else {
           comboInput.disabled = true;
@@ -11898,8 +12760,13 @@ require(['vs/editor/editor.main'], function () {
                   commitTemplateArgs();
                 }, leafHelpers);
               }
-              // Focus: show full list; input: filter by typed text
-              innerInput.addEventListener('focus', () => openInnerCombo(''));
+              // Focus: show full list AND select existing text so typing replaces
+              // (mirrors the outer Style Library combo behavior — click on field
+              // selects all so you can immediately overwrite without manual highlight).
+              innerInput.addEventListener('focus', () => {
+                openInnerCombo('');
+                setTimeout(() => innerInput.select(), 0);
+              });
               innerInput.addEventListener('input', e => { e.stopPropagation(); openInnerCombo(innerInput.value.trim()); });
               innerArrow.addEventListener('click', e => {
                 e.stopPropagation();
@@ -12016,6 +12883,64 @@ require(['vs/editor/editor.main'], function () {
           tpSection.appendChild(row);
         });
 
+        // Phase B: inner-vs-wrapper color mismatch disclosure. Built whenever the
+        // slot's STRUCTURE has the potential to mismatch (wrapper with class INNER,
+        // both with their own RgbArg defaults that differ). Visibility then tracks
+        // `slot.colorArg` live: hidden when a colorArg is set (both wrapper and
+        // inner paint that value), visible when no colorArg is set (defaults differ).
+        // This lets the disclosure pop back in immediately when the user clicks
+        // the X to clear a colorArg — without it, the warning DOM wouldn't exist
+        // to be re-shown.
+        const _staticMismatch = _canHaveInnerMismatch(slot);
+        if (_staticMismatch && window.proffieArgs) {
+          const { innerColor, innerName, innerHasArg } = _staticMismatch;
+          const _innerLbl = window.proffieArgs.colorLabel(innerColor[0], innerColor[1], innerColor[2]);
+          const _innerR8 = Math.round((innerColor[0]||0)/257);
+          const _innerG8 = Math.round((innerColor[1]||0)/257);
+          const _innerB8 = Math.round((innerColor[2]||0)/257);
+
+          const discRow = document.createElement('div');
+          discRow.style.cssText = 'margin-left:14px;margin-top:2px;display:flex;align-items:center;gap:6px;padding:3px 6px;background:rgba(224,160,32,0.08);border-left:2px solid #e0a020;border-radius:0 3px 3px 0;font-size:0.66rem;';
+
+          const _warn = document.createElement('span');
+          _warn.textContent = '⚠';
+          _warn.style.cssText = 'color:#e0a020;flex-shrink:0;font-size:0.78rem;';
+          discRow.appendChild(_warn);
+
+          // Swatch carries the color details in its tooltip — cleaner than baking
+          // the color name into row text, which gets ugly for custom RGB values.
+          const _innerSw = document.createElement('span');
+          _innerSw.style.cssText = 'width:12px;height:12px;border-radius:50%;display:inline-block;overflow:hidden;flex-shrink:0;cursor:help;';
+          try {
+            const _tc = GlowSwatch.create({ animated: false, width: 12, height: 12, color: [_innerR8, _innerG8, _innerB8] });
+            _tc.element.style.clipPath = 'circle(50% at 50% 50%)';
+            _tc.element.style.pointerEvents = 'none';
+            _innerSw.appendChild(_tc.element);
+            _activeArgSwatchControllers.push(_tc);
+          } catch(e) { _innerSw.style.background = `rgb(${_innerR8},${_innerG8},${_innerB8})`; }
+          _innerSw.title = _innerLbl;
+          discRow.appendChild(_innerSw);
+
+          const _txt = document.createElement('span');
+          _txt.style.cssText = 'flex:1;color:var(--c-text-muted);min-width:0;overflow:hidden;text-overflow:ellipsis;';
+          // Label tracks what the inner actually exposes. "Inner BASE_COLOR_ARG"
+          // is accurate only when the inner has an RgbArg<BASE_COLOR_ARG, …>.
+          // Hardcoded literals (e.g. `using Test = Red;`) have no such arg, so
+          // "Inner (hardcoded)" is the truthful label.
+          _txt.textContent = innerHasArg ? 'Inner BASE_COLOR_ARG' : 'Inner (hardcoded)';
+          discRow.appendChild(_txt);
+
+          // Initial visibility: hidden if a colorArg is already pinned, visible
+          // otherwise. _refreshInnerMismatchUI re-evaluates on every colorArg
+          // change so the warning pops back in instantly when X clears it.
+          discRow.style.display = (slot.colorArg ? 'none' : '');
+          tpSection.appendChild(discRow);
+
+          _refreshInnerMismatchUI = () => {
+            discRow.style.display = (slot.colorArg ? 'none' : '');
+          };
+        }
+
         body.appendChild(tpSection);
       }
 
@@ -12051,6 +12976,14 @@ require(['vs/editor/editor.main'], function () {
             advOpen = !advOpen;
             _refreshAdvVisibility();
             advBtn.textContent = advOpen ? 'Advanced ▴' : 'Advanced ▾';
+            // First time the user opens Advanced for any slot is a fine moment
+            // to lazy-load the ArgumentName enum — slot reads/writes for the
+            // Advanced rows benefit from the live slot map, and tooltips will
+            // pick up the enum comments on hover. Fire-and-forget; legacy
+            // hardcoded table covers anything that fires before this resolves.
+            if (advOpen && window.proffieArgs?.refreshSlotMap && !window.proffieArgs.slotMapVersion) {
+              window.proffieArgs.refreshSlotMap().catch(() => {});
+            }
           });
           body.appendChild(advBtn);
         }
@@ -12423,9 +13356,40 @@ require(['vs/editor/editor.main'], function () {
       // ── Named-color dropdown (custom — color swatch per row) ─────────
       if (window.proffieArgs?.namedColors) {
         const _pa = window.proffieArgs;
-        const nameEntries = Object.entries(_pa.namedColors).filter(
-          ([name, vals]) => _pa.colorLabel(vals[0], vals[1], vals[2]) === name
-        );
+        // Sort so the dropdown reads like a color wheel:
+        // reds → oranges → yellows → greens → cyans → blues → purples → pinks →
+        // achromatic (black/grays/white) at the bottom by lightness. Within a hue,
+        // lighter shades fall after darker.
+        //
+        // Achromatic detection uses CHROMA (max channel − min channel) rather than
+        // HSL saturation. HSL's saturation formula reports ~1.0 for near-white
+        // colors like Snow (255, 250, 250) because both max and min are near 1.0,
+        // which would place Snow next to Red at hue=0. Chroma is honest about it
+        // (Snow's chroma ≈ 0.02). Threshold 0.08 cleanly separates whites/grays
+        // from light pastels like MistyRose (chroma ≈ 0.12) that still belong in
+        // the chromatic spectrum.
+        const _colorOrder = (r16, g16, b16) => {
+          const r = r16 / 65535, g = g16 / 65535, b = b16 / 65535;
+          const max = Math.max(r, g, b), min = Math.min(r, g, b);
+          const chroma = max - min;
+          const l = (max + min) / 2;
+          if (chroma < 0.08) return { ach: true, h: 0, l };
+          let h;
+          if      (max === r) h = (g - b) / chroma + (g < b ? 6 : 0);
+          else if (max === g) h = (b - r) / chroma + 2;
+          else                h = (r - g) / chroma + 4;
+          return { ach: false, h: h / 6, l };
+        };
+        const nameEntries = Object.entries(_pa.namedColors)
+          .filter(([name, vals]) => _pa.colorLabel(vals[0], vals[1], vals[2]) === name)
+          .map(([name, vals]) => ({ name, vals, order: _colorOrder(vals[0], vals[1], vals[2]) }))
+          .sort((a, b) => {
+            if (a.order.ach !== b.order.ach) return a.order.ach ? 1 : -1;
+            if (a.order.ach) return a.order.l - b.order.l;
+            if (a.order.h !== b.order.h) return a.order.h - b.order.h;
+            return a.order.l - b.order.l;
+          })
+          .map(o => [o.name, o.vals]);
         const _dot = (r, g, b) =>
           `display:inline-block;width:10px;height:10px;border-radius:50%;flex-shrink:0;` +
           `margin-right:5px;background:rgb(${r},${g},${b});border:1px solid rgba(128,128,128,0.35);` +
@@ -12780,8 +13744,12 @@ require(['vs/editor/editor.main'], function () {
         },
         text: 'StylePtr<Black>()',
       }]);
-      editor.focus();
       _closeSlotArgEdit();
+      // Defer focus past the current click event. A synchronous editor.focus()
+      // inside a click handler can be reasserted back onto the clicked button
+      // when the click event finishes — which leaves Ctrl+Z going to nowhere
+      // until the user clicks into Monaco. setTimeout(0) ensures Monaco wins.
+      setTimeout(() => editor.focus(), 0);
     }
 
     function _deleteExcessSlot(slot) {
@@ -12804,8 +13772,10 @@ require(['vs/editor/editor.main'], function () {
         },
         text: '',
       }]);
-      editor.focus();
       _closeSlotArgEdit();
+      // Defer focus past the click event so Ctrl+Z reaches Monaco without
+      // requiring the user to click into the editor first.
+      setTimeout(() => editor.focus(), 0);
     }
 
     // Extracts the leading /* ... */ comment block(s) from pasted text (e.g. Fett263 headers).

@@ -191,6 +191,12 @@ function _vpRenderDetail(v) {
           </button>
         </div>
         <a href="#" id="vp-jmt-learn-more" title="https://www.jedimastertech.com/jmt-addons" style="font-size:0.74rem;color:#4a9edd;text-decoration:underline;">Learn more</a>
+        ${window._jmtDevMode ? `
+        <div id="vp-jmt-branch-toggle" style="display:flex;align-items:center;gap:6px;font-size:0.7rem;margin-top:2px;" title="Dev-only: switch JMT add-ons source between main and dev branches">
+          <span style="color:var(--c-text-faint);">Source:</span>
+          <button id="vp-jmt-branch-main" style="border:1px solid var(--c-border);background:transparent;color:var(--c-text-muted);padding:1px 8px;border-radius:9px;cursor:pointer;font-size:0.7rem;line-height:1;">main</button>
+          <button id="vp-jmt-branch-dev"  style="border:1px solid var(--c-border);background:transparent;color:var(--c-text-muted);padding:1px 8px;border-radius:9px;cursor:pointer;font-size:0.7rem;line-height:1;">DEV</button>
+        </div>` : ''}
       </div>
     </div>
 
@@ -265,6 +271,36 @@ function _vpRenderDetail(v) {
   document.getElementById('vp-btn-rename')?.addEventListener('click', () => _vpRename(v));
   document.getElementById('vp-btn-delete')?.addEventListener('click', () => _vpDelete(v));
   document.getElementById('vp-btn-jmt')?.addEventListener('click', () => _vpJmtFlow(v));
+
+  // Dev-mode branch toggle. Only present when window._jmtDevMode is true (set via
+  // the 7-tap unlock in Settings). Flipping the branch refetches the manifest and
+  // re-runs the same JMT flow as the regular button — hashes won't match across
+  // branches, so the existing integrity path naturally prompts to reinstall.
+  if (window._jmtDevMode) {
+    const mainPill = document.getElementById('vp-jmt-branch-main');
+    const devPill  = document.getElementById('vp-jmt-branch-dev');
+    const applyPillState = (branch) => {
+      if (!mainPill || !devPill) return;
+      const isDev = branch === 'dev';
+      mainPill.style.background  = isDev ? 'transparent' : 'var(--c-bg-card)';
+      mainPill.style.color       = isDev ? 'var(--c-text-muted)' : 'var(--c-text)';
+      mainPill.style.fontWeight  = isDev ? '400' : '700';
+      mainPill.style.borderColor = isDev ? 'var(--c-border)' : 'var(--c-text-faint)';
+      devPill.style.background  = isDev ? '#e44' : 'transparent';
+      devPill.style.color       = isDev ? '#fff' : 'var(--c-text-muted)';
+      devPill.style.fontWeight  = isDev ? '700' : '400';
+      devPill.style.borderColor = isDev ? '#e44' : 'var(--c-border)';
+    };
+    window.electronAPI.getAddonBranch().then(applyPillState).catch(() => applyPillState('main'));
+    const flip = async (branch) => {
+      const r = await window.electronAPI.setAddonBranch(branch);
+      if (r?.ok) applyPillState(r.branch);
+      _vpJmtFlow(v);
+    };
+    mainPill?.addEventListener('click', () => flip('main'));
+    devPill?.addEventListener('click',  () => flip('dev'));
+  }
+
   document.getElementById('vp-jmt-learn-more')?.addEventListener('click', (e) => {
     e.preventDefault();
     window.electronAPI?.openExternal?.('https://www.jedimastertech.com/jmt-addons');
@@ -743,6 +779,37 @@ async function _vpDoApply(v, btn, panel, isFirstTime, onSuccess) {
     }
   }
 
+  // Apply changed files on disk — any active file-browser search is now potentially
+  // stale (results may reference deleted files, or miss newly-added ones). Clear the
+  // search input and re-initialize the tree against the current state so the user
+  // isn't reading invalidated data. For first-time + rename, vpRefresh already
+  // rebuilt the detail view, so these elements are fresh — the calls are no-ops.
+  const _searchEl    = document.getElementById('vp-search');
+  const _searchClear = document.getElementById('vp-search-clear');
+  const _treeEl      = document.getElementById('vp-tree');
+  if (_searchEl) {
+    _searchEl.value = '';
+    if (_searchClear) _searchClear.style.display = 'none';
+  }
+  if (_treeEl) _vpInitVersionTree(_vpSelected?.name || v.name, _treeEl);
+
+  // The just-applied version's source files changed — main.js already invalidated
+  // its cached folder hash. If this version is the one the build panel is currently
+  // compiling against, re-run the same recheck the OS-version dropdown does so the
+  // Compile button picks up the new buildPkg identity. Skip when modifying a
+  // non-active version (its compile state isn't affected).
+  try {
+    // getSelectedVersion's IPC returns `{ name }`, not a bare string — comparing
+    // the object directly to `modifiedName` is always false, which silently
+    // disabled the post-apply invalidate hook. Pull the name out explicitly.
+    const activeSel    = await window.electronAPI.getSelectedVersion();
+    const activeName   = activeSel?.name || null;
+    const modifiedName = _vpSelected?.name || v.name;
+    if (activeName && activeName === modifiedName && typeof window.onOsVersionChange === 'function') {
+      window.onOsVersionChange();
+    }
+  } catch {}
+
   if (onSuccess) {
     onSuccess(applyResult);
   } else {
@@ -773,6 +840,20 @@ async function _vpJmtFlow(v) {
   const isFirstTime   = !installedVer;
   const proffieVer    = v.proffieVersion || null;
 
+  // Studio version gate — addons can require a minimum JMT Studio version when a
+  // release introduces coupling Studio must know about (new hardcoded guard symbol,
+  // changed manifest schema, etc.). Null / missing means no requirement. Hard refusal:
+  // the Studio code that would handle the addon's contract doesn't exist yet.
+  if (manifest.minStudioVersion) {
+    let studioVer = null;
+    try { studioVer = await window.electronAPI.getAppVersion(); } catch {}
+    if (studioVer && _semverCompare(studioVer, manifest.minStudioVersion) < 0) {
+      panel.innerHTML = `<span style="color:#e44;">⛔ Requires JMT Studio ${_vpEsc(manifest.minStudioVersion)} or higher. Current version is ${_vpEsc(studioVer)}. Update JMT Studio first.</span>`;
+      btn.disabled = false;
+      return;
+    }
+  }
+
   // Compatibility
   let compatHtml = '';
   if (!proffieVer) {
@@ -787,24 +868,35 @@ async function _vpJmtFlow(v) {
     compatHtml = `<div style="color:#4a4;margin-bottom:8px;">✓ Compatible with ProffieOS ${_vpEsc(proffieVer)}.</div>`;
   }
 
+  // Always fetch integrity so toRemove is available even when the manifest has no
+  // hashes. `bad` is only meaningful when hashes exist; toRemove just needs the path
+  // list, which is always present.
+  const integrity   = await window.electronAPI.checkJmtIntegrity(v.name, manifest.files);
+  const hasHashes   = manifest.files.some(f => f.sha256);
+  const bad         = (integrity.ok && hasHashes) ? integrity.results.filter(r => r.status !== 'ok') : [];
+  const toRemove    = integrity.ok ? (integrity.toRemove || []) : [];
+  const removeListHtml = toRemove.length > 0
+    ? `<div style="color:#c90;margin-bottom:6px;">The following file${toRemove.length > 1 ? 's are' : ' is'} no longer part of JMT Add-ons and will be removed:</div>
+       <ul style="margin:0 0 12px 16px;padding:0;font-size:0.78rem;">${toRemove.map(p => `<li style="color:var(--c-text-sub);margin:2px 0;">${_vpEsc(p)}</li>`).join('')}</ul>`
+    : '';
+
   if (!isFirstTime && !hasUpdate) {
-    if (manifest.files.some(f => f.sha256)) {
-      const integrity = await window.electronAPI.checkJmtIntegrity(v.name, manifest.files);
-      const bad = integrity.ok ? integrity.results.filter(r => r.status !== 'ok') : [];
-      if (bad.length > 0) {
-        const badList = bad.map(r => `<li style="color:var(--c-text-sub);margin:2px 0;">${_vpEsc(r.path)} <span style="color:#e44;">(${r.status})</span></li>`).join('');
-        panel.innerHTML = `
-          ${compatHtml}
-          <div style="color:#c90;margin-bottom:8px;">⚠ ${bad.length} JMT file${bad.length > 1 ? 's have' : ' has'} been modified or is missing:</div>
-          <ul style="margin:0 0 12px 16px;padding:0;font-size:0.78rem;">${badList}</ul>
-          <div style="display:flex;gap:8px;align-items:center;">
-            <button id="vp-jmt-confirm" class="vp-action-btn primary">Reinstall</button>
-            <button id="vp-jmt-cancel"  class="vp-action-btn">Cancel</button>
-            <span   id="vp-jmt-status"  style="font-size:0.78rem;color:var(--c-text-sub);"></span>
-          </div>`;
-        _vpJmtWireConfirm(v, btn, panel, false);
-        return;
-      }
+    if (bad.length > 0 || toRemove.length > 0) {
+      const badHtml = bad.length > 0
+        ? `<div style="color:#c90;margin-bottom:8px;">⚠ ${bad.length} JMT file${bad.length > 1 ? 's have' : ' has'} been modified or is missing:</div>
+           <ul style="margin:0 0 12px 16px;padding:0;font-size:0.78rem;">${bad.map(r => `<li style="color:var(--c-text-sub);margin:2px 0;">${_vpEsc(r.path)} <span style="color:#e44;">(${r.status})</span></li>`).join('')}</ul>`
+        : '';
+      panel.innerHTML = `
+        ${compatHtml}
+        ${badHtml}
+        ${removeListHtml}
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button id="vp-jmt-confirm" class="vp-action-btn primary">Reinstall</button>
+          <button id="vp-jmt-cancel"  class="vp-action-btn">Cancel</button>
+          <span   id="vp-jmt-status"  style="font-size:0.78rem;color:var(--c-text-sub);"></span>
+        </div>`;
+      _vpJmtWireConfirm(v, btn, panel, false);
+      return;
     }
     panel.innerHTML = `${compatHtml}<span style="color:var(--c-text-sub);">JMT Add-ons v${_vpEsc(installedVer)} is up to date.</span>`;
     btn.disabled = false;
@@ -827,12 +919,39 @@ async function _vpJmtFlow(v) {
     ? `<div style="margin-bottom:12px;font-size:0.75rem;color:var(--c-text-dim);font-style:italic;">Existing JMT files will be overwritten. Your ProffieOS source files are not modified.</div>`
     : `<div style="margin-bottom:12px;font-size:0.75rem;color:var(--c-text-dim);font-style:italic;">These files do not modify existing ProffieOS source files and are only used if included in a config. Any existing copies will be replaced.</div>`;
 
+  // What's New — render changelog entries newer than installedVer (and ≤ manifest.version)
+  // so the user can see what they're getting before clicking Update. Skipped for first-time
+  // installs (no anchor version to filter from) and when the manifest doesn't carry a
+  // changelog field (graceful degradation for older manifests).
+  let releaseNotesHtml = '';
+  if (!isFirstTime && Array.isArray(manifest.changelog) && manifest.changelog.length > 0) {
+    const relevant = manifest.changelog
+      .filter(c => c && c.version
+        && _semverCompare(c.version, installedVer)    > 0
+        && _semverCompare(c.version, manifest.version) <= 0)
+      .sort((a, b) => _semverCompare(b.version, a.version));
+    if (relevant.length > 0) {
+      const entries = relevant.map(c => `
+        <div style="margin-bottom:8px;">
+          <div style="font-size:0.78rem;font-weight:600;color:var(--c-text);">v${_vpEsc(c.version)}${c.date ? ` <span style="color:var(--c-text-dim);font-weight:400">— ${_vpEsc(c.date)}</span>` : ''}</div>
+          <div style="font-size:0.75rem;color:var(--c-text-sub);white-space:pre-wrap;margin-top:2px;">${_vpEsc(c.notes || '').replace(/\n/g, '<br>')}</div>
+        </div>`).join('');
+      releaseNotesHtml = `
+        <div style="margin-bottom:12px;border:1px solid var(--c-border);border-radius:4px;padding:8px 10px;background:var(--c-bg-inset);">
+          <div style="font-size:0.7rem;color:var(--c-text-muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.06em;">What's New</div>
+          ${entries}
+        </div>`;
+    }
+  }
+
   panel.innerHTML = `
     ${compatHtml}
     ${majorWarnHtml}
     <div style="margin-bottom:8px;"><strong>${action} JMT Add-ons ${fromTo}</strong></div>
+    ${releaseNotesHtml}
     <div style="margin-bottom:8px;color:var(--c-text-dim);font-size:0.78rem;">The following files will be ${isFirstTime ? 'added to' : 'updated in'} this ProffieOS version:</div>
     <ul style="margin:0 0 8px 16px;padding:0;font-size:0.78rem;">${fileList}</ul>
+    ${removeListHtml}
     ${overwriteNote}
     <div style="display:flex;gap:8px;align-items:center;">
       ${isMajorUpdate ? `<button id="vp-jmt-copy-update" class="vp-action-btn primary">Copy &amp; Update</button>` : ''}

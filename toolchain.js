@@ -206,16 +206,29 @@ async function initialize(onLog) {
   if (!cliCheck.ok) return { ok: false, error: cliCheck.error };
   onLog(`arduino-cli found at: ${cliCheck.cliPath}`, false);
 
+  // Run the core install BEFORE checking ProffieOS — they're independent. The
+  // proffieboard core is an arduino-cli platform install in arduino-data/ and
+  // doesn't depend on a ProffieOS folder existing. Running it first lets the
+  // first-run setup banner appear and progress while the user installs/imports
+  // a ProffieOS version in parallel, instead of seeing only a red error first.
+  await ensureCliConfig(onLog);
+  const coreResult = await ensureCore(onLog);
+  if (!coreResult.ok) return { ok: false, error: coreResult.error };
+
+  // ProffieOS-dependent setup (workspace staging) runs only when a version is
+  // installed. When none is present we still return ok — the toolchain itself
+  // IS ready. `needsProffieOS: true` lets the renderer pick the right user-
+  // facing message (warn state pointing at the next action) instead of a
+  // misleading green "Toolchain ready" while compile is still blocked.
   const sourceCheck = proffie.validateProffieOSSource();
-  if (!sourceCheck.ok) return { ok: false, error: sourceCheck.error };
+  if (!sourceCheck.ok) {
+    onLog('Toolchain ready. (Install a ProffieOS version to enable compile.)', false);
+    return { ok: true, needsProffieOS: true };
+  }
   onLog(`ProffieOS source validated (${proffie.getSelectedVersion()}).`, false);
 
   const wsResult = proffie.initWorkspace(onLog);
   if (!wsResult.ok) return { ok: false, error: wsResult.error };
-
-  await ensureCliConfig(onLog);
-  const coreResult = await ensureCore(onLog);
-  if (!coreResult.ok) return { ok: false, error: coreResult.error };
 
   onLog('Toolchain ready.', false);
   return { ok: true };
@@ -283,15 +296,44 @@ async function compile(configContent, fqbn, buildOptions, onLog) {
 }
 
 // ── Extract readable compile error ─────────────────────
+// GCC template-instantiation errors can be many KB on a single line (the entire
+// expanded `using` alias is rendered into the error). Stuffing that raw into the
+// modal status overflows the buttons off-screen. Strategy:
+//   1. Find lines containing ': error: ' (skip 'note:' clarifications and shell
+//      echo lines).
+//   2. For each, peel off the absolute path → keep just `basename:line` so the
+//      user sees what file and where without 200 chars of `C:\Users\...\path`.
+//   3. Truncate the error message itself to a hard cap so a single bad template
+//      can't blow up the modal. Full verbose output is still in the build-output
+//      panel for anyone who wants to copy/paste it.
+//   4. Cap at 3 errors total — first usually identifies the root cause, the rest
+//      are usually cascading from it.
+// Falls back to the last 10 non-empty lines when no `error:` line matches.
 function extractCompileError(raw) {
   const lines = raw.split(/\r?\n/);
-  // Look for lines with 'error:' that aren't just noise
   const errorLines = lines.filter(l =>
-    l.includes('error:') && !l.includes('note:') && !l.startsWith('>')
+    / error: /.test(l) && !/ note: /.test(l) && !l.startsWith('>')
   );
-  if (errorLines.length) return errorLines.slice(0, 5).join('\n');
-  // Fallback: last 10 non-empty lines
-  return lines.filter(Boolean).slice(-10).join('\n');
+  if (!errorLines.length) {
+    return lines.filter(Boolean).slice(-10).join('\n');
+  }
+  const MAX_MSG = 180;
+  const summarize = (line) => {
+    const m = line.match(/^(?:.*[\\/])?([^\\/:]+):(\d+)(?::\d+)?:\s+error:\s+(.*)$/);
+    if (!m) {
+      return line.length > MAX_MSG ? line.slice(0, MAX_MSG) + '…' : line;
+    }
+    const file = m[1];
+    const ln   = m[2];
+    let msg    = m[3];
+    if (msg.length > MAX_MSG) msg = msg.slice(0, MAX_MSG) + '…';
+    return `${file}:${ln} — ${msg}`;
+  };
+  const summary = errorLines.slice(0, 3).map(summarize).join('\n');
+  const moreCount = errorLines.length - 3;
+  return moreCount > 0
+    ? `${summary}\n…and ${moreCount} more (full output in Build Output panel)`
+    : summary;
 }
 
 // ── Tools path ─────────────────────────────────────────
@@ -433,6 +475,28 @@ async function prepareFirmware(onLog) {
     const msg = 'No .elf file found in build output. Run Compile before flashing.';
     onLog(msg, true);
     return { ok: false, error: msg };
+  }
+
+  // Source-hash sanity check. The in-app flows that modify version source files
+  // (e.g. JMT add-on apply) already invalidate the hash cache and force a recompile.
+  // This catches the rare case where the source was edited outside JMT Studio while
+  // a cached/freshly-compiled build was sitting in build-output. Recomputing fresh
+  // (after invalidating the per-session memoization) and comparing to the provenance
+  // sidecar that was written at compile/restore time will fail fast on a mismatch
+  // so we never flash firmware that doesn't match the current source.
+  //
+  // Graceful migration: if no sidecar exists (older builds predating this code), skip
+  // the check — first compile or restore after upgrade will populate the sidecar.
+  const provenance = cache.readBuildProvenance(buildPath);
+  if (provenance && provenance.proffieOSHash) {
+    const versionName = proffie.getSelectedVersion();
+    proffie.invalidateVersionHash(versionName);
+    const freshHash = proffie.hashVersion(versionName);
+    if (freshHash !== provenance.proffieOSHash) {
+      const msg = 'ProffieOS source has changed since this build. Please recompile before flashing.';
+      onLog(msg, true);
+      return { ok: false, error: msg, sourceChanged: true };
+    }
   }
 
   const elfPath  = path.join(buildPath, elfFiles[0]);
