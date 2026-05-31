@@ -4,6 +4,7 @@
   "description": "ProffieOS Configuration Tool by Jedi Master Tech",
   "author": "Jedi Master Tech <jmtstudio@jedimastertech.com>",
   "homepage": "https://jedimastertech.com",
+  "license": "Proprietary",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
