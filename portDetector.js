@@ -135,6 +135,28 @@ function checkLinuxUsbPresence() {
   return false;
 }
 
+// Returns true if the current user IS in the dialout group (has serial port
+// access). Used to decide whether the dialout-banner should fire even when
+// arduino-cli successfully enumerates the board's /dev/ttyACM* (which it does
+// from USB descriptors, no port-open required) — without dialout membership
+// the user still can't flash or open the serial monitor, so the warning is
+// needed regardless of detection success. Returns true on non-Linux (N/A).
+function checkLinuxDialoutMembership() {
+  if (process.platform !== 'linux') return true;
+  const fs = require('fs');
+  try {
+    const groupFile = fs.readFileSync('/etc/group', 'utf8');
+    const dialoutLine = groupFile.split('\n').find(l => l.startsWith('dialout:'));
+    if (!dialoutLine) return true;
+    const gid = parseInt(dialoutLine.split(':')[2], 10);
+    if (!Number.isFinite(gid)) return true;
+    const userGroups = process.getgroups ? process.getgroups() : [];
+    return userGroups.includes(gid);
+  } catch {
+    return true; // can't read /etc/group — don't false-positive
+  }
+}
+
 // ── List ports ─────────────────────────────────────────
 async function listPorts() {
   const result = await runBoardList();
@@ -174,14 +196,16 @@ async function getRecommendedPort() {
 
   const { proffieports, ports } = result;
 
+  // Linux dialout-banner condition: a Proffieboard IS visible on the USB bus,
+  // but the current user is NOT in the dialout group. Computed unconditionally
+  // (not gated on whether arduino-cli detected the board) because arduino-cli
+  // reads USB descriptors and reports the board as found even without serial
+  // port permission — but actually flashing or opening the serial monitor
+  // requires opening /dev/ttyACM*, which still fails without dialout.
+  const linuxSerialPermissionIssue =
+    checkLinuxUsbPresence() && !checkLinuxDialoutMembership();
+
   if (proffieports.length === 0) {
-    // If arduino-cli didn't detect a working Proffieboard (we're here), but a
-    // Proffieboard IS visible on the USB bus, that's a permission problem on
-    // Linux — the device file exists at /dev/ttyACM* but the user isn't in
-    // dialout so it can't be opened. (The earlier `ports.length === 0`
-    // condition broke this — arduino-cli still enumerates the device file
-    // even when it can't probe it, so `ports` isn't empty in this state.)
-    const linuxSerialPermissionIssue = checkLinuxUsbPresence();
     return {
       ok: true,
       autoSelected: false,
@@ -204,6 +228,7 @@ async function getRecommendedPort() {
       port: proffieports[0],
       ports,
       proffieports,
+      linuxSerialPermissionIssue,
       message: `Proffieboard detected on ${proffieports[0].path}.`
     };
   }
@@ -214,6 +239,7 @@ async function getRecommendedPort() {
     port: null,
     ports,
     proffieports,
+    linuxSerialPermissionIssue,
     message: `${proffieports.length} Proffieboards detected. Select a port.`
   };
 }
