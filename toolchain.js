@@ -164,21 +164,34 @@ async function ensureCliConfig(onLog) {
 // libusb), so the swap doesn't require LD_LIBRARY_PATH magic.
 function _ensureLinuxDfuSuffix(onLog) {
   if (process.platform !== 'linux') return;
-  const dataPath     = getArduinoDataPath();
-  const hardwarePath = path.join(dataPath, 'packages', 'proffieboard', 'hardware', 'stm32l4');
-  if (!fs.existsSync(hardwarePath)) return;
   const bundled = path.join(getToolsPath(), 'dfu-suffix');
   if (!fs.existsSync(bundled)) return;
-  for (const v of fs.readdirSync(hardwarePath)) {
-    const toolsLinux = path.join(hardwarePath, v, 'tools', 'linux');
-    const targetPath = path.join(toolsLinux, 'dfu-suffix');
-    try {
-      fs.mkdirSync(toolsLinux, { recursive: true });
-      fs.copyFileSync(bundled, targetPath);
-      fs.chmodSync(targetPath, 0o755);
-      onLog(`Patched dfu-suffix in ${toolsLinux} with bundled 64-bit binary.`, false);
-    } catch (e) {
-      onLog(`Could not patch dfu-suffix: ${e.message}`, true);
+
+  // arduino-cli may run the core from our isolated arduino-data OR from the
+  // Arduino IDE default at ~/.arduino15. When Arduino IDE was used previously
+  // — or when --config-file doesn't redirect platform discovery for compile
+  // on Linux — the system path wins even though we set directories.data in
+  // our yaml. Patch both candidate locations so whichever path arduino-cli
+  // ends up using has the working 64-bit binary.
+  const candidates = [
+    getArduinoDataPath(),
+    path.join(require('os').homedir(), '.arduino15')
+  ];
+
+  for (const dataPath of candidates) {
+    const hardwarePath = path.join(dataPath, 'packages', 'proffieboard', 'hardware', 'stm32l4');
+    if (!fs.existsSync(hardwarePath)) continue;
+    for (const v of fs.readdirSync(hardwarePath)) {
+      const toolsLinux = path.join(hardwarePath, v, 'tools', 'linux');
+      const targetPath = path.join(toolsLinux, 'dfu-suffix');
+      try {
+        fs.mkdirSync(toolsLinux, { recursive: true });
+        fs.copyFileSync(bundled, targetPath);
+        fs.chmodSync(targetPath, 0o755);
+        onLog(`Patched dfu-suffix in ${toolsLinux} with bundled 64-bit binary.`, false);
+      } catch (e) {
+        onLog(`Could not patch dfu-suffix: ${e.message}`, true);
+      }
     }
   }
 }
