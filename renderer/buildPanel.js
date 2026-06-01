@@ -183,6 +183,13 @@ async function initBuildPanel() {
       setTimeout(() => { e.target.textContent = 'Copy Commands'; }, 2000);
     });
   });
+  document.getElementById('linux-udev-copy')?.addEventListener('click', (e) => {
+    const cmd = document.getElementById('linux-udev-cmd')?.textContent || '';
+    navigator.clipboard.writeText(cmd).then(() => {
+      e.target.textContent = 'Copied!';
+      setTimeout(() => { e.target.textContent = 'Copy Commands'; }, 2000);
+    });
+  });
   el('bp-log-toggle').addEventListener('click', toggleLog);
   el('bp-log-clear').addEventListener('click', clearLog);
   wireSerialMonitor();
@@ -511,11 +518,16 @@ function _setLinuxSerialNotice(show) {
   const notice = document.getElementById('linux-serial-notice');
   if (notice) notice.style.display = show ? 'block' : 'none';
 }
+function _setLinuxUdevNotice(show) {
+  const notice = document.getElementById('linux-udev-notice');
+  if (notice) notice.style.display = show ? 'block' : 'none';
+}
 
 async function refreshPorts() {
   if (isDfuMode) return; // port selection is locked while in DFU mode
   const result = await window.electronAPI.getRecommendedPort();
   _setLinuxSerialNotice(result.linuxSerialPermissionIssue || false);
+  _setLinuxUdevNotice(result.linuxUdevRulesMissing || false);
 
   const portSelect = el('bp-port-select');
   portSelect.innerHTML = '';

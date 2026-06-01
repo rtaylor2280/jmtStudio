@@ -2688,6 +2688,14 @@
   &nbsp;<button id="linux-serial-copy" style="background:rgba(200,150,10,0.15);color:#c89010;border:1px solid rgba(200,150,10,0.35);border-radius:3px;padding:2px 9px;font-size:0.7rem;cursor:pointer;vertical-align:middle;">Copy Commands</button>
 </div>
 
+<!-- ── Linux udev rules notice ── -->
+<div id="linux-udev-notice" style="display:none;padding:7px 14px;background:#1a1200;border-top:1px solid #5a3800;border-bottom:1px solid #5a3800;font-size:0.72rem;color:#c89010;line-height:1.7;">
+  Proffieboard flashing requires udev rules to allow USB device access. Install them, then reload udev (no reboot needed):
+  <br>
+  <code id="linux-udev-cmd" style="font-family:monospace;color:#e8b040;margin-left:12px;">cd ~/.arduino15/packages/proffieboard/hardware/stm32l4 &amp;&amp; cd */drivers/linux &amp;&amp; sudo cp *.rules /etc/udev/rules.d &amp;&amp; sudo udevadm control --reload-rules &amp;&amp; sudo udevadm trigger</code>
+  &nbsp;<button id="linux-udev-copy" style="background:rgba(200,150,10,0.15);color:#c89010;border:1px solid rgba(200,150,10,0.35);border-radius:3px;padding:2px 9px;font-size:0.7rem;cursor:pointer;vertical-align:middle;">Copy Commands</button>
+</div>
+
 <!-- ── Log panel (tabbed: Build Output / Serial Monitor) ── -->
 <div id="build-log">
   <div id="bp-log-header">

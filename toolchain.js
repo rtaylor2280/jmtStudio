@@ -693,7 +693,17 @@ async function runDfuFlash(dfuPath, toolsDir, onLog) {
     return { ok: true };
   } else {
     onLog('--- Flash failed ---', true);
-    return { ok: false, error: extractFlashError(flashResult.stderr + flashResult.stdout) };
+    const combined = (flashResult.stderr || '') + (flashResult.stdout || '');
+    const error = extractFlashError(combined);
+    // Linux without udev rules: dfu-util can enumerate the device via sysfs
+    // (so waitForDfu + detectDFU don't catch it as inaccessible) but the
+    // actual transfer fails inside libusb with LIBUSB_ERROR_ACCESS. Surface
+    // the existing "Fix DFU Driver" modal so the user gets udev guidance
+    // instead of a cryptic generic error.
+    const needsDfuDriver =
+      process.platform === 'linux' &&
+      /LIBUSB_ERROR_ACCESS|cannot open DFU device|Permission denied/i.test(combined);
+    return { ok: false, error, needsDfuDriver };
   }
 }
 

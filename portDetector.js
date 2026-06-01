@@ -157,6 +157,23 @@ function checkLinuxDialoutMembership() {
   }
 }
 
+// Returns true if the Proffieboard udev rules are installed at
+// /etc/udev/rules.d/. Without these, dfu-util can enumerate the DFU device
+// (via sysfs) but can't actually OPEN it for transfers — flash fails inside
+// libusb with LIBUSB_ERROR_ACCESS. Detecting the missing rules at startup
+// lets us surface the fix BEFORE the user attempts a flash, instead of
+// after it fails inside the dfu-util transfer.
+function checkLinuxUdevRules() {
+  if (process.platform !== 'linux') return true;
+  const fs = require('fs');
+  try {
+    const entries = fs.readdirSync('/etc/udev/rules.d');
+    return entries.some(name => /proffie/i.test(name));
+  } catch {
+    return true; // can't read /etc/udev/rules.d — don't false-positive
+  }
+}
+
 // ── List ports ─────────────────────────────────────────
 async function listPorts() {
   const result = await runBoardList();
@@ -205,6 +222,14 @@ async function getRecommendedPort() {
   const linuxSerialPermissionIssue =
     checkLinuxUsbPresence() && !checkLinuxDialoutMembership();
 
+  // Linux udev-rules banner condition: a Proffieboard is on the USB bus but
+  // the udev rules for DFU access aren't installed. Surfacing this proactively
+  // (not at flash time) catches it before the user tries to flash and ends up
+  // staring at a generic "flash failed" message. Same gating as the dialout
+  // banner — only show when a board is actually present to act on.
+  const linuxUdevRulesMissing =
+    checkLinuxUsbPresence() && !checkLinuxUdevRules();
+
   if (proffieports.length === 0) {
     return {
       ok: true,
@@ -213,6 +238,7 @@ async function getRecommendedPort() {
       ports,
       proffieports: [],
       linuxSerialPermissionIssue,
+      linuxUdevRulesMissing,
       message: linuxSerialPermissionIssue
         ? 'Proffieboard detected via USB but serial access is blocked.'
         : ports.length === 0
@@ -229,6 +255,7 @@ async function getRecommendedPort() {
       ports,
       proffieports,
       linuxSerialPermissionIssue,
+      linuxUdevRulesMissing,
       message: `Proffieboard detected on ${proffieports[0].path}.`
     };
   }
