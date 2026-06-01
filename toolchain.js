@@ -151,6 +151,35 @@ async function ensureCliConfig(onLog) {
 }
 
 // ── First-run: install core if not present ─────────────
+// The Proffieboard core's Linux tarball ships without `dfu-suffix` (Windows and
+// macOS variants include it). arduino-cli's compile step shells out to
+// `<core>/tools/linux/dfu-suffix` and fails with "no such file or directory"
+// when it's missing. We bundle dfu-suffix for Linux in our own resources/tools
+// dir — copy it into the core's expected path so compile works out of the box.
+// Safe to call after any "core is installed" check; only does work when the
+// target file is missing.
+function _ensureLinuxDfuSuffix(onLog) {
+  if (process.platform !== 'linux') return;
+  const dataPath     = getArduinoDataPath();
+  const hardwarePath = path.join(dataPath, 'packages', 'proffieboard', 'hardware', 'stm32l4');
+  if (!fs.existsSync(hardwarePath)) return;
+  for (const v of fs.readdirSync(hardwarePath)) {
+    const toolsLinux = path.join(hardwarePath, v, 'tools', 'linux');
+    const targetPath = path.join(toolsLinux, 'dfu-suffix');
+    if (fs.existsSync(targetPath)) continue;
+    const bundled = path.join(getToolsPath(), 'dfu-suffix');
+    if (!fs.existsSync(bundled)) continue;
+    try {
+      fs.mkdirSync(toolsLinux, { recursive: true });
+      fs.copyFileSync(bundled, targetPath);
+      fs.chmodSync(targetPath, 0o755);
+      onLog(`Patched missing dfu-suffix into ${toolsLinux}.`, false);
+    } catch (e) {
+      onLog(`Could not patch dfu-suffix: ${e.message}`, true);
+    }
+  }
+}
+
 async function ensureCore(onLog) {
   const dataPath     = getArduinoDataPath();
   const sentinelPath = path.join(dataPath, '.core-installed');
@@ -160,6 +189,7 @@ async function ensureCore(onLog) {
   // via Arduino IDE rather than our own arduino-data directory.
   if (fs.existsSync(sentinelPath) && fs.readFileSync(sentinelPath, 'utf8').trim() === CORE_VERSION) {
     onLog(`Core ${CORE_ID}@${CORE_VERSION} already installed.`, false);
+    _ensureLinuxDfuSuffix(onLog);
     return { ok: true };
   }
 
@@ -173,6 +203,7 @@ async function ensureCore(onLog) {
   if (isInstalled) {
     onLog(`Core ${CORE_ID}@${CORE_VERSION} already installed.`, false);
     fs.writeFileSync(sentinelPath, CORE_VERSION, 'utf8');
+    _ensureLinuxDfuSuffix(onLog);
     return { ok: true };
   }
 
@@ -188,6 +219,8 @@ async function ensureCore(onLog) {
 
   // Write sentinel so subsequent startups skip this flow
   fs.writeFileSync(sentinelPath, CORE_VERSION, 'utf8');
+
+  _ensureLinuxDfuSuffix(onLog);
 
   onLog(`Core installed successfully.`, false);
   return { ok: true };
