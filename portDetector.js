@@ -163,12 +163,25 @@ function checkLinuxDialoutMembership() {
 // libusb with LIBUSB_ERROR_ACCESS. Detecting the missing rules at startup
 // lets us surface the fix BEFORE the user attempts a flash, instead of
 // after it fails inside the dfu-util transfer.
+//
+// Detection is by file content (VID `1209` in any rules file), not by
+// filename, because the Proffieboard core ships rules named for the board
+// codenames (49-butterfly.rules, 49-dragonfly.rules, 49-ladybug.rules,
+// 49-nucleo.rules) — no "proffieboard" string anywhere. A content-based
+// check is also self-adapting if the core ever renames or splits the files.
 function checkLinuxUdevRules() {
   if (process.platform !== 'linux') return true;
   const fs = require('fs');
   try {
-    const entries = fs.readdirSync('/etc/udev/rules.d');
-    return entries.some(name => /proffie/i.test(name));
+    const dir = '/etc/udev/rules.d';
+    for (const name of fs.readdirSync(dir)) {
+      if (!name.endsWith('.rules')) continue;
+      try {
+        const content = fs.readFileSync(`${dir}/${name}`, 'utf8');
+        if (/1209/.test(content)) return true;
+      } catch {}
+    }
+    return false;
   } catch {
     return true; // can't read /etc/udev/rules.d — don't false-positive
   }
