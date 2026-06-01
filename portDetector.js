@@ -115,26 +115,6 @@ function parseBoardList(raw) {
   }).filter(Boolean);
 }
 
-// ── Linux USB presence check ───────────────────────────
-// Reads /sys/bus/usb/devices without needing any group membership.
-// Returns true if a Proffieboard (VID 1209, PID 6668) is visible at the USB layer.
-function checkLinuxUsbPresence() {
-  if (process.platform !== 'linux') return false;
-  const fs = require('fs');
-  try {
-    const base = '/sys/bus/usb/devices';
-    for (const dev of fs.readdirSync(base)) {
-      try {
-        const vendor = fs.readFileSync(`${base}/${dev}/idVendor`,  'utf8').trim();
-        if (vendor !== '1209') continue;
-        const product = fs.readFileSync(`${base}/${dev}/idProduct`, 'utf8').trim();
-        if (product === '6668') return true;
-      } catch {}
-    }
-  } catch {}
-  return false;
-}
-
 // Returns true if the current user IS in the dialout group (has serial port
 // access). Used to decide whether the dialout-banner should fire even when
 // arduino-cli successfully enumerates the board's /dev/ttyACM* (which it does
@@ -226,22 +206,16 @@ async function getRecommendedPort() {
 
   const { proffieports, ports } = result;
 
-  // Linux dialout-banner condition: a Proffieboard IS visible on the USB bus,
-  // but the current user is NOT in the dialout group. Computed unconditionally
-  // (not gated on whether arduino-cli detected the board) because arduino-cli
-  // reads USB descriptors and reports the board as found even without serial
-  // port permission — but actually flashing or opening the serial monitor
-  // requires opening /dev/ttyACM*, which still fails without dialout.
-  const linuxSerialPermissionIssue =
-    checkLinuxUsbPresence() && !checkLinuxDialoutMembership();
-
-  // Linux udev-rules banner condition: a Proffieboard is on the USB bus but
-  // the udev rules for DFU access aren't installed. Surfacing this proactively
-  // (not at flash time) catches it before the user tries to flash and ends up
-  // staring at a generic "flash failed" message. Same gating as the dialout
-  // banner — only show when a board is actually present to act on.
-  const linuxUdevRulesMissing =
-    checkLinuxUsbPresence() && !checkLinuxUdevRules();
+  // Linux prerequisite banners fire whenever the system state is wrong,
+  // regardless of whether a board is currently plugged in. These are one-time
+  // setup steps the user has to do BEFORE the board will work — gating on
+  // board presence meant a first-time Linux user with the board not yet
+  // connected got no guidance, then plugged in, got nothing detected, and
+  // had no way to know what to fix. Surfacing the banners purely on system
+  // state (dialout membership / udev rules content) makes the fix actionable
+  // before the board is ever attached.
+  const linuxSerialPermissionIssue = !checkLinuxDialoutMembership();
+  const linuxUdevRulesMissing      = !checkLinuxUdevRules();
 
   if (proffieports.length === 0) {
     return {
@@ -252,11 +226,9 @@ async function getRecommendedPort() {
       proffieports: [],
       linuxSerialPermissionIssue,
       linuxUdevRulesMissing,
-      message: linuxSerialPermissionIssue
-        ? 'Proffieboard detected via USB but serial access is blocked.'
-        : ports.length === 0
-          ? 'No serial ports detected. Connect your Proffieboard.'
-          : `No Proffieboard detected. ${ports.length} other port(s) available.`
+      message: ports.length === 0
+        ? 'No serial ports detected. Connect your Proffieboard.'
+        : `No Proffieboard detected. ${ports.length} other port(s) available.`
     };
   }
 
