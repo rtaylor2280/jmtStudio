@@ -151,29 +151,32 @@ async function ensureCliConfig(onLog) {
 }
 
 // ── First-run: install core if not present ─────────────
-// The Proffieboard core's Linux tarball ships without `dfu-suffix` (Windows and
-// macOS variants include it). arduino-cli's compile step shells out to
-// `<core>/tools/linux/dfu-suffix` and fails with "no such file or directory"
-// when it's missing. We bundle dfu-suffix for Linux in our own resources/tools
-// dir — copy it into the core's expected path so compile works out of the box.
-// Safe to call after any "core is installed" check; only does work when the
-// target file is missing.
+// The Proffieboard core's Linux tools include a 32-bit dfu-suffix binary. On
+// modern Ubuntu (no `:i386` libc compat by default), the kernel can't find
+// the 32-bit dynamic linker `/lib/ld-linux.so.2` and fork/exec returns
+// "no such file or directory" — referring to the missing linker, not the
+// binary. Initial QA was checking "does the file exist" and skipping the
+// patch when it did, which left the broken 32-bit binary in place.
+//
+// We bundle a 64-bit dfu-suffix in resources/tools/linux/ — overwrite the
+// core's copy unconditionally on Linux so arduino-cli's compile path uses
+// a binary that can actually exec. Note: dfu-suffix only needs libc (no
+// libusb), so the swap doesn't require LD_LIBRARY_PATH magic.
 function _ensureLinuxDfuSuffix(onLog) {
   if (process.platform !== 'linux') return;
   const dataPath     = getArduinoDataPath();
   const hardwarePath = path.join(dataPath, 'packages', 'proffieboard', 'hardware', 'stm32l4');
   if (!fs.existsSync(hardwarePath)) return;
+  const bundled = path.join(getToolsPath(), 'dfu-suffix');
+  if (!fs.existsSync(bundled)) return;
   for (const v of fs.readdirSync(hardwarePath)) {
     const toolsLinux = path.join(hardwarePath, v, 'tools', 'linux');
     const targetPath = path.join(toolsLinux, 'dfu-suffix');
-    if (fs.existsSync(targetPath)) continue;
-    const bundled = path.join(getToolsPath(), 'dfu-suffix');
-    if (!fs.existsSync(bundled)) continue;
     try {
       fs.mkdirSync(toolsLinux, { recursive: true });
       fs.copyFileSync(bundled, targetPath);
       fs.chmodSync(targetPath, 0o755);
-      onLog(`Patched missing dfu-suffix into ${toolsLinux}.`, false);
+      onLog(`Patched dfu-suffix in ${toolsLinux} with bundled 64-bit binary.`, false);
     } catch (e) {
       onLog(`Could not patch dfu-suffix: ${e.message}`, true);
     }
