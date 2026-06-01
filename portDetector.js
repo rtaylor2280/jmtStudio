@@ -175,7 +175,13 @@ async function getRecommendedPort() {
   const { proffieports, ports } = result;
 
   if (proffieports.length === 0) {
-    const linuxSerialPermissionIssue = ports.length === 0 && checkLinuxUsbPresence();
+    // If arduino-cli didn't detect a working Proffieboard (we're here), but a
+    // Proffieboard IS visible on the USB bus, that's a permission problem on
+    // Linux — the device file exists at /dev/ttyACM* but the user isn't in
+    // dialout so it can't be opened. (The earlier `ports.length === 0`
+    // condition broke this — arduino-cli still enumerates the device file
+    // even when it can't probe it, so `ports` isn't empty in this state.)
+    const linuxSerialPermissionIssue = checkLinuxUsbPresence();
     return {
       ok: true,
       autoSelected: false,
