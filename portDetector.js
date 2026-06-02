@@ -144,11 +144,13 @@ function checkLinuxDialoutMembership() {
 // lets us surface the fix BEFORE the user attempts a flash, instead of
 // after it fails inside the dfu-util transfer.
 //
-// Detection is by file content (VID `1209` in any rules file), not by
-// filename, because the Proffieboard core ships rules named for the board
-// codenames (49-butterfly.rules, 49-dragonfly.rules, 49-ladybug.rules,
-// 49-nucleo.rules) — no "proffieboard" string anywhere. A content-based
-// check is also self-adapting if the core ever renames or splits the files.
+// Detection is by file content, not filename, because the Proffieboard core
+// ships rules named for the board codenames (49-butterfly.rules etc.) with
+// no "proffieboard" string anywhere. Requiring both VID `1209` AND PID `6668`
+// in the same file avoids false positives from other devices in the pid.codes
+// 1209 vendor block — Firefox's snap ships rules for hardware security keys
+// (SoloKey, Nitrokey) using `ATTRS{idVendor}=="1209"`, and matching just `1209`
+// would suppress the banner on any Firefox-snap system.
 function checkLinuxUdevRules() {
   if (process.platform !== 'linux') return true;
   const fs = require('fs');
@@ -158,7 +160,7 @@ function checkLinuxUdevRules() {
       if (!name.endsWith('.rules')) continue;
       try {
         const content = fs.readFileSync(`${dir}/${name}`, 'utf8');
-        if (/1209/.test(content)) return true;
+        if (content.includes('1209') && content.includes('6668')) return true;
       } catch {}
     }
     return false;
