@@ -918,6 +918,8 @@ function onBuildDone({ type, ok, error, aborted, retriable, needsDfuDriver, sour
         setStatus('compile', 'warn', 'OS source changed — recompile needed');
         updateCompileButton();
       }
+      _flashTargetPort = null;
+      _flashTargetSN   = null;
       finishBuildModal(false, '✗ Flash Failed', error, { retriable: !!retriable });
       if (error) appendLog(`\n⚠ ${error}`, true);
       return;
