@@ -578,8 +578,14 @@ ipcMain.handle('cache:getDataSize', () => {
       return sum + (e.isDirectory() ? dirSize(full) : fs.statSync(full).size);
     }, 0);
   }
+  // "cache" must match what cache:clear actually deletes — that handler nukes
+  // both build-cache (keyed artifacts) AND build-output (last compile's tree).
+  // Previously this only summed build-cache, so users saw "10.3 MB" before
+  // clicking Clear and "38.2 MB freed" afterward, a 3-4× discrepancy that
+  // erodes trust in the displayed numbers.
   return {
-    cache:       dirSize(path.join(userData, 'build-cache')),
+    cache:       dirSize(path.join(userData, 'build-cache')) +
+                 dirSize(path.join(userData, 'build-output')),
     arduinoData: dirSize(path.join(userData, 'arduino-data')),
     versions:    dirSize(path.join(userData, 'ProffieOS-versions')),
   };
