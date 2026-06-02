@@ -2168,10 +2168,10 @@ async function startDfuWaitModal(isRetry = false, autoFlash = true, justInstalle
       appendModalLog('Paste the following into a terminal:', false);
       appendModalLog('', false);
       const arduinoDataPath = await window.electronAPI.getArduinoDataPath();
-      linuxCopyCmd = `cd "${arduinoDataPath}/packages/proffieboard/hardware/stm32l4" && cd */drivers/linux && sudo cp *.rules /etc/udev/rules.d`;
+      linuxCopyCmd = `cd "${arduinoDataPath}/packages/proffieboard/hardware/stm32l4" && cd */drivers/linux && sudo cp *.rules /etc/udev/rules.d && sudo udevadm control --reload-rules && sudo udevadm trigger`;
       appendModalLog(`  ${linuxCopyCmd}`, false);
       appendModalLog('', false);
-      appendModalLog('Then reboot your computer, replug the board in bootloader mode, and click Try Again.', false);
+      appendModalLog('Then replug the board in bootloader mode and click Try Again.', false);
     } else {
       // Mac — DFU should work without any setup; this state is unexpected
       appendModalLog('DFU device could not be accessed.', true);
@@ -2180,7 +2180,11 @@ async function startDfuWaitModal(isRetry = false, autoFlash = true, justInstalle
     }
 
     // ── Title and shared button state ─────────────────────
-    document.getElementById('bm-title').textContent = 'Fix DFU Driver';
+    // Windows really does have a driver problem (WinUSB rebinding per port).
+    // Linux/Mac don't — it's a permissions issue (udev rules), and calling it
+    // a "driver" misleads users into searching for software that doesn't exist.
+    document.getElementById('bm-title').textContent =
+      isWin ? 'Fix DFU Driver' : 'Fix DFU Access';
     document.getElementById('bm-title').style.color = 'var(--c-warn-text)';
     document.getElementById('bm-abort').style.display = 'none';
     document.getElementById('bm-close').style.display = 'inline-block';
