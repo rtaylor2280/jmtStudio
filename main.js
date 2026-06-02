@@ -730,6 +730,30 @@ ipcMain.on('ports:setPolling', (_, enabled) => {
   else stopPortPolling();
 });
 
+// On Linux, libudev (which serialport uses) has a settle gap after USB
+// attach — the kernel creates /dev/ttyACM* but libudev's published list lags
+// by several seconds. Polling SerialPort.list() alone catches removal
+// promptly but misses insertion until libudev catches up. Cheap sysfs scan
+// for Proffieboard VID 1209 closes that gap: the kernel populates
+// /sys/bus/usb/devices/*/idVendor the instant the device attaches, before
+// any userspace settle. Returns the count so a 0→1 transition (or back)
+// flips the change signature even when SerialPort.list() hasn't updated.
+function _countLinuxProffieUsb() {
+  if (process.platform !== 'linux') return 0;
+  try {
+    const fs = require('fs');
+    const base = '/sys/bus/usb/devices';
+    let count = 0;
+    for (const dev of fs.readdirSync(base)) {
+      try {
+        const v = fs.readFileSync(`${base}/${dev}/idVendor`, 'utf8').trim();
+        if (v === '1209') count++;
+      } catch {}
+    }
+    return count;
+  } catch { return 0; }
+}
+
 async function _pollPortsNow() {
   if (_portPollBusy) return;
   _portPollBusy = true;
@@ -737,12 +761,13 @@ async function _pollPortsNow() {
     const { SerialPort } = require('serialport');
     const raw   = await SerialPort.list();
     const paths = raw.map(p => p.path).sort().join('\0');
+    const sig   = `${paths}|${_countLinuxProffieUsb()}`;
     if (_lastPortPaths === null) {
-      _lastPortPaths = paths;
+      _lastPortPaths = sig;
       return;
     }
-    if (paths !== _lastPortPaths) {
-      _lastPortPaths = paths;
+    if (sig !== _lastPortPaths) {
+      _lastPortPaths = sig;
       if (win && !win.isDestroyed()) win.webContents.send('ports:changed');
     }
   } catch {}
