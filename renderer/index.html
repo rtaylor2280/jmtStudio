@@ -4478,9 +4478,17 @@ window.setCompiledTimestamp = async (isoString, durationSec) => {
 };
 window.getLastCompileDuration = () => metaCompileDuration;
 window.setFlashedTimestamp = async (port, sn) => {
+  // No guards on port/sn — the previous `if (port)` / `if (sn)` checks were
+  // intended as defensive but silently masked upstream bugs that passed
+  // null when the live port/SN had been clobbered mid-flash. With callers
+  // now passing either accurate values or honest null, the setter writes
+  // them through unconditionally. Null clears the field; the port/SN
+  // indicators short-circuit on a null lastFlashed value (no false red),
+  // so missing identity is graceful — the next successful flash with full
+  // identity will repopulate.
   metaFlashed = nowIso();
-  if (port) metaPort = port;
-  if (sn)   metaBoardSN = sn;
+  metaPort     = port || null;
+  metaBoardSN  = sn   || null;
   updateStatusMeta();
   if (currentFilePath) await doSave();
 };
