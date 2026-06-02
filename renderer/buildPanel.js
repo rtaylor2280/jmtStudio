@@ -18,6 +18,15 @@ let selectedPort              = null;
 let selectedPortIsProffieboard = false;
 let selectedPortSN            = null;   // serial number of the currently selected port
 let lastFlashedSN             = null;   // SN of the board we last flashed this session
+// Frozen at the start of a touch-reset flash. During the touch-reset → DFU →
+// reboot sequence, the serial port briefly disappears; refreshPorts runs and
+// clearDetectedBoard() wipes selectedPort/selectedPortSN to null. By the time
+// onBuildDone fires with type:'flash', the live state has been clobbered and
+// setFlashedTimestamp(null, null) silently drops the metadata update. The
+// guards on the setter mask the upstream bug, so the file's @jmt:board_sn
+// and @jmt:last_port stayed at whatever was loaded from the file.
+let _flashTargetPort          = null;
+let _flashTargetSN            = null;
 let selectedFqbn              = null;
 let compileSuccess      = false;   // true after successful compile this session
 let cacheCheckPending   = false;   // true while cache check is in flight
@@ -509,6 +518,14 @@ async function doFlash() {
   setBusy(true);
   setStatus('flash', 'pending', `Flashing on ${selectedPort}...`);
 
+  // Capture target port + SN before the IPC kicks off — the touch-reset
+  // inside the main process will disconnect the serial port, which races
+  // refreshPorts and can null out the live selectedPort/selectedPortSN
+  // before onBuildDone reads them. Frozen here so the success handler can
+  // still write the right values into the file metadata.
+  _flashTargetPort = selectedPort;
+  _flashTargetSN   = selectedPortSN;
+
   await window.electronAPI.flash(selectedPort, selectedFqbn);
   setBusy(false);
 }
@@ -922,8 +939,16 @@ function onBuildDone({ type, ok, error, aborted, retriable, needsDfuDriver, sour
       appendModalLog('Flash complete. Waiting for board to restart...', false);
       watchForSerialAfterDfu();
     } else {
-      lastFlashedSN = selectedPortSN;
-      if (window.setFlashedTimestamp) window.setFlashedTimestamp(selectedPort, selectedPortSN);
+      // Prefer the frozen target captured at doFlash entry — selectedPort/SN
+      // may have been cleared by mid-flash port detection. Fall back to live
+      // values for paths that didn't go through doFlash (auto-flash after
+      // compile, watcher-triggered flash) where the target wasn't frozen.
+      const flashedPort = _flashTargetPort || selectedPort;
+      const flashedSN   = _flashTargetSN   || selectedPortSN;
+      lastFlashedSN = flashedSN;
+      if (window.setFlashedTimestamp) window.setFlashedTimestamp(flashedPort, flashedSN);
+      _flashTargetPort = null;
+      _flashTargetSN   = null;
       updatePortChangedIndicator();
       finishBuildModal(true, '✓ Flash Complete', 'Firmware flashed successfully.', { isFlash: true });
     }
