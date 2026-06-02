@@ -196,6 +196,44 @@ function _ensureLinuxDfuSuffix(onLog) {
   }
 }
 
+// Same shape as the Linux patch, but for Mac. The proffieboard core ships an
+// x86_64-only dfu-suffix at tools/macosx/dfu-suffix. Apple Silicon users
+// without Rosetta installed (increasingly common on recent Macs that have
+// never run an Intel app) hit the same cryptic fork/exec failure we saw on
+// Linux. We bundle a universal binary (Mach-O fat, x86_64 + arm64) at
+// resources/tools/mac/dfu-suffix — overwriting the core's copy makes compile
+// work on all Apple Silicon Macs regardless of Rosetta state.
+//
+// Candidate locations mirror Linux: our isolated arduino-data plus the
+// Arduino IDE default at ~/Library/Arduino15.
+function _ensureMacDfuSuffix(onLog) {
+  if (process.platform !== 'darwin') return;
+  const bundled = path.join(getToolsPath(), 'dfu-suffix');
+  if (!fs.existsSync(bundled)) return;
+
+  const candidates = [
+    getArduinoDataPath(),
+    path.join(require('os').homedir(), 'Library', 'Arduino15')
+  ];
+
+  for (const dataPath of candidates) {
+    const hardwarePath = path.join(dataPath, 'packages', 'proffieboard', 'hardware', 'stm32l4');
+    if (!fs.existsSync(hardwarePath)) continue;
+    for (const v of fs.readdirSync(hardwarePath)) {
+      const toolsMac = path.join(hardwarePath, v, 'tools', 'macosx');
+      const targetPath = path.join(toolsMac, 'dfu-suffix');
+      try {
+        fs.mkdirSync(toolsMac, { recursive: true });
+        fs.copyFileSync(bundled, targetPath);
+        fs.chmodSync(targetPath, 0o755);
+        onLog(`Patched dfu-suffix in ${toolsMac} with bundled universal binary.`, false);
+      } catch (e) {
+        onLog(`Could not patch dfu-suffix: ${e.message}`, true);
+      }
+    }
+  }
+}
+
 async function ensureCore(onLog) {
   const dataPath     = getArduinoDataPath();
   const sentinelPath = path.join(dataPath, '.core-installed');
@@ -206,6 +244,7 @@ async function ensureCore(onLog) {
   if (fs.existsSync(sentinelPath) && fs.readFileSync(sentinelPath, 'utf8').trim() === CORE_VERSION) {
     onLog(`Core ${CORE_ID}@${CORE_VERSION} already installed.`, false);
     _ensureLinuxDfuSuffix(onLog);
+    _ensureMacDfuSuffix(onLog);
     return { ok: true };
   }
 
@@ -220,6 +259,7 @@ async function ensureCore(onLog) {
     onLog(`Core ${CORE_ID}@${CORE_VERSION} already installed.`, false);
     fs.writeFileSync(sentinelPath, CORE_VERSION, 'utf8');
     _ensureLinuxDfuSuffix(onLog);
+    _ensureMacDfuSuffix(onLog);
     return { ok: true };
   }
 
@@ -237,6 +277,7 @@ async function ensureCore(onLog) {
   fs.writeFileSync(sentinelPath, CORE_VERSION, 'utf8');
 
   _ensureLinuxDfuSuffix(onLog);
+  _ensureMacDfuSuffix(onLog);
 
   onLog(`Core installed successfully.`, false);
   return { ok: true };
