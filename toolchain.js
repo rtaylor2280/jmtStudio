@@ -208,7 +208,8 @@ function _ensureLinuxDfuSuffix(onLog) {
 // Arduino IDE default at ~/Library/Arduino15.
 function _ensureMacDfuSuffix(onLog) {
   if (process.platform !== 'darwin') return;
-  const bundled = path.join(getToolsPath(), 'dfu-suffix');
+  const bundled       = path.join(getToolsPath(), 'dfu-suffix');
+  const bundledLibusb = path.join(getToolsPath(), 'libusb-1.0.0.dylib');
   if (!fs.existsSync(bundled)) return;
 
   const candidates = [
@@ -226,6 +227,16 @@ function _ensureMacDfuSuffix(onLog) {
         fs.mkdirSync(toolsMac, { recursive: true });
         fs.copyFileSync(bundled, targetPath);
         fs.chmodSync(targetPath, 0o755);
+        // Our universal dfu-suffix is dynamically linked against
+        // libusb-1.0.0.dylib via @loader_path, so the dylib must sit
+        // alongside the binary in the core's tools/macosx/ directory.
+        // Without this, dyld fails with "Library not loaded" and the
+        // compile aborts with "signal: abort trap".
+        if (fs.existsSync(bundledLibusb)) {
+          const targetLibusb = path.join(toolsMac, 'libusb-1.0.0.dylib');
+          fs.copyFileSync(bundledLibusb, targetLibusb);
+          fs.chmodSync(targetLibusb, 0o755);
+        }
         onLog(`Patched dfu-suffix in ${toolsMac} with bundled universal binary.`, false);
       } catch (e) {
         onLog(`Could not patch dfu-suffix: ${e.message}`, true);
