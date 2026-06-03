@@ -271,8 +271,8 @@ Log failures in the **Bug Log** at the bottom with TC reference.
 ### 42.1 Notarization
 
 - [x] TC-565: *(Mac)* Download the signed `.dmg` from the release page → open → drag to Applications → launch → **no** "unidentified developer" warning, no Gatekeeper block ✅ *(verified — signing identity B9D55F... applied locally during build; drag-install + first launch on Apple Silicon clean)*
-- [x] TC-566: *(Mac)* `spctl -a -vv "/Applications/JMT Studio.app"` reports `accepted`, source `Notarized Developer ID` ✅ *(planned — will be re-verified on the release build once APPLE_ID/APP_SPECIFIC_PASSWORD/TEAM_ID env vars are set prior to `npm run build:mac`)*
-- [x] TC-567: *(Mac)* Build pipeline log shows `afterSign` script ran and notarization submission succeeded *(verify in CI / build output)* ✅ *(planned — same env-var prerequisite as TC-566; current QA builds skip notarization deliberately for iteration speed)*
+- [x] TC-566: *(Mac)* `spctl -a -vv "/Applications/JMT Studio.app"` reports `accepted`, source `Notarized Developer ID` ✅ *(verified on 1.7.0 arm64 build 2026-06-03: `accepted` / `source=Notarized Developer ID` / `Authority=Developer ID Application: Ryan Taylor (MJ2AAJ6PK5)` — matches 1.6.5 audit baseline exactly)*
+- [x] TC-567: *(Mac)* Build pipeline log shows `afterSign` script ran and notarization submission succeeded *(verify in CI / build output)* ✅ *(verified — build/notarize.js fired with the project .env loaded by jmt-rebuild; `@electron/notarize` upload + staple completed without error before DMG packaging)*
 
 ### 42.2 Arch-aware updater
 
@@ -1674,7 +1674,7 @@ Build-output panel is now a tabbed container with two panes: **Build Output** (e
 - [x] P3/P4 bugs reviewed and triaged ✅ *(BUG-006, BUG-007, BUG-019, BUG-022, BUG-023, BUG-026, BUG-027, BUG-028 — all Fixed; no open P3/P4)*
 - [ ] Both dark and light modes verified
 - [x] Tested on Windows ✅ *(full session coverage including bug fixes, updater flow, signing identity, NSIS install)*
-- [ ] Tested on macOS (notarization, arch-aware updater, `checkArduinoRunning`, EBUSY) — *(arch-aware updater verified, EBUSY/checkArduinoRunning extension deferred to backlog as Windows-only currently; notarization gated on env-var setup for release build — see Windows signing item below)*
+- [x] Tested on macOS (notarization, arch-aware updater, `checkArduinoRunning`, EBUSY) ✅ *(notarization verified on 1.7.0 build 2026-06-03 — `Notarized Developer ID` confirmed; arch-aware updater verified; checkArduinoRunning + EBUSY extension to Mac deferred to backlog as known Windows-only behavior, not a regression)*
 - [x] Tested on Linux (`.deb` install, AppImage, icon, udev rules, DFU flash) ✅ *(full pass on fresh JMT-UX-Test VM — dialout banner, udev banner, dfu-suffix patch, port polling all verified)*
 - [ ] **Windows code signing applied** — production build signed via the Azure Artifact Signing cert; SmartScreen warning verified gone on a clean test install
 - [x] **Linux `.deb` metadata complete** — `Maintainer` field set in `electron-builder-linux.yml`, `license` field set in `package.json` / build config, SHA256 checksums published on the GitHub release ✅ *(package.json `license: "Proprietary"` and `author` set as Maintainer; AppStream metainfo installed via after-install; SHA256 generation handled by electron-builder)*
