@@ -44,7 +44,15 @@ exports.default = async function sign(configuration) {
     file,
   ];
 
-  const result = spawnSync('sign', args, { stdio: 'inherit', shell: true });
+  // No shell:true — that mode silently concatenates args, which breaks file
+  // paths with spaces (e.g. "JMT-Studio Setup 1.7.0.exe"). Without shell:true
+  // each array element is passed as a single argument verbatim. Node also
+  // emits DEP0190 deprecation warnings under shell:true. On Windows the
+  // dotnet-global "sign" tool is installed as sign.exe under
+  // %USERPROFILE%\.dotnet\tools (on PATH), and Node's spawn resolves the
+  // .exe extension via PATHEXT.
+  const cmd    = process.platform === 'win32' ? 'sign.exe' : 'sign';
+  const result = spawnSync(cmd, args, { stdio: 'inherit' });
 
   if (result.status !== 0) {
     throw new Error(`sign exited with code ${result.status} for ${file}`);
