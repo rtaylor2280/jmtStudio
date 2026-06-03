@@ -22,6 +22,16 @@ const CERTIFICATE_PROFILE        = 'jmt-studio-signing';
 exports.default = async function sign(configuration) {
   const file = configuration.path;
 
+  // Skip bundled third-party tools — Proffieboard core dfu-util/dfu-suffix/
+  // dfu-prefix, arduino-cli, etc. Those aren't ours and don't need our
+  // signature; signing them would also break any signatures they ship with.
+  // Only sign our own binaries: the main app .exe and the NSIS installer/
+  // uninstaller.
+  if (/[\\\/]resources[\\\/]/i.test(file)) {
+    console.log(`[sign] Skipping third-party binary: ${file}`);
+    return;
+  }
+
   console.log(`[sign] Signing ${file}`);
 
   const args = [
