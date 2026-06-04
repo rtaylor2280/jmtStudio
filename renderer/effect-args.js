@@ -187,27 +187,171 @@
     return [0, 0, 0];
   }
 
-  // ── Parens string helpers ──────────────────────────────────────────────────
+  // ── Slot map (from ProffieOS enum ArgumentName) ──────────────────────────
+  //
+  // Source of truth for ARG_NAME → slot number is the user's selected ProffieOS
+  // version's `enum ArgumentName` in styles/edit_mode.h. Populated via
+  // refreshSlotMap() which calls the main-process IPC; cached here for synchronous
+  // reads during parens parse/serialize. Falls back to the legacy registry table's
+  // `pos` field when the map hasn't loaded yet (initial startup, no version
+  // selected, file missing/unparseable).
+  //
+  // slotComments lets callers surface the enum's line-comments as tooltips on
+  // arg labels — "// Primary Base Color" reads better than "BASE_COLOR_ARG".
 
-  /** Parse parens CSV string into a sparse array of strings (empty string = not set). */
-  function parseParts(parensStr) {
-    if (!parensStr) return [];
-    return parensStr.split(',');
+  const slotMap      = {};   // ARG_NAME → integer slot number
+  const slotComments = {};   // ARG_NAME → string (enum comment, possibly empty)
+  let   slotMapVersion = null;
+
+  function _assignSlotMap(entries, version) {
+    Object.keys(slotMap).forEach(k => delete slotMap[k]);
+    Object.keys(slotComments).forEach(k => delete slotComments[k]);
+    for (const e of entries || []) {
+      slotMap[e.name]      = e.slot;
+      slotComments[e.name] = e.comment || '';
+    }
+    slotMapVersion = version || null;
+  }
+
+  async function refreshSlotMap(versionName) {
+    const api = (typeof window !== 'undefined' && window.electronAPI && window.electronAPI.getArgumentNames) || null;
+    if (!api) return;
+    try {
+      const res = await api(versionName);
+      if (res && res.ok) _assignSlotMap(res.entries, res.version);
+    } catch { /* swallow — leave any prior map in place */ }
+  }
+
+  // Drop the current map and version stamp. Used by `onOsVersionChange` so the
+  // next lazy load (e.g. on Advanced open) pulls the fresh enum from the newly-
+  // selected version. Doesn't refetch here — the enum isn't needed until the
+  // user actually opens Advanced or hovers a tooltip.
+  function invalidateSlotMap() {
+    _assignSlotMap([], null);
+  }
+
+  // DevTools helper — call window.debugSlotMap() to inspect current state.
+  // No runtime cost; only fires when called. Kept as a permanent support hook
+  // for "why isn't my arg showing up?" diagnoses across OS versions.
+  if (typeof window !== 'undefined') {
+    window.debugSlotMap = function () {
+      const names = Object.keys(slotMap).sort();
+      console.log(`[slotMap] version: ${slotMapVersion || '(unloaded)'}, args: ${names.length}`);
+      if (names.length === 0) {
+        console.log('[slotMap] (empty — lazy-load will fire next time Advanced opens or a slot is read)');
+        return { version: slotMapVersion, entries: [] };
+      }
+      console.table(names.map(n => ({ name: n, slot: slotMap[n], comment: slotComments[n] || '' })));
+      return { version: slotMapVersion, entries: names.map(n => ({ name: n, slot: slotMap[n] })) };
+    };
+  }
+
+  function _slotFor(argName) {
+    if (slotMap[argName] != null) return slotMap[argName];
+    // Pre-IPC fallback: use the legacy hardcoded table's `pos`. The legacy table's
+    // positions DO match the enum for the args it covers, so this is a reasonable
+    // bootstrap. Once refreshSlotMap completes, slotMap takes over — at that point,
+    // an arg name missing from the loaded map means it does NOT exist in the
+    // selected OS version's enum, and the fallback would silently corrupt the
+    // parens by writing to a slot the older version's parser won't recognize.
+    if (Object.keys(slotMap).length === 0) {
+      const reg = registry.find(r => r.name === argName);
+      return reg ? reg.pos : null;
+    }
+    return null;
+  }
+
+  // ── Parens string helpers ──────────────────────────────────────────────────
+  //
+  // Modern format: space-separated 1-indexed slots, `~` for empty, multi-component
+  // values (RGB) joined by commas inside a single slot token.
+  //   Example: "65535,0,0 ~ ~ ~ ~ ~ ~ ~ 0,65535,0"
+  //   means slot 1 (BASE_COLOR_ARG) = red, slot 9 (BLAST_COLOR_ARG) = green.
+  //
+  // Legacy format: pure comma-separated flat CSV positional via csvOffset in the
+  // hardcoded registry. We still read this for backward compatibility with configs
+  // written by older JMT Studio builds, but every write produces the modern format.
+  // First save auto-migrates each file.
+
+  function _isNewFormat(parensStr) {
+    if (!parensStr) return false;
+    return parensStr.includes(' ') || parensStr.includes('~');
+  }
+
+  // Parse modern format → 1-indexed array of slot tokens (raw strings, '' for empty).
+  function _parseNewSlots(parensStr) {
+    const slots = ['']; // 1-indexed; slots[0] is unused
+    if (!parensStr) return slots;
+    const tokens = parensStr.split(/\s+/).filter(t => t.length > 0);
+    for (let i = 0; i < tokens.length; i++) {
+      slots[i + 1] = (tokens[i] === '~') ? '' : tokens[i];
+    }
+    return slots;
+  }
+
+  // Parse legacy comma-list format → 1-indexed slot array, using the hardcoded
+  // registry's csvOffset to find each arg's chunk and emitting it as a comma-joined
+  // token at the slot the arg's `pos` field designates.
+  function _parseOldSlots(parensStr) {
+    const slots = [''];
+    if (!parensStr) return slots;
+    const parts = parensStr.split(',');
+    for (const reg of registry) {
+      let allEmpty = true;
+      const chunk = [];
+      for (let i = 0; i < reg.width; i++) {
+        const raw = (parts[reg.csvOffset + i] || '').trim();
+        if (raw !== '') allEmpty = false;
+        chunk.push(raw === '' ? '0' : raw);
+      }
+      if (!allEmpty) slots[reg.pos] = chunk.join(',');
+    }
+    return slots;
+  }
+
+  // Parse parens of either format. Detection is `space or ~` in the string.
+  function _parseAnyParens(parensStr) {
+    return _isNewFormat(parensStr) ? _parseNewSlots(parensStr) : _parseOldSlots(parensStr);
+  }
+
+  // Serialize a 1-indexed slot array to the modern format. Trailing empty slots
+  // are trimmed so we don't write a long tail of `~` tokens.
+  function _serializeSlots(slots) {
+    if (!slots || slots.length <= 1) return '';
+    let lastSet = 0;
+    for (let i = 1; i < slots.length; i++) {
+      if (slots[i] && slots[i] !== '') lastSet = i;
+    }
+    if (lastSet === 0) return '';
+    const out = [];
+    for (let i = 1; i <= lastSet; i++) {
+      out.push((slots[i] && slots[i] !== '') ? slots[i] : '~');
+    }
+    return out.join(' ');
   }
 
   /**
-   * Read the CSV values for a named arg from the parens string.
-   * Returns { values: number[]|null (null for each unset slot), isDefault: boolean }.
-   * isDefault is true when ALL slots for this arg are absent/empty.
+   * Read the values for a named arg from the parens string.
+   * Returns { values: number[]|null (null for each unset slot), isDefault, reg, unsupported? }.
+   * `unsupported: true` indicates the arg name isn't in the selected OS version's enum.
    */
   function readRegistryArg(argName, parensStr) {
     const reg = registry.find(r => r.name === argName);
     if (!reg) return null;
-    const parts = parseParts(parensStr);
+    const slotNum = _slotFor(argName);
+    if (slotNum == null) {
+      return { values: Array(reg.width).fill(null), isDefault: true, reg, unsupported: true };
+    }
+    const slots = _parseAnyParens(parensStr);
+    const tok   = slots[slotNum] || '';
+    if (!tok) {
+      return { values: Array(reg.width).fill(null), isDefault: true, reg };
+    }
+    const parts  = tok.split(',');
     const values = [];
     let allEmpty = true;
     for (let i = 0; i < reg.width; i++) {
-      const raw = (parts[reg.csvOffset + i] || '').trim();
+      const raw = (parts[i] || '').trim();
       if (raw !== '') { allEmpty = false; values.push(parseInt(raw, 10) || 0); }
       else            { values.push(null); }
     }
@@ -217,28 +361,27 @@
   /**
    * Write new values for a named arg into the parens string.
    * Pass null for newValues to clear (reset to default / empty).
-   * Returns the updated parens string with no trailing commas.
+   * Always emits the modern slot-based format regardless of input format.
    */
   function writeRegistryArg(argName, newValues, currentParensStr) {
     const reg = registry.find(r => r.name === argName);
     if (!reg) return currentParensStr || '';
+    const slotNum = _slotFor(argName);
+    if (slotNum == null) return currentParensStr || ''; // arg unsupported in this OS version
 
-    const parts = parseParts(currentParensStr);
-    const needed = reg.csvOffset + reg.width;
-    while (parts.length < needed) parts.push('');
+    const slots = _parseAnyParens(currentParensStr);
+    while (slots.length <= slotNum) slots.push('');
 
     if (newValues === null) {
-      for (let i = 0; i < reg.width; i++) parts[reg.csvOffset + i] = '';
+      slots[slotNum] = '';
     } else {
+      const parts = [];
       for (let i = 0; i < reg.width; i++) {
-        parts[reg.csvOffset + i] = String(newValues[i] != null ? newValues[i] : 0);
+        parts.push(String(newValues[i] != null ? newValues[i] : 0));
       }
+      slots[slotNum] = parts.join(',');
     }
-
-    // Trim trailing empty slots
-    while (parts.length > 0 && parts[parts.length - 1] === '') parts.pop();
-
-    return parts.join(',');
+    return _serializeSlots(slots);
   }
 
   function isNamedColor(s) {
@@ -252,6 +395,21 @@
     return `Rgb<${Math.round(r16/257)},${Math.round(g16/257)},${Math.round(b16/257)}>`;
   }
 
-  root.proffieArgs = { registry, resolveColorDefault, readRegistryArg, writeRegistryArg, colorLabel, isNamedColor, namedColors: NAMED_COLORS };
+  root.proffieArgs = {
+    registry,
+    resolveColorDefault,
+    readRegistryArg,
+    writeRegistryArg,
+    colorLabel,
+    isNamedColor,
+    namedColors:    NAMED_COLORS,
+    // Slot map + helpers — exposed so callers can refresh on version change
+    // and read enum comments for tooltips.
+    slotMap,
+    slotComments,
+    refreshSlotMap,
+    invalidateSlotMap,
+    get slotMapVersion() { return slotMapVersion; },
+  };
 
 })(window);

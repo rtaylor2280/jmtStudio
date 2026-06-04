@@ -15,6 +15,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   removeRecentFile:  (filePath)  => ipcRenderer.invoke('store:removeRecentFile', filePath),
   getSetting: (key, def)         => ipcRenderer.invoke('store:getSetting', key, def),
   setSetting: (key, value)       => ipcRenderer.invoke('store:setSetting', key, value),
+  readDefaultTemplate: ()        => ipcRenderer.invoke('template:readDefault'),
+  resetDefaultTemplate: ()       => ipcRenderer.invoke('template:resetDefault'),
+  getTemplateStatus: ()          => ipcRenderer.invoke('template:getStatus'),
+  importTemplate: ()             => ipcRenderer.invoke('template:import'),
 
   // ── Style Library ──────────────────────────────────────
   stylesFileExists: ()          => ipcRenderer.invoke('styles:exists'),
@@ -51,6 +55,28 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listPorts:          () => ipcRenderer.invoke('ports:list'),
   listPortsRaw:       () => ipcRenderer.invoke('ports:listRaw'),
   getRecommendedPort: () => ipcRenderer.invoke('ports:getRecommended'),
+  setPortPolling: (enabled) => ipcRenderer.send('ports:setPolling', enabled),
+  onPortsChanged: (cb) => {
+    const handler = () => cb();
+    ipcRenderer.on('ports:changed', handler);
+    return () => ipcRenderer.removeListener('ports:changed', handler);
+  },
+
+  // ── Serial Monitor ───────────────────────────────────
+  openSerial:  (port, baudRate)        => ipcRenderer.invoke('serial:open',   { port, baudRate }),
+  closeSerial: ()                      => ipcRenderer.invoke('serial:close'),
+  writeSerial: (text)                  => ipcRenderer.invoke('serial:write',  { text }),
+  isSerialOpen: ()                     => ipcRenderer.invoke('serial:isOpen'),
+  onSerialData: (cb) => {
+    const handler = (_, data) => cb(data);
+    ipcRenderer.on('serial:data', handler);
+    return () => ipcRenderer.removeListener('serial:data', handler);
+  },
+  onSerialClosed: (cb) => {
+    const handler = (_, data) => cb(data);
+    ipcRenderer.on('serial:closed', handler);
+    return () => ipcRenderer.removeListener('serial:closed', handler);
+  },
 
   // ── Build events (main → renderer) ──────────────────
   // Each returns an unsubscribe function — call it to clean up
@@ -72,6 +98,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ── ProffieOS versions ───────────────────────────────────
   listProffieVersions: ()                        => ipcRenderer.invoke('proffieOS:listVersions'),
   getSelectedVersion:  ()                        => ipcRenderer.invoke('proffieOS:getSelected'),
+  getArgumentNames:    (versionName)             => ipcRenderer.invoke('proffieOS:getArgumentNames', versionName),
   selectVersion:       (name)                    => ipcRenderer.invoke('proffieOS:selectVersion', name),
   selectFolder:        ()                        => ipcRenderer.invoke('dialog:selectFolder'),
   validateVersionSource: (sourcePath)            => ipcRenderer.invoke('proffieOS:validateSource', sourcePath),
@@ -97,6 +124,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   fetchJmtManifest:    ()                    => ipcRenderer.invoke('versions:fetchJmtManifest'),
   checkJmtIntegrity:   (versionName, files)  => ipcRenderer.invoke('versions:checkJmtIntegrity', { versionName, files }),
   applyJmtFeatures:    (name)                => ipcRenderer.invoke('versions:applyJmtFeatures', name),
+  getAddonBranch:      ()                    => ipcRenderer.invoke('versions:getAddonBranch'),
+  setAddonBranch:      (branch)              => ipcRenderer.invoke('versions:setAddonBranch', branch),
   onJmtProgress:       (cb) => {
     const handler = (_, data) => cb(data);
     ipcRenderer.on('versions:jmtProgress', handler);

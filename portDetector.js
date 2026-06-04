@@ -115,6 +115,60 @@ function parseBoardList(raw) {
   }).filter(Boolean);
 }
 
+// Returns true if the current user IS in the dialout group (has serial port
+// access). Used to decide whether the dialout-banner should fire even when
+// arduino-cli successfully enumerates the board's /dev/ttyACM* (which it does
+// from USB descriptors, no port-open required) — without dialout membership
+// the user still can't flash or open the serial monitor, so the warning is
+// needed regardless of detection success. Returns true on non-Linux (N/A).
+function checkLinuxDialoutMembership() {
+  if (process.platform !== 'linux') return true;
+  const fs = require('fs');
+  try {
+    const groupFile = fs.readFileSync('/etc/group', 'utf8');
+    const dialoutLine = groupFile.split('\n').find(l => l.startsWith('dialout:'));
+    if (!dialoutLine) return true;
+    const gid = parseInt(dialoutLine.split(':')[2], 10);
+    if (!Number.isFinite(gid)) return true;
+    const userGroups = process.getgroups ? process.getgroups() : [];
+    return userGroups.includes(gid);
+  } catch {
+    return true; // can't read /etc/group — don't false-positive
+  }
+}
+
+// Returns true if the Proffieboard udev rules are installed at
+// /etc/udev/rules.d/. Without these, dfu-util can enumerate the DFU device
+// (via sysfs) but can't actually OPEN it for transfers — flash fails inside
+// libusb with LIBUSB_ERROR_ACCESS. Detecting the missing rules at startup
+// lets us surface the fix BEFORE the user attempts a flash, instead of
+// after it fails inside the dfu-util transfer.
+//
+// Detection is by file content, not filename, because the Proffieboard core
+// ships rules named for the board codenames (49-butterfly.rules etc.) with
+// no "proffieboard" string anywhere. Requiring both VID `1209` AND PID `6668`
+// in the same file avoids false positives from other devices in the pid.codes
+// 1209 vendor block — Firefox's snap ships rules for hardware security keys
+// (SoloKey, Nitrokey) using `ATTRS{idVendor}=="1209"`, and matching just `1209`
+// would suppress the banner on any Firefox-snap system.
+function checkLinuxUdevRules() {
+  if (process.platform !== 'linux') return true;
+  const fs = require('fs');
+  try {
+    const dir = '/etc/udev/rules.d';
+    for (const name of fs.readdirSync(dir)) {
+      if (!name.endsWith('.rules')) continue;
+      try {
+        const content = fs.readFileSync(`${dir}/${name}`, 'utf8');
+        if (content.includes('1209') && content.includes('6668')) return true;
+      } catch {}
+    }
+    return false;
+  } catch {
+    return true; // can't read /etc/udev/rules.d — don't false-positive
+  }
+}
+
 // ── List ports ─────────────────────────────────────────
 async function listPorts() {
   const result = await runBoardList();
@@ -154,6 +208,17 @@ async function getRecommendedPort() {
 
   const { proffieports, ports } = result;
 
+  // Linux prerequisite banners fire whenever the system state is wrong,
+  // regardless of whether a board is currently plugged in. These are one-time
+  // setup steps the user has to do BEFORE the board will work — gating on
+  // board presence meant a first-time Linux user with the board not yet
+  // connected got no guidance, then plugged in, got nothing detected, and
+  // had no way to know what to fix. Surfacing the banners purely on system
+  // state (dialout membership / udev rules content) makes the fix actionable
+  // before the board is ever attached.
+  const linuxSerialPermissionIssue = !checkLinuxDialoutMembership();
+  const linuxUdevRulesMissing      = !checkLinuxUdevRules();
+
   if (proffieports.length === 0) {
     return {
       ok: true,
@@ -161,6 +226,8 @@ async function getRecommendedPort() {
       port: null,
       ports,
       proffieports: [],
+      linuxSerialPermissionIssue,
+      linuxUdevRulesMissing,
       message: ports.length === 0
         ? 'No serial ports detected. Connect your Proffieboard.'
         : `No Proffieboard detected. ${ports.length} other port(s) available.`
@@ -174,6 +241,8 @@ async function getRecommendedPort() {
       port: proffieports[0],
       ports,
       proffieports,
+      linuxSerialPermissionIssue,
+      linuxUdevRulesMissing,
       message: `Proffieboard detected on ${proffieports[0].path}.`
     };
   }
@@ -184,6 +253,7 @@ async function getRecommendedPort() {
     port: null,
     ports,
     proffieports,
+    linuxSerialPermissionIssue,
     message: `${proffieports.length} Proffieboards detected. Select a port.`
   };
 }

@@ -15,3 +15,34 @@ if [ -f "$SRC" ]; then
     done
     gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
 fi
+
+# Install AppStream metainfo so GNOME App Center shows developer name, release
+# date, and project license instead of "Unknown" everywhere. Without this file
+# at /usr/share/metainfo/, the App Center has nothing to populate those fields
+# with for a sideloaded third-party .deb.
+#
+# IMPORTANT: bump the <release version=... date=...> line per release. There's
+# no auto-generation of this yet (backlog item). Date format is YYYY-MM-DD.
+mkdir -p /usr/share/metainfo
+cat > /usr/share/metainfo/com.jmt.proffieos-editor.metainfo.xml << 'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.jmt.proffieos-editor</id>
+  <name>JMT Studio</name>
+  <summary>ProffieOS configuration tool</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>LicenseRef-proprietary</project_license>
+  <description>
+    <p>ProffieOS Configuration Tool by Jedi Master Tech. Edit, compile, and flash lightsaber firmware configurations to Proffieboard hardware.</p>
+  </description>
+  <launchable type="desktop-id">jmt-studio.desktop</launchable>
+  <url type="homepage">https://jedimastertech.com</url>
+  <developer id="com.jmt">
+    <name>Jedi Master Tech</name>
+  </developer>
+  <releases>
+    <release version="1.7.0" date="2026-05-31"/>
+  </releases>
+  <content_rating type="oars-1.1"/>
+</component>
+EOF

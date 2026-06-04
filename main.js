@@ -37,9 +37,15 @@ function addRecentFile(filePath) {
 let win;
 
 function showSplash(parentWin) {
-  const [cx, cy] = parentWin.getContentBounds
-    ? (() => { const b = parentWin.getBounds(); return [b.x + b.width / 2, b.y + b.height / 2]; })()
-    : [960, 540];
+  // Center on the primary display's work area, NOT on parentWin.getBounds().
+  // On Linux/X11+Wayland, maximize() is async — parent bounds reflect the
+  // pre-maximize size when showSplash runs immediately after maximize, which
+  // (combined with the `height: 1` constructor trick anchoring the window mid-
+  // screen) pushes the splash off the bottom edge of the display.
+  const { screen } = require('electron');
+  const display = screen.getPrimaryDisplay();
+  const cx = display.workArea.x + display.workArea.width  / 2;
+  const cy = display.workArea.y + display.workArea.height / 2;
 
   const splash = new BrowserWindow({
     width: 400,
@@ -103,7 +109,14 @@ function createWindow() {
   win.once('ready-to-show', () => {
     win.show();
     win.setSize(bounds.width || 1280, bounds.height || 860);
-    if (wasMax) win.maximize();
+    // First-run: maximize. The app's UI (config editor, style library, preset
+    // sidecar, build output) breathes better at full size, and a first-time
+    // user shouldn't have to manually expand to see everything. Returning
+    // users land at their saved bounds / maximized state instead.
+    // (Without this, the constructor's `height: 1` trick would leave the
+    // window positioned for a 1px-tall window — bottom hangs off-screen.)
+    if (bounds.x == null) win.maximize();
+    else if (wasMax) win.maximize();
     showSplash(win);
   });
 
@@ -118,6 +131,9 @@ function createWindow() {
   };
   win.on('resize', saveBounds);
   win.on('move',   saveBounds);
+
+  win.on('blur',  () => stopPortPolling());
+  win.on('focus', () => { if (_portPollingWanted) { startPortPolling(); _pollPortsNow(); } });
 
   // ── Close handler ──
   win.on('close', (e) => {
@@ -156,6 +172,7 @@ app.whenReady().then(() => {
   if (initVersion) proffie.setSelectedVersion(initVersion);
 
   createWindow();
+  startPortPolling();
 });
 app.on('window-all-closed', () => app.quit());
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
@@ -314,12 +331,29 @@ ipcMain.on('title:set', (_, title) => win.setTitle(title));
 // ── IPC: Toolchain ─────────────────────────────────────
 ipcMain.handle('toolchain:initialize', async () => {
   const log = makeLogger();
+
+  if (toolchain.needsCoreInstall() && win && !win.isDestroyed()) {
+    win.webContents.send('build:status', {
+      type: 'toolchain-setup',
+      ok: null,
+      message: 'Setting up build tools...'
+    });
+  }
+
   const result = await toolchain.initialize(log);
   if (win && !win.isDestroyed()) {
+    // When the toolchain itself is ready but no ProffieOS version is present,
+    // we surface that as an error-state next-action message in the same status
+    // slot rather than a misleading green "Toolchain ready" while compile is
+    // still gated. The renderer reads needsProffieOS to pick the right state.
+    const msg = !result.ok            ? result.error
+              : result.needsProffieOS ? 'No ProffieOS versions found. Please import or download a version first.'
+                                      : 'Toolchain ready';
     win.webContents.send('build:status', {
       type: 'toolchain',
       ok: result.ok,
-      message: result.ok ? 'Toolchain ready' : result.error
+      needsProffieOS: !!result.needsProffieOS,
+      message: msg
     });
   }
   return result;
@@ -371,6 +405,137 @@ ipcMain.handle('toolchain:getStatus', () => toolchain.getStatus());
 ipcMain.handle('cache:check', (_, { configContent, fqbn, usb }) =>
   toolchain.checkCacheAndRestore(configContent, fqbn, usb));
 
+// ── Config template (user-editable in a future release) ──────────────────────
+// Read the default-config template from `userData/templates/default.h`. Create it on first
+// request with the V3 scaffold below if it doesn't exist yet, then return the file contents.
+// Future: a Settings UI will let the user edit the same file, and this handler picks up
+// whatever the file currently contains — no further code change required.
+const DEFAULT_CONFIG_TEMPLATE = [
+  '#ifdef CONFIG_TOP',
+  '#include "proffieboard_v3_config.h"',
+  '#define NUM_BLADES 1                           \t// Number of blade definitions in CONFIG_PRESETS',
+  '#define NUM_BUTTONS 2                          \t// Number of physical buttons',
+  '#define VOLUME 1500                            \t// Master volume (0–2047)',
+  'const unsigned int maxLedsPerStrip = 144;      \t// Max LEDs per strip (important for memory allocation)',
+  '#define CLASH_THRESHOLD_G 2.0                  \t// Clash sensitivity (lower = more sensitive)',
+  '#define ENABLE_AUDIO                           \t// Enables audio playback',
+  '#define ENABLE_MOTION                          \t// Enables motion sensing (gyro/accel)',
+  '#define ENABLE_WS2811                          \t// Enables NeoPixel (WS2811) LED output',
+  '#define ENABLE_SD                              \t// Enables SD card support for sound fonts',
+  '#define MOTION_TIMEOUT (60 * 6 * 1000)        \t// Time (ms) to shut down after inactivity (6 minutes)',
+  '#define IDLE_OFF_TIME (60 * 7 * 1000)         \t// Time (ms) to power down completely after idle (7 minutes)',
+  '',
+  '#endif',
+  '',
+  '#ifdef CONFIG_PROP',
+  '#include "../props/saber_fett263_buttons.h"',
+  '#endif',
+  '',
+  '#ifdef CONFIG_PRESETS',
+  '',
+  'Preset presets[] = {',
+  '',
+  '{ "", "",',
+  '  StylePtr<Black>(),',
+  '',
+  '  "Preset 1" },',
+  '',
+  '};',
+  '',
+  'BladeConfig blades[] = {',
+  '',
+  '{ 0, ',
+  'WS281XBladePtr<128, bladePin, Color8::GRB, PowerPINS<bladePowerPin2, bladePowerPin3>>(),',
+  'CONFIGARRAY(presets)',
+  '},',
+  '',
+  '};',
+  '#endif',
+  '',
+  '#ifdef CONFIG_BUTTONS',
+  'Button PowerButton(BUTTON_POWER, powerButtonPin, "pow");',
+  'Button AuxButton(BUTTON_AUX, auxPin, "aux");',
+  '#endif',
+  '',
+].join('\n');
+
+ipcMain.handle('template:readDefault', () => {
+  try {
+    const dir  = path.join(app.getPath('userData'), 'templates');
+    const file = path.join(dir, 'default.h');
+    if (!fs.existsSync(file)) {
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(file, DEFAULT_CONFIG_TEMPLATE, 'utf8');
+    }
+    const content = fs.readFileSync(file, 'utf8');
+    return { ok: true, content, path: file };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+// Overwrite the template file with the shipped default. Used by the Settings → Reset
+// Default Template action and by users who want to revert custom edits.
+ipcMain.handle('template:resetDefault', () => {
+  try {
+    const dir  = path.join(app.getPath('userData'), 'templates');
+    const file = path.join(dir, 'default.h');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(file, DEFAULT_CONFIG_TEMPLATE, 'utf8');
+    return { ok: true, path: file };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+// Report status of the template file. `isDefault` is true when the current file's content
+// matches DEFAULT_CONFIG_TEMPLATE byte-for-byte — used by the Settings UI to disable
+// "Reset to Default" when there's nothing to reset.
+ipcMain.handle('template:getStatus', () => {
+  try {
+    const dir  = path.join(app.getPath('userData'), 'templates');
+    const file = path.join(dir, 'default.h');
+    if (!fs.existsSync(file)) {
+      return { ok: true, exists: false, isDefault: true, path: file };
+    }
+    const content = fs.readFileSync(file, 'utf8');
+    return { ok: true, exists: true, isDefault: content === DEFAULT_CONFIG_TEMPLATE, path: file };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+// Open a file picker and replace the template file with the selected `.h` file's content.
+ipcMain.handle('template:import', async () => {
+  try {
+    const res = await dialog.showOpenDialog({
+      title: 'Import Default Template',
+      filters: [{ name: 'Header Files', extensions: ['h'] }, { name: 'All Files', extensions: ['*'] }],
+      properties: ['openFile'],
+    });
+    if (res.canceled || !res.filePaths.length) {
+      return { ok: false, cancelled: true };
+    }
+    const sourcePath = res.filePaths[0];
+    const raw        = fs.readFileSync(sourcePath, 'utf8');
+    // Strip JMT metadata — templates should be neutral starting points, not carry
+    // the imported config's identity (config_id, name, dates, board pin, etc.).
+    // Mirrors the renderer's stripJmtLines helper; kept inline here so the main
+    // process doesn't need to require the renderer module.
+    const content    = raw
+      .replace(/^\/\/ Configuration edited with JMT Studio[^\n]*\n?/m, '')
+      .replace(/^\/\/ @jmt:\S+[^\n]*\n?/gm, '')
+      .replace(/^\n+/, '');                // trim leading blank lines left by the strip
+    const dir        = path.join(app.getPath('userData'), 'templates');
+    const file       = path.join(dir, 'default.h');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(file, content, 'utf8');
+    return { ok: true, path: file, sourcePath };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
 ipcMain.handle('cache:getSize', () => {
   const cacheRoot = path.join(app.getPath('userData'), 'build-cache');
   function dirSize(p) {
@@ -413,8 +578,14 @@ ipcMain.handle('cache:getDataSize', () => {
       return sum + (e.isDirectory() ? dirSize(full) : fs.statSync(full).size);
     }, 0);
   }
+  // "cache" must match what cache:clear actually deletes — that handler nukes
+  // both build-cache (keyed artifacts) AND build-output (last compile's tree).
+  // Previously this only summed build-cache, so users saw "10.3 MB" before
+  // clicking Clear and "38.2 MB freed" afterward, a 3-4× discrepancy that
+  // erodes trust in the displayed numbers.
   return {
-    cache:       dirSize(path.join(userData, 'build-cache')),
+    cache:       dirSize(path.join(userData, 'build-cache')) +
+                 dirSize(path.join(userData, 'build-output')),
     arduinoData: dirSize(path.join(userData, 'arduino-data')),
     versions:    dirSize(path.join(userData, 'ProffieOS-versions')),
   };
@@ -466,16 +637,25 @@ ipcMain.handle('app:checkForUpdate', async (_, { force = false } = {}) => {
     const release        = JSON.parse(body);
     const latestVersion  = (release.tag_name || '').replace(/^v/, '');
     const currentVersion = app.getVersion();
-    const hasUpdate      = _semverGt(latestVersion, currentVersion);
-    const assetExt = process.platform === 'win32' ? '.exe'
-                   : process.platform === 'darwin' ? '.dmg'
-                   : '.AppImage';
-    const asset = (release.assets || []).find(a => a.name.endsWith(assetExt));
+    const hasUpdate = _semverGt(latestVersion, currentVersion);
+    let asset;
+    if (process.platform === 'win32') {
+      asset = (release.assets || []).find(a => a.name.endsWith('.exe'));
+    } else if (process.platform === 'darwin') {
+      if (process.arch === 'arm64') {
+        asset = (release.assets || []).find(a => a.name.endsWith('-arm64.dmg'));
+      } else {
+        asset = (release.assets || []).find(a => a.name.endsWith('.dmg') && !a.name.includes('arm64'));
+      }
+    } else {
+      asset = (release.assets || []).find(a => a.name.endsWith('.AppImage'));
+    }
     const result = {
       ok: true,
       hasUpdate,
       currentVersion,
       latestVersion,
+      platform:     process.platform,
       releaseNotes: release.body || '',
       downloadUrl:  asset?.browser_download_url || null,
       assetName:    asset?.name || null,
@@ -537,6 +717,81 @@ ipcMain.handle('app:installUpdate', async () => {
 });
 ipcMain.handle('toolchain:abort',     () => toolchain.abort());
 
+// ── Port polling ───────────────────────────────────────
+// Cheap SerialPort.list() every 4.5s; only fires the expensive arduino-cli
+// call (via renderer refreshPorts) when the port path set actually changes.
+// Polls only when config tab is active AND window is focused.
+let _portPollTimer    = null;
+let _portPollBusy     = false;
+let _lastPortPaths    = null;
+// Defaults to true because the renderer starts on the config tab — `switchTab`
+// only fires when the user CHANGES tabs, so without this default the flag stays
+// false until the user navigates away and back. Then the first blur→focus cycle
+// leaves polling permanently off (the focus handler is gated by this flag).
+let _portPollingWanted = true;
+
+ipcMain.on('ports:setPolling', (_, enabled) => {
+  _portPollingWanted = enabled;
+  if (enabled) { startPortPolling(); _pollPortsNow(); }
+  else stopPortPolling();
+});
+
+// On Linux, libudev (which serialport uses) has a settle gap after USB
+// attach — the kernel creates /dev/ttyACM* but libudev's published list lags
+// by several seconds. Polling SerialPort.list() alone catches removal
+// promptly but misses insertion until libudev catches up. Cheap sysfs scan
+// for Proffieboard VID 1209 closes that gap: the kernel populates
+// /sys/bus/usb/devices/*/idVendor the instant the device attaches, before
+// any userspace settle. Returns the count so a 0→1 transition (or back)
+// flips the change signature even when SerialPort.list() hasn't updated.
+function _countLinuxProffieUsb() {
+  if (process.platform !== 'linux') return 0;
+  try {
+    const fs = require('fs');
+    const base = '/sys/bus/usb/devices';
+    let count = 0;
+    for (const dev of fs.readdirSync(base)) {
+      try {
+        const v = fs.readFileSync(`${base}/${dev}/idVendor`, 'utf8').trim();
+        if (v === '1209') count++;
+      } catch {}
+    }
+    return count;
+  } catch { return 0; }
+}
+
+async function _pollPortsNow() {
+  if (_portPollBusy) return;
+  _portPollBusy = true;
+  try {
+    const { SerialPort } = require('serialport');
+    const raw   = await SerialPort.list();
+    const paths = raw.map(p => p.path).sort().join('\0');
+    const sig   = `${paths}|${_countLinuxProffieUsb()}`;
+    if (_lastPortPaths === null) {
+      _lastPortPaths = sig;
+      return;
+    }
+    if (sig !== _lastPortPaths) {
+      _lastPortPaths = sig;
+      if (win && !win.isDestroyed()) win.webContents.send('ports:changed');
+    }
+  } catch {}
+  finally { _portPollBusy = false; }
+}
+
+function startPortPolling() {
+  if (_portPollTimer) return;
+  _portPollTimer = setInterval(() => _pollPortsNow(), 4500);
+}
+
+function stopPortPolling() {
+  if (_portPollTimer) {
+    clearInterval(_portPollTimer);
+    _portPollTimer = null;
+  }
+}
+
 // ── IPC: Port detection ────────────────────────────────
 ipcMain.handle('ports:list', async () => {
   return await portDetect.listPorts();
@@ -558,6 +813,82 @@ ipcMain.handle('ports:listRaw', async () => {
 
 ipcMain.handle('ports:getRecommended', async () => {
   return await portDetect.getRecommendedPort();
+});
+
+// ── IPC: Serial Monitor ────────────────────────────────
+// One open SerialPort instance at a time, exposed to the renderer's serial
+// monitor pane. Renderer drives open / close / write; main forwards 'data'
+// chunks and unexpected 'close' / 'error' events. Flash auto-pauses by calling
+// `serial:close` (renderer owns the policy — main just honours requests).
+let _serialMonitorPort = null;
+
+function _broadcastSerial(channel, payload) {
+  BrowserWindow.getAllWindows().forEach(w => {
+    if (!w.isDestroyed()) w.webContents.send(channel, payload);
+  });
+}
+
+function _closeSerialMonitor() {
+  if (!_serialMonitorPort) return;
+  try { _serialMonitorPort.removeAllListeners(); } catch {}
+  try {
+    if (_serialMonitorPort.isOpen) _serialMonitorPort.close();
+  } catch {}
+  _serialMonitorPort = null;
+}
+
+ipcMain.handle('serial:open', async (_, { port, baudRate }) => {
+  if (!port) return { ok: false, error: 'No port specified' };
+  _closeSerialMonitor();
+  try {
+    const { SerialPort } = require('serialport');
+    const sp = new SerialPort({
+      path: port,
+      baudRate: baudRate || 115200,
+      autoOpen: false,
+    });
+    await new Promise((resolve, reject) => {
+      sp.open(err => err ? reject(err) : resolve());
+    });
+    _serialMonitorPort = sp;
+    sp.on('data', chunk => {
+      _broadcastSerial('serial:data', { text: chunk.toString('utf8') });
+    });
+    sp.on('close', () => {
+      // Could be intentional (we asked) or external (board unplugged). Either
+      // way, clear the ref and notify renderer so its UI updates.
+      _serialMonitorPort = null;
+      _broadcastSerial('serial:closed', { reason: 'close' });
+    });
+    sp.on('error', err => {
+      _broadcastSerial('serial:closed', { reason: 'error', error: err.message });
+      _closeSerialMonitor();
+    });
+    return { ok: true, port, baudRate: baudRate || 115200 };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+ipcMain.handle('serial:close', async () => {
+  _closeSerialMonitor();
+  return { ok: true };
+});
+
+ipcMain.handle('serial:write', async (_, { text }) => {
+  if (!_serialMonitorPort || !_serialMonitorPort.isOpen) {
+    return { ok: false, error: 'Port not open' };
+  }
+  return await new Promise(resolve => {
+    _serialMonitorPort.write(text, err => {
+      if (err) return resolve({ ok: false, error: err.message });
+      resolve({ ok: true });
+    });
+  });
+});
+
+ipcMain.handle('serial:isOpen', () => {
+  return { ok: true, isOpen: !!(_serialMonitorPort && _serialMonitorPort.isOpen) };
 });
 
 // ── IPC: Favorites ─────────────────────────────────────
@@ -601,6 +932,14 @@ ipcMain.handle('proffieOS:listVersions', () => proffie.listVersions());
 ipcMain.handle('proffieOS:getSelected', () => ({
   name: proffie.getSelectedVersion()
 }));
+
+// Returns [{ name, comment, slot }] for the ArgumentName enum in the given version's
+// styles/edit_mode.h. Falls back to [] when the version / file / enum can't be parsed.
+// Pass null/undefined to use the currently selected version.
+ipcMain.handle('proffieOS:getArgumentNames', (_, versionName) => {
+  const v = versionName || proffie.getSelectedVersion();
+  return { ok: true, version: v, entries: proffie.getArgumentNames(v) };
+});
 
 ipcMain.handle('proffieOS:selectVersion', (_, name) => {
   proffie.setSelectedVersion(name);
@@ -814,8 +1153,13 @@ ipcMain.handle('versions:downloadRelease', async (event, { downloadUrl, versionN
 });
 
 // ── IPC: JMT add-ons ──────────────────────────────────
-const JMT_MANIFEST_URL = 'https://raw.githubusercontent.com/rtaylor2280/jmt-proffie-addons/main/manifest.json';
-const JMT_RAW_BASE     = 'https://raw.githubusercontent.com/rtaylor2280/jmt-proffie-addons/main/';
+// Branch is mutable — the renderer can flip between prod (`main`) and `dev` via the
+// hidden devmode toggle in the versions panel. Session-only: every app launch resets
+// to `main` so a user can never accidentally end up on dev.
+let _addonBranch = 'main';
+const _JMT_REPO_BASE     = 'https://raw.githubusercontent.com/rtaylor2280/jmt-proffie-addons/';
+const _jmtManifestUrl = () => `${_JMT_REPO_BASE}${_addonBranch}/manifest.json`;
+const _jmtRawBase     = () => `${_JMT_REPO_BASE}${_addonBranch}/`;
 let _jmtManifestCache    = null;
 let _jmtManifestCachedAt = 0;
 
@@ -825,7 +1169,7 @@ async function _getJmtManifest() {
     return { ok: true, manifest: _jmtManifestCache };
   }
   try {
-    const body = await _httpsGet(JMT_MANIFEST_URL + '?_=' + Date.now(), { 'User-Agent': 'JMT-Studio', 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' });
+    const body = await _httpsGet(_jmtManifestUrl() + '?_=' + Date.now(), { 'User-Agent': 'JMT-Studio', 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' });
     const manifest = JSON.parse(body);
     _jmtManifestCache    = manifest;
     _jmtManifestCachedAt = Date.now();
@@ -836,6 +1180,16 @@ async function _getJmtManifest() {
 }
 
 ipcMain.handle('versions:fetchJmtManifest', () => _getJmtManifest());
+
+ipcMain.handle('versions:getAddonBranch', () => _addonBranch);
+ipcMain.handle('versions:setAddonBranch', (_, branch) => {
+  _addonBranch = branch === 'dev' ? 'dev' : 'main';
+  // Manifest cache is keyed by URL implicitly — flush it so the next fetch hits
+  // the new branch instead of returning the previous branch's cached manifest.
+  _jmtManifestCache    = null;
+  _jmtManifestCachedAt = 0;
+  return { ok: true, branch: _addonBranch };
+});
 
 ipcMain.handle('versions:checkJmtIntegrity', (_, { versionName, files }) => {
   const proffieRoot = path.join(proffie.getUserVersionsPath(), versionName, 'ProffieOS');
@@ -848,7 +1202,15 @@ ipcMain.handle('versions:checkJmtIntegrity', (_, { versionName, files }) => {
       return { path: file.path, status: hash === file.sha256 ? 'ok' : 'modified' };
     } catch { return { path: file.path, status: 'error' }; }
   });
-  return { ok: true, results };
+  // Files JMT previously installed that aren't in the incoming manifest — these
+  // would be deleted on apply. Surface them to the renderer so the UI can disclose
+  // the removal up front (otherwise the user only sees modified/missing files and
+  // the cleanup happens silently).
+  const meta          = proffie.readVersionMeta(versionName) || {};
+  const prevInstalled = Array.isArray(meta.jmtInstalledFiles) ? meta.jmtInstalledFiles : [];
+  const newSet        = new Set(files.map(f => f.path));
+  const toRemove      = prevInstalled.filter(p => !newSet.has(p));
+  return { ok: true, results, toRemove };
 });
 
 ipcMain.handle('versions:applyJmtFeatures', async (event, versionName) => {
@@ -859,21 +1221,47 @@ ipcMain.handle('versions:applyJmtFeatures', async (event, versionName) => {
   const proffieRoot = path.join(proffie.getUserVersionsPath(), versionName, 'ProffieOS');
   if (!fs.existsSync(proffieRoot)) return { ok: false, error: 'ProffieOS folder not found.' };
 
+  // Reconcile against the previously-installed file list so files that existed in
+  // the prior manifest but aren't in the new one get removed. Handles dev↔main
+  // branch swaps where the file sets differ, and also covers prod when a future
+  // manifest version drops a file. Only files JMT installed are eligible for
+  // deletion — user-created files in the same folders are untouched because they
+  // were never in jmtInstalledFiles.
+  const prevMeta       = proffie.readVersionMeta(versionName) || {};
+  const prevInstalled  = Array.isArray(prevMeta.jmtInstalledFiles) ? prevMeta.jmtInstalledFiles : [];
+  const newFilePaths   = manifest.files.map(f => f.path);
+  const newFileSet     = new Set(newFilePaths);
+  const toDelete       = prevInstalled.filter(p => !newFileSet.has(p));
+
   const total = manifest.files.length;
   let done = 0;
   try {
+    for (const relPath of toDelete) {
+      const abs = path.join(proffieRoot, relPath);
+      try { if (fs.existsSync(abs)) fs.unlinkSync(abs); } catch {}
+    }
     for (const file of manifest.files) {
       win.webContents.send('versions:jmtProgress', { file: file.path, done, total });
-      const content = await _httpsGet(JMT_RAW_BASE + file.path, { 'User-Agent': 'JMT-Studio' });
+      const content = await _httpsGet(_jmtRawBase() + file.path, { 'User-Agent': 'JMT-Studio' });
       const dest = path.join(proffieRoot, file.path);
       fs.mkdirSync(path.dirname(dest), { recursive: true });
       fs.writeFileSync(dest, content, 'utf8');
       done++;
       win.webContents.send('versions:jmtProgress', { file: file.path, done, total });
     }
-    proffie.writeVersionMeta(versionName, { jmtVersion: manifest.version });
+    proffie.writeVersionMeta(versionName, {
+      jmtVersion:        manifest.version,
+      jmtInstalledFiles: newFilePaths,
+    });
+    // Source files of this version just changed — drop the cached folder hash so
+    // the next compile-cache check sees the new buildPkg identity and re-enables
+    // the Compile button when there's actually work to do. Also drop the cached
+    // ArgumentName enum since JMT add-on apply could in principle modify
+    // styles/edit_mode.h (unlikely today, defensive for the future).
+    proffie.invalidateVersionHash(versionName);
+    proffie.invalidateArgumentNames(versionName);
     _jmtManifestCache = null;  // force fresh fetch on next check
-    return { ok: true, jmtVersion: manifest.version };
+    return { ok: true, jmtVersion: manifest.version, removed: toDelete.length };
   } catch (e) {
     return { ok: false, error: e.message };
   }

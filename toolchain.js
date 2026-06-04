@@ -151,6 +151,100 @@ async function ensureCliConfig(onLog) {
 }
 
 // ── First-run: install core if not present ─────────────
+// The Proffieboard core's Linux tools include a 32-bit dfu-suffix binary. On
+// modern Ubuntu (no `:i386` libc compat by default), the kernel can't find
+// the 32-bit dynamic linker `/lib/ld-linux.so.2` and fork/exec returns
+// "no such file or directory" — referring to the missing linker, not the
+// binary. Initial QA was checking "does the file exist" and skipping the
+// patch when it did, which left the broken 32-bit binary in place.
+//
+// We bundle a 64-bit dfu-suffix in resources/tools/linux/ — overwrite the
+// core's copy unconditionally on Linux so arduino-cli's compile path uses
+// a binary that can actually exec. Note: dfu-suffix only needs libc (no
+// libusb), so the swap doesn't require LD_LIBRARY_PATH magic.
+function _ensureLinuxDfuSuffix(onLog) {
+  if (process.platform !== 'linux') return;
+  const bundled = path.join(getToolsPath(), 'dfu-suffix');
+  if (!fs.existsSync(bundled)) return;
+
+  // arduino-cli may run the core from our isolated arduino-data OR from the
+  // Arduino IDE default at ~/.arduino15. When Arduino IDE was used previously
+  // — or when --config-file doesn't redirect platform discovery for compile
+  // on Linux — the system path wins even though we set directories.data in
+  // our yaml. Patch both candidate locations so whichever path arduino-cli
+  // ends up using has the working 64-bit binary.
+  const candidates = [
+    getArduinoDataPath(),
+    path.join(require('os').homedir(), '.arduino15')
+  ];
+
+  for (const dataPath of candidates) {
+    const hardwarePath = path.join(dataPath, 'packages', 'proffieboard', 'hardware', 'stm32l4');
+    if (!fs.existsSync(hardwarePath)) continue;
+    for (const v of fs.readdirSync(hardwarePath)) {
+      const toolsLinux = path.join(hardwarePath, v, 'tools', 'linux');
+      const targetPath = path.join(toolsLinux, 'dfu-suffix');
+      try {
+        fs.mkdirSync(toolsLinux, { recursive: true });
+        fs.copyFileSync(bundled, targetPath);
+        fs.chmodSync(targetPath, 0o755);
+        onLog(`Patched dfu-suffix in ${toolsLinux} with bundled 64-bit binary.`, false);
+      } catch (e) {
+        onLog(`Could not patch dfu-suffix: ${e.message}`, true);
+      }
+    }
+  }
+}
+
+// Same shape as the Linux patch, but for Mac. The proffieboard core ships an
+// x86_64-only dfu-suffix at tools/macosx/dfu-suffix. Apple Silicon users
+// without Rosetta installed (increasingly common on recent Macs that have
+// never run an Intel app) hit the same cryptic fork/exec failure we saw on
+// Linux. We bundle a universal binary (Mach-O fat, x86_64 + arm64) at
+// resources/tools/mac/dfu-suffix — overwriting the core's copy makes compile
+// work on all Apple Silicon Macs regardless of Rosetta state.
+//
+// Candidate locations mirror Linux: our isolated arduino-data plus the
+// Arduino IDE default at ~/Library/Arduino15.
+function _ensureMacDfuSuffix(onLog) {
+  if (process.platform !== 'darwin') return;
+  const bundled       = path.join(getToolsPath(), 'dfu-suffix');
+  const bundledLibusb = path.join(getToolsPath(), 'libusb-1.0.0.dylib');
+  if (!fs.existsSync(bundled)) return;
+
+  const candidates = [
+    getArduinoDataPath(),
+    path.join(require('os').homedir(), 'Library', 'Arduino15')
+  ];
+
+  for (const dataPath of candidates) {
+    const hardwarePath = path.join(dataPath, 'packages', 'proffieboard', 'hardware', 'stm32l4');
+    if (!fs.existsSync(hardwarePath)) continue;
+    for (const v of fs.readdirSync(hardwarePath)) {
+      const toolsMac = path.join(hardwarePath, v, 'tools', 'macosx');
+      const targetPath = path.join(toolsMac, 'dfu-suffix');
+      try {
+        fs.mkdirSync(toolsMac, { recursive: true });
+        fs.copyFileSync(bundled, targetPath);
+        fs.chmodSync(targetPath, 0o755);
+        // Our universal dfu-suffix is dynamically linked against
+        // libusb-1.0.0.dylib via @loader_path, so the dylib must sit
+        // alongside the binary in the core's tools/macosx/ directory.
+        // Without this, dyld fails with "Library not loaded" and the
+        // compile aborts with "signal: abort trap".
+        if (fs.existsSync(bundledLibusb)) {
+          const targetLibusb = path.join(toolsMac, 'libusb-1.0.0.dylib');
+          fs.copyFileSync(bundledLibusb, targetLibusb);
+          fs.chmodSync(targetLibusb, 0o755);
+        }
+        onLog(`Patched dfu-suffix in ${toolsMac} with bundled universal binary.`, false);
+      } catch (e) {
+        onLog(`Could not patch dfu-suffix: ${e.message}`, true);
+      }
+    }
+  }
+}
+
 async function ensureCore(onLog) {
   const dataPath     = getArduinoDataPath();
   const sentinelPath = path.join(dataPath, '.core-installed');
@@ -160,6 +254,8 @@ async function ensureCore(onLog) {
   // via Arduino IDE rather than our own arduino-data directory.
   if (fs.existsSync(sentinelPath) && fs.readFileSync(sentinelPath, 'utf8').trim() === CORE_VERSION) {
     onLog(`Core ${CORE_ID}@${CORE_VERSION} already installed.`, false);
+    _ensureLinuxDfuSuffix(onLog);
+    _ensureMacDfuSuffix(onLog);
     return { ok: true };
   }
 
@@ -173,6 +269,8 @@ async function ensureCore(onLog) {
   if (isInstalled) {
     onLog(`Core ${CORE_ID}@${CORE_VERSION} already installed.`, false);
     fs.writeFileSync(sentinelPath, CORE_VERSION, 'utf8');
+    _ensureLinuxDfuSuffix(onLog);
+    _ensureMacDfuSuffix(onLog);
     return { ok: true };
   }
 
@@ -188,6 +286,9 @@ async function ensureCore(onLog) {
 
   // Write sentinel so subsequent startups skip this flow
   fs.writeFileSync(sentinelPath, CORE_VERSION, 'utf8');
+
+  _ensureLinuxDfuSuffix(onLog);
+  _ensureMacDfuSuffix(onLog);
 
   onLog(`Core installed successfully.`, false);
   return { ok: true };
@@ -206,16 +307,29 @@ async function initialize(onLog) {
   if (!cliCheck.ok) return { ok: false, error: cliCheck.error };
   onLog(`arduino-cli found at: ${cliCheck.cliPath}`, false);
 
+  // Run the core install BEFORE checking ProffieOS — they're independent. The
+  // proffieboard core is an arduino-cli platform install in arduino-data/ and
+  // doesn't depend on a ProffieOS folder existing. Running it first lets the
+  // first-run setup banner appear and progress while the user installs/imports
+  // a ProffieOS version in parallel, instead of seeing only a red error first.
+  await ensureCliConfig(onLog);
+  const coreResult = await ensureCore(onLog);
+  if (!coreResult.ok) return { ok: false, error: coreResult.error };
+
+  // ProffieOS-dependent setup (workspace staging) runs only when a version is
+  // installed. When none is present we still return ok — the toolchain itself
+  // IS ready. `needsProffieOS: true` lets the renderer pick the right user-
+  // facing message (warn state pointing at the next action) instead of a
+  // misleading green "Toolchain ready" while compile is still blocked.
   const sourceCheck = proffie.validateProffieOSSource();
-  if (!sourceCheck.ok) return { ok: false, error: sourceCheck.error };
+  if (!sourceCheck.ok) {
+    onLog('Toolchain ready. (Install a ProffieOS version to enable compile.)', false);
+    return { ok: true, needsProffieOS: true };
+  }
   onLog(`ProffieOS source validated (${proffie.getSelectedVersion()}).`, false);
 
   const wsResult = proffie.initWorkspace(onLog);
   if (!wsResult.ok) return { ok: false, error: wsResult.error };
-
-  await ensureCliConfig(onLog);
-  const coreResult = await ensureCore(onLog);
-  if (!coreResult.ok) return { ok: false, error: coreResult.error };
 
   onLog('Toolchain ready.', false);
   return { ok: true };
@@ -283,15 +397,44 @@ async function compile(configContent, fqbn, buildOptions, onLog) {
 }
 
 // ── Extract readable compile error ─────────────────────
+// GCC template-instantiation errors can be many KB on a single line (the entire
+// expanded `using` alias is rendered into the error). Stuffing that raw into the
+// modal status overflows the buttons off-screen. Strategy:
+//   1. Find lines containing ': error: ' (skip 'note:' clarifications and shell
+//      echo lines).
+//   2. For each, peel off the absolute path → keep just `basename:line` so the
+//      user sees what file and where without 200 chars of `C:\Users\...\path`.
+//   3. Truncate the error message itself to a hard cap so a single bad template
+//      can't blow up the modal. Full verbose output is still in the build-output
+//      panel for anyone who wants to copy/paste it.
+//   4. Cap at 3 errors total — first usually identifies the root cause, the rest
+//      are usually cascading from it.
+// Falls back to the last 10 non-empty lines when no `error:` line matches.
 function extractCompileError(raw) {
   const lines = raw.split(/\r?\n/);
-  // Look for lines with 'error:' that aren't just noise
   const errorLines = lines.filter(l =>
-    l.includes('error:') && !l.includes('note:') && !l.startsWith('>')
+    / error: /.test(l) && !/ note: /.test(l) && !l.startsWith('>')
   );
-  if (errorLines.length) return errorLines.slice(0, 5).join('\n');
-  // Fallback: last 10 non-empty lines
-  return lines.filter(Boolean).slice(-10).join('\n');
+  if (!errorLines.length) {
+    return lines.filter(Boolean).slice(-10).join('\n');
+  }
+  const MAX_MSG = 180;
+  const summarize = (line) => {
+    const m = line.match(/^(?:.*[\\/])?([^\\/:]+):(\d+)(?::\d+)?:\s+error:\s+(.*)$/);
+    if (!m) {
+      return line.length > MAX_MSG ? line.slice(0, MAX_MSG) + '…' : line;
+    }
+    const file = m[1];
+    const ln   = m[2];
+    let msg    = m[3];
+    if (msg.length > MAX_MSG) msg = msg.slice(0, MAX_MSG) + '…';
+    return `${file}:${ln} — ${msg}`;
+  };
+  const summary = errorLines.slice(0, 3).map(summarize).join('\n');
+  const moreCount = errorLines.length - 3;
+  return moreCount > 0
+    ? `${summary}\n…and ${moreCount} more (full output in Build Output panel)`
+    : summary;
 }
 
 // ── Tools path ─────────────────────────────────────────
@@ -332,17 +475,26 @@ function getDfuSuffixPath() {
 // ── Arduino IDE process check ──────────────────────────
 function checkArduinoRunning() {
   return new Promise(resolve => {
-    if (process.platform !== 'win32') { resolve(false); return; }
-    const { execFile } = require('child_process');
-    execFile('tasklist', ['/FO', 'CSV', '/NH'], { timeout: 3000 }, (err, stdout) => {
-      if (err) { resolve(false); return; }
-      resolve(stdout.toLowerCase().includes('arduino'));
-    });
+    const { execFile, exec } = require('child_process');
+    if (process.platform === 'win32') {
+      execFile('tasklist', ['/FO', 'CSV', '/NH'], { timeout: 3000 }, (err, stdout) => {
+        if (err) { resolve(false); return; }
+        resolve(stdout.toLowerCase().includes('arduino'));
+      });
+    } else {
+      exec('ps aux', { timeout: 3000 }, (err, stdout) => {
+        if (err) { resolve(false); return; }
+        resolve(stdout.toLowerCase().includes('arduino'));
+      });
+    }
   });
 }
 
 // ── 1200-bps touch reset ───────────────────────────────
-// Resolves { ok, retriable } — retriable=true means port was locked, user can fix and retry
+// Resolves { ok, retriable, cause }
+//   cause: 'port-locked' (Arduino IDE / other app holds the port)
+//        | 'driver'      (driver-layer failure — often a flaky cable, marginal USB port, or stuck COM driver)
+//        | undefined     (success path)
 function touchReset(port, onLog) {
   return new Promise((resolve) => {
     onLog(`Sending 1200-bps touch reset on ${port}...`, false);
@@ -351,7 +503,9 @@ function touchReset(port, onLog) {
     sp.open(async err => {
       if (err) {
         const isAccessDenied = err.message.toLowerCase().includes('access denied')
-                            || err.message.toLowerCase().includes('cannot open');
+                            || err.message.toLowerCase().includes('cannot open')
+                            || err.message.toLowerCase().includes('resource busy')
+                            || err.message.toLowerCase().includes('ebusy');
         if (isAccessDenied) {
           const arduinoOpen = await checkArduinoRunning();
           if (arduinoOpen) {
@@ -359,10 +513,11 @@ function touchReset(port, onLog) {
           } else {
             onLog(`Port ${port} is in use by another application. Close it and retry.`, true);
           }
-          return resolve({ ok: false, retriable: true });
+          return resolve({ ok: false, retriable: true, cause: 'port-locked' });
         }
         onLog(`Touch reset error: ${err.message}`, true);
-        return resolve({ ok: false, retriable: false });
+        onLog('This is sometimes a flaky USB cable, a marginal USB port, or a stuck COM driver. Try a different cable or USB port, then retry.', false);
+        return resolve({ ok: false, retriable: true, cause: 'driver' });
       }
       sp.set({ dtr: false }, () => {
         setTimeout(() => {
@@ -421,6 +576,28 @@ async function prepareFirmware(onLog) {
     const msg = 'No .elf file found in build output. Run Compile before flashing.';
     onLog(msg, true);
     return { ok: false, error: msg };
+  }
+
+  // Source-hash sanity check. The in-app flows that modify version source files
+  // (e.g. JMT add-on apply) already invalidate the hash cache and force a recompile.
+  // This catches the rare case where the source was edited outside JMT Studio while
+  // a cached/freshly-compiled build was sitting in build-output. Recomputing fresh
+  // (after invalidating the per-session memoization) and comparing to the provenance
+  // sidecar that was written at compile/restore time will fail fast on a mismatch
+  // so we never flash firmware that doesn't match the current source.
+  //
+  // Graceful migration: if no sidecar exists (older builds predating this code), skip
+  // the check — first compile or restore after upgrade will populate the sidecar.
+  const provenance = cache.readBuildProvenance(buildPath);
+  if (provenance && provenance.proffieOSHash) {
+    const versionName = proffie.getSelectedVersion();
+    proffie.invalidateVersionHash(versionName);
+    const freshHash = proffie.hashVersion(versionName);
+    if (freshHash !== provenance.proffieOSHash) {
+      const msg = 'ProffieOS source has changed since this build. Please recompile before flashing.';
+      onLog(msg, true);
+      return { ok: false, error: msg, sourceChanged: true };
+    }
   }
 
   const elfPath  = path.join(buildPath, elfFiles[0]);
@@ -581,7 +758,17 @@ async function runDfuFlash(dfuPath, toolsDir, onLog) {
     return { ok: true };
   } else {
     onLog('--- Flash failed ---', true);
-    return { ok: false, error: extractFlashError(flashResult.stderr + flashResult.stdout) };
+    const combined = (flashResult.stderr || '') + (flashResult.stdout || '');
+    const error = extractFlashError(combined);
+    // Linux without udev rules: dfu-util can enumerate the device via sysfs
+    // (so waitForDfu + detectDFU don't catch it as inaccessible) but the
+    // actual transfer fails inside libusb with LIBUSB_ERROR_ACCESS. Surface
+    // the existing "Fix DFU Driver" modal so the user gets udev guidance
+    // instead of a cryptic generic error.
+    const needsDfuDriver =
+      process.platform === 'linux' &&
+      /LIBUSB_ERROR_ACCESS|cannot open DFU device|Permission denied/i.test(combined);
+    return { ok: false, error, needsDfuDriver };
   }
 }
 
@@ -640,9 +827,14 @@ async function flash(port, fqbn, onLog) {
   // 1200-bps touch reset
   const resetResult = await touchReset(port, onLog);
   if (!resetResult.ok) {
-    const msg = resetResult.retriable
-      ? 'Flash stopped — free the port and click Retry Flash.'
-      : 'Touch reset failed. Try pressing the reset button manually.';
+    let msg;
+    if (resetResult.cause === 'port-locked') {
+      msg = 'Flash stopped — free the port and click Retry Flash.';
+    } else if (resetResult.cause === 'driver') {
+      msg = 'Touch reset didn\'t complete. Sometimes a different USB cable or port is enough — worth trying before pressing reset on the board.';
+    } else {
+      msg = 'Touch reset failed. Try pressing the reset button manually.';
+    }
     return { ok: false, error: msg, retriable: resetResult.retriable };
   }
   await new Promise(r => setTimeout(r, 1000));
@@ -650,9 +842,22 @@ async function flash(port, fqbn, onLog) {
   // Wait for DFU device
   const dfuFound = await waitForDfu(onLog);
   if (!dfuFound) {
-    const msg = 'DFU device not detected. Try pressing the reset button or reconnecting.';
-    onLog(msg, true);
-    return { ok: false, error: msg };
+    // Touch reset succeeded — the board IS in DFU. dfu-util may not see it for two reasons:
+    //   1. Late enumeration race (now accessible) — proceed straight to flash.
+    //   2. Driver state on this USB instance (wrong driver bound, OR no driver bound at all
+    //      after a Device Manager uninstall, OR on Linux, missing udev rules). In all of
+    //      these we hand off to the renderer's bootloader-wait flow, which can offer
+    //      the driver/permission setup and keep polling.
+    const dfuState = await detectDFU();
+
+    if (dfuState.accessible) {
+      onLog('DFU device detected (late). Proceeding with flash.', false);
+      return await runDfuFlash(dfuPath, toolsDir, onLog);
+    }
+
+    const msg = 'DFU device not accessible. Switching to Bootloader Mode to recover.';
+    onLog(msg, false);
+    return { ok: false, error: msg, needsDfuDriver: true };
   }
 
   return await runDfuFlash(dfuPath, toolsDir, onLog);
@@ -710,6 +915,13 @@ function checkCacheAndRestore(configContent, fqbn, usb) {
   return cache.checkAndRestore(configContent, fqbn, usb, proffieOSHash, stylesContent);
 }
 
+function needsCoreInstall() {
+  const dataPath     = getArduinoDataPath();
+  const sentinelPath = path.join(dataPath, '.core-installed');
+  if (!fs.existsSync(sentinelPath)) return true;
+  return fs.readFileSync(sentinelPath, 'utf8').trim() !== CORE_VERSION;
+}
+
 module.exports = {
   initialize,
   compile,
@@ -719,6 +931,7 @@ module.exports = {
   abort,
   getStatus,
   checkCacheAndRestore,
+  needsCoreInstall,
   validateCli,
   CORE_ID,
   CORE_VERSION

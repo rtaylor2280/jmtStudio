@@ -139,6 +139,89 @@ function hashVersion(versionName) {
   return result;
 }
 
+// In-memory hash cache is computed once per versionName per session. When something
+// programmatically modifies a version's source files (currently: JMT add-on apply),
+// the cached value goes stale and the compile-cache check returns false hits. The
+// caller must drop the cached entry so the next hashVersion() walks the folder fresh.
+function invalidateVersionHash(versionName) {
+  if (versionName) _hashCache.delete(versionName);
+  else _hashCache.clear();
+}
+
+// ── ArgumentName enum ──────────────────────────────────
+// ProffieOS defines `enum ArgumentName { BASE_COLOR_ARG = 1, ALT_COLOR_ARG = 2, ... }`
+// in styles/edit_mode.h. The enum's slot numbers determine where each arg lands in a
+// StylePtr<>("…") parens string: slots are space-separated, `~` for empty, with
+// multi-component values like RGB (`65535,0,0`) staying as a single comma-joined
+// slot token.
+//
+// We can't hardcode the list because args differ between OS versions (e.g.
+// RETRACTION_OPTION2_ARG was added after 6.x). Reading from the user's selected
+// version is authoritative. Cached per-versionName to avoid repeated file reads
+// during preset list render / slot tile build / arg editor open; invalidated on
+// programmatic source mutation (currently: JMT add-on apply) the same way
+// _hashCache is.
+//
+// Returns an array of { name, comment, slot } objects, sorted by slot ascending.
+// The line-comment (// …) following each entry is captured for use as a tooltip on
+// arg labels. Alias entries (e.g. `LAST_ARG = RETRACTION_OPTION2_ARG`) are skipped
+// — they reference another slot rather than defining a new one.
+const _argumentNamesCache = new Map(); // versionName → Array<{name, comment, slot}>
+
+function getArgumentNames(versionName) {
+  if (!versionName) return [];
+  if (_argumentNamesCache.has(versionName)) return _argumentNamesCache.get(versionName);
+  const editModePath = path.join(getVersionSourcePath(versionName), 'styles', 'edit_mode.h');
+  const entries = [];
+  try {
+    if (fs.existsSync(editModePath)) {
+      const text = fs.readFileSync(editModePath, 'utf8');
+      // Match `enum ArgumentName { ... }` (optionally `: type`); first match wins.
+      const m = text.match(/\benum\s+ArgumentName\b[^{]*\{([\s\S]*?)\}/);
+      if (m) {
+        // Strip block comments first (rare in this enum but safe), then walk lines.
+        // One entry per line is the convention; if the user's enum is one-liner the
+        // parser yields no entries and callers see an empty array.
+        const body = m[1].replace(/\/\*[\s\S]*?\*\//g, '');
+        let nextSlot = 1;
+        for (const rawLine of body.split(/\r?\n/)) {
+          const cmtIdx = rawLine.indexOf('//');
+          const comment = cmtIdx >= 0 ? rawLine.slice(cmtIdx + 2).trim() : '';
+          // Strip the comment, trailing comma, and surrounding whitespace
+          const code = (cmtIdx >= 0 ? rawLine.slice(0, cmtIdx) : rawLine)
+            .replace(/,/g, '')
+            .trim();
+          if (!code) continue;
+          const lm = code.match(/^([A-Za-z_]\w*)\s*(?:=\s*(.+))?$/);
+          if (!lm) continue;
+          const name = lm[1];
+          const valueRaw = lm[2] && lm[2].trim();
+          let slot;
+          if (valueRaw) {
+            if (/^\d+$/.test(valueRaw)) {
+              slot = parseInt(valueRaw, 10);
+              nextSlot = slot + 1;
+            } else {
+              // Alias entry (NAME = OTHER_NAME) — skip; it's not a new slot.
+              continue;
+            }
+          } else {
+            slot = nextSlot++;
+          }
+          entries.push({ name, comment, slot });
+        }
+      }
+    }
+  } catch { /* swallow — empty array signals "unknown enum" to callers */ }
+  _argumentNamesCache.set(versionName, entries);
+  return entries;
+}
+
+function invalidateArgumentNames(versionName) {
+  if (versionName) _argumentNamesCache.delete(versionName);
+  else _argumentNamesCache.clear();
+}
+
 // ── Workspace (packaged only) ──────────────────────────
 
 // The writable workspace in userData — must be named "ProffieOS" to match
@@ -666,6 +749,9 @@ module.exports = {
   getSelectedVersion,
   setSelectedVersion,
   hashVersion,
+  invalidateVersionHash,
+  getArgumentNames,
+  invalidateArgumentNames,
   getProffieOSRoot,
   getConfigStagingPath,
   getInoPath,

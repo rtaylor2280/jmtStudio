@@ -1,9 +1,10 @@
 {
   "name": "jmt-studio",
-  "version": "1.6.5",
+  "version": "1.7.0",
   "description": "ProffieOS Configuration Tool by Jedi Master Tech",
   "author": "Jedi Master Tech <jmtstudio@jedimastertech.com>",
   "homepage": "https://jedimastertech.com",
+  "license": "Proprietary",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -21,7 +22,8 @@
     },
     "win": {
       "target": "nsis",
-      "icon": "assets/icon.ico"
+      "icon": "assets/icon.ico",
+      "sign": "build/sign.js"
     },
     "nsis": {
       "oneClick": false,

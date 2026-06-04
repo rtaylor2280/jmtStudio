@@ -5,3 +5,18 @@ out/
 local/
 renderer/vs/
 .claude/
+
+# macOS Finder metadata
+.DS_Store
+**/.DS_Store
+
+# Code signing — NEVER commit
+developer_id.csr
+developer_id.key
+*.p12
+*.cer
+*.pem
+
+# Build/dev scratch caught in untracked
+electron
+jmt-studio@*
