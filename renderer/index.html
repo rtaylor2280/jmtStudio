@@ -1943,6 +1943,27 @@
   .style-card-tags { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 2px; }
   .style-tag { font-size: 0.63rem; color: var(--c-text-dim); background: var(--c-bg-raised); border: 1px solid var(--c-border-faint); border-radius: 3px; padding: 1px 5px; white-space: nowrap; cursor: pointer; }
   .style-tag.active { color: var(--jmt-blue); background: rgba(0,130,255,0.1); border-color: rgba(0,130,255,0.35); }
+  .styles-tag-filter-wrap { position: relative; flex-shrink: 0; }
+  .styles-tag-filter-btn { background: var(--c-bg-raised); border: 1px solid var(--c-border-heavy); border-radius: 4px; color: var(--c-text-muted); padding: 4px 10px; font-size: 0.75rem; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+  .styles-tag-filter-btn:hover { color: var(--jmt-blue); }
+  .styles-tag-filter-btn.has-active { color: var(--jmt-blue); border-color: rgba(0,130,255,0.35); }
+  .styles-tag-filter-icon { font-size: 0.6rem; opacity: 0.7; }
+  .styles-tag-filter-badge { background: var(--jmt-blue); color: #fff; font-size: 0.62rem; font-weight: 600; padding: 0 5px; border-radius: 9px; margin-left: 2px; line-height: 1.4; }
+  .styles-tag-dropdown { position: absolute; top: calc(100% + 4px); right: 0; background: var(--c-bg-raised); border: 1px solid var(--c-border-heavy); border-radius: 4px; padding: 4px 0; min-width: 200px; max-width: 280px; max-height: 320px; overflow-y: auto; z-index: 100; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+  .styles-tag-dropdown-item { display: flex; align-items: center; gap: 8px; width: 100%; background: transparent; border: none; color: var(--c-text); padding: 5px 12px; font-size: 0.75rem; cursor: pointer; text-align: left; }
+  .styles-tag-dropdown-item:hover { background: var(--c-bg-inset); }
+  .styles-tag-dropdown-item.selected { color: var(--jmt-blue); background: rgba(0,130,255,0.08); }
+  .styles-tag-dropdown-check { width: 12px; color: var(--jmt-blue); font-weight: 600; text-align: center; }
+  .styles-tag-dropdown-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .styles-tag-dropdown-count { color: var(--c-text-faint); font-size: 0.7rem; }
+  .styles-tag-dropdown-empty { padding: 8px 12px; font-size: 0.72rem; color: var(--c-text-faint); }
+  .styles-active-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 6px 20px; background: var(--c-bg); border-bottom: 1px solid var(--c-border); flex-shrink: 0; }
+  .styles-active-filters-label { font-size: 0.7rem; color: var(--c-text-faint); margin-right: 2px; }
+  .styles-active-filter-chip { display: inline-flex; align-items: center; gap: 2px; background: rgba(0,130,255,0.1); color: var(--jmt-blue); border: 1px solid rgba(0,130,255,0.35); border-radius: 3px; padding: 1px 4px 1px 6px; font-size: 0.7rem; }
+  .styles-active-filter-remove { background: transparent; border: none; color: var(--jmt-blue); font-size: 0.7rem; cursor: pointer; padding: 0 2px; line-height: 1; }
+  .styles-active-filter-remove:hover { color: #ff6464; }
+  .styles-active-filter-clear { background: transparent; border: none; color: var(--c-text-faint); font-size: 0.68rem; cursor: pointer; padding: 0 4px; margin-left: 4px; text-decoration: underline; }
+  .styles-active-filter-clear:hover { color: var(--jmt-blue); }
   .style-card-effects { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px; }
   .style-effect-chip { font-size: 0.6rem; color: var(--c-text-muted); background: transparent; border: 1px solid var(--c-border-faint); border-radius: 3px; padding: 0px 4px; white-space: nowrap; opacity: 0.7; }
   /* Style detail modal */
@@ -2467,8 +2488,17 @@
           <span id="styles-search-clear" class="vp-search-clear" style="display:none" title="Clear">&#x2715;</span>
         </span>
         <span id="styles-search-count" class="styles-search-count"></span>
+        <div class="styles-tag-filter-wrap">
+          <button id="btn-styles-tag-filter" class="styles-tag-filter-btn" title="Filter by tag">
+            <span class="styles-tag-filter-icon">&#9662;</span> Tags<span id="styles-tag-filter-badge" class="styles-tag-filter-badge" style="display:none">0</span>
+          </button>
+          <div id="styles-tag-dropdown" class="styles-tag-dropdown" style="display:none">
+            <div id="styles-tag-dropdown-list"></div>
+          </div>
+        </div>
         <button id="btn-add-style" class="btn-blue" style="margin-left:auto;flex-shrink:0">&#43; Add Style</button>
       </div>
+      <div id="styles-active-filters" class="styles-active-filters" style="display:none"></div>
       <div class="styles-visual-main">
         <div id="styles-conflict-banner" class="styles-conflict-banner"></div>
         <div id="styles-visual-list" class="style-cards"></div>
@@ -5843,7 +5873,7 @@ let _detailTags            = [];
 let _detailSource          = '';
 let _detailUrl             = '';
 let _detailNotes           = '';
-let _detailTagFilter       = null;
+let _activeFilterTags      = new Set();
 
 // ── Add Style helpers ──────────────────────────────────
 
@@ -6512,18 +6542,160 @@ function _applyStylesSearch() {
   const cards = document.querySelectorAll('#styles-visual-list .style-card');
   let shown   = 0;
   cards.forEach(card => {
-    const matchesQ   = !q || (card.dataset.searchBlob || '').includes(q);
-    const matchesTag = !_detailTagFilter || !!card.querySelector(`.style-tag[data-tag="${_detailTagFilter}"]`);
-    const vis = matchesQ && matchesTag;
+    const matchesQ = !q || (card.dataset.searchBlob || '').includes(q);
+    let matchesTags = true;
+    if (_activeFilterTags.size) {
+      for (const tag of _activeFilterTags) {
+        if (!card.querySelector(`.style-tag[data-tag="${CSS.escape(tag)}"]`)) {
+          matchesTags = false;
+          break;
+        }
+      }
+    }
+    const vis = matchesQ && matchesTags;
     card.style.display = vis ? '' : 'none';
     if (vis) shown++;
   });
   // Update active state on all tag chips across all cards
   document.querySelectorAll('.style-tag').forEach(el => {
-    el.classList.toggle('active', _detailTagFilter !== null && el.dataset.tag === _detailTagFilter);
+    el.classList.toggle('active', _activeFilterTags.has(el.dataset.tag));
   });
   const countEl = document.getElementById('styles-search-count');
   if (countEl) countEl.textContent = shown < cards.length ? `${shown} of ${cards.length}` : `${cards.length} styles`;
+  _renderActiveFilterChips();
+}
+
+// Compute tags available given current search + selected tags, with counts.
+// Available = tags found on cards matching the current search text AND all selected tags.
+// Counts = how many cards in that set have each tag.
+function _computeAvailableTagsWithCounts() {
+  const q = (document.getElementById('styles-search')?.value || '').toLowerCase();
+  const allCards = Array.from(document.querySelectorAll('#styles-visual-list .style-card'));
+  const matchingCards = allCards.filter(card => {
+    const matchesQ = !q || (card.dataset.searchBlob || '').includes(q);
+    if (!matchesQ) return false;
+    for (const tag of _activeFilterTags) {
+      if (!card.querySelector(`.style-tag[data-tag="${CSS.escape(tag)}"]`)) return false;
+    }
+    return true;
+  });
+  const counts = new Map();
+  matchingCards.forEach(card => {
+    card.querySelectorAll('.style-tag').forEach(el => {
+      const tag = el.dataset.tag;
+      counts.set(tag, (counts.get(tag) || 0) + 1);
+    });
+  });
+  // Sort: selected first, then by count desc, then alpha
+  return Array.from(counts.entries()).sort((a, b) => {
+    const aSel = _activeFilterTags.has(a[0]);
+    const bSel = _activeFilterTags.has(b[0]);
+    if (aSel !== bSel) return aSel ? -1 : 1;
+    if (a[1] !== b[1]) return b[1] - a[1];
+    return a[0].localeCompare(b[0]);
+  });
+}
+
+function _renderTagFilterDropdown() {
+  const list = document.getElementById('styles-tag-dropdown-list');
+  if (!list) return;
+  const tags = _computeAvailableTagsWithCounts();
+  if (!tags.length) {
+    list.innerHTML = '<div class="styles-tag-dropdown-empty">No tags available</div>';
+    return;
+  }
+  list.innerHTML = tags.map(([tag, count]) => {
+    const sel = _activeFilterTags.has(tag);
+    return `<button class="styles-tag-dropdown-item${sel ? ' selected' : ''}" data-tag="${tag}">`
+      + `<span class="styles-tag-dropdown-check">${sel ? '&#10003;' : ''}</span>`
+      + `<span class="styles-tag-dropdown-name">${tag}</span>`
+      + `<span class="styles-tag-dropdown-count">${count}</span>`
+      + `</button>`;
+  }).join('');
+  list.querySelectorAll('.styles-tag-dropdown-item').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const tag = btn.dataset.tag;
+      if (_activeFilterTags.has(tag)) _activeFilterTags.delete(tag);
+      else _activeFilterTags.add(tag);
+      _applyStylesSearch();
+      _renderTagFilterDropdown();
+    });
+  });
+}
+
+function _renderActiveFilterChips() {
+  const strip = document.getElementById('styles-active-filters');
+  const badge = document.getElementById('styles-tag-filter-badge');
+  const btn   = document.getElementById('btn-styles-tag-filter');
+  if (badge) {
+    if (_activeFilterTags.size) { badge.textContent = _activeFilterTags.size; badge.style.display = ''; }
+    else badge.style.display = 'none';
+  }
+  if (btn) btn.classList.toggle('has-active', _activeFilterTags.size > 0);
+  if (!strip) return;
+  if (!_activeFilterTags.size) {
+    strip.style.display = 'none';
+    strip.innerHTML = '';
+    return;
+  }
+  strip.style.display = '';
+  const chips = Array.from(_activeFilterTags).map(tag =>
+    `<span class="styles-active-filter-chip" data-tag="${tag}">${tag}`
+    + `<button class="styles-active-filter-remove" title="Remove tag filter">&#10005;</button>`
+    + `</span>`
+  ).join('');
+  const clearAll = _activeFilterTags.size > 1
+    ? `<button class="styles-active-filter-clear" id="styles-clear-all-filters">Clear all</button>` : '';
+  strip.innerHTML = `<span class="styles-active-filters-label">Filtering by:</span>${chips}${clearAll}`;
+  strip.querySelectorAll('.styles-active-filter-chip').forEach(chip => {
+    chip.querySelector('.styles-active-filter-remove').addEventListener('click', e => {
+      e.stopPropagation();
+      _activeFilterTags.delete(chip.dataset.tag);
+      _applyStylesSearch();
+      const dd = document.getElementById('styles-tag-dropdown');
+      if (dd && dd.style.display !== 'none') _renderTagFilterDropdown();
+    });
+  });
+  const clearBtn = document.getElementById('styles-clear-all-filters');
+  if (clearBtn) {
+    clearBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      _activeFilterTags.clear();
+      _applyStylesSearch();
+      const dd = document.getElementById('styles-tag-dropdown');
+      if (dd && dd.style.display !== 'none') _renderTagFilterDropdown();
+    });
+  }
+}
+
+let _tagDropdownOutsideHandler = null;
+function _closeTagFilterDropdown() {
+  const dd = document.getElementById('styles-tag-dropdown');
+  if (dd) dd.style.display = 'none';
+  if (_tagDropdownOutsideHandler) {
+    document.removeEventListener('mousedown', _tagDropdownOutsideHandler, true);
+    _tagDropdownOutsideHandler = null;
+  }
+}
+function _openTagFilterDropdown() {
+  const dd = document.getElementById('styles-tag-dropdown');
+  if (!dd) return;
+  _renderTagFilterDropdown();
+  dd.style.display = 'block';
+  if (_tagDropdownOutsideHandler) document.removeEventListener('mousedown', _tagDropdownOutsideHandler, true);
+  _tagDropdownOutsideHandler = (ev) => {
+    const btn = document.getElementById('btn-styles-tag-filter');
+    if (dd.contains(ev.target) || (btn && btn.contains(ev.target))) return;
+    _closeTagFilterDropdown();
+  };
+  document.addEventListener('mousedown', _tagDropdownOutsideHandler, true);
+}
+function _toggleTagFilterDropdown() {
+  const dd = document.getElementById('styles-tag-dropdown');
+  if (!dd) return;
+  if (dd.style.display === 'none' || !dd.style.display) _openTagFilterDropdown();
+  else _closeTagFilterDropdown();
 }
 
 // Classifies entries as helpers vs full styles, and marks JMT-dependent entries:
@@ -7246,7 +7418,7 @@ function _buildStylesVisual() {
       entry.usingCode || ''
     ].join(' ').toLowerCase();
     const userTagsHtml = userTags.slice(0, 8).map(t => {
-      const active = _detailTagFilter === t ? ' active' : '';
+      const active = _activeFilterTags.has(t) ? ' active' : '';
       return `<span class="style-tag${active}" data-tag="${t}">${t}</span>`;
     }).join('');
     const effectsHtml = effects.slice(0, 10)
@@ -7283,12 +7455,16 @@ function _buildStylesVisual() {
       });
     }
 
-    // Tag filter clicks
+    // Tag filter clicks — toggle inclusion in the multi-tag filter set
     card.querySelectorAll('.style-tag').forEach(el => {
       el.addEventListener('click', e => {
         e.stopPropagation();
-        _detailTagFilter = _detailTagFilter === el.dataset.tag ? null : el.dataset.tag;
+        const tag = el.dataset.tag;
+        if (_activeFilterTags.has(tag)) _activeFilterTags.delete(tag);
+        else _activeFilterTags.add(tag);
         _applyStylesSearch();
+        const dd = document.getElementById('styles-tag-dropdown');
+        if (dd && dd.style.display !== 'none') _renderTagFilterDropdown();
       });
     });
 
@@ -9021,19 +9197,28 @@ document.getElementById('detail-notes-input').addEventListener('input', () => {
   _setDetailDirty(true);
 });
 
-// Styles search + tag filter clear on new search
+// Styles search and tag filters are independent dimensions — typing in search
+// does not clear active tag filters and vice versa.
 document.getElementById('styles-search')?.addEventListener('input', function() {
-  _detailTagFilter = null;
   document.getElementById('styles-search-clear').style.display = this.value ? '' : 'none';
   _applyStylesSearch();
+  const dd = document.getElementById('styles-tag-dropdown');
+  if (dd && dd.style.display !== 'none') _renderTagFilterDropdown();
 });
 document.getElementById('styles-search-clear')?.addEventListener('click', () => {
   const inp = document.getElementById('styles-search');
   inp.value = '';
   document.getElementById('styles-search-clear').style.display = 'none';
-  _detailTagFilter = null;
   _applyStylesSearch();
+  const dd = document.getElementById('styles-tag-dropdown');
+  if (dd && dd.style.display !== 'none') _renderTagFilterDropdown();
   inp.focus();
+});
+
+// Tag filter dropdown button
+document.getElementById('btn-styles-tag-filter')?.addEventListener('click', e => {
+  e.stopPropagation();
+  _toggleTagFilterDropdown();
 });
 
 // initStylesPanel called by switchTab on first visit (Monaco is ready by then)
