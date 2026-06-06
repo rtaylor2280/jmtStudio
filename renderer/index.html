@@ -8402,8 +8402,12 @@ function _parseClipboardStyle(text) {
     result.notes = noteLines.join('\n').trim();
   }
 
-  // Extract expression — try using first, then StylePtr, then raw
-  const usingM = raw.match(/\busing\s+([\w+]+)\s*=\s*([\s\S]+?)\s*;/);
+  // Extract expression: try using first, then StylePtr, then raw.
+  // Identifier permits trailing Fett263 footnote markers (*, +, ^, #) between the
+  // name and `=`. Without this, `using NAME* = ...;` fails to match and falls
+  // through to the StylePtr fallback, which then pulls the bogus `NAME*` token
+  // out of the trailing "Add to preset as StylePtr<NAME*>()" comment.
+  const usingM = raw.match(/\busing\s+(\w+)[^\w\s=;]*\s*=\s*([\s\S]+?)\s*;/);
   if (usingM) {
     if (!result.name) result.name = usingM[1];
     result.expr = usingM[2].replace(/\s+/g, ' ').trim();
