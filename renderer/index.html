@@ -8583,14 +8583,12 @@ document.addEventListener('keydown', e => {
   }
 });
 
-// Global Ctrl+O — open from anywhere on the config tab (mirrors Cmd+S scope)
+// Global Ctrl+O — open from anywhere on the config tab. Unlike Cmd+S, no
+// inMonaco skip because Monaco has no internal Ctrl+O handler to defer to.
 document.addEventListener('keydown', e => {
   if ((e.ctrlKey || e.metaKey) && e.key === 'o' && _activeTab === 'config') {
-    const inMonaco = !!document.activeElement?.closest('.monaco-editor');
-    if (!inMonaco) {
-      e.preventDefault();
-      doOpen();
-    }
+    e.preventDefault();
+    doOpen();
   }
 });
 
