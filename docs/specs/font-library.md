@@ -1,7 +1,7 @@
 # Font Library
 
 **Target release:** v1.8.0 (headline feature)
-**Status:** Open spec, design questions outstanding
+**Status:** Open spec, design questions partially resolved (Q1, Q2, Q4, Q5 resolved 2026-06-06)
 **Owner:** Ryan
 **Last updated:** 2026-06-06
 
@@ -41,15 +41,19 @@ Metadata storage shape TBD (likely a sibling `meta.json` next to the font folder
 ## Import flow
 
 1. User picks a folder from the filesystem.
-2. App scans for vendor multi-version structure (`Proffie/`, `Xeno/`, `CrystalFocus/` subfolders).
-3. If a Proffie subfolder is detected, app imports that subfolder. If structure is ambiguous, prompt. If structure is flat (no version subfolders), import the picked folder directly. **See open question 1.**
-4. Copy contents into `userData/fontLibrary/<name>/`.
-5. Prompt for or default the metadata fields.
+2. App scans for vendor multi-version structure. If the picked folder contains a `Proffie/` subfolder (typically alongside `Xeno/`, `CrystalFocus/` siblings), auto-detect and treat that subfolder as the import target. If the user already navigated into the Proffie subfolder before picking, use the picked folder directly. Either path is supported because users will reasonably do both.
+3. Validate the chosen folder (see Validation below). Block import on failure with an inline error.
+4. Prompt for the metadata fields. **Name** is required and must be unique within the library. The default name is the source folder name (so a user who picked the `Proffie/` subfolder sees `Proffie` pre-filled, which they will almost always change to something meaningful like `Vader`).
+5. Copy contents into `userData/fontLibrary/<name>/` using the user-supplied name as the on-disk folder name.
 6. Add entry to the library index.
 
-### Deduplication
+### Validation
 
-When the user imports a font whose name already exists in the library, the behavior is TBD. **See open question 4.**
+Mirrors the validation pattern used for OS version imports. Minimum bar: the folder must exist and contain at least one `.wav` file. We do not enforce specific filenames like `hum.wav` or `font.wav` (vendor variation is real, see User context).
+
+### Name uniqueness
+
+Names are the canonical identifier in the library. The import flow rejects a duplicate name with an inline validation error ("Name already in use") and will not save until the user supplies a unique name. No silent overwrite, no auto-rename suffix.
 
 ## Transport to the saber
 
@@ -85,33 +89,50 @@ Auto-match is the smartest default for users with large libraries: minimizes SD 
 
 Once a library exists, the font folder field in the visual styles editor (currently free text) becomes a dropdown sourced from the library. If a preset references a font name that is not in the library, the dropdown shows a red / missing-state visual indicator so the user can see the gap before flashing.
 
+### Linked-style behavior
+
+When a preset uses a font whose `linkedStyleLibraryEntry` field is set, the style picker on that preset auto-populates with the linked style as the default. If the linked style has been removed from the Style Library since it was linked, the style picker shows an empty selection with a red note beneath it: `Default style "<name>" is unavailable`. The link is preserved (not silently dropped) so re-adding the style to the library restores the auto-populate behavior without manual re-linking.
+
 The font-folder field today lives in [renderer/index.html](renderer/index.html) inside the preset detail editor (location to confirm during implementation).
+
+## UI structure
+
+New top-level tab placed after Style Library and before OS Versions. Tab order: Config Manager → Style Library → **Font Library** → OS Versions.
+
+### Browse view (default)
+
+Card grid modeled on the Style Library, alphabetical by name. Each card shows the font name and key metadata at a glance. Search and filter affordances above the grid.
+
+### Font detail view (opens on card click)
+
+Clicking a card opens the contents of the font folder, not a form. The detail view lets the user:
+
+- Rename individual files inside the folder
+- Drag files in (from desktop or another folder)
+- Import files via a picker
+- Delete files
+
+All operations are undoable. See Engineering notes on the undo system.
+
+Metadata editing (name, author, purchased, acquisition date, description, linked style) lives somewhere accessible from this view. Placement is an open question.
 
 ## Open questions
 
 These are blocking design decisions. Each will be answered with Ryan during the build and the answer logged here.
 
-### 1. Multi-version source folders
+### 1. Multi-version source folders — RESOLVED 2026-06-06
 
-When the user picks a folder that contains `Proffie/`, `Xeno/`, `CrystalFocus/` subfolders, how do we handle the import?
+**Decision:** User picks a single folder. App auto-detects the multi-version structure: if a `Proffie/` subfolder is present, treat that as the import target; otherwise use the picked folder directly. Users who already drilled into the Proffie subfolder before picking also get correct behavior. The on-disk library name comes from the user-supplied metadata name (not the source folder name), so a user who picked the `Proffie/` subfolder will rename it to something meaningful like `Vader` before save.
 
-- Option A: Auto-detect the Proffie subfolder silently, prompt only on ambiguity.
-- Option B: Always prompt the user to confirm which subfolder is the Proffie version.
-- Option C: Take the picked folder as-is, assume the user pointed at the right place.
+Validation mirrors the OS-versions import pattern (minimum: folder exists and contains at least one `.wav` file). See Validation section under Import flow.
 
-**Cody's lean:** A (auto-detect, prompt on ambiguity).
-**Resolution:** TBD.
+### 2. Style library link direction — RESOLVED 2026-06-06
 
-### 2. Style library link direction
+**Decision:** One optional default style per font. The same style can be the default for unlimited fonts (one-to-many: style → fonts).
 
-- One default style per font (font → style), simpler.
-- Or many-to-many between fonts and styles.
-- If the linked style is later removed from the Style Library, do we silently un-link, warn on next use of the font, or keep a tombstoned reference?
+If the linked style is removed from the Style Library after the link was made, do NOT silently un-link. The style picker on a preset using that font shows an empty selection with a red note beneath: `Default style "<name>" is unavailable`. The link is preserved so re-adding the style restores the auto-populate behavior without manual re-linking.
 
-**Cody's lean:** One style per font (font → style), silent un-link if the style is later removed (re-link manually is easy enough).
-**Resolution:** TBD.
-
-### 3. MTP trigger flow
+### 3. MTP trigger flow — OPEN
 
 When the user picks "Push to saber via mass storage," does the app:
 
@@ -121,28 +142,48 @@ When the user picks "Push to saber via mass storage," does the app:
 **Cody's lean:** Auto-send `sd 1`. The user is already in Config Manager when this matters; serial is already connected.
 **Resolution:** TBD.
 
-### 4. Library deduplication
+### 4. Library deduplication — RESOLVED 2026-06-06
 
-Same source folder imported twice, or two folders with the same name from different sources:
+**Decision:** Names are required and must be unique. Enforce at save time with inline validation error ("Name already in use") and block save until the user supplies a unique name. No silent overwrite, no auto-rename suffix.
 
-- Warn-and-skip the duplicate.
-- Warn-and-overwrite the existing entry.
-- Auto-rename with a suffix (`vader-2`).
-- Let the user pick at import time.
+### 5. UI placement — RESOLVED 2026-06-06
 
-**Cody's lean:** Let the user pick (warn + offer overwrite or rename).
+**Decision:** New top-level tab placed after Style Library and before OS Versions. Tab order: Config Manager → Style Library → Font Library → OS Versions.
+
+UI shape: card grid modeled on the Style Library (alphabetical, with search and filter). Clicking a card does NOT open a form. It opens a detail view of the font folder's contents where the user can rename files, drag in new files, import via picker, and delete files. All operations undoable. See UI structure section above.
+
+### 6. Metadata edit placement — OPEN (new)
+
+The card view opens a file-contents view, not a metadata form. So where does metadata editing (name, author, purchased, date, description, linked style) live?
+
+Candidates:
+- A toggle or tab inside the detail view ("Files" / "Properties")
+- A properties drawer that slides out from the side of the detail view
+- A button or icon on the card that opens metadata in a dialog without entering the detail view
+- Right-click on the card → Edit metadata
+
+**Cody's lean:** Toggle inside the detail view (Files | Properties). Keeps the detail view as the single place to work with one font, no extra UI surface for the user to learn.
 **Resolution:** TBD.
 
-### 5. UI placement
+### 7. Undo scope — OPEN (new)
 
-Top-level tab next to Config Manager / Style Library / OS Versions (matches the rest of the app's module shape), or embedded somewhere else?
+"All undoable" was specified for the file operations inside a font folder (rename / drag-in / import / delete). What else falls under undo?
 
-**Cody's lean:** Top-level tab.
+- File operations inside a folder (definitely yes)
+- Deleting an entire font from the library
+- Renaming a font (changes the on-disk folder name)
+- Editing metadata fields
+- Import of a new font (probably yes, as "remove the just-imported font")
+
+Also: is undo a global stack (one Ctrl+Z affects whatever was last done across the module), or per-font (each font's detail view has its own history)? Per-font is more contained; global is more in line with usual app expectations.
+
+**Cody's lean:** Undo covers everything that mutates library state. Global stack scoped to the Font Library tab.
 **Resolution:** TBD.
 
 ## Engineering notes
 
 - **MTP cross-platform mount detection is the hardest engineering piece.** Reader-path SD writing is straightforward; MTP requires per-OS code for mount detection, drive enumeration, and safe-eject. If scope tightens before ship, MTP becomes a Phase 2 feature behind the reader path.
+- **Undo system.** Required by spec ("all undoable"). Operations on files inside a font folder (rename, drag-in, import, delete) need to be reversible. Implementation approach: command pattern with an operation log per session, where each operation knows how to invert itself. Deletes must be soft (move to a session-scoped trash area inside userData) so undo can restore. Final scope of what undo covers is open question 7.
 - **Config parser hook for auto-match push mode.** Need to identify where presets are parsed and pull the font-folder field cleanly. To confirm during implementation.
 - **Visual styles editor dropdown location.** Need to find the current font-folder text field in the preset detail editor and replace it with a library-backed dropdown plus missing-state visual.
 - **Auto-backup interaction.** A separate backlog item proposes auto-backup of user data. The font library may want to be included in that target list when that feature lands, but it does not block this one.
