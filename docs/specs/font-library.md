@@ -1,7 +1,7 @@
 # Font Library
 
 **Target release:** v1.8.0 (headline feature)
-**Status:** Open spec, design questions partially resolved (Q1, Q2, Q4, Q5 resolved 2026-06-06)
+**Status:** Open spec, most design questions resolved (Q1, Q2, Q3, Q4, Q5, Q6 resolved 2026-06-06)
 **Owner:** Ryan
 **Last updated:** 2026-06-06
 
@@ -36,7 +36,7 @@ Each library entry carries metadata alongside the font files:
 
 When the linked-style field is populated, selecting that font on a preset auto-populates the linked style as the default for that preset slot. Useful UX: the font and its intended style travel together.
 
-Metadata storage shape TBD (likely a sibling `meta.json` next to the font folder, or a top-level library index).
+Metadata storage shape TBD. Two main candidates: a sibling JSON file inside each font folder (portable, vulnerable to user deletion), or a single central index at the library root (durable in-app, less portable). See open question 8.
 
 ## Import flow
 
@@ -105,16 +105,23 @@ Card grid modeled on the Style Library, alphabetical by name. Each card shows th
 
 ### Font detail view (opens on card click)
 
-Clicking a card opens the contents of the font folder, not a form. The detail view lets the user:
+The detail view is a single screen with two regions, modeled on existing app patterns:
 
-- Rename individual files inside the folder
-- Drag files in (from desktop or another folder)
+**Top region — editable metadata form.** Look-and-feel of the Style Library's "open style for edit" modal, but with the metadata fields instead of style code: name, author, purchased, acquisition date, description, linked style. Always editable while the card is open.
+
+**Bottom region — editable file list.** Structure modeled on the OS Versions file-view layout, but unlike OS Versions this list is editable. Operations:
+
+- Rename individual files in the folder
+- Drag files in from desktop or another folder
 - Import files via a picker
 - Delete files
+- Click a `.wav` row to play the file in-app (audio playback)
 
-All operations are undoable. See Engineering notes on the undo system.
+All operations are undoable while the card is open. See Engineering notes on the undo system.
 
-Metadata editing (name, author, purchased, acquisition date, description, linked style) lives somewhere accessible from this view. Placement is an open question.
+### In-app audio playback
+
+Clicking a `.wav` file in the detail view's file list plays the sound through the system audio. Implementation uses Electron's built-in HTML5 audio support; no extra dependency. Required for v1 because reviewing a font's sounds is half the reason to open the detail view in the first place. (Out-of-scope until 2026-06-06; called in by Ryan during the spec session.)
 
 ## Open questions
 
@@ -132,15 +139,11 @@ Validation mirrors the OS-versions import pattern (minimum: folder exists and co
 
 If the linked style is removed from the Style Library after the link was made, do NOT silently un-link. The style picker on a preset using that font shows an empty selection with a red note beneath: `Default style "<name>" is unavailable`. The link is preserved so re-adding the style restores the auto-populate behavior without manual re-linking.
 
-### 3. MTP trigger flow — OPEN
+### 3. MTP trigger flow — RESOLVED 2026-06-06
 
-When the user picks "Push to saber via mass storage," does the app:
+**Decision:** App handles the full sequence over the existing serial connection: send `sd 1`, wait for the SD volume to mount, do the work, perform a safe unmount/eject of the volume, then send `sd 0` to return the board to normal saber operation. The user does not need to engage any buttons on the saber.
 
-- Auto-send `sd 1` over the existing serial connection (smoother flow, requires serial to be active).
-- Require the user to enable mass storage on the saber manually via button presses, and the app just detects the mount.
-
-**Cody's lean:** Auto-send `sd 1`. The user is already in Config Manager when this matters; serial is already connected.
-**Resolution:** TBD.
+**Engineering caveat called out by Ryan:** safe unmount/eject is OS-specific and is the engineering risk. Windows path is well-known (e.g. `mountvol /D` or `RemoveDriveSafely.exe` patterns). Mac and Linux are TBD and need real testing. This was flagged at spec time so we do not assume the cross-platform piece is free.
 
 ### 4. Library deduplication — RESOLVED 2026-06-06
 
@@ -152,38 +155,45 @@ When the user picks "Push to saber via mass storage," does the app:
 
 UI shape: card grid modeled on the Style Library (alphabetical, with search and filter). Clicking a card does NOT open a form. It opens a detail view of the font folder's contents where the user can rename files, drag in new files, import via picker, and delete files. All operations undoable. See UI structure section above.
 
-### 6. Metadata edit placement — OPEN (new)
+### 6. Metadata edit placement — RESOLVED 2026-06-06
 
-The card view opens a file-contents view, not a metadata form. So where does metadata editing (name, author, purchased, date, description, linked style) live?
+**Decision:** Metadata lives at the top of the detail view as an always-editable form, with the file list directly below. Look-and-feel: Style Library "edit style" modal up top, OS Versions file-view structure below (but editable). Single screen, no tabs or drawers.
 
-Candidates:
-- A toggle or tab inside the detail view ("Files" / "Properties")
-- A properties drawer that slides out from the side of the detail view
-- A button or icon on the card that opens metadata in a dialog without entering the detail view
-- Right-click on the card → Edit metadata
+### 7. Undo scope — PARTIALLY RESOLVED 2026-06-06
 
-**Cody's lean:** Toggle inside the detail view (Files | Properties). Keeps the detail view as the single place to work with one font, no extra UI surface for the user to learn.
-**Resolution:** TBD.
+**Resolved:** Undo is local to the open card. While a card is open, all mutations are reversible via undo. Closing the card commits the state (no further undo from outside the card).
 
-### 7. Undo scope — OPEN (new)
+**Open sub-question — live operations vs staged operations:**
 
-"All undoable" was specified for the file operations inside a font folder (rename / drag-in / import / delete). What else falls under undo?
+Two architectures for the "while open, all undoable" behavior:
 
-- File operations inside a folder (definitely yes)
-- Deleting an entire font from the library
-- Renaming a font (changes the on-disk folder name)
-- Editing metadata fields
-- Import of a new font (probably yes, as "remove the just-imported font")
+- **Live mode.** Each operation mutates disk immediately. Undo reverses it (e.g. rename back, restore deleted file from a session trash, etc.). Simpler implementation; works well when the user does not need an "abandon all changes" affordance.
 
-Also: is undo a global stack (one Ctrl+Z affects whatever was last done across the module), or per-font (each font's detail view has its own history)? Per-font is more contained; global is more in line with usual app expectations.
+- **Staged mode.** Operations accumulate in a pending change set held in memory (or in a temp area). The font folder on disk is untouched until the user explicitly saves; closing without saving discards. Allows true Cancel/Save semantics, a "pending changes" indicator, and a clean abandon path. More implementation surface: virtual file list rendering, staged copies for imports, deferred deletes.
 
-**Cody's lean:** Undo covers everything that mutates library state. Global stack scoped to the Font Library tab.
+Ryan flagged staged mode as potentially differentiating: "unique file management that would again set us apart." Real point — most file-management UIs are live-mutation; staged feels more like document editing, which is closer to how the rest of JMT Studio behaves (open config → edit → save).
+
+**Cody's lean:** Staged mode in v1.8 if implementation effort is contained. The Save/Cancel framing is consistent with the rest of the app and the implementation is bounded (operation log + lazy apply on save). Live mode is the fallback if staged starts dragging schedule.
+**Resolution:** TBD — decision before any detail-view code lands.
+
+### 8. Metadata storage location — OPEN (new)
+
+Where does the per-font metadata physically live on disk?
+
+- **Option A — Sibling file in the font folder.** A uniquely-named JSON file inside each font folder (e.g. `_jmt_meta.json`). Self-contained, travels if the font is moved or reimported. Vulnerable to the user deleting it via the detail view's file list or external filesystem actions. Must be filtered out of SD-card writes (the board does not need it). Can also be filtered out of the in-app file list so the user is not exposed to deleting it accidentally.
+- **Option B — Central index.** A single `userData/fontLibrary/_index.json` mapping folder name to metadata. Robust to in-app file edits (file not in the font folder, cannot be touched from the detail view). Less portable; if a font folder is renamed or moved outside the app, index goes out of sync.
+- **Option C — Both.** Central index is authoritative; sibling file is a written-out backup that travels with the folder. Two write paths but no real data loss risk.
+
+Ryan's instinct: Option A with the deletion risk accepted as "something we live with." Cody's view: Option A is fine if we filter the metadata file from the in-app file list (so it cannot be casually deleted), and from SD-card writes. That mitigates most of the risk without losing portability.
+
+**Cody's lean:** Option A with in-app filtering. Filename uses a leading underscore or dot so it sorts out of the way and signals "internal."
 **Resolution:** TBD.
 
 ## Engineering notes
 
-- **MTP cross-platform mount detection is the hardest engineering piece.** Reader-path SD writing is straightforward; MTP requires per-OS code for mount detection, drive enumeration, and safe-eject. If scope tightens before ship, MTP becomes a Phase 2 feature behind the reader path.
-- **Undo system.** Required by spec ("all undoable"). Operations on files inside a font folder (rename, drag-in, import, delete) need to be reversible. Implementation approach: command pattern with an operation log per session, where each operation knows how to invert itself. Deletes must be soft (move to a session-scoped trash area inside userData) so undo can restore. Final scope of what undo covers is open question 7.
+- **MTP cross-platform safe-eject is the hardest engineering piece.** Reader-path SD writing is straightforward; MTP requires per-OS code for mount detection, drive enumeration, and crucially a safe-eject that the OS guarantees has flushed writes before we send `sd 0`. Windows path is well-known; Mac and Linux paths need real testing and possibly external helpers (`diskutil unmount` / `udisksctl`). Flagged by Ryan at spec time.
+- **Undo system.** Required by spec ("all undoable while card open"). Two architectures on the table per open question 7 (live vs staged). Both share an operation-log design where each user action records an inverse. Staged mode adds a virtual-file-list rendering layer and defers all disk writes until save. Pick before any detail-view code lands.
+- **Audio playback.** Click a `.wav` row in the detail view to play through system audio. Use Electron's HTML5 `<audio>` element or Web Audio API. No native dependency required. Should support stop/seek for longer files (clash hits and full hum loops are different sizes).
 - **Config parser hook for auto-match push mode.** Need to identify where presets are parsed and pull the font-folder field cleanly. To confirm during implementation.
 - **Visual styles editor dropdown location.** Need to find the current font-folder text field in the preset detail editor and replace it with a library-backed dropdown plus missing-state visual.
 - **Auto-backup interaction.** A separate backlog item proposes auto-backup of user data. The font library may want to be included in that target list when that feature lands, but it does not block this one.
@@ -200,6 +210,5 @@ Both phases ship a useful product. Phase 1 alone closes the "drag files around i
 ## Out of scope for v1
 
 - Browsing or searching a JMT-hosted online font catalog (parallel to Community Style Library; tracked separately on backlog).
-- Editing or transcoding font files inside the app.
+- Editing or transcoding font files inside the app (rename and add/delete only; not waveform editing).
 - Validating internal font folder structure (intentional, see User context).
-- Per-font preview audio in the library UI (could be added in v2; not part of v1 scope unless Ryan calls it in).
