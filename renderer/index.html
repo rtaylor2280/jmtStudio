@@ -8583,6 +8583,17 @@ document.addEventListener('keydown', e => {
   }
 });
 
+// Global Ctrl+O — open from anywhere on the config tab (mirrors Cmd+S scope)
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'o' && _activeTab === 'config') {
+    const inMonaco = !!document.activeElement?.closest('.monaco-editor');
+    if (!inMonaco) {
+      e.preventDefault();
+      doOpen();
+    }
+  }
+});
+
 // Ctrl+Z / Ctrl+Y in Style Library visual view — undo/redo drag reorder
 document.addEventListener('keydown', e => {
   if (_activeTab !== 'styles' || _stylesViewMode !== 'visual') return;
