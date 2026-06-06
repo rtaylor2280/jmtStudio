@@ -8402,7 +8402,7 @@ function _parseClipboardStyle(text) {
     result.notes = noteLines.join('\n').trim();
   }
 
-  // Extract expression: try using first, then StylePtr, then raw.
+  // Extract expression — try using first, then StylePtr, then raw.
   // Identifier permits trailing Fett263 footnote markers (*, +, ^, #) between the
   // name and `=`. Without this, `using NAME* = ...;` fails to match and falls
   // through to the StylePtr fallback, which then pulls the bogus `NAME*` token
@@ -11307,10 +11307,14 @@ require(['vs/editor/editor.main'], function () {
         let _hardcodedInfo = null; // { matchStr, matchIndex } when color is hardcoded in expr
 
         if (slot.colorArg) {
-          // Expression-aware: find the first RgbArg by scanning the expression so
-          // IntArg slots before the color are skipped correctly.
+          // Expression-aware: prefer BASE_COLOR_ARG as the primary color, falling
+          // back to the first RgbArg when the style doesn't define BASE. Without
+          // the name-preference, styles whose first RgbArg in text-order is e.g.
+          // SWING_COLOR_ARG display the swing default in the slot card instead of
+          // the user's actual primary blade color.
           const _resolved = styleArgResolver.resolveStyleArgs(slot.expr || '', slot.colorArg);
-          const _rgbEntry = _resolved.find(a => a.kind === 'RgbArg');
+          const _rgbEntry = _resolved.find(a => a.kind === 'RgbArg' && a.name === 'BASE_COLOR_ARG')
+                         || _resolved.find(a => a.kind === 'RgbArg');
           if (_rgbEntry && _rgbEntry.values.length >= 3) {
             _rgb16 = _rgbEntry.values.slice(0, 3).map(v => v || 0);
           }
@@ -11321,10 +11325,12 @@ require(['vs/editor/editor.main'], function () {
           }
         }
         if (!_rgb16 && window.proffieArgs) {
-          // Registry default for named helper styles
+          // Registry default for named helper styles. Same BASE-preferred lookup
+          // as the parens-aware branch above.
           const _baseName = slot.expr ? (slot.expr.match(/^(\w+)/) || [])[1] : null;
           const _regArgs  = _baseName ? _getHelperRegistryArgs(_baseName) : [];
-          const _cr = _regArgs.find(a => a.kind === 'RgbArg');
+          const _cr = _regArgs.find(a => a.kind === 'RgbArg' && a.name === 'BASE_COLOR_ARG')
+                   || _regArgs.find(a => a.kind === 'RgbArg');
           if (_cr) _rgb16 = window.proffieArgs.resolveColorDefault(_cr.defaultExpr || '');
         }
         if (!_rgb16 && window.proffieArgs) {
@@ -11341,9 +11347,10 @@ require(['vs/editor/editor.main'], function () {
           }
         }
         if (!_rgb16 && window.proffieArgs) {
-          // Inline expressions: scan for RgbArg directly and use its default
+          // Inline expressions: prefer BASE_COLOR_ARG default, fall back to first RgbArg.
           const _inlineArgs = styleArgResolver.findArgs(slot.expr || '');
-          const _firstRgb   = _inlineArgs.find(a => a.kind === 'RgbArg');
+          const _firstRgb   = _inlineArgs.find(a => a.kind === 'RgbArg' && a.name === 'BASE_COLOR_ARG')
+                           || _inlineArgs.find(a => a.kind === 'RgbArg');
           if (_firstRgb) _rgb16 = window.proffieArgs.resolveColorDefault(_firstRgb.defaultExpr || '');
         }
         if (!_rgb16 && window.proffieArgs) {
@@ -11627,7 +11634,8 @@ require(['vs/editor/editor.main'], function () {
       let rgb16 = null;
       if (slot.colorArg) {
         const _resolved = styleArgResolver.resolveStyleArgs(slot.expr || '', slot.colorArg);
-        const _rgbEntry = _resolved.find(a => a.kind === 'RgbArg');
+        const _rgbEntry = _resolved.find(a => a.kind === 'RgbArg' && a.name === 'BASE_COLOR_ARG')
+                       || _resolved.find(a => a.kind === 'RgbArg');
         if (_rgbEntry && _rgbEntry.values.length >= 3) {
           rgb16 = _rgbEntry.values.slice(0, 3).map(v => v || 0);
         }
@@ -11639,7 +11647,8 @@ require(['vs/editor/editor.main'], function () {
       if (!rgb16 && window.proffieArgs) {
         const _baseName = slot.expr ? (slot.expr.match(/^(\w+)/) || [])[1] : null;
         const _regArgs  = _baseName ? _getHelperRegistryArgs(_baseName) : [];
-        const _cr = _regArgs.find(a => a.kind === 'RgbArg');
+        const _cr = _regArgs.find(a => a.kind === 'RgbArg' && a.name === 'BASE_COLOR_ARG')
+                 || _regArgs.find(a => a.kind === 'RgbArg');
         if (_cr) rgb16 = window.proffieArgs.resolveColorDefault(_cr.defaultExpr || '');
       }
       if (!rgb16 && window.proffieArgs) {
@@ -11653,7 +11662,8 @@ require(['vs/editor/editor.main'], function () {
       }
       if (!rgb16 && window.proffieArgs) {
         const _inlineArgs = styleArgResolver.findArgs(slot.expr || '');
-        const _firstRgb   = _inlineArgs.find(a => a.kind === 'RgbArg');
+        const _firstRgb   = _inlineArgs.find(a => a.kind === 'RgbArg' && a.name === 'BASE_COLOR_ARG')
+                         || _inlineArgs.find(a => a.kind === 'RgbArg');
         if (_firstRgb) rgb16 = window.proffieArgs.resolveColorDefault(_firstRgb.defaultExpr || '');
       }
       if (!rgb16 && window.proffieArgs) {
