@@ -607,6 +607,44 @@ ipcMain.handle('cache:getDataSize', () => {
 ipcMain.handle('app:getVersion',      () => app.getVersion());
 ipcMain.handle('app:isDevMode',       () => !app.isPackaged);
 ipcMain.handle('app:isSplashDismissed', () => _splashDismissed);
+
+// ── Sound Fonts Library ────────────────────────────────
+// Library lives at userData/soundFonts/ with a top-level _jmt_library_meta.json
+// as the "library exists" sentinel. Each imported font is a sibling folder.
+// Library state is derived by scanning the directory; no central index.
+const _soundFontsRoot = () => path.join(app.getPath('userData'), 'soundFonts');
+const _soundFontsMeta = () => path.join(_soundFontsRoot(), '_jmt_library_meta.json');
+
+ipcMain.handle('soundFonts:exists', () => {
+  try { return fs.existsSync(_soundFontsMeta()); } catch { return false; }
+});
+
+ipcMain.handle('soundFonts:create', () => {
+  try {
+    const root = _soundFontsRoot();
+    if (!fs.existsSync(root)) fs.mkdirSync(root, { recursive: true });
+    const meta = _soundFontsMeta();
+    if (!fs.existsSync(meta)) {
+      fs.writeFileSync(meta, JSON.stringify({
+        createdAt: new Date().toISOString(),
+        schemaVersion: 1,
+      }, null, 2));
+    }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
+ipcMain.handle('soundFonts:listFonts', () => {
+  try {
+    const root = _soundFontsRoot();
+    if (!fs.existsSync(root)) return [];
+    return fs.readdirSync(root, { withFileTypes: true })
+      .filter(e => e.isDirectory())
+      .map(e => e.name);
+  } catch { return []; }
+});
 ipcMain.handle('app:getArduinoDataPath', () => {
   const os   = require('os');
   const base = app.isPackaged

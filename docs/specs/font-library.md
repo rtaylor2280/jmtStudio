@@ -1,9 +1,16 @@
-# Font Library
+# Sound Fonts Library
 
 **Target release:** v1.8.0 (headline feature)
-**Status:** Open spec, most design questions resolved (Q1, Q2, Q3, Q4, Q5, Q6 resolved 2026-06-06)
+**Status:** Framework slice landed 2026-06-06 (tab, settings toggle, opt-in create flow, layered empty states, storage scaffolding). Most design questions resolved (Q1, Q2, Q3, Q4, Q5, Q6 resolved 2026-06-06).
 **Owner:** Ryan
 **Last updated:** 2026-06-06
+
+## Naming
+
+- **Tab label:** "Sound Fonts" (short form, fits the tab strip alongside Style Library and OS Versions)
+- **Full noun phrase:** "Sound Fonts Library" — used in modal titles, headings, settings labels, and documentation where the longer form reads more naturally
+- **On disk:** `userData/soundFonts/`
+- **Code/internal references:** "Sound Fonts" or "soundFonts" (the prior spec used "Font Library" and `fontLibrary/`; updated 2026-06-06)
 
 ## Purpose
 
@@ -21,7 +28,7 @@ A "font folder" in our model is a named folder like `vader`, `VoltBlade`, `G-Gri
 
 Imported font folders are copied into a userData-backed library, not symlinked. Source folders may move or disappear; the library owns its own copy. Standard disk-space tradeoff for portability and reliability.
 
-Proposed path: `userData/fontLibrary/<font-folder-name>/`
+Proposed path: `userData/soundFonts/<font-folder-name>/`
 
 ### Per-font metadata
 
@@ -44,7 +51,7 @@ Metadata storage shape TBD. Two main candidates: a sibling JSON file inside each
 2. App scans for vendor multi-version structure. If the picked folder contains a `Proffie/` subfolder (typically alongside `Xeno/`, `CrystalFocus/` siblings), auto-detect and treat that subfolder as the import target. If the user already navigated into the Proffie subfolder before picking, use the picked folder directly. Either path is supported because users will reasonably do both.
 3. Validate the chosen folder (see Validation below). Block import on failure with an inline error.
 4. Prompt for the metadata fields. **Name** is required and must be unique within the library. The default name is the source folder name (so a user who picked the `Proffie/` subfolder sees `Proffie` pre-filled, which they will almost always change to something meaningful like `Vader`).
-5. Copy contents into `userData/fontLibrary/<name>/` using the user-supplied name as the on-disk folder name.
+5. Copy contents into `userData/soundFonts/<name>/` using the user-supplied name as the on-disk folder name.
 6. Add entry to the library index.
 
 ### Validation
@@ -97,7 +104,20 @@ The font-folder field today lives in [renderer/index.html](renderer/index.html) 
 
 ## UI structure
 
-New top-level tab placed after Style Library and before OS Versions. Tab order: Config Manager → Style Library → **Font Library** → OS Versions.
+New top-level tab placed after Style Library and before OS Versions. Tab order: Config Manager → Style Library → **Sound Fonts** → OS Versions.
+
+### Opt-in setup (matches Style Library pattern)
+
+The tab is always present in the strip by default, but the user has to opt in to creating the library on disk. Two layered empty states inside the tab:
+
+1. **Library not yet created** — centered empty state with a short headline ("No Sound Fonts Library yet"), a one-sentence explanation, and a single primary button "Set Up Sound Fonts Library". Clicking creates `userData/soundFonts/` and the `_jmt_library_meta.json` sentinel, then swaps to layer 2.
+2. **Library exists, no fonts yet** — same centered shape with "Import your first sound font" headline, one-sentence description, and an "Import Sound Font" button (the import flow itself lands in a later slice).
+
+When the library has at least one font, the empty states are replaced by the browse view (cards grid; future slice).
+
+### Settings toggle for tab visibility
+
+A row in the Settings modal labeled "Show Sound Fonts tab" with a toggle (default on). Setting key: `soundFontsTabEnabled`. The toggle is interactive only when the library doesn't exist OR exists with zero fonts. When the library has fonts, the toggle locks in the on position with a small hint ("remove all sound fonts to disable"). Rationale: the user can hide the tab if they don't intend to use the feature, but they cannot hide data they care about. If the user disables the tab while it's the active tab, the app switches them to Config Manager so no orphaned active-tab state exists.
 
 ### Browse view (default)
 
@@ -181,7 +201,7 @@ Ryan flagged staged mode as potentially differentiating: "unique file management
 Where does the per-font metadata physically live on disk?
 
 - **Option A — Sibling file in the font folder.** A uniquely-named JSON file inside each font folder (e.g. `_jmt_meta.json`). Self-contained, travels if the font is moved or reimported. Vulnerable to the user deleting it via the detail view's file list or external filesystem actions. Must be filtered out of SD-card writes (the board does not need it). Can also be filtered out of the in-app file list so the user is not exposed to deleting it accidentally.
-- **Option B — Central index.** A single `userData/fontLibrary/_index.json` mapping folder name to metadata. Robust to in-app file edits (file not in the font folder, cannot be touched from the detail view). Less portable; if a font folder is renamed or moved outside the app, index goes out of sync.
+- **Option B — Central index.** A single `userData/soundFonts/_index.json` mapping folder name to metadata. Robust to in-app file edits (file not in the font folder, cannot be touched from the detail view). Less portable; if a font folder is renamed or moved outside the app, index goes out of sync.
 - **Option C — Both.** Central index is authoritative; sibling file is a written-out backup that travels with the folder. Two write paths but no real data loss risk.
 
 Ryan's instinct: Option A with the deletion risk accepted as "something we live with." Cody's view: Option A is fine if we filter the metadata file from the in-app file list (so it cannot be casually deleted), and from SD-card writes. That mitigates most of the risk without losing portability.

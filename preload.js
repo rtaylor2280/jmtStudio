@@ -168,6 +168,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   isSplashDismissed: () => ipcRenderer.invoke('app:isSplashDismissed'),
 
+  // ── Sound Fonts Library ───────────────────────────────
+  soundFontsExists:    ()   => ipcRenderer.invoke('soundFonts:exists'),
+  createSoundFonts:    ()   => ipcRenderer.invoke('soundFonts:create'),
+  listSoundFonts:      ()   => ipcRenderer.invoke('soundFonts:listFonts'),
+
   readClipboard:   () => ipcRenderer.invoke('clipboard:read'),
 
 });

@@ -1809,6 +1809,19 @@
   /* ── Style Library panel ── */
   #styles-view { display: none; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
   #styles-view.active { display: flex; }
+
+  /* ── Sound Fonts view ── */
+  #soundfonts-view { display: none; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
+  #soundfonts-view.active { display: flex; }
+  .sf-empty-wrap { flex: 1; display: flex; align-items: center; justify-content: center; padding: 40px 20px; }
+  .sf-empty-card { max-width: 460px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+  .sf-empty-icon { color: var(--c-text-faint); }
+  .sf-empty-title { font-size: 1.05rem; font-weight: 600; color: var(--c-text); margin: 0; }
+  .sf-empty-desc { font-size: 0.82rem; color: var(--c-text-muted); margin: 0; line-height: 1.5; }
+  .sf-empty-action { background: var(--jmt-blue); color: #fff; border: none; border-radius: 4px; padding: 8px 18px; font-size: 0.82rem; font-weight: 600; cursor: pointer; }
+  .sf-empty-action:hover { filter: brightness(1.1); }
+  .sf-empty-action[disabled] { opacity: 0.5; cursor: default; }
+  .sf-empty-hint { font-size: 0.72rem; color: var(--c-text-faint); margin: 0; }
   #styles-code-wrap { flex: 1; min-height: 0; position: relative; overflow: hidden; }
   #styles-code-editor { width: 100%; height: 100%; }
   #styles-visual-view { flex: 1; min-height: 0; display: flex; flex-direction: row; overflow: hidden; }
@@ -2324,6 +2337,14 @@
         </svg>
         Style Library
       </button>
+      <button class="tab" data-tab="soundfonts">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M9 18V5l12-2v13"/>
+          <circle cx="6" cy="18" r="3"/>
+          <circle cx="18" cy="16" r="3"/>
+        </svg>
+        Sound Fonts
+      </button>
       <button class="tab" data-tab="versions">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/>
@@ -2360,6 +2381,9 @@
       <div class="tab-btns" id="tab-btns-versions">
         <button id="btn-vp-download" class="btn-neutral" title="Download an official ProffieOS version from GitHub">&#8595; Download Version</button>
         <button id="btn-vp-import"   class="btn-blue"    title="Import a ProffieOS version folder">&#8593; Import Version</button>
+      </div>
+      <div class="tab-btns" id="tab-btns-soundfonts">
+        <!-- Reserved for Sound Fonts toolbar buttons (Import font, etc.) in future slices -->
       </div>
       <div class="tab-btns" id="tab-btns-styles">
         <button id="btn-styles-undo"    class="btn-neutral" title="Undo (Ctrl+Z)" style="display:none">&#8634;</button>
@@ -2443,6 +2467,37 @@
     </div>
     <div id="vp-detail" class="vp-detail">
       <div class="vp-no-selection">Select a version to view details.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Sound Fonts view ── -->
+<div id="soundfonts-view">
+  <!-- Layer 1: library not yet created -->
+  <div class="sf-empty-wrap" id="sf-empty-nolibrary">
+    <div class="sf-empty-card">
+      <svg class="sf-empty-icon" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4">
+        <path d="M9 18V5l12-2v13"/>
+        <circle cx="6" cy="18" r="3"/>
+        <circle cx="18" cy="16" r="3"/>
+      </svg>
+      <h2 class="sf-empty-title">No Sound Fonts Library yet</h2>
+      <p class="sf-empty-desc">Set up a Sound Fonts Library to manage and organize the sound fonts for your sabers.</p>
+      <button class="sf-empty-action" id="btn-sf-create-library">Set Up Sound Fonts Library</button>
+    </div>
+  </div>
+  <!-- Layer 2: library exists but contains no fonts -->
+  <div class="sf-empty-wrap" id="sf-empty-nofonts" style="display:none">
+    <div class="sf-empty-card">
+      <svg class="sf-empty-icon" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+        <polyline points="17 8 12 3 7 8"/>
+        <line x1="12" y1="3" x2="12" y2="15"/>
+      </svg>
+      <h2 class="sf-empty-title">Import your first sound font</h2>
+      <p class="sf-empty-desc">Pick a sound font folder from your computer. JMT Studio copies it into your library and tracks the metadata you supply.</p>
+      <button class="sf-empty-action" id="btn-sf-import-font" disabled title="Import flow coming soon">Import Sound Font</button>
+      <p class="sf-empty-hint">Import flow is not built yet — coming in a follow-up slice.</p>
     </div>
   </div>
 </div>
@@ -3103,6 +3158,17 @@
       <span class="settings-item-label">Style Library <span style="font-size:0.7rem;color:var(--c-text-dim)">(dev only)</span></span>
       <label class="settings-toggle">
         <input type="checkbox" id="setting-styles-enabled">
+        <span class="settings-toggle-track"></span>
+      </label>
+    </div>
+
+    <div class="settings-item" id="setting-soundfonts-item">
+      <span class="settings-item-label">
+        Show Sound Fonts tab
+        <span id="setting-soundfonts-locked-hint" style="display:none;font-size:0.7rem;color:var(--c-text-dim);margin-left:6px">(remove all sound fonts to disable)</span>
+      </span>
+      <label class="settings-toggle">
+        <input type="checkbox" id="setting-soundfonts-enabled" checked>
         <span class="settings-toggle-track"></span>
       </label>
     </div>
@@ -9554,9 +9620,10 @@ async function switchTab(name) {
   document.querySelectorAll('.tab').forEach(t =>
     t.classList.toggle('active', t.dataset.tab === name));
 
-  document.getElementById('tab-btns-config').style.display   = name === 'config'   ? 'flex' : 'none';
-  document.getElementById('tab-btns-versions').style.display = name === 'versions' ? 'flex' : 'none';
-  document.getElementById('tab-btns-styles').style.display   = name === 'styles'   ? 'flex' : 'none';
+  document.getElementById('tab-btns-config').style.display     = name === 'config'     ? 'flex' : 'none';
+  document.getElementById('tab-btns-versions').style.display   = name === 'versions'   ? 'flex' : 'none';
+  document.getElementById('tab-btns-styles').style.display     = name === 'styles'     ? 'flex' : 'none';
+  document.getElementById('tab-btns-soundfonts').style.display = name === 'soundfonts' ? 'flex' : 'none';
 
   const showConfig = name === 'config';
   _configOnlyEls.forEach(id => {
@@ -9574,11 +9641,13 @@ async function switchTab(name) {
     });
   });
 
-  const versionsView = document.getElementById('versions-view');
-  const stylesView   = document.getElementById('styles-view');
+  const versionsView   = document.getElementById('versions-view');
+  const stylesView     = document.getElementById('styles-view');
+  const soundfontsView = document.getElementById('soundfonts-view');
 
-  versionsView.classList.toggle('active', name === 'versions');
-  stylesView.classList.toggle('active',   name === 'styles');
+  versionsView.classList.toggle('active',   name === 'versions');
+  stylesView.classList.toggle('active',     name === 'styles');
+  soundfontsView.classList.toggle('active', name === 'soundfonts');
 
   if (name === 'config') {
     const v = document.getElementById('input-version')?.value;
@@ -9612,6 +9681,13 @@ async function switchTab(name) {
     } else if (window._stylesEditor) {
       window._stylesEditor.layout();
     }
+  }
+
+  if (name === 'soundfonts') {
+    // Re-evaluate which empty-state layer to show whenever the user lands here.
+    // Library can be created or fonts added from outside the renderer too (the
+    // disk is source of truth), so we re-derive rather than cache.
+    window.refreshSoundFontsView?.();
   }
 }
 
@@ -9999,6 +10075,68 @@ require(['vs/editor/editor.main'], function () {
       const _hasStyles = await window.electronAPI.stylesFileExists();
       _applyStylesTabVisible(_hasStyles);
       await window._applyStylesImportButtons(_hasStyles);
+
+      // Sound Fonts — tab visibility driven by user setting; toggle locked when
+      // library has fonts (rule: user can only disable the tab when there's
+      // nothing in the library to hide). Empty-state layer chosen per current
+      // disk state at view-show time so external changes are reflected.
+      const _applySoundFontsTabVisible = (enabled) => {
+        const tabBtn = document.querySelector('.tab[data-tab="soundfonts"]');
+        if (tabBtn) tabBtn.style.display = enabled ? '' : 'none';
+        if (!enabled && _activeTab === 'soundfonts') switchTab('config');
+      };
+      const _refreshSoundFontsToggleLock = async () => {
+        const exists = await window.electronAPI.soundFontsExists();
+        const fonts  = exists ? await window.electronAPI.listSoundFonts() : [];
+        const locked = exists && fonts.length > 0;
+        const cb     = document.getElementById('setting-soundfonts-enabled');
+        const hint   = document.getElementById('setting-soundfonts-locked-hint');
+        if (cb)   cb.disabled = locked;
+        if (hint) hint.style.display = locked ? '' : 'none';
+        return { exists, fontCount: fonts.length, locked };
+      };
+      window.refreshSoundFontsView = async () => {
+        const { exists, fontCount } = await _refreshSoundFontsToggleLock();
+        const layerNoLib   = document.getElementById('sf-empty-nolibrary');
+        const layerNoFonts = document.getElementById('sf-empty-nofonts');
+        if (!exists) {
+          if (layerNoLib)   layerNoLib.style.display   = '';
+          if (layerNoFonts) layerNoFonts.style.display = 'none';
+        } else {
+          if (layerNoLib)   layerNoLib.style.display   = 'none';
+          if (layerNoFonts) layerNoFonts.style.display = '';
+        }
+        // (When real browse view lands, swap the no-fonts layer for the grid
+        // when fontCount > 0; for now both >0 and =0 fall through to the
+        // import affordance because there's no import or grid yet.)
+        void fontCount;
+      };
+      const _soundFontsEnabled = await window.electronAPI.getSetting('soundFontsTabEnabled', true);
+      _applySoundFontsTabVisible(_soundFontsEnabled);
+      const _sfToggleEl = document.getElementById('setting-soundfonts-enabled');
+      if (_sfToggleEl) {
+        _sfToggleEl.checked = !!_soundFontsEnabled;
+        _sfToggleEl.addEventListener('change', async () => {
+          const { locked } = await _refreshSoundFontsToggleLock();
+          if (locked && !_sfToggleEl.checked) {
+            _sfToggleEl.checked = true; // bounce back; rule says no disable while fonts exist
+            return;
+          }
+          await window.electronAPI.setSetting('soundFontsTabEnabled', _sfToggleEl.checked);
+          _applySoundFontsTabVisible(_sfToggleEl.checked);
+        });
+      }
+      document.getElementById('btn-sf-create-library')?.addEventListener('click', async () => {
+        const res = await window.electronAPI.createSoundFonts();
+        if (res && res.ok) {
+          await window.refreshSoundFontsView();
+        } else {
+          alert('Failed to create Sound Fonts Library: ' + (res && res.error || 'unknown error'));
+        }
+      });
+      await _refreshSoundFontsToggleLock();
+      await window.refreshSoundFontsView();
+
       // Populate OS version dropdown
       const versions   = await window.electronAPI.listProffieVersions();
       const currentVer = await window.electronAPI.getSelectedVersion();
