@@ -175,6 +175,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listSoundFontsWithMeta:  ()                       => ipcRenderer.invoke('soundFonts:listFontsWithMeta'),
   scanSoundFontFolder:     (folderPath)             => ipcRenderer.invoke('soundFonts:scanFolder', folderPath),
   importSoundFont:         (params)                 => ipcRenderer.invoke('soundFonts:importFont', params),
+  onSoundFontImportProgress: (cb) => {
+    const handler = (_, data) => cb(data);
+    ipcRenderer.on('soundFonts:importProgress', handler);
+    return () => ipcRenderer.removeListener('soundFonts:importProgress', handler);
+  },
 
   readClipboard:   () => ipcRenderer.invoke('clipboard:read'),
 

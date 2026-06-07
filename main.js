@@ -741,24 +741,75 @@ ipcMain.handle('soundFonts:scanFolder', (_, folderPath) => {
   }
 });
 
-// Copy `sourcePath` recursively into userData/soundFonts/<name>/, then write
-// the sibling metadata file. Name uniqueness is the caller's responsibility
-// (renderer validates against the live library list before invoking) but we
-// also refuse to overwrite an existing folder as a defense in depth.
-ipcMain.handle('soundFonts:importFont', (_, { sourcePath, name, metadata }) => {
+// Copy `sourcePath` recursively into userData/soundFonts/<name>/ asynchronously,
+// reporting per-file progress via the `soundFonts:importProgress` IPC event so
+// the renderer can show a progress bar instead of an apparent freeze. Files
+// are enumerated first to compute the total, then copied one at a time;
+// progress emits are throttled to ~100ms or every 10 files (whichever first)
+// so we don't flood IPC on small files. The `_jmt_font_meta.json` is filtered
+// out of any source content so a re-import of a previously-imported folder
+// does not carry the prior identity. On error, any partial destination is
+// cleaned up so the library stays consistent.
+ipcMain.handle('soundFonts:importFont', async (event, { sourcePath, name, metadata }) => {
+  let dest;
   try {
     if (!sourcePath || !name) return { ok: false, error: 'Missing sourcePath or name' };
     const root = _soundFontsRoot();
     if (!fs.existsSync(root)) fs.mkdirSync(root, { recursive: true });
-    const dest = path.join(root, name);
+    dest = path.join(root, name);
     if (fs.existsSync(dest)) return { ok: false, error: 'A font with that name already exists' };
-    // Native recursive copy. Node 16.7+ has fs.cpSync; we filter out any
-    // existing JMT metadata file from the source so a re-import of an
-    // already-imported font does not carry the prior identity.
-    fs.cpSync(sourcePath, dest, {
-      recursive: true,
-      filter: (src) => path.basename(src) !== '_jmt_font_meta.json',
-    });
+
+    // Walk source to enumerate files (and skip any existing JMT metadata).
+    const files = [];
+    let totalBytes = 0;
+    const walk = (dir, relBase) => {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (e.name === '_jmt_font_meta.json') continue;
+        const full = path.join(dir, e.name);
+        const rel = path.join(relBase, e.name);
+        if (e.isDirectory()) walk(full, rel);
+        else if (e.isFile()) {
+          let size = 0;
+          try { size = fs.statSync(full).size; } catch {}
+          files.push({ full, rel, size });
+          totalBytes += size;
+        }
+      }
+    };
+    walk(sourcePath, '');
+    const total = files.length;
+
+    const send = (payload) => {
+      try { event.sender.send('soundFonts:importProgress', payload); } catch {}
+    };
+    send({ stage: 'starting', current: 0, total, bytes: 0, totalBytes });
+
+    fs.mkdirSync(dest, { recursive: true });
+
+    let copied = 0;
+    let bytesCopied = 0;
+    let lastEmit = Date.now();
+    for (const f of files) {
+      const destPath = path.join(dest, f.rel);
+      const destDir = path.dirname(destPath);
+      if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+      await fs.promises.copyFile(f.full, destPath);
+      copied++;
+      bytesCopied += f.size;
+      const now = Date.now();
+      if (now - lastEmit > 100 || copied % 10 === 0 || copied === total) {
+        send({
+          stage: 'copying',
+          current: copied,
+          total,
+          bytes: bytesCopied,
+          totalBytes,
+          currentFile: f.rel,
+        });
+        lastEmit = now;
+      }
+    }
+
     const meta = {
       schemaVersion: 1,
       name,
@@ -770,8 +821,12 @@ ipcMain.handle('soundFonts:importFont', (_, { sourcePath, name, metadata }) => {
       importedAt: new Date().toISOString(),
     };
     fs.writeFileSync(path.join(dest, '_jmt_font_meta.json'), JSON.stringify(meta, null, 2));
+
+    send({ stage: 'done', current: total, total, bytes: totalBytes, totalBytes });
     return { ok: true, name };
   } catch (err) {
+    // Clean up partial destination so the library doesn't carry an incomplete copy.
+    try { if (dest && fs.existsSync(dest)) fs.rmSync(dest, { recursive: true, force: true }); } catch {}
     return { ok: false, error: String(err && err.message || err) };
   }
 });

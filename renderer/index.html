@@ -1840,6 +1840,12 @@
   .sf-card-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
   .sf-card-tag { font-size: 0.62rem; color: var(--c-text-dim); background: var(--c-bg-inset); border: 1px solid var(--c-border-faint); border-radius: 3px; padding: 1px 5px; white-space: nowrap; }
   .sf-card-tag.purchased { color: var(--jmt-blue); border-color: rgba(0,130,255,0.35); background: rgba(0,130,255,0.08); }
+  /* Pending / active import cards in the grid */
+  .sf-card.pending { cursor: default; border-style: dashed; border-color: rgba(0,130,255,0.45); background: rgba(0,130,255,0.04); }
+  .sf-card.pending:hover { background: rgba(0,130,255,0.06); border-color: rgba(0,130,255,0.6); }
+  .sf-card-pending-status { font-size: 0.7rem; color: var(--jmt-blue); display: flex; justify-content: space-between; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
+  .sf-card-pending-bar-track { height: 3px; background: rgba(0,130,255,0.12); border-radius: 2px; overflow: hidden; margin-top: 4px; }
+  .sf-card-pending-bar-fill { height: 100%; width: 0%; background: var(--jmt-blue); transition: width 0.15s; }
   /* Import modal */
   #modal-sf-import .import-field { margin-bottom: 12px; }
   #modal-sf-import label { display: block; font-size: 0.76rem; color: var(--c-text-sub); margin-bottom: 4px; font-weight: 500; }
@@ -3097,6 +3103,8 @@
       <label>Description</label>
       <textarea id="sf-import-description" placeholder="Notes about this font (optional)" maxlength="500"></textarea>
     </div>
+
+    <div id="sf-import-queue-hint" style="display:none;font-size:0.72rem;color:#cb6;margin-top:8px"></div>
 
     <div class="modal-btns" style="margin-top:18px;">
       <button class="modal-btn-cancel" id="sf-import-cancel">Cancel</button>
@@ -10179,12 +10187,28 @@ require(['vs/editor/editor.main'], function () {
       };
       let _sfAllFonts = [];
       let _sfSearchQuery = '';
+      // Queue of in-flight or pending imports. Each: { id, name, sourcePath,
+      // metadata, stage: 'queued'|'starting'|'copying'|'done', current, total,
+      // bytes, totalBytes, currentFile }. Serial execution: only one item has
+      // stage !== 'queued' at a time. Hard cap on queue depth to prevent
+      // accidental flooding.
+      const _SF_QUEUE_LIMIT = 5;
+      let _sfImportQueue = [];
+      let _sfImportRunning = false;
       const _sfRenderGrid = () => {
         const list = document.getElementById('sf-cards');
         const countEl = document.getElementById('sf-search-count');
         if (!list) return;
         const q = (_sfSearchQuery || '').toLowerCase();
-        const sorted = _sfAllFonts.slice().sort((a, b) => a.name.localeCompare(b.name));
+        // Combine disk-backed fonts with pending imports for a unified grid.
+        // Pending items appear in their alphabetical slot so the user sees
+        // where a font will land in the library.
+        const pending = _sfImportQueue.map(item => ({
+          name: item.name,
+          pending: item,
+          meta: { author: item.metadata && item.metadata.author },
+        }));
+        const sorted = _sfAllFonts.concat(pending).sort((a, b) => a.name.localeCompare(b.name));
         const matching = q ? sorted.filter(f => {
           const blob = [
             f.name,
@@ -10194,6 +10218,23 @@ require(['vs/editor/editor.main'], function () {
           return blob.includes(q);
         }) : sorted;
         list.innerHTML = matching.map(f => {
+          if (f.pending) {
+            const p = f.pending;
+            const pct = p.total > 0 ? Math.round((p.current / p.total) * 100) : 0;
+            let statusText;
+            if (p.stage === 'queued')        statusText = 'Queued';
+            else if (p.stage === 'starting') statusText = 'Preparing...';
+            else if (p.stage === 'done')     statusText = 'Finishing up...';
+            else                             statusText = `Copying… ${p.current}/${p.total} · ${pct}%`;
+            const author = p.metadata && p.metadata.author
+              ? `<div class="sf-card-author">by ${_sfEscape(p.metadata.author)}</div>` : '';
+            return `<div class="sf-card pending" data-font="${_sfEscape(f.name)}">
+              <div class="sf-card-name">${_sfEscape(f.name)}</div>
+              ${author}
+              <div class="sf-card-pending-status"><span>${_sfEscape(statusText)}</span></div>
+              <div class="sf-card-pending-bar-track"><div class="sf-card-pending-bar-fill" style="width:${pct}%"></div></div>
+            </div>`;
+          }
           const meta = f.meta || {};
           const author = meta.author ? `<div class="sf-card-author">by ${_sfEscape(meta.author)}</div>` : '';
           const desc   = meta.description ? `<div class="sf-card-desc">${_sfEscape(meta.description)}</div>` : '';
@@ -10206,9 +10247,10 @@ require(['vs/editor/editor.main'], function () {
           </div>`;
         }).join('');
         if (countEl) {
-          countEl.textContent = q && matching.length < sorted.length
-            ? `${matching.length} of ${sorted.length}`
-            : (sorted.length ? `${sorted.length} font${sorted.length === 1 ? '' : 's'}` : '');
+          const totalShown = sorted.length;
+          countEl.textContent = q && matching.length < totalShown
+            ? `${matching.length} of ${totalShown}`
+            : (totalShown ? `${totalShown} font${totalShown === 1 ? '' : 's'}` : '');
         }
       };
       const _sfEscape = (s) => String(s ?? '')
@@ -10222,12 +10264,13 @@ require(['vs/editor/editor.main'], function () {
         const layerNoFonts = document.getElementById('sf-empty-nofonts');
         const layerBrowse  = document.getElementById('sf-browse');
         const toolbarBtn   = document.getElementById('btn-sf-import-toolbar');
+        const pendingCount = _sfImportQueue.length;
         if (!exists) {
           if (layerNoLib)   layerNoLib.style.display   = '';
           if (layerNoFonts) layerNoFonts.style.display = 'none';
           if (layerBrowse)  layerBrowse.classList.remove('active');
           if (toolbarBtn)   toolbarBtn.style.display = 'none';
-        } else if (fontCount === 0) {
+        } else if (fontCount === 0 && pendingCount === 0) {
           if (layerNoLib)   layerNoLib.style.display   = 'none';
           if (layerNoFonts) layerNoFonts.style.display = '';
           if (layerBrowse)  layerBrowse.classList.remove('active');
@@ -10299,6 +10342,7 @@ require(['vs/editor/editor.main'], function () {
         if (_sfPurchased) _sfPurchased.checked = false;
         if (_sfDate) _sfDate.value = new Date().toISOString().slice(0, 10);
         if (_sfDesc) _sfDesc.value = '';
+        if (_sfConfirmBtn) _sfConfirmBtn.textContent = 'Import';
         _sfImportValidate();
         if (_sfImportModal) _sfImportModal.classList.add('active');
         setTimeout(() => _sfNameInput?.focus(), 0);
@@ -10308,18 +10352,34 @@ require(['vs/editor/editor.main'], function () {
       };
       const _sfImportValidate = () => {
         const name = (_sfNameInput?.value || '').trim();
-        const dup = _sfAllFonts.some(f => f.name.toLowerCase() === name.toLowerCase());
+        const lower = name.toLowerCase();
+        const dupDisk    = _sfAllFonts.some(f => f.name.toLowerCase() === lower);
+        const dupPending = _sfImportQueue.some(i => i.name.toLowerCase() === lower);
+        const queueFull  = _sfImportQueue.length >= _SF_QUEUE_LIMIT;
         let nameError = '';
         if (!name) nameError = 'Name is required';
         else if (!/^[A-Za-z0-9 _\-]+$/.test(name)) nameError = 'Use letters, numbers, spaces, underscore, or hyphen';
-        else if (dup) nameError = 'A font with that name already exists';
+        else if (dupDisk) nameError = 'A font with that name already exists';
+        else if (dupPending) nameError = 'A font with that name is already queued for import';
         if (_sfNameInput) _sfNameInput.classList.toggle('invalid', !!nameError);
         if (_sfNameError) {
           _sfNameError.textContent = nameError || 'Name is required';
           _sfNameError.style.display = nameError ? '' : 'none';
         }
+        // Surface a queue-full hint independently of the name error so the user
+        // understands why they can't add another even with a valid name.
+        const queueHint = document.getElementById('sf-import-queue-hint');
+        if (queueHint) {
+          if (queueFull) {
+            queueHint.textContent = `Import queue is full (${_SF_QUEUE_LIMIT} max). Wait for a current import to finish.`;
+            queueHint.style.display = '';
+          } else {
+            queueHint.style.display = 'none';
+            queueHint.textContent = '';
+          }
+        }
         const hasScan = !!(_sfImportScan && _sfImportScan.ok && _sfImportScan.hasContent);
-        const valid = !!(_sfImportSourcePath && hasScan && !nameError);
+        const valid = !!(_sfImportSourcePath && hasScan && !nameError && !queueFull);
         if (_sfConfirmBtn) _sfConfirmBtn.disabled = !valid;
       };
       const _sfImportBrowse = async () => {
@@ -10362,14 +10422,18 @@ require(['vs/editor/editor.main'], function () {
         }
         _sfImportValidate();
       };
+      // Enqueue the configured import and close the modal. The background
+      // processor picks it up; the user sees a pending card appear in the grid
+      // and can queue more (up to the limit) or do other work while the copy
+      // runs in main.
       const _sfImportConfirm = async () => {
         if (!_sfImportSourcePath || !_sfNameInput) return;
         const name = _sfNameInput.value.trim();
-        _sfConfirmBtn.disabled = true;
-        _sfConfirmBtn.textContent = 'Importing...';
-        const res = await window.electronAPI.importSoundFont({
-          sourcePath: _sfImportSourcePath,
+        if (_sfImportQueue.length >= _SF_QUEUE_LIMIT) return;
+        const item = {
+          id: `sf-import-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
           name,
+          sourcePath: _sfImportSourcePath,
           metadata: {
             author: (_sfAuthor?.value || '').trim(),
             purchased: !!(_sfPurchased && _sfPurchased.checked),
@@ -10377,15 +10441,68 @@ require(['vs/editor/editor.main'], function () {
             description: (_sfDesc?.value || '').trim(),
             linkedStyleLibraryEntry: null,
           },
+          stage: 'queued',
+          current: 0,
+          total: 0,
+          bytes: 0,
+          totalBytes: 0,
+          currentFile: '',
+        };
+        _sfImportQueue.push(item);
+        _sfCloseImportModal();
+        await window.refreshSoundFontsView();
+        _sfProcessImportQueue();
+      };
+
+      // Serial queue processor — runs one import at a time. Subscribes to main's
+      // progress events for the duration of the active item, updates the matching
+      // pending card in the grid as events arrive, and on completion either
+      // surfaces the error or refreshes the view so the new disk-backed font
+      // shows up in its proper alphabetical slot.
+      let _sfProgressUnsub = null;
+      const _sfProcessImportQueue = async () => {
+        if (_sfImportRunning) return;
+        const active = _sfImportQueue[0];
+        if (!active || active.stage !== 'queued') return;
+        _sfImportRunning = true;
+        active.stage = 'starting';
+        _sfRenderGrid();
+        if (_sfProgressUnsub) { try { _sfProgressUnsub(); } catch {} }
+        _sfProgressUnsub = window.electronAPI.onSoundFontImportProgress((data) => {
+          if (!data || !active) return;
+          if (data.stage === 'starting') {
+            active.stage = 'starting';
+            active.total = data.total || 0;
+            active.totalBytes = data.totalBytes || 0;
+          } else if (data.stage === 'copying') {
+            active.stage = 'copying';
+            active.current = data.current || 0;
+            active.total = data.total || active.total;
+            active.bytes = data.bytes || 0;
+            active.totalBytes = data.totalBytes || active.totalBytes;
+            active.currentFile = data.currentFile || '';
+          } else if (data.stage === 'done') {
+            active.stage = 'done';
+            active.current = active.total;
+            active.bytes = active.totalBytes;
+          }
+          _sfRenderGrid();
         });
-        _sfConfirmBtn.textContent = 'Import';
-        if (res && res.ok) {
-          _sfCloseImportModal();
-          await window.refreshSoundFontsView();
-        } else {
-          alert('Import failed: ' + (res && res.error || 'unknown error'));
-          _sfConfirmBtn.disabled = false;
+        const res = await window.electronAPI.importSoundFont({
+          sourcePath: active.sourcePath,
+          name: active.name,
+          metadata: active.metadata,
+        });
+        if (_sfProgressUnsub) { try { _sfProgressUnsub(); } catch {} _sfProgressUnsub = null; }
+        // Pop the active item regardless of outcome; surface error if needed.
+        _sfImportQueue.shift();
+        _sfImportRunning = false;
+        if (!res || !res.ok) {
+          alert(`Import failed (${active.name}): ${res && res.error || 'unknown error'}`);
         }
+        await window.refreshSoundFontsView();
+        // Kick the next queued item if any.
+        if (_sfImportQueue.length > 0) _sfProcessImportQueue();
       };
       document.getElementById('btn-sf-import-toolbar')?.addEventListener('click', _sfOpenImportModal);
       document.getElementById('btn-sf-import-font')?.addEventListener('click', _sfOpenImportModal);
