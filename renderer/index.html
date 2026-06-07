@@ -3154,14 +3154,6 @@
       </div>
     </div>
 
-    <div class="settings-item" id="setting-styles-item" style="display:none">
-      <span class="settings-item-label">Style Library <span style="font-size:0.7rem;color:var(--c-text-dim)">(dev only)</span></span>
-      <label class="settings-toggle">
-        <input type="checkbox" id="setting-styles-enabled">
-        <span class="settings-toggle-track"></span>
-      </label>
-    </div>
-
     <div class="settings-item" id="setting-soundfonts-item">
       <span class="settings-item-label">
         Show Sound Fonts tab
@@ -10052,7 +10044,6 @@ require(['vs/editor/editor.main'], function () {
       const _isDev = await window.electronAPI.isDevMode();
       if (_isDev) {
         document.getElementById('dev-bar').style.display = 'block';
-        document.getElementById('setting-styles-item').style.display = 'flex';
       }
 
       // Style Library — tab and toolbar buttons driven by whether my_styles.h exists in userData
