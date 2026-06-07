@@ -1,0 +1,35 @@
+name: Notify website on release
+
+# Trigger the jedimastertech-site Cloudflare Pages project to rebuild whenever a
+# stable JMT Studio release is published, so the download page shows the new
+# version automatically. The website fetches the latest version from GitHub at
+# build time; this workflow just kicks off the build.
+#
+# Fires on `released` (NOT `published`), so pre-releases do not trigger a
+# website rebuild. The website's `/releases/latest` fetch also skips
+# pre-releases, so the two are aligned.
+#
+# Setup (one-time):
+#   1. In Cloudflare Pages → jedimastertech-site → Settings → Builds & deployments
+#      → Deploy hooks, create a hook targeting the `main` branch. Copy the URL.
+#   2. In this repo → Settings → Secrets and variables → Actions → New repository
+#      secret. Name: CLOUDFLARE_DEPLOY_HOOK_URL. Value: the URL from step 1.
+
+on:
+  release:
+    types: [released]
+
+jobs:
+  notify-website:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Cloudflare Pages rebuild
+        env:
+          HOOK_URL: ${{ secrets.CLOUDFLARE_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "$HOOK_URL" ]; then
+            echo "::error::CLOUDFLARE_DEPLOY_HOOK_URL secret is not set in this repo. See workflow file header for setup."
+            exit 1
+          fi
+          curl -X POST -f -sS "$HOOK_URL"
+          echo "Cloudflare Pages deploy hook triggered."
