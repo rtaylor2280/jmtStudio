@@ -692,9 +692,18 @@ ipcMain.handle('soundFonts:scanFolder', (_, folderPath) => {
       // always wants the meaningful font name (e.g. "Vader") rather than
       // "Proffie".
       suggestedName = baseName;
-    } else if (/^proffie$/i.test(baseName)) {
-      // User drilled into the Proffie subfolder before picking; use the parent's
-      // basename for the suggested name.
+      // But if the outer folder itself contains "proffie" too (e.g. user picked
+      // something like Vader-Proffie/ where Vader-Proffie/Proffie/ exists),
+      // walk up one more level for a cleaner suggestion.
+      if (/proffie/i.test(baseName)) {
+        const parent = path.basename(path.dirname(folderPath));
+        if (parent && !/proffie/i.test(parent)) suggestedName = parent;
+      }
+    } else if (/proffie/i.test(baseName)) {
+      // User picked a folder whose name contains "proffie" — could be the
+      // bare Proffie subfolder itself, or a vendor-named variant like
+      // Vader-Proffie/, Proffie-V1/, MyFont_Proffie/. In any of these cases
+      // the parent's basename is almost always the cleaner suggestion.
       suggestedName = path.basename(path.dirname(folderPath));
     }
     // Recursive .wav count (we don't care WHERE the .wavs are, only that there
