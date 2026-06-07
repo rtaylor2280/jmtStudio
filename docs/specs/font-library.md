@@ -232,3 +232,23 @@ Both phases ship a useful product. Phase 1 alone closes the "drag files around i
 - Browsing or searching a JMT-hosted online font catalog (parallel to Community Style Library; tracked separately on backlog).
 - Editing or transcoding font files inside the app (rename and add/delete only; not waveform editing).
 - Validating internal font folder structure (intentional, see User context).
+
+## Future iterations (post-v1)
+
+### Bulk crawl import — discover and import an entire library at once
+
+Logged 2026-06-07. For makers with a large existing collection (folders of dozens or hundreds of sound fonts), the per-font import modal does not scale. A future "Bulk Import" affordance picks a top-level folder, recursively walks the tree, identifies every candidate that looks like a Proffie sound font, and presents the discovered list for user review before queueing them all into the background import system.
+
+**Discovery heuristic:** at each directory during the walk, check whether it looks like a font using the same rules `scanFolder` already applies (contains .wav files at any depth, or contains alt-folder structure, or contains a Proffie subfolder). If yes, that directory is a candidate and the crawl does NOT descend further into it. If no, recurse into children. The crawl stops at the first font-shaped folder on any given branch so we don't double-count nested structures.
+
+**Multi-version handling:** existing scanFolder logic applies per candidate — if a candidate contains a Proffie subfolder, that becomes the source path and the candidate's basename (or parent's basename for proffie-containing names) becomes the suggested name. The Proffie-detection prefix and parent-fallback rules carry through unchanged.
+
+**Conflict UX:** the discovered list is shown in a review modal before any imports start. For each candidate, show: suggested name (editable inline), source path, status badge (`New`, `Duplicate of existing font`, `Duplicate within this crawl`, `Name conflict — rename to proceed`). User can uncheck items they don't want to import, rename to resolve conflicts, and accept bulk defaults for metadata (e.g. shared author, shared "all purchased on this date").
+
+**Per-font metadata:** bulk import realistically cannot collect detailed per-font metadata (purchased, author, description) for hundreds of fonts at once. Two reasonable defaults: (a) leave metadata empty and rely on the detail view edit flow for fonts the user actually wants to annotate later; (b) collect ONE shared metadata block at the top of the review modal and apply it to all selected items, with per-row override for outliers. (a) is simpler and ships first.
+
+**Concurrency:** the existing serial-with-limit-5 queue does not work for a bulk import of 50+ fonts. Two options: (1) bulk import bypasses the queue depth limit while still serializing execution under the hood; (2) bulk import gets its own dedicated channel that runs serially without affecting the modal-level queue. (1) is cleaner — same queue, different entry point with relaxed admission.
+
+**Crawl performance:** for very large directory trees the walk itself can be slow. The crawl should run async in main with progress reporting (`Scanning: 142 folders examined, 18 fonts found`), and should be cancellable. The modal blocks interaction during crawl but the rest of the app stays responsive (same pattern as the import copy).
+
+Implementation surface when scoped: new IPC `soundFonts:crawlForFonts(rootPath)` returning `{candidates, scanStats}`, new IPC `soundFonts:cancelCrawl(token)` for cancellation, new modal `modal-sf-bulk-import` with the review list, new bulk-defaults metadata block, and an entry-point button on the toolbar (`+ Bulk Import` or similar) alongside the per-font Import button.
