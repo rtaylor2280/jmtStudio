@@ -1822,6 +1822,40 @@
   .sf-empty-action:hover { filter: brightness(1.1); }
   .sf-empty-action[disabled] { opacity: 0.5; cursor: default; }
   .sf-empty-hint { font-size: 0.72rem; color: var(--c-text-faint); margin: 0; }
+  /* Browse view (card grid) */
+  .sf-browse-wrap { flex: 1; display: none; flex-direction: column; min-height: 0; overflow: hidden; }
+  .sf-browse-wrap.active { display: flex; }
+  .sf-search-bar { display: flex; align-items: center; gap: 8px; flex-shrink: 0; background: var(--c-bg); padding: 0 20px; box-sizing: border-box; height: 42px; border-bottom: 1px solid var(--c-border); }
+  .sf-search-input-wrap { position: relative; flex: 1; max-width: 320px; display: flex; align-items: center; }
+  .sf-search-input { flex: 1; background: var(--c-bg-inset); border: 1px solid var(--c-border-input); border-radius: 4px; color: var(--c-text); padding: 5px 10px; font-size: 0.8rem; outline: none; max-width: unset; width: 100%; padding-right: 22px; }
+  .sf-search-input:focus { border-color: var(--jmt-blue); }
+  .sf-search-count { font-size: 0.72rem; color: var(--c-text-dim); }
+  .sf-grid-scroll { flex: 1; min-width: 0; overflow-y: auto; padding: 12px 20px 20px; }
+  .sf-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; isolation: isolate; }
+  .sf-card { background: var(--c-bg-raised); border: 1px solid var(--c-border-faint); border-radius: 5px; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; cursor: pointer; transition: border-color 0.12s, background 0.12s; }
+  .sf-card:hover { border-color: var(--c-border-heavy); background: var(--c-bg-card); }
+  .sf-card-name { font-size: 0.86rem; font-weight: 600; color: var(--c-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sf-card-author { font-size: 0.72rem; color: var(--c-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sf-card-desc { font-size: 0.7rem; color: var(--c-text-dim); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .sf-card-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+  .sf-card-tag { font-size: 0.62rem; color: var(--c-text-dim); background: var(--c-bg-inset); border: 1px solid var(--c-border-faint); border-radius: 3px; padding: 1px 5px; white-space: nowrap; }
+  .sf-card-tag.purchased { color: var(--jmt-blue); border-color: rgba(0,130,255,0.35); background: rgba(0,130,255,0.08); }
+  /* Import modal */
+  #modal-sf-import .import-field { margin-bottom: 12px; }
+  #modal-sf-import label { display: block; font-size: 0.76rem; color: var(--c-text-sub); margin-bottom: 4px; font-weight: 500; }
+  #modal-sf-import input[type="text"], #modal-sf-import input[type="date"], #modal-sf-import textarea { width: 100%; background: var(--c-bg-inset); border: 1px solid var(--c-border-input); border-radius: 3px; color: var(--c-text); padding: 5px 8px; font-size: 0.82rem; outline: none; box-sizing: border-box; font-family: inherit; }
+  #modal-sf-import input:focus, #modal-sf-import textarea:focus { border-color: var(--jmt-blue); }
+  #modal-sf-import input.invalid { border-color: #e44; }
+  #modal-sf-import textarea { resize: vertical; min-height: 60px; }
+  #modal-sf-import .sf-import-checkbox-row { display: flex; align-items: center; gap: 8px; }
+  #modal-sf-import .sf-import-checkbox-row input { width: auto; }
+  .sf-import-folder-row { display: flex; gap: 6px; }
+  .sf-import-folder-row input { flex: 1; }
+  .sf-import-folder-row button { flex-shrink: 0; }
+  .sf-import-scan-info { font-size: 0.72rem; color: var(--c-text-muted); margin-top: 4px; line-height: 1.4; }
+  .sf-import-scan-info.error { color: #e44; }
+  .sf-import-scan-info.detected { color: var(--jmt-blue); }
+  .sf-import-name-error { font-size: 0.72rem; color: #e44; margin-top: 3px; display: none; }
   #styles-code-wrap { flex: 1; min-height: 0; position: relative; overflow: hidden; }
   #styles-code-editor { width: 100%; height: 100%; }
   #styles-visual-view { flex: 1; min-height: 0; display: flex; flex-direction: row; overflow: hidden; }
@@ -2383,7 +2417,7 @@
         <button id="btn-vp-import"   class="btn-blue"    title="Import a ProffieOS version folder">&#8593; Import Version</button>
       </div>
       <div class="tab-btns" id="tab-btns-soundfonts">
-        <!-- Reserved for Sound Fonts toolbar buttons (Import font, etc.) in future slices -->
+        <button id="btn-sf-import-toolbar" class="btn-blue" style="display:none" title="Import a sound font folder into your library">&#43; Import Sound Font</button>
       </div>
       <div class="tab-btns" id="tab-btns-styles">
         <button id="btn-styles-undo"    class="btn-neutral" title="Undo (Ctrl+Z)" style="display:none">&#8634;</button>
@@ -2496,8 +2530,19 @@
       </svg>
       <h2 class="sf-empty-title">Import your first sound font</h2>
       <p class="sf-empty-desc">Pick a sound font folder from your computer. JMT Studio copies it into your library and tracks the metadata you supply.</p>
-      <button class="sf-empty-action" id="btn-sf-import-font" disabled title="Import flow coming soon">Import Sound Font</button>
-      <p class="sf-empty-hint">Import flow is not built yet — coming in a follow-up slice.</p>
+      <button class="sf-empty-action" id="btn-sf-import-font">Import Sound Font</button>
+    </div>
+  </div>
+  <!-- Layer 3: library has fonts — card grid -->
+  <div class="sf-browse-wrap" id="sf-browse">
+    <div class="sf-search-bar">
+      <div class="sf-search-input-wrap">
+        <input type="text" id="sf-search" class="sf-search-input" placeholder="Search sound fonts…" autocomplete="off" spellcheck="false">
+      </div>
+      <span class="sf-search-count" id="sf-search-count"></span>
+    </div>
+    <div class="sf-grid-scroll">
+      <div class="sf-cards" id="sf-cards"></div>
     </div>
   </div>
 </div>
@@ -3014,6 +3059,52 @@
 </div>
 
 <!-- ── Import ProffieOS Version modal ── -->
+<div class="modal-overlay" id="modal-sf-import">
+  <div class="modal">
+    <h2>Import Sound Font</h2>
+
+    <div class="import-field">
+      <label>Source Folder</label>
+      <div class="sf-import-folder-row">
+        <input type="text" id="sf-import-folder-path" placeholder="Pick a sound font folder..." readonly>
+        <button class="modal-btn-cancel" id="sf-import-browse-btn">Browse...</button>
+      </div>
+      <div class="sf-import-scan-info" id="sf-import-scan-info"></div>
+    </div>
+
+    <div class="import-field">
+      <label>Name <span style="color:#e44">*</span></label>
+      <input type="text" id="sf-import-name" placeholder="e.g. Vader, VoltBlade, G-Grievous" maxlength="64" autocomplete="off">
+      <div class="sf-import-name-error" id="sf-import-name-error">Name is required</div>
+    </div>
+
+    <div class="import-field">
+      <label>Author</label>
+      <input type="text" id="sf-import-author" placeholder="Font creator or vendor (optional)" maxlength="120" autocomplete="off">
+    </div>
+
+    <div class="import-field sf-import-checkbox-row">
+      <input type="checkbox" id="sf-import-purchased">
+      <label for="sf-import-purchased" style="margin:0;cursor:pointer">Purchased</label>
+    </div>
+
+    <div class="import-field">
+      <label>Acquisition Date</label>
+      <input type="date" id="sf-import-date">
+    </div>
+
+    <div class="import-field">
+      <label>Description</label>
+      <textarea id="sf-import-description" placeholder="Notes about this font (optional)" maxlength="500"></textarea>
+    </div>
+
+    <div class="modal-btns" style="margin-top:18px;">
+      <button class="modal-btn-cancel" id="sf-import-cancel">Cancel</button>
+      <button class="modal-btn-primary" id="sf-import-confirm" disabled>Import</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="modal-import-version">
   <div class="modal">
     <h2 id="import-modal-title">Import ProffieOS Version</h2>
@@ -10086,21 +10177,69 @@ require(['vs/editor/editor.main'], function () {
         if (hint) hint.style.display = locked ? '' : 'none';
         return { exists, fontCount: fonts.length, locked };
       };
+      let _sfAllFonts = [];
+      let _sfSearchQuery = '';
+      const _sfRenderGrid = () => {
+        const list = document.getElementById('sf-cards');
+        const countEl = document.getElementById('sf-search-count');
+        if (!list) return;
+        const q = (_sfSearchQuery || '').toLowerCase();
+        const sorted = _sfAllFonts.slice().sort((a, b) => a.name.localeCompare(b.name));
+        const matching = q ? sorted.filter(f => {
+          const blob = [
+            f.name,
+            f.meta && f.meta.author,
+            f.meta && f.meta.description,
+          ].filter(Boolean).join(' ').toLowerCase();
+          return blob.includes(q);
+        }) : sorted;
+        list.innerHTML = matching.map(f => {
+          const meta = f.meta || {};
+          const author = meta.author ? `<div class="sf-card-author">by ${_sfEscape(meta.author)}</div>` : '';
+          const desc   = meta.description ? `<div class="sf-card-desc">${_sfEscape(meta.description)}</div>` : '';
+          const tags   = meta.purchased
+            ? '<div class="sf-card-tags"><span class="sf-card-tag purchased">purchased</span></div>'
+            : '';
+          return `<div class="sf-card" data-font="${_sfEscape(f.name)}">
+            <div class="sf-card-name">${_sfEscape(f.name)}</div>
+            ${author}${desc}${tags}
+          </div>`;
+        }).join('');
+        if (countEl) {
+          countEl.textContent = q && matching.length < sorted.length
+            ? `${matching.length} of ${sorted.length}`
+            : (sorted.length ? `${sorted.length} font${sorted.length === 1 ? '' : 's'}` : '');
+        }
+      };
+      const _sfEscape = (s) => String(s ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
       window.refreshSoundFontsView = async () => {
         const { exists, fontCount } = await _refreshSoundFontsToggleLock();
         const layerNoLib   = document.getElementById('sf-empty-nolibrary');
         const layerNoFonts = document.getElementById('sf-empty-nofonts');
+        const layerBrowse  = document.getElementById('sf-browse');
+        const toolbarBtn   = document.getElementById('btn-sf-import-toolbar');
         if (!exists) {
           if (layerNoLib)   layerNoLib.style.display   = '';
           if (layerNoFonts) layerNoFonts.style.display = 'none';
-        } else {
+          if (layerBrowse)  layerBrowse.classList.remove('active');
+          if (toolbarBtn)   toolbarBtn.style.display = 'none';
+        } else if (fontCount === 0) {
           if (layerNoLib)   layerNoLib.style.display   = 'none';
           if (layerNoFonts) layerNoFonts.style.display = '';
+          if (layerBrowse)  layerBrowse.classList.remove('active');
+          if (toolbarBtn)   toolbarBtn.style.display = '';
+        } else {
+          if (layerNoLib)   layerNoLib.style.display   = 'none';
+          if (layerNoFonts) layerNoFonts.style.display = 'none';
+          if (layerBrowse)  layerBrowse.classList.add('active');
+          if (toolbarBtn)   toolbarBtn.style.display = '';
+          _sfAllFonts = await window.electronAPI.listSoundFontsWithMeta();
+          _sfRenderGrid();
         }
-        // (When real browse view lands, swap the no-fonts layer for the grid
-        // when fontCount > 0; for now both >0 and =0 fall through to the
-        // import affordance because there's no import or grid yet.)
-        void fontCount;
       };
       const _soundFontsEnabledRaw = await window.electronAPI.getSetting('soundFontsTabEnabled', true);
       // Coerce explicitly: getSetting can return null when prefs.json is missing/corrupt
@@ -10135,6 +10274,123 @@ require(['vs/editor/editor.main'], function () {
           alert('Failed to create Sound Fonts Library: ' + (res && res.error || 'unknown error'));
         }
       });
+
+      // ── Import flow ─────────────────────────────────────
+      let _sfImportSourcePath = null;
+      let _sfImportScan = null;
+      const _sfImportModal = document.getElementById('modal-sf-import');
+      const _sfPath = document.getElementById('sf-import-folder-path');
+      const _sfScanInfo = document.getElementById('sf-import-scan-info');
+      const _sfNameInput = document.getElementById('sf-import-name');
+      const _sfNameError = document.getElementById('sf-import-name-error');
+      const _sfAuthor = document.getElementById('sf-import-author');
+      const _sfPurchased = document.getElementById('sf-import-purchased');
+      const _sfDate = document.getElementById('sf-import-date');
+      const _sfDesc = document.getElementById('sf-import-description');
+      const _sfConfirmBtn = document.getElementById('sf-import-confirm');
+      const _sfOpenImportModal = () => {
+        _sfImportSourcePath = null;
+        _sfImportScan = null;
+        if (_sfPath) _sfPath.value = '';
+        if (_sfScanInfo) { _sfScanInfo.textContent = ''; _sfScanInfo.className = 'sf-import-scan-info'; }
+        if (_sfNameInput) { _sfNameInput.value = ''; _sfNameInput.classList.remove('invalid'); }
+        if (_sfNameError) _sfNameError.style.display = 'none';
+        if (_sfAuthor) _sfAuthor.value = '';
+        if (_sfPurchased) _sfPurchased.checked = false;
+        if (_sfDate) _sfDate.value = new Date().toISOString().slice(0, 10);
+        if (_sfDesc) _sfDesc.value = '';
+        _sfImportValidate();
+        if (_sfImportModal) _sfImportModal.classList.add('active');
+        setTimeout(() => _sfNameInput?.focus(), 0);
+      };
+      const _sfCloseImportModal = () => {
+        if (_sfImportModal) _sfImportModal.classList.remove('active');
+      };
+      const _sfImportValidate = () => {
+        const name = (_sfNameInput?.value || '').trim();
+        const dup = _sfAllFonts.some(f => f.name.toLowerCase() === name.toLowerCase());
+        let nameError = '';
+        if (!name) nameError = 'Name is required';
+        else if (!/^[A-Za-z0-9 _\-]+$/.test(name)) nameError = 'Use letters, numbers, spaces, underscore, or hyphen';
+        else if (dup) nameError = 'A font with that name already exists';
+        if (_sfNameInput) _sfNameInput.classList.toggle('invalid', !!nameError);
+        if (_sfNameError) {
+          _sfNameError.textContent = nameError || 'Name is required';
+          _sfNameError.style.display = nameError ? '' : 'none';
+        }
+        const hasScan = !!(_sfImportScan && _sfImportScan.ok && _sfImportScan.hasContent);
+        const valid = !!(_sfImportSourcePath && hasScan && !nameError);
+        if (_sfConfirmBtn) _sfConfirmBtn.disabled = !valid;
+      };
+      const _sfImportBrowse = async () => {
+        const folder = await window.electronAPI.selectFolder();
+        if (!folder) return;
+        _sfImportSourcePath = folder;
+        if (_sfPath) _sfPath.value = folder;
+        const scan = await window.electronAPI.scanSoundFontFolder(folder);
+        _sfImportScan = scan;
+        if (!scan || !scan.ok) {
+          if (_sfScanInfo) {
+            _sfScanInfo.textContent = (scan && scan.error) || 'Could not read folder';
+            _sfScanInfo.className = 'sf-import-scan-info error';
+          }
+          _sfImportSourcePath = null;
+        } else if (!scan.hasContent) {
+          if (_sfScanInfo) {
+            _sfScanInfo.textContent = 'No .wav files found in this folder. Pick a folder that contains sound font audio.';
+            _sfScanInfo.className = 'sf-import-scan-info error';
+          }
+        } else {
+          if (_sfScanInfo) {
+            const parts = [];
+            if (scan.detectedMultiVersion) parts.push('Detected Proffie subfolder — importing from there.');
+            parts.push(`Found ${scan.wavCount} .wav file${scan.wavCount === 1 ? '' : 's'}.`);
+            _sfScanInfo.textContent = parts.join(' ');
+            _sfScanInfo.className = 'sf-import-scan-info' + (scan.detectedMultiVersion ? ' detected' : '');
+          }
+          // Pre-fill the name field with the suggested name if it's empty.
+          if (_sfNameInput && !_sfNameInput.value) _sfNameInput.value = scan.suggestedName || '';
+          _sfImportSourcePath = scan.sourcePath;
+        }
+        _sfImportValidate();
+      };
+      const _sfImportConfirm = async () => {
+        if (!_sfImportSourcePath || !_sfNameInput) return;
+        const name = _sfNameInput.value.trim();
+        _sfConfirmBtn.disabled = true;
+        _sfConfirmBtn.textContent = 'Importing...';
+        const res = await window.electronAPI.importSoundFont({
+          sourcePath: _sfImportSourcePath,
+          name,
+          metadata: {
+            author: (_sfAuthor?.value || '').trim(),
+            purchased: !!(_sfPurchased && _sfPurchased.checked),
+            acquisitionDate: (_sfDate?.value || ''),
+            description: (_sfDesc?.value || '').trim(),
+            linkedStyleLibraryEntry: null,
+          },
+        });
+        _sfConfirmBtn.textContent = 'Import';
+        if (res && res.ok) {
+          _sfCloseImportModal();
+          await window.refreshSoundFontsView();
+        } else {
+          alert('Import failed: ' + (res && res.error || 'unknown error'));
+          _sfConfirmBtn.disabled = false;
+        }
+      };
+      document.getElementById('btn-sf-import-toolbar')?.addEventListener('click', _sfOpenImportModal);
+      document.getElementById('btn-sf-import-font')?.addEventListener('click', _sfOpenImportModal);
+      document.getElementById('sf-import-browse-btn')?.addEventListener('click', _sfImportBrowse);
+      document.getElementById('sf-import-cancel')?.addEventListener('click', _sfCloseImportModal);
+      _sfConfirmBtn?.addEventListener('click', _sfImportConfirm);
+      _sfNameInput?.addEventListener('input', _sfImportValidate);
+      // Search bar wiring for the browse grid
+      document.getElementById('sf-search')?.addEventListener('input', function() {
+        _sfSearchQuery = this.value;
+        _sfRenderGrid();
+      });
+
       await _refreshSoundFontsToggleLock();
       await window.refreshSoundFontsView();
 

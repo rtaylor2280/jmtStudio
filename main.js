@@ -645,6 +645,119 @@ ipcMain.handle('soundFonts:listFonts', () => {
       .map(e => e.name);
   } catch { return []; }
 });
+
+// List fonts with their metadata blob for card rendering.
+ipcMain.handle('soundFonts:listFontsWithMeta', () => {
+  try {
+    const root = _soundFontsRoot();
+    if (!fs.existsSync(root)) return [];
+    const entries = fs.readdirSync(root, { withFileTypes: true })
+      .filter(e => e.isDirectory())
+      .map(e => {
+        const name = e.name;
+        const metaPath = path.join(root, name, '_jmt_font_meta.json');
+        let meta = null;
+        try {
+          if (fs.existsSync(metaPath)) meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+        } catch {}
+        return { name, meta };
+      });
+    return entries;
+  } catch { return []; }
+});
+
+// Scan a candidate source folder. If it contains a `Proffie` subfolder alongside
+// optional `Xeno`, `CrystalFocus`, or other version siblings, we treat the
+// Proffie subfolder as the real source. Otherwise the picked folder is used
+// as-is. Returns the resolved source path, a flag indicating whether a
+// multi-version structure was detected, a recursive .wav count for validation,
+// and a suggested name (the basename of the parent — what a user would
+// recognize as the font's identity).
+ipcMain.handle('soundFonts:scanFolder', (_, folderPath) => {
+  try {
+    if (!folderPath || !fs.existsSync(folderPath)) {
+      return { ok: false, error: 'Folder does not exist' };
+    }
+    const baseName = path.basename(folderPath);
+    let resolvedPath = folderPath;
+    let detectedMultiVersion = false;
+    let suggestedName = baseName;
+    const children = fs.readdirSync(folderPath, { withFileTypes: true });
+    const proffieDir = children.find(e =>
+      e.isDirectory() && /^proffie$/i.test(e.name));
+    if (proffieDir) {
+      resolvedPath = path.join(folderPath, proffieDir.name);
+      detectedMultiVersion = true;
+      // Suggested name stays as the OUTER folder's basename; the user almost
+      // always wants the meaningful font name (e.g. "Vader") rather than
+      // "Proffie".
+      suggestedName = baseName;
+    } else if (/^proffie$/i.test(baseName)) {
+      // User drilled into the Proffie subfolder before picking; use the parent's
+      // basename for the suggested name.
+      suggestedName = path.basename(path.dirname(folderPath));
+    }
+    // Recursive .wav count (we don't care WHERE the .wavs are, only that there
+    // are any — vendor structure varies).
+    const countWavs = (dir) => {
+      let count = 0;
+      try {
+        for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+          const full = path.join(dir, e.name);
+          if (e.isDirectory()) count += countWavs(full);
+          else if (e.isFile() && /\.wav$/i.test(e.name)) count++;
+        }
+      } catch {}
+      return count;
+    };
+    const wavCount = countWavs(resolvedPath);
+    return {
+      ok: true,
+      sourcePath: resolvedPath,
+      detectedMultiVersion,
+      suggestedName,
+      wavCount,
+      hasContent: wavCount > 0,
+    };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
+// Copy `sourcePath` recursively into userData/soundFonts/<name>/, then write
+// the sibling metadata file. Name uniqueness is the caller's responsibility
+// (renderer validates against the live library list before invoking) but we
+// also refuse to overwrite an existing folder as a defense in depth.
+ipcMain.handle('soundFonts:importFont', (_, { sourcePath, name, metadata }) => {
+  try {
+    if (!sourcePath || !name) return { ok: false, error: 'Missing sourcePath or name' };
+    const root = _soundFontsRoot();
+    if (!fs.existsSync(root)) fs.mkdirSync(root, { recursive: true });
+    const dest = path.join(root, name);
+    if (fs.existsSync(dest)) return { ok: false, error: 'A font with that name already exists' };
+    // Native recursive copy. Node 16.7+ has fs.cpSync; we filter out any
+    // existing JMT metadata file from the source so a re-import of an
+    // already-imported font does not carry the prior identity.
+    fs.cpSync(sourcePath, dest, {
+      recursive: true,
+      filter: (src) => path.basename(src) !== '_jmt_font_meta.json',
+    });
+    const meta = {
+      schemaVersion: 1,
+      name,
+      author: (metadata && metadata.author) || '',
+      purchased: !!(metadata && metadata.purchased),
+      acquisitionDate: (metadata && metadata.acquisitionDate) || new Date().toISOString().slice(0, 10),
+      description: (metadata && metadata.description) || '',
+      linkedStyleLibraryEntry: (metadata && metadata.linkedStyleLibraryEntry) || null,
+      importedAt: new Date().toISOString(),
+    };
+    fs.writeFileSync(path.join(dest, '_jmt_font_meta.json'), JSON.stringify(meta, null, 2));
+    return { ok: true, name };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
 ipcMain.handle('app:getArduinoDataPath', () => {
   const os   = require('os');
   const base = app.isPackaged

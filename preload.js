@@ -169,9 +169,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   isSplashDismissed: () => ipcRenderer.invoke('app:isSplashDismissed'),
 
   // ── Sound Fonts Library ───────────────────────────────
-  soundFontsExists:    ()   => ipcRenderer.invoke('soundFonts:exists'),
-  createSoundFonts:    ()   => ipcRenderer.invoke('soundFonts:create'),
-  listSoundFonts:      ()   => ipcRenderer.invoke('soundFonts:listFonts'),
+  soundFontsExists:        ()                       => ipcRenderer.invoke('soundFonts:exists'),
+  createSoundFonts:        ()                       => ipcRenderer.invoke('soundFonts:create'),
+  listSoundFonts:          ()                       => ipcRenderer.invoke('soundFonts:listFonts'),
+  listSoundFontsWithMeta:  ()                       => ipcRenderer.invoke('soundFonts:listFontsWithMeta'),
+  scanSoundFontFolder:     (folderPath)             => ipcRenderer.invoke('soundFonts:scanFolder', folderPath),
+  importSoundFont:         (params)                 => ipcRenderer.invoke('soundFonts:importFont', params),
 
   readClipboard:   () => ipcRenderer.invoke('clipboard:read'),
 
