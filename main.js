@@ -720,13 +720,21 @@ ipcMain.handle('soundFonts:scanFolder', (_, folderPath) => {
       return count;
     };
     const wavCount = countWavs(resolvedPath);
+    // Alt folders (alt000, alt001, ...) at the root are another valid content
+    // marker. Some ProffieOS fonts ship with alt structures only and may not
+    // have any .wav files at the root level; the wavs are inside the alts.
+    // Treat their presence as a valid content signal regardless of wav count.
+    const altFolders = fs.readdirSync(resolvedPath, { withFileTypes: true })
+      .filter(e => e.isDirectory() && /^alt\d+$/i.test(e.name))
+      .map(e => e.name);
     return {
       ok: true,
       sourcePath: resolvedPath,
       detectedMultiVersion,
       suggestedName,
       wavCount,
-      hasContent: wavCount > 0,
+      altFolderCount: altFolders.length,
+      hasContent: wavCount > 0 || altFolders.length > 0,
     };
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };

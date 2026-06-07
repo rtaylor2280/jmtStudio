@@ -10337,14 +10337,22 @@ require(['vs/editor/editor.main'], function () {
           _sfImportSourcePath = null;
         } else if (!scan.hasContent) {
           if (_sfScanInfo) {
-            _sfScanInfo.textContent = 'No .wav files found in this folder. Pick a folder that contains sound font audio.';
+            _sfScanInfo.textContent = 'No sound font content found in this folder. Pick a folder that contains .wav files or alt folders.';
             _sfScanInfo.className = 'sf-import-scan-info error';
           }
         } else {
           if (_sfScanInfo) {
             const parts = [];
             if (scan.detectedMultiVersion) parts.push('Detected Proffie subfolder — importing from there.');
-            parts.push(`Found ${scan.wavCount} .wav file${scan.wavCount === 1 ? '' : 's'}.`);
+            const wavN = scan.wavCount || 0;
+            const altN = scan.altFolderCount || 0;
+            if (wavN > 0 && altN > 0) {
+              parts.push(`Found ${wavN} .wav file${wavN === 1 ? '' : 's'} across ${altN} alt folder${altN === 1 ? '' : 's'}.`);
+            } else if (wavN > 0) {
+              parts.push(`Found ${wavN} .wav file${wavN === 1 ? '' : 's'}.`);
+            } else if (altN > 0) {
+              parts.push(`Found ${altN} alt folder${altN === 1 ? '' : 's'}.`);
+            }
             _sfScanInfo.textContent = parts.join(' ');
             _sfScanInfo.className = 'sf-import-scan-info' + (scan.detectedMultiVersion ? ' detected' : '');
           }
