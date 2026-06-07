@@ -35,6 +35,8 @@ function addRecentFile(filePath) {
 
 // ── Window ─────────────────────────────────────────────
 let win;
+let _splashDismissed = false; // tracked so the renderer can defer
+                              // build-panel-open until splash is gone
 
 function showSplash(parentWin) {
   // Center on the primary display's work area, NOT on parentWin.getBounds().
@@ -64,8 +66,18 @@ function showSplash(parentWin) {
   splash.loadFile(path.join(__dirname, 'renderer', 'splash.html'));
   splash.setIgnoreMouseEvents(true);
 
+  // Single point of truth for "splash is done." Idempotent so any code path
+  // that ends the splash sequence can call it safely.
+  const markDismissed = () => {
+    if (_splashDismissed) return;
+    _splashDismissed = true;
+    if (parentWin && !parentWin.isDestroyed()) {
+      parentWin.webContents.send('app:splash-dismissed');
+    }
+  };
+
   setTimeout(() => {
-    if (splash.isDestroyed()) return;
+    if (splash.isDestroyed()) { markDismissed(); return; }
     // Fade out using native window opacity — 400ms over ~24 steps
     const duration = 400;
     const interval = 16;
@@ -73,11 +85,12 @@ function showSplash(parentWin) {
     let step = 0;
     const timer = setInterval(() => {
       step++;
-      if (splash.isDestroyed()) { clearInterval(timer); return; }
+      if (splash.isDestroyed()) { clearInterval(timer); markDismissed(); return; }
       splash.setOpacity(1 - step / steps);
       if (step >= steps) {
         clearInterval(timer);
         if (!splash.isDestroyed()) splash.destroy();
+        markDismissed();
       }
     }, interval);
   }, 1500);
@@ -593,6 +606,7 @@ ipcMain.handle('cache:getDataSize', () => {
 
 ipcMain.handle('app:getVersion',      () => app.getVersion());
 ipcMain.handle('app:isDevMode',       () => !app.isPackaged);
+ipcMain.handle('app:isSplashDismissed', () => _splashDismissed);
 ipcMain.handle('app:getArduinoDataPath', () => {
   const os   = require('os');
   const base = app.isPackaged

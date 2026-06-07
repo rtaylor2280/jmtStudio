@@ -33,6 +33,15 @@ let cacheCheckPending   = false;   // true while cache check is in flight
 let toolchainReady  = false;
 let isBusy          = false;   // true while compile/flash running
 let unsubs          = [];      // IPC listener cleanup functions
+// Splash-aware deferral for the toolchain-setup branch of onBuildStatus.
+// During first-launch toolchain install the IPC fires before the splash has
+// finished destroying, and opening the build log mid-paint produced a layout
+// glitch where the panel briefly grabbed the full window. We now defer that
+// single open until the splash-dismissed signal arrives; other openLog
+// callsites (compile fail, flash fail) run long after splash and never need
+// to wait.
+let _splashDismissed       = false;
+let _queuedOpenLogForSetup = false;
 let cachedPorts = [];
 let selectedUsb = 'cdc_webusb'; // default Serial + WebUSB
 let _userChosePort     = false;   // true after user manually picks a port
@@ -168,6 +177,25 @@ async function initBuildPanel() {
   unsubs.push(window.electronAPI.onBuildStatus(onBuildStatus));
   unsubs.push(window.electronAPI.onBuildDone(onBuildDone));
   unsubs.push(window.electronAPI.onPortsChanged(() => refreshPorts()));
+  // Splash-dismissed signal — release any queued openLog from a toolchain-setup
+  // event that fired before the splash finished. Also query the current state
+  // in case the signal fired before this listener was registered (race window
+  // on slow renderer startup).
+  unsubs.push(window.electronAPI.onSplashDismissed(() => {
+    _splashDismissed = true;
+    if (_queuedOpenLogForSetup) {
+      openLog();
+      _queuedOpenLogForSetup = false;
+    }
+  }));
+  window.electronAPI.isSplashDismissed().then(dismissed => {
+    if (!dismissed || _splashDismissed) return;
+    _splashDismissed = true;
+    if (_queuedOpenLogForSetup) {
+      openLog();
+      _queuedOpenLogForSetup = false;
+    }
+  });
 
   // ArgumentName enum is loaded lazily — base color swatches don't need it
   // (those come from the styles file), and the legacy hardcoded table covers
@@ -790,7 +818,8 @@ function onBuildLog({ line, isError }) {
 function onBuildStatus({ type, ok, needsProffieOS, message }) {
   if (type === 'toolchain-setup') {
     setStatus('toolchain', 'pending', 'Setting up build tools...');
-    openLog();
+    if (_splashDismissed) openLog();
+    else _queuedOpenLogForSetup = true;
     const notice = document.getElementById('bp-setup-notice');
     if (notice) notice.style.display = '';
     // Hide port/compile/flash during setup — the user has nothing to act on

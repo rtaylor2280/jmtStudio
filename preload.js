@@ -157,6 +157,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onAppClosing:    (cb) => ipcRenderer.on('app:closing', cb),
   doClose:         () => ipcRenderer.send('app:doClose'),
 
+  // Splash lifecycle — used by the build panel to defer auto-opening
+  // the log section until after the splash window has fully destroyed,
+  // so the first-paint layout race that briefly let the panel grab the
+  // full window during toolchain setup is avoided.
+  onSplashDismissed: (cb) => {
+    const handler = () => cb();
+    ipcRenderer.on('app:splash-dismissed', handler);
+    return () => ipcRenderer.removeListener('app:splash-dismissed', handler);
+  },
+  isSplashDismissed: () => ipcRenderer.invoke('app:isSplashDismissed'),
+
   readClipboard:   () => ipcRenderer.invoke('clipboard:read'),
 
 });
