@@ -10102,20 +10102,30 @@ require(['vs/editor/editor.main'], function () {
         // import affordance because there's no import or grid yet.)
         void fontCount;
       };
-      const _soundFontsEnabled = await window.electronAPI.getSetting('soundFontsTabEnabled', true);
+      const _soundFontsEnabledRaw = await window.electronAPI.getSetting('soundFontsTabEnabled', true);
+      // Coerce explicitly: getSetting can return null when prefs.json is missing/corrupt
+      // (Store.get's catch block returns null on read failure, and the handler treats null
+      // as a valid value rather than falling back to the default). Coerce to bool with
+      // an explicit default of true so a never-set or null-returned value defaults visible.
+      const _soundFontsEnabled = _soundFontsEnabledRaw === false ? false : true;
       _applySoundFontsTabVisible(_soundFontsEnabled);
       const _sfToggleEl = document.getElementById('setting-soundfonts-enabled');
-      if (_sfToggleEl) {
-        _sfToggleEl.checked = !!_soundFontsEnabled;
-        _sfToggleEl.addEventListener('change', async () => {
+      const _sfHandleToggle = async () => {
+        try {
           const { locked } = await _refreshSoundFontsToggleLock();
           if (locked && !_sfToggleEl.checked) {
-            _sfToggleEl.checked = true; // bounce back; rule says no disable while fonts exist
+            _sfToggleEl.checked = true;
             return;
           }
           await window.electronAPI.setSetting('soundFontsTabEnabled', _sfToggleEl.checked);
           _applySoundFontsTabVisible(_sfToggleEl.checked);
-        });
+        } catch (err) {
+          console.error('[soundFonts] toggle handler error:', err);
+        }
+      };
+      if (_sfToggleEl) {
+        _sfToggleEl.checked = _soundFontsEnabled;
+        _sfToggleEl.addEventListener('change', _sfHandleToggle);
       }
       document.getElementById('btn-sf-create-library')?.addEventListener('click', async () => {
         const res = await window.electronAPI.createSoundFonts();
