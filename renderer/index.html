@@ -2383,7 +2383,7 @@
       <div style="display:flex;justify-content:space-between;align-items:baseline;">
         <label>Board</label>
         <span id="v1-warning" style="display:none;color:#c8a020;font-size:0.67rem;cursor:default;letter-spacing:0.04em;"
-              title="JMT Studio has not been tested with Proffieboard V1 and may not work as expected. If you try it, please let us know how it goes. Your feedback helps! Contact: studio@jedimastertech.com">
+              title="JMT Studio has not been tested with Proffieboard V1 and may not work as expected. If you try it, please let us know how it goes. Your feedback helps! Contact: studio@jmtfoundry.com">
           ⚠ V1 untested
         </span>
       </div>
@@ -3073,16 +3073,16 @@
       </div>
 
       <div class="about-grid-label">Website</div>
-      <div class="about-grid-val"><a href="#" id="about-website-link">jedimastertech.com</a></div>
+      <div class="about-grid-val"><a href="#" id="about-website-link">jmtfoundry.com</a></div>
 
       <div class="about-grid-label">Support</div>
       <div class="about-grid-val">
         <div class="about-grid-sublabel">For bug reports, feature suggestions, and app questions:</div>
-        <a href="#" id="about-support-link">studio@jedimastertech.com</a>
+        <a href="#" id="about-support-link">studio@jmtfoundry.com</a>
       </div>
 
       <div class="about-grid-label">General Inquiries</div>
-      <div class="about-grid-val"><a href="#" id="about-info-link">info@jedimastertech.com</a></div>
+      <div class="about-grid-val"><a href="#" id="about-info-link">info@jmtfoundry.com</a></div>
 
       <div class="about-grid-label">Tip Jar</div>
       <div class="about-grid-val"><a href="#" id="about-kofi-link">ko-fi.com/jmt</a></div>
@@ -3588,7 +3588,7 @@ function injectMetadata(content) {
 
   const stripped = stripJmtLines(content);
   const lines = [
-    '// Configuration edited with JMT Studio (jedimastertech.com)',
+    '// Configuration edited with JMT Studio (jmtfoundry.com)',
   ];
   const usbVal = document.getElementById('bp-usb-select') ? document.getElementById('bp-usb-select').value : '';
   if (desc)    lines.push(`// @jmt:description ${desc}`);
@@ -5019,15 +5019,15 @@ document.getElementById('about-license-toggle').addEventListener('click', () => 
 });
 document.getElementById('about-website-link').addEventListener('click', (e) => {
   e.preventDefault();
-  if (window.electronAPI?.openExternal) window.electronAPI.openExternal('https://www.jedimastertech.com');
+  if (window.electronAPI?.openExternal) window.electronAPI.openExternal('https://jmtfoundry.com');
 });
 document.getElementById('about-support-link').addEventListener('click', (e) => {
   e.preventDefault();
-  if (window.electronAPI?.openExternal) window.electronAPI.openExternal('mailto:studio@jedimastertech.com');
+  if (window.electronAPI?.openExternal) window.electronAPI.openExternal('mailto:studio@jmtfoundry.com');
 });
 document.getElementById('about-info-link').addEventListener('click', (e) => {
   e.preventDefault();
-  if (window.electronAPI?.openExternal) window.electronAPI.openExternal('mailto:info@jedimastertech.com');
+  if (window.electronAPI?.openExternal) window.electronAPI.openExternal('mailto:info@jmtfoundry.com');
 });
 document.getElementById('about-kofi-link').addEventListener('click', (e) => {
   e.preventDefault();
@@ -5175,7 +5175,7 @@ document.getElementById('btn-download-update').addEventListener('click', async (
   if (!_updateInfo) return;
 
   if (_updateInfo.platform !== 'win32') {
-    window.electronAPI.openExternal('https://jedimastertech.com/jmtstudio/');
+    window.electronAPI.openExternal('https://jmtfoundry.com/jmtstudio/');
     return;
   }
 
@@ -5998,7 +5998,7 @@ function _buildStyleLibraryJmtHeader(createdDate) {
   const today = new Date().toISOString().slice(0, 10);
   const lines = [
     '// ============================================================',
-    '// Style Library  —  JMT Studio (jedimastertech.com)',
+    '// Style Library  —  JMT Studio (jmtfoundry.com)',
     `// @jmt:created     ${createdDate || today}`,
     `// @jmt:updated     ${today}`,
     '// ============================================================',

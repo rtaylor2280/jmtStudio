@@ -36,7 +36,7 @@ cat > /usr/share/metainfo/com.jmt.proffieos-editor.metainfo.xml << 'EOF'
     <p>ProffieOS Configuration Tool by JMT. Edit, compile, and flash lightsaber firmware configurations to Proffieboard hardware.</p>
   </description>
   <launchable type="desktop-id">jmt-studio.desktop</launchable>
-  <url type="homepage">https://jedimastertech.com</url>
+  <url type="homepage">https://jmtfoundry.com</url>
   <developer id="com.jmt">
     <name>JMT</name>
   </developer>

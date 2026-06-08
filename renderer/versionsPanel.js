@@ -190,7 +190,7 @@ function _vpRenderDetail(v) {
             ${v.jmtVersion ? '⚙ Check for Updates' : '⚙ Add JMT Features'}
           </button>
         </div>
-        <a href="#" id="vp-jmt-learn-more" title="https://www.jedimastertech.com/jmt-addons" style="font-size:0.74rem;color:#4a9edd;text-decoration:underline;">Learn more</a>
+        <a href="#" id="vp-jmt-learn-more" title="https://jmtfoundry.com/jmt-addons" style="font-size:0.74rem;color:#4a9edd;text-decoration:underline;">Learn more</a>
         ${window._jmtDevMode ? `
         <div id="vp-jmt-branch-toggle" style="display:flex;align-items:center;gap:6px;font-size:0.7rem;margin-top:2px;" title="Dev-only: switch JMT add-ons source between main and dev branches">
           <span style="color:var(--c-text-faint);">Source:</span>
@@ -303,7 +303,7 @@ function _vpRenderDetail(v) {
 
   document.getElementById('vp-jmt-learn-more')?.addEventListener('click', (e) => {
     e.preventDefault();
-    window.electronAPI?.openExternal?.('https://www.jedimastertech.com/jmt-addons');
+    window.electronAPI?.openExternal?.('https://jmtfoundry.com/jmt-addons');
   });
 
   // File tree — start inside ProffieOS/
