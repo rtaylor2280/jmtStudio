@@ -7,7 +7,7 @@
 <p align="center">
   ProffieOS config editor, compiler, and flasher for Proffieboard V3
   <br/>
-  Made by <a href="https://jedimastertech.com">Jedi Master Tech</a>
+  Made by <a href="https://jedimastertech.com">JMT</a>
 </p>
 
 <p align="center">

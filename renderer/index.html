@@ -2383,7 +2383,7 @@
       <div style="display:flex;justify-content:space-between;align-items:baseline;">
         <label>Board</label>
         <span id="v1-warning" style="display:none;color:#c8a020;font-size:0.67rem;cursor:default;letter-spacing:0.04em;"
-              title="JMT Studio has not been tested with Proffieboard V1 and may not work as expected. If you try it, please let us know how it goes. Your feedback helps! Contact: jmtstudio@jedimastertech.com">
+              title="JMT Studio has not been tested with Proffieboard V1 and may not work as expected. If you try it, please let us know how it goes. Your feedback helps! Contact: studio@jedimastertech.com">
           ⚠ V1 untested
         </span>
       </div>
@@ -2992,7 +2992,7 @@
       <img src="../assets/logo.png" alt="JMT Logo" />
       <div>
         <div class="about-app-name">JMT Studio</div>
-        <div class="about-byline">by Jedi Master Tech</div>
+        <div class="about-byline">by JMT</div>
       </div>
     </div>
 
@@ -3078,14 +3078,14 @@
       <div class="about-grid-label">Support</div>
       <div class="about-grid-val">
         <div class="about-grid-sublabel">For bug reports, feature suggestions, and app questions:</div>
-        <a href="#" id="about-support-link">jmtstudio@jedimastertech.com</a>
+        <a href="#" id="about-support-link">studio@jedimastertech.com</a>
       </div>
 
       <div class="about-grid-label">General Inquiries</div>
       <div class="about-grid-val"><a href="#" id="about-info-link">info@jedimastertech.com</a></div>
 
       <div class="about-grid-label">Tip Jar</div>
-      <div class="about-grid-val"><a href="#" id="about-kofi-link">ko-fi.com/jedimastertech</a></div>
+      <div class="about-grid-val"><a href="#" id="about-kofi-link">ko-fi.com/jmt</a></div>
     </div>
 
     <div id="update-available-panel" style="display:none;margin-bottom:16px;padding:10px 12px;background:rgba(74,158,221,0.08);border:1px solid rgba(74,158,221,0.25);border-radius:6px">
@@ -3107,7 +3107,7 @@
 
     <div class="about-footer">
       <span id="about-restriction-text">This tool is free and fully transparent, but not open for redistribution or modification of the application itself. This ensures consistency and allows me to properly support and troubleshoot it.<br><br>
-      &copy; 2026 Jedi Master Tech. All rights reserved.<br>
+      &copy; 2026 JMT. All rights reserved.<br>
       JMT Studio may be used for personal and commercial purposes, including managing, configuring, and building lightsabers using ProffieOS.<br>
       Unauthorized copying, modification, distribution, or resale is prohibited. Application code and assets may not be extracted or reused in other projects.<br>
       This tool does not include ProffieOS. Users must supply their own copy.<br>
@@ -4800,15 +4800,15 @@ You may not:
 - use any portion of the application source code in your own projects or products
 - remove or alter any copyright, branding, or attribution
 
-This software is provided "as is", without warranty of any kind, express or implied, including but not limited to the warranties of merchantability and fitness for a particular purpose. In no event shall Jedi Master Tech be liable for any claim, damages, or other liability arising from the use of this software.
+This software is provided "as is", without warranty of any kind, express or implied, including but not limited to the warranties of merchantability and fitness for a particular purpose. In no event shall JMT be liable for any claim, damages, or other liability arising from the use of this software.
 
-JMT Studio is a product of Jedi Master Tech and is not affiliated with or endorsed by ProffieOS or its contributors.
+JMT Studio is a JMT product and is not affiliated with or endorsed by ProffieOS or its contributors.
 
 This tool does not include ProffieOS. Users must supply their own copy.
 
 Generated configurations remain fully accessible and editable by the user.
 
-Copyright © 2026 Jedi Master Tech. All rights reserved.`;
+Copyright © 2026 JMT. All rights reserved.`;
 
 function fmtBytes(b) {
   if (b < 1024) return `${b} B`;
@@ -5023,7 +5023,7 @@ document.getElementById('about-website-link').addEventListener('click', (e) => {
 });
 document.getElementById('about-support-link').addEventListener('click', (e) => {
   e.preventDefault();
-  if (window.electronAPI?.openExternal) window.electronAPI.openExternal('mailto:jmtstudio@jedimastertech.com');
+  if (window.electronAPI?.openExternal) window.electronAPI.openExternal('mailto:studio@jedimastertech.com');
 });
 document.getElementById('about-info-link').addEventListener('click', (e) => {
   e.preventDefault();
@@ -5031,7 +5031,7 @@ document.getElementById('about-info-link').addEventListener('click', (e) => {
 });
 document.getElementById('about-kofi-link').addEventListener('click', (e) => {
   e.preventDefault();
-  if (window.electronAPI?.openExternal) window.electronAPI.openExternal('https://ko-fi.com/jedimastertech');
+  if (window.electronAPI?.openExternal) window.electronAPI.openExternal('https://ko-fi.com/jmt');
 });
 
 // ── Self-update ────────────────────────────────────────
