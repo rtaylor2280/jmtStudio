@@ -14,14 +14,14 @@ You may not:
 
 This software is provided "as is", without warranty of any kind, express or
 implied, including but not limited to the warranties of merchantability and
-fitness for a particular purpose. In no event shall Jedi Master Tech be liable
+fitness for a particular purpose. In no event shall JMT be liable
 for any claim, damages, or other liability arising from the use of this software.
 
-JMT Studio is a product of Jedi Master Tech and is not affiliated with or
+JMT Studio is a JMT product and is not affiliated with or
 endorsed by ProffieOS or its contributors.
 
 This tool does not include ProffieOS. Users must supply their own copy.
 
 Generated configurations remain fully accessible and editable by the user.
 
-Copyright © 2026 Jedi Master Tech. All rights reserved.
+Copyright © 2026 JMT. All rights reserved.

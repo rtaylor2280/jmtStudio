@@ -1,9 +1,9 @@
 {
   "name": "jmt-studio",
   "version": "1.8.0",
-  "description": "ProffieOS Configuration Tool by Jedi Master Tech",
-  "author": "Jedi Master Tech <jmtstudio@jedimastertech.com>",
-  "homepage": "https://jedimastertech.com",
+  "description": "ProffieOS Configuration Tool by JMT",
+  "author": "JMT <studio@jmtfoundry.com>",
+  "homepage": "https://jmtfoundry.com",
   "license": "Proprietary",
   "main": "main.js",
   "scripts": {

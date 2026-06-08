@@ -33,12 +33,12 @@ cat > /usr/share/metainfo/com.jmt.proffieos-editor.metainfo.xml << 'EOF'
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>LicenseRef-proprietary</project_license>
   <description>
-    <p>ProffieOS Configuration Tool by Jedi Master Tech. Edit, compile, and flash lightsaber firmware configurations to Proffieboard hardware.</p>
+    <p>ProffieOS Configuration Tool by JMT. Edit, compile, and flash lightsaber firmware configurations to Proffieboard hardware.</p>
   </description>
   <launchable type="desktop-id">jmt-studio.desktop</launchable>
-  <url type="homepage">https://jedimastertech.com</url>
+  <url type="homepage">https://jmtfoundry.com</url>
   <developer id="com.jmt">
-    <name>Jedi Master Tech</name>
+    <name>JMT</name>
   </developer>
   <releases>
     <release version="1.7.0" date="2026-05-31"/>
