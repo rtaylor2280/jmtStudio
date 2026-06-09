@@ -1186,8 +1186,10 @@
   #btn-settings:hover { color: var(--c-text-sub); border-color: var(--c-border-heavy); }
 
   /* ── About modal ── */
-  #modal-about .modal { width: 560px; max-width: 95vw; }
-  #modal-about .about-header { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; padding-bottom: 4px; }
+  #modal-about .modal { width: 560px; max-width: 95vw; max-height: 95vh; overflow-y: auto; padding-top: 0; }
+  #modal-about .modal::-webkit-scrollbar { width: 6px; }
+  #modal-about .modal::-webkit-scrollbar-thumb { background: var(--c-border-strong); border-radius: 3px; }
+  #modal-about .about-header { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; padding: 24px 0 4px; position: sticky; top: 0; background: var(--c-bg-card); z-index: 1; }
   #modal-about .about-header img { width: 52px; height: 52px; object-fit: contain; flex-shrink: 0; }
   #modal-about .about-app-name { font-size: 1.1rem; color: var(--c-text-bright); font-weight: 700; letter-spacing: 0.01em; }
   #modal-about .about-byline { font-size: 0.78rem; color: var(--c-text-dim); margin-top: 2px; }
@@ -1232,6 +1234,8 @@
   #modal-about .about-license-toggle:hover { text-decoration: underline; }
   #modal-about .about-license-body { display: none; font-size: 0.73rem; color: var(--c-text-soft); line-height: 1.6; margin-top: 8px; white-space: pre-wrap; background: var(--c-bg-code); border: 1px solid var(--c-border-mid); border-radius: 4px; padding: 12px 14px; max-height: 180px; overflow-y: auto; }
   #modal-about .about-license-body.open { display: block; }
+  #modal-about .about-license-body::-webkit-scrollbar { width: 6px; }
+  #modal-about .about-license-body::-webkit-scrollbar-thumb { background: var(--c-border-strong); border-radius: 3px; }
 
   /* ── Favorites ── */
   .fav-wrap { position: relative; }
