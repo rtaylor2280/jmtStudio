@@ -38,6 +38,12 @@ const ICNS_OUT  = path.join(ROOT, 'assets', 'icon.icns');
 const LINUX_DIR = path.join(ROOT, 'build', 'icons');
 const LINUX_SIZES = [16, 32, 48, 64, 128, 256, 512];
 
+// JMT Blue (#025192) — brand background color for the macOS app bundle icon.
+// When logo-mac.png has transparency, it gets composited over this square so
+// the Mac icon shows the squircle treatment Apple HIG expects instead of a
+// floating logo over the system's default gray.
+const JMT_BLUE = { r: 2, g: 81, b: 146, alpha: 1 };
+
 async function main() {
   if (!fs.existsSync(SRC)) {
     console.error(`Source not found: ${SRC}`);
@@ -74,16 +80,35 @@ async function main() {
   fs.writeFileSync(ICO_OUT, ico);
   console.log(`  assets/icon.ico  (${ico.length} bytes)`);
 
-  // macOS ICNS — use Mac-styled source if available (square + JMT Blue
-  // background + circle-less logo) so the bundle icon matches Apple convention;
-  // otherwise fall back to the round-on-transparent master.
+  // macOS ICNS — use Mac-styled source if available (logo without circle
+  // frame, designed to sit on a colored square) so the bundle icon matches
+  // Apple HIG convention; otherwise fall back to the round-on-transparent
+  // master. When the Mac source has transparency, composite it over a
+  // JMT Blue square so the resulting bundle icon shows the brand background
+  // instead of macOS's default gray.
   let icnsSource = srcBuffer;
   if (fs.existsSync(MAC_SRC)) {
-    icnsSource = fs.readFileSync(MAC_SRC);
-    const macMeta = await sharp(icnsSource).metadata();
+    const macBuffer = fs.readFileSync(MAC_SRC);
+    const macMeta   = await sharp(macBuffer).metadata();
     console.log(`Mac source: assets/logo-mac.png  (${macMeta.width}x${macMeta.height}, ${macMeta.format})`);
     if (macMeta.width !== macMeta.height) {
       console.warn(`Warning: Mac source is not square — Mac icon will be distorted.`);
+    }
+    if (macMeta.hasAlpha) {
+      console.log(`  compositing Mac logo onto JMT Blue (#025192) square`);
+      icnsSource = await sharp({
+        create: {
+          width:    macMeta.width,
+          height:   macMeta.height,
+          channels: 4,
+          background: JMT_BLUE,
+        },
+      })
+        .composite([{ input: macBuffer }])
+        .png()
+        .toBuffer();
+    } else {
+      icnsSource = macBuffer;
     }
   } else {
     console.log(`Mac source: assets/logo.png  (no logo-mac.png found, using round master)`);
