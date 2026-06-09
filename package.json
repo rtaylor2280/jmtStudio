@@ -11,6 +11,7 @@
     "build": "electron-builder --win --x64",
     "build:mac": "electron-builder --mac",
     "build:linux": "electron-builder --linux --x64",
+    "build:icons": "node scripts/build-icons.js",
     "postinstall": "node scripts/copy-monaco.js"
   },
   "build": {
@@ -44,7 +45,10 @@
       "notarize": false
     },
     "linux": {
-      "target": ["AppImage", "deb"],
+      "target": [
+        "AppImage",
+        "deb"
+      ],
       "icon": "build/icons/512x512.png",
       "category": "Utility",
       "executableName": "jmt-studio",
@@ -81,7 +85,9 @@
     "electron": "^29.0.0",
     "electron-builder": "^24.13.3",
     "monaco-editor": "0.44.0",
-    "png-to-ico": "^3.0.1"
+    "png-to-ico": "^3.0.1",
+    "png2icons": "^2.0.1",
+    "sharp": "^0.34.5"
   },
   "dependencies": {
     "serialport": "^13.0.0"
