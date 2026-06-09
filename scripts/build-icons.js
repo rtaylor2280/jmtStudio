@@ -1,10 +1,18 @@
 // Generates platform icon containers and the Linux icon set from
-// assets/logo.png. Overwrites existing icon files in place.
+// assets/logo.png (and optionally assets/logo-mac.png for Mac styling).
+// Overwrites existing icon files in place.
 //
 // Usage: npm run build:icons
 //
 // Inputs:
-//   assets/logo.png            (the master raster — ideally 1024x1024 PNG)
+//   assets/logo.png            (the master raster — ideally 1024x1024 PNG;
+//                               used for Windows ICO, Linux PNG set, and
+//                               macOS ICNS unless a Mac-specific source exists)
+//   assets/logo-mac.png        (OPTIONAL — Mac-styled source: square PNG
+//                               with JMT Blue background, logo centered
+//                               without the circle frame, padded per Apple
+//                               convention. If present, this is used for
+//                               icon.icns; if absent, falls back to logo.png)
 //
 // Outputs:
 //   assets/icon.ico            (Windows multi-resolution ICO)
@@ -24,6 +32,7 @@ const png2icons = require('png2icons');
 
 const ROOT      = path.resolve(__dirname, '..');
 const SRC       = path.join(ROOT, 'assets', 'logo.png');
+const MAC_SRC   = path.join(ROOT, 'assets', 'logo-mac.png');
 const ICO_OUT   = path.join(ROOT, 'assets', 'icon.ico');
 const ICNS_OUT  = path.join(ROOT, 'assets', 'icon.icns');
 const LINUX_DIR = path.join(ROOT, 'build', 'icons');
@@ -65,8 +74,21 @@ async function main() {
   fs.writeFileSync(ICO_OUT, ico);
   console.log(`  assets/icon.ico  (${ico.length} bytes)`);
 
-  // macOS ICNS
-  const icns = png2icons.createICNS(srcBuffer, png2icons.BICUBIC, 0);
+  // macOS ICNS — use Mac-styled source if available (square + JMT Blue
+  // background + circle-less logo) so the bundle icon matches Apple convention;
+  // otherwise fall back to the round-on-transparent master.
+  let icnsSource = srcBuffer;
+  if (fs.existsSync(MAC_SRC)) {
+    icnsSource = fs.readFileSync(MAC_SRC);
+    const macMeta = await sharp(icnsSource).metadata();
+    console.log(`Mac source: assets/logo-mac.png  (${macMeta.width}x${macMeta.height}, ${macMeta.format})`);
+    if (macMeta.width !== macMeta.height) {
+      console.warn(`Warning: Mac source is not square — Mac icon will be distorted.`);
+    }
+  } else {
+    console.log(`Mac source: assets/logo.png  (no logo-mac.png found, using round master)`);
+  }
+  const icns = png2icons.createICNS(icnsSource, png2icons.BICUBIC, 0);
   if (!icns) {
     console.error('Failed to create ICNS');
     process.exit(1);
