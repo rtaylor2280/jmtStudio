@@ -229,7 +229,7 @@ async function initBuildPanel() {
     e.preventDefault();
     const subject = encodeURIComponent('JMT Studio — Proffieboard V1 Flash Feedback');
     const body    = encodeURIComponent('Hi,\n\nI just flashed a Proffieboard V1 using JMT Studio. Here\'s what happened:\n\n');
-    window.electronAPI?.openExternal(`mailto:jmtstudio@jedimastertech.com?subject=${subject}&body=${body}`);
+    window.electronAPI?.openExternal(`mailto:studio@jmtfoundry.com?subject=${subject}&body=${body}`);
   });
   document.getElementById('bm-board-flash').addEventListener('click', () => {
     const port = document.getElementById('bm-board-port-select').value;
@@ -377,7 +377,7 @@ async function initBuildPanel() {
     e.preventDefault();
     const subject = encodeURIComponent('JMT Studio — DFU Setup Feedback');
     const body    = encodeURIComponent('Hi,\n\nHere\'s my experience with the DFU/Bootloader mode setup in JMT Studio:\n\n');
-    window.electronAPI.openExternal(`mailto:jmtstudio@jedimastertech.com?subject=${subject}&body=${body}`);
+    window.electronAPI.openExternal(`mailto:studio@jmtfoundry.com?subject=${subject}&body=${body}`);
   });
   document.getElementById('bm-abort').addEventListener('click', async () => {
     if (isDfuMode && !isBusy) return; // DFU waiting: cancel handled by startDfuWaitModal's own handler

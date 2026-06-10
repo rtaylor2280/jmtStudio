@@ -1186,8 +1186,10 @@
   #btn-settings:hover { color: var(--c-text-sub); border-color: var(--c-border-heavy); }
 
   /* ── About modal ── */
-  #modal-about .modal { width: 560px; max-width: 95vw; }
-  #modal-about .about-header { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; padding-bottom: 4px; }
+  #modal-about .modal { width: 560px; max-width: 95vw; max-height: 95vh; overflow-y: auto; padding-top: 0; }
+  #modal-about .modal::-webkit-scrollbar { width: 6px; }
+  #modal-about .modal::-webkit-scrollbar-thumb { background: var(--c-border-strong); border-radius: 3px; }
+  #modal-about .about-header { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; padding: 24px 0 4px; position: sticky; top: 0; background: var(--c-bg-card); z-index: 1; }
   #modal-about .about-header img { width: 52px; height: 52px; object-fit: contain; flex-shrink: 0; }
   #modal-about .about-app-name { font-size: 1.1rem; color: var(--c-text-bright); font-weight: 700; letter-spacing: 0.01em; }
   #modal-about .about-byline { font-size: 0.78rem; color: var(--c-text-dim); margin-top: 2px; }
@@ -1232,6 +1234,8 @@
   #modal-about .about-license-toggle:hover { text-decoration: underline; }
   #modal-about .about-license-body { display: none; font-size: 0.73rem; color: var(--c-text-soft); line-height: 1.6; margin-top: 8px; white-space: pre-wrap; background: var(--c-bg-code); border: 1px solid var(--c-border-mid); border-radius: 4px; padding: 12px 14px; max-height: 180px; overflow-y: auto; }
   #modal-about .about-license-body.open { display: block; }
+  #modal-about .about-license-body::-webkit-scrollbar { width: 6px; }
+  #modal-about .about-license-body::-webkit-scrollbar-thumb { background: var(--c-border-strong); border-radius: 3px; }
 
   /* ── Favorites ── */
   .fav-wrap { position: relative; }
@@ -2383,7 +2387,7 @@
       <div style="display:flex;justify-content:space-between;align-items:baseline;">
         <label>Board</label>
         <span id="v1-warning" style="display:none;color:#c8a020;font-size:0.67rem;cursor:default;letter-spacing:0.04em;"
-              title="JMT Studio has not been tested with Proffieboard V1 and may not work as expected. If you try it, please let us know how it goes. Your feedback helps! Contact: jmtstudio@jedimastertech.com">
+              title="JMT Studio has not been tested with Proffieboard V1 and may not work as expected. If you try it, please let us know how it goes. Your feedback helps! Contact: studio@jmtfoundry.com">
           ⚠ V1 untested
         </span>
       </div>
@@ -2992,7 +2996,7 @@
       <img src="../assets/logo.png" alt="JMT Logo" />
       <div>
         <div class="about-app-name">JMT Studio</div>
-        <div class="about-byline">by Jedi Master Tech</div>
+        <div class="about-byline">by JMT</div>
       </div>
     </div>
 
@@ -3073,19 +3077,19 @@
       </div>
 
       <div class="about-grid-label">Website</div>
-      <div class="about-grid-val"><a href="#" id="about-website-link">jedimastertech.com</a></div>
+      <div class="about-grid-val"><a href="#" id="about-website-link">jmtfoundry.com</a></div>
 
       <div class="about-grid-label">Support</div>
       <div class="about-grid-val">
         <div class="about-grid-sublabel">For bug reports, feature suggestions, and app questions:</div>
-        <a href="#" id="about-support-link">jmtstudio@jedimastertech.com</a>
+        <a href="#" id="about-support-link">studio@jmtfoundry.com</a>
       </div>
 
       <div class="about-grid-label">General Inquiries</div>
-      <div class="about-grid-val"><a href="#" id="about-info-link">info@jedimastertech.com</a></div>
+      <div class="about-grid-val"><a href="#" id="about-info-link">info@jmtfoundry.com</a></div>
 
       <div class="about-grid-label">Tip Jar</div>
-      <div class="about-grid-val"><a href="#" id="about-kofi-link">ko-fi.com/jedimastertech</a></div>
+      <div class="about-grid-val"><a href="#" id="about-kofi-link">ko-fi.com/jmt</a></div>
     </div>
 
     <div id="update-available-panel" style="display:none;margin-bottom:16px;padding:10px 12px;background:rgba(74,158,221,0.08);border:1px solid rgba(74,158,221,0.25);border-radius:6px">
@@ -3107,7 +3111,7 @@
 
     <div class="about-footer">
       <span id="about-restriction-text">This tool is free and fully transparent, but not open for redistribution or modification of the application itself. This ensures consistency and allows me to properly support and troubleshoot it.<br><br>
-      &copy; 2026 Jedi Master Tech. All rights reserved.<br>
+      &copy; 2026 JMT. All rights reserved.<br>
       JMT Studio may be used for personal and commercial purposes, including managing, configuring, and building lightsabers using ProffieOS.<br>
       Unauthorized copying, modification, distribution, or resale is prohibited. Application code and assets may not be extracted or reused in other projects.<br>
       This tool does not include ProffieOS. Users must supply their own copy.<br>
@@ -3588,7 +3592,7 @@ function injectMetadata(content) {
 
   const stripped = stripJmtLines(content);
   const lines = [
-    '// Configuration edited with JMT Studio (jedimastertech.com)',
+    '// Configuration edited with JMT Studio (jmtfoundry.com)',
   ];
   const usbVal = document.getElementById('bp-usb-select') ? document.getElementById('bp-usb-select').value : '';
   if (desc)    lines.push(`// @jmt:description ${desc}`);
@@ -4800,15 +4804,15 @@ You may not:
 - use any portion of the application source code in your own projects or products
 - remove or alter any copyright, branding, or attribution
 
-This software is provided "as is", without warranty of any kind, express or implied, including but not limited to the warranties of merchantability and fitness for a particular purpose. In no event shall Jedi Master Tech be liable for any claim, damages, or other liability arising from the use of this software.
+This software is provided "as is", without warranty of any kind, express or implied, including but not limited to the warranties of merchantability and fitness for a particular purpose. In no event shall JMT be liable for any claim, damages, or other liability arising from the use of this software.
 
-JMT Studio is a product of Jedi Master Tech and is not affiliated with or endorsed by ProffieOS or its contributors.
+JMT Studio is a JMT product and is not affiliated with or endorsed by ProffieOS or its contributors.
 
 This tool does not include ProffieOS. Users must supply their own copy.
 
 Generated configurations remain fully accessible and editable by the user.
 
-Copyright © 2026 Jedi Master Tech. All rights reserved.`;
+Copyright © 2026 JMT. All rights reserved.`;
 
 function fmtBytes(b) {
   if (b < 1024) return `${b} B`;
@@ -5019,19 +5023,19 @@ document.getElementById('about-license-toggle').addEventListener('click', () => 
 });
 document.getElementById('about-website-link').addEventListener('click', (e) => {
   e.preventDefault();
-  if (window.electronAPI?.openExternal) window.electronAPI.openExternal('https://www.jedimastertech.com');
+  if (window.electronAPI?.openExternal) window.electronAPI.openExternal('https://jmtfoundry.com');
 });
 document.getElementById('about-support-link').addEventListener('click', (e) => {
   e.preventDefault();
-  if (window.electronAPI?.openExternal) window.electronAPI.openExternal('mailto:jmtstudio@jedimastertech.com');
+  if (window.electronAPI?.openExternal) window.electronAPI.openExternal('mailto:studio@jmtfoundry.com');
 });
 document.getElementById('about-info-link').addEventListener('click', (e) => {
   e.preventDefault();
-  if (window.electronAPI?.openExternal) window.electronAPI.openExternal('mailto:info@jedimastertech.com');
+  if (window.electronAPI?.openExternal) window.electronAPI.openExternal('mailto:info@jmtfoundry.com');
 });
 document.getElementById('about-kofi-link').addEventListener('click', (e) => {
   e.preventDefault();
-  if (window.electronAPI?.openExternal) window.electronAPI.openExternal('https://ko-fi.com/jedimastertech');
+  if (window.electronAPI?.openExternal) window.electronAPI.openExternal('https://ko-fi.com/jmt');
 });
 
 // ── Self-update ────────────────────────────────────────
@@ -5175,7 +5179,7 @@ document.getElementById('btn-download-update').addEventListener('click', async (
   if (!_updateInfo) return;
 
   if (_updateInfo.platform !== 'win32') {
-    window.electronAPI.openExternal('https://jedimastertech.com/jmtstudio/');
+    window.electronAPI.openExternal('https://jmtfoundry.com/jmtstudio/');
     return;
   }
 
@@ -5998,7 +6002,7 @@ function _buildStyleLibraryJmtHeader(createdDate) {
   const today = new Date().toISOString().slice(0, 10);
   const lines = [
     '// ============================================================',
-    '// Style Library  —  JMT Studio (jedimastertech.com)',
+    '// Style Library  —  JMT Studio (jmtfoundry.com)',
     `// @jmt:created     ${createdDate || today}`,
     `// @jmt:updated     ${today}`,
     '// ============================================================',
@@ -8402,8 +8406,12 @@ function _parseClipboardStyle(text) {
     result.notes = noteLines.join('\n').trim();
   }
 
-  // Extract expression — try using first, then StylePtr, then raw
-  const usingM = raw.match(/\busing\s+([\w+]+)\s*=\s*([\s\S]+?)\s*;/);
+  // Extract expression — try using first, then StylePtr, then raw.
+  // Identifier permits trailing Fett263 footnote markers (*, +, ^, #) between the
+  // name and `=`. Without this, `using NAME* = ...;` fails to match and falls
+  // through to the StylePtr fallback, which then pulls the bogus `NAME*` token
+  // out of the trailing "Add to preset as StylePtr<NAME*>()" comment.
+  const usingM = raw.match(/\busing\s+(\w+)[^\w\s=;]*\s*=\s*([\s\S]+?)\s*;/);
   if (usingM) {
     if (!result.name) result.name = usingM[1];
     result.expr = usingM[2].replace(/\s+/g, ' ').trim();
@@ -11303,10 +11311,14 @@ require(['vs/editor/editor.main'], function () {
         let _hardcodedInfo = null; // { matchStr, matchIndex } when color is hardcoded in expr
 
         if (slot.colorArg) {
-          // Expression-aware: find the first RgbArg by scanning the expression so
-          // IntArg slots before the color are skipped correctly.
+          // Expression-aware: prefer BASE_COLOR_ARG as the primary color, falling
+          // back to the first RgbArg when the style doesn't define BASE. Without
+          // the name-preference, styles whose first RgbArg in text-order is e.g.
+          // SWING_COLOR_ARG display the swing default in the slot card instead of
+          // the user's actual primary blade color.
           const _resolved = styleArgResolver.resolveStyleArgs(slot.expr || '', slot.colorArg);
-          const _rgbEntry = _resolved.find(a => a.kind === 'RgbArg');
+          const _rgbEntry = _resolved.find(a => a.kind === 'RgbArg' && a.name === 'BASE_COLOR_ARG')
+                         || _resolved.find(a => a.kind === 'RgbArg');
           if (_rgbEntry && _rgbEntry.values.length >= 3) {
             _rgb16 = _rgbEntry.values.slice(0, 3).map(v => v || 0);
           }
@@ -11317,10 +11329,12 @@ require(['vs/editor/editor.main'], function () {
           }
         }
         if (!_rgb16 && window.proffieArgs) {
-          // Registry default for named helper styles
+          // Registry default for named helper styles. Same BASE-preferred lookup
+          // as the parens-aware branch above.
           const _baseName = slot.expr ? (slot.expr.match(/^(\w+)/) || [])[1] : null;
           const _regArgs  = _baseName ? _getHelperRegistryArgs(_baseName) : [];
-          const _cr = _regArgs.find(a => a.kind === 'RgbArg');
+          const _cr = _regArgs.find(a => a.kind === 'RgbArg' && a.name === 'BASE_COLOR_ARG')
+                   || _regArgs.find(a => a.kind === 'RgbArg');
           if (_cr) _rgb16 = window.proffieArgs.resolveColorDefault(_cr.defaultExpr || '');
         }
         if (!_rgb16 && window.proffieArgs) {
@@ -11337,9 +11351,10 @@ require(['vs/editor/editor.main'], function () {
           }
         }
         if (!_rgb16 && window.proffieArgs) {
-          // Inline expressions: scan for RgbArg directly and use its default
+          // Inline expressions: prefer BASE_COLOR_ARG default, fall back to first RgbArg.
           const _inlineArgs = styleArgResolver.findArgs(slot.expr || '');
-          const _firstRgb   = _inlineArgs.find(a => a.kind === 'RgbArg');
+          const _firstRgb   = _inlineArgs.find(a => a.kind === 'RgbArg' && a.name === 'BASE_COLOR_ARG')
+                           || _inlineArgs.find(a => a.kind === 'RgbArg');
           if (_firstRgb) _rgb16 = window.proffieArgs.resolveColorDefault(_firstRgb.defaultExpr || '');
         }
         if (!_rgb16 && window.proffieArgs) {
@@ -11623,7 +11638,8 @@ require(['vs/editor/editor.main'], function () {
       let rgb16 = null;
       if (slot.colorArg) {
         const _resolved = styleArgResolver.resolveStyleArgs(slot.expr || '', slot.colorArg);
-        const _rgbEntry = _resolved.find(a => a.kind === 'RgbArg');
+        const _rgbEntry = _resolved.find(a => a.kind === 'RgbArg' && a.name === 'BASE_COLOR_ARG')
+                       || _resolved.find(a => a.kind === 'RgbArg');
         if (_rgbEntry && _rgbEntry.values.length >= 3) {
           rgb16 = _rgbEntry.values.slice(0, 3).map(v => v || 0);
         }
@@ -11635,7 +11651,8 @@ require(['vs/editor/editor.main'], function () {
       if (!rgb16 && window.proffieArgs) {
         const _baseName = slot.expr ? (slot.expr.match(/^(\w+)/) || [])[1] : null;
         const _regArgs  = _baseName ? _getHelperRegistryArgs(_baseName) : [];
-        const _cr = _regArgs.find(a => a.kind === 'RgbArg');
+        const _cr = _regArgs.find(a => a.kind === 'RgbArg' && a.name === 'BASE_COLOR_ARG')
+                 || _regArgs.find(a => a.kind === 'RgbArg');
         if (_cr) rgb16 = window.proffieArgs.resolveColorDefault(_cr.defaultExpr || '');
       }
       if (!rgb16 && window.proffieArgs) {
@@ -11649,7 +11666,8 @@ require(['vs/editor/editor.main'], function () {
       }
       if (!rgb16 && window.proffieArgs) {
         const _inlineArgs = styleArgResolver.findArgs(slot.expr || '');
-        const _firstRgb   = _inlineArgs.find(a => a.kind === 'RgbArg');
+        const _firstRgb   = _inlineArgs.find(a => a.kind === 'RgbArg' && a.name === 'BASE_COLOR_ARG')
+                         || _inlineArgs.find(a => a.kind === 'RgbArg');
         if (_firstRgb) rgb16 = window.proffieArgs.resolveColorDefault(_firstRgb.defaultExpr || '');
       }
       if (!rgb16 && window.proffieArgs) {

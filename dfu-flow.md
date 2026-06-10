@@ -184,7 +184,7 @@ Click Download DFU Tool, or use a manual option below.
 
 **Footer note (small text):**
 > DFU/Bootloader mode setup varies by system. We've done our best to simplify this process — [share your feedback](#) to help us improve it.
-> *(clicking "share your feedback" opens a pre-addressed email to jmtstudio@jedimastertech.com)*
+> *(clicking "share your feedback" opens a pre-addressed email to studio@jmtfoundry.com)*
 
 **Buttons visible:**
 | Button | Action |

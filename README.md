@@ -7,7 +7,7 @@
 <p align="center">
   ProffieOS config editor, compiler, and flasher for Proffieboard V3
   <br/>
-  Made by <a href="https://jedimastertech.com">Jedi Master Tech</a>
+  Made by <a href="https://jmtfoundry.com">JMT</a>
 </p>
 
 <p align="center">
@@ -29,7 +29,7 @@ JMT Studio replaces Arduino IDE for ProffieOS lightsaber configuration. One `.h`
 
 ## Download
 
-Get the latest release from the [JMT website](https://jedimastertech.com).
+Get the latest release from the [JMT website](https://jmtfoundry.com).
 
 ## License
 
