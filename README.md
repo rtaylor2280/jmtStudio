@@ -20,12 +20,15 @@
 
 ## What it does
 
-JMT Studio replaces Arduino IDE for ProffieOS lightsaber configuration. One `.h` config file per saber, no folder juggling, no IDE setup.
+JMT Studio is a free, cross-platform ProffieOS workflow app, built as an integrated replacement for the Arduino IDE workflow when configuring Proffieboard-based lightsabers. One `.h` config file per saber: no folder juggling, no separate IDE, no proprietary format.
 
-- Edit ProffieOS config files with a full-featured code editor
-- Compile directly against ProffieOS source
-- Flash Proffieboard V3 via DFU, no drivers needed on Windows
-- Windows, Linux, and macOS supported
+- IDE-style code editor for `.h` config files, with direct in-app browsing of the ProffieOS source
+- Visual preset editor with drag-and-drop reorder and multi-bank `Preset[]` organization
+- Visual style editor with color pickers, inline arg editing, and full `StylePtr<>` syntax preserved
+- Built-in compile, flash, and serial monitor for Proffieboard V3. No Arduino IDE required.
+- Guided DFU setup on Windows, automatic toolchain fixes on Linux and Apple Silicon
+- Run multiple ProffieOS versions side-by-side. Any saber on any version.
+- Signed Windows installer (Microsoft Trusted Signing), notarized macOS DMGs, Linux `.deb` + AppImage
 
 ## Download
 
