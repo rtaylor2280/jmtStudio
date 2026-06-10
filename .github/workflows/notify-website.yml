@@ -1,23 +1,33 @@
 name: Notify website on release
 
-# Trigger the jedimastertech-site Cloudflare Pages project to rebuild whenever a
-# stable JMT Studio release is published, so the download page shows the new
-# version automatically. The website fetches the latest version from GitHub at
-# build time; this workflow just kicks off the build.
+# Trigger the JMT Foundry (jmtfoundry.com) Cloudflare Pages project to rebuild
+# whenever a stable JMT Studio release is published, so the download page shows
+# the new version automatically. The website fetches the latest version from
+# GitHub at build time; this workflow just kicks off the build.
 #
 # Fires on `released` (NOT `published`), so pre-releases do not trigger a
 # website rebuild. The website's `/releases/latest` fetch also skips
 # pre-releases, so the two are aligned.
 #
+# Manual fire: Actions tab → "Notify website on release" → Run workflow.
+# Useful when the auto-trigger didn't fire (e.g. GitHub hiccup) or for testing
+# after rotating the deploy hook URL.
+#
 # Setup (one-time):
-#   1. In Cloudflare Pages → jedimastertech-site → Settings → Builds & deployments
+#   1. In Cloudflare Pages → your jmtfoundry project → Settings → Builds & deployments
 #      → Deploy hooks, create a hook targeting the `main` branch. Copy the URL.
 #   2. In this repo → Settings → Secrets and variables → Actions → New repository
 #      secret. Name: CLOUDFLARE_DEPLOY_HOOK_URL. Value: the URL from step 1.
+#
+# When the Cloudflare project is renamed or recreated, the deploy hook URL
+# changes — DNS redirects don't help; this is an internal Cloudflare API
+# endpoint, not a public URL. Update the GitHub secret with the new hook URL
+# after any project-level change.
 
 on:
   release:
     types: [released]
+  workflow_dispatch:
 
 jobs:
   notify-website:
