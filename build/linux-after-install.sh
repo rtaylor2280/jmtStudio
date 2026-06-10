@@ -41,7 +41,7 @@ cat > /usr/share/metainfo/com.jmt.proffieos-editor.metainfo.xml << 'EOF'
     <name>JMT</name>
   </developer>
   <releases>
-    <release version="1.7.0" date="2026-05-31"/>
+    <release version="1.7.1" date="2026-06-10"/>
   </releases>
   <content_rating type="oars-1.1"/>
 </component>
