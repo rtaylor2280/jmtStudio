@@ -90,6 +90,7 @@
     "sharp": "^0.34.5"
   },
   "dependencies": {
-    "serialport": "^13.0.0"
+    "serialport": "^13.0.0",
+    "yauzl": "^3.4.0"
   }
 }

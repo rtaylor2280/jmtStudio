@@ -191,6 +191,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('sources:importProgress', handler);
   },
 
+  // Format-dispatch reads (slice 2)
+  browseSource:          (params)     => ipcRenderer.invoke('sources:browse', params),
+  readSourceFile:        (params)     => ipcRenderer.invoke('sources:readFile', params),
+  extractFromSource:     (params)     => ipcRenderer.invoke('sources:extractTo', params),
+  exportSourceToDownloads: (params)   => ipcRenderer.invoke('sources:exportToDownloads', params),
+  onSourceExtractProgress: (cb) => {
+    const handler = (_, data) => cb(data);
+    ipcRenderer.on('sources:extractProgress', handler);
+    return () => ipcRenderer.removeListener('sources:extractProgress', handler);
+  },
+
   readClipboard:   () => ipcRenderer.invoke('clipboard:read'),
 
 });

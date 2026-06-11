@@ -18,6 +18,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const yauzl = require('yauzl');
 
 function sourcesRoot(userData) {
   return path.join(userData, 'soundFonts', 'sources');
@@ -305,6 +306,289 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
   }
 }
 
+// ── Format dispatch (Phase 1, slice 2) ──────────────────
+// A "Source" object abstracts read access to a stored source so higher layers
+// (vendor detection, candidate detection, browse UI, library entry creation)
+// don't care whether it's zip-backed or folder-backed. Operations:
+//   browse(subPath)          -> array of entries at that path within the source
+//   readFile(filePath)       -> Buffer of the file's contents
+//   extractTo(subPath, dest) -> copies the subtree at subPath into dest
+//   exportToDownloads(dest)  -> copies the original archive to dest
+//
+// All paths inside the source are forward-slash separated, root is ''.
+
+function _openZip(zipPath) {
+  return new Promise((resolve, reject) => {
+    yauzl.open(zipPath, { lazyEntries: true, autoClose: false }, (err, zipfile) => {
+      if (err) reject(err);
+      else resolve(zipfile);
+    });
+  });
+}
+
+function _readAllZipEntries(zipfile) {
+  return new Promise((resolve, reject) => {
+    const entries = [];
+    zipfile.on('entry', entry => {
+      entries.push(entry);
+      zipfile.readEntry();
+    });
+    zipfile.on('end', () => resolve(entries));
+    zipfile.on('error', reject);
+    zipfile.readEntry();
+  });
+}
+
+function _readZipEntryToBuffer(zipfile, entry) {
+  return new Promise((resolve, reject) => {
+    zipfile.openReadStream(entry, (err, stream) => {
+      if (err) { reject(err); return; }
+      const chunks = [];
+      stream.on('data', c => chunks.push(c));
+      stream.on('end', () => resolve(Buffer.concat(chunks)));
+      stream.on('error', reject);
+    });
+  });
+}
+
+function _writeZipEntryToFile(zipfile, entry, destPath) {
+  return new Promise((resolve, reject) => {
+    zipfile.openReadStream(entry, (err, stream) => {
+      if (err) { reject(err); return; }
+      const writeStream = fs.createWriteStream(destPath);
+      stream.on('error', reject);
+      writeStream.on('error', reject);
+      writeStream.on('finish', resolve);
+      stream.pipe(writeStream);
+    });
+  });
+}
+
+// Build a one-level browse listing from a flat list of zip entries (or from
+// pre-flattened folder entries). Each input entry is { fileName, size, isDir }
+// where fileName is the full forward-slash path inside the source.
+function _listAtPath(allEntries, basePath) {
+  const prefix = basePath ? basePath.replace(/\/+$/, '') + '/' : '';
+  const seenDirs = new Set();
+  const items = [];
+  for (const e of allEntries) {
+    if (!e.fileName.startsWith(prefix)) continue;
+    const rest = e.fileName.slice(prefix.length);
+    if (!rest) continue;
+    const slash = rest.indexOf('/');
+    if (slash === -1) {
+      if (!e.isDir) {
+        items.push({ name: rest, isDirectory: false, size: e.size, path: prefix + rest });
+      } else if (!seenDirs.has(rest)) {
+        // Trailing-slash entry at this level
+        seenDirs.add(rest);
+        items.push({ name: rest, isDirectory: true, path: prefix + rest });
+      }
+    } else {
+      const dirName = rest.slice(0, slash);
+      if (!seenDirs.has(dirName)) {
+        seenDirs.add(dirName);
+        items.push({ name: dirName, isDirectory: true, path: prefix + dirName });
+      }
+    }
+  }
+  items.sort((a, b) => {
+    if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+  return items;
+}
+
+// Return a destination path inside targetDir for `filename` that does not
+// collide with an existing file or folder. If `filename` is free, returns it
+// directly. Otherwise appends " (N)" before the extension and increments N
+// until a free name is found. Used by exportToDownloads so re-exports never
+// overwrite the user's existing copy of a font.
+function _uniqueDestPath(targetDir, filename) {
+  const direct = path.join(targetDir, filename);
+  if (!fs.existsSync(direct)) return direct;
+  const ext = path.extname(filename);
+  const stem = path.basename(filename, ext);
+  let n = 1;
+  while (true) {
+    const candidate = path.join(targetDir, `${stem} (${n})${ext}`);
+    if (!fs.existsSync(candidate)) return candidate;
+    n++;
+  }
+}
+
+function _normalizeSubPath(p) {
+  if (!p) return '';
+  return String(p).replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+}
+
+function _createZipSource({ uuid, uuidDir, meta }) {
+  const zipPath = path.join(uuidDir, 'source.zip');
+
+  return {
+    uuid,
+    meta,
+    format: 'zip',
+
+    async browse(subPath) {
+      const norm = _normalizeSubPath(subPath);
+      const zipfile = await _openZip(zipPath);
+      try {
+        const entries = await _readAllZipEntries(zipfile);
+        const mapped = entries.map(e => ({
+          fileName: e.fileName,
+          size: e.uncompressedSize,
+          isDir: /\/$/.test(e.fileName),
+        }));
+        return _listAtPath(mapped, norm);
+      } finally {
+        zipfile.close();
+      }
+    },
+
+    async readFile(filePath) {
+      const norm = _normalizeSubPath(filePath);
+      if (!norm) throw new Error('readFile requires a path');
+      const zipfile = await _openZip(zipPath);
+      try {
+        const entries = await _readAllZipEntries(zipfile);
+        const match = entries.find(e => e.fileName === norm);
+        if (!match) throw new Error(`Not found in source: ${norm}`);
+        return await _readZipEntryToBuffer(zipfile, match);
+      } finally {
+        zipfile.close();
+      }
+    },
+
+    async extractTo(subPath, destDir, onProgress) {
+      const norm = _normalizeSubPath(subPath);
+      const prefix = norm ? norm + '/' : '';
+      const zipfile = await _openZip(zipPath);
+      try {
+        const entries = await _readAllZipEntries(zipfile);
+        const matching = entries.filter(e => {
+          if (norm && !e.fileName.startsWith(prefix) && e.fileName !== norm && e.fileName !== prefix) return false;
+          return true;
+        });
+        if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+        let fileCount = 0;
+        let totalBytes = 0;
+        for (const entry of matching) {
+          const rel = norm ? entry.fileName.slice(prefix.length) : entry.fileName;
+          if (!rel) continue;
+          const destPath = path.join(destDir, rel.replace(/\//g, path.sep));
+          if (/\/$/.test(entry.fileName)) {
+            if (!fs.existsSync(destPath)) fs.mkdirSync(destPath, { recursive: true });
+            continue;
+          }
+          const parent = path.dirname(destPath);
+          if (!fs.existsSync(parent)) fs.mkdirSync(parent, { recursive: true });
+          await _writeZipEntryToFile(zipfile, entry, destPath);
+          fileCount++;
+          totalBytes += entry.uncompressedSize || 0;
+          if (onProgress) onProgress({ fileCount, totalBytes, currentFile: rel });
+        }
+        return { fileCount, totalBytes };
+      } finally {
+        zipfile.close();
+      }
+    },
+
+    async exportToDownloads(destDir) {
+      if (!destDir) throw new Error('exportToDownloads requires destDir');
+      if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+      const destName = meta.originalName && /\.zip$/i.test(meta.originalName)
+        ? meta.originalName
+        : `${(meta.originalName || uuid).replace(/\.zip$/i, '')}.zip`;
+      const destPath = _uniqueDestPath(destDir, destName);
+      await fs.promises.copyFile(zipPath, destPath);
+      return { destPath };
+    },
+  };
+}
+
+function _createFolderSource({ uuid, uuidDir, meta }) {
+  const folderRoot = path.join(uuidDir, 'source');
+
+  return {
+    uuid,
+    meta,
+    format: 'folder',
+
+    async browse(subPath) {
+      const norm = _normalizeSubPath(subPath);
+      const target = norm ? path.join(folderRoot, norm) : folderRoot;
+      if (!fs.existsSync(target)) return [];
+      const entries = fs.readdirSync(target, { withFileTypes: true });
+      const items = entries.map(e => {
+        const abs = path.join(target, e.name);
+        const isDir = e.isDirectory();
+        const rel = norm ? `${norm}/${e.name}` : e.name;
+        let size;
+        if (e.isFile()) {
+          try { size = fs.statSync(abs).size; } catch {}
+        }
+        return { name: e.name, isDirectory: isDir, size, path: rel };
+      });
+      items.sort((a, b) => {
+        if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+      return items;
+    },
+
+    async readFile(filePath) {
+      const norm = _normalizeSubPath(filePath);
+      if (!norm) throw new Error('readFile requires a path');
+      const abs = path.join(folderRoot, norm);
+      if (!fs.existsSync(abs)) throw new Error(`Not found in source: ${norm}`);
+      return await fs.promises.readFile(abs);
+    },
+
+    async extractTo(subPath, destDir, onProgress) {
+      const norm = _normalizeSubPath(subPath);
+      const srcDir = norm ? path.join(folderRoot, norm) : folderRoot;
+      if (!fs.existsSync(srcDir)) throw new Error(`Not found in source: ${norm}`);
+      if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+      let fileCount = 0;
+      let totalBytes = 0;
+      const stat = fs.statSync(srcDir);
+      if (stat.isFile()) {
+        const destPath = path.join(destDir, path.basename(srcDir));
+        await fs.promises.copyFile(srcDir, destPath);
+        fileCount = 1;
+        totalBytes = stat.size;
+        if (onProgress) onProgress({ fileCount, totalBytes, currentFile: path.basename(srcDir) });
+        return { fileCount, totalBytes };
+      }
+      await copyFolderRecursive(srcDir, destDir, (srcFile) => {
+        fileCount++;
+        try { totalBytes += fs.statSync(srcFile).size; } catch {}
+        if (onProgress) onProgress({ fileCount, totalBytes, currentFile: path.relative(srcDir, srcFile) });
+      });
+      return { fileCount, totalBytes };
+    },
+
+    async exportToDownloads(destDir) {
+      if (!destDir) throw new Error('exportToDownloads requires destDir');
+      if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+      const destPath = _uniqueDestPath(destDir, meta.originalName || uuid);
+      await copyFolderRecursive(folderRoot, destPath, null);
+      return { destPath };
+    },
+  };
+}
+
+function openSource(userData, uuid) {
+  const uuidDir = path.join(sourcesRoot(userData), uuid);
+  const meta = readSourceMeta(uuidDir);
+  if (!meta) return null;
+  const ctx = { uuid, uuidDir, meta };
+  if (meta.format === 'zip') return _createZipSource(ctx);
+  if (meta.format === 'folder') return _createFolderSource(ctx);
+  throw new Error(`Unknown source format: ${meta.format}`);
+}
+
 module.exports = {
   sourcesRoot,
   ensureSourcesRoot,
@@ -313,4 +597,5 @@ module.exports = {
   listSources,
   findByHash,
   importSource,
+  openSource,
 };

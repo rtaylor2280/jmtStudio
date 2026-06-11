@@ -850,6 +850,57 @@ ipcMain.handle('sources:existsByHash', (_, hash) => {
   }
 });
 
+ipcMain.handle('sources:browse', async (_, { uuid, path: subPath } = {}) => {
+  try {
+    const source = soundFontSources.openSource(app.getPath('userData'), uuid);
+    if (!source) return { ok: false, error: `Source not found: ${uuid}` };
+    const entries = await source.browse(subPath || '');
+    return { ok: true, entries };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
+ipcMain.handle('sources:readFile', async (_, { uuid, path: filePath } = {}) => {
+  try {
+    const source = soundFontSources.openSource(app.getPath('userData'), uuid);
+    if (!source) return { ok: false, error: `Source not found: ${uuid}` };
+    const buf = await source.readFile(filePath);
+    return { ok: true, data: buf };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
+ipcMain.handle('sources:extractTo', async (event, { uuid, path: subPath, destDir } = {}) => {
+  const send = (payload) => {
+    try { event.sender.send('sources:extractProgress', { uuid, ...payload }); } catch {}
+  };
+  try {
+    const source = soundFontSources.openSource(app.getPath('userData'), uuid);
+    if (!source) return { ok: false, error: `Source not found: ${uuid}` };
+    const result = await source.extractTo(subPath || '', destDir, send);
+    return { ok: true, ...result };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
+ipcMain.handle('sources:exportToDownloads', async (_, { uuid, destDir } = {}) => {
+  try {
+    const source = soundFontSources.openSource(app.getPath('userData'), uuid);
+    if (!source) return { ok: false, error: `Source not found: ${uuid}` };
+    // Use Electron's resolved downloads path so relocated Known Folders on
+    // Windows (e.g. D:\Downloads) are respected; falls through to system
+    // defaults on Mac/Linux.
+    const target = destDir || app.getPath('downloads');
+    const result = await source.exportToDownloads(target);
+    return { ok: true, ...result };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
 ipcMain.handle('sources:import', async (event, { sourcePath, originalName, metadata } = {}) => {
   const send = (payload) => {
     try { event.sender.send('sources:importProgress', payload); } catch {}
