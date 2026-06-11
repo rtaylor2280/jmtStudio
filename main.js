@@ -8,6 +8,7 @@ const proffie     = require('./proffieos');
 const cacheManager = require('./cacheManager');
 const soundFontSources = require('./soundFontSources');
 const soundFontVendors = require('./soundFontVendors');
+const soundFontCandidates = require('./soundFontCandidates');
 
 // ── Separate userData for dev vs prod ──────────────────
 if (!app.isPackaged) {
@@ -893,6 +894,17 @@ ipcMain.handle('sources:detectVendor', async (_, { uuid } = {}) => {
     if (!source) return { ok: false, error: `Source not found: ${uuid}` };
     const detection = await soundFontVendors.detectVendor(source);
     return { ok: true, ...detection };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
+ipcMain.handle('sources:detectCandidates', async (_, { uuid } = {}) => {
+  try {
+    const source = soundFontSources.openSource(app.getPath('userData'), uuid);
+    if (!source) return { ok: false, error: `Source not found: ${uuid}` };
+    const result = await soundFontCandidates.detectCandidates(source);
+    return { ok: true, ...result };
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };
   }

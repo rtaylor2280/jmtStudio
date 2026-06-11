@@ -197,6 +197,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   extractFromSource:     (params)     => ipcRenderer.invoke('sources:extractTo', params),
   exportSourceToDownloads: (params)   => ipcRenderer.invoke('sources:exportToDownloads', params),
   detectSourceVendor:    (params)     => ipcRenderer.invoke('sources:detectVendor', params),
+  detectSourceCandidates: (params)    => ipcRenderer.invoke('sources:detectCandidates', params),
   onSourceExtractProgress: (cb) => {
     const handler = (_, data) => cb(data);
     ipcRenderer.on('sources:extractProgress', handler);

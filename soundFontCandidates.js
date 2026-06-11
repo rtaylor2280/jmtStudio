@@ -1,0 +1,282 @@
+// Sound Fonts — candidate detection (Phase 1, slice 4).
+//
+// A "candidate" is something inside a source that could become a library
+// entry: a Proffie-shaped font, picked out of whatever vendor structure
+// wraps it. One source can produce many candidates (Father has V1 and V2,
+// Power_Of_Many_Bundle has nine character fonts), or just one (HE-MAN ships
+// PROFFIE/XENO V3 board flavors that are the same font).
+//
+// Detection walks the source's entry tree and applies four cases:
+//   1. Multi-board flavors: siblings named Cfx/Proffie/Verso/etc. (folders)
+//      or Asteria.zip/Proffie.zip/etc. (Greyscale inner zips). One candidate,
+//      pointed at the Proffie variant.
+//   2. Multi-version siblings: distinct Proffie-shaped folders at the same
+//      level. Each is its own candidate.
+//   3. Bundle of inner zips: root contains multiple .zip files whose stems
+//      are NOT board indicators. Each inner zip is a deferred candidate
+//      (library-entry creation in Phase 2 will need nested-zip extraction).
+//   4. Single Proffie font: the dir itself satisfies the Proffie validation
+//      shape. One candidate.
+//
+// Wrapper folders (a single outer folder that contains the real content) are
+// transparent: the walker descends through them before classifying.
+
+// ── Board name detection ────────────────────────────────
+//
+// Each board has multiple naming variants observed across vendors. The
+// matcher returns a board key when the name matches any pattern, otherwise
+// null. Matching is case-insensitive and tolerates surrounding text so
+// "Dark Ani - Proffie", "PROFFIE", "proffie", and "1.1-Origin/Proffie" all
+// register as the Proffie board.
+
+const BOARD_PATTERNS = [
+  { key: 'proffie',       rx: /(^|[\s_\-/])proffie([\s_\-/]|$)/i },
+  { key: 'cfx',           rx: /(^|[\s_\-/])cfx(\b|[\s_\-/]|$)/i },
+  { key: 'ghv3',          rx: /(^|[\s_\-/])gh\s?v\s?3([\s_\-/]|$)/i },
+  { key: 'cfx-ghv3',      rx: /(^|[\s_\-/])cfx[\s_\-]?gh\s?v\s?3([\s_\-/]|$)/i },
+  { key: 'xeno',          rx: /(^|[\s_\-/])xeno(pixel)?(\s?v?3)?([\s_\-/]|$)/i },
+  { key: 'verso',         rx: /(^|[\s_\-/])verso[_]?([\s_\-/]|$)/i },
+  { key: 'asteria',       rx: /(^|[\s_\-/])asteria([\s_\-/]|$)/i },
+  { key: 'goldenharvest', rx: /(^|[\s_\-/])golden[\s_\-]?harvest([\s_\-/]|$)/i },
+];
+
+function identifyBoard(name) {
+  for (const { key, rx } of BOARD_PATTERNS) {
+    if (rx.test(name)) return key;
+  }
+  return null;
+}
+
+function isProffieBoardName(name) {
+  return BOARD_PATTERNS[0].rx.test(name); // proffie entry
+}
+
+// ── Proffie font shape detection ────────────────────────
+
+// Standard Proffie effect subfolder names. tracks/quote/quotes are excluded
+// here on purpose: they are auxiliary content (menu music, movie quotes)
+// commonly bundled alongside a font but never on their own. A folder
+// containing only tracks/ or quote/ is NOT a Proffie font.
+const EFFECT_FOLDER_NAMES = new Set([
+  'boot', 'hum', 'swingh', 'swingl', 'clsh', 'blst', 'lock', 'force', 'in',
+  'out', 'font', 'lb', 'bgnlb', 'endlb', 'bgnlock', 'endlock', 'melt',
+  'bgnmelt', 'endmelt', 'drag', 'bgndrag', 'enddrag', 'swng', 'spin', 'stab',
+  'preon', 'pwroff', 'pstoff',
+]);
+
+// Effect-name prefix for flat-layout Proffie fonts (hum1.wav, hum.wav,
+// boot.wav, font.wav etc). Limited to the three reliable "core" effects so
+// a bonus folder full of unrelated .wav files doesn't get mis-detected.
+const CORE_EFFECT_FILE_PATTERN = /^(boot|hum|font)\d*\.wav$/i;
+
+// A folder counts as a Proffie font when ANY of:
+//   - it contains at least one standard effect subfolder, or
+//   - it contains at least one alt### subfolder, or
+//   - it contains at least one core-effect-named .wav at root (flat layout).
+// The presence of arbitrary .wav files alone is not enough; we need a Proffie
+// naming signal to avoid mistaking a "bonus music" folder for a font.
+function looksLikeProffieFont(childFolders, childFiles) {
+  for (const f of childFolders) {
+    const lower = f.name.toLowerCase();
+    if (EFFECT_FOLDER_NAMES.has(lower)) return true;
+    if (/^alt\d{3}$/i.test(f.name)) return true;
+  }
+  for (const f of childFiles) {
+    if (CORE_EFFECT_FILE_PATTERN.test(f.name)) return true;
+  }
+  return false;
+}
+
+// ── Entry tree helpers ──────────────────────────────────
+
+// Group source.listAll() output into a map of parentDir -> array of children
+// with { name, isDir, fileName, size }. Synthesizes ancestor directory
+// entries when the zip only enumerates files (most do); without this, the
+// walker has no folders to descend into.
+function groupByParent(entries) {
+  const map = new Map();
+  const ensure = (parent, name, isDir, size) => {
+    if (!map.has(parent)) map.set(parent, []);
+    const arr = map.get(parent);
+    const existing = arr.find(x => x.name === name);
+    if (existing) {
+      // Promote a synthesized dir entry to a real one if we later see it
+      // explicitly. Keep largest known size.
+      if (isDir) existing.isDir = true;
+      if (size && size > (existing.size || 0)) existing.size = size;
+      return;
+    }
+    const fileName = parent ? `${parent}/${name}` : name;
+    arr.push({ name, isDir, fileName, size: size || 0 });
+  };
+
+  for (const e of entries) {
+    const isTrailingSlash = e.isDir && /\/$/.test(e.fileName);
+    const stripped = isTrailingSlash ? e.fileName.replace(/\/$/, '') : e.fileName;
+    if (!stripped) continue;
+    const parts = stripped.split('/').filter(Boolean);
+    if (parts.length === 0) continue;
+    // Synthesize directory entries for every ancestor along the path.
+    for (let i = 0; i < parts.length - 1; i++) {
+      const ancestorParent = parts.slice(0, i).join('/');
+      ensure(ancestorParent, parts[i], true, 0);
+    }
+    // Add the leaf entry with the real isDir/size.
+    const leafParent = parts.slice(0, -1).join('/');
+    const leafName = parts[parts.length - 1];
+    ensure(leafParent, leafName, e.isDir, e.size);
+  }
+  return map;
+}
+
+// Recursive count of .wav files under a given dir.
+function countWavsUnder(byParent, dir) {
+  let total = 0;
+  const stack = [dir];
+  while (stack.length) {
+    const d = stack.pop();
+    const children = byParent.get(d) || [];
+    for (const c of children) {
+      if (c.isDir) {
+        stack.push(c.fileName);
+      } else if (/\.wav$/i.test(c.name)) {
+        total++;
+      }
+    }
+  }
+  return total;
+}
+
+// ── Multi-board sibling detection ───────────────────────
+
+// Given the folder children at a dir, decide whether they constitute the
+// multi-board flavors of a single font. Returns { proffieChild, otherFlavors,
+// matchType } when they do, or null when they don't.
+//
+// Rules:
+//   - At least two children are recognized board names.
+//   - At least one of those children is the Proffie board.
+//   - Folder-form siblings (e.g. Cfx/Proffie/Verso/) and zip-form siblings
+//     (e.g. Asteria.zip/Proffie.zip) are both supported. Mixed-form is also
+//     accepted as long as the Proffie sibling exists in some form.
+function detectMultiBoardSiblings(childFolders, childFiles) {
+  const boardFolderHits = [];
+  for (const f of childFolders) {
+    const board = identifyBoard(f.name);
+    if (board) boardFolderHits.push({ ...f, board });
+  }
+  const boardZipHits = [];
+  for (const f of childFiles) {
+    if (!/\.zip$/i.test(f.name)) continue;
+    const stem = f.name.replace(/\.zip$/i, '');
+    const board = identifyBoard(stem);
+    if (board) boardZipHits.push({ ...f, board });
+  }
+  const allHits = [...boardFolderHits, ...boardZipHits];
+  if (allHits.length < 2) return null;
+  const proffie = allHits.find(h => h.board === 'proffie');
+  if (!proffie) return null;
+  const others = allHits.filter(h => h !== proffie).map(h => h.name);
+  return {
+    proffieChild: proffie,
+    otherFlavors: others,
+    matchType: proffie.isDir ? 'folder-siblings' : 'inner-zip-siblings',
+  };
+}
+
+// ── Bundle-of-inner-zips detection ──────────────────────
+
+// True when the children at this dir look like a multi-font bundle (multiple
+// inner zips whose stems are NOT board indicators, e.g. Power_Of_Many_Bundle
+// with Sol.zip/Yord.zip/Osha.zip). The Greyscale inner-zip case is excluded
+// because those stems ARE board indicators (handled by multi-board).
+function detectBundleOfZips(childFiles) {
+  const zips = childFiles.filter(f => /\.zip$/i.test(f.name));
+  if (zips.length < 2) return null;
+  const nonBoardZips = zips.filter(z => !identifyBoard(z.name.replace(/\.zip$/i, '')));
+  if (nonBoardZips.length < 2) return null;
+  return nonBoardZips;
+}
+
+// ── Main walker ─────────────────────────────────────────
+
+function walkForCandidates(byParent, currentDir, candidates, fallbackName) {
+  const children = byParent.get(currentDir) || [];
+  const childFolders = children.filter(c => c.isDir);
+  const childFiles = children.filter(c => !c.isDir);
+
+  // CASE A: this dir IS a Proffie font.
+  if (looksLikeProffieFont(childFolders, childFiles)) {
+    const name = currentDir ? currentDir.split('/').pop() : fallbackName;
+    candidates.push({
+      name,
+      path: currentDir,
+      wavCount: countWavsUnder(byParent, currentDir),
+      multiBoard: false,
+      otherFlavors: [],
+      nested: false,
+    });
+    return;
+  }
+
+  // CASE B: multi-board siblings (folders or inner zips). One candidate.
+  const multiBoard = detectMultiBoardSiblings(childFolders, childFiles);
+  if (multiBoard) {
+    const name = currentDir ? currentDir.split('/').pop() : fallbackName;
+    const proffiePath = multiBoard.proffieChild.fileName;
+    const isInnerZip = multiBoard.matchType === 'inner-zip-siblings';
+    candidates.push({
+      name,
+      path: proffiePath,
+      wavCount: isInnerZip ? null : countWavsUnder(byParent, proffiePath),
+      multiBoard: true,
+      otherFlavors: multiBoard.otherFlavors,
+      nested: isInnerZip,
+    });
+    return;
+  }
+
+  // CASE C: bundle of non-board inner zips. Each is its own candidate.
+  const bundleZips = detectBundleOfZips(childFiles);
+  if (bundleZips) {
+    for (const z of bundleZips) {
+      candidates.push({
+        name: z.name.replace(/\.zip$/i, ''),
+        path: z.fileName,
+        wavCount: null,
+        multiBoard: false,
+        otherFlavors: [],
+        nested: true,
+      });
+    }
+    return;
+  }
+
+  // CASE D: descend. Each child folder may be its own candidate or another
+  // wrapper layer.
+  if (childFolders.length === 0) return;
+  for (const folder of childFolders) {
+    walkForCandidates(byParent, folder.fileName, candidates, folder.name);
+  }
+}
+
+async function detectCandidates(source) {
+  if (!source || typeof source.listAll !== 'function') {
+    return { candidates: [] };
+  }
+  const entries = await source.listAll();
+  const byParent = groupByParent(entries);
+  const candidates = [];
+  const sourceFallbackName = (source.meta && source.meta.originalName)
+    ? source.meta.originalName.replace(/\.zip$/i, '')
+    : 'source';
+  walkForCandidates(byParent, '', candidates, sourceFallbackName);
+  return { candidates };
+}
+
+module.exports = {
+  detectCandidates,
+  // exported for testing / introspection
+  identifyBoard,
+  looksLikeProffieFont,
+};
