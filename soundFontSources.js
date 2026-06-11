@@ -18,7 +18,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const yauzl = require('yauzl');
+const StreamZip = require('node-stream-zip');
 
 function sourcesRoot(userData) {
   return path.join(userData, 'soundFonts', 'sources');
@@ -317,50 +317,48 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
 //
 // All paths inside the source are forward-slash separated, root is ''.
 
+// Open a zip for read. skipEntryNameValidation lets us walk zips that
+// contain a literal "/" root entry or other shapes node-stream-zip considers
+// absolute/malicious by default (several vendor zips do, e.g. JayDaloRian).
+// We re-add zip-slip protection at extractTo time by validating that each
+// destination path stays inside destDir.
 function _openZip(zipPath) {
-  return new Promise((resolve, reject) => {
-    yauzl.open(zipPath, { lazyEntries: true, autoClose: false }, (err, zipfile) => {
-      if (err) reject(err);
-      else resolve(zipfile);
-    });
-  });
+  return new StreamZip.async({ file: zipPath, skipEntryNameValidation: true });
 }
 
-function _readAllZipEntries(zipfile) {
-  return new Promise((resolve, reject) => {
-    const entries = [];
-    zipfile.on('entry', entry => {
-      entries.push(entry);
-      zipfile.readEntry();
+// Normalize node-stream-zip's entries object into our internal shape: an
+// array of { fileName, size, isDir }, filtering out the bare "/" root entry
+// and any entry with an empty name.
+async function _readAllZipEntries(zip) {
+  const map = await zip.entries();
+  const out = [];
+  for (const key of Object.keys(map)) {
+    const e = map[key];
+    if (!e.name || e.name === '/') continue;
+    out.push({
+      fileName: e.name,
+      size: e.size,
+      isDir: e.isDirectory || /\/$/.test(e.name),
     });
-    zipfile.on('end', () => resolve(entries));
-    zipfile.on('error', reject);
-    zipfile.readEntry();
-  });
+  }
+  return out;
 }
 
-function _readZipEntryToBuffer(zipfile, entry) {
-  return new Promise((resolve, reject) => {
-    zipfile.openReadStream(entry, (err, stream) => {
-      if (err) { reject(err); return; }
-      const chunks = [];
-      stream.on('data', c => chunks.push(c));
-      stream.on('end', () => resolve(Buffer.concat(chunks)));
-      stream.on('error', reject);
-    });
-  });
+async function _readZipEntryToBuffer(zip, entry) {
+  return await zip.entryData(entry.fileName);
 }
 
-function _writeZipEntryToFile(zipfile, entry, destPath) {
-  return new Promise((resolve, reject) => {
-    zipfile.openReadStream(entry, (err, stream) => {
-      if (err) { reject(err); return; }
-      const writeStream = fs.createWriteStream(destPath);
-      stream.on('error', reject);
-      writeStream.on('error', reject);
-      writeStream.on('finish', resolve);
-      stream.pipe(writeStream);
-    });
+async function _writeZipEntryToFile(zip, entry, destPath) {
+  await new Promise((resolve, reject) => {
+    zip.stream(entry.fileName)
+      .then(stream => {
+        const writeStream = fs.createWriteStream(destPath);
+        stream.on('error', reject);
+        writeStream.on('error', reject);
+        writeStream.on('finish', resolve);
+        stream.pipe(writeStream);
+      })
+      .catch(reject);
   });
 }
 
@@ -430,67 +428,81 @@ function _createZipSource({ uuid, uuidDir, meta }) {
     meta,
     format: 'zip',
 
+    // Flat list of every entry in the source, used by vendor and candidate
+    // detection. Returns { fileName, size, isDir } in zip-listing order.
+    async listAll() {
+      const zip = _openZip(zipPath);
+      try {
+        return await _readAllZipEntries(zip);
+      } finally {
+        await zip.close();
+      }
+    },
+
     async browse(subPath) {
       const norm = _normalizeSubPath(subPath);
-      const zipfile = await _openZip(zipPath);
+      const zip = _openZip(zipPath);
       try {
-        const entries = await _readAllZipEntries(zipfile);
-        const mapped = entries.map(e => ({
-          fileName: e.fileName,
-          size: e.uncompressedSize,
-          isDir: /\/$/.test(e.fileName),
-        }));
-        return _listAtPath(mapped, norm);
+        const entries = await _readAllZipEntries(zip);
+        return _listAtPath(entries, norm);
       } finally {
-        zipfile.close();
+        await zip.close();
       }
     },
 
     async readFile(filePath) {
       const norm = _normalizeSubPath(filePath);
       if (!norm) throw new Error('readFile requires a path');
-      const zipfile = await _openZip(zipPath);
+      const zip = _openZip(zipPath);
       try {
-        const entries = await _readAllZipEntries(zipfile);
+        const entries = await _readAllZipEntries(zip);
         const match = entries.find(e => e.fileName === norm);
         if (!match) throw new Error(`Not found in source: ${norm}`);
-        return await _readZipEntryToBuffer(zipfile, match);
+        return await _readZipEntryToBuffer(zip, match);
       } finally {
-        zipfile.close();
+        await zip.close();
       }
     },
 
     async extractTo(subPath, destDir, onProgress) {
       const norm = _normalizeSubPath(subPath);
       const prefix = norm ? norm + '/' : '';
-      const zipfile = await _openZip(zipPath);
+      const zip = _openZip(zipPath);
       try {
-        const entries = await _readAllZipEntries(zipfile);
+        const entries = await _readAllZipEntries(zip);
         const matching = entries.filter(e => {
           if (norm && !e.fileName.startsWith(prefix) && e.fileName !== norm && e.fileName !== prefix) return false;
           return true;
         });
         if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+        const destDirResolved = path.resolve(destDir);
         let fileCount = 0;
         let totalBytes = 0;
         for (const entry of matching) {
           const rel = norm ? entry.fileName.slice(prefix.length) : entry.fileName;
           if (!rel) continue;
           const destPath = path.join(destDir, rel.replace(/\//g, path.sep));
-          if (/\/$/.test(entry.fileName)) {
+          // Zip-slip guard: refuse any entry whose resolved destination
+          // escapes destDir (e.g. "../../etc/passwd"). node-stream-zip
+          // doesn't validate this for us, so we enforce it here.
+          const resolved = path.resolve(destPath);
+          if (resolved !== destDirResolved && !resolved.startsWith(destDirResolved + path.sep)) {
+            throw new Error(`Refused to extract outside destination: ${rel}`);
+          }
+          if (entry.isDir) {
             if (!fs.existsSync(destPath)) fs.mkdirSync(destPath, { recursive: true });
             continue;
           }
           const parent = path.dirname(destPath);
           if (!fs.existsSync(parent)) fs.mkdirSync(parent, { recursive: true });
-          await _writeZipEntryToFile(zipfile, entry, destPath);
+          await _writeZipEntryToFile(zip, entry, destPath);
           fileCount++;
-          totalBytes += entry.uncompressedSize || 0;
+          totalBytes += entry.size || 0;
           if (onProgress) onProgress({ fileCount, totalBytes, currentFile: rel });
         }
         return { fileCount, totalBytes };
       } finally {
-        zipfile.close();
+        await zip.close();
       }
     },
 
@@ -514,6 +526,29 @@ function _createFolderSource({ uuid, uuidDir, meta }) {
     uuid,
     meta,
     format: 'folder',
+
+    async listAll() {
+      const out = [];
+      const walk = (dir, relBase) => {
+        let entries;
+        try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
+        catch { return; }
+        for (const e of entries) {
+          const abs = path.join(dir, e.name);
+          const rel = relBase ? `${relBase}/${e.name}` : e.name;
+          if (e.isDirectory()) {
+            out.push({ fileName: `${rel}/`, size: 0, isDir: true });
+            walk(abs, rel);
+          } else if (e.isFile()) {
+            let size = 0;
+            try { size = fs.statSync(abs).size; } catch {}
+            out.push({ fileName: rel, size, isDir: false });
+          }
+        }
+      };
+      walk(folderRoot, '');
+      return out;
+    },
 
     async browse(subPath) {
       const norm = _normalizeSubPath(subPath);
