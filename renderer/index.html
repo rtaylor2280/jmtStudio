@@ -1897,6 +1897,36 @@
   .sf-import-btn-row { display: flex; gap: 8px; justify-content: flex-end; flex-shrink: 0; }
   .sf-dup-btn-stack { display: flex; flex-direction: column; gap: 8px; margin-top: 18px; }
   .sf-dup-btn-stack button { width: 100%; padding: 8px 14px; font-size: 0.85rem; }
+  #modal-sf-entry-detail .modal { width: 620px; max-width: 96vw; max-height: 86vh; display: flex; flex-direction: column; }
+  .sf-entry-detail-header { padding-right: 32px; flex-shrink: 0; }
+  .sf-entry-detail-header h2 { margin: 0 0 4px 0; }
+  .sf-entry-detail-byline { font-size: 0.85rem; color: var(--c-text-sub); }
+  .sf-entry-detail-body { overflow-y: auto; flex: 1; min-height: 0; margin: 12px 0; padding-right: 4px; }
+  .sf-entry-detail-body::-webkit-scrollbar { width: 6px; }
+  .sf-entry-detail-body::-webkit-scrollbar-track { background: transparent; }
+  .sf-entry-detail-body::-webkit-scrollbar-thumb { background: var(--c-border-strong); border-radius: 3px; }
+  .sf-entry-detail-meta { display: flex; flex-direction: column; gap: 8px; background: var(--c-bg-inset); border: 1px solid var(--c-border-faint); border-radius: 4px; padding: 12px 14px; }
+  .sf-meta-row { display: flex; gap: 12px; font-size: 0.82rem; align-items: baseline; }
+  .sf-meta-label { color: var(--c-text-sub); min-width: 110px; font-weight: 500; flex-shrink: 0; }
+  .sf-meta-val { color: var(--c-text); flex: 1; word-break: break-word; min-width: 0; }
+  .sf-meta-val.tags-row { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+  .sf-entry-detail-section { margin-top: 16px; }
+  .sf-entry-detail-section h3 { font-size: 0.85rem; color: var(--c-text); margin: 0 0 8px 0; font-weight: 600; }
+  .sf-entry-detail-source { background: var(--c-bg-inset); border: 1px solid var(--c-border-faint); border-radius: 4px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
+  .sf-entry-detail-source .src-line { display: flex; gap: 12px; font-size: 0.78rem; }
+  .sf-entry-detail-source .src-label { color: var(--c-text-sub); min-width: 110px; font-weight: 500; flex-shrink: 0; }
+  .sf-entry-detail-source .src-val { color: var(--c-text); word-break: break-all; flex: 1; min-width: 0; }
+  .sf-entry-detail-source .src-val.path { font-family: monospace; font-size: 0.74rem; color: var(--c-text-dim); }
+  .sf-external-link { color: var(--jmt-blue); text-decoration: none; cursor: pointer; }
+  .sf-external-link:hover { text-decoration: underline; }
+  .sf-entry-notes-block { display: flex; flex-direction: column; gap: 4px; }
+  .sf-entry-notes-toggle { display: flex; align-items: center; gap: 4px; cursor: pointer; font-size: 0.68rem; color: var(--c-text-sub); text-transform: uppercase; letter-spacing: 0.05em; border: none; background: none; padding: 2px 0; user-select: none; }
+  .sf-entry-notes-toggle:hover { color: var(--c-text-muted); }
+  .sf-entry-notes-toggle .notes-arrow { font-size: 0.6rem; transition: transform 0.15s; display: inline-block; }
+  .sf-entry-notes-toggle.open .notes-arrow { transform: rotate(90deg); }
+  .sf-entry-notes-body { display: none; padding: 6px 8px 0 14px; font-size: 0.82rem; color: var(--c-text); line-height: 1.45; word-break: break-word; }
+  .sf-entry-notes-body.visible { display: block; }
+  .sf-card { cursor: pointer; }
   .sf-import-folder-row { display: flex; gap: 6px; }
   .sf-import-folder-row input { flex: 1; }
   .sf-import-folder-row button { flex-shrink: 0; }
@@ -3171,6 +3201,27 @@
     <div class="modal-btns sf-import-btn-row" style="margin-top:18px;">
       <button class="modal-btn-cancel" id="sf-import-cancel-btn">Cancel</button>
       <button class="modal-btn-primary" id="sf-import-confirm-btn" style="display:none" disabled>Add to Library</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Sound Font entry detail (Phase 3, slice 7 read-only shell) ── -->
+<div class="modal-overlay" id="modal-sf-entry-detail">
+  <div class="modal" style="position:relative">
+    <button class="modal-btn-close" id="sf-entry-detail-close" title="Close">&#10005;</button>
+    <div class="sf-entry-detail-header">
+      <h2 id="sf-entry-detail-name"></h2>
+      <div class="sf-entry-detail-byline" id="sf-entry-detail-byline"></div>
+    </div>
+    <div class="sf-entry-detail-body">
+      <div class="sf-entry-detail-meta" id="sf-entry-detail-meta"></div>
+      <div class="sf-entry-detail-section">
+        <h3>Source</h3>
+        <div class="sf-entry-detail-source" id="sf-entry-detail-source"></div>
+      </div>
+    </div>
+    <div class="modal-btns" style="margin-top:12px">
+      <button class="modal-btn-cancel" id="sf-entry-detail-close-btn">Close</button>
     </div>
   </div>
 </div>
@@ -10847,6 +10898,182 @@ require(['vs/editor/editor.main'], function () {
         if (!sourcePath) return;
         await _sfRunImport(sourcePath);
       };
+
+      // ── Entry detail view (Phase 3, slice 7 read-only shell) ──
+      const _sfEntryDetailEls = {
+        modal:    document.getElementById('modal-sf-entry-detail'),
+        name:     document.getElementById('sf-entry-detail-name'),
+        byline:   document.getElementById('sf-entry-detail-byline'),
+        meta:     document.getElementById('sf-entry-detail-meta'),
+        source:   document.getElementById('sf-entry-detail-source'),
+        closeX:   document.getElementById('sf-entry-detail-close'),
+        closeBtn: document.getElementById('sf-entry-detail-close-btn'),
+      };
+      const _sfFormatDate = (s) => {
+        if (!s) return '';
+        try {
+          const d = new Date(s + 'T00:00:00');
+          if (Number.isNaN(d.getTime())) return s;
+          return d.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+        } catch { return s; }
+      };
+      const _sfOpenEntryDetail = async (entryName) => {
+        const entry = _sfAllEntries.find(e => e.name === entryName);
+        if (!entry || !_sfEntryDetailEls.modal) return;
+        const m = entry.meta || {};
+        if (_sfEntryDetailEls.name) _sfEntryDetailEls.name.textContent = entry.name;
+        if (_sfEntryDetailEls.byline) {
+          _sfEntryDetailEls.byline.textContent = m.author ? `by ${m.author}` : '';
+        }
+        const rows = [];
+        if (m.acquisitionDate) {
+          rows.push(`<div class="sf-meta-row"><span class="sf-meta-label">Acquired</span><span class="sf-meta-val">${_sfEscape(_sfFormatDate(m.acquisitionDate))}</span></div>`);
+        }
+        if (m.description) {
+          rows.push(`<div class="sf-meta-row"><span class="sf-meta-label">Description</span><span class="sf-meta-val">${_sfEscape(m.description)}</span></div>`);
+        }
+        const fileCount = m.fileCount || 0;
+        const sizeStr = _sfFormatBytes(m.totalBytes || 0);
+        rows.push(`<div class="sf-meta-row"><span class="sf-meta-label">Contents</span><span class="sf-meta-val">${fileCount} file${fileCount === 1 ? '' : 's'} (${_sfEscape(sizeStr)})</span></div>`);
+        // Tags: free first (the most notable label when present), then user
+        // tags from entry meta. Conceptually free is just another tag.
+        const tagChips = [];
+        if (m.purchased === false) {
+          tagChips.push('<span class="sf-card-tag free">free</span>');
+        }
+        if (Array.isArray(m.tags)) {
+          for (const t of m.tags) {
+            if (t) tagChips.push(`<span class="sf-card-tag">${_sfEscape(t)}</span>`);
+          }
+        }
+        if (tagChips.length) {
+          rows.push(`<div class="sf-meta-row"><span class="sf-meta-label">Tags</span><span class="sf-meta-val tags-row">${tagChips.join('')}</span></div>`);
+        }
+        // Notes get the same collapsible toggle treatment as the Style Library
+        // detail view: small uppercase header, rotating arrow, hidden by
+        // default. Click to expand and read.
+        if (m.userNotes) {
+          rows.push(`<div class="sf-entry-notes-block">
+            <button class="sf-entry-notes-toggle" type="button"><span class="notes-arrow">&#9654;</span> Notes</button>
+            <div class="sf-entry-notes-body">${_sfEscape(m.userNotes).replace(/\n/g, '<br>')}</div>
+          </div>`);
+        }
+        if (_sfEntryDetailEls.meta) _sfEntryDetailEls.meta.innerHTML = rows.join('');
+        let sourceParts = [];
+        if (m.sourceUuid) {
+          try {
+            const r = await window.electronAPI.listSources();
+            const src = r && r.ok && r.sources && r.sources.find(s => s.uuid === m.sourceUuid);
+            if (src) {
+              const sm = src.meta || {};
+              const displayName = sm.bundleName || sm.originalName || src.uuid;
+              // Build the parenthetical: original filename if it differs from
+              // the display name, plus archive size when known. Keeps the
+              // Source section to one fewer line.
+              // Compare stems so a Volatile / Volatile.zip pair is treated as
+              // the same name (extension shouldn't count as a difference).
+              const originalStem = (sm.originalName || '').replace(/\.zip$/i, '');
+              const sameAsDisplay = sm.originalName && originalStem === displayName;
+              // Parens carry: original filename (if different), or the source
+              // format hint when the filename would have been redundant. Plus
+              // archive size when known.
+              const parenBits = [];
+              if (sm.originalName && !sameAsDisplay) {
+                parenBits.push(_sfEscape(sm.originalName));
+              } else if (sm.format) {
+                parenBits.push(_sfEscape(sm.format));
+              }
+              if (sm.fileSize) parenBits.push(_sfEscape(_sfFormatBytes(sm.fileSize)));
+              const nameVal = parenBits.length
+                ? `${_sfEscape(displayName)} <span style="color:var(--c-text-dim)">(${parenBits.join(', ')})</span>`
+                : _sfEscape(displayName);
+              sourceParts.push(`<div class="src-line"><span class="src-label">Name</span><span class="src-val">${nameVal}</span></div>`);
+              if (sm.vendor) {
+                const creatorVal = sm.vendorWebsite
+                  ? `${_sfEscape(sm.vendor)} &nbsp; <a href="#" class="sf-external-link" data-href="${_sfEscape(sm.vendorWebsite)}">${_sfEscape(sm.vendorWebsite)}</a>`
+                  : _sfEscape(sm.vendor);
+                sourceParts.push(`<div class="src-line"><span class="src-label">Creator</span><span class="src-val">${creatorVal}</span></div>`);
+              }
+              // Source-level notes (captured in the import dialog) belong with
+              // the source, not the entry. Rendered last in the section as a
+              // collapsible row.
+              var _sourceNotesLine = sm.userNotes
+                ? `<div class="src-line"><span class="src-label">Notes</span><span class="src-val"><div class="sf-entry-notes-block"><button class="sf-entry-notes-toggle" type="button"><span class="notes-arrow">&#9654;</span> Notes</button><div class="sf-entry-notes-body">${_sfEscape(sm.userNotes).replace(/\n/g, '<br>')}</div></div></span></div>`
+                : '';
+            } else {
+              sourceParts.push('<div class="src-line"><span class="src-label">Name</span><span class="src-val">(source no longer in library)</span></div>');
+              var _sourceNotesLine = '';
+            }
+          } catch {
+            sourceParts.push('<div class="src-line"><span class="src-label">Name</span><span class="src-val">(error loading source)</span></div>');
+          }
+        }
+        if (m.multiBoard) {
+          // Strip the ".zip" suffix off inner-zip flavor names (Greyscale
+          // ships Asteria.zip, CFX-GHV3.zip, etc.) — the user doesn't need
+          // to see the file extension. Proffie leads the list, then the
+          // other flavors in their detected order.
+          const cleanFlavors = Array.isArray(m.otherFlavors)
+            ? m.otherFlavors.map(f => String(f || '').replace(/\.zip$/i, '')).filter(Boolean)
+            : [];
+          const flavorList = cleanFlavors.length
+            ? _sfEscape(['Proffie', ...cleanFlavors].join(', '))
+            : 'Proffie variant of a multi-board source';
+          sourceParts.push(`<div class="src-line"><span class="src-label">Included Formats</span><span class="src-val">${flavorList}</span></div>`);
+        }
+        if (m.nested) {
+          sourceParts.push('<div class="src-line"><span class="src-label">Extraction</span><span class="src-val">Extracted from a nested zip inside the source</span></div>');
+        }
+        // Notes last so the structural / provenance lines sit together above it.
+        if (typeof _sourceNotesLine === 'string' && _sourceNotesLine) {
+          sourceParts.push(_sourceNotesLine);
+        }
+        if (_sfEntryDetailEls.source) {
+          _sfEntryDetailEls.source.innerHTML = sourceParts.length
+            ? sourceParts.join('')
+            : '<div class="src-line"><span class="src-val" style="color:var(--c-text-dim)">No source information recorded.</span></div>';
+        }
+        _sfEntryDetailEls.modal.classList.add('active');
+      };
+      const _sfCloseEntryDetail = () => {
+        if (_sfEntryDetailEls.modal) _sfEntryDetailEls.modal.classList.remove('active');
+      };
+      _sfEntryDetailEls.closeX?.addEventListener('click', _sfCloseEntryDetail);
+      _sfEntryDetailEls.closeBtn?.addEventListener('click', _sfCloseEntryDetail);
+      _sfEntryDetailEls.modal?.addEventListener('click', (e) => {
+        if (e.target === _sfEntryDetailEls.modal) _sfCloseEntryDetail();
+      });
+      // External link delegation — links inside the source block that should
+      // open in the user's default browser. Avoids inline onclick handlers.
+      _sfEntryDetailEls.source?.addEventListener('click', (e) => {
+        const link = e.target.closest('.sf-external-link');
+        if (!link) return;
+        e.preventDefault();
+        const href = link.getAttribute('data-href');
+        if (href) window.electronAPI.openExternal(href);
+      });
+      // Notes toggle delegation — clicking the small "▶ Notes" header
+      // expands or collapses the body, matching the Style Library pattern.
+      // Listens on both meta (entry-level notes) and source (source-level
+      // notes) sections.
+      const _sfNotesToggleHandler = (e) => {
+        const toggle = e.target.closest('.sf-entry-notes-toggle');
+        if (!toggle) return;
+        const block = toggle.closest('.sf-entry-notes-block');
+        const body = block?.querySelector('.sf-entry-notes-body');
+        toggle.classList.toggle('open');
+        body?.classList.toggle('visible');
+      };
+      _sfEntryDetailEls.meta?.addEventListener('click', _sfNotesToggleHandler);
+      _sfEntryDetailEls.source?.addEventListener('click', _sfNotesToggleHandler);
+      // Card click delegation — the grid re-renders on refresh, so we listen
+      // on the container once.
+      document.getElementById('sf-cards')?.addEventListener('click', (e) => {
+        const card = e.target.closest('.sf-card');
+        if (!card) return;
+        const name = card.getAttribute('data-font');
+        if (name) _sfOpenEntryDetail(name);
+      });
 
       document.getElementById('btn-sf-import-toolbar')?.addEventListener('click', _sfOpenImport);
       document.getElementById('btn-sf-import-font')?.addEventListener('click', _sfOpenImport);
