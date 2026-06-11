@@ -107,6 +107,18 @@ async function hashFolder(folderPath, onProgress) {
   const totalBytes = files.reduce((sum, f) => sum + f.size, 0);
   const hash = crypto.createHash('sha256');
   let bytesHashed = 0;
+  // Throttle onProgress to ~100ms so a fast disk doesn't flood the renderer
+  // with hundreds of events per second (which can make the CSS-transitioned
+  // progress bar look jittery on screen).
+  let lastEmit = Date.now();
+  const emitMaybe = (currentFile, force) => {
+    if (!onProgress) return;
+    const now = Date.now();
+    if (force || now - lastEmit > 100) {
+      onProgress({ bytesHashed, totalBytes, currentFile });
+      lastEmit = now;
+    }
+  };
   for (const f of files) {
     hash.update(f.relPath);
     hash.update('\0');
@@ -115,12 +127,13 @@ async function hashFolder(folderPath, onProgress) {
       stream.on('data', chunk => {
         hash.update(chunk);
         bytesHashed += chunk.length;
-        if (onProgress) onProgress({ bytesHashed, totalBytes, currentFile: f.relPath });
+        emitMaybe(f.relPath, false);
       });
       stream.on('end', resolve);
       stream.on('error', reject);
     });
   }
+  emitMaybe('', true);
   return { hash: hash.digest('hex'), totalBytes, fileCount: files.length };
 }
 
@@ -148,6 +161,43 @@ function findByHash(userData, hash) {
     if (s.meta && s.meta.hash === hash) return s;
   }
   return null;
+}
+
+// Patch fields on a source's meta.json in place. Used after the user
+// reviews an import and edits source-level metadata (bundle/source name,
+// vendor overrides, etc.) before committing entries. Refuses to touch
+// immutable fields like uuid, hash, originalName, format, importedAt.
+const _SOURCE_META_IMMUTABLE = new Set(['schemaVersion', 'uuid', 'hash', 'format', 'originalName', 'importedAt', 'fileSize']);
+function updateSourceMeta(userData, uuid, updates) {
+  if (!uuid) return { ok: false, error: 'Missing uuid' };
+  if (!updates || typeof updates !== 'object') return { ok: false, error: 'Missing updates' };
+  const dir = path.join(sourcesRoot(userData), uuid);
+  const metaPath = path.join(dir, 'meta.json');
+  if (!fs.existsSync(metaPath)) return { ok: false, error: 'Source not found' };
+  let meta;
+  try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); }
+  catch (err) { return { ok: false, error: `Cannot read meta: ${err.message}` }; }
+  for (const key of Object.keys(updates)) {
+    if (_SOURCE_META_IMMUTABLE.has(key)) continue;
+    meta[key] = updates[key];
+  }
+  try { fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2)); }
+  catch (err) { return { ok: false, error: `Cannot write meta: ${err.message}` }; }
+  return { ok: true, meta };
+}
+
+// Remove a source from disk. Used when the user cancels an import after the
+// source was already written but before any library entries referenced it.
+function deleteSource(userData, uuid) {
+  if (!uuid) return { ok: false, error: 'Missing uuid' };
+  const dir = path.join(sourcesRoot(userData), uuid);
+  if (!fs.existsSync(dir)) return { ok: true, deleted: false };
+  try {
+    fs.rmSync(dir, { recursive: true, force: true });
+    return { ok: true, deleted: true };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
 }
 
 // Recursively copy a folder. Async file-by-file so the caller can report
@@ -181,7 +231,7 @@ function cleanupPartialSource(uuidDir) {
 //   { ok: false, error: <string> }
 //
 // Progress events fire in three stages: hashing, copying, done.
-async function importSource({ userData, sourcePath, originalName, metadata, onProgress }) {
+async function importSource({ userData, sourcePath, originalName, metadata, onProgress, forceNewSource }) {
   if (!userData) return { ok: false, error: 'Missing userData' };
   if (!sourcePath) return { ok: false, error: 'Missing sourcePath' };
   if (!fs.existsSync(sourcePath)) return { ok: false, error: `Source not found: ${sourcePath}` };
@@ -240,11 +290,15 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
     return { ok: false, error: `Hash failed: ${err.message}` };
   }
 
-  // Phase 2: dedup check. If hash matches an existing source, short-circuit.
-  const existing = findByHash(userData, hash);
-  if (existing) {
-    emit('done', { isDuplicate: true });
-    return { ok: true, isDuplicate: true, uuid: existing.uuid, hash, format };
+  // Phase 2: dedup check. If hash matches an existing source, short-circuit
+  // unless the caller is explicitly asking to re-import as a new source
+  // (Q1's "Re-import as new" branch in the renderer flow).
+  if (!forceNewSource) {
+    const existing = findByHash(userData, hash);
+    if (existing) {
+      emit('done', { isDuplicate: true });
+      return { ok: true, isDuplicate: true, uuid: existing.uuid, hash, format };
+    }
   }
 
   // Phase 3: copy source into storage under a new UUID. On any error during
@@ -633,4 +687,6 @@ module.exports = {
   findByHash,
   importSource,
   openSource,
+  deleteSource,
+  updateSourceMeta,
 };

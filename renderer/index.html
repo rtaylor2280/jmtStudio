@@ -1844,6 +1844,7 @@
   .sf-card-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
   .sf-card-tag { font-size: 0.62rem; color: var(--c-text-dim); background: var(--c-bg-inset); border: 1px solid var(--c-border-faint); border-radius: 3px; padding: 1px 5px; white-space: nowrap; }
   .sf-card-tag.purchased { color: var(--jmt-blue); border-color: rgba(0,130,255,0.35); background: rgba(0,130,255,0.08); }
+  .sf-card-tag.free { color: #7c5; border-color: rgba(120,200,80,0.35); background: rgba(120,200,80,0.10); }
   /* Pending / active import cards in the grid */
   .sf-card.pending { cursor: default; border-style: dashed; border-color: rgba(0,130,255,0.45); background: rgba(0,130,255,0.04); }
   .sf-card.pending:hover { background: rgba(0,130,255,0.06); border-color: rgba(0,130,255,0.6); }
@@ -1857,8 +1858,45 @@
   #modal-sf-import input:focus, #modal-sf-import textarea:focus { border-color: var(--jmt-blue); }
   #modal-sf-import input.invalid { border-color: #e44; }
   #modal-sf-import textarea { resize: vertical; min-height: 60px; }
-  #modal-sf-import .sf-import-checkbox-row { display: flex; align-items: center; gap: 8px; }
-  #modal-sf-import .sf-import-checkbox-row input { width: auto; }
+  .sf-import-modal { max-width: 600px; width: 92vw; max-height: 86vh; display: flex; flex-direction: column; }
+  .sf-import-phase { overflow-y: auto; max-height: calc(86vh - 130px); }
+  .sf-import-phase::-webkit-scrollbar { width: 6px; }
+  .sf-import-phase::-webkit-scrollbar-track { background: transparent; }
+  .sf-import-phase::-webkit-scrollbar-thumb { background: var(--c-border-strong); border-radius: 3px; }
+  .sf-import-hint { font-size: 0.78rem; color: var(--c-text-sub); margin: 0 0 12px 0; line-height: 1.45; }
+  .sf-import-pick-row { display: flex; gap: 10px; justify-content: center; margin-top: 16px; }
+  .sf-import-pick-row button { padding: 10px 20px; font-size: 0.9rem; }
+  .sf-import-progress-label { font-size: 0.85rem; color: var(--c-text); margin: 8px 0; }
+  .sf-import-progress-track { height: 6px; background: var(--c-bg-inset); border-radius: 3px; overflow: hidden; margin: 6px 0; }
+  .sf-import-progress-bar { height: 100%; width: 0%; background: var(--jmt-blue); transition: width 0.15s; }
+  .sf-import-progress-detail { font-size: 0.72rem; color: var(--c-text-dim); margin: 4px 0 0 0; font-variant-numeric: tabular-nums; min-height: 1em; word-break: break-all; }
+  .sf-import-progress-tip { font-size: 0.74rem; color: var(--c-text-sub); font-style: italic; line-height: 1.45; padding: 8px 10px; margin: 14px 0 0 0; background: var(--c-bg-inset); border-left: 2px solid var(--jmt-blue); border-radius: 2px; }
+  .sf-import-review-section { margin-bottom: 16px; }
+  .sf-import-review-section h3 { font-size: 0.85rem; color: var(--c-text); margin: 0 0 10px 0; font-weight: 600; }
+  .sf-import-review-source-path { font-size: 0.7rem; color: var(--c-text-dim); margin-bottom: 10px; word-break: break-all; font-family: monospace; }
+  .sf-review-vendor-info { font-size: 0.7rem; color: var(--c-text-dim); margin-top: 4px; min-height: 1em; }
+  .sf-review-vendor-info.detected { color: var(--jmt-blue); }
+  .sf-import-field-hint { font-size: 0.7rem; color: var(--c-text-dim); margin-top: 4px; line-height: 1.4; }
+  .sf-review-cand-count { font-size: 0.72rem; color: var(--c-text-dim); font-weight: 400; margin-left: 6px; }
+  .sf-review-candidate-list { display: flex; flex-direction: column; gap: 6px; }
+  .sf-review-candidate-row { display: grid; grid-template-columns: 22px 1fr auto; gap: 8px; align-items: start; padding: 8px 10px; background: var(--c-bg-inset); border: 1px solid var(--c-border-faint); border-radius: 4px; }
+  .sf-review-candidate-row.disabled { opacity: 0.55; }
+  .sf-review-candidate-row input[type="checkbox"] { margin-top: 4px; }
+  .sf-review-candidate-row .cand-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .sf-review-candidate-row input[type="text"] { width: 100%; background: var(--c-bg-raised); border: 1px solid var(--c-border-input); border-radius: 3px; color: var(--c-text); padding: 4px 7px; font-size: 0.82rem; outline: none; box-sizing: border-box; font-family: inherit; }
+  .sf-review-candidate-row input[type="text"]:focus { border-color: var(--jmt-blue); }
+  .sf-review-candidate-row input[type="text"].invalid { border-color: #e44; }
+  .sf-review-candidate-row .cand-path { font-size: 0.68rem; color: var(--c-text-dim); font-family: monospace; word-break: break-all; }
+  .sf-review-candidate-row .cand-status { font-size: 0.68rem; min-height: 1em; }
+  .sf-review-candidate-row .cand-status.error { color: #e44; }
+  .sf-review-candidate-row .cand-meta { display: flex; flex-direction: column; gap: 3px; align-items: flex-end; font-size: 0.7rem; color: var(--c-text-dim); white-space: nowrap; }
+  .sf-review-candidate-row .cand-badges { display: flex; gap: 4px; flex-wrap: wrap; }
+  .sf-review-candidate-row .cand-badge { font-size: 0.62rem; padding: 1px 5px; border-radius: 3px; border: 1px solid var(--c-border-faint); color: var(--c-text-dim); background: var(--c-bg-raised); white-space: nowrap; }
+  .sf-review-candidate-row .cand-badge.multi-board { color: var(--jmt-blue); border-color: rgba(0,130,255,0.35); background: rgba(0,130,255,0.08); }
+  .sf-review-candidate-row .cand-badge.nested { color: #cb6; border-color: rgba(204,180,100,0.35); background: rgba(204,180,100,0.08); }
+  .sf-import-btn-row { display: flex; gap: 8px; justify-content: flex-end; flex-shrink: 0; }
+  .sf-dup-btn-stack { display: flex; flex-direction: column; gap: 8px; margin-top: 18px; }
+  .sf-dup-btn-stack button { width: 100%; padding: 8px 14px; font-size: 0.85rem; }
   .sf-import-folder-row { display: flex; gap: 6px; }
   .sf-import-folder-row input { flex: 1; }
   .sf-import-folder-row button { flex-shrink: 0; }
@@ -2517,21 +2555,9 @@
 
 <!-- ── Sound Fonts view ── -->
 <div id="soundfonts-view">
-  <!-- Layer 1: library not yet created -->
-  <div class="sf-empty-wrap" id="sf-empty-nolibrary">
-    <div class="sf-empty-card">
-      <svg class="sf-empty-icon" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4">
-        <path d="M9 18V5l12-2v13"/>
-        <circle cx="6" cy="18" r="3"/>
-        <circle cx="18" cy="16" r="3"/>
-      </svg>
-      <h2 class="sf-empty-title">No Sound Fonts Library yet</h2>
-      <p class="sf-empty-desc">Set up a Sound Fonts Library to manage and organize the sound fonts for your sabers.</p>
-      <button class="sf-empty-action" id="btn-sf-create-library">Set Up Sound Fonts Library</button>
-    </div>
-  </div>
-  <!-- Layer 2: library exists but contains no fonts -->
-  <div class="sf-empty-wrap" id="sf-empty-nofonts" style="display:none">
+  <!-- Empty state: no library entries yet. The library is created
+       implicitly on first import; no separate setup step. -->
+  <div class="sf-empty-wrap" id="sf-empty-nofonts">
     <div class="sf-empty-card">
       <svg class="sf-empty-icon" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4">
         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
@@ -2539,7 +2565,7 @@
         <line x1="12" y1="3" x2="12" y2="15"/>
       </svg>
       <h2 class="sf-empty-title">Import your first sound font</h2>
-      <p class="sf-empty-desc">Pick a sound font folder from your computer. JMT Studio copies it into your library and tracks the metadata you supply.</p>
+      <p class="sf-empty-desc">Pick a vendor's .zip file or an unzipped folder. JMT Studio archives it, identifies the fonts inside, and adds your picks to the library.</p>
       <button class="sf-empty-action" id="btn-sf-import-font">Import Sound Font</button>
     </div>
   </div>
@@ -3069,50 +3095,96 @@
 </div>
 
 <!-- ── Import ProffieOS Version modal ── -->
+<!-- ── Sound Font import modal (Phase 1 source-and-entry model) ── -->
+<!-- Three phases inside one overlay: pick (zip/folder), import progress,
+     review (vendor metadata + candidate list with checkboxes). -->
 <div class="modal-overlay" id="modal-sf-import">
-  <div class="modal">
-    <h2>Import Sound Font</h2>
+  <div class="modal sf-import-modal">
+    <h2 id="sf-import-title">Import Sound Font</h2>
 
-    <div class="import-field">
-      <label>Source Folder</label>
-      <div class="sf-import-folder-row">
-        <input type="text" id="sf-import-folder-path" placeholder="Pick a sound font folder..." readonly>
-        <button class="modal-btn-cancel" id="sf-import-browse-btn">Browse...</button>
+    <div class="sf-import-phase" id="sf-import-phase-pick">
+      <p class="sf-import-hint">Pick a sound font as it came from the vendor — either the original .zip download or an already-unzipped folder. JMT Studio keeps the archive intact and lets you choose which fonts inside to add to your library.</p>
+      <div class="sf-import-pick-row">
+        <button class="modal-btn-primary" id="sf-import-pick-zip">Pick .zip file…</button>
+        <button class="modal-btn-primary" id="sf-import-pick-folder">Pick folder…</button>
       </div>
-      <div class="sf-import-scan-info" id="sf-import-scan-info"></div>
     </div>
 
-    <div class="import-field">
-      <label>Name <span style="color:#e44">*</span></label>
-      <input type="text" id="sf-import-name" placeholder="e.g. Vader, VoltBlade, G-Grievous" maxlength="64" autocomplete="off">
-      <div class="sf-import-name-error" id="sf-import-name-error">Name is required</div>
+    <div class="sf-import-phase" id="sf-import-phase-progress" style="display:none">
+      <p class="sf-import-progress-label" id="sf-import-progress-label">Importing source…</p>
+      <div class="sf-import-progress-track"><div class="sf-import-progress-bar" id="sf-import-progress-bar"></div></div>
+      <p class="sf-import-progress-detail" id="sf-import-progress-detail"></p>
+      <p class="sf-import-progress-tip" id="sf-import-progress-tip" style="display:none">Folder imports have to read every file to confirm this is a unique source, which is slow on large fonts. If you still have the original .zip from the vendor, importing that is much faster — and keeping your purchases zipped is the cleanest way to archive them long-term.</p>
     </div>
 
-    <div class="import-field">
-      <label>Author</label>
-      <input type="text" id="sf-import-author" placeholder="Font creator or vendor (optional)" maxlength="120" autocomplete="off">
+    <div class="sf-import-phase" id="sf-import-phase-review" style="display:none">
+      <div class="sf-import-review-section">
+        <h3>Source</h3>
+        <div class="sf-import-review-source-path" id="sf-import-review-source-path"></div>
+        <div class="import-field">
+          <label>Vendor</label>
+          <input type="text" id="sf-review-vendor" list="sf-review-vendor-list" placeholder="Vendor name" maxlength="120" autocomplete="off">
+          <datalist id="sf-review-vendor-list"></datalist>
+          <div class="sf-review-vendor-info" id="sf-review-vendor-info"></div>
+        </div>
+        <div class="import-field">
+          <label>Website</label>
+          <input type="text" id="sf-review-website" placeholder="https://..." maxlength="200" autocomplete="off">
+        </div>
+        <div class="import-field sf-import-checkbox-row">
+          <input type="checkbox" id="sf-review-purchased">
+          <label for="sf-review-purchased" style="margin:0;cursor:pointer">Free content (most fonts are paid; check this only if you got it free)</label>
+        </div>
+        <div class="import-field">
+          <label>Acquisition Date</label>
+          <input type="date" id="sf-review-purchase-date">
+        </div>
+        <div class="import-field" id="sf-review-bundle-field" style="display:none">
+          <label>Source Name</label>
+          <input type="text" id="sf-review-bundle-name" placeholder="Friendly name for this source" maxlength="64" autocomplete="off">
+          <div class="sf-import-field-hint">Auto-detected from the file you picked. Becomes a tag on every font imported from this source, so you can find them together later. When the source is a bundle of several fonts, this is the bundle name.</div>
+        </div>
+        <div class="import-field">
+          <label>Notes</label>
+          <textarea id="sf-review-notes" placeholder="Anything you want to remember about this source (optional)" maxlength="500"></textarea>
+        </div>
+      </div>
+
+      <div class="sf-import-review-section">
+        <h3>Sound fonts found <span class="sf-review-cand-count" id="sf-review-cand-count"></span></h3>
+        <p class="sf-import-hint" id="sf-review-cand-hint">Pick which fonts to add to your library. Names must use letters, numbers, underscores, or hyphens (Proffie can't read spaces).</p>
+        <p class="sf-import-hint sf-bundle-followup" id="sf-bundle-followup" style="display:none">This is a bundle with several fonts inside. You don't have to import them all now — the source stays in your library, so you can come back and add the rest later.</p>
+        <div class="sf-import-checkbox-row" id="sf-bundle-prepend-row" style="display:none;margin-bottom:10px">
+          <input type="checkbox" id="sf-review-prepend-bundle" checked>
+          <label for="sf-review-prepend-bundle" style="margin:0;cursor:pointer">Prefix font names with bundle name <span id="sf-bundle-name-hint" style="color:var(--c-text-dim)"></span></label>
+        </div>
+        <div class="sf-review-candidate-list" id="sf-review-candidate-list"></div>
+      </div>
     </div>
 
-    <div class="import-field sf-import-checkbox-row">
-      <input type="checkbox" id="sf-import-purchased">
-      <label for="sf-import-purchased" style="margin:0;cursor:pointer">Purchased</label>
+    <div class="sf-import-phase" id="sf-import-phase-creating" style="display:none">
+      <p class="sf-import-progress-label" id="sf-create-progress-label">Adding to library…</p>
+      <div class="sf-import-progress-track"><div class="sf-import-progress-bar" id="sf-create-progress-bar"></div></div>
+      <p class="sf-import-progress-detail" id="sf-create-progress-detail"></p>
     </div>
 
-    <div class="import-field">
-      <label>Acquisition Date</label>
-      <input type="date" id="sf-import-date">
+    <div class="modal-btns sf-import-btn-row" style="margin-top:18px;">
+      <button class="modal-btn-cancel" id="sf-import-cancel-btn">Cancel</button>
+      <button class="modal-btn-primary" id="sf-import-confirm-btn" style="display:none" disabled>Add to Library</button>
     </div>
+  </div>
+</div>
 
-    <div class="import-field">
-      <label>Description</label>
-      <textarea id="sf-import-description" placeholder="Notes about this font (optional)" maxlength="500"></textarea>
-    </div>
-
-    <div id="sf-import-queue-hint" style="display:none;font-size:0.72rem;color:#cb6;margin-top:8px"></div>
-
-    <div class="modal-btns" style="margin-top:18px;">
-      <button class="modal-btn-cancel" id="sf-import-cancel">Cancel</button>
-      <button class="modal-btn-primary" id="sf-import-confirm" disabled>Import</button>
+<!-- ── Q1: source already imported ── -->
+<div class="modal-overlay" id="modal-sf-duplicate-source">
+  <div class="modal">
+    <h2>Source already imported</h2>
+    <p>You've already imported this exact source. The contents match a source you have on file as <strong id="sf-dup-source-name">…</strong>.</p>
+    <p>What would you like to do?</p>
+    <div class="sf-dup-btn-stack">
+      <button class="modal-btn-primary" id="sf-dup-keep">Open existing</button>
+      <button class="modal-btn-cancel"  id="sf-dup-reimport">Re-import as a new source</button>
+      <button class="modal-btn-cancel"  id="sf-dup-cancel">Cancel</button>
     </div>
   </div>
 </div>
@@ -10180,71 +10252,48 @@ require(['vs/editor/editor.main'], function () {
         if (!enabled && _activeTab === 'soundfonts') switchTab('config');
       };
       const _refreshSoundFontsToggleLock = async () => {
-        const exists = await window.electronAPI.soundFontsExists();
-        const fonts  = exists ? await window.electronAPI.listSoundFonts() : [];
-        const locked = exists && fonts.length > 0;
+        const r = await window.electronAPI.listEntries();
+        const entryCount = (r && r.ok && r.entries) ? r.entries.length : 0;
+        const locked = entryCount > 0;
         const cb     = document.getElementById('setting-soundfonts-enabled');
         const hint   = document.getElementById('setting-soundfonts-locked-hint');
         if (cb)   cb.disabled = locked;
         if (hint) hint.style.display = locked ? '' : 'none';
-        return { exists, fontCount: fonts.length, locked };
+        return { entryCount, locked };
       };
-      let _sfAllFonts = [];
+      let _sfAllEntries = [];
       let _sfSearchQuery = '';
-      // Queue of in-flight or pending imports. Each: { id, name, sourcePath,
-      // metadata, stage: 'queued'|'starting'|'copying'|'done', current, total,
-      // bytes, totalBytes, currentFile }. Serial execution: only one item has
-      // stage !== 'queued' at a time. Hard cap on queue depth to prevent
-      // accidental flooding.
-      const _SF_QUEUE_LIMIT = 5;
-      let _sfImportQueue = [];
-      let _sfImportRunning = false;
       const _sfRenderGrid = () => {
         const list = document.getElementById('sf-cards');
         const countEl = document.getElementById('sf-search-count');
         if (!list) return;
         const q = (_sfSearchQuery || '').toLowerCase();
-        // Combine disk-backed fonts with pending imports for a unified grid.
-        // Pending items appear in their alphabetical slot so the user sees
-        // where a font will land in the library.
-        const pending = _sfImportQueue.map(item => ({
-          name: item.name,
-          pending: item,
-          meta: { author: item.metadata && item.metadata.author },
-        }));
-        const sorted = _sfAllFonts.concat(pending).sort((a, b) => a.name.localeCompare(b.name));
+        const sorted = _sfAllEntries.slice().sort((a, b) => a.name.localeCompare(b.name));
         const matching = q ? sorted.filter(f => {
+          const meta = f.meta || {};
+          const tagBlob = Array.isArray(meta.tags) ? meta.tags.join(' ') : '';
           const blob = [
             f.name,
-            f.meta && f.meta.author,
-            f.meta && f.meta.description,
+            meta.author,
+            meta.description,
+            tagBlob,
           ].filter(Boolean).join(' ').toLowerCase();
           return blob.includes(q);
         }) : sorted;
         list.innerHTML = matching.map(f => {
-          if (f.pending) {
-            const p = f.pending;
-            const pct = p.total > 0 ? Math.round((p.current / p.total) * 100) : 0;
-            let statusText;
-            if (p.stage === 'queued')        statusText = 'Queued';
-            else if (p.stage === 'starting') statusText = 'Preparing...';
-            else if (p.stage === 'done')     statusText = 'Finishing up...';
-            else                             statusText = `Copying… ${p.current}/${p.total} · ${pct}%`;
-            const author = p.metadata && p.metadata.author
-              ? `<div class="sf-card-author">by ${_sfEscape(p.metadata.author)}</div>` : '';
-            return `<div class="sf-card pending" data-font="${_sfEscape(f.name)}">
-              <div class="sf-card-name">${_sfEscape(f.name)}</div>
-              ${author}
-              <div class="sf-card-pending-status"><span>${_sfEscape(statusText)}</span></div>
-              <div class="sf-card-pending-bar-track"><div class="sf-card-pending-bar-fill" style="width:${pct}%"></div></div>
-            </div>`;
-          }
           const meta = f.meta || {};
           const author = meta.author ? `<div class="sf-card-author">by ${_sfEscape(meta.author)}</div>` : '';
           const desc   = meta.description ? `<div class="sf-card-desc">${_sfEscape(meta.description)}</div>` : '';
-          const tags   = meta.purchased
-            ? '<div class="sf-card-tags"><span class="sf-card-tag purchased">purchased</span></div>'
-            : '';
+          const tagBits = [];
+          if (Array.isArray(meta.tags)) {
+            for (const t of meta.tags) {
+              if (t) tagBits.push(`<span class="sf-card-tag">${_sfEscape(t)}</span>`);
+            }
+          }
+          // Surface the exception. Paid is the common case and stays invisible;
+          // free content gets a small badge so the user can spot it at a glance.
+          if (meta.purchased === false) tagBits.push('<span class="sf-card-tag free">free</span>');
+          const tags = tagBits.length ? `<div class="sf-card-tags">${tagBits.join('')}</div>` : '';
           return `<div class="sf-card" data-font="${_sfEscape(f.name)}">
             <div class="sf-card-name">${_sfEscape(f.name)}</div>
             ${author}${desc}${tags}
@@ -10263,28 +10312,21 @@ require(['vs/editor/editor.main'], function () {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
       window.refreshSoundFontsView = async () => {
-        const { exists, fontCount } = await _refreshSoundFontsToggleLock();
-        const layerNoLib   = document.getElementById('sf-empty-nolibrary');
+        await _refreshSoundFontsToggleLock();
         const layerNoFonts = document.getElementById('sf-empty-nofonts');
         const layerBrowse  = document.getElementById('sf-browse');
         const toolbarBtn   = document.getElementById('btn-sf-import-toolbar');
-        const pendingCount = _sfImportQueue.length;
-        if (!exists) {
-          if (layerNoLib)   layerNoLib.style.display   = '';
-          if (layerNoFonts) layerNoFonts.style.display = 'none';
-          if (layerBrowse)  layerBrowse.classList.remove('active');
-          if (toolbarBtn)   toolbarBtn.style.display = 'none';
-        } else if (fontCount === 0 && pendingCount === 0) {
-          if (layerNoLib)   layerNoLib.style.display   = 'none';
+        const r = await window.electronAPI.listEntries();
+        const entries = (r && r.ok && r.entries) || [];
+        _sfAllEntries = entries;
+        if (entries.length === 0) {
           if (layerNoFonts) layerNoFonts.style.display = '';
           if (layerBrowse)  layerBrowse.classList.remove('active');
           if (toolbarBtn)   toolbarBtn.style.display = '';
         } else {
-          if (layerNoLib)   layerNoLib.style.display   = 'none';
           if (layerNoFonts) layerNoFonts.style.display = 'none';
           if (layerBrowse)  layerBrowse.classList.add('active');
           if (toolbarBtn)   toolbarBtn.style.display = '';
-          _sfAllFonts = await window.electronAPI.listSoundFontsWithMeta();
           _sfRenderGrid();
         }
       };
@@ -10313,207 +10355,505 @@ require(['vs/editor/editor.main'], function () {
         _sfToggleEl.checked = _soundFontsEnabled;
         _sfToggleEl.addEventListener('change', _sfHandleToggle);
       }
-      document.getElementById('btn-sf-create-library')?.addEventListener('click', async () => {
-        const res = await window.electronAPI.createSoundFonts();
-        if (res && res.ok) {
-          await window.refreshSoundFontsView();
-        } else {
-          alert('Failed to create Sound Fonts Library: ' + (res && res.error || 'unknown error'));
+      // Library sentinel is auto-created on first import (see _sfRunImport).
+      // No explicit setup step in the UI.
+
+      // ── Import flow (Phase 1 source-and-entry model) ────
+      const _sfImportEls = {
+        modal:       document.getElementById('modal-sf-import'),
+        title:       document.getElementById('sf-import-title'),
+        phasePick:   document.getElementById('sf-import-phase-pick'),
+        phaseProg:   document.getElementById('sf-import-phase-progress'),
+        phaseReview: document.getElementById('sf-import-phase-review'),
+        phaseCreate: document.getElementById('sf-import-phase-creating'),
+        pickZipBtn:    document.getElementById('sf-import-pick-zip'),
+        pickFolderBtn: document.getElementById('sf-import-pick-folder'),
+        progLabel:   document.getElementById('sf-import-progress-label'),
+        progBar:     document.getElementById('sf-import-progress-bar'),
+        progDetail:  document.getElementById('sf-import-progress-detail'),
+        progTip:     document.getElementById('sf-import-progress-tip'),
+        createLabel: document.getElementById('sf-create-progress-label'),
+        createBar:   document.getElementById('sf-create-progress-bar'),
+        createDetail:document.getElementById('sf-create-progress-detail'),
+        sourcePath:  document.getElementById('sf-import-review-source-path'),
+        vendor:      document.getElementById('sf-review-vendor'),
+        vendorList:  document.getElementById('sf-review-vendor-list'),
+        vendorInfo:  document.getElementById('sf-review-vendor-info'),
+        website:     document.getElementById('sf-review-website'),
+        purchased:   document.getElementById('sf-review-purchased'),
+        purchaseDate:document.getElementById('sf-review-purchase-date'),
+        notes:       document.getElementById('sf-review-notes'),
+        bundleField: document.getElementById('sf-review-bundle-field'),
+        bundleNameInput: document.getElementById('sf-review-bundle-name'),
+        candCount:   document.getElementById('sf-review-cand-count'),
+        candList:    document.getElementById('sf-review-candidate-list'),
+        bundleRow:    document.getElementById('sf-bundle-prepend-row'),
+        bundleCheck:  document.getElementById('sf-review-prepend-bundle'),
+        bundleHint:   document.getElementById('sf-bundle-name-hint'),
+        bundleFollow: document.getElementById('sf-bundle-followup'),
+        cancelBtn:   document.getElementById('sf-import-cancel-btn'),
+        confirmBtn:  document.getElementById('sf-import-confirm-btn'),
+      };
+      const _sfDupEls = {
+        modal:       document.getElementById('modal-sf-duplicate-source'),
+        name:        document.getElementById('sf-dup-source-name'),
+        keepBtn:     document.getElementById('sf-dup-keep'),
+        reimportBtn: document.getElementById('sf-dup-reimport'),
+        cancelBtn:   document.getElementById('sf-dup-cancel'),
+      };
+      // Known-vendor list for the datalist hint and website auto-fill.
+      const _sfKnownVendors = [
+        { name: 'Kyberphonic',     website: 'https://www.kyberphonicfonts.com' },
+        { name: 'BKSaberSounds',   website: 'https://www.bksabersounds.com' },
+        { name: 'KSith',           website: 'https://www.ksithsaberfonts.com/' },
+        { name: 'Greyscale Fonts', website: 'https://www.greyscalefonts.com' },
+        { name: 'Juansith',        website: 'https://www.saberfont.com' },
+        { name: 'Rob Petkau',      website: 'https://www.saberfont.com' },
+        { name: 'JayDalorian',     website: 'https://jaydalorian.com/' },
+      ];
+      let _sfImport = null; // { sourcePath, uuid, vendor, candidates }
+      let _sfImportProgressUnsub = null;
+      let _sfCreateProgressUnsub = null;
+
+      const _sfShowPhase = (phase) => {
+        if (_sfImportEls.phasePick)   _sfImportEls.phasePick.style.display   = phase === 'pick'     ? '' : 'none';
+        if (_sfImportEls.phaseProg)   _sfImportEls.phaseProg.style.display   = phase === 'progress' ? '' : 'none';
+        if (_sfImportEls.phaseReview) _sfImportEls.phaseReview.style.display = phase === 'review'   ? '' : 'none';
+        if (_sfImportEls.phaseCreate) _sfImportEls.phaseCreate.style.display = phase === 'creating' ? '' : 'none';
+        if (_sfImportEls.confirmBtn)  _sfImportEls.confirmBtn.style.display  = phase === 'review'   ? '' : 'none';
+      };
+      const _sfOpenImport = () => {
+        _sfImport = null;
+        if (_sfImportEls.title) _sfImportEls.title.textContent = 'Import Sound Font';
+        _sfShowPhase('pick');
+        if (_sfImportEls.modal) _sfImportEls.modal.classList.add('active');
+      };
+      const _sfCloseImport = () => {
+        if (_sfImportProgressUnsub) { try { _sfImportProgressUnsub(); } catch {} _sfImportProgressUnsub = null; }
+        if (_sfCreateProgressUnsub) { try { _sfCreateProgressUnsub(); } catch {} _sfCreateProgressUnsub = null; }
+        // If the user cancels after a fresh source has been written to disk
+        // but before any library entries reference it, the source dir is an
+        // orphan. Clean it up. The confirm path clears _sfImport.uuid first
+        // so the just-committed source isn't deleted.
+        const uuidToClean = _sfImport && _sfImport.uuid;
+        if (_sfImportEls.modal) _sfImportEls.modal.classList.remove('active');
+        _sfImport = null;
+        if (uuidToClean) {
+          window.electronAPI.deleteSource({ uuid: uuidToClean }).catch(() => {});
         }
+      };
+      const _sfFormatBytes = (n) => {
+        if (!n) return '0 B';
+        if (n < 1024) return `${n} B`;
+        if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+        if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+        return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+      };
+      // Mirror of soundFontEntries._sanitizeEntryName so the UI shows the
+      // disk-safe form before the user commits.
+      const _sfSanitizeName = (name) => String(name || '').trim()
+        .replace(/\s+/g, '_')
+        .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
+        .slice(0, 200);
+      // Strip leading vendor-version prefixes (JayDaloRian ships "1.1-Quantum",
+      // "2.0-Sebulba", etc.; the version is not part of the font's identity
+      // for library purposes). Applied to the suggested name only — the user
+      // can keep the version by typing it back in if they want to.
+      const _sfStripVersionPrefix = (name) => String(name || '')
+        .replace(/^\s*\d+(\.\d+)?\s*[-_\s]+\s*/, '');
+      // The bundle name is computed in the backend (soundFontCandidates.js's
+      // detectBundleName) and stamped onto each candidate; this helper just
+      // reads the cached value off the candidate list.
+      const _sfBundleNameFromCands = (cands) => {
+        if (!cands || cands.length === 0) return null;
+        return cands[0]?.bundleName || null;
+      };
+      // Build the suggested entry name from a candidate, optionally prefixing
+      // with the bundle name. Skips the prefix when the candidate's own name
+      // already starts with it (Father_V1 stays Father_V1, not Father_Father_V1).
+      const _sfSuggestName = (cand, idx, bundleName, prepend) => {
+        let base = _sfStripVersionPrefix(cand.name);
+        if (prepend && bundleName) {
+          const lb = bundleName.toLowerCase();
+          if (!base.toLowerCase().startsWith(lb)) base = `${bundleName}_${base}`;
+        }
+        return _sfSanitizeName(base) || `font_${idx + 1}`;
+      };
+
+      const _sfRunImport = async (sourcePath, { forceNewSource } = {}) => {
+        // Auto-opt-in: create the library sentinel on the user's first
+        // import action. Idempotent on the main side.
+        try { await window.electronAPI.createSoundFonts(); } catch {}
+        // Each run gets a private token so we can detect if the user cancels
+        // (or starts another run) while importSource is still in flight on
+        // the main process. If state has moved on by the time the await
+        // resolves, we delete the orphan source we just wrote.
+        const myRun = Symbol('sfImportRun');
+        _sfImport = { sourcePath, uuid: null, vendor: null, candidates: [], runId: myRun };
+        _sfShowPhase('progress');
+        if (_sfImportEls.progLabel) _sfImportEls.progLabel.textContent = 'Reading source…';
+        if (_sfImportEls.progBar) _sfImportEls.progBar.style.width = '0%';
+        if (_sfImportEls.progDetail) _sfImportEls.progDetail.textContent = '';
+        // Folder imports stream every file's content through the hash, which
+        // is noticeably slow on multi-GB sources. Surface the zip-is-faster
+        // hint only in that case.
+        if (_sfImportEls.progTip) {
+          const isZip = /\.zip$/i.test(sourcePath);
+          _sfImportEls.progTip.style.display = isZip ? 'none' : '';
+        }
+        if (_sfImportProgressUnsub) { try { _sfImportProgressUnsub(); } catch {} }
+        _sfImportProgressUnsub = window.electronAPI.onSourceImportProgress((data) => {
+          if (!data || !_sfImportEls.progBar) return;
+          const labels = { hashing: 'Reading source…', copying: 'Copying source…', done: 'Done' };
+          if (_sfImportEls.progLabel && labels[data.stage]) _sfImportEls.progLabel.textContent = labels[data.stage];
+          const pct = typeof data.percent === 'number' ? data.percent : 0;
+          _sfImportEls.progBar.style.width = `${Math.min(100, Math.max(0, pct))}%`;
+          if (_sfImportEls.progDetail) {
+            let detail = '';
+            if (data.bytes && data.totalBytes) detail = `${_sfFormatBytes(data.bytes)} / ${_sfFormatBytes(data.totalBytes)}`;
+            else if (data.currentFile) detail = data.currentFile;
+            _sfImportEls.progDetail.textContent = detail;
+          }
+        });
+        const importRes = await window.electronAPI.importSource({ sourcePath, forceNewSource });
+        if (_sfImportProgressUnsub) { try { _sfImportProgressUnsub(); } catch {} _sfImportProgressUnsub = null; }
+        // If the user cancelled (or started another run) while the import
+        // was in flight, _sfImport's runId no longer matches ours. Clean up
+        // the orphan source if we did successfully write one.
+        if (!_sfImport || _sfImport.runId !== myRun) {
+          if (importRes && importRes.ok && importRes.uuid && !importRes.isDuplicate) {
+            window.electronAPI.deleteSource({ uuid: importRes.uuid }).catch(() => {});
+          }
+          return;
+        }
+        if (!importRes || !importRes.ok) {
+          alert(`Import failed: ${(importRes && importRes.error) || 'unknown error'}`);
+          _sfCloseImport();
+          return;
+        }
+        if (importRes.isDuplicate && !forceNewSource) {
+          // Duplicate path doesn't create a new source, so nothing to clean.
+          // Clear our local uuid before handing off so the dup modal's close
+          // doesn't try to delete the pre-existing source.
+          _sfImport.uuid = null;
+          await _sfHandleDuplicate(importRes.uuid, sourcePath);
+          return;
+        }
+        _sfImport.uuid = importRes.uuid;
+        const [vendorRes, candRes] = await Promise.all([
+          window.electronAPI.detectSourceVendor({ uuid: importRes.uuid }),
+          window.electronAPI.detectSourceCandidates({ uuid: importRes.uuid }),
+        ]);
+        _sfImport.vendor = (vendorRes && vendorRes.ok) ? vendorRes : null;
+        _sfImport.candidates = (candRes && candRes.ok && candRes.candidates) ? candRes.candidates : [];
+        _sfPopulateReview(sourcePath);
+        _sfShowPhase('review');
+      };
+
+      const _sfHandleDuplicate = (existingUuid, sourcePath) => new Promise((resolve) => {
+        if (!_sfDupEls.modal) { resolve(); return; }
+        (async () => {
+          const r = await window.electronAPI.listSources();
+          const match = r && r.ok && r.sources && r.sources.find(s => s.uuid === existingUuid);
+          const displayName = (match && match.meta && match.meta.originalName) || existingUuid;
+          if (_sfDupEls.name) _sfDupEls.name.textContent = displayName;
+          _sfDupEls.modal.classList.add('active');
+          const cleanup = () => {
+            _sfDupEls.modal.classList.remove('active');
+            _sfDupEls.keepBtn?.removeEventListener('click', onKeep);
+            _sfDupEls.reimportBtn?.removeEventListener('click', onReimport);
+            _sfDupEls.cancelBtn?.removeEventListener('click', onCancel);
+          };
+          // "Open existing" and "Cancel" both close the import dialog for v1.
+          // Their semantics diverge once Phase 3's entry detail / sources
+          // view lands — Open will navigate to the existing source's entries
+          // then; Cancel will keep just abandoning the in-flight pick.
+          const onKeep = () => { cleanup(); _sfCloseImport(); resolve(); };
+          const onCancel = () => { cleanup(); _sfCloseImport(); resolve(); };
+          const onReimport = async () => { cleanup(); await _sfRunImport(sourcePath, { forceNewSource: true }); resolve(); };
+          _sfDupEls.keepBtn?.addEventListener('click', onKeep);
+          _sfDupEls.reimportBtn?.addEventListener('click', onReimport);
+          _sfDupEls.cancelBtn?.addEventListener('click', onCancel);
+        })();
       });
 
-      // ── Import flow ─────────────────────────────────────
-      let _sfImportSourcePath = null;
-      let _sfImportScan = null;
-      const _sfImportModal = document.getElementById('modal-sf-import');
-      const _sfPath = document.getElementById('sf-import-folder-path');
-      const _sfScanInfo = document.getElementById('sf-import-scan-info');
-      const _sfNameInput = document.getElementById('sf-import-name');
-      const _sfNameError = document.getElementById('sf-import-name-error');
-      const _sfAuthor = document.getElementById('sf-import-author');
-      const _sfPurchased = document.getElementById('sf-import-purchased');
-      const _sfDate = document.getElementById('sf-import-date');
-      const _sfDesc = document.getElementById('sf-import-description');
-      const _sfConfirmBtn = document.getElementById('sf-import-confirm');
-      const _sfOpenImportModal = () => {
-        _sfImportSourcePath = null;
-        _sfImportScan = null;
-        if (_sfPath) _sfPath.value = '';
-        if (_sfScanInfo) { _sfScanInfo.textContent = ''; _sfScanInfo.className = 'sf-import-scan-info'; }
-        if (_sfNameInput) { _sfNameInput.value = ''; _sfNameInput.classList.remove('invalid'); }
-        if (_sfNameError) _sfNameError.style.display = 'none';
-        if (_sfAuthor) _sfAuthor.value = '';
-        if (_sfPurchased) _sfPurchased.checked = false;
-        if (_sfDate) _sfDate.value = new Date().toISOString().slice(0, 10);
-        if (_sfDesc) _sfDesc.value = '';
-        if (_sfConfirmBtn) _sfConfirmBtn.textContent = 'Import';
-        _sfImportValidate();
-        if (_sfImportModal) _sfImportModal.classList.add('active');
-        setTimeout(() => _sfNameInput?.focus(), 0);
-      };
-      const _sfCloseImportModal = () => {
-        if (_sfImportModal) _sfImportModal.classList.remove('active');
-      };
-      const _sfImportValidate = () => {
-        const name = (_sfNameInput?.value || '').trim();
-        const lower = name.toLowerCase();
-        const dupDisk    = _sfAllFonts.some(f => f.name.toLowerCase() === lower);
-        const dupPending = _sfImportQueue.some(i => i.name.toLowerCase() === lower);
-        const queueFull  = _sfImportQueue.length >= _SF_QUEUE_LIMIT;
-        let nameError = '';
-        if (!name) nameError = 'Name is required';
-        else if (!/^[A-Za-z0-9 _\-]+$/.test(name)) nameError = 'Use letters, numbers, spaces, underscore, or hyphen';
-        else if (dupDisk) nameError = 'A font with that name already exists';
-        else if (dupPending) nameError = 'A font with that name is already queued for import';
-        if (_sfNameInput) _sfNameInput.classList.toggle('invalid', !!nameError);
-        if (_sfNameError) {
-          _sfNameError.textContent = nameError || 'Name is required';
-          _sfNameError.style.display = nameError ? '' : 'none';
+      const _sfPopulateReview = (sourcePath) => {
+        if (_sfImportEls.sourcePath) _sfImportEls.sourcePath.textContent = sourcePath;
+        if (_sfImportEls.vendorList) {
+          _sfImportEls.vendorList.innerHTML = _sfKnownVendors.map(v => `<option value="${_sfEscape(v.name)}"></option>`).join('');
         }
-        // Surface a queue-full hint independently of the name error so the user
-        // understands why they can't add another even with a valid name.
-        const queueHint = document.getElementById('sf-import-queue-hint');
-        if (queueHint) {
-          if (queueFull) {
-            queueHint.textContent = `Import queue is full (${_SF_QUEUE_LIMIT} max). Wait for a current import to finish.`;
-            queueHint.style.display = '';
-          } else {
-            queueHint.style.display = 'none';
-            queueHint.textContent = '';
+        const knownLookup = (name) => _sfKnownVendors.find(k => k.name.toLowerCase() === String(name || '').toLowerCase());
+        const v = _sfImport.vendor;
+        if (v && v.vendor) {
+          if (_sfImportEls.vendor)  _sfImportEls.vendor.value  = v.vendor;
+          if (_sfImportEls.website) _sfImportEls.website.value = v.vendorWebsite || (knownLookup(v.vendor)?.website || '');
+          if (_sfImportEls.purchased) {
+            // Checkbox represents "Free content". Most catalogs are paid, so
+            // it defaults off. Check it only when the detected vendor is known
+            // to ship free-only content (purchasedDefault === false).
+            _sfImportEls.purchased.checked = (v.purchasedDefault === false);
           }
-        }
-        const hasScan = !!(_sfImportScan && _sfImportScan.ok && _sfImportScan.hasContent);
-        const valid = !!(_sfImportSourcePath && hasScan && !nameError && !queueFull);
-        if (_sfConfirmBtn) _sfConfirmBtn.disabled = !valid;
-      };
-      const _sfImportBrowse = async () => {
-        const folder = await window.electronAPI.selectFolder();
-        if (!folder) return;
-        _sfImportSourcePath = folder;
-        if (_sfPath) _sfPath.value = folder;
-        const scan = await window.electronAPI.scanSoundFontFolder(folder);
-        _sfImportScan = scan;
-        if (!scan || !scan.ok) {
-          if (_sfScanInfo) {
-            _sfScanInfo.textContent = (scan && scan.error) || 'Could not read folder';
-            _sfScanInfo.className = 'sf-import-scan-info error';
-          }
-          _sfImportSourcePath = null;
-        } else if (!scan.hasContent) {
-          if (_sfScanInfo) {
-            _sfScanInfo.textContent = 'No sound font content found in this folder. Pick a folder that contains .wav files or alt folders.';
-            _sfScanInfo.className = 'sf-import-scan-info error';
+          if (_sfImportEls.vendorInfo) {
+            const where = v.matchedFile
+              ? ` (matched ${v.matchedFile})`
+              : v.matchedAt
+                ? ` (matched structural pattern at ${v.matchedAt})`
+                : ' (matched structural pattern)';
+            _sfImportEls.vendorInfo.textContent = `Auto-detected as ${v.vendor}${where}`;
+            _sfImportEls.vendorInfo.classList.add('detected');
           }
         } else {
-          if (_sfScanInfo) {
-            const parts = [];
-            if (scan.detectedMultiVersion) parts.push('Detected Proffie subfolder — importing from there.');
-            const wavN = scan.wavCount || 0;
-            const altN = scan.altFolderCount || 0;
-            if (wavN > 0 && altN > 0) {
-              parts.push(`Found ${wavN} .wav file${wavN === 1 ? '' : 's'} across ${altN} alt folder${altN === 1 ? '' : 's'}.`);
-            } else if (wavN > 0) {
-              parts.push(`Found ${wavN} .wav file${wavN === 1 ? '' : 's'}.`);
-            } else if (altN > 0) {
-              parts.push(`Found ${altN} alt folder${altN === 1 ? '' : 's'}.`);
-            }
-            _sfScanInfo.textContent = parts.join(' ');
-            _sfScanInfo.className = 'sf-import-scan-info' + (scan.detectedMultiVersion ? ' detected' : '');
+          if (_sfImportEls.vendor)  _sfImportEls.vendor.value  = '';
+          if (_sfImportEls.website) _sfImportEls.website.value = '';
+          if (_sfImportEls.purchased) _sfImportEls.purchased.checked = false;
+          if (_sfImportEls.vendorInfo) {
+            _sfImportEls.vendorInfo.textContent = 'No vendor pattern matched. Type a vendor name if you know it.';
+            _sfImportEls.vendorInfo.classList.remove('detected');
           }
-          // Pre-fill the name field with the suggested name if it's empty.
-          if (_sfNameInput && !_sfNameInput.value) _sfNameInput.value = scan.suggestedName || '';
-          _sfImportSourcePath = scan.sourcePath;
         }
-        _sfImportValidate();
-      };
-      // Enqueue the configured import and close the modal. The background
-      // processor picks it up; the user sees a pending card appear in the grid
-      // and can queue more (up to the limit) or do other work while the copy
-      // runs in main.
-      const _sfImportConfirm = async () => {
-        if (!_sfImportSourcePath || !_sfNameInput) return;
-        const name = _sfNameInput.value.trim();
-        if (_sfImportQueue.length >= _SF_QUEUE_LIMIT) return;
-        const item = {
-          id: `sf-import-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
-          name,
-          sourcePath: _sfImportSourcePath,
-          metadata: {
-            author: (_sfAuthor?.value || '').trim(),
-            purchased: !!(_sfPurchased && _sfPurchased.checked),
-            acquisitionDate: (_sfDate?.value || ''),
-            description: (_sfDesc?.value || '').trim(),
-            linkedStyleLibraryEntry: null,
-          },
-          stage: 'queued',
-          current: 0,
-          total: 0,
-          bytes: 0,
-          totalBytes: 0,
-          currentFile: '',
+        if (_sfImportEls.vendor) {
+          _sfImportEls.vendor.oninput = () => {
+            const known = knownLookup(_sfImportEls.vendor.value);
+            if (known && _sfImportEls.website && !_sfImportEls.website.value) _sfImportEls.website.value = known.website;
+          };
+        }
+        if (_sfImportEls.purchaseDate) _sfImportEls.purchaseDate.value = new Date().toISOString().slice(0, 10);
+        if (_sfImportEls.notes) _sfImportEls.notes.value = '';
+        const cands = _sfImport.candidates || [];
+        if (_sfImportEls.candCount) _sfImportEls.candCount.textContent = cands.length === 0 ? '(none)' : `(${cands.length})`;
+        // Bundle-name lookup (computed in backend, attached to each candidate)
+        // drives the prepend checkbox visibility and label.
+        const bundleName = _sfBundleNameFromCands(cands);
+        _sfImport.bundleName = bundleName;
+        // Bundle/source name field — always shown when we have at least one
+        // candidate. For single-font sources it doubles as the source's own
+        // friendly name (which can differ from the user's eventual font name).
+        if (_sfImportEls.bundleField) {
+          _sfImportEls.bundleField.style.display = cands.length >= 1 ? '' : 'none';
+        }
+        if (_sfImportEls.bundleNameInput) {
+          _sfImportEls.bundleNameInput.value = bundleName || '';
+        }
+        // Prepend-prefix checkbox only makes sense when 2+ candidates would
+        // share the prefix; hide it for single-font sources.
+        if (_sfImportEls.bundleRow) {
+          _sfImportEls.bundleRow.style.display = (cands.length >= 2 && bundleName) ? '' : 'none';
+        }
+        if (_sfImportEls.bundleHint) {
+          _sfImportEls.bundleHint.textContent = bundleName ? `(${bundleName})` : '';
+        }
+        // Default off — the bundle name is already searchable as a tag, so
+        // prefixing the font names too is redundant. Available as opt-in for
+        // users who want it for sorting or visual grouping.
+        if (_sfImportEls.bundleCheck) {
+          _sfImportEls.bundleCheck.checked = false;
+        }
+        // Surface the "you can come back later" reassurance for any source
+        // with 2+ candidates, regardless of whether they share a bundle prefix.
+        if (_sfImportEls.bundleFollow) {
+          _sfImportEls.bundleFollow.style.display = (cands.length >= 2) ? '' : 'none';
+        }
+        const prependBundle = bundleName && _sfImportEls.bundleCheck ? _sfImportEls.bundleCheck.checked : false;
+        if (_sfImportEls.candList) {
+          if (cands.length === 0) {
+            _sfImportEls.candList.innerHTML = '<div class="sf-import-hint">No Proffie-shaped fonts detected inside this source.</div>';
+          } else {
+            _sfImportEls.candList.innerHTML = cands.map((c, i) => {
+              const initialName = _sfSuggestName(c, i, bundleName, prependBundle);
+              const badges = [];
+              if (c.multiBoard) {
+                const tip = (c.otherFlavors && c.otherFlavors.length)
+                  ? `This source ships for several soundboards. The Proffie variant will be imported. Other flavors in this source: ${c.otherFlavors.join(', ')}.`
+                  : 'This source ships for several soundboards. The Proffie variant will be imported.';
+                badges.push(`<span class="cand-badge multi-board" title="${_sfEscape(tip)}">Proffie variant</span>`);
+              }
+              if (c.nested) {
+                badges.push('<span class="cand-badge nested" title="The Proffie content lives inside a nested zip. JMT Studio extracts it during import.">nested zip</span>');
+              }
+              const wavLine = c.wavCount != null ? `${c.wavCount} .wav` : 'wav count inside nested zip';
+              return `<div class="sf-review-candidate-row" data-idx="${i}">
+                <input type="checkbox" class="cand-check" checked>
+                <div class="cand-main">
+                  <input type="text" class="cand-name" value="${_sfEscape(initialName)}" maxlength="64" autocomplete="off">
+                  <div class="cand-path">${_sfEscape(c.path || '(source root)')}</div>
+                  <div class="cand-status"></div>
+                </div>
+                <div class="cand-meta">
+                  <div class="cand-badges">${badges.join('')}</div>
+                  <div>${_sfEscape(wavLine)}</div>
+                </div>
+              </div>`;
+            }).join('');
+          }
+        }
+        _sfImportEls.candList?.querySelectorAll('.sf-review-candidate-row').forEach(row => {
+          const check = row.querySelector('.cand-check');
+          const name  = row.querySelector('.cand-name');
+          row.dataset.edited = 'false';
+          row.dataset.suggested = name?.value || '';
+          const validate = () => _sfRevalidateCandidates();
+          check?.addEventListener('change', () => {
+            row.classList.toggle('disabled', !check.checked);
+            validate();
+          });
+          name?.addEventListener('input', () => {
+            if (name.value !== row.dataset.suggested) row.dataset.edited = 'true';
+            validate();
+          });
+        });
+        // Recompute the suggested names for every row that hasn't been
+        // manually edited. Called when the user toggles the prepend
+        // checkbox OR when they edit the bundle name itself. Manual name
+        // edits always win.
+        const _rebuildSuggestedNames = () => {
+          const prepend = _sfImportEls.bundleCheck?.checked || false;
+          const currentBundle = (_sfImportEls.bundleNameInput?.value || '').trim() || null;
+          _sfImport.bundleName = currentBundle;
+          if (_sfImportEls.bundleHint) {
+            _sfImportEls.bundleHint.textContent = currentBundle ? `(${currentBundle})` : '';
+          }
+          _sfImportEls.candList?.querySelectorAll('.sf-review-candidate-row').forEach(row => {
+            if (row.dataset.edited === 'true') return;
+            const idx = parseInt(row.dataset.idx, 10);
+            const c = _sfImport.candidates[idx];
+            const newName = _sfSuggestName(c, idx, currentBundle, prepend);
+            const nameEl = row.querySelector('.cand-name');
+            if (nameEl) nameEl.value = newName;
+            row.dataset.suggested = newName;
+          });
+          _sfRevalidateCandidates();
         };
-        _sfImportQueue.push(item);
-        _sfCloseImportModal();
-        await window.refreshSoundFontsView();
-        _sfProcessImportQueue();
+        if (_sfImportEls.bundleCheck) {
+          _sfImportEls.bundleCheck.onchange = _rebuildSuggestedNames;
+        }
+        if (_sfImportEls.bundleNameInput) {
+          _sfImportEls.bundleNameInput.oninput = _rebuildSuggestedNames;
+        }
+        _sfRevalidateCandidates();
       };
 
-      // Serial queue processor — runs one import at a time. Subscribes to main's
-      // progress events for the duration of the active item, updates the matching
-      // pending card in the grid as events arrive, and on completion either
-      // surfaces the error or refreshes the view so the new disk-backed font
-      // shows up in its proper alphabetical slot.
-      let _sfProgressUnsub = null;
-      const _sfProcessImportQueue = async () => {
-        if (_sfImportRunning) return;
-        const active = _sfImportQueue[0];
-        if (!active || active.stage !== 'queued') return;
-        _sfImportRunning = true;
-        active.stage = 'starting';
-        _sfRenderGrid();
-        if (_sfProgressUnsub) { try { _sfProgressUnsub(); } catch {} }
-        _sfProgressUnsub = window.electronAPI.onSoundFontImportProgress((data) => {
-          if (!data || !active) return;
-          if (data.stage === 'starting') {
-            active.stage = 'starting';
-            active.total = data.total || 0;
-            active.totalBytes = data.totalBytes || 0;
-          } else if (data.stage === 'copying') {
-            active.stage = 'copying';
-            active.current = data.current || 0;
-            active.total = data.total || active.total;
-            active.bytes = data.bytes || 0;
-            active.totalBytes = data.totalBytes || active.totalBytes;
-            active.currentFile = data.currentFile || '';
-          } else if (data.stage === 'done') {
-            active.stage = 'done';
-            active.current = active.total;
-            active.bytes = active.totalBytes;
+      const _sfRevalidateCandidates = () => {
+        const rows = Array.from(_sfImportEls.candList?.querySelectorAll('.sf-review-candidate-row') || []);
+        const nameRe = /^[A-Za-z0-9_\-]+$/;
+        let anyChecked = false;
+        let anyError = false;
+        const namesInUse = new Map();
+        for (const row of rows) {
+          const idx = parseInt(row.dataset.idx, 10);
+          const check = row.querySelector('.cand-check');
+          const nameEl = row.querySelector('.cand-name');
+          const statusEl = row.querySelector('.cand-status');
+          const sanitized = _sfSanitizeName(nameEl?.value || '');
+          let err = '';
+          if (check?.checked) {
+            anyChecked = true;
+            if (!sanitized) err = 'Name is required';
+            else if (!nameRe.test(sanitized)) err = 'Use letters, numbers, underscore, or hyphen';
+            else if (_sfAllEntries.some(e => e.name.toLowerCase() === sanitized.toLowerCase())) err = 'A library entry with this name already exists';
+            else if (namesInUse.has(sanitized.toLowerCase())) err = 'Duplicate name in this list';
+            else namesInUse.set(sanitized.toLowerCase(), idx);
           }
-          _sfRenderGrid();
-        });
-        const res = await window.electronAPI.importSoundFont({
-          sourcePath: active.sourcePath,
-          name: active.name,
-          metadata: active.metadata,
-        });
-        if (_sfProgressUnsub) { try { _sfProgressUnsub(); } catch {} _sfProgressUnsub = null; }
-        // Pop the active item regardless of outcome; surface error if needed.
-        _sfImportQueue.shift();
-        _sfImportRunning = false;
-        if (!res || !res.ok) {
-          alert(`Import failed (${active.name}): ${res && res.error || 'unknown error'}`);
+          nameEl?.classList.toggle('invalid', !!err);
+          if (statusEl) {
+            statusEl.textContent = err;
+            statusEl.classList.toggle('error', !!err);
+          }
+          if (err) anyError = true;
         }
-        await window.refreshSoundFontsView();
-        // Kick the next queued item if any.
-        if (_sfImportQueue.length > 0) _sfProcessImportQueue();
+        if (_sfImportEls.confirmBtn) _sfImportEls.confirmBtn.disabled = !anyChecked || anyError;
       };
-      document.getElementById('btn-sf-import-toolbar')?.addEventListener('click', _sfOpenImportModal);
-      document.getElementById('btn-sf-import-font')?.addEventListener('click', _sfOpenImportModal);
-      document.getElementById('sf-import-browse-btn')?.addEventListener('click', _sfImportBrowse);
-      document.getElementById('sf-import-cancel')?.addEventListener('click', _sfCloseImportModal);
-      _sfConfirmBtn?.addEventListener('click', _sfImportConfirm);
-      _sfNameInput?.addEventListener('input', _sfImportValidate);
+
+      const _sfConfirmImport = async () => {
+        if (!_sfImport || !_sfImport.uuid) return;
+        const rows = Array.from(_sfImportEls.candList?.querySelectorAll('.sf-review-candidate-row') || []);
+        const picks = [];
+        for (const row of rows) {
+          const idx = parseInt(row.dataset.idx, 10);
+          const check = row.querySelector('.cand-check');
+          const nameEl = row.querySelector('.cand-name');
+          if (!check?.checked) continue;
+          picks.push({ candidate: _sfImport.candidates[idx], name: _sfSanitizeName(nameEl?.value || '') });
+        }
+        if (picks.length === 0) return;
+        const entryAuthor = (_sfImportEls.vendor?.value || '').trim() || null;
+        const entryWebsite = (_sfImportEls.website?.value || '').trim() || null;
+        const purchaseDate = _sfImportEls.purchaseDate?.value || new Date().toISOString().slice(0, 10);
+        // The checkbox now means "Free content"; invert to get the stored
+        // `purchased` flag. Unchecked (the default) means paid.
+        const purchased = !(_sfImportEls.purchased && _sfImportEls.purchased.checked);
+        const userBundle = (_sfImportEls.bundleNameInput?.value || '').trim() || null;
+        const sourceNotes = (_sfImportEls.notes?.value || '').trim() || '';
+        // Persist the user-edited source-level metadata (bundle/source name,
+        // vendor overrides, paid flag, date, notes) back onto the source's
+        // meta.json before creating any entries. The source ledger ends up
+        // matching what the user saw at review time.
+        await window.electronAPI.updateSourceMeta({
+          uuid: _sfImport.uuid,
+          updates: {
+            bundleName: userBundle,
+            vendor: entryAuthor,
+            vendorWebsite: entryWebsite,
+            purchased,
+            purchaseDate,
+            userNotes: sourceNotes,
+          },
+        });
+        _sfShowPhase('creating');
+        if (_sfImportEls.createBar) _sfImportEls.createBar.style.width = '0%';
+        if (_sfCreateProgressUnsub) { try { _sfCreateProgressUnsub(); } catch {} }
+        _sfCreateProgressUnsub = window.electronAPI.onEntryCreateProgress((data) => {
+          if (!data) return;
+          if (data.stage === 'extracting' && _sfImportEls.createDetail) {
+            _sfImportEls.createDetail.textContent = data.currentFile || '';
+          }
+        });
+        const failures = [];
+        for (let i = 0; i < picks.length; i++) {
+          const pick = picks[i];
+          if (_sfImportEls.createLabel) _sfImportEls.createLabel.textContent = `Adding ${pick.name} (${i + 1} of ${picks.length})…`;
+          if (_sfImportEls.createBar)   _sfImportEls.createBar.style.width = `${Math.round((i / picks.length) * 100)}%`;
+          // Tags come from the user-edited bundle name (if any) plus any
+          // tags they've supplied directly. The backend dedups so duplicate
+          // strings don't cause issues.
+          const tags = userBundle ? [userBundle] : [];
+          const res = await window.electronAPI.createEntry({
+            sourceUuid: _sfImport.uuid,
+            candidate: pick.candidate,
+            name: pick.name,
+            metadata: {
+              author: entryAuthor,
+              purchased,
+              acquisitionDate: purchaseDate,
+              description: '',
+              tags,
+            },
+          });
+          if (!res || !res.ok) failures.push({ name: pick.name, error: (res && res.error) || 'unknown error' });
+        }
+        if (_sfCreateProgressUnsub) { try { _sfCreateProgressUnsub(); } catch {} _sfCreateProgressUnsub = null; }
+        if (_sfImportEls.createBar) _sfImportEls.createBar.style.width = '100%';
+        if (failures.length) {
+          alert(`Some entries failed:\n${failures.map(f => ` • ${f.name}: ${f.error}`).join('\n')}`);
+        }
+        // The source is now committed (referenced by at least one entry, or
+        // attempted by the user). Clear the orphan-cleanup hook before close.
+        if (_sfImport) _sfImport.uuid = null;
+        _sfCloseImport();
+        await window.refreshSoundFontsView();
+      };
+
+      const _sfPickAndImport = async (mode) => {
+        const sourcePath = await window.electronAPI.selectSoundFontSource({ mode });
+        if (!sourcePath) return;
+        await _sfRunImport(sourcePath);
+      };
+
+      document.getElementById('btn-sf-import-toolbar')?.addEventListener('click', _sfOpenImport);
+      document.getElementById('btn-sf-import-font')?.addEventListener('click', _sfOpenImport);
+      _sfImportEls.pickZipBtn?.addEventListener('click', () => _sfPickAndImport('zip'));
+      _sfImportEls.pickFolderBtn?.addEventListener('click', () => _sfPickAndImport('folder'));
+      _sfImportEls.cancelBtn?.addEventListener('click', _sfCloseImport);
+      _sfImportEls.confirmBtn?.addEventListener('click', _sfConfirmImport);
       // Search bar wiring for the browse grid
       document.getElementById('sf-search')?.addEventListener('input', function() {
         _sfSearchQuery = this.value;

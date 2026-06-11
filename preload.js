@@ -185,6 +185,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listSources:           ()           => ipcRenderer.invoke('sources:list'),
   sourceExistsByHash:    (hash)       => ipcRenderer.invoke('sources:existsByHash', hash),
   importSource:          (params)     => ipcRenderer.invoke('sources:import', params),
+  deleteSource:          (params)     => ipcRenderer.invoke('sources:delete', params),
+  updateSourceMeta:      (params)     => ipcRenderer.invoke('sources:updateMeta', params),
   onSourceImportProgress: (cb) => {
     const handler = (_, data) => cb(data);
     ipcRenderer.on('sources:importProgress', handler);
@@ -213,6 +215,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('sources:extractProgress', handler);
     return () => ipcRenderer.removeListener('sources:extractProgress', handler);
   },
+
+  selectSoundFontSource: (params) => ipcRenderer.invoke('dialog:selectSoundFontSource', params),
 
   readClipboard:   () => ipcRenderer.invoke('clipboard:read'),
 

@@ -186,16 +186,29 @@ function detectMultiBoardSiblings(childFolders, childFiles) {
 
 // ── Bundle-of-inner-zips detection ──────────────────────
 
+// Names that look like bonus/non-font content inside a multi-font bundle.
+// Underscore prefixes ("_Extras", "_Bonus", "_ReadMe") are the convention
+// across most vendors; numbered prefixes ("1- Bonus Sounds") show up in
+// JayDaloRian and similar. The word-match catches plain "extras", "media",
+// "manuals", etc. that some vendors ship at the bundle root.
+const NON_FONT_BUNDLE_NAME = /^(?:\d+\s*[-_]\s*)?(?:_|extras?\b|bonus\b|pictures?\b|media\b|movie\b|movies\b|manuals?\b|instructions?\b|copyright\b|read.?me\b|license\b)/i;
+
 // True when the children at this dir look like a multi-font bundle (multiple
 // inner zips whose stems are NOT board indicators, e.g. Power_Of_Many_Bundle
 // with Sol.zip/Yord.zip/Osha.zip). The Greyscale inner-zip case is excluded
-// because those stems ARE board indicators (handled by multi-board).
+// because those stems ARE board indicators (handled by multi-board). Bonus-
+// content zips like _Extras.zip are filtered out by name convention.
 function detectBundleOfZips(childFiles) {
   const zips = childFiles.filter(f => /\.zip$/i.test(f.name));
   if (zips.length < 2) return null;
-  const nonBoardZips = zips.filter(z => !identifyBoard(z.name.replace(/\.zip$/i, '')));
-  if (nonBoardZips.length < 2) return null;
-  return nonBoardZips;
+  const candidateZips = zips.filter(z => {
+    const stem = z.name.replace(/\.zip$/i, '');
+    if (identifyBoard(stem)) return false;
+    if (NON_FONT_BUNDLE_NAME.test(stem)) return false;
+    return true;
+  });
+  if (candidateZips.length < 2) return null;
+  return candidateZips;
 }
 
 // Walk down from startDir looking for the actual Proffie-font root. Many
@@ -294,6 +307,29 @@ function walkForCandidates(byParent, currentDir, candidates, fallbackName) {
   }
 }
 
+// Find the deepest folder path shared by every candidate. For multi-font
+// bundles like Spectre_5 (Huyang, Sabine) or Father (Father_V1, ANH, ESB,
+// R1, ROTJ), this surfaces the outer bundle name. Returns null when there's
+// only one candidate or when the shared folder is a generic board name (so
+// e.g. multiple KSith fonts that all live under "Proffie/" don't get
+// "Proffie" suggested as the bundle).
+function detectBundleName(candidates) {
+  if (!candidates || candidates.length < 2) return null;
+  const parts = candidates.map(c => String(c.path || '').split('/').filter(Boolean));
+  if (parts.some(p => p.length === 0)) return null;
+  const minLen = Math.min(...parts.map(p => p.length));
+  const common = [];
+  for (let i = 0; i < minLen; i++) {
+    const seg = parts[0][i];
+    if (parts.every(p => p[i] === seg)) common.push(seg);
+    else break;
+  }
+  if (common.length === 0) return null;
+  const last = common[common.length - 1];
+  if (/^(proffie|cfx|verso|asteria|xenopixel|xeno|goldenharvest|ghv3|cfx-?ghv3)$/i.test(last)) return null;
+  return last;
+}
+
 async function detectCandidates(source) {
   if (!source || typeof source.listAll !== 'function') {
     return { candidates: [] };
@@ -305,11 +341,22 @@ async function detectCandidates(source) {
     ? source.meta.originalName.replace(/\.zip$/i, '')
     : 'source';
   walkForCandidates(byParent, '', candidates, sourceFallbackName);
-  return { candidates };
+  // Every source has a name. For multi-font bundles with a shared parent
+  // folder (Spectre_5, Father), the bundle name is that folder. For
+  // multi-font bundles with inner zips at the source root (Power_Of_Many_
+  // Bundle), it's the source's own name. For single-font sources it's also
+  // the source's own name (the source-as-bundle of one). Each candidate
+  // carries the bundle name so the renderer and entry meta can read it
+  // without recomputing.
+  let bundleName = detectBundleName(candidates);
+  if (!bundleName && candidates.length >= 1) bundleName = sourceFallbackName;
+  if (bundleName) for (const c of candidates) c.bundleName = bundleName;
+  return { candidates, bundleName };
 }
 
 module.exports = {
   detectCandidates,
+  detectBundleName,
   // exported for testing / introspection
   identifyBoard,
   looksLikeProffieFont,

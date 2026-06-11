@@ -853,6 +853,22 @@ ipcMain.handle('sources:existsByHash', (_, hash) => {
   }
 });
 
+ipcMain.handle('sources:delete', (_, { uuid } = {}) => {
+  try {
+    return soundFontSources.deleteSource(app.getPath('userData'), uuid);
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
+ipcMain.handle('sources:updateMeta', (_, { uuid, updates } = {}) => {
+  try {
+    return soundFontSources.updateSourceMeta(app.getPath('userData'), uuid, updates);
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
 ipcMain.handle('sources:browse', async (_, { uuid, path: subPath } = {}) => {
   try {
     const source = soundFontSources.openSource(app.getPath('userData'), uuid);
@@ -962,7 +978,7 @@ ipcMain.handle('sources:exportToDownloads', async (_, { uuid, destDir } = {}) =>
   }
 });
 
-ipcMain.handle('sources:import', async (event, { sourcePath, originalName, metadata } = {}) => {
+ipcMain.handle('sources:import', async (event, { sourcePath, originalName, metadata, forceNewSource } = {}) => {
   const send = (payload) => {
     try { event.sender.send('sources:importProgress', payload); } catch {}
   };
@@ -972,6 +988,7 @@ ipcMain.handle('sources:import', async (event, { sourcePath, originalName, metad
       sourcePath,
       originalName,
       metadata,
+      forceNewSource,
       onProgress: send,
     });
   } catch (err) {
@@ -1338,6 +1355,26 @@ ipcMain.handle('dialog:selectFolder', async () => {
     title: 'Select ProffieOS Folder',
     properties: ['openDirectory']
   });
+  if (canceled || !filePaths.length) return null;
+  return filePaths[0];
+});
+
+// Pick a sound font source: either a .zip file or a folder. Split into two
+// modes because Electron's openFile + openDirectory only co-exist on macOS;
+// on Windows and Linux the dialog has to commit to one. The renderer shows
+// two buttons so the choice is explicit.
+ipcMain.handle('dialog:selectSoundFontSource', async (_, { mode = 'folder' } = {}) => {
+  const opts = mode === 'zip'
+    ? {
+        title: 'Select Sound Font Zip',
+        properties: ['openFile'],
+        filters: [{ name: 'Zip files', extensions: ['zip'] }],
+      }
+    : {
+        title: 'Select Sound Font Folder',
+        properties: ['openDirectory'],
+      };
+  const { canceled, filePaths } = await dialog.showOpenDialog(win, opts);
   if (canceled || !filePaths.length) return null;
   return filePaths[0];
 });

@@ -40,7 +40,7 @@ const vendors = [
   {
     id: 'ksith',
     displayName: 'KSith',
-    website: null,
+    website: 'https://www.ksithsaberfonts.com/',
     purchasedDefault: undefined,
     patterns: [
       {
@@ -108,16 +108,18 @@ const vendors = [
   },
   {
     id: 'jaydalorian',
-    displayName: 'JayDaloRian',
-    website: null,
+    displayName: 'JayDalorian',
+    website: 'https://jaydalorian.com/',
     purchasedDefault: undefined,
     patterns: [
       // Older shape: ReadMe.txt at bundle root. Newer shape: Copyright ©.txt.
-      // Both contain the same identifier text.
+      // Both contain the same identifier text. Case-insensitive match catches
+      // the variant cap "JayDaloRian" some readmes use vs the website's
+      // canonical "JayDalorian".
       {
         type: 'readmeContent',
         fileMatch: /(^|\/)(ReadMe\.txt|Copyright .+\.txt)$/i,
-        contentMatch: /Jaydalorian|JayDaloRian|J[ée]r[ôo]me\s+Tremblay/i,
+        contentMatch: /jaydalorian|J[ée]r[ôo]me\s+Tremblay/i,
       },
       // Structural fallback for variants that ship without any text identifier
       // but include the newer-shape helper files.

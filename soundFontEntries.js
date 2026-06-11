@@ -187,6 +187,23 @@ async function createEntry({ userData, sourceUuid, candidate, name, metadata, on
       });
     }
 
+    // Tags array. When the caller supplies metadata.tags, that wins (the
+    // renderer pre-resolves the user-edited bundle name and any other tags
+    // and passes them through). Otherwise we fall back to the candidate's
+    // detected bundle name so a backend-only entry creation still gets
+    // sensibly seeded.
+    let initialTags;
+    if (metadata && Array.isArray(metadata.tags)) {
+      initialTags = [];
+      for (const t of metadata.tags) {
+        const trimmed = String(t || '').trim();
+        if (trimmed && !initialTags.includes(trimmed)) initialTags.push(trimmed);
+      }
+    } else if (candidate.bundleName) {
+      initialTags = [candidate.bundleName];
+    } else {
+      initialTags = [];
+    }
     const meta = {
       schemaVersion: 1,
       name: entryName,
@@ -195,6 +212,7 @@ async function createEntry({ userData, sourceUuid, candidate, name, metadata, on
       multiBoard: !!candidate.multiBoard,
       otherFlavors: candidate.otherFlavors || [],
       nested: !!candidate.nested,
+      tags: initialTags,
       linkedStyleLibraryEntry: (metadata && metadata.linkedStyleLibraryEntry) || null,
       purchased: !!(metadata && metadata.purchased),
       author: (metadata && metadata.author) || '',
