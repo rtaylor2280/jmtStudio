@@ -198,6 +198,32 @@ function detectBundleOfZips(childFiles) {
   return nonBoardZips;
 }
 
+// Walk down from startDir looking for the actual Proffie-font root. Many
+// vendor archives wrap the real content in extra layers: JayDaloRian's
+// Proffie/ holds an instruction `resource.txt` plus the actual font inside
+// a `<FontName>/` subfolder. This helper descends through such wrappers
+// until it finds a folder whose direct contents satisfy looksLikeProffieFont.
+// Returns null if multiple sibling folders match (ambiguous, leave it to the
+// caller) or if nothing matches.
+function findDeepestProffieRoot(byParent, startDir) {
+  const children = byParent.get(startDir) || [];
+  const folders = children.filter(c => c.isDir);
+  const files = children.filter(c => !c.isDir);
+
+  if (looksLikeProffieFont(folders, files)) return startDir;
+  if (folders.length === 0) return null;
+
+  const matches = [];
+  for (const f of folders) {
+    const sub = findDeepestProffieRoot(byParent, f.fileName);
+    if (sub) matches.push(sub);
+  }
+  // Exactly one descendant is a real Proffie root → that's the path. More
+  // than one is multi-version-inside-Proffie, which we don't try to flatten
+  // automatically; the caller falls back to the original multi-board path.
+  return matches.length === 1 ? matches[0] : null;
+}
+
 // ── Main walker ─────────────────────────────────────────
 
 function walkForCandidates(byParent, currentDir, candidates, fallbackName) {
@@ -223,8 +249,16 @@ function walkForCandidates(byParent, currentDir, candidates, fallbackName) {
   const multiBoard = detectMultiBoardSiblings(childFolders, childFiles);
   if (multiBoard) {
     const name = currentDir ? currentDir.split('/').pop() : fallbackName;
-    const proffiePath = multiBoard.proffieChild.fileName;
+    const initialPath = multiBoard.proffieChild.fileName;
     const isInnerZip = multiBoard.matchType === 'inner-zip-siblings';
+    // For folder-form multi-board, descend through any wrapper layers (e.g.
+    // JayDaloRian's Proffie/resource.txt + Proffie/<FontName>/) so the path
+    // points at the actual font root. For inner-zip form we can't peek
+    // inside the nested archive at detection time; the extractor handles
+    // wrapper stripping on its end.
+    const proffiePath = isInnerZip
+      ? initialPath
+      : (findDeepestProffieRoot(byParent, initialPath) || initialPath);
     candidates.push({
       name,
       path: proffiePath,

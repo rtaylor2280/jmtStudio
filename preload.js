@@ -198,6 +198,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   exportSourceToDownloads: (params)   => ipcRenderer.invoke('sources:exportToDownloads', params),
   detectSourceVendor:    (params)     => ipcRenderer.invoke('sources:detectVendor', params),
   detectSourceCandidates: (params)    => ipcRenderer.invoke('sources:detectCandidates', params),
+
+  // Library entries (Phase 1, slice 5)
+  listEntries:           ()           => ipcRenderer.invoke('entries:list'),
+  entryExistsByName:     (name)       => ipcRenderer.invoke('entries:existsByName', name),
+  createEntry:           (params)     => ipcRenderer.invoke('entries:create', params),
+  onEntryCreateProgress: (cb) => {
+    const handler = (_, data) => cb(data);
+    ipcRenderer.on('entries:createProgress', handler);
+    return () => ipcRenderer.removeListener('entries:createProgress', handler);
+  },
   onSourceExtractProgress: (cb) => {
     const handler = (_, data) => cb(data);
     ipcRenderer.on('sources:extractProgress', handler);

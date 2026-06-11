@@ -9,6 +9,7 @@ const cacheManager = require('./cacheManager');
 const soundFontSources = require('./soundFontSources');
 const soundFontVendors = require('./soundFontVendors');
 const soundFontCandidates = require('./soundFontCandidates');
+const soundFontEntries = require('./soundFontEntries');
 
 // ── Separate userData for dev vs prod ──────────────────
 if (!app.isPackaged) {
@@ -905,6 +906,42 @@ ipcMain.handle('sources:detectCandidates', async (_, { uuid } = {}) => {
     if (!source) return { ok: false, error: `Source not found: ${uuid}` };
     const result = await soundFontCandidates.detectCandidates(source);
     return { ok: true, ...result };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
+// ── Sound Fonts — library entries (Phase 1, slice 5) ───
+// Entries are curated subsets of a source, extracted into
+// userData/soundFonts/library/<name>/ with a meta.json linking back to the
+// source by UUID. Phase 2 wires these into the browse grid and migration.
+ipcMain.handle('entries:list', () => {
+  try { return { ok: true, entries: soundFontEntries.listEntries(app.getPath('userData')) }; }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+ipcMain.handle('entries:existsByName', (_, name) => {
+  try {
+    const match = soundFontEntries.findEntryByName(app.getPath('userData'), name);
+    return { ok: true, match };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
+ipcMain.handle('entries:create', async (event, { sourceUuid, candidate, name, metadata } = {}) => {
+  const send = (payload) => {
+    try { event.sender.send('entries:createProgress', payload); } catch {}
+  };
+  try {
+    return await soundFontEntries.createEntry({
+      userData: app.getPath('userData'),
+      sourceUuid,
+      candidate,
+      name,
+      metadata,
+      onProgress: send,
+    });
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };
   }
