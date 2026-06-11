@@ -181,6 +181,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('soundFonts:importProgress', handler);
   },
 
+  // ── Sound Fonts — sources (Phase 1) ───────────────────
+  listSources:           ()           => ipcRenderer.invoke('sources:list'),
+  sourceExistsByHash:    (hash)       => ipcRenderer.invoke('sources:existsByHash', hash),
+  importSource:          (params)     => ipcRenderer.invoke('sources:import', params),
+  onSourceImportProgress: (cb) => {
+    const handler = (_, data) => cb(data);
+    ipcRenderer.on('sources:importProgress', handler);
+    return () => ipcRenderer.removeListener('sources:importProgress', handler);
+  },
+
   readClipboard:   () => ipcRenderer.invoke('clipboard:read'),
 
 });

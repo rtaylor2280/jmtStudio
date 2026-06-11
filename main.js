@@ -6,6 +6,7 @@ const toolchain   = require('./toolchain');
 const portDetect  = require('./portDetector');
 const proffie     = require('./proffieos');
 const cacheManager = require('./cacheManager');
+const soundFontSources = require('./soundFontSources');
 
 // ── Separate userData for dev vs prod ──────────────────
 if (!app.isPackaged) {
@@ -830,6 +831,42 @@ ipcMain.handle('soundFonts:importFont', async (event, { sourcePath, name, metada
     return { ok: false, error: String(err && err.message || err) };
   }
 });
+// ── Sound Fonts — sources (Phase 1) ────────────────────
+// Sources are the user's archive of purchases as delivered, stored verbatim
+// under userData/soundFonts/sources/<uuid>/. Each source is either a
+// source.zip (zip-delivered) or a source/ subfolder (folder-delivered) plus
+// a meta.json. Library entries (Phase 2) reference sources by uuid.
+ipcMain.handle('sources:list', () => {
+  try { return { ok: true, sources: soundFontSources.listSources(app.getPath('userData')) }; }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+ipcMain.handle('sources:existsByHash', (_, hash) => {
+  try {
+    const match = soundFontSources.findByHash(app.getPath('userData'), hash);
+    return { ok: true, match };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
+ipcMain.handle('sources:import', async (event, { sourcePath, originalName, metadata } = {}) => {
+  const send = (payload) => {
+    try { event.sender.send('sources:importProgress', payload); } catch {}
+  };
+  try {
+    return await soundFontSources.importSource({
+      userData: app.getPath('userData'),
+      sourcePath,
+      originalName,
+      metadata,
+      onProgress: send,
+    });
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
 ipcMain.handle('app:getArduinoDataPath', () => {
   const os   = require('os');
   const base = app.isPackaged
