@@ -945,6 +945,19 @@ ipcMain.handle('entries:existsByName', (_, name) => {
   }
 });
 
+ipcMain.handle('entries:updateMeta', (_, { currentName, newName, updates } = {}) => {
+  try {
+    return soundFontEntries.updateEntryMeta({
+      userData: app.getPath('userData'),
+      currentName,
+      newName,
+      updates,
+    });
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
 ipcMain.handle('entries:create', async (event, { sourceUuid, candidate, name, metadata } = {}) => {
   const send = (payload) => {
     try { event.sender.send('entries:createProgress', payload); } catch {}

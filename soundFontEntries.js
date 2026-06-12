@@ -236,10 +236,73 @@ async function createEntry({ userData, sourceUuid, candidate, name, metadata, on
   }
 }
 
+// Patch fields on an entry's meta.json, optionally renaming the folder.
+// Refuses to touch immutable fields (uuid linkage, candidatePath, createdAt,
+// schemaVersion, etc.). When `newName` is supplied and differs from the
+// current name, the entry folder is renamed on disk and the meta.name field
+// is kept in sync. Rename collisions surface as an error.
+const _ENTRY_META_IMMUTABLE = new Set([
+  'schemaVersion', 'sourceUuid', 'candidatePath', 'multiBoard', 'otherFlavors',
+  'nested', 'fileCount', 'totalBytes', 'createdAt',
+]);
+function updateEntryMeta({ userData, currentName, newName, updates }) {
+  if (!userData) return { ok: false, error: 'Missing userData' };
+  if (!currentName) return { ok: false, error: 'Missing currentName' };
+  const sanitizedNew = newName != null ? _sanitizeEntryName(newName) : null;
+  const isRename = sanitizedNew && sanitizedNew !== currentName;
+
+  const root = entriesRoot(userData);
+  const curDir = path.join(root, currentName);
+  if (!fs.existsSync(curDir)) return { ok: false, error: `Entry not found: ${currentName}` };
+
+  // Rename target collision check.
+  if (isRename) {
+    if (!sanitizedNew) return { ok: false, error: 'Invalid new name' };
+    const newDir = path.join(root, sanitizedNew);
+    if (fs.existsSync(newDir)) return { ok: false, error: `An entry named "${sanitizedNew}" already exists`, existing: true };
+  }
+
+  // Read current meta.
+  const curMetaPath = path.join(curDir, 'meta.json');
+  let meta;
+  try { meta = JSON.parse(fs.readFileSync(curMetaPath, 'utf8')); }
+  catch (err) { return { ok: false, error: `Cannot read meta: ${err.message}` }; }
+
+  // Apply updates, skipping immutable fields.
+  if (updates && typeof updates === 'object') {
+    for (const key of Object.keys(updates)) {
+      if (_ENTRY_META_IMMUTABLE.has(key)) continue;
+      meta[key] = updates[key];
+    }
+  }
+
+  // Apply rename if requested.
+  let finalDir = curDir;
+  let finalName = currentName;
+  if (isRename) {
+    const newDir = path.join(root, sanitizedNew);
+    try {
+      fs.renameSync(curDir, newDir);
+      finalDir = newDir;
+      finalName = sanitizedNew;
+      meta.name = finalName;
+    } catch (err) {
+      return { ok: false, error: `Rename failed: ${err.message}` };
+    }
+  }
+  meta.updatedAt = new Date().toISOString();
+
+  try { fs.writeFileSync(path.join(finalDir, 'meta.json'), JSON.stringify(meta, null, 2)); }
+  catch (err) { return { ok: false, error: `Cannot write meta: ${err.message}` }; }
+
+  return { ok: true, name: finalName, meta };
+}
+
 module.exports = {
   entriesRoot,
   ensureEntriesRoot,
   listEntries,
   findEntryByName,
   createEntry,
+  updateEntryMeta,
 };

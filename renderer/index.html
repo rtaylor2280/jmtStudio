@@ -1927,6 +1927,44 @@
   .sf-entry-notes-body { display: none; padding: 6px 8px 0 14px; font-size: 0.82rem; color: var(--c-text); line-height: 1.45; word-break: break-word; }
   .sf-entry-notes-body.visible { display: block; }
   .sf-card { cursor: pointer; }
+  /* Slice 8: per-entry link button + edit row */
+  .sf-link-area { margin-left: 20px; display: flex; align-items: center; gap: 4px; min-width: 0; flex: 0 1 auto; }
+  .sf-entry-name-wrap > h2 { flex: 0 0 auto; }
+  .sf-entry-name-wrap > .sf-detail-pencil,
+  .sf-entry-name-wrap > .sf-detail-confirm { flex: 0 0 auto; margin-right: auto; }
+  .sf-link-btn { font-size: 0.78rem; opacity: 0.3; cursor: pointer; padding: 2px 4px; border-radius: 3px; border: none; background: none; color: var(--c-text); flex-shrink: 0; transition: opacity 0.1s; }
+  .sf-link-btn:hover { opacity: 1; background: rgba(0,130,255,0.08); }
+  .sf-link-btn.has-url { opacity: 0.7; color: var(--jmt-blue); }
+  .sf-link-btn.has-url:hover { opacity: 1; }
+  .sf-link-edit-row { margin-top: 4px; display: flex; align-items: center; gap: 6px; }
+  .sf-url-display { background: none; border: none; padding: 0; font-size: 0.78rem; font-family: inherit; color: var(--jmt-blue); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; min-width: 0; flex: 0 1 auto; }
+  .sf-url-display:hover { text-decoration: underline; }
+  /* Slice 8: inline edit pattern (pencil → input → confirm). */
+  .sf-entry-name-wrap { display: flex; align-items: center; gap: 6px; }
+  .sf-entry-name-wrap h2 { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sf-entry-name-input { flex: 1; font-size: 1.1rem; font-weight: 700; background: var(--c-bg-inset); color: var(--c-text); border: 1px solid var(--jmt-blue); border-radius: 4px; padding: 2px 8px; outline: none; min-width: 0; display: none; }
+  .sf-entry-byline-wrap { display: flex; align-items: center; gap: 6px; margin-top: 2px; font-size: 0.85rem; color: var(--c-text-sub); }
+  .sf-byline-prefix { color: var(--c-text-sub); }
+  .sf-edit-display { color: var(--c-text); }
+  .sf-edit-input { background: var(--c-bg-raised); color: var(--c-text); border: 1px solid var(--jmt-blue); border-radius: 3px; padding: 2px 6px; outline: none; font-size: 0.82rem; font-family: inherit; }
+  .sf-edit-input[type="text"] { flex: 1; min-width: 0; }
+  .sf-detail-pencil, .sf-detail-confirm { background: none; border: none; cursor: pointer; font-size: 0.8rem; line-height: 1; padding: 2px 5px; border-radius: 3px; color: var(--c-text-dim); opacity: 0.5; transition: opacity 0.1s, color 0.1s, background 0.1s; }
+  .sf-detail-pencil:hover { opacity: 1; color: var(--jmt-blue); background: rgba(0,130,255,0.08); }
+  .sf-detail-confirm { color: #4a4; opacity: 0.85; }
+  .sf-detail-confirm:hover { opacity: 1; background: rgba(80,200,80,0.12); }
+  .sf-edit-group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .sf-edit-group .sf-edit-display:empty::before { content: '(empty)'; color: var(--c-text-dim); font-style: italic; }
+  .sf-tags-edit { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; width: 100%; }
+  .sf-tags-chips { display: inline-flex; flex-wrap: wrap; gap: 3px; align-items: center; }
+  .sf-tag-chip { display: inline-flex; align-items: center; gap: 3px; font-size: 0.68rem; color: var(--c-text-sub); background: var(--c-bg-raised); border: 1px solid var(--c-border); border-radius: 3px; padding: 1px 4px 1px 6px; }
+  .sf-tag-chip.free { color: #7c5; border-color: rgba(120,200,80,0.35); background: rgba(120,200,80,0.10); }
+  .sf-tag-chip-remove { font-size: 0.6rem; opacity: 0.55; cursor: pointer; border: none; background: none; color: inherit; padding: 0 1px; line-height: 1; }
+  .sf-tag-chip-remove:hover { opacity: 1; color: #e55; }
+  .sf-tag-add-input { font-size: 0.72rem; background: transparent; color: var(--c-text); border: none; border-bottom: 1px dashed var(--c-border-strong); outline: none; padding: 0 4px; width: 90px; font-family: inherit; margin-left: auto; }
+  .sf-tag-add-input:focus { border-bottom-color: var(--jmt-blue); }
+  .sf-notes-textarea { width: 100%; min-height: 60px; resize: vertical; background: var(--c-bg-inset); color: var(--c-text); border: 1px solid var(--c-border-input); border-radius: 3px; padding: 6px 8px; font-size: 0.82rem; outline: none; font-family: inherit; box-sizing: border-box; }
+  .sf-notes-textarea:focus { border-color: var(--jmt-blue); }
+  .sf-detail-action-row { margin-top: 12px; display: flex; gap: 8px; justify-content: flex-end; flex-shrink: 0; }
   .sf-import-folder-row { display: flex; gap: 6px; }
   .sf-import-folder-row input { flex: 1; }
   .sf-import-folder-row button { flex-shrink: 0; }
@@ -3205,23 +3243,86 @@
   </div>
 </div>
 
-<!-- ── Sound Font entry detail (Phase 3, slice 7 read-only shell) ── -->
+<!-- ── Sound Font entry detail (Phase 3, slice 8 editable) ── -->
 <div class="modal-overlay" id="modal-sf-entry-detail">
   <div class="modal" style="position:relative">
     <button class="modal-btn-close" id="sf-entry-detail-close" title="Close">&#10005;</button>
     <div class="sf-entry-detail-header">
-      <h2 id="sf-entry-detail-name"></h2>
-      <div class="sf-entry-detail-byline" id="sf-entry-detail-byline"></div>
+      <div class="sf-entry-name-wrap">
+        <h2 id="sf-entry-detail-name"></h2>
+        <input type="text" id="sf-entry-detail-name-input" class="sf-entry-name-input">
+        <button class="detail-pencil sf-detail-pencil" id="btn-sf-name-edit" title="Edit name">&#9998;</button>
+        <button class="detail-pencil sf-detail-confirm" id="btn-sf-name-confirm" title="Confirm" style="display:none">&#10003;</button>
+        <div class="sf-link-area">
+          <button id="sf-link-display" class="sf-url-display" style="display:none"></button>
+          <button class="sf-link-btn" id="btn-sf-link-toggle" title="Add a link (video demo, vendor page, etc.)">&#128279;</button>
+        </div>
+      </div>
+      <div class="sf-link-edit-row" id="sf-link-edit-row" style="display:none">
+        <input type="url" id="sf-link-input" class="sf-edit-input" placeholder="https://&hellip;" style="flex:1">
+        <button class="detail-pencil sf-detail-confirm" id="btn-sf-link-confirm" title="Confirm link">&#10003;</button>
+        <button class="detail-pencil" id="btn-sf-link-clear" title="Clear link" style="opacity:0.45">&#10005;</button>
+      </div>
+      <div class="sf-entry-byline-wrap">
+        <span class="sf-byline-prefix" id="sf-byline-prefix">by</span>
+        <span id="sf-entry-detail-byline" class="sf-edit-display"></span>
+        <input type="text" id="sf-entry-detail-byline-input" class="sf-edit-input" list="sf-detail-creator-list" placeholder="Add creator&hellip;" style="display:none">
+        <datalist id="sf-detail-creator-list"></datalist>
+        <button class="detail-pencil sf-detail-pencil" id="btn-sf-byline-edit" title="Edit creator">&#9998;</button>
+        <button class="detail-pencil sf-detail-confirm" id="btn-sf-byline-confirm" title="Confirm" style="display:none">&#10003;</button>
+      </div>
     </div>
     <div class="sf-entry-detail-body">
-      <div class="sf-entry-detail-meta" id="sf-entry-detail-meta"></div>
+      <div class="sf-entry-detail-meta">
+        <div class="sf-meta-row">
+          <span class="sf-meta-label">Acquired</span>
+          <div class="sf-meta-val sf-edit-group">
+            <span id="sf-detail-acquired-display" class="sf-edit-display"></span>
+            <input type="date" id="sf-detail-acquired-input" class="sf-edit-input" style="display:none">
+            <button class="detail-pencil sf-detail-pencil" id="btn-sf-acquired-edit" title="Edit date">&#9998;</button>
+            <button class="detail-pencil sf-detail-confirm" id="btn-sf-acquired-confirm" title="Confirm" style="display:none">&#10003;</button>
+          </div>
+        </div>
+        <div class="sf-meta-row">
+          <span class="sf-meta-label">Description</span>
+          <div class="sf-meta-val sf-edit-group">
+            <span id="sf-detail-description-display" class="sf-edit-display"></span>
+            <input type="text" id="sf-detail-description-input" class="sf-edit-input" placeholder="Add description…" maxlength="500" style="display:none">
+            <button class="detail-pencil sf-detail-pencil" id="btn-sf-description-edit" title="Edit description">&#9998;</button>
+            <button class="detail-pencil sf-detail-confirm" id="btn-sf-description-confirm" title="Confirm" style="display:none">&#10003;</button>
+          </div>
+        </div>
+        <div class="sf-meta-row">
+          <span class="sf-meta-label">Contents</span>
+          <span class="sf-meta-val" id="sf-detail-contents"></span>
+        </div>
+        <div class="sf-meta-row">
+          <span class="sf-meta-label">Tags</span>
+          <div class="sf-meta-val sf-tags-edit">
+            <div class="sf-tags-chips" id="sf-detail-tags-chips"></div>
+            <input type="text" id="sf-detail-tags-input" class="sf-tag-add-input" placeholder="Add tag&hellip;" maxlength="40" title="Type a tag and press Enter. Type &quot;free&quot; to mark this entry as free content.">
+          </div>
+        </div>
+        <div class="sf-meta-row" id="sf-detail-notes-row">
+          <span class="sf-meta-label">Notes</span>
+          <div class="sf-meta-val">
+            <div class="sf-entry-notes-block">
+              <button class="sf-entry-notes-toggle" type="button" id="sf-detail-notes-toggle"><span class="notes-arrow">&#9654;</span> Notes</button>
+              <div class="sf-entry-notes-body" id="sf-detail-notes-body">
+                <textarea id="sf-detail-notes-input" class="sf-notes-textarea" placeholder="Anything you want to remember about this font…" maxlength="2000"></textarea>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
       <div class="sf-entry-detail-section">
         <h3>Source</h3>
         <div class="sf-entry-detail-source" id="sf-entry-detail-source"></div>
       </div>
     </div>
-    <div class="modal-btns" style="margin-top:12px">
-      <button class="modal-btn-cancel" id="sf-entry-detail-close-btn">Close</button>
+    <div class="modal-btns sf-detail-action-row">
+      <button class="modal-btn-cancel" id="sf-entry-detail-discard">Close</button>
+      <button class="modal-btn-primary" id="sf-entry-detail-save" disabled>Save</button>
     </div>
   </div>
 </div>
@@ -10899,16 +11000,55 @@ require(['vs/editor/editor.main'], function () {
         await _sfRunImport(sourcePath);
       };
 
-      // ── Entry detail view (Phase 3, slice 7 read-only shell) ──
+      // ── Entry detail view (Phase 3, slice 8 editable) ──
       const _sfEntryDetailEls = {
-        modal:    document.getElementById('modal-sf-entry-detail'),
-        name:     document.getElementById('sf-entry-detail-name'),
-        byline:   document.getElementById('sf-entry-detail-byline'),
-        meta:     document.getElementById('sf-entry-detail-meta'),
-        source:   document.getElementById('sf-entry-detail-source'),
-        closeX:   document.getElementById('sf-entry-detail-close'),
-        closeBtn: document.getElementById('sf-entry-detail-close-btn'),
+        modal:        document.getElementById('modal-sf-entry-detail'),
+        closeX:       document.getElementById('sf-entry-detail-close'),
+        // Name (display + input + pencil + confirm)
+        name:         document.getElementById('sf-entry-detail-name'),
+        nameInput:    document.getElementById('sf-entry-detail-name-input'),
+        nameEditBtn:  document.getElementById('btn-sf-name-edit'),
+        nameConfirmBtn: document.getElementById('btn-sf-name-confirm'),
+        // Byline / creator
+        bylinePrefix: document.getElementById('sf-byline-prefix'),
+        byline:       document.getElementById('sf-entry-detail-byline'),
+        bylineInput:  document.getElementById('sf-entry-detail-byline-input'),
+        bylineList:   document.getElementById('sf-detail-creator-list'),
+        bylineEditBtn: document.getElementById('btn-sf-byline-edit'),
+        bylineConfirmBtn: document.getElementById('btn-sf-byline-confirm'),
+        // Meta rows
+        acquiredDisplay: document.getElementById('sf-detail-acquired-display'),
+        acquiredInput:   document.getElementById('sf-detail-acquired-input'),
+        acquiredEditBtn: document.getElementById('btn-sf-acquired-edit'),
+        acquiredConfirmBtn: document.getElementById('btn-sf-acquired-confirm'),
+        descDisplay:     document.getElementById('sf-detail-description-display'),
+        descInput:       document.getElementById('sf-detail-description-input'),
+        descEditBtn:     document.getElementById('btn-sf-description-edit'),
+        descConfirmBtn:  document.getElementById('btn-sf-description-confirm'),
+        contents:        document.getElementById('sf-detail-contents'),
+        tagsChips:       document.getElementById('sf-detail-tags-chips'),
+        tagsInput:       document.getElementById('sf-detail-tags-input'),
+        notesToggle:     document.getElementById('sf-detail-notes-toggle'),
+        notesBody:       document.getElementById('sf-detail-notes-body'),
+        notesInput:      document.getElementById('sf-detail-notes-input'),
+        // Per-entry link (video demo / vendor page / anything)
+        linkBtn:         document.getElementById('btn-sf-link-toggle'),
+        linkDisplay:     document.getElementById('sf-link-display'),
+        linkEditRow:     document.getElementById('sf-link-edit-row'),
+        linkInput:       document.getElementById('sf-link-input'),
+        linkConfirmBtn:  document.getElementById('btn-sf-link-confirm'),
+        linkClearBtn:    document.getElementById('btn-sf-link-clear'),
+        // Source block (read-only here; source editing comes in slice 10)
+        source:          document.getElementById('sf-entry-detail-source'),
+        // Action buttons
+        discardBtn:      document.getElementById('sf-entry-detail-discard'),
+        saveBtn:         document.getElementById('sf-entry-detail-save'),
       };
+      // Working edit state. Populated on open, mutated by pencil/confirm
+      // actions, written back to disk on Save.
+      let _sfDetailOriginalName = null;
+      let _sfDetailEdit = null;
+      let _sfDetailDirty = false;
       const _sfFormatDate = (s) => {
         if (!s) return '';
         try {
@@ -10917,48 +11057,137 @@ require(['vs/editor/editor.main'], function () {
           return d.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
         } catch { return s; }
       };
+      // Render the tag chip list from _sfDetailEdit.tags + the special free
+      // chip when purchased === false. Wires the X buttons to remove and the
+      // input handler to add. "free" as an input value is mapped to the
+      // purchased boolean rather than an actual tag.
+      const _sfRenderDetailTags = () => {
+        if (!_sfEntryDetailEls.tagsChips || !_sfDetailEdit) return;
+        const chips = [];
+        if (_sfDetailEdit.purchased === false) {
+          chips.push(`<span class="sf-tag-chip free" data-special="free">free<button class="sf-tag-chip-remove" data-special="free" title="Remove">&times;</button></span>`);
+        }
+        const tags = Array.isArray(_sfDetailEdit.tags) ? _sfDetailEdit.tags : [];
+        for (let i = 0; i < tags.length; i++) {
+          chips.push(`<span class="sf-tag-chip">${_sfEscape(tags[i])}<button class="sf-tag-chip-remove" data-i="${i}" title="Remove">&times;</button></span>`);
+        }
+        _sfEntryDetailEls.tagsChips.innerHTML = chips.join('');
+      };
+      const _sfMarkDetailDirty = () => {
+        _sfDetailDirty = true;
+        if (_sfEntryDetailEls.saveBtn) _sfEntryDetailEls.saveBtn.disabled = false;
+        if (_sfEntryDetailEls.discardBtn) _sfEntryDetailEls.discardBtn.textContent = 'Discard';
+      };
+      const _sfRefreshDisplayValues = () => {
+        if (!_sfDetailEdit) return;
+        if (_sfEntryDetailEls.name) _sfEntryDetailEls.name.textContent = _sfDetailEdit.name;
+        if (_sfEntryDetailEls.byline) _sfEntryDetailEls.byline.textContent = _sfDetailEdit.author || '';
+        if (_sfEntryDetailEls.bylinePrefix) _sfEntryDetailEls.bylinePrefix.style.display = _sfDetailEdit.author ? '' : 'none';
+        if (_sfEntryDetailEls.acquiredDisplay) _sfEntryDetailEls.acquiredDisplay.textContent = _sfDetailEdit.acquisitionDate ? _sfFormatDate(_sfDetailEdit.acquisitionDate) : '';
+        if (_sfEntryDetailEls.descDisplay) _sfEntryDetailEls.descDisplay.textContent = _sfDetailEdit.description || '';
+        _sfRenderDetailTags();
+        _sfSyncLinkDisplay();
+      };
+      const _sfSyncLinkDisplay = () => {
+        if (!_sfDetailEdit) return;
+        const has = !!_sfDetailEdit.linkUrl;
+        if (_sfEntryDetailEls.linkBtn) {
+          _sfEntryDetailEls.linkBtn.classList.toggle('has-url', has);
+          _sfEntryDetailEls.linkBtn.title = has ? 'Edit link' : 'Add a link (video demo, vendor page, etc.)';
+        }
+        // URL display sits inline next to the link icon. Truncated with
+        // ellipsis; full URL surfaced via the title attribute on hover.
+        if (_sfEntryDetailEls.linkDisplay) {
+          _sfEntryDetailEls.linkDisplay.textContent = _sfDetailEdit.linkUrl || '';
+          _sfEntryDetailEls.linkDisplay.title = _sfDetailEdit.linkUrl || '';
+          _sfEntryDetailEls.linkDisplay.style.display = has ? 'inline-block' : 'none';
+        }
+        if (_sfEntryDetailEls.linkEditRow) _sfEntryDetailEls.linkEditRow.style.display = 'none';
+      };
+      // Toggle between display and input modes for a single field. Inputs
+      // get explicit display:inline-block because their CSS rule has
+      // display:none; clearing the inline style would fall back to that.
+      const _sfStartFieldEdit = (display, input, editBtn, confirmBtn, value) => {
+        if (display) display.style.display = 'none';
+        if (input) {
+          input.style.display = 'inline-block';
+          input.value = value || '';
+          setTimeout(() => { input.focus(); input.select?.(); }, 0);
+        }
+        if (editBtn) editBtn.style.display = 'none';
+        if (confirmBtn) confirmBtn.style.display = 'inline-block';
+      };
+      const _sfEndFieldEdit = (display, input, editBtn, confirmBtn) => {
+        if (display) display.style.display = '';
+        if (input) input.style.display = 'none';
+        if (editBtn) editBtn.style.display = '';
+        if (confirmBtn) confirmBtn.style.display = 'none';
+      };
+
       const _sfOpenEntryDetail = async (entryName) => {
         const entry = _sfAllEntries.find(e => e.name === entryName);
         if (!entry || !_sfEntryDetailEls.modal) return;
         const m = entry.meta || {};
-        if (_sfEntryDetailEls.name) _sfEntryDetailEls.name.textContent = entry.name;
-        if (_sfEntryDetailEls.byline) {
-          _sfEntryDetailEls.byline.textContent = m.author ? `by ${m.author}` : '';
-        }
-        const rows = [];
-        if (m.acquisitionDate) {
-          rows.push(`<div class="sf-meta-row"><span class="sf-meta-label">Acquired</span><span class="sf-meta-val">${_sfEscape(_sfFormatDate(m.acquisitionDate))}</span></div>`);
-        }
-        if (m.description) {
-          rows.push(`<div class="sf-meta-row"><span class="sf-meta-label">Description</span><span class="sf-meta-val">${_sfEscape(m.description)}</span></div>`);
-        }
+        _sfDetailOriginalName = entry.name;
+        _sfDetailEdit = {
+          name: entry.name,
+          author: m.author || '',
+          acquisitionDate: m.acquisitionDate || '',
+          description: m.description || '',
+          tags: Array.isArray(m.tags) ? m.tags.slice() : [],
+          userNotes: m.userNotes || '',
+          purchased: m.purchased !== false, // default true when undefined
+          linkUrl: m.linkUrl || '',
+        };
+        _sfDetailDirty = false;
+        if (_sfEntryDetailEls.saveBtn) _sfEntryDetailEls.saveBtn.disabled = true;
+        if (_sfEntryDetailEls.discardBtn) _sfEntryDetailEls.discardBtn.textContent = 'Close';
+
+        // Reset all inputs to display mode.
+        _sfEndFieldEdit(_sfEntryDetailEls.name, _sfEntryDetailEls.nameInput, _sfEntryDetailEls.nameEditBtn, _sfEntryDetailEls.nameConfirmBtn);
+        _sfEndFieldEdit(_sfEntryDetailEls.byline, _sfEntryDetailEls.bylineInput, _sfEntryDetailEls.bylineEditBtn, _sfEntryDetailEls.bylineConfirmBtn);
+        _sfEndFieldEdit(_sfEntryDetailEls.acquiredDisplay, _sfEntryDetailEls.acquiredInput, _sfEntryDetailEls.acquiredEditBtn, _sfEntryDetailEls.acquiredConfirmBtn);
+        _sfEndFieldEdit(_sfEntryDetailEls.descDisplay, _sfEntryDetailEls.descInput, _sfEntryDetailEls.descEditBtn, _sfEntryDetailEls.descConfirmBtn);
+
+        // Populate displays.
+        _sfRefreshDisplayValues();
+
+        // Contents row (read-only).
         const fileCount = m.fileCount || 0;
         const sizeStr = _sfFormatBytes(m.totalBytes || 0);
-        rows.push(`<div class="sf-meta-row"><span class="sf-meta-label">Contents</span><span class="sf-meta-val">${fileCount} file${fileCount === 1 ? '' : 's'} (${_sfEscape(sizeStr)})</span></div>`);
-        // Tags: free first (the most notable label when present), then user
-        // tags from entry meta. Conceptually free is just another tag.
-        const tagChips = [];
-        if (m.purchased === false) {
-          tagChips.push('<span class="sf-card-tag free">free</span>');
+        if (_sfEntryDetailEls.contents) {
+          _sfEntryDetailEls.contents.textContent = `${fileCount} file${fileCount === 1 ? '' : 's'} (${sizeStr})`;
         }
-        if (Array.isArray(m.tags)) {
-          for (const t of m.tags) {
-            if (t) tagChips.push(`<span class="sf-card-tag">${_sfEscape(t)}</span>`);
+
+        // Creator datalist: distinct authors already in the library plus the
+        // seeded vendor list. Soft normalization — the user can still type
+        // anything, but the suggestions nudge toward consistent spellings.
+        if (_sfEntryDetailEls.bylineList) {
+          const seen = new Set();
+          const opts = [];
+          for (const v of _sfKnownVendors) {
+            if (v.name && !seen.has(v.name.toLowerCase())) {
+              seen.add(v.name.toLowerCase());
+              opts.push(v.name);
+            }
           }
+          for (const e of _sfAllEntries) {
+            const a = e.meta && e.meta.author;
+            if (a && !seen.has(a.toLowerCase())) {
+              seen.add(a.toLowerCase());
+              opts.push(a);
+            }
+          }
+          opts.sort((a, b) => a.localeCompare(b));
+          _sfEntryDetailEls.bylineList.innerHTML = opts.map(n => `<option value="${_sfEscape(n)}"></option>`).join('');
         }
-        if (tagChips.length) {
-          rows.push(`<div class="sf-meta-row"><span class="sf-meta-label">Tags</span><span class="sf-meta-val tags-row">${tagChips.join('')}</span></div>`);
-        }
-        // Notes get the same collapsible toggle treatment as the Style Library
-        // detail view: small uppercase header, rotating arrow, hidden by
-        // default. Click to expand and read.
-        if (m.userNotes) {
-          rows.push(`<div class="sf-entry-notes-block">
-            <button class="sf-entry-notes-toggle" type="button"><span class="notes-arrow">&#9654;</span> Notes</button>
-            <div class="sf-entry-notes-body">${_sfEscape(m.userNotes).replace(/\n/g, '<br>')}</div>
-          </div>`);
-        }
-        if (_sfEntryDetailEls.meta) _sfEntryDetailEls.meta.innerHTML = rows.join('');
+        // Notes: textarea reflects current value; toggle resets to closed.
+        if (_sfEntryDetailEls.notesInput) _sfEntryDetailEls.notesInput.value = _sfDetailEdit.userNotes;
+        if (_sfEntryDetailEls.notesToggle) _sfEntryDetailEls.notesToggle.classList.toggle('open', !!_sfDetailEdit.userNotes);
+        if (_sfEntryDetailEls.notesBody) _sfEntryDetailEls.notesBody.classList.toggle('visible', !!_sfDetailEdit.userNotes);
+
+        // Tag input cleared.
+        if (_sfEntryDetailEls.tagsInput) _sfEntryDetailEls.tagsInput.value = '';
         let sourceParts = [];
         if (m.sourceUuid) {
           try {
@@ -11037,11 +11266,224 @@ require(['vs/editor/editor.main'], function () {
       };
       const _sfCloseEntryDetail = () => {
         if (_sfEntryDetailEls.modal) _sfEntryDetailEls.modal.classList.remove('active');
+        _sfDetailEdit = null;
+        _sfDetailDirty = false;
       };
-      _sfEntryDetailEls.closeX?.addEventListener('click', _sfCloseEntryDetail);
-      _sfEntryDetailEls.closeBtn?.addEventListener('click', _sfCloseEntryDetail);
+      const _sfTryCloseEntryDetail = async () => {
+        if (_sfDetailDirty) {
+          if (!await _promptDiscard('Unsaved changes to this sound font — discard them?')) return;
+        }
+        _sfCloseEntryDetail();
+      };
+      const _sfSaveEntryDetail = async () => {
+        if (!_sfDetailEdit || !_sfDetailOriginalName) return;
+        const updates = {
+          author: _sfDetailEdit.author,
+          acquisitionDate: _sfDetailEdit.acquisitionDate,
+          description: _sfDetailEdit.description,
+          tags: _sfDetailEdit.tags,
+          userNotes: _sfDetailEdit.userNotes,
+          purchased: _sfDetailEdit.purchased,
+          linkUrl: _sfDetailEdit.linkUrl,
+        };
+        const sanitizedName = _sfSanitizeName(_sfDetailEdit.name);
+        const isRename = sanitizedName !== _sfDetailOriginalName;
+        const res = await window.electronAPI.updateEntryMeta({
+          currentName: _sfDetailOriginalName,
+          newName: isRename ? sanitizedName : undefined,
+          updates,
+        });
+        if (!res || !res.ok) {
+          alert(`Save failed: ${(res && res.error) || 'unknown error'}`);
+          return;
+        }
+        _sfDetailDirty = false;
+        if (_sfEntryDetailEls.saveBtn) _sfEntryDetailEls.saveBtn.disabled = true;
+        if (_sfEntryDetailEls.discardBtn) _sfEntryDetailEls.discardBtn.textContent = 'Close';
+        _sfCloseEntryDetail();
+        await window.refreshSoundFontsView();
+      };
+      _sfEntryDetailEls.closeX?.addEventListener('click', _sfTryCloseEntryDetail);
+      _sfEntryDetailEls.discardBtn?.addEventListener('click', _sfTryCloseEntryDetail);
+      _sfEntryDetailEls.saveBtn?.addEventListener('click', _sfSaveEntryDetail);
       _sfEntryDetailEls.modal?.addEventListener('click', (e) => {
-        if (e.target === _sfEntryDetailEls.modal) _sfCloseEntryDetail();
+        if (e.target === _sfEntryDetailEls.modal) _sfTryCloseEntryDetail();
+      });
+      // Pencil → input mode for each editable field.
+      _sfEntryDetailEls.nameEditBtn?.addEventListener('click', () => {
+        if (!_sfDetailEdit) return;
+        _sfStartFieldEdit(_sfEntryDetailEls.name, _sfEntryDetailEls.nameInput, _sfEntryDetailEls.nameEditBtn, _sfEntryDetailEls.nameConfirmBtn, _sfDetailEdit.name);
+      });
+      _sfEntryDetailEls.nameConfirmBtn?.addEventListener('click', () => {
+        if (!_sfDetailEdit) return;
+        const raw = (_sfEntryDetailEls.nameInput?.value || '').trim();
+        const sanitized = _sfSanitizeName(raw);
+        if (!sanitized) { alert('Name is required.'); return; }
+        if (sanitized !== _sfDetailEdit.name) {
+          _sfDetailEdit.name = sanitized;
+          _sfMarkDetailDirty();
+        }
+        _sfRefreshDisplayValues();
+        _sfEndFieldEdit(_sfEntryDetailEls.name, _sfEntryDetailEls.nameInput, _sfEntryDetailEls.nameEditBtn, _sfEntryDetailEls.nameConfirmBtn);
+      });
+      _sfEntryDetailEls.bylineEditBtn?.addEventListener('click', () => {
+        if (!_sfDetailEdit) return;
+        if (_sfEntryDetailEls.bylinePrefix) _sfEntryDetailEls.bylinePrefix.style.display = 'none';
+        _sfStartFieldEdit(_sfEntryDetailEls.byline, _sfEntryDetailEls.bylineInput, _sfEntryDetailEls.bylineEditBtn, _sfEntryDetailEls.bylineConfirmBtn, _sfDetailEdit.author);
+      });
+      _sfEntryDetailEls.bylineConfirmBtn?.addEventListener('click', () => {
+        if (!_sfDetailEdit) return;
+        const v = (_sfEntryDetailEls.bylineInput?.value || '').trim();
+        if (v !== _sfDetailEdit.author) {
+          _sfDetailEdit.author = v;
+          _sfMarkDetailDirty();
+        }
+        _sfRefreshDisplayValues();
+        _sfEndFieldEdit(_sfEntryDetailEls.byline, _sfEntryDetailEls.bylineInput, _sfEntryDetailEls.bylineEditBtn, _sfEntryDetailEls.bylineConfirmBtn);
+      });
+      _sfEntryDetailEls.acquiredEditBtn?.addEventListener('click', () => {
+        if (!_sfDetailEdit) return;
+        _sfStartFieldEdit(_sfEntryDetailEls.acquiredDisplay, _sfEntryDetailEls.acquiredInput, _sfEntryDetailEls.acquiredEditBtn, _sfEntryDetailEls.acquiredConfirmBtn, _sfDetailEdit.acquisitionDate || new Date().toISOString().slice(0, 10));
+      });
+      _sfEntryDetailEls.acquiredConfirmBtn?.addEventListener('click', () => {
+        if (!_sfDetailEdit) return;
+        const v = _sfEntryDetailEls.acquiredInput?.value || '';
+        if (v !== _sfDetailEdit.acquisitionDate) {
+          _sfDetailEdit.acquisitionDate = v;
+          _sfMarkDetailDirty();
+        }
+        _sfRefreshDisplayValues();
+        _sfEndFieldEdit(_sfEntryDetailEls.acquiredDisplay, _sfEntryDetailEls.acquiredInput, _sfEntryDetailEls.acquiredEditBtn, _sfEntryDetailEls.acquiredConfirmBtn);
+      });
+      _sfEntryDetailEls.descEditBtn?.addEventListener('click', () => {
+        if (!_sfDetailEdit) return;
+        _sfStartFieldEdit(_sfEntryDetailEls.descDisplay, _sfEntryDetailEls.descInput, _sfEntryDetailEls.descEditBtn, _sfEntryDetailEls.descConfirmBtn, _sfDetailEdit.description);
+      });
+      _sfEntryDetailEls.descConfirmBtn?.addEventListener('click', () => {
+        if (!_sfDetailEdit) return;
+        const v = (_sfEntryDetailEls.descInput?.value || '').trim();
+        if (v !== _sfDetailEdit.description) {
+          _sfDetailEdit.description = v;
+          _sfMarkDetailDirty();
+        }
+        _sfRefreshDisplayValues();
+        _sfEndFieldEdit(_sfEntryDetailEls.descDisplay, _sfEntryDetailEls.descInput, _sfEntryDetailEls.descEditBtn, _sfEntryDetailEls.descConfirmBtn);
+      });
+      // Enter commits each field, Escape cancels and reverts the input back
+      // to display mode without mutating _sfDetailEdit.
+      const _sfBindEnterEscape = (input, confirmBtn, displayEl, editBtn) => {
+        input?.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            confirmBtn?.click();
+          } else if (e.key === 'Escape') {
+            e.preventDefault();
+            _sfEndFieldEdit(displayEl, input, editBtn, confirmBtn);
+          }
+        });
+      };
+      _sfBindEnterEscape(_sfEntryDetailEls.nameInput,     _sfEntryDetailEls.nameConfirmBtn,    _sfEntryDetailEls.name,             _sfEntryDetailEls.nameEditBtn);
+      _sfBindEnterEscape(_sfEntryDetailEls.bylineInput,   _sfEntryDetailEls.bylineConfirmBtn,  _sfEntryDetailEls.byline,           _sfEntryDetailEls.bylineEditBtn);
+      _sfBindEnterEscape(_sfEntryDetailEls.acquiredInput, _sfEntryDetailEls.acquiredConfirmBtn,_sfEntryDetailEls.acquiredDisplay,  _sfEntryDetailEls.acquiredEditBtn);
+      _sfBindEnterEscape(_sfEntryDetailEls.descInput,     _sfEntryDetailEls.descConfirmBtn,    _sfEntryDetailEls.descDisplay,      _sfEntryDetailEls.descEditBtn);
+      // Per-entry link: icon toggles to edit row (whether URL set or not).
+      // Display row's URL button opens external on click.
+      _sfEntryDetailEls.linkBtn?.addEventListener('click', () => {
+        if (!_sfDetailEdit) return;
+        const editRow = _sfEntryDetailEls.linkEditRow;
+        if (!editRow) return;
+        const opening = editRow.style.display === 'none';
+        if (opening) {
+          editRow.style.display = '';
+          if (_sfEntryDetailEls.linkInput) {
+            _sfEntryDetailEls.linkInput.value = _sfDetailEdit.linkUrl || '';
+            setTimeout(() => { _sfEntryDetailEls.linkInput.focus(); _sfEntryDetailEls.linkInput.select?.(); }, 0);
+          }
+        } else {
+          editRow.style.display = 'none';
+        }
+      });
+      _sfEntryDetailEls.linkDisplay?.addEventListener('click', () => {
+        if (!_sfDetailEdit?.linkUrl) return;
+        window.electronAPI.openExternal(_sfDetailEdit.linkUrl);
+      });
+      _sfEntryDetailEls.linkConfirmBtn?.addEventListener('click', () => {
+        if (!_sfDetailEdit) return;
+        const v = (_sfEntryDetailEls.linkInput?.value || '').trim();
+        if (v !== _sfDetailEdit.linkUrl) {
+          _sfDetailEdit.linkUrl = v;
+          _sfMarkDetailDirty();
+        }
+        _sfSyncLinkDisplay();
+      });
+      _sfEntryDetailEls.linkClearBtn?.addEventListener('click', () => {
+        if (!_sfDetailEdit) return;
+        if (_sfDetailEdit.linkUrl) {
+          _sfDetailEdit.linkUrl = '';
+          _sfMarkDetailDirty();
+        }
+        if (_sfEntryDetailEls.linkInput) _sfEntryDetailEls.linkInput.value = '';
+        _sfSyncLinkDisplay();
+      });
+      _sfEntryDetailEls.linkInput?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          _sfEntryDetailEls.linkConfirmBtn?.click();
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          if (_sfEntryDetailEls.linkEditRow) _sfEntryDetailEls.linkEditRow.style.display = 'none';
+          _sfSyncLinkDisplay();
+        }
+      });
+      // Tag chip remove (delegated).
+      _sfEntryDetailEls.tagsChips?.addEventListener('click', (e) => {
+        const btn = e.target.closest('.sf-tag-chip-remove');
+        if (!btn || !_sfDetailEdit) return;
+        if (btn.dataset.special === 'free') {
+          _sfDetailEdit.purchased = true;
+        } else {
+          const idx = parseInt(btn.dataset.i, 10);
+          if (!Number.isNaN(idx)) _sfDetailEdit.tags.splice(idx, 1);
+        }
+        _sfRenderDetailTags();
+        _sfMarkDetailDirty();
+      });
+      // Tag add: Enter commits, comma also commits (matching style library pattern).
+      _sfEntryDetailEls.tagsInput?.addEventListener('keydown', (e) => {
+        if (!_sfDetailEdit) return;
+        if (e.key === 'Enter' || e.key === ',') {
+          e.preventDefault();
+          const raw = (e.target.value || '').trim();
+          if (!raw) return;
+          // "free" is a reserved word that maps to the purchased flag.
+          if (/^free$/i.test(raw)) {
+            if (_sfDetailEdit.purchased !== false) {
+              _sfDetailEdit.purchased = false;
+              _sfMarkDetailDirty();
+            }
+          } else {
+            if (!_sfDetailEdit.tags.includes(raw)) {
+              _sfDetailEdit.tags.push(raw);
+              _sfMarkDetailDirty();
+            }
+          }
+          e.target.value = '';
+          _sfRenderDetailTags();
+        }
+      });
+      // Notes textarea: any change marks dirty.
+      _sfEntryDetailEls.notesInput?.addEventListener('input', (e) => {
+        if (!_sfDetailEdit) return;
+        const v = e.target.value || '';
+        if (v !== _sfDetailEdit.userNotes) {
+          _sfDetailEdit.userNotes = v;
+          _sfMarkDetailDirty();
+        }
+      });
+      // Notes toggle expand/collapse.
+      _sfEntryDetailEls.notesToggle?.addEventListener('click', () => {
+        _sfEntryDetailEls.notesToggle.classList.toggle('open');
+        _sfEntryDetailEls.notesBody?.classList.toggle('visible');
       });
       // External link delegation — links inside the source block that should
       // open in the user's default browser. Avoids inline onclick handlers.
