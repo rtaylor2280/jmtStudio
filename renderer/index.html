@@ -1845,6 +1845,9 @@
   .sf-card-tag { font-size: 0.62rem; color: var(--c-text-dim); background: var(--c-bg-inset); border: 1px solid var(--c-border-faint); border-radius: 3px; padding: 1px 5px; white-space: nowrap; }
   .sf-card-tag.purchased { color: var(--jmt-blue); border-color: rgba(0,130,255,0.35); background: rgba(0,130,255,0.08); }
   .sf-card-tag.free { color: #7c5; border-color: rgba(120,200,80,0.35); background: rgba(120,200,80,0.10); }
+  /* Free as an active-filter chip keeps its green identity rather than the
+     default JMT blue of styles-active-filter-chip. */
+  .styles-active-filter-chip.sf-active-filter-free { color: #7c5; border-color: rgba(120,200,80,0.35); background: rgba(120,200,80,0.10); }
   /* Pending / active import cards in the grid */
   .sf-card.pending { cursor: default; border-style: dashed; border-color: rgba(0,130,255,0.45); background: rgba(0,130,255,0.04); }
   .sf-card.pending:hover { background: rgba(0,130,255,0.06); border-color: rgba(0,130,255,0.6); }
@@ -2644,7 +2647,24 @@
         <input type="text" id="sf-search" class="sf-search-input" placeholder="Search sound fonts…" autocomplete="off" spellcheck="false">
       </div>
       <span class="sf-search-count" id="sf-search-count"></span>
+      <div class="styles-tag-filter-wrap">
+        <button id="btn-sf-tag-filter" class="styles-tag-filter-btn" title="Filter by tag">
+          <span class="styles-tag-filter-icon">&#9662;</span> Tags<span id="sf-tag-filter-badge" class="styles-tag-filter-badge" style="display:none">0</span>
+        </button>
+        <div id="sf-tag-dropdown" class="styles-tag-dropdown" style="display:none">
+          <div id="sf-tag-dropdown-list"></div>
+        </div>
+      </div>
+      <div class="styles-tag-filter-wrap">
+        <button id="btn-sf-creator-filter" class="styles-tag-filter-btn" title="Filter by creator">
+          <span class="styles-tag-filter-icon">&#9662;</span> Creators<span id="sf-creator-filter-badge" class="styles-tag-filter-badge" style="display:none">0</span>
+        </button>
+        <div id="sf-creator-dropdown" class="styles-tag-dropdown" style="display:none">
+          <div id="sf-creator-dropdown-list"></div>
+        </div>
+      </div>
     </div>
+    <div id="sf-active-filters" class="styles-active-filters" style="display:none"></div>
     <div class="sf-grid-scroll">
       <div class="sf-cards" id="sf-cards"></div>
     </div>
@@ -10414,24 +10434,66 @@ require(['vs/editor/editor.main'], function () {
         return { entryCount, locked };
       };
       let _sfAllEntries = [];
+      let _sfAllSourcesByUuid = {};
       let _sfSearchQuery = '';
+      let _sfActiveFilterTags = new Set();
+      let _sfActiveFilterCreators = new Set();
+      // Build a search blob that covers everything the user might type to find
+      // an entry: the entry's own name/author/description/notes/tags plus the
+      // backing source's bundle name, original filename, vendor info, and
+      // source-level notes. Source lookup is via entry.meta.sourceUuid.
+      const _sfEntrySearchBlob = (entry) => {
+        const m = entry.meta || {};
+        const tagBlob = _sfEntryAllTags(entry).join(' ');
+        const src = (m.sourceUuid && _sfAllSourcesByUuid[m.sourceUuid]) || null;
+        const sm = src ? (src.meta || {}) : {};
+        return [
+          entry.name,
+          m.author,
+          m.description,
+          m.userNotes,
+          tagBlob,
+          // Source-side fields
+          sm.bundleName,
+          sm.originalName,
+          sm.vendor,
+          sm.vendorWebsite,
+          sm.userNotes,
+        ].filter(Boolean).join(' ').toLowerCase();
+      };
+      // Returns every tag attributed to an entry: stored user tags plus the
+      // virtual "free" tag when m.purchased === false. Used both for search
+      // matching and tag filtering so the two pipes stay in sync.
+      const _sfEntryAllTags = (entry) => {
+        const tags = Array.isArray(entry.meta && entry.meta.tags) ? entry.meta.tags.slice() : [];
+        if (entry.meta && entry.meta.purchased === false) tags.unshift('free');
+        return tags;
+      };
       const _sfRenderGrid = () => {
         const list = document.getElementById('sf-cards');
         const countEl = document.getElementById('sf-search-count');
         if (!list) return;
         const q = (_sfSearchQuery || '').toLowerCase();
         const sorted = _sfAllEntries.slice().sort((a, b) => a.name.localeCompare(b.name));
-        const matching = q ? sorted.filter(f => {
-          const meta = f.meta || {};
-          const tagBlob = Array.isArray(meta.tags) ? meta.tags.join(' ') : '';
-          const blob = [
-            f.name,
-            meta.author,
-            meta.description,
-            tagBlob,
-          ].filter(Boolean).join(' ').toLowerCase();
-          return blob.includes(q);
-        }) : sorted;
+        const filterTagsLower = Array.from(_sfActiveFilterTags).map(t => t.toLowerCase());
+        const matchesSearch = (f) => {
+          if (!q) return true;
+          return _sfEntrySearchBlob(f).includes(q);
+        };
+        const matchesTagFilter = (f) => {
+          if (filterTagsLower.length === 0) return true;
+          const entryTags = new Set(_sfEntryAllTags(f).map(t => t.toLowerCase()));
+          for (const t of filterTagsLower) if (!entryTags.has(t)) return false;
+          return true;
+        };
+        const filterCreatorsLower = Array.from(_sfActiveFilterCreators).map(c => c.toLowerCase());
+        const matchesCreatorFilter = (f) => {
+          if (filterCreatorsLower.length === 0) return true;
+          const a = (f.meta && f.meta.author || '').toLowerCase();
+          if (!a) return false;
+          return filterCreatorsLower.includes(a);
+        };
+        const matching = sorted.filter(f => matchesSearch(f) && matchesTagFilter(f) && matchesCreatorFilter(f));
         list.innerHTML = matching.map(f => {
           const meta = f.meta || {};
           const author = meta.author ? `<div class="sf-card-author">by ${_sfEscape(meta.author)}</div>` : '';
@@ -10453,10 +10515,195 @@ require(['vs/editor/editor.main'], function () {
         }).join('');
         if (countEl) {
           const totalShown = sorted.length;
-          countEl.textContent = q && matching.length < totalShown
+          const isFiltering = !!q || _sfActiveFilterTags.size > 0 || _sfActiveFilterCreators.size > 0;
+          countEl.textContent = isFiltering && matching.length < totalShown
             ? `${matching.length} of ${totalShown}`
             : (totalShown ? `${totalShown} font${totalShown === 1 ? '' : 's'}` : '');
         }
+        _sfRenderTagDropdown();
+        _sfRenderCreatorDropdown();
+        _sfRenderActiveFilters();
+      };
+      // ── Tag filter (slice 9) ──────────────────────────
+      // Dropdown of available tags + counts. Available = tags present on
+      // entries that match the current search AND already-active filters
+      // (so picks never produce zero results). Counts reflect how many
+      // matching entries carry that tag.
+      const _sfRenderTagDropdown = () => {
+        const list = document.getElementById('sf-tag-dropdown-list');
+        const badge = document.getElementById('sf-tag-filter-badge');
+        const btn = document.getElementById('btn-sf-tag-filter');
+        if (badge) {
+          if (_sfActiveFilterTags.size > 0) {
+            badge.textContent = String(_sfActiveFilterTags.size);
+            badge.style.display = '';
+          } else {
+            badge.style.display = 'none';
+          }
+        }
+        if (btn) btn.classList.toggle('has-active', _sfActiveFilterTags.size > 0);
+        if (!list) return;
+        const q = (_sfSearchQuery || '').toLowerCase();
+        const filterTagsLower = Array.from(_sfActiveFilterTags).map(t => t.toLowerCase());
+        // Compute entries matching current search + active tag filters +
+        // already-active creator filters.
+        const filterCreatorsLower = Array.from(_sfActiveFilterCreators).map(c => c.toLowerCase());
+        const matchSet = _sfAllEntries.filter(f => {
+          if (q && !_sfEntrySearchBlob(f).includes(q)) return false;
+          if (filterTagsLower.length) {
+            const t = new Set(_sfEntryAllTags(f).map(x => x.toLowerCase()));
+            for (const ft of filterTagsLower) if (!t.has(ft)) return false;
+          }
+          if (filterCreatorsLower.length) {
+            const a = ((f.meta && f.meta.author) || '').toLowerCase();
+            if (!a || !filterCreatorsLower.includes(a)) return false;
+          }
+          return true;
+        });
+        // Bucket counts per tag across the matching set.
+        const counts = new Map(); // lowercaseTag -> { display: string, count: number }
+        for (const f of matchSet) {
+          for (const tag of _sfEntryAllTags(f)) {
+            if (!tag) continue;
+            const key = tag.toLowerCase();
+            const ent = counts.get(key);
+            if (ent) ent.count++;
+            else counts.set(key, { display: tag, count: 1 });
+          }
+        }
+        const entries = Array.from(counts.entries())
+          .sort((a, b) => {
+            // Active filters at top, then by count desc, then alpha.
+            const aSel = _sfActiveFilterTags.has(a[1].display);
+            const bSel = _sfActiveFilterTags.has(b[1].display);
+            if (aSel !== bSel) return aSel ? -1 : 1;
+            if (a[1].count !== b[1].count) return b[1].count - a[1].count;
+            return a[1].display.localeCompare(b[1].display);
+          });
+        if (entries.length === 0) {
+          list.innerHTML = '<div class="styles-tag-dropdown-empty">No tags on current results.</div>';
+          return;
+        }
+        list.innerHTML = entries.map(([key, info]) => {
+          const sel = _sfActiveFilterTags.has(info.display);
+          return `<button class="styles-tag-dropdown-item${sel ? ' selected' : ''}" data-tag="${_sfEscape(info.display)}">
+            <span class="styles-tag-dropdown-check">${sel ? '&#10003;' : ''}</span>
+            <span class="styles-tag-dropdown-name">${_sfEscape(info.display)}</span>
+            <span class="styles-tag-dropdown-count">${info.count}</span>
+          </button>`;
+        }).join('');
+      };
+      const _sfRenderActiveFilters = () => {
+        const strip = document.getElementById('sf-active-filters');
+        if (!strip) return;
+        const total = _sfActiveFilterTags.size + _sfActiveFilterCreators.size;
+        if (total === 0) {
+          strip.style.display = 'none';
+          strip.innerHTML = '';
+          return;
+        }
+        strip.style.display = '';
+        // Match the Style Library active-filter chip pattern (JMT blue) for
+        // consistency. "free" keeps its green identity as the one exception.
+        const tagChips = Array.from(_sfActiveFilterTags).map(tag => {
+          const isFree = tag.toLowerCase() === 'free';
+          const cls = isFree ? 'styles-active-filter-chip sf-active-filter-free' : 'styles-active-filter-chip';
+          return `<span class="${cls}" data-tag="${_sfEscape(tag)}">${_sfEscape(tag)}<button class="styles-active-filter-remove" data-filter-remove-tag="${_sfEscape(tag)}" title="Remove">&#10005;</button></span>`;
+        }).join('');
+        const creatorChips = Array.from(_sfActiveFilterCreators).map(c =>
+          `<span class="styles-active-filter-chip" data-creator="${_sfEscape(c)}">${_sfEscape(c)}<button class="styles-active-filter-remove" data-filter-remove-creator="${_sfEscape(c)}" title="Remove">&#10005;</button></span>`
+        ).join('');
+        const clearAll = total >= 2
+          ? `<button class="styles-active-filter-clear" id="sf-clear-all-filters">Clear all</button>`
+          : '';
+        strip.innerHTML = `<span class="styles-active-filters-label">Filtering by:</span>${tagChips}${creatorChips}${clearAll}`;
+      };
+      const _sfToggleFilterTag = (tag) => {
+        if (!tag) return;
+        for (const existing of _sfActiveFilterTags) {
+          if (existing.toLowerCase() === tag.toLowerCase()) {
+            _sfActiveFilterTags.delete(existing);
+            _sfRenderGrid();
+            return;
+          }
+        }
+        _sfActiveFilterTags.add(tag);
+        _sfRenderGrid();
+      };
+      // Creator-filter dropdown mirrors the tag dropdown: shows available
+      // creators (from m.author) with counts based on the currently-narrowed
+      // entry set. Counts respect active search + active tag filters +
+      // already-selected creator filters.
+      const _sfRenderCreatorDropdown = () => {
+        const list = document.getElementById('sf-creator-dropdown-list');
+        const badge = document.getElementById('sf-creator-filter-badge');
+        const btn = document.getElementById('btn-sf-creator-filter');
+        if (badge) {
+          if (_sfActiveFilterCreators.size > 0) {
+            badge.textContent = String(_sfActiveFilterCreators.size);
+            badge.style.display = '';
+          } else {
+            badge.style.display = 'none';
+          }
+        }
+        if (btn) btn.classList.toggle('has-active', _sfActiveFilterCreators.size > 0);
+        if (!list) return;
+        const q = (_sfSearchQuery || '').toLowerCase();
+        const filterTagsLower = Array.from(_sfActiveFilterTags).map(t => t.toLowerCase());
+        const filterCreatorsLower = Array.from(_sfActiveFilterCreators).map(c => c.toLowerCase());
+        const matchSet = _sfAllEntries.filter(f => {
+          if (q && !_sfEntrySearchBlob(f).includes(q)) return false;
+          if (filterTagsLower.length) {
+            const t = new Set(_sfEntryAllTags(f).map(x => x.toLowerCase()));
+            for (const ft of filterTagsLower) if (!t.has(ft)) return false;
+          }
+          if (filterCreatorsLower.length) {
+            const a = ((f.meta && f.meta.author) || '').toLowerCase();
+            if (!a || !filterCreatorsLower.includes(a)) return false;
+          }
+          return true;
+        });
+        const counts = new Map();
+        for (const f of matchSet) {
+          const a = (f.meta && f.meta.author) || '';
+          if (!a) continue;
+          const key = a.toLowerCase();
+          const ent = counts.get(key);
+          if (ent) ent.count++;
+          else counts.set(key, { display: a, count: 1 });
+        }
+        const entries = Array.from(counts.entries())
+          .sort((a, b) => {
+            const aSel = _sfActiveFilterCreators.has(a[1].display);
+            const bSel = _sfActiveFilterCreators.has(b[1].display);
+            if (aSel !== bSel) return aSel ? -1 : 1;
+            if (a[1].count !== b[1].count) return b[1].count - a[1].count;
+            return a[1].display.localeCompare(b[1].display);
+          });
+        if (entries.length === 0) {
+          list.innerHTML = '<div class="styles-tag-dropdown-empty">No creators on current results.</div>';
+          return;
+        }
+        list.innerHTML = entries.map(([key, info]) => {
+          const sel = _sfActiveFilterCreators.has(info.display);
+          return `<button class="styles-tag-dropdown-item${sel ? ' selected' : ''}" data-creator="${_sfEscape(info.display)}">
+            <span class="styles-tag-dropdown-check">${sel ? '&#10003;' : ''}</span>
+            <span class="styles-tag-dropdown-name">${_sfEscape(info.display)}</span>
+            <span class="styles-tag-dropdown-count">${info.count}</span>
+          </button>`;
+        }).join('');
+      };
+      const _sfToggleFilterCreator = (creator) => {
+        if (!creator) return;
+        for (const existing of _sfActiveFilterCreators) {
+          if (existing.toLowerCase() === creator.toLowerCase()) {
+            _sfActiveFilterCreators.delete(existing);
+            _sfRenderGrid();
+            return;
+          }
+        }
+        _sfActiveFilterCreators.add(creator);
+        _sfRenderGrid();
       };
       const _sfEscape = (s) => String(s ?? '')
         .replace(/&/g, '&amp;')
@@ -10471,6 +10718,15 @@ require(['vs/editor/editor.main'], function () {
         const r = await window.electronAPI.listEntries();
         const entries = (r && r.ok && r.entries) || [];
         _sfAllEntries = entries;
+        // Fetch sources so the search index can reach into source metadata
+        // (original filename, source vendor, bundle name, source notes).
+        try {
+          const sr = await window.electronAPI.listSources();
+          _sfAllSourcesByUuid = {};
+          if (sr && sr.ok && Array.isArray(sr.sources)) {
+            for (const s of sr.sources) _sfAllSourcesByUuid[s.uuid] = s;
+          }
+        } catch { _sfAllSourcesByUuid = {}; }
         if (entries.length === 0) {
           if (layerNoFonts) layerNoFonts.style.display = '';
           if (layerBrowse)  layerBrowse.classList.remove('active');
@@ -10777,14 +11033,19 @@ require(['vs/editor/editor.main'], function () {
         // drives the prepend checkbox visibility and label.
         const bundleName = _sfBundleNameFromCands(cands);
         _sfImport.bundleName = bundleName;
-        // Bundle/source name field — always shown when we have at least one
-        // candidate. For single-font sources it doubles as the source's own
-        // friendly name (which can differ from the user's eventual font name).
+        // Source name field — always shown when we have at least one candidate.
+        // Default to the detected bundle name when this is a multi-font bundle;
+        // for single-font sources, fall back to the source filename's stem so
+        // the source still gets a friendly name on disk (the same name won't
+        // be auto-tagged on the entry though — see _sfConfirmImport).
+        const sourceFallback = sourcePath
+          ? sourcePath.split(/[\/\\]/).pop().replace(/\.zip$/i, '')
+          : '';
         if (_sfImportEls.bundleField) {
           _sfImportEls.bundleField.style.display = cands.length >= 1 ? '' : 'none';
         }
         if (_sfImportEls.bundleNameInput) {
-          _sfImportEls.bundleNameInput.value = bundleName || '';
+          _sfImportEls.bundleNameInput.value = bundleName || sourceFallback;
         }
         // Prepend-prefix checkbox only makes sense when 2+ candidates would
         // share the prefix; hide it for single-font sources.
@@ -10964,10 +11225,12 @@ require(['vs/editor/editor.main'], function () {
           const pick = picks[i];
           if (_sfImportEls.createLabel) _sfImportEls.createLabel.textContent = `Adding ${pick.name} (${i + 1} of ${picks.length})…`;
           if (_sfImportEls.createBar)   _sfImportEls.createBar.style.width = `${Math.round((i / picks.length) * 100)}%`;
-          // Tags come from the user-edited bundle name (if any) plus any
-          // tags they've supplied directly. The backend dedups so duplicate
-          // strings don't cause issues.
-          const tags = userBundle ? [userBundle] : [];
+          // Tags inherit the user-edited bundle name ONLY when this source
+          // is actually a multi-font bundle. For single-font sources the
+          // source name and the font name are essentially the same thing,
+          // so auto-tagging would be noise.
+          const isBundle = (_sfImport.candidates || []).length >= 2;
+          const tags = (isBundle && userBundle) ? [userBundle] : [];
           const res = await window.electronAPI.createEntry({
             sourceUuid: _sfImport.uuid,
             candidate: pick.candidate,
@@ -11509,12 +11772,90 @@ require(['vs/editor/editor.main'], function () {
       _sfEntryDetailEls.meta?.addEventListener('click', _sfNotesToggleHandler);
       _sfEntryDetailEls.source?.addEventListener('click', _sfNotesToggleHandler);
       // Card click delegation — the grid re-renders on refresh, so we listen
-      // on the container once.
+      // on the container once. Tag chips on cards toggle the filter; clicks
+      // anywhere else on the card open the entry detail.
       document.getElementById('sf-cards')?.addEventListener('click', (e) => {
+        const chip = e.target.closest('.sf-card-tag');
+        if (chip) {
+          e.stopPropagation();
+          const tag = chip.textContent.trim();
+          if (tag) _sfToggleFilterTag(tag);
+          return;
+        }
         const card = e.target.closest('.sf-card');
         if (!card) return;
         const name = card.getAttribute('data-font');
         if (name) _sfOpenEntryDetail(name);
+      });
+      // Tag + Creator filter buttons + dropdowns wiring.
+      const _sfTagFilterBtn = document.getElementById('btn-sf-tag-filter');
+      const _sfTagDropdown = document.getElementById('sf-tag-dropdown');
+      const _sfCreatorFilterBtn = document.getElementById('btn-sf-creator-filter');
+      const _sfCreatorDropdown = document.getElementById('sf-creator-dropdown');
+      _sfTagFilterBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!_sfTagDropdown) return;
+        const opening = _sfTagDropdown.style.display === 'none';
+        if (_sfCreatorDropdown) _sfCreatorDropdown.style.display = 'none';
+        _sfTagDropdown.style.display = opening ? '' : 'none';
+        if (opening) _sfRenderTagDropdown();
+      });
+      _sfTagDropdown?.addEventListener('click', (e) => {
+        const item = e.target.closest('.styles-tag-dropdown-item');
+        if (!item) return;
+        e.stopPropagation();
+        const tag = item.dataset.tag;
+        if (tag) _sfToggleFilterTag(tag);
+        // Match the Style Library: dropdown auto-dismisses after a pick.
+        // User re-opens the button to make another selection.
+        if (_sfTagDropdown) _sfTagDropdown.style.display = 'none';
+      });
+      _sfCreatorFilterBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!_sfCreatorDropdown) return;
+        const opening = _sfCreatorDropdown.style.display === 'none';
+        if (_sfTagDropdown) _sfTagDropdown.style.display = 'none';
+        _sfCreatorDropdown.style.display = opening ? '' : 'none';
+        if (opening) _sfRenderCreatorDropdown();
+      });
+      _sfCreatorDropdown?.addEventListener('click', (e) => {
+        const item = e.target.closest('.styles-tag-dropdown-item');
+        if (!item) return;
+        e.stopPropagation();
+        const creator = item.dataset.creator;
+        if (creator) _sfToggleFilterCreator(creator);
+        if (_sfCreatorDropdown) _sfCreatorDropdown.style.display = 'none';
+      });
+      // Close any open dropdown when clicking outside.
+      document.addEventListener('click', (e) => {
+        const inTag = _sfTagDropdown?.contains(e.target) || _sfTagFilterBtn?.contains(e.target);
+        const inCreator = _sfCreatorDropdown?.contains(e.target) || _sfCreatorFilterBtn?.contains(e.target);
+        if (!inTag && _sfTagDropdown && _sfTagDropdown.style.display !== 'none') _sfTagDropdown.style.display = 'none';
+        if (!inCreator && _sfCreatorDropdown && _sfCreatorDropdown.style.display !== 'none') _sfCreatorDropdown.style.display = 'none';
+      });
+      // Active-filter chip remove + clear-all.
+      document.getElementById('sf-active-filters')?.addEventListener('click', (e) => {
+        const tagRemove = e.target.closest('[data-filter-remove-tag]');
+        if (tagRemove) {
+          e.stopPropagation();
+          const tag = tagRemove.getAttribute('data-filter-remove-tag');
+          if (tag) _sfToggleFilterTag(tag);
+          return;
+        }
+        const creatorRemove = e.target.closest('[data-filter-remove-creator]');
+        if (creatorRemove) {
+          e.stopPropagation();
+          const c = creatorRemove.getAttribute('data-filter-remove-creator');
+          if (c) _sfToggleFilterCreator(c);
+          return;
+        }
+        const clear = e.target.closest('#sf-clear-all-filters');
+        if (clear) {
+          e.stopPropagation();
+          _sfActiveFilterTags = new Set();
+          _sfActiveFilterCreators = new Set();
+          _sfRenderGrid();
+        }
       });
 
       document.getElementById('btn-sf-import-toolbar')?.addEventListener('click', _sfOpenImport);

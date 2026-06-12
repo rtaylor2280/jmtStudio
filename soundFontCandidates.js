@@ -341,15 +341,14 @@ async function detectCandidates(source) {
     ? source.meta.originalName.replace(/\.zip$/i, '')
     : 'source';
   walkForCandidates(byParent, '', candidates, sourceFallbackName);
-  // Every source has a name. For multi-font bundles with a shared parent
-  // folder (Spectre_5, Father), the bundle name is that folder. For
-  // multi-font bundles with inner zips at the source root (Power_Of_Many_
-  // Bundle), it's the source's own name. For single-font sources it's also
-  // the source's own name (the source-as-bundle of one). Each candidate
-  // carries the bundle name so the renderer and entry meta can read it
-  // without recomputing.
-  let bundleName = detectBundleName(candidates);
-  if (!bundleName && candidates.length >= 1) bundleName = sourceFallbackName;
+  // The "bundle" concept only applies when a source produces multiple
+  // candidate fonts. For a single-font source, the source name and the
+  // font name are the same thing, so tagging the entry with the source
+  // name would be redundant (and arguably wrong). Only stamp the bundle
+  // name on candidates when count >= 2. The source's own friendly name is
+  // a separate concern handled by the renderer when saving source meta.
+  let bundleName = candidates.length >= 2 ? detectBundleName(candidates) : null;
+  if (!bundleName && candidates.length >= 2) bundleName = sourceFallbackName;
   if (bundleName) for (const c of candidates) c.bundleName = bundleName;
   return { candidates, bundleName };
 }
