@@ -298,6 +298,29 @@ function updateEntryMeta({ userData, currentName, newName, updates }) {
   return { ok: true, name: finalName, meta };
 }
 
+// Remove an entry from disk. Used by the rename safety guard and by the
+// source-delete cascade (Phase 3, slice 10) — deleting a source should also
+// drop every entry that referenced it.
+function deleteEntry(userData, name) {
+  if (!name) return { ok: false, error: 'Missing name' };
+  const dir = path.join(entriesRoot(userData), name);
+  if (!fs.existsSync(dir)) return { ok: true, deleted: false };
+  try {
+    fs.rmSync(dir, { recursive: true, force: true });
+    return { ok: true, deleted: true };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+}
+
+// Return entries that reference a given source uuid. Used by the source
+// detail view to list "entries from this source" and by the delete cascade
+// to enumerate what's about to be removed.
+function listEntriesBySourceUuid(userData, sourceUuid) {
+  if (!sourceUuid) return [];
+  return listEntries(userData).filter(e => e.meta && e.meta.sourceUuid === sourceUuid);
+}
+
 module.exports = {
   entriesRoot,
   ensureEntriesRoot,
@@ -305,4 +328,6 @@ module.exports = {
   findEntryByName,
   createEntry,
   updateEntryMeta,
+  deleteEntry,
+  listEntriesBySourceUuid,
 };

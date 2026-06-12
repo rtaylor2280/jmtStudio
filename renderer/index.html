@@ -1836,7 +1836,8 @@
   .sf-search-count { font-size: 0.72rem; color: var(--c-text-dim); }
   .sf-grid-scroll { flex: 1; min-width: 0; overflow-y: auto; padding: 12px 20px 20px; }
   .sf-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; isolation: isolate; }
-  .sf-card { background: var(--c-bg-raised); border: 1px solid var(--c-border-faint); border-radius: 5px; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; cursor: pointer; transition: border-color 0.12s, background 0.12s; }
+  .sf-card { position: relative; background: var(--c-bg-raised); border: 1px solid var(--c-border-faint); border-radius: 5px; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; cursor: pointer; transition: border-color 0.12s, background 0.12s; }
+  .sf-card:hover .card-delete-btn { opacity: 0.6; }
   .sf-card:hover { border-color: var(--c-border-heavy); background: var(--c-bg-card); }
   .sf-card-name { font-size: 0.86rem; font-weight: 600; color: var(--c-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sf-card-author { font-size: 0.72rem; color: var(--c-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1884,6 +1885,8 @@
   .sf-review-candidate-list { display: flex; flex-direction: column; gap: 6px; }
   .sf-review-candidate-row { display: grid; grid-template-columns: 22px 1fr auto; gap: 8px; align-items: start; padding: 8px 10px; background: var(--c-bg-inset); border: 1px solid var(--c-border-faint); border-radius: 4px; }
   .sf-review-candidate-row.disabled { opacity: 0.55; }
+  .sf-review-candidate-row.already-imported { opacity: 0.6; }
+  .sf-review-candidate-row.already-imported .cand-status { color: var(--jmt-blue); font-style: italic; }
   .sf-review-candidate-row input[type="checkbox"] { margin-top: 4px; }
   .sf-review-candidate-row .cand-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
   .sf-review-candidate-row input[type="text"] { width: 100%; background: var(--c-bg-raised); border: 1px solid var(--c-border-input); border-radius: 3px; color: var(--c-text); padding: 4px 7px; font-size: 0.82rem; outline: none; box-sizing: border-box; font-family: inherit; }
@@ -1968,6 +1971,24 @@
   .sf-notes-textarea { width: 100%; min-height: 60px; resize: vertical; background: var(--c-bg-inset); color: var(--c-text); border: 1px solid var(--c-border-input); border-radius: 3px; padding: 6px 8px; font-size: 0.82rem; outline: none; font-family: inherit; box-sizing: border-box; }
   .sf-notes-textarea:focus { border-color: var(--jmt-blue); }
   .sf-detail-action-row { margin-top: 12px; display: flex; gap: 8px; justify-content: flex-end; flex-shrink: 0; }
+  /* Slice 10: source detail modal */
+  #modal-sf-source-detail .modal { width: 620px; max-width: 96vw; max-height: 86vh; display: flex; flex-direction: column; }
+  .sf-source-entries-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+  .sf-source-entry-row { position: relative; display: flex; align-items: center; gap: 8px; padding: 6px 10px 6px 10px; padding-right: 32px; background: var(--c-bg-inset); border: 1px solid var(--c-border-faint); border-radius: 4px; cursor: pointer; font-size: 0.82rem; transition: border-color 0.1s, background 0.1s; }
+  .sf-source-entry-row:hover { border-color: var(--c-border-strong); background: var(--c-bg-raised); }
+  .sf-source-entry-row .ent-name { color: var(--c-text); font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sf-source-entry-row .ent-meta { color: var(--c-text-dim); font-size: 0.72rem; }
+  .sf-source-entry-delete { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; color: var(--c-text-muted); opacity: 0; padding: 2px 6px; font-size: 0.95rem; line-height: 1; border-radius: 3px; transition: opacity 0.1s, color 0.1s, background 0.1s; }
+  .sf-source-entry-row:hover .sf-source-entry-delete { opacity: 0.5; }
+  .sf-source-entry-delete:hover { opacity: 1 !important; color: #e44; background: rgba(40,10,10,0.7); }
+  .sf-source-entries-empty { font-size: 0.78rem; color: var(--c-text-dim); font-style: italic; padding: 6px 0; }
+  .sf-source-add-more-btn { font-size: 0.82rem; padding: 6px 14px; }
+  .sf-source-delete-btn { margin-right: auto; color: #e44; }
+  .sf-source-delete-btn:hover { background: rgba(228,68,68,0.12); color: #f66; }
+  /* Edit source link inside entry detail */
+  .sf-edit-source-link { background: none; border: 1px solid var(--c-border-faint); border-radius: 3px; padding: 3px 9px; font-size: 0.7rem; color: var(--c-text-sub); cursor: pointer; margin-top: 8px; }
+  .sf-edit-source-link:hover:not(:disabled) { color: var(--jmt-blue); border-color: var(--jmt-blue); }
+  .sf-edit-source-link:disabled { opacity: 0.4; cursor: not-allowed; }
   .sf-import-folder-row { display: flex; gap: 6px; }
   .sf-import-folder-row input { flex: 1; }
   .sf-import-folder-row button { flex-shrink: 0; }
@@ -3044,6 +3065,10 @@
   <div class="modal">
     <h2 id="modal-confirm-title">Confirm</h2>
     <p id="modal-confirm-msg"></p>
+    <label id="modal-confirm-checkbox-row" style="display:none; margin: 10px 0 20px; font-size: 0.9rem; user-select:none; cursor:pointer;">
+      <input type="checkbox" id="modal-confirm-checkbox" style="margin-right: 6px; vertical-align: middle;">
+      <span id="modal-confirm-checkbox-label"></span>
+    </label>
     <div class="modal-btns">
       <button class="modal-btn-cancel"  id="modal-confirm-cancel">Cancel</button>
       <button class="modal-btn-discard" id="modal-confirm-ok">OK</button>
@@ -3206,7 +3231,7 @@
     </div>
 
     <div class="sf-import-phase" id="sf-import-phase-review" style="display:none">
-      <div class="sf-import-review-section">
+      <div class="sf-import-review-section" id="sf-review-source-section">
         <h3>Source</h3>
         <div class="sf-import-review-source-path" id="sf-import-review-source-path"></div>
         <div class="import-field">
@@ -3338,11 +3363,93 @@
       <div class="sf-entry-detail-section">
         <h3>Source</h3>
         <div class="sf-entry-detail-source" id="sf-entry-detail-source"></div>
+        <button class="sf-edit-source-link" id="btn-sf-open-source-detail">Edit source&hellip;</button>
       </div>
     </div>
     <div class="modal-btns sf-detail-action-row">
       <button class="modal-btn-cancel" id="sf-entry-detail-discard">Close</button>
       <button class="modal-btn-primary" id="sf-entry-detail-save" disabled>Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Source detail (Phase 3, slice 10) ── -->
+<div class="modal-overlay" id="modal-sf-source-detail">
+  <div class="modal" style="position:relative">
+    <button class="modal-btn-close" id="sf-source-detail-close" title="Close">&#10005;</button>
+    <div class="sf-entry-detail-header">
+      <div class="sf-entry-name-wrap">
+        <h2 id="sf-source-detail-name"></h2>
+        <input type="text" id="sf-source-detail-name-input" class="sf-entry-name-input">
+        <button class="detail-pencil sf-detail-pencil" id="btn-sf-source-name-edit" title="Edit name">&#9998;</button>
+        <button class="detail-pencil sf-detail-confirm" id="btn-sf-source-name-confirm" title="Confirm" style="display:none">&#10003;</button>
+        <div class="sf-link-area">
+          <button id="sf-source-link-display" class="sf-url-display" style="display:none"></button>
+          <button class="sf-link-btn" id="btn-sf-source-link-toggle" title="Vendor or storefront URL">&#128279;</button>
+        </div>
+      </div>
+      <div class="sf-entry-byline-wrap">
+        <span class="sf-byline-prefix" id="sf-source-byline-prefix">by</span>
+        <span id="sf-source-detail-creator" class="sf-edit-display"></span>
+        <input type="text" id="sf-source-detail-creator-input" class="sf-edit-input" list="sf-source-creator-list" placeholder="Add creator&hellip;" style="display:none">
+        <datalist id="sf-source-creator-list"></datalist>
+        <button class="detail-pencil sf-detail-pencil" id="btn-sf-source-creator-edit" title="Edit creator">&#9998;</button>
+        <button class="detail-pencil sf-detail-confirm" id="btn-sf-source-creator-confirm" title="Confirm" style="display:none">&#10003;</button>
+      </div>
+    </div>
+    <div class="sf-link-edit-row" id="sf-source-link-edit-row" style="display:none">
+      <input type="url" id="sf-source-link-input" class="sf-edit-input" placeholder="https://&hellip;" style="flex:1">
+      <button class="detail-pencil sf-detail-confirm" id="btn-sf-source-link-confirm" title="Confirm link">&#10003;</button>
+      <button class="detail-pencil" id="btn-sf-source-link-clear" title="Clear link" style="opacity:0.45">&#10005;</button>
+    </div>
+    <div class="sf-entry-detail-body">
+      <div class="sf-entry-detail-meta">
+        <div class="sf-meta-row">
+          <span class="sf-meta-label">Acquired</span>
+          <div class="sf-meta-val sf-edit-group">
+            <span id="sf-source-acquired-display" class="sf-edit-display"></span>
+            <input type="date" id="sf-source-acquired-input" class="sf-edit-input" style="display:none">
+            <button class="detail-pencil sf-detail-pencil" id="btn-sf-source-acquired-edit" title="Edit date">&#9998;</button>
+            <button class="detail-pencil sf-detail-confirm" id="btn-sf-source-acquired-confirm" title="Confirm" style="display:none">&#10003;</button>
+          </div>
+        </div>
+        <div class="sf-meta-row">
+          <span class="sf-meta-label">Original file</span>
+          <span id="sf-source-original-file" class="sf-meta-val"></span>
+        </div>
+        <div class="sf-meta-row">
+          <span class="sf-meta-label">Archive size</span>
+          <span id="sf-source-archive-size" class="sf-meta-val"></span>
+        </div>
+        <div class="sf-meta-row">
+          <span class="sf-meta-label">Tags</span>
+          <div class="sf-meta-val sf-tags-edit">
+            <div class="sf-tags-chips" id="sf-source-tags-chips"></div>
+            <input type="text" id="sf-source-tags-input" class="sf-tag-add-input" placeholder="Add tag&hellip;" maxlength="40" title="Type a tag and press Enter. Type &quot;free&quot; to mark this source as free content.">
+          </div>
+        </div>
+        <div class="sf-meta-row">
+          <span class="sf-meta-label">Notes</span>
+          <div class="sf-meta-val">
+            <div class="sf-entry-notes-block">
+              <button class="sf-entry-notes-toggle" type="button" id="sf-source-notes-toggle"><span class="notes-arrow">&#9654;</span> Notes</button>
+              <div class="sf-entry-notes-body" id="sf-source-notes-body">
+                <textarea id="sf-source-notes-input" class="sf-notes-textarea" placeholder="Anything you want to remember about this source&hellip;" maxlength="2000"></textarea>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="sf-entry-detail-section">
+        <h3>Fonts from this source <span id="sf-source-entries-count" class="sf-review-cand-count"></span></h3>
+        <div class="sf-source-entries-list" id="sf-source-entries-list"></div>
+        <button class="modal-btn-primary sf-source-add-more-btn" id="btn-sf-source-add-more">+ Add more fonts from this source</button>
+      </div>
+    </div>
+    <div class="modal-btns sf-detail-action-row">
+      <button class="modal-btn-cancel sf-source-delete-btn" id="btn-sf-source-delete">Delete source&hellip;</button>
+      <button class="modal-btn-cancel" id="sf-source-detail-discard">Close</button>
+      <button class="modal-btn-primary" id="sf-source-detail-save" disabled>Save</button>
     </div>
   </div>
 </div>
@@ -3721,6 +3828,10 @@ window.promptUnsaved = promptUnsaved;
 //   opts.confirmText — primary button label (default: 'OK')
 //   opts.confirmKind — 'danger' (default, red) | 'save' (green) | 'primary' (blue)
 //   opts.cancelText  — secondary button label (default: 'Cancel')
+//   opts.checkbox    — optional { label } to show a checkbox between message and
+//                      buttons. When provided, resolves with { confirmed, checked }
+//                      instead of a bare boolean so the caller can branch on the
+//                      checkbox state. Always starts unchecked.
 function promptConfirm(opts) {
   return new Promise(resolve => {
     const {
@@ -3729,6 +3840,7 @@ function promptConfirm(opts) {
       confirmText = 'OK',
       confirmKind = 'danger',
       cancelText  = 'Cancel',
+      checkbox    = null,
     } = opts || {};
     document.getElementById('modal-confirm-title').textContent = title;
     const msgEl = document.getElementById('modal-confirm-msg');
@@ -3737,6 +3849,18 @@ function promptConfirm(opts) {
       if (i > 0) msgEl.appendChild(document.createElement('br'));
       msgEl.appendChild(document.createTextNode(line));
     });
+    const cbRow   = document.getElementById('modal-confirm-checkbox-row');
+    const cbInput = document.getElementById('modal-confirm-checkbox');
+    const cbLabel = document.getElementById('modal-confirm-checkbox-label');
+    if (checkbox && cbRow && cbInput && cbLabel) {
+      cbLabel.textContent = checkbox.label || '';
+      cbInput.checked = false;
+      // <label> is inline by default; force block so vertical margins apply
+      // and the row visually separates from the buttons below it.
+      cbRow.style.display = 'block';
+    } else if (cbRow) {
+      cbRow.style.display = 'none';
+    }
     const okBtn = document.getElementById('modal-confirm-ok');
     okBtn.textContent = confirmText;
     okBtn.className = confirmKind === 'primary' ? 'modal-btn-primary'
@@ -3746,7 +3870,14 @@ function promptConfirm(opts) {
     cancelBtn.textContent = cancelText;
     const overlay = document.getElementById('modal-confirm');
     overlay.classList.add('active');
-    const cleanup = (r) => { overlay.classList.remove('active'); resolve(r); };
+    const cleanup = (confirmed) => {
+      overlay.classList.remove('active');
+      if (checkbox) {
+        resolve({ confirmed, checked: !!(cbInput && cbInput.checked) });
+      } else {
+        resolve(confirmed);
+      }
+    };
     okBtn.onclick     = () => cleanup(true);
     cancelBtn.onclick = () => cleanup(false);
   });
@@ -10509,6 +10640,7 @@ require(['vs/editor/editor.main'], function () {
           if (meta.purchased === false) tagBits.push('<span class="sf-card-tag free">free</span>');
           const tags = tagBits.length ? `<div class="sf-card-tags">${tagBits.join('')}</div>` : '';
           return `<div class="sf-card" data-font="${_sfEscape(f.name)}">
+            <button class="card-delete-btn" data-card-delete="${_sfEscape(f.name)}" title="Delete font">&#10005;</button>
             <div class="sf-card-name">${_sfEscape(f.name)}</div>
             ${author}${desc}${tags}
           </div>`;
@@ -10638,6 +10770,22 @@ require(['vs/editor/editor.main'], function () {
         const list = document.getElementById('sf-creator-dropdown-list');
         const badge = document.getElementById('sf-creator-filter-badge');
         const btn = document.getElementById('btn-sf-creator-filter');
+        // Single-creator libraries (or empty libraries) don't need a creator
+        // filter — there's nothing to choose between. Hide the whole control
+        // and drop any stale active filter so the chip strip stays clean.
+        const distinctCreators = new Set();
+        for (const f of _sfAllEntries) {
+          const a = (f.meta && f.meta.author || '').trim();
+          if (a) distinctCreators.add(a.toLowerCase());
+        }
+        if (distinctCreators.size <= 1) {
+          if (btn) btn.style.display = 'none';
+          const dd = document.getElementById('sf-creator-dropdown');
+          if (dd) dd.style.display = 'none';
+          if (_sfActiveFilterCreators.size > 0) _sfActiveFilterCreators.clear();
+          return;
+        }
+        if (btn) btn.style.display = '';
         if (badge) {
           if (_sfActiveFilterCreators.size > 0) {
             badge.textContent = String(_sfActiveFilterCreators.size);
@@ -10770,6 +10918,7 @@ require(['vs/editor/editor.main'], function () {
       const _sfImportEls = {
         modal:       document.getElementById('modal-sf-import'),
         title:       document.getElementById('sf-import-title'),
+        reviewSourceSection: document.getElementById('sf-review-source-section'),
         phasePick:   document.getElementById('sf-import-phase-pick'),
         phaseProg:   document.getElementById('sf-import-phase-progress'),
         phaseReview: document.getElementById('sf-import-phase-review'),
@@ -10822,6 +10971,10 @@ require(['vs/editor/editor.main'], function () {
       let _sfImport = null; // { sourcePath, uuid, vendor, candidates }
       let _sfImportProgressUnsub = null;
       let _sfCreateProgressUnsub = null;
+      // When set, closing or confirming the import modal returns the user to
+      // the source detail view of this uuid. Used by the "Add more fonts from
+      // this source" path so cancel feels like a back-step, not an exit.
+      let _sfReturnToSourceUuid = null;
 
       const _sfShowPhase = (phase) => {
         if (_sfImportEls.phasePick)   _sfImportEls.phasePick.style.display   = phase === 'pick'     ? '' : 'none';
@@ -10842,12 +10995,25 @@ require(['vs/editor/editor.main'], function () {
         // If the user cancels after a fresh source has been written to disk
         // but before any library entries reference it, the source dir is an
         // orphan. Clean it up. The confirm path clears _sfImport.uuid first
-        // so the just-committed source isn't deleted.
-        const uuidToClean = _sfImport && _sfImport.uuid;
+        // so the just-committed source isn't deleted. Existing-source reviews
+        // never clean up (the source predates this modal).
+        const uuidToClean = _sfImport && _sfImport.uuid && !_sfImport.isExistingReview ? _sfImport.uuid : null;
         if (_sfImportEls.modal) _sfImportEls.modal.classList.remove('active');
         _sfImport = null;
         if (uuidToClean) {
           window.electronAPI.deleteSource({ uuid: uuidToClean }).catch(() => {});
+        }
+      };
+      // Close the import modal AND, when the user reached it via
+      // "Add more fonts from this source", reopen the source detail view
+      // they came from. Used by the cancel path.
+      const _sfCloseImportAndReturn = async () => {
+        const returnUuid = _sfReturnToSourceUuid;
+        _sfReturnToSourceUuid = null;
+        _sfCloseImport();
+        if (returnUuid) {
+          await window.refreshSoundFontsView();
+          await _sfOpenSourceDetail(returnUuid);
         }
       };
       const _sfFormatBytes = (n) => {
@@ -10986,6 +11152,21 @@ require(['vs/editor/editor.main'], function () {
       });
 
       const _sfPopulateReview = (sourcePath) => {
+        // When this is an "add more fonts from existing source" flow, the
+        // source metadata is already on file (edited in source detail). Hide
+        // the source section entirely — only the candidate list is relevant.
+        const isAddMore = !!(_sfImport && _sfImport.isExistingReview);
+        if (_sfImportEls.reviewSourceSection) {
+          _sfImportEls.reviewSourceSection.style.display = isAddMore ? 'none' : '';
+        }
+        if (_sfImportEls.title) {
+          const src = _sfImport && _sfImport.uuid ? _sfAllSourcesByUuid[_sfImport.uuid] : null;
+          const sm = (src && src.meta) || {};
+          const sourceLabel = sm.bundleName || sm.originalName || '';
+          _sfImportEls.title.textContent = isAddMore
+            ? (sourceLabel ? `Add more fonts from ${sourceLabel}` : 'Add more fonts from this source')
+            : 'Import Sound Font';
+        }
         if (_sfImportEls.sourcePath) _sfImportEls.sourcePath.textContent = sourcePath;
         if (_sfImportEls.vendorList) {
           _sfImportEls.vendorList.innerHTML = _sfKnownVendors.map(v => `<option value="${_sfEscape(v.name)}"></option>`).join('');
@@ -11071,8 +11252,22 @@ require(['vs/editor/editor.main'], function () {
           if (cands.length === 0) {
             _sfImportEls.candList.innerHTML = '<div class="sf-import-hint">No Proffie-shaped fonts detected inside this source.</div>';
           } else {
+            // When reviewing an existing source ("Add more fonts from this
+            // source"), mark candidates that already have a library entry
+            // from this source so the user can only pick new ones.
+            const existingByPath = new Map();
+            if (_sfImport.isExistingReview) {
+              for (const e of _sfAllEntries) {
+                const m = e.meta || {};
+                if (m.sourceUuid === _sfImport.uuid && m.candidatePath != null) {
+                  existingByPath.set(m.candidatePath, e.name);
+                }
+              }
+            }
             _sfImportEls.candList.innerHTML = cands.map((c, i) => {
               const initialName = _sfSuggestName(c, i, bundleName, prependBundle);
+              const alreadyName = existingByPath.get(c.path || '');
+              const isAlready = !!alreadyName;
               const badges = [];
               if (c.multiBoard) {
                 const tip = (c.otherFlavors && c.otherFlavors.length)
@@ -11084,12 +11279,16 @@ require(['vs/editor/editor.main'], function () {
                 badges.push('<span class="cand-badge nested" title="The Proffie content lives inside a nested zip. JMT Studio extracts it during import.">nested zip</span>');
               }
               const wavLine = c.wavCount != null ? `${c.wavCount} .wav` : 'wav count inside nested zip';
-              return `<div class="sf-review-candidate-row" data-idx="${i}">
-                <input type="checkbox" class="cand-check" checked>
+              const checkAttrs = isAlready ? 'disabled' : 'checked';
+              const nameAttrs = isAlready ? 'disabled' : '';
+              const nameVal = isAlready ? alreadyName : initialName;
+              const statusHtml = isAlready ? `Already in your library as ${_sfEscape(alreadyName)}` : '';
+              return `<div class="sf-review-candidate-row${isAlready ? ' already-imported' : ''}" data-idx="${i}" data-already="${isAlready ? '1' : '0'}">
+                <input type="checkbox" class="cand-check" ${checkAttrs}>
                 <div class="cand-main">
-                  <input type="text" class="cand-name" value="${_sfEscape(initialName)}" maxlength="64" autocomplete="off">
+                  <input type="text" class="cand-name" value="${_sfEscape(nameVal)}" maxlength="64" autocomplete="off" ${nameAttrs}>
                   <div class="cand-path">${_sfEscape(c.path || '(source root)')}</div>
-                  <div class="cand-status"></div>
+                  <div class="cand-status">${statusHtml}</div>
                 </div>
                 <div class="cand-meta">
                   <div class="cand-badges">${badges.join('')}</div>
@@ -11100,6 +11299,7 @@ require(['vs/editor/editor.main'], function () {
           }
         }
         _sfImportEls.candList?.querySelectorAll('.sf-review-candidate-row').forEach(row => {
+          if (row.dataset.already === '1') return; // already-imported rows are locked
           const check = row.querySelector('.cand-check');
           const name  = row.querySelector('.cand-name');
           row.dataset.edited = 'false';
@@ -11152,6 +11352,7 @@ require(['vs/editor/editor.main'], function () {
         let anyError = false;
         const namesInUse = new Map();
         for (const row of rows) {
+          if (row.dataset.already === '1') continue; // locked rows skip validation
           const idx = parseInt(row.dataset.idx, 10);
           const check = row.querySelector('.cand-check');
           const nameEl = row.querySelector('.cand-name');
@@ -11181,6 +11382,7 @@ require(['vs/editor/editor.main'], function () {
         const rows = Array.from(_sfImportEls.candList?.querySelectorAll('.sf-review-candidate-row') || []);
         const picks = [];
         for (const row of rows) {
+          if (row.dataset.already === '1') continue;
           const idx = parseInt(row.dataset.idx, 10);
           const check = row.querySelector('.cand-check');
           const nameEl = row.querySelector('.cand-name');
@@ -11188,29 +11390,44 @@ require(['vs/editor/editor.main'], function () {
           picks.push({ candidate: _sfImport.candidates[idx], name: _sfSanitizeName(nameEl?.value || '') });
         }
         if (picks.length === 0) return;
-        const entryAuthor = (_sfImportEls.vendor?.value || '').trim() || null;
-        const entryWebsite = (_sfImportEls.website?.value || '').trim() || null;
-        const purchaseDate = _sfImportEls.purchaseDate?.value || new Date().toISOString().slice(0, 10);
-        // The checkbox now means "Free content"; invert to get the stored
-        // `purchased` flag. Unchecked (the default) means paid.
-        const purchased = !(_sfImportEls.purchased && _sfImportEls.purchased.checked);
-        const userBundle = (_sfImportEls.bundleNameInput?.value || '').trim() || null;
-        const sourceNotes = (_sfImportEls.notes?.value || '').trim() || '';
-        // Persist the user-edited source-level metadata (bundle/source name,
-        // vendor overrides, paid flag, date, notes) back onto the source's
-        // meta.json before creating any entries. The source ledger ends up
-        // matching what the user saw at review time.
-        await window.electronAPI.updateSourceMeta({
-          uuid: _sfImport.uuid,
-          updates: {
-            bundleName: userBundle,
-            vendor: entryAuthor,
-            vendorWebsite: entryWebsite,
-            purchased,
-            purchaseDate,
-            userNotes: sourceNotes,
-          },
-        });
+        const isAddMore = !!_sfImport.isExistingReview;
+        // Use the existing source's saved meta for author/date/purchased
+        // when we're in the add-more flow (the source-metadata form was
+        // hidden, so the inputs may be empty or stale).
+        let entryAuthor, purchaseDate, purchased, userBundle;
+        if (isAddMore) {
+          const src = _sfAllSourcesByUuid[_sfImport.uuid];
+          const sm = (src && src.meta) || {};
+          entryAuthor = sm.vendor || null;
+          purchaseDate = sm.purchaseDate || new Date().toISOString().slice(0, 10);
+          purchased = sm.purchased !== false;
+          userBundle = sm.bundleName || null;
+        } else {
+          entryAuthor = (_sfImportEls.vendor?.value || '').trim() || null;
+          const entryWebsite = (_sfImportEls.website?.value || '').trim() || null;
+          purchaseDate = _sfImportEls.purchaseDate?.value || new Date().toISOString().slice(0, 10);
+          purchased = !(_sfImportEls.purchased && _sfImportEls.purchased.checked);
+          userBundle = (_sfImportEls.bundleNameInput?.value || '').trim() || null;
+          const sourceNotes = (_sfImportEls.notes?.value || '').trim() || '';
+          // Persist the user-edited source-level metadata back onto the
+          // source's meta.json (only on fresh imports — add-more doesn't
+          // change source meta from this modal).
+          await window.electronAPI.updateSourceMeta({
+            uuid: _sfImport.uuid,
+            updates: {
+              bundleName: userBundle,
+              vendor: entryAuthor,
+              vendorWebsite: entryWebsite,
+              purchased,
+              purchaseDate,
+              userNotes: sourceNotes,
+              // Frozen at import time so delete-confirm wording can tell
+              // "single-font source" apart from "multi-font source down to
+              // its last entry" later, regardless of how bundleName is edited.
+              multiCandidate: (_sfImport.candidates || []).length >= 2,
+            },
+          });
+        }
         _sfShowPhase('creating');
         if (_sfImportEls.createBar) _sfImportEls.createBar.style.width = '0%';
         if (_sfCreateProgressUnsub) { try { _sfCreateProgressUnsub(); } catch {} }
@@ -11253,8 +11470,11 @@ require(['vs/editor/editor.main'], function () {
         // The source is now committed (referenced by at least one entry, or
         // attempted by the user). Clear the orphan-cleanup hook before close.
         if (_sfImport) _sfImport.uuid = null;
+        const returnUuid = _sfReturnToSourceUuid;
+        _sfReturnToSourceUuid = null;
         _sfCloseImport();
         await window.refreshSoundFontsView();
+        if (returnUuid) await _sfOpenSourceDetail(returnUuid);
       };
 
       const _sfPickAndImport = async (mode) => {
@@ -11452,11 +11672,13 @@ require(['vs/editor/editor.main'], function () {
         // Tag input cleared.
         if (_sfEntryDetailEls.tagsInput) _sfEntryDetailEls.tagsInput.value = '';
         let sourceParts = [];
+        let sourceFound = false;
         if (m.sourceUuid) {
           try {
             const r = await window.electronAPI.listSources();
             const src = r && r.ok && r.sources && r.sources.find(s => s.uuid === m.sourceUuid);
             if (src) {
+              sourceFound = true;
               const sm = src.meta || {};
               const displayName = sm.bundleName || sm.originalName || src.uuid;
               // Build the parenthetical: original filename if it differs from
@@ -11524,6 +11746,13 @@ require(['vs/editor/editor.main'], function () {
           _sfEntryDetailEls.source.innerHTML = sourceParts.length
             ? sourceParts.join('')
             : '<div class="src-line"><span class="src-val" style="color:var(--c-text-dim)">No source information recorded.</span></div>';
+        }
+        // Enable/disable the Edit source… button based on whether the
+        // backing source is still on file. No source → nothing to edit.
+        const editSrcBtn = document.getElementById('btn-sf-open-source-detail');
+        if (editSrcBtn) {
+          editSrcBtn.disabled = !sourceFound;
+          editSrcBtn.title = sourceFound ? '' : 'The source archive for this font is no longer in your library.';
         }
         _sfEntryDetailEls.modal.classList.add('active');
       };
@@ -11649,6 +11878,519 @@ require(['vs/editor/editor.main'], function () {
       _sfBindEnterEscape(_sfEntryDetailEls.bylineInput,   _sfEntryDetailEls.bylineConfirmBtn,  _sfEntryDetailEls.byline,           _sfEntryDetailEls.bylineEditBtn);
       _sfBindEnterEscape(_sfEntryDetailEls.acquiredInput, _sfEntryDetailEls.acquiredConfirmBtn,_sfEntryDetailEls.acquiredDisplay,  _sfEntryDetailEls.acquiredEditBtn);
       _sfBindEnterEscape(_sfEntryDetailEls.descInput,     _sfEntryDetailEls.descConfirmBtn,    _sfEntryDetailEls.descDisplay,      _sfEntryDetailEls.descEditBtn);
+
+      // ── Source detail view (Phase 3, slice 10) ─────────
+      const _sfSourceDetailEls = {
+        modal:           document.getElementById('modal-sf-source-detail'),
+        closeX:          document.getElementById('sf-source-detail-close'),
+        name:            document.getElementById('sf-source-detail-name'),
+        nameInput:       document.getElementById('sf-source-detail-name-input'),
+        nameEditBtn:     document.getElementById('btn-sf-source-name-edit'),
+        nameConfirmBtn:  document.getElementById('btn-sf-source-name-confirm'),
+        bylinePrefix:    document.getElementById('sf-source-byline-prefix'),
+        creator:         document.getElementById('sf-source-detail-creator'),
+        creatorInput:    document.getElementById('sf-source-detail-creator-input'),
+        creatorList:     document.getElementById('sf-source-creator-list'),
+        creatorEditBtn:  document.getElementById('btn-sf-source-creator-edit'),
+        creatorConfirmBtn: document.getElementById('btn-sf-source-creator-confirm'),
+        linkBtn:         document.getElementById('btn-sf-source-link-toggle'),
+        linkDisplay:     document.getElementById('sf-source-link-display'),
+        linkEditRow:     document.getElementById('sf-source-link-edit-row'),
+        linkInput:       document.getElementById('sf-source-link-input'),
+        linkConfirmBtn:  document.getElementById('btn-sf-source-link-confirm'),
+        linkClearBtn:    document.getElementById('btn-sf-source-link-clear'),
+        acquiredDisplay: document.getElementById('sf-source-acquired-display'),
+        acquiredInput:   document.getElementById('sf-source-acquired-input'),
+        acquiredEditBtn: document.getElementById('btn-sf-source-acquired-edit'),
+        acquiredConfirmBtn: document.getElementById('btn-sf-source-acquired-confirm'),
+        originalFile:    document.getElementById('sf-source-original-file'),
+        archiveSize:     document.getElementById('sf-source-archive-size'),
+        tagsChips:       document.getElementById('sf-source-tags-chips'),
+        tagsInput:       document.getElementById('sf-source-tags-input'),
+        notesToggle:     document.getElementById('sf-source-notes-toggle'),
+        notesBody:       document.getElementById('sf-source-notes-body'),
+        notesInput:      document.getElementById('sf-source-notes-input'),
+        entriesCount:    document.getElementById('sf-source-entries-count'),
+        entriesList:     document.getElementById('sf-source-entries-list'),
+        addMoreBtn:      document.getElementById('btn-sf-source-add-more'),
+        deleteBtn:       document.getElementById('btn-sf-source-delete'),
+        discardBtn:      document.getElementById('sf-source-detail-discard'),
+        saveBtn:         document.getElementById('sf-source-detail-save'),
+      };
+      let _sfSourceOriginalUuid = null;
+      let _sfSourceEdit = null;
+      let _sfSourceDirty = false;
+      const _sfRenderSourceTags = () => {
+        if (!_sfSourceDetailEls.tagsChips || !_sfSourceEdit) return;
+        const chips = [];
+        if (_sfSourceEdit.purchased === false) {
+          chips.push(`<span class="sf-tag-chip free" data-special="free">free<button class="sf-tag-chip-remove" data-special="free" title="Remove">&times;</button></span>`);
+        }
+        _sfSourceDetailEls.tagsChips.innerHTML = chips.join('');
+      };
+      const _sfMarkSourceDirty = () => {
+        _sfSourceDirty = true;
+        if (_sfSourceDetailEls.saveBtn) _sfSourceDetailEls.saveBtn.disabled = false;
+        if (_sfSourceDetailEls.discardBtn) _sfSourceDetailEls.discardBtn.textContent = 'Discard';
+      };
+      const _sfSyncSourceLinkDisplay = () => {
+        if (!_sfSourceEdit) return;
+        const has = !!_sfSourceEdit.vendorWebsite;
+        if (_sfSourceDetailEls.linkBtn) {
+          _sfSourceDetailEls.linkBtn.classList.toggle('has-url', has);
+          _sfSourceDetailEls.linkBtn.title = has ? 'Edit link' : 'Add a vendor or storefront URL';
+        }
+        if (_sfSourceDetailEls.linkDisplay) {
+          _sfSourceDetailEls.linkDisplay.textContent = _sfSourceEdit.vendorWebsite || '';
+          _sfSourceDetailEls.linkDisplay.title = _sfSourceEdit.vendorWebsite || '';
+          _sfSourceDetailEls.linkDisplay.style.display = has ? 'inline-block' : 'none';
+        }
+        if (_sfSourceDetailEls.linkEditRow) _sfSourceDetailEls.linkEditRow.style.display = 'none';
+      };
+      const _sfRefreshSourceDisplayValues = () => {
+        if (!_sfSourceEdit) return;
+        if (_sfSourceDetailEls.name) _sfSourceDetailEls.name.textContent = _sfSourceEdit.bundleName || _sfSourceEdit.originalName || '(unnamed)';
+        if (_sfSourceDetailEls.creator) _sfSourceDetailEls.creator.textContent = _sfSourceEdit.vendor || '';
+        if (_sfSourceDetailEls.bylinePrefix) _sfSourceDetailEls.bylinePrefix.style.display = _sfSourceEdit.vendor ? '' : 'none';
+        if (_sfSourceDetailEls.acquiredDisplay) _sfSourceDetailEls.acquiredDisplay.textContent = _sfSourceEdit.purchaseDate ? _sfFormatDate(_sfSourceEdit.purchaseDate) : '';
+        _sfRenderSourceTags();
+        _sfSyncSourceLinkDisplay();
+      };
+      const _sfRenderSourceEntries = async (uuid) => {
+        if (!_sfSourceDetailEls.entriesList) return;
+        let entries = [];
+        try {
+          const r = await window.electronAPI.listEntriesBySource({ sourceUuid: uuid });
+          entries = (r && r.ok && r.entries) || [];
+        } catch {}
+        _sfSourceDetailEls.entriesCount.textContent = entries.length === 0 ? '(none)' : `(${entries.length})`;
+        if (entries.length === 0) {
+          _sfSourceDetailEls.entriesList.innerHTML = '<div class="sf-source-entries-empty">No fonts have been added to your library from this source.</div>';
+        } else {
+          entries.sort((a, b) => a.name.localeCompare(b.name));
+          _sfSourceDetailEls.entriesList.innerHTML = entries.map(e => {
+            const fc = (e.meta && e.meta.fileCount) || 0;
+            const sz = (e.meta && e.meta.totalBytes) || 0;
+            return `<div class="sf-source-entry-row" data-entry-name="${_sfEscape(e.name)}">
+              <span class="ent-name">${_sfEscape(e.name)}</span>
+              <span class="ent-meta">${fc} file${fc === 1 ? '' : 's'} &middot; ${_sfEscape(_sfFormatBytes(sz))}</span>
+              <button class="sf-source-entry-delete" data-entry-delete="${_sfEscape(e.name)}" title="Delete this font from your library">&times;</button>
+            </div>`;
+          }).join('');
+        }
+        // Check whether any candidates remain in the source that haven't been
+        // imported. If everything's already in the library, hide the "Add
+        // more" button so the user isn't offered something they can't do.
+        if (_sfSourceDetailEls.addMoreBtn) {
+          _sfSourceDetailEls.addMoreBtn.style.display = 'none';
+          try {
+            const cr = await window.electronAPI.detectSourceCandidates({ uuid });
+            const cands = (cr && cr.ok && cr.candidates) || [];
+            const importedPaths = new Set(entries.map(e => (e.meta && e.meta.candidatePath) || ''));
+            const remaining = cands.filter(c => !importedPaths.has(c.path || ''));
+            _sfSourceDetailEls.addMoreBtn.style.display = remaining.length > 0 ? '' : 'none';
+          } catch {}
+        }
+      };
+      const _sfOpenSourceDetail = async (uuid) => {
+        if (!uuid) return;
+        // Refresh the sources map in case it's stale (e.g. another entry
+        // detail was open just now and the source got deleted out from
+        // under us).
+        try {
+          const r = await window.electronAPI.listSources();
+          if (r && r.ok && Array.isArray(r.sources)) {
+            _sfAllSourcesByUuid = {};
+            for (const s of r.sources) _sfAllSourcesByUuid[s.uuid] = s;
+          }
+        } catch {}
+        const src = _sfAllSourcesByUuid[uuid];
+        if (!src) return;
+        const sm = src.meta || {};
+        _sfSourceOriginalUuid = uuid;
+        _sfSourceEdit = {
+          bundleName: sm.bundleName || (sm.originalName || '').replace(/\.zip$/i, ''),
+          originalName: sm.originalName || '',
+          vendor: sm.vendor || '',
+          vendorWebsite: sm.vendorWebsite || '',
+          purchaseDate: sm.purchaseDate || '',
+          purchased: sm.purchased !== false, // default true
+          userNotes: sm.userNotes || '',
+        };
+        _sfSourceDirty = false;
+        if (_sfSourceDetailEls.saveBtn) _sfSourceDetailEls.saveBtn.disabled = true;
+        if (_sfSourceDetailEls.discardBtn) _sfSourceDetailEls.discardBtn.textContent = 'Close';
+        // Reset all fields to display mode.
+        _sfEndFieldEdit(_sfSourceDetailEls.name, _sfSourceDetailEls.nameInput, _sfSourceDetailEls.nameEditBtn, _sfSourceDetailEls.nameConfirmBtn);
+        _sfEndFieldEdit(_sfSourceDetailEls.creator, _sfSourceDetailEls.creatorInput, _sfSourceDetailEls.creatorEditBtn, _sfSourceDetailEls.creatorConfirmBtn);
+        _sfEndFieldEdit(_sfSourceDetailEls.acquiredDisplay, _sfSourceDetailEls.acquiredInput, _sfSourceDetailEls.acquiredEditBtn, _sfSourceDetailEls.acquiredConfirmBtn);
+        _sfRefreshSourceDisplayValues();
+        // Read-only fields.
+        if (_sfSourceDetailEls.originalFile) _sfSourceDetailEls.originalFile.textContent = sm.originalName || '(unknown)';
+        if (_sfSourceDetailEls.archiveSize) _sfSourceDetailEls.archiveSize.textContent = sm.fileSize ? _sfFormatBytes(sm.fileSize) : '(unknown)';
+        // Notes.
+        if (_sfSourceDetailEls.notesInput) _sfSourceDetailEls.notesInput.value = _sfSourceEdit.userNotes;
+        if (_sfSourceDetailEls.notesToggle) _sfSourceDetailEls.notesToggle.classList.toggle('open', !!_sfSourceEdit.userNotes);
+        if (_sfSourceDetailEls.notesBody) _sfSourceDetailEls.notesBody.classList.toggle('visible', !!_sfSourceEdit.userNotes);
+        if (_sfSourceDetailEls.tagsInput) _sfSourceDetailEls.tagsInput.value = '';
+        // Creator datalist (same source as entry detail).
+        if (_sfSourceDetailEls.creatorList) {
+          const seen = new Set();
+          const opts = [];
+          for (const v of _sfKnownVendors) {
+            if (v.name && !seen.has(v.name.toLowerCase())) {
+              seen.add(v.name.toLowerCase());
+              opts.push(v.name);
+            }
+          }
+          for (const e of _sfAllEntries) {
+            const a = e.meta && e.meta.author;
+            if (a && !seen.has(a.toLowerCase())) {
+              seen.add(a.toLowerCase());
+              opts.push(a);
+            }
+          }
+          opts.sort((a, b) => a.localeCompare(b));
+          _sfSourceDetailEls.creatorList.innerHTML = opts.map(n => `<option value="${_sfEscape(n)}"></option>`).join('');
+        }
+        await _sfRenderSourceEntries(uuid);
+        _sfSourceDetailEls.modal?.classList.add('active');
+      };
+      const _sfCloseSourceDetail = () => {
+        _sfSourceDetailEls.modal?.classList.remove('active');
+        _sfSourceEdit = null;
+        _sfSourceOriginalUuid = null;
+        _sfSourceDirty = false;
+      };
+      const _sfTryCloseSourceDetail = async () => {
+        if (_sfSourceDirty) {
+          if (!await _promptDiscard('Unsaved changes to this source — discard them?')) return;
+        }
+        _sfCloseSourceDetail();
+      };
+      const _sfSaveSourceDetail = async () => {
+        if (!_sfSourceEdit || !_sfSourceOriginalUuid) return;
+        const updates = {
+          bundleName: _sfSourceEdit.bundleName,
+          vendor: _sfSourceEdit.vendor,
+          vendorWebsite: _sfSourceEdit.vendorWebsite,
+          purchaseDate: _sfSourceEdit.purchaseDate,
+          purchased: _sfSourceEdit.purchased,
+          userNotes: _sfSourceEdit.userNotes,
+        };
+        const res = await window.electronAPI.updateSourceMeta({ uuid: _sfSourceOriginalUuid, updates });
+        if (!res || !res.ok) {
+          alert(`Save failed: ${(res && res.error) || 'unknown error'}`);
+          return;
+        }
+        _sfSourceDirty = false;
+        _sfCloseSourceDetail();
+        await window.refreshSoundFontsView();
+      };
+      _sfSourceDetailEls.closeX?.addEventListener('click', _sfTryCloseSourceDetail);
+      _sfSourceDetailEls.discardBtn?.addEventListener('click', _sfTryCloseSourceDetail);
+      _sfSourceDetailEls.saveBtn?.addEventListener('click', _sfSaveSourceDetail);
+      _sfSourceDetailEls.modal?.addEventListener('click', (e) => {
+        if (e.target === _sfSourceDetailEls.modal) _sfTryCloseSourceDetail();
+      });
+      // Pencil/confirm for source fields.
+      _sfSourceDetailEls.nameEditBtn?.addEventListener('click', () => {
+        if (!_sfSourceEdit) return;
+        _sfStartFieldEdit(_sfSourceDetailEls.name, _sfSourceDetailEls.nameInput, _sfSourceDetailEls.nameEditBtn, _sfSourceDetailEls.nameConfirmBtn, _sfSourceEdit.bundleName);
+      });
+      _sfSourceDetailEls.nameConfirmBtn?.addEventListener('click', () => {
+        if (!_sfSourceEdit) return;
+        const v = (_sfSourceDetailEls.nameInput?.value || '').trim();
+        if (v !== _sfSourceEdit.bundleName) {
+          _sfSourceEdit.bundleName = v;
+          _sfMarkSourceDirty();
+        }
+        _sfRefreshSourceDisplayValues();
+        _sfEndFieldEdit(_sfSourceDetailEls.name, _sfSourceDetailEls.nameInput, _sfSourceDetailEls.nameEditBtn, _sfSourceDetailEls.nameConfirmBtn);
+      });
+      _sfSourceDetailEls.creatorEditBtn?.addEventListener('click', () => {
+        if (!_sfSourceEdit) return;
+        if (_sfSourceDetailEls.bylinePrefix) _sfSourceDetailEls.bylinePrefix.style.display = 'none';
+        _sfStartFieldEdit(_sfSourceDetailEls.creator, _sfSourceDetailEls.creatorInput, _sfSourceDetailEls.creatorEditBtn, _sfSourceDetailEls.creatorConfirmBtn, _sfSourceEdit.vendor);
+      });
+      _sfSourceDetailEls.creatorConfirmBtn?.addEventListener('click', () => {
+        if (!_sfSourceEdit) return;
+        const v = (_sfSourceDetailEls.creatorInput?.value || '').trim();
+        if (v !== _sfSourceEdit.vendor) {
+          _sfSourceEdit.vendor = v;
+          _sfMarkSourceDirty();
+        }
+        _sfRefreshSourceDisplayValues();
+        _sfEndFieldEdit(_sfSourceDetailEls.creator, _sfSourceDetailEls.creatorInput, _sfSourceDetailEls.creatorEditBtn, _sfSourceDetailEls.creatorConfirmBtn);
+      });
+      _sfSourceDetailEls.acquiredEditBtn?.addEventListener('click', () => {
+        if (!_sfSourceEdit) return;
+        _sfStartFieldEdit(_sfSourceDetailEls.acquiredDisplay, _sfSourceDetailEls.acquiredInput, _sfSourceDetailEls.acquiredEditBtn, _sfSourceDetailEls.acquiredConfirmBtn, _sfSourceEdit.purchaseDate || new Date().toISOString().slice(0, 10));
+      });
+      _sfSourceDetailEls.acquiredConfirmBtn?.addEventListener('click', () => {
+        if (!_sfSourceEdit) return;
+        const v = _sfSourceDetailEls.acquiredInput?.value || '';
+        if (v !== _sfSourceEdit.purchaseDate) {
+          _sfSourceEdit.purchaseDate = v;
+          _sfMarkSourceDirty();
+        }
+        _sfRefreshSourceDisplayValues();
+        _sfEndFieldEdit(_sfSourceDetailEls.acquiredDisplay, _sfSourceDetailEls.acquiredInput, _sfSourceDetailEls.acquiredEditBtn, _sfSourceDetailEls.acquiredConfirmBtn);
+      });
+      _sfBindEnterEscape(_sfSourceDetailEls.nameInput,     _sfSourceDetailEls.nameConfirmBtn,    _sfSourceDetailEls.name,             _sfSourceDetailEls.nameEditBtn);
+      _sfBindEnterEscape(_sfSourceDetailEls.creatorInput,  _sfSourceDetailEls.creatorConfirmBtn, _sfSourceDetailEls.creator,          _sfSourceDetailEls.creatorEditBtn);
+      _sfBindEnterEscape(_sfSourceDetailEls.acquiredInput, _sfSourceDetailEls.acquiredConfirmBtn,_sfSourceDetailEls.acquiredDisplay,  _sfSourceDetailEls.acquiredEditBtn);
+      // Link button: open edit row.
+      _sfSourceDetailEls.linkBtn?.addEventListener('click', () => {
+        if (!_sfSourceEdit) return;
+        const editRow = _sfSourceDetailEls.linkEditRow;
+        if (!editRow) return;
+        const opening = editRow.style.display === 'none';
+        if (opening) {
+          editRow.style.display = '';
+          if (_sfSourceDetailEls.linkInput) {
+            _sfSourceDetailEls.linkInput.value = _sfSourceEdit.vendorWebsite || '';
+            setTimeout(() => { _sfSourceDetailEls.linkInput.focus(); _sfSourceDetailEls.linkInput.select?.(); }, 0);
+          }
+        } else {
+          editRow.style.display = 'none';
+        }
+      });
+      _sfSourceDetailEls.linkDisplay?.addEventListener('click', () => {
+        if (!_sfSourceEdit?.vendorWebsite) return;
+        window.electronAPI.openExternal(_sfSourceEdit.vendorWebsite);
+      });
+      _sfSourceDetailEls.linkConfirmBtn?.addEventListener('click', () => {
+        if (!_sfSourceEdit) return;
+        const v = (_sfSourceDetailEls.linkInput?.value || '').trim();
+        if (v !== _sfSourceEdit.vendorWebsite) {
+          _sfSourceEdit.vendorWebsite = v;
+          _sfMarkSourceDirty();
+        }
+        _sfSyncSourceLinkDisplay();
+      });
+      _sfSourceDetailEls.linkClearBtn?.addEventListener('click', () => {
+        if (!_sfSourceEdit) return;
+        if (_sfSourceEdit.vendorWebsite) {
+          _sfSourceEdit.vendorWebsite = '';
+          _sfMarkSourceDirty();
+        }
+        if (_sfSourceDetailEls.linkInput) _sfSourceDetailEls.linkInput.value = '';
+        _sfSyncSourceLinkDisplay();
+      });
+      _sfSourceDetailEls.linkInput?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          _sfSourceDetailEls.linkConfirmBtn?.click();
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          if (_sfSourceDetailEls.linkEditRow) _sfSourceDetailEls.linkEditRow.style.display = 'none';
+          _sfSyncSourceLinkDisplay();
+        }
+      });
+      // Tag chip remove (free toggle).
+      _sfSourceDetailEls.tagsChips?.addEventListener('click', (e) => {
+        const btn = e.target.closest('.sf-tag-chip-remove');
+        if (!btn || !_sfSourceEdit) return;
+        if (btn.dataset.special === 'free') {
+          _sfSourceEdit.purchased = true;
+        }
+        _sfRenderSourceTags();
+        _sfMarkSourceDirty();
+      });
+      // Tag add: only "free" is meaningful at the source level for now.
+      _sfSourceDetailEls.tagsInput?.addEventListener('keydown', (e) => {
+        if (!_sfSourceEdit) return;
+        if (e.key === 'Enter' || e.key === ',') {
+          e.preventDefault();
+          const raw = (e.target.value || '').trim();
+          if (!raw) return;
+          if (/^free$/i.test(raw)) {
+            if (_sfSourceEdit.purchased !== false) {
+              _sfSourceEdit.purchased = false;
+              _sfMarkSourceDirty();
+            }
+          }
+          // Non-"free" tags at source level are ignored for v1 — the entry
+          // level is where user-supplied tags live. We could surface a hint
+          // here if Ryan wants user-tagged sources.
+          e.target.value = '';
+          _sfRenderSourceTags();
+        }
+      });
+      // Notes input.
+      _sfSourceDetailEls.notesInput?.addEventListener('input', (e) => {
+        if (!_sfSourceEdit) return;
+        const v = e.target.value || '';
+        if (v !== _sfSourceEdit.userNotes) {
+          _sfSourceEdit.userNotes = v;
+          _sfMarkSourceDirty();
+        }
+      });
+      _sfSourceDetailEls.notesToggle?.addEventListener('click', () => {
+        _sfSourceDetailEls.notesToggle.classList.toggle('open');
+        _sfSourceDetailEls.notesBody?.classList.toggle('visible');
+      });
+      // Clicking an entry in the list jumps to that entry detail. The × on
+      // the right edge of each row deletes the font; if it's the last entry
+      // from this source, the source archive is removed too (and the source
+      // detail closes since there's nothing left to inspect).
+      _sfSourceDetailEls.entriesList?.addEventListener('click', async (e) => {
+        const del = e.target.closest('[data-entry-delete]');
+        if (del) {
+          e.stopPropagation();
+          const name = del.getAttribute('data-entry-delete');
+          if (!name) return;
+          _sfSourceDetailEls.modal?.classList.remove('active');
+          const message = await _sfBuildDeleteMessage(name);
+          const { willRemove, sourceUuid } = await _sfWillSourceBeRemovedOnEntryDelete(name);
+          const res = await promptConfirm({
+            title: 'Delete font',
+            message,
+            confirmText: 'Delete',
+            confirmKind: 'danger',
+            checkbox: willRemove ? { label: 'Save a copy of the source to Downloads' } : null,
+          });
+          const confirmed = willRemove ? res && res.confirmed : res;
+          const wantExport = willRemove ? !!(res && res.checked) : false;
+          if (!confirmed) {
+            _sfSourceDetailEls.modal?.classList.add('active');
+            return;
+          }
+          if (!await _sfExportSourceBeforeDelete(sourceUuid, wantExport)) {
+            _sfSourceDetailEls.modal?.classList.add('active');
+            return;
+          }
+          // Capture the source uuid before delete so we know whether to
+          // close (source got cleaned up) or stay open.
+          const uuidBefore = _sfSourceOriginalUuid;
+          if (!await _sfDeleteEntryAndCleanup(name)) {
+            _sfSourceDetailEls.modal?.classList.add('active');
+            return;
+          }
+          await window.refreshSoundFontsView();
+          // If the source still exists, reopen detail and re-render its
+          // entries. Otherwise the source got auto-removed; leave it closed.
+          if (uuidBefore && _sfAllSourcesByUuid[uuidBefore]) {
+            _sfSourceDetailEls.modal?.classList.add('active');
+            await _sfRenderSourceEntries(uuidBefore);
+          } else {
+            _sfCloseSourceDetail();
+          }
+          return;
+        }
+        const row = e.target.closest('.sf-source-entry-row');
+        if (!row) return;
+        const name = row.getAttribute('data-entry-name');
+        if (name) {
+          _sfCloseSourceDetail();
+          _sfOpenEntryDetail(name);
+        }
+      });
+      // "Add more fonts from this source" reuses the import review flow.
+      _sfSourceDetailEls.addMoreBtn?.addEventListener('click', async () => {
+        if (!_sfSourceOriginalUuid) return;
+        if (_sfSourceDirty) {
+          if (!await _promptDiscard('Unsaved source edits — discard them and continue?')) return;
+        }
+        const uuid = _sfSourceOriginalUuid;
+        _sfCloseSourceDetail();
+        await _sfReviewExistingSource(uuid);
+      });
+      // Delete source with cascade warning.
+      _sfSourceDetailEls.deleteBtn?.addEventListener('click', async () => {
+        if (!_sfSourceOriginalUuid) return;
+        const uuid = _sfSourceOriginalUuid;
+        const r = await window.electronAPI.listEntriesBySource({ sourceUuid: uuid });
+        const entries = (r && r.ok && r.entries) || [];
+        const src = _sfAllSourcesByUuid[uuid];
+        const sm = (src && src.meta) || {};
+        const sourceLabel = sm.bundleName || sm.originalName || uuid;
+        let message;
+        if (entries.length === 0) {
+          message = `Delete the source "${sourceLabel}"?\nThe archived copy will be removed from disk.`;
+        } else {
+          const names = entries.slice(0, 8).map(e => `  · ${e.name}`).join('\n');
+          const more = entries.length > 8 ? `\n  · …and ${entries.length - 8} more` : '';
+          message = `Delete the source "${sourceLabel}" and the ${entries.length} font${entries.length === 1 ? '' : 's'} that came from it?\n${names}${more}\n\nThis cannot be undone.`;
+        }
+        // Temporarily hide the source detail modal so the confirm prompt
+        // doesn't end up stacked behind it (DOM order would otherwise put
+        // source detail on top). If the user cancels, restore it.
+        _sfSourceDetailEls.modal?.classList.remove('active');
+        const res = await promptConfirm({
+          title: 'Delete source',
+          message,
+          confirmText: 'Delete',
+          confirmKind: 'danger',
+          checkbox: { label: 'Save a copy of the source to Downloads' },
+        });
+        const confirmed = res && res.confirmed;
+        const wantExport = !!(res && res.checked);
+        if (!confirmed) {
+          _sfSourceDetailEls.modal?.classList.add('active');
+          return;
+        }
+        if (!await _sfExportSourceBeforeDelete(uuid, wantExport)) {
+          _sfSourceDetailEls.modal?.classList.add('active');
+          return;
+        }
+        // Cascade-delete entries first, then the source.
+        const failures = [];
+        for (const e of entries) {
+          const dr = await window.electronAPI.deleteEntry({ name: e.name });
+          if (!dr || !dr.ok) failures.push({ name: e.name, error: dr && dr.error || 'unknown error' });
+        }
+        const sr = await window.electronAPI.deleteSource({ uuid });
+        if (!sr || !sr.ok) failures.push({ name: sourceLabel, error: sr && sr.error || 'unknown error' });
+        if (failures.length) {
+          alert(`Some items failed to delete:\n${failures.map(f => ` • ${f.name}: ${f.error}`).join('\n')}`);
+        }
+        _sfCloseSourceDetail();
+        await window.refreshSoundFontsView();
+      });
+
+      // "Edit source" affordance on the entry detail view → opens this modal.
+      document.getElementById('btn-sf-open-source-detail')?.addEventListener('click', async () => {
+        if (!_sfDetailEdit) return;
+        const entry = _sfAllEntries.find(e => e.name === _sfDetailOriginalName);
+        const uuid = entry && entry.meta && entry.meta.sourceUuid;
+        if (!uuid) return;
+        if (_sfDetailDirty) {
+          if (!await _promptDiscard('Unsaved changes to this font — discard them and go to source?')) return;
+        }
+        _sfCloseEntryDetail();
+        await _sfOpenSourceDetail(uuid);
+      });
+
+      // ── Review an existing source (slice 10 helper) ───
+      // Same review flow as a fresh import, but skips picker + import. Marks
+      // candidates that already have a library entry from this source as
+      // disabled in the candidate list so the user can only pick new ones.
+      const _sfReviewExistingSource = async (uuid) => {
+        if (!_sfImportEls.modal) return;
+        const src = _sfAllSourcesByUuid[uuid];
+        const sourcePath = (src && src.meta && src.meta.originalName) || '(existing source)';
+        const myRun = Symbol('sfImportRun');
+        _sfImport = { sourcePath, uuid, vendor: null, candidates: [], runId: myRun, isExistingReview: true };
+        // Remember where we came from so cancel/save returns here.
+        _sfReturnToSourceUuid = uuid;
+        _sfShowPhase('progress');
+        if (_sfImportEls.progLabel) _sfImportEls.progLabel.textContent = 'Reading source…';
+        if (_sfImportEls.progBar) _sfImportEls.progBar.style.width = '50%';
+        if (_sfImportEls.progDetail) _sfImportEls.progDetail.textContent = '';
+        if (_sfImportEls.progTip) _sfImportEls.progTip.style.display = 'none';
+        if (_sfImportEls.modal) _sfImportEls.modal.classList.add('active');
+        const [vendorRes, candRes] = await Promise.all([
+          window.electronAPI.detectSourceVendor({ uuid }),
+          window.electronAPI.detectSourceCandidates({ uuid }),
+        ]);
+        if (_sfImport?.runId !== myRun) return;
+        _sfImport.vendor = (vendorRes && vendorRes.ok) ? vendorRes : null;
+        _sfImport.candidates = (candRes && candRes.ok && candRes.candidates) ? candRes.candidates : [];
+        _sfPopulateReview(sourcePath);
+        _sfShowPhase('review');
+      };
       // Per-entry link: icon toggles to edit row (whether URL set or not).
       // Display row's URL button opens external on click.
       _sfEntryDetailEls.linkBtn?.addEventListener('click', () => {
@@ -11771,10 +12513,128 @@ require(['vs/editor/editor.main'], function () {
       };
       _sfEntryDetailEls.meta?.addEventListener('click', _sfNotesToggleHandler);
       _sfEntryDetailEls.source?.addEventListener('click', _sfNotesToggleHandler);
+      // Best-effort export of a source archive to the user's Downloads folder
+      // before a delete cascade removes it. Returns true if the export ran (or
+      // wasn't requested), false if the user opted in but the export failed —
+      // in which case the caller should abort the delete so the user has a
+      // chance to retry or reconsider.
+      const _sfExportSourceBeforeDelete = async (sourceUuid, requested) => {
+        if (!requested || !sourceUuid) return true;
+        try {
+          const r = await window.electronAPI.exportSourceToDownloads({ uuid: sourceUuid });
+          if (!r || !r.ok) {
+            alert(`Could not save a copy to Downloads: ${(r && r.error) || 'unknown error'}\n\nNothing was deleted.`);
+            return false;
+          }
+          return true;
+        } catch (err) {
+          alert(`Could not save a copy to Downloads: ${err && err.message || err}\n\nNothing was deleted.`);
+          return false;
+        }
+      };
+      // Whether deleting this entry will also drop the source archive. True
+      // when no other entries reference the same source. Used to decide
+      // whether to show the "save a copy first" checkbox on the confirm.
+      const _sfWillSourceBeRemovedOnEntryDelete = async (name) => {
+        const entry = _sfAllEntries.find(e => e.name === name);
+        const sourceUuid = entry && entry.meta && entry.meta.sourceUuid;
+        if (!sourceUuid) return { willRemove: false, sourceUuid: null };
+        try {
+          const er = await window.electronAPI.listEntriesBySource({ sourceUuid });
+          const remaining = ((er && er.ok && er.entries) || []).filter(e => e.name !== name);
+          return { willRemove: remaining.length === 0, sourceUuid };
+        } catch {
+          return { willRemove: false, sourceUuid };
+        }
+      };
+      // Delete an entry and clean up its source if nothing else references
+      // it (a single-font source or the last surviving entry). Returns true
+      // on success.
+      const _sfDeleteEntryAndCleanup = async (name) => {
+        const entry = _sfAllEntries.find(e => e.name === name);
+        const sourceUuid = entry && entry.meta && entry.meta.sourceUuid;
+        const r = await window.electronAPI.deleteEntry({ name });
+        if (!r || !r.ok) {
+          alert(`Delete failed: ${(r && r.error) || 'unknown error'}`);
+          return false;
+        }
+        // If no other entries reference the same source, the archive is now
+        // orphaned. Remove it so the library stays tight.
+        if (sourceUuid) {
+          try {
+            const er = await window.electronAPI.listEntriesBySource({ sourceUuid });
+            const remaining = (er && er.ok && er.entries) || [];
+            if (remaining.length === 0) {
+              await window.electronAPI.deleteSource({ uuid: sourceUuid });
+            }
+          } catch {}
+        }
+        return true;
+      };
+      // Build a delete-confirm message that's honest about what happens to
+      // the source archive. If other fonts in the library still come from
+      // the same source, the source stays. If this is the only one, the
+      // source archive comes off disk too.
+      // Three cases:
+      //   1. Other fonts in the library still reference this source → keep
+      //      source, reassure user the font can be re-added later.
+      //   2. This source only ever produced one font (single-font source) →
+      //      "the only font from its source" framing.
+      //   3. Multi-candidate source, but every other entry has already been
+      //      deleted → "the only remaining font" framing.
+      // multiCandidate is stamped on source meta at import time (true when
+      // the source surfaced 2+ candidate fonts), which is what distinguishes
+      // case 2 from case 3. Legacy sources without this field default to
+      // case 2 wording.
+      const _sfBuildDeleteMessage = async (name) => {
+        const entry = _sfAllEntries.find(e => e.name === name);
+        const sourceUuid = entry && entry.meta && entry.meta.sourceUuid;
+        let othersFromSameSource = 0;
+        let isMultiCandidateSource = false;
+        if (sourceUuid) {
+          try {
+            const er = await window.electronAPI.listEntriesBySource({ sourceUuid });
+            const remaining = ((er && er.ok && er.entries) || []).filter(e => e.name !== name);
+            othersFromSameSource = remaining.length;
+          } catch {}
+          const src = _sfAllSourcesByUuid[sourceUuid];
+          isMultiCandidateSource = !!(src && src.meta && src.meta.multiCandidate === true);
+        }
+        if (othersFromSameSource > 0) {
+          return `Remove "${name}" from your library?\nThe source archive will stay on file (used by ${othersFromSameSource} other font${othersFromSameSource === 1 ? '' : 's'}), so you can add this font back later if you change your mind.`;
+        }
+        if (isMultiCandidateSource) {
+          return `Remove "${name}" from your library?\nThis is the only remaining font from its source. The source archive will also be removed from your library.`;
+        }
+        return `Remove "${name}" from your library?\nThis is the only font from its source. The source archive will also be removed from your library.`;
+      };
       // Card click delegation — the grid re-renders on refresh, so we listen
-      // on the container once. Tag chips on cards toggle the filter; clicks
-      // anywhere else on the card open the entry detail.
-      document.getElementById('sf-cards')?.addEventListener('click', (e) => {
+      // on the container once. Tag chips on cards toggle the filter; the
+      // × in the corner deletes the font; clicks anywhere else on the card
+      // open the entry detail.
+      document.getElementById('sf-cards')?.addEventListener('click', async (e) => {
+        const del = e.target.closest('[data-card-delete]');
+        if (del) {
+          e.stopPropagation();
+          const name = del.getAttribute('data-card-delete');
+          if (!name) return;
+          const message = await _sfBuildDeleteMessage(name);
+          const { willRemove, sourceUuid } = await _sfWillSourceBeRemovedOnEntryDelete(name);
+          const res = await promptConfirm({
+            title: 'Delete font',
+            message,
+            confirmText: 'Delete',
+            confirmKind: 'danger',
+            checkbox: willRemove ? { label: 'Save a copy of the source to Downloads' } : null,
+          });
+          const confirmed = willRemove ? res && res.confirmed : res;
+          const wantExport = willRemove ? !!(res && res.checked) : false;
+          if (!confirmed) return;
+          if (!await _sfExportSourceBeforeDelete(sourceUuid, wantExport)) return;
+          if (!await _sfDeleteEntryAndCleanup(name)) return;
+          await window.refreshSoundFontsView();
+          return;
+        }
         const chip = e.target.closest('.sf-card-tag');
         if (chip) {
           e.stopPropagation();
@@ -11862,7 +12722,7 @@ require(['vs/editor/editor.main'], function () {
       document.getElementById('btn-sf-import-font')?.addEventListener('click', _sfOpenImport);
       _sfImportEls.pickZipBtn?.addEventListener('click', () => _sfPickAndImport('zip'));
       _sfImportEls.pickFolderBtn?.addEventListener('click', () => _sfPickAndImport('folder'));
-      _sfImportEls.cancelBtn?.addEventListener('click', _sfCloseImport);
+      _sfImportEls.cancelBtn?.addEventListener('click', _sfCloseImportAndReturn);
       _sfImportEls.confirmBtn?.addEventListener('click', _sfConfirmImport);
       // Search bar wiring for the browse grid
       document.getElementById('sf-search')?.addEventListener('input', function() {

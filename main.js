@@ -945,6 +945,22 @@ ipcMain.handle('entries:existsByName', (_, name) => {
   }
 });
 
+ipcMain.handle('entries:delete', (_, { name } = {}) => {
+  try {
+    return soundFontEntries.deleteEntry(app.getPath('userData'), name);
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
+ipcMain.handle('entries:listBySource', (_, { sourceUuid } = {}) => {
+  try {
+    return { ok: true, entries: soundFontEntries.listEntriesBySourceUuid(app.getPath('userData'), sourceUuid) };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
 ipcMain.handle('entries:updateMeta', (_, { currentName, newName, updates } = {}) => {
   try {
     return soundFontEntries.updateEntryMeta({

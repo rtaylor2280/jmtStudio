@@ -661,8 +661,23 @@ function _createFolderSource({ uuid, uuidDir, meta }) {
     async exportToDownloads(destDir) {
       if (!destDir) throw new Error('exportToDownloads requires destDir');
       if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
-      const destPath = _uniqueDestPath(destDir, meta.originalName || uuid);
-      await copyFolderRecursive(folderRoot, destPath, null);
+      // Folder sources are archived into a single zip on export so the user
+      // gets one tidy artifact in Downloads instead of a loose tree of files,
+      // and so the round-trip (re-import the exported file) works the same
+      // way zip-format sources do.
+      const baseName = String(meta.originalName || uuid).replace(/\.zip$/i, '');
+      const destPath = _uniqueDestPath(destDir, `${baseName}.zip`);
+      const archiver = require('archiver');
+      await new Promise((resolve, reject) => {
+        const ws = fs.createWriteStream(destPath);
+        const archive = archiver('zip', { zlib: { level: 6 } });
+        ws.on('close', resolve);
+        ws.on('error', reject);
+        archive.on('error', reject);
+        archive.pipe(ws);
+        archive.directory(folderRoot, false);
+        archive.finalize();
+      });
       return { destPath };
     },
   };

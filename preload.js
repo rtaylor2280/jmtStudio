@@ -206,6 +206,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   entryExistsByName:     (name)       => ipcRenderer.invoke('entries:existsByName', name),
   createEntry:           (params)     => ipcRenderer.invoke('entries:create', params),
   updateEntryMeta:       (params)     => ipcRenderer.invoke('entries:updateMeta', params),
+  deleteEntry:           (params)     => ipcRenderer.invoke('entries:delete', params),
+  listEntriesBySource:   (params)     => ipcRenderer.invoke('entries:listBySource', params),
   onEntryCreateProgress: (cb) => {
     const handler = (_, data) => cb(data);
     ipcRenderer.on('entries:createProgress', handler);
