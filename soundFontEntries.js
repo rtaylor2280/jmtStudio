@@ -313,6 +313,74 @@ function deleteEntry(userData, name) {
   }
 }
 
+// List non-audio files that ship inside an entry's extracted font folder.
+// Audio (.wav) is the font itself; everything else (readmes, .tg config,
+// blade-style snippets, ini files) is surfaced as "included files" so the
+// user can preview or save without spelunking the filesystem. Walks the
+// entry folder recursively but skips the auto-generated meta.json.
+function listEntryDocs(userData, name) {
+  if (!name) return [];
+  const dir = path.join(entriesRoot(userData), name);
+  if (!fs.existsSync(dir)) return [];
+  const out = [];
+  const walk = (curDir, relBase) => {
+    let entries;
+    try { entries = fs.readdirSync(curDir, { withFileTypes: true }); }
+    catch { return; }
+    for (const e of entries) {
+      const abs = path.join(curDir, e.name);
+      const rel = relBase ? `${relBase}/${e.name}` : e.name;
+      if (e.isDirectory()) {
+        walk(abs, rel);
+        continue;
+      }
+      if (!e.isFile()) continue;
+      if (rel === 'meta.json') continue;
+      if (/\.wav$/i.test(e.name)) continue;
+      let size = 0;
+      try { size = fs.statSync(abs).size; } catch {}
+      out.push({ fileName: rel, size });
+    }
+  };
+  walk(dir, '');
+  out.sort((a, b) => a.fileName.localeCompare(b.fileName));
+  return out;
+}
+
+// Read raw bytes of a single included file from an entry's folder. Path is
+// validated to stay within the entry directory to defend against traversal.
+function readEntryFileBytes(userData, name, subPath) {
+  if (!name || !subPath) throw new Error('Missing name or subPath');
+  const dir = path.join(entriesRoot(userData), name);
+  if (!fs.existsSync(dir)) throw new Error(`Entry not found: ${name}`);
+  const normalized = String(subPath).replace(/\\/g, '/');
+  const target = path.resolve(dir, normalized);
+  if (!target.startsWith(path.resolve(dir) + path.sep) && target !== path.resolve(dir)) {
+    throw new Error('Path escapes entry folder');
+  }
+  if (!fs.existsSync(target)) throw new Error(`File not found: ${subPath}`);
+  return fs.readFileSync(target);
+}
+
+// Copy one included file out to destDir (typically Downloads), collision-safe.
+function exportEntryFileTo(userData, name, subPath, destDir) {
+  if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+  const buf = readEntryFileBytes(userData, name, subPath);
+  const baseName = String(subPath).split(/[\\/]/).pop() || `entry-${name}.bin`;
+  // Mirror _uniqueDestPath from soundFontSources: bump " (1)", " (2)" until free.
+  const ext = path.extname(baseName);
+  const stem = path.basename(baseName, ext);
+  let candidate = baseName;
+  let n = 1;
+  while (fs.existsSync(path.join(destDir, candidate))) {
+    candidate = `${stem} (${n})${ext}`;
+    n++;
+  }
+  const destPath = path.join(destDir, candidate);
+  fs.writeFileSync(destPath, buf);
+  return { destPath };
+}
+
 // Return entries that reference a given source uuid. Used by the source
 // detail view to list "entries from this source" and by the delete cascade
 // to enumerate what's about to be removed.
@@ -330,4 +398,7 @@ module.exports = {
   updateEntryMeta,
   deleteEntry,
   listEntriesBySourceUuid,
+  listEntryDocs,
+  readEntryFileBytes,
+  exportEntryFileTo,
 };

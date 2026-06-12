@@ -1835,15 +1835,19 @@
   .sf-search-input:focus { border-color: var(--jmt-blue); }
   .sf-search-count { font-size: 0.72rem; color: var(--c-text-dim); }
   .sf-grid-scroll { flex: 1; min-width: 0; overflow-y: auto; padding: 12px 20px 20px; }
-  .sf-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; isolation: isolate; }
-  .sf-card { position: relative; background: var(--c-bg-raised); border: 1px solid var(--c-border-faint); border-radius: 5px; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; cursor: pointer; transition: border-color 0.12s, background 0.12s; }
+  .sf-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; isolation: isolate; }
+  .sf-card { position: relative; background: var(--c-bg-card); border: 1px solid var(--c-border); border-radius: 5px; padding: 10px 12px; display: flex; flex-direction: column; gap: 3px; cursor: pointer; transition: border-color 0.15s, background 0.15s; }
   .sf-card:hover .card-delete-btn { opacity: 0.6; }
-  .sf-card:hover { border-color: var(--c-border-heavy); background: var(--c-bg-card); }
-  .sf-card-name { font-size: 0.86rem; font-weight: 600; color: var(--c-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .sf-card-author { font-size: 0.72rem; color: var(--c-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sf-card:hover { border-color: var(--jmt-blue); background: var(--c-bg-hover); }
+  .sf-card-name-row { display: flex; align-items: baseline; gap: 5px; min-width: 0; }
+  .sf-card-name { font-size: 0.84rem; font-weight: 600; color: var(--c-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+  .sf-card-link { font-size: 0.72rem; color: var(--jmt-blue); text-decoration: underline; text-underline-offset: 2px; background: none; border: none; padding: 0; cursor: pointer; flex-shrink: 0; font-family: inherit; }
+  .sf-card-link:hover { opacity: 0.8; }
+  .sf-card-author { font-size: 0.71rem; color: var(--c-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sf-card-desc { font-size: 0.7rem; color: var(--c-text-dim); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .sf-card-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
-  .sf-card-tag { font-size: 0.62rem; color: var(--c-text-dim); background: var(--c-bg-inset); border: 1px solid var(--c-border-faint); border-radius: 3px; padding: 1px 5px; white-space: nowrap; }
+  .sf-card-tags { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 2px; }
+  .sf-card-tag { font-size: 0.63rem; color: var(--c-text-dim); background: var(--c-bg-raised); border: 1px solid var(--c-border-faint); border-radius: 3px; padding: 1px 5px; white-space: nowrap; cursor: pointer; }
+  .sf-card-tag.active { color: var(--jmt-blue); background: rgba(0,130,255,0.1); border-color: rgba(0,130,255,0.35); }
   .sf-card-tag.purchased { color: var(--jmt-blue); border-color: rgba(0,130,255,0.35); background: rgba(0,130,255,0.08); }
   .sf-card-tag.free { color: #7c5; border-color: rgba(120,200,80,0.35); background: rgba(120,200,80,0.10); }
   /* Free as an active-filter chip keeps its green identity rather than the
@@ -1858,6 +1862,12 @@
   /* Import modal */
   #modal-sf-import .import-field { margin-bottom: 12px; }
   #modal-sf-import label { display: block; font-size: 0.76rem; color: var(--c-text-sub); margin-bottom: 4px; font-weight: 500; }
+  /* Checkbox rows opt out of the block-label default: the checkbox and its
+     label sit inline so the label reads as the checkbox's caption, not a
+     separate field heading above it. */
+  #modal-sf-import .sf-import-checkbox-row { display: flex; align-items: center; gap: 8px; }
+  #modal-sf-import .sf-import-checkbox-row label { display: inline; margin: 0; cursor: pointer; }
+  #modal-sf-import .sf-import-checkbox-row input[type="checkbox"] { margin: 0; flex-shrink: 0; }
   #modal-sf-import input[type="text"], #modal-sf-import input[type="date"], #modal-sf-import textarea { width: 100%; background: var(--c-bg-inset); border: 1px solid var(--c-border-input); border-radius: 3px; color: var(--c-text); padding: 5px 8px; font-size: 0.82rem; outline: none; box-sizing: border-box; font-family: inherit; }
   #modal-sf-import input:focus, #modal-sf-import textarea:focus { border-color: var(--jmt-blue); }
   #modal-sf-import input.invalid { border-color: #e44; }
@@ -1903,7 +1913,7 @@
   .sf-import-btn-row { display: flex; gap: 8px; justify-content: flex-end; flex-shrink: 0; }
   .sf-dup-btn-stack { display: flex; flex-direction: column; gap: 8px; margin-top: 18px; }
   .sf-dup-btn-stack button { width: 100%; padding: 8px 14px; font-size: 0.85rem; }
-  #modal-sf-entry-detail .modal { width: 620px; max-width: 96vw; max-height: 86vh; display: flex; flex-direction: column; }
+  #modal-sf-entry-detail .modal { width: 820px; max-width: 96vw; height: min(90vh, 700px); display: flex; flex-direction: column; padding-bottom: 16px; }
   .sf-entry-detail-header { padding-right: 32px; flex-shrink: 0; }
   .sf-entry-detail-header h2 { margin: 0 0 4px 0; }
   .sf-entry-detail-byline { font-size: 0.85rem; color: var(--c-text-sub); }
@@ -1911,41 +1921,38 @@
   .sf-entry-detail-body::-webkit-scrollbar { width: 6px; }
   .sf-entry-detail-body::-webkit-scrollbar-track { background: transparent; }
   .sf-entry-detail-body::-webkit-scrollbar-thumb { background: var(--c-border-strong); border-radius: 3px; }
-  .sf-entry-detail-meta { display: flex; flex-direction: column; gap: 8px; background: var(--c-bg-inset); border: 1px solid var(--c-border-faint); border-radius: 4px; padding: 12px 14px; }
-  .sf-meta-row { display: flex; gap: 12px; font-size: 0.82rem; align-items: baseline; }
-  .sf-meta-label { color: var(--c-text-sub); min-width: 110px; font-weight: 500; flex-shrink: 0; }
-  .sf-meta-val { color: var(--c-text); flex: 1; word-break: break-word; min-width: 0; }
-  .sf-meta-val.tags-row { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+  .sf-entry-detail-meta { font-size: 0.75rem; color: var(--c-text-muted); background: var(--c-bg-inset); border: 1px solid var(--c-border-faint); border-radius: 4px; padding: 8px 12px; margin-bottom: 8px; display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
+  .sf-meta-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .sf-meta-label { color: var(--c-text-dim); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; flex-shrink: 0; width: 120px; }
+  .sf-meta-val { color: var(--c-text-sub); flex: 1; word-break: break-word; min-width: 0; }
+  .sf-meta-val.tags-row { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; flex: 1; }
   .sf-entry-detail-section { margin-top: 16px; }
   .sf-entry-detail-section h3 { font-size: 0.85rem; color: var(--c-text); margin: 0 0 8px 0; font-weight: 600; }
-  .sf-entry-detail-source { background: var(--c-bg-inset); border: 1px solid var(--c-border-faint); border-radius: 4px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
-  .sf-entry-detail-source .src-line { display: flex; gap: 12px; font-size: 0.78rem; }
-  .sf-entry-detail-source .src-label { color: var(--c-text-sub); min-width: 110px; font-weight: 500; flex-shrink: 0; }
-  .sf-entry-detail-source .src-val { color: var(--c-text); word-break: break-all; flex: 1; min-width: 0; }
+  .sf-entry-detail-source { font-size: 0.75rem; color: var(--c-text-muted); background: var(--c-bg-inset); border: 1px solid var(--c-border-faint); border-radius: 4px; padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; }
+  .sf-entry-detail-source .src-line { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .sf-entry-detail-source .src-label { color: var(--c-text-dim); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; flex-shrink: 0; width: 120px; }
+  .sf-entry-detail-source .src-val { color: var(--c-text-sub); word-break: break-all; flex: 1; min-width: 0; }
   .sf-entry-detail-source .src-val.path { font-family: monospace; font-size: 0.74rem; color: var(--c-text-dim); }
   .sf-external-link { color: var(--jmt-blue); text-decoration: none; cursor: pointer; }
   .sf-external-link:hover { text-decoration: underline; }
   .sf-entry-notes-block { display: flex; flex-direction: column; gap: 4px; }
-  .sf-entry-notes-toggle { display: flex; align-items: center; gap: 4px; cursor: pointer; font-size: 0.68rem; color: var(--c-text-sub); text-transform: uppercase; letter-spacing: 0.05em; border: none; background: none; padding: 2px 0; user-select: none; }
-  .sf-entry-notes-toggle:hover { color: var(--c-text-muted); }
-  .sf-entry-notes-toggle .notes-arrow { font-size: 0.6rem; transition: transform 0.15s; display: inline-block; }
-  .sf-entry-notes-toggle.open .notes-arrow { transform: rotate(90deg); }
+  /* sf-entry-notes-toggle visuals come from shared .detail-notes-toggle; the
+     class is retained on the markup for JS event-delegation lookups. */
   .sf-entry-notes-body { display: none; padding: 6px 8px 0 14px; font-size: 0.82rem; color: var(--c-text); line-height: 1.45; word-break: break-word; }
   .sf-entry-notes-body.visible { display: block; }
   .sf-card { cursor: pointer; }
-  /* Slice 8: per-entry link button + edit row */
+  /* Per-entry link button + edit row. Link button visuals come from the
+     shared .detail-link-btn class declared in the Style Library block; the
+     .sf-link-area layout sits beside it. */
   .sf-link-area { margin-left: 20px; display: flex; align-items: center; gap: 4px; min-width: 0; flex: 0 1 auto; }
   .sf-entry-name-wrap > h2 { flex: 0 0 auto; }
-  .sf-entry-name-wrap > .sf-detail-pencil,
-  .sf-entry-name-wrap > .sf-detail-confirm { flex: 0 0 auto; margin-right: auto; }
-  .sf-link-btn { font-size: 0.78rem; opacity: 0.3; cursor: pointer; padding: 2px 4px; border-radius: 3px; border: none; background: none; color: var(--c-text); flex-shrink: 0; transition: opacity 0.1s; }
-  .sf-link-btn:hover { opacity: 1; background: rgba(0,130,255,0.08); }
-  .sf-link-btn.has-url { opacity: 0.7; color: var(--jmt-blue); }
-  .sf-link-btn.has-url:hover { opacity: 1; }
+  .sf-entry-name-wrap > .detail-pencil,
+  .sf-entry-name-wrap > .detail-confirm { flex: 0 0 auto; margin-right: auto; }
   .sf-link-edit-row { margin-top: 4px; display: flex; align-items: center; gap: 6px; }
   .sf-url-display { background: none; border: none; padding: 0; font-size: 0.78rem; font-family: inherit; color: var(--jmt-blue); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; min-width: 0; flex: 0 1 auto; }
   .sf-url-display:hover { text-decoration: underline; }
-  /* Slice 8: inline edit pattern (pencil → input → confirm). */
+  /* Inline edit pattern (pencil → input → confirm). Pencil/confirm buttons
+     use the shared .detail-pencil / .detail-confirm classes. */
   .sf-entry-name-wrap { display: flex; align-items: center; gap: 6px; }
   .sf-entry-name-wrap h2 { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sf-entry-name-input { flex: 1; font-size: 1.1rem; font-weight: 700; background: var(--c-bg-inset); color: var(--c-text); border: 1px solid var(--jmt-blue); border-radius: 4px; padding: 2px 8px; outline: none; min-width: 0; display: none; }
@@ -1954,10 +1961,6 @@
   .sf-edit-display { color: var(--c-text); }
   .sf-edit-input { background: var(--c-bg-raised); color: var(--c-text); border: 1px solid var(--jmt-blue); border-radius: 3px; padding: 2px 6px; outline: none; font-size: 0.82rem; font-family: inherit; }
   .sf-edit-input[type="text"] { flex: 1; min-width: 0; }
-  .sf-detail-pencil, .sf-detail-confirm { background: none; border: none; cursor: pointer; font-size: 0.8rem; line-height: 1; padding: 2px 5px; border-radius: 3px; color: var(--c-text-dim); opacity: 0.5; transition: opacity 0.1s, color 0.1s, background 0.1s; }
-  .sf-detail-pencil:hover { opacity: 1; color: var(--jmt-blue); background: rgba(0,130,255,0.08); }
-  .sf-detail-confirm { color: #4a4; opacity: 0.85; }
-  .sf-detail-confirm:hover { opacity: 1; background: rgba(80,200,80,0.12); }
   .sf-edit-group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .sf-edit-group .sf-edit-display:empty::before { content: '(empty)'; color: var(--c-text-dim); font-style: italic; }
   .sf-tags-edit { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; width: 100%; }
@@ -1970,14 +1973,48 @@
   .sf-tag-add-input:focus { border-bottom-color: var(--jmt-blue); }
   .sf-notes-textarea { width: 100%; min-height: 60px; resize: vertical; background: var(--c-bg-inset); color: var(--c-text); border: 1px solid var(--c-border-input); border-radius: 3px; padding: 6px 8px; font-size: 0.82rem; outline: none; font-family: inherit; box-sizing: border-box; }
   .sf-notes-textarea:focus { border-color: var(--jmt-blue); }
-  .sf-detail-action-row { margin-top: 12px; display: flex; gap: 8px; justify-content: flex-end; flex-shrink: 0; }
+  /* Included files — vendor-supplied docs at the source level (readmes,
+     license, etc.) or non-audio files inside an entry. Rendered as inline
+     comma-separated text links to match the "Included Formats" pattern;
+     clicking opens a text viewer in-app or copies the file to Downloads. */
+  .sf-doc-chips { display: inline; }
+  .sf-doc-chip { background: none; border: none; padding: 0; font: inherit; cursor: pointer; color: var(--jmt-blue); text-decoration: underline; text-underline-offset: 2px; }
+  .sf-doc-chip:hover { opacity: 0.8; }
+  .sf-doc-sep { color: var(--c-text-sub); }
+  .sf-doc-empty { font-size: 0.72rem; color: var(--c-text-dim); font-style: italic; }
+  /* Text viewer modal */
+  #modal-sf-doc-viewer .modal { width: 720px; max-width: 96vw; height: min(80vh, 600px); display: flex; flex-direction: column; position: relative; padding-bottom: 16px; }
+  .sf-doc-viewer-header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; padding-right: 28px; }
+  .sf-doc-viewer-name { font-weight: 600; color: var(--c-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+  .sf-doc-viewer-size { font-size: 0.72rem; color: var(--c-text-dim); flex-shrink: 0; }
+  .sf-doc-viewer-body { flex: 1; min-height: 0; overflow: auto; background: var(--c-bg-inset); border: 1px solid var(--c-border-faint); border-radius: 4px; padding: 10px 12px; font-family: ui-monospace, Consolas, "Cascadia Code", monospace; font-size: 0.78rem; line-height: 1.5; color: var(--c-text); white-space: pre-wrap; word-break: break-word; }
+  .sf-doc-viewer-body::-webkit-scrollbar { width: 6px; }
+  .sf-doc-viewer-body::-webkit-scrollbar-track { background: transparent; }
+  .sf-doc-viewer-body::-webkit-scrollbar-thumb { background: var(--c-border-strong); border-radius: 3px; }
   /* Slice 10: source detail modal */
-  #modal-sf-source-detail .modal { width: 620px; max-width: 96vw; max-height: 86vh; display: flex; flex-direction: column; }
-  .sf-source-entries-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
-  .sf-source-entry-row { position: relative; display: flex; align-items: center; gap: 8px; padding: 6px 10px 6px 10px; padding-right: 32px; background: var(--c-bg-inset); border: 1px solid var(--c-border-faint); border-radius: 4px; cursor: pointer; font-size: 0.82rem; transition: border-color 0.1s, background 0.1s; }
+  #modal-sf-source-detail .modal { width: 820px; max-width: 96vw; height: min(90vh, 700px); display: flex; flex-direction: column; padding-bottom: 16px; }
+  /* Container is a 4-column grid so all display rows can share column widths
+     via subgrid — name column auto-fits the widest name in view, description
+     column flexes to take remaining space, meta column sits right-aligned. */
+  .sf-source-entries-list { display: grid; grid-template-columns: auto minmax(180px, auto) 1fr auto; gap: 4px 12px; margin-bottom: 10px; }
+  .sf-source-entry-row { position: relative; display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: center; padding: 6px 32px 6px 8px; background: var(--c-bg-inset); border: 1px solid var(--c-border-faint); border-radius: 4px; cursor: pointer; font-size: 0.82rem; transition: border-color 0.1s, background 0.1s; }
   .sf-source-entry-row:hover { border-color: var(--c-border-strong); background: var(--c-bg-raised); }
-  .sf-source-entry-row .ent-name { color: var(--c-text); font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .sf-source-entry-row .ent-meta { color: var(--c-text-dim); font-size: 0.72rem; }
+  /* Edit rows opt out of the subgrid alignment — they have a different shape
+     (no meta, no delete, inputs that should breathe), so they're laid out
+     with flex instead. The 1/-1 grid-column keeps them spanning the full row. */
+  .sf-source-entry-row.editing { display: flex; align-items: center; gap: 8px; grid-column: 1 / -1; grid-template-columns: none; cursor: default; background: var(--c-bg-raised); border-color: var(--c-border); padding-right: 10px; }
+  .sf-source-entry-pencil { background: none; border: none; cursor: pointer; font-size: 0.78rem; line-height: 1; padding: 2px 4px; border-radius: 3px; color: var(--c-text); opacity: 0.35; flex-shrink: 0; transition: opacity 0.1s, background 0.1s; }
+  .sf-source-entry-pencil:hover { opacity: 1; background: var(--c-bg-hover); }
+  /* When the row is in edit mode the same slot becomes a visible cancel ×;
+     match the confirm-button visibility level so the two row actions feel
+     equally weighted. */
+  .sf-source-entry-row.editing .sf-source-entry-pencil { opacity: 0.7; }
+  .sf-source-entry-row .ent-name { color: var(--c-text); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sf-source-entry-row .ent-desc { color: var(--c-text-sub); font-size: 0.78rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sf-source-entry-row .ent-meta { color: var(--c-text-dim); font-size: 0.72rem; white-space: nowrap; justify-self: end; }
+  .sf-source-entry-name-input { flex: 0 1 160px; min-width: 80px; font-size: 0.82rem; font-weight: 600; background: var(--c-bg-inset); color: var(--c-text); border: 1px solid var(--jmt-blue); border-radius: 3px; padding: 2px 6px; outline: none; font-family: inherit; }
+  .sf-source-entry-desc-input { flex: 1; min-width: 0; font-size: 0.78rem; background: var(--c-bg-inset); color: var(--c-text); border: 1px solid var(--jmt-blue); border-radius: 3px; padding: 2px 6px; outline: none; font-family: inherit; }
+  .sf-source-entry-edit-actions { display: flex; gap: 2px; flex-shrink: 0; }
   .sf-source-entry-delete { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; color: var(--c-text-muted); opacity: 0; padding: 2px 6px; font-size: 0.95rem; line-height: 1; border-radius: 3px; transition: opacity 0.1s, color 0.1s, background 0.1s; }
   .sf-source-entry-row:hover .sf-source-entry-delete { opacity: 0.5; }
   .sf-source-entry-delete:hover { opacity: 1 !important; color: #e44; background: rgba(40,10,10,0.7); }
@@ -2168,8 +2205,10 @@
   .style-detail-name-wrap { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; }
   .style-detail-name-wrap h2 { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: default; }
   .style-detail-name-input { flex: 1; font-size: 1.1rem; font-weight: 700; background: var(--c-bg-inset); color: var(--c-text); border: 1px solid var(--jmt-blue); border-radius: 4px; padding: 2px 8px; outline: none; min-width: 0; display: none; }
-  .detail-pencil { font-size: 0.72rem; opacity: 0.35; cursor: pointer; padding: 2px 4px; border-radius: 3px; border: none; background: none; color: var(--c-text); flex-shrink: 0; }
+  .detail-pencil { font-size: 0.72rem; opacity: 0.35; cursor: pointer; padding: 2px 4px; border-radius: 3px; border: none; background: none; color: var(--c-text); flex-shrink: 0; transition: opacity 0.1s, background 0.1s; }
   .detail-pencil:hover { opacity: 1; background: var(--c-bg-hover); }
+  .detail-confirm { font-size: 0.72rem; cursor: pointer; padding: 2px 4px; border-radius: 3px; border: none; background: none; color: #4a4; opacity: 0.7; flex-shrink: 0; transition: opacity 0.1s, background 0.1s; }
+  .detail-confirm:hover { opacity: 1; background: rgba(40,160,40,0.12); }
   #btn-detail-url-confirm { color: #4a4; opacity: 0.7; }
   #btn-detail-url-confirm:hover { opacity: 1; background: rgba(40,160,40,0.12); }
   #style-detail-meta { font-size: 0.75rem; color: var(--c-text-muted); background: var(--c-bg-inset); border: 1px solid var(--c-border-faint); border-radius: 4px; padding: 8px 12px; margin-bottom: 8px; display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
@@ -2191,13 +2230,13 @@
   .detail-url-display:hover { text-decoration: underline; }
   .detail-url-input { font-size: 0.73rem; background: var(--c-bg-inset); color: var(--c-text); border: 1px solid var(--jmt-blue); border-radius: 3px; padding: 1px 6px; outline: none; flex: 1; min-width: 0; font-family: monospace; }
   .detail-url-input.url-invalid { border-color: #c44; color: #e44; }
-  #detail-notes-toggle { display: flex; align-items: center; gap: 4px; cursor: pointer; font-size: 0.68rem; color: var(--c-text-dim); text-transform: uppercase; letter-spacing: 0.05em; border: none; background: none; padding: 2px 0; user-select: none; }
-  #detail-notes-toggle:hover { color: var(--c-text-muted); }
-  #detail-notes-toggle .notes-arrow { font-size: 0.6rem; transition: transform 0.15s; display: inline-block; }
-  #detail-notes-toggle.open .notes-arrow { transform: rotate(90deg); }
-  #detail-notes-toggle.has-notes { color: var(--c-text-sub); }
-  #detail-notes-body { display: none; padding-top: 4px; }
-  #detail-notes-body.visible { display: block; }
+  .detail-notes-toggle { display: flex; align-items: center; gap: 4px; cursor: pointer; font-size: 0.68rem; color: var(--c-text-dim); text-transform: uppercase; letter-spacing: 0.05em; border: none; background: none; padding: 2px 0; user-select: none; }
+  .detail-notes-toggle:hover { color: var(--c-text-muted); }
+  .detail-notes-toggle .notes-arrow { font-size: 0.6rem; transition: transform 0.15s; display: inline-block; }
+  .detail-notes-toggle.open .notes-arrow { transform: rotate(90deg); }
+  .detail-notes-toggle.has-notes { color: var(--c-text-sub); }
+  .detail-notes-body { display: none; padding-top: 4px; }
+  .detail-notes-body.visible { display: block; }
   #detail-notes-input { width: 100%; box-sizing: border-box; font-size: 0.75rem; background: var(--c-bg-inset); color: var(--c-text); border: 1px solid var(--c-border); border-radius: 3px; padding: 5px 7px; outline: none; resize: vertical; min-height: 56px; font-family: inherit; line-height: 1.4; }
   #detail-notes-input:focus { border-color: var(--jmt-blue); }
   #style-detail-editor { flex: 1; min-height: 0; border: 1px solid var(--c-border); border-radius: 4px; overflow: hidden; }
@@ -2666,6 +2705,7 @@
     <div class="sf-search-bar">
       <div class="sf-search-input-wrap">
         <input type="text" id="sf-search" class="sf-search-input" placeholder="Search sound fonts…" autocomplete="off" spellcheck="false">
+        <span id="sf-search-clear" class="vp-search-clear" style="display:none" title="Clear">&#x2715;</span>
       </div>
       <span class="sf-search-count" id="sf-search-count"></span>
       <div class="styles-tag-filter-wrap">
@@ -2813,8 +2853,8 @@
         <input id="detail-tag-input" class="detail-tag-input" type="text" placeholder="Add tag…">
       </div>
       <div>
-        <button id="detail-notes-toggle"><span class="notes-arrow">&#9654;</span> Notes</button>
-        <div id="detail-notes-body">
+        <button id="detail-notes-toggle" class="detail-notes-toggle"><span class="notes-arrow">&#9654;</span> Notes</button>
+        <div id="detail-notes-body" class="detail-notes-body">
           <textarea id="detail-notes-input" placeholder="Add notes…"></textarea>
         </div>
       </div>
@@ -3244,13 +3284,13 @@
           <label>Website</label>
           <input type="text" id="sf-review-website" placeholder="https://..." maxlength="200" autocomplete="off">
         </div>
-        <div class="import-field sf-import-checkbox-row">
-          <input type="checkbox" id="sf-review-purchased">
-          <label for="sf-review-purchased" style="margin:0;cursor:pointer">Free content (most fonts are paid; check this only if you got it free)</label>
-        </div>
         <div class="import-field">
           <label>Acquisition Date</label>
           <input type="date" id="sf-review-purchase-date">
+        </div>
+        <div class="import-field sf-import-checkbox-row">
+          <input type="checkbox" id="sf-review-purchased">
+          <label for="sf-review-purchased">Free content</label>
         </div>
         <div class="import-field" id="sf-review-bundle-field" style="display:none">
           <label>Source Name</label>
@@ -3296,16 +3336,17 @@
       <div class="sf-entry-name-wrap">
         <h2 id="sf-entry-detail-name"></h2>
         <input type="text" id="sf-entry-detail-name-input" class="sf-entry-name-input">
-        <button class="detail-pencil sf-detail-pencil" id="btn-sf-name-edit" title="Edit name">&#9998;</button>
-        <button class="detail-pencil sf-detail-confirm" id="btn-sf-name-confirm" title="Confirm" style="display:none">&#10003;</button>
+        <button class="detail-pencil" id="btn-sf-name-edit" title="Edit name">&#9998;</button>
+        <button class="detail-confirm" id="btn-sf-name-confirm" title="Confirm" style="display:none">&#10003;</button>
         <div class="sf-link-area">
           <button id="sf-link-display" class="sf-url-display" style="display:none"></button>
-          <button class="sf-link-btn" id="btn-sf-link-toggle" title="Add a link (video demo, vendor page, etc.)">&#128279;</button>
+          <button class="detail-link-btn" id="btn-sf-link-toggle" title="Add a link (video demo, vendor page, etc.)">&#128279;</button>
         </div>
       </div>
       <div class="sf-link-edit-row" id="sf-link-edit-row" style="display:none">
         <input type="url" id="sf-link-input" class="sf-edit-input" placeholder="https://&hellip;" style="flex:1">
-        <button class="detail-pencil sf-detail-confirm" id="btn-sf-link-confirm" title="Confirm link">&#10003;</button>
+        <input type="text" id="sf-link-label-input" class="sf-edit-input" placeholder="Demo" maxlength="32" style="width: 90px; flex-shrink: 0" title="What the link reads as (e.g. Demo, YouTube, Vendor)">
+        <button class="detail-confirm" id="btn-sf-link-confirm" title="Confirm link">&#10003;</button>
         <button class="detail-pencil" id="btn-sf-link-clear" title="Clear link" style="opacity:0.45">&#10005;</button>
       </div>
       <div class="sf-entry-byline-wrap">
@@ -3313,8 +3354,8 @@
         <span id="sf-entry-detail-byline" class="sf-edit-display"></span>
         <input type="text" id="sf-entry-detail-byline-input" class="sf-edit-input" list="sf-detail-creator-list" placeholder="Add creator&hellip;" style="display:none">
         <datalist id="sf-detail-creator-list"></datalist>
-        <button class="detail-pencil sf-detail-pencil" id="btn-sf-byline-edit" title="Edit creator">&#9998;</button>
-        <button class="detail-pencil sf-detail-confirm" id="btn-sf-byline-confirm" title="Confirm" style="display:none">&#10003;</button>
+        <button class="detail-pencil" id="btn-sf-byline-edit" title="Edit creator">&#9998;</button>
+        <button class="detail-confirm" id="btn-sf-byline-confirm" title="Confirm" style="display:none">&#10003;</button>
       </div>
     </div>
     <div class="sf-entry-detail-body">
@@ -3324,8 +3365,8 @@
           <div class="sf-meta-val sf-edit-group">
             <span id="sf-detail-acquired-display" class="sf-edit-display"></span>
             <input type="date" id="sf-detail-acquired-input" class="sf-edit-input" style="display:none">
-            <button class="detail-pencil sf-detail-pencil" id="btn-sf-acquired-edit" title="Edit date">&#9998;</button>
-            <button class="detail-pencil sf-detail-confirm" id="btn-sf-acquired-confirm" title="Confirm" style="display:none">&#10003;</button>
+            <button class="detail-pencil" id="btn-sf-acquired-edit" title="Edit date">&#9998;</button>
+            <button class="detail-confirm" id="btn-sf-acquired-confirm" title="Confirm" style="display:none">&#10003;</button>
           </div>
         </div>
         <div class="sf-meta-row">
@@ -3333,8 +3374,8 @@
           <div class="sf-meta-val sf-edit-group">
             <span id="sf-detail-description-display" class="sf-edit-display"></span>
             <input type="text" id="sf-detail-description-input" class="sf-edit-input" placeholder="Add description…" maxlength="500" style="display:none">
-            <button class="detail-pencil sf-detail-pencil" id="btn-sf-description-edit" title="Edit description">&#9998;</button>
-            <button class="detail-pencil sf-detail-confirm" id="btn-sf-description-confirm" title="Confirm" style="display:none">&#10003;</button>
+            <button class="detail-pencil" id="btn-sf-description-edit" title="Edit description">&#9998;</button>
+            <button class="detail-confirm" id="btn-sf-description-confirm" title="Confirm" style="display:none">&#10003;</button>
           </div>
         </div>
         <div class="sf-meta-row">
@@ -3348,11 +3389,15 @@
             <input type="text" id="sf-detail-tags-input" class="sf-tag-add-input" placeholder="Add tag&hellip;" maxlength="40" title="Type a tag and press Enter. Type &quot;free&quot; to mark this entry as free content.">
           </div>
         </div>
+        <div class="sf-meta-row" id="sf-detail-docs-row" style="display:none">
+          <span class="sf-meta-label">Included Files</span>
+          <div class="sf-meta-val sf-doc-chips" id="sf-detail-docs-chips" data-doc-scope="entry"></div>
+        </div>
         <div class="sf-meta-row" id="sf-detail-notes-row">
           <span class="sf-meta-label">Notes</span>
           <div class="sf-meta-val">
             <div class="sf-entry-notes-block">
-              <button class="sf-entry-notes-toggle" type="button" id="sf-detail-notes-toggle"><span class="notes-arrow">&#9654;</span> Notes</button>
+              <button class="sf-entry-notes-toggle detail-notes-toggle" type="button" id="sf-detail-notes-toggle"><span class="notes-arrow">&#9654;</span> Notes</button>
               <div class="sf-entry-notes-body" id="sf-detail-notes-body">
                 <textarea id="sf-detail-notes-input" class="sf-notes-textarea" placeholder="Anything you want to remember about this font…" maxlength="2000"></textarea>
               </div>
@@ -3366,7 +3411,7 @@
         <button class="sf-edit-source-link" id="btn-sf-open-source-detail">Edit source&hellip;</button>
       </div>
     </div>
-    <div class="modal-btns sf-detail-action-row">
+    <div class="modal-btns" style="margin-top: 12px;">
       <button class="modal-btn-cancel" id="sf-entry-detail-discard">Close</button>
       <button class="modal-btn-primary" id="sf-entry-detail-save" disabled>Save</button>
     </div>
@@ -3381,11 +3426,11 @@
       <div class="sf-entry-name-wrap">
         <h2 id="sf-source-detail-name"></h2>
         <input type="text" id="sf-source-detail-name-input" class="sf-entry-name-input">
-        <button class="detail-pencil sf-detail-pencil" id="btn-sf-source-name-edit" title="Edit name">&#9998;</button>
-        <button class="detail-pencil sf-detail-confirm" id="btn-sf-source-name-confirm" title="Confirm" style="display:none">&#10003;</button>
+        <button class="detail-pencil" id="btn-sf-source-name-edit" title="Edit name">&#9998;</button>
+        <button class="detail-confirm" id="btn-sf-source-name-confirm" title="Confirm" style="display:none">&#10003;</button>
         <div class="sf-link-area">
           <button id="sf-source-link-display" class="sf-url-display" style="display:none"></button>
-          <button class="sf-link-btn" id="btn-sf-source-link-toggle" title="Vendor or storefront URL">&#128279;</button>
+          <button class="detail-link-btn" id="btn-sf-source-link-toggle" title="Vendor or storefront URL">&#128279;</button>
         </div>
       </div>
       <div class="sf-entry-byline-wrap">
@@ -3393,13 +3438,13 @@
         <span id="sf-source-detail-creator" class="sf-edit-display"></span>
         <input type="text" id="sf-source-detail-creator-input" class="sf-edit-input" list="sf-source-creator-list" placeholder="Add creator&hellip;" style="display:none">
         <datalist id="sf-source-creator-list"></datalist>
-        <button class="detail-pencil sf-detail-pencil" id="btn-sf-source-creator-edit" title="Edit creator">&#9998;</button>
-        <button class="detail-pencil sf-detail-confirm" id="btn-sf-source-creator-confirm" title="Confirm" style="display:none">&#10003;</button>
+        <button class="detail-pencil" id="btn-sf-source-creator-edit" title="Edit creator">&#9998;</button>
+        <button class="detail-confirm" id="btn-sf-source-creator-confirm" title="Confirm" style="display:none">&#10003;</button>
       </div>
     </div>
     <div class="sf-link-edit-row" id="sf-source-link-edit-row" style="display:none">
       <input type="url" id="sf-source-link-input" class="sf-edit-input" placeholder="https://&hellip;" style="flex:1">
-      <button class="detail-pencil sf-detail-confirm" id="btn-sf-source-link-confirm" title="Confirm link">&#10003;</button>
+      <button class="detail-confirm" id="btn-sf-source-link-confirm" title="Confirm link">&#10003;</button>
       <button class="detail-pencil" id="btn-sf-source-link-clear" title="Clear link" style="opacity:0.45">&#10005;</button>
     </div>
     <div class="sf-entry-detail-body">
@@ -3409,8 +3454,8 @@
           <div class="sf-meta-val sf-edit-group">
             <span id="sf-source-acquired-display" class="sf-edit-display"></span>
             <input type="date" id="sf-source-acquired-input" class="sf-edit-input" style="display:none">
-            <button class="detail-pencil sf-detail-pencil" id="btn-sf-source-acquired-edit" title="Edit date">&#9998;</button>
-            <button class="detail-pencil sf-detail-confirm" id="btn-sf-source-acquired-confirm" title="Confirm" style="display:none">&#10003;</button>
+            <button class="detail-pencil" id="btn-sf-source-acquired-edit" title="Edit date">&#9998;</button>
+            <button class="detail-confirm" id="btn-sf-source-acquired-confirm" title="Confirm" style="display:none">&#10003;</button>
           </div>
         </div>
         <div class="sf-meta-row">
@@ -3428,11 +3473,15 @@
             <input type="text" id="sf-source-tags-input" class="sf-tag-add-input" placeholder="Add tag&hellip;" maxlength="40" title="Type a tag and press Enter. Type &quot;free&quot; to mark this source as free content.">
           </div>
         </div>
+        <div class="sf-meta-row" id="sf-source-docs-row" style="display:none">
+          <span class="sf-meta-label">Included Files</span>
+          <div class="sf-meta-val sf-doc-chips" id="sf-source-docs-chips" data-doc-scope="source"></div>
+        </div>
         <div class="sf-meta-row">
           <span class="sf-meta-label">Notes</span>
           <div class="sf-meta-val">
             <div class="sf-entry-notes-block">
-              <button class="sf-entry-notes-toggle" type="button" id="sf-source-notes-toggle"><span class="notes-arrow">&#9654;</span> Notes</button>
+              <button class="sf-entry-notes-toggle detail-notes-toggle" type="button" id="sf-source-notes-toggle"><span class="notes-arrow">&#9654;</span> Notes</button>
               <div class="sf-entry-notes-body" id="sf-source-notes-body">
                 <textarea id="sf-source-notes-input" class="sf-notes-textarea" placeholder="Anything you want to remember about this source&hellip;" maxlength="2000"></textarea>
               </div>
@@ -3446,11 +3495,39 @@
         <button class="modal-btn-primary sf-source-add-more-btn" id="btn-sf-source-add-more">+ Add more fonts from this source</button>
       </div>
     </div>
-    <div class="modal-btns sf-detail-action-row">
+    <div class="modal-btns" style="margin-top: 12px;">
       <button class="modal-btn-cancel sf-source-delete-btn" id="btn-sf-source-delete">Delete source&hellip;</button>
       <button class="modal-btn-cancel" id="sf-source-detail-discard">Close</button>
       <button class="modal-btn-primary" id="sf-source-detail-save" disabled>Save</button>
     </div>
+  </div>
+</div>
+
+<!-- ── Link-label scope prompt ── -->
+<!-- Asked when the user changes a link label on an entry and other linked
+     entries exist in the library: how widely should this rename apply? -->
+<div class="modal-overlay" id="modal-sf-label-scope">
+  <div class="modal">
+    <h2>Change link label</h2>
+    <p>You changed the link label from "<strong id="sf-label-scope-old"></strong>" to "<strong id="sf-label-scope-new"></strong>". How widely should this apply?</p>
+    <div class="sf-dup-btn-stack">
+      <button class="modal-btn-primary" id="sf-label-scope-current">This font only</button>
+      <button class="modal-btn-cancel"  id="sf-label-scope-matching">All fonts currently labeled "<span id="sf-label-scope-matching-text"></span>"</button>
+      <button class="modal-btn-cancel"  id="sf-label-scope-all">All fonts with links</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── In-app text viewer for vendor-supplied docs (readmes, license, etc.)
+     and non-audio files inside an entry. Read-only; click to close. ── -->
+<div class="modal-overlay" id="modal-sf-doc-viewer">
+  <div class="modal">
+    <button class="modal-btn-close" id="sf-doc-viewer-close" title="Close">&#10005;</button>
+    <div class="sf-doc-viewer-header">
+      <span class="sf-doc-viewer-name" id="sf-doc-viewer-name"></span>
+      <span class="sf-doc-viewer-size" id="sf-doc-viewer-size"></span>
+    </div>
+    <div class="sf-doc-viewer-body" id="sf-doc-viewer-body"></div>
   </div>
 </div>
 
@@ -10566,6 +10643,175 @@ require(['vs/editor/editor.main'], function () {
       };
       let _sfAllEntries = [];
       let _sfAllSourcesByUuid = {};
+      // Stored preference: the link-label string the user last chose when
+      // saving a font with a URL. Defaults to "Demo" until the user changes
+      // it. Cached here at module scope and re-read on view refresh so the
+      // card grid renders without an async hop per card.
+      // Text-readable extensions for the in-app viewer. Anything outside this
+      // list falls back to the "save to Downloads" path so the user can open
+      // it in their OS.
+      const _SF_TEXT_EXTENSIONS = new Set([
+        '.txt', '.md', '.rtf', '.json', '.xml', '.ini', '.nfo', '.log',
+        '.csv', '.yaml', '.yml', '.cfg', '.conf', '.text', '.html', '.htm',
+      ]);
+      const _sfIsTextReadable = (fileName) => {
+        const m = String(fileName || '').toLowerCase().match(/\.[^.\/\\]+$/);
+        if (!m) return false;
+        return _SF_TEXT_EXTENSIONS.has(m[0]);
+      };
+      // Strip RTF control words and structural markup down to readable plain
+      // text. Not a full RTF renderer — handles the patterns common in vendor
+      // readmes: \par/\tab/quote control words, \'XX hex bytes, \uNNNN Unicode
+      // escapes, hyperlink fields (keep visible text, drop URL markup), and
+      // skips header groups (fonttbl/colortbl/stylesheet/info/etc.) entirely.
+      // Bold/italic/font-size formatting is just dropped — viewer is plain.
+      // True group-leader words only — control words that, when they appear
+      // as the FIRST control word inside a fresh "{", mark the whole group
+      // as non-body content. Inline formatting words (\cocoatextscaling,
+      // \margl, \f0, etc.) are NOT in here; they're consumed silently as
+      // unrecognized control words.
+      const _SF_RTF_SKIP_GROUPS = new Set([
+        'fonttbl', 'colortbl', 'stylesheet', 'listtable', 'listoverridetable',
+        'info', 'generator', 'expandedcolortbl', 'rsidtbl', 'themedata',
+        'colorschememapping', 'latentstyles', 'datastore', 'wgrffmtfilter',
+        'docvar', 'pict', 'shp', 'shppict', 'fldinst',
+      ]);
+      const _sfStripRtf = (rtf) => {
+        if (!rtf) return '';
+        let out = '';
+        let i = 0;
+        const len = rtf.length;
+        let depth = 0;
+        let skipDepth = 0;
+        // True only between "{" and the first piece of content that isn't
+        // the "\*" marker. This guards SKIP_GROUPS so inline control words
+        // can't accidentally truncate the body.
+        let atGroupStart = false;
+        const consumed = () => { atGroupStart = false; };
+        while (i < len) {
+          const c = rtf[i];
+          if (c === '\\') {
+            i++;
+            if (i >= len) break;
+            const next = rtf[i];
+            if (next === '\\' || next === '{' || next === '}') {
+              if (skipDepth === 0) out += next;
+              i++;
+              consumed();
+            } else if (next === "'") {
+              i++;
+              const hex = rtf.substr(i, 2);
+              if (/^[0-9a-fA-F]{2}$/.test(hex)) {
+                if (skipDepth === 0) {
+                  const code = parseInt(hex, 16);
+                  if (code === 0x91 || code === 0x92) out += "'";
+                  else if (code === 0x93 || code === 0x94) out += '"';
+                  else if (code === 0x96 || code === 0x97) out += '-';
+                  else if (code === 0xA0) out += ' ';
+                  else out += String.fromCharCode(code);
+                }
+                i += 2;
+              }
+              consumed();
+            } else if (next === '*') {
+              // Skip-marker. Doesn't end "at group start" — the next control
+              // word still counts as the group leader (e.g. {\*\generator...}).
+              i++;
+            } else if (next === '\n' || next === '\r') {
+              if (skipDepth === 0) out += '\n';
+              i++;
+              consumed();
+            } else if (/[a-zA-Z]/.test(next)) {
+              let word = '';
+              while (i < len && /[a-zA-Z]/.test(rtf[i])) { word += rtf[i]; i++; }
+              let num = '';
+              if (i < len && rtf[i] === '-') { num += rtf[i]; i++; }
+              while (i < len && /[0-9]/.test(rtf[i])) { num += rtf[i]; i++; }
+              if (i < len && rtf[i] === ' ') i++;
+              if (skipDepth === 0) {
+                if (word === 'par' || word === 'line' || word === 'sect') out += '\n';
+                else if (word === 'tab') out += '\t';
+                else if (word === 'lquote' || word === 'rquote') out += "'";
+                else if (word === 'ldblquote' || word === 'rdblquote') out += '"';
+                else if (word === 'emdash') out += '—';
+                else if (word === 'endash') out += '–';
+                else if (word === 'bullet') out += '•';
+                else if (word === 'u' && num) {
+                  let code = parseInt(num, 10);
+                  if (code < 0) code += 65536;
+                  out += String.fromCharCode(code);
+                  // Skip the single-character substitute that follows.
+                  if (i < len && rtf[i] !== '\\' && rtf[i] !== '{' && rtf[i] !== '}') i++;
+                }
+              }
+              // Only treat as skippable group when this control word is the
+              // first thing inside a fresh "{". Inline occurrences are no-ops.
+              if (atGroupStart && _SF_RTF_SKIP_GROUPS.has(word) && skipDepth === 0) {
+                skipDepth = depth;
+              }
+              consumed();
+            } else {
+              i++;
+              consumed();
+            }
+          } else if (c === '{') {
+            depth++;
+            atGroupStart = true;
+            i++;
+          } else if (c === '}') {
+            depth--;
+            if (skipDepth > 0 && depth < skipDepth) skipDepth = 0;
+            i++;
+            consumed();
+          } else {
+            if (skipDepth === 0 && c !== '\r') out += c;
+            // Whitespace between "{" and the group leader doesn't break the
+            // atGroupStart flag — that's still inside the leading whitespace.
+            if (c !== ' ' && c !== '\t' && c !== '\n' && c !== '\r') consumed();
+            i++;
+          }
+        }
+        out = out.split('\n').map(l => l.replace(/[ \t]+$/, '')).join('\n');
+        out = out.replace(/\n{3,}/g, '\n\n');
+        return out.trim();
+      };
+      // Decode a Uint8Array as text, handling UTF-16 LE/BE BOM, UTF-8 BOM,
+      // and unmarked UTF-16 LE (Windows Notepad saves Greyscale-style readmes
+      // this way without a BOM). Mirrors _decodeText from soundFontVendors.js
+      // but runs in the renderer against Uint8Array.
+      const _sfDecodeBytes = (bytes) => {
+        if (!bytes || bytes.length === 0) return '';
+        const td = (label) => new TextDecoder(label);
+        if (bytes.length >= 2 && bytes[0] === 0xFF && bytes[1] === 0xFE) {
+          return td('utf-16le').decode(bytes.slice(2));
+        }
+        if (bytes.length >= 2 && bytes[0] === 0xFE && bytes[1] === 0xFF) {
+          return td('utf-16be').decode(bytes.slice(2));
+        }
+        if (bytes.length >= 3 && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) {
+          return td('utf-8').decode(bytes.slice(3));
+        }
+        // Unmarked UTF-16 LE heuristic: high proportion of null bytes at odd
+        // positions in the first 256 bytes.
+        const sampleLen = Math.min(256, bytes.length);
+        let nullCount = 0;
+        let oddPositions = 0;
+        for (let i = 1; i < sampleLen; i += 2) {
+          oddPositions++;
+          if (bytes[i] === 0) nullCount++;
+        }
+        if (oddPositions > 0 && nullCount / oddPositions > 0.7) {
+          return td('utf-16le').decode(bytes);
+        }
+        return td('utf-8').decode(bytes);
+      };
+      let _sfLinkLabelPref = 'Demo';
+      (async () => {
+        try {
+          const v = await window.electronAPI.getSetting('soundFontLinkLabel', 'Demo');
+          if (v && typeof v === 'string') _sfLinkLabelPref = v;
+        } catch {}
+      })();
       let _sfSearchQuery = '';
       let _sfActiveFilterTags = new Set();
       let _sfActiveFilterCreators = new Set();
@@ -10625,9 +10871,21 @@ require(['vs/editor/editor.main'], function () {
           return filterCreatorsLower.includes(a);
         };
         const matching = sorted.filter(f => matchesSearch(f) && matchesTagFilter(f) && matchesCreatorFilter(f));
+        const isFiltering = !!q || _sfActiveFilterTags.size > 0 || _sfActiveFilterCreators.size > 0;
+        if (matching.length === 0 && sorted.length > 0 && isFiltering) {
+          // Library has fonts but the current search/filter narrowed to zero.
+          // Match the Style Library "no results" placeholder so the empty
+          // state reads as a deliberate filter outcome, not a missing view.
+          list.innerHTML = '<div class="styles-empty">No fonts match.</div>';
+          if (countEl) countEl.textContent = `0 of ${sorted.length}`;
+          _sfRenderTagDropdown();
+          _sfRenderCreatorDropdown();
+          _sfRenderActiveFilters();
+          return;
+        }
         list.innerHTML = matching.map(f => {
           const meta = f.meta || {};
-          const author = meta.author ? `<div class="sf-card-author">by ${_sfEscape(meta.author)}</div>` : '';
+          const author = meta.author ? `<div class="sf-card-author">${_sfEscape(meta.author)}</div>` : '';
           const desc   = meta.description ? `<div class="sf-card-desc">${_sfEscape(meta.description)}</div>` : '';
           const tagBits = [];
           if (Array.isArray(meta.tags)) {
@@ -10639,15 +10897,23 @@ require(['vs/editor/editor.main'], function () {
           // free content gets a small badge so the user can spot it at a glance.
           if (meta.purchased === false) tagBits.push('<span class="sf-card-tag free">free</span>');
           const tags = tagBits.length ? `<div class="sf-card-tags">${tagBits.join('')}</div>` : '';
+          // Inline link button sits next to the name. Label defaults to "Demo"
+          // when not customized; the linkUrl is kept in the title attribute
+          // so hovering still reveals the destination.
+          const linkUrl = meta.linkUrl || '';
+          const linkLabel = (meta.linkLabel || '').trim() || _sfLinkLabelPref || 'Demo';
+          const linkBtn = linkUrl ? `<button class="sf-card-link" data-card-link="${_sfEscape(linkUrl)}" title="${_sfEscape(linkUrl)}">${_sfEscape(linkLabel)}</button>` : '';
           return `<div class="sf-card" data-font="${_sfEscape(f.name)}">
             <button class="card-delete-btn" data-card-delete="${_sfEscape(f.name)}" title="Delete font">&#10005;</button>
-            <div class="sf-card-name">${_sfEscape(f.name)}</div>
+            <div class="sf-card-name-row">
+              <span class="sf-card-name">${_sfEscape(f.name)}</span>
+              ${linkBtn}
+            </div>
             ${author}${desc}${tags}
           </div>`;
         }).join('');
         if (countEl) {
           const totalShown = sorted.length;
-          const isFiltering = !!q || _sfActiveFilterTags.size > 0 || _sfActiveFilterCreators.size > 0;
           countEl.textContent = isFiltering && matching.length < totalShown
             ? `${matching.length} of ${totalShown}`
             : (totalShown ? `${totalShown} font${totalShown === 1 ? '' : 's'}` : '');
@@ -11519,6 +11785,7 @@ require(['vs/editor/editor.main'], function () {
         linkDisplay:     document.getElementById('sf-link-display'),
         linkEditRow:     document.getElementById('sf-link-edit-row'),
         linkInput:       document.getElementById('sf-link-input'),
+        linkLabelInput:  document.getElementById('sf-link-label-input'),
         linkConfirmBtn:  document.getElementById('btn-sf-link-confirm'),
         linkClearBtn:    document.getElementById('btn-sf-link-clear'),
         // Source block (read-only here; source editing comes in slice 10)
@@ -11578,10 +11845,12 @@ require(['vs/editor/editor.main'], function () {
           _sfEntryDetailEls.linkBtn.classList.toggle('has-url', has);
           _sfEntryDetailEls.linkBtn.title = has ? 'Edit link' : 'Add a link (video demo, vendor page, etc.)';
         }
-        // URL display sits inline next to the link icon. Truncated with
-        // ellipsis; full URL surfaced via the title attribute on hover.
+        // Link label sits inline next to the link icon — what reads as the
+        // link to the user (e.g. "Demo", "YouTube"). Full URL surfaces via
+        // the title attribute on hover so the destination is still verifiable.
         if (_sfEntryDetailEls.linkDisplay) {
-          _sfEntryDetailEls.linkDisplay.textContent = _sfDetailEdit.linkUrl || '';
+          const labelForDisplay = (_sfDetailEdit.linkLabel || '').trim() || _sfLinkLabelPref || 'Demo';
+          _sfEntryDetailEls.linkDisplay.textContent = labelForDisplay;
           _sfEntryDetailEls.linkDisplay.title = _sfDetailEdit.linkUrl || '';
           _sfEntryDetailEls.linkDisplay.style.display = has ? 'inline-block' : 'none';
         }
@@ -11607,7 +11876,10 @@ require(['vs/editor/editor.main'], function () {
         if (confirmBtn) confirmBtn.style.display = 'none';
       };
 
-      const _sfOpenEntryDetail = async (entryName) => {
+      // opts.swapFromModalId — see _sfOpenSourceDetail. Used by the source
+      // detail's close-back-to-entry path so the swap is atomic and the card
+      // grid doesn't flash through between the two modals.
+      const _sfOpenEntryDetail = async (entryName, opts = {}) => {
         const entry = _sfAllEntries.find(e => e.name === entryName);
         if (!entry || !_sfEntryDetailEls.modal) return;
         const m = entry.meta || {};
@@ -11621,6 +11893,7 @@ require(['vs/editor/editor.main'], function () {
           userNotes: m.userNotes || '',
           purchased: m.purchased !== false, // default true when undefined
           linkUrl: m.linkUrl || '',
+          linkLabel: (m.linkLabel || '').trim(),
         };
         _sfDetailDirty = false;
         if (_sfEntryDetailEls.saveBtn) _sfEntryDetailEls.saveBtn.disabled = true;
@@ -11641,6 +11914,15 @@ require(['vs/editor/editor.main'], function () {
         if (_sfEntryDetailEls.contents) {
           _sfEntryDetailEls.contents.textContent = `${fileCount} file${fileCount === 1 ? '' : 's'} (${sizeStr})`;
         }
+        // Included files row (read-only chips). Non-wav files inside the
+        // entry folder — readmes, blade-style snippets, .tg config, etc.
+        try {
+          const docsRow = document.getElementById('sf-detail-docs-row');
+          const docsContainer = document.getElementById('sf-detail-docs-chips');
+          if (docsContainer) docsContainer.setAttribute('data-doc-key', entry.name);
+          const dr = await window.electronAPI.listEntryDocs({ name: entry.name });
+          _sfRenderDocChips(docsContainer, docsRow, (dr && dr.ok && dr.docs) || []);
+        } catch {}
 
         // Creator datalist: distinct authors already in the library plus the
         // seeded vendor list. Soft normalization — the user can still type
@@ -11712,7 +11994,7 @@ require(['vs/editor/editor.main'], function () {
               // the source, not the entry. Rendered last in the section as a
               // collapsible row.
               var _sourceNotesLine = sm.userNotes
-                ? `<div class="src-line"><span class="src-label">Notes</span><span class="src-val"><div class="sf-entry-notes-block"><button class="sf-entry-notes-toggle" type="button"><span class="notes-arrow">&#9654;</span> Notes</button><div class="sf-entry-notes-body">${_sfEscape(sm.userNotes).replace(/\n/g, '<br>')}</div></div></span></div>`
+                ? `<div class="src-line"><span class="src-label">Notes</span><span class="src-val"><div class="sf-entry-notes-block"><button class="sf-entry-notes-toggle detail-notes-toggle" type="button"><span class="notes-arrow">&#9654;</span> Notes</button><div class="sf-entry-notes-body">${_sfEscape(sm.userNotes).replace(/\n/g, '<br>')}</div></div></span></div>`
                 : '';
             } else {
               sourceParts.push('<div class="src-line"><span class="src-label">Name</span><span class="src-val">(source no longer in library)</span></div>');
@@ -11738,6 +12020,12 @@ require(['vs/editor/editor.main'], function () {
         if (m.nested) {
           sourceParts.push('<div class="src-line"><span class="src-label">Extraction</span><span class="src-val">Extracted from a nested zip inside the source</span></div>');
         }
+        // Included files (vendor-supplied docs) — read-only chips. Fetched
+        // async; the container is rendered as a placeholder and populated
+        // when the listing returns. Hidden when the source has no docs.
+        if (m.sourceUuid) {
+          sourceParts.push(`<div class="src-line" id="sf-entry-src-docs-line" style="display:none"><span class="src-label">Included Files</span><span class="src-val"><div class="sf-doc-chips" data-doc-scope="source" data-doc-key="${_sfEscape(m.sourceUuid)}" id="sf-entry-src-docs-chips"></div></span></div>`);
+        }
         // Notes last so the structural / provenance lines sit together above it.
         if (typeof _sourceNotesLine === 'string' && _sourceNotesLine) {
           sourceParts.push(_sourceNotesLine);
@@ -11746,6 +12034,17 @@ require(['vs/editor/editor.main'], function () {
           _sfEntryDetailEls.source.innerHTML = sourceParts.length
             ? sourceParts.join('')
             : '<div class="src-line"><span class="src-val" style="color:var(--c-text-dim)">No source information recorded.</span></div>';
+          // Populate the included-files chip list now that the container exists.
+          if (m.sourceUuid) {
+            (async () => {
+              try {
+                const dr = await window.electronAPI.listSourceDocs({ uuid: m.sourceUuid });
+                const row = document.getElementById('sf-entry-src-docs-line');
+                const container = document.getElementById('sf-entry-src-docs-chips');
+                _sfRenderDocChips(container, row, (dr && dr.ok && dr.docs) || []);
+              } catch {}
+            })();
+          }
         }
         // Enable/disable the Edit source… button based on whether the
         // backing source is still on file. No source → nothing to edit.
@@ -11753,6 +12052,10 @@ require(['vs/editor/editor.main'], function () {
         if (editSrcBtn) {
           editSrcBtn.disabled = !sourceFound;
           editSrcBtn.title = sourceFound ? '' : 'The source archive for this font is no longer in your library.';
+        }
+        // Atomic visibility swap — see _sfOpenSourceDetail for rationale.
+        if (opts.swapFromModalId) {
+          document.getElementById(opts.swapFromModalId)?.classList.remove('active');
         }
         _sfEntryDetailEls.modal.classList.add('active');
       };
@@ -11767,8 +12070,61 @@ require(['vs/editor/editor.main'], function () {
         }
         _sfCloseEntryDetail();
       };
+      // Three-way prompt: when the user changes a link label on one entry,
+      // ask whether to apply the change to just this entry, to every other
+      // entry currently showing the same (old) label, or to every linked
+      // entry across the library. Resolves 'current' | 'matching' | 'all'
+      // or null if the user closes the modal without choosing.
+      const _sfPromptLabelScope = (oldEffectiveLabel, newLabel) => {
+        const modal = document.getElementById('modal-sf-label-scope');
+        if (!modal) return Promise.resolve('current');
+        const oldEl = document.getElementById('sf-label-scope-old');
+        const newEl = document.getElementById('sf-label-scope-new');
+        const matchTxt = document.getElementById('sf-label-scope-matching-text');
+        if (oldEl) oldEl.textContent = oldEffectiveLabel;
+        if (newEl) newEl.textContent = newLabel;
+        if (matchTxt) matchTxt.textContent = oldEffectiveLabel;
+        return new Promise(resolve => {
+          const curBtn   = document.getElementById('sf-label-scope-current');
+          const matchBtn = document.getElementById('sf-label-scope-matching');
+          const allBtn   = document.getElementById('sf-label-scope-all');
+          const cleanup = (val) => {
+            modal.classList.remove('active');
+            curBtn?.removeEventListener('click', onCur);
+            matchBtn?.removeEventListener('click', onMatch);
+            allBtn?.removeEventListener('click', onAll);
+            modal.removeEventListener('click', onBackdrop);
+            document.removeEventListener('keydown', onKey);
+            resolve(val);
+          };
+          const onCur   = () => cleanup('current');
+          const onMatch = () => cleanup('matching');
+          const onAll   = () => cleanup('all');
+          const onBackdrop = (e) => { if (e.target === modal) cleanup(null); };
+          const onKey = (e) => { if (e.key === 'Escape') cleanup(null); };
+          curBtn?.addEventListener('click', onCur);
+          matchBtn?.addEventListener('click', onMatch);
+          allBtn?.addEventListener('click', onAll);
+          modal.addEventListener('click', onBackdrop);
+          document.addEventListener('keydown', onKey);
+          modal.classList.add('active');
+        });
+      };
       const _sfSaveEntryDetail = async () => {
         if (!_sfDetailEdit || !_sfDetailOriginalName) return;
+        // Snapshot the entry's pre-save state so we can decide whether the
+        // label changed in a way that affects display, and propagate to
+        // matching entries if the user asks.
+        const origEntry = _sfAllEntries.find(e => e.name === _sfDetailOriginalName);
+        const origMeta = (origEntry && origEntry.meta) || {};
+        const origLabelExplicit = (origMeta.linkLabel || '').trim();
+        const origLinkUrl = origMeta.linkUrl || '';
+        const prefAtSaveStart = _sfLinkLabelPref || 'Demo';
+        // Effective label = explicit if set, else the current preference. The
+        // "old effective" reflects what the card actually showed before save.
+        const oldEffective = origLabelExplicit || prefAtSaveStart;
+        const newLabelExplicit = (_sfDetailEdit.linkLabel || '').trim();
+        const newEffective = newLabelExplicit || prefAtSaveStart;
         const updates = {
           author: _sfDetailEdit.author,
           acquisitionDate: _sfDetailEdit.acquisitionDate,
@@ -11777,6 +12133,7 @@ require(['vs/editor/editor.main'], function () {
           userNotes: _sfDetailEdit.userNotes,
           purchased: _sfDetailEdit.purchased,
           linkUrl: _sfDetailEdit.linkUrl,
+          linkLabel: _sfDetailEdit.linkLabel,
         };
         const sanitizedName = _sfSanitizeName(_sfDetailEdit.name);
         const isRename = sanitizedName !== _sfDetailOriginalName;
@@ -11788,6 +12145,53 @@ require(['vs/editor/editor.main'], function () {
         if (!res || !res.ok) {
           alert(`Save failed: ${(res && res.error) || 'unknown error'}`);
           return;
+        }
+        // Decide scope of label propagation. Only ask when:
+        //   - this entry has a linkUrl (label only makes sense with a link)
+        //   - the effective label actually changed
+        //   - and there are OTHER linked entries to potentially update
+        // Otherwise: no prompt, no propagation.
+        const labelChanged = !!_sfDetailEdit.linkUrl && oldEffective !== newEffective;
+        const otherLinkedEntries = _sfAllEntries.filter(e =>
+          e.name !== _sfDetailOriginalName && e.meta && e.meta.linkUrl);
+        let scope = 'current';
+        if (labelChanged && otherLinkedEntries.length > 0) {
+          const choice = await _sfPromptLabelScope(oldEffective, newEffective);
+          if (choice) scope = choice;
+        }
+        // Propagate explicit linkLabel to other entries according to scope.
+        // Set them explicitly (not relying on pref fallback) so the intent is
+        // clear at the data layer and surviving future pref changes.
+        const propagationFailures = [];
+        if (scope === 'matching' || scope === 'all') {
+          const newLabelForOthers = newLabelExplicit || prefAtSaveStart;
+          for (const other of otherLinkedEntries) {
+            const otherExplicit = (other.meta.linkLabel || '').trim();
+            const otherEffective = otherExplicit || prefAtSaveStart;
+            const shouldUpdate = scope === 'all'
+              ? otherEffective !== newLabelForOthers
+              : otherEffective === oldEffective && otherEffective !== newLabelForOthers;
+            if (!shouldUpdate) continue;
+            try {
+              const er = await window.electronAPI.updateEntryMeta({
+                currentName: other.name,
+                updates: { linkLabel: newLabelForOthers },
+              });
+              if (!er || !er.ok) propagationFailures.push({ name: other.name, error: (er && er.error) || 'unknown error' });
+            } catch (err) {
+              propagationFailures.push({ name: other.name, error: String(err && err.message || err) });
+            }
+          }
+        }
+        if (propagationFailures.length) {
+          alert(`The label change saved, but some other entries failed to update:\n${propagationFailures.map(f => ` • ${f.name}: ${f.error}`).join('\n')}`);
+        }
+        // Update the stored preference whenever the label effectively changed
+        // and a URL is attached. Per Ryan: the most recent label choice IS the
+        // new default for future linked entries, regardless of scope picked.
+        if (labelChanged && newEffective !== prefAtSaveStart) {
+          _sfLinkLabelPref = newEffective;
+          try { await window.electronAPI.setSetting('soundFontLinkLabel', newEffective); } catch {}
         }
         _sfDetailDirty = false;
         if (_sfEntryDetailEls.saveBtn) _sfEntryDetailEls.saveBtn.disabled = true;
@@ -11920,11 +12324,25 @@ require(['vs/editor/editor.main'], function () {
       let _sfSourceOriginalUuid = null;
       let _sfSourceEdit = null;
       let _sfSourceDirty = false;
+      // When the source detail was opened via the "Edit source…" link inside
+      // an entry detail modal, remember which entry to reopen after close/save.
+      // Null means "user opened source detail standalone" — go back to the
+      // card grid as before.
+      let _sfSourceDetailReturnToEntry = null;
+      // Tag chips on the source detail represent the *intersection* of tags
+      // across every entry from this source — tags that every font shares.
+      // Adding a tag here adds it to every entry on Save; removing one from
+      // here removes it from every entry. Tags present on some but not all
+      // entries are not shown (they wouldn't be representative of the bundle).
       const _sfRenderSourceTags = () => {
         if (!_sfSourceDetailEls.tagsChips || !_sfSourceEdit) return;
         const chips = [];
         if (_sfSourceEdit.purchased === false) {
           chips.push(`<span class="sf-tag-chip free" data-special="free">free<button class="sf-tag-chip-remove" data-special="free" title="Remove">&times;</button></span>`);
+        }
+        const tags = Array.isArray(_sfSourceEdit.tags) ? _sfSourceEdit.tags : [];
+        for (let i = 0; i < tags.length; i++) {
+          chips.push(`<span class="sf-tag-chip">${_sfEscape(tags[i])}<button class="sf-tag-chip-remove" data-i="${i}" title="Remove">&times;</button></span>`);
         }
         _sfSourceDetailEls.tagsChips.innerHTML = chips.join('');
       };
@@ -11963,18 +12381,52 @@ require(['vs/editor/editor.main'], function () {
           const r = await window.electronAPI.listEntriesBySource({ sourceUuid: uuid });
           entries = (r && r.ok && r.entries) || [];
         } catch {}
+        // Refresh the cached snapshot so the inline-edit pencils read from
+        // current disk state (this list lags slightly behind disk after deletes
+        // and the bulk-tag flush from earlier saves).
+        if (_sfSourceEdit) _sfSourceEdit.entries = entries;
         _sfSourceDetailEls.entriesCount.textContent = entries.length === 0 ? '(none)' : `(${entries.length})`;
         if (entries.length === 0) {
           _sfSourceDetailEls.entriesList.innerHTML = '<div class="sf-source-entries-empty">No fonts have been added to your library from this source.</div>';
         } else {
           entries.sort((a, b) => a.name.localeCompare(b.name));
+          const edits = (_sfSourceEdit && _sfSourceEdit.entryEdits) || new Map();
           _sfSourceDetailEls.entriesList.innerHTML = entries.map(e => {
             const fc = (e.meta && e.meta.fileCount) || 0;
             const sz = (e.meta && e.meta.totalBytes) || 0;
-            return `<div class="sf-source-entry-row" data-entry-name="${_sfEscape(e.name)}">
-              <span class="ent-name">${_sfEscape(e.name)}</span>
-              <span class="ent-meta">${fc} file${fc === 1 ? '' : 's'} &middot; ${_sfEscape(_sfFormatBytes(sz))}</span>
-              <button class="sf-source-entry-delete" data-entry-delete="${_sfEscape(e.name)}" title="Delete this font from your library">&times;</button>
+            const stored = edits.get(e.name);
+            const isEditing = !!(stored && stored.editing);
+            const effName = stored ? stored.name : e.name;
+            const effDesc = stored ? stored.description : (e.meta && e.meta.description) || '';
+            const escName = _sfEscape(e.name);
+            const meta = `${fc} file${fc === 1 ? '' : 's'} &middot; ${_sfEscape(_sfFormatBytes(sz))}`;
+            if (isEditing) {
+              // Edit mode is a single line: ✗ cancel (occupying the pencil's
+              // slot — same-slot-swap convention used throughout the app),
+              // name input (compact), description input (takes remaining
+              // space), then ✓ confirm. No pencil (redundant — we ARE editing).
+              // No file-count meta and no delete (both hidden so the inputs
+              // breathe; user must commit or cancel before deleting).
+              return `<div class="sf-source-entry-row editing" data-entry-name="${escName}">
+                <button class="sf-source-entry-pencil" data-entry-cancel="${escName}" title="Discard edits for this row">&#10005;</button>
+                <input type="text" class="sf-source-entry-name-input" data-entry-name-input="${escName}" value="${_sfEscape(effName)}" maxlength="200" autocomplete="off">
+                <input type="text" class="sf-source-entry-desc-input" data-entry-desc-input="${escName}" value="${_sfEscape(effDesc)}" placeholder="Add description&hellip;" maxlength="500" autocomplete="off">
+                <div class="sf-source-entry-edit-actions">
+                  <button class="detail-confirm" data-entry-confirm="${escName}" title="Lock in (saves when the modal is saved)">&#10003;</button>
+                </div>
+              </div>`;
+            }
+            // Description: shown inline next to the name. Truncates with
+            // ellipsis when the cell is narrower than the text; hover tooltip
+            // shows the full string. Tooltip text is capped at ~200 chars so
+            // browser tooltip rendering stays reasonable.
+            const descTooltip = effDesc.length > 200 ? effDesc.slice(0, 200) + '…' : effDesc;
+            return `<div class="sf-source-entry-row" data-entry-name="${escName}">
+              <button class="sf-source-entry-pencil" data-entry-edit-toggle="${escName}" title="Edit name and description">&#9998;</button>
+              <span class="ent-name">${_sfEscape(effName)}</span>
+              <span class="ent-desc"${effDesc ? ` title="${_sfEscape(descTooltip)}"` : ''}>${_sfEscape(effDesc)}</span>
+              <span class="ent-meta">${meta}</span>
+              <button class="sf-source-entry-delete" data-entry-delete="${escName}" title="Delete this font from your library">&times;</button>
             </div>`;
           }).join('');
         }
@@ -11992,7 +12444,11 @@ require(['vs/editor/editor.main'], function () {
           } catch {}
         }
       };
-      const _sfOpenSourceDetail = async (uuid) => {
+      // opts.swapFromModalId — when set, that modal's `active` class is
+      // removed in the same synchronous tick this modal's class is added,
+      // so transitions between detail views don't flash the card grid in
+      // between async data fetches.
+      const _sfOpenSourceDetail = async (uuid, opts = {}) => {
         if (!uuid) return;
         // Refresh the sources map in case it's stale (e.g. another entry
         // detail was open just now and the source got deleted out from
@@ -12008,6 +12464,29 @@ require(['vs/editor/editor.main'], function () {
         if (!src) return;
         const sm = src.meta || {};
         _sfSourceOriginalUuid = uuid;
+        // Load the entries that came from this source so we can compute the
+        // initial tag intersection (the bulk-edit baseline). We also cache the
+        // entries so Save can diff against them and apply per-entry deltas
+        // without a second round trip.
+        let sourceEntries = [];
+        try {
+          const er = await window.electronAPI.listEntriesBySource({ sourceUuid: uuid });
+          sourceEntries = (er && er.ok && er.entries) || [];
+        } catch {}
+        // Tag intersection: a tag is "common" only when every entry in the
+        // bundle has it. Match case-insensitively but preserve the casing
+        // from the first entry that introduced the tag.
+        let commonTags = [];
+        if (sourceEntries.length > 0) {
+          const firstTags = Array.isArray(sourceEntries[0].meta && sourceEntries[0].meta.tags) ? sourceEntries[0].meta.tags : [];
+          commonTags = firstTags.filter(t => {
+            const lc = String(t).toLowerCase();
+            return sourceEntries.every(e => {
+              const et = Array.isArray(e.meta && e.meta.tags) ? e.meta.tags : [];
+              return et.some(x => String(x).toLowerCase() === lc);
+            });
+          });
+        }
         _sfSourceEdit = {
           bundleName: sm.bundleName || (sm.originalName || '').replace(/\.zip$/i, ''),
           originalName: sm.originalName || '',
@@ -12016,6 +12495,13 @@ require(['vs/editor/editor.main'], function () {
           purchaseDate: sm.purchaseDate || '',
           purchased: sm.purchased !== false, // default true
           userNotes: sm.userNotes || '',
+          entries: sourceEntries,
+          tagsInitial: commonTags.slice(),
+          tags: commonTags.slice(),
+          // Per-row pending edits: originalName → { name, description, editing }.
+          // Nothing here touches disk until the modal Save fires; the in-row ✓
+          // just collapses the row visually while keeping the values stashed.
+          entryEdits: new Map(),
         };
         _sfSourceDirty = false;
         if (_sfSourceDetailEls.saveBtn) _sfSourceDetailEls.saveBtn.disabled = true;
@@ -12033,6 +12519,14 @@ require(['vs/editor/editor.main'], function () {
         if (_sfSourceDetailEls.notesToggle) _sfSourceDetailEls.notesToggle.classList.toggle('open', !!_sfSourceEdit.userNotes);
         if (_sfSourceDetailEls.notesBody) _sfSourceDetailEls.notesBody.classList.toggle('visible', !!_sfSourceEdit.userNotes);
         if (_sfSourceDetailEls.tagsInput) _sfSourceDetailEls.tagsInput.value = '';
+        // Included files row (read-only chips).
+        try {
+          const docsRow = document.getElementById('sf-source-docs-row');
+          const docsContainer = document.getElementById('sf-source-docs-chips');
+          if (docsContainer) docsContainer.setAttribute('data-doc-key', uuid);
+          const dr = await window.electronAPI.listSourceDocs({ uuid });
+          _sfRenderDocChips(docsContainer, docsRow, (dr && dr.ok && dr.docs) || []);
+        } catch {}
         // Creator datalist (same source as entry detail).
         if (_sfSourceDetailEls.creatorList) {
           const seen = new Set();
@@ -12054,9 +12548,31 @@ require(['vs/editor/editor.main'], function () {
           _sfSourceDetailEls.creatorList.innerHTML = opts.map(n => `<option value="${_sfEscape(n)}"></option>`).join('');
         }
         await _sfRenderSourceEntries(uuid);
+        // Atomic visibility swap — remove the caller-specified modal's active
+        // class in the same tick we add ours, eliminating the gap that would
+        // otherwise show the card grid through the dim backdrop.
+        if (opts.swapFromModalId) {
+          document.getElementById(opts.swapFromModalId)?.classList.remove('active');
+        }
         _sfSourceDetailEls.modal?.classList.add('active');
       };
-      const _sfCloseSourceDetail = () => {
+      const _sfCloseSourceDetail = async () => {
+        // Snapshot the return target before any state changes, then defer the
+        // visibility flip to the entry-detail open step so the transition is
+        // atomic (no card grid flash mid-swap).
+        const returnEntry = _sfSourceDetailReturnToEntry;
+        _sfSourceDetailReturnToEntry = null;
+        // Always refresh so the card grid and any open detail view see the
+        // latest source/entry meta (bulk-tag updates, vendor edits, etc.).
+        await window.refreshSoundFontsView();
+        if (returnEntry && _sfAllEntries.some(e => e.name === returnEntry)) {
+          await _sfOpenEntryDetail(returnEntry, { swapFromModalId: 'modal-sf-source-detail' });
+          _sfSourceEdit = null;
+          _sfSourceOriginalUuid = null;
+          _sfSourceDirty = false;
+          return;
+        }
+        // No return target — close normally.
         _sfSourceDetailEls.modal?.classList.remove('active');
         _sfSourceEdit = null;
         _sfSourceOriginalUuid = null;
@@ -12066,7 +12582,7 @@ require(['vs/editor/editor.main'], function () {
         if (_sfSourceDirty) {
           if (!await _promptDiscard('Unsaved changes to this source — discard them?')) return;
         }
-        _sfCloseSourceDetail();
+        await _sfCloseSourceDetail();
       };
       const _sfSaveSourceDetail = async () => {
         if (!_sfSourceEdit || !_sfSourceOriginalUuid) return;
@@ -12083,9 +12599,86 @@ require(['vs/editor/editor.main'], function () {
           alert(`Save failed: ${(res && res.error) || 'unknown error'}`);
           return;
         }
+        // Bulk-tag delta: compare the working tag set against the snapshot
+        // taken on open. Tags removed from here are removed from every entry;
+        // tags added here are added to every entry that doesn't already have
+        // one (case-insensitively). Per-entry tags outside this delta are
+        // preserved as-is.
+        const initial = Array.isArray(_sfSourceEdit.tagsInitial) ? _sfSourceEdit.tagsInitial : [];
+        const current = Array.isArray(_sfSourceEdit.tags) ? _sfSourceEdit.tags : [];
+        const initialLc = new Set(initial.map(t => String(t).toLowerCase()));
+        const currentLc = new Set(current.map(t => String(t).toLowerCase()));
+        const tagsRemovedLc = new Set([...initialLc].filter(t => !currentLc.has(t)));
+        const tagsAdded = current.filter(t => !initialLc.has(String(t).toLowerCase()));
+        const tagFailures = [];
+        if (tagsRemovedLc.size > 0 || tagsAdded.length > 0) {
+          for (const entry of (_sfSourceEdit.entries || [])) {
+            const existing = Array.isArray(entry.meta && entry.meta.tags) ? entry.meta.tags : [];
+            const kept = existing.filter(t => !tagsRemovedLc.has(String(t).toLowerCase()));
+            const keptLc = new Set(kept.map(t => String(t).toLowerCase()));
+            const finalTags = kept.slice();
+            for (const t of tagsAdded) {
+              if (!keptLc.has(String(t).toLowerCase())) finalTags.push(t);
+            }
+            const changed = finalTags.length !== existing.length
+              || finalTags.some((t, i) => t !== existing[i]);
+            if (!changed) continue;
+            try {
+              const er = await window.electronAPI.updateEntryMeta({
+                currentName: entry.name,
+                updates: { tags: finalTags },
+              });
+              if (!er || !er.ok) tagFailures.push({ name: entry.name, error: (er && er.error) || 'unknown error' });
+            } catch (err) {
+              tagFailures.push({ name: entry.name, error: String(err && err.message || err) });
+            }
+          }
+        }
+        if (tagFailures.length) {
+          alert(`Source saved, but some entries failed to update tags:\n${tagFailures.map(f => ` • ${f.name}: ${f.error}`).join('\n')}`);
+        }
+        // Per-row inline edits: flush any pending name/description changes,
+        // including rows still in edit mode (read the live input value so the
+        // user doesn't have to click ✓ before Save). Per-entry failures don't
+        // abort the rest — collect them and surface at the end.
+        const entryEditFailures = [];
+        if (_sfSourceEdit.entryEdits && _sfSourceEdit.entryEdits.size > 0) {
+          for (const [origName, pending] of _sfSourceEdit.entryEdits) {
+            // If the row is still in edit mode, prefer the current live input
+            // values over the pending state — they might be newer than the
+            // last input event.
+            let liveName = pending.name;
+            let liveDesc = pending.description;
+            if (pending.editing) {
+              const nameInput = _sfSourceDetailEls.entriesList?.querySelector(`[data-entry-name-input="${CSS.escape(origName)}"]`);
+              const descInput = _sfSourceDetailEls.entriesList?.querySelector(`[data-entry-desc-input="${CSS.escape(origName)}"]`);
+              if (nameInput) liveName = nameInput.value;
+              if (descInput) liveDesc = descInput.value;
+            }
+            const cleanName = String(liveName || '').trim();
+            const cleanDesc = String(liveDesc || '').trim();
+            const cached = _sfSourceEdit.entries?.find(en => en.name === origName);
+            const origMeta = (cached && cached.meta) || {};
+            const nameChanged = cleanName && cleanName !== origName;
+            const descChanged = cleanDesc !== (origMeta.description || '');
+            if (!nameChanged && !descChanged) continue;
+            try {
+              const er = await window.electronAPI.updateEntryMeta({
+                currentName: origName,
+                newName: nameChanged ? cleanName : undefined,
+                updates: descChanged ? { description: cleanDesc } : {},
+              });
+              if (!er || !er.ok) entryEditFailures.push({ name: origName, error: (er && er.error) || 'unknown error' });
+            } catch (err) {
+              entryEditFailures.push({ name: origName, error: String(err && err.message || err) });
+            }
+          }
+        }
+        if (entryEditFailures.length) {
+          alert(`Source saved, but some entry edits failed:\n${entryEditFailures.map(f => ` • ${f.name}: ${f.error}`).join('\n')}`);
+        }
         _sfSourceDirty = false;
-        _sfCloseSourceDetail();
-        await window.refreshSoundFontsView();
+        await _sfCloseSourceDetail();
       };
       _sfSourceDetailEls.closeX?.addEventListener('click', _sfTryCloseSourceDetail);
       _sfSourceDetailEls.discardBtn?.addEventListener('click', _sfTryCloseSourceDetail);
@@ -12188,17 +12781,25 @@ require(['vs/editor/editor.main'], function () {
           _sfSyncSourceLinkDisplay();
         }
       });
-      // Tag chip remove (free toggle).
+      // Tag chip remove. "free" stays the source-level purchased toggle;
+      // any other chip is part of the bulk-tag set that will be applied to
+      // every entry on Save.
       _sfSourceDetailEls.tagsChips?.addEventListener('click', (e) => {
         const btn = e.target.closest('.sf-tag-chip-remove');
         if (!btn || !_sfSourceEdit) return;
         if (btn.dataset.special === 'free') {
           _sfSourceEdit.purchased = true;
+        } else {
+          const idx = parseInt(btn.dataset.i, 10);
+          if (!Number.isNaN(idx) && Array.isArray(_sfSourceEdit.tags)) {
+            _sfSourceEdit.tags.splice(idx, 1);
+          }
         }
         _sfRenderSourceTags();
         _sfMarkSourceDirty();
       });
-      // Tag add: only "free" is meaningful at the source level for now.
+      // Tag add. Mirrors the entry-detail input behavior: Enter or comma
+      // commits, "free" is reserved and maps to the source's purchased flag.
       _sfSourceDetailEls.tagsInput?.addEventListener('keydown', (e) => {
         if (!_sfSourceEdit) return;
         if (e.key === 'Enter' || e.key === ',') {
@@ -12210,10 +12811,14 @@ require(['vs/editor/editor.main'], function () {
               _sfSourceEdit.purchased = false;
               _sfMarkSourceDirty();
             }
+          } else {
+            if (!Array.isArray(_sfSourceEdit.tags)) _sfSourceEdit.tags = [];
+            const exists = _sfSourceEdit.tags.some(t => String(t).toLowerCase() === raw.toLowerCase());
+            if (!exists) {
+              _sfSourceEdit.tags.push(raw);
+              _sfMarkSourceDirty();
+            }
           }
-          // Non-"free" tags at source level are ignored for v1 — the entry
-          // level is where user-supplied tags live. We could surface a hint
-          // here if Ryan wants user-tagged sources.
           e.target.value = '';
           _sfRenderSourceTags();
         }
@@ -12235,7 +12840,129 @@ require(['vs/editor/editor.main'], function () {
       // the right edge of each row deletes the font; if it's the last entry
       // from this source, the source archive is removed too (and the source
       // detail closes since there's nothing left to inspect).
+      // Helpers for the per-row inline edit lifecycle. Pending edits live on
+      // _sfSourceEdit.entryEdits and don't touch disk until the modal Save.
+      const _sfBeginEntryRowEdit = async (name) => {
+        if (!_sfSourceEdit || !_sfSourceEdit.entryEdits) return;
+        const cached = _sfSourceEdit.entries?.find(en => en.name === name);
+        if (!cached) return;
+        const meta = cached.meta || {};
+        const existing = _sfSourceEdit.entryEdits.get(name);
+        if (existing) {
+          existing.editing = true;
+        } else {
+          _sfSourceEdit.entryEdits.set(name, {
+            name,
+            description: meta.description || '',
+            editing: true,
+          });
+        }
+        // Await the re-render so the focus/select call in the caller can
+        // actually find the freshly-rendered input element.
+        if (_sfSourceOriginalUuid) await _sfRenderSourceEntries(_sfSourceOriginalUuid);
+      };
+      const _sfCollapseEntryRowEdit = (name) => {
+        if (!_sfSourceEdit || !_sfSourceEdit.entryEdits) return;
+        const existing = _sfSourceEdit.entryEdits.get(name);
+        if (!existing) return;
+        // If nothing actually changed vs the entry's stored values, drop the
+        // pending entry entirely so the row goes back to "no pending edits."
+        const cached = _sfSourceEdit.entries?.find(en => en.name === name);
+        const meta = (cached && cached.meta) || {};
+        const cleanName = (existing.name || '').trim() || name;
+        const cleanDesc = (existing.description || '').trim();
+        const origName = name;
+        const origDesc = (meta.description || '').trim();
+        if (cleanName === origName && cleanDesc === origDesc) {
+          _sfSourceEdit.entryEdits.delete(name);
+        } else {
+          existing.editing = false;
+        }
+        if (_sfSourceOriginalUuid) _sfRenderSourceEntries(_sfSourceOriginalUuid);
+      };
+      const _sfCancelEntryRowEdit = (name) => {
+        if (!_sfSourceEdit || !_sfSourceEdit.entryEdits) return;
+        _sfSourceEdit.entryEdits.delete(name);
+        if (_sfSourceOriginalUuid) _sfRenderSourceEntries(_sfSourceOriginalUuid);
+      };
+      // Live input handling for the per-row name/description fields. Delegated
+      // on the entries list so it survives re-renders. Doesn't re-render on
+      // every keystroke (the re-render would yank focus from the input);
+      // instead, just updates state and marks the source dirty.
+      _sfSourceDetailEls.entriesList?.addEventListener('input', (e) => {
+        if (!_sfSourceEdit || !_sfSourceEdit.entryEdits) return;
+        const nameInput = e.target.closest('[data-entry-name-input]');
+        if (nameInput) {
+          const key = nameInput.getAttribute('data-entry-name-input');
+          const entry = _sfSourceEdit.entryEdits.get(key);
+          if (entry) {
+            entry.name = nameInput.value;
+            _sfMarkSourceDirty();
+          }
+          return;
+        }
+        const descInput = e.target.closest('[data-entry-desc-input]');
+        if (descInput) {
+          const key = descInput.getAttribute('data-entry-desc-input');
+          const entry = _sfSourceEdit.entryEdits.get(key);
+          if (entry) {
+            entry.description = descInput.value;
+            _sfMarkSourceDirty();
+          }
+        }
+      });
+      // Enter on either input collapses the row (treat as ✓). Escape cancels.
+      _sfSourceDetailEls.entriesList?.addEventListener('keydown', (e) => {
+        const nameInput = e.target.closest('[data-entry-name-input]');
+        const descInput = e.target.closest('[data-entry-desc-input]');
+        if (!nameInput && !descInput) return;
+        const key = (nameInput || descInput).getAttribute(nameInput ? 'data-entry-name-input' : 'data-entry-desc-input');
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          _sfCollapseEntryRowEdit(key);
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          _sfCancelEntryRowEdit(key);
+        }
+      });
       _sfSourceDetailEls.entriesList?.addEventListener('click', async (e) => {
+        // Ignore clicks inside the inline edit inputs — they're for typing,
+        // not for opening the entry detail.
+        if (e.target.closest('input')) return;
+        const editToggle = e.target.closest('[data-entry-edit-toggle]');
+        if (editToggle) {
+          e.stopPropagation();
+          const name = editToggle.getAttribute('data-entry-edit-toggle');
+          if (!name || !_sfSourceEdit) return;
+          // Pencil acts as a toggle: opens edit mode, or collapses if already.
+          const existing = _sfSourceEdit.entryEdits?.get(name);
+          if (existing && existing.editing) {
+            _sfCollapseEntryRowEdit(name);
+          } else {
+            // Await the re-render so the name input is in the DOM before we
+            // try to focus/select it — convention is to land on the field
+            // with its current text highlighted, ready to be overwritten.
+            await _sfBeginEntryRowEdit(name);
+            const input = _sfSourceDetailEls.entriesList?.querySelector(`[data-entry-name-input="${CSS.escape(name)}"]`);
+            input?.focus();
+            input?.select?.();
+          }
+          return;
+        }
+        const confirmRow = e.target.closest('[data-entry-confirm]');
+        if (confirmRow) {
+          e.stopPropagation();
+          const name = confirmRow.getAttribute('data-entry-confirm');
+          if (name) _sfCollapseEntryRowEdit(name);
+          return;
+        }
+        const cancelRow = e.target.closest('[data-entry-cancel]');
+        if (cancelRow) {
+          e.stopPropagation();
+          const name = cancelRow.getAttribute('data-entry-cancel');
+          if (name) _sfCancelEntryRowEdit(name);
+          return;
+        }
         const del = e.target.closest('[data-entry-delete]');
         if (del) {
           e.stopPropagation();
@@ -12275,17 +13002,27 @@ require(['vs/editor/editor.main'], function () {
             _sfSourceDetailEls.modal?.classList.add('active');
             await _sfRenderSourceEntries(uuidBefore);
           } else {
-            _sfCloseSourceDetail();
+            await _sfCloseSourceDetail();
           }
           return;
         }
         const row = e.target.closest('.sf-source-entry-row');
         if (!row) return;
         const name = row.getAttribute('data-entry-name');
-        if (name) {
-          _sfCloseSourceDetail();
-          _sfOpenEntryDetail(name);
+        if (!name) return;
+        // Same dirty-check the "Edit source" forward-nav does — silently
+        // closing the modal would otherwise discard the user's in-progress
+        // source edits with no warning.
+        if (_sfSourceDirty) {
+          if (!await _promptDiscard('Unsaved source edits — discard them and open this font?')) return;
         }
+        // Clear source-detail state and swap atomically to the entry detail
+        // so the card grid doesn't flash through between modals.
+        _sfSourceDetailReturnToEntry = null;
+        _sfSourceEdit = null;
+        _sfSourceOriginalUuid = null;
+        _sfSourceDirty = false;
+        await _sfOpenEntryDetail(name, { swapFromModalId: 'modal-sf-source-detail' });
       });
       // "Add more fonts from this source" reuses the import review flow.
       _sfSourceDetailEls.addMoreBtn?.addEventListener('click', async () => {
@@ -12294,7 +13031,7 @@ require(['vs/editor/editor.main'], function () {
           if (!await _promptDiscard('Unsaved source edits — discard them and continue?')) return;
         }
         const uuid = _sfSourceOriginalUuid;
-        _sfCloseSourceDetail();
+        await _sfCloseSourceDetail();
         await _sfReviewExistingSource(uuid);
       });
       // Delete source with cascade warning.
@@ -12306,13 +13043,21 @@ require(['vs/editor/editor.main'], function () {
         const src = _sfAllSourcesByUuid[uuid];
         const sm = (src && src.meta) || {};
         const sourceLabel = sm.bundleName || sm.originalName || uuid;
+        // Three shapes to match the actual scope being deleted:
+        //   - 0 entries (orphaned source): just confirm the source.
+        //   - 1 entry: collapse to a single sentence — listing one name when
+        //     the question already names the source is just noise.
+        //   - N entries: header sentence + bullet list of names; the list IS
+        //     the warning, so we don't tack on a separate "cannot be undone".
         let message;
         if (entries.length === 0) {
-          message = `Delete the source "${sourceLabel}"?\nThe archived copy will be removed from disk.`;
+          message = `Delete the source "${sourceLabel}"?`;
+        } else if (entries.length === 1) {
+          message = `Delete the source "${sourceLabel}" and its font "${entries[0].name}"?`;
         } else {
-          const names = entries.slice(0, 8).map(e => `  · ${e.name}`).join('\n');
-          const more = entries.length > 8 ? `\n  · …and ${entries.length - 8} more` : '';
-          message = `Delete the source "${sourceLabel}" and the ${entries.length} font${entries.length === 1 ? '' : 's'} that came from it?\n${names}${more}\n\nThis cannot be undone.`;
+          const names = entries.slice(0, 8).map(e => `· ${e.name}`).join('\n');
+          const more = entries.length > 8 ? `\n· …and ${entries.length - 8} more` : '';
+          message = `Delete the source "${sourceLabel}" and the ${entries.length} fonts that came from it?\n${names}${more}`;
         }
         // Temporarily hide the source detail modal so the confirm prompt
         // doesn't end up stacked behind it (DOM order would otherwise put
@@ -12346,7 +13091,7 @@ require(['vs/editor/editor.main'], function () {
         if (failures.length) {
           alert(`Some items failed to delete:\n${failures.map(f => ` • ${f.name}: ${f.error}`).join('\n')}`);
         }
-        _sfCloseSourceDetail();
+        await _sfCloseSourceDetail();
         await window.refreshSoundFontsView();
       });
 
@@ -12359,8 +13104,16 @@ require(['vs/editor/editor.main'], function () {
         if (_sfDetailDirty) {
           if (!await _promptDiscard('Unsaved changes to this font — discard them and go to source?')) return;
         }
-        _sfCloseEntryDetail();
-        await _sfOpenSourceDetail(uuid);
+        // Remember the entry to come back to after the source modal closes,
+        // so the user doesn't get dropped to the card grid when they're
+        // expecting to land back on the font they were editing.
+        _sfSourceDetailReturnToEntry = _sfDetailOriginalName;
+        // Defer the entry-detail visibility flip to the source-detail open
+        // step so the swap is atomic. State cleanup for the old entry-detail
+        // happens after the swap, since the modal is no longer visible.
+        await _sfOpenSourceDetail(uuid, { swapFromModalId: 'modal-sf-entry-detail' });
+        _sfDetailEdit = null;
+        _sfDetailDirty = false;
       });
 
       // ── Review an existing source (slice 10 helper) ───
@@ -12402,8 +13155,15 @@ require(['vs/editor/editor.main'], function () {
           editRow.style.display = '';
           if (_sfEntryDetailEls.linkInput) {
             _sfEntryDetailEls.linkInput.value = _sfDetailEdit.linkUrl || '';
-            setTimeout(() => { _sfEntryDetailEls.linkInput.focus(); _sfEntryDetailEls.linkInput.select?.(); }, 0);
           }
+          // Label seeds from this entry's stored label, otherwise the user's
+          // last-chosen label across the library, otherwise "Demo".
+          if (_sfEntryDetailEls.linkLabelInput) {
+            _sfEntryDetailEls.linkLabelInput.value = _sfDetailEdit.linkLabel || _sfLinkLabelPref || 'Demo';
+          }
+          // Focus the URL field — that's the field the user came here to
+          // fill in. The label has a sensible default already.
+          setTimeout(() => { _sfEntryDetailEls.linkInput?.focus(); _sfEntryDetailEls.linkInput?.select?.(); }, 0);
         } else {
           editRow.style.display = 'none';
         }
@@ -12415,8 +13175,13 @@ require(['vs/editor/editor.main'], function () {
       _sfEntryDetailEls.linkConfirmBtn?.addEventListener('click', () => {
         if (!_sfDetailEdit) return;
         const v = (_sfEntryDetailEls.linkInput?.value || '').trim();
+        const lbl = (_sfEntryDetailEls.linkLabelInput?.value || '').trim();
         if (v !== _sfDetailEdit.linkUrl) {
           _sfDetailEdit.linkUrl = v;
+          _sfMarkDetailDirty();
+        }
+        if (lbl !== _sfDetailEdit.linkLabel) {
+          _sfDetailEdit.linkLabel = lbl;
           _sfMarkDetailDirty();
         }
         _sfSyncLinkDisplay();
@@ -12427,10 +13192,15 @@ require(['vs/editor/editor.main'], function () {
           _sfDetailEdit.linkUrl = '';
           _sfMarkDetailDirty();
         }
+        if (_sfDetailEdit.linkLabel) {
+          _sfDetailEdit.linkLabel = '';
+          _sfMarkDetailDirty();
+        }
         if (_sfEntryDetailEls.linkInput) _sfEntryDetailEls.linkInput.value = '';
+        if (_sfEntryDetailEls.linkLabelInput) _sfEntryDetailEls.linkLabelInput.value = '';
         _sfSyncLinkDisplay();
       });
-      _sfEntryDetailEls.linkInput?.addEventListener('keydown', (e) => {
+      const _sfLinkKeydown = (e) => {
         if (e.key === 'Enter') {
           e.preventDefault();
           _sfEntryDetailEls.linkConfirmBtn?.click();
@@ -12439,6 +13209,19 @@ require(['vs/editor/editor.main'], function () {
           if (_sfEntryDetailEls.linkEditRow) _sfEntryDetailEls.linkEditRow.style.display = 'none';
           _sfSyncLinkDisplay();
         }
+      };
+      _sfEntryDetailEls.linkInput?.addEventListener('keydown', _sfLinkKeydown);
+      _sfEntryDetailEls.linkLabelInput?.addEventListener('keydown', _sfLinkKeydown);
+      // After the user pastes into the URL field, shift focus to the label
+      // input and pre-select its contents so they can immediately type a new
+      // label, hit Tab to accept the default, or Enter to commit. setTimeout
+      // gives the browser a tick to apply the paste before we read/select.
+      _sfEntryDetailEls.linkInput?.addEventListener('paste', () => {
+        setTimeout(() => {
+          if (!_sfEntryDetailEls.linkLabelInput) return;
+          _sfEntryDetailEls.linkLabelInput.focus();
+          _sfEntryDetailEls.linkLabelInput.select?.();
+        }, 0);
       });
       // Tag chip remove (delegated).
       _sfEntryDetailEls.tagsChips?.addEventListener('click', (e) => {
@@ -12586,6 +13369,157 @@ require(['vs/editor/editor.main'], function () {
       // the source surfaced 2+ candidate fonts), which is what distinguishes
       // case 2 from case 3. Legacy sources without this field default to
       // case 2 wording.
+      // ── Included files (slice 11) ────────────────────────
+      // Renders vendor-supplied docs (at the source level) or non-audio files
+      // (at the entry level) as clickable chips. Clicking a text-readable file
+      // opens an in-app viewer; anything else copies the file to Downloads
+      // and shows a confirmation. The chip carries enough data to fetch the
+      // right bytes — the row's data-doc-scope attribute disambiguates source
+      // vs entry, and a data-doc-key attribute on the parent identifies the
+      // source uuid or entry name.
+      const _sfRenderDocChips = (containerEl, rowEl, docs) => {
+        if (!containerEl || !rowEl) return;
+        if (!Array.isArray(docs) || docs.length === 0) {
+          rowEl.style.display = 'none';
+          containerEl.innerHTML = '';
+          return;
+        }
+        rowEl.style.display = '';
+        const fmtSize = (n) => {
+          if (!n) return '';
+          if (n < 1024) return `${n} B`;
+          if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+          return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+        };
+        // Inline link styling, comma-separated — mirrors the "Included Formats"
+        // line. Size goes into the title tooltip so the line stays scannable.
+        containerEl.innerHTML = docs.map(d => {
+          const sizeHint = d.size ? ` (${fmtSize(d.size)})` : '';
+          const title = `${d.fileName}${sizeHint}`;
+          const sizeAttr = d.size ? ` data-doc-size="${d.size}"` : '';
+          return `<button class="sf-doc-chip" data-doc-path="${_sfEscape(d.fileName)}"${sizeAttr} title="${_sfEscape(title)}">${_sfEscape(d.fileName)}</button>`;
+        }).join('<span class="sf-doc-sep">, </span>');
+      };
+      // In-app text viewer modal. Shows decoded text content with the filename
+      // in the header; clicking outside, the × button, or Escape closes it.
+      const _sfDocViewerEls = {
+        modal:    document.getElementById('modal-sf-doc-viewer'),
+        closeBtn: document.getElementById('sf-doc-viewer-close'),
+        name:     document.getElementById('sf-doc-viewer-name'),
+        size:     document.getElementById('sf-doc-viewer-size'),
+        body:     document.getElementById('sf-doc-viewer-body'),
+      };
+      // Modals to stash while the doc viewer is on top, so the user doesn't
+      // see two layered modal panels at once. State stays intact (dirty edits,
+      // input focus history, etc.) — only the visible .active class is toggled.
+      let _sfDocViewerStashedModalIds = [];
+      const _sfShowDocViewer = (fileName, size, content) => {
+        if (!_sfDocViewerEls.modal) return;
+        const fmtSize = (n) => {
+          if (!n) return '';
+          if (n < 1024) return `${n} B`;
+          if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+          return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+        };
+        if (_sfDocViewerEls.name) _sfDocViewerEls.name.textContent = fileName;
+        if (_sfDocViewerEls.size) _sfDocViewerEls.size.textContent = size ? fmtSize(size) : '';
+        if (_sfDocViewerEls.body) _sfDocViewerEls.body.textContent = content;
+        // Hide any SF modals currently open so the viewer is the only thing
+        // on screen. They get restored on close.
+        _sfDocViewerStashedModalIds = [];
+        const candidates = ['modal-sf-entry-detail', 'modal-sf-source-detail'];
+        for (const id of candidates) {
+          const el = document.getElementById(id);
+          if (el && el.classList.contains('active')) {
+            el.classList.remove('active');
+            _sfDocViewerStashedModalIds.push(id);
+          }
+        }
+        _sfDocViewerEls.modal.classList.add('active');
+      };
+      const _sfHideDocViewer = () => {
+        _sfDocViewerEls.modal?.classList.remove('active');
+        if (_sfDocViewerEls.body) _sfDocViewerEls.body.textContent = '';
+        // Restore whatever modals we hid when the viewer opened, preserving
+        // their existing state (dirty flags, in-progress edits, etc.).
+        for (const id of _sfDocViewerStashedModalIds) {
+          document.getElementById(id)?.classList.add('active');
+        }
+        _sfDocViewerStashedModalIds = [];
+      };
+      _sfDocViewerEls.closeBtn?.addEventListener('click', _sfHideDocViewer);
+      _sfDocViewerEls.modal?.addEventListener('click', (e) => {
+        if (e.target === _sfDocViewerEls.modal) _sfHideDocViewer();
+      });
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && _sfDocViewerEls.modal?.classList.contains('active')) {
+          _sfHideDocViewer();
+        }
+      });
+      // Click dispatch for any .sf-doc-chip: routes by the parent container's
+      // data-doc-scope (source vs entry) and data-doc-key (uuid or name).
+      const _sfHandleDocClick = async (chip) => {
+        const fileName = chip.getAttribute('data-doc-path');
+        if (!fileName) return;
+        const container = chip.closest('.sf-doc-chips');
+        const scope = container?.getAttribute('data-doc-scope') || 'source';
+        const key = container?.getAttribute('data-doc-key') || '';
+        if (!key) return;
+        const size = parseInt(chip.getAttribute('data-doc-size') || '0', 10) || 0;
+        if (_sfIsTextReadable(fileName)) {
+          try {
+            const res = scope === 'entry'
+              ? await window.electronAPI.readEntryDocBytes({ name: key, path: fileName })
+              : await window.electronAPI.readSourceDocBytes({ uuid: key, path: fileName });
+            if (!res || !res.ok) {
+              alert(`Could not read file: ${(res && res.error) || 'unknown error'}`);
+              return;
+            }
+            const bytes = Uint8Array.from(res.bytes || []);
+            const rawText = _sfDecodeBytes(bytes);
+            // RTF is markup, not plain text — strip control words and structural
+            // groups down to readable text before showing. Other text types
+            // (.txt, .md, .ini, etc.) render as-is.
+            const displayText = /\.rtf$/i.test(fileName) ? _sfStripRtf(rawText) : rawText;
+            _sfShowDocViewer(fileName, size || bytes.length, displayText);
+          } catch (err) {
+            alert(`Could not read file: ${err && err.message || err}`);
+          }
+        } else {
+          // Binary or unrecognized — copy out and show a confirmation that the
+          // file landed in Downloads. The OK/Cancel modal here doubles as the
+          // "are you sure" gate and the completion notice.
+          const baseName = String(fileName).split('/').pop();
+          try {
+            const res = scope === 'entry'
+              ? await window.electronAPI.exportEntryDoc({ name: key, path: fileName })
+              : await window.electronAPI.exportSourceDoc({ uuid: key, path: fileName });
+            if (!res || !res.ok) {
+              alert(`Could not save file: ${(res && res.error) || 'unknown error'}`);
+              return;
+            }
+            const destBase = String(res.destPath || '').split(/[\\/]/).pop() || baseName;
+            await promptConfirm({
+              title: 'Saved to Downloads',
+              message: `"${baseName}" can't be previewed in app.\nIt has been saved to your Downloads folder as "${destBase}".`,
+              confirmText: 'OK',
+              confirmKind: 'primary',
+              cancelText: 'Close',
+            });
+          } catch (err) {
+            alert(`Could not save file: ${err && err.message || err}`);
+          }
+        }
+      };
+      // Global delegated handler for any included-files chip clicked anywhere
+      // in the SF view (entry-detail header section, source-detail modal, or
+      // entry-detail meta row). Single listener, three call sites.
+      document.addEventListener('click', (e) => {
+        const chip = e.target.closest?.('.sf-doc-chip');
+        if (!chip) return;
+        e.stopPropagation();
+        _sfHandleDocClick(chip);
+      });
       const _sfBuildDeleteMessage = async (name) => {
         const entry = _sfAllEntries.find(e => e.name === name);
         const sourceUuid = entry && entry.meta && entry.meta.sourceUuid;
@@ -12633,6 +13567,16 @@ require(['vs/editor/editor.main'], function () {
           if (!await _sfExportSourceBeforeDelete(sourceUuid, wantExport)) return;
           if (!await _sfDeleteEntryAndCleanup(name)) return;
           await window.refreshSoundFontsView();
+          return;
+        }
+        const cardLink = e.target.closest('[data-card-link]');
+        if (cardLink) {
+          // The inline "Demo" / vendor link on the card opens externally and
+          // does NOT open the entry detail — clicking the link is a deliberate
+          // navigation away, not a card-tap.
+          e.stopPropagation();
+          const href = cardLink.getAttribute('data-card-link');
+          if (href) window.electronAPI.openExternal(href);
           return;
         }
         const chip = e.target.closest('.sf-card-tag');
@@ -12727,7 +13671,19 @@ require(['vs/editor/editor.main'], function () {
       // Search bar wiring for the browse grid
       document.getElementById('sf-search')?.addEventListener('input', function() {
         _sfSearchQuery = this.value;
+        const clear = document.getElementById('sf-search-clear');
+        if (clear) clear.style.display = this.value ? '' : 'none';
         _sfRenderGrid();
+      });
+      document.getElementById('sf-search-clear')?.addEventListener('click', () => {
+        const inp = document.getElementById('sf-search');
+        if (!inp) return;
+        inp.value = '';
+        _sfSearchQuery = '';
+        const clear = document.getElementById('sf-search-clear');
+        if (clear) clear.style.display = 'none';
+        _sfRenderGrid();
+        inp.focus();
       });
 
       await _refreshSoundFontsToggleLock();

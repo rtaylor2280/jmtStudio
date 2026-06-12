@@ -208,6 +208,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   updateEntryMeta:       (params)     => ipcRenderer.invoke('entries:updateMeta', params),
   deleteEntry:           (params)     => ipcRenderer.invoke('entries:delete', params),
   listEntriesBySource:   (params)     => ipcRenderer.invoke('entries:listBySource', params),
+  listSourceDocs:        (params)     => ipcRenderer.invoke('sources:listDocs', params),
+  readSourceDocBytes:    (params)     => ipcRenderer.invoke('sources:readDocBytes', params),
+  exportSourceDoc:       (params)     => ipcRenderer.invoke('sources:exportDoc', params),
+  listEntryDocs:         (params)     => ipcRenderer.invoke('entries:listDocs', params),
+  readEntryDocBytes:     (params)     => ipcRenderer.invoke('entries:readDocBytes', params),
+  exportEntryDoc:        (params)     => ipcRenderer.invoke('entries:exportDoc', params),
   onEntryCreateProgress: (cb) => {
     const handler = (_, data) => cb(data);
     ipcRenderer.on('entries:createProgress', handler);

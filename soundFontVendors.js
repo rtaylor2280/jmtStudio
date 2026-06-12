@@ -56,12 +56,16 @@ const vendors = [
     website: 'https://www.greyscalefonts.com',
     purchasedDefault: undefined,
     patterns: [
-      // Three Greyscale fonts in the archive ship a readme that says so
-      // (Coda, Exalted, EngineGrip).
+      // Greyscale's own readme template carries an authorial signature
+      // ("copyright (C) Greyscale Fonts <year>"). Match against the
+      // copyright-adjacent phrasing rather than the bare brand name so
+      // collaboration fonts that merely credit Greyscale as a contributor
+      // (e.g. JayDalorian's Decimate, where the readme lists "Greyscale
+      // Fonts- Blasters and Clashes") don't false-positive here.
       {
         type: 'readmeContent',
         fileMatch: /(^|\/)(read.?me|ReadMe)\.txt$/i,
-        contentMatch: /Greyscale Fonts/i,
+        contentMatch: /(?:copyright|©|\(c\))[^\n]{0,40}Greyscale Fonts/i,
       },
       // The remaining ~17 Greyscale fonts ship no readme but have the
       // signature five-zip board-flavor set at a common depth.

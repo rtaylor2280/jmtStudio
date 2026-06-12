@@ -683,6 +683,66 @@ function _createFolderSource({ uuid, uuidDir, meta }) {
   };
 }
 
+// List vendor-supplied files in a source that sit OUTSIDE the board-flavor
+// folders — readmes, license, blade-style snippets, anything else the vendor
+// shipped alongside the actual font data. The exclusion rules:
+//   - Files inside any directory that resolves to a board name (Proffie,
+//     Asteria, CFX, Verso, etc.) are extracted as part of the font, not
+//     bundle-level docs.
+//   - Files whose leaf basename (without extension) is a board name are the
+//     board-flavor zip deliveries themselves (Proffie.zip, Asteria.zip);
+//     they're how the font is distributed, not bundle-level docs.
+//   - Audio files are font content by definition — not vendor docs — and are
+//     excluded regardless of where they sit. Bundles often have bonus audio
+//     in non-board subfolders (_Extras, Quotes, Music) which would otherwise
+//     swamp the doc list.
+// Returns an array of { fileName, size } sorted lexicographically.
+const _SOURCE_AUDIO_EXTENSIONS = /\.(wav|raw|ogg|mp3|aiff?|flac)$/i;
+async function listSourceDocs(userData, uuid) {
+  const source = openSource(userData, uuid);
+  if (!source) return [];
+  const { identifyBoard } = require('./soundFontCandidates');
+  const all = await source.listAll();
+  const docs = [];
+  for (const e of all) {
+    if (e.isDir) continue;
+    const parts = String(e.fileName).split('/').filter(Boolean);
+    const leaf = parts[parts.length - 1] || '';
+    const ancestors = parts.slice(0, -1);
+    // Exclude files inside board-named folders.
+    if (ancestors.some(a => identifyBoard(a))) continue;
+    // Exclude board-flavor distribution files (Proffie.zip, etc.).
+    const leafStem = leaf.replace(/\.[^.]+$/, '');
+    if (identifyBoard(leafStem)) continue;
+    // Exclude audio — font content, not vendor docs.
+    if (_SOURCE_AUDIO_EXTENSIONS.test(leaf)) continue;
+    docs.push({ fileName: e.fileName, size: e.size || 0 });
+  }
+  docs.sort((a, b) => a.fileName.localeCompare(b.fileName));
+  return docs;
+}
+
+// Read the raw bytes of a single non-board file from a source. Caller decides
+// whether to decode as text or treat as binary (export). The path must point
+// at a real file inside the source (no traversal); the underlying Source's
+// readFile validates this.
+async function readSourceFileBytes(userData, uuid, subPath) {
+  const source = openSource(userData, uuid);
+  if (!source) throw new Error('Source not found');
+  return await source.readFile(subPath);
+}
+
+// Copy a single source-supplied file to destDir, collision-safe. Used when
+// the user asks to save a non-text doc out for opening in their OS.
+async function exportSourceFileTo(userData, uuid, subPath, destDir) {
+  if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+  const buf = await readSourceFileBytes(userData, uuid, subPath);
+  const baseName = String(subPath).split('/').pop() || `source-${uuid}.bin`;
+  const destPath = _uniqueDestPath(destDir, baseName);
+  await fs.promises.writeFile(destPath, buf);
+  return { destPath };
+}
+
 function openSource(userData, uuid) {
   const uuidDir = path.join(sourcesRoot(userData), uuid);
   const meta = readSourceMeta(uuidDir);
@@ -704,4 +764,7 @@ module.exports = {
   openSource,
   deleteSource,
   updateSourceMeta,
+  listSourceDocs,
+  readSourceFileBytes,
+  exportSourceFileTo,
 };

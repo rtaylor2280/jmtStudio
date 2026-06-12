@@ -992,6 +992,70 @@ ipcMain.handle('entries:create', async (event, { sourceUuid, candidate, name, me
   }
 });
 
+ipcMain.handle('sources:listDocs', async (_, { uuid } = {}) => {
+  try {
+    const docs = await soundFontSources.listSourceDocs(app.getPath('userData'), uuid);
+    return { ok: true, docs };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
+ipcMain.handle('sources:readDocBytes', async (_, { uuid, path: subPath } = {}) => {
+  try {
+    const buf = await soundFontSources.readSourceFileBytes(app.getPath('userData'), uuid, subPath);
+    return { ok: true, bytes: Array.from(buf) };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
+ipcMain.handle('sources:exportDoc', async (_, { uuid, path: subPath } = {}) => {
+  try {
+    const result = await soundFontSources.exportSourceFileTo(
+      app.getPath('userData'),
+      uuid,
+      subPath,
+      app.getPath('downloads'),
+    );
+    return { ok: true, ...result };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
+ipcMain.handle('entries:listDocs', (_, { name } = {}) => {
+  try {
+    const docs = soundFontEntries.listEntryDocs(app.getPath('userData'), name);
+    return { ok: true, docs };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
+ipcMain.handle('entries:readDocBytes', (_, { name, path: subPath } = {}) => {
+  try {
+    const buf = soundFontEntries.readEntryFileBytes(app.getPath('userData'), name, subPath);
+    return { ok: true, bytes: Array.from(buf) };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
+ipcMain.handle('entries:exportDoc', (_, { name, path: subPath } = {}) => {
+  try {
+    const result = soundFontEntries.exportEntryFileTo(
+      app.getPath('userData'),
+      name,
+      subPath,
+      app.getPath('downloads'),
+    );
+    return { ok: true, ...result };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
 ipcMain.handle('sources:exportToDownloads', async (_, { uuid, destDir } = {}) => {
   try {
     const source = soundFontSources.openSource(app.getPath('userData'), uuid);
