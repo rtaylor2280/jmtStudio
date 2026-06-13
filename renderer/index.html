@@ -1867,7 +1867,7 @@
   /* Common folder sidecar — fixed width on the LEFT, collapsible to a thin
      vertical strip with a rotated label, matching the preset sidecar
      convention so users who already know one know both. */
-  .sf-common-sidecar { position: relative; display: flex; flex-direction: row; border-right: 1px solid var(--c-border); background: var(--c-bg); flex-shrink: 0; transition: width 0.2s ease; width: 280px; }
+  .sf-common-sidecar { position: relative; display: flex; flex-direction: row; border-right: 1px solid var(--c-border); background: var(--c-bg); flex-shrink: 0; transition: width 0.2s ease; width: 320px; }
   .sf-common-sidecar.collapsed { width: 20px; }
   .sf-common-sidecar.collapsed .sf-common-inner { display: none; }
   .sf-common-sidecar.collapsed .sf-common-divider { border-left: none; }
@@ -1941,6 +1941,13 @@
   .sf-tree-row.drop-target { background: rgba(58,143,255,0.22); outline: 1px solid var(--jmt-blue); outline-offset: -1px; }
   .sf-common-files.drop-target { background: rgba(58,143,255,0.10); outline: 1px dashed var(--jmt-blue); outline-offset: -2px; }
   .sf-common-row-header.drop-target { background: rgba(58,143,255,0.18); }
+  /* Star button on common card headers — only rendered when more than one
+     common exists. Mirrors the favorites star pattern from the title-bar
+     #btn-fav-star, scoped to common cards so the two don't share state. */
+  .sf-common-row-star { background: none; border: none; color: var(--c-text-faint); font-size: 1.05rem; cursor: pointer; padding: 0 2px; border-radius: 3px; line-height: 1; transition: color 0.15s; flex-shrink: 0; opacity: 0.7; }
+  .sf-common-row-star:hover { color: var(--c-text-soft); opacity: 1; }
+  .sf-common-row-star.is-starred { color: var(--jmt-blue); opacity: 1; }
+  .sf-common-row-star.is-starred:hover { color: #1a78c0; }
   /* Missing fonts banner — sits at the bottom of the SF view, just above the
      legend. Surfaces font directories the open config references that the
      user hasn't imported. Each name is a clickable chip that copies on click. */
@@ -11427,14 +11434,62 @@ require(['vs/editor/editor.main'], function () {
         if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
         return `${(n / (1024 * 1024)).toFixed(1)} MB`;
       };
+      // First-launch sentinel — the active-common setting has never been
+      // written. _sfRefreshCommons resolves it to the starred uuid so the
+      // user lands on a sensible default the first time they open the SF view.
+      // After that, '' (explicitly collapsed) and uuid values are respected.
+      const _SF_ACTIVE_COMMON_PENDING = '__pending_starred__';
       const _sfLoadActiveCommon = async () => {
         try {
           const v = await window.electronAPI.getSetting('soundFontActiveCommon', null);
-          _sfSelectedCommonUuid = (v && typeof v === 'string') ? v : null;
+          if (v === null) _sfSelectedCommonUuid = _SF_ACTIVE_COMMON_PENDING;
+          else _sfSelectedCommonUuid = (typeof v === 'string' && v) ? v : null;
         } catch { _sfSelectedCommonUuid = null; }
       };
       const _sfSaveActiveCommon = async () => {
         try { await window.electronAPI.setSetting('soundFontActiveCommon', _sfSelectedCommonUuid || ''); } catch {}
+      };
+      // Starred common — app-global persistent default. Always exactly one
+      // when at least one common exists; null otherwise. The star icon on
+      // each common card writes here; Save / open-default reads from here.
+      let _sfStarredCommonUuid = null;
+      const _sfLoadStarredCommon = async () => {
+        try {
+          const v = await window.electronAPI.getSetting('soundFontStarredCommon', null);
+          _sfStarredCommonUuid = (typeof v === 'string' && v) ? v : null;
+        } catch { _sfStarredCommonUuid = null; }
+      };
+      const _sfSaveStarredCommon = async () => {
+        try { await window.electronAPI.setSetting('soundFontStarredCommon', _sfStarredCommonUuid || ''); } catch {}
+      };
+      // Enforce the invariant: when commons exist, exactly one is starred.
+      // If the current star is missing (deleted/unset), pick the oldest
+      // remaining by createdAt. Returns true if the star changed (caller
+      // can decide to persist).
+      const _sfNormalizeStarredCommon = () => {
+        if (_sfCommons.length === 0) {
+          if (_sfStarredCommonUuid !== null) { _sfStarredCommonUuid = null; return true; }
+          return false;
+        }
+        const knownUuids = new Set(_sfCommons.map(c => c.uuid));
+        if (_sfStarredCommonUuid && knownUuids.has(_sfStarredCommonUuid)) return false;
+        // Pick oldest by createdAt; fall back to first in list if any meta
+        // lacks a timestamp (defensive — every common written through the
+        // importer has one, but old files might not).
+        const sorted = [..._sfCommons].sort((a, b) => {
+          const ta = a.meta?.createdAt || '';
+          const tb = b.meta?.createdAt || '';
+          return ta < tb ? -1 : ta > tb ? 1 : 0;
+        });
+        _sfStarredCommonUuid = sorted[0].uuid;
+        return true;
+      };
+      const _sfSetStarredCommon = async (uuid) => {
+        if (!uuid || uuid === _sfStarredCommonUuid) return;
+        if (!_sfCommons.some(c => c.uuid === uuid)) return;
+        _sfStarredCommonUuid = uuid;
+        await _sfSaveStarredCommon();
+        await _sfRenderCommonList();
       };
       const _sfRenderCommonList = async () => {
         const list = document.getElementById('sf-common-list');
@@ -11446,8 +11501,15 @@ require(['vs/editor/editor.main'], function () {
         // Build each card as an accordion item. Only the currently-expanded
         // common renders its file tree inline (placeholder div populated
         // async after the HTML lands so listCommonFiles can do its IPC).
+        // Star is only shown when there's a meaningful choice (>1 common).
+        // With a single common, it is silently the default — no UI noise.
+        const showStars = _sfCommons.length > 1;
         list.innerHTML = _sfCommons.map(c => {
           const isExpanded = c.uuid === _sfSelectedCommonUuid;
+          const isStarred = c.uuid === _sfStarredCommonUuid;
+          const starBtn = showStars
+            ? `<button class="sf-common-row-star${isStarred ? ' is-starred' : ''}" data-star-uuid="${_sfEscape(c.uuid)}" title="${isStarred ? 'Default common folder' : 'Set as default'}">${isStarred ? '&#9733;' : '&#9734;'}</button>`
+            : '';
           const filesBlock = isExpanded ? `
             <div class="sf-common-row-files">
               <div class="sf-common-files-header">
@@ -11464,6 +11526,7 @@ require(['vs/editor/editor.main'], function () {
                 <div class="sf-common-row-name" title="${_sfEscape(c.meta.name || '')}">${_sfEscape(c.meta.name || '')}</div>
                 <div class="sf-common-row-meta">${c.fileCount} file${c.fileCount === 1 ? '' : 's'} &middot; ${_sfFmtBytes(c.totalBytes)}</div>
               </div>
+              ${starBtn}
             </div>
             ${filesBlock}
           </div>`;
@@ -11537,7 +11600,17 @@ require(['vs/editor/editor.main'], function () {
           const r = await window.electronAPI.listCommons();
           _sfCommons = (r && r.ok && r.commons) || [];
         } catch { _sfCommons = []; }
+        // Enforce the star invariant first — deletes, imports, and rename
+        // operations all funnel through here, so normalizing here covers
+        // every transition.
+        if (_sfNormalizeStarredCommon()) await _sfSaveStarredCommon();
         const knownUuids = new Set(_sfCommons.map(c => c.uuid));
+        // First-launch sentinel from _sfLoadActiveCommon resolves to the
+        // starred uuid here, once commons are loaded.
+        if (_sfSelectedCommonUuid === _SF_ACTIVE_COMMON_PENDING) {
+          _sfSelectedCommonUuid = _sfStarredCommonUuid || null;
+          await _sfSaveActiveCommon();
+        }
         // Stale uuid → reset. An explicit null (user collapsed the active
         // card) is preserved across refresh — auto-expanding on every refresh
         // would override their deliberate collapse and feel sticky.
@@ -11621,7 +11694,18 @@ require(['vs/editor/editor.main'], function () {
       const _sfDuplicateCommon = async (uuid) => {
         const c = _sfCommons.find(x => x.uuid === uuid);
         if (!c) return;
-        const suggested = `${c.meta.name} copy`;
+        // Find a free suggestion: "<name> copy", then " copy 2", " copy 3"...
+        // Names are case-insensitively unique server-side, so compare the
+        // same way here. Cap the loop at something absurd just to avoid
+        // pathological infinite scans if the cache is somehow stale.
+        const taken = new Set(_sfCommons.map(x => (x.meta?.name || '').toLowerCase()));
+        const base = `${c.meta.name} copy`;
+        let suggested = base;
+        let n = 2;
+        while (taken.has(suggested.toLowerCase()) && n < 1000) {
+          suggested = `${base} ${n}`;
+          n++;
+        }
         const name = await _sfPromptCommonName({ title: 'Duplicate common folder', defaultValue: suggested });
         if (!name) return;
         _sfDeleteProgress.show('Duplicating common folder', name);
@@ -12161,6 +12245,7 @@ require(['vs/editor/editor.main'], function () {
         // Common folder sidecar — load active uuid from prefs on first run,
         // then refresh the list + file tree alongside the font entries.
         if (_sfSelectedCommonUuid === null) await _sfLoadActiveCommon();
+        await _sfLoadStarredCommon();
         await _sfRefreshCommons();
         // Fetch sources so the search index can reach into source metadata
         // (original filename, source vendor, bundle name, source notes).
@@ -15263,6 +15348,14 @@ require(['vs/editor/editor.main'], function () {
       // every interaction below the panel header has to be delegated from
       // the list container.
       document.getElementById('sf-common-list')?.addEventListener('click', async (e) => {
+        // 0. Star button — sets default common. Caught before the header
+        // expand/collapse so clicking the star doesn't also toggle the card.
+        const starBtn = e.target.closest('[data-star-uuid]');
+        if (starBtn) {
+          e.stopPropagation();
+          await _sfSetStarredCommon(starBtn.getAttribute('data-star-uuid'));
+          return;
+        }
         // 1a. + Add button inside the expanded files block.
         if (e.target.closest('#btn-sf-common-add-files')) {
           e.stopPropagation();
