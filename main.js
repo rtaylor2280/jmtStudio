@@ -10,6 +10,7 @@ const soundFontSources = require('./soundFontSources');
 const soundFontVendors = require('./soundFontVendors');
 const soundFontCandidates = require('./soundFontCandidates');
 const soundFontEntries = require('./soundFontEntries');
+const soundFontCommon = require('./soundFontCommon');
 
 // ── Separate userData for dev vs prod ──────────────────
 if (!app.isPackaged) {
@@ -1082,6 +1083,118 @@ ipcMain.handle('entries:existsAt', (_, { name, destDir } = {}) => {
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };
   }
+});
+
+// ── Common folder IPC ──────────────────────────────────
+ipcMain.handle('common:list', () => {
+  try { return { ok: true, commons: soundFontCommon.listCommons(app.getPath('userData')) }; }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+ipcMain.handle('common:nameInUse', (_, { name, excludeUuid } = {}) => {
+  try { return { ok: true, inUse: soundFontCommon.nameInUse(app.getPath('userData'), name, excludeUuid) }; }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+ipcMain.handle('common:importFromFolder', async (_, { folderPath, name } = {}) => {
+  try { return await soundFontCommon.importCommonFromFolder(app.getPath('userData'), folderPath, name); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+ipcMain.handle('common:importFromZip', async (_, { zipPath, name } = {}) => {
+  try { return await soundFontCommon.importCommonFromZip(app.getPath('userData'), zipPath, name); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+ipcMain.handle('common:rename', (_, { uuid, newName } = {}) => {
+  try { return soundFontCommon.renameCommon(app.getPath('userData'), uuid, newName); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+ipcMain.handle('common:duplicate', (_, { uuid, newName } = {}) => {
+  try { return soundFontCommon.duplicateCommon(app.getPath('userData'), uuid, newName); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+ipcMain.handle('common:delete', (_, { uuid } = {}) => {
+  try { return soundFontCommon.deleteCommon(app.getPath('userData'), uuid); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+ipcMain.handle('common:listFiles', (_, { uuid } = {}) => {
+  try { return { ok: true, files: soundFontCommon.listCommonFiles(app.getPath('userData'), uuid) }; }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+ipcMain.handle('common:addFiles', (_, { uuid, subPath, sourceFilePaths } = {}) => {
+  try { return soundFontCommon.addFilesToCommon(app.getPath('userData'), uuid, subPath, sourceFilePaths); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+ipcMain.handle('common:renameFile', (_, { uuid, subPath, newName } = {}) => {
+  try { return soundFontCommon.renameCommonFile(app.getPath('userData'), uuid, subPath, newName); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+ipcMain.handle('common:deleteFile', (_, { uuid, subPath } = {}) => {
+  try { return soundFontCommon.deleteCommonFile(app.getPath('userData'), uuid, subPath); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+ipcMain.handle('common:createSubfolder', (_, { uuid, parentSubPath, name } = {}) => {
+  try { return soundFontCommon.createCommonSubfolder(app.getPath('userData'), uuid, parentSubPath, name); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+ipcMain.handle('common:copyFiles', (_, { sourceUuid, sourcePaths, destUuid, destSubPath } = {}) => {
+  try { return soundFontCommon.copyCommonFiles(app.getPath('userData'), sourceUuid, sourcePaths, destUuid, destSubPath); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+ipcMain.handle('common:moveFiles', (_, { uuid, sourcePaths, destSubPath } = {}) => {
+  try { return soundFontCommon.moveCommonFiles(app.getPath('userData'), uuid, sourcePaths, destSubPath); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+ipcMain.handle('common:readFileBytes', (_, { uuid, subPath } = {}) => {
+  try {
+    const buf = soundFontCommon.readCommonFileBytes(app.getPath('userData'), uuid, subPath);
+    return { ok: true, bytes: Array.from(buf) };
+  } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+// Pick wav files to add into a common folder. Multi-select on by default;
+// filtered to .wav and "all files" so users can still import oddly-named
+// audio files the OS doesn't tag with .wav.
+ipcMain.handle('dialog:selectCommonFiles', async () => {
+  const result = await dialog.showOpenDialog(win, {
+    title: 'Add files to common folder',
+    properties: ['openFile', 'multiSelections'],
+    filters: [
+      { name: 'Audio', extensions: ['wav'] },
+      { name: 'All files', extensions: ['*'] },
+    ],
+  });
+  if (result.canceled || !result.filePaths.length) return { ok: false, canceled: true };
+  return { ok: true, filePaths: result.filePaths };
+});
+
+// Pick a folder OR zip as the source for an "Import common folder" action.
+// Mode is the same shape as dialog:selectSoundFontSource — folder vs file
+// can't co-exist in one dialog on Windows/Linux.
+ipcMain.handle('dialog:selectCommonSource', async (_, { mode = 'folder' } = {}) => {
+  const opts = {
+    title: mode === 'zip' ? 'Pick a voicepack zip' : 'Pick a folder containing common wav files',
+  };
+  if (mode === 'zip') {
+    opts.properties = ['openFile'];
+    opts.filters = [{ name: 'Zip files', extensions: ['zip'] }];
+  } else {
+    opts.properties = ['openDirectory'];
+  }
+  const result = await dialog.showOpenDialog(win, opts);
+  if (result.canceled || !result.filePaths.length) return { ok: false, canceled: true };
+  return { ok: true, filePath: result.filePaths[0] };
 });
 
 ipcMain.handle('sources:exportToDownloads', async (_, { uuid, destDir } = {}) => {

@@ -217,6 +217,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
   exportEntryToFolder:   (params)     => ipcRenderer.invoke('entries:exportToFolder', params),
   entryFolderExistsAt:   (params)     => ipcRenderer.invoke('entries:existsAt', params),
   selectSaveDestination: ()           => ipcRenderer.invoke('dialog:selectSaveDestination'),
+
+  // Common folder management (Sound Fonts → side panel)
+  listCommons:           ()           => ipcRenderer.invoke('common:list'),
+  commonNameInUse:       (params)     => ipcRenderer.invoke('common:nameInUse', params),
+  importCommonFromFolder:(params)     => ipcRenderer.invoke('common:importFromFolder', params),
+  importCommonFromZip:   (params)     => ipcRenderer.invoke('common:importFromZip', params),
+  renameCommon:          (params)     => ipcRenderer.invoke('common:rename', params),
+  duplicateCommon:       (params)     => ipcRenderer.invoke('common:duplicate', params),
+  deleteCommon:          (params)     => ipcRenderer.invoke('common:delete', params),
+  listCommonFiles:       (params)     => ipcRenderer.invoke('common:listFiles', params),
+  addCommonFiles:        (params)     => ipcRenderer.invoke('common:addFiles', params),
+  renameCommonFile:      (params)     => ipcRenderer.invoke('common:renameFile', params),
+  deleteCommonFile:      (params)     => ipcRenderer.invoke('common:deleteFile', params),
+  createCommonSubfolder: (params)     => ipcRenderer.invoke('common:createSubfolder', params),
+  copyCommonFiles:       (params)     => ipcRenderer.invoke('common:copyFiles', params),
+  moveCommonFiles:       (params)     => ipcRenderer.invoke('common:moveFiles', params),
+  readCommonFileBytes:   (params)     => ipcRenderer.invoke('common:readFileBytes', params),
+  selectCommonFiles:     ()           => ipcRenderer.invoke('dialog:selectCommonFiles'),
+  selectCommonSource:    (params)     => ipcRenderer.invoke('dialog:selectCommonSource', params),
   onEntryCreateProgress: (cb) => {
     const handler = (_, data) => cb(data);
     ipcRenderer.on('entries:createProgress', handler);

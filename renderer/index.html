@@ -1860,6 +1860,87 @@
   .sf-card-select-btn:hover { border-color: var(--jmt-blue); }
   .sf-card.selected .sf-card-select-btn { border-color: var(--jmt-blue); background: var(--jmt-blue); color: #fff; }
   .sf-card.selected { border-color: var(--jmt-blue); background: var(--c-bg-hover); }
+  /* Main row inside the SF browse view — card grid on the left and the
+     common-folder sidecar on the right share horizontal space, sandwiched
+     between the search bar above and the missing/legend bars below. */
+  .sf-main-row { flex: 1; min-height: 0; display: flex; overflow: hidden; }
+  /* Common folder sidecar — fixed width on the LEFT, collapsible to a thin
+     vertical strip with a rotated label, matching the preset sidecar
+     convention so users who already know one know both. */
+  .sf-common-sidecar { position: relative; display: flex; flex-direction: row; border-right: 1px solid var(--c-border); background: var(--c-bg); flex-shrink: 0; transition: width 0.2s ease; width: 280px; }
+  .sf-common-sidecar.collapsed { width: 20px; }
+  .sf-common-sidecar.collapsed .sf-common-inner { display: none; }
+  .sf-common-sidecar.collapsed .sf-common-divider { border-left: none; }
+  /* Drag-to-resize handle on the right edge — same convention the preset
+     sidecar uses (6px wide, overlaps the boundary so the cursor change
+     fires reliably, hides when collapsed). */
+  .sf-common-sidecar-resizer { position: absolute; top: 0; right: -3px; width: 6px; height: 100%; cursor: col-resize; z-index: 20; background: transparent; transition: background 0.15s; }
+  .sf-common-sidecar-resizer:hover, .sf-common-sidecar-resizer.dragging { background: rgba(58,143,255,0.45); }
+  .sf-common-sidecar.collapsed .sf-common-sidecar-resizer { display: none; }
+  .sf-common-divider { display: flex; flex-direction: column; align-items: center; padding: 6px 2px; border-left: 1px solid var(--c-border); flex-shrink: 0; gap: 4px; cursor: pointer; background: var(--c-bg); }
+  .sf-common-divider:hover { background: var(--c-bg-hover); }
+  /* Left-side panel chevron convention: ◀ when expanded ("collapse left"),
+     ▶ when collapsed ("expand right"). Base char ❮ is left-pointing already
+     so the rotation only fires in the collapsed state. */
+  .sf-common-toggle { background: none; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; width: 16px; height: 16px; color: var(--c-text-muted); font-size: 0.72rem; border-radius: 2px; padding: 0; flex-shrink: 0; transition: transform 0.2s; }
+  .sf-common-sidecar.collapsed .sf-common-toggle { transform: rotate(180deg); }
+  .sf-common-strip-label { font-size: 0.58rem; font-weight: 900; letter-spacing: 0.08em; color: var(--c-text-muted); white-space: nowrap; writing-mode: vertical-lr; user-select: none; padding: 4px 0; }
+  .sf-common-sidecar:not(.collapsed) .sf-common-strip-label { display: none; }
+  .sf-common-inner { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+  .sf-common-header { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--c-border); flex-shrink: 0; }
+  .sf-common-title { font-size: 0.7rem; font-weight: 700; color: var(--c-text); letter-spacing: 0.05em; text-transform: uppercase; flex: 1; min-width: 0; }
+  .sf-common-import-btn { font-size: 0.68rem; padding: 2px 7px; }
+  /* List is a flex column filling the inner panel. Collapsed cards take
+     their natural height; the one expanded card flex:1 grows into all the
+     remaining space, but has a sane min-height so a panel jammed with many
+     collapsed cards forces the outer list to scroll rather than squishing
+     the file tree down to nothing. */
+  .sf-common-list { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
+  .sf-common-list::-webkit-scrollbar { width: 6px; }
+  .sf-common-list::-webkit-scrollbar-track { background: transparent; }
+  .sf-common-list::-webkit-scrollbar-thumb { background: var(--c-border-strong); border-radius: 3px; }
+  .sf-common-row { display: flex; flex-direction: column; border-bottom: 1px solid var(--c-border-faint); flex-shrink: 0; }
+  .sf-common-row.expanded { flex: 1 1 auto; min-height: 260px; overflow: hidden; }
+  .sf-common-row-header { display: flex; align-items: center; gap: 8px; padding: 6px 10px; cursor: pointer; border-left: 2px solid transparent; transition: background 0.1s, border-color 0.1s; flex-shrink: 0; }
+  .sf-common-row-header:hover { background: var(--c-bg-hover); }
+  .sf-common-row.expanded > .sf-common-row-header { background: var(--c-bg-card); border-left-color: var(--jmt-blue); }
+  .sf-common-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  .sf-common-row-name { font-size: 0.78rem; color: var(--c-text); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sf-common-row-meta { font-size: 0.66rem; color: var(--c-text-dim); white-space: nowrap; }
+  .sf-common-row-chevron { font-size: 0.55rem; color: var(--c-text-dim); flex-shrink: 0; transition: transform 0.15s; }
+  .sf-common-row.expanded .sf-common-row-chevron { transform: rotate(90deg); }
+  .sf-common-empty { padding: 20px 14px; text-align: center; font-size: 0.78rem; color: var(--c-text-muted); line-height: 1.5; }
+  /* Expanded files area: a small "FILES" header + a scrollable file tree
+     that fills all of the expanded card's remaining height. */
+  .sf-common-row-files { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--c-bg); border-top: 1px solid var(--c-border-faint); overflow: hidden; }
+  .sf-common-files-header { display: flex; align-items: center; gap: 6px; padding: 5px 10px 5px 14px; flex-shrink: 0; }
+  .sf-common-files-title { font-size: 0.64rem; font-weight: 700; color: var(--c-text-sub); letter-spacing: 0.06em; text-transform: uppercase; flex: 1; min-width: 0; }
+  .sf-common-files-add-btn { font-size: 0.64rem; padding: 1px 6px; }
+  .sf-common-files { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 0 6px; }
+  .sf-common-files::-webkit-scrollbar { width: 6px; }
+  .sf-common-files::-webkit-scrollbar-track { background: transparent; }
+  .sf-common-files::-webkit-scrollbar-thumb { background: var(--c-border-strong); border-radius: 3px; }
+  /* File tree rows — same visual language as the OS Versions vp-tree but
+     scoped to this panel to avoid styling collisions. */
+  .sf-tree-row { display: flex; align-items: center; gap: 4px; padding: 2px 8px; font-size: 0.75rem; cursor: default; user-select: none; }
+  .sf-tree-row:hover { background: var(--c-bg-hover); }
+  .sf-tree-row.selected { background: rgba(0,130,255,0.2); }
+  .sf-tree-row.selected:hover { background: rgba(0,130,255,0.28); }
+  .sf-tree-toggle { width: 14px; flex-shrink: 0; font-size: 0.6rem; color: var(--c-text-dim); text-align: center; cursor: pointer; user-select: none; }
+  .sf-tree-icon { font-size: 0.8rem; flex-shrink: 0; line-height: 1; color: var(--c-text-dim); }
+  .sf-tree-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--c-text); }
+  .sf-tree-dir > .sf-tree-name { color: var(--c-text-sub); font-weight: 500; }
+  .sf-tree-size { font-size: 0.66rem; color: var(--c-text-dim); flex-shrink: 0; }
+  .sf-tree-children { display: none; }
+  .sf-tree-children.open { display: block; }
+  .sf-tree-empty { padding: 20px 14px; text-align: center; font-size: 0.74rem; color: var(--c-text-muted); font-style: italic; }
+  /* Drag/drop visual feedback for cross-common file moves. A subtle blue
+     outline on the active drop target — file/dir/common rows highlight when
+     a drag hovers over them so the user knows where the drop will land. */
+  .sf-tree-row[draggable="true"] { cursor: grab; }
+  .sf-tree-row.drop-target { background: rgba(58,143,255,0.22); outline: 1px solid var(--jmt-blue); outline-offset: -1px; }
+  .sf-common-files.drop-target { background: rgba(58,143,255,0.10); outline: 1px dashed var(--jmt-blue); outline-offset: -2px; }
+  .sf-common-row-header.drop-target { background: rgba(58,143,255,0.18); }
   /* Missing fonts banner — sits at the bottom of the SF view, just above the
      legend. Surfaces font directories the open config references that the
      user hasn't imported. Each name is a clickable chip that copies on click. */
@@ -2778,8 +2859,28 @@
       </div>
     </div>
     <div id="sf-active-filters" class="styles-active-filters" style="display:none"></div>
-    <div class="sf-grid-scroll">
-      <div class="sf-cards" id="sf-cards"></div>
+    <!-- Main horizontal row: common-folder sidecar on the LEFT (matching the
+         preset sidecar convention), card grid on the right. Both share the
+         vertical space between the search bar above and the missing/legend
+         bars below. -->
+    <div class="sf-main-row">
+      <div class="sf-common-sidecar" id="sf-common-sidecar">
+        <div class="sf-common-inner">
+          <div class="sf-common-header">
+            <span class="sf-common-title">Common Folders</span>
+            <button class="btn-neutral sf-common-import-btn" id="btn-sf-common-import" title="Import a voicepack zip or a folder of wav files">+ Import</button>
+          </div>
+          <div class="sf-common-list" id="sf-common-list"></div>
+        </div>
+        <div class="sf-common-divider" id="sf-common-divider" title="Toggle common folder panel">
+          <button class="sf-common-toggle" id="btn-sf-common-toggle" title="Toggle common folder panel">&#10094;</button>
+          <span class="sf-common-strip-label">COMMON</span>
+        </div>
+        <div id="sf-common-sidecar-resizer" class="sf-common-sidecar-resizer"></div>
+      </div>
+      <div class="sf-grid-scroll">
+        <div class="sf-cards" id="sf-cards"></div>
+      </div>
     </div>
     <!-- Missing fonts banner: surfaces font directories the open config
          references that the user hasn't imported. Click a chip to copy the
@@ -3600,6 +3701,39 @@
      allowing the user to type something new. ── -->
 <datalist id="sf-all-tags-datalist"></datalist>
 <datalist id="style-all-tags-datalist"></datalist>
+
+<!-- ── Import-source chooser for common folders. Mirrors the Sound Font
+     import-modal pick phase: two big buttons side by side, Cancel at the
+     bottom. Windows/Linux dialog constraints prevent one native picker
+     from co-mingling files + folders, so the up-front choice is forced
+     here too. ── -->
+<div class="modal-overlay" id="modal-sf-common-import-chooser">
+  <div class="modal">
+    <h2>Import Common Folder</h2>
+    <div class="sf-import-pick-row">
+      <button class="modal-btn-primary" id="sf-common-import-zip">Pick .zip file&hellip;</button>
+      <button class="modal-btn-primary" id="sf-common-import-folder">Pick folder&hellip;</button>
+    </div>
+    <div class="modal-btns" style="margin-top: 16px">
+      <button class="modal-btn-cancel" id="sf-common-import-cancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Simple text prompt modal — reusable for "name your common folder",
+     rename, and duplicate flows. Resolves with the trimmed string or null
+     on cancel/Escape/backdrop click. ── -->
+<div class="modal-overlay" id="modal-sf-text-prompt">
+  <div class="modal">
+    <h2 id="sf-text-prompt-title">Enter value</h2>
+    <p id="sf-text-prompt-message" class="sf-import-hint" style="margin-bottom: 8px"></p>
+    <input type="text" id="sf-text-prompt-input" maxlength="100" autocomplete="off" style="width: 100%; box-sizing: border-box; background: var(--c-bg-inset); border: 1px solid var(--c-border-input); border-radius: 3px; color: var(--c-text); padding: 6px 8px; font-size: 0.86rem; outline: none; font-family: inherit;">
+    <div class="modal-btns" style="margin-top: 14px">
+      <button class="modal-btn-cancel" id="sf-text-prompt-cancel">Cancel</button>
+      <button class="modal-btn-primary" id="sf-text-prompt-ok">OK</button>
+    </div>
+  </div>
+</div>
 
 <!-- ── Bulk save conflict resolution: shown when one or more selected fonts
      already exist at the chosen destination. Per-row Skip/Replace choice
@@ -11014,6 +11148,40 @@ require(['vs/editor/editor.main'], function () {
         _sfSelectedNames.clear();
         _sfRenderGrid();
       });
+      // Ctrl/Cmd+C / Ctrl/Cmd+V on the common folder file tree. Active only
+      // when the SF tab is showing, no modal is up, and focus isn't in an
+      // input/textarea (so it doesn't hijack normal text shortcuts).
+      document.addEventListener('keydown', (e) => {
+        if (!(e.ctrlKey || e.metaKey)) return;
+        const key = e.key.toLowerCase();
+        if (key !== 'c' && key !== 'v') return;
+        if (document.querySelector('.modal-overlay.active')) return;
+        const ae = document.activeElement;
+        if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT')) return;
+        // Only act when the SF tab is the visible one — otherwise plain Ctrl+C
+        // somewhere else in the app would steal selection.
+        const sfView = document.getElementById('soundfonts-view');
+        if (!sfView || !sfView.classList.contains('active')) return;
+        if (key === 'c') {
+          if (!_sfSelectedCommonUuid || _sfCommonFilesSelected.size === 0) return;
+          e.preventDefault();
+          _sfCopyCommonSelection();
+        } else {
+          if (!_sfCommonClipboard || _sfCommonClipboard.paths.length === 0) return;
+          if (!_sfSelectedCommonUuid) return;
+          e.preventDefault();
+          // Paste destination: parent dir of the current anchor file (so
+          // the user's focus location guides where the paste lands), or
+          // root if no anchor.
+          let destSubPath = '';
+          if (_sfCommonFilesAnchor) {
+            const parts = _sfCommonFilesAnchor.split('/');
+            parts.pop();
+            destSubPath = parts.join('/');
+          }
+          _sfPasteCommonClipboard(_sfSelectedCommonUuid, destSubPath);
+        }
+      });
       // Build a search blob that covers everything the user might type to find
       // an entry: the entry's own name/author/description/notes/tags plus the
       // backing source's bundle name, original filename, vendor info, and
@@ -11185,6 +11353,527 @@ require(['vs/editor/editor.main'], function () {
         }
         legendEl.innerHTML = items.join('');
         legendEl.style.display = items.length ? 'flex' : 'none';
+      };
+      // ── Common folder sidecar ────────────────────────────
+      // State:
+      //   _sfCommons              — cached list from backend
+      //   _sfSelectedCommonUuid   — the single active common (file-tree pivot
+      //                             + the one Save will include + the one used
+      //                             for in-config matching). Persisted to
+      //                             prefs as "soundFontActiveCommon".
+      //   _sfCommonTreeOpen       — set of folder paths currently expanded.
+      //   _sfCommonFilesSelected  — file-tree multi-select set (subpaths).
+      //                             Mirrors the preset sidecar's three-modifier
+      //                             pattern: plain click replaces, Ctrl/Cmd
+      //                             toggles, Shift selects range from anchor.
+      //   _sfCommonFilesAnchor    — anchor row for Shift-range, set on plain
+      //                             or Ctrl click.
+      let _sfCommons = [];
+      let _sfSelectedCommonUuid = null;
+      let _sfCommonTreeOpen = new Set();
+      let _sfCommonSidecarCollapsed = false;
+      let _sfCommonFilesSelected = new Set();
+      let _sfCommonFilesAnchor = null;
+      // Cross-common copy/paste clipboard. Holds the source common's uuid
+      // and the set of file subpaths that were copied. Survives across
+      // re-renders and tab switches. Cleared on paste only if the user
+      // wants — currently kept until overwritten by a new Copy.
+      let _sfCommonClipboard = null; // { sourceUuid, paths: string[] }
+      // Reusable text-prompt helper. Used for naming on import / rename /
+      // duplicate. Returns the trimmed string or null on cancel/Escape.
+      const _sfPromptText = ({ title, message, defaultValue, okText = 'OK' } = {}) => {
+        return new Promise(resolve => {
+          const modal = document.getElementById('modal-sf-text-prompt');
+          const titleEl = document.getElementById('sf-text-prompt-title');
+          const msgEl = document.getElementById('sf-text-prompt-message');
+          const input = document.getElementById('sf-text-prompt-input');
+          const okBtn = document.getElementById('sf-text-prompt-ok');
+          const cancelBtn = document.getElementById('sf-text-prompt-cancel');
+          if (!modal) { resolve(null); return; }
+          titleEl.textContent = title || 'Enter value';
+          msgEl.textContent = message || '';
+          msgEl.style.display = message ? '' : 'none';
+          input.value = defaultValue || '';
+          okBtn.textContent = okText;
+          const cleanup = (val) => {
+            modal.classList.remove('active');
+            okBtn.removeEventListener('click', onOk);
+            cancelBtn.removeEventListener('click', onCancel);
+            input.removeEventListener('keydown', onKey);
+            modal.removeEventListener('click', onBackdrop);
+            resolve(val);
+          };
+          const onOk = () => cleanup((input.value || '').trim() || null);
+          const onCancel = () => cleanup(null);
+          const onKey = (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); onOk(); }
+            else if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
+          };
+          const onBackdrop = (e) => { if (e.target === modal) onCancel(); };
+          okBtn.addEventListener('click', onOk);
+          cancelBtn.addEventListener('click', onCancel);
+          input.addEventListener('keydown', onKey);
+          modal.addEventListener('click', onBackdrop);
+          modal.classList.add('active');
+          setTimeout(() => { input.focus(); input.select(); }, 0);
+        });
+      };
+      // Format helper — bytes → human-readable. Mirrors _sfFormatBytes (which
+      // exists later in the file) but we may need it earlier in render order
+      // so define our own scoped to the common sidecar.
+      const _sfFmtBytes = (n) => {
+        if (!n) return '0 B';
+        if (n < 1024) return `${n} B`;
+        if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+        return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+      };
+      const _sfLoadActiveCommon = async () => {
+        try {
+          const v = await window.electronAPI.getSetting('soundFontActiveCommon', null);
+          _sfSelectedCommonUuid = (v && typeof v === 'string') ? v : null;
+        } catch { _sfSelectedCommonUuid = null; }
+      };
+      const _sfSaveActiveCommon = async () => {
+        try { await window.electronAPI.setSetting('soundFontActiveCommon', _sfSelectedCommonUuid || ''); } catch {}
+      };
+      const _sfRenderCommonList = async () => {
+        const list = document.getElementById('sf-common-list');
+        if (!list) return;
+        if (_sfCommons.length === 0) {
+          list.innerHTML = `<div class="sf-common-empty">No common folder yet.<br>Import a voicepack zip or a folder of wav files to get started.</div>`;
+          return;
+        }
+        // Build each card as an accordion item. Only the currently-expanded
+        // common renders its file tree inline (placeholder div populated
+        // async after the HTML lands so listCommonFiles can do its IPC).
+        list.innerHTML = _sfCommons.map(c => {
+          const isExpanded = c.uuid === _sfSelectedCommonUuid;
+          const filesBlock = isExpanded ? `
+            <div class="sf-common-row-files">
+              <div class="sf-common-files-header">
+                <span class="sf-common-files-title">Files</span>
+                <button class="btn-neutral sf-common-files-add-btn" id="btn-sf-common-add-folder" title="Create a new subfolder">+ Folder</button>
+                <button class="btn-neutral sf-common-files-add-btn" id="btn-sf-common-add-files" title="Add wav files to this common folder">+ Add</button>
+              </div>
+              <div class="sf-common-files" id="sf-common-files"></div>
+            </div>` : '';
+          return `<div class="sf-common-row${isExpanded ? ' expanded' : ''}" data-common-uuid="${_sfEscape(c.uuid)}">
+            <div class="sf-common-row-header">
+              <span class="sf-common-row-chevron">&#9656;</span>
+              <div class="sf-common-row-main">
+                <div class="sf-common-row-name" title="${_sfEscape(c.meta.name || '')}">${_sfEscape(c.meta.name || '')}</div>
+                <div class="sf-common-row-meta">${c.fileCount} file${c.fileCount === 1 ? '' : 's'} &middot; ${_sfFmtBytes(c.totalBytes)}</div>
+              </div>
+            </div>
+            ${filesBlock}
+          </div>`;
+        }).join('');
+        if (_sfSelectedCommonUuid) await _sfRenderCommonFileTree();
+      };
+      const _sfRenderCommonFileTree = async () => {
+        const wrap = document.getElementById('sf-common-files');
+        if (!wrap || !_sfSelectedCommonUuid) return;
+        let files = [];
+        try {
+          const r = await window.electronAPI.listCommonFiles({ uuid: _sfSelectedCommonUuid });
+          files = (r && r.ok && r.files) || [];
+        } catch {}
+        if (files.length === 0) {
+          wrap.innerHTML = '<div class="sf-tree-empty">No files yet. Use "+ Add files" to include wavs.</div>';
+          return;
+        }
+        const renderNodes = (nodes, depth) => {
+          return nodes.map(n => {
+            const indent = depth * 14;
+            if (n.isDir) {
+              const isOpen = _sfCommonTreeOpen.has(n.path);
+              return `<div class="sf-tree-row sf-tree-dir" data-tree-dir="${_sfEscape(n.path)}" style="padding-left:${8 + indent}px">
+                <span class="sf-tree-toggle" data-tree-toggle="${_sfEscape(n.path)}">${isOpen ? '&#9662;' : '&#9656;'}</span>
+                <span class="sf-tree-icon">&#128193;</span>
+                <span class="sf-tree-name">${_sfEscape(n.name)}</span>
+              </div><div class="sf-tree-children${isOpen ? ' open' : ''}" data-tree-children="${_sfEscape(n.path)}">${renderNodes(n.children || [], depth + 1)}</div>`;
+            }
+            const sel = _sfCommonFilesSelected.has(n.path) ? ' selected' : '';
+            return `<div class="sf-tree-row sf-tree-file${sel}" draggable="true" data-tree-file="${_sfEscape(n.path)}" style="padding-left:${8 + indent + 14}px">
+              <span class="sf-tree-icon">&#127925;</span>
+              <span class="sf-tree-name">${_sfEscape(n.name)}</span>
+              <span class="sf-tree-size">${_sfFmtBytes(n.size)}</span>
+            </div>`;
+          }).join('');
+        };
+        wrap.innerHTML = renderNodes(files, 0);
+      };
+      // Clipboard prune. Runs on every refresh so stale entries (source file
+      // deleted, source common deleted, source file moved/renamed) drop out
+      // and the right-click "Paste" / Ctrl+V flow hides cleanly instead of
+      // dispatching to a missing source and producing an error dialog.
+      const _sfPruneCommonClipboard = async () => {
+        if (!_sfCommonClipboard) return;
+        const knownUuids = new Set(_sfCommons.map(c => c.uuid));
+        if (!knownUuids.has(_sfCommonClipboard.sourceUuid)) {
+          _sfCommonClipboard = null;
+          return;
+        }
+        let files = [];
+        try {
+          const r = await window.electronAPI.listCommonFiles({ uuid: _sfCommonClipboard.sourceUuid });
+          files = (r && r.ok && r.files) || [];
+        } catch {}
+        // Walk into the source's tree, build a flat set of file paths.
+        const flat = new Set();
+        const walk = (nodes) => {
+          for (const n of nodes) {
+            if (n.isDir) walk(n.children || []);
+            else flat.add(n.path);
+          }
+        };
+        walk(files);
+        const surviving = _sfCommonClipboard.paths.filter(p => flat.has(p));
+        if (surviving.length === 0) _sfCommonClipboard = null;
+        else _sfCommonClipboard.paths = surviving;
+      };
+      const _sfRefreshCommons = async ({ preserveSelection = false } = {}) => {
+        try {
+          const r = await window.electronAPI.listCommons();
+          _sfCommons = (r && r.ok && r.commons) || [];
+        } catch { _sfCommons = []; }
+        const knownUuids = new Set(_sfCommons.map(c => c.uuid));
+        // Stale uuid → reset. An explicit null (user collapsed the active
+        // card) is preserved across refresh — auto-expanding on every refresh
+        // would override their deliberate collapse and feel sticky.
+        if (_sfSelectedCommonUuid && !knownUuids.has(_sfSelectedCommonUuid)) {
+          _sfSelectedCommonUuid = null;
+          await _sfSaveActiveCommon();
+        }
+        await _sfPruneCommonClipboard();
+        // Default: switching / clearing commons drops the file-tree
+        // multi-select. Paste/move set the selection to the newly-landed
+        // files and pass preserveSelection so the refresh doesn't wipe it.
+        if (!preserveSelection) {
+          _sfCommonFilesSelected.clear();
+          _sfCommonFilesAnchor = null;
+        }
+        await _sfRenderCommonList();
+      };
+      // Default name from the picked path's basename, with extension stripped.
+      const _sfDefaultCommonName = (filePath) => {
+        const base = String(filePath || '').split(/[\\/]/).pop() || '';
+        return base.replace(/\.zip$/i, '');
+      };
+      // Loop the name prompt until the user provides a unique name or cancels.
+      // Returns the validated name or null.
+      const _sfPromptCommonName = async ({ title, defaultValue, excludeUuid = null }) => {
+        let suggested = defaultValue || '';
+        while (true) {
+          const name = await _sfPromptText({
+            title,
+            message: 'Pick a name for this common folder. Names must be unique.',
+            defaultValue: suggested,
+            okText: 'Save',
+          });
+          if (name === null) return null;
+          try {
+            const r = await window.electronAPI.commonNameInUse({ name, excludeUuid });
+            if (r && r.ok && r.inUse) {
+              alert(`A common folder named "${name}" already exists.`);
+              suggested = name;
+              continue;
+            }
+          } catch {}
+          return name;
+        }
+      };
+      const _sfImportCommon = async (mode) => {
+        let pick;
+        try { pick = await window.electronAPI.selectCommonSource({ mode }); }
+        catch (err) { alert(`Could not open the picker: ${err && err.message || err}`); return; }
+        if (!pick || !pick.ok) return;
+        const defaultName = _sfDefaultCommonName(pick.filePath);
+        const name = await _sfPromptCommonName({ title: 'Import common folder', defaultValue: defaultName });
+        if (!name) return;
+        _sfDeleteProgress.show('Importing common folder', name);
+        let res;
+        try {
+          if (mode === 'zip') res = await window.electronAPI.importCommonFromZip({ zipPath: pick.filePath, name });
+          else res = await window.electronAPI.importCommonFromFolder({ folderPath: pick.filePath, name });
+        } catch (err) {
+          res = { ok: false, error: String(err && err.message || err) };
+        }
+        await _sfDeleteProgress.hide();
+        if (!res || !res.ok) {
+          alert(`Import failed: ${(res && res.error) || 'unknown error'}`);
+          return;
+        }
+        // Newly imported becomes the selected one for the file tree pivot.
+        // The first-common auto-check happens inside _sfRefreshCommons.
+        _sfSelectedCommonUuid = res.uuid;
+        await _sfRefreshCommons();
+      };
+      const _sfRenameCommon = async (uuid) => {
+        const c = _sfCommons.find(x => x.uuid === uuid);
+        if (!c) return;
+        const name = await _sfPromptCommonName({ title: 'Rename common folder', defaultValue: c.meta.name, excludeUuid: uuid });
+        if (!name || name === c.meta.name) return;
+        const res = await window.electronAPI.renameCommon({ uuid, newName: name });
+        if (!res || !res.ok) { alert(`Rename failed: ${(res && res.error) || 'unknown error'}`); return; }
+        await _sfRefreshCommons();
+      };
+      const _sfDuplicateCommon = async (uuid) => {
+        const c = _sfCommons.find(x => x.uuid === uuid);
+        if (!c) return;
+        const suggested = `${c.meta.name} copy`;
+        const name = await _sfPromptCommonName({ title: 'Duplicate common folder', defaultValue: suggested });
+        if (!name) return;
+        _sfDeleteProgress.show('Duplicating common folder', name);
+        const res = await window.electronAPI.duplicateCommon({ uuid, newName: name });
+        await _sfDeleteProgress.hide();
+        if (!res || !res.ok) { alert(`Duplicate failed: ${(res && res.error) || 'unknown error'}`); return; }
+        _sfSelectedCommonUuid = res.uuid;
+        await _sfRefreshCommons();
+      };
+      const _sfDeleteCommonPrompt = async (uuid) => {
+        const c = _sfCommons.find(x => x.uuid === uuid);
+        if (!c) return;
+        const ok = await promptConfirm({
+          title: 'Delete common folder',
+          message: `Delete the common folder "${c.meta.name}"?\nThis cannot be undone.`,
+          confirmText: 'Delete',
+          confirmKind: 'danger',
+        });
+        if (!ok) return;
+        const res = await window.electronAPI.deleteCommon({ uuid });
+        if (!res || !res.ok) { alert(`Delete failed: ${(res && res.error) || 'unknown error'}`); return; }
+        if (_sfSelectedCommonUuid === uuid) {
+          _sfSelectedCommonUuid = null;
+          await _sfSaveActiveCommon();
+        }
+        await _sfRefreshCommons();
+      };
+      const _sfAddCommonFiles = async () => {
+        if (!_sfSelectedCommonUuid) return;
+        let pick;
+        try { pick = await window.electronAPI.selectCommonFiles(); }
+        catch (err) { alert(`Could not open picker: ${err && err.message || err}`); return; }
+        if (!pick || !pick.ok || !pick.filePaths?.length) return;
+        _sfDeleteProgress.show('Adding files', `${pick.filePaths.length} file${pick.filePaths.length === 1 ? '' : 's'}`);
+        const res = await window.electronAPI.addCommonFiles({
+          uuid: _sfSelectedCommonUuid,
+          subPath: '',
+          sourceFilePaths: pick.filePaths,
+        });
+        await _sfDeleteProgress.hide();
+        if (!res || !res.ok) { alert(`Add failed: ${(res && res.error) || 'unknown error'}`); return; }
+        if (res.failed?.length) {
+          alert(`Some files failed to add:\n${res.failed.map(f => ` • ${f.source}: ${f.error}`).join('\n')}`);
+        }
+        await _sfRefreshCommons();
+      };
+      const _sfRenameCommonFile = async (subPath) => {
+        if (!_sfSelectedCommonUuid || !subPath) return;
+        const current = subPath.split('/').pop();
+        const name = await _sfPromptText({
+          title: 'Rename file',
+          message: 'New name for this file:',
+          defaultValue: current,
+          okText: 'Rename',
+        });
+        if (!name || name === current) return;
+        const res = await window.electronAPI.renameCommonFile({ uuid: _sfSelectedCommonUuid, subPath, newName: name });
+        if (!res || !res.ok) { alert(`Rename failed: ${(res && res.error) || 'unknown error'}`); return; }
+        await _sfRefreshCommons();
+      };
+      const _sfDeleteCommonFilePrompt = async (subPath) => {
+        if (!_sfSelectedCommonUuid || !subPath) return;
+        const base = subPath.split('/').pop();
+        const ok = await promptConfirm({
+          title: 'Delete file',
+          message: `Delete "${base}" from this common folder?`,
+          confirmText: 'Delete',
+          confirmKind: 'danger',
+        });
+        if (!ok) return;
+        const res = await window.electronAPI.deleteCommonFile({ uuid: _sfSelectedCommonUuid, subPath });
+        if (!res || !res.ok) { alert(`Delete failed: ${(res && res.error) || 'unknown error'}`); return; }
+        await _sfRefreshCommons();
+      };
+      // Copy the current file-tree selection to the clipboard for cross-
+      // common paste. The clipboard is just an in-memory snapshot; it
+      // survives across re-renders, tab switches, and panel collapse.
+      const _sfCopyCommonSelection = () => {
+        if (!_sfSelectedCommonUuid || _sfCommonFilesSelected.size === 0) return;
+        _sfCommonClipboard = {
+          sourceUuid: _sfSelectedCommonUuid,
+          paths: Array.from(_sfCommonFilesSelected),
+        };
+      };
+      // Core copy operation. Takes explicit source + destination so it serves
+      // both clipboard paste and drag-drop without re-reading globals.
+      // On success: switches the active common to the destination, expands
+      // ancestor folders so the new files are visible, and selects the
+      // newly-pasted set as the highlight.
+      const _sfDoCommonCopy = async (sourceUuid, sourcePaths, destUuid, destSubPath = '', verb = 'Pasting') => {
+        if (!sourceUuid || !destUuid) return;
+        if (!sourcePaths || sourcePaths.length === 0) return;
+        const n = sourcePaths.length;
+        _sfDeleteProgress.show(`${verb} files`, `${n} file${n === 1 ? '' : 's'}`);
+        let res;
+        try {
+          res = await window.electronAPI.copyCommonFiles({
+            sourceUuid,
+            sourcePaths,
+            destUuid,
+            destSubPath,
+          });
+        } catch (err) {
+          res = { ok: false, error: String(err && err.message || err) };
+        }
+        await _sfDeleteProgress.hide();
+        if (!res || !res.ok) {
+          alert(`${verb} failed: ${(res && res.error) || 'unknown error'}`);
+          return;
+        }
+        if (res.failed?.length) {
+          alert(`Some files failed:\n${res.failed.map(f => ` • ${f.source}: ${f.error}`).join('\n')}`);
+        }
+        _sfSelectedCommonUuid = destUuid;
+        await _sfSaveActiveCommon();
+        for (const p of (res.added || [])) {
+          const parts = p.split('/');
+          parts.pop();
+          let acc = '';
+          for (const segment of parts) {
+            acc = acc ? `${acc}/${segment}` : segment;
+            _sfCommonTreeOpen.add(acc);
+          }
+        }
+        _sfCommonFilesSelected = new Set(res.added || []);
+        _sfCommonFilesAnchor = (res.added && res.added[0]) || null;
+        await _sfRefreshCommons({ preserveSelection: true });
+      };
+      // Paste the clipboard's files into a destination common at a subpath.
+      const _sfPasteCommonClipboard = async (destUuid, destSubPath = '') => {
+        if (!_sfCommonClipboard || _sfCommonClipboard.paths.length === 0) return;
+        await _sfDoCommonCopy(
+          _sfCommonClipboard.sourceUuid,
+          _sfCommonClipboard.paths,
+          destUuid,
+          destSubPath,
+          'Pasting',
+        );
+      };
+      // In-common move (drag within a single common into a different
+      // subfolder). Files that are already at the destination subPath are
+      // skipped silently. Mirrors _sfDoCommonCopy's selection/expand behavior
+      // so the user sees the moved set highlighted in their new home.
+      const _sfDoCommonMove = async (uuid, sourcePaths, destSubPath = '') => {
+        if (!uuid || !sourcePaths || sourcePaths.length === 0) return;
+        const n = sourcePaths.length;
+        _sfDeleteProgress.show('Moving files', `${n} file${n === 1 ? '' : 's'}`);
+        let res;
+        try {
+          res = await window.electronAPI.moveCommonFiles({ uuid, sourcePaths, destSubPath });
+        } catch (err) {
+          res = { ok: false, error: String(err && err.message || err) };
+        }
+        await _sfDeleteProgress.hide();
+        if (!res || !res.ok) {
+          alert(`Move failed: ${(res && res.error) || 'unknown error'}`);
+          return;
+        }
+        if (res.failed?.length) {
+          alert(`Some files failed:\n${res.failed.map(f => ` • ${f.source}: ${f.error}`).join('\n')}`);
+        }
+        for (const p of (res.moved || [])) {
+          const parts = p.split('/');
+          parts.pop();
+          let acc = '';
+          for (const segment of parts) {
+            acc = acc ? `${acc}/${segment}` : segment;
+            _sfCommonTreeOpen.add(acc);
+          }
+        }
+        _sfCommonFilesSelected = new Set(res.moved || []);
+        _sfCommonFilesAnchor = (res.moved && res.moved[0]) || null;
+        await _sfRefreshCommons({ preserveSelection: true });
+      };
+      // Create a new subfolder. Parent dir is derived from the current
+      // anchor's location — if the user has a file selected, the new
+      // folder becomes a sibling of that file. If nothing is selected,
+      // it lands at the common's root.
+      const _sfCreateCommonFolderPrompt = async () => {
+        if (!_sfSelectedCommonUuid) return;
+        let parentSubPath = '';
+        if (_sfCommonFilesAnchor) {
+          const parts = _sfCommonFilesAnchor.split('/');
+          parts.pop();
+          parentSubPath = parts.join('/');
+        }
+        const name = await _sfPromptText({
+          title: 'New folder',
+          message: parentSubPath
+            ? `Name for the new subfolder inside "${parentSubPath}":`
+            : 'Name for the new subfolder:',
+          defaultValue: '',
+          okText: 'Create',
+        });
+        if (!name) return;
+        const res = await window.electronAPI.createCommonSubfolder({
+          uuid: _sfSelectedCommonUuid,
+          parentSubPath,
+          name,
+        });
+        if (!res || !res.ok) { alert(`Create folder failed: ${(res && res.error) || 'unknown error'}`); return; }
+        // Open ancestors + the new folder itself so the empty subdir is
+        // visible in the tree right after creation.
+        if (parentSubPath) {
+          const parts = parentSubPath.split('/');
+          let acc = '';
+          for (const segment of parts) {
+            acc = acc ? `${acc}/${segment}` : segment;
+            _sfCommonTreeOpen.add(acc);
+          }
+        }
+        _sfCommonTreeOpen.add(res.path);
+        await _sfRefreshCommons();
+      };
+      // Bulk delete — operates on the file-tree multi-select set. Shows a
+      // confirm with the count + a few names, then iterates with progress.
+      // Failures are batched into one alert at the end; the rest still go.
+      const _sfDeleteCommonFilesPrompt = async () => {
+        if (!_sfSelectedCommonUuid || _sfCommonFilesSelected.size === 0) return;
+        const paths = [..._sfCommonFilesSelected];
+        const names = paths.map(p => p.split('/').pop());
+        const preview = names.slice(0, 6).join(', ') + (names.length > 6 ? `, +${names.length - 6} more` : '');
+        const ok = await promptConfirm({
+          title: `Delete ${paths.length} file${paths.length === 1 ? '' : 's'}`,
+          message: `Delete ${paths.length} file${paths.length === 1 ? '' : 's'} from this common folder?\n${preview}`,
+          confirmText: 'Delete',
+          confirmKind: 'danger',
+        });
+        if (!ok) return;
+        _sfDeleteProgress.show(`Deleting files`, '');
+        const failures = [];
+        for (let i = 0; i < paths.length; i++) {
+          const subPath = paths[i];
+          _sfDeleteProgress.show(`Deleting files (${i + 1} of ${paths.length})`, subPath.split('/').pop());
+          try {
+            const res = await window.electronAPI.deleteCommonFile({ uuid: _sfSelectedCommonUuid, subPath });
+            if (!res || !res.ok) failures.push({ name: subPath, error: (res && res.error) || 'unknown error' });
+          } catch (err) {
+            failures.push({ name: subPath, error: String(err && err.message || err) });
+          }
+        }
+        await _sfDeleteProgress.hide();
+        if (failures.length) {
+          alert(`Some files failed to delete:\n${failures.map(f => ` • ${f.name}: ${f.error}`).join('\n')}`);
+        }
+        // Prune successful deletions; keep failures for inspection.
+        const failedSet = new Set(failures.map(f => f.name));
+        for (const p of [..._sfCommonFilesSelected]) {
+          if (!failedSet.has(p)) _sfCommonFilesSelected.delete(p);
+        }
+        if (_sfCommonFilesAnchor && !failedSet.has(_sfCommonFilesAnchor)) _sfCommonFilesAnchor = null;
+        await _sfRefreshCommons();
       };
       // Sync the toolbar bulk-action buttons with the current selection.
       // Hidden when empty, labeled with the count when non-empty. Mirrors the
@@ -11469,6 +12158,10 @@ require(['vs/editor/editor.main'], function () {
         const entries = (r && r.ok && r.entries) || [];
         _sfAllEntries = entries;
         _sfRefreshTagsDatalist();
+        // Common folder sidecar — load active uuid from prefs on first run,
+        // then refresh the list + file tree alongside the font entries.
+        if (_sfSelectedCommonUuid === null) await _sfLoadActiveCommon();
+        await _sfRefreshCommons();
         // Fetch sources so the search index can reach into source metadata
         // (original filename, source vendor, bundle name, source notes).
         try {
@@ -14490,6 +15183,374 @@ require(['vs/editor/editor.main'], function () {
       });
 
       document.getElementById('btn-sf-import-toolbar')?.addEventListener('click', _sfOpenImport);
+      // Common folder sidecar wiring — import chooser / collapse / add files /
+      // list row interactions / file tree interactions / right-click menus.
+      // Single "+ Import" button opens a small chooser modal that asks zip vs
+      // folder; native pickers can't co-mingle file + directory on Win/Linux.
+      const _sfOpenImportChooser = () => {
+        const modal = document.getElementById('modal-sf-common-import-chooser');
+        if (!modal) return;
+        const zipBtn = document.getElementById('sf-common-import-zip');
+        const folderBtn = document.getElementById('sf-common-import-folder');
+        const cancelBtn = document.getElementById('sf-common-import-cancel');
+        const cleanup = () => {
+          modal.classList.remove('active');
+          zipBtn?.removeEventListener('click', onZip);
+          folderBtn?.removeEventListener('click', onFolder);
+          cancelBtn?.removeEventListener('click', onCancel);
+          modal.removeEventListener('click', onBackdrop);
+        };
+        const onZip = () => { cleanup(); _sfImportCommon('zip'); };
+        const onFolder = () => { cleanup(); _sfImportCommon('folder'); };
+        const onCancel = () => cleanup();
+        const onBackdrop = (e) => { if (e.target === modal) cleanup(); };
+        zipBtn?.addEventListener('click', onZip);
+        folderBtn?.addEventListener('click', onFolder);
+        cancelBtn?.addEventListener('click', onCancel);
+        modal.addEventListener('click', onBackdrop);
+        modal.classList.add('active');
+      };
+      document.getElementById('btn-sf-common-import')?.addEventListener('click', _sfOpenImportChooser);
+      document.getElementById('sf-common-divider')?.addEventListener('click', () => {
+        const panel = document.getElementById('sf-common-sidecar');
+        if (!panel) return;
+        _sfCommonSidecarCollapsed = !_sfCommonSidecarCollapsed;
+        panel.classList.toggle('collapsed', _sfCommonSidecarCollapsed);
+        // Clear any drag-set inline width when collapsing so the CSS rule
+        // (.collapsed { width: 20px }) wins. Same trick the preset sidecar
+        // uses — inline styles override class rules without !important, and
+        // we'd rather not litter !important than restore on every toggle.
+        if (_sfCommonSidecarCollapsed) {
+          panel.style.width = '';
+          panel.style.transition = '';
+        }
+      });
+      // Drag-to-resize the sidecar — mirrors the preset sidecar's pattern
+      // (width clamped to [220, 600], transition disabled mid-drag so the
+      // resize feels responsive, body cursor + userSelect locked while
+      // dragging so the pointer stays right and text doesn't get selected).
+      {
+        const sidecarEl = document.getElementById('sf-common-sidecar');
+        const resizerEl = document.getElementById('sf-common-sidecar-resizer');
+        let _dragging = false, _startX = 0, _startW = 0;
+        resizerEl?.addEventListener('mousedown', (e) => {
+          if (!sidecarEl || sidecarEl.classList.contains('collapsed')) return;
+          e.preventDefault();
+          _dragging = true;
+          _startX = e.clientX;
+          _startW = sidecarEl.offsetWidth;
+          sidecarEl.style.transition = 'none';
+          resizerEl.classList.add('dragging');
+          document.body.style.cursor = 'col-resize';
+          document.body.style.userSelect = 'none';
+        });
+        document.addEventListener('mousemove', (e) => {
+          if (!_dragging) return;
+          const w = Math.max(220, Math.min(600, _startW + (e.clientX - _startX)));
+          sidecarEl.style.width = w + 'px';
+        });
+        document.addEventListener('mouseup', () => {
+          if (!_dragging) return;
+          _dragging = false;
+          sidecarEl.style.transition = '';
+          resizerEl.classList.remove('dragging');
+          document.body.style.cursor = '';
+          document.body.style.userSelect = '';
+        });
+      }
+      // Accordion behavior + delegated file-tree handlers. The card-files
+      // block is created dynamically inside whichever row is expanded, so
+      // every interaction below the panel header has to be delegated from
+      // the list container.
+      document.getElementById('sf-common-list')?.addEventListener('click', async (e) => {
+        // 1a. + Add button inside the expanded files block.
+        if (e.target.closest('#btn-sf-common-add-files')) {
+          e.stopPropagation();
+          _sfAddCommonFiles();
+          return;
+        }
+        // 1b. + Folder button inside the expanded files block.
+        if (e.target.closest('#btn-sf-common-add-folder')) {
+          e.stopPropagation();
+          _sfCreateCommonFolderPrompt();
+          return;
+        }
+        // 2. File row click (in the file tree) — multi-select with Ctrl/Shift.
+        const fileRow = e.target.closest('[data-tree-file]');
+        if (fileRow) {
+          e.stopPropagation();
+          const subPath = fileRow.getAttribute('data-tree-file');
+          if (!subPath) return;
+          if (e.shiftKey && _sfCommonFilesAnchor) {
+            _sfShiftSelectFilesTo(subPath);
+          } else if (e.ctrlKey || e.metaKey) {
+            if (_sfCommonFilesSelected.has(subPath)) _sfCommonFilesSelected.delete(subPath);
+            else _sfCommonFilesSelected.add(subPath);
+            _sfCommonFilesAnchor = subPath;
+          } else {
+            _sfCommonFilesSelected.clear();
+            _sfCommonFilesSelected.add(subPath);
+            _sfCommonFilesAnchor = subPath;
+          }
+          await _sfRenderCommonFileTree();
+          return;
+        }
+        // 3. Directory row click — toggle expand/collapse of the subfolder.
+        const dir = e.target.closest('[data-tree-dir]');
+        if (dir) {
+          e.stopPropagation();
+          const dirPath = dir.getAttribute('data-tree-dir');
+          if (!dirPath) return;
+          if (_sfCommonTreeOpen.has(dirPath)) _sfCommonTreeOpen.delete(dirPath);
+          else _sfCommonTreeOpen.add(dirPath);
+          await _sfRenderCommonFileTree();
+          return;
+        }
+        // 4. Header click → toggle the card's expanded state (accordion).
+        //    Clicks inside the expanded files area are intentionally a no-op
+        //    at the header level — they should never collapse the card.
+        if (e.target.closest('.sf-common-row-files')) return;
+        const header = e.target.closest('.sf-common-row-header');
+        if (!header) return;
+        const row = header.closest('[data-common-uuid]');
+        if (!row) return;
+        const uuid = row.getAttribute('data-common-uuid');
+        if (!uuid) return;
+        if (uuid === _sfSelectedCommonUuid) {
+          _sfSelectedCommonUuid = null;
+        } else {
+          _sfSelectedCommonUuid = uuid;
+        }
+        _sfCommonFilesSelected.clear();
+        _sfCommonFilesAnchor = null;
+        await _sfSaveActiveCommon();
+        await _sfRenderCommonList();
+      });
+      // Shift-range helper for files. Enumerates every visible file row in
+      // document order, finds anchor + target indices, and adds every file
+      // in between to the selection. Mirrors the preset sidecar's
+      // _shiftSelectTo. Stale anchor (e.g. removed by a previous delete)
+      // collapses to a single-item selection.
+      const _sfShiftSelectFilesTo = (targetPath) => {
+        const all = [...document.querySelectorAll('#sf-common-files [data-tree-file]')];
+        const allPaths = all.map(el => el.getAttribute('data-tree-file'));
+        const toIdx = allPaths.indexOf(targetPath);
+        if (toIdx < 0) return;
+        let fromIdx = _sfCommonFilesAnchor ? allPaths.indexOf(_sfCommonFilesAnchor) : -1;
+        if (fromIdx < 0) fromIdx = toIdx;
+        const [lo, hi] = fromIdx <= toIdx ? [fromIdx, toIdx] : [toIdx, fromIdx];
+        for (let i = lo; i <= hi; i++) _sfCommonFilesSelected.add(allPaths[i]);
+      };
+      // Unified right-click dispatcher for the common-folder list. File and
+      // dir rows are nested inside the expanded common's row, so the priority
+      // order is most-specific to least: file row → dir row → common row.
+      // Otherwise a right-click on a file would also match the outer common
+      // row and we'd race two menus.
+      document.getElementById('sf-common-list')?.addEventListener('contextmenu', (e) => {
+        const fileRow = e.target.closest('[data-tree-file]');
+        const dirRow = e.target.closest('[data-tree-dir]');
+        const commonRow = e.target.closest('[data-common-uuid]');
+        if (!fileRow && !dirRow && !commonRow) return;
+        e.preventDefault();
+        const menu = document.getElementById('preset-ctx-menu');
+        if (!menu) return;
+        const mkItem = (text, cls, fn) => {
+          const d = document.createElement('div');
+          d.className = 'preset-ctx-item' + (cls ? ' ' + cls : '');
+          d.textContent = text;
+          d.addEventListener('mousedown', (e2) => { e2.stopPropagation(); menu.style.display = 'none'; fn(); });
+          menu.appendChild(d);
+        };
+        const mkSep = () => { const s = document.createElement('div'); s.className = 'preset-ctx-separator'; menu.appendChild(s); };
+        menu.innerHTML = '';
+        const clipboardCount = _sfCommonClipboard?.paths?.length || 0;
+        if (fileRow) {
+          const subPath = fileRow.getAttribute('data-tree-file');
+          if (!subPath) return;
+          // Right-clicking a file that isn't in the current multi-select
+          // collapses the selection to just that one so context-menu
+          // actions always operate on a sensible target.
+          if (!_sfCommonFilesSelected.has(subPath)) {
+            _sfCommonFilesSelected.clear();
+            _sfCommonFilesSelected.add(subPath);
+            _sfCommonFilesAnchor = subPath;
+            _sfRenderCommonFileTree();
+          }
+          const count = _sfCommonFilesSelected.size;
+          mkItem(count > 1 ? `Copy (${count})` : 'Copy', '', _sfCopyCommonSelection);
+          if (clipboardCount > 0) {
+            // Paste into THIS file's parent dir (sibling of the clicked file).
+            const parts = subPath.split('/'); parts.pop();
+            const parentDir = parts.join('/');
+            mkItem(`Paste (${clipboardCount})`, '', () => _sfPasteCommonClipboard(_sfSelectedCommonUuid, parentDir));
+          }
+          mkSep();
+          if (count === 1) mkItem('Rename…', '', () => _sfRenameCommonFile([..._sfCommonFilesSelected][0]));
+          mkItem(count > 1 ? `× Delete (${count})` : '× Delete', 'danger', () => _sfDeleteCommonFilesPrompt());
+        } else if (dirRow) {
+          const subPath = dirRow.getAttribute('data-tree-dir');
+          if (!subPath) return;
+          if (clipboardCount > 0) {
+            mkItem(`Paste (${clipboardCount})`, '', () => _sfPasteCommonClipboard(_sfSelectedCommonUuid, subPath));
+            mkSep();
+          }
+          mkItem('Delete folder', 'danger', () => _sfDeleteCommonFilePrompt(subPath));
+        } else {
+          const uuid = commonRow.getAttribute('data-common-uuid');
+          if (!uuid) return;
+          // Right-click on a common's header row. If we have a clipboard and
+          // this card is the (or another) common, offer Paste-to-root.
+          if (clipboardCount > 0) {
+            mkItem(`Paste here (${clipboardCount})`, '', () => _sfPasteCommonClipboard(uuid, ''));
+            mkSep();
+          }
+          mkItem('Rename…', '', () => _sfRenameCommon(uuid));
+          mkItem('Duplicate…', '', () => _sfDuplicateCommon(uuid));
+          mkSep();
+          mkItem('× Delete', 'danger', () => _sfDeleteCommonPrompt(uuid));
+        }
+        const x = Math.min(e.clientX, window.innerWidth - 180);
+        const y = Math.min(e.clientY, window.innerHeight - 140);
+        menu.style.left = x + 'px';
+        menu.style.top = y + 'px';
+        menu.style.display = 'block';
+      });
+      // Double-click on a text-readable file row → open in the shared SF
+      // doc-viewer modal. Mirrors the entry/source included-files flow so
+      // .txt/.md/.rtf etc. that the user dropped into a common are
+      // browseable without leaving the app. Binary files are ignored on
+      // double-click (no Downloads-export branch here — common folders are
+      // workspace storage, not archived deliveries).
+      document.getElementById('sf-common-list')?.addEventListener('dblclick', async (e) => {
+        const fileRow = e.target.closest('[data-tree-file]');
+        if (!fileRow || !_sfSelectedCommonUuid) return;
+        const subPath = fileRow.getAttribute('data-tree-file');
+        if (!subPath) return;
+        const fileName = subPath.split('/').pop();
+        if (!_sfIsTextReadable(fileName)) return;
+        e.stopPropagation();
+        try {
+          const res = await window.electronAPI.readCommonFileBytes({
+            uuid: _sfSelectedCommonUuid,
+            subPath,
+          });
+          if (!res || !res.ok) {
+            alert(`Could not read file: ${(res && res.error) || 'unknown error'}`);
+            return;
+          }
+          const bytes = Uint8Array.from(res.bytes || []);
+          const rawText = _sfDecodeBytes(bytes);
+          const displayText = /\.rtf$/i.test(fileName) ? _sfStripRtf(rawText) : rawText;
+          _sfShowDocViewer(fileName, bytes.length, displayText);
+        } catch (err) {
+          alert(`Could not read file: ${err && err.message || err}`);
+        }
+      });
+      // Drag-and-drop between commons (and into subfolders). File rows are
+      // draggable; valid drop targets are file rows (drop into parent dir),
+      // dir rows (drop into that dir), common header rows (drop at root),
+      // and the empty files area (drop at root of the active common).
+      // Drag payload lives in this module-scope variable rather than the
+      // clipboard so it doesn't clobber Ctrl+C/V state.
+      let _sfCommonDragData = null;
+      // Single helper for the visual highlight — keeps the .drop-target class
+      // on exactly one element at a time so leaving/re-entering rows doesn't
+      // leave orphaned highlights behind.
+      let _sfDragTargetEl = null;
+      const _sfSetDragTarget = (el) => {
+        if (_sfDragTargetEl === el) return;
+        if (_sfDragTargetEl) _sfDragTargetEl.classList.remove('drop-target');
+        _sfDragTargetEl = el;
+        if (_sfDragTargetEl) _sfDragTargetEl.classList.add('drop-target');
+      };
+      // Resolve the drop target underneath the cursor and return { destUuid,
+      // destSubPath, hlEl } — or null if the position isn't a valid drop.
+      const _sfResolveDrop = (e) => {
+        const fileRow = e.target.closest('[data-tree-file]');
+        const dirRow = e.target.closest('[data-tree-dir]');
+        const filesArea = e.target.closest('.sf-common-files');
+        const headerRow = e.target.closest('.sf-common-row-header');
+        const commonRow = e.target.closest('[data-common-uuid]');
+        if (!commonRow) return null;
+        const destUuid = commonRow.getAttribute('data-common-uuid');
+        if (!destUuid) return null;
+        if (dirRow) {
+          return { destUuid, destSubPath: dirRow.getAttribute('data-tree-dir') || '', hlEl: dirRow };
+        }
+        if (fileRow) {
+          const sp = fileRow.getAttribute('data-tree-file') || '';
+          const parts = sp.split('/'); parts.pop();
+          return { destUuid, destSubPath: parts.join('/'), hlEl: fileRow };
+        }
+        if (filesArea) {
+          return { destUuid, destSubPath: '', hlEl: filesArea };
+        }
+        if (headerRow) {
+          return { destUuid, destSubPath: '', hlEl: headerRow };
+        }
+        return null;
+      };
+      const _sfCommonListEl = document.getElementById('sf-common-list');
+      _sfCommonListEl?.addEventListener('dragstart', (e) => {
+        const fileRow = e.target.closest('[data-tree-file]');
+        if (!fileRow || !_sfSelectedCommonUuid) { e.preventDefault(); return; }
+        const subPath = fileRow.getAttribute('data-tree-file');
+        if (!subPath) { e.preventDefault(); return; }
+        // If the dragged file isn't already in the selection, collapse the
+        // selection to just it — matches OS file manager behavior where
+        // dragging an unselected item drags only that item.
+        if (!_sfCommonFilesSelected.has(subPath)) {
+          _sfCommonFilesSelected.clear();
+          _sfCommonFilesSelected.add(subPath);
+          _sfCommonFilesAnchor = subPath;
+          _sfRenderCommonFileTree();
+        }
+        _sfCommonDragData = {
+          sourceUuid: _sfSelectedCommonUuid,
+          paths: Array.from(_sfCommonFilesSelected),
+        };
+        // Allow both effects so dragover can pick the right one per target —
+        // move within the same common, copy across commons.
+        try { e.dataTransfer.effectAllowed = 'copyMove'; } catch {}
+        // Setting some data is required for Firefox; the value is unused —
+        // we read from _sfCommonDragData on drop so we have the full payload.
+        try { e.dataTransfer.setData('text/plain', _sfCommonDragData.paths.join('\n')); } catch {}
+      });
+      _sfCommonListEl?.addEventListener('dragover', (e) => {
+        if (!_sfCommonDragData) return;
+        const target = _sfResolveDrop(e);
+        if (!target) { _sfSetDragTarget(null); return; }
+        e.preventDefault();
+        const isMove = _sfCommonDragData.sourceUuid === target.destUuid;
+        try { e.dataTransfer.dropEffect = isMove ? 'move' : 'copy'; } catch {}
+        _sfSetDragTarget(target.hlEl);
+      });
+      _sfCommonListEl?.addEventListener('dragleave', (e) => {
+        // Only clear if leaving the whole list — internal moves between rows
+        // are handled by dragover replacing _sfDragTargetEl.
+        if (e.target === _sfCommonListEl) _sfSetDragTarget(null);
+      });
+      _sfCommonListEl?.addEventListener('drop', async (e) => {
+        if (!_sfCommonDragData) return;
+        const target = _sfResolveDrop(e);
+        _sfSetDragTarget(null);
+        if (!target) { _sfCommonDragData = null; return; }
+        e.preventDefault();
+        const data = _sfCommonDragData;
+        _sfCommonDragData = null;
+        // Same common → move (drag-to-reorganize). Different common → copy.
+        // The move backend silently skips files already in destSubPath so a
+        // no-op drop doesn't error or duplicate.
+        if (data.sourceUuid === target.destUuid) {
+          await _sfDoCommonMove(data.sourceUuid, data.paths, target.destSubPath);
+        } else {
+          await _sfDoCommonCopy(data.sourceUuid, data.paths, target.destUuid, target.destSubPath, 'Copying');
+        }
+      });
+      _sfCommonListEl?.addEventListener('dragend', () => {
+        _sfSetDragTarget(null);
+        _sfCommonDragData = null;
+      });
       // Bulk add tags — open the modal. stopPropagation guards against the
       // (historical) document-level "click clears selection" handler in case
       // it ever comes back.
