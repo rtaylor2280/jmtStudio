@@ -1901,9 +1901,18 @@
   .sf-common-list::-webkit-scrollbar-thumb { background: var(--c-border-strong); border-radius: 3px; }
   .sf-common-row { display: flex; flex-direction: column; border-bottom: 1px solid var(--c-border-faint); flex-shrink: 0; }
   .sf-common-row.expanded { flex: 1 1 auto; min-height: 260px; overflow: hidden; }
-  .sf-common-row-header { display: flex; align-items: center; gap: 8px; padding: 6px 10px; cursor: pointer; border-left: 2px solid transparent; transition: background 0.1s, border-color 0.1s; flex-shrink: 0; }
+  /* Border layout mirrors .sf-card.selected: 1px on all sides (transparent
+     in default state so layout doesn't shift on expand) + a 3px left edge
+     for the list-row "active item" emphasis the card grid doesn't need. */
+  .sf-common-row-header { display: flex; align-items: center; gap: 8px; padding: 6px 10px; cursor: pointer; border: 1px solid transparent; border-left: 3px solid transparent; transition: background 0.1s, border-color 0.1s; flex-shrink: 0; }
   .sf-common-row-header:hover { background: var(--c-bg-hover); }
-  .sf-common-row.expanded > .sf-common-row-header { background: var(--c-bg-card); border-left-color: var(--jmt-blue); }
+  /* Expanded/active common — full JMT-blue outline + tinted background,
+     matching the .sf-card.selected convention so active items read the
+     same across the SF view. */
+  .sf-common-row.expanded > .sf-common-row-header { background: rgba(0,100,220,0.12); border-color: var(--jmt-blue); }
+  .sf-common-row.expanded > .sf-common-row-header:hover { background: rgba(0,100,220,0.18); }
+  html.light-mode .sf-common-row.expanded > .sf-common-row-header { background: rgba(0,100,220,0.08); }
+  html.light-mode .sf-common-row.expanded > .sf-common-row-header:hover { background: rgba(0,100,220,0.14); }
   .sf-common-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
   .sf-common-row-name { font-size: 0.78rem; color: var(--c-text); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .sf-common-row-meta { font-size: 0.66rem; color: var(--c-text-dim); white-space: nowrap; }
@@ -2874,7 +2883,7 @@
       <div class="sf-common-sidecar" id="sf-common-sidecar">
         <div class="sf-common-inner">
           <div class="sf-common-header">
-            <span class="sf-common-title">Common Folders</span>
+            <span class="sf-common-title" id="sf-common-title">Common Folders</span>
             <button class="btn-neutral sf-common-import-btn" id="btn-sf-common-import" title="Import a voicepack zip or a folder of wav files">+ Import</button>
           </div>
           <div class="sf-common-list" id="sf-common-list"></div>
@@ -4134,6 +4143,9 @@ function setFileOpen(open) {
   _updateStylesLinkBtn();
   _updateJmtLinkBtn();
   _scheduleStylesInUseRebuild();
+  // SF sidecar visibility might depend on whether the open config references
+  // ";common" — re-evaluate when file open/close transitions happen.
+  if (typeof _sfScheduleSidecarRuleRecheck === 'function') _sfScheduleSidecarRuleRecheck();
 }
 
 // ── Unsaved modal ──────────────────────────────────────
@@ -10854,6 +10866,9 @@ require(['vs/editor/editor.main'], function () {
       _scheduleAutoDetectBoard();
     }
     _scheduleStylesInUseRebuild();
+    // SF common folder sidecar visibility tracks whether the open config
+    // references ";common". Debounced so typing doesn't thrash the panel.
+    if (typeof _sfScheduleSidecarRuleRecheck === 'function') _sfScheduleSidecarRuleRecheck();
   });
 
   editor.onDidChangeCursorPosition(e => {
@@ -11335,19 +11350,29 @@ require(['vs/editor/editor.main'], function () {
         const missing = [...inUseFonts]
           .filter(name => !haveNames.has(name) && !_SF_NON_FONT_REFS.has(name.toLowerCase()))
           .sort((a, b) => a.localeCompare(b));
-        if (missing.length === 0) {
+        // Config references ;common but no common folder has been imported.
+        // Quiet when not needed — only triggers when the open config actually
+        // uses the convention AND the library has nothing to ship.
+        const wantsCommon = [...inUseFonts].some(n => n.toLowerCase() === 'common');
+        const needsCommon = wantsCommon && _sfCommons.length === 0;
+        if (missing.length === 0 && !needsCommon) {
           bar.style.display = 'none';
         } else {
           bar.style.display = '';
-          chipsEl.innerHTML = missing.map(name =>
-            `<button type="button" class="sf-missing-chip" data-missing-name="${_sfEscape(name)}" title="Click to copy">${_sfEscape(name)}</button>`
-          ).join('');
+          const parts = [];
+          if (needsCommon) {
+            parts.push(`<button type="button" class="sf-missing-chip sf-missing-common-chip" data-missing-common="1" title="Click to import a common folder">Common folder needed</button>`);
+          }
+          for (const name of missing) {
+            parts.push(`<button type="button" class="sf-missing-chip" data-missing-name="${_sfEscape(name)}" title="Click to copy">${_sfEscape(name)}</button>`);
+          }
+          chipsEl.innerHTML = parts.join('');
         }
         // Legend: same colored-swatch pattern Style Library uses. Only the
         // in-use swatch is meaningful for SF right now; future states (broken
         // source links, etc.) can stack here without re-doing the structure.
         const inUseCountInLibrary = _sfAllEntries.filter(e => inUseFonts.has(e.name)).length;
-        if (inUseCountInLibrary === 0 && missing.length === 0) {
+        if (inUseCountInLibrary === 0 && missing.length === 0 && !needsCommon) {
           legendEl.style.display = 'none';
           return;
         }
@@ -11355,7 +11380,7 @@ require(['vs/editor/editor.main'], function () {
         if (inUseCountInLibrary > 0) {
           items.push(`<span class="legend-item"><span class="legend-swatch blue"></span>Used in open config</span>`);
         }
-        if (missing.length > 0) {
+        if (missing.length > 0 || needsCommon) {
           items.push(`<span class="legend-item"><span class="legend-swatch red"></span>Referenced but not imported</span>`);
         }
         legendEl.innerHTML = items.join('');
@@ -11364,10 +11389,11 @@ require(['vs/editor/editor.main'], function () {
       // ── Common folder sidecar ────────────────────────────
       // State:
       //   _sfCommons              — cached list from backend
-      //   _sfSelectedCommonUuid   — the single active common (file-tree pivot
-      //                             + the one Save will include + the one used
-      //                             for in-config matching). Persisted to
-      //                             prefs as "soundFontActiveCommon".
+      //   _sfSelectedCommonUuid   — the currently EXPANDED card (file-tree
+      //                             pivot). In-session state only — every
+      //                             app launch starts with no card expanded.
+      //                             Save and in-config matching read from
+      //                             _sfStarredCommonUuid, not this.
       //   _sfCommonTreeOpen       — set of folder paths currently expanded.
       //   _sfCommonFilesSelected  — file-tree multi-select set (subpaths).
       //                             Mirrors the preset sidecar's three-modifier
@@ -11434,20 +11460,69 @@ require(['vs/editor/editor.main'], function () {
         if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
         return `${(n / (1024 * 1024)).toFixed(1)} MB`;
       };
-      // First-launch sentinel — the active-common setting has never been
-      // written. _sfRefreshCommons resolves it to the starred uuid so the
-      // user lands on a sensible default the first time they open the SF view.
-      // After that, '' (explicitly collapsed) and uuid values are respected.
-      const _SF_ACTIVE_COMMON_PENDING = '__pending_starred__';
-      const _sfLoadActiveCommon = async () => {
+      // Expanded common card is in-session state only — every app launch
+      // starts with all cards collapsed regardless of last-session history,
+      // per the v1.8 fresh-open consistency rule. The load/save fns stay
+      // (other call sites depend on them) but no longer touch persistence;
+      // selection lives in the _sfSelectedCommonUuid variable for the
+      // session lifetime and clears on relaunch.
+      const _sfLoadActiveCommon = async () => { _sfSelectedCommonUuid = null; };
+      const _sfSaveActiveCommon = async () => { /* no-op — session-only */ };
+      // ── Sidecar visibility rule ──────────────────────────
+      // Delta-driven: the rule's verdict (should-be-open vs should-be-collapsed)
+      // is recomputed at app launch, on common imports/deletes, and on config
+      // changes. The sidecar only changes state when the verdict TRANSITIONS —
+      // a mid-session user toggle stays put until the underlying conditions
+      // change.
+      //   Open when: at least one common exists OR the open config has a preset
+      //              whose font references ";common" (case-insensitive)
+      //   Collapsed otherwise
+      // _sfPrevSidecarRuleVerdict tracks the last computed value so the delta
+      // check works. null means "no prior computation" — handled as a force.
+      let _sfPrevSidecarRuleVerdict = null;
+      const _sfShouldSidecarBeOpen = () => {
+        if (_sfCommons.length > 0) return true;
+        // Cheap-fail when the editor / parser aren't ready, or no config open.
         try {
-          const v = await window.electronAPI.getSetting('soundFontActiveCommon', null);
-          if (v === null) _sfSelectedCommonUuid = _SF_ACTIVE_COMMON_PENDING;
-          else _sfSelectedCommonUuid = (typeof v === 'string' && v) ? v : null;
-        } catch { _sfSelectedCommonUuid = null; }
+          if (typeof editor === 'undefined' || !editor) return false;
+          if (typeof presetParser === 'undefined' || !presetParser) return false;
+          const result = presetParser.parsePresets(editor.getValue());
+          for (const arr of (result?.arrays || [])) {
+            for (const preset of (arr.presets || [])) {
+              if (!preset || !preset.font) continue;
+              for (const piece of String(preset.font).split(';')) {
+                if (piece.trim().toLowerCase() === 'common') return true;
+              }
+            }
+          }
+        } catch {}
+        return false;
       };
-      const _sfSaveActiveCommon = async () => {
-        try { await window.electronAPI.setSetting('soundFontActiveCommon', _sfSelectedCommonUuid || ''); } catch {}
+      const _sfApplySidecarRule = ({ force = false } = {}) => {
+        const verdict = _sfShouldSidecarBeOpen();
+        const prev = _sfPrevSidecarRuleVerdict;
+        _sfPrevSidecarRuleVerdict = verdict;
+        // Only mutate state on a real transition or a forced launch-time apply.
+        if (!force && prev === verdict) return;
+        const panel = document.getElementById('sf-common-sidecar');
+        if (!panel) return;
+        _sfCommonSidecarCollapsed = !verdict;
+        panel.classList.toggle('collapsed', _sfCommonSidecarCollapsed);
+        // Clear any drag-set inline width when collapsing so the CSS rule
+        // (.collapsed { width: 20px }) wins — same trick the divider toggle
+        // uses.
+        if (_sfCommonSidecarCollapsed) {
+          panel.style.width = '';
+          panel.style.transition = '';
+        }
+      };
+      // Debounced re-check on editor content change — config edits can change
+      // whether ";common" is referenced and the rule needs to react, but not
+      // on every keystroke.
+      let _sfSidecarRuleTimer = null;
+      const _sfScheduleSidecarRuleRecheck = () => {
+        clearTimeout(_sfSidecarRuleTimer);
+        _sfSidecarRuleTimer = setTimeout(() => _sfApplySidecarRule(), 400);
       };
       // Starred common — app-global persistent default. Always exactly one
       // when at least one common exists; null otherwise. The star icon on
@@ -11494,6 +11569,11 @@ require(['vs/editor/editor.main'], function () {
       const _sfRenderCommonList = async () => {
         const list = document.getElementById('sf-common-list');
         if (!list) return;
+        // Pluralize the panel title against the current count. Empty state
+        // keeps the plural ("Common Folders") since the user is about to add
+        // — singular only when exactly one exists.
+        const titleEl = document.getElementById('sf-common-title');
+        if (titleEl) titleEl.textContent = _sfCommons.length === 1 ? 'Common Folder' : 'Common Folders';
         if (_sfCommons.length === 0) {
           list.innerHTML = `<div class="sf-common-empty">No common folder yet.<br>Import a voicepack zip or a folder of wav files to get started.</div>`;
           return;
@@ -11605,18 +11685,10 @@ require(['vs/editor/editor.main'], function () {
         // every transition.
         if (_sfNormalizeStarredCommon()) await _sfSaveStarredCommon();
         const knownUuids = new Set(_sfCommons.map(c => c.uuid));
-        // First-launch sentinel from _sfLoadActiveCommon resolves to the
-        // starred uuid here, once commons are loaded.
-        if (_sfSelectedCommonUuid === _SF_ACTIVE_COMMON_PENDING) {
-          _sfSelectedCommonUuid = _sfStarredCommonUuid || null;
-          await _sfSaveActiveCommon();
-        }
-        // Stale uuid → reset. An explicit null (user collapsed the active
-        // card) is preserved across refresh — auto-expanding on every refresh
-        // would override their deliberate collapse and feel sticky.
+        // Stale uuid (the expanded card got deleted) → clear so the next
+        // render shows no card expanded.
         if (_sfSelectedCommonUuid && !knownUuids.has(_sfSelectedCommonUuid)) {
           _sfSelectedCommonUuid = null;
-          await _sfSaveActiveCommon();
         }
         await _sfPruneCommonClipboard();
         // Default: switching / clearing commons drops the file-tree
@@ -11627,6 +11699,10 @@ require(['vs/editor/editor.main'], function () {
           _sfCommonFilesAnchor = null;
         }
         await _sfRenderCommonList();
+        // Sidecar rule check — commons changed, so the verdict might have
+        // transitioned (e.g. went from 0 → 1, or 1 → 0). Delta-driven so a
+        // mid-session user-toggle isn't blown away unless the rule changes.
+        _sfApplySidecarRule();
       };
       // Default name from the picked path's basename, with extension stripped.
       const _sfDefaultCommonName = (filePath) => {
@@ -12242,11 +12318,16 @@ require(['vs/editor/editor.main'], function () {
         const entries = (r && r.ok && r.entries) || [];
         _sfAllEntries = entries;
         _sfRefreshTagsDatalist();
-        // Common folder sidecar — load active uuid from prefs on first run,
-        // then refresh the list + file tree alongside the font entries.
-        if (_sfSelectedCommonUuid === null) await _sfLoadActiveCommon();
+        // Common folder sidecar — every app launch starts with all cards
+        // collapsed (per the fresh-open consistency rule) so we don't
+        // hydrate any prior active-uuid. The star is still persistent.
+        _sfSelectedCommonUuid = null;
         await _sfLoadStarredCommon();
         await _sfRefreshCommons();
+        // Force-apply the sidecar visibility rule once at launch so the
+        // initial state matches the rule regardless of any persisted
+        // collapsed/expanded state from previous sessions.
+        _sfApplySidecarRule({ force: true });
         // Fetch sources so the search index can reach into source metadata
         // (original filename, source vendor, bundle name, source notes).
         try {
@@ -15670,8 +15751,15 @@ require(['vs/editor/editor.main'], function () {
       });
       // Missing-fonts banner: click a chip to copy the name. Brief visual
       // confirmation via the .copied class so the user knows the click
-      // registered without a noisy toast.
+      // registered without a noisy toast. The "Common folder needed" chip
+      // is in the same bar but has its own data attr and opens the import
+      // chooser instead of doing a clipboard write.
       document.getElementById('sf-missing-chips')?.addEventListener('click', async (e) => {
+        const commonChip = e.target.closest('[data-missing-common]');
+        if (commonChip) {
+          _sfOpenImportChooser();
+          return;
+        }
         const chip = e.target.closest('[data-missing-name]');
         if (!chip) return;
         const name = chip.getAttribute('data-missing-name');
