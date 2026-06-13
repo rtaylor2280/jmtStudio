@@ -1056,6 +1056,34 @@ ipcMain.handle('entries:exportDoc', (_, { name, path: subPath } = {}) => {
   }
 });
 
+// Pick a destination directory for the bulk Save action — typically an SD
+// card root or any folder the user wants Proffie-shaped font folders copied
+// into. createDirectory lets the user make a subfolder on the fly.
+ipcMain.handle('dialog:selectSaveDestination', async () => {
+  const result = await dialog.showOpenDialog(win, {
+    title: 'Choose destination for sound fonts',
+    properties: ['openDirectory', 'createDirectory'],
+  });
+  if (result.canceled || !result.filePaths.length) return { ok: false, canceled: true };
+  return { ok: true, dirPath: result.filePaths[0] };
+});
+
+ipcMain.handle('entries:exportToFolder', (_, { name, destDir, mode } = {}) => {
+  try {
+    return soundFontEntries.exportEntryToFolder(app.getPath('userData'), name, destDir, mode);
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
+ipcMain.handle('entries:existsAt', (_, { name, destDir } = {}) => {
+  try {
+    return { ok: true, exists: soundFontEntries.entryFolderExistsAt(name, destDir) };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
 ipcMain.handle('sources:exportToDownloads', async (_, { uuid, destDir } = {}) => {
   try {
     const source = soundFontSources.openSource(app.getPath('userData'), uuid);

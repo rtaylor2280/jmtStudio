@@ -381,6 +381,89 @@ function exportEntryFileTo(userData, name, subPath, destDir) {
   return { destPath };
 }
 
+// Check whether a font folder named after an entry already exists at the
+// user-chosen destination. Used by the bulk-save flow to pre-scan for
+// duplicates before kicking off any copies.
+function entryFolderExistsAt(name, destDir) {
+  if (!name || !destDir) return false;
+  return fs.existsSync(path.join(destDir, name));
+}
+
+// Copy an entry's font files out to a user-chosen folder (typically an SD
+// card root). Recreates the entry's directory tree under destDir/<name>/
+// using the entry name as the on-disk folder name — matching how Proffie
+// expects fonts laid out on the SD card. Skips meta.json since that's an
+// internal artifact, not part of the font.
+//
+// mode controls duplicate handling:
+//   'rename'  — if <name> exists, fall through to "<name> (1)", " (2)", ...
+//   'skip'    — if <name> exists, do nothing and return ok with skipped=true
+//   'replace' — if <name> exists, remove it first, then copy the new tree
+// Defaults to 'rename' for backward compat with non-conflict callers.
+//
+// Returns { ok, destPath } on copy success, { ok, skipped: true } when the
+// caller asked to skip an existing folder, or { ok: false, error } otherwise.
+function exportEntryToFolder(userData, name, destDir, mode = 'rename') {
+  if (!name) return { ok: false, error: 'Missing name' };
+  if (!destDir) return { ok: false, error: 'Missing destDir' };
+  const srcDir = path.join(entriesRoot(userData), name);
+  if (!fs.existsSync(srcDir)) return { ok: false, error: `Entry not found: ${name}` };
+  if (!fs.existsSync(destDir)) {
+    try { fs.mkdirSync(destDir, { recursive: true }); }
+    catch (err) { return { ok: false, error: `Cannot create destination: ${err.message}` }; }
+  }
+  // Per-mode conflict handling. 'rename' suffixes; 'skip' bails; 'replace'
+  // wipes the existing tree first so the new font goes in cleanly with no
+  // leftover files from the previous version (which could leave a half-old
+  // half-new Frankenfont in the directory otherwise).
+  let targetName = name;
+  const exists = fs.existsSync(path.join(destDir, targetName));
+  if (exists) {
+    if (mode === 'skip') {
+      return { ok: true, skipped: true, destPath: path.join(destDir, targetName) };
+    }
+    if (mode === 'replace') {
+      try { fs.rmSync(path.join(destDir, targetName), { recursive: true, force: true }); }
+      catch (err) { return { ok: false, error: `Cannot remove existing folder: ${err.message}` }; }
+    } else {
+      // 'rename' (default) — fall through to " (N)" until free.
+      let n = 1;
+      while (fs.existsSync(path.join(destDir, targetName))) {
+        targetName = `${name} (${n})`;
+        n++;
+      }
+    }
+  }
+  const targetDir = path.join(destDir, targetName);
+  try {
+    fs.mkdirSync(targetDir, { recursive: true });
+    const walk = (curSrc, curDest) => {
+      const items = fs.readdirSync(curSrc, { withFileTypes: true });
+      for (const item of items) {
+        // Skip the internal meta.json at the entry root — it's an app
+        // artifact, not a font file. (Nested meta.json files inside font
+        // subdirs are kept on the off chance a vendor shipped one.)
+        if (curSrc === srcDir && item.name === 'meta.json') continue;
+        const srcPath = path.join(curSrc, item.name);
+        const destPath = path.join(curDest, item.name);
+        if (item.isDirectory()) {
+          fs.mkdirSync(destPath, { recursive: true });
+          walk(srcPath, destPath);
+        } else if (item.isFile()) {
+          fs.copyFileSync(srcPath, destPath);
+        }
+      }
+    };
+    walk(srcDir, targetDir);
+    return { ok: true, destPath: targetDir };
+  } catch (err) {
+    // Best-effort cleanup of a partial copy on failure so the user doesn't
+    // end up with half a font folder mixed in with their other content.
+    try { fs.rmSync(targetDir, { recursive: true, force: true }); } catch {}
+    return { ok: false, error: String(err && err.message || err) };
+  }
+}
+
 // Return entries that reference a given source uuid. Used by the source
 // detail view to list "entries from this source" and by the delete cascade
 // to enumerate what's about to be removed.
@@ -401,4 +484,6 @@ module.exports = {
   listEntryDocs,
   readEntryFileBytes,
   exportEntryFileTo,
+  exportEntryToFolder,
+  entryFolderExistsAt,
 };

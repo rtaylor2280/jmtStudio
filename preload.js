@@ -214,6 +214,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listEntryDocs:         (params)     => ipcRenderer.invoke('entries:listDocs', params),
   readEntryDocBytes:     (params)     => ipcRenderer.invoke('entries:readDocBytes', params),
   exportEntryDoc:        (params)     => ipcRenderer.invoke('entries:exportDoc', params),
+  exportEntryToFolder:   (params)     => ipcRenderer.invoke('entries:exportToFolder', params),
+  entryFolderExistsAt:   (params)     => ipcRenderer.invoke('entries:existsAt', params),
+  selectSaveDestination: ()           => ipcRenderer.invoke('dialog:selectSaveDestination'),
   onEntryCreateProgress: (cb) => {
     const handler = (_, data) => cb(data);
     ipcRenderer.on('entries:createProgress', handler);

@@ -1850,6 +1850,38 @@
   .sf-card-tag.active { color: var(--jmt-blue); background: rgba(0,130,255,0.1); border-color: rgba(0,130,255,0.35); }
   .sf-card-tag.purchased { color: var(--jmt-blue); border-color: rgba(0,130,255,0.35); background: rgba(0,130,255,0.08); }
   .sf-card-tag.free { color: #7c5; border-color: rgba(120,200,80,0.35); background: rgba(120,200,80,0.10); }
+  /* Multi-select checkbox in the bottom-right corner. Hover-revealed (matches
+     the top-right × delete pattern); persists visible when checked. Selected
+     cards adopt the same border + background as the hover state so the chosen
+     ones look "already hovered" while the rest stay neutral. */
+  .sf-card-select-btn { position: absolute; bottom: 6px; right: 6px; width: 16px; height: 16px; border: 1.5px solid var(--c-border-strong); border-radius: 3px; background: var(--c-bg-card); cursor: pointer; opacity: 0; padding: 0; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; line-height: 1; color: transparent; transition: opacity 0.15s, border-color 0.1s, background 0.1s; }
+  .sf-card:hover .sf-card-select-btn,
+  .sf-card.selected .sf-card-select-btn { opacity: 1; }
+  .sf-card-select-btn:hover { border-color: var(--jmt-blue); }
+  .sf-card.selected .sf-card-select-btn { border-color: var(--jmt-blue); background: var(--jmt-blue); color: #fff; }
+  .sf-card.selected { border-color: var(--jmt-blue); background: var(--c-bg-hover); }
+  /* Missing fonts banner — sits at the bottom of the SF view, just above the
+     legend. Surfaces font directories the open config references that the
+     user hasn't imported. Each name is a clickable chip that copies on click. */
+  .sf-missing-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 6px 20px; background: var(--c-bg); border-top: 1px solid var(--c-border); flex-shrink: 0; font-size: 0.72rem; }
+  .sf-missing-label { color: var(--c-text-muted); flex-shrink: 0; }
+  .sf-missing-chips { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+  .sf-missing-chip { font-family: inherit; font-size: 0.7rem; color: #e44; background: transparent; border: 1px solid #c44; border-radius: 3px; padding: 1px 6px; cursor: pointer; transition: border-color 0.1s, color 0.1s, background 0.1s; }
+  .sf-missing-chip:hover { background: rgba(200,40,40,0.12); }
+  /* Copy confirmation flashes blue briefly so the click-to-copy action gets
+     its own distinct signal vs. the persistent red "this is missing" state. */
+  .sf-missing-chip.copied { color: var(--jmt-blue); border-color: var(--jmt-blue); background: rgba(0,130,255,0.08); }
+  /* Override the styles-legend horizontal padding for the SF footer
+     (styles-legend's later cascade rule zeroes horizontal padding, which
+     works in the Style Library but pushes content to the SF view edges). */
+  #sf-legend.styles-legend { padding: 4px 20px; }
+  /* In-use indicator — font directory matches a preset's font in the open
+     config. Mirrors the Style Library convention: subtle blue border + tint
+     at rest, full blue on hover. Selected state still wins if both apply. */
+  .sf-card.in-use { border-color: rgba(0,130,255,0.5); background: rgba(0,100,220,0.08); }
+  .sf-card.in-use:hover { border-color: var(--jmt-blue); background: rgba(0,100,220,0.14); }
+  html.light-mode .sf-card.in-use { border-color: rgba(0,100,220,0.4); background: rgba(0,100,220,0.06); }
+  html.light-mode .sf-card.in-use:hover { border-color: var(--jmt-blue); background: rgba(0,100,220,0.12); }
   /* Free as an active-filter chip keeps its green identity rather than the
      default JMT blue of styles-active-filter-chip. */
   .styles-active-filter-chip.sf-active-filter-free { color: #7c5; border-color: rgba(120,200,80,0.35); background: rgba(120,200,80,0.10); }
@@ -1991,6 +2023,20 @@
   .sf-doc-viewer-body::-webkit-scrollbar { width: 6px; }
   .sf-doc-viewer-body::-webkit-scrollbar-track { background: transparent; }
   .sf-doc-viewer-body::-webkit-scrollbar-thumb { background: var(--c-border-strong); border-radius: 3px; }
+  /* Bulk save conflict modal: list of rows, each with a per-entry choice. */
+  #modal-sf-save-conflict .modal { width: 560px; max-width: 96vw; max-height: min(80vh, 600px); display: flex; flex-direction: column; }
+  .sf-save-conflict-bulk { display: flex; gap: 8px; margin: 6px 0 10px; }
+  .sf-save-conflict-bulk-btn { font-size: 0.74rem; background: none; border: 1px solid var(--c-border-strong); border-radius: 3px; color: var(--c-text-sub); padding: 3px 9px; cursor: pointer; }
+  .sf-save-conflict-bulk-btn:hover { color: var(--jmt-blue); border-color: var(--jmt-blue); }
+  .sf-save-conflict-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding-right: 4px; }
+  .sf-save-conflict-list::-webkit-scrollbar { width: 6px; }
+  .sf-save-conflict-list::-webkit-scrollbar-track { background: transparent; }
+  .sf-save-conflict-list::-webkit-scrollbar-thumb { background: var(--c-border-strong); border-radius: 3px; }
+  .sf-save-conflict-row { display: flex; align-items: center; gap: 12px; padding: 6px 10px; background: var(--c-bg-inset); border: 1px solid var(--c-border-faint); border-radius: 4px; font-size: 0.82rem; }
+  .sf-save-conflict-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--c-text); font-weight: 600; }
+  .sf-save-conflict-choices { display: flex; gap: 10px; flex-shrink: 0; }
+  .sf-save-conflict-choices label { display: inline-flex; align-items: center; gap: 4px; font-size: 0.76rem; color: var(--c-text-sub); cursor: pointer; user-select: none; }
+  .sf-save-conflict-choices input[type="radio"] { margin: 0; }
   /* Slice 10: source detail modal */
   #modal-sf-source-detail .modal { width: 820px; max-width: 96vw; height: min(90vh, 700px); display: flex; flex-direction: column; padding-bottom: 16px; }
   /* Container is a 4-column grid so all display rows can share column widths
@@ -2596,6 +2642,12 @@
         <button id="btn-vp-import"   class="btn-blue"    title="Import a ProffieOS version folder">&#8593; Import Version</button>
       </div>
       <div class="tab-btns" id="tab-btns-soundfonts">
+        <button id="btn-sf-select-all" class="btn-neutral" style="display:none" title="Select every font currently visible">Select all</button>
+        <button id="btn-sf-select-in-use" class="btn-neutral" style="display:none" title="Select fonts referenced by the open config's presets">Select in-use</button>
+        <button id="btn-sf-clear-selection" class="btn-neutral" style="display:none" title="Deselect all">Clear selection</button>
+        <button id="btn-sf-bulk-tag" class="btn-neutral" style="display:none" title="Edit tags shared across the selected fonts">Tags</button>
+        <button id="btn-sf-bulk-save" class="btn-neutral" style="display:none" title="Save the selected fonts as Proffie-shaped folders to a destination (SD card, etc.)">Save</button>
+        <button id="btn-sf-bulk-delete" class="btn-red" style="display:none" title="Delete the selected fonts">Delete</button>
         <button id="btn-sf-import-toolbar" class="btn-blue" style="display:none" title="Import a sound font folder into your library">&#43; Import Sound Font</button>
       </div>
       <div class="tab-btns" id="tab-btns-styles">
@@ -2729,6 +2781,17 @@
     <div class="sf-grid-scroll">
       <div class="sf-cards" id="sf-cards"></div>
     </div>
+    <!-- Missing fonts banner: surfaces font directories the open config
+         references that the user hasn't imported. Click a chip to copy the
+         name. Common-style shared folders (e.g. "common") are excluded. -->
+    <div id="sf-missing-bar" class="sf-missing-bar" style="display:none">
+      <span class="sf-missing-label">Not in your library:</span>
+      <span class="sf-missing-chips" id="sf-missing-chips"></span>
+    </div>
+    <!-- Legend mirrors Style Library's footer key — same colored swatches +
+         labels, surfacing card-state meanings without forcing the user to
+         hover or guess. Hidden when nothing in the library is in any state. -->
+    <div id="sf-legend" class="styles-legend" style="display:none"></div>
   </div>
 </div>
 
@@ -2850,7 +2913,7 @@
       <div class="style-meta-row">
         <span class="style-meta-label">Tags</span>
         <div class="detail-tags-wrap" id="detail-tags-chips"></div>
-        <input id="detail-tag-input" class="detail-tag-input" type="text" placeholder="Add tag…">
+        <input id="detail-tag-input" class="detail-tag-input" type="text" list="style-all-tags-datalist" autocomplete="off" placeholder="Add tag…">
       </div>
       <div>
         <button id="detail-notes-toggle" class="detail-notes-toggle"><span class="notes-arrow">&#9654;</span> Notes</button>
@@ -3386,7 +3449,7 @@
           <span class="sf-meta-label">Tags</span>
           <div class="sf-meta-val sf-tags-edit">
             <div class="sf-tags-chips" id="sf-detail-tags-chips"></div>
-            <input type="text" id="sf-detail-tags-input" class="sf-tag-add-input" placeholder="Add tag&hellip;" maxlength="40" title="Type a tag and press Enter. Type &quot;free&quot; to mark this entry as free content.">
+            <input type="text" id="sf-detail-tags-input" class="sf-tag-add-input" list="sf-all-tags-datalist" autocomplete="off" placeholder="Add tag&hellip;" maxlength="40" title="Type a tag and press Enter. Type &quot;free&quot; to mark this entry as free content.">
           </div>
         </div>
         <div class="sf-meta-row" id="sf-detail-docs-row" style="display:none">
@@ -3470,7 +3533,7 @@
           <span class="sf-meta-label">Tags</span>
           <div class="sf-meta-val sf-tags-edit">
             <div class="sf-tags-chips" id="sf-source-tags-chips"></div>
-            <input type="text" id="sf-source-tags-input" class="sf-tag-add-input" placeholder="Add tag&hellip;" maxlength="40" title="Type a tag and press Enter. Type &quot;free&quot; to mark this source as free content.">
+            <input type="text" id="sf-source-tags-input" class="sf-tag-add-input" list="sf-all-tags-datalist" autocomplete="off" placeholder="Add tag&hellip;" maxlength="40" title="Type a tag and press Enter. Type &quot;free&quot; to mark this source as free content.">
           </div>
         </div>
         <div class="sf-meta-row" id="sf-source-docs-row" style="display:none">
@@ -3532,6 +3595,64 @@
 </div>
 
 <!-- ── Q1: source already imported ── -->
+<!-- ── Shared datalists for tag autocomplete. Populated dynamically from
+     current entry data so existing tags surface as suggestions while still
+     allowing the user to type something new. ── -->
+<datalist id="sf-all-tags-datalist"></datalist>
+<datalist id="style-all-tags-datalist"></datalist>
+
+<!-- ── Bulk save conflict resolution: shown when one or more selected fonts
+     already exist at the chosen destination. Per-row Skip/Replace choice
+     so the user can keep some old, refresh others. Bulk-set quick links at
+     the top set every row at once. ── -->
+<div class="modal-overlay" id="modal-sf-save-conflict">
+  <div class="modal">
+    <h2>Some fonts already exist at the destination</h2>
+    <p class="sf-import-hint">For each duplicate, choose whether to keep the existing folder or replace it with the version in your library. Treats each font as a unit — no mixing files between old and new.</p>
+    <div class="sf-save-conflict-bulk">
+      <button class="sf-save-conflict-bulk-btn" data-conflict-all="skip">Set all to Skip</button>
+      <button class="sf-save-conflict-bulk-btn" data-conflict-all="replace">Set all to Replace</button>
+    </div>
+    <div class="sf-save-conflict-list" id="sf-save-conflict-list"></div>
+    <div class="modal-btns" style="margin-top: 16px">
+      <button class="modal-btn-cancel" id="sf-save-conflict-cancel">Cancel</button>
+      <button class="modal-btn-primary" id="sf-save-conflict-apply">Continue</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Bulk add tags modal: applies one or more tags to every selected font
+     in one pass. Existing tags on each entry are preserved; new tags are
+     merged in case-insensitively. ── -->
+<div class="modal-overlay" id="modal-sf-bulk-tag">
+  <div class="modal">
+    <h2 id="sf-bulk-tag-title">Add tags</h2>
+    <p class="sf-import-hint">Press Enter or comma to stage each tag. Existing tags will appear as suggestions.</p>
+    <div class="sf-tags-edit" style="margin-top: 8px">
+      <div class="sf-tags-chips" id="sf-bulk-tag-chips"></div>
+      <input type="text" id="sf-bulk-tag-input" class="sf-tag-add-input" list="sf-all-tags-datalist" placeholder="Add tag&hellip;" maxlength="40" autocomplete="off">
+    </div>
+    <div class="modal-btns" style="margin-top: 16px">
+      <button class="modal-btn-cancel" id="sf-bulk-tag-cancel">Cancel</button>
+      <button class="modal-btn-primary" id="sf-bulk-tag-apply" disabled>Apply</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Bulk delete progress: shown while the bulk-delete operation runs.
+     Copy phase is the slow part (source archives can be hundreds of MB);
+     count-based progress + current source name signals work is happening
+     even when fs.copyFile doesn't emit per-byte progress. ── -->
+<div class="modal-overlay" id="modal-sf-bulk-progress">
+  <div class="modal">
+    <h2 id="sf-bulk-progress-title">Working&hellip;</h2>
+    <p id="sf-bulk-progress-detail" class="sf-import-progress-detail"></p>
+    <div class="sf-import-progress-track">
+      <div id="sf-bulk-progress-bar" class="sf-import-progress-bar"></div>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="modal-sf-duplicate-source">
   <div class="modal">
     <h2>Source already imported</h2>
@@ -8043,6 +8164,27 @@ function _buildStylesVisual() {
   const helpers    = allEntries.filter(e =>  e.isHelper);
   const fullStyles = allEntries.filter(e => !e.isHelper);
 
+  // Populate the Style Library tags datalist with the union of userTags
+  // across all entries. Used by the detail-edit tag input for autocomplete.
+  // Existing tags are suggested but new tags are still accepted.
+  (() => {
+    const dl = document.getElementById('style-all-tags-datalist');
+    if (!dl) return;
+    const seen = new Map();
+    for (const e of fullStyles) {
+      const t = e?.meta?.userTags;
+      if (!Array.isArray(t)) continue;
+      for (const tag of t) {
+        const s = String(tag || '').trim();
+        if (!s) continue;
+        const k = s.toLowerCase();
+        if (!seen.has(k)) seen.set(k, s);
+      }
+    }
+    const opts = Array.from(seen.values()).sort((a, b) => a.localeCompare(b));
+    dl.innerHTML = opts.map(t => `<option value="${t.replace(/"/g, '&quot;').replace(/</g, '&lt;')}"></option>`).join('');
+  })();
+
   // ── Helpers side panel ──────────────────────────────
   // Preserve open helper so a background rebuild doesn't close the editor
   // In add mode, don't try to re-open (there's nothing saved yet to re-open)
@@ -9853,11 +9995,11 @@ document.getElementById('detail-source-input').addEventListener('input', () => {
   _setDetailDirty(true);
 });
 
-// Tag input — comma or Enter adds a tag
+// Tag input — Enter adds a tag
 document.getElementById('detail-tag-input').addEventListener('keydown', e => {
-  if (e.key === 'Enter' || e.key === ',') {
+  if (e.key === 'Enter') {
     e.preventDefault();
-    const val = e.target.value.replace(',', '').trim();
+    const val = e.target.value.trim();
     if (val && !_detailTags.includes(val)) {
       _detailTags.push(val);
       _renderDetailTags();
@@ -10815,6 +10957,63 @@ require(['vs/editor/editor.main'], function () {
       let _sfSearchQuery = '';
       let _sfActiveFilterTags = new Set();
       let _sfActiveFilterCreators = new Set();
+      // Set of font directory strings currently referenced by presets in the
+      // open config. Recomputed on each grid render so editing the config
+      // and switching back updates the visual immediately. Empty set when no
+      // config is open or parsing fails (defensive — never break the grid).
+      const _sfComputeInUseFonts = () => {
+        if (typeof editor === 'undefined' || !editor) return new Set();
+        if (typeof presetParser === 'undefined' || !presetParser) return new Set();
+        try {
+          const result = presetParser.parsePresets(editor.getValue());
+          const fonts = new Set();
+          for (const arr of (result?.arrays || [])) {
+            for (const preset of (arr.presets || [])) {
+              if (!preset || !preset.font) continue;
+              // Preset font is semicolon-separated in Proffie when a font is
+              // combined with other directories (e.g. "Father;common" layers
+              // the shared "common" folder on top of the Father font). Each
+              // piece is its own font-directory reference, so split and add
+              // both — the library matches by exact folder-name.
+              for (const piece of String(preset.font).split(';')) {
+                const s = piece.trim();
+                if (s) fonts.add(s);
+              }
+            }
+          }
+          return fonts;
+        } catch { return new Set(); }
+      };
+      // Cached from the last grid render so the action-bar sync can decide
+      // visibility of Select-all / Select-in-use without re-parsing the
+      // config or re-running the filter chain.
+      let _sfLastMatchingNames = [];
+      let _sfLastInUseFonts = new Set();
+      // Multi-select state. Click a card's hover-revealed checkbox to toggle,
+      // or Ctrl/Cmd-click anywhere on a card. Selection acts as a "keep-this"
+      // override on top of search/filter — selected cards remain visible
+      // through any narrowing. Only deliberate actions clear selection:
+      //   - The explicit "Clear selection" toolbar button
+      //   - Pressing Escape (when no modal is open and no input is focused)
+      //   - Unchecking individual cards (toggle off)
+      //   - Completing a bulk action
+      // Filter/search changes, opening entry details, tab switches, scroll,
+      // and window focus loss all preserve selection.
+      let _sfSelectedNames = new Set();
+      // Escape key clears multi-select. Skipped when a modal is active (let
+      // the modal handle its own Escape) or when focus is in an input/textarea
+      // (let the input's own Escape behavior — like the source-detail inline
+      // row-edit cancel — take precedence over the global clear).
+      document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return;
+        if (_sfSelectedNames.size === 0) return;
+        if (document.querySelector('.modal-overlay.active')) return;
+        const ae = document.activeElement;
+        if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT')) return;
+        e.preventDefault();
+        _sfSelectedNames.clear();
+        _sfRenderGrid();
+      });
       // Build a search blob that covers everything the user might type to find
       // an entry: the entry's own name/author/description/notes/tags plus the
       // backing source's bundle name, original filename, vendor info, and
@@ -10870,8 +11069,24 @@ require(['vs/editor/editor.main'], function () {
           if (!a) return false;
           return filterCreatorsLower.includes(a);
         };
-        const matching = sorted.filter(f => matchesSearch(f) && matchesTagFilter(f) && matchesCreatorFilter(f));
+        // Selected cards bypass the current filter — they stay visible even
+        // when the search/tag/creator filter would otherwise hide them. The
+        // mental model: selection is a "keep this" override on top of the
+        // filter. Clearing the selection lets the filter take over again.
+        const matching = sorted.filter(f =>
+          _sfSelectedNames.has(f.name) ||
+          (matchesSearch(f) && matchesTagFilter(f) && matchesCreatorFilter(f))
+        );
         const isFiltering = !!q || _sfActiveFilterTags.size > 0 || _sfActiveFilterCreators.size > 0;
+        // In-use lookup for visual indicator + the "Select in-use" affordance.
+        // Computed once per render and reused inside the card-map loop and
+        // the action-bar sync below.
+        const inUseFonts = _sfComputeInUseFonts();
+        // Stash the matching set and in-use lookup for the action-bar sync
+        // below — Select-all and Select-in-use need to know what's visible
+        // and which of those are referenced by the open config.
+        _sfLastMatchingNames = matching.map(f => f.name);
+        _sfLastInUseFonts = inUseFonts;
         if (matching.length === 0 && sorted.length > 0 && isFiltering) {
           // Library has fonts but the current search/filter narrowed to zero.
           // Match the Style Library "no results" placeholder so the empty
@@ -10903,13 +11118,18 @@ require(['vs/editor/editor.main'], function () {
           const linkUrl = meta.linkUrl || '';
           const linkLabel = (meta.linkLabel || '').trim() || _sfLinkLabelPref || 'Demo';
           const linkBtn = linkUrl ? `<button class="sf-card-link" data-card-link="${_sfEscape(linkUrl)}" title="${_sfEscape(linkUrl)}">${_sfEscape(linkLabel)}</button>` : '';
-          return `<div class="sf-card" data-font="${_sfEscape(f.name)}">
+          const isSelected = _sfSelectedNames.has(f.name);
+          const isInUse = inUseFonts.has(f.name);
+          const checkmark = isSelected ? '&#10003;' : '';
+          const cardClass = `sf-card${isSelected ? ' selected' : ''}${isInUse ? ' in-use' : ''}`;
+          return `<div class="${cardClass}" data-font="${_sfEscape(f.name)}">
             <button class="card-delete-btn" data-card-delete="${_sfEscape(f.name)}" title="Delete font">&#10005;</button>
             <div class="sf-card-name-row">
               <span class="sf-card-name">${_sfEscape(f.name)}</span>
               ${linkBtn}
             </div>
             ${author}${desc}${tags}
+            <button class="sf-card-select-btn" data-card-select="${_sfEscape(f.name)}" title="Select">${checkmark}</button>
           </div>`;
         }).join('');
         if (countEl) {
@@ -10921,6 +11141,101 @@ require(['vs/editor/editor.main'], function () {
         _sfRenderTagDropdown();
         _sfRenderCreatorDropdown();
         _sfRenderActiveFilters();
+        _sfUpdateBulkActionBar();
+        _sfRenderMissingBarAndLegend(inUseFonts);
+      };
+      // Names that Proffie configs reference but aren't fonts in our sense.
+      // "common" is the shared-effects sidecar; flagged for future support
+      // (see backlog) but for the missing-fonts banner it's intentionally
+      // excluded so it doesn't show up as a perpetual missing reference.
+      const _SF_NON_FONT_REFS = new Set(['common']);
+      const _sfRenderMissingBarAndLegend = (inUseFonts) => {
+        const bar = document.getElementById('sf-missing-bar');
+        const chipsEl = document.getElementById('sf-missing-chips');
+        const legendEl = document.getElementById('sf-legend');
+        if (!bar || !chipsEl || !legendEl) return;
+        // Missing = in-use directories that don't have a matching library
+        // entry by name, with the non-font convention list filtered out.
+        const haveNames = new Set(_sfAllEntries.map(e => e.name));
+        const missing = [...inUseFonts]
+          .filter(name => !haveNames.has(name) && !_SF_NON_FONT_REFS.has(name.toLowerCase()))
+          .sort((a, b) => a.localeCompare(b));
+        if (missing.length === 0) {
+          bar.style.display = 'none';
+        } else {
+          bar.style.display = '';
+          chipsEl.innerHTML = missing.map(name =>
+            `<button type="button" class="sf-missing-chip" data-missing-name="${_sfEscape(name)}" title="Click to copy">${_sfEscape(name)}</button>`
+          ).join('');
+        }
+        // Legend: same colored-swatch pattern Style Library uses. Only the
+        // in-use swatch is meaningful for SF right now; future states (broken
+        // source links, etc.) can stack here without re-doing the structure.
+        const inUseCountInLibrary = _sfAllEntries.filter(e => inUseFonts.has(e.name)).length;
+        if (inUseCountInLibrary === 0 && missing.length === 0) {
+          legendEl.style.display = 'none';
+          return;
+        }
+        const items = [];
+        if (inUseCountInLibrary > 0) {
+          items.push(`<span class="legend-item"><span class="legend-swatch blue"></span>Used in open config</span>`);
+        }
+        if (missing.length > 0) {
+          items.push(`<span class="legend-item"><span class="legend-swatch red"></span>Referenced but not imported</span>`);
+        }
+        legendEl.innerHTML = items.join('');
+        legendEl.style.display = items.length ? 'flex' : 'none';
+      };
+      // Sync the toolbar bulk-action buttons with the current selection.
+      // Hidden when empty, labeled with the count when non-empty. Mirrors the
+      // import-toolbar visibility convention.
+      const _sfUpdateBulkActionBar = () => {
+        const delBtn = document.getElementById('btn-sf-bulk-delete');
+        const clearBtn = document.getElementById('btn-sf-clear-selection');
+        const tagBtn = document.getElementById('btn-sf-bulk-tag');
+        const saveBtn = document.getElementById('btn-sf-bulk-save');
+        const allBtn = document.getElementById('btn-sf-select-all');
+        const inUseBtn = document.getElementById('btn-sf-select-in-use');
+        const n = _sfSelectedNames.size;
+        const visibleCount = _sfLastMatchingNames.length;
+        const visibleInUseCount = _sfLastMatchingNames.filter(name => _sfLastInUseFonts.has(name)).length;
+        // Action buttons appear only when there's something to act on.
+        if (n === 0) {
+          if (delBtn) delBtn.style.display = 'none';
+          if (clearBtn) clearBtn.style.display = 'none';
+          if (tagBtn) tagBtn.style.display = 'none';
+          if (saveBtn) saveBtn.style.display = 'none';
+        } else {
+          if (delBtn) {
+            delBtn.style.display = '';
+            delBtn.textContent = `Delete (${n})`;
+          }
+          if (clearBtn) {
+            clearBtn.style.display = '';
+            clearBtn.textContent = `Clear selection (${n})`;
+          }
+          if (tagBtn) {
+            tagBtn.style.display = '';
+            tagBtn.textContent = `Tags (${n})`;
+          }
+          if (saveBtn) {
+            saveBtn.style.display = '';
+            saveBtn.textContent = `Save (${n})`;
+          }
+        }
+        // Select-helpers appear whenever there are entries to act on. Hide
+        // "Select all" if every visible entry is already selected (no-op).
+        // Hide "Select in-use" if zero visible entries are in use.
+        if (allBtn) {
+          const allAlreadySelected = visibleCount > 0
+            && _sfLastMatchingNames.every(name => _sfSelectedNames.has(name));
+          allBtn.style.display = (visibleCount > 0 && !allAlreadySelected) ? '' : 'none';
+          allBtn.textContent = `Select all (${visibleCount})`;
+        }
+        if (inUseBtn) {
+          inUseBtn.style.display = visibleInUseCount > 0 ? '' : 'none';
+          inUseBtn.textContent = `Select in-use (${visibleInUseCount})`;
+        }
       };
       // ── Tag filter (slice 9) ──────────────────────────
       // Dropdown of available tags + counts. Available = tags present on
@@ -11032,6 +11347,27 @@ require(['vs/editor/editor.main'], function () {
       // creators (from m.author) with counts based on the currently-narrowed
       // entry set. Counts respect active search + active tag filters +
       // already-selected creator filters.
+      // Populate the shared SF tags datalist with the union of tags currently
+      // attached to any entry. Used by every SF tag input (entry detail,
+      // source detail, bulk-add) for autocomplete. New tags aren't blocked —
+      // the datalist is a suggestion layer, not a constraint.
+      const _sfRefreshTagsDatalist = () => {
+        const dl = document.getElementById('sf-all-tags-datalist');
+        if (!dl) return;
+        const seen = new Map(); // lowercase → original-case
+        for (const e of _sfAllEntries) {
+          const t = e?.meta?.tags;
+          if (!Array.isArray(t)) continue;
+          for (const tag of t) {
+            const s = String(tag || '').trim();
+            if (!s) continue;
+            const k = s.toLowerCase();
+            if (!seen.has(k)) seen.set(k, s);
+          }
+        }
+        const opts = Array.from(seen.values()).sort((a, b) => a.localeCompare(b));
+        dl.innerHTML = opts.map(t => `<option value="${_sfEscape(t)}"></option>`).join('');
+      };
       const _sfRenderCreatorDropdown = () => {
         const list = document.getElementById('sf-creator-dropdown-list');
         const badge = document.getElementById('sf-creator-filter-badge');
@@ -11132,6 +11468,7 @@ require(['vs/editor/editor.main'], function () {
         const r = await window.electronAPI.listEntries();
         const entries = (r && r.ok && r.entries) || [];
         _sfAllEntries = entries;
+        _sfRefreshTagsDatalist();
         // Fetch sources so the search index can reach into source metadata
         // (original filename, source vendor, bundle name, source notes).
         try {
@@ -11276,11 +11613,21 @@ require(['vs/editor/editor.main'], function () {
       const _sfCloseImportAndReturn = async () => {
         const returnUuid = _sfReturnToSourceUuid;
         _sfReturnToSourceUuid = null;
-        _sfCloseImport();
         if (returnUuid) {
+          // Atomic swap back to source detail so the card grid doesn't flash
+          // between the two modals. Clear import state without touching the
+          // import modal's active class — the swap below handles visibility.
+          if (_sfImportProgressUnsub) { try { _sfImportProgressUnsub(); } catch {} _sfImportProgressUnsub = null; }
+          if (_sfCreateProgressUnsub) { try { _sfCreateProgressUnsub(); } catch {} _sfCreateProgressUnsub = null; }
+          // For existing-source (add-more) reviews there's no orphan source
+          // to clean up on cancel — the source predates this modal. Fresh
+          // imports never land here (cancelBtn alone goes through _sfCloseImport).
+          _sfImport = null;
           await window.refreshSoundFontsView();
-          await _sfOpenSourceDetail(returnUuid);
+          await _sfOpenSourceDetail(returnUuid, { swapFromModalId: 'modal-sf-import' });
+          return;
         }
+        _sfCloseImport();
       };
       const _sfFormatBytes = (n) => {
         if (!n) return '0 B';
@@ -11738,9 +12085,19 @@ require(['vs/editor/editor.main'], function () {
         if (_sfImport) _sfImport.uuid = null;
         const returnUuid = _sfReturnToSourceUuid;
         _sfReturnToSourceUuid = null;
-        _sfCloseImport();
-        await window.refreshSoundFontsView();
-        if (returnUuid) await _sfOpenSourceDetail(returnUuid);
+        if (returnUuid) {
+          // Atomic swap back to source detail — no card-grid flash on save.
+          // Clear import state without flipping its modal class; the open
+          // call below handles the visibility handoff.
+          if (_sfImportProgressUnsub) { try { _sfImportProgressUnsub(); } catch {} _sfImportProgressUnsub = null; }
+          if (_sfCreateProgressUnsub) { try { _sfCreateProgressUnsub(); } catch {} _sfCreateProgressUnsub = null; }
+          _sfImport = null;
+          await window.refreshSoundFontsView();
+          await _sfOpenSourceDetail(returnUuid, { swapFromModalId: 'modal-sf-import' });
+        } else {
+          _sfCloseImport();
+          await window.refreshSoundFontsView();
+        }
       };
 
       const _sfPickAndImport = async (mode) => {
@@ -12802,7 +13159,7 @@ require(['vs/editor/editor.main'], function () {
       // commits, "free" is reserved and maps to the source's purchased flag.
       _sfSourceDetailEls.tagsInput?.addEventListener('keydown', (e) => {
         if (!_sfSourceEdit) return;
-        if (e.key === 'Enter' || e.key === ',') {
+        if (e.key === 'Enter') {
           e.preventDefault();
           const raw = (e.target.value || '').trim();
           if (!raw) return;
@@ -12984,14 +13341,10 @@ require(['vs/editor/editor.main'], function () {
             _sfSourceDetailEls.modal?.classList.add('active');
             return;
           }
-          if (!await _sfExportSourceBeforeDelete(sourceUuid, wantExport)) {
-            _sfSourceDetailEls.modal?.classList.add('active');
-            return;
-          }
           // Capture the source uuid before delete so we know whether to
           // close (source got cleaned up) or stay open.
           const uuidBefore = _sfSourceOriginalUuid;
-          if (!await _sfDeleteEntryAndCleanup(name)) {
+          if (!await _sfPerformSingleDelete(name, sourceUuid, wantExport)) {
             _sfSourceDetailEls.modal?.classList.add('active');
             return;
           }
@@ -13031,8 +13384,16 @@ require(['vs/editor/editor.main'], function () {
           if (!await _promptDiscard('Unsaved source edits — discard them and continue?')) return;
         }
         const uuid = _sfSourceOriginalUuid;
-        await _sfCloseSourceDetail();
-        await _sfReviewExistingSource(uuid);
+        // Drop the return-to-entry tracking — we're navigating to import,
+        // not back to entry detail.
+        _sfSourceDetailReturnToEntry = null;
+        // Clear source-detail state but don't toggle its modal class —
+        // _sfReviewExistingSource does the atomic swap so there's no flash
+        // through the card grid between the two modals.
+        _sfSourceEdit = null;
+        _sfSourceOriginalUuid = null;
+        _sfSourceDirty = false;
+        await _sfReviewExistingSource(uuid, { swapFromModalId: 'modal-sf-source-detail' });
       });
       // Delete source with cascade warning.
       _sfSourceDetailEls.deleteBtn?.addEventListener('click', async () => {
@@ -13076,18 +13437,25 @@ require(['vs/editor/editor.main'], function () {
           _sfSourceDetailEls.modal?.classList.add('active');
           return;
         }
-        if (!await _sfExportSourceBeforeDelete(uuid, wantExport)) {
-          _sfSourceDetailEls.modal?.classList.add('active');
-          return;
+        if (wantExport) {
+          _sfDeleteProgress.show('Saving a copy to Downloads', sourceLabel);
+          if (!await _sfExportSourceBeforeDelete(uuid, wantExport)) {
+            await _sfDeleteProgress.hide();
+            _sfSourceDetailEls.modal?.classList.add('active');
+            return;
+          }
         }
         // Cascade-delete entries first, then the source.
         const failures = [];
         for (const e of entries) {
+          _sfDeleteProgress.show('Deleting fonts', e.name);
           const dr = await window.electronAPI.deleteEntry({ name: e.name });
           if (!dr || !dr.ok) failures.push({ name: e.name, error: dr && dr.error || 'unknown error' });
         }
+        _sfDeleteProgress.show('Removing source', sourceLabel);
         const sr = await window.electronAPI.deleteSource({ uuid });
         if (!sr || !sr.ok) failures.push({ name: sourceLabel, error: sr && sr.error || 'unknown error' });
+        await _sfDeleteProgress.hide();
         if (failures.length) {
           alert(`Some items failed to delete:\n${failures.map(f => ` • ${f.name}: ${f.error}`).join('\n')}`);
         }
@@ -13120,7 +13488,11 @@ require(['vs/editor/editor.main'], function () {
       // Same review flow as a fresh import, but skips picker + import. Marks
       // candidates that already have a library entry from this source as
       // disabled in the candidate list so the user can only pick new ones.
-      const _sfReviewExistingSource = async (uuid) => {
+      // opts.swapFromModalId — see _sfOpenSourceDetail. Atomically removes
+      // the named modal's active class in the same tick this one's is added,
+      // so the card grid doesn't flash through when handing off from another
+      // modal to the add-more review flow.
+      const _sfReviewExistingSource = async (uuid, opts = {}) => {
         if (!_sfImportEls.modal) return;
         const src = _sfAllSourcesByUuid[uuid];
         const sourcePath = (src && src.meta && src.meta.originalName) || '(existing source)';
@@ -13133,6 +13505,9 @@ require(['vs/editor/editor.main'], function () {
         if (_sfImportEls.progBar) _sfImportEls.progBar.style.width = '50%';
         if (_sfImportEls.progDetail) _sfImportEls.progDetail.textContent = '';
         if (_sfImportEls.progTip) _sfImportEls.progTip.style.display = 'none';
+        if (opts.swapFromModalId) {
+          document.getElementById(opts.swapFromModalId)?.classList.remove('active');
+        }
         if (_sfImportEls.modal) _sfImportEls.modal.classList.add('active');
         const [vendorRes, candRes] = await Promise.all([
           window.electronAPI.detectSourceVendor({ uuid }),
@@ -13236,10 +13611,10 @@ require(['vs/editor/editor.main'], function () {
         _sfRenderDetailTags();
         _sfMarkDetailDirty();
       });
-      // Tag add: Enter commits, comma also commits (matching style library pattern).
+      // Tag add: Enter commits.
       _sfEntryDetailEls.tagsInput?.addEventListener('keydown', (e) => {
         if (!_sfDetailEdit) return;
-        if (e.key === 'Enter' || e.key === ',') {
+        if (e.key === 'Enter') {
           e.preventDefault();
           const raw = (e.target.value || '').trim();
           if (!raw) return;
@@ -13315,6 +13690,52 @@ require(['vs/editor/editor.main'], function () {
           return false;
         }
       };
+      // Single-delete progress helper. Covers the whole post-confirm sequence
+      // (export + delete + cleanup) so the user gets continuous feedback
+      // instead of seeing the card linger then pop away. Minimum 200ms hold
+      // keeps fast deletes from flickering the modal on screen.
+      const _sfDeleteProgress = {
+        startTs: 0,
+        modal:    () => document.getElementById('modal-sf-bulk-progress'),
+        titleEl:  () => document.getElementById('sf-bulk-progress-title'),
+        detailEl: () => document.getElementById('sf-bulk-progress-detail'),
+        barEl:    () => document.getElementById('sf-bulk-progress-bar'),
+        show(title, detail) {
+          const t = this.titleEl(), d = this.detailEl(), b = this.barEl(), m = this.modal();
+          if (t) t.textContent = title;
+          if (d) d.textContent = detail || '';
+          if (b) b.style.width = '50%';
+          if (m && !m.classList.contains('active')) {
+            m.classList.add('active');
+            this.startTs = Date.now();
+          }
+        },
+        async hide(minMs = 200) {
+          const elapsed = Date.now() - this.startTs;
+          if (elapsed < minMs) {
+            await new Promise(r => setTimeout(r, minMs - elapsed));
+          }
+          this.modal()?.classList.remove('active');
+          this.startTs = 0;
+        },
+      };
+      // Convenience for the export+delete sequence — picks the right title
+      // based on whether the user opted to save a copy first, transitions
+      // titles between phases, returns true if everything succeeded.
+      const _sfPerformSingleDelete = async (name, sourceUuid, wantExport) => {
+        const sourceLabel = (_sfAllSourcesByUuid[sourceUuid]?.meta?.bundleName)
+          || (_sfAllSourcesByUuid[sourceUuid]?.meta?.originalName)
+          || '';
+        if (wantExport) {
+          _sfDeleteProgress.show('Saving a copy to Downloads', sourceLabel);
+          const ok = await _sfExportSourceBeforeDelete(sourceUuid, wantExport);
+          if (!ok) { await _sfDeleteProgress.hide(); return false; }
+        }
+        _sfDeleteProgress.show('Deleting', name);
+        const ok = await _sfDeleteEntryAndCleanup(name);
+        await _sfDeleteProgress.hide();
+        return ok;
+      };
       // Whether deleting this entry will also drop the source archive. True
       // when no other entries reference the same source. Used to decide
       // whether to show the "save a copy first" checkbox on the confirm.
@@ -13352,6 +13773,380 @@ require(['vs/editor/editor.main'], function () {
             }
           } catch {}
         }
+        return true;
+      };
+      // Bulk delete: composes the single-delete flow over the selected set.
+      // Pre-computes which sources will be orphaned (all their entries are in
+      // the selection) so the confirm dialog can honestly say how many source
+      // archives are going too, and the Save-to-Downloads checkbox covers
+      // every orphaned source in one pass. Returns true if any work happened.
+      // Bulk tag management: shows the intersection of tags currently common
+      // to every selected entry as removable chips, plus an input to stage
+      // new ones. On Apply the delta is computed — tags removed from the
+      // initial intersection are removed from each entry that has them; tags
+      // added beyond the initial set land on each entry that doesn't have
+      // them already (case-insensitive, no duplicates). Mirrors the
+      // source-detail bulk-tag flow.
+      let _sfBulkTagInitial = [];   // snapshot of the intersection at open
+      let _sfBulkTagWorking = [];   // current working set the user is editing
+      const _sfBulkTagComputeInitial = () => {
+        // Tag is "common" only when every selected entry has it.
+        const selectedEntries = _sfAllEntries.filter(e => _sfSelectedNames.has(e.name));
+        if (selectedEntries.length === 0) return [];
+        const firstTags = Array.isArray(selectedEntries[0].meta?.tags)
+          ? selectedEntries[0].meta.tags : [];
+        return firstTags.filter(t => {
+          const lc = String(t).toLowerCase();
+          return selectedEntries.every(e => {
+            const et = Array.isArray(e.meta?.tags) ? e.meta.tags : [];
+            return et.some(x => String(x).toLowerCase() === lc);
+          });
+        });
+      };
+      const _sfBulkTagRenderChips = () => {
+        const wrap = document.getElementById('sf-bulk-tag-chips');
+        const applyBtn = document.getElementById('sf-bulk-tag-apply');
+        if (wrap) {
+          wrap.innerHTML = _sfBulkTagWorking.map((t, i) =>
+            `<span class="sf-tag-chip">${_sfEscape(t)}<button class="sf-tag-chip-remove" data-bulk-tag-i="${i}" title="Remove">&times;</button></span>`
+          ).join('');
+        }
+        // Enabled when the working set differs from the initial set, in
+        // either direction (added or removed).
+        if (applyBtn) {
+          const initialLc = new Set(_sfBulkTagInitial.map(t => t.toLowerCase()));
+          const workingLc = new Set(_sfBulkTagWorking.map(t => t.toLowerCase()));
+          let changed = initialLc.size !== workingLc.size;
+          if (!changed) {
+            for (const v of initialLc) if (!workingLc.has(v)) { changed = true; break; }
+          }
+          applyBtn.disabled = !changed;
+        }
+      };
+      const _sfBulkTagOpen = () => {
+        const modal = document.getElementById('modal-sf-bulk-tag');
+        const title = document.getElementById('sf-bulk-tag-title');
+        const input = document.getElementById('sf-bulk-tag-input');
+        const hint = modal?.querySelector('.sf-import-hint');
+        const n = _sfSelectedNames.size;
+        if (!modal || n === 0) return;
+        if (title) title.textContent = `Tags for ${n} font${n === 1 ? '' : 's'}`;
+        if (hint) {
+          hint.textContent = 'Chips show tags common to all selected fonts — remove to drop them from every selection. Type to add a tag to every selected font that doesn\'t already have it.';
+        }
+        _sfBulkTagInitial = _sfBulkTagComputeInitial();
+        _sfBulkTagWorking = _sfBulkTagInitial.slice();
+        _sfBulkTagRenderChips();
+        if (input) input.value = '';
+        modal.classList.add('active');
+        // Defer focus until the modal is up so the cursor lands in the input.
+        setTimeout(() => input?.focus(), 0);
+      };
+      const _sfBulkTagClose = () => {
+        document.getElementById('modal-sf-bulk-tag')?.classList.remove('active');
+        _sfBulkTagInitial = [];
+        _sfBulkTagWorking = [];
+      };
+      const _sfBulkTagApply = async () => {
+        const names = Array.from(_sfSelectedNames);
+        if (names.length === 0) { _sfBulkTagClose(); return; }
+        // Compute the delta between the initial common-tag set and the
+        // user's working set. Removals get pulled from any entry that had
+        // them; additions get pushed onto any entry that doesn't already.
+        const initialLc = new Set(_sfBulkTagInitial.map(t => t.toLowerCase()));
+        const workingLc = new Set(_sfBulkTagWorking.map(t => t.toLowerCase()));
+        const removedLc = new Set([...initialLc].filter(t => !workingLc.has(t)));
+        const added = _sfBulkTagWorking.filter(t => !initialLc.has(t.toLowerCase()));
+        if (removedLc.size === 0 && added.length === 0) { _sfBulkTagClose(); return; }
+        // Close the input modal before kicking off the work so the progress
+        // modal is the only thing on screen — same anti-clutter rule as the
+        // other modal stacks.
+        _sfBulkTagClose();
+        _sfDeleteProgress.show('Updating tags', '');
+        const failures = [];
+        for (let i = 0; i < names.length; i++) {
+          const name = names[i];
+          _sfDeleteProgress.show(`Updating tags (${i + 1} of ${names.length})`, name);
+          const entry = _sfAllEntries.find(e => e.name === name);
+          const existing = Array.isArray(entry?.meta?.tags) ? entry.meta.tags.slice() : [];
+          // Apply removes (case-insensitive), then merge in adds where missing.
+          const kept = existing.filter(t => !removedLc.has(String(t).toLowerCase()));
+          const keptLc = new Set(kept.map(t => String(t).toLowerCase()));
+          const finalTags = kept.slice();
+          for (const t of added) {
+            if (!keptLc.has(t.toLowerCase())) finalTags.push(t);
+          }
+          const changed = finalTags.length !== existing.length
+            || finalTags.some((t, i) => t !== existing[i]);
+          if (!changed) continue;
+          try {
+            const er = await window.electronAPI.updateEntryMeta({
+              currentName: name,
+              updates: { tags: finalTags },
+            });
+            if (!er || !er.ok) failures.push({ name, error: (er && er.error) || 'unknown error' });
+          } catch (err) {
+            failures.push({ name, error: String(err && err.message || err) });
+          }
+        }
+        await _sfDeleteProgress.hide();
+        if (failures.length) {
+          alert(`Some entries failed to update tags:\n${failures.map(f => ` • ${f.name}: ${f.error}`).join('\n')}`);
+          // Keep selection so user can see what's still in scope and retry.
+          await window.refreshSoundFontsView();
+          return;
+        }
+        _sfSelectedNames.clear();
+        await window.refreshSoundFontsView();
+      };
+      // Promise-returning conflict-resolution modal. Receives the list of
+      // duplicate entry names and returns a Map<name, 'skip'|'replace'>
+      // when the user clicks Continue, or null on Cancel. Default per row
+      // is 'skip' — safer; the user has to explicitly choose Replace, or
+      // hit the "Set all to Replace" quick action.
+      const _sfPromptSaveConflicts = (conflictNames) => {
+        const modal = document.getElementById('modal-sf-save-conflict');
+        const list = document.getElementById('sf-save-conflict-list');
+        const applyBtn = document.getElementById('sf-save-conflict-apply');
+        const cancelBtn = document.getElementById('sf-save-conflict-cancel');
+        if (!modal || !list) return Promise.resolve(null);
+        // Render one row per conflict; both options shown, "skip" pre-selected.
+        list.innerHTML = conflictNames.map(n => `
+          <div class="sf-save-conflict-row" data-conflict-row="${_sfEscape(n)}">
+            <span class="sf-save-conflict-name" title="${_sfEscape(n)}">${_sfEscape(n)}</span>
+            <span class="sf-save-conflict-choices">
+              <label><input type="radio" name="conflict-${_sfEscape(n)}" value="skip" checked>Skip</label>
+              <label><input type="radio" name="conflict-${_sfEscape(n)}" value="replace">Replace</label>
+            </span>
+          </div>
+        `).join('');
+        return new Promise(resolve => {
+          const onBulk = (e) => {
+            const btn = e.target.closest('[data-conflict-all]');
+            if (!btn) return;
+            const mode = btn.getAttribute('data-conflict-all');
+            list.querySelectorAll(`input[type="radio"][value="${mode}"]`).forEach(r => { r.checked = true; });
+          };
+          const onApply = () => {
+            const choices = new Map();
+            for (const name of conflictNames) {
+              const checked = list.querySelector(`input[name="conflict-${CSS.escape(name)}"]:checked`);
+              choices.set(name, checked?.value || 'skip');
+            }
+            cleanup();
+            resolve(choices);
+          };
+          const onCancel = () => { cleanup(); resolve(null); };
+          const onBackdrop = (e) => { if (e.target === modal) onCancel(); };
+          const onKey = (e) => { if (e.key === 'Escape') onCancel(); };
+          const bulkRow = modal.querySelector('.sf-save-conflict-bulk');
+          const cleanup = () => {
+            modal.classList.remove('active');
+            applyBtn?.removeEventListener('click', onApply);
+            cancelBtn?.removeEventListener('click', onCancel);
+            modal.removeEventListener('click', onBackdrop);
+            document.removeEventListener('keydown', onKey);
+            bulkRow?.removeEventListener('click', onBulk);
+          };
+          applyBtn?.addEventListener('click', onApply);
+          cancelBtn?.addEventListener('click', onCancel);
+          modal.addEventListener('click', onBackdrop);
+          document.addEventListener('keydown', onKey);
+          bulkRow?.addEventListener('click', onBulk);
+          modal.classList.add('active');
+        });
+      };
+      // Bulk save: copies each selected entry as a Proffie-shaped folder to
+      // a destination the user picks (typically an SD card root). Pre-scans
+      // for name collisions and prompts per-entry Skip / Replace so each
+      // font stays atomic — no risk of half-old / half-new file mixing.
+      const _sfBulkSave = async () => {
+        const names = Array.from(_sfSelectedNames);
+        if (names.length === 0) return false;
+        let pick;
+        try { pick = await window.electronAPI.selectSaveDestination(); }
+        catch (err) { alert(`Could not open the folder picker: ${err && err.message || err}`); return false; }
+        if (!pick || !pick.ok) return false;
+        const destDir = pick.dirPath;
+        // Pre-scan: which entries already exist at the destination?
+        const conflicts = [];
+        for (const name of names) {
+          try {
+            const r = await window.electronAPI.entryFolderExistsAt({ name, destDir });
+            if (r && r.ok && r.exists) conflicts.push(name);
+          } catch {}
+        }
+        // If conflicts exist, ask the user how to handle each one.
+        let modeByName = new Map(); // name -> 'skip' | 'replace'
+        if (conflicts.length > 0) {
+          const choices = await _sfPromptSaveConflicts(conflicts);
+          if (!choices) return false; // user cancelled
+          modeByName = choices;
+        }
+        _sfDeleteProgress.show('Saving fonts', '');
+        const failures = [];
+        const results = { copied: 0, skipped: 0, replaced: 0 };
+        for (let i = 0; i < names.length; i++) {
+          const name = names[i];
+          const mode = modeByName.get(name) || 'rename';
+          _sfDeleteProgress.show(`Saving fonts (${i + 1} of ${names.length})`, name);
+          try {
+            const r = await window.electronAPI.exportEntryToFolder({ name, destDir, mode });
+            if (!r || !r.ok) {
+              failures.push({ name, error: (r && r.error) || 'unknown error' });
+            } else if (r.skipped) {
+              results.skipped++;
+            } else if (mode === 'replace') {
+              results.replaced++;
+            } else {
+              results.copied++;
+            }
+          } catch (err) {
+            failures.push({ name, error: String(err && err.message || err) });
+          }
+        }
+        await _sfDeleteProgress.hide();
+        if (failures.length) {
+          alert(`Some fonts failed to save:\n${failures.map(f => ` • ${f.name}: ${f.error}`).join('\n')}`);
+          // Keep selection on real failures so the user can see what's still
+          // in scope and retry. (Skips don't count as failures — those were
+          // deliberate user choices.)
+          return true;
+        }
+        _sfSelectedNames.clear();
+        _sfRenderGrid();
+        return true;
+      };
+      const _sfBulkDelete = async () => {
+        const names = Array.from(_sfSelectedNames);
+        if (names.length === 0) return false;
+        // Group by source uuid: which entries are selected from each source,
+        // and how many total entries that source has.
+        const bySource = new Map();
+        for (const name of names) {
+          const entry = _sfAllEntries.find(e => e.name === name);
+          const uuid = entry?.meta?.sourceUuid;
+          if (!uuid) continue;
+          if (!bySource.has(uuid)) {
+            const total = _sfAllEntries.filter(x => x?.meta?.sourceUuid === uuid).length;
+            const sm = _sfAllSourcesByUuid[uuid]?.meta || {};
+            const label = sm.bundleName || sm.originalName || uuid;
+            bySource.set(uuid, { uuid, label, selected: [], total });
+          }
+          bySource.get(uuid).selected.push(name);
+        }
+        const sourcesToRemove = Array.from(bySource.values())
+          .filter(s => s.selected.length >= s.total);
+        // Build the confirm message. List fonts inline up to 8 names; longer
+        // selections collapse to a count. Source-removal context is appended
+        // only when applicable.
+        const fontList = names.length <= 8
+          ? names.join(', ')
+          : `${names.slice(0, 8).join(', ')}, and ${names.length - 8} more`;
+        let message = `Delete ${names.length} font${names.length === 1 ? '' : 's'}?\n${fontList}`;
+        if (sourcesToRemove.length === 1) {
+          message += `\n\nThe source "${sourcesToRemove[0].label}" will also be removed (its last ${sourcesToRemove[0].total === 1 ? 'font' : `${sourcesToRemove[0].selected.length} of ${sourcesToRemove[0].total} fonts`}).`;
+        } else if (sourcesToRemove.length > 1) {
+          message += `\n\n${sourcesToRemove.length} source archives will also be removed.`;
+        }
+        const res = await promptConfirm({
+          title: `Delete ${names.length} font${names.length === 1 ? '' : 's'}`,
+          message,
+          confirmText: 'Delete',
+          confirmKind: 'danger',
+          checkbox: sourcesToRemove.length > 0
+            ? { label: `Save ${sourcesToRemove.length === 1 ? 'a copy of the source' : 'copies of the sources'} to Downloads` }
+            : null,
+        });
+        const confirmed = sourcesToRemove.length > 0 ? res && res.confirmed : res;
+        const wantExport = sourcesToRemove.length > 0 ? !!(res && res.checked) : false;
+        if (!confirmed) return false;
+        // Bulk progress modal: one bar advancing across all the steps below
+        // (exports, entry deletes, source deletes). The copy phase is the
+        // slow one, but unifying the bar keeps the UI from flashing on/off
+        // when the user opted out of save-to-Downloads.
+        const progModal = document.getElementById('modal-sf-bulk-progress');
+        const progTitle = document.getElementById('sf-bulk-progress-title');
+        const progDetail = document.getElementById('sf-bulk-progress-detail');
+        const progBar = document.getElementById('sf-bulk-progress-bar');
+        const totalSteps = (wantExport ? sourcesToRemove.length : 0) + names.length + sourcesToRemove.length;
+        let stepIdx = 0;
+        const showProgress = (title, detail) => {
+          if (progTitle) progTitle.textContent = title;
+          if (progDetail) progDetail.textContent = detail;
+          if (progBar) progBar.style.width = totalSteps > 0
+            ? `${Math.min(100, Math.round((stepIdx / totalSteps) * 100))}%`
+            : '0%';
+        };
+        const hideProgress = () => progModal?.classList.remove('active');
+        showProgress('Working…', '');
+        progModal?.classList.add('active');
+        // Export sources first if the user opted in. If any export fails,
+        // abort the delete so the user has a chance to retry — matches the
+        // single-delete flow's "nothing was deleted" guarantee.
+        if (wantExport) {
+          for (let i = 0; i < sourcesToRemove.length; i++) {
+            const src = sourcesToRemove[i];
+            showProgress(`Saving copies to Downloads (${i + 1} of ${sourcesToRemove.length})`, src.label);
+            try {
+              const er = await window.electronAPI.exportSourceToDownloads({ uuid: src.uuid });
+              if (!er || !er.ok) {
+                hideProgress();
+                alert(`Could not save "${src.label}" to Downloads: ${(er && er.error) || 'unknown error'}\n\nNothing was deleted.`);
+                return false;
+              }
+            } catch (err) {
+              hideProgress();
+              alert(`Could not save "${src.label}" to Downloads: ${err && err.message || err}\n\nNothing was deleted.`);
+              return false;
+            }
+            stepIdx++;
+            showProgress(`Saving copies to Downloads (${i + 1} of ${sourcesToRemove.length})`, src.label);
+          }
+        }
+        // Delete entries first, then the orphaned sources. Collect per-item
+        // failures and surface at the end so one failure doesn't abort the
+        // rest — partial cleanup is better than all-or-nothing for bulk.
+        const failures = [];
+        for (let i = 0; i < names.length; i++) {
+          const name = names[i];
+          showProgress(`Deleting fonts (${i + 1} of ${names.length})`, name);
+          try {
+            const r = await window.electronAPI.deleteEntry({ name });
+            if (!r || !r.ok) failures.push({ name, error: (r && r.error) || 'unknown error' });
+          } catch (err) {
+            failures.push({ name, error: String(err && err.message || err) });
+          }
+          stepIdx++;
+          showProgress(`Deleting fonts (${i + 1} of ${names.length})`, name);
+        }
+        for (let i = 0; i < sourcesToRemove.length; i++) {
+          const src = sourcesToRemove[i];
+          showProgress(`Removing source archives (${i + 1} of ${sourcesToRemove.length})`, src.label);
+          try {
+            const r = await window.electronAPI.deleteSource({ uuid: src.uuid });
+            if (!r || !r.ok) failures.push({ name: src.label, error: (r && r.error) || 'unknown error' });
+          } catch (err) {
+            failures.push({ name: src.label, error: String(err && err.message || err) });
+          }
+          stepIdx++;
+          showProgress(`Removing source archives (${i + 1} of ${sourcesToRemove.length})`, src.label);
+        }
+        hideProgress();
+        if (failures.length) {
+          alert(`Some items failed to delete:\n${failures.map(f => ` • ${f.name}: ${f.error}`).join('\n')}`);
+          // Prune successfully-deleted names so retry won't fail on
+          // not-found errors; keep the actual failures selected for the
+          // user to investigate.
+          const failedNames = new Set(failures.map(f => f.name));
+          for (const n of [..._sfSelectedNames]) {
+            if (!failedNames.has(n)) _sfSelectedNames.delete(n);
+          }
+          await window.refreshSoundFontsView();
+          return true;
+        }
+        _sfSelectedNames.clear();
+        await window.refreshSoundFontsView();
         return true;
       };
       // Build a delete-confirm message that's honest about what happens to
@@ -13547,6 +14342,39 @@ require(['vs/editor/editor.main'], function () {
       // × in the corner deletes the font; clicks anywhere else on the card
       // open the entry detail.
       document.getElementById('sf-cards')?.addEventListener('click', async (e) => {
+        // Ctrl/Cmd-click on a card toggles selection regardless of what was
+        // clicked within it (body, link, chip, delete glyph, etc.). The
+        // modifier converts every in-card click into a selection action and
+        // suppresses the normal one. Standard convention from file managers
+        // and most multi-select UIs.
+        if (e.ctrlKey || e.metaKey) {
+          const card = e.target.closest('.sf-card');
+          if (card) {
+            e.stopPropagation();
+            e.preventDefault();
+            const name = card.getAttribute('data-font');
+            if (!name) return;
+            if (_sfSelectedNames.has(name)) _sfSelectedNames.delete(name);
+            else _sfSelectedNames.add(name);
+            _sfRenderGrid();
+            return;
+          }
+          // Ctrl+click outside any card falls through to the existing
+          // handlers and the document-level clear — same as a plain click.
+        }
+        // Multi-select checkbox is the only click that doesn't dismiss
+        // selection — and it doesn't open the entry either. stopPropagation
+        // keeps the document-level "clear on any other click" from firing.
+        const selectBtn = e.target.closest('[data-card-select]');
+        if (selectBtn) {
+          e.stopPropagation();
+          const name = selectBtn.getAttribute('data-card-select');
+          if (!name) return;
+          if (_sfSelectedNames.has(name)) _sfSelectedNames.delete(name);
+          else _sfSelectedNames.add(name);
+          _sfRenderGrid();
+          return;
+        }
         const del = e.target.closest('[data-card-delete]');
         if (del) {
           e.stopPropagation();
@@ -13564,8 +14392,7 @@ require(['vs/editor/editor.main'], function () {
           const confirmed = willRemove ? res && res.confirmed : res;
           const wantExport = willRemove ? !!(res && res.checked) : false;
           if (!confirmed) return;
-          if (!await _sfExportSourceBeforeDelete(sourceUuid, wantExport)) return;
-          if (!await _sfDeleteEntryAndCleanup(name)) return;
+          if (!await _sfPerformSingleDelete(name, sourceUuid, wantExport)) return;
           await window.refreshSoundFontsView();
           return;
         }
@@ -13663,6 +14490,177 @@ require(['vs/editor/editor.main'], function () {
       });
 
       document.getElementById('btn-sf-import-toolbar')?.addEventListener('click', _sfOpenImport);
+      // Bulk add tags — open the modal. stopPropagation guards against the
+      // (historical) document-level "click clears selection" handler in case
+      // it ever comes back.
+      document.getElementById('btn-sf-bulk-tag')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        _sfBulkTagOpen();
+      });
+      document.getElementById('btn-sf-bulk-save')?.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await _sfBulkSave();
+      });
+      // Selection helpers — replace the current selection with a computed
+      // set. Replace (not extend) matches the standard "Select all" semantic
+      // most apps use; if a user wants to extend they can Ctrl+click.
+      document.getElementById('btn-sf-select-all')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        _sfSelectedNames = new Set(_sfLastMatchingNames);
+        _sfRenderGrid();
+      });
+      document.getElementById('btn-sf-select-in-use')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        _sfSelectedNames = new Set(_sfLastMatchingNames.filter(name => _sfLastInUseFonts.has(name)));
+        _sfRenderGrid();
+      });
+      // Missing-fonts banner: click a chip to copy the name. Brief visual
+      // confirmation via the .copied class so the user knows the click
+      // registered without a noisy toast.
+      document.getElementById('sf-missing-chips')?.addEventListener('click', async (e) => {
+        const chip = e.target.closest('[data-missing-name]');
+        if (!chip) return;
+        const name = chip.getAttribute('data-missing-name');
+        if (!name) return;
+        try {
+          await navigator.clipboard.writeText(name);
+          chip.classList.add('copied');
+          setTimeout(() => chip.classList.remove('copied'), 900);
+        } catch {}
+      });
+      // Right-click on a missing chip → context menu with the disable action.
+      // Reuses the preset sidecar's #preset-ctx-menu element + styling so the
+      // visual language stays consistent across the app's right-click menus.
+      // The disable action scans every preset bank in the open config, not
+      // just the active one — a missing font might be referenced in multiple
+      // banks and the user expects all of them to go quiet.
+      document.getElementById('sf-missing-chips')?.addEventListener('contextmenu', (e) => {
+        const chip = e.target.closest('[data-missing-name]');
+        if (!chip) return;
+        e.preventDefault();
+        const missingName = chip.getAttribute('data-missing-name');
+        if (!missingName || typeof editor === 'undefined' || !editor) return;
+        if (typeof presetParser === 'undefined' || !presetParser) return;
+        // Scan all live presets across all banks; collect ones whose font
+        // (split on ";") includes the missing name as an exact piece.
+        let result;
+        try { result = presetParser.parsePresets(editor.getValue()); }
+        catch { return; }
+        const matches = [];
+        for (const arr of (result?.arrays || [])) {
+          for (const preset of (arr.presets || [])) {
+            if (!preset || !preset.font) continue;
+            const pieces = String(preset.font).split(';').map(p => p.trim());
+            if (pieces.includes(missingName)) matches.push(preset);
+          }
+        }
+        const menu = document.getElementById('preset-ctx-menu');
+        if (!menu) return;
+        menu.innerHTML = '';
+        const n = matches.length;
+        if (n === 0) {
+          // Defensive: if for some reason the missing name isn't actually
+          // referenced (parser drift, race), show a no-op menu so the user
+          // still gets feedback that the right-click registered.
+          const item = document.createElement('div');
+          item.className = 'preset-ctx-item';
+          item.textContent = 'No presets reference this';
+          item.style.opacity = '0.5';
+          menu.appendChild(item);
+        } else {
+          const item = document.createElement('div');
+          item.className = 'preset-ctx-item';
+          item.textContent = n === 1 ? '▼ Disable preset using this' : `▼ Disable ${n} presets using this`;
+          item.addEventListener('mousedown', (e2) => {
+            e2.stopPropagation();
+            menu.style.display = 'none';
+            // Build all the wrap-in-comment edits and apply atomically. The
+            // preset sidecar's _batchDisable uses the same shape; sorting
+            // ascending by line number is what it does too.
+            const model = editor.getModel();
+            const edits = matches.map(preset => {
+              const inner = model.getValueInRange({
+                startLineNumber: preset.startLine, startColumn: 1,
+                endLineNumber:   preset.endLine,   endColumn: model.getLineMaxColumn(preset.endLine),
+              });
+              return {
+                range: {
+                  startLineNumber: preset.startLine, startColumn: 1,
+                  endLineNumber:   preset.endLine,   endColumn: model.getLineMaxColumn(preset.endLine),
+                },
+                text: `/* @jmt-disabled\n${inner}\n*/`,
+              };
+            });
+            edits.sort((a, b) => a.range.startLineNumber - b.range.startLineNumber);
+            if (typeof _atomicEdit === 'function') {
+              _atomicEdit(editor, 'sf-missing-disable', edits);
+            } else {
+              // Fallback path if _atomicEdit isn't in scope from here.
+              editor.executeEdits('sf-missing-disable', edits);
+            }
+            // Refresh the SF view so the in-use indicator + missing chip
+            // both update (the disabled presets no longer count as in-use,
+            // so the missing chip should disappear from the banner).
+            _sfRenderGrid();
+          });
+          menu.appendChild(item);
+        }
+        // Position the menu near the cursor, respecting viewport edges.
+        const x = Math.min(e.clientX, window.innerWidth - 220);
+        const y = Math.min(e.clientY, window.innerHeight - 80);
+        menu.style.left = x + 'px';
+        menu.style.top = y + 'px';
+        menu.style.display = 'block';
+      });
+      document.getElementById('sf-bulk-tag-cancel')?.addEventListener('click', _sfBulkTagClose);
+      document.getElementById('sf-bulk-tag-apply')?.addEventListener('click', _sfBulkTagApply);
+      // Backdrop click closes (matches other modals' backdrop behavior).
+      document.getElementById('modal-sf-bulk-tag')?.addEventListener('click', (e) => {
+        if (e.target === e.currentTarget) _sfBulkTagClose();
+      });
+      // Chip × → remove from the working set.
+      document.getElementById('sf-bulk-tag-chips')?.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-bulk-tag-i]');
+        if (!btn) return;
+        const idx = parseInt(btn.getAttribute('data-bulk-tag-i'), 10);
+        if (!Number.isNaN(idx)) {
+          _sfBulkTagWorking.splice(idx, 1);
+          _sfBulkTagRenderChips();
+        }
+      });
+      // Enter adds the typed tag to the working set if it's not already
+      // there (case-insensitive). Escape closes the modal.
+      document.getElementById('sf-bulk-tag-input')?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          const raw = (e.target.value || '').trim();
+          if (!raw) return;
+          const exists = _sfBulkTagWorking.some(t => t.toLowerCase() === raw.toLowerCase());
+          if (!exists) {
+            _sfBulkTagWorking.push(raw);
+            _sfBulkTagRenderChips();
+          }
+          e.target.value = '';
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          _sfBulkTagClose();
+        }
+      });
+      // stopPropagation is required because the document-level "click clears
+      // selection" handler would otherwise fire on this very click and wipe
+      // the selection before _sfBulkDelete can read it.
+      document.getElementById('btn-sf-bulk-delete')?.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await _sfBulkDelete();
+      });
+      // Clear-selection button does the same thing the document-level click
+      // handler would do, but is discoverable in the toolbar instead of
+      // hidden in the "click anywhere" gesture.
+      document.getElementById('btn-sf-clear-selection')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        _sfSelectedNames.clear();
+        _sfRenderGrid();
+      });
       document.getElementById('btn-sf-import-font')?.addEventListener('click', _sfOpenImport);
       _sfImportEls.pickZipBtn?.addEventListener('click', () => _sfPickAndImport('zip'));
       _sfImportEls.pickFolderBtn?.addEventListener('click', () => _sfPickAndImport('folder'));
