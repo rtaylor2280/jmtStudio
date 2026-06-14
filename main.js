@@ -1275,6 +1275,38 @@ ipcMain.handle('sfBackup:inspect', async (_, { zipPath } = {}) => {
   catch (err) { return { ok: false, reason: 'unknown', error: String(err && err.message || err) }; }
 });
 
+// Replace-import: pre-wipe snapshot + extract + commit-or-rollback. Reuses
+// the export op map for cancellation since opIds are unique strings; the
+// inner module handles snapshot/rollback so this handler just plumbs IPC.
+ipcMain.handle('sfBackup:applyReplace', async (event, { opId, zipPath } = {}) => {
+  if (!opId || !zipPath) return { ok: false, error: 'Missing opId or zipPath' };
+  if (_sfBackupOps.has(opId)) return { ok: false, error: 'Op already running' };
+  const controller = new AbortController();
+  _sfBackupOps.set(opId, controller);
+  try {
+    const result = await soundFontBackup.applyReplace({
+      userData: app.getPath('userData'),
+      zipPath,
+      signal: controller.signal,
+      onProgress: (p) => {
+        try { event.sender.send('sfBackup:progress', { opId, ...p }); } catch {}
+      },
+    });
+    // Apply manifest-borne library settings (currently just starredCommon).
+    // Skipped silently if the manifest is missing or doesn't have settings.
+    const m = result && result.manifest;
+    if (m && m.settings && typeof m.settings.starredCommon === 'string') {
+      Store.set('settings.soundFontStarredCommon', m.settings.starredCommon);
+    }
+    return { ok: true, manifest: m };
+  } catch (err) {
+    if (err && err.cancelled) return { ok: false, cancelled: true };
+    return { ok: false, error: String(err && err.message || err) };
+  } finally {
+    _sfBackupOps.delete(opId);
+  }
+});
+
 // Pick wav files to add into a common folder. Multi-select on by default;
 // filtered to .wav and "all files" so users can still import oddly-named
 // audio files the OS doesn't tag with .wav.

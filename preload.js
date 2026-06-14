@@ -242,6 +242,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   selectBackupExportPath:()           => ipcRenderer.invoke('dialog:selectBackupExportPath'),
   selectBackupImportPath:()           => ipcRenderer.invoke('dialog:selectBackupImportPath'),
   sfBackupInspect:       (params)     => ipcRenderer.invoke('sfBackup:inspect', params),
+  sfBackupApplyReplace:  (params)     => ipcRenderer.invoke('sfBackup:applyReplace', params),
   onSfBackupProgress:    (cb) => {
     const handler = (_, data) => cb(data);
     ipcRenderer.on('sfBackup:progress', handler);

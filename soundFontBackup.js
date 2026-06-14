@@ -327,6 +327,147 @@ async function inspectBackup(zipPath) {
   }
 }
 
+// Replace-import: wipe the current SF library and restore from the backup
+// exactly. The whole operation is atomic from the user's perspective —
+// either the new library is fully in place or the original library is
+// untouched.
+//
+// Mechanism:
+//   1. Rename userData/soundFonts/ → userData/soundFonts.preimport-bak-<ts>/
+//      so the original is preserved as a complete tree (cheap rename, not a
+//      copy) and an interrupted extract leaves zero ambiguity about state.
+//   2. Create fresh userData/soundFonts/ and extract every entry into it.
+//   3. On success: delete the snapshot.
+//   4. On cancel/error: delete the partial new dir + rename snapshot back.
+//
+// progress callback fires per entry with { processedBytes, totalBytes,
+// currentItem }. Caller supplies an AbortSignal for cancellation.
+async function applyReplace({
+  userData,
+  zipPath,
+  onProgress = () => {},
+  signal = null,
+}) {
+  if (!zipPath) throw new Error('Missing zipPath');
+  if (!userData) throw new Error('Missing userData');
+  const sfRoot = _soundFontsRoot(userData);
+  const snapshotPath = `${sfRoot}.preimport-bak-${Date.now()}`;
+
+  // Snapshot via rename. If the original doesn't exist yet (fresh install
+  // path), there's nothing to preserve — just skip the rename.
+  const hadOriginal = fs.existsSync(sfRoot);
+  if (hadOriginal) {
+    try { fs.renameSync(sfRoot, snapshotPath); }
+    catch (err) { throw new Error(`Could not snapshot existing library: ${err.message}`); }
+  }
+
+  // Create the fresh root early so a no-entries backup still lands a valid
+  // empty dir rather than leaving the SF tab pointing at nothing.
+  try { fs.mkdirSync(sfRoot, { recursive: true }); }
+  catch (err) {
+    // Couldn't even make the new root — try to put things back exactly as
+    // they were so the user isn't worse off than when they started.
+    if (hadOriginal) {
+      try { fs.renameSync(snapshotPath, sfRoot); } catch {}
+    }
+    throw new Error(`Could not create library directory: ${err.message}`);
+  }
+
+  const StreamZip = require('node-stream-zip');
+  let zip;
+  try {
+    zip = new StreamZip.async({ file: zipPath, skipEntryNameValidation: true });
+  } catch (err) {
+    // Rollback before re-throwing.
+    try { fs.rmSync(sfRoot, { recursive: true, force: true }); } catch {}
+    if (hadOriginal) {
+      try { fs.renameSync(snapshotPath, sfRoot); } catch {}
+    }
+    throw new Error(`Could not open backup zip: ${err.message}`);
+  }
+
+  let cancelled = false;
+  const onAbort = () => { cancelled = true; };
+  if (signal) {
+    if (signal.aborted) cancelled = true;
+    else signal.addEventListener('abort', onAbort, { once: true });
+  }
+
+  let manifest = null;
+  let processedBytes = 0;
+  let totalBytes = 0;
+
+  try {
+    const entries = await zip.entries();
+    // Survey total bytes up front so the progress bar has something honest
+    // to count against, and pull the manifest into memory immediately so
+    // we can apply settings after the extract regardless of zip order.
+    for (const key of Object.keys(entries)) {
+      const e = entries[key];
+      if (!e.isDirectory && e.name !== 'manifest.json') totalBytes += (e.size || 0);
+    }
+    try {
+      const buf = await zip.entryData('manifest.json');
+      manifest = JSON.parse(buf.toString('utf8'));
+    } catch {}
+
+    // Extract each entry, validating that the resolved path stays inside
+    // sfRoot (defense against a malicious zip with "../" entries).
+    for (const key of Object.keys(entries)) {
+      if (cancelled) break;
+      const e = entries[key];
+      if (e.name === 'manifest.json') continue; // not a library file
+      if (!e.name || e.name === '/') continue;
+      const normalized = e.name.replace(/\\/g, '/');
+      const target = path.resolve(sfRoot, normalized);
+      if (!target.startsWith(path.resolve(sfRoot) + path.sep) && target !== path.resolve(sfRoot)) {
+        // Zip entry escapes the destination root — skip it rather than
+        // failing the whole import on a single bad entry.
+        continue;
+      }
+      if (e.isDirectory) {
+        try { fs.mkdirSync(target, { recursive: true }); } catch {}
+        continue;
+      }
+      // Ensure parent dir exists, then stream out the entry.
+      try { fs.mkdirSync(path.dirname(target), { recursive: true }); } catch {}
+      try {
+        await zip.extract(e.name, target);
+        processedBytes += (e.size || 0);
+        onProgress({ phase: 'extracting', processedBytes, totalBytes, currentItem: e.name });
+      } catch (err) {
+        // Per-entry failures abort the whole run — a half-extracted library
+        // isn't useful, and a clean rollback is better UX than limping on.
+        throw new Error(`Failed extracting ${e.name}: ${err && err.message || err}`);
+      }
+    }
+
+    if (cancelled) {
+      throw Object.assign(new Error('Cancelled'), { cancelled: true });
+    }
+  } catch (err) {
+    // Rollback: nuke the partial new dir, restore the snapshot.
+    try { fs.rmSync(sfRoot, { recursive: true, force: true }); } catch {}
+    if (hadOriginal) {
+      try { fs.renameSync(snapshotPath, sfRoot); } catch {}
+    }
+    try { await zip.close(); } catch {}
+    if (signal) { try { signal.removeEventListener('abort', onAbort); } catch {} }
+    throw err;
+  } finally {
+    if (signal) { try { signal.removeEventListener('abort', onAbort); } catch {} }
+  }
+  try { await zip.close(); } catch {}
+
+  // Success — discard the snapshot. Best-effort: if the rm fails the user
+  // still has a working library, just a leftover backup dir to clean up
+  // manually.
+  if (hadOriginal) {
+    try { fs.rmSync(snapshotPath, { recursive: true, force: true }); } catch {}
+  }
+  return { manifest };
+}
+
 module.exports = {
   SCHEMA_VERSION,
   BACKUP_TYPE,
@@ -336,4 +477,5 @@ module.exports = {
   suggestedFileName,
   exportBackup,
   inspectBackup,
+  applyReplace,
 };

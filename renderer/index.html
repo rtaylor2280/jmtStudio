@@ -2032,6 +2032,10 @@
   .sf-import-progress-track { height: 6px; background: var(--c-bg-inset); border-radius: 3px; overflow: hidden; margin: 6px 0; }
   .sf-import-progress-bar { height: 100%; width: 0%; background: var(--jmt-blue); transition: width 0.15s; }
   .sf-import-progress-detail { font-size: 0.72rem; color: var(--c-text-dim); margin: 4px 0 0 0; font-variant-numeric: tabular-nums; min-height: 1em; word-break: break-all; }
+  /* Backup export/restore stream long zip-entry paths through the detail
+     line; without a stable 2-line allotment the modal pumps up and down on
+     every wrap/unwrap. Fixed line-clamped box keeps the chrome still. */
+  #sf-backup-progress-detail { min-height: 2.4em; line-height: 1.2; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .sf-import-progress-tip { font-size: 0.74rem; color: var(--c-text-sub); font-style: italic; line-height: 1.45; padding: 8px 10px; margin: 14px 0 0 0; background: var(--c-bg-inset); border-left: 2px solid var(--jmt-blue); border-radius: 2px; }
   .sf-import-review-section { margin-bottom: 16px; }
   .sf-import-review-section h3 { font-size: 0.85rem; color: var(--c-text); margin: 0 0 10px 0; font-weight: 600; }
@@ -16204,16 +16208,24 @@ require(['vs/editor/editor.main'], function () {
         cancelBtn.disabled = false;
         cancelBtn.textContent = 'Cancel';
         let userCancelRequested = false;
+        // Render the stats line from current state. Called both on progress
+        // events (which update byte counts) and on a 1s tick (so the elapsed
+        // clock keeps moving even mid-large-file when progress events go
+        // silent for several seconds at a stretch).
+        const renderStats = () => {
+          const elapsedSec = (Date.now() - startMs) / 1000;
+          stats.textContent =
+            `${_sfFormatBytesShort(lastProcessed)} of ${_sfFormatBytesShort(survey.totalBytes)} · ` +
+            `${_sfFormatDuration(elapsedSec)} elapsed`;
+        };
+        const tickHandle = setInterval(renderStats, 1000);
         const off = window.electronAPI.onSfBackupProgress((p) => {
           if (p.opId !== opId) return;
           lastProcessed = p.processedBytes || 0;
           const pct = survey.totalBytes > 0 ? Math.min(100, (lastProcessed / survey.totalBytes) * 100) : 0;
           bar.style.width = `${pct}%`;
           if (p.currentItem) detail.textContent = p.currentItem;
-          const elapsedSec = (Date.now() - startMs) / 1000;
-          stats.textContent =
-            `${_sfFormatBytesShort(lastProcessed)} of ${_sfFormatBytesShort(survey.totalBytes)} · ` +
-            `${_sfFormatDuration(elapsedSec)} elapsed`;
+          renderStats();
         });
         const onCancel = async () => {
           if (userCancelRequested) return;
@@ -16236,6 +16248,7 @@ require(['vs/editor/editor.main'], function () {
         let result;
         try { result = await window.electronAPI.sfBackupExport({ opId, destPath }); }
         catch (err) { result = { ok: false, error: String(err && err.message || err) }; }
+        clearInterval(tickHandle);
         try { off && off(); } catch {}
         cancelBtn.removeEventListener('click', onCancel);
         modal.classList.remove('active');
@@ -16262,6 +16275,104 @@ require(['vs/editor/editor.main'], function () {
         await promptConfirm({
           title: 'Export complete',
           message: `Backup written to:\n${result.destPath}`,
+          confirmText: 'OK',
+          confirmKind: 'primary',
+          hideCancel: true,
+        });
+      };
+      // Replace-import run — extracts the backup zip on top of a wiped
+      // library, with progress + cancel + rollback handled by the backend.
+      // The progress modal mirrors the export modal's pattern (continuous
+      // bar + bytes/total + elapsed; no time estimate by design).
+      const _sfRunReplaceImport = async (zipPath, observed) => {
+        const opId = `sfBackupReplace-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const modal = document.getElementById('modal-sf-backup-progress');
+        const titleEl = document.getElementById('sf-backup-progress-title');
+        const detail = document.getElementById('sf-backup-progress-detail');
+        const bar = document.getElementById('sf-backup-progress-bar');
+        const stats = document.getElementById('sf-backup-progress-stats');
+        const cancelBtn = document.getElementById('sf-backup-progress-cancel');
+        if (!modal || !bar || !detail || !cancelBtn) return;
+        const totalBytes = observed?.totals?.totalBytes || 0;
+        const startMs = Date.now();
+        if (titleEl) titleEl.textContent = 'Restoring Sound Font library…';
+        modal.classList.add('active');
+        bar.style.width = '0%';
+        detail.textContent = 'Starting…';
+        stats.textContent = '';
+        cancelBtn.disabled = false;
+        cancelBtn.textContent = 'Cancel';
+        let userCancelRequested = false;
+        let lastProcessed = 0;
+        // Same independent-tick pattern as the export — keeps the elapsed
+        // clock honest even when single-entry extracts take several seconds.
+        const renderStats = () => {
+          const elapsedSec = (Date.now() - startMs) / 1000;
+          stats.textContent =
+            `${_sfFormatBytesShort(lastProcessed)} of ${_sfFormatBytesShort(totalBytes)} · ` +
+            `${_sfFormatDuration(elapsedSec)} elapsed`;
+        };
+        const tickHandle = setInterval(renderStats, 1000);
+        const off = window.electronAPI.onSfBackupProgress((p) => {
+          if (p.opId !== opId) return;
+          lastProcessed = p.processedBytes || 0;
+          const pct = totalBytes > 0 ? Math.min(100, (lastProcessed / totalBytes) * 100) : 0;
+          bar.style.width = `${pct}%`;
+          if (p.currentItem) detail.textContent = p.currentItem;
+          renderStats();
+        });
+        const onCancel = async () => {
+          if (userCancelRequested) return;
+          const ok = await promptConfirm({
+            title: 'Cancel import?',
+            message: 'Your original library will be restored. Are you sure?',
+            confirmText: 'Cancel import',
+            confirmKind: 'danger',
+            cancelText: 'Keep going',
+          });
+          if (!ok) return;
+          userCancelRequested = true;
+          cancelBtn.disabled = true;
+          cancelBtn.textContent = 'Cancelling…';
+          try { await window.electronAPI.sfBackupCancel({ opId }); } catch {}
+        };
+        cancelBtn.addEventListener('click', onCancel);
+        let result;
+        try { result = await window.electronAPI.sfBackupApplyReplace({ opId, zipPath }); }
+        catch (err) { result = { ok: false, error: String(err && err.message || err) }; }
+        clearInterval(tickHandle);
+        try { off && off(); } catch {}
+        cancelBtn.removeEventListener('click', onCancel);
+        modal.classList.remove('active');
+        // Reset title for the next time the modal is reused by export.
+        if (titleEl) titleEl.textContent = 'Exporting Sound Font library…';
+        if (result && result.cancelled) {
+          await promptConfirm({
+            title: 'Import cancelled',
+            message: 'Your original library was restored. No changes were kept.',
+            confirmText: 'OK',
+            confirmKind: 'primary',
+            hideCancel: true,
+          });
+          return;
+        }
+        if (!result || !result.ok) {
+          await promptConfirm({
+            title: 'Import failed',
+            message: `The backup could not be restored.\n${(result && result.error) || 'Unknown error.'}\nYour original library was restored.`,
+            confirmText: 'OK',
+            confirmKind: 'danger',
+            hideCancel: true,
+          });
+          return;
+        }
+        // Refresh the SF view so the new library renders. Force-clearing
+        // any stale in-memory selection / pivot the prior library left
+        // behind happens inside refreshSoundFontsView.
+        try { await window.refreshSoundFontsView(); } catch {}
+        await promptConfirm({
+          title: 'Import complete',
+          message: 'Your Sound Font library was restored from the backup.',
           confirmText: 'OK',
           confirmKind: 'primary',
           hideCancel: true,
@@ -16350,13 +16461,20 @@ require(['vs/editor/editor.main'], function () {
           };
           const onReplace = async () => {
             cleanup();
-            await promptConfirm({
-              title: 'Replace import',
-              message: 'The write step lands in slice 12.3. Validation and the choice modal are working.',
-              confirmText: 'OK',
-              confirmKind: 'primary',
-              hideCancel: true,
+            // Final-yes confirm before the destructive action. The choose
+            // modal already noted "cannot be undone", but a separate beat
+            // forces the user to acknowledge the wipe right before it
+            // happens — same convention the styles Discard / preset
+            // destructive flows use.
+            const go = await promptConfirm({
+              title: 'Replace your library?',
+              message: 'This wipes your current Sound Font library (sources, fonts, common folders) and restores the backup exactly. This cannot be undone.',
+              confirmText: 'Wipe and restore',
+              confirmKind: 'danger',
+              cancelText: 'Cancel',
             });
+            if (!go) return;
+            await _sfRunReplaceImport(zipPath, observed);
           };
           cancelBtn.addEventListener('click', onCancel);
           mergeBtn.addEventListener('click', onMerge);
