@@ -1429,8 +1429,9 @@
   }
   .tab svg { color: var(--jmt-blue); flex-shrink: 0; }
   .tab-btns { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-  #tab-btns-versions { display: none; }
-  #tab-btns-styles   { display: none; }
+  #tab-btns-versions   { display: none; }
+  #tab-btns-styles     { display: none; }
+  #tab-btns-soundfonts { display: none; }
 
   /* ── Versions panel layout ── */
   #versions-view {
@@ -1902,17 +1903,30 @@
   .sf-common-row { display: flex; flex-direction: column; border-bottom: 1px solid var(--c-border-faint); flex-shrink: 0; }
   .sf-common-row.expanded { flex: 1 1 auto; min-height: 260px; overflow: hidden; }
   /* Border layout mirrors .sf-card.selected: 1px on all sides (transparent
-     in default state so layout doesn't shift on expand) + a 3px left edge
-     for the list-row "active item" emphasis the card grid doesn't need. */
-  .sf-common-row-header { display: flex; align-items: center; gap: 8px; padding: 6px 10px; cursor: pointer; border: 1px solid transparent; border-left: 3px solid transparent; transition: background 0.1s, border-color 0.1s; flex-shrink: 0; }
+     in default state so layout doesn't shift between states) + a 3px left
+     edge slot for the list-row "active item" emphasis on the config-selected
+     state. */
+  .sf-common-row-header { display: flex; align-items: center; gap: 8px; padding: 6px 10px; cursor: pointer; border: 1px solid transparent; border-left: 3px solid transparent; transition: background 0.1s, border-color 0.1s, opacity 0.1s; flex-shrink: 0; }
   .sf-common-row-header:hover { background: var(--c-bg-hover); }
-  /* Expanded/active common — full JMT-blue outline + tinted background,
-     matching the .sf-card.selected convention so active items read the
-     same across the SF view. */
-  .sf-common-row.expanded > .sf-common-row-header { background: rgba(0,100,220,0.12); border-color: var(--jmt-blue); }
-  .sf-common-row.expanded > .sf-common-row-header:hover { background: rgba(0,100,220,0.18); }
-  html.light-mode .sf-common-row.expanded > .sf-common-row-header { background: rgba(0,100,220,0.08); }
-  html.light-mode .sf-common-row.expanded > .sf-common-row-header:hover { background: rgba(0,100,220,0.14); }
+  /* Expanded card — just a subtle background tint to mark "files visible
+     below". No selection-style border; the chevron rotation + the files
+     panel below carry the visual weight. Distinct from "selected" so users
+     don't misread expansion as activation. */
+  .sf-common-row.expanded > .sf-common-row-header { background: var(--c-bg-hover); }
+  /* Config-selected — the strong "this is being used" state. Drives off
+     the open config actually referencing ";common" AND this being the
+     default common. Same outline/background as .sf-card.selected for
+     cross-view consistency. */
+  .sf-common-row.config-selected > .sf-common-row-header { background: rgba(0,100,220,0.12); border-color: var(--jmt-blue); }
+  .sf-common-row.config-selected > .sf-common-row-header:hover { background: rgba(0,100,220,0.18); }
+  html.light-mode .sf-common-row.config-selected > .sf-common-row-header { background: rgba(0,100,220,0.08); }
+  html.light-mode .sf-common-row.config-selected > .sf-common-row-header:hover { background: rgba(0,100,220,0.14); }
+  /* De-emphasized — applied to cards that aren't config-selected. Mirrors
+     the opacity convention used by .fav-item-missing and similar "muted
+     but readable" states. Cards stay clickable and hoverable; text just
+     reads quieter so the eye lands on the selected one. */
+  .sf-common-row.is-dimmed > .sf-common-row-header { opacity: 0.6; }
+  .sf-common-row.is-dimmed > .sf-common-row-header:hover { opacity: 0.85; }
   .sf-common-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
   .sf-common-row-name { font-size: 0.78rem; color: var(--c-text); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .sf-common-row-meta { font-size: 0.66rem; color: var(--c-text-dim); white-space: nowrap; }
@@ -3290,7 +3304,8 @@
       <span id="modal-confirm-checkbox-label"></span>
     </label>
     <div class="modal-btns">
-      <button class="modal-btn-cancel"  id="modal-confirm-cancel">Cancel</button>
+      <button class="modal-btn-cancel" id="modal-confirm-cancel">Cancel</button>
+      <button class="modal-btn-cancel" id="modal-confirm-middle" style="display:none"></button>
       <button class="modal-btn-discard" id="modal-confirm-ok">OK</button>
     </div>
   </div>
@@ -3757,8 +3772,8 @@
      the top set every row at once. ── -->
 <div class="modal-overlay" id="modal-sf-save-conflict">
   <div class="modal">
-    <h2>Some fonts already exist at the destination</h2>
-    <p class="sf-import-hint">For each duplicate, choose whether to keep the existing folder or replace it with the version in your library. Treats each font as a unit — no mixing files between old and new.</p>
+    <h2 id="sf-save-conflict-title">Some fonts already exist at the destination</h2>
+    <p class="sf-import-hint" id="sf-save-conflict-desc">For each duplicate, choose whether to keep the existing folder or replace it with the version in your library. Treats each font as a unit — no mixing files between old and new.</p>
     <div class="sf-save-conflict-bulk">
       <button class="sf-save-conflict-bulk-btn" data-conflict-all="skip">Set all to Skip</button>
       <button class="sf-save-conflict-bulk-btn" data-conflict-all="replace">Set all to Replace</button>
@@ -3767,6 +3782,27 @@
     <div class="modal-btns" style="margin-top: 16px">
       <button class="modal-btn-cancel" id="sf-save-conflict-cancel">Cancel</button>
       <button class="modal-btn-primary" id="sf-save-conflict-apply">Continue</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Include-common-folder courtesy modal: shown at Save time when the open
+     config does NOT reference ";common" but the user has multiple common
+     folders available. Dropdown forces an explicit pick (no pre-select),
+     since asking is a courtesy and assuming the default would defeat that.
+     ── -->
+<div class="modal-overlay" id="modal-sf-include-common">
+  <div class="modal">
+    <h2>Include common folder?</h2>
+    <p class="sf-import-hint">The open config does not reference a "common" folder, but your library has several. Pick one to include alongside the selected fonts, or skip to save fonts only.</p>
+    <div style="margin: 14px 0 18px;">
+      <label for="sf-include-common-select" style="display:block; margin-bottom: 6px; font-size: 0.78rem; color: var(--c-text-sub);">Common folder</label>
+      <select id="sf-include-common-select" style="width: 100%; padding: 6px 8px; background: var(--c-bg-inset); color: var(--c-text); border: 1px solid var(--c-border-strong); border-radius: 3px; font-size: 0.82rem;"></select>
+    </div>
+    <div class="modal-btns">
+      <button class="modal-btn-cancel" id="sf-include-common-cancel">Cancel</button>
+      <button class="modal-btn-cancel" id="sf-include-common-skip">Skip</button>
+      <button class="modal-btn-primary" id="sf-include-common-include" disabled>Include</button>
     </div>
   </div>
 </div>
@@ -4179,6 +4215,12 @@ window.promptUnsaved = promptUnsaved;
 //   opts.confirmText — primary button label (default: 'OK')
 //   opts.confirmKind — 'danger' (default, red) | 'save' (green) | 'primary' (blue)
 //   opts.cancelText  — secondary button label (default: 'Cancel')
+//   opts.middleText  — optional third button between Cancel and Confirm. When
+//                      provided, the function resolves with one of three
+//                      strings ('cancel' | 'middle' | 'confirm') instead of
+//                      a bare boolean so the caller can branch three ways.
+//   opts.hideCancel  — when true, hides the Cancel button so the modal reads
+//                      as an info notice (single OK). Resolves true on OK.
 //   opts.checkbox    — optional { label } to show a checkbox between message and
 //                      buttons. When provided, resolves with { confirmed, checked }
 //                      instead of a bare boolean so the caller can branch on the
@@ -4191,6 +4233,8 @@ function promptConfirm(opts) {
       confirmText = 'OK',
       confirmKind = 'danger',
       cancelText  = 'Cancel',
+      middleText  = null,
+      hideCancel  = false,
       checkbox    = null,
     } = opts || {};
     document.getElementById('modal-confirm-title').textContent = title;
@@ -4219,18 +4263,34 @@ function promptConfirm(opts) {
                     : 'modal-btn-discard';
     const cancelBtn = document.getElementById('modal-confirm-cancel');
     cancelBtn.textContent = cancelText;
+    cancelBtn.style.display = hideCancel ? 'none' : '';
+    const middleBtn = document.getElementById('modal-confirm-middle');
+    if (middleBtn) {
+      if (middleText) {
+        middleBtn.textContent = middleText;
+        middleBtn.style.display = '';
+      } else {
+        middleBtn.style.display = 'none';
+        middleBtn.onclick = null;
+      }
+    }
     const overlay = document.getElementById('modal-confirm');
     overlay.classList.add('active');
-    const cleanup = (confirmed) => {
+    // Three-button mode resolves with strings so the caller can branch;
+    // two-button mode keeps the historical boolean shape for compat.
+    const cleanup = (result) => {
       overlay.classList.remove('active');
-      if (checkbox) {
-        resolve({ confirmed, checked: !!(cbInput && cbInput.checked) });
+      if (middleText) {
+        resolve(result);
+      } else if (checkbox) {
+        resolve({ confirmed: result === true, checked: !!(cbInput && cbInput.checked) });
       } else {
-        resolve(confirmed);
+        resolve(result === true);
       }
     };
-    okBtn.onclick     = () => cleanup(true);
-    cancelBtn.onclick = () => cleanup(false);
+    okBtn.onclick     = () => cleanup(middleText ? 'confirm' : true);
+    cancelBtn.onclick = () => cleanup(middleText ? 'cancel'  : false);
+    if (middleBtn) middleBtn.onclick = () => cleanup('middle');
   });
 }
 window.promptConfirm = promptConfirm;
@@ -11468,21 +11528,11 @@ require(['vs/editor/editor.main'], function () {
       // session lifetime and clears on relaunch.
       const _sfLoadActiveCommon = async () => { _sfSelectedCommonUuid = null; };
       const _sfSaveActiveCommon = async () => { /* no-op — session-only */ };
-      // ── Sidecar visibility rule ──────────────────────────
-      // Delta-driven: the rule's verdict (should-be-open vs should-be-collapsed)
-      // is recomputed at app launch, on common imports/deletes, and on config
-      // changes. The sidecar only changes state when the verdict TRANSITIONS —
-      // a mid-session user toggle stays put until the underlying conditions
-      // change.
-      //   Open when: at least one common exists OR the open config has a preset
-      //              whose font references ";common" (case-insensitive)
-      //   Collapsed otherwise
-      // _sfPrevSidecarRuleVerdict tracks the last computed value so the delta
-      // check works. null means "no prior computation" — handled as a force.
-      let _sfPrevSidecarRuleVerdict = null;
-      const _sfShouldSidecarBeOpen = () => {
-        if (_sfCommons.length > 0) return true;
-        // Cheap-fail when the editor / parser aren't ready, or no config open.
+      // Does the open config reference ";common" anywhere? Used both by
+      // the common-list render (drives config-selected vs dimmed visual)
+      // and by the sidecar visibility rule. Pure read — safe to call any
+      // time the editor and parser are loaded.
+      const _sfConfigWantsCommon = () => {
         try {
           if (typeof editor === 'undefined' || !editor) return false;
           if (typeof presetParser === 'undefined' || !presetParser) return false;
@@ -11497,6 +11547,22 @@ require(['vs/editor/editor.main'], function () {
           }
         } catch {}
         return false;
+      };
+      // ── Sidecar visibility rule ──────────────────────────
+      // Delta-driven: the rule's verdict (should-be-open vs should-be-collapsed)
+      // is recomputed at app launch, on common imports/deletes, and on config
+      // changes. The sidecar only changes state when the verdict TRANSITIONS —
+      // a mid-session user toggle stays put until the underlying conditions
+      // change.
+      //   Open when: at least one common exists OR the open config has a preset
+      //              whose font references ";common" (case-insensitive)
+      //   Collapsed otherwise
+      // _sfPrevSidecarRuleVerdict tracks the last computed value so the delta
+      // check works. null means "no prior computation" — handled as a force.
+      let _sfPrevSidecarRuleVerdict = null;
+      const _sfShouldSidecarBeOpen = () => {
+        if (_sfCommons.length > 0) return true;
+        return _sfConfigWantsCommon();
       };
       const _sfApplySidecarRule = ({ force = false } = {}) => {
         const verdict = _sfShouldSidecarBeOpen();
@@ -11517,12 +11583,17 @@ require(['vs/editor/editor.main'], function () {
         }
       };
       // Debounced re-check on editor content change — config edits can change
-      // whether ";common" is referenced and the rule needs to react, but not
-      // on every keystroke.
+      // whether ";common" is referenced. Drives both the sidecar visibility
+      // rule and the common-list config-selected/dimmed visual classes.
       let _sfSidecarRuleTimer = null;
       const _sfScheduleSidecarRuleRecheck = () => {
         clearTimeout(_sfSidecarRuleTimer);
-        _sfSidecarRuleTimer = setTimeout(() => _sfApplySidecarRule(), 400);
+        _sfSidecarRuleTimer = setTimeout(() => {
+          _sfApplySidecarRule();
+          // The list visual classes depend on _sfConfigWantsCommon; re-render
+          // so the selected/dimmed state tracks the editor.
+          _sfRenderCommonList();
+        }, 400);
       };
       // Starred common — app-global persistent default. Always exactly one
       // when at least one common exists; null otherwise. The star icon on
@@ -11578,6 +11649,12 @@ require(['vs/editor/editor.main'], function () {
           list.innerHTML = `<div class="sf-common-empty">No common folder yet.<br>Import a voicepack zip or a folder of wav files to get started.</div>`;
           return;
         }
+        // Selection (the "this is the one being used" affordance) is driven
+        // off the open config. When the config references ";common", the
+        // default common is the selected one; otherwise nothing is selected
+        // and every card is de-emphasized. Click-to-expand is purely a file
+        // browsing affordance and intentionally does not look like selection.
+        const wantsCommon = _sfConfigWantsCommon();
         // Build each card as an accordion item. Only the currently-expanded
         // common renders its file tree inline (placeholder div populated
         // async after the HTML lands so listCommonFiles can do its IPC).
@@ -11587,6 +11664,11 @@ require(['vs/editor/editor.main'], function () {
         list.innerHTML = _sfCommons.map(c => {
           const isExpanded = c.uuid === _sfSelectedCommonUuid;
           const isStarred = c.uuid === _sfStarredCommonUuid;
+          const isConfigSelected = wantsCommon && isStarred;
+          const isDimmed = !isConfigSelected;
+          const headerTitle = isConfigSelected
+            ? 'Referenced by the open config'
+            : 'Not referenced by the open config';
           const starBtn = showStars
             ? `<button class="sf-common-row-star${isStarred ? ' is-starred' : ''}" data-star-uuid="${_sfEscape(c.uuid)}" title="${isStarred ? 'Default common folder' : 'Set as default'}">${isStarred ? '&#9733;' : '&#9734;'}</button>`
             : '';
@@ -11599,11 +11681,15 @@ require(['vs/editor/editor.main'], function () {
               </div>
               <div class="sf-common-files" id="sf-common-files"></div>
             </div>` : '';
-          return `<div class="sf-common-row${isExpanded ? ' expanded' : ''}" data-common-uuid="${_sfEscape(c.uuid)}">
-            <div class="sf-common-row-header">
+          const rowClasses = ['sf-common-row'];
+          if (isExpanded) rowClasses.push('expanded');
+          if (isConfigSelected) rowClasses.push('config-selected');
+          if (isDimmed) rowClasses.push('is-dimmed');
+          return `<div class="${rowClasses.join(' ')}" data-common-uuid="${_sfEscape(c.uuid)}">
+            <div class="sf-common-row-header" title="${_sfEscape(headerTitle)}">
               <span class="sf-common-row-chevron">&#9656;</span>
               <div class="sf-common-row-main">
-                <div class="sf-common-row-name" title="${_sfEscape(c.meta.name || '')}">${_sfEscape(c.meta.name || '')}</div>
+                <div class="sf-common-row-name">${_sfEscape(c.meta.name || '')}</div>
                 <div class="sf-common-row-meta">${c.fileCount} file${c.fileCount === 1 ? '' : 's'} &middot; ${_sfFmtBytes(c.totalBytes)}</div>
               </div>
               ${starBtn}
@@ -11808,6 +11894,40 @@ require(['vs/editor/editor.main'], function () {
           await _sfSaveActiveCommon();
         }
         await _sfRefreshCommons();
+      };
+      // Right-click "Export…" — write this common's files to a user-picked
+      // destination as a "common/" subfolder. Same conflict semantics as the
+      // bulk Save flow, just scoped to one common. Cheaper UX than mixing
+      // single-common export into the main Save which is fonts-driven.
+      const _sfExportCommonPrompt = async (uuid) => {
+        const c = _sfCommons.find(x => x.uuid === uuid);
+        if (!c) return;
+        let pick;
+        try { pick = await window.electronAPI.selectSaveDestination(); }
+        catch (err) { alert(`Could not open the folder picker: ${err && err.message || err}`); return; }
+        if (!pick || !pick.ok) return;
+        const destDir = pick.dirPath;
+        // If a "common" already exists at the destination, ask how to handle
+        // it. The shared conflict modal expects a list of names; pass just
+        // "common".
+        let mode = 'rename';
+        try {
+          const r = await window.electronAPI.commonFolderExistsAt({ destDir });
+          if (r && r.ok && r.exists) {
+            const choices = await _sfPromptSaveConflicts(['common'], {
+              title: 'A common folder already exists at the destination',
+              description: 'Choose whether to keep the existing folder or replace it with the version in your library. Treats the common folder as a unit — no mixing files between old and new.',
+            });
+            if (!choices) return; // cancelled
+            mode = choices.get('common') || 'skip';
+          }
+        } catch {}
+        _sfDeleteProgress.show('Exporting common folder', c.meta.name);
+        let res;
+        try { res = await window.electronAPI.exportCommonToFolder({ uuid, destDir, mode }); }
+        catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
+        await _sfDeleteProgress.hide();
+        if (!res || !res.ok) { alert(`Export failed: ${(res && res.error) || 'unknown error'}`); return; }
       };
       const _sfAddCommonFiles = async () => {
         if (!_sfSelectedCommonUuid) return;
@@ -14763,12 +14883,68 @@ require(['vs/editor/editor.main'], function () {
       // when the user clicks Continue, or null on Cancel. Default per row
       // is 'skip' — safer; the user has to explicitly choose Replace, or
       // hit the "Set all to Replace" quick action.
-      const _sfPromptSaveConflicts = (conflictNames) => {
+      // Multi-common include prompt — shown when the open config does NOT
+      // reference ";common" and the user has more than one common available.
+      // Default common is pre-selected so there's always a valid choice;
+      // user can change the dropdown if they want a different one.
+      // Resolves with { action, uuid? } where action is
+      // 'cancel' | 'skip' | 'include'.
+      const _sfPromptIncludeCommonChoice = () => {
+        const modal = document.getElementById('modal-sf-include-common');
+        const select = document.getElementById('sf-include-common-select');
+        const cancelBtn = document.getElementById('sf-include-common-cancel');
+        const skipBtn = document.getElementById('sf-include-common-skip');
+        const includeBtn = document.getElementById('sf-include-common-include');
+        if (!modal || !select) return Promise.resolve({ action: 'cancel' });
+        // Build options. Default common is marked and pre-selected so the
+        // Include button has a valid target from the start.
+        const opts = [];
+        for (const c of _sfCommons) {
+          const isDefault = c.uuid === _sfStarredCommonUuid;
+          const label = isDefault ? `${c.meta.name || c.uuid} (default)` : (c.meta.name || c.uuid);
+          opts.push(`<option value="${_sfEscape(c.uuid)}">${_sfEscape(label)}</option>`);
+        }
+        select.innerHTML = opts.join('');
+        select.value = _sfStarredCommonUuid || _sfCommons[0]?.uuid || '';
+        includeBtn.disabled = !select.value;
+        return new Promise(resolve => {
+          const cleanup = (result) => {
+            modal.classList.remove('active');
+            cancelBtn.removeEventListener('click', onCancel);
+            skipBtn.removeEventListener('click', onSkip);
+            includeBtn.removeEventListener('click', onInclude);
+            modal.removeEventListener('click', onBackdrop);
+            document.removeEventListener('keydown', onKey);
+            resolve(result);
+          };
+          const onCancel = () => cleanup({ action: 'cancel' });
+          const onSkip = () => cleanup({ action: 'skip' });
+          const onInclude = () => {
+            if (!select.value) return;
+            cleanup({ action: 'include', uuid: select.value });
+          };
+          const onBackdrop = (e) => { if (e.target === modal) onCancel(); };
+          const onKey = (e) => { if (e.key === 'Escape') onCancel(); };
+          cancelBtn.addEventListener('click', onCancel);
+          skipBtn.addEventListener('click', onSkip);
+          includeBtn.addEventListener('click', onInclude);
+          modal.addEventListener('click', onBackdrop);
+          document.addEventListener('keydown', onKey);
+          modal.classList.add('active');
+        });
+      };
+      const _sfPromptSaveConflicts = (conflictNames, opts = {}) => {
         const modal = document.getElementById('modal-sf-save-conflict');
         const list = document.getElementById('sf-save-conflict-list');
         const applyBtn = document.getElementById('sf-save-conflict-apply');
         const cancelBtn = document.getElementById('sf-save-conflict-cancel');
+        const titleEl = document.getElementById('sf-save-conflict-title');
+        const descEl = document.getElementById('sf-save-conflict-desc');
         if (!modal || !list) return Promise.resolve(null);
+        // Default copy is the bulk-fonts case; common-only export passes
+        // overrides so the modal language matches the action.
+        if (titleEl) titleEl.textContent = opts.title || 'Some fonts already exist at the destination';
+        if (descEl) descEl.textContent = opts.description || 'For each duplicate, choose whether to keep the existing folder or replace it with the version in your library. Treats each font as a unit — no mixing files between old and new.';
         // Render one row per conflict; both options shown, "skip" pre-selected.
         list.innerHTML = conflictNames.map(n => `
           <div class="sf-save-conflict-row" data-conflict-row="${_sfEscape(n)}">
@@ -14822,12 +14998,64 @@ require(['vs/editor/editor.main'], function () {
       const _sfBulkSave = async () => {
         const names = Array.from(_sfSelectedNames);
         if (names.length === 0) return false;
+        // Common inclusion logic:
+        //   config refs ;common AND starred exists  → include silently (uses default)
+        //   config refs ;common AND no starred       → warn (only fonts ship)
+        //   config DOESN'T ref ;common AND 1 common  → 3-button ask (default uuid)
+        //   config DOESN'T ref ;common AND 2+ commons → dropdown forces an explicit pick
+        //   config DOESN'T ref ;common AND no commons → don't include, no ask
+        const wantsCommon = [..._sfLastInUseFonts].some(n => n.toLowerCase() === 'common');
+        const hasStarred = !!_sfStarredCommonUuid;
+        let includeCommon = false;
+        // Tracks which common to include for this Save. Defaults to the
+        // starred uuid; the multi-common dropdown can override it.
+        let _sfBulkSaveCommonOverride = null;
+        if (wantsCommon && hasStarred) {
+          includeCommon = true;
+        } else if (wantsCommon && !hasStarred) {
+          const ok = await promptConfirm({
+            title: 'No common folder available',
+            message: 'The open config references a "common" folder, but no common folder is imported in your library.\nSave will only include the selected fonts. Continue?',
+            confirmText: 'Continue',
+            confirmKind: 'primary',
+            cancelText: 'Cancel',
+          });
+          if (!ok) return false;
+        } else if (!wantsCommon && hasStarred) {
+          // Config doesn't ask for it — but the user has one available.
+          // Single-common case: simple 3-button (Cancel / Skip / Include).
+          // Multi-common case: dropdown forces an explicit pick so we
+          // don't silently assume the default in a courtesy ask. The
+          // dropdown overrides the starred default into a per-Save
+          // selection captured in _sfBulkSaveCommonOverride.
+          if (_sfCommons.length === 1) {
+            const choice = await promptConfirm({
+              title: 'Include common folder?',
+              message: 'The open config does not reference a "common" folder, but you have a default common folder in your library. Include it in the saved output?',
+              confirmText: 'Include',
+              confirmKind: 'primary',
+              middleText: 'Skip',
+              cancelText: 'Cancel',
+            });
+            if (choice === 'cancel') return false;
+            includeCommon = choice === 'confirm';
+          } else {
+            const result = await _sfPromptIncludeCommonChoice();
+            if (result.action === 'cancel') return false;
+            if (result.action === 'include') {
+              includeCommon = true;
+              _sfBulkSaveCommonOverride = result.uuid;
+            }
+          }
+        }
         let pick;
         try { pick = await window.electronAPI.selectSaveDestination(); }
         catch (err) { alert(`Could not open the folder picker: ${err && err.message || err}`); return false; }
         if (!pick || !pick.ok) return false;
         const destDir = pick.dirPath;
-        // Pre-scan: which entries already exist at the destination?
+        // Pre-scan: which entries already exist at the destination? Also
+        // check whether a "common" folder already exists if we plan to write
+        // one — surfaced in the same conflict UI so the user picks per-item.
         const conflicts = [];
         for (const name of names) {
           try {
@@ -14835,20 +15063,58 @@ require(['vs/editor/editor.main'], function () {
             if (r && r.ok && r.exists) conflicts.push(name);
           } catch {}
         }
-        // If conflicts exist, ask the user how to handle each one.
+        // The literal label "common" can collide with a font folder named
+        // "common" in extreme edge cases; pre-scan order is fonts first then
+        // common, and the UI keys by string so a collision here is benign —
+        // the user just sees one row labeled "common" representing the
+        // common folder's overwrite choice.
+        if (includeCommon) {
+          try {
+            const r = await window.electronAPI.commonFolderExistsAt({ destDir });
+            if (r && r.ok && r.exists && !conflicts.includes('common')) conflicts.push('common');
+          } catch {}
+        }
         let modeByName = new Map(); // name -> 'skip' | 'replace'
         if (conflicts.length > 0) {
           const choices = await _sfPromptSaveConflicts(conflicts);
           if (!choices) return false; // user cancelled
           modeByName = choices;
         }
+        // Combined progress count — only items that will actually be written.
+        // Items the user chose to skip in the conflict modal don't count
+        // toward the total (and don't increment the running step), so the
+        // progress reflects real work.
+        const commonMode = includeCommon ? (modeByName.get('common') || 'rename') : null;
+        const willWriteFonts = names.filter(n => (modeByName.get(n) || 'rename') !== 'skip').length;
+        const willWriteCommon = includeCommon && commonMode !== 'skip' ? 1 : 0;
+        const totalSteps = willWriteFonts + willWriteCommon;
+        // Everything got skipped — honest bail rather than a "Saving (0 of 0)"
+        // flash. Selection is preserved so the user can revisit their
+        // conflict choices and re-Save without re-selecting fonts.
+        if (totalSteps === 0) {
+          await promptConfirm({
+            title: 'Nothing to save',
+            message: 'Every selected item was set to Skip, so no files were written. Your selection is kept so you can revisit your choices.',
+            confirmText: 'OK',
+            confirmKind: 'primary',
+            hideCancel: true,
+          });
+          return false;
+        }
         _sfDeleteProgress.show('Saving fonts', '');
         const failures = [];
         const results = { copied: 0, skipped: 0, replaced: 0 };
-        for (let i = 0; i < names.length; i++) {
-          const name = names[i];
+        let stepIdx = 0;
+        for (const name of names) {
           const mode = modeByName.get(name) || 'rename';
-          _sfDeleteProgress.show(`Saving fonts (${i + 1} of ${names.length})`, name);
+          if (mode === 'skip') {
+            // Already in destination, user chose to keep existing. No IPC
+            // call (it would just confirm the skip); no progress tick.
+            results.skipped++;
+            continue;
+          }
+          stepIdx++;
+          _sfDeleteProgress.show(`Saving fonts (${stepIdx} of ${totalSteps})`, name);
           try {
             const r = await window.electronAPI.exportEntryToFolder({ name, destDir, mode });
             if (!r || !r.ok) {
@@ -14864,9 +15130,30 @@ require(['vs/editor/editor.main'], function () {
             failures.push({ name, error: String(err && err.message || err) });
           }
         }
+        if (includeCommon && commonMode !== 'skip') {
+          const commonUuid = _sfBulkSaveCommonOverride || _sfStarredCommonUuid;
+          stepIdx++;
+          _sfDeleteProgress.show(`Saving fonts (${stepIdx} of ${totalSteps})`, 'common folder');
+          try {
+            const r = await window.electronAPI.exportCommonToFolder({
+              uuid: commonUuid,
+              destDir,
+              mode: commonMode,
+            });
+            if (!r || !r.ok) failures.push({ name: 'common', error: (r && r.error) || 'unknown error' });
+            else if (r.skipped) results.skipped++;
+            else if (commonMode === 'replace') results.replaced++;
+            else results.copied++;
+          } catch (err) {
+            failures.push({ name: 'common', error: String(err && err.message || err) });
+          }
+        } else if (includeCommon && commonMode === 'skip') {
+          // User chose to keep the existing common at destination.
+          results.skipped++;
+        }
         await _sfDeleteProgress.hide();
         if (failures.length) {
-          alert(`Some fonts failed to save:\n${failures.map(f => ` • ${f.name}: ${f.error}`).join('\n')}`);
+          alert(`Some items failed to save:\n${failures.map(f => ` • ${f.name}: ${f.error}`).join('\n')}`);
           // Keep selection on real failures so the user can see what's still
           // in scope and retry. (Skips don't count as failures — those were
           // deliberate user choices.)
@@ -15580,6 +15867,7 @@ require(['vs/editor/editor.main'], function () {
           }
           mkItem('Rename…', '', () => _sfRenameCommon(uuid));
           mkItem('Duplicate…', '', () => _sfDuplicateCommon(uuid));
+          mkItem('Export…', '', () => _sfExportCommonPrompt(uuid));
           mkSep();
           mkItem('× Delete', 'danger', () => _sfDeleteCommonPrompt(uuid));
         }

@@ -551,6 +551,72 @@ function moveCommonFiles(userData, uuid, sourcePaths, destSubPath) {
   return { ok: true, moved, failed };
 }
 
+// Does a "common" folder already exist at this destination? Used by Save
+// pre-scans so the conflict UI can include the common alongside font
+// entries that would collide.
+function commonFolderExistsAt(destDir) {
+  if (!destDir) return false;
+  try { return fs.existsSync(path.join(destDir, 'common')); }
+  catch { return false; }
+}
+
+// Copy a common's files/ contents into destDir/<targetName>/. Mirrors
+// soundFontEntries.exportEntryToFolder's mode semantics so the bulk Save
+// flow can treat both uniformly. Target name is "common" by Proffie's SD
+// convention; rename mode bumps to "common (N)" if collisions can't be
+// avoided otherwise.
+function exportCommonToFolder(userData, uuid, destDir, mode = 'rename') {
+  if (!uuid) return { ok: false, error: 'Missing uuid' };
+  if (!destDir) return { ok: false, error: 'Missing destDir' };
+  const srcDir = path.join(commonRoot(userData), uuid, 'files');
+  if (!fs.existsSync(srcDir)) return { ok: false, error: `Common files not found: ${uuid}` };
+  if (!fs.existsSync(destDir)) {
+    try { fs.mkdirSync(destDir, { recursive: true }); }
+    catch (err) { return { ok: false, error: `Cannot create destination: ${err.message}` }; }
+  }
+  let targetName = 'common';
+  const exists = fs.existsSync(path.join(destDir, targetName));
+  if (exists) {
+    if (mode === 'skip') {
+      return { ok: true, skipped: true, destPath: path.join(destDir, targetName) };
+    }
+    if (mode === 'replace') {
+      try { fs.rmSync(path.join(destDir, targetName), { recursive: true, force: true }); }
+      catch (err) { return { ok: false, error: `Cannot remove existing folder: ${err.message}` }; }
+    } else {
+      let n = 1;
+      while (fs.existsSync(path.join(destDir, targetName))) {
+        targetName = `common (${n})`;
+        n++;
+      }
+    }
+  }
+  const targetDir = path.join(destDir, targetName);
+  try {
+    fs.mkdirSync(targetDir, { recursive: true });
+    const walk = (curSrc, curDest) => {
+      const items = fs.readdirSync(curSrc, { withFileTypes: true });
+      for (const item of items) {
+        const srcPath = path.join(curSrc, item.name);
+        const destPath = path.join(curDest, item.name);
+        if (item.isDirectory()) {
+          fs.mkdirSync(destPath, { recursive: true });
+          walk(srcPath, destPath);
+        } else if (item.isFile()) {
+          fs.copyFileSync(srcPath, destPath);
+        }
+      }
+    };
+    walk(srcDir, targetDir);
+    return { ok: true, destPath: targetDir };
+  } catch (err) {
+    // Best-effort cleanup of a partial copy so the user doesn't end up with
+    // half a common folder mixed in with their other content.
+    try { fs.rmSync(targetDir, { recursive: true, force: true }); } catch {}
+    return { ok: false, error: String(err && err.message || err) };
+  }
+}
+
 // Read raw bytes of a single file inside a common's files/ tree. Used by
 // the in-app text viewer (.txt/.md/.rtf/etc. that may live alongside wavs).
 // Path is validated via _resolveFilesPath to stay inside files/.
@@ -582,4 +648,6 @@ module.exports = {
   copyCommonFiles,
   moveCommonFiles,
   readCommonFileBytes,
+  commonFolderExistsAt,
+  exportCommonToFolder,
 };

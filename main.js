@@ -1163,6 +1163,16 @@ ipcMain.handle('common:readFileBytes', (_, { uuid, subPath } = {}) => {
   } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
+ipcMain.handle('common:folderExistsAt', (_, { destDir } = {}) => {
+  try { return { ok: true, exists: soundFontCommon.commonFolderExistsAt(destDir) }; }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+ipcMain.handle('common:exportToFolder', (_, { uuid, destDir, mode } = {}) => {
+  try { return soundFontCommon.exportCommonToFolder(app.getPath('userData'), uuid, destDir, mode); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
 // Pick wav files to add into a common folder. Multi-select on by default;
 // filtered to .wav and "all files" so users can still import oddly-named
 // audio files the OS doesn't tag with .wav.

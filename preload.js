@@ -234,6 +234,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   copyCommonFiles:       (params)     => ipcRenderer.invoke('common:copyFiles', params),
   moveCommonFiles:       (params)     => ipcRenderer.invoke('common:moveFiles', params),
   readCommonFileBytes:   (params)     => ipcRenderer.invoke('common:readFileBytes', params),
+  commonFolderExistsAt:  (params)     => ipcRenderer.invoke('common:folderExistsAt', params),
+  exportCommonToFolder:  (params)     => ipcRenderer.invoke('common:exportToFolder', params),
   selectCommonFiles:     ()           => ipcRenderer.invoke('dialog:selectCommonFiles'),
   selectCommonSource:    (params)     => ipcRenderer.invoke('dialog:selectCommonSource', params),
   onEntryCreateProgress: (cb) => {
