@@ -3866,6 +3866,24 @@
   </div>
 </div>
 
+<!-- ── Backup import choose — shown after a valid backup is selected. Lists
+     what the backup contains (counts + size) and offers the three-way
+     branch: Cancel (bail) / Merge (additive with per-item conflict
+     prompts in 12.3) / Replace (wipe + restore exactly). The actual
+     write path lands in 12.3. ── -->
+<div class="modal-overlay" id="modal-sf-backup-import-choose">
+  <div class="modal">
+    <h2>Import Sound Font library backup</h2>
+    <p class="sf-import-hint" id="sf-backup-import-summary">&nbsp;</p>
+    <p class="sf-import-hint" style="margin-top:6px; color: var(--c-text-muted);"><strong>Merge</strong> adds what's in the backup to your library. Items that already match are left alone. When an item exists in both but the contents differ, you'll choose to keep yours, use the backup's version, or keep both (renamed).<br><strong>Replace</strong> wipes your current library and restores the backup exactly. This cannot be undone.</p>
+    <div class="modal-btns" style="margin-top: 18px">
+      <button class="modal-btn-cancel" id="sf-backup-import-cancel">Cancel</button>
+      <button class="modal-btn-cancel" id="sf-backup-import-merge">Merge</button>
+      <button class="modal-btn-discard" id="sf-backup-import-replace">Replace</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── Backup export progress — long-running progress with continuous bar,
      time elapsed + estimated remaining, current item, cancel button. The
      cancel goes through a confirm + rollback (partial zip deleted). ── -->
@@ -16250,10 +16268,102 @@ require(['vs/editor/editor.main'], function () {
         });
       };
       document.getElementById('btn-sf-export-backup')?.addEventListener('click', _sfOpenExportBackup);
-      // Import-backup placeholder — wired in slice 12.2/12.3.
-      document.getElementById('btn-sf-import-backup')?.addEventListener('click', () => {
-        alert('Import Backup is coming next. Slice 12.2.');
-      });
+      // Import-backup — validation phase. Picks a zip, validates the manifest,
+      // either rejects with a styled error or shows the Replace/Merge/Cancel
+      // choice modal. The actual write path lands in slice 12.3.
+      const _sfOpenImportBackup = async () => {
+        let pick;
+        try { pick = await window.electronAPI.selectBackupImportPath(); }
+        catch (err) { alert(`Could not open the picker: ${err && err.message || err}`); return; }
+        if (!pick || !pick.ok) return;
+        const zipPath = pick.filePath;
+        // Inspection can take a moment on a big zip — show a brief progress
+        // modal so the UI doesn't appear hung. Reusing the bulk progress
+        // helper since the work is short and unitless.
+        _sfDeleteProgress.show('Reading backup', '');
+        let inspect;
+        try { inspect = await window.electronAPI.sfBackupInspect({ zipPath }); }
+        catch (err) { inspect = { ok: false, reason: 'unknown', error: String(err && err.message || err) }; }
+        await _sfDeleteProgress.hide();
+        if (!inspect || !inspect.ok) {
+          // Branch the user-facing copy by reason so the message matches
+          // what actually went wrong. The backend reason codes are stable
+          // and intended as the renderer's source of truth here.
+          const titleByReason = {
+            'not-a-backup': 'Not a backup file',
+            'bad-manifest': 'Backup file is damaged',
+            'newer-schema': 'Backup is too new',
+            'unreadable':   'Could not read the file',
+            'missing-file': 'File not found',
+          };
+          const reason = inspect && inspect.reason;
+          await promptConfirm({
+            title: titleByReason[reason] || 'Import failed',
+            message: (inspect && inspect.error) || 'Unknown error.',
+            confirmText: 'OK',
+            confirmKind: 'danger',
+            hideCancel: true,
+          });
+          return;
+        }
+        const { manifest, observed } = inspect;
+        // Show counts from the manifest, but cross-check against what's
+        // actually in the zip so a tampered manifest doesn't deceive the
+        // summary. When they disagree we trust the observed numbers — it's
+        // the file we're going to extract from, not the manifest.
+        const cs = observed.counts;
+        const totalSize = _sfFormatBytesShort(observed.totals.totalBytes);
+        const exportedAt = manifest.exportedAt ? new Date(manifest.exportedAt).toLocaleString() : '';
+        const summaryEl = document.getElementById('sf-backup-import-summary');
+        if (summaryEl) {
+          summaryEl.textContent =
+            `Backup contains ${cs.sources} source${cs.sources === 1 ? '' : 's'}, ${cs.library} font${cs.library === 1 ? '' : 's'}, ${cs.common} common folder${cs.common === 1 ? '' : 's'}. ` +
+            `Total ${totalSize}.` +
+            (exportedAt ? ` Exported ${exportedAt}.` : '');
+        }
+        const modal = document.getElementById('modal-sf-backup-import-choose');
+        const cancelBtn = document.getElementById('sf-backup-import-cancel');
+        const mergeBtn  = document.getElementById('sf-backup-import-merge');
+        const replaceBtn = document.getElementById('sf-backup-import-replace');
+        if (!modal || !cancelBtn || !mergeBtn || !replaceBtn) return;
+        modal.classList.add('active');
+        await new Promise((resolve) => {
+          const cleanup = () => {
+            modal.classList.remove('active');
+            cancelBtn.removeEventListener('click', onCancel);
+            mergeBtn.removeEventListener('click', onMerge);
+            replaceBtn.removeEventListener('click', onReplace);
+            resolve();
+          };
+          const onCancel = () => cleanup();
+          const onMerge = async () => {
+            cleanup();
+            // 12.3 lands the write path. For now confirm the choice landed
+            // and surface the manifest so the user knows the read succeeded.
+            await promptConfirm({
+              title: 'Merge import',
+              message: 'The write step lands in slice 12.3. Validation and the choice modal are working.',
+              confirmText: 'OK',
+              confirmKind: 'primary',
+              hideCancel: true,
+            });
+          };
+          const onReplace = async () => {
+            cleanup();
+            await promptConfirm({
+              title: 'Replace import',
+              message: 'The write step lands in slice 12.3. Validation and the choice modal are working.',
+              confirmText: 'OK',
+              confirmKind: 'primary',
+              hideCancel: true,
+            });
+          };
+          cancelBtn.addEventListener('click', onCancel);
+          mergeBtn.addEventListener('click', onMerge);
+          replaceBtn.addEventListener('click', onReplace);
+        });
+      };
+      document.getElementById('btn-sf-import-backup')?.addEventListener('click', _sfOpenImportBackup);
       // Bulk add tags — open the modal. stopPropagation guards against the
       // (historical) document-level "click clears selection" handler in case
       // it ever comes back.

@@ -1254,6 +1254,27 @@ ipcMain.handle('sfBackup:cancel', (_, { opId } = {}) => {
   return { ok: true };
 });
 
+ipcMain.handle('dialog:selectBackupImportPath', async () => {
+  const lastDir = Store.get('lastSfBackupDir') || Store.get('lastDir') || app.getPath('documents');
+  const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+    title: 'Import Sound Font library backup',
+    defaultPath: lastDir,
+    properties: ['openFile'],
+    filters: [
+      { name: 'JMT Studio Sound Font library backup', extensions: ['zip'] },
+      { name: 'All files', extensions: ['*'] },
+    ],
+  });
+  if (canceled || !filePaths || filePaths.length === 0) return { ok: false };
+  Store.set('lastSfBackupDir', path.dirname(filePaths[0]));
+  return { ok: true, filePath: filePaths[0] };
+});
+
+ipcMain.handle('sfBackup:inspect', async (_, { zipPath } = {}) => {
+  try { return await soundFontBackup.inspectBackup(zipPath); }
+  catch (err) { return { ok: false, reason: 'unknown', error: String(err && err.message || err) }; }
+});
+
 // Pick wav files to add into a common folder. Multi-select on by default;
 // filtered to .wav and "all files" so users can still import oddly-named
 // audio files the OS doesn't tag with .wav.

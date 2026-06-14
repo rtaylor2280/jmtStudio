@@ -258,6 +258,75 @@ async function exportBackup({
   return { destPath, manifest };
 }
 
+// Read + validate a backup zip without unpacking it. Returns the manifest
+// + a survey of what's actually inside the zip (counts per bucket measured
+// from the entry list, so a tampered manifest doesn't silently mismatch
+// the real contents). Errors carry a `reason` code so the renderer can
+// branch UX between "not a backup" vs "wrong schema" vs "unreadable file".
+async function inspectBackup(zipPath) {
+  if (!zipPath) return { ok: false, reason: 'missing-path', error: 'Missing zip path' };
+  if (!fs.existsSync(zipPath)) return { ok: false, reason: 'missing-file', error: 'File not found' };
+  const StreamZip = require('node-stream-zip');
+  let zip;
+  try {
+    zip = new StreamZip.async({ file: zipPath, skipEntryNameValidation: true });
+  } catch (err) {
+    return { ok: false, reason: 'unreadable', error: String(err && err.message || err) };
+  }
+  try {
+    let entries;
+    try { entries = await zip.entries(); }
+    catch (err) { return { ok: false, reason: 'unreadable', error: String(err && err.message || err) }; }
+    const manifestEntry = entries['manifest.json'];
+    if (!manifestEntry) {
+      return { ok: false, reason: 'not-a-backup', error: 'This zip is not a JMT Studio Sound Font library backup.' };
+    }
+    let manifest;
+    try {
+      const buf = await zip.entryData('manifest.json');
+      manifest = JSON.parse(buf.toString('utf8'));
+    } catch (err) {
+      return { ok: false, reason: 'bad-manifest', error: 'The backup file is damaged or its manifest is not readable.' };
+    }
+    if (!manifest || manifest.type !== BACKUP_TYPE) {
+      return { ok: false, reason: 'not-a-backup', error: 'This zip is not a JMT Studio Sound Font library backup.' };
+    }
+    if (typeof manifest.schemaVersion !== 'number' || manifest.schemaVersion > SCHEMA_VERSION) {
+      return {
+        ok: false,
+        reason: 'newer-schema',
+        error: `This backup was created by a newer version of JMT Studio (schema ${manifest.schemaVersion}). Update JMT Studio to import it.`,
+      };
+    }
+    // Measure actual bucket contents from the entry list. Counts top-level
+    // subdirs under each bucket (sources/<uuid>, library/<name>, common/<uuid>).
+    // Bytes sum from entry sizes for accuracy.
+    const buckets = { sources: { count: 0, bytes: 0 }, library: { count: 0, bytes: 0 }, common: { count: 0, bytes: 0 } };
+    const topDirs = { sources: new Set(), library: new Set(), common: new Set() };
+    for (const key of Object.keys(entries)) {
+      const e = entries[key];
+      if (!e.name || e.name === '/' || e.name === 'manifest.json') continue;
+      const parts = e.name.split('/');
+      const bucket = parts[0];
+      if (!buckets[bucket]) continue;
+      if (parts[1] && parts[1] !== '') topDirs[bucket].add(parts[1]);
+      if (!e.isDirectory) buckets[bucket].bytes += (e.size || 0);
+    }
+    for (const b of Object.keys(buckets)) buckets[b].count = topDirs[b].size;
+    const observedTotal = buckets.sources.bytes + buckets.library.bytes + buckets.common.bytes;
+    return {
+      ok: true,
+      manifest,
+      observed: {
+        counts: { sources: buckets.sources.count, library: buckets.library.count, common: buckets.common.count },
+        totals: { sources: buckets.sources.bytes, library: buckets.library.bytes, common: buckets.common.bytes, totalBytes: observedTotal },
+      },
+    };
+  } finally {
+    try { await zip.close(); } catch {}
+  }
+}
+
 module.exports = {
   SCHEMA_VERSION,
   BACKUP_TYPE,
@@ -266,4 +335,5 @@ module.exports = {
   estimateSeconds,
   suggestedFileName,
   exportBackup,
+  inspectBackup,
 };
