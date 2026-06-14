@@ -243,6 +243,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   selectBackupImportPath:()           => ipcRenderer.invoke('dialog:selectBackupImportPath'),
   sfBackupInspect:       (params)     => ipcRenderer.invoke('sfBackup:inspect', params),
   sfBackupApplyReplace:  (params)     => ipcRenderer.invoke('sfBackup:applyReplace', params),
+  sfBackupSurveyMerge:   (params)     => ipcRenderer.invoke('sfBackup:surveyMerge', params),
+  sfBackupApplyMerge:    (params)     => ipcRenderer.invoke('sfBackup:applyMerge', params),
   onSfBackupProgress:    (cb) => {
     const handler = (_, data) => cb(data);
     ipcRenderer.on('sfBackup:progress', handler);

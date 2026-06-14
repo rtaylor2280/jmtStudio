@@ -285,6 +285,32 @@ function deleteCommon(userData, uuid) {
   }
 }
 
+// Proffie-style variant numbering for wav file collisions. The Proffie
+// firmware reads multi-variant sound effects from <name>.wav,
+// <name>2.wav, <name>3.wav... (no spaces, no parens, no underscore —
+// just the digit appended directly). Use this helper everywhere a wav
+// file might collide on copy/move/add inside a common (the destination
+// SD layout depends on these names being Proffie-readable).
+//
+//   destDir   absolute dir we're writing into
+//   srcName   the source file's basename (e.g. "boot.wav" or "boot2.wav")
+//
+// Tries the source name first (round-trip identity wins when free), then
+// strips any trailing digits from the stem to find the "base," and walks
+// 2, 3, 4... until a free slot opens up. So copying "boot.wav" into a
+// dir already holding "boot.wav" yields "boot2.wav"; doing it again
+// yields "boot3.wav"; copying an existing "boot5.wav" into the same dir
+// yields "boot6.wav" (or whatever's next free).
+function _proffieVariantName(destDir, srcName) {
+  if (!fs.existsSync(path.join(destDir, srcName))) return srcName;
+  const ext = path.extname(srcName);
+  const stem = path.basename(srcName, ext);
+  const base = stem.replace(/\d+$/, '') || stem;
+  let n = 2;
+  while (fs.existsSync(path.join(destDir, `${base}${n}${ext}`))) n++;
+  return `${base}${n}${ext}`;
+}
+
 // Validate a sub-path stays inside a common's files/ root. Defensive
 // against any caller passing "../" sequences or absolute paths.
 function _resolveFilesPath(userData, uuid, subPath) {
@@ -351,15 +377,8 @@ function addFilesToCommon(userData, uuid, subPath, sourceFilePaths) {
         failed.push({ source: src, error: 'Not a file' });
         continue;
       }
-      const base = path.basename(src);
-      const ext = path.extname(base);
-      const stem = path.basename(base, ext);
-      let dest = path.join(destDir, base);
-      let n = 1;
-      while (fs.existsSync(dest)) {
-        dest = path.join(destDir, `${stem} (${n})${ext}`);
-        n++;
-      }
+      const finalName = _proffieVariantName(destDir, path.basename(src));
+      const dest = path.join(destDir, finalName);
       fs.copyFileSync(src, dest);
       added.push(path.basename(dest));
     } catch (err) {
@@ -474,15 +493,8 @@ function copyCommonFiles(userData, sourceUuid, sourcePaths, destUuid, destSubPat
         failed.push({ source: srcSubPath, error: 'Source file not found' });
         continue;
       }
-      const base = path.basename(srcAbs);
-      const ext = path.extname(base);
-      const stem = path.basename(base, ext);
-      let destPath = path.join(destDir, base);
-      let n = 1;
-      while (fs.existsSync(destPath)) {
-        destPath = path.join(destDir, `${stem} (${n})${ext}`);
-        n++;
-      }
+      const finalName = _proffieVariantName(destDir, path.basename(srcAbs));
+      const destPath = path.join(destDir, finalName);
       fs.copyFileSync(srcAbs, destPath);
       const rel = path.relative(destFilesRoot, destPath).replace(/\\/g, '/');
       added.push(rel);
@@ -532,15 +544,8 @@ function moveCommonFiles(userData, uuid, sourcePaths, destSubPath) {
         moved.push(srcSubPath);
         continue;
       }
-      const base = path.basename(srcAbs);
-      const ext = path.extname(base);
-      const stem = path.basename(base, ext);
-      let destPath = path.join(destDir, base);
-      let n = 1;
-      while (fs.existsSync(destPath)) {
-        destPath = path.join(destDir, `${stem} (${n})${ext}`);
-        n++;
-      }
+      const finalName = _proffieVariantName(destDir, path.basename(srcAbs));
+      const destPath = path.join(destDir, finalName);
       fs.renameSync(srcAbs, destPath);
       const rel = path.relative(filesRoot, destPath).replace(/\\/g, '/');
       moved.push(rel);
@@ -584,9 +589,13 @@ function exportCommonToFolder(userData, uuid, destDir, mode = 'rename') {
       try { fs.rmSync(path.join(destDir, targetName), { recursive: true, force: true }); }
       catch (err) { return { ok: false, error: `Cannot remove existing folder: ${err.message}` }; }
     } else {
+      // Underscore (not parens) — folder names on SD ride the same
+      // safety rule as font folders. The user-facing "rename" mode is
+      // really staging, since Proffie only matches the literal "common"
+      // folder; either way, _N is the safer suffix.
       let n = 1;
       while (fs.existsSync(path.join(destDir, targetName))) {
-        targetName = `common (${n})`;
+        targetName = `common_${n}`;
         n++;
       }
     }

@@ -2036,6 +2036,43 @@
      line; without a stable 2-line allotment the modal pumps up and down on
      every wrap/unwrap. Fixed line-clamped box keeps the chrome still. */
   #sf-backup-progress-detail { min-height: 2.4em; line-height: 1.2; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  /* Merge-plan conflict list — one row per conflicting item, grouped by
+     category. Each row shows name + current/backup info + 2-or-3 way
+     radio. Bulk "set all" buttons per category sit at the group header. */
+  .sf-merge-group { margin-bottom: 14px; }
+  .sf-merge-group-header { display: flex; align-items: center; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--c-border); margin-bottom: 6px; }
+  .sf-merge-group-title { font-size: 0.78rem; font-weight: 600; color: var(--c-text); flex: 1; }
+  .sf-merge-bulk { display: inline-flex; gap: 4px; }
+  .sf-merge-bulk button { font-size: 0.68rem; padding: 2px 8px; background: var(--c-bg-raised); border: 1px solid var(--c-border-strong); border-radius: 3px; color: var(--c-text-sub); cursor: pointer; }
+  .sf-merge-bulk button:hover { background: var(--c-bg-hover); color: var(--c-text); }
+  .sf-merge-row { display: flex; align-items: flex-start; gap: 10px; padding: 6px 8px; background: var(--c-bg-inset); border: 1px solid var(--c-border-faint); border-radius: 3px; margin-bottom: 4px; }
+  .sf-merge-row-main { flex: 1; min-width: 0; }
+  .sf-merge-row-name { font-size: 0.76rem; color: var(--c-text); font-weight: 500; word-break: break-all; }
+  .sf-merge-row-meta { font-size: 0.66rem; color: var(--c-text-dim); margin-top: 2px; }
+  .sf-merge-row-choices { display: inline-flex; gap: 10px; flex-shrink: 0; }
+  .sf-merge-row-choices label { font-size: 0.7rem; color: var(--c-text-sub); display: inline-flex; align-items: center; gap: 3px; cursor: pointer; }
+  .sf-merge-row-choices input[type="radio"] { margin: 0; }
+  .sf-merge-summary-counts { font-size: 0.7rem; color: var(--c-text-muted); margin-top: 4px; }
+  /* Per-row "Details" expansion — side-by-side comparison of every field
+     that differs between backup and current. Notes and description can
+     be long, so the cells wrap and overflow scrolls. */
+  .sf-merge-row-expand { background: none; border: none; color: var(--c-text-muted); font-size: 0.66rem; cursor: pointer; padding: 2px 0 0 0; text-align: left; }
+  .sf-merge-row-expand:hover { color: var(--jmt-blue); text-decoration: underline; }
+  .sf-merge-row-details { margin: -2px 4px 6px 4px; background: var(--c-bg); border: 1px solid var(--c-border-faint); border-top: none; border-radius: 0 0 3px 3px; padding: 6px 10px 8px; }
+  .sf-merge-detail-head { display: grid; grid-template-columns: 130px 1fr 1fr; gap: 10px; font-size: 0.64rem; color: var(--c-text-dim); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; padding-bottom: 3px; border-bottom: 1px solid var(--c-border-faint); }
+  .sf-merge-detail-field { display: grid; grid-template-columns: 130px 1fr 1fr; gap: 10px; padding: 4px 0; border-bottom: 1px dashed var(--c-border-faint); font-size: 0.7rem; }
+  .sf-merge-detail-field:last-child { border-bottom: none; }
+  .sf-merge-detail-label { color: var(--c-text-sub); font-weight: 500; }
+  .sf-merge-detail-value { color: var(--c-text); white-space: pre-wrap; word-break: break-word; max-height: 180px; overflow-y: auto; }
+  .sf-merge-detail-value.empty { color: var(--c-text-dim); font-style: italic; }
+  /* Inline rename input — only shown when "Keep both" is selected for a
+     library conflict. Pre-filled with the safe default so the user can
+     accept it by clicking elsewhere or type to override. */
+  .sf-merge-row-rename { display: none; margin-top: 6px; font-size: 0.7rem; gap: 6px; align-items: center; }
+  .sf-merge-row.show-rename .sf-merge-row-rename { display: flex; }
+  .sf-merge-row-rename label { color: var(--c-text-sub); flex-shrink: 0; }
+  .sf-merge-row-rename input { background: var(--c-bg-inset); border: 1px solid var(--c-border-strong); border-radius: 3px; padding: 2px 6px; color: var(--c-text); font-size: 0.7rem; flex: 1; min-width: 0; font-family: inherit; }
+  .sf-merge-row-rename input:focus { border-color: var(--jmt-blue); outline: none; }
   .sf-import-progress-tip { font-size: 0.74rem; color: var(--c-text-sub); font-style: italic; line-height: 1.45; padding: 8px 10px; margin: 14px 0 0 0; background: var(--c-bg-inset); border-left: 2px solid var(--jmt-blue); border-radius: 2px; }
   .sf-import-review-section { margin-bottom: 16px; }
   .sf-import-review-section h3 { font-size: 0.85rem; color: var(--c-text); margin: 0 0 10px 0; font-weight: 600; }
@@ -3870,11 +3907,27 @@
   </div>
 </div>
 
+<!-- ── Backup import merge plan — surfaces per-item conflicts after the
+     user picks Merge. Identical items (same content) are silently
+     skipped; new items (in backup but not current) install silently;
+     this modal exists to resolve the third case: items that exist in
+     both with different contents. ── -->
+<div class="modal-overlay" id="modal-sf-backup-merge-plan">
+  <div class="modal" style="max-width: 760px; max-height: 88vh; display: flex; flex-direction: column;">
+    <h2>Merge backup into your library</h2>
+    <p class="sf-import-hint" id="sf-merge-plan-summary" style="margin-bottom: 6px;">&nbsp;</p>
+    <div id="sf-merge-plan-conflicts" style="flex: 1 1 auto; overflow-y: auto; min-height: 0; margin: 10px 0; padding-right: 6px;"></div>
+    <div class="modal-btns" style="margin-top: 14px">
+      <button class="modal-btn-cancel" id="sf-merge-plan-cancel">Cancel</button>
+      <button class="modal-btn-primary" id="sf-merge-plan-apply">Apply</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── Backup import choose — shown after a valid backup is selected. Lists
      what the backup contains (counts + size) and offers the three-way
      branch: Cancel (bail) / Merge (additive with per-item conflict
-     prompts in 12.3) / Replace (wipe + restore exactly). The actual
-     write path lands in 12.3. ── -->
+     prompts in 12.4) / Replace (wipe + restore exactly). ── -->
 <div class="modal-overlay" id="modal-sf-backup-import-choose">
   <div class="modal">
     <h2>Import Sound Font library backup</h2>
@@ -16280,6 +16333,465 @@ require(['vs/editor/editor.main'], function () {
           hideCancel: true,
         });
       };
+      // Merge-import run — survey first to classify each backup item
+      // (identical / new / conflict), then if there are any conflicts
+      // present the plan modal so the user can choose per-item, then
+      // apply with progress + cancel + rollback. Identical items are
+      // skipped silently; new items install without prompting.
+      const _sfRunMergeImport = async (zipPath, observed) => {
+        _sfDeleteProgress.show('Inspecting backup', '');
+        let survey;
+        try { survey = await window.electronAPI.sfBackupSurveyMerge({ zipPath }); }
+        catch (err) { survey = { ok: false, error: String(err && err.message || err) }; }
+        await _sfDeleteProgress.hide();
+        if (!survey || !survey.ok) {
+          await promptConfirm({
+            title: 'Could not inspect backup',
+            message: (survey && survey.error) || 'Unknown error.',
+            confirmText: 'OK',
+            confirmKind: 'danger',
+            hideCancel: true,
+          });
+          return;
+        }
+        // Empty case detection — if the backup has no new items AND no
+        // conflicts, the only outcome would be "do nothing." Skip the
+        // plan modal entirely and tell the user directly, so they don't
+        // see an Apply button on a modal where Apply is a no-op.
+        const totalAdds =
+          survey.sources.add.length + survey.library.add.length + survey.common.add.length;
+        const totalConflicts =
+          survey.sources.conflict.length + survey.library.conflict.length + survey.common.conflict.length;
+        if (totalAdds === 0 && totalConflicts === 0) {
+          await promptConfirm({
+            title: 'Library already up to date',
+            message: 'Everything in the backup is already in your library. No changes needed.',
+            confirmText: 'OK',
+            confirmKind: 'primary',
+            hideCancel: true,
+          });
+          return;
+        }
+        // Build the plan: every "add" item gets 'install'; conflicts get
+        // user-chosen modes from the plan modal (default: 'keep' = safe);
+        // identical items are absent from the plan (no-op).
+        //
+        // Library plan values are objects { mode, currentName } so the
+        // backend can replace/extract-alongside the right on-disk dir
+        // even when it was renamed locally (currentName !== id). Sources
+        // and commons use bare strings since uuid identity == on-disk
+        // name for those categories.
+        const plan = { sources: {}, library: {}, common: {} };
+        for (const it of survey.sources.add) plan.sources[it.id] = 'install';
+        for (const it of survey.library.add) plan.library[it.id] = { mode: 'install', currentName: null };
+        for (const it of survey.common.add)  plan.common[it.id]  = 'install';
+        const userChoices = await _sfPromptMergePlan(survey);
+        if (!userChoices) return; // cancelled
+        // Index library conflicts by id so we can look up the current dir
+        // name for each user choice. Sources/commons use uuid == dir name.
+        const libConflictByid = new Map(survey.library.conflict.map(c => [c.id, c]));
+        for (const cat of ['sources', 'library', 'common']) {
+          for (const id of Object.keys(userChoices[cat] || {})) {
+            if (cat === 'library') {
+              const raw = userChoices.library[id];
+              const mode = typeof raw === 'string' ? raw : raw.mode;
+              const customName = typeof raw === 'object' ? raw.customName : '';
+              const conflict = libConflictByid.get(id);
+              const currentName = conflict ? (conflict.current.dirName || conflict.current.name || id) : id;
+              plan.library[id] = { mode, currentName, customName };
+            } else {
+              plan[cat][id] = userChoices[cat][id];
+            }
+          }
+        }
+        // After the user's choices, if every conflict was set to Keep and
+        // there were no adds, there's still nothing to write. Different
+        // wording from the upfront case since this one IS a result of the
+        // user's choices.
+        const isActionable = (v) => {
+          if (typeof v === 'string') return v !== 'keep';
+          if (v && typeof v === 'object') return v.mode && v.mode !== 'keep';
+          return false;
+        };
+        const totalActions =
+          Object.values(plan.sources).filter(isActionable).length +
+          Object.values(plan.library).filter(isActionable).length +
+          Object.values(plan.common).filter(isActionable).length;
+        if (totalActions === 0) {
+          await promptConfirm({
+            title: 'Nothing to merge',
+            message: 'You set every conflicting item to Keep yours, so no changes were written.',
+            confirmText: 'OK',
+            confirmKind: 'primary',
+            hideCancel: true,
+          });
+          return;
+        }
+        await _sfRunMergeApply(zipPath, plan, survey);
+      };
+
+      // Prompt the user with the per-item conflict resolution UI. Returns
+      // { sources, library, common } maps of conflict id → mode, or null
+      // on cancel. Identical and add-only categories show as muted counts
+      // in the summary so the user knows what's being handled silently.
+      const _sfPromptMergePlan = (survey) => {
+        const modal = document.getElementById('modal-sf-backup-merge-plan');
+        const summary = document.getElementById('sf-merge-plan-summary');
+        const list = document.getElementById('sf-merge-plan-conflicts');
+        const cancelBtn = document.getElementById('sf-merge-plan-cancel');
+        const applyBtn = document.getElementById('sf-merge-plan-apply');
+        if (!modal || !list || !cancelBtn || !applyBtn) return Promise.resolve(null);
+
+        // Tally for the summary line — identical (silent skip), new (silent
+        // install), conflict (user picks). Honest counts up front.
+        const ident = survey.sources.identical.length + survey.library.identical.length + survey.common.identical.length;
+        const adds = survey.sources.add.length + survey.library.add.length + survey.common.add.length;
+        const conflicts = survey.sources.conflict.length + survey.library.conflict.length + survey.common.conflict.length;
+        // Lead with what the user has to act on; mention identical items
+        // only as a quiet "everything else matches" parenthetical so they
+        // know nothing else is happening behind their back. Zero-count
+        // branches drop out entirely.
+        // Modal only opens when there's at least one add or conflict
+        // (caller catches the empty case upfront), so the summary always
+        // has something actionable to lead with. Identical items appear
+        // as a quiet parenthetical for confidence, never the lead.
+        const parts = [];
+        if (adds > 0) parts.push(`${adds} new item${adds === 1 ? '' : 's'} will be added.`);
+        if (conflicts > 0) parts.push(`${conflicts} item${conflicts === 1 ? '' : 's'} ${conflicts === 1 ? 'differs' : 'differ'}. Choose what to do with each below.`);
+        if (ident > 0) parts.push(`Everything else in your library already matches.`);
+        summary.textContent = parts.join(' ');
+
+        // Render one section per category, only if it has conflicts.
+        const labels = { sources: 'Sources', library: 'Fonts', common: 'Common folders' };
+        // Library is the only category with 3-way (keep / replace / both);
+        // sources and commons get the simpler 2-way per the v1 scope.
+        const allowsBoth = { sources: false, library: true, common: false };
+        const buildRow = (cat, item, defaultMode) => {
+          const safeId = _sfEscape(item.id);
+          const nameField = `name-${cat}-${safeId}`;
+          const bothOpt = allowsBoth[cat]
+            ? `<label><input type="radio" name="${nameField}" value="both"${defaultMode === 'both' ? ' checked' : ''}>Keep both</label>`
+            : '';
+          // What differs — content vs metadata — surfaced explicitly so
+          // the user can make an informed choice. When metadata differs,
+          // list the specific fields ("acquisition date, tags") so they
+          // don't have to guess what changed.
+          const fieldList = Array.isArray(item.diffFields) && item.diffFields.length > 0
+            ? item.diffFields.join(', ')
+            : '';
+          let diffLine = '';
+          if (item.contentDiffers && item.metaDiffers) {
+            diffLine = fieldList
+              ? `Files differ. Metadata also differs: ${fieldList}. `
+              : 'Files and metadata both differ. ';
+          } else if (item.contentDiffers) {
+            diffLine = 'Sound files differ. ';
+          } else if (item.metaDiffers) {
+            diffLine = fieldList
+              ? `Sound files are identical. Metadata differs: ${fieldList}. `
+              : 'Sound files are identical. Only metadata differs. ';
+          }
+          // The current dir name (the on-disk slug) is the entry's name
+          // field by default; if the user renamed locally it'd already
+          // appear in the "name" diffField above, so no separate rename
+          // note needed.
+          const sizesLine = `Backup: ${item.backup.fileCount} files, ${_sfFormatBytesShort(item.backup.totalBytes)} · Yours: ${item.current.fileCount} files, ${_sfFormatBytesShort(item.current.totalBytes)}`;
+          const meta = `${diffLine}${sizesLine}`;
+          // Details expansion is only meaningful when there are actual
+          // per-field values to compare (library meta diffs). Sources and
+          // commons get the same row without the toggle since they don't
+          // carry diffDetails.
+          const expandable = Array.isArray(item.diffDetails) && item.diffDetails.length > 0;
+          const expandBtn = expandable
+            ? `<button type="button" class="sf-merge-row-expand" data-merge-expand="${cat}|${safeId}">Show details</button>`
+            : '';
+          // Inline rename input for library "Keep both". Pre-fill with a
+          // safe-character default (underscore, not parens — Proffie's font
+          // matcher is picky about folder names on the SD card). The
+          // .show-rename class on the row toggles its visibility based on
+          // which radio is selected.
+          const renameInput = allowsBoth[cat]
+            ? `<div class="sf-merge-row-rename">
+                <label for="rn-${safeId}">Save backup as:</label>
+                <input id="rn-${safeId}" type="text" data-merge-rename="${cat}|${safeId}" value="${_sfEscape(item.name + '_1')}" maxlength="200">
+              </div>`
+            : '';
+          return `<div class="sf-merge-row" data-merge-cat="${cat}" data-merge-id="${safeId}">
+            <div class="sf-merge-row-main">
+              <div class="sf-merge-row-name">${_sfEscape(item.name)}</div>
+              <div class="sf-merge-row-meta">${_sfEscape(meta)}</div>
+              ${expandBtn}
+              ${renameInput}
+            </div>
+            <div class="sf-merge-row-choices">
+              <label><input type="radio" name="${nameField}" value="keep"${defaultMode === 'keep' ? ' checked' : ''}>Keep yours</label>
+              <label><input type="radio" name="${nameField}" value="replace"${defaultMode === 'replace' ? ' checked' : ''}>Use backup</label>
+              ${bothOpt}
+            </div>
+          </div>`;
+        };
+        // Format a diff value for the details table — arrays come through
+        // as comma-joined, booleans as Yes/No, empty/null as italic "(empty)".
+        const formatDiffValue = (v) => {
+          if (v === undefined || v === null) return { text: '(empty)', empty: true };
+          if (Array.isArray(v)) {
+            if (v.length === 0) return { text: '(empty)', empty: true };
+            return { text: v.join(', '), empty: false };
+          }
+          if (typeof v === 'boolean') return { text: v ? 'Yes' : 'No', empty: false };
+          const s = String(v);
+          if (s.trim() === '') return { text: '(empty)', empty: true };
+          return { text: s, empty: false };
+        };
+        const buildDetails = (item) => {
+          const rows = (item.diffDetails || []).map(d => {
+            const b = formatDiffValue(d.backup);
+            const c = formatDiffValue(d.current);
+            return `<div class="sf-merge-detail-field">
+              <div class="sf-merge-detail-label">${_sfEscape(d.label)}</div>
+              <div class="sf-merge-detail-value${b.empty ? ' empty' : ''}">${_sfEscape(b.text)}</div>
+              <div class="sf-merge-detail-value${c.empty ? ' empty' : ''}">${_sfEscape(c.text)}</div>
+            </div>`;
+          }).join('');
+          return `<div class="sf-merge-row-details">
+            <div class="sf-merge-detail-head">
+              <div>Field</div>
+              <div>Backup</div>
+              <div>Yours</div>
+            </div>
+            ${rows}
+          </div>`;
+        };
+        const sections = [];
+        for (const cat of ['sources', 'library', 'common']) {
+          const conflictsList = survey[cat].conflict;
+          if (conflictsList.length === 0) continue;
+          const bulkBoth = allowsBoth[cat] ? `<button data-merge-bulk="both" data-merge-cat="${cat}">All: keep both</button>` : '';
+          sections.push(`<div class="sf-merge-group" data-merge-group="${cat}">
+            <div class="sf-merge-group-header">
+              <span class="sf-merge-group-title">${labels[cat]} (${conflictsList.length})</span>
+              <span class="sf-merge-bulk">
+                <button data-merge-bulk="keep" data-merge-cat="${cat}">All: keep yours</button>
+                <button data-merge-bulk="replace" data-merge-cat="${cat}">All: use backup</button>
+                ${bulkBoth}
+              </span>
+            </div>
+            ${conflictsList.map(it => buildRow(cat, it, 'keep')).join('')}
+          </div>`);
+        }
+        list.innerHTML = sections.join('');
+
+        return new Promise(resolve => {
+          const onBulkClick = (e) => {
+            const btn = e.target.closest('[data-merge-bulk]');
+            if (!btn) return;
+            const cat = btn.getAttribute('data-merge-cat');
+            const mode = btn.getAttribute('data-merge-bulk');
+            const group = list.querySelector(`[data-merge-group="${cat}"]`);
+            if (!group) return;
+            group.querySelectorAll('input[type="radio"]').forEach(r => {
+              r.checked = (r.value === mode);
+            });
+          };
+          // Toggle the side-by-side details block inline below its row so
+          // the user can verify exactly what differs without leaving the
+          // plan modal. Builds + inserts on demand so list HTML stays
+          // small; preserves the existing radio choices because we don't
+          // re-render the row itself.
+          const onExpandClick = (e) => {
+            const btn = e.target.closest('[data-merge-expand]');
+            if (!btn) return;
+            const tag = btn.getAttribute('data-merge-expand');
+            const [cat, id] = tag.split('|');
+            const row = list.querySelector(`.sf-merge-row[data-merge-cat="${cat}"][data-merge-id="${id}"]`);
+            if (!row) return;
+            const next = row.nextElementSibling;
+            const isOpen = next && next.classList.contains('sf-merge-row-details');
+            if (isOpen) {
+              next.remove();
+              btn.textContent = 'Show details';
+              return;
+            }
+            const itemCat = survey[cat];
+            const item = itemCat && itemCat.conflict.find(c => String(c.id) === id);
+            if (!item) return;
+            row.insertAdjacentHTML('afterend', buildDetails(item));
+            btn.textContent = 'Hide details';
+          };
+          const collect = () => {
+            const out = { sources: {}, library: {}, common: {} };
+            list.querySelectorAll('.sf-merge-row').forEach(row => {
+              const cat = row.getAttribute('data-merge-cat');
+              const id = row.getAttribute('data-merge-id');
+              const checked = row.querySelector('input[type="radio"]:checked');
+              const mode = checked ? checked.value : 'keep';
+              // For library 'both', capture the user's typed name (or the
+              // pre-filled safe default if they didn't touch it).
+              if (cat === 'library' && mode === 'both') {
+                const input = row.querySelector('[data-merge-rename]');
+                const typed = input ? input.value.trim() : '';
+                out[cat][id] = { mode, customName: typed };
+              } else {
+                out[cat][id] = mode;
+              }
+            });
+            return out;
+          };
+          // Toggle the rename input's visibility off the row's "both" radio.
+          // Auto-focuses + selects the input when "both" is picked so the
+          // user can type-over the default in one motion.
+          const onRadioChange = (e) => {
+            if (e.target.type !== 'radio') return;
+            const row = e.target.closest('.sf-merge-row');
+            if (!row) return;
+            const isBoth = e.target.value === 'both' && e.target.checked;
+            row.classList.toggle('show-rename', isBoth);
+            if (isBoth) {
+              const input = row.querySelector('[data-merge-rename]');
+              if (input) setTimeout(() => { input.focus(); input.select(); }, 0);
+            }
+          };
+          const cleanup = (result) => {
+            modal.classList.remove('active');
+            applyBtn.removeEventListener('click', onApply);
+            cancelBtn.removeEventListener('click', onCancel);
+            list.removeEventListener('click', onBulkClick);
+            list.removeEventListener('click', onExpandClick);
+            list.removeEventListener('change', onRadioChange);
+            modal.removeEventListener('click', onBackdrop);
+            document.removeEventListener('keydown', onKey);
+            resolve(result);
+          };
+          const onApply = () => cleanup(collect());
+          const onCancel = () => cleanup(null);
+          const onBackdrop = (e) => { if (e.target === modal) onCancel(); };
+          const onKey = (e) => { if (e.key === 'Escape') onCancel(); };
+          applyBtn.addEventListener('click', onApply);
+          cancelBtn.addEventListener('click', onCancel);
+          list.addEventListener('click', onBulkClick);
+          list.addEventListener('click', onExpandClick);
+          list.addEventListener('change', onRadioChange);
+          modal.addEventListener('click', onBackdrop);
+          document.addEventListener('keydown', onKey);
+          modal.classList.add('active');
+        });
+      };
+
+      // Apply phase — runs the actual writes with the same progress modal
+      // pattern as Replace. Same cancel + rollback contract: the backend
+      // undoes per-item snapshots on AbortController fire.
+      const _sfRunMergeApply = async (zipPath, plan, survey) => {
+        const opId = `sfBackupMerge-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const modal = document.getElementById('modal-sf-backup-progress');
+        const titleEl = document.getElementById('sf-backup-progress-title');
+        const detail = document.getElementById('sf-backup-progress-detail');
+        const bar = document.getElementById('sf-backup-progress-bar');
+        const stats = document.getElementById('sf-backup-progress-stats');
+        const cancelBtn = document.getElementById('sf-backup-progress-cancel');
+        if (!modal || !bar || !detail || !cancelBtn) return;
+        // Total bytes for progress — only the items we'll actually write.
+        // Library plan entries are objects { mode, currentName }; sources
+        // and commons use bare strings. modeOf() normalizes the lookup.
+        let totalBytes = 0;
+        const modeOf = (v) => (typeof v === 'string' ? v : (v && v.mode));
+        const sumWritable = (cat, items) => {
+          for (const it of items) {
+            const mode = modeOf(plan[cat][it.id]);
+            if (mode && mode !== 'keep') totalBytes += it.totalBytes || 0;
+          }
+        };
+        sumWritable('sources', survey.sources.add);
+        sumWritable('library', survey.library.add);
+        sumWritable('common',  survey.common.add);
+        const sumConflictWritable = (cat, items) => {
+          for (const it of items) {
+            const mode = modeOf(plan[cat][it.id]);
+            if (mode && mode !== 'keep') totalBytes += (it.backup && it.backup.totalBytes) || 0;
+          }
+        };
+        sumConflictWritable('sources', survey.sources.conflict);
+        sumConflictWritable('library', survey.library.conflict);
+        sumConflictWritable('common',  survey.common.conflict);
+
+        const startMs = Date.now();
+        let lastProcessed = 0;
+        if (titleEl) titleEl.textContent = 'Merging Sound Font library backup…';
+        modal.classList.add('active');
+        bar.style.width = '0%';
+        detail.textContent = 'Starting…';
+        stats.textContent = '';
+        cancelBtn.disabled = false;
+        cancelBtn.textContent = 'Cancel';
+        let userCancelRequested = false;
+        const renderStats = () => {
+          const elapsedSec = (Date.now() - startMs) / 1000;
+          stats.textContent =
+            `${_sfFormatBytesShort(lastProcessed)} of ${_sfFormatBytesShort(totalBytes)} · ` +
+            `${_sfFormatDuration(elapsedSec)} elapsed`;
+        };
+        const tickHandle = setInterval(renderStats, 1000);
+        const off = window.electronAPI.onSfBackupProgress((p) => {
+          if (p.opId !== opId) return;
+          lastProcessed = p.processedBytes || 0;
+          const pct = totalBytes > 0 ? Math.min(100, (lastProcessed / totalBytes) * 100) : 0;
+          bar.style.width = `${pct}%`;
+          if (p.currentItem) detail.textContent = p.currentItem;
+          renderStats();
+        });
+        const onCancel = async () => {
+          if (userCancelRequested) return;
+          const ok = await promptConfirm({
+            title: 'Cancel merge?',
+            message: 'Items written so far in this run will be rolled back. Items you chose to keep are unaffected. Are you sure?',
+            confirmText: 'Cancel merge',
+            confirmKind: 'danger',
+            cancelText: 'Keep going',
+          });
+          if (!ok) return;
+          userCancelRequested = true;
+          cancelBtn.disabled = true;
+          cancelBtn.textContent = 'Cancelling…';
+          try { await window.electronAPI.sfBackupCancel({ opId }); } catch {}
+        };
+        cancelBtn.addEventListener('click', onCancel);
+        let result;
+        try { result = await window.electronAPI.sfBackupApplyMerge({ opId, zipPath, plan }); }
+        catch (err) { result = { ok: false, error: String(err && err.message || err) }; }
+        clearInterval(tickHandle);
+        try { off && off(); } catch {}
+        cancelBtn.removeEventListener('click', onCancel);
+        modal.classList.remove('active');
+        if (titleEl) titleEl.textContent = 'Exporting Sound Font library…';
+        if (result && result.cancelled) {
+          await promptConfirm({
+            title: 'Merge cancelled',
+            message: 'Items already written in this run were rolled back. Your library is in the state it was before the merge.',
+            confirmText: 'OK',
+            confirmKind: 'primary',
+            hideCancel: true,
+          });
+          return;
+        }
+        if (!result || !result.ok) {
+          await promptConfirm({
+            title: 'Merge failed',
+            message: `Some items could not be merged.\n${(result && result.error) || 'Unknown error.'}\nItems already written in this run were rolled back.`,
+            confirmText: 'OK',
+            confirmKind: 'danger',
+            hideCancel: true,
+          });
+          return;
+        }
+        try { await window.refreshSoundFontsView(); } catch {}
+        await promptConfirm({
+          title: 'Merge complete',
+          message: 'The backup was merged into your library.',
+          confirmText: 'OK',
+          confirmKind: 'primary',
+          hideCancel: true,
+        });
+      };
+
       // Replace-import run — extracts the backup zip on top of a wiped
       // library, with progress + cancel + rollback handled by the backend.
       // The progress modal mirrors the export modal's pattern (continuous
@@ -16449,15 +16961,7 @@ require(['vs/editor/editor.main'], function () {
           const onCancel = () => cleanup();
           const onMerge = async () => {
             cleanup();
-            // 12.3 lands the write path. For now confirm the choice landed
-            // and surface the manifest so the user knows the read succeeded.
-            await promptConfirm({
-              title: 'Merge import',
-              message: 'The write step lands in slice 12.3. Validation and the choice modal are working.',
-              confirmText: 'OK',
-              confirmKind: 'primary',
-              hideCancel: true,
-            });
+            await _sfRunMergeImport(zipPath, observed);
           };
           const onReplace = async () => {
             cleanup();

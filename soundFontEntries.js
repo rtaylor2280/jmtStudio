@@ -426,10 +426,12 @@ function exportEntryToFolder(userData, name, destDir, mode = 'rename') {
       try { fs.rmSync(path.join(destDir, targetName), { recursive: true, force: true }); }
       catch (err) { return { ok: false, error: `Cannot remove existing folder: ${err.message}` }; }
     } else {
-      // 'rename' (default) — fall through to " (N)" until free.
+      // 'rename' (default) — fall through to "<name>_N" until free.
+      // Underscore (not parens) so the resulting folder name is safe
+      // for Proffie's font-folder matcher on the SD card destination.
       let n = 1;
       while (fs.existsSync(path.join(destDir, targetName))) {
-        targetName = `${name} (${n})`;
+        targetName = `${name}_${n}`;
         n++;
       }
     }

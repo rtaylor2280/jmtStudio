@@ -1278,6 +1278,42 @@ ipcMain.handle('sfBackup:inspect', async (_, { zipPath } = {}) => {
 // Replace-import: pre-wipe snapshot + extract + commit-or-rollback. Reuses
 // the export op map for cancellation since opIds are unique strings; the
 // inner module handles snapshot/rollback so this handler just plumbs IPC.
+ipcMain.handle('sfBackup:surveyMerge', async (_, { zipPath } = {}) => {
+  try {
+    return await soundFontBackup.surveyMerge({
+      userData: app.getPath('userData'),
+      zipPath,
+    });
+  } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+ipcMain.handle('sfBackup:applyMerge', async (event, { opId, zipPath, plan } = {}) => {
+  if (!opId || !zipPath) return { ok: false, error: 'Missing opId or zipPath' };
+  if (_sfBackupOps.has(opId)) return { ok: false, error: 'Op already running' };
+  const controller = new AbortController();
+  _sfBackupOps.set(opId, controller);
+  try {
+    const result = await soundFontBackup.applyMerge({
+      userData: app.getPath('userData'),
+      zipPath,
+      plan: plan || { sources: {}, library: {}, common: {} },
+      signal: controller.signal,
+      onProgress: (p) => {
+        try { event.sender.send('sfBackup:progress', { opId, ...p }); } catch {}
+      },
+    });
+    // Merge doesn't auto-apply starredCommon — the user keeping their
+    // current library implies keeping their current default. (Replace
+    // does apply it; that path is for "wipe and restore exactly.")
+    return { ok: true, manifest: result.manifest };
+  } catch (err) {
+    if (err && err.cancelled) return { ok: false, cancelled: true };
+    return { ok: false, error: String(err && err.message || err) };
+  } finally {
+    _sfBackupOps.delete(opId);
+  }
+});
+
 ipcMain.handle('sfBackup:applyReplace', async (event, { opId, zipPath } = {}) => {
   if (!opId || !zipPath) return { ok: false, error: 'Missing opId or zipPath' };
   if (_sfBackupOps.has(opId)) return { ok: false, error: 'Op already running' };
