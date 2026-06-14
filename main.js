@@ -11,6 +11,7 @@ const soundFontVendors = require('./soundFontVendors');
 const soundFontCandidates = require('./soundFontCandidates');
 const soundFontEntries = require('./soundFontEntries');
 const soundFontCommon = require('./soundFontCommon');
+const soundFontBackup = require('./soundFontBackup');
 
 // ── Separate userData for dev vs prod ──────────────────
 if (!app.isPackaged) {
@@ -1171,6 +1172,86 @@ ipcMain.handle('common:folderExistsAt', (_, { destDir } = {}) => {
 ipcMain.handle('common:exportToFolder', (_, { uuid, destDir, mode } = {}) => {
   try { return soundFontCommon.exportCommonToFolder(app.getPath('userData'), uuid, destDir, mode); }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+// ─── SF Library Backup ────────────────────────────────────
+// Survey + benchmark run together as the "prep" phase. The renderer uses
+// these to populate the confirm dialog with counts/size/estimated time
+// BEFORE committing to a destination, so the user can bail cheaply if the
+// estimate looks wrong.
+ipcMain.handle('sfBackup:prep', async () => {
+  // Survey only — earlier iterations benchmarked the destination drive
+  // and produced a time estimate, but the benchmark (a single large
+  // contiguous write of zeros) doesn't model the real workload (many
+  // small file reads + compression + streaming writes), so the estimate
+  // was misleading. Better to show nothing than wrong numbers; the
+  // progress bar + elapsed time during the run is honest information.
+  try {
+    const userData = app.getPath('userData');
+    const survey = soundFontBackup.surveyLibrary(userData);
+    return { ok: true, survey };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
+ipcMain.handle('dialog:selectBackupExportPath', async () => {
+  const lastDir = Store.get('lastSfBackupDir') || Store.get('lastDir') || app.getPath('documents');
+  const defaultName = soundFontBackup.suggestedFileName();
+  const { canceled, filePath } = await dialog.showSaveDialog(win, {
+    title: 'Export Sound Font library backup',
+    defaultPath: path.join(lastDir, defaultName),
+    filters: [
+      { name: 'JMT Studio Sound Font library backup', extensions: ['zip'] },
+      { name: 'All files', extensions: ['*'] },
+    ],
+  });
+  if (canceled || !filePath) return { ok: false };
+  Store.set('lastSfBackupDir', path.dirname(filePath));
+  return { ok: true, filePath };
+});
+
+// In-flight export controller — keyed by opId so multiple sessions in
+// theory can coexist, but the renderer only runs one at a time. Cancel
+// fires the AbortController; the backup module's signal listener wipes
+// the partial file before throwing.
+const _sfBackupOps = new Map();
+ipcMain.handle('sfBackup:export', async (event, { opId, destPath } = {}) => {
+  if (!opId || !destPath) return { ok: false, error: 'Missing opId or destPath' };
+  if (_sfBackupOps.has(opId)) return { ok: false, error: 'Op already running' };
+  const controller = new AbortController();
+  _sfBackupOps.set(opId, controller);
+  try {
+    const prefs = {
+      // setSetting writes under "settings.<key>" — match the renderer's
+      // storage path or this comes back undefined and the manifest ships
+      // with an empty starredCommon even when one is set.
+      starredCommon: Store.get('settings.soundFontStarredCommon') || '',
+    };
+    const result = await soundFontBackup.exportBackup({
+      userData: app.getPath('userData'),
+      destPath,
+      appVersion: app.getVersion(),
+      prefs,
+      signal: controller.signal,
+      onProgress: (p) => {
+        try { event.sender.send('sfBackup:progress', { opId, ...p }); } catch {}
+      },
+    });
+    return { ok: true, destPath: result.destPath, manifest: result.manifest };
+  } catch (err) {
+    if (err && err.cancelled) return { ok: false, cancelled: true };
+    return { ok: false, error: String(err && err.message || err) };
+  } finally {
+    _sfBackupOps.delete(opId);
+  }
+});
+
+ipcMain.handle('sfBackup:cancel', (_, { opId } = {}) => {
+  const controller = _sfBackupOps.get(opId);
+  if (!controller) return { ok: false, error: 'No such op' };
+  try { controller.abort(); } catch {}
+  return { ok: true };
 });
 
 // Pick wav files to add into a common folder. Multi-select on by default;

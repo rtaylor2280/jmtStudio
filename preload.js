@@ -236,6 +236,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readCommonFileBytes:   (params)     => ipcRenderer.invoke('common:readFileBytes', params),
   commonFolderExistsAt:  (params)     => ipcRenderer.invoke('common:folderExistsAt', params),
   exportCommonToFolder:  (params)     => ipcRenderer.invoke('common:exportToFolder', params),
+  sfBackupPrep:          (params)     => ipcRenderer.invoke('sfBackup:prep', params),
+  sfBackupExport:        (params)     => ipcRenderer.invoke('sfBackup:export', params),
+  sfBackupCancel:        (params)     => ipcRenderer.invoke('sfBackup:cancel', params),
+  selectBackupExportPath:()           => ipcRenderer.invoke('dialog:selectBackupExportPath'),
+  onSfBackupProgress:    (cb) => {
+    const handler = (_, data) => cb(data);
+    ipcRenderer.on('sfBackup:progress', handler);
+    return () => ipcRenderer.removeListener('sfBackup:progress', handler);
+  },
   selectCommonFiles:     ()           => ipcRenderer.invoke('dialog:selectCommonFiles'),
   selectCommonSource:    (params)     => ipcRenderer.invoke('dialog:selectCommonSource', params),
   onEntryCreateProgress: (cb) => {

@@ -1819,6 +1819,11 @@
   #soundfonts-view { display: none; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
   #soundfonts-view.active { display: flex; }
   .sf-empty-wrap { flex: 1; display: flex; align-items: center; justify-content: center; padding: 40px 20px; }
+  /* When the empty card lives inside the grid-scroll container (post-restructure
+     so the sidecar stays visible), the flex:1 is moot — the scroll parent isn't
+     a flex container. Min-height fills the visible scroll area so the centering
+     still lands in the middle. */
+  .sf-grid-scroll > .sf-empty-wrap { min-height: 100%; }
   .sf-empty-card { max-width: 460px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 14px; }
   .sf-empty-icon { color: var(--c-text-faint); }
   .sf-empty-title { font-size: 1.05rem; font-weight: 600; color: var(--c-text); margin: 0; }
@@ -2759,6 +2764,10 @@
         <button id="btn-sf-bulk-tag" class="btn-neutral" style="display:none" title="Edit tags shared across the selected fonts">Tags</button>
         <button id="btn-sf-bulk-save" class="btn-neutral" style="display:none" title="Save the selected fonts as Proffie-shaped folders to a destination (SD card, etc.)">Save</button>
         <button id="btn-sf-bulk-delete" class="btn-red" style="display:none" title="Delete the selected fonts">Delete</button>
+        <div class="toolbar-divider"></div>
+        <button id="btn-sf-export-backup" class="btn-neutral" title="Export your entire Sound Font library as a single backup file">&#8599; Export Backup</button>
+        <button id="btn-sf-import-backup" class="btn-neutral" title="Restore from a previously exported Sound Font library backup">&#8601; Import Backup</button>
+        <div class="toolbar-divider"></div>
         <button id="btn-sf-import-toolbar" class="btn-blue" style="display:none" title="Import a sound font folder into your library">&#43; Import Sound Font</button>
       </div>
       <div class="tab-btns" id="tab-btns-styles">
@@ -2849,21 +2858,10 @@
 
 <!-- ── Sound Fonts view ── -->
 <div id="soundfonts-view">
-  <!-- Empty state: no library entries yet. The library is created
-       implicitly on first import; no separate setup step. -->
-  <div class="sf-empty-wrap" id="sf-empty-nofonts">
-    <div class="sf-empty-card">
-      <svg class="sf-empty-icon" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4">
-        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-        <polyline points="17 8 12 3 7 8"/>
-        <line x1="12" y1="3" x2="12" y2="15"/>
-      </svg>
-      <h2 class="sf-empty-title">Import your first sound font</h2>
-      <p class="sf-empty-desc">Pick a vendor's .zip file or an unzipped folder. JMT Studio archives it, identifies the fonts inside, and adds your picks to the library.</p>
-      <button class="sf-empty-action" id="btn-sf-import-font">Import Sound Font</button>
-    </div>
-  </div>
-  <!-- Layer 3: library has fonts — card grid -->
+  <!-- Browse layer is always on now that the common-folder sidecar lives
+       inside it — so the sidecar stays visible even when there are no
+       fonts. The "no fonts yet" empty card is rendered inside the grid
+       scroll area below, replacing the cards when the library is empty. -->
   <div class="sf-browse-wrap" id="sf-browse">
     <div class="sf-search-bar">
       <div class="sf-search-input-wrap">
@@ -2909,6 +2907,21 @@
         <div id="sf-common-sidecar-resizer" class="sf-common-sidecar-resizer"></div>
       </div>
       <div class="sf-grid-scroll">
+        <!-- Empty state shown when no fonts in the library. Sidecar (and
+             its own empty state) sits to the left independently, so the
+             user still sees their commons even with zero fonts. -->
+        <div class="sf-empty-wrap" id="sf-empty-nofonts" style="display:none">
+          <div class="sf-empty-card">
+            <svg class="sf-empty-icon" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="17 8 12 3 7 8"/>
+              <line x1="12" y1="3" x2="12" y2="15"/>
+            </svg>
+            <h2 class="sf-empty-title">Import your first sound font</h2>
+            <p class="sf-empty-desc">Pick a vendor's .zip file or an unzipped folder. JMT Studio archives it, identifies the fonts inside, and adds your picks to the library.</p>
+            <button class="sf-empty-action" id="btn-sf-import-font">Import Sound Font</button>
+          </div>
+        </div>
         <div class="sf-cards" id="sf-cards"></div>
       </div>
     </div>
@@ -3835,6 +3848,37 @@
     <p id="sf-bulk-progress-detail" class="sf-import-progress-detail"></p>
     <div class="sf-import-progress-track">
       <div id="sf-bulk-progress-bar" class="sf-import-progress-bar"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Backup export prep — shows the survey + time estimate so the user
+     can confirm or bail before the long-running archive step starts. ── -->
+<div class="modal-overlay" id="modal-sf-backup-prep">
+  <div class="modal">
+    <h2>Export Sound Font library</h2>
+    <p class="sf-import-hint" id="sf-backup-prep-summary">Surveying library&hellip;</p>
+    <p class="sf-import-hint" style="margin-top:6px; color: var(--c-text-muted);">Backups can take a while. Don't close the app until it finishes. You can Cancel if you change your mind.</p>
+    <div class="modal-btns" style="margin-top: 18px">
+      <button class="modal-btn-cancel" id="sf-backup-prep-cancel">Cancel</button>
+      <button class="modal-btn-primary" id="sf-backup-prep-start" disabled>Start export</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Backup export progress — long-running progress with continuous bar,
+     time elapsed + estimated remaining, current item, cancel button. The
+     cancel goes through a confirm + rollback (partial zip deleted). ── -->
+<div class="modal-overlay" id="modal-sf-backup-progress">
+  <div class="modal">
+    <h2 id="sf-backup-progress-title">Exporting Sound Font library&hellip;</h2>
+    <p class="sf-import-progress-detail" id="sf-backup-progress-detail">Preparing&hellip;</p>
+    <div class="sf-import-progress-track">
+      <div class="sf-import-progress-bar" id="sf-backup-progress-bar" style="width:0%"></div>
+    </div>
+    <p class="sf-import-hint" id="sf-backup-progress-stats" style="margin-top:10px; color: var(--c-text-muted); font-size: 0.72rem;">&nbsp;</p>
+    <div class="modal-btns" style="margin-top: 14px">
+      <button class="modal-btn-cancel" id="sf-backup-progress-cancel">Cancel</button>
     </div>
   </div>
 </div>
@@ -12457,14 +12501,27 @@ require(['vs/editor/editor.main'], function () {
             for (const s of sr.sources) _sfAllSourcesByUuid[s.uuid] = s;
           }
         } catch { _sfAllSourcesByUuid = {}; }
+        // Browse layer is always active now — the sidecar lives inside it
+        // and must stay visible whether or not the user has any fonts. The
+        // "import your first sound font" card swaps into the grid area
+        // when entries are empty; cards otherwise.
+        if (layerBrowse) layerBrowse.classList.add('active');
+        if (toolbarBtn)  toolbarBtn.style.display = '';
+        const cardsEl = document.getElementById('sf-cards');
         if (entries.length === 0) {
           if (layerNoFonts) layerNoFonts.style.display = '';
-          if (layerBrowse)  layerBrowse.classList.remove('active');
-          if (toolbarBtn)   toolbarBtn.style.display = '';
+          if (cardsEl)      cardsEl.innerHTML = '';
+          // Stale selection from before the last delete would otherwise keep
+          // the bulk action bar populated with phantom counts. Clear it and
+          // sync the bar.
+          _sfSelectedNames.clear();
+          _sfLastMatchingNames = [];
+          _sfLastInUseFonts = new Set();
+          _sfUpdateBulkActionBar();
+          // Also clear the missing/legend bars since they reflect the grid.
+          _sfRenderMissingBarAndLegend(new Set());
         } else {
           if (layerNoFonts) layerNoFonts.style.display = 'none';
-          if (layerBrowse)  layerBrowse.classList.add('active');
-          if (toolbarBtn)   toolbarBtn.style.display = '';
           _sfRenderGrid();
         }
       };
@@ -12723,9 +12780,17 @@ require(['vs/editor/editor.main'], function () {
           const match = r && r.ok && r.sources && r.sources.find(s => s.uuid === existingUuid);
           const displayName = (match && match.meta && match.meta.originalName) || existingUuid;
           if (_sfDupEls.name) _sfDupEls.name.textContent = displayName;
+          // Stash the import modal so the dup prompt isn't stacked on top
+          // of the 100%-progress import modal. Restored in cleanup; the
+          // keep/cancel paths then close it via _sfCloseImport, and the
+          // re-import path needs it visible for _sfRunImport's phases.
+          const importModal = _sfImportEls.modal;
+          const importWasActive = !!importModal?.classList.contains('active');
+          if (importWasActive) importModal.classList.remove('active');
           _sfDupEls.modal.classList.add('active');
           const cleanup = () => {
             _sfDupEls.modal.classList.remove('active');
+            if (importWasActive) importModal.classList.add('active');
             _sfDupEls.keepBtn?.removeEventListener('click', onKeep);
             _sfDupEls.reimportBtn?.removeEventListener('click', onReimport);
             _sfDupEls.cancelBtn?.removeEventListener('click', onCancel);
@@ -13080,8 +13145,25 @@ require(['vs/editor/editor.main'], function () {
       };
 
       const _sfPickAndImport = async (mode) => {
+        // Stash the chooser modal while the native picker is up — native
+        // dialogs block rendering before the in-app modal can hide, so a
+        // user-cancelled pick would otherwise show the chooser stacked
+        // behind the OS file picker.
+        const modal = _sfImportEls.modal;
+        const wasActive = !!modal?.classList.contains('active');
+        if (wasActive) modal.classList.remove('active');
         const sourcePath = await window.electronAPI.selectSoundFontSource({ mode });
-        if (!sourcePath) return;
+        if (!sourcePath) {
+          // Cancel: restore the modal at the 'pick' phase so the user can
+          // try the other mode (zip vs folder) without re-opening Import.
+          if (wasActive) modal.classList.add('active');
+          return;
+        }
+        // Transition the modal's internal phase BEFORE making it visible
+        // again so we don't briefly show the 'pick' phase between the
+        // picker closing and _sfRunImport's own _sfShowPhase call.
+        _sfShowPhase('progress');
+        if (wasActive) modal.classList.add('active');
         await _sfRunImport(sourcePath);
       };
 
@@ -16012,6 +16094,165 @@ require(['vs/editor/editor.main'], function () {
       _sfCommonListEl?.addEventListener('dragend', () => {
         _sfSetDragTarget(null);
         _sfCommonDragData = null;
+      });
+      // ── SF Library Backup export flow ────────────────────
+      // Two-stage: prep modal (survey + benchmark + confirm) then progress
+      // modal (continuous bar + elapsed/remaining + cancel). The renderer
+      // owns the user-facing copy; the IPC layer just streams bytes.
+      const _sfFormatBytesShort = (n) => {
+        if (!n && n !== 0) return '';
+        if (n < 1024) return `${n} B`;
+        if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+        if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+        return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+      };
+      const _sfFormatDuration = (sec) => {
+        if (!isFinite(sec) || sec <= 0) return 'less than a second';
+        if (sec < 60) return `${Math.ceil(sec)} second${Math.ceil(sec) === 1 ? '' : 's'}`;
+        const m = Math.floor(sec / 60);
+        const s = Math.round(sec - m * 60);
+        if (m < 60) {
+          if (s === 0 || m >= 10) return `${m} minute${m === 1 ? '' : 's'}`;
+          return `${m}m ${s}s`;
+        }
+        const h = Math.floor(m / 60);
+        const mm = m - h * 60;
+        return mm === 0 ? `${h} hour${h === 1 ? '' : 's'}` : `${h}h ${mm}m`;
+      };
+      const _sfOpenExportBackup = async () => {
+        // Pick the destination zip path first so the benchmark can run on
+        // the actual target drive (USB vs internal SSD make a real diff).
+        let pick;
+        try { pick = await window.electronAPI.selectBackupExportPath(); }
+        catch (err) { alert(`Could not open the picker: ${err && err.message || err}`); return; }
+        if (!pick || !pick.ok) return;
+        const destPath = pick.filePath;
+        // Prep — run survey + benchmark before showing the confirm.
+        const prepModal = document.getElementById('modal-sf-backup-prep');
+        const summaryEl = document.getElementById('sf-backup-prep-summary');
+        const startBtn = document.getElementById('sf-backup-prep-start');
+        const cancelBtn = document.getElementById('sf-backup-prep-cancel');
+        if (!prepModal || !summaryEl || !startBtn || !cancelBtn) return;
+        summaryEl.textContent = 'Surveying library and benchmarking destination…';
+        startBtn.disabled = true;
+        prepModal.classList.add('active');
+        let prep;
+        try { prep = await window.electronAPI.sfBackupPrep({ destPath }); }
+        catch (err) { prep = { ok: false, error: String(err && err.message || err) }; }
+        if (!prep || !prep.ok) {
+          prepModal.classList.remove('active');
+          alert(`Could not prepare export: ${(prep && prep.error) || 'unknown error'}`);
+          return;
+        }
+        const { survey } = prep;
+        const totalSize = _sfFormatBytesShort(survey.totalBytes);
+        const cs = survey.counts;
+        summaryEl.textContent =
+          `Library: ${cs.sources} source${cs.sources === 1 ? '' : 's'}, ${cs.library} font${cs.library === 1 ? '' : 's'}, ${cs.common} common folder${cs.common === 1 ? '' : 's'}. ` +
+          `Total ${totalSize}.`;
+        startBtn.disabled = false;
+        await new Promise((resolve) => {
+          const cleanup = () => {
+            prepModal.classList.remove('active');
+            startBtn.removeEventListener('click', onStart);
+            cancelBtn.removeEventListener('click', onCancel);
+            resolve();
+          };
+          const onStart = () => { cleanup(); _sfRunExportBackup(destPath, survey); };
+          const onCancel = () => cleanup();
+          startBtn.addEventListener('click', onStart);
+          cancelBtn.addEventListener('click', onCancel);
+        });
+      };
+      // Actual run — opens the progress modal, streams progress events,
+      // updates the bar + elapsed label, handles the cancel button (with
+      // confirm) and the cleanup. No "remaining time" estimate by design:
+      // observed throughput on small-file streaming isn't a reliable
+      // predictor, and a wrong number is worse than no number.
+      const _sfRunExportBackup = async (destPath, survey) => {
+        const opId = `sfBackup-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const modal = document.getElementById('modal-sf-backup-progress');
+        const detail = document.getElementById('sf-backup-progress-detail');
+        const bar = document.getElementById('sf-backup-progress-bar');
+        const stats = document.getElementById('sf-backup-progress-stats');
+        const cancelBtn = document.getElementById('sf-backup-progress-cancel');
+        if (!modal || !bar || !detail || !cancelBtn) return;
+        const startMs = Date.now();
+        let lastProcessed = 0;
+        modal.classList.add('active');
+        bar.style.width = '0%';
+        detail.textContent = 'Starting…';
+        stats.textContent = '';
+        cancelBtn.disabled = false;
+        cancelBtn.textContent = 'Cancel';
+        let userCancelRequested = false;
+        const off = window.electronAPI.onSfBackupProgress((p) => {
+          if (p.opId !== opId) return;
+          lastProcessed = p.processedBytes || 0;
+          const pct = survey.totalBytes > 0 ? Math.min(100, (lastProcessed / survey.totalBytes) * 100) : 0;
+          bar.style.width = `${pct}%`;
+          if (p.currentItem) detail.textContent = p.currentItem;
+          const elapsedSec = (Date.now() - startMs) / 1000;
+          stats.textContent =
+            `${_sfFormatBytesShort(lastProcessed)} of ${_sfFormatBytesShort(survey.totalBytes)} · ` +
+            `${_sfFormatDuration(elapsedSec)} elapsed`;
+        });
+        const onCancel = async () => {
+          if (userCancelRequested) return;
+          // Cheap inline confirm — full confirm modal would stack and
+          // race with the progress modal updates.
+          const ok = await promptConfirm({
+            title: 'Cancel export?',
+            message: 'The partial backup file will be deleted. Are you sure?',
+            confirmText: 'Cancel export',
+            confirmKind: 'danger',
+            cancelText: 'Keep going',
+          });
+          if (!ok) return;
+          userCancelRequested = true;
+          cancelBtn.disabled = true;
+          cancelBtn.textContent = 'Cancelling…';
+          try { await window.electronAPI.sfBackupCancel({ opId }); } catch {}
+        };
+        cancelBtn.addEventListener('click', onCancel);
+        let result;
+        try { result = await window.electronAPI.sfBackupExport({ opId, destPath }); }
+        catch (err) { result = { ok: false, error: String(err && err.message || err) }; }
+        try { off && off(); } catch {}
+        cancelBtn.removeEventListener('click', onCancel);
+        modal.classList.remove('active');
+        if (result && result.cancelled) {
+          await promptConfirm({
+            title: 'Export cancelled',
+            message: 'No backup file was written. Your library is unchanged.',
+            confirmText: 'OK',
+            confirmKind: 'primary',
+            hideCancel: true,
+          });
+          return;
+        }
+        if (!result || !result.ok) {
+          await promptConfirm({
+            title: 'Export failed',
+            message: `The backup could not be written.\n${(result && result.error) || 'Unknown error.'}`,
+            confirmText: 'OK',
+            confirmKind: 'danger',
+            hideCancel: true,
+          });
+          return;
+        }
+        await promptConfirm({
+          title: 'Export complete',
+          message: `Backup written to:\n${result.destPath}`,
+          confirmText: 'OK',
+          confirmKind: 'primary',
+          hideCancel: true,
+        });
+      };
+      document.getElementById('btn-sf-export-backup')?.addEventListener('click', _sfOpenExportBackup);
+      // Import-backup placeholder — wired in slice 12.2/12.3.
+      document.getElementById('btn-sf-import-backup')?.addEventListener('click', () => {
+        alert('Import Backup is coming next. Slice 12.2.');
       });
       // Bulk add tags — open the modal. stopPropagation guards against the
       // (historical) document-level "click clears selection" handler in case
