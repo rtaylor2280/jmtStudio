@@ -236,6 +236,108 @@ async function createEntry({ userData, sourceUuid, candidate, name, metadata, on
   }
 }
 
+// Duplicate an existing entry into a new entry of the given name.
+//   mode === 'current': copy the source entry's directory verbatim
+//     (current files + accumulated edits). Meta is copied too, then
+//     name + timestamps + addedFromSource are patched.
+//   mode === 'source':  re-extract from the original archive via the
+//     source. Files come back exactly as the vendor shipped them
+//     (any local additions/edits are NOT carried over). User-facing
+//     meta fields (tags, author, description, link*, purchased, etc.)
+//     are seeded from the source entry so the duplicate looks like a
+//     sibling rather than a stranger.
+async function duplicateEntry({ userData, sourceName, newName, mode = 'current' }) {
+  if (!userData) return { ok: false, error: 'Missing userData' };
+  if (!sourceName) return { ok: false, error: 'Missing sourceName' };
+  if (!newName) return { ok: false, error: 'Missing newName' };
+  const sanitized = _sanitizeEntryName(newName);
+  if (!sanitized) return { ok: false, error: 'Invalid new name' };
+  const root = ensureEntriesRoot(userData);
+  const srcDir = path.join(root, sourceName);
+  if (!fs.existsSync(srcDir)) return { ok: false, error: `Entry not found: ${sourceName}` };
+  const destDir = path.join(root, sanitized);
+  if (fs.existsSync(destDir)) {
+    return { ok: false, error: `An entry named "${sanitized}" already exists`, existing: true };
+  }
+  const srcMeta = _readEntryMeta(srcDir);
+  if (!srcMeta) return { ok: false, error: 'Source entry has no readable meta' };
+
+  if (mode === 'current') {
+    try {
+      // Recursive disk copy. Two-pass approach keeps it simple and
+      // safe: build the destination tree, copy each file. No symlink
+      // handling — entry trees are plain files.
+      const walkCopy = (sd, dd) => {
+        fs.mkdirSync(dd, { recursive: true });
+        for (const ent of fs.readdirSync(sd, { withFileTypes: true })) {
+          const s = path.join(sd, ent.name);
+          const d = path.join(dd, ent.name);
+          if (ent.isDirectory()) walkCopy(s, d);
+          else if (ent.isFile()) fs.copyFileSync(s, d);
+        }
+      };
+      walkCopy(srcDir, destDir);
+      // Patch meta: new identity, fresh timestamps, drop the
+      // additions log since the duplicated tree IS the new baseline.
+      const now = new Date().toISOString();
+      const meta = { ...srcMeta };
+      meta.name = sanitized;
+      meta.createdAt = now;
+      meta.updatedAt = now;
+      meta.addedFromSource = [];
+      fs.writeFileSync(path.join(destDir, 'meta.json'), JSON.stringify(meta, null, 2));
+      return { ok: true, name: sanitized, meta };
+    } catch (err) {
+      try { fs.rmSync(destDir, { recursive: true, force: true }); } catch {}
+      return { ok: false, error: String(err && err.message || err) };
+    }
+  }
+
+  if (mode === 'source') {
+    // Reconstruct a candidate descriptor from the source entry's meta
+    // so createEntry can re-extract from the archive.
+    const candidate = {
+      path: srcMeta.candidatePath || '',
+      name: sanitized,
+      multiBoard: !!srcMeta.multiBoard,
+      otherFlavors: srcMeta.otherFlavors || [],
+      nested: !!srcMeta.nested,
+      bundleName: undefined, // tags below carry whatever bundle name we had
+    };
+    // Seed user-facing fields from the source entry so the duplicate
+    // looks like a sibling. Files are fresh from the archive.
+    const metadata = {
+      tags: Array.isArray(srcMeta.tags) ? srcMeta.tags.slice() : [],
+      author: srcMeta.author || '',
+      acquisitionDate: srcMeta.acquisitionDate || new Date().toISOString().slice(0, 10),
+      description: srcMeta.description || '',
+      userNotes: srcMeta.userNotes || '',
+      purchased: !!srcMeta.purchased,
+      linkedStyleLibraryEntry: srcMeta.linkedStyleLibraryEntry || null,
+    };
+    const r = await createEntry({
+      userData,
+      sourceUuid: srcMeta.sourceUuid,
+      candidate,
+      name: sanitized,
+      metadata,
+    });
+    if (!r || !r.ok) return r || { ok: false, error: 'Duplicate from source failed' };
+    // Propagate link fields if any were set on the source entry.
+    if (srcMeta.linkUrl || srcMeta.linkLabel) {
+      try {
+        const newMetaPath = path.join(destDir, 'meta.json');
+        const written = JSON.parse(fs.readFileSync(newMetaPath, 'utf8'));
+        if (srcMeta.linkUrl)   written.linkUrl   = srcMeta.linkUrl;
+        if (srcMeta.linkLabel) written.linkLabel = srcMeta.linkLabel;
+        fs.writeFileSync(newMetaPath, JSON.stringify(written, null, 2));
+      } catch {}
+    }
+    return r;
+  }
+  return { ok: false, error: `Unknown mode: ${mode}` };
+}
+
 // Patch fields on an entry's meta.json, optionally renaming the folder.
 // Refuses to touch immutable fields (uuid linkage, candidatePath, createdAt,
 // schemaVersion, etc.). When `newName` is supplied and differs from the
@@ -519,6 +621,7 @@ module.exports = {
   listEntries,
   findEntryByName,
   createEntry,
+  duplicateEntry,
   updateEntryMeta,
   deleteEntry,
   listEntriesBySourceUuid,

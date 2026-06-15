@@ -1139,6 +1139,57 @@
   #modal-sf-text-prompt input.invalid { border-color: #e44; }
   .sf-text-prompt-error { font-size: 0.7rem; color: #e44; margin-top: 4px; min-height: 1em; }
 
+  /* Library picker — two-column modal for adding from sources/fonts. */
+  #modal-sf-library-picker { z-index: 10010; }
+  #modal-sf-library-picker .modal.sf-libpick-modal { position: relative; width: 900px; max-width: 96vw; height: min(86vh, 660px); display: flex; flex-direction: column; padding: 18px 20px; }
+  .sf-libpick-title { margin: 0 0 12px 0; font-size: 0.95rem; padding-right: 28px; }
+  .sf-libpick-body { flex: 1; min-height: 0; display: flex; gap: 12px; }
+  .sf-libpick-left { flex: 1 1 60%; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+  .sf-libpick-right { flex: 1 1 40%; min-width: 240px; display: flex; flex-direction: column; gap: 6px; background: var(--c-bg-inset); border: 1px solid var(--c-border-faint); border-radius: 4px; padding: 8px 10px; }
+  .sf-libpick-target-row { display: flex; align-items: center; gap: 8px; }
+  .sf-libpick-target-label { font-size: 0.74rem; color: var(--c-text-sub); }
+  .sf-libpick-target-select { flex: 1; background: var(--c-bg-inset); border: 1px solid var(--c-border-input); color: var(--c-text); border-radius: 3px; padding: 4px 8px; font-size: 0.8rem; font-family: inherit; outline: none; }
+  .sf-libpick-target-select:focus { border-color: var(--jmt-blue); }
+  .sf-libpick-target-select optgroup { font-style: normal; color: var(--c-text-muted); font-size: 0.7rem; }
+  .sf-libpick-crumb { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; font-size: 0.7rem; min-height: 1.4em; }
+  .sf-libpick-crumb-item { display: inline-flex; align-items: center; background: var(--c-bg-raised); border: 1px solid var(--c-border-faint); color: var(--c-text-sub); cursor: pointer; padding: 1px 8px; border-radius: 10px; transition: background 0.1s, color 0.1s, border-color 0.1s; }
+  .sf-libpick-crumb-item:hover { background: var(--c-bg-hover); border-color: var(--jmt-blue); color: var(--jmt-blue); }
+  .sf-libpick-crumb-item.current { background: var(--c-bg-card); color: var(--c-text); cursor: default; border-color: var(--c-border); }
+  .sf-libpick-crumb-sep { color: var(--c-text-dim); padding: 0 1px; }
+  .sf-libpick-tree { flex: 1; min-height: 0; overflow-y: auto; background: var(--c-bg-inset); border: 1px solid var(--c-border-faint); border-radius: 4px; padding: 4px 6px; }
+  .sf-libpick-tree::-webkit-scrollbar { width: 6px; }
+  .sf-libpick-tree::-webkit-scrollbar-thumb { background: var(--c-border-strong); border-radius: 3px; }
+  .sf-libpick-row { display: flex; align-items: center; gap: 8px; padding: 3px 6px; font-size: 0.78rem; border-radius: 2px; cursor: default; user-select: none; }
+  .sf-libpick-row:hover { background: var(--c-bg-hover); }
+  .sf-libpick-row.is-dir { cursor: pointer; }
+  .sf-libpick-row.disabled { opacity: 0.5; }
+  /* Custom checkbox so the native white background doesn't blowtorch
+     the dark theme. Transparent square with subtle border, JMT-blue
+     fill + checkmark when on. accent-color alone isn't enough on
+     Chromium — the browser still paints a white inner square. */
+  .sf-libpick-row input[type="checkbox"] { appearance: none; -webkit-appearance: none; width: 14px; height: 14px; margin: 0; padding: 0; border: 1px solid var(--c-border-strong); border-radius: 2px; background: transparent; cursor: pointer; flex-shrink: 0; display: inline-grid; place-content: center; transition: background 0.1s, border-color 0.1s; }
+  .sf-libpick-row input[type="checkbox"]:hover { border-color: var(--jmt-blue); }
+  .sf-libpick-row input[type="checkbox"]:checked { background: var(--jmt-blue); border-color: var(--jmt-blue); }
+  .sf-libpick-row input[type="checkbox"]:checked::before { content: ''; width: 4px; height: 8px; border: solid white; border-width: 0 2px 2px 0; transform: translateY(-1px) rotate(45deg); }
+  .sf-libpick-row input[type="checkbox"]:disabled { cursor: default; opacity: 0.5; }
+  .sf-libpick-row-icon { font-size: 0.85rem; color: var(--c-text-dim); flex-shrink: 0; line-height: 1; }
+  .sf-libpick-row.is-dir .sf-libpick-row-icon { color: #d9c468; }
+  .sf-libpick-row-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--c-text); }
+  .sf-libpick-row-badge { font-size: 0.66rem; color: var(--c-text-muted); font-style: italic; flex-shrink: 0; }
+  .sf-libpick-tree-empty { padding: 30px 10px; font-size: 0.74rem; color: var(--c-text-muted); font-style: italic; text-align: center; }
+  .sf-libpick-sel-head { font-size: 0.74rem; color: var(--c-text); font-weight: 600; padding: 2px 2px 4px 2px; border-bottom: 1px solid var(--c-border-faint); }
+  .sf-libpick-sel-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding-top: 4px; }
+  .sf-libpick-sel-list::-webkit-scrollbar { width: 6px; }
+  .sf-libpick-sel-list::-webkit-scrollbar-thumb { background: var(--c-border-strong); border-radius: 3px; }
+  .sf-libpick-sel-row { display: flex; align-items: center; gap: 6px; padding: 3px 4px; font-size: 0.72rem; border-radius: 2px; }
+  .sf-libpick-sel-row:hover { background: var(--c-bg-hover); }
+  .sf-libpick-sel-where { color: var(--c-text-muted); font-size: 0.66rem; flex-shrink: 0; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sf-libpick-sel-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--c-text); }
+  .sf-libpick-sel-remove { background: transparent; border: none; color: var(--c-text-dim); cursor: pointer; padding: 0 4px; font-size: 0.78rem; line-height: 1; }
+  .sf-libpick-sel-remove:hover { color: #e44; }
+  .sf-libpick-sel-empty { font-size: 0.7rem; color: var(--c-text-muted); font-style: italic; padding: 10px 4px; text-align: center; }
+  .sf-libpick-actions { margin-top: 10px; justify-content: flex-end; gap: 6px; }
+
   /* Mini audio player — quick-listen modal for .wav rows. Sits at the
      base modal layer (10000) so opening it doesn't disturb confirm-style
      modals (10015) or the context menu (10020) on top. */
@@ -1309,9 +1360,9 @@
   #modal-about .about-grid-sublabel { font-size: 0.72rem; color: var(--c-text-hint); margin-bottom: 2px; }
   #modal-about .about-section-heading { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.09em; color: var(--c-text-hint); margin: 20px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--c-border); }
   #modal-about .about-section-heading:first-of-type { margin-top: 0; }
-  #modal-about .settings-item { display: flex; align-items: center; justify-content: space-between; padding: 7px 0; border-bottom: 1px solid var(--c-border-faint); }
+  #modal-about .settings-item { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 7px 0; border-bottom: 1px solid var(--c-border-faint); }
   #modal-about .settings-item:last-child { border-bottom: none; }
-  #modal-about .settings-item-label { font-size: 0.82rem; color: var(--c-text-muted); }
+  #modal-about .settings-item-label { font-size: 0.82rem; color: var(--c-text-muted); flex: 1; min-width: 0; }
   #modal-about .settings-item-btn { background: var(--c-border); border: 1px solid var(--c-border-heavy); color: var(--c-text-sub); border-radius: 3px; padding: 4px 10px; font-size: 0.75rem; cursor: not-allowed; opacity: 0.5; }
   #modal-about .settings-item-btn.enabled { cursor: pointer; opacity: 1; }
   #modal-about .settings-item-btn.enabled:hover { background: var(--c-border-strong); }
@@ -2950,7 +3001,7 @@
         <button id="btn-sf-select-in-use" class="btn-neutral" style="display:none" title="Select fonts referenced by the open config's presets">Select in-use</button>
         <button id="btn-sf-clear-selection" class="btn-neutral" style="display:none" title="Deselect all">Clear selection</button>
         <button id="btn-sf-bulk-tag" class="btn-neutral" style="display:none" title="Edit tags shared across the selected fonts">Tags</button>
-        <button id="btn-sf-bulk-save" class="btn-neutral" style="display:none" title="Save the selected fonts as Proffie-shaped folders to a destination (SD card, etc.)">Save</button>
+        <button id="btn-sf-bulk-save" class="btn-neutral" style="display:none" title="Export the selected fonts as Proffie-shaped folders to a destination (SD card, etc.)">&#8599; Export</button>
         <button id="btn-sf-bulk-delete" class="btn-red" style="display:none" title="Delete the selected fonts">Delete</button>
         <div class="toolbar-divider"></div>
         <div class="styles-tag-filter-wrap">
@@ -3827,7 +3878,17 @@
           <span class="sf-entry-files-head-actions">
             <button class="btn-neutral sf-entry-files-head-btn" id="btn-sf-entry-reorganize" title="Restructure, reorder, find &amp; replace">Reorganize</button>
             <button class="btn-neutral sf-entry-files-head-btn" id="btn-sf-entry-add-folder" title="Create a new subfolder">+ Folder</button>
-            <button class="btn-neutral sf-entry-files-head-btn" id="btn-sf-entry-add-files" title="Add wav files to this entry">+ Add</button>
+            <span class="styles-tag-filter-wrap" style="position:relative">
+              <button class="btn-neutral sf-entry-files-head-btn" id="btn-sf-entry-add-files" title="Add files to this entry">+ Add</button>
+              <div id="sf-entry-add-dropdown" class="styles-tag-dropdown" style="display:none;min-width:160px;right:0;left:auto">
+                <button id="btn-sf-entry-add-browse" class="styles-tag-dropdown-item">
+                  <span class="styles-tag-dropdown-name">Browse&hellip;</span>
+                </button>
+                <button id="btn-sf-entry-add-library" class="styles-tag-dropdown-item">
+                  <span class="styles-tag-dropdown-name">From library&hellip;</span>
+                </button>
+              </div>
+            </span>
           </span>
         </h3>
         <div class="sf-entry-files-browser" id="sf-entry-files-browser">
@@ -3916,7 +3977,10 @@
       <div class="sf-entry-detail-section">
         <h3>Fonts from this source <span id="sf-source-entries-count" class="sf-review-cand-count"></span></h3>
         <div class="sf-source-entries-list" id="sf-source-entries-list"></div>
-        <button class="modal-btn-primary sf-source-add-more-btn" id="btn-sf-source-add-more">+ Add more fonts from this source</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="modal-btn-primary sf-source-add-more-btn" id="btn-sf-source-add-more">+ Add more fonts from source</button>
+          <button class="modal-btn-cancel sf-source-add-more-btn" id="btn-sf-source-duplicate" title="Open the same picker but with every font already in your library available to duplicate (auto-suggests _copy names)">+ Duplicate fonts from source</button>
+        </div>
       </div>
       <!-- ── Files section ── read-only browser of the whole source
            archive. Same layout/UX as the entry file browser; right-click
@@ -3997,6 +4061,37 @@
 <!-- ── Simple text prompt modal — reusable for "name your common folder",
      rename, and duplicate flows. Resolves with the trimmed string or null
      on cancel/Escape/backdrop click. ── -->
+<!-- ── Library picker — pulls files from any source or font already in
+     the library into the open entry. Combined target dropdown (sources
+     grouped above, fonts below; default is the entry's own source).
+     Left column browses the picked target; right column lists every
+     selection made across any number of target switches. ── -->
+<div class="modal-overlay" id="modal-sf-library-picker">
+  <div class="modal sf-libpick-modal">
+    <button class="modal-btn-close" id="sf-libpick-close" title="Close">&#10005;</button>
+    <h2 class="sf-libpick-title">Add files from the library</h2>
+    <div class="sf-libpick-body">
+      <div class="sf-libpick-left">
+        <div class="sf-libpick-target-row">
+          <label class="sf-libpick-target-label">Browse:</label>
+          <select id="sf-libpick-target" class="sf-libpick-target-select"></select>
+        </div>
+        <div class="sf-libpick-crumb" id="sf-libpick-crumb"></div>
+        <div class="sf-libpick-tree" id="sf-libpick-tree"></div>
+      </div>
+      <div class="sf-libpick-right">
+        <div class="sf-libpick-sel-head">Selected (<span id="sf-libpick-sel-count">0</span>)</div>
+        <div class="sf-libpick-sel-list" id="sf-libpick-sel-list"></div>
+      </div>
+    </div>
+    <div class="modal-btns sf-libpick-actions">
+      <button class="modal-btn-cancel" id="btn-sf-libpick-cancel">Cancel</button>
+      <button class="modal-btn-cancel" id="btn-sf-libpick-clear">Clear selection</button>
+      <button class="modal-btn-primary" id="btn-sf-libpick-add" disabled>Add (0)</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── Mini audio player — quick-listen modal for .wav rows in any of
      the SF browsers (entry, common, source) and the Reorganize reorder
      list. Decodes with Web Audio API so we can draw the waveform from
@@ -4394,13 +4489,24 @@
       </div>
     </div>
 
+    <!-- Show Sound Fonts tab: only relevant before the user has any
+         fonts. Once anything's in the library, this whole row hides
+         (the toggle is implicitly ON — feature in use). -->
     <div class="settings-item" id="setting-soundfonts-item">
-      <span class="settings-item-label">
-        Show Sound Fonts tab
-        <span id="setting-soundfonts-locked-hint" style="display:none;font-size:0.7rem;color:var(--c-text-dim);margin-left:6px">(remove all sound fonts to disable)</span>
-      </span>
+      <span class="settings-item-label">Show Sound Fonts tab</span>
       <label class="settings-toggle">
         <input type="checkbox" id="setting-soundfonts-enabled" checked>
+        <span class="settings-toggle-track"></span>
+      </label>
+    </div>
+
+    <!-- Hidden in lockstep with the parent's visibility (value preserved). -->
+    <div class="settings-item" id="setting-sf-dupcheck-item">
+      <span class="settings-item-label">
+        Detect duplicate sounds in library picker <span style="color:var(--c-text-dim);font-weight:400">(compares file contents to flag sounds included; usually adds less than a second per font)</span>
+      </span>
+      <label class="settings-toggle">
+        <input type="checkbox" id="setting-sf-dupcheck-enabled" checked>
         <span class="settings-toggle-track"></span>
       </label>
     </div>
@@ -11390,15 +11496,23 @@ require(['vs/editor/editor.main'], function () {
         const tabBtn = document.querySelector('.tab[data-tab="soundfonts"]');
         if (tabBtn) tabBtn.style.display = enabled ? '' : 'none';
         if (!enabled && _activeTab === 'soundfonts') switchTab('config');
+        // Sub-settings under "Show Sound Fonts tab" hide in lockstep so
+        // they don't dangle in the Settings panel when the parent
+        // feature is off. Stored values are preserved.
+        const dupItem = document.getElementById('setting-sf-dupcheck-item');
+        if (dupItem) dupItem.style.display = enabled ? '' : 'none';
       };
       const _refreshSoundFontsToggleLock = async () => {
         const r = await window.electronAPI.listEntries();
         const entryCount = (r && r.ok && r.entries) ? r.entries.length : 0;
         const locked = entryCount > 0;
-        const cb     = document.getElementById('setting-soundfonts-enabled');
-        const hint   = document.getElementById('setting-soundfonts-locked-hint');
-        if (cb)   cb.disabled = locked;
-        if (hint) hint.style.display = locked ? '' : 'none';
+        // Hide the whole row when locked — the toggle is implicitly ON
+        // because the feature is in use, and there's nothing the user
+        // can do about it without first emptying the library. Show
+        // again when the library is empty so a user who doesn't want
+        // the feature can opt out.
+        const row = document.getElementById('setting-soundfonts-item');
+        if (row) row.style.display = locked ? 'none' : '';
         return { entryCount, locked };
       };
       let _sfAllEntries = [];
@@ -11651,7 +11765,7 @@ require(['vs/editor/editor.main'], function () {
           e.preventDefault();
           _sfCopyCommonSelection();
         } else {
-          if (!_sfCommonClipboard || _sfCommonClipboard.paths.length === 0) return;
+          if (!_sfFileClipboard || _sfFileClipboard.paths.length === 0) return;
           if (!_sfSelectedCommonUuid) return;
           e.preventDefault();
           // Paste destination: parent dir of the current anchor file (so
@@ -12704,7 +12818,7 @@ require(['vs/editor/editor.main'], function () {
           }
           if (saveBtn) {
             saveBtn.style.display = '';
-            saveBtn.textContent = `Save (${n})`;
+            saveBtn.textContent = `↗ Export (${n})`;
           }
         }
         // Select-helpers appear whenever there are entries to act on. Hide
@@ -13021,6 +13135,19 @@ require(['vs/editor/editor.main'], function () {
         _sfToggleEl.checked = _soundFontsEnabled;
         _sfToggleEl.addEventListener('change', _sfHandleToggle);
       }
+      // Library-picker duplicate-detection toggle. Default ON (true);
+      // null/undefined from the store also resolves to ON so a fresh
+      // install gets the feature without an explicit opt-in.
+      const _sfDupCheckRaw = await window.electronAPI.getSetting('sfDupCheckEnabled', true);
+      let _sfDupCheckEnabled = _sfDupCheckRaw === false ? false : true;
+      const _sfDupCheckEl = document.getElementById('setting-sf-dupcheck-enabled');
+      if (_sfDupCheckEl) {
+        _sfDupCheckEl.checked = _sfDupCheckEnabled;
+        _sfDupCheckEl.addEventListener('change', async () => {
+          _sfDupCheckEnabled = !!_sfDupCheckEl.checked;
+          try { await window.electronAPI.setSetting('sfDupCheckEnabled', _sfDupCheckEnabled); } catch {}
+        });
+      }
       // Library sentinel is auto-created on first import (see _sfRunImport).
       // No explicit setup step in the UI.
 
@@ -13284,6 +13411,9 @@ require(['vs/editor/editor.main'], function () {
         // source metadata is already on file (edited in source detail). Hide
         // the source section entirely — only the candidate list is relevant.
         const isAddMore = !!(_sfImport && _sfImport.isExistingReview);
+        const isDuplicate = !!(_sfImport && _sfImport.isDuplicateMode);
+        const candsForTitle = (_sfImport && _sfImport.candidates) || [];
+        const isSingleCand = candsForTitle.length === 1;
         if (_sfImportEls.reviewSourceSection) {
           _sfImportEls.reviewSourceSection.style.display = isAddMore ? 'none' : '';
         }
@@ -13291,9 +13421,14 @@ require(['vs/editor/editor.main'], function () {
           const src = _sfImport && _sfImport.uuid ? _sfAllSourcesByUuid[_sfImport.uuid] : null;
           const sm = (src && src.meta) || {};
           const sourceLabel = sm.bundleName || sm.originalName || '';
-          _sfImportEls.title.textContent = isAddMore
-            ? (sourceLabel ? `Add more fonts from ${sourceLabel}` : 'Add more fonts from this source')
-            : 'Import Sound Font';
+          const word = isSingleCand ? 'font' : 'fonts';
+          _sfImportEls.title.textContent = isDuplicate
+            ? (sourceLabel ? `Duplicate ${word} from ${sourceLabel}` : `Duplicate ${word} from source`)
+            : isAddMore
+              ? (sourceLabel
+                  ? (isSingleCand ? `Add font from ${sourceLabel}` : `Add more fonts from ${sourceLabel}`)
+                  : (isSingleCand ? 'Add font from source' : 'Add more fonts from source'))
+              : 'Import Sound Font';
         }
         if (_sfImportEls.sourcePath) _sfImportEls.sourcePath.textContent = sourcePath;
         if (_sfImportEls.vendorList) {
@@ -13392,6 +13527,24 @@ require(['vs/editor/editor.main'], function () {
                 }
               }
             }
+            // For duplicate mode: seed names with a non-colliding
+            // _copy / _copy2 / _copy3 suffix so the import doesn't
+            // immediately fail validation against the existing entry.
+            const _suggestCopyName = (base) => {
+              const taken = new Set(_sfAllEntries.map(e => e.name.toLowerCase()));
+              let n = 0;
+              while (true) {
+                const cand = n === 0 ? `${base}_copy` : `${base}_copy${n + 1}`;
+                if (!taken.has(cand.toLowerCase())) return cand;
+                n++;
+              }
+            };
+            const isDuplicate = !!(_sfImport && _sfImport.isDuplicateMode);
+            // When duplicate-mode opens against a source with exactly
+            // one candidate, pre-check it — there's only one thing
+            // they could possibly want. With multiple candidates the
+            // user has to pick which ones explicitly.
+            const _autoCheckDup = isDuplicate && cands.length === 1;
             _sfImportEls.candList.innerHTML = cands.map((c, i) => {
               const initialName = _sfSuggestName(c, i, bundleName, prependBundle);
               const alreadyName = existingByPath.get(c.path || '');
@@ -13407,11 +13560,27 @@ require(['vs/editor/editor.main'], function () {
                 badges.push('<span class="cand-badge nested" title="The Proffie content lives inside a nested zip. JMT Studio extracts it during import.">nested zip</span>');
               }
               const wavLine = c.wavCount != null ? `${c.wavCount} .wav` : 'wav count inside nested zip';
-              const checkAttrs = isAlready ? 'disabled' : 'checked';
-              const nameAttrs = isAlready ? 'disabled' : '';
-              const nameVal = isAlready ? alreadyName : initialName;
-              const statusHtml = isAlready ? `Already in your library as ${_sfEscape(alreadyName)}` : '';
-              return `<div class="sf-review-candidate-row${isAlready ? ' already-imported' : ''}" data-idx="${i}" data-already="${isAlready ? '1' : '0'}">
+              // Duplicate mode flips the existing-import logic: nothing
+              // is locked, nothing is checked by default, and already-
+              // imported items seed with a _copy suffix so the user can
+              // commit immediately without renaming.
+              let checkAttrs, nameAttrs, nameVal, statusHtml, rowAlreadyData, rowAlreadyClass;
+              if (isDuplicate) {
+                checkAttrs = _autoCheckDup ? 'checked' : '';
+                nameAttrs = '';
+                nameVal = isAlready ? _suggestCopyName(alreadyName) : initialName;
+                statusHtml = isAlready ? `Currently imported as ${_sfEscape(alreadyName)}` : '';
+                rowAlreadyData = '0'; // not locked — duplicate flow
+                rowAlreadyClass = '';
+              } else {
+                checkAttrs = isAlready ? 'disabled' : 'checked';
+                nameAttrs = isAlready ? 'disabled' : '';
+                nameVal = isAlready ? alreadyName : initialName;
+                statusHtml = isAlready ? `Already in your library as ${_sfEscape(alreadyName)}` : '';
+                rowAlreadyData = isAlready ? '1' : '0';
+                rowAlreadyClass = isAlready ? ' already-imported' : '';
+              }
+              return `<div class="sf-review-candidate-row${rowAlreadyClass}" data-idx="${i}" data-already="${rowAlreadyData}">
                 <input type="checkbox" class="cand-check" ${checkAttrs}>
                 <div class="cand-main">
                   <input type="text" class="cand-name" value="${_sfEscape(nameVal)}" maxlength="64" autocomplete="off" ${nameAttrs}>
@@ -14510,6 +14679,20 @@ require(['vs/editor/editor.main'], function () {
           const er = await window.electronAPI.listEntriesBySource({ sourceUuid: uuid });
           sourceEntries = (er && er.ok && er.entries) || [];
         } catch {}
+        // Singularize the two action buttons when the source has only
+        // one font in the library — drops "more" for the add path so
+        // the grammar reads naturally, and "fonts" → "font" everywhere.
+        // Falls back to the plural defaults when no entries (zero) or
+        // many.
+        const _isSingleFont = sourceEntries.length === 1;
+        const addMoreBtnEl = document.getElementById('btn-sf-source-add-more');
+        const dupBtnEl     = document.getElementById('btn-sf-source-duplicate');
+        if (addMoreBtnEl) addMoreBtnEl.textContent = _isSingleFont
+          ? '+ Add font from source'
+          : '+ Add more fonts from source';
+        if (dupBtnEl) dupBtnEl.textContent = _isSingleFont
+          ? '+ Duplicate font from source'
+          : '+ Duplicate fonts from source';
         // Tag intersection: a tag is "common" only when every entry in the
         // bundle has it. Match case-insensitively but preserve the casing
         // from the first entry that introduced the tag.
@@ -15108,6 +15291,89 @@ require(['vs/editor/editor.main'], function () {
         _sfSourceDirty = false;
         await _sfOpenEntryDetail(name, { swapFromModalId: 'modal-sf-source-detail' });
       });
+      // Walk "_copy", "_copy2", "_copy3"... against the current entry
+      // name set until we find a free slot. Used by the entry-row
+      // context menu's Duplicate items so the new entry name lands
+      // valid out of the gate.
+      const _sfSuggestCopyEntryName = (base) => {
+        const taken = new Set((_sfAllEntries || []).map(e => e.name.toLowerCase()));
+        let n = 0;
+        while (true) {
+          const cand = n === 0 ? `${base}_copy` : `${base}_copy${n + 1}`;
+          if (!taken.has(cand.toLowerCase())) return cand;
+          n++;
+        }
+      };
+      // Run after a successful duplicate: refresh the source-detail
+      // entries list and the global SF view, then pop the newly-created
+      // row into edit mode with the name input focused and selected so
+      // the user can immediately type a new name.
+      const _sfFinishEntryDuplicate = async (newName) => {
+        try { await window.refreshSoundFontsView(); } catch {}
+        if (_sfSourceOriginalUuid) {
+          await _sfRenderSourceEntries(_sfSourceOriginalUuid);
+        }
+        await _sfBeginEntryRowEdit(newName);
+        const input = _sfSourceDetailEls.entriesList?.querySelector(`[data-entry-name-input="${CSS.escape(newName)}"]`);
+        input?.focus();
+        input?.select?.();
+      };
+      // Right-click context menu on source-detail entry rows. Lives on
+      // the entries list itself so it survives re-renders. Same DOM
+      // (preset-ctx-menu) every other SF context menu reuses.
+      _sfSourceDetailEls.entriesList?.addEventListener('contextmenu', (e) => {
+        const row = e.target.closest('.sf-source-entry-row[data-entry-name]');
+        if (!row) return;
+        const name = row.getAttribute('data-entry-name');
+        if (!name) return;
+        e.preventDefault();
+        const menu = document.getElementById('preset-ctx-menu');
+        if (!menu) return;
+        const mkItem = (text, cls, fn) => {
+          const d = document.createElement('div');
+          d.className = 'preset-ctx-item' + (cls ? ' ' + cls : '');
+          d.textContent = text;
+          d.addEventListener('mousedown', (e2) => { e2.stopPropagation(); menu.style.display = 'none'; fn(); });
+          menu.appendChild(d);
+        };
+        const mkSep = () => { const s = document.createElement('div'); s.className = 'preset-ctx-separator'; menu.appendChild(s); };
+        menu.innerHTML = '';
+        // Edit — same effect as clicking the pencil button on the row.
+        mkItem('Edit', '', () => {
+          row.querySelector(`[data-entry-edit-toggle="${CSS.escape(name)}"]`)?.click();
+        });
+        mkSep();
+        mkItem('Duplicate', '', async () => {
+          const newName = _sfSuggestCopyEntryName(name);
+          let res;
+          try {
+            res = await window.electronAPI.duplicateEntry({ sourceName: name, newName, mode: 'current' });
+          } catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
+          if (!res || !res.ok) { alert(`Duplicate failed: ${(res && res.error) || 'unknown'}`); return; }
+          await _sfFinishEntryDuplicate(res.name || newName);
+        });
+        mkItem('Duplicate from source', '', async () => {
+          const newName = _sfSuggestCopyEntryName(name);
+          let res;
+          try {
+            res = await window.electronAPI.duplicateEntry({ sourceName: name, newName, mode: 'source' });
+          } catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
+          if (!res || !res.ok) { alert(`Duplicate failed: ${(res && res.error) || 'unknown'}`); return; }
+          await _sfFinishEntryDuplicate(res.name || newName);
+        });
+        mkSep();
+        // Delete — programmatically click the existing × so the full
+        // delete flow (confirm prompt, source-cleanup, source close)
+        // runs unchanged.
+        mkItem('× Delete', 'danger', () => {
+          row.querySelector(`[data-entry-delete="${CSS.escape(name)}"]`)?.click();
+        });
+        const x = Math.min(e.clientX, window.innerWidth - 220);
+        const y = Math.min(e.clientY, window.innerHeight - 180);
+        menu.style.left = x + 'px';
+        menu.style.top = y + 'px';
+        menu.style.display = 'block';
+      });
       // "Add more fonts from this source" reuses the import review flow.
       _sfSourceDetailEls.addMoreBtn?.addEventListener('click', async () => {
         if (!_sfSourceOriginalUuid) return;
@@ -15125,6 +15391,21 @@ require(['vs/editor/editor.main'], function () {
         _sfSourceOriginalUuid = null;
         _sfSourceDirty = false;
         await _sfReviewExistingSource(uuid, { swapFromModalId: 'modal-sf-source-detail' });
+      });
+      // "Duplicate fonts from this source" — same review flow but
+      // duplicate mode (every font selectable, none checked by default,
+      // _copy suffix on suggested names).
+      document.getElementById('btn-sf-source-duplicate')?.addEventListener('click', async () => {
+        if (!_sfSourceOriginalUuid) return;
+        if (_sfSourceDirty) {
+          if (!await _promptDiscard('Unsaved source edits — discard them and continue?')) return;
+        }
+        const uuid = _sfSourceOriginalUuid;
+        _sfSourceDetailReturnToEntry = null;
+        _sfSourceEdit = null;
+        _sfSourceOriginalUuid = null;
+        _sfSourceDirty = false;
+        await _sfDuplicateFromSource(uuid, { swapFromModalId: 'modal-sf-source-detail' });
       });
       // Delete source with cascade warning.
       _sfSourceDetailEls.deleteBtn?.addEventListener('click', async () => {
@@ -15467,7 +15748,578 @@ require(['vs/editor/editor.main'], function () {
         _sfRenderEntryFiles();
       };
       document.getElementById('btn-sf-entry-add-folder')?.addEventListener('click', _sfCreateEntrySubfolderPrompt);
-      document.getElementById('btn-sf-entry-add-files')?.addEventListener('click', _sfAddEntryFiles);
+      // +Add becomes a dropdown: Browse… (existing computer file
+      // picker) or From library… (sources + fonts already in the
+      // library). The "+" symbol carries the call-to-action so there
+      // is no caret on the button itself — clicking opens the menu.
+      const _sfEntryAddDropdown = document.getElementById('sf-entry-add-dropdown');
+      const _sfEntryAddBtn = document.getElementById('btn-sf-entry-add-files');
+      _sfEntryAddBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!_sfEntryAddDropdown) return;
+        const opening = _sfEntryAddDropdown.style.display === 'none';
+        _sfEntryAddDropdown.style.display = opening ? '' : 'none';
+      });
+      document.addEventListener('click', (e) => {
+        if (!_sfEntryAddDropdown) return;
+        if (_sfEntryAddDropdown.style.display === 'none') return;
+        const inside = _sfEntryAddDropdown.contains(e.target) || _sfEntryAddBtn?.contains(e.target);
+        if (!inside) _sfEntryAddDropdown.style.display = 'none';
+      });
+      document.getElementById('btn-sf-entry-add-browse')?.addEventListener('click', () => {
+        if (_sfEntryAddDropdown) _sfEntryAddDropdown.style.display = 'none';
+        _sfAddEntryFiles();
+      });
+      document.getElementById('btn-sf-entry-add-library')?.addEventListener('click', () => {
+        if (_sfEntryAddDropdown) _sfEntryAddDropdown.style.display = 'none';
+        _sfOpenLibraryPicker();
+      });
+
+      // ── Library picker ────────────────────────────────────────────────
+      // Add files from any source or font already in the library into
+      // the open entry. Target dropdown groups Sources and Fonts and
+      // defaults to the entry's own source. Switching targets does NOT
+      // clear the running selection — picks accumulate in the right
+      // panel and the user can browse freely. Already-present files in
+      // the destination entry render disabled with a badge so the
+      // picker doesn't redundantly stage them.
+      let _sfLibPickActive = null;       // { kind: 'source'|'entry', id }
+      let _sfLibPickTree = [];           // tree for the active target
+      let _sfLibPickPath = '';           // breadcrumb path inside the active target
+      // Hash-based duplicate detection. _sfLibPickDestHashes is the set
+      // of sha256s in the destination entry. _sfLibPickHashCache maps
+      // "kind::id::subPath" → sha256 (or null while pending, undefined
+      // when never requested). _sfLibPickGen invalidates in-flight
+      // results when the picker closes so they don't paint into a
+      // future open.
+      let _sfLibPickDestHashes = new Set();
+      let _sfLibPickHashCache = new Map();
+      let _sfLibPickGen = 0;
+      // Selections: array of { kind, id, name (label of target), subPath, fileName }.
+      let _sfLibPickSelections = [];
+      const _sfLibPickKey = (k, id, sub) => `${k}::${id}::${sub}`;
+      const _sfLibPickIsDup = (k, id, sub) => {
+        if (!_sfDupCheckEnabled) return false;
+        const h = _sfLibPickHashCache.get(_sfLibPickKey(k, id, sub));
+        return typeof h === 'string' && _sfLibPickDestHashes.has(h);
+      };
+      const _sfLibPickEls = {
+        modal:        document.getElementById('modal-sf-library-picker'),
+        closeX:       document.getElementById('sf-libpick-close'),
+        target:       document.getElementById('sf-libpick-target'),
+        crumb:        document.getElementById('sf-libpick-crumb'),
+        tree:         document.getElementById('sf-libpick-tree'),
+        selList:      document.getElementById('sf-libpick-sel-list'),
+        selCount:     document.getElementById('sf-libpick-sel-count'),
+        cancelBtn:    document.getElementById('btn-sf-libpick-cancel'),
+        clearBtn:     document.getElementById('btn-sf-libpick-clear'),
+        addBtn:       document.getElementById('btn-sf-libpick-add'),
+      };
+      // Modals to stash while the picker is on top — same pattern the
+      // doc viewer uses.
+      let _sfLibPickStashedIds = [];
+      const _sfLibPickChildrenAt = (tree, navPath) => {
+        if (!navPath) return tree;
+        const parts = navPath.split('/').filter(Boolean);
+        let cur = tree;
+        for (const p of parts) {
+          const next = cur.find(n => n.isDir && n.name === p);
+          if (!next) return [];
+          cur = next.children || [];
+        }
+        return cur;
+      };
+      const _sfLibPickIconFor = (n) => {
+        if (n.isDir) return '&#128193;';
+        const ext = (n.name.match(/\.[^.]+$/) || [''])[0].toLowerCase();
+        if (ext === '.wav') return '&#127925;';
+        return '&#128196;';
+      };
+      // Populate the target <select>. Sources first (every library
+      // source), then Fonts (every library entry EXCEPT the open one).
+      // Marks the entry's own source with " (this font's source)" so
+      // the default selection is recognizable without reading the uuid.
+      const _sfLibPickPopulateTargets = () => {
+        const sel = _sfLibPickEls.target;
+        if (!sel) return;
+        const entry = _sfAllEntries.find(e => e.name === _sfDetailOriginalName);
+        const ownSourceUuid = entry?.meta?.sourceUuid || null;
+        const sources = Object.values(_sfAllSourcesByUuid || {}).slice().sort((a, b) => {
+          const an = (a.meta?.bundleName || a.meta?.originalName || a.uuid).toLowerCase();
+          const bn = (b.meta?.bundleName || b.meta?.originalName || b.uuid).toLowerCase();
+          return an.localeCompare(bn);
+        });
+        const fonts = (_sfAllEntries || []).filter(e => e.name !== _sfDetailOriginalName)
+          .slice().sort((a, b) => a.name.localeCompare(b.name));
+        const optgroups = [];
+        if (sources.length) {
+          const items = sources.map(s => {
+            const label = s.meta?.bundleName || s.meta?.originalName || s.uuid;
+            const tail = s.uuid === ownSourceUuid ? '  (this font’s source)' : '';
+            return `<option value="source::${_sfEscape(s.uuid)}">${_sfEscape(label)}${tail}</option>`;
+          }).join('');
+          optgroups.push(`<optgroup label="Sources">${items}</optgroup>`);
+        }
+        if (fonts.length) {
+          const items = fonts.map(f => `<option value="entry::${_sfEscape(f.name)}">${_sfEscape(f.name)}</option>`).join('');
+          optgroups.push(`<optgroup label="Fonts">${items}</optgroup>`);
+        }
+        sel.innerHTML = optgroups.join('');
+        // Default to the entry's own source when available, otherwise
+        // first source, otherwise first font.
+        if (ownSourceUuid && sources.some(s => s.uuid === ownSourceUuid)) {
+          sel.value = `source::${ownSourceUuid}`;
+        } else if (sources.length) {
+          sel.value = `source::${sources[0].uuid}`;
+        } else if (fonts.length) {
+          sel.value = `entry::${fonts[0].name}`;
+        }
+      };
+      const _sfLibPickLoadTarget = async () => {
+        const v = _sfLibPickEls.target?.value || '';
+        const [kind, id] = v.split('::');
+        if (!kind || !id) {
+          _sfLibPickActive = null;
+          _sfLibPickTree = [];
+          _sfLibPickPath = '';
+          _sfRenderLibPickTree();
+          return;
+        }
+        _sfLibPickActive = { kind, id };
+        _sfLibPickPath = '';
+        _sfLibPickTree = [];
+        if (_sfLibPickEls.tree) _sfLibPickEls.tree.innerHTML = `<div class="sf-libpick-tree-empty">Loading…</div>`;
+        try {
+          if (kind === 'source') {
+            const r = await window.electronAPI.listSourceFiles({ uuid: id });
+            _sfLibPickTree = (r && r.ok && r.files) || [];
+          } else if (kind === 'entry') {
+            const r = await window.electronAPI.listEntryFiles({ name: id });
+            _sfLibPickTree = (r && r.ok && r.files) || [];
+          }
+        } catch { _sfLibPickTree = []; }
+        _sfRenderLibPickTree();
+      };
+      // Collect file subPaths visible in the current tree render that
+      // we haven't hashed yet (or have a pending entry for). Issues
+      // one batched IPC per request, then patches the badges in
+      // place using the row-key attribute as anchor. Guarded by the
+      // generation counter so a close mid-fetch is a no-op.
+      const _sfLibPickHashVisible = async () => {
+        if (!_sfDupCheckEnabled) return;
+        const t = _sfLibPickActive;
+        if (!t) return;
+        const rows = [...document.querySelectorAll('#sf-libpick-tree [data-file-row]')];
+        const need = [];
+        for (const r of rows) {
+          const sub = r.getAttribute('data-file-row');
+          const k = _sfLibPickKey(t.kind, t.id, sub);
+          if (_sfLibPickHashCache.has(k)) continue; // already resolved or pending
+          _sfLibPickHashCache.set(k, null); // pending sentinel
+          need.push(sub);
+        }
+        if (!need.length) return;
+        const gen = _sfLibPickGen;
+        let res;
+        try {
+          res = await window.electronAPI.hashFiles({ kind: t.kind, id: t.id, paths: need });
+        } catch (err) { res = { ok: false }; }
+        if (gen !== _sfLibPickGen) return; // picker closed; abandon results
+        if (!res || !res.ok || !Array.isArray(res.hashes)) {
+          // Clear pending sentinels so a re-render can retry.
+          for (const sub of need) _sfLibPickHashCache.delete(_sfLibPickKey(t.kind, t.id, sub));
+          return;
+        }
+        for (const h of res.hashes) {
+          const k = _sfLibPickKey(t.kind, t.id, h.subPath);
+          if (h.sha256) _sfLibPickHashCache.set(k, h.sha256);
+          else _sfLibPickHashCache.delete(k); // error → eligible for retry next render
+        }
+        _sfLibPickPatchBadges();
+      };
+      // Walk every visible row and ensure its badge matches the
+      // current cache state. Cheap (DOM toggle only) since the row
+      // markup already exists.
+      const _sfLibPickPatchBadges = () => {
+        const t = _sfLibPickActive;
+        if (!t) return;
+        const rows = [...document.querySelectorAll('#sf-libpick-tree [data-file-row]')];
+        for (const r of rows) {
+          const sub = r.getAttribute('data-file-row');
+          const isDup = _sfLibPickIsDup(t.kind, t.id, sub);
+          let badge = r.querySelector('[data-dup-badge]');
+          if (isDup && !badge) {
+            badge = document.createElement('span');
+            badge.className = 'sf-libpick-row-badge';
+            badge.setAttribute('data-dup-badge', '');
+            badge.textContent = 'already in entry';
+            r.appendChild(badge);
+          } else if (!isDup && badge) {
+            badge.remove();
+          }
+        }
+      };
+      // Hash every file in the destination entry once on picker open.
+      // Result populates _sfLibPickDestHashes which is the lookup set
+      // for badge decisions. Runs async; UI doesn't block, badges
+      // appear when this resolves + per-row hashes resolve.
+      const _sfLibPickPrimeDestHashes = async () => {
+        _sfLibPickDestHashes = new Set();
+        if (!_sfDupCheckEnabled || !_sfDetailOriginalName) return;
+        const paths = [];
+        const walk = (nodes, pre) => {
+          for (const n of (nodes || [])) {
+            if (n.isDir) walk(n.children, pre ? `${pre}/${n.name}` : n.name);
+            else paths.push(pre ? `${pre}/${n.name}` : n.name);
+          }
+        };
+        walk(_sfEntryFilesTree, '');
+        if (!paths.length) return;
+        const gen = _sfLibPickGen;
+        let res;
+        try {
+          res = await window.electronAPI.hashFiles({
+            kind: 'entry', id: _sfDetailOriginalName, paths,
+          });
+        } catch { res = { ok: false }; }
+        if (gen !== _sfLibPickGen) return;
+        if (!res || !res.ok || !Array.isArray(res.hashes)) return;
+        for (const h of res.hashes) if (h.sha256) _sfLibPickDestHashes.add(h.sha256);
+        _sfLibPickPatchBadges();
+      };
+      // Render the file tree for the currently-active target at the
+      // current breadcrumb path. Files whose hash matches a file in
+      // the destination entry render with an "already in entry" badge
+      // (hash-resolved — name collisions across fonts don't trigger).
+      const _sfRenderLibPickTree = () => {
+        const wrap = _sfLibPickEls.tree;
+        const crumbEl = _sfLibPickEls.crumb;
+        if (!wrap || !crumbEl) return;
+        // Breadcrumb: target label + path segments.
+        const t = _sfLibPickActive;
+        const opt = t ? _sfLibPickEls.target?.querySelector(`option[value="${CSS.escape(`${t.kind}::${t.id}`)}"]`) : null;
+        const rootLabel = (opt?.textContent || 'Files').replace(/\s+\(this font.s source\)$/u, '');
+        const segs = _sfLibPickPath.split('/').filter(Boolean);
+        const crumbs = [`<span class="sf-libpick-crumb-item${segs.length === 0 ? ' current' : ''}" data-crumb="">${_sfEscape(rootLabel)}</span>`];
+        let acc = '';
+        for (let i = 0; i < segs.length; i++) {
+          acc = acc ? `${acc}/${segs[i]}` : segs[i];
+          const isLast = i === segs.length - 1;
+          crumbs.push(`<span class="sf-libpick-crumb-sep">›</span><span class="sf-libpick-crumb-item${isLast ? ' current' : ''}" data-crumb="${_sfEscape(acc)}">${_sfEscape(segs[i])}</span>`);
+        }
+        crumbEl.innerHTML = crumbs.join('');
+        const children = _sfLibPickChildrenAt(_sfLibPickTree, _sfLibPickPath);
+        if (!children.length) {
+          wrap.innerHTML = `<div class="sf-libpick-tree-empty">This folder is empty.</div>`;
+          return;
+        }
+        wrap.innerHTML = children.map(n => {
+          if (n.isDir) {
+            return `<div class="sf-libpick-row is-dir" data-dir="${_sfEscape(n.path)}">
+              <span style="width:14px"></span>
+              <span class="sf-libpick-row-icon">${_sfLibPickIconFor(n)}</span>
+              <span class="sf-libpick-row-name">${_sfEscape(n.name)}</span>
+            </div>`;
+          }
+          const key = t ? _sfLibPickKey(t.kind, t.id, n.path) : '';
+          const checked = _sfLibPickSelections.some(s => _sfLibPickKey(s.kind, s.id, s.subPath) === key);
+          // Hash-based duplicate badge. May not be resolved yet — the
+          // post-render hash-visible pass will patch the badge in once
+          // the IPC returns. User can still check the row regardless;
+          // Proffie variant naming handles the destination collision.
+          const isDup = t && _sfLibPickIsDup(t.kind, t.id, n.path);
+          const cb = `<input type="checkbox" data-file="${_sfEscape(n.path)}"${checked ? ' checked' : ''}>`;
+          const badge = isDup ? `<span class="sf-libpick-row-badge" data-dup-badge>already in entry</span>` : '';
+          return `<div class="sf-libpick-row" data-file-row="${_sfEscape(n.path)}" data-row-key="${_sfEscape(key)}">
+            ${cb}
+            <span class="sf-libpick-row-icon">${_sfLibPickIconFor(n)}</span>
+            <span class="sf-libpick-row-name">${_sfEscape(n.name)}</span>
+            ${badge}
+          </div>`;
+        }).join('');
+        // After render, kick off background hashing of any visible
+        // file rows whose hash we don't already have. Results patch
+        // badges in place; render path doesn't block.
+        _sfLibPickHashVisible();
+      };
+      // Render the right-hand selections panel. Each row shows where the
+      // file lives (target name + folder path) and the file name, with
+      // an X to remove it from the staged set.
+      const _sfRenderLibPickSelections = () => {
+        const el = _sfLibPickEls.selList;
+        const countEl = _sfLibPickEls.selCount;
+        const addBtn = _sfLibPickEls.addBtn;
+        if (!el) return;
+        const n = _sfLibPickSelections.length;
+        if (countEl) countEl.textContent = String(n);
+        if (addBtn) {
+          addBtn.disabled = n === 0;
+          addBtn.textContent = `Add (${n})`;
+        }
+        if (n === 0) {
+          el.innerHTML = `<div class="sf-libpick-sel-empty">No files selected yet.</div>`;
+          return;
+        }
+        el.innerHTML = _sfLibPickSelections.map((s, idx) => {
+          const parts = s.subPath.split('/'); parts.pop();
+          const folder = parts.join('/');
+          const where = folder ? `${s.name}/${folder}` : s.name;
+          return `<div class="sf-libpick-sel-row">
+            <span class="sf-libpick-sel-where" title="${_sfEscape(where)}">${_sfEscape(where)}</span>
+            <span class="sf-libpick-sel-name" title="${_sfEscape(s.fileName)}">${_sfEscape(s.fileName)}</span>
+            <button class="sf-libpick-sel-remove" data-sel-idx="${idx}" title="Remove">&#10005;</button>
+          </div>`;
+        }).join('');
+      };
+      const _sfLibPickToggleFile = (subPath, checked) => {
+        const t = _sfLibPickActive;
+        if (!t) return;
+        const key = _sfLibPickKey(t.kind, t.id, subPath);
+        const existingIdx = _sfLibPickSelections.findIndex(s => _sfLibPickKey(s.kind, s.id, s.subPath) === key);
+        if (checked && existingIdx < 0) {
+          // Target label (without the "this font's source" suffix).
+          const opt = _sfLibPickEls.target?.querySelector(`option[value="${CSS.escape(`${t.kind}::${t.id}`)}"]`);
+          const name = (opt?.textContent || t.id).replace(/\s+\(this font.s source\)$/u, '');
+          _sfLibPickSelections.push({
+            kind: t.kind, id: t.id, name,
+            subPath, fileName: subPath.split('/').pop(),
+          });
+        } else if (!checked && existingIdx >= 0) {
+          _sfLibPickSelections.splice(existingIdx, 1);
+        }
+        _sfRenderLibPickSelections();
+      };
+      const _sfOpenLibraryPicker = async () => {
+        const m = _sfLibPickEls.modal;
+        if (!m || !_sfDetailOriginalName) return;
+        // Refresh the snapshot caches the picker reads from (sources +
+        // entries) so a freshly imported source shows up immediately.
+        try {
+          const sr = await window.electronAPI.listSources();
+          if (sr && sr.ok && Array.isArray(sr.sources)) {
+            _sfAllSourcesByUuid = {};
+            for (const s of sr.sources) _sfAllSourcesByUuid[s.uuid] = s;
+          }
+          const er = await window.electronAPI.listEntries();
+          if (er && er.ok && Array.isArray(er.entries)) _sfAllEntries = er.entries;
+        } catch {}
+        // Reset hash state for this open. Generation bump invalidates
+        // any background hashing still in flight from a prior session.
+        _sfLibPickGen++;
+        _sfLibPickHashCache = new Map();
+        _sfLibPickDestHashes = new Set();
+        _sfLibPickSelections = [];
+        _sfLibPickPath = '';
+        _sfLibPickPopulateTargets();
+        await _sfLibPickLoadTarget();
+        _sfRenderLibPickSelections();
+        // Kick off the destination hash in the background — the picker
+        // is interactive immediately; badges appear when hashes land.
+        _sfLibPickPrimeDestHashes();
+        // Stash the entry detail modal while the picker is up — same
+        // convention the doc viewer follows.
+        _sfLibPickStashedIds = [];
+        const candidates = ['modal-sf-entry-detail'];
+        for (const id of candidates) {
+          const el = document.getElementById(id);
+          if (el && el.classList.contains('active')) {
+            el.classList.remove('active');
+            _sfLibPickStashedIds.push(id);
+          }
+        }
+        m.classList.add('active');
+      };
+      const _sfCloseLibraryPicker = () => {
+        const m = _sfLibPickEls.modal;
+        if (!m) return;
+        m.classList.remove('active');
+        // Bump the gen counter so any pending hash batch resolves into
+        // a no-op rather than painting badges into the next open.
+        _sfLibPickGen++;
+        for (const id of _sfLibPickStashedIds) {
+          document.getElementById(id)?.classList.add('active');
+        }
+        _sfLibPickStashedIds = [];
+      };
+      // Target switch — load the picked source / font tree.
+      _sfLibPickEls.target?.addEventListener('change', _sfLibPickLoadTarget);
+      // Tree clicks — folder rows navigate, checkbox toggles selection.
+      _sfLibPickEls.tree?.addEventListener('click', (e) => {
+        const cb = e.target.closest('input[type="checkbox"][data-file]');
+        if (cb) {
+          // Native checkbox change handles the value; we just sync our
+          // selection model. Stop propagation so the row's click
+          // (folder nav) doesn't fight us.
+          e.stopPropagation();
+          _sfLibPickToggleFile(cb.getAttribute('data-file'), cb.checked);
+          return;
+        }
+        const dir = e.target.closest('[data-dir]');
+        if (dir) {
+          _sfLibPickPath = dir.getAttribute('data-dir') || '';
+          _sfRenderLibPickTree();
+          return;
+        }
+      });
+      // Breadcrumb clicks — jump to that depth.
+      _sfLibPickEls.crumb?.addEventListener('click', (e) => {
+        const c = e.target.closest('[data-crumb]');
+        if (!c) return;
+        _sfLibPickPath = c.getAttribute('data-crumb') || '';
+        _sfRenderLibPickTree();
+      });
+      // Right panel — X to remove one selection.
+      _sfLibPickEls.selList?.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-sel-idx]');
+        if (!btn) return;
+        const idx = parseInt(btn.getAttribute('data-sel-idx'), 10);
+        if (Number.isNaN(idx)) return;
+        _sfLibPickSelections.splice(idx, 1);
+        _sfRenderLibPickSelections();
+        _sfRenderLibPickTree(); // re-render so unchecking shows
+      });
+      _sfLibPickEls.clearBtn?.addEventListener('click', () => {
+        _sfLibPickSelections = [];
+        _sfRenderLibPickSelections();
+        _sfRenderLibPickTree();
+      });
+      _sfLibPickEls.cancelBtn?.addEventListener('click', _sfCloseLibraryPicker);
+      _sfLibPickEls.closeX?.addEventListener('click', _sfCloseLibraryPicker);
+      _sfLibPickEls.modal?.addEventListener('click', (e) => {
+        if (e.target === _sfLibPickEls.modal) _sfCloseLibraryPicker();
+      });
+      document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return;
+        const m = _sfLibPickEls.modal;
+        if (!m || !m.classList.contains('active')) return;
+        const top = [...document.querySelectorAll('.modal-overlay.active')].pop();
+        if (top !== m) return;
+        e.preventDefault();
+        _sfCloseLibraryPicker();
+      });
+      // Double-click + right-click → Play/Open inside the picker tree.
+      // Uses the shared dispatcher so behavior matches every other SF
+      // browser. Checkbox clicks (handled above) propagate-stop so they
+      // never get mistaken for a row dblclick.
+      _sfLibPickEls.tree?.addEventListener('click', (e) => {
+        if (e.target.closest('input[type="checkbox"]')) return;
+        const row = e.target.closest('[data-file-row]');
+        if (!row || row.classList.contains('disabled')) return;
+        const p = row.getAttribute('data-file-row');
+        const t = _sfLibPickActive;
+        if (!t || !p) return;
+        if (_sfTryDoubleClick(`libpick:${t.kind}:${t.id}:${p}`)) {
+          _sfTryOpenFile({ kind: t.kind, id: t.id, subPath: p });
+        }
+      });
+      _sfLibPickEls.tree?.addEventListener('contextmenu', (e) => {
+        const t = _sfLibPickActive;
+        if (!t) return;
+        // Folder row → single-item Export… menu (library picker is the
+        // grab-from-somewhere flow; the matching Add button at the
+        // bottom handles in-app moves, so Copy isn't needed here).
+        const dirRow = e.target.closest('[data-dir]');
+        if (dirRow) {
+          const dirSub = dirRow.getAttribute('data-dir');
+          if (!dirSub) return;
+          e.preventDefault();
+          const menu = document.getElementById('preset-ctx-menu');
+          if (!menu) return;
+          menu.innerHTML = '';
+          const item = document.createElement('div');
+          item.className = 'preset-ctx-item';
+          item.textContent = '↗ Export folder…';
+          item.addEventListener('mousedown', (e2) => {
+            e2.stopPropagation();
+            menu.style.display = 'none';
+            _sfExportFiles({ kind: t.kind, id: t.id, subPaths: [dirSub] });
+          });
+          menu.appendChild(item);
+          const x = Math.min(e.clientX, window.innerWidth - 200);
+          const y = Math.min(e.clientY, window.innerHeight - 100);
+          menu.style.left = x + 'px';
+          menu.style.top = y + 'px';
+          menu.style.display = 'block';
+          return;
+        }
+        const row = e.target.closest('[data-file-row]');
+        if (!row) return;
+        const p = row.getAttribute('data-file-row');
+        if (!p) return;
+        const isWav = _sfIsWavPath(p);
+        const isText = !isWav && _sfIsTextReadable(p);
+        e.preventDefault();
+        const menu = document.getElementById('preset-ctx-menu');
+        if (!menu) return;
+        menu.innerHTML = '';
+        const mkItem = (text, fn) => {
+          const d = document.createElement('div');
+          d.className = 'preset-ctx-item';
+          d.textContent = text;
+          d.addEventListener('mousedown', (e2) => { e2.stopPropagation(); menu.style.display = 'none'; fn(); });
+          menu.appendChild(d);
+        };
+        const mkSep = () => { const s = document.createElement('div'); s.className = 'preset-ctx-separator'; menu.appendChild(s); };
+        if (isWav) {
+          mkItem('▶ Play', () => _sfTryOpenFile({ kind: t.kind, id: t.id, subPath: p }));
+          mkSep();
+        } else if (isText) {
+          mkItem('Open', () => _sfTryOpenFile({ kind: t.kind, id: t.id, subPath: p }));
+          mkSep();
+        }
+        mkItem('↗ Export…', () => _sfExportFiles({ kind: t.kind, id: t.id, subPaths: [p] }));
+        const x = Math.min(e.clientX, window.innerWidth - 200);
+        const y = Math.min(e.clientY, window.innerHeight - 100);
+        menu.style.left = x + 'px';
+        menu.style.top = y + 'px';
+        menu.style.display = 'block';
+      });
+      // Add — group selections by source target, batch one fileOps:copy
+      // per group. Destination is the entry's CURRENT breadcrumb path
+      // (so users picking up wavs while looking at "boot/" land them in
+      // boot/, matching the existing +Add and right-click paste UX).
+      _sfLibPickEls.addBtn?.addEventListener('click', async () => {
+        if (_sfLibPickSelections.length === 0 || !_sfDetailOriginalName) return;
+        const groups = new Map(); // "kind::id" → { src, paths[] }
+        for (const s of _sfLibPickSelections) {
+          const k = `${s.kind}::${s.id}`;
+          if (!groups.has(k)) groups.set(k, { src: { kind: s.kind, id: s.id }, paths: [] });
+          groups.get(k).paths.push(s.subPath);
+        }
+        const total = _sfLibPickSelections.length;
+        _sfDeleteProgress.show('Adding files', `${total} file${total === 1 ? '' : 's'}`);
+        const allAdded = [];
+        const allFailed = [];
+        for (const { src, paths } of groups.values()) {
+          let res;
+          try {
+            res = await window.electronAPI.fileOpsCopy({
+              src, srcPaths: paths,
+              dest: { kind: 'entry', id: _sfDetailOriginalName, subPath: _sfEntryFilesPath },
+            });
+          } catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
+          if (!res || !res.ok) {
+            allFailed.push({ source: `${src.kind}:${src.id}`, error: (res && res.error) || 'unknown' });
+            continue;
+          }
+          for (const p of (res.added || [])) allAdded.push(p);
+          for (const f of (res.failed || [])) allFailed.push(f);
+        }
+        await _sfDeleteProgress.hide();
+        if (allFailed.length) {
+          alert(`Some files failed to add:\n${allFailed.map(f => ` • ${f.source}: ${f.error}`).join('\n')}`);
+        }
+        // Refresh the entry tree, highlight the newly-added set, and
+        // close the picker (restoring the entry detail modal).
+        try {
+          const fr = await window.electronAPI.listEntryFiles({ name: _sfDetailOriginalName });
+          _sfEntryFilesTree = (fr && fr.ok && fr.files) || [];
+        } catch {}
+        _sfEntryFilesSelected = new Set(allAdded);
+        _sfEntryFilesAnchor = allAdded[0] || null;
+        _sfRenderEntryFiles();
+        _sfCloseLibraryPicker();
+      });
 
       // ── Mini audio player ─────────────────────────────────────────────
       // Decodes a .wav from disk via the existing per-kind byte IPCs,
@@ -15796,6 +16648,24 @@ require(['vs/editor/editor.main'], function () {
       // decide whether the row is playable.
       const _sfIsWavPath = (p) => /\.wav$/i.test(String(p || ''));
 
+      // Export files to disk. Single-path → save dialog (user picks
+      // name + location); multi-path → folder picker (files write with
+      // original names, " (N)" collision suffix). Backend handles the
+      // dialog and the actual write — renderer just dispatches and
+      // surfaces any per-file failures.
+      const _sfExportFiles = async ({ kind, id, subPaths }) => {
+        if (!Array.isArray(subPaths) || subPaths.length === 0) return;
+        let res;
+        try {
+          res = await window.electronAPI.sfExportFiles({ kind, id, paths: subPaths });
+        } catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
+        if (!res || res.canceled) return;
+        if (!res.ok) { alert(`Export failed: ${res.error || 'unknown'}`); return; }
+        if (res.failed?.length) {
+          alert(`Some files failed to export:\n${res.failed.map(f => ` • ${f.source}: ${f.error}`).join('\n')}`);
+        }
+      };
+
       // Unified dispatcher: pick the right opener based on extension.
       // .wav → audio player. Anything _sfIsTextReadable recognises →
       // doc viewer. Anything else → no-op (caller falls back to
@@ -16106,32 +16976,35 @@ require(['vs/editor/editor.main'], function () {
           document.getElementById('sf-reorg-reorder-list').focus();
         }
       });
-      // Right-click on a reorder row → Play (wav) or Open (text).
-      // Same ctx-menu DOM the rest of the SF browsers reuse.
+      // Right-click on a reorder row → Play (wav) / Open (text) plus
+      // Export… on every file. Same ctx-menu DOM the rest of the SF
+      // browsers reuse.
       document.getElementById('sf-reorg-reorder-list')?.addEventListener('contextmenu', (e) => {
         const row = e.target.closest('[data-row-path]');
         if (!row || !_sfDetailOriginalName) return;
         const p = row.getAttribute('data-row-path');
         const isWav = _sfIsWavPath(p);
         const isText = !isWav && _sfIsTextReadable(p);
-        if (!isWav && !isText) return;
         e.preventDefault();
         const menu = document.getElementById('preset-ctx-menu');
         if (!menu) return;
         menu.innerHTML = '';
-        const item = document.createElement('div');
-        item.className = 'preset-ctx-item';
-        item.textContent = isWav ? '▶ Play' : 'Open';
-        item.addEventListener('mousedown', (e2) => {
-          e2.stopPropagation();
-          menu.style.display = 'none';
-          if (isWav) {
-            _sfOpenAudioPlayer({ kind: 'entry', id: _sfDetailOriginalName, subPath: p, label: p.split('/').pop() });
-          } else {
-            _sfOpenDocViewer({ kind: 'entry', id: _sfDetailOriginalName, subPath: p });
-          }
-        });
-        menu.appendChild(item);
+        const mkItem = (text, fn) => {
+          const d = document.createElement('div');
+          d.className = 'preset-ctx-item';
+          d.textContent = text;
+          d.addEventListener('mousedown', (e2) => { e2.stopPropagation(); menu.style.display = 'none'; fn(); });
+          menu.appendChild(d);
+        };
+        const mkSep = () => { const s = document.createElement('div'); s.className = 'preset-ctx-separator'; menu.appendChild(s); };
+        if (isWav) {
+          mkItem('▶ Play', () => _sfOpenAudioPlayer({ kind: 'entry', id: _sfDetailOriginalName, subPath: p, label: p.split('/').pop() }));
+          mkSep();
+        } else if (isText) {
+          mkItem('Open', () => _sfOpenDocViewer({ kind: 'entry', id: _sfDetailOriginalName, subPath: p }));
+          mkSep();
+        }
+        mkItem('↗ Export…', () => _sfExportFiles({ kind: 'entry', id: _sfDetailOriginalName, subPaths: [p] }));
         const x = Math.min(e.clientX, window.innerWidth - 200);
         const y = Math.min(e.clientY, window.innerHeight - 100);
         menu.style.left = x + 'px';
@@ -16373,6 +17246,7 @@ require(['vs/editor/editor.main'], function () {
           if (clipboardCount > 0) mkItem(`Paste (${clipboardCount})`, '', () => _sfPasteIntoEntry());
           mkSep();
           if (count === 1) mkItem('Rename…', '', () => _sfRenameEntryFilePrompt([..._sfEntryFilesSelected][0]));
+          mkItem(count > 1 ? `↗ Export… (${count})` : '↗ Export…', '', () => _sfExportFiles({ kind: 'entry', id: _sfDetailOriginalName, subPaths: [..._sfEntryFilesSelected] }));
           mkItem('+ New folder', '', _sfCreateEntrySubfolderPrompt);
           mkSep();
           mkItem(count > 1 ? `× Delete (${count})` : '× Delete', 'danger', () => _sfDeleteEntryFilesPrompt());
@@ -16384,6 +17258,13 @@ require(['vs/editor/editor.main'], function () {
             await _sfPasteIntoEntry();
           });
           if (clipboardCount > 0) mkSep();
+          // Folder-level Copy / Export — clipboard carries the folder
+          // path; paste handlers walk the destination recursively.
+          mkItem('Copy folder', '', () => {
+            _sfFileClipboard = { kind: 'entry', id: _sfDetailOriginalName, paths: [dirSubPath] };
+          });
+          mkItem('↗ Export folder…', '', () => _sfExportFiles({ kind: 'entry', id: _sfDetailOriginalName, subPaths: [dirSubPath] }));
+          mkSep();
           mkItem('Rename…', '', () => _sfRenameEntryFolderPrompt(dirSubPath));
           mkItem('+ New folder', '', _sfCreateEntrySubfolderPrompt);
           mkSep();
@@ -16673,9 +17554,18 @@ require(['vs/editor/editor.main'], function () {
             }
           }
           mkItem(count > 1 ? `Copy (${count})` : 'Copy', '', _sfCopySourceFilesSelection);
+          mkSep();
+          mkItem(count > 1 ? `↗ Export… (${count})` : '↗ Export…', '', () => _sfExportFiles({ kind: 'source', id: _sfSourceOriginalUuid, subPaths: [..._sfSourceFilesSelected] }));
         } else {
-          // Empty space / folder row right-click — no operations available.
-          return;
+          // Folder rows in the source browser support Copy + Export
+          // (sources are read-only otherwise — no rename/delete).
+          const dirRow = e.target.closest('[data-dir-path]');
+          if (!dirRow || !_sfSourceOriginalUuid) return;
+          const dirSubPath = dirRow.getAttribute('data-dir-path') || '';
+          mkItem('Copy folder', '', () => {
+            _sfFileClipboard = { kind: 'source', id: _sfSourceOriginalUuid, paths: [dirSubPath] };
+          });
+          mkItem('↗ Export folder…', '', () => _sfExportFiles({ kind: 'source', id: _sfSourceOriginalUuid, subPaths: [dirSubPath] }));
         }
         if (!menu.children.length) return;
         const x = Math.min(e.clientX, window.innerWidth - 200);
@@ -16765,6 +17655,44 @@ require(['vs/editor/editor.main'], function () {
         const sourcePath = (src && src.meta && src.meta.originalName) || '(existing source)';
         const myRun = Symbol('sfImportRun');
         _sfImport = { sourcePath, uuid, vendor: null, candidates: [], runId: myRun, isExistingReview: true };
+        _sfReturnToSourceUuid = uuid;
+        _sfShowPhase('progress');
+        if (_sfImportEls.progLabel) _sfImportEls.progLabel.textContent = 'Reading source…';
+        if (_sfImportEls.progBar) _sfImportEls.progBar.style.width = '50%';
+        if (_sfImportEls.progDetail) _sfImportEls.progDetail.textContent = '';
+        if (_sfImportEls.progTip) _sfImportEls.progTip.style.display = 'none';
+        if (opts.swapFromModalId) {
+          document.getElementById(opts.swapFromModalId)?.classList.remove('active');
+        }
+        if (_sfImportEls.modal) _sfImportEls.modal.classList.add('active');
+        const [vendorRes, candRes] = await Promise.all([
+          window.electronAPI.detectSourceVendor({ uuid }),
+          window.electronAPI.detectSourceCandidates({ uuid }),
+        ]);
+        if (_sfImport?.runId !== myRun) return;
+        _sfImport.vendor = (vendorRes && vendorRes.ok) ? vendorRes : null;
+        _sfImport.candidates = (candRes && candRes.ok && candRes.candidates) ? candRes.candidates : [];
+        _sfPopulateReview(sourcePath);
+        _sfShowPhase('review');
+      };
+      // Open the import-review modal in DUPLICATE mode against an
+      // existing source. Same chrome as Add-more but: every font in
+      // the source is selectable (already-imported entries aren't
+      // locked), nothing is checked by default (the user explicitly
+      // picks which ones to duplicate), and suggested names get a
+      // "_copy" tail so they don't collide with the originals.
+      const _sfDuplicateFromSource = async (uuid, opts = {}) => {
+        if (!_sfImportEls.modal) return;
+        const src = _sfAllSourcesByUuid[uuid];
+        const sourcePath = (src && src.meta && src.meta.originalName) || '(existing source)';
+        const myRun = Symbol('sfImportRun');
+        // isExistingReview gives us the right title/source-section
+        // baseline; isDuplicateMode flips the unchecked-default + no-lock
+        // + _copy-suffix differences in _sfPopulateReview.
+        _sfImport = {
+          sourcePath, uuid, vendor: null, candidates: [],
+          runId: myRun, isExistingReview: true, isDuplicateMode: true,
+        };
         // Remember where we came from so cancel/save returns here.
         _sfReturnToSourceUuid = uuid;
         _sfShowPhase('progress');
@@ -17389,7 +18317,7 @@ require(['vs/editor/editor.main'], function () {
           });
           return false;
         }
-        _sfDeleteProgress.show('Saving fonts', '');
+        _sfDeleteProgress.show('Exporting fonts', '');
         const failures = [];
         const results = { copied: 0, skipped: 0, replaced: 0 };
         let stepIdx = 0;
@@ -17402,7 +18330,7 @@ require(['vs/editor/editor.main'], function () {
             continue;
           }
           stepIdx++;
-          _sfDeleteProgress.show(`Saving fonts (${stepIdx} of ${totalSteps})`, name);
+          _sfDeleteProgress.show(`Exporting fonts (${stepIdx} of ${totalSteps})`, name);
           try {
             const r = await window.electronAPI.exportEntryToFolder({ name, destDir, mode });
             if (!r || !r.ok) {
@@ -17421,7 +18349,7 @@ require(['vs/editor/editor.main'], function () {
         if (includeCommon && commonMode !== 'skip') {
           const commonUuid = _sfBulkSaveCommonOverride || _sfStarredCommonUuid;
           stepIdx++;
-          _sfDeleteProgress.show(`Saving fonts (${stepIdx} of ${totalSteps})`, 'common folder');
+          _sfDeleteProgress.show(`Exporting fonts (${stepIdx} of ${totalSteps})`, 'common folder');
           try {
             const r = await window.electronAPI.exportCommonToFolder({
               uuid: commonUuid,
@@ -18139,7 +19067,9 @@ require(['vs/editor/editor.main'], function () {
         };
         const mkSep = () => { const s = document.createElement('div'); s.className = 'preset-ctx-separator'; menu.appendChild(s); };
         menu.innerHTML = '';
-        const clipboardCount = _sfCommonClipboard?.paths?.length || 0;
+        // Use the unified clipboard so entry- and source-kind copies
+        // are pasteable into a common, not just common→common.
+        const clipboardCount = _sfFileClipboard?.paths?.length || 0;
         if (fileRow) {
           const subPath = fileRow.getAttribute('data-tree-file');
           if (!subPath) return;
@@ -18171,6 +19101,7 @@ require(['vs/editor/editor.main'], function () {
           }
           mkSep();
           if (count === 1) mkItem('Rename…', '', () => _sfRenameCommonFile([..._sfCommonFilesSelected][0]));
+          mkItem(count > 1 ? `↗ Export… (${count})` : '↗ Export…', '', () => _sfExportFiles({ kind: 'common', id: _sfSelectedCommonUuid, subPaths: [..._sfCommonFilesSelected] }));
           mkItem('+ New folder', '', _sfCreateCommonFolderPrompt);
           mkItem(count > 1 ? `× Delete (${count})` : '× Delete', 'danger', () => _sfDeleteCommonFilesPrompt());
         } else if (dirRow) {
@@ -18178,7 +19109,14 @@ require(['vs/editor/editor.main'], function () {
           if (!subPath) return;
           if (clipboardCount > 0) {
             mkItem(`Paste (${clipboardCount})`, '', () => _sfPasteCommonClipboard(_sfSelectedCommonUuid, subPath));
+            mkSep();
           }
+          mkItem('Copy folder', '', () => {
+            _sfFileClipboard = { kind: 'common', id: _sfSelectedCommonUuid, paths: [subPath] };
+            _sfCommonClipboard = { sourceUuid: _sfSelectedCommonUuid, paths: [subPath] };
+          });
+          mkItem('↗ Export folder…', '', () => _sfExportFiles({ kind: 'common', id: _sfSelectedCommonUuid, subPaths: [subPath] }));
+          mkSep();
           mkItem('Rename…', '', () => _sfRenameCommonFolderPrompt(subPath));
           mkItem('+ New folder', '', _sfCreateCommonFolderPrompt);
           mkSep();

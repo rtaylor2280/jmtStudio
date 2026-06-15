@@ -987,6 +987,21 @@ ipcMain.handle('entries:updateMeta', (_, { currentName, newName, updates } = {})
   }
 });
 
+// Duplicate an existing entry. mode='current' copies the on-disk
+// state verbatim (local edits carried over); mode='source' re-extracts
+// from the original archive (vendor-original files, user-facing meta
+// seeded from the source entry).
+ipcMain.handle('entries:duplicate', async (_, { sourceName, newName, mode } = {}) => {
+  try {
+    return await soundFontEntries.duplicateEntry({
+      userData: app.getPath('userData'),
+      sourceName, newName, mode,
+    });
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
 ipcMain.handle('entries:create', async (event, { sourceUuid, candidate, name, metadata } = {}) => {
   const send = (payload) => {
     try { event.sender.send('entries:createProgress', payload); } catch {}
@@ -1268,6 +1283,236 @@ ipcMain.handle('common:folderExistsAt', (_, { destDir } = {}) => {
 ipcMain.handle('common:exportToFolder', (_, { uuid, destDir, mode } = {}) => {
   try { return soundFontCommon.exportCommonToFolder(app.getPath('userData'), uuid, destDir, mode); }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+// Export one or more files from any SF location to disk. Single-file
+// mode pops a save dialog (user picks name + location); multi-file
+// mode pops a folder picker and writes each file at the chosen folder
+// with its original name, walking collisions through a " (N)" tail so
+// nothing gets silently overwritten. Returns the list of written paths.
+ipcMain.handle('sfFile:export', async (_, { kind, id, paths, suggestedName } = {}) => {
+  if (!kind || !id || !Array.isArray(paths) || paths.length === 0) {
+    return { ok: false, error: 'Missing kind/id/paths' };
+  }
+  const userData = app.getPath('userData');
+  // Resolve bytes for a single FILE path. Reuses the existing kind-
+  // aware byte readers — same code paths the doc viewer and audio
+  // player use.
+  const readBytes = async (subPath) => {
+    if (kind === 'entry')  return soundFontEntries.readEntryFileBytes(userData, id, subPath);
+    if (kind === 'common') return soundFontCommon.readCommonFileBytes(userData, id, subPath);
+    if (kind === 'source') {
+      const source = soundFontSources.openSource(userData, id);
+      if (!source) throw new Error(`Source not found: ${id}`);
+      return await source.readFile(subPath);
+    }
+    throw new Error(`Unknown kind: ${kind}`);
+  };
+  // Collision-safe target name inside a chosen destination folder.
+  // Walks " (1)", " (2)"... until a free name is found so re-exports
+  // never overwrite the user's existing copy.
+  const uniqueIn = (dir, baseName) => {
+    const direct = path.join(dir, baseName);
+    if (!fs.existsSync(direct)) return direct;
+    const ext = path.extname(baseName);
+    const stem = path.basename(baseName, ext);
+    let n = 1;
+    while (true) {
+      const cand = path.join(dir, `${stem} (${n})${ext}`);
+      if (!fs.existsSync(cand)) return cand;
+      n++;
+    }
+  };
+  // Probe whether a subPath inside the active location refers to a
+  // directory. Source kind reads the archive listing; entry/common
+  // resolve to disk.
+  const isDirAtPath = async (subPath) => {
+    if (kind === 'source') {
+      const source = soundFontSources.openSource(userData, id);
+      if (!source) return false;
+      const all = await source.listAll();
+      const exact = all.find(e => e.fileName === subPath);
+      if (exact && exact.isDir) return true;
+      const prefix = subPath.endsWith('/') ? subPath : subPath + '/';
+      return all.some(e => e.fileName.startsWith(prefix));
+    }
+    const root = kind === 'entry'
+      ? require('path').join(userData, 'soundFonts', 'library', id)
+      : require('path').join(userData, 'soundFonts', 'common', id, 'files');
+    const abs = require('path').join(root, subPath);
+    try { return fs.statSync(abs).isDirectory(); } catch { return false; }
+  };
+  // Write a whole directory (source-side or on-disk) into outRoot,
+  // preserving relative structure.
+  const writeDirTo = async (subPath, outRoot) => {
+    if (!fs.existsSync(outRoot)) fs.mkdirSync(outRoot, { recursive: true });
+    if (kind === 'source') {
+      const source = soundFontSources.openSource(userData, id);
+      const all = await source.listAll();
+      const prefix = subPath.endsWith('/') ? subPath : subPath + '/';
+      for (const entry of all) {
+        if (entry.isDir) continue;
+        if (!entry.fileName.startsWith(prefix)) continue;
+        const innerRel = entry.fileName.slice(prefix.length);
+        if (!innerRel) continue;
+        const outPath = path.join(outRoot, innerRel.replace(/\//g, path.sep));
+        fs.mkdirSync(path.dirname(outPath), { recursive: true });
+        const buf = await source.readFile(entry.fileName);
+        fs.writeFileSync(outPath, buf);
+      }
+      return;
+    }
+    const root = kind === 'entry'
+      ? path.join(userData, 'soundFonts', 'library', id)
+      : path.join(userData, 'soundFonts', 'common', id, 'files');
+    const srcAbs = path.join(root, subPath);
+    const walk = (sd, dd) => {
+      fs.mkdirSync(dd, { recursive: true });
+      for (const ent of fs.readdirSync(sd, { withFileTypes: true })) {
+        const s = path.join(sd, ent.name);
+        const d = path.join(dd, ent.name);
+        if (ent.isDirectory()) walk(s, d);
+        else if (ent.isFile()) fs.copyFileSync(s, d);
+      }
+    };
+    walk(srcAbs, outRoot);
+  };
+  const lastDir = Store.get('lastExportDir') || app.getPath('downloads');
+  // Single-path mode: file → save dialog; folder → folder picker,
+  // writes the folder inside the chosen parent with its original name.
+  if (paths.length === 1) {
+    const subPath = paths[0];
+    const baseName = suggestedName || subPath.split('/').pop() || 'untitled';
+    const isDir = await isDirAtPath(subPath);
+    if (isDir) {
+      const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+        title: `Export "${baseName}" folder to…`,
+        defaultPath: lastDir,
+        properties: ['openDirectory', 'createDirectory'],
+      });
+      if (canceled || !filePaths?.length) return { ok: false, canceled: true };
+      const parent = filePaths[0];
+      try {
+        // Folder collision in chosen parent → walk " (N)" suffix
+        // (matches the copy-paste convention for dirs).
+        let finalName = baseName;
+        if (fs.existsSync(path.join(parent, finalName))) {
+          let n = 1;
+          while (fs.existsSync(path.join(parent, `${baseName} (${n})`))) n++;
+          finalName = `${baseName} (${n})`;
+        }
+        const outRoot = path.join(parent, finalName);
+        await writeDirTo(subPath, outRoot);
+        Store.set('lastExportDir', parent);
+        return { ok: true, written: [outRoot] };
+      } catch (err) {
+        return { ok: false, error: String(err && err.message || err) };
+      }
+    }
+    const ext = path.extname(baseName).replace(/^\./, '') || '*';
+    const { canceled, filePath } = await dialog.showSaveDialog(win, {
+      title: 'Export file',
+      defaultPath: path.join(lastDir, baseName),
+      filters: ext === '*'
+        ? [{ name: 'All files', extensions: ['*'] }]
+        : [{ name: ext.toUpperCase(), extensions: [ext] }, { name: 'All files', extensions: ['*'] }],
+    });
+    if (canceled || !filePath) return { ok: false, canceled: true };
+    try {
+      const buf = await readBytes(subPath);
+      fs.writeFileSync(filePath, buf);
+      Store.set('lastExportDir', path.dirname(filePath));
+      return { ok: true, written: [filePath] };
+    } catch (err) {
+      return { ok: false, error: String(err && err.message || err) };
+    }
+  }
+  // Multi-path → pick a destination folder. Files write with their
+  // original names + " (N)" collision suffix. Folders write as named
+  // subfolders inside the chosen destination, recursively.
+  const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+    title: 'Export to folder',
+    defaultPath: lastDir,
+    properties: ['openDirectory', 'createDirectory'],
+  });
+  if (canceled || !filePaths?.length) return { ok: false, canceled: true };
+  const destDir = filePaths[0];
+  const written = [];
+  const failed = [];
+  for (const subPath of paths) {
+    try {
+      const baseName = subPath.split('/').pop() || 'untitled';
+      const isDir = await isDirAtPath(subPath);
+      if (isDir) {
+        let finalName = baseName;
+        if (fs.existsSync(path.join(destDir, finalName))) {
+          let n = 1;
+          while (fs.existsSync(path.join(destDir, `${baseName} (${n})`))) n++;
+          finalName = `${baseName} (${n})`;
+        }
+        const outRoot = path.join(destDir, finalName);
+        await writeDirTo(subPath, outRoot);
+        written.push(outRoot);
+      } else {
+        const buf = await readBytes(subPath);
+        const out = uniqueIn(destDir, baseName);
+        fs.writeFileSync(out, buf);
+        written.push(out);
+      }
+    } catch (err) {
+      failed.push({ source: subPath, error: String(err && err.message || err) });
+    }
+  }
+  Store.set('lastExportDir', destDir);
+  return { ok: true, written, failed };
+});
+
+// Batched sha256 hashing of a set of files for one (kind, id). The
+// renderer uses this from the library picker to detect "this file
+// already exists in the destination entry" without false positives
+// from name collisions across different fonts. Source-kind opens the
+// archive once for the whole batch instead of per-path so a folder of
+// 100 wavs doesn't pay 100 zip-open round-trips.
+ipcMain.handle('hash:files', async (_, { kind, id, paths } = {}) => {
+  if (!kind || !id || !Array.isArray(paths)) return { ok: false, error: 'Missing kind/id/paths' };
+  const userData = app.getPath('userData');
+  const out = [];
+  const hashBuf = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
+  if (kind === 'entry') {
+    for (const subPath of paths) {
+      try {
+        const buf = soundFontEntries.readEntryFileBytes(userData, id, subPath);
+        out.push({ subPath, sha256: hashBuf(buf) });
+      } catch (err) {
+        out.push({ subPath, error: String(err && err.message || err) });
+      }
+    }
+  } else if (kind === 'common') {
+    for (const subPath of paths) {
+      try {
+        const buf = soundFontCommon.readCommonFileBytes(userData, id, subPath);
+        out.push({ subPath, sha256: hashBuf(buf) });
+      } catch (err) {
+        out.push({ subPath, error: String(err && err.message || err) });
+      }
+    }
+  } else if (kind === 'source') {
+    // Open once, reuse for the whole batch — avoids re-parsing the zip
+    // central directory per file when the batch is large.
+    const source = soundFontSources.openSource(userData, id);
+    if (!source) return { ok: false, error: `Source not found: ${id}` };
+    for (const subPath of paths) {
+      try {
+        const buf = await source.readFile(subPath);
+        out.push({ subPath, sha256: hashBuf(buf) });
+      } catch (err) {
+        out.push({ subPath, error: String(err && err.message || err) });
+      }
+    }
+  } else {
+    return { ok: false, error: `Unknown kind: ${kind}` };
+  }
+  return { ok: true, hashes: out };
 });
 
 // ─── SF Library Backup ────────────────────────────────────

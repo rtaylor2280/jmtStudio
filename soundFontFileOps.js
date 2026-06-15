@@ -105,18 +105,72 @@ async function copyAcrossLocations({
   const destRoot = path.resolve(_root(userData, dest.kind, dest.id));
   const added = [];
   const failed = [];
+  // Pick a free folder name in destDir using the same " (N)" walk we
+  // use elsewhere when a paste would collide with an existing folder.
+  // Filesystem-safe (parens are fine on every target FS); avoids the
+  // Proffie-style numeric tail since that convention is reserved for
+  // saber-meaningful filenames, not directory names.
+  const _uniqueDirName = (destDir, baseName) => {
+    if (!fs.existsSync(path.join(destDir, baseName))) return baseName;
+    let n = 1;
+    while (true) {
+      const cand = `${baseName} (${n})`;
+      if (!fs.existsSync(path.join(destDir, cand))) return cand;
+      n++;
+    }
+  };
+  // Walk a source-side path: returns array of { rel, isDir } for the
+  // path itself + everything underneath. Empty when the path doesn't
+  // resolve in the archive.
+  const _enumerateSourceTree = async (sourceId, subPath) => {
+    const soundFontSources = require('./soundFontSources');
+    const source = soundFontSources.openSource(userData, sourceId);
+    if (!source) throw new Error(`Source not found: ${sourceId}`);
+    const all = await source.listAll();
+    const prefix = subPath.endsWith('/') ? subPath : subPath + '/';
+    const exact = all.find(e => e.fileName === subPath);
+    const inside = all.filter(e => e.fileName.startsWith(prefix));
+    if (!exact && !inside.length) return null;
+    return { exact, inside };
+  };
   if (src.kind === 'source') {
-    // Lazy require to avoid a circular dep at module load (sources →
-    // candidates → ... eventually back into ops in some flows).
     const soundFontSources = require('./soundFontSources');
     for (const srcSubPath of srcPaths) {
       try {
         const baseName = String(srcSubPath).split('/').pop();
         if (!baseName) { failed.push({ source: srcSubPath, error: 'Invalid source path' }); continue; }
-        const finalName = _proffieVariantName(destDir, baseName);
-        await soundFontSources.extractSourceFileTo(userData, src.id, srcSubPath, destDir, finalName);
-        const rel = path.relative(destRoot, path.join(destDir, finalName)).replace(/\\/g, '/');
-        added.push(rel);
+        // Distinguish file vs directory by probing the source listing.
+        const tree = await _enumerateSourceTree(src.id, srcSubPath);
+        if (!tree) { failed.push({ source: srcSubPath, error: 'Not found in source' }); continue; }
+        const isDir = (tree.exact && tree.exact.isDir) || (!tree.exact && tree.inside.length > 0);
+        if (!isDir) {
+          // File path — current behavior, single extract with Proffie
+          // variant naming on collision.
+          const finalName = _proffieVariantName(destDir, baseName);
+          await soundFontSources.extractSourceFileTo(userData, src.id, srcSubPath, destDir, finalName);
+          const rel = path.relative(destRoot, path.join(destDir, finalName)).replace(/\\/g, '/');
+          added.push(rel);
+        } else {
+          // Directory — extract the whole subtree under a folder-named
+          // safe name. Each interior file lands at <destDir>/<finalDir>
+          // /<originalRelPath>.
+          const finalDir = _uniqueDirName(destDir, baseName);
+          const outRoot = path.join(destDir, finalDir);
+          fs.mkdirSync(outRoot, { recursive: true });
+          const prefix = srcSubPath.endsWith('/') ? srcSubPath : srcSubPath + '/';
+          const source = soundFontSources.openSource(userData, src.id);
+          for (const entry of tree.inside) {
+            if (entry.isDir) continue; // dir markers handled implicitly
+            const innerRel = entry.fileName.slice(prefix.length);
+            if (!innerRel) continue;
+            const outPath = path.join(outRoot, innerRel.replace(/\//g, path.sep));
+            fs.mkdirSync(path.dirname(outPath), { recursive: true });
+            const buf = await source.readFile(entry.fileName);
+            fs.writeFileSync(outPath, buf);
+          }
+          const rel = path.relative(destRoot, outRoot).replace(/\\/g, '/');
+          added.push(rel);
+        }
       } catch (err) {
         failed.push({ source: srcSubPath, error: String(err && err.message || err) });
       }
@@ -128,7 +182,34 @@ async function copyAcrossLocations({
       let srcAbs;
       try { srcAbs = _resolve(userData, src.kind, src.id, srcSubPath); }
       catch (err) { failed.push({ source: srcSubPath, error: err.message }); continue; }
-      if (!fs.existsSync(srcAbs) || !fs.statSync(srcAbs).isFile()) {
+      if (!fs.existsSync(srcAbs)) {
+        failed.push({ source: srcSubPath, error: 'Source not found' });
+        continue;
+      }
+      const stat = fs.statSync(srcAbs);
+      if (stat.isDirectory()) {
+        // Recursive on-disk copy. Destination folder gets a " (N)"
+        // suffix on collision so an existing folder isn't merged into
+        // silently. Inner files copy verbatim (no variant renaming
+        // inside — preserves relative structure).
+        const baseName = path.basename(srcAbs);
+        const finalDir = _uniqueDirName(destDir, baseName);
+        const outRoot = path.join(destDir, finalDir);
+        const walkCopy = (sd, dd) => {
+          fs.mkdirSync(dd, { recursive: true });
+          for (const ent of fs.readdirSync(sd, { withFileTypes: true })) {
+            const s = path.join(sd, ent.name);
+            const d = path.join(dd, ent.name);
+            if (ent.isDirectory()) walkCopy(s, d);
+            else if (ent.isFile()) fs.copyFileSync(s, d);
+          }
+        };
+        walkCopy(srcAbs, outRoot);
+        const rel = path.relative(destRoot, outRoot).replace(/\\/g, '/');
+        added.push(rel);
+        continue;
+      }
+      if (!stat.isFile()) {
         failed.push({ source: srcSubPath, error: 'Source file not found' });
         continue;
       }
