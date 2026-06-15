@@ -1139,6 +1139,34 @@
   #modal-sf-text-prompt input.invalid { border-color: #e44; }
   .sf-text-prompt-error { font-size: 0.7rem; color: #e44; margin-top: 4px; min-height: 1em; }
 
+  /* Mini audio player — quick-listen modal for .wav rows. Sits at the
+     base modal layer (10000) so opening it doesn't disturb confirm-style
+     modals (10015) or the context menu (10020) on top. */
+  /* Above any underlying detail / reorganize modal (10000/10010), still
+     below confirm-style prompts (10015) and the context menu (10020). */
+  #modal-sf-audio { z-index: 10012; }
+  #modal-sf-audio .modal.sf-audio-modal { position: relative; width: 520px; max-width: 92vw; padding: 18px 20px; }
+  .sf-audio-name { margin: 0 30px 12px 0; font-size: 0.88rem; color: var(--c-text); font-weight: 600; word-break: break-all; }
+  .sf-audio-loading { font-size: 0.74rem; color: var(--c-text-muted); font-style: italic; padding: 18px 0; text-align: center; }
+  .sf-audio-error { font-size: 0.74rem; color: #e44; padding: 18px 0; text-align: center; }
+  .sf-audio-body { display: flex; flex-direction: column; gap: 10px; }
+  .sf-audio-waveform-wrap { position: relative; background: var(--c-bg-inset); border: 1px solid var(--c-border-faint); border-radius: 4px; overflow: hidden; height: 110px; cursor: pointer; }
+  .sf-audio-canvas { display: block; width: 100%; height: 100%; }
+  .sf-audio-playhead { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--jmt-blue); box-shadow: 0 0 4px var(--jmt-blue); pointer-events: none; transform: translateX(0); transition: transform 80ms linear; }
+  .sf-audio-controls { display: flex; align-items: center; gap: 12px; }
+  .sf-audio-play-btn { width: 32px; height: 32px; border-radius: 50%; background: var(--jmt-blue); color: white; border: none; cursor: pointer; font-size: 0.85rem; display: inline-flex; align-items: center; justify-content: center; padding: 0; transition: background 0.1s; }
+  .sf-audio-play-btn:hover { background: #0466ad; }
+  .sf-audio-play-btn:disabled { background: var(--c-border-strong); cursor: default; }
+  /* Loop button — off state is chromeless (icon only) so it doesn't
+     compete visually with the filled Play button. On state matches the
+     Play button shape: solid JMT blue circle with white glyph. */
+  .sf-audio-loop-btn { width: 32px; height: 32px; border-radius: 50%; background: transparent; color: var(--c-text-dim); border: none; cursor: pointer; font-size: 0.95rem; display: inline-flex; align-items: center; justify-content: center; padding: 0; transition: color 0.1s, background 0.1s; }
+  .sf-audio-loop-btn:hover { color: var(--c-text); background: rgba(255,255,255,0.06); }
+  .sf-audio-loop-btn[aria-pressed="true"] { color: white; background: var(--jmt-blue); }
+  .sf-audio-loop-btn[aria-pressed="true"]:hover { background: #0466ad; }
+  .sf-audio-time { font-size: 0.74rem; color: var(--c-text-sub); font-variant-numeric: tabular-nums; }
+  .sf-audio-meta { font-size: 0.7rem; color: var(--c-text-muted); margin-left: auto; }
+
   /* Reorganize modal — three stacked cards (Restructure, Reorder, Find & replace) */
   #modal-sf-reorganize { z-index: 10010; }
   #modal-sf-reorganize .modal { position: relative; width: 640px; max-width: 96vw; max-height: 90vh; display: flex; flex-direction: column; padding-bottom: 16px; }
@@ -3960,6 +3988,40 @@
 <!-- ── Simple text prompt modal — reusable for "name your common folder",
      rename, and duplicate flows. Resolves with the trimmed string or null
      on cancel/Escape/backdrop click. ── -->
+<!-- ── Mini audio player — quick-listen modal for .wav rows in any of
+     the SF browsers (entry, common, source) and the Reorganize reorder
+     list. Decodes with Web Audio API so we can draw the waveform from
+     samples (cannot do that with an <audio> element). Auto-plays on
+     open; click-outside closes. No dirty state, no prompt — only one
+     can be open at a time (opening a new one closes the previous). ── -->
+<div class="modal-overlay" id="modal-sf-audio">
+  <div class="modal sf-audio-modal">
+    <button class="modal-btn-close" id="sf-audio-close" title="Close">&#10005;</button>
+    <h3 class="sf-audio-name" id="sf-audio-name">…</h3>
+    <div class="sf-audio-loading" id="sf-audio-loading">Loading…</div>
+    <div class="sf-audio-error" id="sf-audio-error" style="display:none"></div>
+    <div class="sf-audio-body" id="sf-audio-body" style="display:none">
+      <div class="sf-audio-waveform-wrap">
+        <canvas id="sf-audio-canvas" class="sf-audio-canvas"></canvas>
+        <div class="sf-audio-playhead" id="sf-audio-playhead"></div>
+      </div>
+      <div class="sf-audio-controls">
+        <button class="sf-audio-play-btn" id="sf-audio-play" title="Play / Pause">&#9654;</button>
+        <button class="sf-audio-loop-btn" id="sf-audio-loop" title="Loop" aria-pressed="false">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M17 2l4 4-4 4"/>
+            <path d="M3 11V9a4 4 0 0 1 4-4h14"/>
+            <path d="M7 22l-4-4 4-4"/>
+            <path d="M21 13v2a4 4 0 0 1-4 4H3"/>
+          </svg>
+        </button>
+        <span class="sf-audio-time"><span id="sf-audio-current">0:00</span> / <span id="sf-audio-total">0:00</span></span>
+        <span class="sf-audio-meta" id="sf-audio-meta"></span>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ── Reorganize modal — three stacked tools for the open entry:
      Restructure (flat ↔ grouped), Reorder (drag/arrow/keyboard re-
      numbering within a sound type), Find & replace (folder-scoped
@@ -15150,6 +15212,13 @@ require(['vs/editor/editor.main'], function () {
         if (fileRow) {
           const p = fileRow.getAttribute('data-file-path');
           if (!p) return;
+          // Double-click on a .wav fires the audio player.
+          if (!e.shiftKey && !e.ctrlKey && !e.metaKey
+              && _sfIsWavPath(p) && _sfTryDoubleClick(`entry:${p}`)
+              && _sfDetailOriginalName) {
+            _sfOpenAudioPlayer({ kind: 'entry', id: _sfDetailOriginalName, subPath: p, label: p.split('/').pop() });
+            return;
+          }
           if (e.shiftKey && _sfEntryFilesAnchor) {
             _sfShiftSelectEntryFilesTo(p);
           } else if (e.ctrlKey || e.metaKey) {
@@ -15392,6 +15461,353 @@ require(['vs/editor/editor.main'], function () {
       document.getElementById('btn-sf-entry-add-folder')?.addEventListener('click', _sfCreateEntrySubfolderPrompt);
       document.getElementById('btn-sf-entry-add-files')?.addEventListener('click', _sfAddEntryFiles);
 
+      // ── Mini audio player ─────────────────────────────────────────────
+      // Decodes a .wav from disk via the existing per-kind byte IPCs,
+      // draws a min/max-bucketed waveform onto a canvas, and plays the
+      // buffer through a shared AudioContext. Auto-plays on open;
+      // opening another instance closes the previous so only one is
+      // ever audible. Click-outside dismisses (no dirty state).
+      let _sfAudioCtx = null;
+      let _sfAudioBuffer = null;
+      let _sfAudioSource = null;
+      let _sfAudioStartedAt = 0;     // AudioContext clock at last start
+      let _sfAudioPausedAt = 0;       // seconds into buffer when paused
+      let _sfAudioIsPlaying = false;
+      let _sfAudioIsPaused = false;
+      let _sfAudioRafId = null;
+      let _sfAudioOpenToken = 0;     // bumps on every open so stale decodes can bail
+      // Loop is OFF by default on every open (same sound or new). The
+      // user has to opt in for each playthrough — matches the
+      // "single-press" intent of opening a player to audition a sound.
+      let _sfAudioLoop = false;
+      const _sfAudioFmtTime = (secs) => {
+        if (!isFinite(secs) || secs < 0) secs = 0;
+        const m = Math.floor(secs / 60);
+        const s = Math.floor(secs % 60);
+        return `${m}:${String(s).padStart(2, '0')}`;
+      };
+      const _sfAudioEnsureCtx = () => {
+        if (!_sfAudioCtx) {
+          const Ctor = window.AudioContext || window.webkitAudioContext;
+          if (!Ctor) throw new Error('Web Audio API unavailable');
+          _sfAudioCtx = new Ctor();
+        }
+        if (_sfAudioCtx.state === 'suspended') return _sfAudioCtx.resume().then(() => _sfAudioCtx);
+        return Promise.resolve(_sfAudioCtx);
+      };
+      // Pull bytes for the requested file from the kind-specific IPC.
+      // All three return shapes get normalized to a single Uint8Array
+      // so the decode path doesn't care where the file lives.
+      const _sfAudioReadBytes = async ({ kind, id, subPath }) => {
+        if (kind === 'entry') {
+          const r = await window.electronAPI.readEntryDocBytes({ name: id, path: subPath });
+          if (!r || !r.ok) throw new Error((r && r.error) || 'Read failed');
+          return new Uint8Array(r.bytes);
+        }
+        if (kind === 'common') {
+          const r = await window.electronAPI.readCommonFileBytes({ uuid: id, subPath });
+          if (!r || !r.ok) throw new Error((r && r.error) || 'Read failed');
+          return new Uint8Array(r.bytes);
+        }
+        if (kind === 'source') {
+          const r = await window.electronAPI.readSourceFile({ uuid: id, path: subPath });
+          if (!r || !r.ok) throw new Error((r && r.error) || 'Read failed');
+          // sources:readFile sends a Node Buffer which arrives as
+          // Uint8Array across the IPC bridge.
+          return r.data instanceof Uint8Array ? r.data : new Uint8Array(r.data);
+        }
+        throw new Error(`Unknown audio source kind: ${kind}`);
+      };
+      // Min/max bucket sweep over channel 0 — same algorithm the
+      // foundry trimmer page uses. Fast for any file size since we
+      // scale by canvas width, not sample count. JMT-blue lines on the
+      // inset background; subtle horizontal grid for visual anchoring.
+      const _sfAudioDrawWaveform = () => {
+        if (!_sfAudioBuffer) return;
+        const canvas = document.getElementById('sf-audio-canvas');
+        if (!canvas) return;
+        // Match the canvas pixel size to its CSS size so we draw at
+        // 1:1 without scaling artifacts on hi-DPI displays.
+        const rect = canvas.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = Math.max(1, Math.floor(rect.width * dpr));
+        canvas.height = Math.max(1, Math.floor(rect.height * dpr));
+        const ctx = canvas.getContext('2d');
+        ctx.scale(dpr, dpr);
+        const w = rect.width;
+        const h = rect.height;
+        // Background.
+        ctx.fillStyle = 'rgba(0,0,0,0)';
+        ctx.clearRect(0, 0, w, h);
+        // Center line + quarter grid lines.
+        ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+        ctx.lineWidth = 1;
+        for (let i = 1; i < 4; i++) {
+          const y = (h / 4) * i;
+          ctx.beginPath();
+          ctx.moveTo(0, y + 0.5);
+          ctx.lineTo(w, y + 0.5);
+          ctx.stroke();
+        }
+        // Waveform.
+        const data = _sfAudioBuffer.getChannelData(0);
+        const step = Math.max(1, Math.ceil(data.length / w));
+        const amp = h / 2;
+        ctx.strokeStyle = '#3a8fff'; // JMT blue
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        for (let x = 0; x < w; x++) {
+          let min = 1.0, max = -1.0;
+          const base = x * step;
+          for (let j = 0; j < step; j++) {
+            const v = data[base + j];
+            if (v === undefined) break;
+            if (v < min) min = v;
+            if (v > max) max = v;
+          }
+          const yMin = (1 + min) * amp;
+          const yMax = (1 + max) * amp;
+          if (x === 0) ctx.moveTo(x + 0.5, amp);
+          ctx.lineTo(x + 0.5, yMin);
+          ctx.lineTo(x + 0.5, yMax);
+        }
+        ctx.stroke();
+      };
+      // Move the playhead overlay to match the given time offset.
+      const _sfAudioMovePlayhead = (timeSec) => {
+        const ph = document.getElementById('sf-audio-playhead');
+        const wrap = ph?.parentElement;
+        if (!ph || !wrap || !_sfAudioBuffer) return;
+        const pct = Math.max(0, Math.min(1, timeSec / _sfAudioBuffer.duration));
+        ph.style.transform = `translateX(${pct * wrap.clientWidth}px)`;
+        const cur = document.getElementById('sf-audio-current');
+        if (cur) cur.textContent = _sfAudioFmtTime(timeSec);
+      };
+      const _sfAudioSetPlayLabel = (mode) => {
+        const btn = document.getElementById('sf-audio-play');
+        if (!btn) return;
+        // ▶ for paused/stopped, ❚❚ for playing
+        btn.innerHTML = mode === 'playing' ? '&#10074;&#10074;' : '&#9654;';
+      };
+      const _sfAudioStopSource = () => {
+        if (_sfAudioSource) {
+          try { _sfAudioSource.onended = null; _sfAudioSource.stop(); } catch {}
+          try { _sfAudioSource.disconnect(); } catch {}
+          _sfAudioSource = null;
+        }
+      };
+      const _sfAudioCancelRaf = () => {
+        if (_sfAudioRafId) { cancelAnimationFrame(_sfAudioRafId); _sfAudioRafId = null; }
+      };
+      // Drive the playhead on the AudioContext clock, not setInterval —
+      // accurate enough for typical .wav lengths without drifting. When
+      // looping, the BufferSource handles audio wraparound for us; we
+      // just need to wrap the displayed position so the visual playhead
+      // matches the audio.
+      const _sfAudioAnimatePlayhead = () => {
+        if (!_sfAudioIsPlaying || _sfAudioIsPaused || !_sfAudioBuffer) return;
+        let elapsed = (_sfAudioCtx.currentTime - _sfAudioStartedAt) + _sfAudioPausedAt;
+        if (_sfAudioLoop) {
+          // Modulo wraps the visible position; audio side already loops.
+          elapsed = elapsed % _sfAudioBuffer.duration;
+        } else if (elapsed >= _sfAudioBuffer.duration) {
+          _sfAudioStop(); return;
+        }
+        _sfAudioMovePlayhead(elapsed);
+        _sfAudioRafId = requestAnimationFrame(_sfAudioAnimatePlayhead);
+      };
+      const _sfAudioStop = () => {
+        _sfAudioStopSource();
+        _sfAudioCancelRaf();
+        _sfAudioIsPlaying = false;
+        _sfAudioIsPaused = false;
+        _sfAudioPausedAt = 0;
+        _sfAudioMovePlayhead(0);
+        _sfAudioSetPlayLabel('stopped');
+      };
+      const _sfAudioPlayFrom = async (offset) => {
+        if (!_sfAudioBuffer) return;
+        const ctx = await _sfAudioEnsureCtx();
+        _sfAudioStopSource();
+        _sfAudioCancelRaf();
+        const src = ctx.createBufferSource();
+        src.buffer = _sfAudioBuffer;
+        // Native loop on the BufferSource — wraps audio without our
+        // having to restart manually each time.
+        src.loop = _sfAudioLoop;
+        src.connect(ctx.destination);
+        src.onended = () => {
+          // Natural end (not user-pause). Loop runs forever so this
+          // only fires for non-loop playback.
+          if (!_sfAudioIsPaused) _sfAudioStop();
+        };
+        src.start(0, Math.max(0, Math.min(offset, _sfAudioBuffer.duration)));
+        _sfAudioSource = src;
+        _sfAudioStartedAt = ctx.currentTime;
+        _sfAudioPausedAt = offset;
+        _sfAudioIsPlaying = true;
+        _sfAudioIsPaused = false;
+        _sfAudioSetPlayLabel('playing');
+        _sfAudioAnimatePlayhead();
+      };
+      const _sfAudioTogglePlay = async () => {
+        if (!_sfAudioBuffer) return;
+        if (_sfAudioIsPlaying && !_sfAudioIsPaused) {
+          // Pause: capture position, stop the source.
+          const elapsed = (_sfAudioCtx.currentTime - _sfAudioStartedAt) + _sfAudioPausedAt;
+          _sfAudioPausedAt = Math.min(elapsed, _sfAudioBuffer.duration);
+          _sfAudioStopSource();
+          _sfAudioCancelRaf();
+          _sfAudioIsPaused = true;
+          _sfAudioSetPlayLabel('stopped');
+          return;
+        }
+        if (_sfAudioIsPaused) {
+          await _sfAudioPlayFrom(_sfAudioPausedAt);
+          return;
+        }
+        // Stopped → play from start.
+        await _sfAudioPlayFrom(0);
+      };
+      const _sfCloseAudioPlayer = () => {
+        _sfAudioStop();
+        _sfAudioBuffer = null;
+        _sfAudioOpenToken++; // invalidate any in-flight decode
+        const m = document.getElementById('modal-sf-audio');
+        if (m) m.classList.remove('active');
+      };
+      const _sfOpenAudioPlayer = async ({ kind, id, subPath, label }) => {
+        const modal = document.getElementById('modal-sf-audio');
+        if (!modal) return;
+        // If something else is already playing, drop it before loading
+        // the new file — only one player audible at a time.
+        _sfAudioStop();
+        _sfAudioBuffer = null;
+        const token = ++_sfAudioOpenToken;
+        const displayName = label || (subPath ? subPath.split('/').pop() : '(audio)');
+        const nameEl = document.getElementById('sf-audio-name');
+        const loadEl = document.getElementById('sf-audio-loading');
+        const errEl  = document.getElementById('sf-audio-error');
+        const bodyEl = document.getElementById('sf-audio-body');
+        const metaEl = document.getElementById('sf-audio-meta');
+        const curEl  = document.getElementById('sf-audio-current');
+        const totEl  = document.getElementById('sf-audio-total');
+        if (nameEl) nameEl.textContent = displayName;
+        if (loadEl) loadEl.style.display = '';
+        if (errEl)  errEl.style.display = 'none';
+        if (bodyEl) bodyEl.style.display = 'none';
+        if (curEl)  curEl.textContent = '0:00';
+        if (totEl)  totEl.textContent = '0:00';
+        if (metaEl) metaEl.textContent = '';
+        // Loop resets to OFF on every open (per Ryan: even reopening
+        // the same file).
+        _sfAudioLoop = false;
+        const loopBtn = document.getElementById('sf-audio-loop');
+        if (loopBtn) loopBtn.setAttribute('aria-pressed', 'false');
+        modal.classList.add('active');
+        try {
+          const bytes = await _sfAudioReadBytes({ kind, id, subPath });
+          if (token !== _sfAudioOpenToken) return; // stale — user opened another
+          const ctx = await _sfAudioEnsureCtx();
+          const buffer = await ctx.decodeAudioData(bytes.buffer.slice(0));
+          if (token !== _sfAudioOpenToken) return;
+          _sfAudioBuffer = buffer;
+          if (loadEl) loadEl.style.display = 'none';
+          if (bodyEl) bodyEl.style.display = '';
+          if (totEl)  totEl.textContent = _sfAudioFmtTime(buffer.duration);
+          if (metaEl) {
+            const khz = (buffer.sampleRate / 1000).toFixed(1) + ' kHz';
+            const ch = buffer.numberOfChannels === 1 ? 'mono' : `${buffer.numberOfChannels}ch`;
+            metaEl.textContent = `${khz} · ${ch}`;
+          }
+          // Defer to next frame so layout sizes have settled before
+          // we measure the canvas for waveform draw.
+          requestAnimationFrame(() => {
+            if (token !== _sfAudioOpenToken) return;
+            _sfAudioDrawWaveform();
+            _sfAudioPlayFrom(0);
+          });
+        } catch (err) {
+          if (token !== _sfAudioOpenToken) return;
+          if (loadEl) loadEl.style.display = 'none';
+          if (errEl) {
+            errEl.style.display = '';
+            errEl.textContent = `Could not play: ${err && err.message || err}`;
+          }
+        }
+      };
+      document.getElementById('sf-audio-close')?.addEventListener('click', _sfCloseAudioPlayer);
+      // Backdrop click closes — no dirty state to protect.
+      document.getElementById('modal-sf-audio')?.addEventListener('click', (e) => {
+        if (e.target.id === 'modal-sf-audio') _sfCloseAudioPlayer();
+      });
+      // Play button toggles.
+      document.getElementById('sf-audio-play')?.addEventListener('click', _sfAudioTogglePlay);
+      // Loop toggle — flip the BufferSource's loop flag live so the
+      // change takes effect mid-playback without a restart, and update
+      // the pressed-state styling.
+      document.getElementById('sf-audio-loop')?.addEventListener('click', (e) => {
+        _sfAudioLoop = !_sfAudioLoop;
+        e.currentTarget.setAttribute('aria-pressed', _sfAudioLoop ? 'true' : 'false');
+        if (_sfAudioSource) _sfAudioSource.loop = _sfAudioLoop;
+        // If we already played past the end (stopped) and the user
+        // turns loop on, kick playback off again from the start so the
+        // intent is honored immediately.
+        if (_sfAudioLoop && !_sfAudioIsPlaying && _sfAudioBuffer) _sfAudioPlayFrom(0);
+      });
+      // Click on the waveform to seek.
+      document.getElementById('sf-audio-canvas')?.addEventListener('click', (e) => {
+        if (!_sfAudioBuffer) return;
+        const wrap = e.currentTarget.parentElement;
+        const rect = wrap.getBoundingClientRect();
+        const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+        const target = pct * _sfAudioBuffer.duration;
+        // If currently playing, jump-and-continue; otherwise stage the
+        // resume position so the next play starts there.
+        if (_sfAudioIsPlaying && !_sfAudioIsPaused) {
+          _sfAudioPlayFrom(target);
+        } else {
+          _sfAudioPausedAt = target;
+          _sfAudioIsPaused = true;
+          _sfAudioMovePlayhead(target);
+        }
+      });
+      // Escape closes (gated to topmost so it doesn't poach from
+      // an unrelated modal underneath).
+      document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return;
+        const modal = document.getElementById('modal-sf-audio');
+        if (!modal || !modal.classList.contains('active')) return;
+        const top = [...document.querySelectorAll('.modal-overlay.active')].pop();
+        if (top !== modal) return;
+        e.preventDefault();
+        _sfCloseAudioPlayer();
+      });
+      // True for any file with a .wav extension (case-insensitive).
+      // Used by the per-browser double-click + context menu wiring to
+      // decide whether the row is playable.
+      const _sfIsWavPath = (p) => /\.wav$/i.test(String(p || ''));
+
+      // Manual double-click detector. The native dblclick event doesn't
+      // fire reliably here because the row lists re-render on every
+      // click (selection-state change), so the second click lands on a
+      // different DOM node and the browser breaks the dblclick chain.
+      // Timestamp + path comparison sidesteps that entirely.
+      let _sfDblClickLastTime = 0;
+      let _sfDblClickLastKey = null;
+      const _sfTryDoubleClick = (key) => {
+        const now = Date.now();
+        const hit = key === _sfDblClickLastKey && (now - _sfDblClickLastTime) < 400;
+        if (hit) {
+          _sfDblClickLastKey = null; // reset so triple-click doesn't fire twice
+          _sfDblClickLastTime = 0;
+          return true;
+        }
+        _sfDblClickLastKey = key;
+        _sfDblClickLastTime = now;
+        return false;
+      };
+
       // ── Reorganize modal ──────────────────────────────────────────────
       // Three tools: Restructure (flat ↔ grouped), Reorder (drag/arrow/
       // keyboard renumbering within a bucket), Find & replace (folder-
@@ -15625,10 +16041,41 @@ require(['vs/editor/editor.main'], function () {
         }
         const row = e.target.closest('[data-row-path]');
         if (row) {
-          _sfReorgSelectedRow = row.getAttribute('data-row-path');
+          const p = row.getAttribute('data-row-path');
+          if (_sfIsWavPath(p) && _sfTryDoubleClick(`reorg:${p}`) && _sfDetailOriginalName) {
+            _sfOpenAudioPlayer({ kind: 'entry', id: _sfDetailOriginalName, subPath: p, label: p.split('/').pop() });
+            return;
+          }
+          _sfReorgSelectedRow = p;
           _sfRenderReorgReorderList();
           document.getElementById('sf-reorg-reorder-list').focus();
         }
+      });
+      // Right-click on a reorder row → Play (when row is a .wav). Same
+      // ctx-menu DOM the rest of the SF browsers reuse.
+      document.getElementById('sf-reorg-reorder-list')?.addEventListener('contextmenu', (e) => {
+        const row = e.target.closest('[data-row-path]');
+        if (!row || !_sfDetailOriginalName) return;
+        const p = row.getAttribute('data-row-path');
+        if (!_sfIsWavPath(p)) return;
+        e.preventDefault();
+        const menu = document.getElementById('preset-ctx-menu');
+        if (!menu) return;
+        menu.innerHTML = '';
+        const item = document.createElement('div');
+        item.className = 'preset-ctx-item';
+        item.textContent = '▶ Play';
+        item.addEventListener('mousedown', (e2) => {
+          e2.stopPropagation();
+          menu.style.display = 'none';
+          _sfOpenAudioPlayer({ kind: 'entry', id: _sfDetailOriginalName, subPath: p, label: p.split('/').pop() });
+        });
+        menu.appendChild(item);
+        const x = Math.min(e.clientX, window.innerWidth - 200);
+        const y = Math.min(e.clientY, window.innerHeight - 100);
+        menu.style.left = x + 'px';
+        menu.style.top = y + 'px';
+        menu.style.display = 'block';
       });
       // Keyboard reorder — ↑/↓ moves selected row; Home/End jumps to
       // first/last numbered slot. Anchors the focus to the list so the
@@ -15852,6 +16299,10 @@ require(['vs/editor/editor.main'], function () {
             _sfRenderEntryFiles();
           }
           const count = _sfEntryFilesSelected.size;
+          if (count === 1 && _sfIsWavPath(p)) {
+            mkItem('▶ Play', '', () => _sfOpenAudioPlayer({ kind: 'entry', id: _sfDetailOriginalName, subPath: p, label: p.split('/').pop() }));
+            mkSep();
+          }
           mkItem(count > 1 ? `Copy (${count})` : 'Copy', '', _sfCopyEntryFilesSelection);
           if (clipboardCount > 0) mkItem(`Paste (${clipboardCount})`, '', () => _sfPasteIntoEntry());
           mkSep();
@@ -16076,6 +16527,12 @@ require(['vs/editor/editor.main'], function () {
         if (fileRow) {
           const p = fileRow.getAttribute('data-file-path');
           if (!p) return;
+          if (!e.shiftKey && !e.ctrlKey && !e.metaKey
+              && _sfIsWavPath(p) && _sfTryDoubleClick(`source:${p}`)
+              && _sfSourceOriginalUuid) {
+            _sfOpenAudioPlayer({ kind: 'source', id: _sfSourceOriginalUuid, subPath: p, label: p.split('/').pop() });
+            return;
+          }
           if (e.shiftKey && _sfSourceFilesAnchor) {
             _sfShiftSelectSourceFilesTo(p);
           } else if (e.ctrlKey || e.metaKey) {
@@ -16129,6 +16586,7 @@ require(['vs/editor/editor.main'], function () {
           d.addEventListener('mousedown', (e2) => { e2.stopPropagation(); menu.style.display = 'none'; fn(); });
           menu.appendChild(d);
         };
+        const mkSep = () => { const s = document.createElement('div'); s.className = 'preset-ctx-separator'; menu.appendChild(s); };
         menu.innerHTML = '';
         if (fileRow) {
           const p = fileRow.getAttribute('data-file-path');
@@ -16140,6 +16598,10 @@ require(['vs/editor/editor.main'], function () {
             _sfRenderSourceFiles();
           }
           const count = _sfSourceFilesSelected.size;
+          if (count === 1 && _sfIsWavPath(p)) {
+            mkItem('▶ Play', '', () => _sfOpenAudioPlayer({ kind: 'source', id: _sfSourceOriginalUuid, subPath: p, label: p.split('/').pop() }));
+            mkSep();
+          }
           mkItem(count > 1 ? `Copy (${count})` : 'Copy', '', _sfCopySourceFilesSelection);
         } else {
           // Empty space / folder row right-click — no operations available.
@@ -17498,6 +17960,12 @@ require(['vs/editor/editor.main'], function () {
           e.stopPropagation();
           const subPath = fileRow.getAttribute('data-tree-file');
           if (!subPath) return;
+          if (!e.shiftKey && !e.ctrlKey && !e.metaKey
+              && _sfIsWavPath(subPath) && _sfTryDoubleClick(`common:${subPath}`)
+              && _sfSelectedCommonUuid) {
+            _sfOpenAudioPlayer({ kind: 'common', id: _sfSelectedCommonUuid, subPath, label: subPath.split('/').pop() });
+            return;
+          }
           if (e.shiftKey && _sfCommonFilesAnchor) {
             _sfShiftSelectFilesTo(subPath);
           } else if (e.ctrlKey || e.metaKey) {
@@ -17594,6 +18062,10 @@ require(['vs/editor/editor.main'], function () {
             _sfRenderCommonFileTree();
           }
           const count = _sfCommonFilesSelected.size;
+          if (count === 1 && _sfIsWavPath(subPath)) {
+            mkItem('▶ Play', '', () => _sfOpenAudioPlayer({ kind: 'common', id: _sfSelectedCommonUuid, subPath, label: subPath.split('/').pop() }));
+            mkSep();
+          }
           mkItem(count > 1 ? `Copy (${count})` : 'Copy', '', _sfCopyCommonSelection);
           if (clipboardCount > 0) {
             // Paste into THIS file's parent dir (sibling of the clicked file).
