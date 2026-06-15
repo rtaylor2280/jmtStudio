@@ -1128,7 +1128,86 @@
     z-index: 10000;
   }
   .modal-overlay.active { display: flex; }
-  #modal-unsaved { z-index: 10010; }
+  /* Confirm / prompt modals stack ABOVE base modals like the entry
+     detail view, otherwise a Delete confirm or Rename prompt summoned
+     from inside another modal would render behind it (invisible to the
+     user but functionally active). 10010 sits below the context menu
+     at 10020 so clicking outside the menu still closes it. */
+  #modal-unsaved { z-index: 10015; }
+  #modal-confirm { z-index: 10015; }
+  #modal-sf-text-prompt { z-index: 10015; }
+  #modal-sf-text-prompt input.invalid { border-color: #e44; }
+  .sf-text-prompt-error { font-size: 0.7rem; color: #e44; margin-top: 4px; min-height: 1em; }
+
+  /* Reorganize modal — three stacked cards (Restructure, Reorder, Find & replace) */
+  #modal-sf-reorganize { z-index: 10010; }
+  #modal-sf-reorganize .modal { position: relative; width: 640px; max-width: 96vw; max-height: 90vh; display: flex; flex-direction: column; padding-bottom: 16px; }
+  #modal-sf-reorganize h2 { display: flex; align-items: baseline; gap: 8px; margin: 0 0 12px 0; }
+  .sf-reorg-entry-name { font-weight: 400; font-size: 0.78rem; color: var(--c-text-sub); }
+  .sf-reorg-body { overflow-y: auto; flex: 1; min-height: 0; padding-right: 4px; display: flex; flex-direction: column; gap: 12px; }
+  .sf-reorg-body::-webkit-scrollbar { width: 6px; }
+  .sf-reorg-body::-webkit-scrollbar-track { background: transparent; }
+  .sf-reorg-body::-webkit-scrollbar-thumb { background: var(--c-border-strong); border-radius: 3px; }
+  .sf-reorg-card { background: var(--c-bg-inset); border: 1px solid var(--c-border-faint); border-radius: 4px; padding: 10px 12px; }
+  .sf-reorg-card-title { margin: 0 0 4px 0; font-size: 0.86rem; color: var(--c-text); font-weight: 600; }
+  .sf-reorg-card-help { margin: 0 0 8px 0; font-size: 0.72rem; color: var(--c-text-muted); line-height: 1.3; }
+  .sf-reorg-card-help code { display: inline-block; min-width: 1.1em; text-align: center; background: var(--c-bg-card); border: 1px solid var(--jmt-blue); border-radius: 3px; padding: 0 5px; font-size: 0.78rem; font-weight: 700; color: var(--jmt-blue); font-family: var(--mono, ui-monospace, "Cascadia Mono", Consolas, monospace); line-height: 1.4; }
+  .sf-reorg-card-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
+
+  /* Restructure preview block */
+  .sf-reorg-restructure-preview { font-size: 0.72rem; color: var(--c-text-sub); padding: 6px 8px; background: var(--c-bg-raised); border-radius: 3px; min-height: 1em; }
+  .sf-reorg-restructure-preview .sf-reorg-layout-label { color: var(--c-text); font-weight: 600; }
+
+  /* Reorder bucket chips */
+  .sf-reorg-bucket-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+  .sf-reorg-bucket-chip { display: inline-flex; align-items: center; gap: 4px; background: var(--c-bg-raised); border: 1px solid var(--c-border-faint); color: var(--c-text-sub); cursor: pointer; padding: 3px 10px; border-radius: 10px; font-size: 0.72rem; transition: background 0.1s, color 0.1s, border-color 0.1s; }
+  .sf-reorg-bucket-chip:hover { background: var(--c-bg-hover); border-color: var(--jmt-blue); color: var(--jmt-blue); }
+  .sf-reorg-bucket-chip.active { background: var(--c-bg-card); color: var(--c-text); border-color: var(--jmt-blue); cursor: default; }
+  .sf-reorg-bucket-chip.warn { border-color: #d9a13a; color: #d9a13a; }
+  .sf-reorg-bucket-chip.warn:hover { background: rgba(217,161,58,0.12); }
+  .sf-reorg-bucket-chip .sf-reorg-bucket-count { opacity: 0.65; font-size: 0.65rem; }
+  .sf-reorg-bucket-empty { font-size: 0.72rem; color: var(--c-text-muted); font-style: italic; padding: 4px 0; }
+
+  /* Reorder list */
+  .sf-reorg-reorder-panel { margin-top: 4px; }
+  .sf-reorg-reorder-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+  .sf-reorg-reorder-title { font-size: 0.74rem; color: var(--c-text); font-weight: 500; }
+  .sf-reorg-reorder-actions { display: inline-flex; gap: 6px; }
+  .sf-reorg-reorder-actions button { font-size: 0.7rem; padding: 3px 10px; }
+  .sf-reorg-reorder-list { background: var(--c-bg-raised); border: 1px solid var(--c-border-faint); border-radius: 3px; padding: 4px; max-height: 280px; overflow-y: auto; outline: none; }
+  .sf-reorg-reorder-list::-webkit-scrollbar { width: 6px; }
+  .sf-reorg-reorder-list::-webkit-scrollbar-thumb { background: var(--c-border-strong); border-radius: 3px; }
+  .sf-reorg-reorder-row { display: flex; align-items: center; gap: 6px; padding: 3px 6px; font-size: 0.74rem; cursor: grab; user-select: none; border-radius: 2px; }
+  .sf-reorg-reorder-row:hover { background: var(--c-bg-hover); }
+  .sf-reorg-reorder-row.selected { background: rgba(58,143,255,0.22); }
+  .sf-reorg-reorder-row.dragging { opacity: 0.4; }
+  .sf-reorg-reorder-row.drop-before { box-shadow: inset 0 2px 0 0 var(--jmt-blue); }
+  .sf-reorg-reorder-row.drop-after { box-shadow: inset 0 -2px 0 0 var(--jmt-blue); }
+  .sf-reorg-reorder-row.misnamed { color: #d9a13a; }
+  .sf-reorg-reorder-pos { min-width: 22px; text-align: right; color: var(--c-text-dim); font-variant-numeric: tabular-nums; font-size: 0.7rem; }
+  .sf-reorg-reorder-pos.changed { color: var(--jmt-blue); font-weight: 600; }
+  .sf-reorg-reorder-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sf-reorg-reorder-arrows { display: inline-flex; gap: 2px; }
+  .sf-reorg-reorder-arrows button { background: transparent; border: 1px solid transparent; color: var(--c-text-dim); cursor: pointer; padding: 0 4px; font-size: 0.85rem; line-height: 1; border-radius: 2px; }
+  .sf-reorg-reorder-arrows button:hover { color: var(--c-text); border-color: var(--c-border-faint); background: var(--c-bg-card); }
+  .sf-reorg-reorder-arrows button:disabled { color: var(--c-text-dim); opacity: 0.3; cursor: default; border-color: transparent; background: transparent; }
+
+  /* Find & replace */
+  .sf-reorg-fr-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .sf-reorg-fr-label { width: 60px; font-size: 0.72rem; color: var(--c-text-sub); }
+  .sf-reorg-fr-input { flex: 1; background: var(--c-bg-inset); border: 1px solid var(--c-border-input); border-radius: 3px; color: var(--c-text); padding: 4px 8px; font-size: 0.78rem; outline: none; font-family: inherit; }
+  .sf-reorg-fr-input:focus { border-color: var(--jmt-blue); }
+  .sf-reorg-fr-preview { font-size: 0.7rem; max-height: 180px; overflow-y: auto; background: var(--c-bg-raised); border: 1px solid var(--c-border-faint); border-radius: 3px; padding: 4px 8px; margin-top: 6px; color: var(--c-text-sub); }
+  .sf-reorg-fr-preview::-webkit-scrollbar { width: 6px; }
+  .sf-reorg-fr-preview::-webkit-scrollbar-thumb { background: var(--c-border-strong); border-radius: 3px; }
+  .sf-reorg-fr-preview-row { display: flex; gap: 8px; padding: 1px 0; font-variant-numeric: tabular-nums; }
+  .sf-reorg-fr-preview-from { color: var(--c-text-dim); text-decoration: line-through; }
+  .sf-reorg-fr-preview-arrow { color: var(--c-text-dim); }
+  .sf-reorg-fr-preview-to { color: var(--c-text); }
+  .sf-reorg-fr-preview-row.error { color: #e44; }
+  .sf-reorg-fr-preview-empty { color: var(--c-text-muted); font-style: italic; }
+  .sf-reorg-fr-preview-dir { color: var(--c-text-dim); }
+  .sf-reorg-gap-hint { font-size: 0.7rem; color: var(--jmt-blue); font-style: italic; margin-top: 4px; }
   .modal {
     background: var(--c-bg-card);
     border: 1px solid var(--c-border-heavy);
@@ -2102,11 +2181,11 @@
   .sf-import-btn-row { display: flex; gap: 8px; justify-content: flex-end; flex-shrink: 0; }
   .sf-dup-btn-stack { display: flex; flex-direction: column; gap: 8px; margin-top: 18px; }
   .sf-dup-btn-stack button { width: 100%; padding: 8px 14px; font-size: 0.85rem; }
-  #modal-sf-entry-detail .modal { width: 820px; max-width: 96vw; height: min(90vh, 700px); display: flex; flex-direction: column; padding-bottom: 16px; }
+  #modal-sf-entry-detail .modal { width: 820px; max-width: 96vw; height: min(90vh, 800px); display: flex; flex-direction: column; padding-bottom: 16px; }
   .sf-entry-detail-header { padding-right: 32px; flex-shrink: 0; }
   .sf-entry-detail-header h2 { margin: 0 0 4px 0; }
   .sf-entry-detail-byline { font-size: 0.85rem; color: var(--c-text-sub); }
-  .sf-entry-detail-body { overflow-y: auto; flex: 1; min-height: 0; margin: 12px 0; padding-right: 4px; }
+  .sf-entry-detail-body { overflow-y: auto; flex: 1; min-height: 0; margin: 12px 0; padding-right: 4px; display: flex; flex-direction: column; }
   .sf-entry-detail-body::-webkit-scrollbar { width: 6px; }
   .sf-entry-detail-body::-webkit-scrollbar-track { background: transparent; }
   .sf-entry-detail-body::-webkit-scrollbar-thumb { background: var(--c-border-strong); border-radius: 3px; }
@@ -2118,6 +2197,46 @@
   .sf-entry-detail-section { margin-top: 16px; }
   .sf-entry-detail-section h3 { font-size: 0.85rem; color: var(--c-text); margin: 0 0 8px 0; font-weight: 600; }
   .sf-entry-detail-source { font-size: 0.75rem; color: var(--c-text-muted); background: var(--c-bg-inset); border: 1px solid var(--c-border-faint); border-radius: 4px; padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; }
+  /* Files browser inside entry detail — single-column list of folders +
+     files exactly as they'd land on the SD card. Container box wraps the
+     list (back to the original common-folder visual language). The
+     section h3 acts as both label AND breadcrumb: "Files: Sabine" at
+     root, "Files: Sabine › clsh" when navigated into a subfolder. */
+  .sf-entry-files-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 0 0 8px 0; font-size: 0.85rem; color: var(--c-text); font-weight: 600; }
+  .sf-entry-files-head-actions { display: inline-flex; gap: 4px; margin-left: auto; }
+  .sf-entry-files-head-btn { font-size: 0.7rem; padding: 2px 8px; font-weight: 500; }
+  .sf-entry-files-breadcrumb { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; font-weight: 400; font-size: 0.72rem; }
+  /* Breadcrumb chips — small pill buttons so clickability is obvious. */
+  .sf-entry-files-crumb { display: inline-flex; align-items: center; background: var(--c-bg-raised); border: 1px solid var(--c-border-faint); color: var(--c-text-sub); cursor: pointer; padding: 1px 8px; border-radius: 10px; transition: background 0.1s, color 0.1s, border-color 0.1s; }
+  .sf-entry-files-crumb:hover { background: var(--c-bg-hover); border-color: var(--jmt-blue); color: var(--jmt-blue); }
+  .sf-entry-files-crumb.current { background: var(--c-bg-card); color: var(--c-text); cursor: default; border-color: var(--c-border); }
+  .sf-entry-files-crumb.current:hover { background: var(--c-bg-card); color: var(--c-text); border-color: var(--c-border); }
+  .sf-entry-files-crumb-sep { color: var(--c-text-dim); padding: 0 1px; line-height: 1; }
+  /* Files section grows to fill the remaining modal-body space so the
+     browser is the primary scroll surface. Min-height = enough room for
+     4 rows of content + breadcrumb header + a little breathing room; the
+     outer modal body only scrolls if EVEN that minimum can't fit. */
+  .sf-files-section { flex: 1 1 auto; min-height: 130px; display: flex; flex-direction: column; }
+  .sf-entry-files-browser { background: var(--c-bg-inset); border: 1px solid var(--c-border-faint); border-radius: 4px; padding: 6px 8px; flex: 1; min-height: 100px; overflow-y: auto; }
+  /* Row-major list: items flow left-to-right and wrap to the next row
+     when they hit the container edge. Vertical scroll lives on the
+     browser container above; this is just the flex grid of items. */
+  .sf-entry-files-list { display: flex; flex-wrap: wrap; align-content: flex-start; gap: 1px 8px; }
+  .sf-entry-files-row { display: flex; align-items: center; gap: 6px; padding: 2px 4px; font-size: 0.75rem; cursor: default; user-select: none; width: 140px; flex-shrink: 0; border-radius: 2px; }
+  .sf-entry-files-row:hover { background: var(--c-bg-hover); }
+  .sf-entry-files-row.is-dir { cursor: pointer; }
+  .sf-entry-files-row.selected { background: rgba(58,143,255,0.22); }
+  .sf-entry-files-row.selected:hover { background: rgba(58,143,255,0.30); }
+  /* Drag-drop highlight on a directory row when files are being dragged
+     over it (within the entry modal). */
+  .sf-entry-files-row.drop-target { outline: 1px solid var(--jmt-blue); outline-offset: -1px; background: rgba(58,143,255,0.25); }
+  .sf-entry-files-row-icon { font-size: 0.85rem; flex-shrink: 0; line-height: 1; color: var(--c-text-dim); }
+  .sf-entry-files-row.is-dir .sf-entry-files-row-icon { color: #d9c468; }
+  .sf-entry-files-row-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--c-text); }
+  .sf-entry-files-empty { padding: 28px 10px; text-align: center; font-size: 0.74rem; color: var(--c-text-muted); font-style: italic; width: 100%; }
+  .sf-entry-files-browser::-webkit-scrollbar { width: 6px; }
+  .sf-entry-files-browser::-webkit-scrollbar-track { background: transparent; }
+  .sf-entry-files-browser::-webkit-scrollbar-thumb { background: var(--c-border-strong); border-radius: 3px; }
   .sf-entry-detail-source .src-line { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .sf-entry-detail-source .src-label { color: var(--c-text-dim); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; flex-shrink: 0; width: 120px; }
   .sf-entry-detail-source .src-val { color: var(--c-text-sub); word-break: break-all; flex: 1; min-width: 0; }
@@ -2539,7 +2658,7 @@
   #preset-list-top[data-disabled-active] .preset-row[data-live-idx].selected { background: transparent !important; color: var(--c-text-sub) !important; }
   .preset-disabled-banner { font-size: 0.65rem; color: var(--c-text-hint); font-style: italic; padding: 4px 10px 2px; letter-spacing: 0.03em; }
   .preset-detail-disabled-slots { opacity: 0.4; pointer-events: none; filter: grayscale(0.5); }
-  .preset-ctx-menu { position: fixed; background: var(--c-bg-card); border: 1px solid var(--c-border); border-radius: 6px; padding: 4px 0; min-width: 150px; z-index: 9999; box-shadow: 0 4px 20px rgba(0,0,0,0.7); display: none; }
+  .preset-ctx-menu { position: fixed; background: var(--c-bg-card); border: 1px solid var(--c-border); border-radius: 6px; padding: 4px 0; min-width: 150px; z-index: 10020; box-shadow: 0 4px 20px rgba(0,0,0,0.7); display: none; }
 
   /* ── Toast notifications ── */
   #toast-host {
@@ -3659,6 +3778,25 @@
         <div class="sf-entry-detail-source" id="sf-entry-detail-source"></div>
         <button class="sf-edit-source-link" id="btn-sf-open-source-detail">Edit source&hellip;</button>
       </div>
+      <!-- ── Files section (slice 13) — shows the entry's on-disk contents
+           exactly as they would land on the SD card. List view with a
+           multi-column grid, folder cells navigable, breadcrumb tracks
+           current path. Foundation for the per-file preview/actions that
+           land in subsequent slices. -->
+      <div class="sf-entry-detail-section sf-files-section">
+        <h3 class="sf-entry-files-head">
+          <span>Files:</span>
+          <span class="sf-entry-files-breadcrumb" id="sf-entry-files-breadcrumb"></span>
+          <span class="sf-entry-files-head-actions">
+            <button class="btn-neutral sf-entry-files-head-btn" id="btn-sf-entry-reorganize" title="Restructure, reorder, find &amp; replace">Reorganize</button>
+            <button class="btn-neutral sf-entry-files-head-btn" id="btn-sf-entry-add-folder" title="Create a new subfolder">+ Folder</button>
+            <button class="btn-neutral sf-entry-files-head-btn" id="btn-sf-entry-add-files" title="Add wav files to this entry">+ Add</button>
+          </span>
+        </h3>
+        <div class="sf-entry-files-browser" id="sf-entry-files-browser">
+          <div class="sf-entry-files-list" id="sf-entry-files-list"></div>
+        </div>
+      </div>
     </div>
     <div class="modal-btns" style="margin-top: 12px;">
       <button class="modal-btn-cancel" id="sf-entry-detail-discard">Close</button>
@@ -3743,6 +3881,20 @@
         <div class="sf-source-entries-list" id="sf-source-entries-list"></div>
         <button class="modal-btn-primary sf-source-add-more-btn" id="btn-sf-source-add-more">+ Add more fonts from this source</button>
       </div>
+      <!-- ── Files section ── read-only browser of the whole source
+           archive. Same layout/UX as the entry file browser; right-click
+           and Ctrl+C copy selections into the unified clipboard so the
+           user can paste them into an entry or a common folder. No move,
+           no delete, no add, no rename — sources are immutable. -->
+      <div class="sf-entry-detail-section sf-files-section">
+        <h3 class="sf-entry-files-head">
+          <span>Files:</span>
+          <span class="sf-entry-files-breadcrumb" id="sf-source-files-breadcrumb"></span>
+        </h3>
+        <div class="sf-entry-files-browser" id="sf-source-files-browser">
+          <div class="sf-entry-files-list" id="sf-source-files-list"></div>
+        </div>
+      </div>
     </div>
     <div class="modal-btns" style="margin-top: 12px;">
       <button class="modal-btn-cancel sf-source-delete-btn" id="btn-sf-source-delete">Delete source&hellip;</button>
@@ -3808,11 +3960,71 @@
 <!-- ── Simple text prompt modal — reusable for "name your common folder",
      rename, and duplicate flows. Resolves with the trimmed string or null
      on cancel/Escape/backdrop click. ── -->
+<!-- ── Reorganize modal — three stacked tools for the open entry:
+     Restructure (flat ↔ grouped), Reorder (drag/arrow/keyboard re-
+     numbering within a sound type), Find & replace (folder-scoped
+     text/wildcard rename). ── -->
+<div class="modal-overlay" id="modal-sf-reorganize">
+  <div class="modal">
+    <button class="modal-btn-close" id="sf-reorganize-close" title="Close">&#10005;</button>
+    <h2>Reorganize <span class="sf-reorg-entry-name" id="sf-reorg-entry-name"></span></h2>
+    <div class="sf-reorg-body">
+      <!-- Restructure -->
+      <section class="sf-reorg-card" id="sf-reorg-card-restructure">
+        <h3 class="sf-reorg-card-title">Restructure layout</h3>
+        <p class="sf-reorg-card-help">Group multi-file sound types into subfolders, or flatten back to a single folder. Single files stay at the root either way.</p>
+        <div class="sf-reorg-restructure-preview" id="sf-reorg-restructure-preview"></div>
+        <div class="sf-reorg-card-actions">
+          <button class="modal-btn-cancel" id="btn-sf-reorg-flatten">Flatten into folder</button>
+          <button class="modal-btn-primary" id="btn-sf-reorg-group">Group into subfolders</button>
+        </div>
+      </section>
+      <!-- Reorder -->
+      <section class="sf-reorg-card" id="sf-reorg-card-reorder">
+        <h3 class="sf-reorg-card-title">Reorder a sound type</h3>
+        <p class="sf-reorg-card-help">Drag rows, use the arrows, or click and press ↑/↓. Save renumbers files to match the new order.</p>
+        <div class="sf-reorg-bucket-chips" id="sf-reorg-bucket-chips"></div>
+        <div class="sf-reorg-reorder-panel" id="sf-reorg-reorder-panel" style="display:none">
+          <div class="sf-reorg-reorder-header">
+            <span class="sf-reorg-reorder-title" id="sf-reorg-reorder-title"></span>
+            <span class="sf-reorg-reorder-actions">
+              <button class="modal-btn-cancel sf-reorg-reorder-cancel" id="btn-sf-reorg-reorder-cancel">Cancel</button>
+              <button class="modal-btn-primary sf-reorg-reorder-save" id="btn-sf-reorg-reorder-save" disabled>Save order</button>
+            </span>
+          </div>
+          <div class="sf-reorg-reorder-list" id="sf-reorg-reorder-list" tabindex="0"></div>
+        </div>
+      </section>
+      <!-- Find & replace -->
+      <section class="sf-reorg-card" id="sf-reorg-card-findreplace">
+        <h3 class="sf-reorg-card-title">Find &amp; replace</h3>
+        <p class="sf-reorg-card-help">Renames matching files across the whole font.</p>
+        <div class="sf-reorg-fr-row">
+          <label class="sf-reorg-fr-label">Find</label>
+          <input type="text" class="sf-reorg-fr-input" id="sf-reorg-fr-find" placeholder="e.g. Quotes">
+        </div>
+        <div class="sf-reorg-fr-row">
+          <label class="sf-reorg-fr-label">Replace</label>
+          <input type="text" class="sf-reorg-fr-input" id="sf-reorg-fr-replace" placeholder="e.g. quote">
+        </div>
+        <div class="sf-reorg-fr-preview" id="sf-reorg-fr-preview"></div>
+        <div class="sf-reorg-card-actions">
+          <button class="modal-btn-primary" id="btn-sf-reorg-fr-apply" disabled>Replace all</button>
+        </div>
+      </section>
+    </div>
+    <div class="modal-btns" style="margin-top: 12px;">
+      <button class="modal-btn-cancel" id="btn-sf-reorg-close-bottom">Close</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="modal-sf-text-prompt">
   <div class="modal">
     <h2 id="sf-text-prompt-title">Enter value</h2>
     <p id="sf-text-prompt-message" class="sf-import-hint" style="margin-bottom: 8px"></p>
     <input type="text" id="sf-text-prompt-input" maxlength="100" autocomplete="off" style="width: 100%; box-sizing: border-box; background: var(--c-bg-inset); border: 1px solid var(--c-border-input); border-radius: 3px; color: var(--c-text); padding: 6px 8px; font-size: 0.86rem; outline: none; font-family: inherit;">
+    <div id="sf-text-prompt-error" class="sf-text-prompt-error"></div>
     <div class="modal-btns" style="margin-top: 14px">
       <button class="modal-btn-cancel" id="sf-text-prompt-cancel">Cancel</button>
       <button class="modal-btn-primary" id="sf-text-prompt-ok">OK</button>
@@ -11593,12 +11805,48 @@ require(['vs/editor/editor.main'], function () {
       let _sfCommonClipboard = null; // { sourceUuid, paths: string[] }
       // Reusable text-prompt helper. Used for naming on import / rename /
       // duplicate. Returns the trimmed string or null on cancel/Escape.
-      const _sfPromptText = ({ title, message, defaultValue, okText = 'OK' } = {}) => {
+      // Shared validator for the file-stem rename prompt. Bare empty is
+      // not flagged (treated as a silent cancel via the prompt's null
+      // return). Periods are rejected because the extension is preserved
+      // automatically; path separators and Windows-illegal chars are
+      // rejected for filesystem safety.
+      // Reserved DOS device names — Windows refuses to create these
+      // regardless of extension. Cheap to catch up-front so the user sees
+      // a clear "this name" message instead of a backend rename error.
+      const _SF_RESERVED_NAMES = new Set([
+        'CON', 'PRN', 'AUX', 'NUL',
+        'COM0', 'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9',
+        'LPT0', 'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9',
+      ]);
+      const _sfValidateFileStem = (value /*, ext */) => {
+        const v = (value || '').trim();
+        if (!v) return null; // empty = cancel, no error
+        // Collect the distinct invalid chars the user actually typed so the
+        // message points at exactly what's wrong, in input order.
+        const seen = new Set();
+        const bad = [];
+        for (const ch of v) {
+          if (!/[.\\/<>:"|?*\x00-\x1f]/.test(ch)) continue;
+          if (seen.has(ch)) continue;
+          seen.add(ch);
+          bad.push(ch.charCodeAt(0) < 0x20 ? `\\x${ch.charCodeAt(0).toString(16).padStart(2, '0')}` : ch);
+        }
+        if (bad.length > 0) return `Name contains invalid characters (${bad.join(' ')})`;
+        if (_SF_RESERVED_NAMES.has(v.toUpperCase())) return `"${v}" is a reserved system name`;
+        return null;
+      };
+      // validate: optional (string) => string | null. Return a message to
+      // show inline (red text under the input, red border, OK disabled);
+      // return null for valid. Runs on every input + on submit. Empty
+      // strings still resolve as null (cancel), so an empty-required
+      // check is best expressed via validate.
+      const _sfPromptText = ({ title, message, defaultValue, okText = 'OK', validate } = {}) => {
         return new Promise(resolve => {
           const modal = document.getElementById('modal-sf-text-prompt');
           const titleEl = document.getElementById('sf-text-prompt-title');
           const msgEl = document.getElementById('sf-text-prompt-message');
           const input = document.getElementById('sf-text-prompt-input');
+          const errEl = document.getElementById('sf-text-prompt-error');
           const okBtn = document.getElementById('sf-text-prompt-ok');
           const cancelBtn = document.getElementById('sf-text-prompt-cancel');
           if (!modal) { resolve(null); return; }
@@ -11607,15 +11855,29 @@ require(['vs/editor/editor.main'], function () {
           msgEl.style.display = message ? '' : 'none';
           input.value = defaultValue || '';
           okBtn.textContent = okText;
+          if (errEl) errEl.textContent = '';
+          input.classList.remove('invalid');
+          const recheck = () => {
+            if (!validate) { okBtn.disabled = false; return null; }
+            const err = validate(input.value || '') || null;
+            if (errEl) errEl.textContent = err || '';
+            input.classList.toggle('invalid', !!err);
+            okBtn.disabled = !!err;
+            return err;
+          };
           const cleanup = (val) => {
             modal.classList.remove('active');
             okBtn.removeEventListener('click', onOk);
             cancelBtn.removeEventListener('click', onCancel);
             input.removeEventListener('keydown', onKey);
+            input.removeEventListener('input', recheck);
             modal.removeEventListener('click', onBackdrop);
             resolve(val);
           };
-          const onOk = () => cleanup((input.value || '').trim() || null);
+          const onOk = () => {
+            if (recheck()) return; // blocked — validator surfaced the reason
+            cleanup((input.value || '').trim() || null);
+          };
           const onCancel = () => cleanup(null);
           const onKey = (e) => {
             if (e.key === 'Enter') { e.preventDefault(); onOk(); }
@@ -11625,8 +11887,10 @@ require(['vs/editor/editor.main'], function () {
           okBtn.addEventListener('click', onOk);
           cancelBtn.addEventListener('click', onCancel);
           input.addEventListener('keydown', onKey);
+          input.addEventListener('input', recheck);
           modal.addEventListener('click', onBackdrop);
           modal.classList.add('active');
+          recheck();
           setTimeout(() => { input.focus(); input.select(); }, 0);
         });
       };
@@ -12067,16 +12331,40 @@ require(['vs/editor/editor.main'], function () {
         }
         await _sfRefreshCommons();
       };
-      const _sfRenameCommonFile = async (subPath) => {
+      // Rename a folder inside a common's file tree. Uses the unified
+      // fileOps:rename IPC since it handles both files and dirs.
+      const _sfRenameCommonFolderPrompt = async (subPath) => {
         if (!_sfSelectedCommonUuid || !subPath) return;
         const current = subPath.split('/').pop();
         const name = await _sfPromptText({
-          title: 'Rename file',
-          message: 'New name for this file:',
+          title: 'Rename folder',
+          message: 'New name for this folder:',
           defaultValue: current,
           okText: 'Rename',
         });
         if (!name || name === current) return;
+        const res = await window.electronAPI.fileOpsRename({
+          kind: 'common', id: _sfSelectedCommonUuid, subPath, newName: name,
+        });
+        if (!res || !res.ok) { alert(`Rename failed: ${(res && res.error) || 'unknown'}`); return; }
+        await _sfRefreshCommons();
+      };
+      const _sfRenameCommonFile = async (subPath) => {
+        if (!_sfSelectedCommonUuid || !subPath) return;
+        const current = subPath.split('/').pop();
+        const dot = current.lastIndexOf('.');
+        const stem = dot > 0 ? current.slice(0, dot) : current;
+        const ext = dot > 0 ? current.slice(dot) : '';
+        const typed = await _sfPromptText({
+          title: 'Rename file',
+          message: 'New name for this file:',
+          defaultValue: stem,
+          okText: 'Rename',
+          validate: (v) => _sfValidateFileStem(v, ext),
+        });
+        if (!typed) return;
+        const name = typed.trim() + ext;
+        if (name === current) return;
         const res = await window.electronAPI.renameCommonFile({ uuid: _sfSelectedCommonUuid, subPath, newName: name });
         if (!res || !res.ok) { alert(`Rename failed: ${(res && res.error) || 'unknown error'}`); return; }
         await _sfRefreshCommons();
@@ -12100,10 +12388,11 @@ require(['vs/editor/editor.main'], function () {
       // survives across re-renders, tab switches, and panel collapse.
       const _sfCopyCommonSelection = () => {
         if (!_sfSelectedCommonUuid || _sfCommonFilesSelected.size === 0) return;
-        _sfCommonClipboard = {
-          sourceUuid: _sfSelectedCommonUuid,
-          paths: Array.from(_sfCommonFilesSelected),
-        };
+        const paths = Array.from(_sfCommonFilesSelected);
+        _sfCommonClipboard = { sourceUuid: _sfSelectedCommonUuid, paths };
+        // Mirror to the unified clipboard so a subsequent paste in an
+        // entry's file browser (or another common) sees the same payload.
+        _sfFileClipboard = { kind: 'common', id: _sfSelectedCommonUuid, paths };
       };
       // Core copy operation. Takes explicit source + destination so it serves
       // both clipboard paste and drag-drop without re-reading globals.
@@ -12150,7 +12439,43 @@ require(['vs/editor/editor.main'], function () {
         await _sfRefreshCommons({ preserveSelection: true });
       };
       // Paste the clipboard's files into a destination common at a subpath.
+      // Source can be a common (existing path) OR an entry/source archive
+      // (via the unified clipboard). Common-source uses the optimized
+      // cross-common path so the active common can switch automatically;
+      // entry and source kinds go through fileOps:copy and the user stays
+      // on the current common.
       const _sfPasteCommonClipboard = async (destUuid, destSubPath = '') => {
+        if (_sfFileClipboard && _sfFileClipboard.kind !== 'common' && _sfFileClipboard.paths.length > 0) {
+          const n = _sfFileClipboard.paths.length;
+          _sfDeleteProgress.show('Pasting files', `${n} file${n === 1 ? '' : 's'}`);
+          let res;
+          try {
+            res = await window.electronAPI.fileOpsCopy({
+              src: { kind: _sfFileClipboard.kind, id: _sfFileClipboard.id },
+              srcPaths: _sfFileClipboard.paths,
+              dest: { kind: 'common', id: destUuid, subPath: destSubPath },
+            });
+          } catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
+          await _sfDeleteProgress.hide();
+          if (!res || !res.ok) { alert(`Paste failed: ${(res && res.error) || 'unknown'}`); return; }
+          if (res.failed?.length) {
+            alert(`Some files failed to paste:\n${res.failed.map(f => ` • ${f.source}: ${f.error}`).join('\n')}`);
+          }
+          _sfSelectedCommonUuid = destUuid;
+          await _sfSaveActiveCommon();
+          for (const p of (res.added || [])) {
+            const parts = p.split('/'); parts.pop();
+            let acc = '';
+            for (const segment of parts) {
+              acc = acc ? `${acc}/${segment}` : segment;
+              _sfCommonTreeOpen.add(acc);
+            }
+          }
+          _sfCommonFilesSelected = new Set(res.added || []);
+          _sfCommonFilesAnchor = (res.added && res.added[0]) || null;
+          await _sfRefreshCommons({ preserveSelection: true });
+          return;
+        }
         if (!_sfCommonClipboard || _sfCommonClipboard.paths.length === 0) return;
         await _sfDoCommonCopy(
           _sfCommonClipboard.sourceUuid,
@@ -13372,6 +13697,87 @@ require(['vs/editor/editor.main'], function () {
       // opts.swapFromModalId — see _sfOpenSourceDetail. Used by the source
       // detail's close-back-to-entry path so the swap is atomic and the card
       // grid doesn't flash through between the two modals.
+      // Entry files browser — in-memory tree from the backend +
+      // a current-path cursor for navigation. Resets on each open.
+      let _sfEntryFilesTree = [];
+      let _sfEntryFilesPath = ''; // empty string = root; otherwise "boot" or "boot/sub"
+      // Multi-select state for the entry file rows. Selection is in-memory
+      // per modal session; cleared on entry detail close + on folder
+      // navigation. _sfEntryFilesAnchor is the last plain-click for the
+      // Shift-range pattern.
+      let _sfEntryFilesSelected = new Set();
+      let _sfEntryFilesAnchor = null;
+      // Unified file clipboard shared across entry/common modals. Format:
+      //   { kind: 'common' | 'entry', id: '<uuid or entry name>', paths: [...] }
+      // Persists across modal closes so the user can copy in one entry and
+      // paste in another (or paste into a common folder, and vice versa).
+      let _sfFileClipboard = null;
+      // Pick an icon glyph per filename — folders get one branch and
+      // common-extension files get hints (wavs vs config vs text) so the
+      // grid reads at a glance.
+      const _sfEntryFileIcon = (node) => {
+        if (node.isDir) return '&#128193;'; // 📁
+        const ext = (node.name.match(/\.[^.]+$/) || [''])[0].toLowerCase();
+        if (ext === '.wav') return '&#127925;'; // 🎵
+        if (ext === '.txt' || ext === '.md' || ext === '.rtf' || ext === '.ini' || ext === '.cfg' || ext === '.tg') return '&#128196;'; // 📄
+        return '&#128196;'; // default doc
+      };
+      // Walk the tree to the children array for the current path. Empty
+      // path returns the root array; a missing path returns [] so a
+      // stale navigation doesn't crash the render.
+      const _sfChildrenAt = (tree, navPath) => {
+        if (!navPath) return tree;
+        const parts = navPath.split('/').filter(Boolean);
+        let cur = tree;
+        for (const p of parts) {
+          const next = cur.find(n => n.isDir && n.name === p);
+          if (!next) return [];
+          cur = next.children || [];
+        }
+        return cur;
+      };
+      const _sfRenderEntryFiles = () => {
+        const list = document.getElementById('sf-entry-files-list');
+        const crumbEl = document.getElementById('sf-entry-files-breadcrumb');
+        if (!list || !crumbEl) return;
+        // Breadcrumb always shows the entry name as the root crumb so the
+        // header reads "Files: Sabine" at root, "Files: Sabine › clsh"
+        // after navigating in. Entry name is clickable from any subfolder
+        // depth to bounce back to root.
+        const segs = _sfEntryFilesPath.split('/').filter(Boolean);
+        const rootLabel = _sfDetailOriginalName || 'Files';
+        const rootIsCurrent = segs.length === 0;
+        const crumbs = [`<span class="sf-entry-files-crumb${rootIsCurrent ? ' current' : ''}" data-crumb-path="">${_sfEscape(rootLabel)}</span>`];
+        let acc = '';
+        for (let i = 0; i < segs.length; i++) {
+          acc = acc ? `${acc}/${segs[i]}` : segs[i];
+          const isLast = i === segs.length - 1;
+          crumbs.push(`<span class="sf-entry-files-crumb-sep">›</span><span class="sf-entry-files-crumb${isLast ? ' current' : ''}" data-crumb-path="${_sfEscape(acc)}">${_sfEscape(segs[i])}</span>`);
+        }
+        crumbEl.innerHTML = crumbs.join('');
+        // List rows — directories first (server already sorted), then files.
+        const children = _sfChildrenAt(_sfEntryFilesTree, _sfEntryFilesPath);
+        if (children.length === 0) {
+          list.innerHTML = `<div class="sf-entry-files-empty">This folder is empty.</div>`;
+          return;
+        }
+        list.innerHTML = children.map(n => {
+          const isSel = !n.isDir && _sfEntryFilesSelected.has(n.path);
+          const klasses = ['sf-entry-files-row'];
+          if (n.isDir) klasses.push('is-dir');
+          if (isSel) klasses.push('selected');
+          const dataAttr = n.isDir
+            ? `data-dir-path="${_sfEscape(n.path)}"`
+            : `data-file-path="${_sfEscape(n.path)}"`;
+          // Files draggable for drop targets within the same modal.
+          // Folders aren't draggable (they're nav targets, not payload).
+          const dragAttr = n.isDir ? '' : 'draggable="true"';
+          return `<div class="${klasses.join(' ')}" ${dataAttr} ${dragAttr} title="${_sfEscape(n.name)}">
+            <span class="sf-entry-files-row-icon">${_sfEntryFileIcon(n)}</span>
+            <span class="sf-entry-files-row-name">${_sfEscape(n.name)}</span>
+          </div>`;
+        }).join('');
+      };
       const _sfOpenEntryDetail = async (entryName, opts = {}) => {
         const entry = _sfAllEntries.find(e => e.name === entryName);
         if (!entry || !_sfEntryDetailEls.modal) return;
@@ -13416,6 +13822,22 @@ require(['vs/editor/editor.main'], function () {
           const dr = await window.electronAPI.listEntryDocs({ name: entry.name });
           _sfRenderDocChips(docsContainer, docsRow, (dr && dr.ok && dr.docs) || []);
         } catch {}
+
+        // Files browser — full on-disk tree (every wav + every doc + every
+        // subfolder, exactly as it would land on the SD card). Stored as
+        // a tree; the renderer maintains a current path and re-renders the
+        // grid on navigation. Reset to root + clear in-modal selection on
+        // every open (the file CLIPBOARD doesn't reset — it persists for
+        // cross-modal paste).
+        _sfEntryFilesTree = [];
+        _sfEntryFilesPath = '';
+        _sfEntryFilesSelected = new Set();
+        _sfEntryFilesAnchor = null;
+        try {
+          const fr = await window.electronAPI.listEntryFiles({ name: entry.name });
+          _sfEntryFilesTree = (fr && fr.ok && fr.files) || [];
+        } catch { _sfEntryFilesTree = []; }
+        _sfRenderEntryFiles();
 
         // Creator datalist: distinct authors already in the library plus the
         // seeded vendor list. Soft normalization — the user can still type
@@ -13603,8 +14025,35 @@ require(['vs/editor/editor.main'], function () {
           modal.classList.add('active');
         });
       };
+      // Flush any pencil-edit field that's still open into the working
+      // edit state — clicking each visible confirm button triggers the
+      // existing per-field commit handler. The user shouldn't have to
+      // remember to click ✓ on every field before hitting Save.
+      // Returns false when any field's handler refused to commit (e.g.
+      // empty required name), signaling save to abort.
+      const _sfFlushEntryFieldEdits = () => {
+        const btns = [
+          _sfEntryDetailEls.nameConfirmBtn,
+          _sfEntryDetailEls.bylineConfirmBtn,
+          _sfEntryDetailEls.acquiredConfirmBtn,
+          _sfEntryDetailEls.descConfirmBtn,
+        ];
+        for (const b of btns) {
+          if (!b || b.style.display === 'none') continue;
+          b.click();
+          // A handler that rejected the input leaves the confirm button
+          // visible; that's our signal that the flush failed.
+          if (b.style.display !== 'none') return false;
+        }
+        if (_sfEntryDetailEls.linkEditRow && _sfEntryDetailEls.linkEditRow.style.display !== 'none') {
+          _sfEntryDetailEls.linkConfirmBtn?.click();
+          if (_sfEntryDetailEls.linkEditRow.style.display !== 'none') return false;
+        }
+        return true;
+      };
       const _sfSaveEntryDetail = async () => {
         if (!_sfDetailEdit || !_sfDetailOriginalName) return;
+        if (!_sfFlushEntryFieldEdits()) return;
         // Snapshot the entry's pre-save state so we can decide whether the
         // label changed in a way that affects display, and propagate to
         // matching entries if the user asks.
@@ -13693,10 +14142,20 @@ require(['vs/editor/editor.main'], function () {
         await window.refreshSoundFontsView();
       };
       _sfEntryDetailEls.closeX?.addEventListener('click', _sfTryCloseEntryDetail);
-      _sfEntryDetailEls.discardBtn?.addEventListener('click', _sfTryCloseEntryDetail);
+      // Bottom button is labeled "Discard" when dirty and "Close" when
+      // clean — both readings are an explicit dismissal of any pending
+      // edits, so skip the prompt either way. The X / backdrop / Esc
+      // paths still go through _sfTryCloseEntryDetail since their
+      // intent is ambiguous.
+      _sfEntryDetailEls.discardBtn?.addEventListener('click', _sfCloseEntryDetail);
       _sfEntryDetailEls.saveBtn?.addEventListener('click', _sfSaveEntryDetail);
+      // Backdrop click: silent block when dirty so an accidental click
+      // outside doesn't pop a discard prompt over half-written edits.
+      // X / Close / Esc still go through the explicit-prompt path.
       _sfEntryDetailEls.modal?.addEventListener('click', (e) => {
-        if (e.target === _sfEntryDetailEls.modal) _sfTryCloseEntryDetail();
+        if (e.target !== _sfEntryDetailEls.modal) return;
+        if (_sfDetailDirty) return;
+        _sfCloseEntryDetail();
       });
       // Pencil → input mode for each editable field.
       _sfEntryDetailEls.nameEditBtn?.addEventListener('click', () => {
@@ -13775,6 +14234,20 @@ require(['vs/editor/editor.main'], function () {
       _sfBindEnterEscape(_sfEntryDetailEls.bylineInput,   _sfEntryDetailEls.bylineConfirmBtn,  _sfEntryDetailEls.byline,           _sfEntryDetailEls.bylineEditBtn);
       _sfBindEnterEscape(_sfEntryDetailEls.acquiredInput, _sfEntryDetailEls.acquiredConfirmBtn,_sfEntryDetailEls.acquiredDisplay,  _sfEntryDetailEls.acquiredEditBtn);
       _sfBindEnterEscape(_sfEntryDetailEls.descInput,     _sfEntryDetailEls.descConfirmBtn,    _sfEntryDetailEls.descDisplay,      _sfEntryDetailEls.descEditBtn);
+      // Live dirty marking on every keystroke. Save was previously
+      // gated on a committed change, so typing in a pencil-edit field
+      // and clicking Save did nothing because the button was still
+      // disabled. Mirrors the Style Library convention.
+      for (const inp of [
+        _sfEntryDetailEls.nameInput,
+        _sfEntryDetailEls.bylineInput,
+        _sfEntryDetailEls.acquiredInput,
+        _sfEntryDetailEls.descInput,
+        _sfEntryDetailEls.linkInput,
+        _sfEntryDetailEls.linkLabelInput,
+      ]) {
+        inp?.addEventListener('input', _sfMarkDetailDirty);
+      }
 
       // ── Source detail view (Phase 3, slice 10) ─────────
       const _sfSourceDetailEls = {
@@ -14041,6 +14514,19 @@ require(['vs/editor/editor.main'], function () {
           _sfSourceDetailEls.creatorList.innerHTML = opts.map(n => `<option value="${_sfEscape(n)}"></option>`).join('');
         }
         await _sfRenderSourceEntries(uuid);
+        // Load + render the read-only file browser for this source. Same
+        // reset-on-open shape the entry browser uses; the unified
+        // _sfFileClipboard is intentionally NOT cleared so a prior Copy
+        // survives the modal open (cross-modal paste flow).
+        _sfSourceFilesTree = [];
+        _sfSourceFilesPath = '';
+        _sfSourceFilesSelected = new Set();
+        _sfSourceFilesAnchor = null;
+        try {
+          const sf = await window.electronAPI.listSourceFiles({ uuid });
+          _sfSourceFilesTree = (sf && sf.ok && sf.files) || [];
+        } catch { _sfSourceFilesTree = []; }
+        _sfRenderSourceFiles();
         // Atomic visibility swap — remove the caller-specified modal's active
         // class in the same tick we add ours, eliminating the gap that would
         // otherwise show the card grid through the dim backdrop.
@@ -14077,8 +14563,29 @@ require(['vs/editor/editor.main'], function () {
         }
         await _sfCloseSourceDetail();
       };
+      // Same auto-commit convention as the entry detail save: any open
+      // pencil-edit field is flushed before reading working state.
+      // Returns false when any handler rejected commit.
+      const _sfFlushSourceFieldEdits = () => {
+        const btns = [
+          _sfSourceDetailEls.nameConfirmBtn,
+          _sfSourceDetailEls.creatorConfirmBtn,
+          _sfSourceDetailEls.acquiredConfirmBtn,
+        ];
+        for (const b of btns) {
+          if (!b || b.style.display === 'none') continue;
+          b.click();
+          if (b.style.display !== 'none') return false;
+        }
+        if (_sfSourceDetailEls.linkEditRow && _sfSourceDetailEls.linkEditRow.style.display !== 'none') {
+          _sfSourceDetailEls.linkConfirmBtn?.click();
+          if (_sfSourceDetailEls.linkEditRow.style.display !== 'none') return false;
+        }
+        return true;
+      };
       const _sfSaveSourceDetail = async () => {
         if (!_sfSourceEdit || !_sfSourceOriginalUuid) return;
+        if (!_sfFlushSourceFieldEdits()) return;
         const updates = {
           bundleName: _sfSourceEdit.bundleName,
           vendor: _sfSourceEdit.vendor,
@@ -14174,10 +14681,17 @@ require(['vs/editor/editor.main'], function () {
         await _sfCloseSourceDetail();
       };
       _sfSourceDetailEls.closeX?.addEventListener('click', _sfTryCloseSourceDetail);
-      _sfSourceDetailEls.discardBtn?.addEventListener('click', _sfTryCloseSourceDetail);
+      // Bottom button reads "Discard" when dirty / "Close" when clean —
+      // either click is an explicit dismissal, so skip the prompt.
+      // Same convention as the entry detail modal.
+      _sfSourceDetailEls.discardBtn?.addEventListener('click', _sfCloseSourceDetail);
       _sfSourceDetailEls.saveBtn?.addEventListener('click', _sfSaveSourceDetail);
+      // Backdrop click: silent block when dirty — same convention as
+      // the entry detail and reorganize modals.
       _sfSourceDetailEls.modal?.addEventListener('click', (e) => {
-        if (e.target === _sfSourceDetailEls.modal) _sfTryCloseSourceDetail();
+        if (e.target !== _sfSourceDetailEls.modal) return;
+        if (_sfSourceDirty) return;
+        _sfCloseSourceDetail();
       });
       // Pencil/confirm for source fields.
       _sfSourceDetailEls.nameEditBtn?.addEventListener('click', () => {
@@ -14226,6 +14740,16 @@ require(['vs/editor/editor.main'], function () {
       _sfBindEnterEscape(_sfSourceDetailEls.nameInput,     _sfSourceDetailEls.nameConfirmBtn,    _sfSourceDetailEls.name,             _sfSourceDetailEls.nameEditBtn);
       _sfBindEnterEscape(_sfSourceDetailEls.creatorInput,  _sfSourceDetailEls.creatorConfirmBtn, _sfSourceDetailEls.creator,          _sfSourceDetailEls.creatorEditBtn);
       _sfBindEnterEscape(_sfSourceDetailEls.acquiredInput, _sfSourceDetailEls.acquiredConfirmBtn,_sfSourceDetailEls.acquiredDisplay,  _sfSourceDetailEls.acquiredEditBtn);
+      // Live dirty marking, same reason as the entry modal: pencil-
+      // edit fields had a "click confirm before Save works" footgun.
+      for (const inp of [
+        _sfSourceDetailEls.nameInput,
+        _sfSourceDetailEls.creatorInput,
+        _sfSourceDetailEls.acquiredInput,
+        _sfSourceDetailEls.linkInput,
+      ]) {
+        inp?.addEventListener('input', _sfMarkSourceDirty);
+      }
       // Link button: open edit row.
       _sfSourceDetailEls.linkBtn?.addEventListener('click', () => {
         if (!_sfSourceEdit) return;
@@ -14599,6 +15123,1081 @@ require(['vs/editor/editor.main'], function () {
         await window.refreshSoundFontsView();
       });
 
+      // Shift-range helper for entry file selection. Enumerates visible
+      // file rows in document order, then selects everything between the
+      // anchor and target inclusive. Stale anchor collapses to single.
+      const _sfShiftSelectEntryFilesTo = (targetPath) => {
+        const all = [...document.querySelectorAll('#sf-entry-files-list [data-file-path]')];
+        const allPaths = all.map(el => el.getAttribute('data-file-path'));
+        const toIdx = allPaths.indexOf(targetPath);
+        if (toIdx < 0) return;
+        let fromIdx = _sfEntryFilesAnchor ? allPaths.indexOf(_sfEntryFilesAnchor) : -1;
+        if (fromIdx < 0) fromIdx = toIdx;
+        const [lo, hi] = fromIdx <= toIdx ? [fromIdx, toIdx] : [toIdx, fromIdx];
+        for (let i = lo; i <= hi; i++) _sfEntryFilesSelected.add(allPaths[i]);
+      };
+      // Files-browser delegated clicks. Three row types matter:
+      //   file row  — multi-select with plain / Ctrl / Shift modifiers
+      //   dir row   — drill in (clears file selection — different context)
+      //   breadcrumb in the h3 — jump to ancestor path (separate listener)
+      //
+      // Attached to document with target-filter rather than the browser
+      // element directly — that pattern is robust to any timing or DOM
+      // replacement issues with the modal markup.
+      document.addEventListener('click', (e) => {
+        if (!e.target.closest('#sf-entry-files-browser')) return;
+        const fileRow = e.target.closest('[data-file-path]');
+        if (fileRow) {
+          const p = fileRow.getAttribute('data-file-path');
+          if (!p) return;
+          if (e.shiftKey && _sfEntryFilesAnchor) {
+            _sfShiftSelectEntryFilesTo(p);
+          } else if (e.ctrlKey || e.metaKey) {
+            if (_sfEntryFilesSelected.has(p)) _sfEntryFilesSelected.delete(p);
+            else _sfEntryFilesSelected.add(p);
+            _sfEntryFilesAnchor = p;
+          } else {
+            _sfEntryFilesSelected.clear();
+            _sfEntryFilesSelected.add(p);
+            _sfEntryFilesAnchor = p;
+          }
+          _sfRenderEntryFiles();
+          return;
+        }
+        const dir = e.target.closest('[data-dir-path]');
+        if (!dir) return;
+        _sfEntryFilesPath = dir.getAttribute('data-dir-path') || '';
+        _sfEntryFilesSelected.clear();
+        _sfEntryFilesAnchor = null;
+        _sfRenderEntryFiles();
+      });
+      document.getElementById('sf-entry-files-breadcrumb')?.addEventListener('click', (e) => {
+        const crumb = e.target.closest('[data-crumb-path]');
+        if (!crumb) return;
+        _sfEntryFilesPath = crumb.getAttribute('data-crumb-path') || '';
+        _sfEntryFilesSelected.clear();
+        _sfEntryFilesAnchor = null;
+        _sfRenderEntryFiles();
+      });
+      // Copy the current entry-files selection to the unified clipboard
+      // so the user can paste it elsewhere (another entry, a common
+      // folder). No-op if nothing selected.
+      const _sfCopyEntryFilesSelection = () => {
+        if (!_sfDetailOriginalName || _sfEntryFilesSelected.size === 0) return;
+        _sfFileClipboard = {
+          kind: 'entry',
+          id: _sfDetailOriginalName,
+          paths: Array.from(_sfEntryFilesSelected),
+        };
+      };
+      // Paste the clipboard's files into the current entry at the current
+      // breadcrumb path. Source can be any kind (entry or common).
+      const _sfPasteIntoEntry = async () => {
+        if (!_sfDetailOriginalName) return;
+        if (!_sfFileClipboard || _sfFileClipboard.paths.length === 0) return;
+        const n = _sfFileClipboard.paths.length;
+        _sfDeleteProgress.show('Pasting files', `${n} file${n === 1 ? '' : 's'}`);
+        let res;
+        try {
+          res = await window.electronAPI.fileOpsCopy({
+            src: { kind: _sfFileClipboard.kind, id: _sfFileClipboard.id },
+            srcPaths: _sfFileClipboard.paths,
+            dest: { kind: 'entry', id: _sfDetailOriginalName, subPath: _sfEntryFilesPath },
+          });
+        } catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
+        await _sfDeleteProgress.hide();
+        if (!res || !res.ok) { alert(`Paste failed: ${(res && res.error) || 'unknown'}`); return; }
+        if (res.failed?.length) {
+          alert(`Some files failed to paste:\n${res.failed.map(f => ` • ${f.source}: ${f.error}`).join('\n')}`);
+        }
+        // Reload tree + highlight the newly-pasted files so the user
+        // sees what landed (mirrors the common-folder paste UX).
+        try {
+          const fr = await window.electronAPI.listEntryFiles({ name: _sfDetailOriginalName });
+          _sfEntryFilesTree = (fr && fr.ok && fr.files) || [];
+        } catch {}
+        _sfEntryFilesSelected = new Set(res.added || []);
+        _sfEntryFilesAnchor = (res.added && res.added[0]) || null;
+        _sfRenderEntryFiles();
+      };
+      // Delete the current selection from the entry's on-disk tree. Files
+      // only — directories aren't part of the multi-select.
+      const _sfDeleteEntryFilesPrompt = async () => {
+        if (!_sfDetailOriginalName || _sfEntryFilesSelected.size === 0) return;
+        const paths = [..._sfEntryFilesSelected];
+        const names = paths.map(p => p.split('/').pop());
+        const preview = names.slice(0, 6).join(', ') + (names.length > 6 ? `, +${names.length - 6} more` : '');
+        const ok = await promptConfirm({
+          title: `Delete ${paths.length} file${paths.length === 1 ? '' : 's'}`,
+          message: `Delete ${paths.length} file${paths.length === 1 ? '' : 's'} from this entry?\n${preview}`,
+          confirmText: 'Delete',
+          confirmKind: 'danger',
+        });
+        if (!ok) return;
+        _sfDeleteProgress.show('Deleting files', `${paths.length}`);
+        let res;
+        try {
+          res = await window.electronAPI.fileOpsDelete({ kind: 'entry', id: _sfDetailOriginalName, subPaths: paths });
+        } catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
+        await _sfDeleteProgress.hide();
+        if (!res || !res.ok) { alert(`Delete failed: ${(res && res.error) || 'unknown'}`); return; }
+        if (res.failed?.length) {
+          alert(`Some files could not be deleted:\n${res.failed.map(f => ` • ${f.source}: ${f.error}`).join('\n')}`);
+        }
+        try {
+          const fr = await window.electronAPI.listEntryFiles({ name: _sfDetailOriginalName });
+          _sfEntryFilesTree = (fr && fr.ok && fr.files) || [];
+        } catch {}
+        _sfEntryFilesSelected = new Set();
+        _sfEntryFilesAnchor = null;
+        _sfRenderEntryFiles();
+      };
+      // Delete a folder (and its contents) from the entry. UI confirm
+      // happens here; backend recursively removes.
+      const _sfDeleteEntryFolderPrompt = async (subPath) => {
+        if (!_sfDetailOriginalName || !subPath) return;
+        const name = subPath.split('/').pop();
+        const ok = await promptConfirm({
+          title: `Delete folder "${name}"`,
+          message: `Delete this folder and everything inside it from the entry?\nThis cannot be undone.`,
+          confirmText: 'Delete',
+          confirmKind: 'danger',
+        });
+        if (!ok) return;
+        const res = await window.electronAPI.fileOpsDelete({
+          kind: 'entry', id: _sfDetailOriginalName, subPaths: [subPath],
+        });
+        if (!res || !res.ok) { alert(`Delete failed: ${(res && res.error) || 'unknown'}`); return; }
+        try {
+          const fr = await window.electronAPI.listEntryFiles({ name: _sfDetailOriginalName });
+          _sfEntryFilesTree = (fr && fr.ok && fr.files) || [];
+        } catch {}
+        // If we were navigated INTO the deleted folder (or a child), pop
+        // back up to the deleted folder's parent so the breadcrumb stays
+        // valid.
+        if (_sfEntryFilesPath === subPath || _sfEntryFilesPath.startsWith(subPath + '/')) {
+          const parts = subPath.split('/');
+          parts.pop();
+          _sfEntryFilesPath = parts.join('/');
+        }
+        _sfEntryFilesSelected.clear();
+        _sfEntryFilesAnchor = null;
+        _sfRenderEntryFiles();
+      };
+      // Rename a folder in the entry. Backend treats files and dirs
+      // uniformly through fileOps:rename; the UX wording is the only
+      // thing that changes.
+      const _sfRenameEntryFolderPrompt = async (subPath) => {
+        if (!_sfDetailOriginalName || !subPath) return;
+        const current = subPath.split('/').pop();
+        const name = await _sfPromptText({
+          title: 'Rename folder',
+          message: 'New name for this folder:',
+          defaultValue: current,
+          okText: 'Rename',
+        });
+        if (!name || name === current) return;
+        const res = await window.electronAPI.fileOpsRename({
+          kind: 'entry', id: _sfDetailOriginalName, subPath, newName: name,
+        });
+        if (!res || !res.ok) { alert(`Rename failed: ${(res && res.error) || 'unknown'}`); return; }
+        try {
+          const fr = await window.electronAPI.listEntryFiles({ name: _sfDetailOriginalName });
+          _sfEntryFilesTree = (fr && fr.ok && fr.files) || [];
+        } catch {}
+        _sfRenderEntryFiles();
+      };
+      // Rename a single file in the entry. Re-uses _sfPromptText (the
+      // same in-app text prompt the common-folder rename flow uses).
+      const _sfRenameEntryFilePrompt = async (subPath) => {
+        if (!_sfDetailOriginalName || !subPath) return;
+        const current = subPath.split('/').pop();
+        const dot = current.lastIndexOf('.');
+        const stem = dot > 0 ? current.slice(0, dot) : current;
+        const ext = dot > 0 ? current.slice(dot) : '';
+        const typed = await _sfPromptText({
+          title: 'Rename file',
+          message: 'New name for this file:',
+          defaultValue: stem,
+          okText: 'Rename',
+          validate: (v) => _sfValidateFileStem(v, ext),
+        });
+        if (!typed) return;
+        const name = typed.trim() + ext;
+        if (name === current) return;
+        const res = await window.electronAPI.fileOpsRename({
+          kind: 'entry', id: _sfDetailOriginalName, subPath, newName: name,
+        });
+        if (!res || !res.ok) { alert(`Rename failed: ${(res && res.error) || 'unknown'}`); return; }
+        try {
+          const fr = await window.electronAPI.listEntryFiles({ name: _sfDetailOriginalName });
+          _sfEntryFilesTree = (fr && fr.ok && fr.files) || [];
+        } catch {}
+        _sfEntryFilesSelected = new Set([res.path]);
+        _sfEntryFilesAnchor = res.path;
+        _sfRenderEntryFiles();
+      };
+      // Create a new subfolder in the entry at the current breadcrumb
+      // path. Mirrors the common-folder "+ Folder" affordance.
+      const _sfCreateEntrySubfolderPrompt = async () => {
+        if (!_sfDetailOriginalName) return;
+        const parentSubPath = _sfEntryFilesPath;
+        const name = await _sfPromptText({
+          title: 'New folder',
+          message: parentSubPath
+            ? `Name for the new subfolder inside "${parentSubPath}":`
+            : 'Name for the new subfolder:',
+          defaultValue: '',
+          okText: 'Create',
+        });
+        if (!name) return;
+        const res = await window.electronAPI.fileOpsCreateSubfolder({
+          kind: 'entry', id: _sfDetailOriginalName, parentSubPath, name,
+        });
+        if (!res || !res.ok) { alert(`Create folder failed: ${(res && res.error) || 'unknown'}`); return; }
+        try {
+          const fr = await window.electronAPI.listEntryFiles({ name: _sfDetailOriginalName });
+          _sfEntryFilesTree = (fr && fr.ok && fr.files) || [];
+        } catch {}
+        _sfRenderEntryFiles();
+      };
+      // + Add: pick audio files from disk and copy them into the entry at
+      // the current breadcrumb path. Collisions go through the Proffie
+      // variant naming so e.g. boot01.wav landing in a dir of boot01/02
+      // becomes boot03, not boot01 (1).
+      const _sfAddEntryFiles = async () => {
+        if (!_sfDetailOriginalName) return;
+        let pick;
+        try { pick = await window.electronAPI.selectAudioFiles({ title: 'Add files to entry' }); }
+        catch (err) { alert(`Could not open picker: ${err && err.message || err}`); return; }
+        if (!pick || !pick.ok || !pick.filePaths?.length) return;
+        _sfDeleteProgress.show('Adding files', `${pick.filePaths.length} file${pick.filePaths.length === 1 ? '' : 's'}`);
+        const res = await window.electronAPI.fileOpsAddFiles({
+          kind: 'entry', id: _sfDetailOriginalName,
+          subPath: _sfEntryFilesPath, sourceFilePaths: pick.filePaths,
+        });
+        await _sfDeleteProgress.hide();
+        if (!res || !res.ok) { alert(`Add failed: ${(res && res.error) || 'unknown'}`); return; }
+        if (res.failed?.length) {
+          alert(`Some files failed to add:\n${res.failed.map(f => ` • ${f.source}: ${f.error}`).join('\n')}`);
+        }
+        try {
+          const fr = await window.electronAPI.listEntryFiles({ name: _sfDetailOriginalName });
+          _sfEntryFilesTree = (fr && fr.ok && fr.files) || [];
+        } catch {}
+        _sfEntryFilesSelected = new Set(res.added || []);
+        _sfEntryFilesAnchor = (res.added && res.added[0]) || null;
+        _sfRenderEntryFiles();
+      };
+      document.getElementById('btn-sf-entry-add-folder')?.addEventListener('click', _sfCreateEntrySubfolderPrompt);
+      document.getElementById('btn-sf-entry-add-files')?.addEventListener('click', _sfAddEntryFiles);
+
+      // ── Reorganize modal ──────────────────────────────────────────────
+      // Three tools: Restructure (flat ↔ grouped), Reorder (drag/arrow/
+      // keyboard renumbering within a bucket), Find & replace (folder-
+      // scoped, wildcard-aware). Opens against the currently-open entry;
+      // closes refresh the file browser so any landed changes show up.
+      let _sfReorgBuckets = [];
+      let _sfReorgLayout = { canGroup: false, canFlatten: false };
+      let _sfReorgActiveBucket = null;       // currently-selected bucket id
+      let _sfReorgStaged = null;             // ordered file paths during reorder
+      let _sfReorgStagedOriginal = null;     // snapshot for cancel
+      let _sfReorgSelectedRow = null;        // for keyboard reorder
+      let _sfReorgDragFrom = null;
+      let _sfReorgFrTimer = null;
+      const _sfOpenReorganize = async () => {
+        if (!_sfDetailOriginalName) return;
+        const modal = document.getElementById('modal-sf-reorganize');
+        if (!modal) return;
+        document.getElementById('sf-reorg-entry-name').textContent = _sfDetailOriginalName;
+        // Reset reorder + find/replace state on every open.
+        _sfReorgActiveBucket = null;
+        _sfReorgStaged = null;
+        _sfReorgStagedOriginal = null;
+        _sfReorgSelectedRow = null;
+        document.getElementById('sf-reorg-reorder-panel').style.display = 'none';
+        document.getElementById('sf-reorg-fr-find').value = '';
+        document.getElementById('sf-reorg-fr-replace').value = '';
+        document.getElementById('sf-reorg-fr-preview').innerHTML = '';
+        document.getElementById('btn-sf-reorg-fr-apply').disabled = true;
+        await _sfReorgRefresh();
+        modal.classList.add('active');
+      };
+      // Dirty = user staged a reorder (drag/arrow/keyboard moved at
+      // least one row) but didn't Save. Gap-closure alone isn't dirty —
+      // the user didn't ask for anything, they just looked.
+      const _sfReorgIsDirty = () => {
+        if (!_sfReorgActiveBucket || !_sfReorgStaged || !_sfReorgStagedOriginal) return false;
+        if (_sfReorgStaged.length !== _sfReorgStagedOriginal.length) return true;
+        for (let i = 0; i < _sfReorgStaged.length; i++) {
+          if (_sfReorgStaged[i] !== _sfReorgStagedOriginal[i]) return true;
+        }
+        return false;
+      };
+      const _sfCloseReorganize = async () => {
+        const modal = document.getElementById('modal-sf-reorganize');
+        if (!modal) return;
+        if (_sfReorgIsDirty()) {
+          if (!await _promptDiscard('You have a staged reorder. Discard it?')) return;
+        }
+        modal.classList.remove('active');
+        _sfReorgActiveBucket = null;
+        _sfReorgStaged = null;
+        _sfReorgStagedOriginal = null;
+        _sfReorgSelectedRow = null;
+      };
+      // Re-detect layout + buckets and re-render every card. Called on
+      // open and after any commit so the state always reflects disk.
+      const _sfReorgRefresh = async () => {
+        let res;
+        try { res = await window.electronAPI.reorganizeDetect({ name: _sfDetailOriginalName }); }
+        catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
+        if (!res || !res.ok) {
+          alert(`Reorganize unavailable: ${(res && res.error) || 'unknown'}`);
+          return;
+        }
+        _sfReorgBuckets = res.buckets || [];
+        _sfReorgLayout = { canGroup: !!res.canGroup, canFlatten: !!res.canFlatten };
+        _sfRenderReorgRestructure();
+        _sfRenderReorgBuckets();
+      };
+      // Restructure card — describes current state and enables only the
+      // direction(s) that actually apply. "Flat" when no subfolders;
+      // "Grouped" when every multi-file bucket lives in a subfolder.
+      const _sfRenderReorgRestructure = () => {
+        const preview = document.getElementById('sf-reorg-restructure-preview');
+        const flattenBtn = document.getElementById('btn-sf-reorg-flatten');
+        const groupBtn   = document.getElementById('btn-sf-reorg-group');
+        const subCount  = _sfReorgBuckets.filter(b => b.location === 'subfolder').length;
+        const rootMulti = _sfReorgBuckets.filter(b => b.location === 'root' && b.files.length >= 2).length;
+        const rootSingle = _sfReorgBuckets.filter(b => b.location === 'root' && b.files.length === 1).length;
+        let label = '';
+        if (subCount === 0 && rootMulti > 0) label = 'Currently <span class="sf-reorg-layout-label">flat</span> — all files at the root.';
+        else if (rootMulti === 0 && subCount > 0) label = 'Currently <span class="sf-reorg-layout-label">grouped</span> — multi-file sound types in subfolders.';
+        else if (subCount > 0 && rootMulti > 0) label = 'Currently <span class="sf-reorg-layout-label">mixed</span> — some types in subfolders, some at root.';
+        else label = 'Nothing to restructure yet.';
+        if (rootSingle > 0) label += ` <span style="color:var(--c-text-muted)">(${rootSingle} single-file type${rootSingle === 1 ? '' : 's'} will stay at root.)</span>`;
+        preview.innerHTML = label;
+        flattenBtn.disabled = !_sfReorgLayout.canFlatten;
+        groupBtn.disabled   = !_sfReorgLayout.canGroup;
+      };
+      document.getElementById('btn-sf-reorg-group')?.addEventListener('click', async () => {
+        const ok = await promptConfirm({
+          title: 'Group into subfolders',
+          message: 'Move every multi-file sound type into its own subfolder. Single files stay at the root.',
+          confirmText: 'Group',
+        });
+        if (!ok) return;
+        let res;
+        try { res = await window.electronAPI.reorganizeGroup({ name: _sfDetailOriginalName }); }
+        catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
+        if (!res || !res.ok) { alert(`Group failed: ${(res && res.error) || 'unknown'}`); return; }
+        await _sfReorgRefresh();
+        await _sfReorgRefreshOuterBrowser();
+      });
+      document.getElementById('btn-sf-reorg-flatten')?.addEventListener('click', async () => {
+        const ok = await promptConfirm({
+          title: 'Flatten into folder',
+          message: 'Move all files out of their subfolders to the entry root. File names get the type prefix when needed.',
+          confirmText: 'Flatten',
+        });
+        if (!ok) return;
+        let res;
+        try { res = await window.electronAPI.reorganizeFlatten({ name: _sfDetailOriginalName }); }
+        catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
+        if (!res || !res.ok) { alert(`Flatten failed: ${(res && res.error) || 'unknown'}`); return; }
+        await _sfReorgRefresh();
+        await _sfReorgRefreshOuterBrowser();
+      });
+      // Push reorganize-side changes back into the entry file browser so
+      // closing the modal doesn't show stale rows.
+      const _sfReorgRefreshOuterBrowser = async () => {
+        try {
+          const fr = await window.electronAPI.listEntryFiles({ name: _sfDetailOriginalName });
+          _sfEntryFilesTree = (fr && fr.ok && fr.files) || [];
+        } catch {}
+        _sfEntryFilesSelected = new Set();
+        _sfEntryFilesAnchor = null;
+        // Don't reset the breadcrumb path — user expects to land back
+        // where they were unless we know the folder is gone.
+        _sfRenderEntryFiles();
+      };
+      // Reorder card — chip row for each detected bucket. Click a chip
+      // to load the reorder panel with that bucket's files. Buckets
+      // with hasMisnamed or isConflict get a warn-styled chip + tooltip.
+      const _sfRenderReorgBuckets = () => {
+        const wrap = document.getElementById('sf-reorg-bucket-chips');
+        if (!wrap) return;
+        if (_sfReorgBuckets.length === 0) {
+          wrap.innerHTML = `<div class="sf-reorg-bucket-empty">No sound types detected.</div>`;
+          return;
+        }
+        wrap.innerHTML = _sfReorgBuckets.map(b => {
+          const active = _sfReorgActiveBucket === b.id ? ' active' : '';
+          const warn = (b.hasMisnamed || b.isConflict) ? ' warn' : '';
+          const tip = [];
+          if (b.hasMisnamed) tip.push(`Contains a file whose name doesn't match the folder — ProffieOS will skip it.`);
+          if (b.isConflict) tip.push(`Both a root-level file and a subfolder for "${b.effect}" exist. Resolve manually.`);
+          const title = tip.length ? ` title="${_sfEscape(tip.join(' '))}"` : '';
+          return `<button class="sf-reorg-bucket-chip${active}${warn}" data-bucket-id="${_sfEscape(b.id)}"${title}>${_sfEscape(b.label)} <span class="sf-reorg-bucket-count">${b.files.length}</span></button>`;
+        }).join('');
+      };
+      document.getElementById('sf-reorg-bucket-chips')?.addEventListener('click', async (e) => {
+        const chip = e.target.closest('[data-bucket-id]');
+        if (!chip) return;
+        const id = chip.getAttribute('data-bucket-id');
+        if (id === _sfReorgActiveBucket) return;
+        // Switching buckets with a staged reorder would silently drop
+        // the user's work. Prompt to discard before loading the new
+        // bucket; bail out of the chip click if they cancel.
+        if (_sfReorgIsDirty()) {
+          if (!await _promptDiscard('You have a staged reorder. Discard it and switch?')) return;
+        }
+        const bucket = _sfReorgBuckets.find(b => b.id === id);
+        if (!bucket) return;
+        _sfReorgActiveBucket = id;
+        _sfReorgStaged = bucket.files.map(f => f.path);
+        _sfReorgStagedOriginal = _sfReorgStaged.slice();
+        _sfReorgSelectedRow = null;
+        document.getElementById('sf-reorg-reorder-title').textContent = `${bucket.label} — ${bucket.files.length} file${bucket.files.length === 1 ? '' : 's'}`;
+        document.getElementById('sf-reorg-reorder-panel').style.display = '';
+        _sfRenderReorgBuckets();
+        _sfRenderReorgReorderList();
+      });
+      const _sfRenderReorgReorderList = () => {
+        const list = document.getElementById('sf-reorg-reorder-list');
+        const bucket = _sfReorgBuckets.find(b => b.id === _sfReorgActiveBucket);
+        if (!list || !bucket) return;
+        let pos = 0;
+        let renumberWork = false; // true when Save would actually change names
+        list.innerHTML = _sfReorgStaged.map((p, idx) => {
+          const f = bucket.files.find(x => x.path === p);
+          if (!f) return '';
+          const classes = ['sf-reorg-reorder-row'];
+          if (f.isMisnamed) classes.push('misnamed');
+          if (_sfReorgSelectedRow === p) classes.push('selected');
+          const isFirst = idx === 0;
+          const isLast = idx === _sfReorgStaged.length - 1;
+          let posLabel = '';
+          if (!f.isMisnamed) {
+            pos++;
+            // "Changed" means the file's CURRENT number doesn't match
+            // the position Save would assign it. Catches both reorder
+            // moves and gap-closure (e.g. blst15 sitting at position 10).
+            const isChanged = f.num !== pos;
+            if (isChanged) renumberWork = true;
+            posLabel = `<span class="sf-reorg-reorder-pos${isChanged ? ' changed' : ''}">${pos}</span>`;
+          } else {
+            posLabel = `<span class="sf-reorg-reorder-pos" title="Won't play — name doesn't match folder">⚠</span>`;
+          }
+          return `<div class="${classes.join(' ')}" draggable="true" data-row-path="${_sfEscape(p)}">
+            ${posLabel}
+            <span class="sf-reorg-reorder-name">${_sfEscape(f.name)}</span>
+            <span class="sf-reorg-reorder-arrows">
+              <button data-move="up" ${isFirst ? 'disabled' : ''} title="Move up">▲</button>
+              <button data-move="down" ${isLast ? 'disabled' : ''} title="Move down">▼</button>
+            </span>
+          </div>`;
+        }).join('');
+        // Save fires whenever any name would change — either because the
+        // user reordered, OR because the bucket has gaps Save can close.
+        document.getElementById('btn-sf-reorg-reorder-save').disabled = !renumberWork;
+      };
+      const _sfReorgMove = (path, delta) => {
+        const idx = _sfReorgStaged.indexOf(path);
+        if (idx < 0) return;
+        const target = idx + delta;
+        if (target < 0 || target >= _sfReorgStaged.length) return;
+        const arr = _sfReorgStaged.slice();
+        const [item] = arr.splice(idx, 1);
+        arr.splice(target, 0, item);
+        _sfReorgStaged = arr;
+        _sfReorgSelectedRow = path;
+        _sfRenderReorgReorderList();
+      };
+      document.getElementById('sf-reorg-reorder-list')?.addEventListener('click', (e) => {
+        const btn = e.target.closest('button[data-move]');
+        if (btn) {
+          const row = btn.closest('[data-row-path]');
+          if (!row) return;
+          _sfReorgMove(row.getAttribute('data-row-path'), btn.getAttribute('data-move') === 'up' ? -1 : 1);
+          return;
+        }
+        const row = e.target.closest('[data-row-path]');
+        if (row) {
+          _sfReorgSelectedRow = row.getAttribute('data-row-path');
+          _sfRenderReorgReorderList();
+          document.getElementById('sf-reorg-reorder-list').focus();
+        }
+      });
+      // Keyboard reorder — ↑/↓ moves selected row; Home/End jumps to
+      // first/last numbered slot. Anchors the focus to the list so the
+      // user can tab in and use it without a mouse.
+      document.getElementById('sf-reorg-reorder-list')?.addEventListener('keydown', (e) => {
+        if (!_sfReorgSelectedRow) return;
+        if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown' && e.key !== 'Home' && e.key !== 'End') return;
+        e.preventDefault();
+        const idx = _sfReorgStaged.indexOf(_sfReorgSelectedRow);
+        if (idx < 0) return;
+        if (e.key === 'ArrowUp')   _sfReorgMove(_sfReorgSelectedRow, -1);
+        if (e.key === 'ArrowDown') _sfReorgMove(_sfReorgSelectedRow, 1);
+        if (e.key === 'Home')      _sfReorgMove(_sfReorgSelectedRow, -idx);
+        if (e.key === 'End')       _sfReorgMove(_sfReorgSelectedRow, _sfReorgStaged.length - 1 - idx);
+      });
+      // Drag-and-drop reorder inside the list.
+      document.getElementById('sf-reorg-reorder-list')?.addEventListener('dragstart', (e) => {
+        const row = e.target.closest('[data-row-path]');
+        if (!row) { e.preventDefault(); return; }
+        _sfReorgDragFrom = row.getAttribute('data-row-path');
+        row.classList.add('dragging');
+        try { e.dataTransfer.effectAllowed = 'move'; } catch {}
+      });
+      document.getElementById('sf-reorg-reorder-list')?.addEventListener('dragover', (e) => {
+        if (!_sfReorgDragFrom) return;
+        const row = e.target.closest('[data-row-path]');
+        if (!row) return;
+        e.preventDefault();
+        const rect = row.getBoundingClientRect();
+        const before = (e.clientY - rect.top) < rect.height / 2;
+        document.querySelectorAll('.sf-reorg-reorder-row.drop-before,.sf-reorg-reorder-row.drop-after')
+          .forEach(el => el.classList.remove('drop-before', 'drop-after'));
+        row.classList.add(before ? 'drop-before' : 'drop-after');
+      });
+      document.getElementById('sf-reorg-reorder-list')?.addEventListener('drop', (e) => {
+        if (!_sfReorgDragFrom) return;
+        const row = e.target.closest('[data-row-path]');
+        if (!row) return;
+        e.preventDefault();
+        const target = row.getAttribute('data-row-path');
+        if (target === _sfReorgDragFrom) { _sfReorgDragFrom = null; return; }
+        const rect = row.getBoundingClientRect();
+        const before = (e.clientY - rect.top) < rect.height / 2;
+        const arr = _sfReorgStaged.slice();
+        const fromIdx = arr.indexOf(_sfReorgDragFrom);
+        if (fromIdx < 0) { _sfReorgDragFrom = null; return; }
+        const [item] = arr.splice(fromIdx, 1);
+        let toIdx = arr.indexOf(target);
+        if (!before) toIdx++;
+        arr.splice(toIdx, 0, item);
+        _sfReorgStaged = arr;
+        _sfReorgSelectedRow = item;
+        _sfReorgDragFrom = null;
+        _sfRenderReorgReorderList();
+      });
+      document.getElementById('sf-reorg-reorder-list')?.addEventListener('dragend', () => {
+        document.querySelectorAll('.sf-reorg-reorder-row.dragging,.sf-reorg-reorder-row.drop-before,.sf-reorg-reorder-row.drop-after')
+          .forEach(el => el.classList.remove('dragging', 'drop-before', 'drop-after'));
+        _sfReorgDragFrom = null;
+      });
+      document.getElementById('btn-sf-reorg-reorder-cancel')?.addEventListener('click', () => {
+        _sfReorgActiveBucket = null;
+        _sfReorgStaged = null;
+        _sfReorgStagedOriginal = null;
+        _sfReorgSelectedRow = null;
+        document.getElementById('sf-reorg-reorder-panel').style.display = 'none';
+        _sfRenderReorgBuckets();
+      });
+      document.getElementById('btn-sf-reorg-reorder-save')?.addEventListener('click', async () => {
+        if (!_sfReorgActiveBucket || !_sfReorgStaged) return;
+        let res;
+        try {
+          res = await window.electronAPI.reorganizeReorder({
+            name: _sfDetailOriginalName,
+            bucketId: _sfReorgActiveBucket,
+            orderedPaths: _sfReorgStaged,
+          });
+        } catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
+        if (!res || !res.ok) { alert(`Reorder failed: ${(res && res.error) || 'unknown'}`); return; }
+        // Close the reorder panel and re-detect so the chip + counts
+        // reflect the new file names.
+        _sfReorgActiveBucket = null;
+        _sfReorgStaged = null;
+        _sfReorgStagedOriginal = null;
+        _sfReorgSelectedRow = null;
+        document.getElementById('sf-reorg-reorder-panel').style.display = 'none';
+        await _sfReorgRefresh();
+        await _sfReorgRefreshOuterBrowser();
+      });
+      // Find & replace — entry-wide, debounced live preview. The
+      // preview lists every proposed rename with its containing
+      // subfolder so the user can see exactly what would move.
+      const _sfReorgFrPreview = async () => {
+        const find = document.getElementById('sf-reorg-fr-find').value;
+        const replace = document.getElementById('sf-reorg-fr-replace').value;
+        const previewEl = document.getElementById('sf-reorg-fr-preview');
+        const applyBtn = document.getElementById('btn-sf-reorg-fr-apply');
+        if (!find) {
+          previewEl.innerHTML = `<div class="sf-reorg-fr-preview-empty">Enter find text to see the preview.</div>`;
+          applyBtn.disabled = true;
+          return;
+        }
+        let res;
+        try {
+          res = await window.electronAPI.reorganizeFindReplace({
+            name: _sfDetailOriginalName,
+            find, replace,
+            commit: false,
+          });
+        } catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
+        if (!res || !res.ok) {
+          previewEl.innerHTML = `<div class="sf-reorg-fr-preview-empty">${_sfEscape((res && res.error) || 'No preview available.')}</div>`;
+          applyBtn.disabled = true;
+          return;
+        }
+        const items = res.preview || [];
+        const valid = items.filter(p => !p.error);
+        if (items.length === 0) {
+          previewEl.innerHTML = `<div class="sf-reorg-fr-preview-empty">No matches in this font.</div>`;
+          applyBtn.disabled = true;
+          return;
+        }
+        previewEl.innerHTML = items.map(p => {
+          const dir = p.relFrom.includes('/') ? p.relFrom.slice(0, p.relFrom.lastIndexOf('/')) : '';
+          return `<div class="sf-reorg-fr-preview-row${p.error ? ' error' : ''}">
+            ${dir ? `<span class="sf-reorg-fr-preview-dir">${_sfEscape(dir)}/</span>` : ''}
+            <span class="sf-reorg-fr-preview-from">${_sfEscape(p.from)}</span>
+            <span class="sf-reorg-fr-preview-arrow">→</span>
+            <span class="sf-reorg-fr-preview-to">${_sfEscape(p.to)}</span>
+            ${p.error ? `<span class="sf-reorg-fr-preview-arrow" title="${_sfEscape(p.error)}">⚠</span>` : ''}
+          </div>`;
+        }).join('');
+        applyBtn.disabled = valid.length === 0;
+      };
+      const _sfReorgFrSchedulePreview = () => {
+        if (_sfReorgFrTimer) clearTimeout(_sfReorgFrTimer);
+        _sfReorgFrTimer = setTimeout(_sfReorgFrPreview, 120);
+      };
+      document.getElementById('sf-reorg-fr-find')?.addEventListener('input', _sfReorgFrSchedulePreview);
+      document.getElementById('sf-reorg-fr-replace')?.addEventListener('input', _sfReorgFrSchedulePreview);
+      document.getElementById('btn-sf-reorg-fr-apply')?.addEventListener('click', async () => {
+        const find = document.getElementById('sf-reorg-fr-find').value;
+        const replace = document.getElementById('sf-reorg-fr-replace').value;
+        const ok = await promptConfirm({
+          title: 'Replace all',
+          message: `Apply this rename to every matching file in the font?`,
+          confirmText: 'Replace all',
+        });
+        if (!ok) return;
+        let res;
+        try {
+          res = await window.electronAPI.reorganizeFindReplace({
+            name: _sfDetailOriginalName,
+            find, replace,
+            commit: true,
+          });
+        } catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
+        if (!res || !res.ok) { alert(`Replace failed: ${(res && res.error) || 'unknown'}`); return; }
+        // Clear the inputs and refresh both views — find/replace can
+        // change files that buckets also care about.
+        document.getElementById('sf-reorg-fr-find').value = '';
+        document.getElementById('sf-reorg-fr-replace').value = '';
+        document.getElementById('sf-reorg-fr-preview').innerHTML = '';
+        document.getElementById('btn-sf-reorg-fr-apply').disabled = true;
+        await _sfReorgRefresh();
+        await _sfReorgRefreshOuterBrowser();
+      });
+      document.getElementById('btn-sf-entry-reorganize')?.addEventListener('click', _sfOpenReorganize);
+      document.getElementById('sf-reorganize-close')?.addEventListener('click', _sfCloseReorganize);
+      document.getElementById('btn-sf-reorg-close-bottom')?.addEventListener('click', _sfCloseReorganize);
+      // Backdrop click: silent block when dirty (no prompt — the user
+      // has to commit or use Close to dismiss intentionally). Cleanly
+      // closes when there's no staged work. Matches the Style Library
+      // modal convention.
+      document.getElementById('modal-sf-reorganize')?.addEventListener('click', (e) => {
+        if (e.target.id !== 'modal-sf-reorganize') return;
+        if (_sfReorgIsDirty()) return;
+        _sfCloseReorganize();
+      });
+      // Escape stays an "intentional close" gesture — prompts when
+      // dirty rather than silently doing nothing, since the user
+      // explicitly hit the key.
+      document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return;
+        const modal = document.getElementById('modal-sf-reorganize');
+        if (!modal || !modal.classList.contains('active')) return;
+        const topMost = [...document.querySelectorAll('.modal-overlay.active')].pop();
+        if (topMost !== modal) return;
+        e.preventDefault();
+        _sfCloseReorganize();
+      });
+      // Right-click menu on the entry file list — Copy / Paste / Rename
+      // / New Folder / Delete. Reuses the preset-ctx-menu DOM (same
+      // visual language the SF and preset views use).
+      document.addEventListener('contextmenu', (e) => {
+        if (!e.target.closest('#sf-entry-files-browser')) return;
+        const fileRow = e.target.closest('[data-file-path]');
+        const dirRow = e.target.closest('[data-dir-path]');
+        e.preventDefault();
+        const menu = document.getElementById('preset-ctx-menu');
+        if (!menu) return;
+        const mkItem = (text, cls, fn) => {
+          const d = document.createElement('div');
+          d.className = 'preset-ctx-item' + (cls ? ' ' + cls : '');
+          d.textContent = text;
+          d.addEventListener('mousedown', (e2) => { e2.stopPropagation(); menu.style.display = 'none'; fn(); });
+          menu.appendChild(d);
+        };
+        const mkSep = () => { const s = document.createElement('div'); s.className = 'preset-ctx-separator'; menu.appendChild(s); };
+        menu.innerHTML = '';
+        const clipboardCount = _sfFileClipboard?.paths?.length || 0;
+        if (fileRow) {
+          const p = fileRow.getAttribute('data-file-path');
+          if (!p) return;
+          // Right-clicking a row that isn't in the selection collapses
+          // the selection to just it (matches the common-folder UX).
+          if (!_sfEntryFilesSelected.has(p)) {
+            _sfEntryFilesSelected.clear();
+            _sfEntryFilesSelected.add(p);
+            _sfEntryFilesAnchor = p;
+            _sfRenderEntryFiles();
+          }
+          const count = _sfEntryFilesSelected.size;
+          mkItem(count > 1 ? `Copy (${count})` : 'Copy', '', _sfCopyEntryFilesSelection);
+          if (clipboardCount > 0) mkItem(`Paste (${clipboardCount})`, '', () => _sfPasteIntoEntry());
+          mkSep();
+          if (count === 1) mkItem('Rename…', '', () => _sfRenameEntryFilePrompt([..._sfEntryFilesSelected][0]));
+          mkItem('+ New folder', '', _sfCreateEntrySubfolderPrompt);
+          mkSep();
+          mkItem(count > 1 ? `× Delete (${count})` : '× Delete', 'danger', () => _sfDeleteEntryFilesPrompt());
+        } else if (dirRow) {
+          const dirSubPath = dirRow.getAttribute('data-dir-path') || '';
+          if (clipboardCount > 0) mkItem(`Paste into ${dirRow.querySelector('.sf-entry-files-row-name')?.textContent || 'folder'} (${clipboardCount})`, '', async () => {
+            const prev = _sfEntryFilesPath;
+            _sfEntryFilesPath = dirSubPath || prev;
+            await _sfPasteIntoEntry();
+          });
+          if (clipboardCount > 0) mkSep();
+          mkItem('Rename…', '', () => _sfRenameEntryFolderPrompt(dirSubPath));
+          mkItem('+ New folder', '', _sfCreateEntrySubfolderPrompt);
+          mkSep();
+          mkItem('× Delete folder', 'danger', () => _sfDeleteEntryFolderPrompt(dirSubPath));
+        } else {
+          if (clipboardCount > 0) mkItem(`Paste here (${clipboardCount})`, '', () => _sfPasteIntoEntry());
+          if (clipboardCount > 0) mkSep();
+          mkItem('+ New folder', '', _sfCreateEntrySubfolderPrompt);
+        }
+        if (!menu.children.length) return;
+        const x = Math.min(e.clientX, window.innerWidth - 200);
+        const y = Math.min(e.clientY, window.innerHeight - 160);
+        menu.style.left = x + 'px';
+        menu.style.top = y + 'px';
+        menu.style.display = 'block';
+      });
+      // Ctrl/Cmd+C and Ctrl/Cmd+V scoped to the entry detail modal —
+      // gated to: modal active, no other modal stacked, focus not in a
+      // text input/textarea (so typing into the description still works).
+      document.addEventListener('keydown', (e) => {
+        if (!(e.ctrlKey || e.metaKey)) return;
+        const key = e.key.toLowerCase();
+        if (key !== 'c' && key !== 'v') return;
+        const modal = _sfEntryDetailEls.modal;
+        if (!modal || !modal.classList.contains('active')) return;
+        // Skip if another modal is on top (confirm, save-conflict, etc.).
+        const topMost = [...document.querySelectorAll('.modal-overlay.active')].pop();
+        if (topMost && topMost !== modal) return;
+        const ae = document.activeElement;
+        if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
+        if (key === 'c') {
+          if (_sfEntryFilesSelected.size === 0) return;
+          e.preventDefault();
+          _sfCopyEntryFilesSelection();
+        } else {
+          if (!_sfFileClipboard || _sfFileClipboard.paths.length === 0) return;
+          e.preventDefault();
+          _sfPasteIntoEntry();
+        }
+      });
+      // Drag-drop within the entry modal — drag files (multi if multi
+      // selected) onto folder rows to move them in. Cross-modal drag is
+      // intentionally NOT supported (cross-location movement goes through
+      // copy/paste instead).
+      let _sfEntryFilesDragData = null;
+      let _sfEntryFilesDragTargetEl = null;
+      const _sfEntrySetDragTarget = (el) => {
+        if (_sfEntryFilesDragTargetEl === el) return;
+        if (_sfEntryFilesDragTargetEl) _sfEntryFilesDragTargetEl.classList.remove('drop-target');
+        _sfEntryFilesDragTargetEl = el;
+        if (_sfEntryFilesDragTargetEl) _sfEntryFilesDragTargetEl.classList.add('drop-target');
+      };
+      document.getElementById('sf-entry-files-browser')?.addEventListener('dragstart', (e) => {
+        const fileRow = e.target.closest('[data-file-path]');
+        if (!fileRow || !_sfDetailOriginalName) { e.preventDefault(); return; }
+        const p = fileRow.getAttribute('data-file-path');
+        if (!p) { e.preventDefault(); return; }
+        // Match OS file manager: if the row isn't in the selection,
+        // dragging just that row drags only it.
+        if (!_sfEntryFilesSelected.has(p)) {
+          _sfEntryFilesSelected.clear();
+          _sfEntryFilesSelected.add(p);
+          _sfEntryFilesAnchor = p;
+          _sfRenderEntryFiles();
+        }
+        _sfEntryFilesDragData = { paths: Array.from(_sfEntryFilesSelected) };
+        try { e.dataTransfer.effectAllowed = 'move'; } catch {}
+        try { e.dataTransfer.setData('text/plain', _sfEntryFilesDragData.paths.join('\n')); } catch {}
+      });
+      document.getElementById('sf-entry-files-browser')?.addEventListener('dragover', (e) => {
+        if (!_sfEntryFilesDragData) return;
+        const dir = e.target.closest('[data-dir-path]');
+        if (!dir) { _sfEntrySetDragTarget(null); return; }
+        e.preventDefault();
+        try { e.dataTransfer.dropEffect = 'move'; } catch {}
+        _sfEntrySetDragTarget(dir);
+      });
+      document.getElementById('sf-entry-files-browser')?.addEventListener('dragleave', (e) => {
+        const browser = document.getElementById('sf-entry-files-browser');
+        if (e.target === browser) _sfEntrySetDragTarget(null);
+      });
+      document.getElementById('sf-entry-files-browser')?.addEventListener('drop', async (e) => {
+        if (!_sfEntryFilesDragData) return;
+        const dir = e.target.closest('[data-dir-path]');
+        _sfEntrySetDragTarget(null);
+        if (!dir) { _sfEntryFilesDragData = null; return; }
+        e.preventDefault();
+        const destSubPath = dir.getAttribute('data-dir-path') || '';
+        const data = _sfEntryFilesDragData;
+        _sfEntryFilesDragData = null;
+        _sfDeleteProgress.show('Moving files', `${data.paths.length}`);
+        let res;
+        try {
+          res = await window.electronAPI.fileOpsMove({
+            kind: 'entry', id: _sfDetailOriginalName,
+            sourcePaths: data.paths, destSubPath,
+          });
+        } catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
+        await _sfDeleteProgress.hide();
+        if (!res || !res.ok) { alert(`Move failed: ${(res && res.error) || 'unknown'}`); return; }
+        if (res.failed?.length) {
+          alert(`Some files failed:\n${res.failed.map(f => ` • ${f.source}: ${f.error}`).join('\n')}`);
+        }
+        try {
+          const fr = await window.electronAPI.listEntryFiles({ name: _sfDetailOriginalName });
+          _sfEntryFilesTree = (fr && fr.ok && fr.files) || [];
+        } catch {}
+        _sfEntryFilesSelected = new Set(res.moved || []);
+        _sfEntryFilesAnchor = (res.moved && res.moved[0]) || null;
+        _sfRenderEntryFiles();
+      });
+      document.getElementById('sf-entry-files-browser')?.addEventListener('dragend', () => {
+        _sfEntrySetDragTarget(null);
+        _sfEntryFilesDragData = null;
+      });
+      // Up-one-level navigation for the files browser — Backspace key and
+      // mouse "back" button (button 3), matching native file-explorer
+      // muscle memory. Both gated to: entry detail modal active, path is
+      // not already root, and focus isn't inside a text input/textarea
+      // (so editing the description with Backspace still works).
+      const _sfEntryFilesGoUp = () => {
+        if (!_sfEntryFilesPath) return false;
+        const parts = _sfEntryFilesPath.split('/').filter(Boolean);
+        parts.pop();
+        _sfEntryFilesPath = parts.join('/');
+        _sfRenderEntryFiles();
+        return true;
+      };
+      document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Backspace') return;
+        const modal = _sfEntryDetailEls.modal;
+        if (!modal || !modal.classList.contains('active')) return;
+        if (!_sfEntryFilesPath) return;
+        const ae = document.activeElement;
+        if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
+        e.preventDefault();
+        _sfEntryFilesGoUp();
+      });
+      document.addEventListener('mouseup', (e) => {
+        if (e.button !== 3) return; // mouse-back button
+        const modal = _sfEntryDetailEls.modal;
+        if (!modal || !modal.classList.contains('active')) return;
+        if (!_sfEntryFilesPath) return;
+        e.preventDefault();
+        _sfEntryFilesGoUp();
+      });
+      // ── Source file browser (read-only) ───────────────────────────────
+      // Same UX as the entry/common browsers but every mutation operation
+      // is intentionally absent — sources are immutable. The browser's
+      // contribution is letting the user copy specific files out of a
+      // source into an entry or a common folder via the unified
+      // _sfFileClipboard (kind: 'source').
+      let _sfSourceFilesTree = [];
+      let _sfSourceFilesPath = '';
+      let _sfSourceFilesSelected = new Set();
+      let _sfSourceFilesAnchor = null;
+      const _sfRenderSourceFiles = () => {
+        const list = document.getElementById('sf-source-files-list');
+        const crumbEl = document.getElementById('sf-source-files-breadcrumb');
+        if (!list || !crumbEl) return;
+        const segs = _sfSourceFilesPath.split('/').filter(Boolean);
+        const rootLabel = (_sfSourceEdit && _sfSourceEdit.bundleName) || 'Files';
+        const rootIsCurrent = segs.length === 0;
+        const crumbs = [`<span class="sf-entry-files-crumb${rootIsCurrent ? ' current' : ''}" data-crumb-path="">${_sfEscape(rootLabel)}</span>`];
+        let acc = '';
+        for (let i = 0; i < segs.length; i++) {
+          acc = acc ? `${acc}/${segs[i]}` : segs[i];
+          const isLast = i === segs.length - 1;
+          crumbs.push(`<span class="sf-entry-files-crumb-sep">›</span><span class="sf-entry-files-crumb${isLast ? ' current' : ''}" data-crumb-path="${_sfEscape(acc)}">${_sfEscape(segs[i])}</span>`);
+        }
+        crumbEl.innerHTML = crumbs.join('');
+        const children = _sfChildrenAt(_sfSourceFilesTree, _sfSourceFilesPath);
+        if (children.length === 0) {
+          list.innerHTML = `<div class="sf-entry-files-empty">This folder is empty.</div>`;
+          return;
+        }
+        list.innerHTML = children.map(n => {
+          const isSel = !n.isDir && _sfSourceFilesSelected.has(n.path);
+          const klasses = ['sf-entry-files-row'];
+          if (n.isDir) klasses.push('is-dir');
+          if (isSel) klasses.push('selected');
+          const dataAttr = n.isDir
+            ? `data-dir-path="${_sfEscape(n.path)}"`
+            : `data-file-path="${_sfEscape(n.path)}"`;
+          return `<div class="${klasses.join(' ')}" ${dataAttr} title="${_sfEscape(n.name)}">
+            <span class="sf-entry-files-row-icon">${_sfEntryFileIcon(n)}</span>
+            <span class="sf-entry-files-row-name">${_sfEscape(n.name)}</span>
+          </div>`;
+        }).join('');
+      };
+      const _sfShiftSelectSourceFilesTo = (targetPath) => {
+        const all = [...document.querySelectorAll('#sf-source-files-list [data-file-path]')];
+        const allPaths = all.map(el => el.getAttribute('data-file-path'));
+        const toIdx = allPaths.indexOf(targetPath);
+        if (toIdx < 0) return;
+        let fromIdx = _sfSourceFilesAnchor ? allPaths.indexOf(_sfSourceFilesAnchor) : -1;
+        if (fromIdx < 0) fromIdx = toIdx;
+        const [lo, hi] = fromIdx <= toIdx ? [fromIdx, toIdx] : [toIdx, fromIdx];
+        for (let i = lo; i <= hi; i++) _sfSourceFilesSelected.add(allPaths[i]);
+      };
+      // Document-level click delegation, target-filtered to the source
+      // browser. Mirrors the entry-browser handler shape so behavior stays
+      // consistent across the two modals.
+      document.addEventListener('click', (e) => {
+        if (!e.target.closest('#sf-source-files-browser')) return;
+        const fileRow = e.target.closest('[data-file-path]');
+        if (fileRow) {
+          const p = fileRow.getAttribute('data-file-path');
+          if (!p) return;
+          if (e.shiftKey && _sfSourceFilesAnchor) {
+            _sfShiftSelectSourceFilesTo(p);
+          } else if (e.ctrlKey || e.metaKey) {
+            if (_sfSourceFilesSelected.has(p)) _sfSourceFilesSelected.delete(p);
+            else _sfSourceFilesSelected.add(p);
+            _sfSourceFilesAnchor = p;
+          } else {
+            _sfSourceFilesSelected.clear();
+            _sfSourceFilesSelected.add(p);
+            _sfSourceFilesAnchor = p;
+          }
+          _sfRenderSourceFiles();
+          return;
+        }
+        const dir = e.target.closest('[data-dir-path]');
+        if (!dir) return;
+        _sfSourceFilesPath = dir.getAttribute('data-dir-path') || '';
+        _sfSourceFilesSelected.clear();
+        _sfSourceFilesAnchor = null;
+        _sfRenderSourceFiles();
+      });
+      document.getElementById('sf-source-files-breadcrumb')?.addEventListener('click', (e) => {
+        const crumb = e.target.closest('[data-crumb-path]');
+        if (!crumb) return;
+        _sfSourceFilesPath = crumb.getAttribute('data-crumb-path') || '';
+        _sfSourceFilesSelected.clear();
+        _sfSourceFilesAnchor = null;
+        _sfRenderSourceFiles();
+      });
+      const _sfCopySourceFilesSelection = () => {
+        if (!_sfSourceOriginalUuid || _sfSourceFilesSelected.size === 0) return;
+        _sfFileClipboard = {
+          kind: 'source',
+          id: _sfSourceOriginalUuid,
+          paths: Array.from(_sfSourceFilesSelected),
+        };
+      };
+      // Context menu: Copy only. Sources are immutable so paste/move/
+      // delete/rename/new-folder aren't on the menu. Reuses the same
+      // preset-ctx-menu DOM the other browsers use.
+      document.addEventListener('contextmenu', (e) => {
+        if (!e.target.closest('#sf-source-files-browser')) return;
+        const fileRow = e.target.closest('[data-file-path]');
+        e.preventDefault();
+        const menu = document.getElementById('preset-ctx-menu');
+        if (!menu) return;
+        const mkItem = (text, cls, fn) => {
+          const d = document.createElement('div');
+          d.className = 'preset-ctx-item' + (cls ? ' ' + cls : '');
+          d.textContent = text;
+          d.addEventListener('mousedown', (e2) => { e2.stopPropagation(); menu.style.display = 'none'; fn(); });
+          menu.appendChild(d);
+        };
+        menu.innerHTML = '';
+        if (fileRow) {
+          const p = fileRow.getAttribute('data-file-path');
+          if (!p) return;
+          if (!_sfSourceFilesSelected.has(p)) {
+            _sfSourceFilesSelected.clear();
+            _sfSourceFilesSelected.add(p);
+            _sfSourceFilesAnchor = p;
+            _sfRenderSourceFiles();
+          }
+          const count = _sfSourceFilesSelected.size;
+          mkItem(count > 1 ? `Copy (${count})` : 'Copy', '', _sfCopySourceFilesSelection);
+        } else {
+          // Empty space / folder row right-click — no operations available.
+          return;
+        }
+        if (!menu.children.length) return;
+        const x = Math.min(e.clientX, window.innerWidth - 200);
+        const y = Math.min(e.clientY, window.innerHeight - 160);
+        menu.style.left = x + 'px';
+        menu.style.top = y + 'px';
+        menu.style.display = 'block';
+      });
+      // Ctrl/Cmd+C scoped to the source detail modal. Mirrors the entry
+      // shortcut shape; Ctrl+V is intentionally absent since pasting into
+      // a source is meaningless.
+      document.addEventListener('keydown', (e) => {
+        if (!(e.ctrlKey || e.metaKey)) return;
+        if (e.key.toLowerCase() !== 'c') return;
+        const modal = _sfSourceDetailEls.modal;
+        if (!modal || !modal.classList.contains('active')) return;
+        const topMost = [...document.querySelectorAll('.modal-overlay.active')].pop();
+        if (topMost && topMost !== modal) return;
+        const ae = document.activeElement;
+        if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
+        if (_sfSourceFilesSelected.size === 0) return;
+        e.preventDefault();
+        _sfCopySourceFilesSelection();
+      });
+      // Backspace + mouse-back for up-one navigation, same gating as the
+      // entry browser (no text input focus, modal active, path not root).
+      const _sfSourceFilesGoUp = () => {
+        if (!_sfSourceFilesPath) return false;
+        const parts = _sfSourceFilesPath.split('/').filter(Boolean);
+        parts.pop();
+        _sfSourceFilesPath = parts.join('/');
+        _sfSourceFilesSelected.clear();
+        _sfSourceFilesAnchor = null;
+        _sfRenderSourceFiles();
+        return true;
+      };
+      document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Backspace') return;
+        const modal = _sfSourceDetailEls.modal;
+        if (!modal || !modal.classList.contains('active')) return;
+        if (!_sfSourceFilesPath) return;
+        const ae = document.activeElement;
+        if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
+        e.preventDefault();
+        _sfSourceFilesGoUp();
+      });
+      document.addEventListener('mouseup', (e) => {
+        if (e.button !== 3) return;
+        const modal = _sfSourceDetailEls.modal;
+        if (!modal || !modal.classList.contains('active')) return;
+        if (!_sfSourceFilesPath) return;
+        e.preventDefault();
+        _sfSourceFilesGoUp();
+      });
       // "Edit source" affordance on the entry detail view → opens this modal.
       document.getElementById('btn-sf-open-source-detail')?.addEventListener('click', async () => {
         if (!_sfDetailEdit) return;
@@ -16004,14 +17603,17 @@ require(['vs/editor/editor.main'], function () {
           }
           mkSep();
           if (count === 1) mkItem('Rename…', '', () => _sfRenameCommonFile([..._sfCommonFilesSelected][0]));
+          mkItem('+ New folder', '', _sfCreateCommonFolderPrompt);
           mkItem(count > 1 ? `× Delete (${count})` : '× Delete', 'danger', () => _sfDeleteCommonFilesPrompt());
         } else if (dirRow) {
           const subPath = dirRow.getAttribute('data-tree-dir');
           if (!subPath) return;
           if (clipboardCount > 0) {
             mkItem(`Paste (${clipboardCount})`, '', () => _sfPasteCommonClipboard(_sfSelectedCommonUuid, subPath));
-            mkSep();
           }
+          mkItem('Rename…', '', () => _sfRenameCommonFolderPrompt(subPath));
+          mkItem('+ New folder', '', _sfCreateCommonFolderPrompt);
+          mkSep();
           mkItem('Delete folder', 'danger', () => _sfDeleteCommonFilePrompt(subPath));
         } else {
           const uuid = commonRow.getAttribute('data-common-uuid');

@@ -474,6 +474,45 @@ function listEntriesBySourceUuid(userData, sourceUuid) {
   return listEntries(userData).filter(e => e.meta && e.meta.sourceUuid === sourceUuid);
 }
 
+// Tree-shaped listing of every file inside an entry's on-disk folder.
+// Mirrors soundFontCommon.listCommonFiles in shape so the renderer can
+// share the same node shape. Excludes the entry-root meta.json since it
+// is an app-internal record (tags, link, etc.) — not part of what would
+// land on the SD card. Sort: directories first, then files, each
+// alphabetical for stable display order.
+function listEntryFiles(userData, name) {
+  if (!name) return [];
+  const root = path.join(entriesRoot(userData), name);
+  if (!fs.existsSync(root)) return [];
+  const walk = (dir, relBase) => {
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
+    catch { return []; }
+    const out = [];
+    for (const e of entries) {
+      const abs = path.join(dir, e.name);
+      const rel = relBase ? `${relBase}/${e.name}` : e.name;
+      // Skip the per-entry meta.json at the entry root — internal record,
+      // not user-visible content. Nested meta.json files (rare, e.g.
+      // vendor-included sub-meta) still appear.
+      if (!relBase && e.name === 'meta.json') continue;
+      if (e.isDirectory()) {
+        out.push({ name: e.name, isDir: true, path: rel, children: walk(abs, rel) });
+      } else if (e.isFile()) {
+        let size = 0;
+        try { size = fs.statSync(abs).size; } catch {}
+        out.push({ name: e.name, isDir: false, path: rel, size });
+      }
+    }
+    out.sort((a, b) => {
+      if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+    return out;
+  };
+  return walk(root, '');
+}
+
 module.exports = {
   entriesRoot,
   ensureEntriesRoot,
@@ -488,4 +527,5 @@ module.exports = {
   exportEntryFileTo,
   exportEntryToFolder,
   entryFolderExistsAt,
+  listEntryFiles,
 };

@@ -361,6 +361,37 @@ async function applyReplace({
     catch (err) { throw new Error(`Could not snapshot existing library: ${err.message}`); }
   }
 
+  // Pre-extract survey for the identical-skip optimization. surveyMerge
+  // expects the user's library at userData/soundFonts; we've just renamed
+  // it to snapshotPath, so a junction symlink at the original location
+  // lets the survey read the snapshot transparently. Done BEFORE creating
+  // the fresh sfRoot so the symlink can actually take that path.
+  const skipDirs = { sources: new Set(), library: new Set(), common: new Set() };
+  if (hadOriginal) {
+    let tmpLink = null;
+    try {
+      try {
+        fs.symlinkSync(snapshotPath, sfRoot, 'junction');
+        tmpLink = sfRoot;
+      } catch {
+        // Symlink failed (permissions, platform). Fall back to no
+        // optimization — wipe-and-extract everything.
+      }
+      if (tmpLink) {
+        const surveyRes = await surveyMerge({ userData, zipPath });
+        for (const it of surveyRes.sources?.identical || []) skipDirs.sources.add(it.id);
+        for (const it of surveyRes.library?.identical || []) skipDirs.library.add(it.id);
+        for (const it of surveyRes.common?.identical  || []) skipDirs.common.add(it.id);
+      }
+    } catch {
+      skipDirs.sources.clear();
+      skipDirs.library.clear();
+      skipDirs.common.clear();
+    } finally {
+      if (tmpLink) { try { fs.unlinkSync(tmpLink); } catch {} }
+    }
+  }
+
   // Create the fresh root early so a no-entries backup still lands a valid
   // empty dir rather than leaving the SF tab pointing at nothing.
   try { fs.mkdirSync(sfRoot, { recursive: true }); }
@@ -396,48 +427,145 @@ async function applyReplace({
   let manifest = null;
   let processedBytes = 0;
   let totalBytes = 0;
+  // Items we move from snapshot to fresh root because they're 100%
+  // identical to the backup. Tracked so a mid-run failure can move them
+  // back to the snapshot during rollback and the user lands exactly
+  // where they started.
+  const reusedItems = []; // [{ snapshotAbs, freshAbs }, ...]
 
   try {
     const entries = await zip.entries();
-    // Survey total bytes up front so the progress bar has something honest
-    // to count against, and pull the manifest into memory immediately so
-    // we can apply settings after the extract regardless of zip order.
-    for (const key of Object.keys(entries)) {
-      const e = entries[key];
-      if (!e.isDirectory && e.name !== 'manifest.json') totalBytes += (e.size || 0);
-    }
+    // Manifest first (small, needed for settings).
     try {
       const buf = await zip.entryData('manifest.json');
       manifest = JSON.parse(buf.toString('utf8'));
     } catch {}
 
+    // Per-item directory-presence map for the verification step. For
+    // each backup item we record which directories the zip contains
+    // (both as implicit parents of files and explicit dir entries).
+    // The survey already vouched for file content via count+bytes (or
+    // source hash); the only realistic gap is on-disk dirs that the
+    // backup doesn't have, which the size aggregate can't see.
+    const zipDirsByItem = new Map(); // "bucket/id" → Set<relPath>
+    for (const key of Object.keys(entries)) {
+      const e = entries[key];
+      if (!e.name || e.name === 'manifest.json') continue;
+      const parts = e.name.split('/');
+      if (parts.length < 3) continue;
+      const itemKey = `${parts[0]}/${parts[1]}`;
+      if (!zipDirsByItem.has(itemKey)) zipDirsByItem.set(itemKey, new Set());
+      const dirsSet = zipDirsByItem.get(itemKey);
+      const innerParts = parts.slice(2);
+      const endIdx = e.isDirectory ? innerParts.length : innerParts.length - 1;
+      let acc = '';
+      for (let i = 0; i < endIdx; i++) {
+        acc = acc ? `${acc}/${innerParts[i]}` : innerParts[i];
+        if (acc) dirsSet.add(acc);
+      }
+    }
+
+    // Walk an item dir on disk, returning the set of subdirectory paths
+    // (relative to the item root). Empty folders the user added show up
+    // here, and the zip-side set won't contain them — that's the catch.
+    const onDiskDirsOf = (itemAbs) => {
+      const out = new Set();
+      const walk = (cur, rel) => {
+        let items;
+        try { items = fs.readdirSync(cur, { withFileTypes: true }); }
+        catch { return; }
+        for (const it of items) {
+          if (!it.isDirectory()) continue;
+          const rp = rel ? `${rel}/${it.name}` : it.name;
+          out.add(rp);
+          walk(path.join(cur, it.name), rp);
+        }
+      };
+      walk(itemAbs, '');
+      return out;
+    };
+
+    // Move truly-identical items from snapshot to fresh. Verify against
+    // the zip first — if the snapshot dir has anything the zip doesn't,
+    // or vice versa, drop the item from skipDirs so it gets re-extracted
+    // (catches "user added an empty folder, content bytes still match"
+    // case where survey's file-count + total-bytes check is too loose).
+    for (const bucket of ['sources', 'library', 'common']) {
+      const freshBucketDir = path.join(sfRoot, bucket);
+      try { fs.mkdirSync(freshBucketDir, { recursive: true }); } catch {}
+      for (const id of [...skipDirs[bucket]]) {
+        const snapAbs = path.join(snapshotPath, bucket, id);
+        const freshAbs = path.join(freshBucketDir, id);
+        if (!fs.existsSync(snapAbs)) {
+          skipDirs[bucket].delete(id);
+          continue;
+        }
+        // Only the directory set might disagree with the zip when the
+        // survey says identical — empty folders added (or removed)
+        // since the backup was taken. Symmetric check: every on-disk
+        // dir must be in the zip, every zip dir must be on-disk.
+        const onDiskDirs = onDiskDirsOf(snapAbs);
+        const zipDirs = zipDirsByItem.get(`${bucket}/${id}`) || new Set();
+        let mismatch = false;
+        for (const d of onDiskDirs) { if (!zipDirs.has(d)) { mismatch = true; break; } }
+        if (!mismatch) {
+          for (const d of zipDirs) { if (!onDiskDirs.has(d)) { mismatch = true; break; } }
+        }
+        if (mismatch) {
+          skipDirs[bucket].delete(id);
+          continue;
+        }
+        try {
+          fs.renameSync(snapAbs, freshAbs);
+          reusedItems.push({ snapshotAbs: snapAbs, freshAbs });
+        } catch {
+          skipDirs[bucket].delete(id);
+        }
+      }
+    }
+
+    // Survey total bytes up front, but only for entries we'll actually
+    // extract — skipped items aren't part of the progress denominator.
+    const isSkipped = (entryName) => {
+      const parts = entryName.split('/');
+      if (parts.length < 2) return false;
+      const bucket = parts[0];
+      const id = parts[1];
+      return skipDirs[bucket] && skipDirs[bucket].has(id);
+    };
+    for (const key of Object.keys(entries)) {
+      const e = entries[key];
+      if (e.isDirectory) continue;
+      if (e.name === 'manifest.json') continue;
+      if (isSkipped(e.name)) continue;
+      totalBytes += (e.size || 0);
+    }
+
     // Extract each entry, validating that the resolved path stays inside
-    // sfRoot (defense against a malicious zip with "../" entries).
+    // sfRoot (defense against a malicious zip with "../" entries). Skip
+    // anything that lives under a top-level dir we already moved across
+    // from the snapshot.
     for (const key of Object.keys(entries)) {
       if (cancelled) break;
       const e = entries[key];
       if (e.name === 'manifest.json') continue; // not a library file
       if (!e.name || e.name === '/') continue;
+      if (isSkipped(e.name)) continue; // identical — already in place
       const normalized = e.name.replace(/\\/g, '/');
       const target = path.resolve(sfRoot, normalized);
       if (!target.startsWith(path.resolve(sfRoot) + path.sep) && target !== path.resolve(sfRoot)) {
-        // Zip entry escapes the destination root — skip it rather than
-        // failing the whole import on a single bad entry.
         continue;
       }
       if (e.isDirectory) {
         try { fs.mkdirSync(target, { recursive: true }); } catch {}
         continue;
       }
-      // Ensure parent dir exists, then stream out the entry.
       try { fs.mkdirSync(path.dirname(target), { recursive: true }); } catch {}
       try {
         await zip.extract(e.name, target);
         processedBytes += (e.size || 0);
         onProgress({ phase: 'extracting', processedBytes, totalBytes, currentItem: e.name });
       } catch (err) {
-        // Per-entry failures abort the whole run — a half-extracted library
-        // isn't useful, and a clean rollback is better UX than limping on.
         throw new Error(`Failed extracting ${e.name}: ${err && err.message || err}`);
       }
     }
@@ -446,7 +574,11 @@ async function applyReplace({
       throw Object.assign(new Error('Cancelled'), { cancelled: true });
     }
   } catch (err) {
-    // Rollback: nuke the partial new dir, restore the snapshot.
+    // Rollback. Move reused items back to the snapshot first so the
+    // snapshot is whole again, then nuke fresh and rename snapshot back.
+    for (const r of reusedItems) {
+      try { fs.renameSync(r.freshAbs, r.snapshotAbs); } catch {}
+    }
     try { fs.rmSync(sfRoot, { recursive: true, force: true }); } catch {}
     if (hadOriginal) {
       try { fs.renameSync(snapshotPath, sfRoot); } catch {}

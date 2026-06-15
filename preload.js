@@ -195,6 +195,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Format-dispatch reads (slice 2)
   browseSource:          (params)     => ipcRenderer.invoke('sources:browse', params),
+  listSourceFiles:       (params)     => ipcRenderer.invoke('sources:listFiles', params),
   readSourceFile:        (params)     => ipcRenderer.invoke('sources:readFile', params),
   extractFromSource:     (params)     => ipcRenderer.invoke('sources:extractTo', params),
   exportSourceToDownloads: (params)   => ipcRenderer.invoke('sources:exportToDownloads', params),
@@ -212,6 +213,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readSourceDocBytes:    (params)     => ipcRenderer.invoke('sources:readDocBytes', params),
   exportSourceDoc:       (params)     => ipcRenderer.invoke('sources:exportDoc', params),
   listEntryDocs:         (params)     => ipcRenderer.invoke('entries:listDocs', params),
+  listEntryFiles:        (params)     => ipcRenderer.invoke('entries:listFiles', params),
+
+  // Reorganize ops (entry detail modal)
+  reorganizeDetect:      (params)     => ipcRenderer.invoke('reorganize:detect', params),
+  reorganizeGroup:       (params)     => ipcRenderer.invoke('reorganize:group', params),
+  reorganizeFlatten:     (params)     => ipcRenderer.invoke('reorganize:flatten', params),
+  reorganizeReorder:     (params)     => ipcRenderer.invoke('reorganize:reorder', params),
+  reorganizeFindReplace: (params)     => ipcRenderer.invoke('reorganize:findReplace', params),
+  fileOpsCopy:           (params)     => ipcRenderer.invoke('fileOps:copy', params),
+  fileOpsMove:           (params)     => ipcRenderer.invoke('fileOps:move', params),
+  fileOpsDelete:         (params)     => ipcRenderer.invoke('fileOps:delete', params),
+  fileOpsRename:         (params)     => ipcRenderer.invoke('fileOps:rename', params),
+  fileOpsCreateSubfolder:(params)     => ipcRenderer.invoke('fileOps:createSubfolder', params),
+  fileOpsAddFiles:       (params)     => ipcRenderer.invoke('fileOps:addFiles', params),
+  selectAudioFiles:      (params)     => ipcRenderer.invoke('dialog:selectAudioFiles', params),
   readEntryDocBytes:     (params)     => ipcRenderer.invoke('entries:readDocBytes', params),
   exportEntryDoc:        (params)     => ipcRenderer.invoke('entries:exportDoc', params),
   exportEntryToFolder:   (params)     => ipcRenderer.invoke('entries:exportToFolder', params),

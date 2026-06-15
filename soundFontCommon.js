@@ -305,10 +305,44 @@ function _proffieVariantName(destDir, srcName) {
   if (!fs.existsSync(path.join(destDir, srcName))) return srcName;
   const ext = path.extname(srcName);
   const stem = path.basename(srcName, ext);
-  const base = stem.replace(/\d+$/, '') || stem;
-  let n = 2;
-  while (fs.existsSync(path.join(destDir, `${base}${n}${ext}`))) n++;
-  return `${base}${n}${ext}`;
+  // Base = source stem with any trailing digits stripped. Used to scan
+  // the destination for existing variants and infer the local convention.
+  const baseMatch = stem.match(/^(.*?)(\d*)$/);
+  const base = (baseMatch && baseMatch[1]) || stem;
+  const srcPad = (baseMatch && baseMatch[2]) ? baseMatch[2].length : 0;
+  // Scan dest for files matching <base>\d*<ext>. Each contributes its
+  // digit-suffix length (padding seen locally) and value (max number
+  // already used). The "1" slot is implicit when a bare <base><ext>
+  // exists with no digits — Proffie's first variant slot.
+  // Collect the DISTINCT padding lengths observed in the dest so we can
+  // detect convention vs. ambiguity. The bare-base file (e.g., "boot.wav"
+  // alongside "boot2.wav") doesn't contribute to padLens — it's the
+  // implicit slot 1 in any convention.
+  let maxNum = 0;
+  const padLens = new Set();
+  let entries;
+  try { entries = fs.readdirSync(destDir); } catch { entries = []; }
+  for (const file of entries) {
+    if (path.extname(file) !== ext) continue;
+    const fStem = path.basename(file, ext);
+    if (fStem === base) { if (maxNum < 1) maxNum = 1; continue; }
+    if (!fStem.startsWith(base)) continue;
+    const rest = fStem.substring(base.length);
+    if (!/^\d+$/.test(rest)) continue;
+    const num = parseInt(rest, 10);
+    if (num > maxNum) maxNum = num;
+    padLens.add(rest.length);
+  }
+  let padLen;
+  if (padLens.size === 0) padLen = srcPad;
+  else if (padLens.size === 1) padLen = [...padLens][0];
+  else padLen = 0; // Ambiguous mix → fall back to plain 1, 2, 3...
+  let n = maxNum + 1;
+  while (true) {
+    const candidate = `${base}${String(n).padStart(padLen, '0')}${ext}`;
+    if (!fs.existsSync(path.join(destDir, candidate))) return candidate;
+    n++;
+  }
 }
 
 // Validate a sub-path stays inside a common's files/ root. Defensive

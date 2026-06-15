@@ -12,6 +12,8 @@ const soundFontCandidates = require('./soundFontCandidates');
 const soundFontEntries = require('./soundFontEntries');
 const soundFontCommon = require('./soundFontCommon');
 const soundFontBackup = require('./soundFontBackup');
+const soundFontFileOps = require('./soundFontFileOps');
+const soundFontReorganize = require('./soundFontReorganize');
 
 // ── Separate userData for dev vs prod ──────────────────
 if (!app.isPackaged) {
@@ -871,6 +873,15 @@ ipcMain.handle('sources:updateMeta', (_, { uuid, updates } = {}) => {
   }
 });
 
+ipcMain.handle('sources:listFiles', async (_, { uuid } = {}) => {
+  try {
+    const files = await soundFontSources.listSourceFiles(app.getPath('userData'), uuid);
+    return { ok: true, files };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
 ipcMain.handle('sources:browse', async (_, { uuid, path: subPath } = {}) => {
   try {
     const source = soundFontSources.openSource(app.getPath('userData'), uuid);
@@ -1024,6 +1035,91 @@ ipcMain.handle('sources:exportDoc', async (_, { uuid, path: subPath } = {}) => {
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };
   }
+});
+
+ipcMain.handle('entries:listFiles', (_, { name } = {}) => {
+  try {
+    const files = soundFontEntries.listEntryFiles(app.getPath('userData'), name);
+    return { ok: true, files };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
+// Unified file ops (common ↔ entry, either direction, same kind same dir).
+// Used by both the common-folder sidecar and the entry detail file browser
+// so clipboard contents can survive switching between them.
+ipcMain.handle('fileOps:copy', async (_, { src, srcPaths, dest } = {}) => {
+  try { return await soundFontFileOps.copyAcrossLocations({ userData: app.getPath('userData'), src, srcPaths, dest }); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+ipcMain.handle('fileOps:move', (_, { kind, id, sourcePaths, destSubPath } = {}) => {
+  try { return soundFontFileOps.moveWithinLocation({ userData: app.getPath('userData'), kind, id, sourcePaths, destSubPath }); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+ipcMain.handle('fileOps:delete', (_, { kind, id, subPaths } = {}) => {
+  try { return soundFontFileOps.deleteFilesAt({ userData: app.getPath('userData'), kind, id, subPaths }); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+ipcMain.handle('fileOps:rename', (_, { kind, id, subPath, newName } = {}) => {
+  try { return soundFontFileOps.renameFileAt({ userData: app.getPath('userData'), kind, id, subPath, newName }); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+ipcMain.handle('fileOps:createSubfolder', (_, { kind, id, parentSubPath, name } = {}) => {
+  try { return soundFontFileOps.createSubfolderAt({ userData: app.getPath('userData'), kind, id, parentSubPath, name }); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+ipcMain.handle('fileOps:addFiles', (_, { kind, id, subPath, sourceFilePaths } = {}) => {
+  try { return soundFontFileOps.addFilesAt({ userData: app.getPath('userData'), kind, id, subPath, sourceFilePaths }); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+// Reorganize ops — bucket detection drives the Reorganize modal; the
+// restructure/reorder/find&replace handlers commit changes to disk.
+ipcMain.handle('reorganize:detect', (_, { name } = {}) => {
+  try { return { ok: true, ...soundFontReorganize.detectLayout(app.getPath('userData'), name) }; }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+ipcMain.handle('reorganize:group', (_, { name } = {}) => {
+  try { return soundFontReorganize.restructureToGrouped(app.getPath('userData'), name); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+ipcMain.handle('reorganize:flatten', (_, { name } = {}) => {
+  try { return soundFontReorganize.restructureToFlat(app.getPath('userData'), name); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+ipcMain.handle('reorganize:reorder', (_, { name, bucketId, orderedPaths } = {}) => {
+  try { return soundFontReorganize.applyReorder(app.getPath('userData'), name, bucketId, orderedPaths); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+ipcMain.handle('reorganize:findReplace', (_, { name, find, replace, commit } = {}) => {
+  try { return soundFontReorganize.findReplaceInEntry(app.getPath('userData'), name, find, replace, { commit: !!commit }); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+// Generic audio file picker — used by the entry's "+ Add" affordance.
+// Title differs from the common-folder picker so the dialog reads
+// correctly in either context.
+ipcMain.handle('dialog:selectAudioFiles', async (_, { title } = {}) => {
+  const result = await dialog.showOpenDialog(win, {
+    title: title || 'Add audio files',
+    properties: ['openFile', 'multiSelections'],
+    filters: [
+      { name: 'Audio', extensions: ['wav'] },
+      { name: 'All files', extensions: ['*'] },
+    ],
+  });
+  if (result.canceled || !result.filePaths.length) return { ok: false, canceled: true };
+  return { ok: true, filePaths: result.filePaths };
 });
 
 ipcMain.handle('entries:listDocs', (_, { name } = {}) => {

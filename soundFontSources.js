@@ -732,6 +732,66 @@ async function readSourceFileBytes(userData, uuid, subPath) {
   return await source.readFile(subPath);
 }
 
+// Walk every entry in a source and return the same tree shape the entry
+// and common-folder browsers consume — { name, isDir, path, size?, children? }
+// — so the renderer can reuse the same node helpers and rendering. Folders
+// sort before files at each depth; alphabetical within. Implicit folders
+// (entries with embedded slashes but no own dir entry) are synthesized so
+// every file has a navigable parent in the tree.
+async function listSourceFiles(userData, uuid) {
+  const source = openSource(userData, uuid);
+  if (!source) return [];
+  const all = await source.listAll();
+  const root = [];
+  const dirNodes = new Map(); // 'a/b' → node
+  const ensureDir = (relPath) => {
+    if (!relPath) return null;
+    if (dirNodes.has(relPath)) return dirNodes.get(relPath);
+    const parts = relPath.split('/');
+    const name = parts.pop();
+    const parentRel = parts.join('/');
+    const parentChildren = parentRel ? ensureDir(parentRel).children : root;
+    const node = { name, isDir: true, path: relPath, children: [] };
+    dirNodes.set(relPath, node);
+    parentChildren.push(node);
+    return node;
+  };
+  for (const e of all) {
+    const clean = String(e.fileName).replace(/\\/g, '/').replace(/\/+$/g, '');
+    if (!clean) continue;
+    if (e.isDir) { ensureDir(clean); continue; }
+    const parts = clean.split('/');
+    const name = parts.pop();
+    const parentRel = parts.join('/');
+    const parentChildren = parentRel ? ensureDir(parentRel).children : root;
+    parentChildren.push({ name, isDir: false, path: clean, size: e.size || 0 });
+  }
+  const sortRec = (arr) => {
+    arr.sort((a, b) => {
+      if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+    for (const n of arr) if (n.isDir && n.children) sortRec(n.children);
+  };
+  sortRec(root);
+  return root;
+}
+
+// Extract a single file from a source into destDir, preserving the source's
+// basename, collision-safe via Proffie-style variant naming (so dragging
+// boot01.wav into a dest of boot01/02 lands as boot03). Returns the final
+// on-disk subPath relative to destRoot — used by copy-from-source so the
+// caller can mirror the same "added" array the regular copy returns.
+async function extractSourceFileTo(userData, uuid, subPath, destDir, finalName) {
+  const source = openSource(userData, uuid);
+  if (!source) throw new Error('Source not found');
+  if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+  const buf = await source.readFile(subPath);
+  const destPath = path.join(destDir, finalName);
+  await fs.promises.writeFile(destPath, buf);
+  return { destPath };
+}
+
 // Copy a single source-supplied file to destDir, collision-safe. Used when
 // the user asks to save a non-text doc out for opening in their OS.
 async function exportSourceFileTo(userData, uuid, subPath, destDir) {
@@ -767,4 +827,6 @@ module.exports = {
   listSourceDocs,
   readSourceFileBytes,
   exportSourceFileTo,
+  listSourceFiles,
+  extractSourceFileTo,
 };
