@@ -2953,8 +2953,17 @@
         <button id="btn-sf-bulk-save" class="btn-neutral" style="display:none" title="Save the selected fonts as Proffie-shaped folders to a destination (SD card, etc.)">Save</button>
         <button id="btn-sf-bulk-delete" class="btn-red" style="display:none" title="Delete the selected fonts">Delete</button>
         <div class="toolbar-divider"></div>
-        <button id="btn-sf-export-backup" class="btn-neutral" title="Export your entire Sound Font library as a single backup file">&#8599; Export Backup</button>
-        <button id="btn-sf-import-backup" class="btn-neutral" title="Restore from a previously exported Sound Font library backup">&#8601; Import Backup</button>
+        <div class="styles-tag-filter-wrap">
+          <button id="btn-sf-backup-menu" class="btn-neutral" title="Library backup">Backup &#9660;</button>
+          <div id="sf-backup-dropdown" class="styles-tag-dropdown" style="display:none;min-width:0">
+            <button id="btn-sf-export-backup" class="styles-tag-dropdown-item" title="Export your entire Sound Font library as a single backup file">
+              <span class="styles-tag-dropdown-name">&#8599; Export Backup</span>
+            </button>
+            <button id="btn-sf-import-backup" class="styles-tag-dropdown-item" title="Restore from a previously exported Sound Font library backup">
+              <span class="styles-tag-dropdown-name">&#8601; Import Backup</span>
+            </button>
+          </div>
+        </div>
         <div class="toolbar-divider"></div>
         <button id="btn-sf-import-toolbar" class="btn-blue" style="display:none" title="Import a sound font folder into your library">&#43; Import Sound Font</button>
       </div>
@@ -15212,12 +15221,11 @@ require(['vs/editor/editor.main'], function () {
         if (fileRow) {
           const p = fileRow.getAttribute('data-file-path');
           if (!p) return;
-          // Double-click on a .wav fires the audio player.
+          // Double-click on a playable file (wav → player, text → doc viewer).
           if (!e.shiftKey && !e.ctrlKey && !e.metaKey
-              && _sfIsWavPath(p) && _sfTryDoubleClick(`entry:${p}`)
+              && _sfTryDoubleClick(`entry:${p}`)
               && _sfDetailOriginalName) {
-            _sfOpenAudioPlayer({ kind: 'entry', id: _sfDetailOriginalName, subPath: p, label: p.split('/').pop() });
-            return;
+            if (_sfTryOpenFile({ kind: 'entry', id: _sfDetailOriginalName, subPath: p })) return;
           }
           if (e.shiftKey && _sfEntryFilesAnchor) {
             _sfShiftSelectEntryFilesTo(p);
@@ -15788,6 +15796,54 @@ require(['vs/editor/editor.main'], function () {
       // decide whether the row is playable.
       const _sfIsWavPath = (p) => /\.wav$/i.test(String(p || ''));
 
+      // Unified dispatcher: pick the right opener based on extension.
+      // .wav → audio player. Anything _sfIsTextReadable recognises →
+      // doc viewer. Anything else → no-op (caller falls back to
+      // selection behavior). Returns true when an opener fired.
+      const _sfTryOpenFile = ({ kind, id, subPath, size }) => {
+        if (!subPath) return false;
+        if (_sfIsWavPath(subPath)) {
+          _sfOpenAudioPlayer({ kind, id, subPath, label: subPath.split('/').pop() });
+          return true;
+        }
+        if (_sfIsTextReadable(subPath)) {
+          _sfOpenDocViewer({ kind, id, subPath, size });
+          return true;
+        }
+        return false;
+      };
+      // Kind-aware doc viewer launcher — reads the bytes from the right
+      // IPC, decodes to text (stripping RTF markup when relevant), and
+      // hands off to the existing _sfShowDocViewer. Mirrors the audio
+      // player's { kind, id, subPath } shape so the per-browser triggers
+      // can dispatch on extension to the right opener.
+      const _sfOpenDocViewer = async ({ kind, id, subPath, size }) => {
+        const fileName = subPath.split('/').pop();
+        let res;
+        try {
+          if (kind === 'entry') {
+            res = await window.electronAPI.readEntryDocBytes({ name: id, path: subPath });
+          } else if (kind === 'common') {
+            res = await window.electronAPI.readCommonFileBytes({ uuid: id, subPath });
+          } else if (kind === 'source') {
+            res = await window.electronAPI.readSourceDocBytes({ uuid: id, path: subPath });
+          } else {
+            throw new Error(`Unknown doc viewer kind: ${kind}`);
+          }
+        } catch (err) {
+          alert(`Could not read file: ${err && err.message || err}`);
+          return;
+        }
+        if (!res || !res.ok) {
+          alert(`Could not read file: ${(res && res.error) || 'unknown error'}`);
+          return;
+        }
+        const bytes = Uint8Array.from(res.bytes || []);
+        const raw = _sfDecodeBytes(bytes);
+        const text = /\.rtf$/i.test(fileName) ? _sfStripRtf(raw) : raw;
+        _sfShowDocViewer(fileName, size || bytes.length, text);
+      };
+
       // Manual double-click detector. The native dblclick event doesn't
       // fire reliably here because the row lists re-render on every
       // click (selection-state change), so the second click lands on a
@@ -16042,33 +16098,38 @@ require(['vs/editor/editor.main'], function () {
         const row = e.target.closest('[data-row-path]');
         if (row) {
           const p = row.getAttribute('data-row-path');
-          if (_sfIsWavPath(p) && _sfTryDoubleClick(`reorg:${p}`) && _sfDetailOriginalName) {
-            _sfOpenAudioPlayer({ kind: 'entry', id: _sfDetailOriginalName, subPath: p, label: p.split('/').pop() });
-            return;
+          if (_sfTryDoubleClick(`reorg:${p}`) && _sfDetailOriginalName) {
+            if (_sfTryOpenFile({ kind: 'entry', id: _sfDetailOriginalName, subPath: p })) return;
           }
           _sfReorgSelectedRow = p;
           _sfRenderReorgReorderList();
           document.getElementById('sf-reorg-reorder-list').focus();
         }
       });
-      // Right-click on a reorder row → Play (when row is a .wav). Same
-      // ctx-menu DOM the rest of the SF browsers reuse.
+      // Right-click on a reorder row → Play (wav) or Open (text).
+      // Same ctx-menu DOM the rest of the SF browsers reuse.
       document.getElementById('sf-reorg-reorder-list')?.addEventListener('contextmenu', (e) => {
         const row = e.target.closest('[data-row-path]');
         if (!row || !_sfDetailOriginalName) return;
         const p = row.getAttribute('data-row-path');
-        if (!_sfIsWavPath(p)) return;
+        const isWav = _sfIsWavPath(p);
+        const isText = !isWav && _sfIsTextReadable(p);
+        if (!isWav && !isText) return;
         e.preventDefault();
         const menu = document.getElementById('preset-ctx-menu');
         if (!menu) return;
         menu.innerHTML = '';
         const item = document.createElement('div');
         item.className = 'preset-ctx-item';
-        item.textContent = '▶ Play';
+        item.textContent = isWav ? '▶ Play' : 'Open';
         item.addEventListener('mousedown', (e2) => {
           e2.stopPropagation();
           menu.style.display = 'none';
-          _sfOpenAudioPlayer({ kind: 'entry', id: _sfDetailOriginalName, subPath: p, label: p.split('/').pop() });
+          if (isWav) {
+            _sfOpenAudioPlayer({ kind: 'entry', id: _sfDetailOriginalName, subPath: p, label: p.split('/').pop() });
+          } else {
+            _sfOpenDocViewer({ kind: 'entry', id: _sfDetailOriginalName, subPath: p });
+          }
         });
         menu.appendChild(item);
         const x = Math.min(e.clientX, window.innerWidth - 200);
@@ -16299,9 +16360,14 @@ require(['vs/editor/editor.main'], function () {
             _sfRenderEntryFiles();
           }
           const count = _sfEntryFilesSelected.size;
-          if (count === 1 && _sfIsWavPath(p)) {
-            mkItem('▶ Play', '', () => _sfOpenAudioPlayer({ kind: 'entry', id: _sfDetailOriginalName, subPath: p, label: p.split('/').pop() }));
-            mkSep();
+          if (count === 1) {
+            if (_sfIsWavPath(p)) {
+              mkItem('▶ Play', '', () => _sfOpenAudioPlayer({ kind: 'entry', id: _sfDetailOriginalName, subPath: p, label: p.split('/').pop() }));
+              mkSep();
+            } else if (_sfIsTextReadable(p)) {
+              mkItem('Open', '', () => _sfOpenDocViewer({ kind: 'entry', id: _sfDetailOriginalName, subPath: p }));
+              mkSep();
+            }
           }
           mkItem(count > 1 ? `Copy (${count})` : 'Copy', '', _sfCopyEntryFilesSelection);
           if (clipboardCount > 0) mkItem(`Paste (${clipboardCount})`, '', () => _sfPasteIntoEntry());
@@ -16528,10 +16594,9 @@ require(['vs/editor/editor.main'], function () {
           const p = fileRow.getAttribute('data-file-path');
           if (!p) return;
           if (!e.shiftKey && !e.ctrlKey && !e.metaKey
-              && _sfIsWavPath(p) && _sfTryDoubleClick(`source:${p}`)
+              && _sfTryDoubleClick(`source:${p}`)
               && _sfSourceOriginalUuid) {
-            _sfOpenAudioPlayer({ kind: 'source', id: _sfSourceOriginalUuid, subPath: p, label: p.split('/').pop() });
-            return;
+            if (_sfTryOpenFile({ kind: 'source', id: _sfSourceOriginalUuid, subPath: p })) return;
           }
           if (e.shiftKey && _sfSourceFilesAnchor) {
             _sfShiftSelectSourceFilesTo(p);
@@ -16598,9 +16663,14 @@ require(['vs/editor/editor.main'], function () {
             _sfRenderSourceFiles();
           }
           const count = _sfSourceFilesSelected.size;
-          if (count === 1 && _sfIsWavPath(p)) {
-            mkItem('▶ Play', '', () => _sfOpenAudioPlayer({ kind: 'source', id: _sfSourceOriginalUuid, subPath: p, label: p.split('/').pop() }));
-            mkSep();
+          if (count === 1) {
+            if (_sfIsWavPath(p)) {
+              mkItem('▶ Play', '', () => _sfOpenAudioPlayer({ kind: 'source', id: _sfSourceOriginalUuid, subPath: p, label: p.split('/').pop() }));
+              mkSep();
+            } else if (_sfIsTextReadable(p)) {
+              mkItem('Open', '', () => _sfOpenDocViewer({ kind: 'source', id: _sfSourceOriginalUuid, subPath: p }));
+              mkSep();
+            }
           }
           mkItem(count > 1 ? `Copy (${count})` : 'Copy', '', _sfCopySourceFilesSelection);
         } else {
@@ -17586,7 +17656,7 @@ require(['vs/editor/editor.main'], function () {
         // Hide any SF modals currently open so the viewer is the only thing
         // on screen. They get restored on close.
         _sfDocViewerStashedModalIds = [];
-        const candidates = ['modal-sf-entry-detail', 'modal-sf-source-detail'];
+        const candidates = ['modal-sf-entry-detail', 'modal-sf-source-detail', 'modal-sf-reorganize'];
         for (const id of candidates) {
           const el = document.getElementById(id);
           if (el && el.classList.contains('active')) {
@@ -17821,12 +17891,34 @@ require(['vs/editor/editor.main'], function () {
         if (creator) _sfToggleFilterCreator(creator);
         if (_sfCreatorDropdown) _sfCreatorDropdown.style.display = 'none';
       });
+      // Backup menu — Export / Import live inside a dropdown so they share
+      // one toolbar slot and deemphasize an action the user rarely runs.
+      // The item buttons keep their original IDs so the existing
+      // _sfOpenExportBackup / _sfOpenImportBackup handlers bind directly.
+      const _sfBackupMenuBtn  = document.getElementById('btn-sf-backup-menu');
+      const _sfBackupDropdown = document.getElementById('sf-backup-dropdown');
+      _sfBackupMenuBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!_sfBackupDropdown) return;
+        const opening = _sfBackupDropdown.style.display === 'none';
+        if (_sfTagDropdown) _sfTagDropdown.style.display = 'none';
+        if (_sfCreatorDropdown) _sfCreatorDropdown.style.display = 'none';
+        _sfBackupDropdown.style.display = opening ? '' : 'none';
+      });
+      _sfBackupDropdown?.addEventListener('click', (e) => {
+        // Auto-dismiss after a pick — the chosen action opens its own modal.
+        if (e.target.closest('.styles-tag-dropdown-item')) {
+          _sfBackupDropdown.style.display = 'none';
+        }
+      });
       // Close any open dropdown when clicking outside.
       document.addEventListener('click', (e) => {
         const inTag = _sfTagDropdown?.contains(e.target) || _sfTagFilterBtn?.contains(e.target);
         const inCreator = _sfCreatorDropdown?.contains(e.target) || _sfCreatorFilterBtn?.contains(e.target);
+        const inBackup = _sfBackupDropdown?.contains(e.target) || _sfBackupMenuBtn?.contains(e.target);
         if (!inTag && _sfTagDropdown && _sfTagDropdown.style.display !== 'none') _sfTagDropdown.style.display = 'none';
         if (!inCreator && _sfCreatorDropdown && _sfCreatorDropdown.style.display !== 'none') _sfCreatorDropdown.style.display = 'none';
+        if (!inBackup && _sfBackupDropdown && _sfBackupDropdown.style.display !== 'none') _sfBackupDropdown.style.display = 'none';
       });
       // Active-filter chip remove + clear-all.
       document.getElementById('sf-active-filters')?.addEventListener('click', (e) => {
@@ -17961,10 +18053,9 @@ require(['vs/editor/editor.main'], function () {
           const subPath = fileRow.getAttribute('data-tree-file');
           if (!subPath) return;
           if (!e.shiftKey && !e.ctrlKey && !e.metaKey
-              && _sfIsWavPath(subPath) && _sfTryDoubleClick(`common:${subPath}`)
+              && _sfTryDoubleClick(`common:${subPath}`)
               && _sfSelectedCommonUuid) {
-            _sfOpenAudioPlayer({ kind: 'common', id: _sfSelectedCommonUuid, subPath, label: subPath.split('/').pop() });
-            return;
+            if (_sfTryOpenFile({ kind: 'common', id: _sfSelectedCommonUuid, subPath })) return;
           }
           if (e.shiftKey && _sfCommonFilesAnchor) {
             _sfShiftSelectFilesTo(subPath);
@@ -18062,9 +18153,14 @@ require(['vs/editor/editor.main'], function () {
             _sfRenderCommonFileTree();
           }
           const count = _sfCommonFilesSelected.size;
-          if (count === 1 && _sfIsWavPath(subPath)) {
-            mkItem('▶ Play', '', () => _sfOpenAudioPlayer({ kind: 'common', id: _sfSelectedCommonUuid, subPath, label: subPath.split('/').pop() }));
-            mkSep();
+          if (count === 1) {
+            if (_sfIsWavPath(subPath)) {
+              mkItem('▶ Play', '', () => _sfOpenAudioPlayer({ kind: 'common', id: _sfSelectedCommonUuid, subPath, label: subPath.split('/').pop() }));
+              mkSep();
+            } else if (_sfIsTextReadable(subPath)) {
+              mkItem('Open', '', () => _sfOpenDocViewer({ kind: 'common', id: _sfSelectedCommonUuid, subPath }));
+              mkSep();
+            }
           }
           mkItem(count > 1 ? `Copy (${count})` : 'Copy', '', _sfCopyCommonSelection);
           if (clipboardCount > 0) {
