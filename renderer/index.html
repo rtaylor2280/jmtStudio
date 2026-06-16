@@ -1136,6 +1136,10 @@
   #modal-unsaved { z-index: 10015; }
   #modal-confirm { z-index: 10015; }
   #modal-sf-text-prompt { z-index: 10015; }
+  /* Sits above the library picker (10010) so the rename decision is
+     always on top of the modal that triggered it. Same tier as the
+     other confirm-style prompts. */
+  #modal-sf-paste-rename { z-index: 10016; }
   #modal-sf-text-prompt input.invalid { border-color: #e44; }
   .sf-text-prompt-error { font-size: 0.7rem; color: #e44; margin-top: 4px; min-height: 1em; }
 
@@ -4008,6 +4012,23 @@
 <!-- ── Link-label scope prompt ── -->
 <!-- Asked when the user changes a link label on an entry and other linked
      entries exist in the library: how widely should this rename apply? -->
+<!-- ── Paste rename prompt — asked when files land in a named
+     subfolder and their incoming basenames don't already match the
+     folder. Three choices: Rename to match (use the folder's name and
+     number the incoming files past the existing max), Keep names (paste
+     verbatim — collisions still use Proffie variant naming), Cancel. ── -->
+<div class="modal-overlay" id="modal-sf-paste-rename">
+  <div class="modal">
+    <h2>Rename to match folder?</h2>
+    <p id="sf-paste-rename-msg">…</p>
+    <div class="sf-dup-btn-stack">
+      <button class="modal-btn-primary" id="sf-paste-rename-yes">Rename to match</button>
+      <button class="modal-btn-cancel"  id="sf-paste-rename-no">Keep names</button>
+      <button class="modal-btn-cancel"  id="sf-paste-rename-cancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="modal-sf-label-scope">
   <div class="modal">
     <h2>Change link label</h2>
@@ -4155,7 +4176,7 @@
             <span class="sf-reorg-reorder-title" id="sf-reorg-reorder-title"></span>
             <span class="sf-reorg-reorder-actions">
               <button class="modal-btn-cancel sf-reorg-reorder-cancel" id="btn-sf-reorg-reorder-cancel">Cancel</button>
-              <button class="modal-btn-primary sf-reorg-reorder-save" id="btn-sf-reorg-reorder-save" disabled>Save order</button>
+              <button class="modal-btn-primary sf-reorg-reorder-save" id="btn-sf-reorg-reorder-save" disabled>Reorder</button>
             </span>
           </div>
           <div class="sf-reorg-reorder-list" id="sf-reorg-reorder-list" tabindex="0"></div>
@@ -15553,6 +15574,12 @@ require(['vs/editor/editor.main'], function () {
       const _sfPasteIntoEntry = async () => {
         if (!_sfDetailOriginalName) return;
         if (!_sfFileClipboard || _sfFileClipboard.paths.length === 0) return;
+        // Pull incoming basenames from the clipboard paths so the
+        // rename prompt can decide whether the names already match
+        // the destination folder.
+        const incomingNames = _sfFileClipboard.paths.map(p => p.split('/').pop());
+        const destNames = await _sfResolvePasteRenames(incomingNames, _sfEntryFilesPath);
+        if (destNames === null) return; // user cancelled
         const n = _sfFileClipboard.paths.length;
         _sfDeleteProgress.show('Pasting files', `${n} file${n === 1 ? '' : 's'}`);
         let res;
@@ -15561,6 +15588,7 @@ require(['vs/editor/editor.main'], function () {
             src: { kind: _sfFileClipboard.kind, id: _sfFileClipboard.id },
             srcPaths: _sfFileClipboard.paths,
             dest: { kind: 'entry', id: _sfDetailOriginalName, subPath: _sfEntryFilesPath },
+            destNames: destNames.length ? destNames : undefined,
           });
         } catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
         await _sfDeleteProgress.hide();
@@ -15719,6 +15747,155 @@ require(['vs/editor/editor.main'], function () {
         } catch {}
         _sfRenderEntryFiles();
       };
+      // Walk _sfEntryFilesTree to children at a given subPath. Returns
+      // the array of node objects (files + dirs) at that depth.
+      const _sfEntryChildrenAt = (sub) => {
+        if (!sub) return _sfEntryFilesTree;
+        const parts = sub.split('/').filter(Boolean);
+        let cur = _sfEntryFilesTree;
+        for (const p of parts) {
+          const next = cur.find(n => n.isDir && n.name === p);
+          if (!next) return [];
+          cur = next.children || [];
+        }
+        return cur;
+      };
+      // True when every incoming basename's letters-only prefix matches
+      // the destination folder name (case-insensitive). Used to skip
+      // the rename prompt — there's nothing to rename if the names
+      // are already what the folder asks for.
+      const _sfAllNamesMatchFolder = (incomingNames, folderName) => {
+        const target = String(folderName || '').toLowerCase();
+        if (!target) return true;
+        for (const n of incomingNames) {
+          const m = String(n).match(/^([a-zA-Z]+)/);
+          if (!m || m[1].toLowerCase() !== target) return false;
+        }
+        return true;
+      };
+      // Compute target basenames for files landing in a named folder.
+      // Rule (per Ryan): the incoming sequence numbers PAST the highest
+      // existing <folder><N>.<ext> in the destination, treating a bare
+      // <folder>.<ext> as position 1. Padding preserved when the
+      // existing files use a single consistent width; mixed → no
+      // padding. Order of incoming names is respected (so the user's
+      // own order in the picker drives 1, 2, 3 …).
+      const _sfComputePasteRenameTargets = (folderName, incomingNames, destSubPath) => {
+        const folderLc = folderName.toLowerCase();
+        const existing = _sfEntryChildrenAt(destSubPath || '').filter(n => !n.isDir);
+        // For each extension we'll encounter, track the current max
+        // number among matching existing files, plus distinct paddings.
+        const stateByExt = new Map();
+        const ensureState = (ext) => {
+          if (!stateByExt.has(ext)) stateByExt.set(ext, { max: 0, padLens: new Set() });
+          return stateByExt.get(ext);
+        };
+        for (const f of existing) {
+          const dot = f.name.lastIndexOf('.');
+          if (dot < 0) continue;
+          const ext = f.name.slice(dot).toLowerCase();
+          const stem = f.name.slice(0, dot);
+          const m = stem.match(/^([a-zA-Z]+)(\d*)$/);
+          if (!m) continue;
+          if (m[1].toLowerCase() !== folderLc) continue;
+          const s = ensureState(ext);
+          if (m[2] === '') {
+            // Bare file = position 1.
+            if (s.max < 1) s.max = 1;
+          } else {
+            const n = parseInt(m[2], 10);
+            if (n > s.max) s.max = n;
+            s.padLens.add(m[2].length);
+          }
+        }
+        const pickPad = (padLens) => {
+          if (padLens.size === 1) return [...padLens][0];
+          return 0; // none or mixed → unpadded
+        };
+        const targets = [];
+        for (const inName of incomingNames) {
+          const dot = inName.lastIndexOf('.');
+          const ext = dot > 0 ? inName.slice(dot).toLowerCase() : '';
+          const s = ensureState(ext);
+          s.max += 1;
+          const padLen = pickPad(s.padLens);
+          const numStr = padLen > 0 ? String(s.max).padStart(padLen, '0') : String(s.max);
+          targets.push(`${folderName}${numStr}${ext}`);
+        }
+        return targets;
+      };
+      // Three-button choice modal: Rename / Keep names / Cancel.
+      // Resolves to one of those strings; backdrop click and Escape
+      // resolve to 'cancel'.
+      const _sfPromptPasteRename = ({ folderName, count }) => {
+        return new Promise((resolve) => {
+          const modal = document.getElementById('modal-sf-paste-rename');
+          const msg   = document.getElementById('sf-paste-rename-msg');
+          const yes   = document.getElementById('sf-paste-rename-yes');
+          const no    = document.getElementById('sf-paste-rename-no');
+          const cncl  = document.getElementById('sf-paste-rename-cancel');
+          if (!modal || !msg || !yes || !no || !cncl) { resolve('cancel'); return; }
+          msg.innerHTML = `${count} file${count === 1 ? '' : 's'} will land in <strong>${_sfEscape(folderName)}</strong>. Rename to match the folder, or keep their current names?`;
+          const cleanup = (val) => {
+            modal.classList.remove('active');
+            yes.removeEventListener('click', onYes);
+            no.removeEventListener('click', onNo);
+            cncl.removeEventListener('click', onCancel);
+            modal.removeEventListener('click', onBackdrop);
+            document.removeEventListener('keydown', onKey);
+            resolve(val);
+          };
+          const onYes    = () => cleanup('rename');
+          const onNo     = () => cleanup('keep');
+          const onCancel = () => cleanup('cancel');
+          const onBackdrop = (e) => { if (e.target === modal) onCancel(); };
+          const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); onCancel(); } };
+          yes.addEventListener('click', onYes);
+          no.addEventListener('click', onNo);
+          cncl.addEventListener('click', onCancel);
+          modal.addEventListener('click', onBackdrop);
+          document.addEventListener('keydown', onKey);
+          modal.classList.add('active');
+        });
+      };
+      // Resolve destNames for a paste into the entry at destSubPath.
+      // Returns null when the user cancels; [] when "keep names" (the
+      // existing copy/add path uses source basenames + Proffie variant
+      // for collisions); array of target names otherwise. Skips the
+      // prompt when destSubPath is root (no folder to match) or every
+      // incoming name already matches the folder.
+      const _sfResolvePasteRenames = async (incomingNames, destSubPath) => {
+        if (!destSubPath) return []; // root → no rename
+        const folderName = destSubPath.split('/').pop();
+        if (!folderName) return [];
+        if (_sfAllNamesMatchFolder(incomingNames, folderName)) return []; // already correct
+        const choice = await _sfPromptPasteRename({ folderName, count: incomingNames.length });
+        if (choice === 'cancel') return null;
+        if (choice === 'keep')   return [];
+        return _sfComputePasteRenameTargets(folderName, incomingNames, destSubPath);
+      };
+      // Renumber buckets in the entry's CURRENT breadcrumb folder so
+      // numbered sequences close gaps and become contiguous. Bare files
+      // keep position 1 (Ryan: "respect blank as if it were 1"); next
+      // ones become 2, 3, … . Single-file buckets are left alone.
+      const _sfRenumberCurrentFolder = async () => {
+        if (!_sfDetailOriginalName) return;
+        let res;
+        try {
+          res = await window.electronAPI.reorganizeRenumber({
+            name: _sfDetailOriginalName,
+            subPath: _sfEntryFilesPath,
+          });
+        } catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
+        if (!res || !res.ok) { alert(`Renumber failed: ${(res && res.error) || 'unknown'}`); return; }
+        try {
+          const fr = await window.electronAPI.listEntryFiles({ name: _sfDetailOriginalName });
+          _sfEntryFilesTree = (fr && fr.ok && fr.files) || [];
+        } catch {}
+        _sfEntryFilesSelected = new Set();
+        _sfEntryFilesAnchor = null;
+        _sfRenderEntryFiles();
+      };
       // + Add: pick audio files from disk and copy them into the entry at
       // the current breadcrumb path. Collisions go through the Proffie
       // variant naming so e.g. boot01.wav landing in a dir of boot01/02
@@ -15729,10 +15906,17 @@ require(['vs/editor/editor.main'], function () {
         try { pick = await window.electronAPI.selectAudioFiles({ title: 'Add files to entry' }); }
         catch (err) { alert(`Could not open picker: ${err && err.message || err}`); return; }
         if (!pick || !pick.ok || !pick.filePaths?.length) return;
+        // Same rename-to-match-folder prompt as Paste and the library
+        // picker. Pull basenames from the absolute paths the OS picker
+        // returned.
+        const incomingNames = pick.filePaths.map(p => p.replace(/\\/g, '/').split('/').pop());
+        const destNames = await _sfResolvePasteRenames(incomingNames, _sfEntryFilesPath);
+        if (destNames === null) return; // cancelled
         _sfDeleteProgress.show('Adding files', `${pick.filePaths.length} file${pick.filePaths.length === 1 ? '' : 's'}`);
         const res = await window.electronAPI.fileOpsAddFiles({
           kind: 'entry', id: _sfDetailOriginalName,
           subPath: _sfEntryFilesPath, sourceFilePaths: pick.filePaths,
+          destNames: destNames.length ? destNames : undefined,
         });
         await _sfDeleteProgress.hide();
         if (!res || !res.ok) { alert(`Add failed: ${(res && res.error) || 'unknown'}`); return; }
@@ -16280,22 +16464,35 @@ require(['vs/editor/editor.main'], function () {
       // boot/, matching the existing +Add and right-click paste UX).
       _sfLibPickEls.addBtn?.addEventListener('click', async () => {
         if (_sfLibPickSelections.length === 0 || !_sfDetailOriginalName) return;
-        const groups = new Map(); // "kind::id" → { src, paths[] }
-        for (const s of _sfLibPickSelections) {
+        // Run the rename-to-match-folder prompt once across the whole
+        // staged set so the numbering stays sequential across sources.
+        const incomingNames = _sfLibPickSelections.map(s => s.fileName);
+        const destNames = await _sfResolvePasteRenames(incomingNames, _sfEntryFilesPath);
+        if (destNames === null) return; // cancelled
+        // Group selections by source (kind, id) but remember each
+        // selection's index in the flat order so we can carry the
+        // matching destName into the per-group call.
+        const groups = new Map(); // "kind::id" → { src, paths[], names[] }
+        for (let i = 0; i < _sfLibPickSelections.length; i++) {
+          const s = _sfLibPickSelections[i];
           const k = `${s.kind}::${s.id}`;
-          if (!groups.has(k)) groups.set(k, { src: { kind: s.kind, id: s.id }, paths: [] });
-          groups.get(k).paths.push(s.subPath);
+          if (!groups.has(k)) groups.set(k, { src: { kind: s.kind, id: s.id }, paths: [], names: [] });
+          const g = groups.get(k);
+          g.paths.push(s.subPath);
+          g.names.push(destNames.length ? destNames[i] : null);
         }
         const total = _sfLibPickSelections.length;
         _sfDeleteProgress.show('Adding files', `${total} file${total === 1 ? '' : 's'}`);
         const allAdded = [];
         const allFailed = [];
-        for (const { src, paths } of groups.values()) {
+        for (const { src, paths, names } of groups.values()) {
+          const hasDestNames = names.some(n => n !== null);
           let res;
           try {
             res = await window.electronAPI.fileOpsCopy({
               src, srcPaths: paths,
               dest: { kind: 'entry', id: _sfDetailOriginalName, subPath: _sfEntryFilesPath },
+              destNames: hasDestNames ? names : undefined,
             });
           } catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
           if (!res || !res.ok) {
@@ -16888,7 +17085,20 @@ require(['vs/editor/editor.main'], function () {
         const chip = e.target.closest('[data-bucket-id]');
         if (!chip) return;
         const id = chip.getAttribute('data-bucket-id');
-        if (id === _sfReorgActiveBucket) return;
+        // Click the SAME chip again to dismiss the panel — saves a
+        // trip to Cancel when the user just wanted to peek.
+        if (id === _sfReorgActiveBucket) {
+          if (_sfReorgIsDirty()) {
+            if (!await _promptDiscard('You have a staged reorder. Discard it?')) return;
+          }
+          _sfReorgActiveBucket = null;
+          _sfReorgStaged = null;
+          _sfReorgStagedOriginal = null;
+          _sfReorgSelectedRow = null;
+          document.getElementById('sf-reorg-reorder-panel').style.display = 'none';
+          _sfRenderReorgBuckets();
+          return;
+        }
         // Switching buckets with a staged reorder would silently drop
         // the user's work. Prompt to discard before loading the new
         // bucket; bail out of the chip click if they cancel.
@@ -16910,8 +17120,18 @@ require(['vs/editor/editor.main'], function () {
         const list = document.getElementById('sf-reorg-reorder-list');
         const bucket = _sfReorgBuckets.find(b => b.id === _sfReorgActiveBucket);
         if (!list || !bucket) return;
-        let pos = 0;
-        let renumberWork = false; // true when Save would actually change names
+        // Bare-at-position-1 rule (matches the backend applyReorder):
+        // when the file the user placed first is currently bare, the
+        // rename preserves bare for that row and numbers the rest 2,
+        // 3, … . When the first file is numbered, numbering starts at
+        // 1 for everyone (including any bare file dragged out of the
+        // first slot — it picks up its position's number).
+        const firstStagedFile = _sfReorgStaged.length > 0
+          ? bucket.files.find(x => x.path === _sfReorgStaged[0])
+          : null;
+        const firstIsBare = !!(firstStagedFile && !firstStagedFile.isMisnamed && firstStagedFile.num === null);
+        let renumberWork = false; // true when Reorder would actually change names
+        let firstHandled = false;
         list.innerHTML = _sfReorgStaged.map((p, idx) => {
           const f = bucket.files.find(x => x.path === p);
           if (!f) return '';
@@ -16921,16 +17141,31 @@ require(['vs/editor/editor.main'], function () {
           const isFirst = idx === 0;
           const isLast = idx === _sfReorgStaged.length - 1;
           let posLabel = '';
-          if (!f.isMisnamed) {
-            pos++;
-            // "Changed" means the file's CURRENT number doesn't match
-            // the position Save would assign it. Catches both reorder
-            // moves and gap-closure (e.g. blst15 sitting at position 10).
-            const isChanged = f.num !== pos;
-            if (isChanged) renumberWork = true;
-            posLabel = `<span class="sf-reorg-reorder-pos${isChanged ? ' changed' : ''}">${pos}</span>`;
-          } else {
+          if (f.isMisnamed) {
             posLabel = `<span class="sf-reorg-reorder-pos" title="Won't play — name doesn't match folder">⚠</span>`;
+          } else if (!firstHandled && firstIsBare) {
+            // Bare stays bare at position 1; no rename, no work flag.
+            firstHandled = true;
+            posLabel = `<span class="sf-reorg-reorder-pos" title="Stays bare at position 1">1</span>`;
+          } else {
+            // The N-th NON-misnamed slot. Use a running counter rather
+            // than idx so misnamed rows don't shift the numbering.
+            // First slot gets 1 when first wasn't bare; otherwise the
+            // counter continues from 2.
+            firstHandled = true;
+            // Count how many non-misnamed files came before us in
+            // staged order to derive the numbering position.
+            let countBefore = 0;
+            for (let j = 0; j < idx; j++) {
+              const g = bucket.files.find(x => x.path === _sfReorgStaged[j]);
+              if (g && !g.isMisnamed) countBefore++;
+            }
+            const targetNum = firstIsBare
+              ? (countBefore + 1) // bare took slot 1; this row continues from 2
+              : countBefore + 1;
+            const isChanged = f.num !== targetNum;
+            if (isChanged) renumberWork = true;
+            posLabel = `<span class="sf-reorg-reorder-pos${isChanged ? ' changed' : ''}">${targetNum}</span>`;
           }
           return `<div class="${classes.join(' ')}" draggable="true" data-row-path="${_sfEscape(p)}">
             ${posLabel}
@@ -16941,9 +17176,15 @@ require(['vs/editor/editor.main'], function () {
             </span>
           </div>`;
         }).join('');
-        // Save fires whenever any name would change — either because the
-        // user reordered, OR because the bucket has gaps Save can close.
+        // Reorder fires whenever any name would change — either because
+        // the user reordered, OR because the bucket has gaps to close.
+        // The button is the only commit path; a single click renames.
         document.getElementById('btn-sf-reorg-reorder-save').disabled = !renumberWork;
+        // Cancel only matters when the user has unsaved drag changes —
+        // otherwise there's nothing to back out of, and clicking the
+        // chip again is the way to dismiss the panel.
+        const cancelBtn = document.getElementById('btn-sf-reorg-reorder-cancel');
+        if (cancelBtn) cancelBtn.style.display = _sfReorgIsDirty() ? '' : 'none';
       };
       const _sfReorgMove = (path, delta) => {
         const idx = _sfReorgStaged.indexOf(path);
@@ -17080,23 +17321,36 @@ require(['vs/editor/editor.main'], function () {
       });
       document.getElementById('btn-sf-reorg-reorder-save')?.addEventListener('click', async () => {
         if (!_sfReorgActiveBucket || !_sfReorgStaged) return;
+        const bucketId = _sfReorgActiveBucket;
         let res;
         try {
           res = await window.electronAPI.reorganizeReorder({
             name: _sfDetailOriginalName,
-            bucketId: _sfReorgActiveBucket,
+            bucketId,
             orderedPaths: _sfReorgStaged,
           });
         } catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
         if (!res || !res.ok) { alert(`Reorder failed: ${(res && res.error) || 'unknown'}`); return; }
-        // Close the reorder panel and re-detect so the chip + counts
-        // reflect the new file names.
-        _sfReorgActiveBucket = null;
-        _sfReorgStaged = null;
-        _sfReorgStagedOriginal = null;
-        _sfReorgSelectedRow = null;
-        document.getElementById('sf-reorg-reorder-panel').style.display = 'none';
-        await _sfReorgRefresh();
+        // Stay open on the same bucket so the user sees the renumbered
+        // list. Re-detect to pick up the freshly renamed files, then
+        // remap the staged + original arrays to the new paths so the
+        // dirty check resets and the Reorder button greys out.
+        try {
+          const det = await window.electronAPI.reorganizeDetect({ name: _sfDetailOriginalName });
+          if (det && det.ok) {
+            _sfReorgBuckets = det.buckets || [];
+            _sfReorgLayout = { canGroup: !!det.canGroup, canFlatten: !!det.canFlatten };
+          }
+        } catch {}
+        const reloaded = _sfReorgBuckets.find(b => b.id === bucketId);
+        if (reloaded) {
+          _sfReorgStaged = reloaded.files.map(f => f.path);
+          _sfReorgStagedOriginal = _sfReorgStaged.slice();
+          _sfReorgSelectedRow = null;
+        }
+        _sfRenderReorgRestructure();
+        _sfRenderReorgBuckets();
+        _sfRenderReorgReorderList();
         await _sfReorgRefreshOuterBrowser();
       });
       // Find & replace — entry-wide, debounced live preview. The
@@ -17273,6 +17527,11 @@ require(['vs/editor/editor.main'], function () {
           if (clipboardCount > 0) mkItem(`Paste here (${clipboardCount})`, '', () => _sfPasteIntoEntry());
           if (clipboardCount > 0) mkSep();
           mkItem('+ New folder', '', _sfCreateEntrySubfolderPrompt);
+          mkSep();
+          // Renumber files in the current folder — closes gaps in
+          // numbered sequences. Operates on the breadcrumb path, not
+          // any one file. "Bare = position 1" rule applies.
+          mkItem('Renumber files', '', () => _sfRenumberCurrentFolder());
         }
         if (!menu.children.length) return;
         const x = Math.min(e.clientX, window.innerWidth - 200);

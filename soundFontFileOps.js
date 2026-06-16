@@ -89,6 +89,9 @@ async function copyAcrossLocations({
   src,    // { kind, id }
   srcPaths,
   dest,   // { kind, id, subPath }
+  destNames, // optional: parallel to srcPaths; when supplied, use these
+             // target basenames instead of the source's own. Proffie
+             // variant naming still resolves collisions at the dest.
 }) {
   if (!src || !src.kind || !src.id) return { ok: false, error: 'Missing src' };
   if (!dest || !dest.kind || !dest.id) return { ok: false, error: 'Missing dest' };
@@ -135,10 +138,12 @@ async function copyAcrossLocations({
   };
   if (src.kind === 'source') {
     const soundFontSources = require('./soundFontSources');
-    for (const srcSubPath of srcPaths) {
+    for (let i = 0; i < srcPaths.length; i++) {
+      const srcSubPath = srcPaths[i];
       try {
         const baseName = String(srcSubPath).split('/').pop();
         if (!baseName) { failed.push({ source: srcSubPath, error: 'Invalid source path' }); continue; }
+        const desiredName = (destNames && destNames[i]) || baseName;
         // Distinguish file vs directory by probing the source listing.
         const tree = await _enumerateSourceTree(src.id, srcSubPath);
         if (!tree) { failed.push({ source: srcSubPath, error: 'Not found in source' }); continue; }
@@ -146,7 +151,7 @@ async function copyAcrossLocations({
         if (!isDir) {
           // File path — current behavior, single extract with Proffie
           // variant naming on collision.
-          const finalName = _proffieVariantName(destDir, baseName);
+          const finalName = _proffieVariantName(destDir, desiredName);
           await soundFontSources.extractSourceFileTo(userData, src.id, srcSubPath, destDir, finalName);
           const rel = path.relative(destRoot, path.join(destDir, finalName)).replace(/\\/g, '/');
           added.push(rel);
@@ -177,7 +182,8 @@ async function copyAcrossLocations({
     }
     return { ok: true, added, failed };
   }
-  for (const srcSubPath of srcPaths) {
+  for (let i = 0; i < srcPaths.length; i++) {
+    const srcSubPath = srcPaths[i];
     try {
       let srcAbs;
       try { srcAbs = _resolve(userData, src.kind, src.id, srcSubPath); }
@@ -187,6 +193,7 @@ async function copyAcrossLocations({
         continue;
       }
       const stat = fs.statSync(srcAbs);
+      const desiredName = (destNames && destNames[i]) || path.basename(srcAbs);
       if (stat.isDirectory()) {
         // Recursive on-disk copy. Destination folder gets a " (N)"
         // suffix on collision so an existing folder isn't merged into
@@ -213,7 +220,7 @@ async function copyAcrossLocations({
         failed.push({ source: srcSubPath, error: 'Source file not found' });
         continue;
       }
-      const finalName = _proffieVariantName(destDir, path.basename(srcAbs));
+      const finalName = _proffieVariantName(destDir, desiredName);
       const destPath = path.join(destDir, finalName);
       fs.copyFileSync(srcAbs, destPath);
       const rel = path.relative(destRoot, destPath).replace(/\\/g, '/');
@@ -364,7 +371,7 @@ function createSubfolderAt({ userData, kind, id, parentSubPath, name }) {
 // the given subPath. Used by the "+ Add" affordance in both common
 // folders and entries — picks files from disk, copies them in with
 // Proffie-style variant naming on collision.
-function addFilesAt({ userData, kind, id, subPath, sourceFilePaths }) {
+function addFilesAt({ userData, kind, id, subPath, sourceFilePaths, destNames }) {
   if (!kind || !id) return { ok: false, error: 'Missing location' };
   if (!Array.isArray(sourceFilePaths) || sourceFilePaths.length === 0) {
     return { ok: false, error: 'No source paths' };
@@ -379,13 +386,15 @@ function addFilesAt({ userData, kind, id, subPath, sourceFilePaths }) {
   const destRoot = path.resolve(_root(userData, kind, id));
   const added = [];
   const failed = [];
-  for (const src of sourceFilePaths) {
+  for (let i = 0; i < sourceFilePaths.length; i++) {
+    const src = sourceFilePaths[i];
     try {
       if (!fs.existsSync(src) || !fs.statSync(src).isFile()) {
         failed.push({ source: src, error: 'Not a file' });
         continue;
       }
-      const finalName = _proffieVariantName(destDir, path.basename(src));
+      const desiredName = (destNames && destNames[i]) || path.basename(src);
+      const finalName = _proffieVariantName(destDir, desiredName);
       const destPath = path.join(destDir, finalName);
       fs.copyFileSync(src, destPath);
       const rel = path.relative(destRoot, destPath).replace(/\\/g, '/');

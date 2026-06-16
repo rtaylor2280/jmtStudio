@@ -160,13 +160,16 @@ function detectBuckets(userData, entryName) {
       other.label = `${other.effect} (2)`;
     }
   }
-  // Sort and merge: subfolders first (alpha), then root effects (alpha).
-  subBuckets.sort((a, b) => a.subfolderName.localeCompare(b.subfolderName));
-  const rootBuckets = Array.from(rootBucketsByEffect.values())
-    .sort((a, b) => a.effect.localeCompare(b.effect));
-  for (const b of subBuckets) b.files = _sortBucketFiles(b.files);
-  for (const b of rootBuckets) b.files = _sortBucketFiles(b.files);
-  return [...subBuckets, ...rootBuckets];
+  // Single alphabetical sort across BOTH subfolder and root buckets so
+  // the chip row reads as one scannable list. Earlier versions split
+  // by location ("subfolders first, then root") which made an unrelated
+  // jump in the order (e.g. swng → ccbegin) that the user had to
+  // mentally bridge. The conflict suffix "(2)" sorts naturally next to
+  // its partner so the related entries stay visually adjacent.
+  const all = [...subBuckets, ...Array.from(rootBucketsByEffect.values())];
+  all.sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: 'base' }));
+  for (const b of all) b.files = _sortBucketFiles(b.files);
+  return all;
 }
 
 // Sort: unnumbered file first (Proffie treats it as position 1), then by
@@ -179,7 +182,7 @@ function _sortBucketFiles(files) {
     const bHas = b.num !== null;
     if (aHas !== bHas) return aHas ? 1 : -1; // unnumbered first
     if (aHas && bHas) return a.num - b.num;
-    return a.name.localeCompare(b.name);
+    return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
   });
 }
 
@@ -338,22 +341,34 @@ function applyReorder(userData, entryName, bucketId, orderedPaths) {
   const workingDir = bucket.location === 'subfolder'
     ? path.join(root, bucket.subfolderName)
     : root;
-  // Build the rename pairs. Numbered position increments by 1 for every
-  // non-misnamed file in display order; misnamed files keep their name.
+  // For a subfolder bucket where files use bare-numeric names (1.wav),
+  // keep the bare-numeric scheme. Otherwise use <effect><N><ext>.
+  const usesBareNumbers = bucket.location === 'subfolder'
+    && bucket.files.every(x => x.isMisnamed || _parseName(x.name)?.effect === '');
+  // Bare-at-position-1 rule: if the file the user placed first is
+  // currently bare (no number), keep it bare; numbering resumes at 2
+  // for the rest. Matches the right-click Renumber behavior so the
+  // convention is the same everywhere a sequence gets renumbered.
+  const firstFile = bucket.files.find(x => x.path === ordered[0]);
+  const firstIsBare = firstFile && !firstFile.isMisnamed && firstFile.num === null;
   const pairs = [];
-  let n = 1;
+  let counter = firstIsBare ? 2 : 1;
+  let firstHandled = false;
   for (const subPath of ordered) {
     const f = bucket.files.find(x => x.path === subPath);
     const oldBasename = f.name;
     if (f.isMisnamed) continue;
-    // For a subfolder bucket where files use bare-numeric names (1.wav),
-    // keep the bare-numeric scheme. Otherwise use <effect><N><ext>.
-    const usesBareNumbers = bucket.location === 'subfolder'
-      && bucket.files.every(x => x.isMisnamed || _parseName(x.name)?.effect === '');
-    const newBasename = usesBareNumbers
-      ? `${_padded(n, padLen)}${f.ext}`
-      : `${bucket.effect}${_padded(n, padLen)}${f.ext}`;
-    n++;
+    let newBasename;
+    if (!firstHandled && firstIsBare) {
+      // Keep the bare name as-is; nothing to rename for this row.
+      firstHandled = true;
+      continue;
+    }
+    firstHandled = true;
+    newBasename = usesBareNumbers
+      ? `${_padded(counter, padLen)}${f.ext}`
+      : `${bucket.effect}${_padded(counter, padLen)}${f.ext}`;
+    counter++;
     if (oldBasename !== newBasename) pairs.push({ from: oldBasename, to: newBasename });
   }
   _atomicRenameBatch(workingDir, pairs);
@@ -367,6 +382,75 @@ function applyReorder(userData, entryName, bucketId, orderedPaths) {
 }
 
 // Apply a find pattern to a filename STEM (extension is handled by the
+// Renumber every numbered "bucket" inside ONE folder so the sequence
+// reads 1, 2, 3, … contiguously. Rules:
+//   - A "bucket" = files sharing the same letters prefix + extension
+//     (e.g. quote.wav, quote2.wav, quote5.wav).
+//   - Single-file buckets are left alone (don't strip a number from a
+//     standalone file; don't bare-rename one either).
+//   - When a bucket has 2+ files AND one of them is bare (e.g.
+//     quote.wav), the bare file stays at position 1; the others get
+//     2, 3, … . Per the user convention: "respect blank as if it
+//     were 1 so next is 2 etc."
+//   - When a bucket has 2+ files and none is bare, the lowest-
+//     numbered becomes 1 and the rest follow in order.
+//   - Padding preserved when the bucket uses a single width; mixed
+//     widths fall back to none.
+//   - Two-phase atomic rename inside the folder so name swaps can't
+//     collide mid-batch.
+function renumberFolder(userData, entryName, subPath) {
+  const root = _root(userData, entryName);
+  const dir = subPath ? _safe(root, subPath) : root;
+  if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
+    return { ok: false, error: 'Folder not found' };
+  }
+  let entries;
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+  // Group files by (effect, ext). Files whose effect is empty (bare
+  // numeric like "1.wav") OR that don't parse are skipped — those
+  // don't belong to a letter-prefixed bucket.
+  const buckets = new Map(); // key "effect::ext" → { effect, ext, files }
+  for (const e of entries) {
+    if (!e.isFile()) continue;
+    if (!subPath && e.name === 'meta.json') continue;
+    const parsed = _parseName(e.name);
+    if (!parsed) continue;
+    if (!parsed.effect) continue; // bare-numeric — not part of a named bucket
+    const key = `${parsed.effect}::${parsed.ext}`;
+    if (!buckets.has(key)) buckets.set(key, { effect: parsed.effect, ext: parsed.ext, files: [] });
+    buckets.get(key).files.push({ name: e.name, num: parsed.num, padLen: parsed.padLen });
+  }
+  const renamed = [];
+  for (const b of buckets.values()) {
+    if (b.files.length < 2) continue; // singletons untouched
+    // Sort: bare first (num === null), then ascending number.
+    b.files.sort((a, b2) => {
+      const aBare = a.num === null;
+      const bBare = b2.num === null;
+      if (aBare !== bBare) return aBare ? -1 : 1;
+      if (aBare && bBare) return 0;
+      return a.num - b2.num;
+    });
+    const hasBare = b.files[0].num === null;
+    const padLen = _pickPadLen(b.files);
+    const pairs = [];
+    let counter = hasBare ? 2 : 1;
+    for (let i = 0; i < b.files.length; i++) {
+      const f = b.files[i];
+      if (i === 0 && hasBare) continue; // keep bare as position 1
+      const target = `${b.effect}${_padded(counter, padLen)}${b.ext}`;
+      counter++;
+      if (f.name === target) continue; // already correct
+      pairs.push({ from: f.name, to: target });
+    }
+    if (pairs.length === 0) continue;
+    _atomicRenameBatch(dir, pairs);
+    for (const p of pairs) renamed.push(p);
+  }
+  return { ok: true, renamed };
+}
+
 // caller, so we never touch it). Wildcards `*` and `?` get glob
 // semantics — `*` matches any run of characters, `?` matches one. The
 // matched span is replaced literally with the replace string; no
@@ -526,5 +610,6 @@ module.exports = {
   restructureToGrouped,
   restructureToFlat,
   applyReorder,
+  renumberFolder,
   findReplaceInEntry,
 };

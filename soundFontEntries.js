@@ -445,7 +445,7 @@ function listEntryDocs(userData, name) {
     }
   };
   walk(dir, '');
-  out.sort((a, b) => a.fileName.localeCompare(b.fileName));
+  out.sort((a, b) => a.fileName.localeCompare(b.fileName, undefined, { numeric: true, sensitivity: 'base' }));
   return out;
 }
 
@@ -608,7 +608,9 @@ function listEntryFiles(userData, name) {
     }
     out.sort((a, b) => {
       if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
-      return a.name.localeCompare(b.name);
+      // Natural sort so "Sabine_2" precedes "Sabine_10" instead of
+      // the lexicographic order that would put 10 before 2.
+      return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
     });
     return out;
   };

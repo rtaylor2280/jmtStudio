@@ -380,7 +380,8 @@ function listCommonFiles(userData, uuid) {
     }
     out.sort((a, b) => {
       if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
-      return a.name.localeCompare(b.name);
+      // Natural sort so numbered filenames land in human order.
+      return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
     });
     return out;
   };

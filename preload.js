@@ -222,6 +222,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   reorganizeFlatten:     (params)     => ipcRenderer.invoke('reorganize:flatten', params),
   reorganizeReorder:     (params)     => ipcRenderer.invoke('reorganize:reorder', params),
   reorganizeFindReplace: (params)     => ipcRenderer.invoke('reorganize:findReplace', params),
+  reorganizeRenumber:    (params)     => ipcRenderer.invoke('reorganize:renumber', params),
   hashFiles:             (params)     => ipcRenderer.invoke('hash:files', params),
   sfExportFiles:         (params)     => ipcRenderer.invoke('sfFile:export', params),
   fileOpsCopy:           (params)     => ipcRenderer.invoke('fileOps:copy', params),

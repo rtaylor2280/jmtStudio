@@ -1064,8 +1064,8 @@ ipcMain.handle('entries:listFiles', (_, { name } = {}) => {
 // Unified file ops (common ↔ entry, either direction, same kind same dir).
 // Used by both the common-folder sidecar and the entry detail file browser
 // so clipboard contents can survive switching between them.
-ipcMain.handle('fileOps:copy', async (_, { src, srcPaths, dest } = {}) => {
-  try { return await soundFontFileOps.copyAcrossLocations({ userData: app.getPath('userData'), src, srcPaths, dest }); }
+ipcMain.handle('fileOps:copy', async (_, { src, srcPaths, dest, destNames } = {}) => {
+  try { return await soundFontFileOps.copyAcrossLocations({ userData: app.getPath('userData'), src, srcPaths, dest, destNames }); }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
@@ -1089,8 +1089,8 @@ ipcMain.handle('fileOps:createSubfolder', (_, { kind, id, parentSubPath, name } 
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
-ipcMain.handle('fileOps:addFiles', (_, { kind, id, subPath, sourceFilePaths } = {}) => {
-  try { return soundFontFileOps.addFilesAt({ userData: app.getPath('userData'), kind, id, subPath, sourceFilePaths }); }
+ipcMain.handle('fileOps:addFiles', (_, { kind, id, subPath, sourceFilePaths, destNames } = {}) => {
+  try { return soundFontFileOps.addFilesAt({ userData: app.getPath('userData'), kind, id, subPath, sourceFilePaths, destNames }); }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
@@ -1120,6 +1120,12 @@ ipcMain.handle('reorganize:findReplace', (_, { name, find, replace, commit } = {
   try { return soundFontReorganize.findReplaceInEntry(app.getPath('userData'), name, find, replace, { commit: !!commit }); }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
+
+ipcMain.handle('reorganize:renumber', (_, { name, subPath } = {}) => {
+  try { return soundFontReorganize.renumberFolder(app.getPath('userData'), name, subPath); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
 
 // Generic audio file picker — used by the entry's "+ Add" affordance.
 // Title differs from the common-folder picker so the dialog reads

@@ -446,7 +446,7 @@ function _listAtPath(allEntries, basePath) {
   }
   items.sort((a, b) => {
     if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
-    return a.name.localeCompare(b.name);
+    return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
   });
   return items;
 }
@@ -621,7 +621,7 @@ function _createFolderSource({ uuid, uuidDir, meta }) {
       });
       items.sort((a, b) => {
         if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
-        return a.name.localeCompare(b.name);
+        return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
       });
       return items;
     },
@@ -769,7 +769,8 @@ async function listSourceFiles(userData, uuid) {
   const sortRec = (arr) => {
     arr.sort((a, b) => {
       if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
-      return a.name.localeCompare(b.name);
+      // Natural sort for files inside the source archive view.
+      return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
     });
     for (const n of arr) if (n.isDir && n.children) sortRec(n.children);
   };
