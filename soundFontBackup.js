@@ -159,6 +159,53 @@ async function exportBackup({
 }) {
   if (!destPath) throw new Error('Missing destPath');
   const survey = surveyLibrary(userData);
+
+  // Content-hash pre-pass. One sha256 per top-level item, written into
+  // the manifest so the Replace-import survey can do a true byte-level
+  // skip-or-extract decision instead of the older fileCount+totalBytes
+  // proxy + directory-set heuristic. Costs one full read of the library
+  // up front; cheaper than the unbounded user-trust risk of "looked
+  // identical, wasn't actually." Per-item progress emits so the UI can
+  // tick a counter (large libraries with paid voicepacks can take
+  // tens of seconds at this step on a spinning disk).
+  const { hashItemDir } = require('./soundFontFileHash');
+  const contentHashes = { sources: {}, library: {}, common: {} };
+  // Pre-count items across all buckets so the renderer can show a
+  // proportional progress bar instead of three step-changes.
+  const hashJobs = [];
+  for (const bucket of ['sources', 'library', 'common']) {
+    const root = path.join(_soundFontsRoot(userData), bucket);
+    if (!fs.existsSync(root)) continue;
+    let entries;
+    try { entries = fs.readdirSync(root, { withFileTypes: true }); }
+    catch { continue; }
+    for (const e of entries) {
+      if (e.isDirectory()) hashJobs.push({ bucket, name: e.name, abs: path.join(root, e.name) });
+    }
+  }
+  let hashed = 0;
+  for (const job of hashJobs) {
+    if (signal && signal.aborted) {
+      const e = new Error('Cancelled');
+      e.cancelled = true;
+      throw e;
+    }
+    onProgress({
+      phase: 'hashing',
+      currentItem: `${job.bucket}/${job.name}`,
+      processedItems: hashed,
+      totalItems: hashJobs.length,
+    });
+    const h = hashItemDir(job.abs);
+    if (h) contentHashes[job.bucket][job.name] = h;
+    hashed++;
+  }
+  // Final tick so the bar visibly hits 100% before the archive phase
+  // starts and the meter resets to bytes-based progress.
+  if (hashJobs.length > 0) {
+    onProgress({ phase: 'hashing', currentItem: '', processedItems: hashJobs.length, totalItems: hashJobs.length });
+  }
+
   // Build the manifest first so a corrupted partial zip still gets the
   // type marker even if it doesn't finish.
   const manifest = {
@@ -169,6 +216,11 @@ async function exportBackup({
     counts: { ...survey.counts },
     totals: { ...survey.totals, totalBytes: survey.totalBytes },
     settings: _captureLibrarySettings(prefs),
+    // Per-item canonical content hashes, see soundFontFileHash.js for
+    // what's included and excluded. Backups without this field fall
+    // through to the legacy count+bytes path on import — backward
+    // compat is preserved by absence.
+    contentHashes,
   };
 
   const archiver = require('archiver');
@@ -441,6 +493,14 @@ async function applyReplace({
       manifest = JSON.parse(buf.toString('utf8'));
     } catch {}
 
+    // When the manifest carries per-item content hashes, surveyMerge
+    // already did a strict byte-level identical check (hash from
+    // manifest vs hash of the live tree). The directory-set heuristic
+    // below was the v1 stopgap for that gap; it's redundant when the
+    // hash is authoritative. Old backups without contentHashes still
+    // get the heuristic via the legacy path.
+    const hasManifestContentHashes = !!(manifest && manifest.contentHashes);
+
     // Per-item directory-presence map for the verification step. For
     // each backup item we record which directories the zip contains
     // (both as implicit parents of files and explicit dir entries).
@@ -504,16 +564,20 @@ async function applyReplace({
         // survey says identical — empty folders added (or removed)
         // since the backup was taken. Symmetric check: every on-disk
         // dir must be in the zip, every zip dir must be on-disk.
-        const onDiskDirs = onDiskDirsOf(snapAbs);
-        const zipDirs = zipDirsByItem.get(`${bucket}/${id}`) || new Set();
-        let mismatch = false;
-        for (const d of onDiskDirs) { if (!zipDirs.has(d)) { mismatch = true; break; } }
-        if (!mismatch) {
-          for (const d of zipDirs) { if (!onDiskDirs.has(d)) { mismatch = true; break; } }
-        }
-        if (mismatch) {
-          skipDirs[bucket].delete(id);
-          continue;
+        // Skipped entirely when the manifest carries content hashes
+        // (surveyMerge already did a strict comparison).
+        if (!hasManifestContentHashes) {
+          const onDiskDirs = onDiskDirsOf(snapAbs);
+          const zipDirs = zipDirsByItem.get(`${bucket}/${id}`) || new Set();
+          let mismatch = false;
+          for (const d of onDiskDirs) { if (!zipDirs.has(d)) { mismatch = true; break; } }
+          if (!mismatch) {
+            for (const d of zipDirs) { if (!onDiskDirs.has(d)) { mismatch = true; break; } }
+          }
+          if (mismatch) {
+            skipDirs[bucket].delete(id);
+            continue;
+          }
         }
         try {
           fs.renameSync(snapAbs, freshAbs);
@@ -636,8 +700,32 @@ async function surveyMerge({ userData, zipPath }) {
   } catch (err) {
     throw new Error(`Could not open backup zip: ${err.message}`);
   }
+  // Hash the on-disk item lazily so a Replace-import that needs the
+  // identical decision can compare against manifest.contentHashes when
+  // present. Cached so repeated calls (e.g. one per bucket) only walk
+  // the tree once per item.
+  const { hashItemDir } = require('./soundFontFileHash');
+  const sfRoot = _soundFontsRoot(userData);
+  const liveHashCache = new Map(); // "bucket/id" → hex or null
+  const liveHashOf = (bucket, id) => {
+    const k = `${bucket}/${id}`;
+    if (liveHashCache.has(k)) return liveHashCache.get(k);
+    const h = hashItemDir(path.join(sfRoot, bucket, id));
+    liveHashCache.set(k, h);
+    return h;
+  };
   try {
     const entries = await zip.entries();
+    // Manifest content hashes when present — drives the strict
+    // identical check for library/common (and overrides the source
+    // meta.hash for sources too, since the canonical-tree hash
+    // catches local edits the import-time stream hash cannot).
+    let manifestHashes = null;
+    try {
+      const mbuf = await zip.entryData('manifest.json');
+      const m = JSON.parse(mbuf.toString('utf8'));
+      if (m && m.contentHashes) manifestHashes = m.contentHashes;
+    } catch {}
 
     // Build per-bucket per-top-dir aggregates from the zip's entry list.
     // Library entries are keyed by their on-disk dir name (which is also
@@ -810,19 +898,35 @@ async function surveyMerge({ userData, zipPath }) {
       } catch { return { displayName: '' }; }
     });
 
-    // Classify each backup item per category.
+    // Classify each backup item per category. The "identical" rule per
+    // bucket prefers manifest.contentHashes when present (catches any
+    // byte-level diff: file edit, rename, empty-folder add/remove),
+    // and falls through to the legacy proxy when absent for backward
+    // compat with older backup files.
+    const sourceManifestHashes = (manifestHashes && manifestHashes.sources) || null;
     const classifySources = () => {
       const out = { identical: [], conflict: [], add: [] };
       for (const [uuid, z] of zipSources) {
         const c = curSources.get(uuid);
         if (!c) { out.add.push({ id: uuid, name: z.name || uuid, fileCount: z.fileCount, totalBytes: z.totalBytes }); continue; }
-        if (z.hash && c.hash && z.hash === c.hash) {
+        // Strict path: canonical-tree hash from the manifest vs the
+        // current on-disk tree hash. Catches local edits to a source
+        // (trim, file removal) that the import-time stream hash can't.
+        let identical = false;
+        if (sourceManifestHashes && sourceManifestHashes[uuid]) {
+          identical = sourceManifestHashes[uuid] === liveHashOf('sources', uuid);
+        } else if (z.hash && c.hash && z.hash === c.hash) {
+          // Legacy backups don't carry contentHashes — fall back to
+          // the import-time stream hash that's been on source meta.json
+          // since the original backup format.
+          identical = true;
+        }
+        if (identical) {
           out.identical.push({ id: uuid, name: z.name || uuid });
         } else {
-          // Source conflict always means content differs (sources have a
-          // streamed hash at import time; matching uuid + differing hash =
-          // content diff). Sources don't carry user-curated meta the user
-          // typically edits, so meta-only conflicts aren't a thing here.
+          // Source conflict always means content differs (sources don't
+          // carry user-curated meta the user typically edits, so meta-
+          // only conflicts aren't a thing here).
           out.conflict.push({
             id: uuid,
             name: z.name || uuid,
@@ -841,6 +945,7 @@ async function surveyMerge({ userData, zipPath }) {
     // includes a list of which specific meta fields differ so the UI can
     // tell the user "Sound files identical, only metadata differs:
     // acquisition date, tags" instead of a generic "metadata differs."
+    const libraryManifestHashes = (manifestHashes && manifestHashes.library) || null;
     const classifyLibrary = () => {
       const out = { identical: [], conflict: [], add: [] };
       const curByIdentity = new Map();
@@ -885,7 +990,18 @@ async function surveyMerge({ userData, zipPath }) {
           continue;
         }
         const c = curLibrary.get(curDirName);
-        const contentDiffers = !(c.fileCount === z.fileCount && c.totalBytes === z.totalBytes);
+        // Strict content comparison via the manifest's canonical-tree
+        // hash when available; older backups without contentHashes
+        // fall back to the count+bytes proxy. The manifest key is the
+        // BACKUP-time dir name (curDirName may have been locally
+        // renamed by the user); content identity ignores the name and
+        // is what we're checking here.
+        let contentDiffers;
+        if (libraryManifestHashes && libraryManifestHashes[backupDirName]) {
+          contentDiffers = libraryManifestHashes[backupDirName] !== liveHashOf('library', curDirName);
+        } else {
+          contentDiffers = !(c.fileCount === z.fileCount && c.totalBytes === z.totalBytes);
+        }
         const { labels: diffFields, details: diffDetails } = computeMetaDiff(z, c);
         const metaDiffers = diffFields.length > 0;
         if (!contentDiffers && !metaDiffers) {
@@ -909,6 +1025,7 @@ async function surveyMerge({ userData, zipPath }) {
     // Common: uuid-based identity. Same content/meta split as library so
     // the UI can show a meta-only diff (local rename) distinctly from a
     // file-content diff.
+    const commonManifestHashes = (manifestHashes && manifestHashes.common) || null;
     const classifyCommon = () => {
       const out = { identical: [], conflict: [], add: [] };
       for (const [uuid, z] of zipCommon) {
@@ -916,7 +1033,14 @@ async function surveyMerge({ userData, zipPath }) {
         const zName = z.displayName || uuid;
         if (!c) { out.add.push({ id: uuid, name: zName, fileCount: z.fileCount, totalBytes: z.totalBytes }); continue; }
         const cName = c.displayName || uuid;
-        const contentDiffers = !(c.fileCount === z.fileCount && c.totalBytes === z.totalBytes);
+        // Strict content comparison via the manifest's canonical-tree
+        // hash when available; older backups fall back to count+bytes.
+        let contentDiffers;
+        if (commonManifestHashes && commonManifestHashes[uuid]) {
+          contentDiffers = commonManifestHashes[uuid] !== liveHashOf('common', uuid);
+        } else {
+          contentDiffers = !(c.fileCount === z.fileCount && c.totalBytes === z.totalBytes);
+        }
         const metaDiffers = cName !== zName;
         if (!contentDiffers && !metaDiffers) {
           out.identical.push({ id: uuid, name: zName });
