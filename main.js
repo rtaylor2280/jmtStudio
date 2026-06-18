@@ -1587,7 +1587,7 @@ ipcMain.handle('sfBackup:export', async (event, { opId, destPath } = {}) => {
     });
     return { ok: true, destPath: result.destPath, manifest: result.manifest };
   } catch (err) {
-    if (err && err.cancelled) return { ok: false, cancelled: true };
+    if (err && err.cancelled) return { ok: false, cancelled: true, residualPath: err.residualPath || null };
     return { ok: false, error: String(err && err.message || err) };
   } finally {
     _sfBackupOps.delete(opId);

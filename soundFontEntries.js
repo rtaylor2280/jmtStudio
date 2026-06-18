@@ -16,6 +16,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const crypto = require('crypto');
 const StreamZip = require('node-stream-zip');
 const soundFontSources = require('./soundFontSources');
 
@@ -29,9 +30,22 @@ function ensureEntriesRoot(userData) {
   return root;
 }
 
+// entryUuid backfill: every library entry needs a per-folder identity so
+// the backup merge step can disambiguate duplicates (Sabine vs Sabine_KT
+// that both came from the same source candidate). Entries created before
+// entryUuid landed get a fresh uuid assigned on first read and persisted
+// to disk so subsequent reads see the same value. The field is treated
+// as immutable once written (see _ENTRY_META_IMMUTABLE below).
 function _readEntryMeta(entryDir) {
-  try { return JSON.parse(fs.readFileSync(path.join(entryDir, 'meta.json'), 'utf8')); }
+  let meta;
+  try { meta = JSON.parse(fs.readFileSync(path.join(entryDir, 'meta.json'), 'utf8')); }
   catch { return null; }
+  if (meta && !meta.entryUuid) {
+    meta.entryUuid = crypto.randomUUID();
+    try { fs.writeFileSync(path.join(entryDir, 'meta.json'), JSON.stringify(meta, null, 2)); }
+    catch {}
+  }
+  return meta;
 }
 
 function listEntries(userData) {
@@ -206,6 +220,7 @@ async function createEntry({ userData, sourceUuid, candidate, name, metadata, on
     }
     const meta = {
       schemaVersion: 1,
+      entryUuid: crypto.randomUUID(),
       name: entryName,
       sourceUuid,
       candidatePath: candidate.path || '',
@@ -279,8 +294,13 @@ async function duplicateEntry({ userData, sourceName, newName, mode = 'current' 
       walkCopy(srcDir, destDir);
       // Patch meta: new identity, fresh timestamps, drop the
       // additions log since the duplicated tree IS the new baseline.
+      // entryUuid is regenerated so the duplicate is a distinct library
+      // entry. sourceUuid + candidatePath are provenance and stay
+      // shared with the original (they DID come from the same source
+      // candidate), but the per-entry identity diverges.
       const now = new Date().toISOString();
       const meta = { ...srcMeta };
+      meta.entryUuid = crypto.randomUUID();
       meta.name = sanitized;
       meta.createdAt = now;
       meta.updatedAt = now;
@@ -344,8 +364,8 @@ async function duplicateEntry({ userData, sourceName, newName, mode = 'current' 
 // current name, the entry folder is renamed on disk and the meta.name field
 // is kept in sync. Rename collisions surface as an error.
 const _ENTRY_META_IMMUTABLE = new Set([
-  'schemaVersion', 'sourceUuid', 'candidatePath', 'multiBoard', 'otherFlavors',
-  'nested', 'fileCount', 'totalBytes', 'createdAt',
+  'schemaVersion', 'entryUuid', 'sourceUuid', 'candidatePath', 'multiBoard',
+  'otherFlavors', 'nested', 'fileCount', 'totalBytes', 'createdAt',
 ]);
 function updateEntryMeta({ userData, currentName, newName, updates }) {
   if (!userData) return { ok: false, error: 'Missing userData' };

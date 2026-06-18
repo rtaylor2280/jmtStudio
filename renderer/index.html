@@ -112,6 +112,16 @@
   html.light-mode #banner-name    { color: #4a7a4a; }
   html.light-mode #meta-timestamps span { color: #5a8a5a !important; }
 
+  /* Global scrollbar theming. Catches every overflow:auto/scroll surface
+     that doesn't have its own ::-webkit-scrollbar rule, so dropdowns and
+     newer panels don't fall back to the chunky OS scrollbar. Per-element
+     rules (.foo::-webkit-scrollbar) have higher specificity and override
+     this default; the preset-strip-banks 0-width rule still wins. */
+  *::-webkit-scrollbar { width: 6px; height: 6px; }
+  *::-webkit-scrollbar-track { background: transparent; }
+  *::-webkit-scrollbar-thumb { background: var(--c-border-strong); border-radius: 3px; }
+  *::-webkit-scrollbar-corner { background: transparent; }
+
 /* ── Log toggle hover — light mode ── */
   html.light-mode #bp-log-toggle:hover { background: var(--c-bg-hover); }
 
@@ -2193,6 +2203,20 @@
   .sf-import-progress-label { font-size: 0.85rem; color: var(--c-text); margin: 8px 0; }
   .sf-import-progress-track { height: 6px; background: var(--c-bg-inset); border-radius: 3px; overflow: hidden; margin: 6px 0; }
   .sf-import-progress-bar { height: 100%; width: 0%; background: var(--jmt-blue); transition: width 0.15s; }
+  /* Indeterminate cleanup state. Used during cancel while the backend
+     is unlinking the partial file. Tells the user "work is happening"
+     without claiming a percentage we don't know. The 40% inline width
+     gives the sliding chip enough mass to read at a glance. */
+  .sf-import-progress-bar.indeterminate {
+    width: 40% !important;
+    background: linear-gradient(90deg, transparent 0%, var(--jmt-blue) 50%, transparent 100%);
+    transition: none;
+    animation: sf-progress-slide 1.2s linear infinite;
+  }
+  @keyframes sf-progress-slide {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(250%); }
+  }
   .sf-import-progress-detail { font-size: 0.72rem; color: var(--c-text-dim); margin: 4px 0 0 0; font-variant-numeric: tabular-nums; min-height: 1em; word-break: break-all; }
   /* Backup export/restore stream long zip-entry paths through the detail
      line; without a stable 2-line allotment the modal pumps up and down on
@@ -2584,6 +2608,12 @@
   .styles-tag-dropdown-item.selected { color: var(--jmt-blue); background: rgba(0,130,255,0.08); }
   .styles-tag-dropdown-check { width: 12px; color: var(--jmt-blue); font-weight: 600; text-align: center; }
   .styles-tag-dropdown-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Backup dropdown is a small menu of two short labels. Right-justify
+     so the names anchor to the right edge of the menu with breathing
+     room on the left, instead of the cramped left-edge feel of the
+     default flow-list dropdowns. */
+  #sf-backup-dropdown .styles-tag-dropdown-item { justify-content: flex-end; padding-right: 14px; }
+  #sf-backup-dropdown .styles-tag-dropdown-name { flex: 0 0 auto; }
   .styles-tag-dropdown-count { color: var(--c-text-faint); font-size: 0.7rem; }
   .styles-tag-dropdown-empty { padding: 8px 12px; font-size: 0.72rem; color: var(--c-text-faint); }
   .styles-active-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 6px 20px; background: var(--c-bg); border-bottom: 1px solid var(--c-border); flex-shrink: 0; }
@@ -3010,7 +3040,7 @@
         <div class="toolbar-divider"></div>
         <div class="styles-tag-filter-wrap">
           <button id="btn-sf-backup-menu" class="btn-neutral" title="Library backup">Backup &#9660;</button>
-          <div id="sf-backup-dropdown" class="styles-tag-dropdown" style="display:none;min-width:0">
+          <div id="sf-backup-dropdown" class="styles-tag-dropdown" style="display:none;min-width:150px">
             <button id="btn-sf-export-backup" class="styles-tag-dropdown-item" title="Export your entire Sound Font library as a single backup file">
               <span class="styles-tag-dropdown-name">&#8599; Export Backup</span>
             </button>
@@ -19621,6 +19651,11 @@ require(['vs/editor/editor.main'], function () {
         if (!modal || !bar || !detail || !cancelBtn) return;
         const startMs = Date.now();
         let lastProcessed = 0;
+        // Mark the SF backup pipeline busy so the app close guard can
+        // refuse OS-level X clicks while atomic disk work is mid-flight.
+        // The in-app Cancel button is the only safe exit; it triggers
+        // AbortController which unlinks the partial zip.
+        window._sfBackupBusy = true;
         modal.classList.add('active');
         bar.style.width = '0%';
         detail.textContent = 'Starting…';
@@ -19660,6 +19695,17 @@ require(['vs/editor/editor.main'], function () {
           });
           if (!ok) return;
           userCancelRequested = true;
+          // Switch the progress modal into a "cleaning up" state so the
+          // user isn't staring at a frozen byte counter that looks like
+          // the export is still progressing. The bar's indeterminate
+          // animation says "work is happening" without lying about how
+          // much. Stop the progress event listener so a late tick from
+          // the backend can't overwrite the cleanup message.
+          try { off && off(); } catch {}
+          clearInterval(tickHandle);
+          bar.classList.add('indeterminate');
+          detail.textContent = 'Cleaning up partial file…';
+          stats.textContent = '';
           cancelBtn.disabled = true;
           cancelBtn.textContent = 'Cancelling…';
           try { await window.electronAPI.sfBackupCancel({ opId }); } catch {}
@@ -19671,11 +19717,16 @@ require(['vs/editor/editor.main'], function () {
         clearInterval(tickHandle);
         try { off && off(); } catch {}
         cancelBtn.removeEventListener('click', onCancel);
+        bar.classList.remove('indeterminate');
         modal.classList.remove('active');
+        window._sfBackupBusy = false;
         if (result && result.cancelled) {
+          const residualMsg = result.residualPath
+            ? `No backup file was written at your chosen location. Your library is unchanged.\n\nA temporary file remains at:\n${result.residualPath}\nIt should disappear on its own; if not, you can delete it manually.`
+            : 'No backup file was written. Your library is unchanged.';
           await promptConfirm({
             title: 'Export cancelled',
-            message: 'No backup file was written. Your library is unchanged.',
+            message: residualMsg,
             confirmText: 'OK',
             confirmKind: 'primary',
             hideCancel: true,
@@ -20083,6 +20134,7 @@ require(['vs/editor/editor.main'], function () {
         const startMs = Date.now();
         let lastProcessed = 0;
         if (titleEl) titleEl.textContent = 'Merging Sound Font library backup…';
+        window._sfBackupBusy = true;
         modal.classList.add('active');
         bar.style.width = '0%';
         detail.textContent = 'Starting…';
@@ -20116,6 +20168,11 @@ require(['vs/editor/editor.main'], function () {
           });
           if (!ok) return;
           userCancelRequested = true;
+          try { off && off(); } catch {}
+          clearInterval(tickHandle);
+          bar.classList.add('indeterminate');
+          detail.textContent = 'Rolling back changes…';
+          stats.textContent = '';
           cancelBtn.disabled = true;
           cancelBtn.textContent = 'Cancelling…';
           try { await window.electronAPI.sfBackupCancel({ opId }); } catch {}
@@ -20127,7 +20184,9 @@ require(['vs/editor/editor.main'], function () {
         clearInterval(tickHandle);
         try { off && off(); } catch {}
         cancelBtn.removeEventListener('click', onCancel);
+        bar.classList.remove('indeterminate');
         modal.classList.remove('active');
+        window._sfBackupBusy = false;
         if (titleEl) titleEl.textContent = 'Exporting Sound Font library…';
         if (result && result.cancelled) {
           await promptConfirm({
@@ -20175,6 +20234,7 @@ require(['vs/editor/editor.main'], function () {
         const totalBytes = observed?.totals?.totalBytes || 0;
         const startMs = Date.now();
         if (titleEl) titleEl.textContent = 'Restoring Sound Font library…';
+        window._sfBackupBusy = true;
         modal.classList.add('active');
         bar.style.width = '0%';
         detail.textContent = 'Starting…';
@@ -20211,6 +20271,11 @@ require(['vs/editor/editor.main'], function () {
           });
           if (!ok) return;
           userCancelRequested = true;
+          try { off && off(); } catch {}
+          clearInterval(tickHandle);
+          bar.classList.add('indeterminate');
+          detail.textContent = 'Restoring original library…';
+          stats.textContent = '';
           cancelBtn.disabled = true;
           cancelBtn.textContent = 'Cancelling…';
           try { await window.electronAPI.sfBackupCancel({ opId }); } catch {}
@@ -20222,7 +20287,9 @@ require(['vs/editor/editor.main'], function () {
         clearInterval(tickHandle);
         try { off && off(); } catch {}
         cancelBtn.removeEventListener('click', onCancel);
+        bar.classList.remove('indeterminate');
         modal.classList.remove('active');
+        window._sfBackupBusy = false;
         // Reset title for the next time the modal is reused by export.
         if (titleEl) titleEl.textContent = 'Exporting Sound Font library…';
         if (result && result.cancelled) {
@@ -20578,6 +20645,10 @@ require(['vs/editor/editor.main'], function () {
   async function _runQuitGuards(verb) {
     if (window._isFlashing) {
       alert('Cannot ' + (verb === 'closing' ? 'close' : 'install update') + ' while flashing. Wait for flash to complete.');
+      return false;
+    }
+    if (window._sfBackupBusy) {
+      alert('Cannot ' + (verb === 'closing' ? 'close' : 'install update') + ' while a Sound Font backup is in progress. Click Cancel on the progress dialog first. It will clean up the partial file.');
       return false;
     }
     if (isDirty) {

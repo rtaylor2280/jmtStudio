@@ -15,9 +15,19 @@
 
 const fs = require('fs');
 const path = require('path');
+const soundFontEntries = require('./soundFontEntries');
 
 const SCHEMA_VERSION = 1;
 const BACKUP_TYPE = 'jmt-soundfontlibrary';
+
+// Side-effect call into soundFontEntries: its _readEntryMeta backfills
+// entryUuid into any legacy meta.json that doesn't have one. Running
+// listEntries here means the backup's downstream disk reads (export
+// hashing + archive writes + merge classification) all see meta with
+// the uuid persisted, instead of a half-populated mid-flight state.
+function _ensureLibraryBackfill(userData) {
+  try { soundFontEntries.listEntries(userData); } catch {}
+}
 
 // Path helpers — match the layout the rest of the SF modules use so this
 // stays the single source of truth for "what does the library look like
@@ -158,6 +168,7 @@ async function exportBackup({
   signal = null,
 }) {
   if (!destPath) throw new Error('Missing destPath');
+  _ensureLibraryBackfill(userData);
   const survey = surveyLibrary(userData);
 
   // Content-hash pre-pass. One sha256 per top-level item, written into
@@ -224,7 +235,19 @@ async function exportBackup({
   };
 
   const archiver = require('archiver');
-  const ws = fs.createWriteStream(destPath);
+  // Atomic-write pattern: stream to a sibling .partial file, then rename
+  // atomically into the user's chosen destPath on success. Two wins:
+  //   1. The user's chosen filename is never a partially-written zip:
+  //      it either doesn't exist yet or it's the final, complete file.
+  //      Cloud-sync agents (Drive/OneDrive/Dropbox) never see the
+  //      streaming write at the user-visible path; they only see the
+  //      finished file appear via rename.
+  //   2. On cancel, the user-facing path was never created, so there's
+  //      no "looks like a backup but isn't" hazard. The .partial file
+  //      may linger if we can't delete it (own write-stream handle, sync
+  //      agent lock), but it's visibly intermediate by name.
+  const partialPath = destPath + '.partial';
+  const ws = fs.createWriteStream(partialPath);
   const archive = archiver('zip', { zlib: { level: 6 } });
 
   // Hook cancellation. Aborting the archiver mid-stream + closing the
@@ -239,6 +262,52 @@ async function exportBackup({
     if (signal.aborted) onAbort();
     else signal.addEventListener('abort', onAbort, { once: true });
   }
+
+  // Single-attempt unlink with a hard wall. fs.promises.unlink on Windows
+  // can block indefinitely at the OS level when the file is held open
+  // by ANY process, including our own not-yet-fully-closed write
+  // stream. Node provides no way to cancel an in-flight unlink. The
+  // race below lets us stop WAITING after the wall; the unlink itself
+  // continues in the background and may eventually succeed (in which
+  // case the residualPath we report becomes a harmless lie that the
+  // user discovers as a missing file when they go to clean it up).
+  // .catch() is attached to the unlink promise BEFORE the race so a
+  // rejection arriving after the wall doesn't become an unhandled
+  // rejection that destabilizes the main process.
+  const cleanupPartialFile = async (p) => {
+    let outcome = 'timeout';
+    await Promise.race([
+      fs.promises.unlink(p).then(
+        () => { outcome = 'ok'; },
+        (e) => { outcome = e.code || 'err'; }
+      ),
+      new Promise(r => setTimeout(r, 3000)),
+    ]);
+    return outcome === 'ok' || outcome === 'ENOENT';
+  };
+  // Hard outer ceiling on cancel response. If anything inside the main
+  // flow hangs past this point after abort (archive.finalize stuck on
+  // a slow drain, ws never emitting 'close', whatever), we forcibly
+  // throw cancelled and return, leaving the in-flight work to die in
+  // the background. The renderer never gets trapped in an endless
+  // "Cleaning up…" state even if our own teardown deadlocks.
+  // deadlineTimer is cleared in the finally if work wins the race, so
+  // the deadline promise never rejects and there's no late unhandled
+  // rejection floating in the loop.
+  let deadlineTimer = null;
+  const cancelDeadline = new Promise((_, reject) => {
+    if (!signal) return;
+    const onAbortDeadline = () => {
+      deadlineTimer = setTimeout(() => {
+        const e = new Error('Cancelled');
+        e.cancelled = true;
+        e.residualPath = partialPath;
+        reject(e);
+      }, 5000);
+    };
+    if (signal.aborted) onAbortDeadline();
+    else signal.addEventListener('abort', onAbortDeadline, { once: true });
+  });
 
   let processedBytes = 0;
   archive.on('entry', (entry) => {
@@ -263,10 +332,19 @@ async function exportBackup({
       reject(err);
     });
   });
+  // Pre-attach a no-op catch IMMEDIATELY so a rejection arriving before
+  // the await in `work` (typically: ws.destroy() triggers pending write
+  // callbacks to fail with ERR_STREAM_DESTROYED, archiver propagates,
+  // done rejects) doesn't fire an UnhandledPromiseRejectionWarning in
+  // the Node console. Awaits later still see the rejection because
+  // .catch() creates a new derived promise; the original `done` keeps
+  // its rejection state and the await observes it independently.
+  done.catch(() => {});
 
   archive.pipe(ws);
 
-  try {
+  // Main streaming work wrapped so we can race it against cancelDeadline.
+  const work = (async () => {
     // Manifest first so a partial-but-readable zip still identifies as
     // ours when someone tries to peek into it.
     archive.append(JSON.stringify(manifest, null, 2), { name: 'manifest.json' });
@@ -283,15 +361,25 @@ async function exportBackup({
     }
 
     if (!cancelled) await archive.finalize();
-    await done;
+    await done.catch(() => {}); // swallow during cancel; race handles exits
+  })();
+
+  try {
+    await Promise.race([work, cancelDeadline]);
   } catch (err) {
-    // Anything thrown here (cancel-driven destroy, archiver error, write
-    // stream EIO) routes through cleanup. Re-throw cancellation as a
-    // distinct shape so the IPC layer can label it correctly.
-    try { await fs.promises.unlink(destPath); } catch {}
+    // Cancel deadline fired OR work threw. Either way, attempt cleanup
+    // of the .partial (best effort) and rethrow with the right shape.
+    const cleaned = await cleanupPartialFile(partialPath);
+    if (err && err.cancelled) {
+      const e = new Error('Cancelled');
+      e.cancelled = true;
+      e.residualPath = cleaned ? null : partialPath;
+      throw e;
+    }
     if (cancelled) {
       const e = new Error('Cancelled');
       e.cancelled = true;
+      e.residualPath = cleaned ? null : partialPath;
       throw e;
     }
     throw err;
@@ -299,14 +387,33 @@ async function exportBackup({
     if (signal) {
       try { signal.removeEventListener('abort', onAbort); } catch {}
     }
+    if (deadlineTimer) { clearTimeout(deadlineTimer); deadlineTimer = null; }
+    // Belt-and-suspenders: if cancelDeadline is still pending here
+    // (work won the race or threw early), attach a no-op catch so a
+    // late-arriving rejection can't become an unhandled rejection.
+    cancelDeadline.catch(() => {});
+    // Same for work, in case its internal awaits throw after race
+    // already resolved.
+    work.catch(() => {});
   }
 
   if (cancelled) {
-    try { await fs.promises.unlink(destPath); } catch {}
+    const cleaned = await cleanupPartialFile(partialPath);
     const e = new Error('Cancelled');
     e.cancelled = true;
+    e.residualPath = cleaned ? null : partialPath;
     throw e;
   }
+
+  // Success: atomic rename .partial → destPath. If destPath already
+  // exists (overwrite), try to remove it first; on Windows newer Node
+  // versions support overwrite-on-rename, but the explicit unlink is
+  // a belt-and-suspenders that also surfaces a useful error if the
+  // existing file is locked.
+  if (fs.existsSync(destPath)) {
+    try { await fs.promises.unlink(destPath); } catch {}
+  }
+  await fs.promises.rename(partialPath, destPath);
   return { destPath, manifest };
 }
 
@@ -692,6 +799,7 @@ async function applyReplace({
 async function surveyMerge({ userData, zipPath }) {
   if (!zipPath) throw new Error('Missing zipPath');
   if (!userData) throw new Error('Missing userData');
+  _ensureLibraryBackfill(userData);
 
   const StreamZip = require('node-stream-zip');
   let zip;
@@ -810,11 +918,22 @@ async function surveyMerge({ userData, zipPath }) {
       { key: 'acquisitionDate',         label: 'acquisition date',    normalize: (v) => v || '' },
       { key: 'userNotes',               label: 'notes',               normalize: (v) => v || '' },
     ];
+    // Two-tier identity:
+    //   primary: entryUuid (uuid per library folder, generated at
+    //            create/duplicate; legacy entries get a uuid backfilled
+    //            by soundFontEntries._readEntryMeta on first read).
+    //   legacy:  sourceUuid|candidatePath (provenance pair). Used as
+    //            a fallback so backups taken before entryUuid existed
+    //            still match against the current library.
+    // A library entry can have both. Duplicates from the same source
+    // share `legacy` but have distinct `primary`, which is exactly the
+    // case the merge classifier needs to disambiguate.
     const readLibraryMeta = (meta, fallbackName) => {
-      const out = { identity: null, name: fallbackName, fields: {} };
+      const out = { identity: null, legacyIdentity: null, name: fallbackName, fields: {} };
+      out.identity = meta.entryUuid || null;
       const su = meta.sourceUuid || '';
       const cp = meta.candidatePath || '';
-      out.identity = (su || cp) ? `${su}|${cp}` : null;
+      out.legacyIdentity = (su || cp) ? `${su}|${cp}` : null;
       out.name = meta.name || fallbackName;
       for (const f of LIBRARY_META_FIELDS) {
         const raw = meta[f.key];
@@ -834,6 +953,7 @@ async function surveyMerge({ userData, zipPath }) {
         const parsed = readLibraryMeta(meta, dirName);
         const agg = zipLibrary.get(dirName);
         agg.identity = parsed.identity;
+        agg.legacyIdentity = parsed.legacyIdentity;
         agg.name = parsed.name;
         agg.meta = parsed.fields;
       } catch {}
@@ -888,8 +1008,13 @@ async function surveyMerge({ userData, zipPath }) {
       try {
         const meta = JSON.parse(fs.readFileSync(path.join(dirPath, 'meta.json'), 'utf8'));
         const parsed = readLibraryMeta(meta, '');
-        return { identity: parsed.identity, name: parsed.name, meta: parsed.fields };
-      } catch { return { identity: null, name: '', meta: {} }; }
+        return {
+          identity: parsed.identity,
+          legacyIdentity: parsed.legacyIdentity,
+          name: parsed.name,
+          meta: parsed.fields,
+        };
+      } catch { return { identity: null, legacyIdentity: null, name: '', meta: {} }; }
     });
     readBucket('common', curCommon, (dirPath) => {
       try {
@@ -948,9 +1073,20 @@ async function surveyMerge({ userData, zipPath }) {
     const libraryManifestHashes = (manifestHashes && manifestHashes.library) || null;
     const classifyLibrary = () => {
       const out = { identical: [], conflict: [], add: [] };
-      const curByIdentity = new Map();
+      // Primary identity (entryUuid) is unique per library folder, so a
+      // single-value lookup is unambiguous. Legacy identity
+      // (sourceUuid|candidatePath) is shared by duplicates, so its
+      // lookup is multi-valued: the matcher prefers the candidate
+      // whose dir name also matches the backup before falling through
+      // to first-found.
+      const curByEntryUuid = new Map();
+      const curByLegacy = new Map();
       for (const [dirName, c] of curLibrary) {
-        if (c.identity) curByIdentity.set(c.identity, dirName);
+        if (c.identity) curByEntryUuid.set(c.identity, dirName);
+        if (c.legacyIdentity) {
+          if (!curByLegacy.has(c.legacyIdentity)) curByLegacy.set(c.legacyIdentity, []);
+          curByLegacy.get(c.legacyIdentity).push(dirName);
+        }
       }
       const eq = (a, b) => {
         if (Array.isArray(a) && Array.isArray(b)) {
@@ -978,11 +1114,24 @@ async function surveyMerge({ userData, zipPath }) {
       };
       for (const [backupDirName, z] of zipLibrary) {
         let curDirName = null;
-        if (z.identity && curByIdentity.has(z.identity)) {
-          curDirName = curByIdentity.get(z.identity);
-        } else if (curLibrary.has(backupDirName)) {
-          // Fall-through: entries pre-dating sourceUuid/candidatePath in meta
-          // (or sources imported without that data) match by dir name only.
+        // Priority order:
+        //   1. entryUuid (primary identity): unique per library folder,
+        //      so this is a clean 1-to-1 match across renames AND
+        //      duplicates.
+        //   2. sourceUuid|candidatePath (legacy identity): for backups
+        //      taken before entryUuid existed. Multi-valued because
+        //      duplicates share this key; prefer the dir-name match,
+        //      fall through to first.
+        //   3. Bare dir-name match: last-resort fallback for entries
+        //      that pre-date even the legacy identity.
+        if (z.identity && curByEntryUuid.has(z.identity)) {
+          curDirName = curByEntryUuid.get(z.identity);
+        }
+        if (!curDirName && z.legacyIdentity && curByLegacy.has(z.legacyIdentity)) {
+          const candidates = curByLegacy.get(z.legacyIdentity);
+          curDirName = candidates.find(n => n === backupDirName) || candidates[0];
+        }
+        if (!curDirName && curLibrary.has(backupDirName)) {
           curDirName = backupDirName;
         }
         if (!curDirName) {
