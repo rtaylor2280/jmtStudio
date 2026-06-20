@@ -13113,7 +13113,7 @@ require(['vs/editor/editor.main'], function () {
       // automatically via _sfBucketCommonsByGroup on next render.
       const _sfGroupSelectedCommons = async () => {
         const uuids = [..._sfMultiSelectedCommonUuids];
-        if (uuids.length < 2) return;
+        if (uuids.length < 1) return;
         // Default-suggest the most common existing group label among
         // the selection (if any), otherwise empty.
         const counts = new Map();
@@ -13127,8 +13127,10 @@ require(['vs/editor/editor.main'], function () {
           suggested = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
         }
         const name = await _sfPromptText({
-          title: `Group ${uuids.length} common folders`,
-          message: 'Name the group these folders belong to. New group is created if the name does not exist; otherwise folders join the existing group.',
+          title: `Group ${uuids.length} common folder${uuids.length === 1 ? '' : 's'}`,
+          message: uuids.length === 1
+            ? 'Name the group this folder belongs to. A new group is created if the name does not exist; otherwise the folder joins the existing group.'
+            : 'Name the group these folders belong to. A new group is created if the name does not exist; otherwise the folders join the existing group.',
           defaultValue: suggested,
           okText: 'Group',
           validate: (v) => !v.trim() ? 'Group name is required.' : null,
@@ -21127,9 +21129,9 @@ require(['vs/editor/editor.main'], function () {
             ? [...targetGroups][0]
             : null;
           const addToCandidates = existingGroups.filter(g => g !== homogeneousGroup);
-          // Group-creation action: 2+ in target AND total commons >= 3
-          // (a group of fewer than that doesn't really earn its header).
-          const showNewGroup = targetCount >= 2 && _sfCommons.length >= 3;
+          // Group-creation action: any selection (including a single
+          // common) can be promoted to its own group.
+          const showNewGroup = targetCount >= 1;
 
           // Right-click on a common's header row. If we have a clipboard and
           // this card is the (or another) common, offer Paste-to-root.
