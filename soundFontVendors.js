@@ -67,8 +67,14 @@ const vendors = [
         fileMatch: /(^|\/)(read.?me|ReadMe)\.txt$/i,
         contentMatch: /(?:copyright|©|\(c\))[^\n]{0,40}Greyscale Fonts/i,
       },
-      // The remaining ~17 Greyscale fonts ship no readme but have the
-      // signature five-zip board-flavor set at a common depth.
+      // The remaining ~17 Greyscale fonts ship no readme but have a
+      // distinctive INNER-ZIP five-board set at a common depth
+      // (Asteria.zip / CFX-GHv3.zip / Proffie.zip / Verso.zip / Xeno3.zip).
+      // The unpacked-folder form of the same names is NOT a Greyscale
+      // signature: it's the community-standard multi-board export shape
+      // and is used by many other vendors including character-font
+      // makers. Don't extend this pattern to folders without additional
+      // textual evidence.
       {
         type: 'structuralSiblings',
         requireAll: [
@@ -76,7 +82,7 @@ const vendors = [
           /^CFX-GH(?:V|v)3\.zip$/i,
           /^Proffie\.zip$/i,
           /^Verso\.zip$/i,
-          /^Xeno3\.zip$/i,
+          /^Xeno3?\.zip$/i,
         ],
       },
     ],
@@ -206,6 +212,33 @@ function _matchesStructuralSiblings(entries, requireAll) {
   return null;
 }
 
+// Companion to _matchesStructuralSiblings for vendors whose board flavors
+// ship as folders rather than inner zips. Greyscale uses this layout
+// alongside the zip form (e.g. Cere unpacks as Cere/Asteria/, Cere/Proffie/,
+// etc. while older releases shipped Cere/Asteria.zip etc.). Groups
+// directory basenames by their parent and checks that all required regexes
+// hit somewhere in the same parent. Returns the parent path (or '/' at
+// root) when matched.
+function _matchesStructuralFolderSiblings(entries, requireAll) {
+  const folderNamesByParent = new Map();
+  for (const e of entries) {
+    if (!e.isDir) continue;
+    const clean = String(e.fileName).replace(/\/$/, '');
+    if (!clean) continue;
+    const slashIdx = clean.lastIndexOf('/');
+    const parent = slashIdx === -1 ? '' : clean.slice(0, slashIdx);
+    const name = slashIdx === -1 ? clean : clean.slice(slashIdx + 1);
+    if (!name) continue;
+    if (!folderNamesByParent.has(parent)) folderNamesByParent.set(parent, []);
+    folderNamesByParent.get(parent).push(name);
+  }
+  for (const [parent, names] of folderNamesByParent) {
+    const allHit = requireAll.every(rx => names.some(n => rx.test(n)));
+    if (allHit) return parent || '/';
+  }
+  return null;
+}
+
 function _matchesStructuralAll(entries, requireAll) {
   return requireAll.every(rx =>
     entries.some(e => !e.isDir && rx.test(e.fileName))
@@ -246,6 +279,15 @@ async function detectVendor(source) {
   }
   const entries = await source.listAll();
 
+  // Confidence levels:
+  //   - 'content'    — a file inside the source contains the vendor's
+  //                    actual name as text. High confidence; safe to
+  //                    auto-fill the vendor field.
+  //   - 'structural' — only the file/folder shape matches a known
+  //                    vendor's signature. Low confidence because the
+  //                    same shape can be produced by other vendors using
+  //                    similar tooling. Renderer treats this as a
+  //                    suggestion the user has to apply explicitly.
   for (const vendor of vendors) {
     for (const pattern of vendor.patterns) {
       if (pattern.type === 'readmeContent') {
@@ -256,6 +298,7 @@ async function detectVendor(source) {
             vendor: vendor.displayName,
             vendorWebsite: vendor.website,
             vendorAutoDetected: true,
+            confidence: 'content',
             purchasedDefault: vendor.purchasedDefault,
             matchedFile: hit.matchedFile,
             matchType: 'readmeContent',
@@ -269,9 +312,25 @@ async function detectVendor(source) {
             vendor: vendor.displayName,
             vendorWebsite: vendor.website,
             vendorAutoDetected: true,
+            confidence: 'structural',
             purchasedDefault: vendor.purchasedDefault,
             matchedFile: null,
             matchType: 'structuralSiblings',
+            matchedAt: parent,
+          };
+        }
+      } else if (pattern.type === 'structuralFolderSiblings') {
+        const parent = _matchesStructuralFolderSiblings(entries, pattern.requireAll);
+        if (parent) {
+          return {
+            vendorId: vendor.id,
+            vendor: vendor.displayName,
+            vendorWebsite: vendor.website,
+            vendorAutoDetected: true,
+            confidence: 'structural',
+            purchasedDefault: vendor.purchasedDefault,
+            matchedFile: null,
+            matchType: 'structuralFolderSiblings',
             matchedAt: parent,
           };
         }
@@ -282,6 +341,7 @@ async function detectVendor(source) {
             vendor: vendor.displayName,
             vendorWebsite: vendor.website,
             vendorAutoDetected: true,
+            confidence: 'structural',
             purchasedDefault: vendor.purchasedDefault,
             matchedFile: null,
             matchType: 'structuralAll',

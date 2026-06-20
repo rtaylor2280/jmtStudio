@@ -2361,6 +2361,9 @@
   .sf-import-review-source-path { font-size: 0.7rem; color: var(--c-text-dim); margin-bottom: 10px; word-break: break-all; font-family: monospace; }
   .sf-review-vendor-info { font-size: 0.7rem; color: var(--c-text-dim); margin-top: 4px; min-height: 1em; }
   .sf-review-vendor-info.detected { color: var(--jmt-blue); }
+  .sf-review-vendor-info.suggested { color: var(--c-text-sub); }
+  .sf-vendor-suggest-apply { color: var(--jmt-blue); text-decoration: underline; cursor: pointer; }
+  .sf-vendor-suggest-apply:hover { opacity: 0.85; }
   .sf-import-field-hint { font-size: 0.7rem; color: var(--c-text-dim); margin-top: 4px; line-height: 1.4; }
   .sf-review-cand-count { font-size: 0.72rem; color: var(--c-text-dim); font-weight: 400; margin-left: 6px; }
   .sf-review-candidate-list { display: flex; flex-direction: column; gap: 6px; }
@@ -3768,6 +3771,7 @@
     <label id="modal-confirm-checkbox-row" style="display:none; margin: 10px 0 20px; font-size: 0.9rem; user-select:none; cursor:pointer;">
       <input type="checkbox" id="modal-confirm-checkbox" style="margin-right: 6px; vertical-align: middle;">
       <span id="modal-confirm-checkbox-label"></span>
+      <div id="modal-confirm-checkbox-hint" style="display:none; margin: 4px 0 0 22px; font-size: 0.75rem; color: var(--c-text-dim);"></div>
     </label>
     <div class="modal-btns">
       <button class="modal-btn-cancel" id="modal-confirm-cancel">Cancel</button>
@@ -4204,6 +4208,7 @@
     </div>
     <div class="modal-btns" style="margin-top: 12px;">
       <button class="modal-btn-cancel sf-source-delete-btn" id="btn-sf-source-delete">Delete source&hellip;</button>
+      <button class="modal-btn-cancel" id="btn-sf-source-export" title="Save a copy of the source archive to a folder you pick.&#10;Preserves the original file date for archive integrity.">Export source&hellip;</button>
       <button class="modal-btn-cancel" id="sf-source-detail-discard">Close</button>
       <button class="modal-btn-primary" id="sf-source-detail-save" disabled>Save</button>
     </div>
@@ -5097,9 +5102,19 @@ function promptConfirm(opts) {
     const cbRow   = document.getElementById('modal-confirm-checkbox-row');
     const cbInput = document.getElementById('modal-confirm-checkbox');
     const cbLabel = document.getElementById('modal-confirm-checkbox-label');
+    const cbHint  = document.getElementById('modal-confirm-checkbox-hint');
     if (checkbox && cbRow && cbInput && cbLabel) {
       cbLabel.textContent = checkbox.label || '';
       cbInput.checked = false;
+      if (cbHint) {
+        if (checkbox.hint) {
+          cbHint.textContent = checkbox.hint;
+          cbHint.style.display = 'block';
+        } else {
+          cbHint.textContent = '';
+          cbHint.style.display = 'none';
+        }
+      }
       // <label> is inline by default; force block so vertical margins apply
       // and the row visually separates from the buttons below it.
       cbRow.style.display = 'block';
@@ -14227,6 +14242,12 @@ require(['vs/editor/editor.main'], function () {
         const layerNoFonts = document.getElementById('sf-empty-nofonts');
         const layerBrowse  = document.getElementById('sf-browse');
         const toolbarBtn   = document.getElementById('btn-sf-import-toolbar');
+        // Sweep corrupt source dirs (meta without archive, or archive
+        // without meta) before listing. Safe no-op when none exist.
+        // Suppressed mid-import so we don't race the in-flight write.
+        if (!_sfImport) {
+          try { await window.electronAPI.cleanupOrphanSources(); } catch {}
+        }
         const r = await window.electronAPI.listEntries();
         const entries = (r && r.ok && r.entries) || [];
         _sfAllEntries = entries;
@@ -14414,6 +14435,21 @@ require(['vs/editor/editor.main'], function () {
         if (_sfImportEls.phaseReview) _sfImportEls.phaseReview.style.display = phase === 'review'   ? '' : 'none';
         if (_sfImportEls.phaseCreate) _sfImportEls.phaseCreate.style.display = phase === 'creating' ? '' : 'none';
         if (_sfImportEls.confirmBtn)  _sfImportEls.confirmBtn.style.display  = phase === 'review'   ? '' : 'none';
+        // Lock the Cancel button while the main process is actively
+        // writing (progress = source copy, creating = entry extraction).
+        // Those phases run an in-flight IPC that can't be torn down
+        // cleanly from the renderer; an accidental click here would
+        // leave a partial source or partial entry on disk. The cancel
+        // path reopens as soon as the phase advances to review.
+        const busy = phase === 'progress' || phase === 'creating';
+        if (_sfImportEls.cancelBtn) {
+          _sfImportEls.cancelBtn.disabled = busy;
+          _sfImportEls.cancelBtn.style.opacity = busy ? '0.45' : '';
+          _sfImportEls.cancelBtn.style.cursor = busy ? 'not-allowed' : '';
+          _sfImportEls.cancelBtn.title = busy
+            ? 'Cancel available once the import finishes'
+            : '';
+        }
       };
       const _sfOpenImport = () => {
         _sfImport = null;
@@ -14808,12 +14844,6 @@ require(['vs/editor/editor.main'], function () {
         .replace(/\s+/g, '_')
         .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
         .slice(0, 200);
-      // Strip leading vendor-version prefixes (JayDaloRian ships "1.1-Quantum",
-      // "2.0-Sebulba", etc.; the version is not part of the font's identity
-      // for library purposes). Applied to the suggested name only — the user
-      // can keep the version by typing it back in if they want to.
-      const _sfStripVersionPrefix = (name) => String(name || '')
-        .replace(/^\s*\d+(\.\d+)?\s*[-_\s]+\s*/, '');
       // The bundle name is computed in the backend (soundFontCandidates.js's
       // detectBundleName) and stamped onto each candidate; this helper just
       // reads the cached value off the candidate list.
@@ -14822,10 +14852,13 @@ require(['vs/editor/editor.main'], function () {
         return cands[0]?.bundleName || null;
       };
       // Build the suggested entry name from a candidate, optionally prefixing
-      // with the bundle name. Skips the prefix when the candidate's own name
-      // already starts with it (Father_V1 stays Father_V1, not Father_Father_V1).
+      // with the bundle name. cand.name and bundleName arrive already cleaned
+      // by soundFontNameClean.cleanSuggestedName on the main side, so the
+      // only work left here is the bundle-prepend rule and a final disk-safe
+      // pass. Skips the prefix when the candidate's own name already starts
+      // with it (Father_V1 stays Father_V1, not Father_Father_V1).
       const _sfSuggestName = (cand, idx, bundleName, prepend) => {
-        let base = _sfStripVersionPrefix(cand.name);
+        let base = cand.name || '';
         if (prepend && bundleName) {
           const lb = bundleName.toLowerCase();
           if (!base.toLowerCase().startsWith(lb)) base = `${bundleName}_${base}`;
@@ -14893,6 +14926,7 @@ require(['vs/editor/editor.main'], function () {
           return;
         }
         _sfImport.uuid = importRes.uuid;
+        _sfImport.sourceFileDate = importRes.sourceFileDate || null;
         const [vendorRes, candRes] = await Promise.all([
           window.electronAPI.detectSourceVendor({ uuid: importRes.uuid }),
           window.electronAPI.detectSourceCandidates({ uuid: importRes.uuid }),
@@ -14925,11 +14959,17 @@ require(['vs/editor/editor.main'], function () {
             _sfDupEls.reimportBtn?.removeEventListener('click', onReimport);
             _sfDupEls.cancelBtn?.removeEventListener('click', onCancel);
           };
-          // "Open existing" and "Cancel" both close the import dialog for v1.
-          // Their semantics diverge once Phase 3's entry detail / sources
-          // view lands — Open will navigate to the existing source's entries
-          // then; Cancel will keep just abandoning the in-flight pick.
-          const onKeep = () => { cleanup(); _sfCloseImport(); resolve(); };
+          // "Open existing" navigates to the source detail view for the
+          // matched source. Cancel just abandons the in-flight pick.
+          // Re-import as new forces a parallel copy even though the
+          // content matches (rare, for restoring a clean working copy).
+          const onKeep = async () => {
+            cleanup();
+            _sfCloseImport();
+            await window.refreshSoundFontsView();
+            await _sfOpenSourceDetail(existingUuid);
+            resolve();
+          };
           const onCancel = () => { cleanup(); _sfCloseImport(); resolve(); };
           const onReimport = async () => { cleanup(); await _sfRunImport(sourcePath, { forceNewSource: true }); resolve(); };
           _sfDupEls.keepBtn?.addEventListener('click', onKeep);
@@ -14968,7 +15008,16 @@ require(['vs/editor/editor.main'], function () {
         }
         const knownLookup = (name) => _sfKnownVendors.find(k => k.name.toLowerCase() === String(name || '').toLowerCase());
         const v = _sfImport.vendor;
-        if (v && v.vendor) {
+        // Two confidence levels matter here:
+        //   - 'content'    — readme text references the vendor by name.
+        //                    Safe to auto-fill; user can still override.
+        //   - 'structural' — only the file/folder shape matches a known
+        //                    vendor's pattern. Same shape often occurs
+        //                    across vendors, so we SUGGEST and leave the
+        //                    field empty until the user applies it.
+        const hasContentMatch = v && v.vendor && v.confidence === 'content';
+        const hasStructuralMatch = v && v.vendor && v.confidence === 'structural';
+        if (hasContentMatch) {
           if (_sfImportEls.vendor)  _sfImportEls.vendor.value  = v.vendor;
           if (_sfImportEls.website) _sfImportEls.website.value = v.vendorWebsite || (knownLookup(v.vendor)?.website || '');
           if (_sfImportEls.purchased) {
@@ -14978,30 +15027,62 @@ require(['vs/editor/editor.main'], function () {
             _sfImportEls.purchased.checked = (v.purchasedDefault === false);
           }
           if (_sfImportEls.vendorInfo) {
-            const where = v.matchedFile
-              ? ` (matched ${v.matchedFile})`
-              : v.matchedAt
-                ? ` (matched structural pattern at ${v.matchedAt})`
-                : ' (matched structural pattern)';
-            _sfImportEls.vendorInfo.textContent = `Auto-detected as ${v.vendor}${where}`;
+            const where = v.matchedFile ? ` (matched ${v.matchedFile})` : '';
+            _sfImportEls.vendorInfo.innerHTML = `Auto-detected as ${_sfEscape(v.vendor)}${_sfEscape(where)}`;
             _sfImportEls.vendorInfo.classList.add('detected');
+          }
+        } else if (hasStructuralMatch) {
+          // Suggestion mode: do NOT pre-fill the field. The hint surfaces
+          // the guess with an Apply button so the user makes the call.
+          if (_sfImportEls.vendor)  _sfImportEls.vendor.value  = '';
+          if (_sfImportEls.website) _sfImportEls.website.value = '';
+          if (_sfImportEls.purchased) _sfImportEls.purchased.checked = false;
+          if (_sfImportEls.vendorInfo) {
+            const where = v.matchedAt ? ` based on file structure at ${v.matchedAt}` : ' based on file structure';
+            _sfImportEls.vendorInfo.innerHTML =
+              `Suggested: <strong>${_sfEscape(v.vendor)}</strong>${_sfEscape(where)}. ` +
+              `<a href="#" id="sf-review-vendor-apply" class="sf-vendor-suggest-apply">Apply suggestion</a>`;
+            _sfImportEls.vendorInfo.classList.remove('detected');
+            _sfImportEls.vendorInfo.classList.add('suggested');
+            const applyLink = document.getElementById('sf-review-vendor-apply');
+            applyLink?.addEventListener('click', (e) => {
+              e.preventDefault();
+              if (_sfImportEls.vendor)  _sfImportEls.vendor.value = v.vendor;
+              if (_sfImportEls.website) _sfImportEls.website.value = v.vendorWebsite || (knownLookup(v.vendor)?.website || '');
+              if (_sfImportEls.purchased) _sfImportEls.purchased.checked = (v.purchasedDefault === false);
+              if (_sfImportEls.vendorInfo) {
+                _sfImportEls.vendorInfo.textContent = `Applied suggestion: ${v.vendor}`;
+                _sfImportEls.vendorInfo.classList.remove('suggested');
+                _sfImportEls.vendorInfo.classList.add('detected');
+              }
+              _sfRevalidateCandidates();
+            });
           }
         } else {
           if (_sfImportEls.vendor)  _sfImportEls.vendor.value  = '';
           if (_sfImportEls.website) _sfImportEls.website.value = '';
           if (_sfImportEls.purchased) _sfImportEls.purchased.checked = false;
           if (_sfImportEls.vendorInfo) {
-            _sfImportEls.vendorInfo.textContent = 'No vendor pattern matched. Type a vendor name if you know it.';
+            _sfImportEls.vendorInfo.textContent = 'No vendor pattern matched. Type a vendor name (required).';
             _sfImportEls.vendorInfo.classList.remove('detected');
+            _sfImportEls.vendorInfo.classList.remove('suggested');
           }
         }
         if (_sfImportEls.vendor) {
           _sfImportEls.vendor.oninput = () => {
             const known = knownLookup(_sfImportEls.vendor.value);
             if (known && _sfImportEls.website && !_sfImportEls.website.value) _sfImportEls.website.value = known.website;
+            _sfRevalidateCandidates();
           };
         }
-        if (_sfImportEls.purchaseDate) _sfImportEls.purchaseDate.value = new Date().toISOString().slice(0, 10);
+        // Default the date to the source archive's filesystem creation
+        // date (when the user downloaded it) when available; fall back to
+        // today only when birthtime wasn't reported by the OS. The user
+        // can always retype.
+        if (_sfImportEls.purchaseDate) {
+          _sfImportEls.purchaseDate.value = _sfImport.sourceFileDate
+            || new Date().toISOString().slice(0, 10);
+        }
         if (_sfImportEls.notes) _sfImportEls.notes.value = '';
         const cands = _sfImport.candidates || [];
         if (_sfImportEls.candCount) _sfImportEls.candCount.textContent = cands.length === 0 ? '(none)' : `(${cands.length})`;
@@ -15203,7 +15284,20 @@ require(['vs/editor/editor.main'], function () {
           }
           if (err) anyError = true;
         }
-        if (_sfImportEls.confirmBtn) _sfImportEls.confirmBtn.disabled = !anyChecked || anyError;
+        // Vendor field is required for fresh imports. Add-more-fonts
+        // (isExistingReview) reuses the existing source's vendor, so no
+        // re-validation needed there. Duplicate-mode also reuses the
+        // existing source's vendor.
+        const isAddMore = !!(_sfImport && _sfImport.isExistingReview);
+        const isDuplicate = !!(_sfImport && _sfImport.isDuplicateMode);
+        const vendorMissing = !isAddMore && !isDuplicate
+          && !((_sfImportEls.vendor?.value || '').trim());
+        if (_sfImportEls.vendor) {
+          _sfImportEls.vendor.classList.toggle('invalid', vendorMissing && anyChecked);
+        }
+        if (_sfImportEls.confirmBtn) {
+          _sfImportEls.confirmBtn.disabled = !anyChecked || anyError || vendorMissing;
+        }
       };
 
       const _sfConfirmImport = async () => {
@@ -16056,6 +16150,7 @@ require(['vs/editor/editor.main'], function () {
         entriesList:     document.getElementById('sf-source-entries-list'),
         addMoreBtn:      document.getElementById('btn-sf-source-add-more'),
         deleteBtn:       document.getElementById('btn-sf-source-delete'),
+        exportBtn:       document.getElementById('btn-sf-source-export'),
         discardBtn:      document.getElementById('sf-source-detail-discard'),
         saveBtn:         document.getElementById('sf-source-detail-save'),
       };
@@ -16779,7 +16874,7 @@ require(['vs/editor/editor.main'], function () {
             message,
             confirmText: 'Delete',
             confirmKind: 'danger',
-            checkbox: willRemove ? { label: 'Save a copy of the source to Downloads' } : null,
+            checkbox: willRemove ? { label: 'Export source first', hint: 'Source archive keeps its original date.' } : null,
           });
           const confirmed = willRemove ? res && res.confirmed : res;
           const wantExport = willRemove ? !!(res && res.checked) : false;
@@ -16787,10 +16882,24 @@ require(['vs/editor/editor.main'], function () {
             _sfSourceDetailEls.modal?.classList.add('active');
             return;
           }
+          let exportDir = null;
+          if (wantExport) {
+            const sourceLabel = (_sfAllSourcesByUuid[sourceUuid]?.meta?.bundleName)
+              || (_sfAllSourcesByUuid[sourceUuid]?.meta?.originalName)
+              || 'source';
+            const pick = await window.electronAPI.pickExportDir({
+              title: `Choose export destination for "${sourceLabel}"…`,
+            });
+            if (!pick || !pick.ok) {
+              _sfSourceDetailEls.modal?.classList.add('active');
+              return;
+            }
+            exportDir = pick.destDir;
+          }
           // Capture the source uuid before delete so we know whether to
           // close (source got cleaned up) or stay open.
           const uuidBefore = _sfSourceOriginalUuid;
-          if (!await _sfPerformSingleDelete(name, sourceUuid, wantExport)) {
+          if (!await _sfPerformSingleDelete(name, sourceUuid, wantExport, exportDir)) {
             _sfSourceDetailEls.modal?.classList.add('active');
             return;
           }
@@ -16939,6 +17048,28 @@ require(['vs/editor/editor.main'], function () {
         _sfSourceDirty = false;
         await _sfDuplicateFromSource(uuid, { swapFromModalId: 'modal-sf-source-detail' });
       });
+      // Export the source archive to a user-chosen folder. Standalone
+      // back-up action; doesn't touch the library or remove anything.
+      // Picks via OS folder dialog so the user always knows where the
+      // file landed (toast confirms the full path on success).
+      _sfSourceDetailEls.exportBtn?.addEventListener('click', async () => {
+        if (!_sfSourceOriginalUuid) return;
+        const uuid = _sfSourceOriginalUuid;
+        try {
+          const r = await window.electronAPI.exportSourceToPicked({ uuid });
+          if (r && r.canceled) return;
+          if (!r || !r.ok) {
+            alert(`Export failed: ${(r && r.error) || 'unknown error'}`);
+            return;
+          }
+          // Success: silent. The user picked the destination via the OS
+          // dialog so they already know where the file landed; popping
+          // an "Exported to X" modal would just be a redundant
+          // interruption.
+        } catch (err) {
+          alert(`Export failed: ${err && err.message || err}`);
+        }
+      });
       // Delete source with cascade warning.
       _sfSourceDetailEls.deleteBtn?.addEventListener('click', async () => {
         if (!_sfSourceOriginalUuid) return;
@@ -16973,7 +17104,7 @@ require(['vs/editor/editor.main'], function () {
           message,
           confirmText: 'Delete',
           confirmKind: 'danger',
-          checkbox: { label: 'Save a copy of the source to Downloads' },
+          checkbox: { label: 'Export source first', hint: 'Source archive keeps its original date.' },
         });
         const confirmed = res && res.confirmed;
         const wantExport = !!(res && res.checked);
@@ -16981,9 +17112,23 @@ require(['vs/editor/editor.main'], function () {
           _sfSourceDetailEls.modal?.classList.add('active');
           return;
         }
+        // When export was requested, pick the destination BEFORE any
+        // delete work happens. Cancelling the picker aborts the whole
+        // delete so the user doesn't lose data they wanted to keep.
+        let exportDir = null;
         if (wantExport) {
-          _sfDeleteProgress.show('Saving a copy to Downloads', sourceLabel);
-          if (!await _sfExportSourceBeforeDelete(uuid, wantExport)) {
+          const pick = await window.electronAPI.pickExportDir({
+            title: `Choose export destination for "${sourceLabel}"…`,
+          });
+          if (!pick || !pick.ok) {
+            _sfSourceDetailEls.modal?.classList.add('active');
+            return;
+          }
+          exportDir = pick.destDir;
+        }
+        if (wantExport) {
+          _sfDeleteProgress.show('Exporting source', sourceLabel);
+          if (!await _sfExportSourceBeforeDelete(uuid, wantExport, exportDir)) {
             await _sfDeleteProgress.hide();
             _sfSourceDetailEls.modal?.classList.add('active');
             return;
@@ -19691,17 +19836,18 @@ require(['vs/editor/editor.main'], function () {
       // wasn't requested), false if the user opted in but the export failed —
       // in which case the caller should abort the delete so the user has a
       // chance to retry or reconsider.
-      const _sfExportSourceBeforeDelete = async (sourceUuid, requested) => {
+      const _sfExportSourceBeforeDelete = async (sourceUuid, requested, destDir) => {
         if (!requested || !sourceUuid) return true;
+        if (!destDir) return false;
         try {
-          const r = await window.electronAPI.exportSourceToDownloads({ uuid: sourceUuid });
+          const r = await window.electronAPI.exportSourceToDownloads({ uuid: sourceUuid, destDir });
           if (!r || !r.ok) {
-            alert(`Could not save a copy to Downloads: ${(r && r.error) || 'unknown error'}\n\nNothing was deleted.`);
+            alert(`Could not export source: ${(r && r.error) || 'unknown error'}\n\nNothing was deleted.`);
             return false;
           }
           return true;
         } catch (err) {
-          alert(`Could not save a copy to Downloads: ${err && err.message || err}\n\nNothing was deleted.`);
+          alert(`Could not export source: ${err && err.message || err}\n\nNothing was deleted.`);
           return false;
         }
       };
@@ -19737,13 +19883,13 @@ require(['vs/editor/editor.main'], function () {
       // Convenience for the export+delete sequence — picks the right title
       // based on whether the user opted to save a copy first, transitions
       // titles between phases, returns true if everything succeeded.
-      const _sfPerformSingleDelete = async (name, sourceUuid, wantExport) => {
+      const _sfPerformSingleDelete = async (name, sourceUuid, wantExport, exportDir) => {
         const sourceLabel = (_sfAllSourcesByUuid[sourceUuid]?.meta?.bundleName)
           || (_sfAllSourcesByUuid[sourceUuid]?.meta?.originalName)
           || '';
         if (wantExport) {
-          _sfDeleteProgress.show('Saving a copy to Downloads', sourceLabel);
-          const ok = await _sfExportSourceBeforeDelete(sourceUuid, wantExport);
+          _sfDeleteProgress.show('Exporting source', sourceLabel);
+          const ok = await _sfExportSourceBeforeDelete(sourceUuid, wantExport, exportDir);
           if (!ok) { await _sfDeleteProgress.hide(); return false; }
         }
         _sfDeleteProgress.show('Deleting', name);
@@ -20307,12 +20453,30 @@ require(['vs/editor/editor.main'], function () {
           confirmText: 'Delete',
           confirmKind: 'danger',
           checkbox: sourcesToRemove.length > 0
-            ? { label: `Save ${sourcesToRemove.length === 1 ? 'a copy of the source' : 'copies of the sources'} to Downloads` }
+            ? {
+                label: sourcesToRemove.length === 1 ? 'Export source first' : 'Export sources first',
+                hint: sourcesToRemove.length === 1
+                  ? 'Source archive keeps its original date.'
+                  : 'Source archives keep their original dates.',
+              }
             : null,
         });
         const confirmed = sourcesToRemove.length > 0 ? res && res.confirmed : res;
         const wantExport = sourcesToRemove.length > 0 ? !!(res && res.checked) : false;
         if (!confirmed) return false;
+        // When export was requested, pick the shared destination upfront
+        // so the user picks once instead of N times for N sources.
+        // Cancelling the picker aborts the whole delete.
+        let bulkExportDir = null;
+        if (wantExport) {
+          const pick = await window.electronAPI.pickExportDir({
+            title: sourcesToRemove.length === 1
+              ? `Choose export destination for "${sourcesToRemove[0].label}"…`
+              : `Choose export destination for ${sourcesToRemove.length} sources…`,
+          });
+          if (!pick || !pick.ok) return false;
+          bulkExportDir = pick.destDir;
+        }
         // Bulk progress modal: one bar advancing across all the steps below
         // (exports, entry deletes, source deletes). The copy phase is the
         // slow one, but unifying the bar keeps the UI from flashing on/off
@@ -20339,21 +20503,21 @@ require(['vs/editor/editor.main'], function () {
         if (wantExport) {
           for (let i = 0; i < sourcesToRemove.length; i++) {
             const src = sourcesToRemove[i];
-            showProgress(`Saving copies to Downloads (${i + 1} of ${sourcesToRemove.length})`, src.label);
+            showProgress(`Exporting sources (${i + 1} of ${sourcesToRemove.length})`, src.label);
             try {
-              const er = await window.electronAPI.exportSourceToDownloads({ uuid: src.uuid });
+              const er = await window.electronAPI.exportSourceToDownloads({ uuid: src.uuid, destDir: bulkExportDir });
               if (!er || !er.ok) {
                 hideProgress();
-                alert(`Could not save "${src.label}" to Downloads: ${(er && er.error) || 'unknown error'}\n\nNothing was deleted.`);
+                alert(`Could not export "${src.label}": ${(er && er.error) || 'unknown error'}\n\nNothing was deleted.`);
                 return false;
               }
             } catch (err) {
               hideProgress();
-              alert(`Could not save "${src.label}" to Downloads: ${err && err.message || err}\n\nNothing was deleted.`);
+              alert(`Could not export "${src.label}": ${err && err.message || err}\n\nNothing was deleted.`);
               return false;
             }
             stepIdx++;
-            showProgress(`Saving copies to Downloads (${i + 1} of ${sourcesToRemove.length})`, src.label);
+            showProgress(`Exporting sources (${i + 1} of ${sourcesToRemove.length})`, src.label);
           }
         }
         // Delete entries first, then the orphaned sources. Collect per-item
@@ -20661,12 +20825,23 @@ require(['vs/editor/editor.main'], function () {
             message,
             confirmText: 'Delete',
             confirmKind: 'danger',
-            checkbox: willRemove ? { label: 'Save a copy of the source to Downloads' } : null,
+            checkbox: willRemove ? { label: 'Export source first', hint: 'Source archive keeps its original date.' } : null,
           });
           const confirmed = willRemove ? res && res.confirmed : res;
           const wantExport = willRemove ? !!(res && res.checked) : false;
           if (!confirmed) return;
-          if (!await _sfPerformSingleDelete(name, sourceUuid, wantExport)) return;
+          let exportDir = null;
+          if (wantExport) {
+            const sourceLabel = (_sfAllSourcesByUuid[sourceUuid]?.meta?.bundleName)
+              || (_sfAllSourcesByUuid[sourceUuid]?.meta?.originalName)
+              || 'source';
+            const pick = await window.electronAPI.pickExportDir({
+              title: `Choose export destination for "${sourceLabel}"…`,
+            });
+            if (!pick || !pick.ok) return;
+            exportDir = pick.destDir;
+          }
+          if (!await _sfPerformSingleDelete(name, sourceUuid, wantExport, exportDir)) return;
           await window.refreshSoundFontsView();
           return;
         }

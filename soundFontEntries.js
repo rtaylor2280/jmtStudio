@@ -239,7 +239,10 @@ async function createEntry({ userData, sourceUuid, candidate, name, metadata, on
       linkedStyleLibraryEntry: (metadata && metadata.linkedStyleLibraryEntry) || null,
       purchased: !!(metadata && metadata.purchased),
       author: (metadata && metadata.author) || '',
-      acquisitionDate: (metadata && metadata.acquisitionDate) || new Date().toISOString().slice(0, 10),
+      acquisitionDate: (metadata && metadata.acquisitionDate)
+        || (source.meta && source.meta.sourceFileDate)
+        || (source.meta && source.meta.importedAt && source.meta.importedAt.slice(0, 10))
+        || new Date().toISOString().slice(0, 10),
       description: (metadata && metadata.description) || '',
       userNotes: (metadata && metadata.userNotes) || '',
       addedFromSource: [],

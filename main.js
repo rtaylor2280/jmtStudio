@@ -850,6 +850,13 @@ ipcMain.handle('sources:list', () => {
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
+ipcMain.handle('sources:cleanupOrphans', () => {
+  try {
+    const result = soundFontSources.cleanupOrphanSources(app.getPath('userData'));
+    return { ok: true, ...result };
+  } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
 ipcMain.handle('sources:existsByHash', (_, hash) => {
   try {
     const match = soundFontSources.findByHash(app.getPath('userData'), hash);
@@ -1842,6 +1849,53 @@ ipcMain.handle('sources:exportToDownloads', async (_, { uuid, destDir } = {}) =>
     // Windows (e.g. D:\Downloads) are respected; falls through to system
     // defaults on Mac/Linux.
     const target = destDir || app.getPath('downloads');
+    const result = await source.exportToDownloads(target);
+    return { ok: true, ...result };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
+// Open a folder picker for source-export workflows. Returns the chosen
+// path without running an export, so callers that need to export many
+// sources to the same destination (bulk delete with "Export sources
+// first") can pick once and then drive multiple exports. Remembers the
+// last chosen dir.
+ipcMain.handle('dialog:pickExportDir', async (_, { title } = {}) => {
+  try {
+    const lastDir = Store.get('lastExportDir') || app.getPath('downloads');
+    const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+      title: title || 'Choose export destination…',
+      defaultPath: lastDir,
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    if (canceled || !filePaths?.length) return { ok: false, canceled: true };
+    Store.set('lastExportDir', filePaths[0]);
+    return { ok: true, destDir: filePaths[0] };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
+// Standalone "Export source…" — opens a folder picker so the user can
+// drop the source archive wherever they want (saber SD card, an external
+// backup drive, a project folder), instead of the silent always-Downloads
+// behavior of the delete-cascade checkbox. Remembers the last chosen dir
+// the same way other export flows do.
+ipcMain.handle('sources:exportToPicked', async (_, { uuid } = {}) => {
+  try {
+    const source = soundFontSources.openSource(app.getPath('userData'), uuid);
+    if (!source) return { ok: false, error: `Source not found: ${uuid}` };
+    const lastDir = Store.get('lastExportDir') || app.getPath('downloads');
+    const label = (source.meta && source.meta.originalName) || 'source';
+    const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+      title: `Export "${label}" to…`,
+      defaultPath: lastDir,
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    if (canceled || !filePaths?.length) return { ok: false, canceled: true };
+    const target = filePaths[0];
+    Store.set('lastExportDir', target);
     const result = await source.exportToDownloads(target);
     return { ok: true, ...result };
   } catch (err) {

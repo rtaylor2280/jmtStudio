@@ -183,6 +183,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // ── Sound Fonts — sources (Phase 1) ───────────────────
   listSources:           ()           => ipcRenderer.invoke('sources:list'),
+  cleanupOrphanSources:  ()           => ipcRenderer.invoke('sources:cleanupOrphans'),
   sourceExistsByHash:    (hash)       => ipcRenderer.invoke('sources:existsByHash', hash),
   importSource:          (params)     => ipcRenderer.invoke('sources:import', params),
   deleteSource:          (params)     => ipcRenderer.invoke('sources:delete', params),
@@ -199,6 +200,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readSourceFile:        (params)     => ipcRenderer.invoke('sources:readFile', params),
   extractFromSource:     (params)     => ipcRenderer.invoke('sources:extractTo', params),
   exportSourceToDownloads: (params)   => ipcRenderer.invoke('sources:exportToDownloads', params),
+  exportSourceToPicked:    (params)   => ipcRenderer.invoke('sources:exportToPicked', params),
+  pickExportDir:           (params)   => ipcRenderer.invoke('dialog:pickExportDir', params),
   detectSourceVendor:    (params)     => ipcRenderer.invoke('sources:detectVendor', params),
   detectSourceCandidates: (params)    => ipcRenderer.invoke('sources:detectCandidates', params),
 

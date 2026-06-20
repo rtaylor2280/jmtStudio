@@ -20,6 +20,20 @@ const path = require('path');
 const crypto = require('crypto');
 const StreamZip = require('node-stream-zip');
 
+// OS-level archive noise: macOS Finder shadow tree, AppleDouble sidecars,
+// Windows / Mac metadata leftovers. Never real content. Filtered at
+// extractTo so library entries don't carry junk onto the SD card.
+function _isNoisePath(relPath) {
+  const parts = String(relPath || '').split('/').filter(Boolean);
+  for (const seg of parts) {
+    if (seg === '__MACOSX') return true;
+    if (seg === '.DS_Store') return true;
+    if (seg === 'Thumbs.db' || seg === 'desktop.ini') return true;
+    if (seg.startsWith('._')) return true;
+  }
+  return false;
+}
+
 function sourcesRoot(userData) {
   return path.join(userData, 'soundFonts', 'sources');
 }
@@ -143,6 +157,80 @@ function readSourceMeta(uuidDir) {
   catch { return null; }
 }
 
+// Scan the sources dir for orphan UUID dirs and remove them. Two
+// flavors of orphan:
+//   - Corrupt shape: meta without archive, or archive without parseable
+//     meta. The user can't open these and they shouldn't exist.
+//   - Entry-less: a healthy source whose UUID isn't referenced by any
+//     library entry. The only legitimate path to a source goes through
+//     a library entry; an entry-less source has no UI surface. This
+//     happens when an import was abandoned before the review modal was
+//     committed, or when the user deleted every entry from a source
+//     without deleting the source itself.
+//
+// Both flavors get torn down. Safe to call repeatedly. The renderer
+// must guard against running this while a review modal is in-flight
+// (its in-progress source has no entries yet); the `refreshSoundFontsView`
+// caller already does that via `if (!_sfImport)`, and `importSource`
+// callers are safe because the new source UUID doesn't exist yet at
+// cleanup time.
+//
+// Returns { removed: [<uuid>...], errors: [<string>...] } so the caller
+// can surface what happened.
+function cleanupOrphanSources(userData) {
+  const root = sourcesRoot(userData);
+  const result = { removed: [], errors: [] };
+  if (!fs.existsSync(root)) return result;
+  let entries;
+  try { entries = fs.readdirSync(root, { withFileTypes: true }); }
+  catch (err) { result.errors.push(`Cannot read sources root: ${err.message}`); return result; }
+  // Build the set of source UUIDs that library entries reference. Any
+  // source NOT in this set is an entry-less orphan candidate.
+  const entriesRoot = path.join(userData, 'soundFonts', 'library');
+  const referencedUuids = new Set();
+  if (fs.existsSync(entriesRoot)) {
+    let entryNames = [];
+    try { entryNames = fs.readdirSync(entriesRoot); } catch {}
+    for (const entryName of entryNames) {
+      const metaPath = path.join(entriesRoot, entryName, 'meta.json');
+      if (!fs.existsSync(metaPath)) continue;
+      try {
+        const m = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+        if (m && m.sourceUuid) referencedUuids.add(m.sourceUuid);
+      } catch {}
+    }
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const uuid = entry.name;
+    const uuidDir = path.join(root, uuid);
+    const metaPath = path.join(uuidDir, 'meta.json');
+    const hasMeta = fs.existsSync(metaPath);
+    const hasZip = fs.existsSync(path.join(uuidDir, 'source.zip'));
+    const hasFolder = fs.existsSync(path.join(uuidDir, 'source'));
+    const hasArchive = hasZip || hasFolder;
+    let meta = null;
+    if (hasMeta) {
+      try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); }
+      catch { meta = null; }
+    }
+    const formatExpected = meta && meta.format;
+    const formatPresent = formatExpected === 'zip' ? hasZip
+      : formatExpected === 'folder' ? hasFolder
+      : hasArchive;
+    const isCorrupt = !meta || !formatPresent;
+    const isEntryLess = !referencedUuids.has(uuid);
+    if (!isCorrupt && !isEntryLess) continue;
+    try {
+      fs.rmSync(uuidDir, { recursive: true, force: true });
+      result.removed.push(uuid);
+    } catch (err) {
+      result.errors.push(`Could not remove ${uuid}: ${err.message}`);
+    }
+  }
+  return result;
+}
+
 function listSources(userData) {
   const root = sourcesRoot(userData);
   if (!fs.existsSync(root)) return [];
@@ -201,11 +289,15 @@ function deleteSource(userData, uuid) {
 }
 
 // Recursively copy a folder. Async file-by-file so the caller can report
-// progress and we don't pull all bytes into memory at once.
+// progress and we don't pull all bytes into memory at once. Skips OS-level
+// noise (__MACOSX subtree, AppleDouble ._* files, .DS_Store, Thumbs.db,
+// desktop.ini) so library entries land clean even when the source folder
+// has metadata leftovers from a Mac or Windows copy.
 async function copyFolderRecursive(srcDir, destDir, onFile) {
   if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
   const entries = fs.readdirSync(srcDir, { withFileTypes: true });
   for (const e of entries) {
+    if (_isNoisePath(e.name)) continue;
     const srcPath = path.join(srcDir, e.name);
     const destPath = path.join(destDir, e.name);
     if (e.isDirectory()) {
@@ -234,6 +326,13 @@ function cleanupPartialSource(uuidDir) {
 async function importSource({ userData, sourcePath, originalName, metadata, onProgress, forceNewSource }) {
   if (!userData) return { ok: false, error: 'Missing userData' };
   if (!sourcePath) return { ok: false, error: 'Missing sourcePath' };
+  // Sweep corrupt source dirs (meta without archive, archive without
+  // meta) BEFORE the hash dedup check. A stale meta from a crashed or
+  // half-cancelled earlier import would otherwise let findByHash report
+  // "already imported" pointing at a source whose archive is missing,
+  // which is the exact stuck-state the user hit. Cleaning first
+  // guarantees the dedup answer is honest.
+  try { cleanupOrphanSources(userData); } catch {}
   if (!fs.existsSync(sourcePath)) return { ok: false, error: `Source not found: ${sourcePath}` };
 
   let stat;
@@ -334,6 +433,28 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
       });
     }
 
+    // Capture the original archive's modification date as the default
+    // acquisitionDate. We use mtime, NOT birthtime: on Windows + Google
+    // Drive (and most sync clients) birthtime gets rewritten to the local
+    // sync moment, which masks the real date a file has been in the
+    // user's collection. mtime survives sync because preserving it is
+    // exactly what "modified time" means. This is also what Explorer
+    // shows in its "Date modified" column, so the modal default matches
+    // what the user sees in the OS file picker. Formatted YYYY-MM-DD UTC.
+    //
+    // Both the date string (for the UI default) and the precise
+    // milliseconds (for export-time mtime preservation, so a re-exported
+    // source carries the original date out to the user's Downloads) are
+    // stored on the source meta.
+    let sourceFileDate = null;
+    let sourceFileMtimeMs = null;
+    try {
+      if (stat.mtimeMs && stat.mtimeMs > 0) {
+        sourceFileDate = new Date(stat.mtimeMs).toISOString().slice(0, 10);
+        sourceFileMtimeMs = stat.mtimeMs;
+      }
+    } catch {}
+
     const meta = {
       schemaVersion: 1,
       uuid,
@@ -344,6 +465,8 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
       vendorWebsite: (metadata && metadata.vendorWebsite) || null,
       vendorAutoDetected: !!(metadata && metadata.vendorAutoDetected),
       purchaseDate: (metadata && metadata.purchaseDate) || null,
+      sourceFileDate,
+      sourceFileMtimeMs,
       importedAt: new Date().toISOString(),
       userNotes: (metadata && metadata.userNotes) || '',
       fileSize,
@@ -353,7 +476,7 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
     fs.writeFileSync(path.join(uuidDir, 'meta.json'), JSON.stringify(meta, null, 2));
 
     emit('done', { isDuplicate: false });
-    return { ok: true, isDuplicate: false, uuid, hash, format };
+    return { ok: true, isDuplicate: false, uuid, hash, format, sourceFileDate };
   } catch (err) {
     cleanupPartialSource(uuidDir);
     return { ok: false, error: `Import failed: ${err.message}` };
@@ -526,6 +649,7 @@ function _createZipSource({ uuid, uuidDir, meta }) {
         const entries = await _readAllZipEntries(zip);
         const matching = entries.filter(e => {
           if (norm && !e.fileName.startsWith(prefix) && e.fileName !== norm && e.fileName !== prefix) return false;
+          if (_isNoisePath(e.fileName)) return false;
           return true;
         });
         if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
@@ -568,6 +692,16 @@ function _createZipSource({ uuid, uuidDir, meta }) {
         : `${(meta.originalName || uuid).replace(/\.zip$/i, '')}.zip`;
       const destPath = _uniqueDestPath(destDir, destName);
       await fs.promises.copyFile(zipPath, destPath);
+      // Stamp the exported file with the captured original mtime so a
+      // round-trip (export now, re-import later) keeps showing the date
+      // the user actually got the font. fs.utimes is cross-platform on
+      // Windows / Mac / Linux. Older sources imported before this field
+      // was captured have no mtime to apply; in that case the dest keeps
+      // its just-written time (no regression from current behavior).
+      if (meta.sourceFileMtimeMs && meta.sourceFileMtimeMs > 0) {
+        const t = new Date(meta.sourceFileMtimeMs);
+        try { await fs.promises.utimes(destPath, t, t); } catch {}
+      }
       return { destPath };
     },
   };
@@ -678,6 +812,13 @@ function _createFolderSource({ uuid, uuidDir, meta }) {
         archive.directory(folderRoot, false);
         archive.finalize();
       });
+      // Apply the captured original folder mtime to the freshly written
+      // zip so a round-trip preserves the user's collection date. Same
+      // rationale as the zip-source path above.
+      if (meta.sourceFileMtimeMs && meta.sourceFileMtimeMs > 0) {
+        const t = new Date(meta.sourceFileMtimeMs);
+        try { await fs.promises.utimes(destPath, t, t); } catch {}
+      }
       return { destPath };
     },
   };
@@ -820,6 +961,7 @@ module.exports = {
   hashZipFile,
   hashFolder,
   listSources,
+  cleanupOrphanSources,
   findByHash,
   importSource,
   openSource,

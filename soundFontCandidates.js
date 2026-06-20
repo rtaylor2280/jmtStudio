@@ -1,3 +1,5 @@
+const { cleanSuggestedName } = require('./soundFontNameClean');
+
 // Sound Fonts — candidate detection (Phase 1, slice 4).
 //
 // A "candidate" is something inside a source that could become a library
@@ -89,6 +91,21 @@ function looksLikeProffieFont(childFolders, childFiles) {
 
 // ── Entry tree helpers ──────────────────────────────────
 
+// OS-level zip artifacts that are never real content. Mac Finder zips
+// drop a parallel __MACOSX/ tree of AppleDouble metadata (._foo.wav for
+// every foo.wav); ignoring that whole subtree is critical because its
+// shadow .wav names trip the candidate walker into seeing a duplicate
+// Proffie-shaped folder. AppleDouble files can also appear outside
+// __MACOSX/ when someone has copied files across volumes, so we match
+// them on the segment regardless of where they show up.
+function isNoiseSegment(seg) {
+  if (seg === '__MACOSX') return true;
+  if (seg === '.DS_Store') return true;
+  if (seg === 'Thumbs.db' || seg === 'desktop.ini') return true;
+  if (seg.startsWith('._')) return true;
+  return false;
+}
+
 // Group source.listAll() output into a map of parentDir -> array of children
 // with { name, isDir, fileName, size }. Synthesizes ancestor directory
 // entries when the zip only enumerates files (most do); without this, the
@@ -116,6 +133,7 @@ function groupByParent(entries) {
     if (!stripped) continue;
     const parts = stripped.split('/').filter(Boolean);
     if (parts.length === 0) continue;
+    if (parts.some(isNoiseSegment)) continue;
     // Synthesize directory entries for every ancestor along the path.
     for (let i = 0; i < parts.length - 1; i++) {
       const ancestorParent = parts.slice(0, i).join('/');
@@ -341,6 +359,14 @@ async function detectCandidates(source) {
     ? source.meta.originalName.replace(/\.zip$/i, '')
     : 'source';
   walkForCandidates(byParent, '', candidates, sourceFallbackName);
+  // Clean every candidate name through the shared pipeline before the
+  // renderer sees them. Original name is preserved on rawName for any
+  // future caller that needs the unmodified inner-folder string.
+  for (const c of candidates) {
+    c.rawName = c.name;
+    const cleaned = cleanSuggestedName(c.name);
+    if (cleaned) c.name = cleaned;
+  }
   // The "bundle" concept only applies when a source produces multiple
   // candidate fonts. For a single-font source, the source name and the
   // font name are the same thing, so tagging the entry with the source
@@ -349,7 +375,11 @@ async function detectCandidates(source) {
   // a separate concern handled by the renderer when saving source meta.
   let bundleName = candidates.length >= 2 ? detectBundleName(candidates) : null;
   if (!bundleName && candidates.length >= 2) bundleName = sourceFallbackName;
-  if (bundleName) for (const c of candidates) c.bundleName = bundleName;
+  if (bundleName) {
+    const cleanedBundle = cleanSuggestedName(bundleName);
+    if (cleanedBundle) bundleName = cleanedBundle;
+    for (const c of candidates) c.bundleName = bundleName;
+  }
   return { candidates, bundleName };
 }
 
