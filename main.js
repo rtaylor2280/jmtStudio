@@ -14,6 +14,8 @@ const soundFontCommon = require('./soundFontCommon');
 const soundFontBackup = require('./soundFontBackup');
 const soundFontFileOps = require('./soundFontFileOps');
 const soundFontReorganize = require('./soundFontReorganize');
+const soundFontVoicepack = require('./soundFontVoicepack');
+const soundFontSharedTracks = require('./soundFontSharedTracks');
 
 // ── Separate userData for dev vs prod ──────────────────
 if (!app.isPackaged) {
@@ -1291,14 +1293,116 @@ ipcMain.handle('common:exportToFolder', (_, { uuid, destDir, mode } = {}) => {
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
+// Group management — assign/unassign, rename across all members,
+// delete (unsets group on every member). Group ORDER (drag-reorder of
+// headers in the sidecar) is persisted as a renderer preference (see
+// settings.soundFontGroupOrder), not in common meta.
+ipcMain.handle('common:setGroup', (_, { uuid, groupName } = {}) => {
+  try { return soundFontCommon.setCommonGroup(app.getPath('userData'), uuid, groupName); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+ipcMain.handle('common:setGroupMany', (_, { uuids, groupName } = {}) => {
+  try { return soundFontCommon.setCommonGroupMany(app.getPath('userData'), uuids, groupName); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+ipcMain.handle('common:renameGroup', (_, { oldName, newName } = {}) => {
+  try { return soundFontCommon.renameCommonGroup(app.getPath('userData'), oldName, newName); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+ipcMain.handle('common:deleteGroup', (_, { name } = {}) => {
+  try { return soundFontCommon.deleteCommonGroup(app.getPath('userData'), name); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+// ── Shared Tracks folder IPC ──────────────────────────
+// Single app-global folder that maps to /tracks/ at the SD card root —
+// ProffieOS prop_base.h ListTracks scans /tracks/ as well as per-font
+// /<font>/tracks/, so a top-level /tracks/ is the universal-tracks
+// location that doesn't have to live inside a common folder.
+ipcMain.handle('sharedTracks:exists', () => {
+  try { return { ok: true, exists: soundFontSharedTracks.exists(app.getPath('userData')) }; }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+ipcMain.handle('sharedTracks:create', () => {
+  try { return soundFontSharedTracks.create(app.getPath('userData')); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+ipcMain.handle('sharedTracks:listFiles', () => {
+  try { return { ok: true, files: soundFontSharedTracks.listFiles(app.getPath('userData')) }; }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+ipcMain.handle('sharedTracks:addFiles', (_, { sourceFilePaths } = {}) => {
+  try { return soundFontSharedTracks.addFiles(app.getPath('userData'), sourceFilePaths); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+ipcMain.handle('sharedTracks:renameFile', (_, { oldName, newName } = {}) => {
+  try { return soundFontSharedTracks.renameFile(app.getPath('userData'), oldName, newName); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+ipcMain.handle('sharedTracks:deleteFile', (_, { name } = {}) => {
+  try { return soundFontSharedTracks.deleteFile(app.getPath('userData'), name); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+ipcMain.handle('sharedTracks:delete', () => {
+  try { return soundFontSharedTracks.deleteAll(app.getPath('userData')); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+ipcMain.handle('sharedTracks:folderExistsAt', (_, { destDir } = {}) => {
+  try { return { ok: true, exists: soundFontSharedTracks.folderExistsAt(destDir) }; }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+ipcMain.handle('sharedTracks:exportToFolder', (_, { destDir, mode } = {}) => {
+  try { return soundFontSharedTracks.exportToFolder(app.getPath('userData'), destDir, mode); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+ipcMain.handle('sharedTracks:readFileBytes', (_, { name } = {}) => {
+  try {
+    const buf = soundFontSharedTracks.readFileBytes(app.getPath('userData'), name);
+    if (!buf) return { ok: false, error: 'File not found' };
+    return { ok: true, bytes: Array.from(buf) };
+  } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+// Voicepack catalog + downloader. First iteration: V1 packs from hubbe.net
+// only. The catalog ships in the renderer at modal-open time; sample/install
+// fetches happen on user action so we don't speculatively hit the network.
+ipcMain.handle('voicepack:getCatalog', () => {
+  try { return { ok: true, catalog: soundFontVoicepack.getCatalog() }; }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+ipcMain.handle('voicepack:downloadSample', async (_, { id } = {}) => {
+  try {
+    const result = await soundFontVoicepack.downloadSample(id, app.getAppPath());
+    if (!result.ok) return result;
+    // Convert Buffer to ArrayBuffer-compatible payload for the renderer
+    return { ok: true, bytes: Array.from(result.bytes) };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
+ipcMain.handle('voicepack:install', async (_, { id } = {}) => {
+  try {
+    return await soundFontVoicepack.downloadAndInstall({ id, userData: app.getPath('userData') });
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
 // Export one or more files from any SF location to disk. Single-file
 // mode pops a save dialog (user picks name + location); multi-file
 // mode pops a folder picker and writes each file at the chosen folder
 // with its original name, walking collisions through a " (N)" tail so
 // nothing gets silently overwritten. Returns the list of written paths.
 ipcMain.handle('sfFile:export', async (_, { kind, id, paths, suggestedName } = {}) => {
-  if (!kind || !id || !Array.isArray(paths) || paths.length === 0) {
-    return { ok: false, error: 'Missing kind/id/paths' };
+  // sharedTracks is the singleton flat folder — no id required. Every
+  // other kind needs one.
+  if (!kind || !Array.isArray(paths) || paths.length === 0) {
+    return { ok: false, error: 'Missing kind/paths' };
+  }
+  if (kind !== 'sharedTracks' && !id) {
+    return { ok: false, error: 'Missing id' };
   }
   const userData = app.getPath('userData');
   // Resolve bytes for a single FILE path. Reuses the existing kind-
@@ -1311,6 +1415,11 @@ ipcMain.handle('sfFile:export', async (_, { kind, id, paths, suggestedName } = {
       const source = soundFontSources.openSource(userData, id);
       if (!source) throw new Error(`Source not found: ${id}`);
       return await source.readFile(subPath);
+    }
+    if (kind === 'sharedTracks') {
+      const buf = soundFontSharedTracks.readFileBytes(userData, subPath);
+      if (!buf) throw new Error(`File not found: ${subPath}`);
+      return buf;
     }
     throw new Error(`Unknown kind: ${kind}`);
   };
@@ -1333,6 +1442,7 @@ ipcMain.handle('sfFile:export', async (_, { kind, id, paths, suggestedName } = {
   // directory. Source kind reads the archive listing; entry/common
   // resolve to disk.
   const isDirAtPath = async (subPath) => {
+    if (kind === 'sharedTracks') return false; // flat folder, no subdirs
     if (kind === 'source') {
       const source = soundFontSources.openSource(userData, id);
       if (!source) return false;

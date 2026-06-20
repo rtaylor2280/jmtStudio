@@ -2017,6 +2017,28 @@
   .sf-card { position: relative; background: var(--c-bg-card); border: 1px solid var(--c-border); border-radius: 5px; padding: 10px 12px; display: flex; flex-direction: column; gap: 3px; cursor: pointer; transition: border-color 0.15s, background 0.15s; }
   .sf-card:hover .card-delete-btn { opacity: 0.6; }
   .sf-card:hover { border-color: var(--jmt-blue); background: var(--c-bg-hover); }
+  /* Shared Tracks card — dashed JMT-blue border, soft blue tint, music
+     icon. Visually it reads as a different KIND of thing than a font
+     folder so users don't confuse it for a regular library entry. */
+  /* Shared Tracks card uses the default .sf-card chrome — the music
+     note icon + "shared at SD root" sublabel carry the visual identity.
+     When the open config references shared tracks (track field starts
+     with `tracks/`), the regular .sf-card.in-use blue tint applies and
+     matches how in-use fonts read. */
+  .sf-shared-tracks-icon { color: var(--jmt-blue); font-size: 1rem; line-height: 1; margin-right: 4px; }
+  .sf-shared-tracks-count { font-size: 0.72rem; color: var(--c-text-muted); margin-top: 2px; }
+  .sf-shared-tracks-empty { font-size: 0.7rem; color: var(--c-text-dim); font-style: italic; margin-top: 2px; }
+  /* Undersized track warning — files below ProffieOS's 200KB cutoff are
+     visually flagged so the user knows they won't play. */
+  .sf-entry-files-row-name.warn { color: #d97706; }
+  /* Footer explaining the amber rows — only rendered when at least one
+     undersized track exists. Color matches the row tint so the link
+     between footer and rows reads at a glance. */
+  .sf-shared-tracks-warn-footer { margin-top: 8px; padding: 6px 2px; font-size: 0.72rem; color: #d97706; line-height: 1.4; }
+  /* Shared Tracks layout — wider rows than entry-files since track names
+     tend to run long (artist + theme + variant). 230px lands 3 columns
+     in the 820px modal with breathing room. */
+  #sf-shared-tracks-file-list .sf-entry-files-row { width: 230px; }
   .sf-card-name-row { display: flex; align-items: baseline; gap: 5px; min-width: 0; }
   .sf-card-name { font-size: 0.84rem; font-weight: 600; color: var(--c-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
   .sf-card-link { font-size: 0.72rem; color: var(--jmt-blue); text-decoration: underline; text-underline-offset: 2px; background: none; border: none; padding: 0; cursor: pointer; flex-shrink: 0; font-family: inherit; }
@@ -2141,6 +2163,28 @@
   .sf-tree-row.drop-target { background: rgba(58,143,255,0.22); outline: 1px solid var(--jmt-blue); outline-offset: -1px; }
   .sf-common-files.drop-target { background: rgba(58,143,255,0.10); outline: 1px dashed var(--jmt-blue); outline-offset: -2px; }
   .sf-common-row-header.drop-target { background: rgba(58,143,255,0.18); }
+  /* Multi-selected card (Ctrl/Shift click) — visible highlight separate
+     from the active/expanded state. Uses a faint JMT-blue tint so it
+     reads as "part of a selection" without competing with the active
+     common's heavier border. */
+  .sf-common-row.multi-selected > .sf-common-row-header { background: rgba(0,130,255,0.08); border-color: rgba(0,130,255,0.35); }
+  .sf-common-row.multi-selected > .sf-common-row-header:hover { background: rgba(0,130,255,0.14); }
+  /* Group header — JMT-blue strip in the sidecar list with collapse
+     chevron, label, star indicator when a member is the default, and
+     a count badge. Draggable for user-defined reorder; drop targets
+     get a faint highlight to show where it would land. */
+  .sf-common-group { display: flex; flex-direction: column; flex-shrink: 0; }
+  .sf-common-group-header { display: flex; align-items: center; gap: 8px; padding: 6px 10px; cursor: pointer; background: var(--jmt-blue); color: #fff; font-size: 0.78rem; font-weight: 600; user-select: none; flex-shrink: 0; transition: background 0.1s; }
+  .sf-common-group-header:hover { background: #036bb8; }
+  .sf-common-group-header.drop-before { box-shadow: inset 0 2px 0 0 #fff; }
+  .sf-common-group-header.drop-after { box-shadow: inset 0 -2px 0 0 #fff; }
+  .sf-common-group-chevron { font-size: 0.7rem; transition: transform 0.12s; }
+  .sf-common-group.collapsed .sf-common-group-chevron { transform: rotate(-90deg); }
+  .sf-common-group-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sf-common-group-star { font-size: 0.85rem; opacity: 0.9; cursor: default; }
+  .sf-common-group-count { font-size: 0.7rem; opacity: 0.8; font-weight: 500; }
+  .sf-common-group.collapsed .sf-common-group-body { display: none; }
+  .sf-common-group-body { display: flex; flex-direction: column; }
   /* Star button on common card headers — only rendered when more than one
      common exists. Mirrors the favorites star pattern from the title-bar
      #btn-fav-star, scoped to common cards so the two don't share state. */
@@ -2198,8 +2242,60 @@
   .sf-import-phase::-webkit-scrollbar-track { background: transparent; }
   .sf-import-phase::-webkit-scrollbar-thumb { background: var(--c-border-strong); border-radius: 3px; }
   .sf-import-hint { font-size: 0.78rem; color: var(--c-text-sub); margin: 0 0 12px 0; line-height: 1.45; }
-  .sf-import-pick-row { display: flex; gap: 10px; justify-content: center; margin-top: 16px; }
+  .sf-import-pick-row { display: flex; gap: 10px; justify-content: center; margin-top: 16px; flex-wrap: wrap; }
   .sf-import-pick-row button { padding: 10px 20px; font-size: 0.9rem; }
+  /* Common-folder import chooser layout. zip and folder are the same
+     category (local file source) so they sit side-by-side equally
+     sized; voicepack is a different category (online source) so it
+     gets its own row below and uses the neutral button color to
+     visually separate it. Grid keeps the two upper buttons exactly
+     the same width regardless of label length. */
+  #modal-sf-common-import-chooser .sf-import-pick-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; max-width: 320px; margin-left: auto; margin-right: auto; }
+  #modal-sf-common-import-chooser .sf-import-pick-row button { width: 100%; }
+  #modal-sf-common-import-chooser #sf-common-import-voicepack { grid-column: 1 / -1; }
+
+  /* Voicepack picker modal. Inline form layout: version toggle on top,
+     language and variant dropdowns stacked with the sample/install
+     controls inline. Attribution footer is small + muted, positioned
+     under the action buttons so it's visible but not noisy. */
+  #modal-sf-voicepack-picker .modal.sf-voicepack-modal {
+    width: 460px; max-width: 92vw; padding: 18px 20px;
+    display: flex; flex-direction: column; gap: 12px;
+  }
+  .sf-voicepack-help { margin: 0; font-size: 0.78rem; color: var(--c-text-sub); line-height: 1.45; }
+  .sf-voicepack-row { display: flex; align-items: center; gap: 10px; }
+  .sf-voicepack-label { font-size: 0.78rem; color: var(--c-text-muted); width: 70px; flex-shrink: 0; }
+  .sf-voicepack-toggle { display: flex; gap: 0; border-radius: 4px; overflow: hidden; border: 1px solid var(--c-border); }
+  .sf-voicepack-toggle-btn { padding: 6px 14px; font-size: 0.78rem; background: var(--c-bg); color: var(--c-text-sub); border: none; cursor: pointer; transition: background 0.12s, color 0.12s; }
+  .sf-voicepack-toggle-btn:hover:not(:disabled):not(.active) { background: var(--c-bg-hover); }
+  .sf-voicepack-toggle-btn.active { background: var(--jmt-blue); color: #fff; }
+  .sf-voicepack-toggle-btn.disabled, .sf-voicepack-toggle-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .sf-voicepack-select { flex: 1; padding: 5px 8px; font-size: 0.82rem; background: var(--c-bg-inset); color: var(--c-text); border: 1px solid var(--c-border); border-radius: 3px; }
+  .sf-voicepack-sample { padding: 5px 10px; font-size: 0.78rem; background: var(--c-bg-inset); color: var(--c-text); border: 1px solid var(--c-border); border-radius: 3px; cursor: pointer; white-space: nowrap; flex-shrink: 0; }
+  .sf-voicepack-sample:hover:not(:disabled) { background: var(--c-bg-hover); }
+  .sf-voicepack-sample:disabled { opacity: 0.45; cursor: not-allowed; }
+  .sf-voicepack-sample.playing { background: var(--jmt-blue); color: #fff; border-color: #036bb8; }
+  .sf-voicepack-status { font-size: 0.74rem; color: var(--c-text-muted); min-height: 1.2em; padding: 4px 0; }
+  .sf-voicepack-status.error { color: #e88; }
+  .sf-voicepack-status.success { color: #6c6; }
+  .sf-voicepack-actions { margin-top: 4px; }
+  .sf-voicepack-attribution { margin: 8px 0 0 0; padding-top: 10px; border-top: 1px solid var(--c-border-faint); font-size: 0.7rem; color: var(--c-text-dim); line-height: 1.5; }
+  .sf-voicepack-attribution a { color: var(--c-text-muted); text-decoration: underline; }
+  .sf-voicepack-attribution a:hover { color: var(--c-text); }
+  /* "More" tab: links out to community sources. Card-style list with
+     name, short description, and an external link per item. */
+  .sf-voicepack-more-panel { display: flex; flex-direction: column; gap: 10px; }
+  .sf-voicepack-more-item { padding: 10px 12px; background: var(--c-bg-inset); border: 1px solid var(--c-border-faint); border-radius: 4px; }
+  .sf-voicepack-more-name { font-size: 0.85rem; color: var(--c-text); font-weight: 600; margin-bottom: 4px; }
+  .sf-voicepack-more-desc { font-size: 0.74rem; color: var(--c-text-sub); line-height: 1.4; margin-bottom: 6px; }
+  .sf-voicepack-more-link { font-size: 0.74rem; color: var(--jmt-blue); text-decoration: underline; }
+  .sf-voicepack-more-link:hover { color: #036bb8; }
+  /* Fallback link block — shown under the status when an install or
+     sample fails so the user has a clear path out (download the file
+     manually from the source). */
+  .sf-voicepack-fallback { font-size: 0.72rem; color: var(--c-text-sub); margin-top: 6px; line-height: 1.5; }
+  .sf-voicepack-fallback a { color: var(--jmt-blue); text-decoration: underline; }
+  .sf-voicepack-fallback a:hover { color: #036bb8; }
   .sf-import-progress-label { font-size: 0.85rem; color: var(--c-text); margin: 8px 0; }
   .sf-import-progress-track { height: 6px; background: var(--c-bg-inset); border-radius: 3px; overflow: hidden; margin: 6px 0; }
   .sf-import-progress-bar { height: 100%; width: 0%; background: var(--jmt-blue); transition: width 0.15s; }
@@ -2722,6 +2818,46 @@
   .preset-sidecar-inner { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; background: var(--c-bg-raised); }
   .preset-sidecar-header { display: flex; align-items: center; gap: 4px; padding: 8px 10px 6px; border-bottom: 1px solid var(--c-border); flex-shrink: 0; }
   .preset-sidecar-title { font-size: 0.7rem; font-weight: 700; color: var(--c-text); letter-spacing: 0.05em; }
+  /* Common folder selector row in the preset sidecar. Shown only when
+     the SF library has at least one common folder. Selecting a row
+     updates the starred (active) common — same data source as the
+     star button on the SF tab, so the two stay in sync. */
+  /* Common Folder meta-field — lives in the top bar next to OS Version.
+     All three render states match the OS Version select's styling so
+     the row reads as one coherent strip. Uses the same padding/font/
+     border as #input-version; spans use display:block so they fill the
+     field width and compute their height from padding just like the
+     select does. */
+  #config-common-field select,
+  .config-common-name,
+  .config-common-missing {
+    display: block;
+    width: max-content;
+    min-width: 160px;
+    box-sizing: border-box;
+    background: var(--c-bg-raised);
+    border: 1px solid var(--c-border-input);
+    border-radius: 3px;
+    color: var(--c-text);
+    font-size: 0.78rem;
+    padding: 4px 6px;
+    line-height: normal;
+    outline: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  #config-common-field select { cursor: pointer; }
+  #config-common-field select:focus { border-color: var(--jmt-blue); }
+  /* Ghost option (saved name not in current library) — red on both the
+     closed trigger and inside the open dropdown so the mismatch reads
+     at a glance. Trigger color cascades to options in the open list,
+     so the non-ghost options need an explicit reset back to text color. */
+  #config-common-field select.ghost-selected { color: #e44; }
+  #config-common-field select option[data-ghost="1"] { color: #e44; }
+  #config-common-field select.ghost-selected option:not([data-ghost]) { color: var(--c-text); }
+  .config-common-name { cursor: default; }
+  .config-common-missing { color: #e44; cursor: help; }
   .preset-add-btn { font-size: 0.7rem; padding: 1px 7px; line-height: 1; }
   .preset-sidecar-close { margin-left: auto; background: none; border: none; cursor: pointer; color: var(--c-text-muted); font-size: 1.25rem; line-height: 1; padding: 0 4px; }
   .preset-sidecar-close:hover { color: var(--c-text); }
@@ -2824,9 +2960,14 @@
   .preset-ctx-item:hover { background: var(--c-bg-hover); color: var(--c-text); }
   .preset-ctx-item.danger:hover { background: rgba(40,10,10,0.7); color: #e44; }
 
+  /* New-row pulse: inset white border that fades. Background is left
+     alone so the row's selection color (which lands together with the
+     add) stays put — the previous version animated background to
+     transparent, which made a freshly-selected row briefly lose its
+     blue and read as a flicker. */
   @keyframes preset-new-glow {
-    0%   { background: rgba(58,143,255,0.22); box-shadow: inset 0 0 0 1px var(--jmt-blue); }
-    100% { background: transparent; box-shadow: inset 0 0 0 0 transparent; }
+    0%   { box-shadow: inset 0 0 0 2px rgba(255,255,255,0.55); }
+    100% { box-shadow: inset 0 0 0 0 transparent; }
   }
   .preset-row.new-preset { animation: preset-new-glow 0.55s ease-out forwards; }
 
@@ -2836,6 +2977,11 @@
   .preset-detail-num { color: var(--c-text-muted); font-weight: 600; }
   .preset-detail-name-wrap { display: inline-flex; align-items: center; gap: 3px; flex: 1; min-width: 0; }
   .preset-detail-name { font-weight: 700; color: var(--c-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Click-to-edit affordance for the preset name span (the dedicated
+     pencil was removed in favor of the span itself being the target).
+     Hover signals editability without adding a visual element. */
+  .preset-detail-name-editable { cursor: text; padding: 0 3px; border-radius: 3px; transition: background-color 0.12s; }
+  .preset-detail-name-editable:hover { background: var(--c-bg-hover); }
 
   .preset-nav-btn, .preset-detail-delete { background: none; border: none; cursor: pointer; font-size: 0.85rem; line-height: 1; padding: 2px 5px; border-radius: 3px; opacity: 0.3; transition: opacity 0.1s, color 0.1s, background 0.1s; }
   .preset-nav-btn { color: var(--c-text-muted); }
@@ -2850,10 +2996,19 @@
   .preset-detail-field-value-wrap { display: inline-flex; align-items: center; gap: 3px; flex: 1; min-width: 0; }
   .preset-detail-field-value { flex: 0 0 auto; min-width: 0; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--c-text); }
   .preset-detail-field-value[data-placeholder]:empty::after { content: attr(data-placeholder); color: var(--c-text-hint); font-style: italic; }
+  /* Library-validation: font folder path doesn't match any entry in
+     the user's SF library. Red text + cursor:help so the tooltip
+     explains the consequence. */
+  .preset-detail-field-value.not-in-library { color: #e44; cursor: help; }
 
   .preset-common-toggle { display: inline-flex; align-items: center; gap: 3px; cursor: default; user-select: none; flex-shrink: 0; margin-left: 8px; font-size: 0.72rem; color: var(--c-text-muted); }
   .preset-common-toggle-label { cursor: help; }
   .preset-common-toggle input[type="checkbox"] { cursor: pointer; width: 11px; height: 11px; accent-color: var(--jmt-blue); margin: 0; }
+  /* Red-state when the SF library has no common folder. Both the
+     label text and the checkbox accent shift to a warning red; the
+     tooltip on the label explains the consequence. */
+  .preset-common-toggle.no-common-in-library .preset-common-toggle-label { color: #e44; }
+  .preset-common-toggle.no-common-in-library input[type="checkbox"] { accent-color: #e44; }
 
   .preset-edit-input { font: inherit; color: var(--c-text); background: var(--c-bg-card); border: 1px solid var(--jmt-blue); border-radius: 2px; padding: 1px 4px; outline: none; flex: 1; min-width: 60px; max-width: 220px; }
   .preset-edit-input.invalid { border-color: #e44; }
@@ -2862,6 +3017,12 @@
   .preset-edit-confirm:disabled { opacity: 0.15; cursor: not-allowed; }
   .preset-edit-cancel { background: none; border: none; cursor: pointer; font-size: 0.85rem; line-height: 1; padding: 1px 3px; color: var(--c-text-muted); opacity: 0.35; }
   .preset-edit-cancel:hover { opacity: 1; color: #e44; }
+  .preset-lib-combo-input.not-in-library { color: #e44; }
+  .preset-lib-combo-input.not-in-library::placeholder { color: rgba(228,68,68,0.5); }
+  .preset-font-combo, .preset-track-combo { flex: 1; min-width: 0; max-width: 260px; }
+  .preset-track-dropdown-header { padding: 4px 8px; font-size: 0.68rem; color: var(--c-text-muted); border-bottom: 1px solid var(--c-border-faint); font-family: 'Cascadia Code','Consolas',monospace; }
+  .preset-track-dropdown-nav { padding: 4px 8px; font-size: 0.72rem; color: var(--jmt-blue); cursor: pointer; }
+  .preset-track-dropdown-nav:hover { background: rgba(58,143,255,0.15); }
 
   .preset-detail-slots-label { font-size: 0.7rem; color: var(--c-text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; margin: 10px 0 4px; cursor: help; }
   .preset-detail-slots-label.field-error { color: #e44; }
@@ -3050,6 +3211,7 @@
           </div>
         </div>
         <div class="toolbar-divider"></div>
+        <button id="btn-sf-create-shared-tracks" class="btn-blue" style="display:none" title="Create a shared tracks folder. Maps to /tracks/ at the SD card root — the universal track location ProffieOS scans for all presets.">&#43; Create Shared Tracks Folder</button>
         <button id="btn-sf-import-toolbar" class="btn-blue" style="display:none" title="Import a sound font folder into your library">&#43; Import Sound Font</button>
       </div>
       <div class="tab-btns" id="tab-btns-styles">
@@ -3118,6 +3280,15 @@
     <div class="meta-field">
       <label>OS Version</label>
       <select id="input-version"></select>
+    </div>
+    <!-- Common Folder — surfaces only when the open config references
+         ;common (any preset font with the `;common` suffix or a stored
+         JMT_COMMON marker) OR the library has commons available. One
+         element flips between three states: missing-needed (red text),
+         single-name display, and a dropdown when 2+ commons exist. -->
+    <div class="meta-field" id="config-common-field" style="display:none">
+      <label>Common Folder</label>
+      <div id="config-common-content"></div>
     </div>
     <span id="txt-convert-notice" style="display:none;margin-left:auto;font-size:0.7rem;color:#4caf50;white-space:nowrap;padding-bottom:6px;align-self:flex-end;"></span>
   </div>
@@ -3746,7 +3917,7 @@
     <h2 id="sf-import-title">Import Sound Font</h2>
 
     <div class="sf-import-phase" id="sf-import-phase-pick">
-      <p class="sf-import-hint">Pick a sound font as it came from the vendor — either the original .zip download or an already-unzipped folder. JMT Studio keeps the archive intact and lets you choose which fonts inside to add to your library.</p>
+      <p class="sf-import-hint">Pick a sound font as it came from the vendor with preference for the original .zip download. JMT Studio keeps the archive intact and lets you choose which fonts inside to add to your library.</p>
       <div class="sf-import-pick-row">
         <button class="modal-btn-primary" id="sf-import-pick-zip">Pick .zip file…</button>
         <button class="modal-btn-primary" id="sf-import-pick-folder">Pick folder…</button>
@@ -4096,16 +4267,136 @@
      bottom. Windows/Linux dialog constraints prevent one native picker
      from co-mingling files + folders, so the up-front choice is forced
      here too. ── -->
+<!-- ── Shared Tracks folder — full modal mirroring the entry-detail
+     pattern (header with name + byline, meta block with contents +
+     notes, files section, bottom Close/Save buttons). Maps to /tracks/
+     at the SD card root — the universal-tracks location ProffieOS
+     prop_base.h ListTracks scans. Deletion happens via the X on the
+     SF grid card, not here. ── -->
+<div class="modal-overlay" id="modal-sf-shared-tracks">
+  <div class="modal" style="position:relative;width:820px;max-width:96vw;height:min(90vh,800px);display:flex;flex-direction:column;padding-bottom:16px;">
+    <button class="modal-btn-close" id="sf-shared-tracks-close" title="Close">&#10005;</button>
+    <div class="sf-entry-detail-header">
+      <div class="sf-entry-name-wrap">
+        <h2>tracks</h2>
+      </div>
+      <div class="sf-entry-byline-wrap">
+        <span class="sf-byline-prefix">by</span>
+        <span class="sf-edit-display">Various Artists</span>
+      </div>
+    </div>
+    <div class="sf-entry-detail-body">
+      <div class="sf-entry-detail-section sf-files-section">
+        <h3 class="sf-entry-files-head">
+          <span>Tracks</span>
+          <span id="sf-shared-tracks-contents" style="font-weight:400;color:var(--c-text-muted)"></span>
+          <span class="sf-entry-files-head-actions">
+            <span class="styles-tag-filter-wrap" style="position:relative">
+              <button class="btn-neutral sf-entry-files-head-btn" id="btn-sf-shared-tracks-add" title="Add files to the Shared Tracks folder">+ Add</button>
+              <div id="sf-shared-tracks-add-dropdown" class="styles-tag-dropdown" style="display:none;min-width:160px;right:0;left:auto">
+                <button id="btn-sf-shared-tracks-add-browse" class="styles-tag-dropdown-item">
+                  <span class="styles-tag-dropdown-name">Browse&hellip;</span>
+                </button>
+                <button id="btn-sf-shared-tracks-add-library" class="styles-tag-dropdown-item">
+                  <span class="styles-tag-dropdown-name">From library&hellip;</span>
+                </button>
+              </div>
+            </span>
+          </span>
+        </h3>
+        <div class="sf-entry-files-browser">
+          <div id="sf-shared-tracks-file-list" class="sf-entry-files-list"></div>
+        </div>
+        <!-- Surfaces only when at least one undersized track exists in
+             the list — explains the amber rows in one place so the
+             tooltip on individual rows can stay clean (just the filename). -->
+        <div id="sf-shared-tracks-warn-footer" class="sf-shared-tracks-warn-footer" style="display:none"></div>
+      </div>
+    </div>
+    <div class="modal-btns" style="margin-top:12px;">
+      <button class="modal-btn-cancel" id="sf-shared-tracks-discard">Close</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="modal-sf-common-import-chooser">
   <div class="modal">
     <h2>Import Common Folder</h2>
     <div class="sf-import-pick-row">
       <button class="modal-btn-primary" id="sf-common-import-zip">Pick .zip file&hellip;</button>
       <button class="modal-btn-primary" id="sf-common-import-folder">Pick folder&hellip;</button>
+      <button class="modal-btn-primary" id="sf-common-import-voicepack">Download voicepack&hellip;</button>
     </div>
     <div class="modal-btns" style="margin-top: 16px">
       <button class="modal-btn-cancel" id="sf-common-import-cancel">Cancel</button>
     </div>
+  </div>
+</div>
+
+<!-- ── Voicepack picker — download official ProffieOS voicepacks
+     directly from hubbe.net (V1) and (future) NoSloppy's Dropbox (V2).
+     V1/V2 toggle gates the catalog; language + variant pickers narrow
+     to a specific pack. Sample button fetches the small sibling .wav
+     and plays inline. Install fetches the full zip and routes through
+     the existing common-folder import. Attribution to Brian Conner
+     (NoSloppy) in the footer per CC BY 4.0. ── -->
+<div class="modal-overlay" id="modal-sf-voicepack-picker">
+  <div class="modal sf-voicepack-modal">
+    <button class="modal-btn-close" id="sf-voicepack-close" title="Close">&#10005;</button>
+    <h2>Download Voicepack</h2>
+    <p class="sf-voicepack-help">Voice prompts used by ProffieOS for menu narration and Edit Mode. Pick a language and variant, preview the voice, then install.</p>
+
+    <div class="sf-voicepack-row">
+      <label class="sf-voicepack-label">Version:</label>
+      <div class="sf-voicepack-toggle">
+        <button class="sf-voicepack-toggle-btn" id="sf-voicepack-v1" data-version="v1" title="Original ProffieOS voicepack from hubbe.net. Covers basic saber operation. V2 adds menu narration for OS 8 features on top of everything V1 has, so V2 is the better default unless you have a specific reason to want the original recordings.">V1</button>
+        <button class="sf-voicepack-toggle-btn active" id="sf-voicepack-v2" data-version="v2" title="Updated voicepack with menu narration for OS 8 features (color adjustment menu, multi-preset reorder, style copy/paste). Available in the same languages as V1.">V2</button>
+        <button class="sf-voicepack-toggle-btn" id="sf-voicepack-more" data-version="more" title="Community-made character voicepacks and other external sources.">More</button>
+      </div>
+    </div>
+
+    <div class="sf-voicepack-row" id="sf-voicepack-language-row">
+      <label class="sf-voicepack-label" for="sf-voicepack-language">Language:</label>
+      <select id="sf-voicepack-language" class="sf-voicepack-select"></select>
+    </div>
+
+    <div class="sf-voicepack-row">
+      <label class="sf-voicepack-label" for="sf-voicepack-variant">Variant:</label>
+      <select id="sf-voicepack-variant" class="sf-voicepack-select"></select>
+      <button class="sf-voicepack-sample" id="sf-voicepack-sample" title="Play a short sample of this voice">&#9654; Sample</button>
+    </div>
+
+    <div class="sf-voicepack-more-panel" id="sf-voicepack-more-panel" style="display:none">
+      <p class="sf-voicepack-help" style="margin-top:0">Community-made voicepacks and other external sources. Download from the linked page, then use "Pick .zip file&hellip;" in the import chooser to add it.</p>
+      <div class="sf-voicepack-more-item">
+        <div class="sf-voicepack-more-name">Additional Voicepacks &mdash; Brian Conner (NoSloppy)</div>
+        <div class="sf-voicepack-more-desc">60+ character voicepacks (Vader, Yoda, GLaDOS, K.I.T.T., HK-47, many more) plus the V2 update of the official defaults. Free, donations welcome.</div>
+        <a class="sf-voicepack-more-link" href="#" data-href="https://crucible.hubbe.net/t/additional-voicepacks/4227/257">The Crucible &rarr; Additional Voicepacks</a>
+      </div>
+      <div class="sf-voicepack-more-item">
+        <div class="sf-voicepack-more-name">Darkwolf Sabers &mdash; Sound Board Voice Packs</div>
+        <div class="sf-voicepack-more-desc">Curated voicepack collection from Darkwolf Sabers, including Brian Conner's free packs plus a few Xeno/Golden Harvest options.</div>
+        <a class="sf-voicepack-more-link" href="#" data-href="https://darkwolfsabers.com/sound-board-voice-packs">darkwolfsabers.com/sound-board-voice-packs</a>
+      </div>
+    </div>
+
+    <div class="sf-voicepack-progress" id="sf-voicepack-progress" style="display:none">
+      <div class="sf-import-progress-track"><div class="sf-import-progress-bar indeterminate"></div></div>
+    </div>
+    <div class="sf-voicepack-status" id="sf-voicepack-status">&nbsp;</div>
+    <div class="sf-voicepack-fallback" id="sf-voicepack-fallback" style="display:none"></div>
+
+    <div class="modal-btns sf-voicepack-actions">
+      <button class="modal-btn-cancel" id="sf-voicepack-cancel">Cancel</button>
+      <button class="modal-btn-primary" id="sf-voicepack-install">Install</button>
+    </div>
+
+    <p class="sf-voicepack-attribution">
+      Voice prompts created by Brian Conner (NoSloppy). Released under
+      <a href="#" id="sf-voicepack-cc-link" data-href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>.
+      Downloads come directly from the original source on
+      <a href="#" id="sf-voicepack-source-link" data-href="https://fredrik.hubbe.net/lightsaber/sound/">fredrik.hubbe.net</a>.
+    </p>
   </div>
 </div>
 
@@ -4361,7 +4652,7 @@
   <div class="modal">
     <h2>Import Sound Font library backup</h2>
     <p class="sf-import-hint" id="sf-backup-import-summary">&nbsp;</p>
-    <p class="sf-import-hint" style="margin-top:6px; color: var(--c-text-muted);"><strong>Merge</strong> adds what's in the backup to your library. Items that already match are left alone. When an item exists in both but the contents differ, you'll choose to keep yours, use the backup's version, or keep both (renamed).<br><strong>Replace</strong> wipes your current library and restores the backup exactly. This cannot be undone.</p>
+    <p class="sf-import-hint" style="margin-top:6px; color: var(--c-text-muted);"><strong>Merge</strong> adds what's in the backup to your library. Items that already match are left alone. When an item exists in both but the contents differ, you'll choose to keep yours, use the backup's version, or keep both (renamed). Shared tracks merge silently: any tracks from the backup that you don't already have are added, and your existing tracks are kept as-is.<br><strong>Replace</strong> wipes your current library and restores the backup exactly. This cannot be undone.</p>
     <div class="modal-btns" style="margin-top: 18px">
       <button class="modal-btn-cancel" id="sf-backup-import-cancel">Cancel</button>
       <button class="modal-btn-cancel" id="sf-backup-import-merge">Merge</button>
@@ -5144,10 +5435,16 @@ function injectMetadata(content) {
     '// Configuration edited with JMT Studio (jmtfoundry.com)',
   ];
   const usbVal = document.getElementById('bp-usb-select') ? document.getElementById('bp-usb-select').value : '';
+  // Common folder lives in window state (set on file load + dropdown
+  // change). Same DOM-state-authoritative pattern as the other meta
+  // fields — read here at save time, never written into the editor
+  // during normal editing.
+  const commonName = (window._sfActiveCommonForConfig || '').trim();
   if (desc)    lines.push(`// @jmt:description ${desc}`);
   if (board)   lines.push(`// @jmt:board       ${board}`);
   if (version) lines.push(`// @jmt:os_version  ${version}`);
   if (usbVal)  lines.push(`// @jmt:usb         ${usbVal}`);
+  if (commonName) lines.push(`// @jmt:common      ${commonName}`);
   metaUpdated = now;
   lines.push(`// @jmt:created     ${metaCreated}`);
   lines.push(`// @jmt:updated     ${now}`);
@@ -5294,13 +5591,18 @@ function extractMetadata(content) {
     usb:      m(/^\/\/ @jmt:usb\s+(.+)$/m),
     port:     m(/^\/\/ @jmt:last_port\s+(.+)$/m),
     configId: m(/^\/\/ @jmt:config_id\s+(\S+)$/m),
+    common:   m(/^\/\/ @jmt:common\s+(.+)$/m),
     clean:    stripJmtLines(content)
   };
 }
 
 // ── Load content ───────────────────────────────────────
 function loadContent(rawContent, filePath) {
-  const { desc, board, version, created, updated, compiled, compileDuration, flashed, boardSn, usb, port, configId, clean } = extractMetadata(rawContent);
+  const { desc, board, version, created, updated, compiled, compileDuration, flashed, boardSn, usb, port, configId, common, clean } = extractMetadata(rawContent);
+  // Common-folder selection lives in window state during the session
+  // (file-state is generated at save time via injectMetadata). Seed it
+  // from the loaded file's @jmt:common, or clear if absent.
+  window._sfActiveCommonForConfig = common || '';
   const base = filePath ? filePath.split(/[\\/]/).pop().replace(/\.[^.]+$/, '') : null;
   document.getElementById('input-filename').value = base || 'my_config';
   document.getElementById('input-desc').value     = desc    || '';
@@ -5341,6 +5643,9 @@ function loadContent(rawContent, filePath) {
   takeSnapshot(clean);
   setFilePath(filePath || null);
   setFileOpen(true);
+  // Refresh the preset-sidecar common-folder dropdown so it reads the new
+  // file's JMT_COMMON marker (or falls back to the global star default).
+  try { window._sfRenderPresetSidecarCommonRow?.(); } catch {}
   updateBanner();
   updateStatusMeta();
   setDirty(false);
@@ -11121,6 +11426,10 @@ async function switchTab(name) {
     // compile-cache key. Re-validate on return so a now-stale "Compile restored
     // from cache" doesn't linger.
     window.recheckOnConfigReturn?.();
+    // The Sound Fonts tab can add/remove entries that the preset sidecar's
+    // font-folder combo depends on (dropdown contents + not-in-library
+    // validation). Re-render the detail so both reflect the current library.
+    try { window._renderPresetDetail?.(); } catch {}
   }
 
   if (name === 'versions') {
@@ -11568,6 +11877,45 @@ require(['vs/editor/editor.main'], function () {
       };
       let _sfAllEntries = [];
       let _sfAllSourcesByUuid = {};
+      // Forward-declared so the boot warmer below can populate it before
+      // the SF tab is ever visited. Other state related to commons lives
+      // further down in the IIFE alongside the SF tab's UI code.
+      let _sfCommons = [];
+      // Warm all three caches at script load so the Config tab's
+      // font-folder typeahead, the "not-in-library" validation, and the
+      // Common Folder meta-field dropdown work even when the user never
+      // opens the Sound Fonts tab. Cheap IPCs; failures leave the empty
+      // defaults in place (validation no-ops, dropdowns stay empty).
+      (async () => {
+        try {
+          const er = await window.electronAPI.listEntries();
+          if (er && er.ok && Array.isArray(er.entries)) {
+            _sfAllEntries = er.entries;
+            // Mirror to window so code outside this IIFE's scope (e.g.
+            // _buildFontField on the Config tab) can read the same data
+            // without an extra IPC.
+            window._sfEntriesCache = er.entries;
+          }
+        } catch {}
+        try {
+          const sr = await window.electronAPI.listSources();
+          if (sr && sr.ok && Array.isArray(sr.sources)) {
+            _sfAllSourcesByUuid = {};
+            for (const s of sr.sources) _sfAllSourcesByUuid[s.uuid] = s;
+          }
+        } catch {}
+        try {
+          const cr = await window.electronAPI.listCommons();
+          if (cr && cr.ok && Array.isArray(cr.commons)) {
+            _sfCommons = cr.commons;
+            // Re-render the Common Folder meta-field now that commons
+            // are loaded — covers the race where loadContent ran before
+            // this warmer finished, leaving the field at its empty-
+            // commons fallback.
+            try { window._sfRenderPresetSidecarCommonRow?.(); } catch {}
+          }
+        } catch {}
+      })();
       // Stored preference: the link-label string the user last chose when
       // saving a font with a URL. Defaults to "Demo" until the user changes
       // it. Cached here at module scope and re-read on view refresh so the
@@ -11744,6 +12092,24 @@ require(['vs/editor/editor.main'], function () {
       // open config. Recomputed on each grid render so editing the config
       // and switching back updates the visual immediately. Empty set when no
       // config is open or parsing fails (defensive — never break the grid).
+      // Shared Tracks is in use when any preset's track field references
+      // the shared root tracks folder (slash-prefixed `tracks/...`). The
+      // alternative track shapes (`<font>/tracks/...`, plain filename)
+      // don't touch the shared folder, so they don't light up the card.
+      const _sfIsSharedTracksInUse = () => {
+        if (typeof editor === 'undefined' || !editor) return false;
+        if (typeof presetParser === 'undefined' || !presetParser) return false;
+        try {
+          const result = presetParser.parsePresets(editor.getValue());
+          for (const arr of (result?.arrays || [])) {
+            for (const preset of (arr.presets || [])) {
+              const t = (preset && preset.track) || '';
+              if (/^tracks\//i.test(t.trim())) return true;
+            }
+          }
+          return false;
+        } catch { return false; }
+      };
       const _sfComputeInUseFonts = () => {
         if (typeof editor === 'undefined' || !editor) return new Set();
         if (typeof presetParser === 'undefined' || !presetParser) return new Set();
@@ -11915,7 +12281,32 @@ require(['vs/editor/editor.main'], function () {
           _sfRenderActiveFilters();
           return;
         }
-        list.innerHTML = matching.map(f => {
+        // Shared Tracks card — always first in the grid when the folder
+        // exists. Identity carried by the music-note icon + "shared at
+        // SD root" sublabel, not chrome — the card otherwise inherits
+        // the same .sf-card styling as font cards, including the
+        // .in-use blue tint when the open config references shared
+        // tracks (a track field starting with `tracks/`).
+        const sharedTracksInUse = window._sfSharedTracksExists && _sfIsSharedTracksInUse();
+        const sharedTracksCard = window._sfSharedTracksExists ? (() => {
+          const files = window._sfSharedTracksFiles || [];
+          const n = files.length;
+          const countLine = n === 0
+            ? '<div class="sf-shared-tracks-empty">No tracks yet, click to add</div>'
+            : `<div class="sf-shared-tracks-count">${n} track${n === 1 ? '' : 's'}</div>`;
+          const klasses = ['sf-card', 'sf-shared-tracks-card'];
+          if (sharedTracksInUse) klasses.push('in-use');
+          return `<div class="${klasses.join(' ')}" data-shared-tracks="1" title="Shared tracks folder — maps to /tracks/ at the SD card root. Universal tracks available to every preset.">
+            <button class="card-delete-btn" data-shared-tracks-delete="1" title="Delete Shared Tracks folder">&#10005;</button>
+            <div class="sf-card-name-row">
+              <span class="sf-shared-tracks-icon">&#9835;</span>
+              <span class="sf-card-name">tracks</span>
+            </div>
+            <div class="sf-card-author">Various Artists</div>
+            ${countLine}
+          </div>`;
+        })() : '';
+        list.innerHTML = sharedTracksCard + matching.map(f => {
           const meta = f.meta || {};
           const author = meta.author ? `<div class="sf-card-author">${_sfEscape(meta.author)}</div>` : '';
           const desc   = meta.description ? `<div class="sf-card-desc">${_sfEscape(meta.description)}</div>` : '';
@@ -12028,12 +12419,33 @@ require(['vs/editor/editor.main'], function () {
       //                             toggles, Shift selects range from anchor.
       //   _sfCommonFilesAnchor    — anchor row for Shift-range, set on plain
       //                             or Ctrl click.
-      let _sfCommons = [];
+      // _sfCommons is declared up at the boot-warmer site so the
+      // pre-tab-visit warming pass can populate it; keeping it there
+      // means the Config Manager's Common Folder field resolves on
+      // first render after file open without waiting for an SF tab
+      // visit.
       let _sfSelectedCommonUuid = null;
       let _sfCommonTreeOpen = new Set();
       let _sfCommonSidecarCollapsed = false;
       let _sfCommonFilesSelected = new Set();
       let _sfCommonFilesAnchor = null;
+      // Multi-select state for common folder CARDS (separate from
+      // active selection above). Plain click sets the active common;
+      // Ctrl-click toggles uuids in this set; Shift-click extends from
+      // anchor. Multi-select drives bulk actions (group, ungroup) via
+      // right-click and is purely visual otherwise.
+      let _sfMultiSelectedCommonUuids = new Set();
+      let _sfMultiSelectAnchor = null;
+      // Group state. _sfCommonGroupOrder is the user-preferred order
+      // of group headers in the sidecar (drag-reorderable, persisted
+      // via setting). _sfCommonGroupOpen is per-group collapsed/open
+      // state, also persisted; default for a new group is "open" and
+      // the group containing the starred common stays open on first
+      // load if user hasn't toggled anything.
+      let _sfCommonGroupOrder = [];
+      let _sfCommonGroupOpen = {};
+      let _sfCommonGroupOpenLoaded = false;
+      let _sfCommonGroupDragName = null; // group being dragged for reorder
       // Cross-common copy/paste clipboard. Holds the source common's uuid
       // and the set of file subpaths that were copied. Survives across
       // re-renders and tab switches. Cleared on paste only if the user
@@ -12147,6 +12559,73 @@ require(['vs/editor/editor.main'], function () {
       // session lifetime and clears on relaunch.
       const _sfLoadActiveCommon = async () => { _sfSelectedCommonUuid = null; };
       const _sfSaveActiveCommon = async () => { /* no-op — session-only */ };
+
+      // Load persisted group state (display order + collapsed/open).
+      // Lazy-loaded on first common list render so the renderer doesn't
+      // pay the IPC cost at app start if the user never opens the SF
+      // tab. After load, the in-memory copy is the source of truth and
+      // the save functions push back to disk on every change.
+      const _sfLoadCommonGroupState = async () => {
+        if (_sfCommonGroupOpenLoaded) return;
+        try {
+          const order = await window.electronAPI.getSetting('soundFontGroupOrder', []);
+          if (Array.isArray(order)) _sfCommonGroupOrder = order;
+          const openMap = await window.electronAPI.getSetting('soundFontGroupOpen', {});
+          if (openMap && typeof openMap === 'object') _sfCommonGroupOpen = openMap;
+        } catch {}
+        _sfCommonGroupOpenLoaded = true;
+      };
+      const _sfSaveCommonGroupOrder = async () => {
+        try { await window.electronAPI.setSetting('soundFontGroupOrder', _sfCommonGroupOrder); } catch {}
+      };
+      const _sfSaveCommonGroupOpen = async () => {
+        try { await window.electronAPI.setSetting('soundFontGroupOpen', _sfCommonGroupOpen); } catch {}
+      };
+      // Bucket the loaded commons into { ungrouped: [], groups: Map<name, []> }.
+      // Group order is the user's drag-set order with any newly-discovered
+      // groups appended in their creation-time order (which we can't fully
+      // recover, so they come in name-sort as a stable fallback). Ungrouped
+      // commons keep listCommons' alphabetical order from the backend.
+      const _sfBucketCommonsByGroup = () => {
+        const ungrouped = [];
+        const groupMap = new Map();
+        for (const c of _sfCommons) {
+          const g = (c.meta?.group || '').trim();
+          if (!g) { ungrouped.push(c); continue; }
+          if (!groupMap.has(g)) groupMap.set(g, []);
+          groupMap.get(g).push(c);
+        }
+        // Append any groups that exist in commons but not yet in the
+        // user's saved order. Sort newcomers by name so the addition
+        // is deterministic before the user drags them.
+        const known = new Set(_sfCommonGroupOrder);
+        const newcomers = [...groupMap.keys()].filter(g => !known.has(g)).sort();
+        if (newcomers.length > 0) {
+          _sfCommonGroupOrder = [..._sfCommonGroupOrder.filter(g => groupMap.has(g)), ...newcomers];
+          _sfSaveCommonGroupOrder();
+        } else {
+          // Prune any orphan group names (group deleted from all commons).
+          const orphans = _sfCommonGroupOrder.filter(g => !groupMap.has(g));
+          if (orphans.length > 0) {
+            _sfCommonGroupOrder = _sfCommonGroupOrder.filter(g => groupMap.has(g));
+            _sfSaveCommonGroupOrder();
+          }
+        }
+        const orderedGroups = _sfCommonGroupOrder
+          .filter(g => groupMap.has(g))
+          .map(g => ({ name: g, commons: groupMap.get(g) }));
+        return { ungrouped, groups: orderedGroups };
+      };
+      // Default open: explicit user toggle wins. If no toggle yet, the
+      // group containing the starred common defaults to open, others
+      // to closed. Pure read — doesn't persist.
+      const _sfIsGroupOpen = (groupName, groupCommons) => {
+        if (Object.prototype.hasOwnProperty.call(_sfCommonGroupOpen, groupName)) {
+          return !!_sfCommonGroupOpen[groupName];
+        }
+        // Implicit default: open iff this group contains the starred common.
+        return groupCommons.some(c => c.uuid === _sfStarredCommonUuid);
+      };
       // Does the open config reference ";common" anywhere? Used both by
       // the common-list render (drives config-selected vs dimmed visual)
       // and by the sidecar visibility rule. Pure read — safe to call any
@@ -12255,10 +12734,143 @@ require(['vs/editor/editor.main'], function () {
         _sfStarredCommonUuid = uuid;
         await _sfSaveStarredCommon();
         await _sfRenderCommonList();
+        _sfRenderConfigCommonField();
       };
+      // Marker comment that records which common a given config uses.
+      // Lives in the config text itself so copying / sharing / backing up
+      // the file carries the selection with it (same approach as the board
+      // #include line). ProffieOS ignores it — it's a plain comment.
+      // Common selection for the open config lives in window state
+      // during the session; the file representation is generated only
+      // at save time by injectMetadata (same pattern as board / os
+      // version — DOM-state authoritative mid-edit, file-state on
+      // save). This keeps the @jmt: block out of the editor view during
+      // normal editing.
+      const _sfSetActiveCommonForConfig = (name) => {
+        const cur = window._sfActiveCommonForConfig || '';
+        const next = name || '';
+        if (cur === next) return;
+        window._sfActiveCommonForConfig = next;
+        // Mark editor dirty so the user knows there's a pending save.
+        // The selection won't materialize in the file until then.
+        try { if (typeof setDirty === 'function') setDirty(true); } catch {}
+      };
+      // Config Manager top-bar Common Folder field. States:
+      //   1+ commons                              → dropdown (or name when exactly 1)
+      //   0 commons + referenced + has library    → "Common folder needed" red text
+      //   0 commons + (!referenced OR no library) → field hidden
+      // "Has library" mirrors the gate the font/track fields use
+      // (window._sfEntriesCache); without a library the red message is
+      // dead UI because the user can't act on it from this view.
+      // Selection persists IN the config text via the JMT_COMMON marker
+      // (sticks to the file when copied/shared); falls back to the
+      // global star when no marker is present.
+      const _sfRenderConfigCommonField = () => {
+        const field = document.getElementById('config-common-field');
+        const content = document.getElementById('config-common-content');
+        if (!field || !content) return;
+        const commons = _sfCommons || [];
+        const referenced = _sfConfigWantsCommon();
+        const hasLibrary = !!(window._sfEntriesCache && window._sfEntriesCache.length);
+        if (commons.length === 0 && (!referenced || !hasLibrary)) {
+          field.style.display = 'none';
+          return;
+        }
+        field.style.display = '';
+        content.innerHTML = '';
+        if (commons.length === 0) {
+          const span = document.createElement('span');
+          span.className = 'config-common-missing';
+          span.textContent = 'Common folder needed';
+          span.title = 'The open config references ;common but no common folder is in your library. Import one from the Sound Fonts tab.';
+          content.appendChild(span);
+          return;
+        }
+        const sorted = [...commons].sort((a, b) =>
+          (a.meta?.name || '').localeCompare(b.meta?.name || '')
+        );
+        // Resolve from window state (set on file load from @jmt:common,
+        // and on dropdown change). Falls back to global star default.
+        const activeName = window._sfActiveCommonForConfig || '';
+        const hit = activeName ? sorted.find(c => (c.meta?.name || '') === activeName) : null;
+        const savedButMissing = activeName && !hit;
+        let selectedUuid = hit ? hit.uuid : (_sfStarredCommonUuid || '');
+        // Label-only single-common shortcut applies when the library
+        // has exactly one common AND the saved value resolves to it (or
+        // no saved value exists). When the saved value is missing from
+        // the library, fall through to dropdown so the user can see the
+        // missing name as a ghost option and switch to the real one.
+        if (sorted.length === 1 && !savedButMissing) {
+          const c = sorted[0];
+          const name = c.meta?.name || c.uuid;
+          const span = document.createElement('span');
+          span.className = 'config-common-name';
+          span.textContent = name;
+          span.title = `Using "${name}" (only common folder in your library).`;
+          content.appendChild(span);
+          // Track this implicit selection in window state so save sees
+          // it. No dirty flip needed — this is a passive inference, not
+          // a user action.
+          if (!window._sfActiveCommonForConfig) {
+            window._sfActiveCommonForConfig = name;
+          }
+          return;
+        }
+        // Dropdown render. When the saved name doesn't match any
+        // library common, prepend a ghost option for it — selected by
+        // default — so the user can see what was saved and can choose
+        // to either keep it (no action) or switch to a real entry.
+        // Mirrors how OS Version behaves when its saved value is no
+        // longer in the installed-versions list: dropdown stays usable,
+        // the original value is preserved until the user changes it.
+        const sel = document.createElement('select');
+        const GHOST_VALUE = '__missing__';
+        if (savedButMissing) {
+          const ghost = document.createElement('option');
+          ghost.value = GHOST_VALUE;
+          ghost.textContent = `${activeName} (not in library)`;
+          ghost.dataset.ghost = '1';
+          sel.appendChild(ghost);
+          selectedUuid = GHOST_VALUE;
+          // Red trigger text while the ghost is selected so the
+          // mismatch is obvious without opening the dropdown.
+          sel.classList.add('ghost-selected');
+        }
+        for (const c of sorted) {
+          const opt = document.createElement('option');
+          opt.value = c.uuid;
+          opt.textContent = c.meta?.name || c.uuid;
+          sel.appendChild(opt);
+        }
+        sel.addEventListener('change', (e) => {
+          const uuid = e.target.value;
+          // Toggle the red trigger class on every change so picking a
+          // real common clears it and re-picking the ghost re-applies.
+          sel.classList.toggle('ghost-selected', uuid === GHOST_VALUE);
+          // Ghost option re-selected (user reverted to the missing
+          // value) — keep the original activeName in place, don't
+          // overwrite with the star.
+          if (uuid === GHOST_VALUE) return;
+          if (!uuid) return;
+          const c = sorted.find(x => x.uuid === uuid);
+          const name = c?.meta?.name || '';
+          if (name) _sfSetActiveCommonForConfig(name);
+        });
+        content.appendChild(sel);
+        // Set value AFTER the select is in the DOM. Some browsers
+        // ignore .value assignment on detached selects when the value
+        // was supposed to override the first-option default.
+        if (selectedUuid) sel.value = selectedUuid;
+      };
+      // Expose so the file-open path (outside this IIFE scope) can
+      // refresh the field from the newly-loaded config's JMT_COMMON
+      // marker. Name kept for the existing call site; the function it
+      // points to is the new meta-bar renderer.
+      window._sfRenderPresetSidecarCommonRow = _sfRenderConfigCommonField;
       const _sfRenderCommonList = async () => {
         const list = document.getElementById('sf-common-list');
         if (!list) return;
+        await _sfLoadCommonGroupState();
         // Pluralize the panel title against the current count. Empty state
         // keeps the plural ("Common Folders") since the user is about to add
         // — singular only when exactly one exists.
@@ -12274,15 +12886,14 @@ require(['vs/editor/editor.main'], function () {
         // and every card is de-emphasized. Click-to-expand is purely a file
         // browsing affordance and intentionally does not look like selection.
         const wantsCommon = _sfConfigWantsCommon();
-        // Build each card as an accordion item. Only the currently-expanded
-        // common renders its file tree inline (placeholder div populated
-        // async after the HTML lands so listCommonFiles can do its IPC).
-        // Star is only shown when there's a meaningful choice (>1 common).
-        // With a single common, it is silently the default — no UI noise.
         const showStars = _sfCommons.length > 1;
-        list.innerHTML = _sfCommons.map(c => {
+
+        // Render one common's card. Used by both ungrouped and grouped
+        // sections so the card markup stays in one place.
+        const renderCard = (c) => {
           const isExpanded = c.uuid === _sfSelectedCommonUuid;
           const isStarred = c.uuid === _sfStarredCommonUuid;
+          const isMultiSelected = _sfMultiSelectedCommonUuids.has(c.uuid);
           const isConfigSelected = wantsCommon && isStarred;
           const isDimmed = !isConfigSelected;
           const headerTitle = isConfigSelected
@@ -12304,6 +12915,7 @@ require(['vs/editor/editor.main'], function () {
           if (isExpanded) rowClasses.push('expanded');
           if (isConfigSelected) rowClasses.push('config-selected');
           if (isDimmed) rowClasses.push('is-dimmed');
+          if (isMultiSelected) rowClasses.push('multi-selected');
           return `<div class="${rowClasses.join(' ')}" data-common-uuid="${_sfEscape(c.uuid)}">
             <div class="sf-common-row-header" title="${_sfEscape(headerTitle)}">
               <span class="sf-common-row-chevron">&#9656;</span>
@@ -12315,7 +12927,29 @@ require(['vs/editor/editor.main'], function () {
             </div>
             ${filesBlock}
           </div>`;
-        }).join('');
+        };
+
+        const { ungrouped, groups } = _sfBucketCommonsByGroup();
+        const parts = [];
+        // Ungrouped commons render at the top in their natural (alphabetical)
+        // order. Groups render below.
+        for (const c of ungrouped) parts.push(renderCard(c));
+        for (const g of groups) {
+          const open = _sfIsGroupOpen(g.name, g.commons);
+          const hasStar = g.commons.some(c => c.uuid === _sfStarredCommonUuid);
+          const groupClasses = ['sf-common-group'];
+          if (!open) groupClasses.push('collapsed');
+          parts.push(`<div class="${groupClasses.join(' ')}" data-group-name="${_sfEscape(g.name)}">
+            <div class="sf-common-group-header" draggable="true" title="${hasStar ? 'Contains the default common folder' : ''}">
+              <span class="sf-common-group-chevron">&#9662;</span>
+              <span class="sf-common-group-name">${_sfEscape(g.name)}</span>
+              ${hasStar ? '<span class="sf-common-group-star" title="Contains the default common folder">&#9733;</span>' : ''}
+              <span class="sf-common-group-count">${g.commons.length}</span>
+            </div>
+            <div class="sf-common-group-body">${g.commons.map(renderCard).join('')}</div>
+          </div>`);
+        }
+        list.innerHTML = parts.join('');
         if (_sfSelectedCommonUuid) await _sfRenderCommonFileTree();
       };
       const _sfRenderCommonFileTree = async () => {
@@ -12342,8 +12976,14 @@ require(['vs/editor/editor.main'], function () {
               </div><div class="sf-tree-children${isOpen ? ' open' : ''}" data-tree-children="${_sfEscape(n.path)}">${renderNodes(n.children || [], depth + 1)}</div>`;
             }
             const sel = _sfCommonFilesSelected.has(n.path) ? ' selected' : '';
+            // Pick the icon by extension so .ini / .txt / config files
+            // get the document glyph instead of the music note. wav is
+            // by far the common case in a voicepack, but voicepack.ini
+            // and similar config files exist alongside.
+            const fileExt = (n.name.match(/\.[^.]+$/) || [''])[0].toLowerCase();
+            const fileIcon = fileExt === '.wav' ? '&#127925;' : '&#128196;';
             return `<div class="sf-tree-row sf-tree-file${sel}" draggable="true" data-tree-file="${_sfEscape(n.path)}" style="padding-left:${8 + indent + 14}px">
-              <span class="sf-tree-icon">&#127925;</span>
+              <span class="sf-tree-icon">${fileIcon}</span>
               <span class="sf-tree-name">${_sfEscape(n.name)}</span>
               <span class="sf-tree-size">${_sfFmtBytes(n.size)}</span>
             </div>`;
@@ -12404,6 +13044,10 @@ require(['vs/editor/editor.main'], function () {
           _sfCommonFilesAnchor = null;
         }
         await _sfRenderCommonList();
+        // Keep the Config Manager's Common Folder meta-field in sync
+        // with the latest library state (newly imported, deleted,
+        // renamed, group reshuffled — all funnel through here).
+        _sfRenderConfigCommonField();
         // Sidecar rule check — commons changed, so the verdict might have
         // transitioned (e.g. went from 0 → 1, or 1 → 0). Delta-driven so a
         // mid-session user-toggle isn't blown away unless the rule changes.
@@ -12463,6 +13107,473 @@ require(['vs/editor/editor.main'], function () {
         _sfSelectedCommonUuid = res.uuid;
         await _sfRefreshCommons();
       };
+      // ── Common folder group actions ──────────────────────────────
+      // Prompt the user for a group name and apply it to every uuid
+      // in the multi-selection. New groups are added to the order
+      // automatically via _sfBucketCommonsByGroup on next render.
+      const _sfGroupSelectedCommons = async () => {
+        const uuids = [..._sfMultiSelectedCommonUuids];
+        if (uuids.length < 2) return;
+        // Default-suggest the most common existing group label among
+        // the selection (if any), otherwise empty.
+        const counts = new Map();
+        for (const uuid of uuids) {
+          const c = _sfCommons.find(x => x.uuid === uuid);
+          const g = (c?.meta?.group || '').trim();
+          if (g) counts.set(g, (counts.get(g) || 0) + 1);
+        }
+        let suggested = '';
+        if (counts.size > 0) {
+          suggested = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+        }
+        const name = await _sfPromptText({
+          title: `Group ${uuids.length} common folders`,
+          message: 'Name the group these folders belong to. New group is created if the name does not exist; otherwise folders join the existing group.',
+          defaultValue: suggested,
+          okText: 'Group',
+          validate: (v) => !v.trim() ? 'Group name is required.' : null,
+        });
+        if (!name) return;
+        const res = await window.electronAPI.setCommonGroupMany({ uuids, groupName: name.trim() });
+        if (!res || !res.ok) { alert(`Group failed: ${(res && res.error) || 'unknown error'}`); return; }
+        _sfMultiSelectedCommonUuids.clear();
+        _sfMultiSelectAnchor = null;
+        // Ensure the new group is visible (opened) so the user sees
+        // the result immediately.
+        _sfCommonGroupOpen[name] = true;
+        await _sfSaveCommonGroupOpen();
+        await _sfRefreshCommons();
+      };
+      const _sfUngroupCommon = async (uuid) => {
+        const res = await window.electronAPI.setCommonGroup({ uuid, groupName: '' });
+        if (!res || !res.ok) { alert(`Remove from group failed: ${(res && res.error) || 'unknown error'}`); return; }
+        await _sfRefreshCommons();
+      };
+      // Apply a group name to many uuids at once (used by both
+      // "Add to <existing group>" and "Remove from group" multi-select
+      // actions; empty groupName = ungroup).
+      const _sfApplyGroupToCommons = async (uuids, groupName) => {
+        if (!uuids || uuids.length === 0) return;
+        const res = await window.electronAPI.setCommonGroupMany({ uuids, groupName: groupName || '' });
+        if (!res || !res.ok) { alert(`Action failed: ${(res && res.error) || 'unknown error'}`); return; }
+        _sfMultiSelectedCommonUuids.clear();
+        _sfMultiSelectAnchor = null;
+        // Ensure target group is visible if non-empty
+        if (groupName) {
+          _sfCommonGroupOpen[groupName] = true;
+          await _sfSaveCommonGroupOpen();
+        }
+        await _sfRefreshCommons();
+      };
+      // Collect the list of all existing group names from the current
+      // commons (in the user's saved display order so the menu reads
+      // consistently with the sidecar).
+      const _sfExistingCommonGroups = () => {
+        const present = new Set();
+        for (const c of _sfCommons) {
+          const g = (c.meta?.group || '').trim();
+          if (g) present.add(g);
+        }
+        const ordered = _sfCommonGroupOrder.filter(g => present.has(g));
+        for (const g of present) if (!ordered.includes(g)) ordered.push(g);
+        return ordered;
+      };
+      const _sfRenameCommonGroupPrompt = async (oldName) => {
+        const name = await _sfPromptText({
+          title: 'Rename group',
+          message: `Rename "${oldName}" to:`,
+          defaultValue: oldName,
+          okText: 'Rename',
+          validate: (v) => !v.trim() ? 'Group name is required.' : null,
+        });
+        if (!name) return;
+        const clean = name.trim();
+        if (clean === oldName) return;
+        const res = await window.electronAPI.renameCommonGroup({ oldName, newName: clean });
+        if (!res || !res.ok) { alert(`Rename group failed: ${(res && res.error) || 'unknown error'}`); return; }
+        // Migrate persisted state from old name to new name.
+        const idx = _sfCommonGroupOrder.indexOf(oldName);
+        if (idx >= 0) _sfCommonGroupOrder.splice(idx, 1, clean);
+        if (Object.prototype.hasOwnProperty.call(_sfCommonGroupOpen, oldName)) {
+          _sfCommonGroupOpen[clean] = _sfCommonGroupOpen[oldName];
+          delete _sfCommonGroupOpen[oldName];
+        }
+        await _sfSaveCommonGroupOrder();
+        await _sfSaveCommonGroupOpen();
+        await _sfRefreshCommons();
+      };
+      const _sfDeleteCommonGroupPrompt = async (groupName) => {
+        const count = _sfCommons.filter(c => (c.meta?.group || '') === groupName).length;
+        const ok = await promptConfirm({
+          title: 'Delete group',
+          message: `Delete the group "${groupName}"?\nThe ${count} common folder${count === 1 ? '' : 's'} inside will become ungrouped. No files are deleted.`,
+          confirmText: 'Delete group',
+          confirmKind: 'danger',
+        });
+        if (!ok) return;
+        const res = await window.electronAPI.deleteCommonGroup({ name: groupName });
+        if (!res || !res.ok) { alert(`Delete group failed: ${(res && res.error) || 'unknown error'}`); return; }
+        const idx = _sfCommonGroupOrder.indexOf(groupName);
+        if (idx >= 0) _sfCommonGroupOrder.splice(idx, 1);
+        delete _sfCommonGroupOpen[groupName];
+        await _sfSaveCommonGroupOrder();
+        await _sfSaveCommonGroupOpen();
+        await _sfRefreshCommons();
+      };
+
+      // ── Voicepack picker ──────────────────────────────────────────
+      // State for the open picker session. Reset every time the picker
+      // is reopened. _sfVpSampleAudio holds the current HTMLAudioElement
+      // doing inline sample playback (one at a time); we use <audio>
+      // rather than Web Audio for samples specifically because it has
+      // its own buffer/timing layer that doesn't exhibit the leading-
+      // edge drop the main audio player works around with silent pad.
+      let _sfVpCatalog = null;        // { v1: [...] } loaded on first open
+      let _sfVpSelectedVersion = 'v2';
+      let _sfVpSelectedLanguage = null;
+      let _sfVpSelectedVariant = null;
+      let _sfVpSampleAudio = null;
+      let _sfVpSampleObjectUrl = null;
+      let _sfVpSampleEntryId = null;  // the entry currently playing/loading
+      let _sfVpInstallInFlight = false;
+
+      const _sfVpStopSample = () => {
+        if (_sfVpSampleAudio) {
+          try { _sfVpSampleAudio.pause(); } catch {}
+          _sfVpSampleAudio = null;
+        }
+        if (_sfVpSampleObjectUrl) {
+          try { URL.revokeObjectURL(_sfVpSampleObjectUrl); } catch {}
+          _sfVpSampleObjectUrl = null;
+        }
+        _sfVpSampleEntryId = null;
+        const btn = document.getElementById('sf-voicepack-sample');
+        if (btn) { btn.classList.remove('playing'); btn.innerHTML = '&#9654; Sample'; }
+      };
+
+      const _sfVpSetStatus = (msg, kind) => {
+        const el = document.getElementById('sf-voicepack-status');
+        if (!el) return;
+        el.textContent = msg || ' ';
+        el.className = 'sf-voicepack-status' + (kind ? ' ' + kind : '');
+      };
+      const _sfVpSetProgress = (visible) => {
+        const el = document.getElementById('sf-voicepack-progress');
+        if (el) el.style.display = visible ? '' : 'none';
+      };
+      // Fallback link surface. Shown alongside the status when a sample
+      // or install fails so the user has a clear path to download from
+      // the source manually. Links open in the system browser via
+      // shell.openExternal (wired in the picker's data-href handler).
+      const _SF_VP_HUBBE_URL = 'https://fredrik.hubbe.net/lightsaber/sound/';
+      const _SF_VP_DROPBOX_URL = 'https://www.dropbox.com/scl/fo/zojbb933bcysjll16dz6h/ADyeV3F3TxUAiCic9BGit9Q?rlkey=4z7pt3vmj6v2cuenniyfyz57i';
+      const _SF_VP_CRUCIBLE_URL = 'https://crucible.hubbe.net/t/additional-voicepacks/4227/257';
+      const _sfVpShowFallback = (version) => {
+        const el = document.getElementById('sf-voicepack-fallback');
+        if (!el) return;
+        const primary = version === 'v2'
+          ? { label: "NoSloppy's Dropbox folder", url: _SF_VP_DROPBOX_URL }
+          : { label: 'hubbe.net voicepack downloads', url: _SF_VP_HUBBE_URL };
+        el.innerHTML =
+          `Or download directly from the source: ` +
+          `<a href="#" data-href="${primary.url}">${primary.label}</a> ` +
+          `&middot; <a href="#" data-href="${_SF_VP_CRUCIBLE_URL}">The Crucible thread</a>`;
+        el.style.display = '';
+        // Re-bind external link handlers for the freshly-inserted anchors
+        // (the one-time wiring at modal load doesn't catch dynamically
+        // added elements).
+        el.querySelectorAll('a[data-href]').forEach(a => {
+          a.onclick = (e) => {
+            e.preventDefault();
+            const url = a.getAttribute('data-href');
+            if (url && window.electronAPI?.openExternal) window.electronAPI.openExternal(url);
+          };
+        });
+      };
+      const _sfVpHideFallback = () => {
+        const el = document.getElementById('sf-voicepack-fallback');
+        if (el) { el.style.display = 'none'; el.innerHTML = ''; }
+      };
+
+      const _sfVpEntriesFor = (version, language) => {
+        if (!_sfVpCatalog) return [];
+        const list = _sfVpCatalog[version] || [];
+        return list.filter(e => !language || e.language === language);
+      };
+
+      const _sfVpLanguagesFor = (version) => {
+        if (!_sfVpCatalog) return [];
+        const list = _sfVpCatalog[version] || [];
+        const seen = new Set();
+        const out = [];
+        for (const e of list) {
+          if (!seen.has(e.language)) { seen.add(e.language); out.push(e.language); }
+        }
+        return out;
+      };
+
+      const _sfVpDetectDefaultLanguage = (versions) => {
+        // Browser's navigator.language is "en-US" / "es-ES" etc. Map
+        // the prefix to our catalog's language names.
+        const map = { en: 'English', it: 'Italian', ru: 'Russian', es: 'Spanish', fr: 'French', zh: 'Chinese', ja: 'Japanese' };
+        const code = (navigator.language || 'en').slice(0, 2).toLowerCase();
+        const matched = map[code];
+        if (matched && versions.includes(matched)) return matched;
+        return versions.includes('English') ? 'English' : versions[0];
+      };
+
+      const _sfVpRepopulateVariants = () => {
+        const variantSel = document.getElementById('sf-voicepack-variant');
+        if (!variantSel) return;
+        const entries = _sfVpEntriesFor(_sfVpSelectedVersion, _sfVpSelectedLanguage);
+        variantSel.innerHTML = '';
+        for (const e of entries) {
+          const opt = document.createElement('option');
+          opt.value = e.id;
+          opt.textContent = `Variant ${e.variant}`;
+          variantSel.appendChild(opt);
+        }
+        // Keep selection if still valid; otherwise default to first.
+        const stillValid = entries.find(e => e.id === _sfVpSelectedVariant);
+        _sfVpSelectedVariant = stillValid ? stillValid.id : (entries[0]?.id || null);
+        if (_sfVpSelectedVariant) variantSel.value = _sfVpSelectedVariant;
+      };
+
+      const _sfVpRepopulateLanguages = () => {
+        const langSel = document.getElementById('sf-voicepack-language');
+        const langRow = document.getElementById('sf-voicepack-language-row');
+        if (!langSel) return;
+        const languages = _sfVpLanguagesFor(_sfVpSelectedVersion);
+        langSel.innerHTML = '';
+        for (const lang of languages) {
+          const opt = document.createElement('option');
+          opt.value = lang;
+          opt.textContent = lang;
+          langSel.appendChild(opt);
+        }
+        if (!_sfVpSelectedLanguage || !languages.includes(_sfVpSelectedLanguage)) {
+          _sfVpSelectedLanguage = _sfVpDetectDefaultLanguage(languages);
+        }
+        if (_sfVpSelectedLanguage) langSel.value = _sfVpSelectedLanguage;
+        // Hide the language row entirely when there's only one choice
+        // (V2 is English-only). Showing a single-option dropdown adds
+        // visual noise without offering a choice.
+        if (langRow) langRow.style.display = languages.length > 1 ? '' : 'none';
+        _sfVpRepopulateVariants();
+      };
+
+      const _sfVpPlaySample = async () => {
+        const entryId = _sfVpSelectedVariant;
+        if (!entryId) return;
+        // If user clicks Sample while it's already playing the same
+        // entry, treat as stop. If it's a different entry, stop the
+        // current one and start the new one.
+        if (_sfVpSampleAudio && _sfVpSampleEntryId === entryId) {
+          _sfVpStopSample();
+          return;
+        }
+        _sfVpStopSample();
+        _sfVpSampleEntryId = entryId;
+        const btn = document.getElementById('sf-voicepack-sample');
+        if (btn) { btn.innerHTML = '&#8987; Loading…'; btn.disabled = true; }
+        _sfVpSetStatus('Loading sample…');
+        _sfVpHideFallback();
+        _sfVpSetProgress(true);
+        let res;
+        try { res = await window.electronAPI.voicepackDownloadSample({ id: entryId }); }
+        catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
+        _sfVpSetProgress(false);
+        if (btn) btn.disabled = false;
+        // Bail if user changed selection or stopped while loading.
+        if (_sfVpSampleEntryId !== entryId) return;
+        if (!res || !res.ok) {
+          _sfVpSetStatus(`Could not load sample: ${(res && res.error) || 'unknown error'}`, 'error');
+          _sfVpShowFallback(_sfVpSelectedVersion);
+          if (btn) { btn.classList.remove('playing'); btn.innerHTML = '&#9654; Sample'; }
+          _sfVpSampleEntryId = null;
+          return;
+        }
+        try {
+          const blob = new Blob([new Uint8Array(res.bytes)], { type: 'audio/wav' });
+          _sfVpSampleObjectUrl = URL.createObjectURL(blob);
+          _sfVpSampleAudio = new Audio(_sfVpSampleObjectUrl);
+          _sfVpSampleAudio.onended = () => _sfVpStopSample();
+          _sfVpSampleAudio.onerror = () => {
+            _sfVpSetStatus('Sample playback failed.', 'error');
+            _sfVpStopSample();
+          };
+          await _sfVpSampleAudio.play();
+          if (btn) { btn.classList.add('playing'); btn.innerHTML = '&#9632; Stop'; }
+          _sfVpSetStatus(' ');
+        } catch (err) {
+          _sfVpSetStatus(`Playback error: ${err && err.message || err}`, 'error');
+          _sfVpStopSample();
+        }
+      };
+
+      const _sfVpInstall = async () => {
+        if (_sfVpInstallInFlight) return;
+        const entryId = _sfVpSelectedVariant;
+        if (!entryId) return;
+        // Look up the catalog entry to decide install strategy.
+        // installType 'in-app' = backend fetches the zip and imports
+        // through the existing common folder pipeline. 'external' =
+        // open the source URL in the browser and show import
+        // instructions; the user does the download + uses 'Pick .zip
+        // file…' to bring it back into JMT Studio.
+        const entry = _sfVpCatalog?.[_sfVpSelectedVersion]?.find(e => e.id === entryId);
+        if (entry && entry.installType === 'external') {
+          if (entry.installUrl && window.electronAPI?.openExternal) {
+            window.electronAPI.openExternal(entry.installUrl);
+          }
+          _sfVpSetStatus(`Your browser opened the source folder. Download "${entry.baseName}.zip" from there, then close this window and use "Pick .zip file…" in the import chooser to add it.`, 'success');
+          return;
+        }
+        _sfVpStopSample();
+        _sfVpInstallInFlight = true;
+        const installBtn = document.getElementById('sf-voicepack-install');
+        const cancelBtn = document.getElementById('sf-voicepack-cancel');
+        if (installBtn) { installBtn.disabled = true; installBtn.textContent = 'Installing…'; }
+        if (cancelBtn) cancelBtn.disabled = true;
+        _sfVpSetStatus('Installing voicepack…');
+        _sfVpHideFallback();
+        _sfVpSetProgress(true);
+        let res;
+        try { res = await window.electronAPI.voicepackInstall({ id: entryId }); }
+        catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
+        _sfVpSetProgress(false);
+        _sfVpInstallInFlight = false;
+        if (installBtn) { installBtn.disabled = false; installBtn.textContent = 'Install'; }
+        if (cancelBtn) cancelBtn.disabled = false;
+        if (!res || !res.ok) {
+          _sfVpSetStatus(`Install failed: ${(res && res.error) || 'unknown error'}`, 'error');
+          _sfVpShowFallback(_sfVpSelectedVersion);
+          return;
+        }
+        _sfVpSetStatus(`Installed as "${res.name}".`, 'success');
+        _sfSelectedCommonUuid = res.uuid;
+        await _sfRefreshCommons();
+        // Small delay so the user sees the success status before the
+        // modal closes; matches the natural feel of other install flows.
+        setTimeout(() => _sfCloseVoicepackPicker(), 800);
+      };
+
+      const _sfCloseVoicepackPicker = () => {
+        _sfVpStopSample();
+        _sfVpHideFallback();
+        const modal = document.getElementById('modal-sf-voicepack-picker');
+        if (modal) modal.classList.remove('active');
+        _sfVpSetStatus(' ');
+      };
+
+      const _sfOpenVoicepackPicker = async () => {
+        const modal = document.getElementById('modal-sf-voicepack-picker');
+        if (!modal) return;
+        modal.classList.add('active');
+        _sfVpSetStatus('Loading catalog…');
+        // Fetch the catalog once per session; the catalog is small and
+        // doesn't change frequently. Cached for the rest of the session.
+        if (!_sfVpCatalog) {
+          let res;
+          try { res = await window.electronAPI.voicepackGetCatalog(); }
+          catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
+          if (!res || !res.ok) {
+            _sfVpSetStatus(`Could not load catalog: ${(res && res.error) || 'unknown error'}`, 'error');
+            return;
+          }
+          _sfVpCatalog = res.catalog;
+        }
+        _sfVpRepopulateLanguages();
+        _sfVpSetStatus(' ');
+      };
+
+      // One-time wiring for the voicepack picker controls. The eager
+      // V2 warm fires from inside _sfOpenVoicepackPicker (when V2 is
+      // the default selection) and from _sfVpSetVersion (when the user
+      // toggles to V2 manually).
+      document.getElementById('sf-voicepack-close')?.addEventListener('click', _sfCloseVoicepackPicker);
+      document.getElementById('sf-voicepack-cancel')?.addEventListener('click', _sfCloseVoicepackPicker);
+      document.getElementById('modal-sf-voicepack-picker')?.addEventListener('click', (e) => {
+        if (e.target.id === 'modal-sf-voicepack-picker') _sfCloseVoicepackPicker();
+      });
+      // Hide / show the standard catalog controls (language, variant,
+      // sample, install) vs the "More" panel. The More tab shows only
+      // external-source link cards; no catalog controls apply.
+      const _sfVpToggleCatalogControls = (visible) => {
+        const ids = ['sf-voicepack-language-row'];
+        for (const id of ids) {
+          const el = document.getElementById(id);
+          if (el) el.style.display = visible ? '' : 'none';
+        }
+        // Variant row contains the variant select + sample button.
+        // It's the third .sf-voicepack-row inside the modal; locate
+        // by the variant select's parent.
+        const variantSel = document.getElementById('sf-voicepack-variant');
+        const variantRow = variantSel ? variantSel.closest('.sf-voicepack-row') : null;
+        if (variantRow) variantRow.style.display = visible ? '' : 'none';
+        // Install button + cancel are in the modal-btns; hide install
+        // entirely on More tab (cancel still functional).
+        const installBtn = document.getElementById('sf-voicepack-install');
+        if (installBtn) installBtn.style.display = visible ? '' : 'none';
+        // Status + progress aren't relevant on More tab.
+        const statusEl = document.getElementById('sf-voicepack-status');
+        if (statusEl) statusEl.style.display = visible ? '' : 'none';
+        // More panel itself is the inverse.
+        const morePanel = document.getElementById('sf-voicepack-more-panel');
+        if (morePanel) morePanel.style.display = visible ? 'none' : '';
+      };
+
+      // V1/V2/More toggle: rewires the active class, manages which
+      // content shows (catalog controls for V1/V2, link cards for More),
+      // resets language/variant selection if the current language isn't
+      // available in the new version. Stops any sample playback in
+      // progress since the audio belongs to the previous version.
+      const _sfVpSetVersion = (version) => {
+        if (version !== 'v1' && version !== 'v2' && version !== 'more') return;
+        if (version === _sfVpSelectedVersion) return;
+        _sfVpStopSample();
+        _sfVpSelectedVersion = version;
+        document.querySelectorAll('#modal-sf-voicepack-picker .sf-voicepack-toggle-btn').forEach(btn => {
+          btn.classList.toggle('active', btn.getAttribute('data-version') === version);
+        });
+        _sfVpHideFallback();
+        if (version === 'more') {
+          _sfVpToggleCatalogControls(false);
+          _sfVpSetStatus(' ');
+          return;
+        }
+        _sfVpToggleCatalogControls(true);
+        const languages = _sfVpLanguagesFor(version);
+        if (!languages.includes(_sfVpSelectedLanguage)) {
+          _sfVpSelectedLanguage = null;
+        }
+        _sfVpRepopulateLanguages();
+        _sfVpSetStatus(' ');
+      };
+      document.getElementById('sf-voicepack-v1')?.addEventListener('click', () => _sfVpSetVersion('v1'));
+      document.getElementById('sf-voicepack-v2')?.addEventListener('click', () => _sfVpSetVersion('v2'));
+      document.getElementById('sf-voicepack-more')?.addEventListener('click', () => _sfVpSetVersion('more'));
+      document.getElementById('sf-voicepack-language')?.addEventListener('change', (e) => {
+        _sfVpSelectedLanguage = e.target.value;
+        _sfVpStopSample();
+        _sfVpRepopulateVariants();
+      });
+      document.getElementById('sf-voicepack-variant')?.addEventListener('change', (e) => {
+        _sfVpSelectedVariant = e.target.value;
+        _sfVpStopSample();
+      });
+      document.getElementById('sf-voicepack-sample')?.addEventListener('click', _sfVpPlaySample);
+      document.getElementById('sf-voicepack-install')?.addEventListener('click', _sfVpInstall);
+      // External link handling — open in the default browser via Electron's
+      // shell.openExternal so we don't navigate the renderer away.
+      document.querySelectorAll('#modal-sf-voicepack-picker a[data-href]').forEach(a => {
+        a.addEventListener('click', (e) => {
+          e.preventDefault();
+          const url = a.getAttribute('data-href');
+          if (url && window.electronAPI?.openExternal) window.electronAPI.openExternal(url);
+        });
+      });
+
       const _sfRenameCommon = async (uuid) => {
         const c = _sfCommons.find(x => x.uuid === uuid);
         if (!c) return;
@@ -13117,6 +14228,7 @@ require(['vs/editor/editor.main'], function () {
         const r = await window.electronAPI.listEntries();
         const entries = (r && r.ok && r.entries) || [];
         _sfAllEntries = entries;
+        window._sfEntriesCache = entries;
         _sfRefreshTagsDatalist();
         // Common folder sidecar — every app launch starts with all cards
         // collapsed (per the fresh-open consistency rule) so we don't
@@ -13143,8 +14255,38 @@ require(['vs/editor/editor.main'], function () {
         // when entries are empty; cards otherwise.
         if (layerBrowse) layerBrowse.classList.add('active');
         if (toolbarBtn)  toolbarBtn.style.display = '';
+        // Shared Tracks: show the "Create" button only when the folder
+        // doesn't exist yet (mirrors the Style Library "Create" pattern).
+        // Once the folder exists it shows up as a card in the grid; the
+        // toolbar button collapses to keep the toolbar clean.
+        try {
+          const stRes = await window.electronAPI.sharedTracksExists();
+          window._sfSharedTracksExists = !!(stRes && stRes.ok && stRes.exists);
+          if (window._sfSharedTracksExists) {
+            const filesRes = await window.electronAPI.sharedTracksListFiles();
+            window._sfSharedTracksFiles = (filesRes && filesRes.ok && filesRes.files) || [];
+            // Auto-prune: an empty folder is a stranded "created then
+            // changed my mind" leftover. Nuke it so the toolbar's
+            // "+ Create" affordance reappears on the next render.
+            if (window._sfSharedTracksFiles.length === 0) {
+              try { await window.electronAPI.sharedTracksDelete(); } catch {}
+              window._sfSharedTracksExists = false;
+            }
+          } else {
+            window._sfSharedTracksFiles = [];
+          }
+        } catch { window._sfSharedTracksExists = false; window._sfSharedTracksFiles = []; }
+        const stBtn = document.getElementById('btn-sf-create-shared-tracks');
+        if (stBtn) stBtn.style.display = window._sfSharedTracksExists ? 'none' : '';
         const cardsEl = document.getElementById('sf-cards');
-        if (entries.length === 0) {
+        // "No fonts" empty-state only shows when there's truly nothing to
+        // render — no fonts AND no shared tracks card. With shared tracks
+        // present we render the grid (which contains the tracks card at
+        // the top) so the user sees their tracks even before importing
+        // their first font.
+        const hasFonts = entries.length > 0;
+        const hasShared = !!window._sfSharedTracksExists;
+        if (!hasFonts && !hasShared) {
           if (layerNoFonts) layerNoFonts.style.display = '';
           if (cardsEl)      cardsEl.innerHTML = '';
           // Stale selection from before the last delete would otherwise keep
@@ -13276,6 +14418,343 @@ require(['vs/editor/editor.main'], function () {
         if (_sfImportEls.title) _sfImportEls.title.textContent = 'Import Sound Font';
         _sfShowPhase('pick');
         if (_sfImportEls.modal) _sfImportEls.modal.classList.add('active');
+      };
+
+      // ── Shared Tracks folder detail modal ─────────────────────────
+      // Header (name + byline), meta (contents), files section
+      // (+ Add dropdown), bottom Close. Deletion happens via the X on
+      // the SF grid card, not inside this modal.
+      // ProffieOS prop_base.h ListTracks rule: only WAVs where
+      // `i2.size() > 200000` are listed as tracks. A file at exactly
+      // 200000 bytes is silently excluded. Match the boundary precisely
+      // so we don't false-flag the 200000–204800 window.
+      const _SF_TRACK_MIN_BYTES = 200000;
+      const _sfFmtSize = (n) => {
+        if (n < 1024) return `${n} B`;
+        if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+        return `${(n / 1024 / 1024).toFixed(2)} MB`;
+      };
+      const _sfRenderSharedTracksContents = (files) => {
+        const el = document.getElementById('sf-shared-tracks-contents');
+        if (!el) return;
+        const n = files.length;
+        if (n === 0) { el.textContent = ''; return; }
+        const total = files.reduce((sum, f) => sum + (f.size || 0), 0);
+        el.textContent = `${n} file${n === 1 ? '' : 's'} (${_sfFmtSize(total)})`;
+      };
+      // Selection state for the shared-tracks browser. Mirrors the
+      // entry-files selection model so the same shift/ctrl multi-select
+      // patterns work; anchor remembers the last single-click for
+      // shift-range expansion.
+      let _sfSharedTracksSelected = new Set();
+      let _sfSharedTracksAnchor = null;
+      const _sfRenderSharedTracksList = (files) => {
+        const listEl = document.getElementById('sf-shared-tracks-file-list');
+        const footerEl = document.getElementById('sf-shared-tracks-warn-footer');
+        if (!listEl) return;
+        const setFooter = (msg) => {
+          if (!footerEl) return;
+          if (!msg) { footerEl.style.display = 'none'; footerEl.textContent = ''; return; }
+          footerEl.style.display = '';
+          footerEl.textContent = msg;
+        };
+        if (!files || files.length === 0) {
+          _sfSharedTracksSelected.clear();
+          _sfSharedTracksAnchor = null;
+          listEl.innerHTML = '<div class="sf-entry-files-empty">No tracks yet. Click "+ Add" to get started.</div>';
+          setFooter(null);
+          return;
+        }
+        // Prune stale selections that no longer match disk state (a file
+        // got renamed or deleted out-of-band).
+        const liveNames = new Set(files.map(f => f.name));
+        for (const sel of [..._sfSharedTracksSelected]) {
+          if (!liveNames.has(sel)) _sfSharedTracksSelected.delete(sel);
+        }
+        if (_sfSharedTracksAnchor && !liveNames.has(_sfSharedTracksAnchor)) _sfSharedTracksAnchor = null;
+        let undersizedCount = 0;
+        listEl.innerHTML = files.map(f => {
+          const undersized = f.size > 0 && f.size <= _SF_TRACK_MIN_BYTES;
+          if (undersized) undersizedCount++;
+          // Tooltip shows the full filename plus the size — useful both
+          // for long names that ellipsis off the row and for spotting
+          // which amber row is the small one. Parens match the CONTENTS
+          // row's "N files (X MB)" convention.
+          const titleAttr = `${f.name}  (${_sfFmtSize(f.size || 0)})`;
+          const isSel = _sfSharedTracksSelected.has(f.name);
+          const klasses = ['sf-entry-files-row'];
+          if (isSel) klasses.push('selected');
+          if (undersized) klasses.push('warn');
+          return `<div class="${klasses.join(' ')}" data-st-file="${_sfEscape(f.name)}" title="${_sfEscape(titleAttr)}">
+            <span class="sf-entry-files-row-icon">&#127925;</span>
+            <span class="sf-entry-files-row-name${undersized ? ' warn' : ''}">${_sfEscape(f.name)}</span>
+          </div>`;
+        }).join('');
+        setFooter(undersizedCount === 0
+          ? null
+          : 'The track player in ProffieOS skips files smaller than ~195 KB (200,000 bytes).');
+      };
+      const _sfRefreshSharedTracksModal = async () => {
+        const r = await window.electronAPI.sharedTracksListFiles();
+        const files = (r && r.ok && r.files) || [];
+        window._sfSharedTracksFiles = files;
+        _sfRenderSharedTracksList(files);
+        _sfRenderSharedTracksContents(files);
+      };
+      const _sfOpenSharedTracks = async () => {
+        const modal = document.getElementById('modal-sf-shared-tracks');
+        if (!modal) return;
+        await _sfRefreshSharedTracksModal();
+        modal.classList.add('active');
+      };
+      const _sfCloseSharedTracks = () => {
+        const modal = document.getElementById('modal-sf-shared-tracks');
+        if (modal) modal.classList.remove('active');
+        // Refresh the grid so the card reflects any add/rename/delete
+        // (file count + the picker's cached file list).
+        window.refreshSoundFontsView?.();
+      };
+      document.getElementById('sf-shared-tracks-close')?.addEventListener('click', _sfCloseSharedTracks);
+      document.getElementById('sf-shared-tracks-discard')?.addEventListener('click', _sfCloseSharedTracks);
+      document.getElementById('modal-sf-shared-tracks')?.addEventListener('click', (e) => {
+        if (e.target.id === 'modal-sf-shared-tracks') _sfCloseSharedTracks();
+      });
+      // + Add dropdown — Browse (native file picker) or From library
+      // (open the existing entry library picker scoped to .wav files).
+      const _sfSharedAddBtn = document.getElementById('btn-sf-shared-tracks-add');
+      const _sfSharedAddDropdown = document.getElementById('sf-shared-tracks-add-dropdown');
+      const _sfCloseSharedAddDropdown = () => {
+        if (_sfSharedAddDropdown) _sfSharedAddDropdown.style.display = 'none';
+        document.removeEventListener('click', _sfSharedAddOutside);
+      };
+      function _sfSharedAddOutside(e) {
+        if (_sfSharedAddDropdown && !_sfSharedAddDropdown.contains(e.target) && !_sfSharedAddBtn?.contains(e.target)) {
+          _sfCloseSharedAddDropdown();
+        }
+      }
+      // Shared Tracks "+ Add" affordance. The Browse / From library
+      // choice is only meaningful when the user has a Sound Fonts
+      // library to pick from. With no entries, "From library" has
+      // nothing to offer, so a single click on +Add goes straight to
+      // the native file picker (Browse) — no dropdown.
+      const _sfSharedAddBrowse = async () => {
+        const picked = await window.electronAPI.selectAudioFiles({ title: 'Add tracks to Shared Tracks folder' });
+        if (!picked || !picked.ok || !Array.isArray(picked.filePaths) || picked.filePaths.length === 0) return;
+        const res = await window.electronAPI.sharedTracksAddFiles({ sourceFilePaths: picked.filePaths });
+        if (!res || !res.ok) {
+          alert('Failed to add files: ' + (res?.error || 'unknown error'));
+          return;
+        }
+        if (res.skipped && res.skipped.length > 0) {
+          const lines = res.skipped.map(s => `• ${s.src}: ${s.reason}`).join('\n');
+          alert(`Skipped ${res.skipped.length} file(s):\n${lines}`);
+        }
+        await _sfRefreshSharedTracksModal();
+      };
+      _sfSharedAddBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const hasLibrary = !!(window._sfEntriesCache && window._sfEntriesCache.length);
+        if (!hasLibrary) { _sfSharedAddBrowse(); return; }
+        if (!_sfSharedAddDropdown) return;
+        const open = _sfSharedAddDropdown.style.display !== 'none';
+        if (open) { _sfCloseSharedAddDropdown(); return; }
+        _sfSharedAddDropdown.style.display = '';
+        setTimeout(() => document.addEventListener('click', _sfSharedAddOutside), 0);
+      });
+      document.getElementById('btn-sf-shared-tracks-add-browse')?.addEventListener('click', async () => {
+        _sfCloseSharedAddDropdown();
+        await _sfSharedAddBrowse();
+      });
+      document.getElementById('btn-sf-shared-tracks-add-library')?.addEventListener('click', () => {
+        _sfCloseSharedAddDropdown();
+        _sfOpenLibraryPicker({ kind: 'sharedTracks' });
+      });
+      // Shift-range selection helper — enumerates visible rows in
+      // document order and selects everything between the anchor and
+      // target inclusive. Same pattern entry-files uses.
+      const _sfShiftSelectSharedTracksTo = (targetName) => {
+        const all = [...document.querySelectorAll('#sf-shared-tracks-file-list [data-st-file]')];
+        const allNames = all.map(el => el.getAttribute('data-st-file'));
+        const toIdx = allNames.indexOf(targetName);
+        if (toIdx < 0) return;
+        let fromIdx = _sfSharedTracksAnchor ? allNames.indexOf(_sfSharedTracksAnchor) : -1;
+        if (fromIdx < 0) fromIdx = toIdx;
+        const [lo, hi] = fromIdx <= toIdx ? [fromIdx, toIdx] : [toIdx, fromIdx];
+        for (let i = lo; i <= hi; i++) _sfSharedTracksSelected.add(allNames[i]);
+      };
+      // Click dispatcher — double-click on a row plays the track; single
+      // click (with modifiers) updates the selection.
+      document.getElementById('sf-shared-tracks-file-list')?.addEventListener('click', (e) => {
+        const row = e.target.closest('[data-st-file]');
+        if (!row) return;
+        const name = row.getAttribute('data-st-file');
+        if (!name) return;
+        // Double-click → play (no modifier keys).
+        if (!e.shiftKey && !e.ctrlKey && !e.metaKey
+            && _sfTryDoubleClick(`sharedTracks:${name}`)) {
+          _sfOpenAudioPlayer({ kind: 'sharedTracks', id: '', subPath: name, label: name });
+          return;
+        }
+        if (e.shiftKey && _sfSharedTracksAnchor) {
+          _sfShiftSelectSharedTracksTo(name);
+        } else if (e.ctrlKey || e.metaKey) {
+          if (_sfSharedTracksSelected.has(name)) _sfSharedTracksSelected.delete(name);
+          else _sfSharedTracksSelected.add(name);
+          _sfSharedTracksAnchor = name;
+        } else {
+          _sfSharedTracksSelected.clear();
+          _sfSharedTracksSelected.add(name);
+          _sfSharedTracksAnchor = name;
+        }
+        _sfRenderSharedTracksList(window._sfSharedTracksFiles || []);
+      });
+      // Right-click context menu. Reuses the preset-ctx-menu DOM the
+      // entry-files / common / source browsers all share. Items:
+      // Play (single-row), Copy (count), Paste (count, when clipboard
+      // has anything), Rename… (single-row), Export… (count),
+      // Delete (count). No "+ New folder" or "Renumber" — sharedTracks
+      // is a flat .wav-only folder with no numbering convention.
+      document.addEventListener('contextmenu', (e) => {
+        if (!e.target.closest('#sf-shared-tracks-file-list')) return;
+        const modal = document.getElementById('modal-sf-shared-tracks');
+        if (!modal || !modal.classList.contains('active')) return;
+        const row = e.target.closest('[data-st-file]');
+        e.preventDefault();
+        const menu = document.getElementById('preset-ctx-menu');
+        if (!menu) return;
+        const mkItem = (text, cls, fn) => {
+          const d = document.createElement('div');
+          d.className = 'preset-ctx-item' + (cls ? ' ' + cls : '');
+          d.textContent = text;
+          d.addEventListener('mousedown', (e2) => { e2.stopPropagation(); menu.style.display = 'none'; fn(); });
+          menu.appendChild(d);
+        };
+        const mkSep = () => { const s = document.createElement('div'); s.className = 'preset-ctx-separator'; menu.appendChild(s); };
+        menu.innerHTML = '';
+        const clipboardCount = _sfFileClipboard?.paths?.length || 0;
+        if (row) {
+          const name = row.getAttribute('data-st-file');
+          if (!name) return;
+          // Right-click on a row that isn't in the current selection
+          // collapses to just that row (matches every other SF browser).
+          if (!_sfSharedTracksSelected.has(name)) {
+            _sfSharedTracksSelected.clear();
+            _sfSharedTracksSelected.add(name);
+            _sfSharedTracksAnchor = name;
+            _sfRenderSharedTracksList(window._sfSharedTracksFiles || []);
+          }
+          const count = _sfSharedTracksSelected.size;
+          if (count === 1) {
+            mkItem('▶ Play', '', () => _sfOpenAudioPlayer({ kind: 'sharedTracks', id: '', subPath: name, label: name }));
+            mkSep();
+          }
+          mkItem(count > 1 ? `Copy (${count})` : 'Copy', '', _sfCopySharedTracksSelection);
+          if (clipboardCount > 0) mkItem(`Paste (${clipboardCount})`, '', () => _sfPasteIntoSharedTracks());
+          mkSep();
+          if (count === 1) mkItem('Rename…', '', () => _sfRenameSharedTrackPrompt([..._sfSharedTracksSelected][0]));
+          mkItem(count > 1 ? `↗ Export… (${count})` : '↗ Export…', '', () => _sfExportFiles({ kind: 'sharedTracks', id: '', subPaths: [..._sfSharedTracksSelected] }));
+          mkSep();
+          mkItem(count > 1 ? `× Delete (${count})` : '× Delete', 'danger', () => _sfDeleteSharedTracksPrompt());
+        } else {
+          // Empty-space context — Paste only. No "+ New folder" since the
+          // layout is flat.
+          if (clipboardCount > 0) mkItem(`Paste here (${clipboardCount})`, '', () => _sfPasteIntoSharedTracks());
+        }
+        if (!menu.children.length) return;
+        const x = Math.min(e.clientX, window.innerWidth - 200);
+        const y = Math.min(e.clientY, window.innerHeight - 160);
+        menu.style.left = x + 'px';
+        menu.style.top = y + 'px';
+        menu.style.display = 'block';
+      });
+      // Copy → unified clipboard, kind=sharedTracks so paste handlers
+      // (in entry / common folders) read the right source.
+      const _sfCopySharedTracksSelection = () => {
+        if (_sfSharedTracksSelected.size === 0) return;
+        _sfFileClipboard = {
+          kind: 'sharedTracks',
+          id: 'sharedTracks',
+          paths: [..._sfSharedTracksSelected],
+        };
+      };
+      // Paste from the unified clipboard into the shared-tracks folder.
+      // Uses fileOpsCopy with sharedTracks dest; the backend handles
+      // collision-safe naming and source extraction (source/entry/common
+      // kinds all supported as src).
+      const _sfPasteIntoSharedTracks = async () => {
+        if (!_sfFileClipboard || _sfFileClipboard.paths.length === 0) return;
+        try {
+          const res = await window.electronAPI.fileOpsCopy({
+            src: { kind: _sfFileClipboard.kind, id: _sfFileClipboard.id },
+            srcPaths: _sfFileClipboard.paths,
+            dest: { kind: 'sharedTracks' },
+          });
+          if (!res || !res.ok) {
+            alert('Paste failed: ' + (res?.error || 'unknown error'));
+            return;
+          }
+          if (res.failed?.length) {
+            alert(`Some files failed to paste:\n${res.failed.map(f => ` • ${f.source}: ${f.error}`).join('\n')}`);
+          }
+          // Select the pasted files so the user can immediately see what
+          // landed. Backend `added` are relative to the sharedTracks
+          // root — for the flat folder, that's just the basename.
+          const added = res.added || [];
+          _sfSharedTracksSelected = new Set(added.map(p => p.split('/').pop()));
+          _sfSharedTracksAnchor = added.length ? added[0].split('/').pop() : null;
+          await _sfRefreshSharedTracksModal();
+        } catch (err) {
+          alert('Paste failed: ' + String(err && err.message || err));
+        }
+      };
+      const _sfRenameSharedTrackPrompt = async (oldName) => {
+        const dot = oldName.lastIndexOf('.');
+        const stem = dot > 0 ? oldName.slice(0, dot) : oldName;
+        const ext = dot > 0 ? oldName.slice(dot) : '';
+        const typed = await _sfPromptText({
+          title: 'Rename track',
+          message: 'New name for this track:',
+          defaultValue: stem,
+          okText: 'Rename',
+          validate: (v) => _sfValidateFileStem(v, ext),
+        });
+        if (!typed) return;
+        const newName = typed.trim() + ext;
+        if (newName === oldName) return;
+        const res = await window.electronAPI.sharedTracksRenameFile({ oldName, newName });
+        if (!res || !res.ok) {
+          alert('Rename failed: ' + (res?.error || 'unknown error'));
+          return;
+        }
+        // Keep the renamed file in the selection.
+        _sfSharedTracksSelected.delete(oldName);
+        _sfSharedTracksSelected.add(res.newName || newName);
+        _sfSharedTracksAnchor = res.newName || newName;
+        await _sfRefreshSharedTracksModal();
+      };
+      const _sfDeleteSharedTracksPrompt = async () => {
+        const names = [..._sfSharedTracksSelected];
+        if (names.length === 0) return;
+        const ok = await promptConfirm({
+          title: names.length === 1 ? 'Delete track' : `Delete ${names.length} tracks`,
+          message: names.length === 1
+            ? `Delete "${names[0]}"?`
+            : `Delete these ${names.length} tracks?\n${names.map(n => ` • ${n}`).join('\n')}`,
+          confirmText: 'Delete',
+          confirmKind: 'danger',
+        });
+        if (!ok) return;
+        const failures = [];
+        for (const name of names) {
+          const res = await window.electronAPI.sharedTracksDeleteFile({ name });
+          if (!res || !res.ok) failures.push({ name, error: res?.error || 'unknown' });
+        }
+        if (failures.length) {
+          alert(`Some tracks failed to delete:\n${failures.map(f => ` • ${f.name}: ${f.error}`).join('\n')}`);
+        }
+        _sfSharedTracksSelected.clear();
+        _sfSharedTracksAnchor = null;
+        await _sfRefreshSharedTracksModal();
       };
       const _sfCloseImport = () => {
         if (_sfImportProgressUnsub) { try { _sfImportProgressUnsub(); } catch {} _sfImportProgressUnsub = null; }
@@ -14420,7 +15899,7 @@ require(['vs/editor/editor.main'], function () {
           alert(`The label change saved, but some other entries failed to update:\n${propagationFailures.map(f => ` • ${f.name}: ${f.error}`).join('\n')}`);
         }
         // Update the stored preference whenever the label effectively changed
-        // and a URL is attached. Per Ryan: the most recent label choice IS the
+        // and a URL is attached. The most recent label choice becomes the
         // new default for future linked entries, regardless of scope picked.
         if (labelChanged && newEffective !== prefAtSaveStart) {
           _sfLinkLabelPref = newEffective;
@@ -15804,8 +17283,8 @@ require(['vs/editor/editor.main'], function () {
         return true;
       };
       // Compute target basenames for files landing in a named folder.
-      // Rule (per Ryan): the incoming sequence numbers PAST the highest
-      // existing <folder><N>.<ext> in the destination, treating a bare
+      // Rule: the incoming sequence numbers PAST the highest existing
+      // <folder><N>.<ext> in the destination, treating a bare
       // <folder>.<ext> as position 1. Padding preserved when the
       // existing files use a single consistent width; mixed → no
       // padding. Order of incoming names is respected (so the user's
@@ -15906,8 +17385,8 @@ require(['vs/editor/editor.main'], function () {
       };
       // Renumber buckets in the entry's CURRENT breadcrumb folder so
       // numbered sequences close gaps and become contiguous. Bare files
-      // keep position 1 (Ryan: "respect blank as if it were 1"); next
-      // ones become 2, 3, … . Single-file buckets are left alone.
+      // keep position 1 (a blank suffix is treated as if it were 1);
+      // next ones become 2, 3, … . Single-file buckets are left alone.
       const _sfRenumberCurrentFolder = async () => {
         if (!_sfDetailOriginalName) return;
         let res;
@@ -16032,6 +17511,12 @@ require(['vs/editor/editor.main'], function () {
       // Modals to stash while the picker is on top — same pattern the
       // doc viewer uses.
       let _sfLibPickStashedIds = [];
+      // Picker destination. Default null = entry-detail mode (resolves
+      // to {kind:'entry', id:_sfDetailOriginalName, subPath:_sfEntryFilesPath}
+      // at Add time, preserving original behavior). Set by the opener to
+      // {kind:'sharedTracks'} (or future kinds) to retarget the picker
+      // without forking the modal.
+      let _sfLibPickDest = null;
       const _sfLibPickChildrenAt = (tree, navPath) => {
         if (!navPath) return tree;
         const parts = navPath.split('/').filter(Boolean);
@@ -16056,14 +17541,19 @@ require(['vs/editor/editor.main'], function () {
       const _sfLibPickPopulateTargets = () => {
         const sel = _sfLibPickEls.target;
         if (!sel) return;
-        const entry = _sfAllEntries.find(e => e.name === _sfDetailOriginalName);
+        // Entry-mode pulls the open font's source for the "(this font's
+        // source)" annotation + default selection, and excludes the open
+        // font from the Fonts list (copying to self is meaningless).
+        // sharedTracks mode has no "own" context, so it shows every font.
+        const isEntryMode = !_sfLibPickDest || _sfLibPickDest.kind === 'entry';
+        const entry = isEntryMode ? _sfAllEntries.find(e => e.name === _sfDetailOriginalName) : null;
         const ownSourceUuid = entry?.meta?.sourceUuid || null;
         const sources = Object.values(_sfAllSourcesByUuid || {}).slice().sort((a, b) => {
           const an = (a.meta?.bundleName || a.meta?.originalName || a.uuid).toLowerCase();
           const bn = (b.meta?.bundleName || b.meta?.originalName || b.uuid).toLowerCase();
           return an.localeCompare(bn);
         });
-        const fonts = (_sfAllEntries || []).filter(e => e.name !== _sfDetailOriginalName)
+        const fonts = (_sfAllEntries || []).filter(e => isEntryMode ? e.name !== _sfDetailOriginalName : true)
           .slice().sort((a, b) => a.name.localeCompare(b.name));
         const optgroups = [];
         if (sources.length) {
@@ -16222,7 +17712,15 @@ require(['vs/editor/editor.main'], function () {
           crumbs.push(`<span class="sf-libpick-crumb-sep">›</span><span class="sf-libpick-crumb-item${isLast ? ' current' : ''}" data-crumb="${_sfEscape(acc)}">${_sfEscape(segs[i])}</span>`);
         }
         crumbEl.innerHTML = crumbs.join('');
-        const children = _sfLibPickChildrenAt(_sfLibPickTree, _sfLibPickPath);
+        const allChildren = _sfLibPickChildrenAt(_sfLibPickTree, _sfLibPickPath);
+        // sharedTracks dest accepts only .wav files. Hide other file
+        // types so the user can't accidentally stage non-wav content
+        // for a folder that doesn't accept it. Directories stay visible
+        // since deeper paths may still have wav content.
+        const isSharedTracksMode = _sfLibPickDest && _sfLibPickDest.kind === 'sharedTracks';
+        const children = isSharedTracksMode
+          ? allChildren.filter(n => n.isDir || /\.wav$/i.test(n.name))
+          : allChildren;
         if (!children.length) {
           wrap.innerHTML = `<div class="sf-libpick-tree-empty">This folder is empty.</div>`;
           return;
@@ -16303,9 +17801,14 @@ require(['vs/editor/editor.main'], function () {
         }
         _sfRenderLibPickSelections();
       };
-      const _sfOpenLibraryPicker = async () => {
+      const _sfOpenLibraryPicker = async (destOverride) => {
         const m = _sfLibPickEls.modal;
-        if (!m || !_sfDetailOriginalName) return;
+        if (!m) return;
+        _sfLibPickDest = destOverride || null;
+        // Entry mode still requires an open entry; other modes (e.g.
+        // sharedTracks) bring their own destination context.
+        const isEntryMode = !_sfLibPickDest || _sfLibPickDest.kind === 'entry';
+        if (isEntryMode && !_sfDetailOriginalName) return;
         // Refresh the snapshot caches the picker reads from (sources +
         // entries) so a freshly imported source shows up immediately.
         try {
@@ -16327,13 +17830,15 @@ require(['vs/editor/editor.main'], function () {
         _sfLibPickPopulateTargets();
         await _sfLibPickLoadTarget();
         _sfRenderLibPickSelections();
-        // Kick off the destination hash in the background — the picker
-        // is interactive immediately; badges appear when hashes land.
-        _sfLibPickPrimeDestHashes();
-        // Stash the entry detail modal while the picker is up — same
-        // convention the doc viewer follows.
+        // Dup-detection hashes the destination's existing files. Skip
+        // for non-entry destinations — the dup machinery is wired for
+        // entry folders only; extending it to sharedTracks/etc. is
+        // future work.
+        if (isEntryMode) _sfLibPickPrimeDestHashes();
+        // Stash whichever underlying modal the picker covers, so it
+        // restores cleanly on close.
         _sfLibPickStashedIds = [];
-        const candidates = ['modal-sf-entry-detail'];
+        const candidates = isEntryMode ? ['modal-sf-entry-detail'] : ['modal-sf-shared-tracks'];
         for (const id of candidates) {
           const el = document.getElementById(id);
           if (el && el.classList.contains('active')) {
@@ -16493,11 +17998,23 @@ require(['vs/editor/editor.main'], function () {
       // (so users picking up wavs while looking at "boot/" land them in
       // boot/, matching the existing +Add and right-click paste UX).
       _sfLibPickEls.addBtn?.addEventListener('click', async () => {
-        if (_sfLibPickSelections.length === 0 || !_sfDetailOriginalName) return;
+        if (_sfLibPickSelections.length === 0) return;
+        const isEntryMode = !_sfLibPickDest || _sfLibPickDest.kind === 'entry';
+        if (isEntryMode && !_sfDetailOriginalName) return;
+        // Resolve the effective destination once. Entry mode reads the
+        // open entry + current subPath; sharedTracks mode is the flat
+        // singleton folder.
+        const effectiveDest = isEntryMode
+          ? { kind: 'entry', id: _sfDetailOriginalName, subPath: _sfEntryFilesPath }
+          : { kind: 'sharedTracks' };
         // Run the rename-to-match-folder prompt once across the whole
         // staged set so the numbering stays sequential across sources.
+        // sharedTracks is flat with arbitrary track names — skip the
+        // prompt; the backend's collision-safe naming handles dupes.
         const incomingNames = _sfLibPickSelections.map(s => s.fileName);
-        const destNames = await _sfResolvePasteRenames(incomingNames, _sfEntryFilesPath);
+        const destNames = isEntryMode
+          ? await _sfResolvePasteRenames(incomingNames, _sfEntryFilesPath)
+          : [];
         if (destNames === null) return; // cancelled
         // Group selections by source (kind, id) but remember each
         // selection's index in the flat order so we can carry the
@@ -16521,7 +18038,7 @@ require(['vs/editor/editor.main'], function () {
           try {
             res = await window.electronAPI.fileOpsCopy({
               src, srcPaths: paths,
-              dest: { kind: 'entry', id: _sfDetailOriginalName, subPath: _sfEntryFilesPath },
+              dest: effectiveDest,
               destNames: hasDestNames ? names : undefined,
             });
           } catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
@@ -16536,15 +18053,20 @@ require(['vs/editor/editor.main'], function () {
         if (allFailed.length) {
           alert(`Some files failed to add:\n${allFailed.map(f => ` • ${f.source}: ${f.error}`).join('\n')}`);
         }
-        // Refresh the entry tree, highlight the newly-added set, and
-        // close the picker (restoring the entry detail modal).
-        try {
-          const fr = await window.electronAPI.listEntryFiles({ name: _sfDetailOriginalName });
-          _sfEntryFilesTree = (fr && fr.ok && fr.files) || [];
-        } catch {}
-        _sfEntryFilesSelected = new Set(allAdded);
-        _sfEntryFilesAnchor = allAdded[0] || null;
-        _sfRenderEntryFiles();
+        // Refresh the underlying surface and close the picker.
+        if (isEntryMode) {
+          try {
+            const fr = await window.electronAPI.listEntryFiles({ name: _sfDetailOriginalName });
+            _sfEntryFilesTree = (fr && fr.ok && fr.files) || [];
+          } catch {}
+          _sfEntryFilesSelected = new Set(allAdded);
+          _sfEntryFilesAnchor = allAdded[0] || null;
+          _sfRenderEntryFiles();
+        } else {
+          // sharedTracks — re-pull the file list so the modal reflects
+          // the new tracks.
+          await _sfRefreshSharedTracksModal();
+        }
         _sfCloseLibraryPicker();
       });
 
@@ -16602,6 +18124,13 @@ require(['vs/editor/editor.main'], function () {
           // sources:readFile sends a Node Buffer which arrives as
           // Uint8Array across the IPC bridge.
           return r.data instanceof Uint8Array ? r.data : new Uint8Array(r.data);
+        }
+        if (kind === 'sharedTracks') {
+          // sharedTracks is a singleton flat folder; the file name lives
+          // in subPath. No id involved.
+          const r = await window.electronAPI.sharedTracksReadFileBytes({ name: subPath });
+          if (!r || !r.ok) throw new Error((r && r.error) || 'Read failed');
+          return new Uint8Array(r.bytes);
         }
         throw new Error(`Unknown audio source kind: ${kind}`);
       };
@@ -16719,7 +18248,7 @@ require(['vs/editor/editor.main'], function () {
         _sfAudioCancelRaf();
         const src = ctx.createBufferSource();
         src.buffer = _sfAudioBuffer;
-        // Native loop on the BufferSource — wraps audio without our
+        // Native loop on the BufferSource: wraps audio without our
         // having to restart manually each time.
         src.loop = _sfAudioLoop;
         src.connect(ctx.destination);
@@ -16786,8 +18315,8 @@ require(['vs/editor/editor.main'], function () {
         if (curEl)  curEl.textContent = '0:00';
         if (totEl)  totEl.textContent = '0:00';
         if (metaEl) metaEl.textContent = '';
-        // Loop resets to OFF on every open (per Ryan: even reopening
-        // the same file).
+        // Loop resets to OFF on every open, even when reopening the
+        // same file — fresh-open consistency.
         _sfAudioLoop = false;
         const loopBtn = document.getElementById('sf-audio-loop');
         if (loopBtn) loopBtn.setAttribute('aria-pressed', 'false');
@@ -18553,6 +20082,50 @@ require(['vs/editor/editor.main'], function () {
             }
           }
         }
+        // Shared Tracks inclusion logic — same shape as common, simpler
+        // since the folder is singleton (no star, no dropdown).
+        //   config refs tracks/ AND folder exists       → include silently
+        //   config refs tracks/ AND no folder            → warn (only fonts ship)
+        //   config DOESN'T ref tracks/ AND folder exists → 3-button ask
+        //   config DOESN'T ref tracks/ AND no folder      → don't include, no ask
+        const wantsTracks = _sfIsSharedTracksInUse();
+        // Re-check existence via IPC rather than trusting the window
+        // cache. The cache only refreshes on tab switch / modal close,
+        // so a user who creates + populates the folder and exports
+        // without a tab-switch-induced refresh could otherwise see the
+        // tracks branch silently skipped.
+        let hasTracksFolder = false;
+        try {
+          const stRes = await window.electronAPI.sharedTracksExists();
+          hasTracksFolder = !!(stRes && stRes.ok && stRes.exists);
+          // Keep the window cache in sync so subsequent renders see
+          // the same truth this branch did.
+          window._sfSharedTracksExists = hasTracksFolder;
+        } catch { hasTracksFolder = !!window._sfSharedTracksExists; }
+        let includeTracks = false;
+        if (wantsTracks && hasTracksFolder) {
+          includeTracks = true;
+        } else if (wantsTracks && !hasTracksFolder) {
+          const ok = await promptConfirm({
+            title: 'No shared tracks folder',
+            message: 'The open config references the shared "tracks/" folder at the SD card root, but no shared tracks folder exists in your library.\nSave will only include the selected fonts. Continue?',
+            confirmText: 'Continue',
+            confirmKind: 'primary',
+            cancelText: 'Cancel',
+          });
+          if (!ok) return false;
+        } else if (!wantsTracks && hasTracksFolder) {
+          const choice = await promptConfirm({
+            title: 'Include shared tracks folder?',
+            message: 'The open config does not reference the shared "tracks/" folder, but you have one in your library. Include it in the saved output?',
+            confirmText: 'Include',
+            confirmKind: 'primary',
+            middleText: 'Skip',
+            cancelText: 'Cancel',
+          });
+          if (choice === 'cancel') return false;
+          includeTracks = choice === 'confirm';
+        }
         let pick;
         try { pick = await window.electronAPI.selectSaveDestination(); }
         catch (err) { alert(`Could not open the folder picker: ${err && err.message || err}`); return false; }
@@ -18579,6 +20152,12 @@ require(['vs/editor/editor.main'], function () {
             if (r && r.ok && r.exists && !conflicts.includes('common')) conflicts.push('common');
           } catch {}
         }
+        if (includeTracks) {
+          try {
+            const r = await window.electronAPI.sharedTracksFolderExistsAt({ destDir });
+            if (r && r.ok && r.exists && !conflicts.includes('tracks')) conflicts.push('tracks');
+          } catch {}
+        }
         let modeByName = new Map(); // name -> 'skip' | 'replace'
         if (conflicts.length > 0) {
           const choices = await _sfPromptSaveConflicts(conflicts);
@@ -18590,9 +20169,11 @@ require(['vs/editor/editor.main'], function () {
         // toward the total (and don't increment the running step), so the
         // progress reflects real work.
         const commonMode = includeCommon ? (modeByName.get('common') || 'rename') : null;
+        const tracksMode = includeTracks ? (modeByName.get('tracks') || 'rename') : null;
         const willWriteFonts = names.filter(n => (modeByName.get(n) || 'rename') !== 'skip').length;
         const willWriteCommon = includeCommon && commonMode !== 'skip' ? 1 : 0;
-        const totalSteps = willWriteFonts + willWriteCommon;
+        const willWriteTracks = includeTracks && tracksMode !== 'skip' ? 1 : 0;
+        const totalSteps = willWriteFonts + willWriteCommon + willWriteTracks;
         // Everything got skipped — honest bail rather than a "Saving (0 of 0)"
         // flash. Selection is preserved so the user can revisit their
         // conflict choices and re-Save without re-selecting fonts.
@@ -18654,6 +20235,24 @@ require(['vs/editor/editor.main'], function () {
           }
         } else if (includeCommon && commonMode === 'skip') {
           // User chose to keep the existing common at destination.
+          results.skipped++;
+        }
+        if (includeTracks && tracksMode !== 'skip') {
+          stepIdx++;
+          _sfDeleteProgress.show(`Exporting fonts (${stepIdx} of ${totalSteps})`, 'shared tracks folder');
+          try {
+            const r = await window.electronAPI.sharedTracksExportToFolder({
+              destDir,
+              mode: tracksMode,
+            });
+            if (!r || !r.ok) failures.push({ name: 'tracks', error: (r && r.error) || 'unknown error' });
+            else if (r.skipped) results.skipped++;
+            else if (tracksMode === 'replace') results.replaced++;
+            else results.copied++;
+          } catch (err) {
+            failures.push({ name: 'tracks', error: String(err && err.message || err) });
+          }
+        } else if (includeTracks && tracksMode === 'skip') {
           results.skipped++;
         }
         await _sfDeleteProgress.hide();
@@ -19026,6 +20625,28 @@ require(['vs/editor/editor.main'], function () {
           _sfRenderGrid();
           return;
         }
+        const sharedDel = e.target.closest('[data-shared-tracks-delete]');
+        if (sharedDel) {
+          e.stopPropagation();
+          const files = window._sfSharedTracksFiles || [];
+          const msg = files.length === 0
+            ? 'Remove the Shared Tracks folder from JMT Studio? The folder on your SD card is NOT touched.'
+            : `Remove the Shared Tracks folder and all ${files.length} track${files.length === 1 ? '' : 's'} inside? The folder on your SD card is NOT touched.`;
+          const ok = await promptConfirm({
+            title: 'Delete Shared Tracks folder',
+            message: msg,
+            confirmText: 'Delete folder',
+            confirmKind: 'danger',
+          });
+          if (!ok) return;
+          const res = await window.electronAPI.sharedTracksDelete();
+          if (!res || !res.ok) {
+            alert('Could not delete the folder: ' + (res?.error || 'unknown error'));
+            return;
+          }
+          await window.refreshSoundFontsView();
+          return;
+        }
         const del = e.target.closest('[data-card-delete]');
         if (del) {
           e.stopPropagation();
@@ -19066,6 +20687,11 @@ require(['vs/editor/editor.main'], function () {
         }
         const card = e.target.closest('.sf-card');
         if (!card) return;
+        // Shared Tracks card has no data-font; route to its own browser.
+        if (card.hasAttribute('data-shared-tracks')) {
+          _sfOpenSharedTracks();
+          return;
+        }
         const name = card.getAttribute('data-font');
         if (name) _sfOpenEntryDetail(name);
       });
@@ -19163,6 +20789,20 @@ require(['vs/editor/editor.main'], function () {
       });
 
       document.getElementById('btn-sf-import-toolbar')?.addEventListener('click', _sfOpenImport);
+
+      // Shared Tracks: create-on-click then refresh the view so the toolbar
+      // button collapses and the card surfaces in the grid. The folder is
+      // empty at creation — user opens it to add files.
+      document.getElementById('btn-sf-create-shared-tracks')?.addEventListener('click', async () => {
+        const res = await window.electronAPI.sharedTracksCreate();
+        if (!res || !res.ok) {
+          alert('Could not create the Shared Tracks folder: ' + (res?.error || 'unknown error'));
+          return;
+        }
+        await window.refreshSoundFontsView();
+        // Auto-open the new folder so the user lands somewhere useful.
+        _sfOpenSharedTracks?.();
+      });
       // Common folder sidecar wiring — import chooser / collapse / add files /
       // list row interactions / file tree interactions / right-click menus.
       // Single "+ Import" button opens a small chooser modal that asks zip vs
@@ -19172,20 +20812,24 @@ require(['vs/editor/editor.main'], function () {
         if (!modal) return;
         const zipBtn = document.getElementById('sf-common-import-zip');
         const folderBtn = document.getElementById('sf-common-import-folder');
+        const voicepackBtn = document.getElementById('sf-common-import-voicepack');
         const cancelBtn = document.getElementById('sf-common-import-cancel');
         const cleanup = () => {
           modal.classList.remove('active');
           zipBtn?.removeEventListener('click', onZip);
           folderBtn?.removeEventListener('click', onFolder);
+          voicepackBtn?.removeEventListener('click', onVoicepack);
           cancelBtn?.removeEventListener('click', onCancel);
           modal.removeEventListener('click', onBackdrop);
         };
         const onZip = () => { cleanup(); _sfImportCommon('zip'); };
         const onFolder = () => { cleanup(); _sfImportCommon('folder'); };
+        const onVoicepack = () => { cleanup(); _sfOpenVoicepackPicker(); };
         const onCancel = () => cleanup();
         const onBackdrop = (e) => { if (e.target === modal) cleanup(); };
         zipBtn?.addEventListener('click', onZip);
         folderBtn?.addEventListener('click', onFolder);
+        voicepackBtn?.addEventListener('click', onVoicepack);
         cancelBtn?.addEventListener('click', onCancel);
         modal.addEventListener('click', onBackdrop);
         modal.classList.add('active');
@@ -19299,9 +20943,25 @@ require(['vs/editor/editor.main'], function () {
           await _sfRenderCommonFileTree();
           return;
         }
-        // 4. Header click → toggle the card's expanded state (accordion).
-        //    Clicks inside the expanded files area are intentionally a no-op
-        //    at the header level — they should never collapse the card.
+        // 4a. Group header click → toggle the group's collapsed state.
+        //     (Stars on the group header are display-only — the user
+        //     stars individual commons, not groups.)
+        const groupHeader = e.target.closest('.sf-common-group-header');
+        if (groupHeader) {
+          e.stopPropagation();
+          const groupEl = groupHeader.closest('[data-group-name]');
+          const name = groupEl?.getAttribute('data-group-name');
+          if (!name) return;
+          const currentlyOpen = !groupEl.classList.contains('collapsed');
+          _sfCommonGroupOpen[name] = !currentlyOpen;
+          await _sfSaveCommonGroupOpen();
+          await _sfRenderCommonList();
+          return;
+        }
+        // 4b. Card header click → either toggle expand (plain click) or
+        //     update multi-selection (Ctrl/Shift). Clicks inside the
+        //     expanded files area are intentionally a no-op at the header
+        //     level — they should never collapse the card.
         if (e.target.closest('.sf-common-row-files')) return;
         const header = e.target.closest('.sf-common-row-header');
         if (!header) return;
@@ -19309,10 +20969,37 @@ require(['vs/editor/editor.main'], function () {
         if (!row) return;
         const uuid = row.getAttribute('data-common-uuid');
         if (!uuid) return;
+        // Multi-select gestures (Ctrl/Shift): update the multi-select
+        // set, do NOT change the active common or expanded card.
+        if (e.ctrlKey || e.metaKey) {
+          if (_sfMultiSelectedCommonUuids.has(uuid)) _sfMultiSelectedCommonUuids.delete(uuid);
+          else _sfMultiSelectedCommonUuids.add(uuid);
+          _sfMultiSelectAnchor = uuid;
+          await _sfRenderCommonList();
+          return;
+        }
+        if (e.shiftKey && _sfMultiSelectAnchor) {
+          // Enumerate visible card rows in document order; add every uuid
+          // between anchor and target inclusive to the multi-select set.
+          const allRows = [...document.querySelectorAll('#sf-common-list [data-common-uuid]')];
+          const allUuids = allRows.map(el => el.getAttribute('data-common-uuid'));
+          const anchorIdx = allUuids.indexOf(_sfMultiSelectAnchor);
+          const targetIdx = allUuids.indexOf(uuid);
+          if (anchorIdx >= 0 && targetIdx >= 0) {
+            const [lo, hi] = anchorIdx <= targetIdx ? [anchorIdx, targetIdx] : [targetIdx, anchorIdx];
+            for (let i = lo; i <= hi; i++) _sfMultiSelectedCommonUuids.add(allUuids[i]);
+            await _sfRenderCommonList();
+          }
+          return;
+        }
+        // Plain click: clear multi-select, toggle expanded.
+        _sfMultiSelectedCommonUuids.clear();
+        _sfMultiSelectAnchor = null;
         if (uuid === _sfSelectedCommonUuid) {
           _sfSelectedCommonUuid = null;
         } else {
           _sfSelectedCommonUuid = uuid;
+          _sfMultiSelectAnchor = uuid;
         }
         _sfCommonFilesSelected.clear();
         _sfCommonFilesAnchor = null;
@@ -19343,7 +21030,8 @@ require(['vs/editor/editor.main'], function () {
         const fileRow = e.target.closest('[data-tree-file]');
         const dirRow = e.target.closest('[data-tree-dir]');
         const commonRow = e.target.closest('[data-common-uuid]');
-        if (!fileRow && !dirRow && !commonRow) return;
+        const groupHeader = e.target.closest('.sf-common-group-header');
+        if (!fileRow && !dirRow && !commonRow && !groupHeader) return;
         e.preventDefault();
         const menu = document.getElementById('preset-ctx-menu');
         if (!menu) return;
@@ -19410,15 +21098,71 @@ require(['vs/editor/editor.main'], function () {
           mkItem('+ New folder', '', _sfCreateCommonFolderPrompt);
           mkSep();
           mkItem('Delete folder', 'danger', () => _sfDeleteCommonFilePrompt(subPath));
+        } else if (groupHeader && !commonRow) {
+          // Group header right-click — rename / delete the group.
+          const groupEl = groupHeader.closest('[data-group-name]');
+          const groupName = groupEl?.getAttribute('data-group-name');
+          if (!groupName) return;
+          mkItem('Rename group…', '', () => _sfRenameCommonGroupPrompt(groupName));
+          mkSep();
+          mkItem('Delete group', 'danger', () => _sfDeleteCommonGroupPrompt(groupName));
         } else {
           const uuid = commonRow.getAttribute('data-common-uuid');
           if (!uuid) return;
+          // Determine target set: if multi-select is active and this row
+          // is part of it, operate on the whole selection. Otherwise
+          // operate on just this single row.
+          const multiCount = _sfMultiSelectedCommonUuids.size;
+          const isPartOfMulti = multiCount >= 2 && _sfMultiSelectedCommonUuids.has(uuid);
+          const targetUuids = isPartOfMulti ? [..._sfMultiSelectedCommonUuids] : [uuid];
+          const targetCount = targetUuids.length;
+          const targetCommons = targetUuids.map(u => _sfCommons.find(c => c.uuid === u)).filter(Boolean);
+          const targetGroups = new Set(targetCommons.map(c => (c.meta?.group || '').trim()).filter(Boolean));
+          const inAnyGroupCount = targetCommons.filter(c => (c.meta?.group || '').trim()).length;
+          const existingGroups = _sfExistingCommonGroups();
+          // "Add to group" candidates: existing groups MINUS the one
+          // EVERY target is already in (no point offering it). If
+          // targets span multiple groups or none, show all existing.
+          const homogeneousGroup = (targetGroups.size === 1 && inAnyGroupCount === targetCount)
+            ? [...targetGroups][0]
+            : null;
+          const addToCandidates = existingGroups.filter(g => g !== homogeneousGroup);
+          // Group-creation action: 2+ in target AND total commons >= 3
+          // (a group of fewer than that doesn't really earn its header).
+          const showNewGroup = targetCount >= 2 && _sfCommons.length >= 3;
+
           // Right-click on a common's header row. If we have a clipboard and
           // this card is the (or another) common, offer Paste-to-root.
           if (clipboardCount > 0) {
             mkItem(`Paste here (${clipboardCount})`, '', () => _sfPasteCommonClipboard(uuid, ''));
             mkSep();
           }
+          // Group / add-to-group / ungroup section.
+          if (showNewGroup) {
+            mkItem(targetCount === 1 ? 'New group…' : `New group from selected (${targetCount})…`, '',
+              isPartOfMulti ? _sfGroupSelectedCommons : () => {
+                _sfMultiSelectedCommonUuids = new Set([uuid]);
+                _sfMultiSelectAnchor = uuid;
+                _sfGroupSelectedCommons();
+              });
+          }
+          if (addToCandidates.length > 0) {
+            for (const g of addToCandidates) {
+              const label = targetCount === 1 ? `Add to "${g}"` : `Add ${targetCount} to "${g}"`;
+              mkItem(label, '', () => _sfApplyGroupToCommons(targetUuids, g));
+            }
+          }
+          if (inAnyGroupCount > 0) {
+            const label = inAnyGroupCount === targetCount && targetCount === 1
+              ? 'Remove from group'
+              : `Remove from group (${inAnyGroupCount})`;
+            mkItem(label, '', () => _sfApplyGroupToCommons(
+              targetCommons.filter(c => (c.meta?.group || '').trim()).map(c => c.uuid),
+              ''
+            ));
+          }
+          if (showNewGroup || addToCandidates.length > 0 || inAnyGroupCount > 0) mkSep();
+
           mkItem('Rename…', '', () => _sfRenameCommon(uuid));
           mkItem('Duplicate…', '', () => _sfDuplicateCommon(uuid));
           mkItem('Export…', '', () => _sfExportCommonPrompt(uuid));
@@ -19508,6 +21252,20 @@ require(['vs/editor/editor.main'], function () {
       };
       const _sfCommonListEl = document.getElementById('sf-common-list');
       _sfCommonListEl?.addEventListener('dragstart', (e) => {
+        // Group header drag — kicks off a reorder. Stashes the group
+        // name on a module variable; the dragover/drop handlers below
+        // handle placement. Don't preventDefault here so HTML5 drag
+        // proceeds; let dataTransfer carry something for Firefox.
+        const groupHeader = e.target.closest('.sf-common-group-header');
+        if (groupHeader) {
+          const groupEl = groupHeader.closest('[data-group-name]');
+          const name = groupEl?.getAttribute('data-group-name');
+          if (!name) { e.preventDefault(); return; }
+          _sfCommonGroupDragName = name;
+          try { e.dataTransfer.effectAllowed = 'move'; } catch {}
+          try { e.dataTransfer.setData('text/plain', `group:${name}`); } catch {}
+          return;
+        }
         const fileRow = e.target.closest('[data-tree-file]');
         if (!fileRow || !_sfSelectedCommonUuid) { e.preventDefault(); return; }
         const subPath = fileRow.getAttribute('data-tree-file');
@@ -19532,7 +21290,37 @@ require(['vs/editor/editor.main'], function () {
         // we read from _sfCommonDragData on drop so we have the full payload.
         try { e.dataTransfer.setData('text/plain', _sfCommonDragData.paths.join('\n')); } catch {}
       });
+      // Helper for group-header reorder: figure out the target header and
+      // whether the cursor is in the top or bottom half (drop-before vs
+      // drop-after for visual feedback).
+      const _sfResolveGroupDrop = (e) => {
+        if (!_sfCommonGroupDragName) return null;
+        const targetHeader = e.target.closest('.sf-common-group-header');
+        if (!targetHeader) return null;
+        const targetEl = targetHeader.closest('[data-group-name]');
+        const targetName = targetEl?.getAttribute('data-group-name');
+        if (!targetName || targetName === _sfCommonGroupDragName) return null;
+        const rect = targetHeader.getBoundingClientRect();
+        const before = (e.clientY - rect.top) < (rect.height / 2);
+        return { targetName, targetHeader, before };
+      };
+      const _sfClearGroupDropHighlights = () => {
+        document.querySelectorAll('.sf-common-group-header.drop-before, .sf-common-group-header.drop-after').forEach(el => {
+          el.classList.remove('drop-before', 'drop-after');
+        });
+      };
       _sfCommonListEl?.addEventListener('dragover', (e) => {
+        // Group reorder takes priority when a group header is being dragged.
+        if (_sfCommonGroupDragName) {
+          const drop = _sfResolveGroupDrop(e);
+          _sfClearGroupDropHighlights();
+          if (drop) {
+            e.preventDefault();
+            try { e.dataTransfer.dropEffect = 'move'; } catch {}
+            drop.targetHeader.classList.add(drop.before ? 'drop-before' : 'drop-after');
+          }
+          return;
+        }
         if (!_sfCommonDragData) return;
         const target = _sfResolveDrop(e);
         if (!target) { _sfSetDragTarget(null); return; }
@@ -19544,9 +21332,34 @@ require(['vs/editor/editor.main'], function () {
       _sfCommonListEl?.addEventListener('dragleave', (e) => {
         // Only clear if leaving the whole list — internal moves between rows
         // are handled by dragover replacing _sfDragTargetEl.
-        if (e.target === _sfCommonListEl) _sfSetDragTarget(null);
+        if (e.target === _sfCommonListEl) {
+          _sfSetDragTarget(null);
+          _sfClearGroupDropHighlights();
+        }
       });
       _sfCommonListEl?.addEventListener('drop', async (e) => {
+        // Group reorder drop: splice dragged name to new position in the
+        // order array, persist, re-render.
+        if (_sfCommonGroupDragName) {
+          const drop = _sfResolveGroupDrop(e);
+          _sfClearGroupDropHighlights();
+          const dragName = _sfCommonGroupDragName;
+          _sfCommonGroupDragName = null;
+          if (!drop) return;
+          e.preventDefault();
+          const order = [..._sfCommonGroupOrder];
+          const fromIdx = order.indexOf(dragName);
+          if (fromIdx < 0) return;
+          order.splice(fromIdx, 1);
+          let toIdx = order.indexOf(drop.targetName);
+          if (toIdx < 0) return;
+          if (!drop.before) toIdx += 1;
+          order.splice(toIdx, 0, dragName);
+          _sfCommonGroupOrder = order;
+          await _sfSaveCommonGroupOrder();
+          await _sfRenderCommonList();
+          return;
+        }
         if (!_sfCommonDragData) return;
         const target = _sfResolveDrop(e);
         _sfSetDragTarget(null);
@@ -19565,7 +21378,9 @@ require(['vs/editor/editor.main'], function () {
       });
       _sfCommonListEl?.addEventListener('dragend', () => {
         _sfSetDragTarget(null);
+        _sfClearGroupDropHighlights();
         _sfCommonDragData = null;
+        _sfCommonGroupDragName = null;
       });
       // ── SF Library Backup export flow ────────────────────
       // Two-stage: prep modal (survey + benchmark + confirm) then progress
@@ -19803,6 +21618,15 @@ require(['vs/editor/editor.main'], function () {
         for (const it of survey.sources.add) plan.sources[it.id] = 'install';
         for (const it of survey.library.add) plan.library[it.id] = { mode: 'install', currentName: null };
         for (const it of survey.common.add)  plan.common[it.id]  = 'install';
+        // Nothing to decide — no per-item conflicts means the plan modal
+        // would just show "N items will be added" + Apply, which is a
+        // redundant confirmation of the Merge choice the user already
+        // made. Skip straight to apply; the progress modal carries the
+        // visual feedback.
+        if (totalConflicts === 0) {
+          await _sfRunMergeApply(zipPath, plan, survey);
+          return;
+        }
         const userChoices = await _sfPromptMergePlan(survey);
         if (!userChoices) return; // cancelled
         // Index library conflicts by id so we can look up the current dir
@@ -20364,6 +22188,28 @@ require(['vs/editor/editor.main'], function () {
           return;
         }
         const { manifest, observed } = inspect;
+        // Empty-library shortcut: with nothing to merge or replace, the
+        // three-way choice is meaningless and the destructive-confirm
+        // beat is a lie ("wipe" implies something to wipe). Skip straight
+        // to the restore path; _sfRunReplaceImport opens its own progress
+        // modal so the user still sees the operation underway.
+        // sharedTracks is checked via IPC since the window cache only
+        // refreshes on tab switch / modal close.
+        const liveEntries  = (window._sfEntriesCache || []).length;
+        const liveCommons  = (_sfCommons || []).length;
+        const liveSources  = Object.keys(_sfAllSourcesByUuid || {}).length;
+        let liveSharedTracks = 0;
+        try {
+          const stRes = await window.electronAPI.sharedTracksExists();
+          if (stRes && stRes.ok && stRes.exists) {
+            const filesRes = await window.electronAPI.sharedTracksListFiles();
+            liveSharedTracks = (filesRes && filesRes.ok && filesRes.files) ? filesRes.files.length : 0;
+          }
+        } catch {}
+        if (liveEntries === 0 && liveCommons === 0 && liveSources === 0 && liveSharedTracks === 0) {
+          await _sfRunReplaceImport(zipPath, observed);
+          return;
+        }
         // Show counts from the manifest, but cross-check against what's
         // actually in the zip so a tampered manifest doesn't deceive the
         // summary. When they disagree we trust the observed numbers — it's
@@ -20373,8 +22219,15 @@ require(['vs/editor/editor.main'], function () {
         const exportedAt = manifest.exportedAt ? new Date(manifest.exportedAt).toLocaleString() : '';
         const summaryEl = document.getElementById('sf-backup-import-summary');
         if (summaryEl) {
+          // Shared tracks only mentioned when present — keeps the line
+          // tight on the common no-shared-tracks case while still
+          // surfacing the count when one was backed up.
+          const stCount = cs.sharedTracks || 0;
+          const stPart = stCount > 0
+            ? `, ${stCount} shared track${stCount === 1 ? '' : 's'}`
+            : '';
           summaryEl.textContent =
-            `Backup contains ${cs.sources} source${cs.sources === 1 ? '' : 's'}, ${cs.library} font${cs.library === 1 ? '' : 's'}, ${cs.common} common folder${cs.common === 1 ? '' : 's'}. ` +
+            `Backup contains ${cs.sources} source${cs.sources === 1 ? '' : 's'}, ${cs.library} font${cs.library === 1 ? '' : 's'}, ${cs.common} common folder${cs.common === 1 ? '' : 's'}${stPart}. ` +
             `Total ${totalSize}.` +
             (exportedAt ? ` Exported ${exportedAt}.` : '');
         }
@@ -21258,6 +23111,10 @@ require(['vs/editor/editor.main'], function () {
       if (typeof _validatePresetIdentifiers === 'function') _validatePresetIdentifiers();
       _parseResult    = presetParser.parsePresets(editor.getValue());
       _refreshStrip();
+      // Common Folder meta-field: re-evaluate every rebuild so toggling
+      // ;common in a preset (or any edit that adds/removes the marker)
+      // flips the field's missing/needed state immediately.
+      try { window._sfRenderPresetSidecarCommonRow?.(); } catch {}
       if (!_sidecarOpen) return;
       if (_editingSlot) { _refreshBladeSectionLabel(); return; }
       // Skip the destructive detail re-render while a field input is open OR the Common
@@ -21800,6 +23657,10 @@ require(['vs/editor/editor.main'], function () {
       }
     }
 
+    // Exposed so switchTab (which lives outside the require callback) can
+    // re-render when returning to the Config tab — Sound Fonts edits in
+    // other tabs change the font-folder combo's library state.
+    window._renderPresetDetail = () => _renderDetail();
     function _renderDetail() {
       const detail = document.getElementById('preset-detail');
       detail.innerHTML = '';
@@ -21957,7 +23818,13 @@ require(['vs/editor/editor.main'], function () {
       }
       _openActivePresetNameEdit = applyNameDirect;
 
-      nameWrap.appendChild(_makePencil(() => openNameEdit()));
+      // Click-to-edit on the name span itself — no separate pencil
+      // affordance. CSS hover (cursor: text + subtle tint) carries the
+      // editability cue. Stays out of the tab cycle; the Tab loop still
+      // reaches the name via _openFieldByName('name') → openNameEdit().
+      nameVal.classList.add('preset-detail-name-editable');
+      nameVal.title = 'Click to rename';
+      nameVal.addEventListener('click', () => openNameEdit());
       heading.appendChild(nameWrap);
 
       const total = arr.presets.length;
@@ -22035,35 +23902,184 @@ require(['vs/editor/editor.main'], function () {
       const label = document.createElement('span');
       label.className = 'preset-detail-field-label';
       label.textContent = 'Font Folder';
-      label.title = 'Case-sensitive font folder name on the SD card.';
+      label.title = 'Pick a font folder from your Sound Fonts library.';
       wrap.appendChild(label);
 
       const valueWrap = document.createElement('span');
       valueWrap.className = 'preset-detail-field-value-wrap';
-      const fontVal = document.createElement('span');
-      fontVal.className = 'preset-detail-field-value';
-      const displayFont = (preset.font || '').split(';').filter(p => p.trim() !== 'common').join(';');
-      fontVal.textContent = displayFont;
-      fontVal.dataset.placeholder = displayFont ? '' : '(empty)';
-      valueWrap.appendChild(fontVal);
 
+      const displayFont = (preset.font || '').split(';').filter(p => p.trim() !== 'common').join(';');
+
+      // Common checkbox declared early so the combo's commit closure can
+      // read its state. The font value the user picks gets ";common"
+      // appended when the box is checked.
       const cb = document.createElement('input');
       cb.type = 'checkbox';
       cb.checked = (preset.font || '').split(';').some(p => p.trim() === 'common');
 
-      valueWrap.appendChild(_makePencil(() => {
-        // Read live display value at click time — apply() keeps fontVal.textContent
-        // current across nav, but the closure-captured displayFont is stale.
-        _startFieldEdit(fontVal, preset.fontRange, fontVal.textContent || '', undefined, newPath => {
-          const full = cb.checked ? (newPath ? newPath + ';common' : 'common') : newPath;
-          _commitFieldEdit(_getFreshFieldRange('font') || preset.fontRange, full);
-        }, 'font');
-      }));
+      const commit = (newName) => {
+        const full = cb.checked ? (newName ? newName + ';common' : 'common') : (newName || '');
+        _commitFieldEdit(_getFreshFieldRange('font') || preset.fontRange, full);
+      };
+
+      // Library combo (input + arrow + dropdown) — same pattern the Style
+      // Library picker uses for blade styles. Library state is resolved
+      // asynchronously so a fresh render that beats the boot warmer's IPC
+      // still produces a working combo once the entries land. If the
+      // library is genuinely empty after the fetch, the arrow drops away
+      // and the field becomes a plain text input.
+      const comboWrap = document.createElement('div');
+      comboWrap.className = 'preset-lib-combo preset-font-combo';
+      const comboInput = document.createElement('input');
+      comboInput.type = 'text';
+      comboInput.className = 'preset-lib-combo-input';
+      comboInput.placeholder = 'Pick a font from your library…';
+      comboInput.value = displayFont;
+      comboInput.title = 'Case-sensitive font folder name on the SD card.';
+      const comboArrow = document.createElement('button');
+      comboArrow.className = 'preset-lib-combo-arrow';
+      comboArrow.innerHTML = '&#9660;';
+      comboArrow.title = 'Browse font library';
+      comboArrow.tabIndex = -1;
+
+      // Mutable state for the async library load. fontNames is empty
+      // until entries arrive; libraryReady gates the dropdown so users
+      // who focus the input during the load just see a brief no-op.
+      let fontNames = [];
+      let libLoaded = false;
+      let libEmpty = false;
+
+      const applyLibrary = (entries) => {
+        libLoaded = true;
+        fontNames = entries
+          .map(e => e.name || e.meta?.name || '')
+          .filter(Boolean)
+          .sort((a, b) => a.localeCompare(b));
+        if (fontNames.length === 0) {
+          libEmpty = true;
+          comboArrow.remove();
+          comboInput.placeholder = 'Name on SD';
+          comboInput.title = 'Type the font folder name as it appears on the SD card. No Sound Fonts library imported yet.';
+          comboInput.classList.remove('not-in-library');
+          return;
+        }
+        const libNamesSet = new Set(fontNames.map(n => n.toLowerCase()));
+        if (displayFont && !libNamesSet.has(displayFont.toLowerCase())) {
+          comboInput.classList.add('not-in-library');
+          comboInput.title = `"${displayFont}" isn't in your JMT Studio library. Pick from the dropdown to fix.`;
+        } else {
+          comboInput.classList.remove('not-in-library');
+          comboInput.title = 'Case-sensitive font folder name on the SD card.';
+        }
+      };
+
+      // Initial state: try the window-level cache (warmed at boot),
+      // otherwise fetch. _sfAllEntries lives inside the startup IIFE so
+      // it isn't visible from this function's scope — _sfEntriesCache
+      // is the window-level mirror that both can see.
+      const cached = (window._sfEntriesCache && window._sfEntriesCache.length) ? window._sfEntriesCache : null;
+      if (cached) {
+        applyLibrary(cached);
+      } else {
+        window.electronAPI.listEntries().then(er => {
+          const entries = (er && er.ok && Array.isArray(er.entries)) ? er.entries : [];
+          if (entries.length > 0) window._sfEntriesCache = entries;
+          applyLibrary(entries);
+        }).catch(() => applyLibrary([]));
+      }
+
+      const openCombo = (filter) => {
+        if (!libLoaded || libEmpty) return;
+        // Re-derive from the live cache each open — same lazy pattern the
+        // Style Library picker uses (_getLibraryStyles called per open).
+        // Imports/deletes that happened on the SF tab show up here without
+        // needing a full preset-detail re-render.
+        const fresh = (window._sfEntriesCache && window._sfEntriesCache.length)
+          ? window._sfEntriesCache
+              .map(e => e.name || e.meta?.name || '')
+              .filter(Boolean)
+              .sort((a, b) => a.localeCompare(b))
+          : fontNames;
+        _openLibComboDropdown(comboWrap, filter || '', name => {
+          commit(name);
+          comboInput.value = name;
+          comboInput.classList.remove('not-in-library');
+          comboInput.title = 'Case-sensitive font folder name on the SD card.';
+        }, fresh);
+      };
+      comboInput.addEventListener('focus', () => {
+        openCombo('');
+        setTimeout(() => comboInput.select(), 0);
+      });
+      comboInput.addEventListener('input', (e) => {
+        e.stopPropagation();
+        if (libEmpty) {
+          // No library — accept free-form typing, commit on blur.
+          return;
+        }
+        openCombo(comboInput.value.trim());
+      });
+      comboInput.addEventListener('blur', () => {
+        // Library mode defers so a click on a dropdown item gets to fire
+        // its own commit before this handler runs. Empty mode commits
+        // immediately — there's no dropdown to wait for.
+        const doCommit = () => {
+          const v = comboInput.value.trim();
+          const committed = (preset.font || '').split(';').filter(p => p.trim() !== 'common').join(';');
+          if (v === committed) return; // unchanged — no-op
+          commit(v);
+          // Re-evaluate red flag: typed value may not be in the library
+          // (free-form is allowed, the red is just a heads-up).
+          if (!libEmpty && v) {
+            const libNamesSet = new Set(fontNames.map(n => n.toLowerCase()));
+            if (!libNamesSet.has(v.toLowerCase())) {
+              comboInput.classList.add('not-in-library');
+              comboInput.title = `"${v}" isn't in your JMT Studio library. The config may still work if the font is on the SD card.`;
+            } else {
+              comboInput.classList.remove('not-in-library');
+              comboInput.title = 'Case-sensitive font folder name on the SD card.';
+            }
+          }
+        };
+        if (libEmpty) doCommit();
+        else setTimeout(doCommit, 200);
+      });
+      comboArrow.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        if (!libLoaded || libEmpty) return;
+        if (_activeLibComboDropdown) _closeLibComboDropdown();
+        else { openCombo(''); comboInput.focus(); }
+      });
+      comboInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Tab') {
+          e.preventDefault();
+          _openFieldByName(_nextFieldName('font', e.shiftKey));
+        } else if (e.key === 'Escape') {
+          if (_activeLibComboDropdown) { _closeLibComboDropdown(); e.preventDefault(); }
+          else { comboInput.blur(); if (editor) editor.focus(); }
+        } else if (e.key === 'Enter' && libEmpty) {
+          e.preventDefault();
+          commit(comboInput.value.trim());
+          if (editor) editor.focus();
+        }
+      });
+      comboInput.addEventListener('click', (e) => e.stopPropagation());
+      comboWrap.appendChild(comboInput);
+      comboWrap.appendChild(comboArrow);
+      valueWrap.appendChild(comboWrap);
 
       const cbWrap = document.createElement('label');
       cbWrap.className = 'preset-common-toggle';
+      // Library-validation styling: if the SF library has no common
+      // folders, the checkbox is meaningful only as a config string —
+      // it'll write ";common" into the preset but the SD card will
+      // have nothing at that path. Red-state + tooltip flags this so
+      // the user can decide whether to import a common or uncheck.
+      if (typeof _sfCommons !== 'undefined' && _sfCommons.length === 0) {
+        cbWrap.classList.add('no-common-in-library');
+      }
       cb.addEventListener('change', () => {
-        const path = fontVal.textContent;
+        const path = comboInput.value.trim();
         const full = cb.checked ? (path ? path + ';common' : 'common') : path;
         _commitFieldEdit(_getFreshFieldRange('font') || preset.fontRange, full);
         _scheduleRebuild();
@@ -22098,7 +24114,10 @@ require(['vs/editor/editor.main'], function () {
       cbWrap.appendChild(cb);
       const _cbLbl = document.createElement('span');
       _cbLbl.className = 'preset-common-toggle-label';
-      _cbLbl.title = 'Consider enabling the common folder so missing or shared sound files automatically fall back to a central common folder, reducing duplication and making fonts easier to maintain.';
+      const _noCommon = (typeof _sfCommons !== 'undefined' && _sfCommons.length === 0);
+      _cbLbl.title = _noCommon
+        ? "Your Sound Fonts library has no common folder. Enabling this writes ';common' into the preset, but nothing will resolve at that path on the SD card until you import a common folder."
+        : 'Consider enabling the common folder so missing or shared sound files automatically fall back to a central common folder, reducing duplication and making fonts easier to maintain.';
       _cbLbl.textContent = 'common';
       cbWrap.appendChild(_cbLbl);
       valueWrap.appendChild(cbWrap);
@@ -22112,26 +24131,735 @@ require(['vs/editor/editor.main'], function () {
       const label = document.createElement('span');
       label.className = 'preset-detail-field-label';
       label.textContent = 'Track';
-      label.title = 'The track entry defines which audio file is used for background playback, while the prop determines when and how it plays.';
+      label.title = 'Path to the audio file on the SD card. Pick from your library or type a path; existence is verified against the library.';
       wrap.appendChild(label);
       const valueWrap = document.createElement('span');
       valueWrap.className = 'preset-detail-field-value-wrap';
-      const val = document.createElement('span');
-      val.className = 'preset-detail-field-value';
-      val.textContent = preset.track || '';
-      val.dataset.placeholder = preset.track ? '' : '(empty)';
-      valueWrap.appendChild(val);
-      if (preset.trackRange) {
-        valueWrap.appendChild(_makePencil(() =>
-          // Read live display value at click time — see Font pencil comment.
-          _startFieldEdit(val, preset.trackRange, val.textContent || '', undefined, trackValue => {
-            // Auto-append `.wav` for non-empty tracks that don't already have it.
-            const final = (trackValue && !/\.wav$/i.test(trackValue)) ? trackValue + '.wav' : trackValue;
-            _commitFieldEdit(_getFreshFieldRange('track') || preset.trackRange, final);
-            // Sync the displayed value so the user sees what got saved.
-            val.textContent = final;
-          }, 'track')));
+
+      const displayTrack = preset.track || '';
+      const currentFontFolder = (preset.font || '')
+        .split(';').filter(p => p.trim() !== 'common').join(';')
+        .split('/')[0].trim();
+
+      const commit = (newValue) => {
+        const trimmed = (newValue || '').trim();
+        // Auto-append .wav for non-empty values without an extension —
+        // matches the previous pencil-edit behavior.
+        const final = (trimmed && !/\.wav$/i.test(trimmed)) ? trimmed + '.wav' : trimmed;
+        _commitFieldEdit(_getFreshFieldRange('track') || preset.trackRange, final);
+        return final;
+      };
+
+      const comboWrap = document.createElement('div');
+      comboWrap.className = 'preset-lib-combo preset-track-combo';
+      const comboInput = document.createElement('input');
+      comboInput.type = 'text';
+      comboInput.className = 'preset-lib-combo-input';
+      comboInput.placeholder = 'Father/tracks/track1.wav';
+      comboInput.value = displayTrack;
+      comboInput.title = 'Path to the audio file on the SD card.';
+      const comboArrow = document.createElement('button');
+      comboArrow.className = 'preset-lib-combo-arrow';
+      comboArrow.innerHTML = '&#9660;';
+      comboArrow.title = 'Browse tracks';
+      comboArrow.tabIndex = -1;
+
+      // Library-empty state: the track picker is meaningful only when
+      // there's SOMETHING to validate against — either font folders in
+      // the library or shared tracks. When both are empty (fresh install
+      // / user wiped the library), drop the arrow and skip validation so
+      // the field reads as a plain text input. Same pattern the font
+      // field uses for its no-library case.
+      let _trackLibEmpty = false;
+      const _applyTrackLibState = () => {
+        const entries = window._sfEntriesCache || [];
+        const sharedAny = !!(window._sfSharedTracksExists && (window._sfSharedTracksFiles || []).length > 0);
+        const empty = entries.length === 0 && !sharedAny;
+        // State-transition work only runs when libEmpty actually flips.
+        // The placeholder update below runs every call regardless, since
+        // the first synchronous call (before the helper is declared)
+        // hits TDZ and silently no-ops; later async calls would early-
+        // return on a state match and never get the chance to refresh it.
+        if (empty !== _trackLibEmpty) {
+          _trackLibEmpty = empty;
+          if (_trackLibEmpty) {
+            comboArrow.style.display = 'none';
+            comboInput.classList.remove('not-in-library');
+            comboInput.title = 'Path to the audio file on the SD card. No Sound Fonts library imported yet.';
+          } else {
+            comboArrow.style.display = '';
+            try { validateValue(); } catch {}
+          }
+        }
+        try { _updatePlaceholderFromState(); } catch {}
+      };
+
+      // Shared Tracks state (lives on window because the SF tab init
+      // populates it; the Config tab may render before that). Lazy fetch
+      // if the cache hasn't been warmed yet so the picker can offer the
+      // shared option on first edit.
+      if (window._sfSharedTracksExists === undefined) {
+        (async () => {
+          try {
+            const er = await window.electronAPI.sharedTracksExists();
+            window._sfSharedTracksExists = !!(er && er.ok && er.exists);
+            if (window._sfSharedTracksExists) {
+              const fr = await window.electronAPI.sharedTracksListFiles();
+              window._sfSharedTracksFiles = (fr && fr.ok && fr.files) || [];
+            } else {
+              window._sfSharedTracksFiles = [];
+            }
+            _applyTrackLibState();
+          } catch {
+            window._sfSharedTracksExists = false;
+            window._sfSharedTracksFiles = [];
+            _applyTrackLibState();
+          }
+        })();
       }
+      // Also warm the entries cache if it hasn't been populated yet —
+      // same boot-warmer race as the font field. Apply lib state after
+      // each cache lands so the arrow + validation update correctly
+      // regardless of which IPC returns first.
+      if (!window._sfEntriesCache) {
+        window.electronAPI.listEntries().then(er => {
+          if (er && er.ok && Array.isArray(er.entries)) window._sfEntriesCache = er.entries;
+          _applyTrackLibState();
+        }).catch(() => {});
+      }
+      // Sync once with whatever's already in cache so the empty case
+      // applies on first render too.
+      _applyTrackLibState();
+
+      // Per-font listing cache so repeated dropdown opens within a single
+      // edit session don't re-IPC for the same font. `fontTreeCache`
+      // stores the full file tree; `getFontTracks` derives the tracks/
+      // shortcut on demand.
+      const fontTreeCache = new Map();
+      const getFontTree = async (fontName) => {
+        if (!fontName) return null;
+        if (fontTreeCache.has(fontName)) return fontTreeCache.get(fontName);
+        let tree = null;
+        try {
+          const r = await window.electronAPI.listEntryFiles({ name: fontName });
+          if (r && r.ok && Array.isArray(r.files)) tree = r.files;
+        } catch {}
+        fontTreeCache.set(fontName, tree);
+        return tree;
+      };
+      // Walk to a sub-path inside an entry's tree. Empty path → root.
+      // Returns the children array at that location, or null if the path
+      // doesn't exist.
+      const walkTree = (tree, subPath) => {
+        if (!tree) return null;
+        if (!subPath) return tree;
+        const parts = subPath.split('/').filter(Boolean);
+        let cur = tree;
+        for (const p of parts) {
+          const next = cur.find(n => n.isDir && n.name === p);
+          if (!next) return null;
+          cur = next.children || [];
+        }
+        return cur;
+      };
+      const fontTracksCache = new Map();
+      const getFontTracks = async (fontName) => {
+        if (!fontName) return { tracks: [], subfolder: null, exists: false };
+        if (fontTracksCache.has(fontName)) return fontTracksCache.get(fontName);
+        let result = { tracks: [], subfolder: null, exists: false };
+        try {
+          const r = await window.electronAPI.listEntryFiles({ name: fontName });
+          if (r && r.ok && Array.isArray(r.files)) {
+            result.exists = true;
+            // ProffieOS prop_base.h ListTracks scans only "tracks/" (plural,
+            // lowercase). A singular "track/" folder is a common typo and
+            // wouldn't be found by the prop, so we deliberately don't fall
+            // back to it — surfacing it would imply playability we can't
+            // guarantee.
+            const tracksFolder = r.files.find(f => f.isDir && f.name === 'tracks');
+            if (tracksFolder) {
+              const wavFiles = (tracksFolder.children || [])
+                .filter(c => !c.isDir && /\.wav$/i.test(c.name));
+              result.tracks = wavFiles.map(f => ({
+                name: f.name,
+                path: `${fontName}/tracks/${f.name}`,
+              }));
+              result.subfolder = 'tracks';
+            }
+          }
+        } catch {}
+        fontTracksCache.set(fontName, result);
+        return result;
+      };
+
+      // Validate the current value: red if the file isn't in the library.
+      // Two valid shapes: "tracks/<file>" for shared-at-root, or
+      // "<font>/tracks/<file>" for font-specific. Short-circuits when
+      // the library is empty — without entries or shared tracks there's
+      // nothing to validate against, so flagging would be a false alarm.
+      const validateValue = async () => {
+        const v = comboInput.value.trim();
+        if (!v) {
+          comboInput.classList.remove('not-in-library');
+          comboInput.title = 'Path to the audio file on the SD card.';
+          return;
+        }
+        if (_trackLibEmpty) {
+          comboInput.classList.remove('not-in-library');
+          comboInput.title = 'Path to the audio file on the SD card. No Sound Fonts library imported yet.';
+          return;
+        }
+        const parts = v.split('/');
+        if (parts.length < 2) {
+          comboInput.classList.add('not-in-library');
+          comboInput.title = `"${v}" doesn't look like a track path. Expected: tracks/<file>.wav or <font folder>/tracks/<file>.wav`;
+          return;
+        }
+        // Shared-at-root: tracks/<file>.wav (two parts, first is 'tracks').
+        if (parts.length === 2 && parts[0] === 'tracks') {
+          const fileName = parts[1];
+          const sharedFiles = window._sfSharedTracksFiles || [];
+          const hit = sharedFiles.find(f => f.name.toLowerCase() === fileName.toLowerCase());
+          if (hit) {
+            comboInput.classList.remove('not-in-library');
+            comboInput.title = `Track exists in the Shared Tracks folder.`;
+          } else if (!window._sfSharedTracksExists) {
+            comboInput.classList.add('not-in-library');
+            comboInput.title = `No Shared Tracks folder in your library yet. Create one from the Sound Fonts tab. The config may still work if the file is on the SD card.`;
+          } else {
+            comboInput.classList.add('not-in-library');
+            comboInput.title = `"${fileName}" isn't in your Shared Tracks folder. The config may still work if the file is on the SD card.`;
+          }
+          return;
+        }
+        // Font-specific: <font>/tracks/<file>.wav
+        const fontName = parts[0];
+        const result = await getFontTracks(fontName);
+        if (!result.exists) {
+          comboInput.classList.add('not-in-library');
+          comboInput.title = `Font folder "${fontName}" isn't in your JMT Studio library. The config may still work if the file is on the SD card.`;
+          return;
+        }
+        const hit = result.tracks.find(t => t.path.toLowerCase() === v.toLowerCase());
+        if (hit) {
+          comboInput.classList.remove('not-in-library');
+          comboInput.title = `Track exists at ${hit.path}.`;
+        } else {
+          comboInput.classList.add('not-in-library');
+          comboInput.title = `"${v}" wasn't found in ${fontName}/tracks/. The config may still work if the file is on the SD card.`;
+        }
+      };
+      validateValue();
+
+      // Live filter from the input. Applies to content rows (files,
+      // folders, entries) but NOT to the persistent top shortcuts or
+      // headers — user can always click "tracks" or "Browse other font
+      // folders →" regardless of what they typed.
+      let _trackFilter = '';
+      const _matchFilter = (text) => {
+        if (!_trackFilter) return true;
+        return String(text || '').toLowerCase().includes(_trackFilter);
+      };
+
+      // Placeholder: example-as-hint by default — useful whether the
+      // library is empty or not (consistent UX, doesn't shift around
+      // based on backend state). The only override is when the dropdown
+      // is open and parked on a real nav location; then the placeholder
+      // becomes a breadcrumb-style "you are here" indicator.
+      const _updatePlaceholderFromState = () => {
+        if (!comboInput) return;
+        let label = 'Father/tracks/track1.wav';
+        if (!_trackLibEmpty && dropdownState) {
+          if (dropdownState.mode === 'files' && dropdownState.sharedRoot) {
+            label = 'tracks/';
+          } else if (dropdownState.mode === 'files') {
+            label = `${dropdownState.font}/${dropdownState.subfolder}/`;
+          } else if (dropdownState.mode === 'browse') {
+            label = `${dropdownState.font}/${dropdownState.subPath ? dropdownState.subPath + '/' : ''}`;
+          }
+        }
+        comboInput.placeholder = label;
+      };
+
+      // Attempt to navigate the dropdown to a typed path like "Sabine/"
+      // or "Sabine/tracks/". On success: switch dropdownState, clear the
+      // input + filter, re-render, refresh placeholder. On failure: red
+      // tint on the input (matches the not-in-library convention) so the
+      // user knows the path didn't resolve.
+      const _navigateToTypedPath = async (raw) => {
+        const trimmed = String(raw || '').replace(/^\/+/, '').replace(/\/+$/, '');
+        if (!trimmed) return false;
+        const parts = trimmed.split('/').filter(Boolean);
+        if (parts.length === 0) return false;
+        // Shared tracks shortcut: "tracks/" at root targets the shared
+        // folder regardless of what font we were viewing.
+        if (parts.length === 1 && parts[0].toLowerCase() === 'tracks') {
+          const sharedFiles = window._sfSharedTracksFiles || [];
+          if (!window._sfSharedTracksExists || sharedFiles.length === 0) return false;
+          const stFiles = sharedFiles.map(f => ({ name: f.name, path: `tracks/${f.name}` }));
+          dropdownState = {
+            mode: 'files', font: '', subfolder: 'tracks (shared)',
+            files: stFiles, from: null, sharedRoot: true,
+          };
+          return true;
+        }
+        // Match the first segment against an entry name (case-insensitive
+        // so the user doesn't have to nail capitalization to navigate).
+        const entries = window._sfEntriesCache || [];
+        const entry = entries.find(e => e.name.toLowerCase() === parts[0].toLowerCase());
+        if (!entry) return false;
+        const tree = await getFontTree(entry.name);
+        if (!tree) return false;
+        if (parts.length === 1) {
+          // Just "<font>/" — drill into tracks/ if present, otherwise
+          // browse-mode at the font's root (matches the entries-mode
+          // click behavior).
+          const result = await getFontTracks(entry.name);
+          if (result.tracks.length > 0) {
+            dropdownState = {
+              mode: 'files', font: entry.name, subfolder: result.subfolder,
+              files: result.tracks, from: null,
+            };
+          } else {
+            dropdownState = buildBrowseState(entry.name, '', tree, null);
+          }
+          return true;
+        }
+        // "<font>/<sub>/[<sub>/...]" — drill into that path.
+        const subPath = parts.slice(1).join('/');
+        const children = walkTree(tree, subPath);
+        if (!children) return false;
+        // If the subPath ends at tracks/, prefer files mode for the
+        // canonical "<font>/tracks/" view so the path header reads right.
+        if (subPath === 'tracks') {
+          const result = await getFontTracks(entry.name);
+          if (result.tracks.length > 0) {
+            dropdownState = {
+              mode: 'files', font: entry.name, subfolder: 'tracks',
+              files: result.tracks, from: null,
+            };
+            return true;
+          }
+        }
+        dropdownState = buildBrowseState(entry.name, subPath, tree, null);
+        return true;
+      };
+      // Dropdown state. Modes:
+      //   'files'  — flat list of pre-built {name,path} files. Used for
+      //              the canonical "<font>/tracks/" view and the shared
+      //              tracks at-SD-root view. No folder navigation here.
+      //   'browse' — file-browser view of a font's tree. Shows folders
+      //              + .wav files at the current subPath. Folder click
+      //              drills in; file click commits.
+      //   'entries' — pick a font folder (or shared tracks).
+      // `from` lets a navigated state restore on back.
+      let dropdownState = null;
+
+      // Build a browse-mode state for an entry at a given subPath. Auto-
+      // promotes a single-subfolder case so the user doesn't have to take
+      // an extra click — same intent as the original "drill straight into
+      // tracks/" heuristic.
+      const buildBrowseState = (fontName, subPath, tree, fromState) => {
+        const items = walkTree(tree, subPath) || [];
+        const nodes = items
+          .filter(n => n.isDir || /\.wav$/i.test(n.name))
+          .map(n => ({
+            name: n.name,
+            isDir: !!n.isDir,
+            path: subPath ? `${subPath}/${n.name}` : n.name,
+            size: n.size || 0,
+          }));
+        return { mode: 'browse', font: fontName, subPath, nodes, from: fromState };
+      };
+
+      // Persistent shortcuts pinned at the top of every view. Together
+      // they form a small nav strip: Shared Tracks (when populated),
+      // then "Browse other font folders" (when not already in entries
+      // mode). Single separator below the strip so it reads as one unit.
+      const appendTopShortcuts = (drop) => {
+        let appendedAny = false;
+        const sharedFiles = (window._sfSharedTracksExists && (window._sfSharedTracksFiles || []).length > 0)
+          ? window._sfSharedTracksFiles : null;
+        const inSharedView = !!(dropdownState && dropdownState.mode === 'files' && dropdownState.sharedRoot);
+        const inEntriesView = !!(dropdownState && dropdownState.mode === 'entries');
+        if (sharedFiles && !inSharedView) {
+          const item = document.createElement('div');
+          item.className = 'preset-lib-combo-item';
+          // Music note icon to visually pair with the folder glyphs that
+          // appear in browse mode below — same kind-of-thing affordance.
+          const icon = document.createElement('span');
+          icon.style.color = 'var(--jmt-blue)';
+          icon.style.marginRight = '6px';
+          icon.innerHTML = '&#9835;';
+          item.appendChild(icon);
+          const bold = document.createElement('span');
+          bold.style.fontWeight = '600';
+          bold.style.color = 'var(--jmt-blue)';
+          bold.textContent = 'tracks';
+          const small = document.createElement('span');
+          small.style.fontSize = '0.66rem';
+          small.style.color = 'var(--c-text-muted)';
+          small.style.marginLeft = '6px';
+          small.textContent = '(shared at SD root)';
+          item.appendChild(bold);
+          item.appendChild(small);
+          item.addEventListener('mousedown', (ev) => {
+            ev.preventDefault();
+            const prev = dropdownState;
+            const stFiles = sharedFiles.map(f => ({ name: f.name, path: `tracks/${f.name}` }));
+            dropdownState = {
+              mode: 'files', font: '', subfolder: 'tracks (shared)',
+              files: stFiles, from: prev, sharedRoot: true,
+            };
+            renderDropdownInto(drop);
+          });
+          drop.appendChild(item);
+          appendedAny = true;
+        }
+        if (!inEntriesView) {
+          const browse = document.createElement('div');
+          browse.className = 'preset-track-dropdown-nav';
+          browse.textContent = 'Browse other font folders →';
+          browse.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            const prev = dropdownState;
+            dropdownState = { mode: 'entries', from: prev };
+            renderDropdownInto(drop);
+          });
+          drop.appendChild(browse);
+          appendedAny = true;
+        }
+        if (appendedAny) {
+          const sep = document.createElement('div');
+          sep.style.borderBottom = '1px solid var(--c-border-faint)';
+          sep.style.margin = '2px 0';
+          drop.appendChild(sep);
+        }
+      };
+
+      // Build a human-readable header string for any dropdownState — used
+      // by back links so they don't print "undefined" when the parent
+      // state's mode is different from where the child was built.
+      const stateHeaderLabel = (st) => {
+        if (!st) return 'previous';
+        if (st.mode === 'files') {
+          if (st.sharedRoot) return 'tracks/ (shared)';
+          return `${st.font}/${st.subfolder}/`;
+        }
+        if (st.mode === 'browse') {
+          return `${st.font}/${st.subPath ? st.subPath + '/' : ''}`;
+        }
+        return 'font list';
+      };
+
+      const renderDropdownInto = async (drop) => {
+        drop.innerHTML = '';
+
+        if (!dropdownState) {
+          if (currentFontFolder) {
+            const result = await getFontTracks(currentFontFolder);
+            if (result.tracks.length > 0) {
+              dropdownState = {
+                mode: 'files', font: currentFontFolder, subfolder: result.subfolder,
+                files: result.tracks,
+              };
+            } else if (result.exists) {
+              // No tracks/ folder — fall back to browsing the font so
+              // the user can pick something useful: show all folders;
+              // if no folders, show all files at root.
+              const tree = await getFontTree(currentFontFolder);
+              dropdownState = buildBrowseState(currentFontFolder, '', tree, null);
+            } else {
+              dropdownState = { mode: 'entries' };
+            }
+          } else {
+            dropdownState = { mode: 'entries' };
+          }
+          // Sync placeholder once initial state is determined.
+          _updatePlaceholderFromState();
+        }
+
+        appendTopShortcuts(drop);
+
+        if (dropdownState.mode === 'files') {
+          const header = document.createElement('div');
+          header.className = 'preset-track-dropdown-header';
+          header.textContent = dropdownState.sharedRoot
+            ? 'tracks/ (shared at SD root)'
+            : `${dropdownState.font}/${dropdownState.subfolder}/`;
+          drop.appendChild(header);
+          const filtered = dropdownState.files.filter(f => _matchFilter(f.path) || _matchFilter(f.name));
+          if (filtered.length === 0 && _trackFilter) {
+            const noMatch = document.createElement('div');
+            noMatch.className = 'preset-lib-combo-empty';
+            noMatch.textContent = 'No matches';
+            drop.appendChild(noMatch);
+          }
+          for (const f of filtered) {
+            const item = document.createElement('div');
+            item.className = 'preset-lib-combo-item';
+            item.textContent = f.path;
+            item.addEventListener('mousedown', (e) => {
+              e.preventDefault();
+              comboInput.value = commit(f.path);
+              validateValue();
+              _closeLibComboDropdown();
+            });
+            drop.appendChild(item);
+          }
+        } else if (dropdownState.mode === 'browse') {
+          // Back nav: up one folder when subPath is set, otherwise back
+          // to whatever state launched the browse (typically entries).
+          const backLabel = dropdownState.subPath
+            ? `← ${dropdownState.font}/${dropdownState.subPath.split('/').slice(0, -1).join('/') || ''}`
+            : (dropdownState.from ? `← Back to ${stateHeaderLabel(dropdownState.from)}` : null);
+          if (backLabel) {
+            const back = document.createElement('div');
+            back.className = 'preset-track-dropdown-nav';
+            back.textContent = backLabel;
+            back.addEventListener('mousedown', async (e) => {
+              e.preventDefault();
+              if (dropdownState.subPath) {
+                const parts = dropdownState.subPath.split('/');
+                parts.pop();
+                const newSub = parts.join('/');
+                const tree = await getFontTree(dropdownState.font);
+                dropdownState = buildBrowseState(dropdownState.font, newSub, tree, dropdownState.from);
+              } else {
+                dropdownState = dropdownState.from || { mode: 'entries' };
+              }
+              renderDropdownInto(drop);
+            });
+            drop.appendChild(back);
+          }
+          const header = document.createElement('div');
+          header.className = 'preset-track-dropdown-header';
+          header.textContent = `${dropdownState.font}/${dropdownState.subPath ? dropdownState.subPath + '/' : ''}`;
+          drop.appendChild(header);
+          if (dropdownState.nodes.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'preset-lib-combo-empty';
+            empty.textContent = 'Empty';
+            drop.appendChild(empty);
+          }
+          // Folders first (alphabetical), then .wav files. Apply the
+          // live filter — folders match by their own name (so typing
+          // "tracks" still surfaces a tracks/ folder even when its
+          // children aren't yet visible), files match by name OR full
+          // path so a path-style filter works too.
+          const folders = dropdownState.nodes.filter(n => n.isDir && _matchFilter(n.name));
+          const files = dropdownState.nodes.filter(n => !n.isDir && (_matchFilter(n.name) || _matchFilter(`${dropdownState.font}/${n.path}`)));
+          if (folders.length === 0 && files.length === 0 && _trackFilter) {
+            const noMatch = document.createElement('div');
+            noMatch.className = 'preset-lib-combo-empty';
+            noMatch.textContent = 'No matches';
+            drop.appendChild(noMatch);
+          }
+          for (const n of folders) {
+            const item = document.createElement('div');
+            item.className = 'preset-lib-combo-item';
+            const icon = document.createElement('span');
+            icon.style.color = 'var(--c-text-muted)';
+            icon.innerHTML = '&#128193;';
+            item.appendChild(icon);
+            item.appendChild(document.createTextNode(' ' + n.name + '/'));
+            item.addEventListener('mousedown', async (e) => {
+              e.preventDefault();
+              const tree = await getFontTree(dropdownState.font);
+              const prev = dropdownState;
+              dropdownState = buildBrowseState(dropdownState.font, n.path, tree, prev);
+              renderDropdownInto(drop);
+            });
+            drop.appendChild(item);
+          }
+          for (const n of files) {
+            const item = document.createElement('div');
+            item.className = 'preset-lib-combo-item';
+            item.textContent = `${dropdownState.font}/${n.path}`;
+            item.addEventListener('mousedown', (e) => {
+              e.preventDefault();
+              const full = `${dropdownState.font}/${n.path}`;
+              comboInput.value = commit(full);
+              validateValue();
+              _closeLibComboDropdown();
+            });
+            drop.appendChild(item);
+          }
+        } else {
+          // entries mode
+          if (dropdownState.from) {
+            const back = document.createElement('div');
+            back.className = 'preset-track-dropdown-nav';
+            back.textContent = `← Back to ${stateHeaderLabel(dropdownState.from)}`;
+            back.addEventListener('mousedown', (e) => {
+              e.preventDefault();
+              dropdownState = dropdownState.from;
+              renderDropdownInto(drop);
+            });
+            drop.appendChild(back);
+          }
+          const header = document.createElement('div');
+          header.className = 'preset-track-dropdown-header';
+          header.textContent = 'Pick a font folder';
+          drop.appendChild(header);
+          // Every font folder, alphabetical. The Shared Tracks shortcut
+          // is already pinned by appendTopShortcuts at the top.
+          const entries = (window._sfEntriesCache || [])
+            .filter(e => _matchFilter(e.name))
+            .slice()
+            .sort((a, b) => a.name.localeCompare(b.name));
+          if (entries.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'preset-lib-combo-empty';
+            empty.textContent = _trackFilter ? 'No matches' : 'No font folders in library';
+            drop.appendChild(empty);
+          } else {
+            for (const e of entries) {
+              const item = document.createElement('div');
+              item.className = 'preset-lib-combo-item';
+              item.textContent = e.name;
+              item.addEventListener('mousedown', async (ev) => {
+                ev.preventDefault();
+                const result = await getFontTracks(e.name);
+                const prev = dropdownState;
+                if (result.tracks.length > 0) {
+                  // Canonical tracks/ path — drill straight in.
+                  dropdownState = {
+                    mode: 'files', font: e.name, subfolder: result.subfolder,
+                    files: result.tracks, from: prev,
+                  };
+                } else {
+                  // No tracks/ folder — fall back to browse-mode at the
+                  // font's root. User sees subfolders and root .wav files
+                  // and can drill in to pick anything.
+                  const tree = await getFontTree(e.name);
+                  dropdownState = buildBrowseState(e.name, '', tree, prev);
+                }
+                renderDropdownInto(drop);
+              });
+              drop.appendChild(item);
+            }
+          }
+        }
+
+        // Position relative to the combo wrap (same model as the style
+        // picker dropdown). Defer one frame so offsetWidth is current.
+        requestAnimationFrame(() => {
+          const rect = comboWrap.getBoundingClientRect();
+          const dw = drop.offsetWidth || 280;
+          let left = rect.left;
+          const top = rect.bottom + 2;
+          if (left + dw > window.innerWidth - 4) left = Math.max(4, window.innerWidth - dw - 8);
+          const maxH = Math.max(120, window.innerHeight - top - 8);
+          drop.style.maxHeight = Math.min(320, maxH) + 'px';
+          drop.style.left = left + 'px';
+          drop.style.top = top + 'px';
+          drop.style.minWidth = Math.max(280, rect.width) + 'px';
+        });
+      };
+
+      const openDropdown = () => {
+        _closeLibComboDropdown();
+        const drop = document.createElement('div');
+        drop.className = 'preset-lib-combo-dropdown preset-track-dropdown';
+        document.body.appendChild(drop);
+        _activeLibComboDropdown = drop;
+        setTimeout(() => document.addEventListener('click', _libComboOutside), 0);
+        renderDropdownInto(drop);
+      };
+
+      comboInput.addEventListener('focus', () => {
+        // No library → plain text mode: select existing value for easy
+        // overwrite, but don't open a dropdown there's nothing useful in.
+        if (_trackLibEmpty) {
+          setTimeout(() => comboInput.select(), 0);
+          return;
+        }
+        dropdownState = null;
+        _trackFilter = '';
+        openDropdown();
+        setTimeout(() => {
+          comboInput.select();
+          _updatePlaceholderFromState();
+        }, 0);
+      });
+      // Track the previous value so we can detect a "newly typed /" —
+      // trailing slash that wasn't there before signals folder-navigation
+      // intent. Typing "Sabine/" jumps to Sabine's view; "Sabine/tracks/"
+      // jumps directly into its tracks folder.
+      let _trackInputPrev = '';
+      comboInput.addEventListener('input', async (e) => {
+        e.stopPropagation();
+        const v = String(comboInput.value || '');
+        // No library → typing is purely free-form; no filtering or
+        // navigation, no red flag.
+        if (_trackLibEmpty) { _trackInputPrev = v; return; }
+        const prev = _trackInputPrev;
+        _trackInputPrev = v;
+        // Navigation intent: value ends with '/' AND that '/' is new
+        // (so backspacing past it doesn't re-trigger). Also requires at
+        // least one non-slash character before it — typing just "/" on
+        // its own isn't navigation.
+        const justTypedSlash = v.endsWith('/') && !prev.endsWith('/');
+        if (justTypedSlash && v.replace(/\/+$/, '').trim()) {
+          const ok = await _navigateToTypedPath(v);
+          if (ok) {
+            // Clear input + filter so the placeholder shows the new path
+            // and the user can keep typing to filter the new view.
+            comboInput.value = '';
+            _trackInputPrev = '';
+            _trackFilter = '';
+            comboInput.classList.remove('not-in-library');
+            if (_activeLibComboDropdown) renderDropdownInto(_activeLibComboDropdown);
+            _updatePlaceholderFromState();
+          } else {
+            // Path doesn't resolve — red flag, but leave the input alone
+            // so the user can keep editing.
+            comboInput.classList.add('not-in-library');
+            comboInput.title = `"${v}" doesn't match a font folder or path in your library. Backspace to keep typing freely.`;
+          }
+          return;
+        }
+        // Regular live filter — narrows the current view.
+        _trackFilter = v.toLowerCase().trim();
+        if (_activeLibComboDropdown) renderDropdownInto(_activeLibComboDropdown);
+      });
+      comboInput.addEventListener('blur', () => {
+        setTimeout(() => {
+          const v = comboInput.value.trim();
+          const committed = preset.track || '';
+          if (v !== committed) {
+            comboInput.value = commit(v);
+          }
+          validateValue();
+        }, 200);
+      });
+      comboArrow.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        // Arrow is hidden in libEmpty mode anyway, but guard here too
+        // so a stray click during the brief async window is harmless.
+        if (_trackLibEmpty) return;
+        if (_activeLibComboDropdown) _closeLibComboDropdown();
+        else { dropdownState = null; openDropdown(); comboInput.focus(); }
+      });
+      comboInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Tab') {
+          e.preventDefault();
+          _openFieldByName(_nextFieldName('track', e.shiftKey));
+        } else if (e.key === 'Escape') {
+          if (_activeLibComboDropdown) { _closeLibComboDropdown(); e.preventDefault(); }
+          else { comboInput.blur(); if (editor) editor.focus(); }
+        } else if (e.key === 'Enter') {
+          e.preventDefault();
+          comboInput.value = commit(comboInput.value.trim());
+          validateValue();
+          if (editor) editor.focus();
+        }
+      });
+      comboInput.addEventListener('click', (e) => e.stopPropagation());
+      comboWrap.appendChild(comboInput);
+      comboWrap.appendChild(comboArrow);
+      valueWrap.appendChild(comboWrap);
       wrap.appendChild(valueWrap);
       return wrap;
     }
@@ -22689,6 +25417,17 @@ require(['vs/editor/editor.main'], function () {
       input.type = 'text';
       input.className = 'preset-edit-input' + (inputClass ? ' ' + inputClass : '');
       input.value = currentValue;
+      // Typeahead from the SF library for the Font Folder field. Uses
+      // a native <datalist> rather than a custom dropdown — browser
+      // handles click-to-show-all, type-to-filter, keyboard nav, and
+      // click-to-select with zero JS. User can still type any value
+      // freely (datalist suggests, doesn't enforce). Generated id is
+      // per-edit-session so concurrent edits on different fields don't
+      // collide.
+      // Font Folder no longer uses _startFieldEdit — it has its own
+      // library-only combo in _buildFontField. Kept this branch nominal
+      // so the fieldId='font' Tab handoff stays correct for the rest of
+      // the field cycle (name → font → common → track).
 
       const confirm = document.createElement('button');
       confirm.className = 'preset-edit-confirm';
@@ -22824,10 +25563,12 @@ require(['vs/editor/editor.main'], function () {
     // No auto-chain — keyboard navigation (Tab to advance, Enter to commit+exit, Esc
     // to cancel+exit, Shift+Tab to go back) handles moving through fields.
     function _openNameForNewPreset(detailEl) {
+      // The dedicated pencil was removed; the name span is the click
+      // target now. Triggering its click runs the same openNameEdit
+      // flow the manual click does — input appears with the default
+      // "Preset N" pre-selected, ready for the user to type over.
       const nameVal = detailEl.querySelector('.preset-detail-name');
-      if (!nameVal) return;
-      const pencil = nameVal.parentNode.querySelector('.preset-edit-pencil');
-      if (pencil) pencil.click();
+      if (nameVal) nameVal.click();
     }
 
     // Programmatic helpers to open / focus a specific field — used by the Tab loop and
@@ -22836,16 +25577,21 @@ require(['vs/editor/editor.main'], function () {
       const detail = document.getElementById('preset-detail');
       if (!detail) return false;
       if (name === 'name') {
-        const pencil = detail.querySelector('.preset-detail-name-wrap .preset-edit-pencil');
-        if (pencil) { pencil.click(); return true; }
+        // Click the name span itself — the dedicated pencil is gone;
+        // the span is the affordance now.
+        const nameSpan = detail.querySelector('.preset-detail-name-wrap .preset-detail-name');
+        if (nameSpan) { nameSpan.click(); return true; }
       } else if (name === 'common') {
         const cb = detail.querySelector('.preset-common-toggle input[type="checkbox"]');
         if (cb) { cb.focus(); return true; }
-      } else if (name === 'font' || name === 'track') {
-        const wraps  = detail.querySelectorAll('.preset-detail-field-value-wrap');
-        const wrap   = name === 'font' ? wraps[0] : wraps[1];
-        const pencil = wrap?.querySelector('.preset-edit-pencil');
-        if (pencil) { pencil.click(); return true; }
+      } else if (name === 'font') {
+        const wrap = detail.querySelectorAll('.preset-detail-field-value-wrap')[0];
+        const input = wrap?.querySelector('.preset-lib-combo-input');
+        if (input && !input.disabled) { input.focus(); return true; }
+      } else if (name === 'track') {
+        const wrap = detail.querySelectorAll('.preset-detail-field-value-wrap')[1];
+        const input = wrap?.querySelector('.preset-lib-combo-input');
+        if (input && !input.disabled) { input.focus(); return true; }
       }
       return false;
     }
@@ -25130,12 +27876,20 @@ require(['vs/editor/editor.main'], function () {
           _renderDetail();
           _navigateToLine(newPreset.startLine, newPreset.endLine);
           setTimeout(() => {
-            const rows = document.querySelectorAll('#preset-list-top .preset-row');
-            const row = rows[_selectedPresetIndex];
+            // Query by data-live-idx (enabled-only index) so interleaved
+            // disabled rows don't throw off the lookup — indexing into
+            // .preset-row matched disabled rows too and landed on the
+            // wrong target when any preset above was disabled.
+            const row = document.querySelector(`#preset-list-top .preset-row[data-live-idx="${_selectedPresetIndex}"]`);
             if (row) {
               row.classList.add('new-preset');
               row.addEventListener('animationend', () => row.classList.remove('new-preset'), { once: true });
-              row.scrollIntoView({ block: 'nearest' });
+              // `block: 'center'` instead of 'nearest' — nearest no-ops
+              // when the row is even partially visible, which leaves a
+              // newly-added row clipped at the edge of the list.
+              // requestAnimationFrame defers past the rebuild's layout
+              // so the scroll math sees final positions.
+              requestAnimationFrame(() => row.scrollIntoView({ block: 'center', behavior: 'auto' }));
             }
           }, 50);
         }
@@ -25280,7 +28034,7 @@ require(['vs/editor/editor.main'], function () {
             if (row) {
               row.classList.add('new-preset');
               row.addEventListener('animationend', () => row.classList.remove('new-preset'), { once: true });
-              row.scrollIntoView({ block: 'nearest' });
+              requestAnimationFrame(() => row.scrollIntoView({ block: 'center', behavior: 'auto' }));
             }
           }, 50);
         }

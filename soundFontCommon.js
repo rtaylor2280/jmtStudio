@@ -220,6 +220,71 @@ function getCommon(userData, uuid) {
   return { uuid, meta, fileCount: files.length, totalBytes: files.reduce((s, f) => s + f.size, 0) };
 }
 
+// Group management. Each common folder optionally carries a `group`
+// string in its meta.json — a free-form label used by the renderer
+// to render commons in collapsible sections. Identity by name (not
+// uuid) since groups are user-facing labels; renaming the group
+// updates all member commons' meta.group field in place. Group order
+// is a separate concern persisted as a renderer preference (see the
+// SF settings keys); this module only owns the per-common membership.
+function setCommonGroup(userData, uuid, groupName) {
+  if (!uuid) return { ok: false, error: 'Missing uuid' };
+  const clean = String(groupName || '').trim();
+  const dir = path.join(commonRoot(userData), uuid);
+  const metaPath = path.join(dir, 'meta.json');
+  const meta = _readMeta(dir);
+  if (!meta) return { ok: false, error: 'Common folder not found' };
+  if (clean) meta.group = clean;
+  else delete meta.group;
+  try { fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2)); }
+  catch (err) { return { ok: false, error: `Cannot write meta: ${err.message}` }; }
+  return { ok: true };
+}
+
+// Apply a group label to many commons at once. Used by the "Group
+// selected" multi-select action so a single backend call updates
+// every member's meta in one pass.
+function setCommonGroupMany(userData, uuids, groupName) {
+  if (!Array.isArray(uuids) || uuids.length === 0) return { ok: false, error: 'No uuids provided' };
+  for (const uuid of uuids) {
+    const r = setCommonGroup(userData, uuid, groupName);
+    if (!r.ok) return { ok: false, error: `Failed for ${uuid}: ${r.error}` };
+  }
+  return { ok: true, count: uuids.length };
+}
+
+// Rename a group across every common that has it. No-op if the new
+// name is empty or matches the old name. Returns the number of
+// commons that were updated.
+function renameCommonGroup(userData, oldName, newName) {
+  const oldClean = String(oldName || '').trim();
+  const newClean = String(newName || '').trim();
+  if (!oldClean) return { ok: false, error: 'Missing old group name' };
+  if (!newClean) return { ok: false, error: 'New group name is required' };
+  if (oldClean === newClean) return { ok: true, count: 0 };
+  let updated = 0;
+  for (const c of listCommons(userData)) {
+    if ((c.meta.group || '') !== oldClean) continue;
+    const r = setCommonGroup(userData, c.uuid, newClean);
+    if (r.ok) updated++;
+  }
+  return { ok: true, count: updated };
+}
+
+// Delete a group — sets meta.group to empty on every member, leaving
+// the commons themselves intact (they just become ungrouped).
+function deleteCommonGroup(userData, groupName) {
+  const clean = String(groupName || '').trim();
+  if (!clean) return { ok: false, error: 'Missing group name' };
+  let updated = 0;
+  for (const c of listCommons(userData)) {
+    if ((c.meta.group || '') !== clean) continue;
+    const r = setCommonGroup(userData, c.uuid, '');
+    if (r.ok) updated++;
+  }
+  return { ok: true, count: updated };
+}
+
 // Rename a common folder. Updates meta.json in place; the on-disk uuid
 // directory is unchanged (uuid is the stable identifier; name is the
 // user-facing label only). Validates the new name is non-empty and unique.
@@ -684,6 +749,10 @@ module.exports = {
   renameCommon,
   duplicateCommon,
   deleteCommon,
+  setCommonGroup,
+  setCommonGroupMany,
+  renameCommonGroup,
+  deleteCommonGroup,
   listCommonFiles,
   addFilesToCommon,
   renameCommonFile,

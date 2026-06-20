@@ -82,6 +82,13 @@ function detectBuckets(userData, entryName) {
   const rootBucketsByEffect = new Map();
   for (const e of entries) {
     if (e.name === 'meta.json') continue;
+    // ProffieOS uses tracks/ as a soundtrack folder, not a sound-effect
+    // bucket. Files inside (e.g. imperial_march.wav) are intentionally
+    // arbitrary names that ProffieOS plays through the track player —
+    // they don't follow the <effect><num>.wav convention. Skip the
+    // folder entirely so reorganize doesn't flag every file as misnamed
+    // or try to renumber them.
+    if (e.isDirectory() && e.name === 'tracks') continue;
     if (e.isDirectory()) {
       const effect = e.name.toLowerCase();
       const folder = path.join(root, e.name);

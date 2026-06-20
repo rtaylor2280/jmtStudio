@@ -55,7 +55,15 @@ function listEntries(userData) {
   for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
     const meta = _readEntryMeta(path.join(root, entry.name));
-    if (meta) out.push({ name: entry.name, meta });
+    if (!meta) continue;
+    // hasTracks: surfaces in the preset sidecar's track picker so only
+    // entries with a ProffieOS-conventional tracks/ subfolder appear in
+    // the dropdown. A singular "track/" is a common typo the prop won't
+    // see, so we don't count it.
+    let hasTracks = false;
+    try { hasTracks = fs.statSync(path.join(root, entry.name, 'tracks')).isDirectory(); }
+    catch {}
+    out.push({ name: entry.name, meta, hasTracks });
   }
   return out;
 }

@@ -256,6 +256,27 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readCommonFileBytes:   (params)     => ipcRenderer.invoke('common:readFileBytes', params),
   commonFolderExistsAt:  (params)     => ipcRenderer.invoke('common:folderExistsAt', params),
   exportCommonToFolder:  (params)     => ipcRenderer.invoke('common:exportToFolder', params),
+  setCommonGroup:        (params)     => ipcRenderer.invoke('common:setGroup', params),
+  setCommonGroupMany:    (params)     => ipcRenderer.invoke('common:setGroupMany', params),
+  renameCommonGroup:     (params)     => ipcRenderer.invoke('common:renameGroup', params),
+  deleteCommonGroup:     (params)     => ipcRenderer.invoke('common:deleteGroup', params),
+
+  // Shared Tracks folder (maps to /tracks/ at SD card root)
+  sharedTracksExists:    ()           => ipcRenderer.invoke('sharedTracks:exists'),
+  sharedTracksCreate:    ()           => ipcRenderer.invoke('sharedTracks:create'),
+  sharedTracksListFiles: ()           => ipcRenderer.invoke('sharedTracks:listFiles'),
+  sharedTracksAddFiles:  (params)     => ipcRenderer.invoke('sharedTracks:addFiles', params),
+  sharedTracksRenameFile:(params)     => ipcRenderer.invoke('sharedTracks:renameFile', params),
+  sharedTracksDeleteFile:(params)     => ipcRenderer.invoke('sharedTracks:deleteFile', params),
+  sharedTracksDelete:    ()           => ipcRenderer.invoke('sharedTracks:delete'),
+  sharedTracksFolderExistsAt:(params) => ipcRenderer.invoke('sharedTracks:folderExistsAt', params),
+  sharedTracksExportToFolder:(params) => ipcRenderer.invoke('sharedTracks:exportToFolder', params),
+  sharedTracksReadFileBytes:(params)  => ipcRenderer.invoke('sharedTracks:readFileBytes', params),
+
+  // Voicepack catalog + downloader (Sound Fonts → common folder → Get Voicepack)
+  voicepackGetCatalog:   ()           => ipcRenderer.invoke('voicepack:getCatalog'),
+  voicepackDownloadSample:(params)    => ipcRenderer.invoke('voicepack:downloadSample', params),
+  voicepackInstall:      (params)     => ipcRenderer.invoke('voicepack:install', params),
   sfBackupPrep:          (params)     => ipcRenderer.invoke('sfBackup:prep', params),
   sfBackupExport:        (params)     => ipcRenderer.invoke('sfBackup:export', params),
   sfBackupCancel:        (params)     => ipcRenderer.invoke('sfBackup:cancel', params),

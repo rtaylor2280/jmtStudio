@@ -1,7 +1,7 @@
 // Sound Fonts — vendor lookup table and detection (Phase 1, slice 3).
 //
-// The seed table encodes the patterns we verified during the 2026-06-11 crawl
-// of Ryan's pristine vendor archive. Each vendor has one or more patterns; the
+// The seed table encodes the patterns verified during the 2026-06-11 crawl
+// of the pristine vendor archive. Each vendor has one or more patterns; the
 // detector walks a Source's full entry tree and returns the first match in
 // vendor list order. Content-match patterns win when present; structural
 // patterns are fallbacks for vendors that ship without a readme.

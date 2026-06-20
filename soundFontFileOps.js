@@ -16,6 +16,8 @@ const fs = require('fs');
 const path = require('path');
 
 function _root(userData, kind, id) {
+  // sharedTracks is a singleton folder — no id required.
+  if (kind === 'sharedTracks') return path.join(userData, 'soundFonts', 'sharedTracks');
   if (!id) throw new Error('Missing location id');
   if (kind === 'common') return path.join(userData, 'soundFonts', 'common', id, 'files');
   if (kind === 'entry')  return path.join(userData, 'soundFonts', 'library', id);
@@ -93,8 +95,12 @@ async function copyAcrossLocations({
              // target basenames instead of the source's own. Proffie
              // variant naming still resolves collisions at the dest.
 }) {
-  if (!src || !src.kind || !src.id) return { ok: false, error: 'Missing src' };
-  if (!dest || !dest.kind || !dest.id) return { ok: false, error: 'Missing dest' };
+  // sharedTracks (src or dest) is the singleton flat folder — no id
+  // required either side. Every other kind needs one.
+  if (!src || !src.kind) return { ok: false, error: 'Missing src' };
+  if (src.kind !== 'sharedTracks' && !src.id) return { ok: false, error: 'Missing src' };
+  if (!dest || !dest.kind) return { ok: false, error: 'Missing dest' };
+  if (dest.kind !== 'sharedTracks' && !dest.id) return { ok: false, error: 'Missing dest' };
   if (!Array.isArray(srcPaths) || srcPaths.length === 0) {
     return { ok: false, error: 'No source paths' };
   }
@@ -180,6 +186,7 @@ async function copyAcrossLocations({
         failed.push({ source: srcSubPath, error: String(err && err.message || err) });
       }
     }
+    _maybeIndexSharedTracksAdds(userData, dest, added);
     return { ok: true, added, failed };
   }
   for (let i = 0; i < srcPaths.length; i++) {
@@ -229,7 +236,29 @@ async function copyAcrossLocations({
       failed.push({ source: srcSubPath, error: String(err && err.message || err) });
     }
   }
+  // sharedTracks dest gets per-file hash records — every file that landed
+  // needs an index entry so backup merge/replace can use content-identity
+  // instead of bare filename matching.
+  _maybeIndexSharedTracksAdds(userData, dest, added);
   return { ok: true, added, failed };
+}
+
+// Hook the sharedTracks hash index after copyAcrossLocations writes
+// files into the shared folder. Called from both the source-archive
+// branch and the on-disk branch so every landing path is covered.
+// No-op for non-sharedTracks destinations.
+function _maybeIndexSharedTracksAdds(userData, dest, added) {
+  if (!dest || dest.kind !== 'sharedTracks') return;
+  if (!Array.isArray(added) || added.length === 0) return;
+  let hashIndex;
+  try { hashIndex = require('./soundFontSharedTracksHash'); }
+  catch { return; }
+  for (const rel of added) {
+    // rel is relative to the destination root; sharedTracks is flat
+    // so rel === filename.
+    if (!rel || rel.includes('/')) continue;
+    try { hashIndex.recordAdd(userData, rel); } catch {}
+  }
 }
 
 // Move files within a single location (any kind). Same-dir source/dest is

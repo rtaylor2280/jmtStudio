@@ -72,13 +72,15 @@ function _dirBytes(dir) {
 }
 
 // Survey what's in the library — count + size per bucket. Bucket keys
-// match the on-disk directory names ('sources', 'library', 'common') so
-// the archive layout, manifest counts, and restore code all use the same
-// vocabulary. Renderer translates 'library' to "fonts" for display.
+// match the on-disk directory names ('sources', 'library', 'common',
+// 'sharedTracks') so the archive layout, manifest counts, and restore
+// code all use the same vocabulary. Renderer translates 'library' to
+// "fonts" for display. sharedTracks is a flat singleton folder (counts
+// = number of .wav files, not subdirs).
 function surveyLibrary(userData) {
   const buckets = ['sources', 'library', 'common'];
-  const counts = { sources: 0, library: 0, common: 0 };
-  const totals = { sources: 0, library: 0, common: 0 };
+  const counts = { sources: 0, library: 0, common: 0, sharedTracks: 0 };
+  const totals = { sources: 0, library: 0, common: 0, sharedTracks: 0 };
   for (const b of buckets) {
     const root = path.join(_soundFontsRoot(userData), b);
     if (!fs.existsSync(root)) continue;
@@ -89,7 +91,20 @@ function surveyLibrary(userData) {
     counts[b] = dirs.length;
     for (const d of dirs) totals[b] += _dirBytes(path.join(root, d.name));
   }
-  const totalBytes = totals.sources + totals.library + totals.common;
+  // sharedTracks — flat folder, count .wav files at top level only.
+  const stRoot = path.join(_soundFontsRoot(userData), 'sharedTracks');
+  if (fs.existsSync(stRoot)) {
+    let stEntries;
+    try { stEntries = fs.readdirSync(stRoot, { withFileTypes: true }); }
+    catch { stEntries = []; }
+    for (const e of stEntries) {
+      if (!e.isFile()) continue;
+      if (!/\.wav$/i.test(e.name)) continue;
+      counts.sharedTracks++;
+      try { totals.sharedTracks += fs.statSync(path.join(stRoot, e.name)).size; } catch {}
+    }
+  }
+  const totalBytes = totals.sources + totals.library + totals.common + totals.sharedTracks;
   return { counts, totals, totalBytes };
 }
 
@@ -351,8 +366,10 @@ async function exportBackup({
 
     // Each bucket walked separately so empty buckets just contribute no
     // entries. archiver.directory handles permission errors per file
-    // (surfaced via 'warning' which we re-route above).
-    for (const bucket of ['sources', 'library', 'common']) {
+    // (surfaced via 'warning' which we re-route above). sharedTracks is
+    // walked the same way — it's the only flat bucket but archiver
+    // handles file lists, directories, and trees identically.
+    for (const bucket of ['sources', 'library', 'common', 'sharedTracks']) {
       if (cancelled) break;
       const root = path.join(_soundFontsRoot(userData), bucket);
       if (!fs.existsSync(root)) continue;
@@ -458,9 +475,15 @@ async function inspectBackup(zipPath) {
       };
     }
     // Measure actual bucket contents from the entry list. Counts top-level
-    // subdirs under each bucket (sources/<uuid>, library/<name>, common/<uuid>).
-    // Bytes sum from entry sizes for accuracy.
-    const buckets = { sources: { count: 0, bytes: 0 }, library: { count: 0, bytes: 0 }, common: { count: 0, bytes: 0 } };
+    // subdirs under each nested bucket (sources/<uuid>, library/<name>,
+    // common/<uuid>). sharedTracks is flat — count .wav file entries
+    // directly (no top-dir layer). Bytes sum from entry sizes either way.
+    const buckets = {
+      sources: { count: 0, bytes: 0 },
+      library: { count: 0, bytes: 0 },
+      common: { count: 0, bytes: 0 },
+      sharedTracks: { count: 0, bytes: 0 },
+    };
     const topDirs = { sources: new Set(), library: new Set(), common: new Set() };
     for (const key of Object.keys(entries)) {
       const e = entries[key];
@@ -468,17 +491,25 @@ async function inspectBackup(zipPath) {
       const parts = e.name.split('/');
       const bucket = parts[0];
       if (!buckets[bucket]) continue;
+      if (bucket === 'sharedTracks') {
+        // Flat: parts[1] is the filename. Count .wav files only.
+        if (!e.isDirectory && parts[1] && /\.wav$/i.test(parts[1])) {
+          buckets.sharedTracks.count++;
+          buckets.sharedTracks.bytes += (e.size || 0);
+        }
+        continue;
+      }
       if (parts[1] && parts[1] !== '') topDirs[bucket].add(parts[1]);
       if (!e.isDirectory) buckets[bucket].bytes += (e.size || 0);
     }
-    for (const b of Object.keys(buckets)) buckets[b].count = topDirs[b].size;
-    const observedTotal = buckets.sources.bytes + buckets.library.bytes + buckets.common.bytes;
+    for (const b of ['sources', 'library', 'common']) buckets[b].count = topDirs[b].size;
+    const observedTotal = buckets.sources.bytes + buckets.library.bytes + buckets.common.bytes + buckets.sharedTracks.bytes;
     return {
       ok: true,
       manifest,
       observed: {
-        counts: { sources: buckets.sources.count, library: buckets.library.count, common: buckets.common.count },
-        totals: { sources: buckets.sources.bytes, library: buckets.library.bytes, common: buckets.common.bytes, totalBytes: observedTotal },
+        counts: { sources: buckets.sources.count, library: buckets.library.count, common: buckets.common.count, sharedTracks: buckets.sharedTracks.count },
+        totals: { sources: buckets.sources.bytes, library: buckets.library.bytes, common: buckets.common.bytes, sharedTracks: buckets.sharedTracks.bytes, totalBytes: observedTotal },
       },
     };
   } finally {
@@ -695,9 +726,71 @@ async function applyReplace({
       }
     }
 
+    // sharedTracks per-file identical-skip. The bucket-level dir move
+    // above doesn't apply (sharedTracks is flat files, not uuid-keyed
+    // subdirs); we instead build a per-file skip set, move identical
+    // files from snapshot to fresh, and let the extract loop skip the
+    // ones we already moved. Files compared by hash via the local +
+    // backup hash indexes — both ship in the sharedTracks folder so
+    // they're available before any extraction has happened.
+    const skipFiles = new Set();      // zip entry names to skip extracting
+    const reusedFiles = [];           // { snapshotAbs, freshAbs } for rollback
+    if (hadOriginal) {
+      try {
+        // Load the snapshot's hash index. ensureIndex would mutate the
+        // snapshot dir which we want to leave pristine for rollback —
+        // so we read raw and tolerate a missing index by giving up the
+        // optimization (extract everything).
+        const hashMod = require('./soundFontSharedTracksHash');
+        const snapStRoot = path.join(snapshotPath, 'sharedTracks');
+        const snapIndexPath = path.join(snapStRoot, '.jmt-hashes.json');
+        let snapIndex = null;
+        if (fs.existsSync(snapIndexPath)) {
+          try { snapIndex = JSON.parse(fs.readFileSync(snapIndexPath, 'utf8')); } catch {}
+        }
+        // Load the backup's index from the zip.
+        let backupIndex = null;
+        try {
+          const buf = await zip.entryData('sharedTracks/.jmt-hashes.json');
+          backupIndex = JSON.parse(buf.toString('utf8'));
+        } catch {}
+        if (snapIndex && backupIndex && snapIndex.tracks && backupIndex.tracks) {
+          // Snapshot-side: map hash → snapshot filename so we can
+          // resolve a backup record to a snapshot file by content.
+          const snapHashToName = new Map();
+          for (const u of Object.keys(snapIndex.tracks)) {
+            const r = snapIndex.tracks[u];
+            if (r && r.hash && r.name) snapHashToName.set(r.hash, r.name);
+          }
+          // Ensure fresh sharedTracks dir exists for any moves.
+          const freshStRoot = path.join(sfRoot, 'sharedTracks');
+          try { fs.mkdirSync(freshStRoot, { recursive: true }); } catch {}
+          for (const buuid of Object.keys(backupIndex.tracks)) {
+            const br = backupIndex.tracks[buuid];
+            if (!br || !br.name || !br.hash) continue;
+            const snapName = snapHashToName.get(br.hash);
+            if (!snapName) continue; // backup file isn't in snapshot — must extract
+            const snapAbs = path.join(snapStRoot, snapName);
+            if (!fs.existsSync(snapAbs)) continue;
+            const freshAbs = path.join(freshStRoot, br.name);
+            try {
+              fs.renameSync(snapAbs, freshAbs);
+              reusedFiles.push({ snapshotAbs: snapAbs, freshAbs });
+              // Skip this entry during extraction since we've already
+              // satisfied it via move-from-snapshot.
+              skipFiles.add(`sharedTracks/${br.name}`);
+            } catch {
+              // Move failed (lock, permissions); fall back to extract.
+            }
+          }
+        }
+      } catch {}
+    }
+
     // Survey total bytes up front, but only for entries we'll actually
     // extract — skipped items aren't part of the progress denominator.
     const isSkipped = (entryName) => {
+      if (skipFiles.has(entryName)) return true;
       const parts = entryName.split('/');
       if (parts.length < 2) return false;
       const bucket = parts[0];
@@ -745,9 +838,13 @@ async function applyReplace({
       throw Object.assign(new Error('Cancelled'), { cancelled: true });
     }
   } catch (err) {
-    // Rollback. Move reused items back to the snapshot first so the
-    // snapshot is whole again, then nuke fresh and rename snapshot back.
+    // Rollback. Move reused items + reused per-file moves back to the
+    // snapshot first so the snapshot is whole again, then nuke fresh
+    // and rename snapshot back.
     for (const r of reusedItems) {
+      try { fs.renameSync(r.freshAbs, r.snapshotAbs); } catch {}
+    }
+    for (const r of reusedFiles) {
       try { fs.renameSync(r.freshAbs, r.snapshotAbs); } catch {}
     }
     try { fs.rmSync(sfRoot, { recursive: true, force: true }); } catch {}
@@ -1426,6 +1523,130 @@ async function applyMerge({
             fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
           } catch {}
         }
+      }
+    }
+
+    // Shared Tracks — flat folder, no per-item prompts. Rules per
+    // user spec, hash-aware:
+    //   1. Backup record's content (hash) already exists locally under
+    //      any filename  → skip (we already have the content)
+    //   2. Local has the same filename but different hash → keep local
+    //      (filename-collision: user's file wins)
+    //   3. Else → extract the backup file and record it in the local
+    //      hash index with the backup's UUID, so identity travels
+    if (!cancelled) {
+      const stPrefix = 'sharedTracks/';
+      const stRootAbs = path.join(sfRoot, 'sharedTracks');
+      const hasStEntries = Object.keys(entries).some(k => k.startsWith(stPrefix));
+      if (hasStEntries) {
+        try { fs.mkdirSync(stRootAbs, { recursive: true }); } catch {}
+        const stCreated = [];
+        // Read the backup's hash index from the zip if present. Older
+        // backups (pre-hash-index) won't have it — those fall through
+        // to filename-only identity for each extracted file.
+        let backupIndex = null;
+        try {
+          const buf = await zip.entryData('sharedTracks/.jmt-hashes.json');
+          const parsed = JSON.parse(buf.toString('utf8'));
+          if (parsed && parsed.tracks && typeof parsed.tracks === 'object') {
+            backupIndex = parsed;
+          }
+        } catch {}
+        // Read (and backfill) the local index — drives the content
+        // identity check for "already have this under any name".
+        const hashMod = require('./soundFontSharedTracksHash');
+        const localIndex = hashMod.ensureIndex(userData);
+        const localHashes = new Set();
+        const localNames = new Set();
+        for (const u of Object.keys(localIndex.tracks || {})) {
+          if (localIndex.tracks[u].hash) localHashes.add(localIndex.tracks[u].hash);
+          if (localIndex.tracks[u].name) localNames.add(localIndex.tracks[u].name);
+        }
+        // Helper that extracts a single backup track + records it.
+        const extractTrack = async (entryName, fileName, backupRecord) => {
+          const target = path.join(stRootAbs, fileName);
+          await zip.extract(entryName, target);
+          stCreated.push(target);
+          const e = entries[entryName];
+          if (e) processedBytes += (e.size || 0);
+          onProgress({ phase: 'merging', processedBytes, totalBytes, currentItem: entryName });
+          // Record into the local index. Carry the backup's UUID so the
+          // file's identity survives the round-trip across backups.
+          if (backupRecord && backupRecord.uuid) {
+            try {
+              hashMod.recordInsert(userData, {
+                uuid: backupRecord.uuid,
+                name: fileName,
+                size: backupRecord.size,
+                hash: backupRecord.hash,
+                addedAt: backupRecord.addedAt,
+              });
+              if (backupRecord.hash) localHashes.add(backupRecord.hash);
+              localNames.add(fileName);
+            } catch {}
+          } else {
+            // No backup record (legacy backup) — let recordAdd hash the
+            // file on disk and assign a fresh UUID.
+            try {
+              const r = hashMod.recordAdd(userData, fileName);
+              if (r && r.hash) localHashes.add(r.hash);
+              localNames.add(fileName);
+            } catch {}
+          }
+        };
+        // First pass: process files we DO have an index record for.
+        // Lets us make hash-based decisions without re-hashing the
+        // backup files on the fly.
+        const handledFiles = new Set(); // by filename
+        if (backupIndex) {
+          for (const buuid of Object.keys(backupIndex.tracks)) {
+            if (cancelled) break;
+            const br = backupIndex.tracks[buuid];
+            if (!br || !br.name) continue;
+            handledFiles.add(br.name);
+            const entryName = `${stPrefix}${br.name}`;
+            if (!entries[entryName]) continue; // index references a missing file
+            // Rule 1: content already present locally under ANY name.
+            if (br.hash && localHashes.has(br.hash)) continue;
+            // Rule 2: filename collision with different content (or
+            // local lacks a record for it — defensive). Local wins.
+            if (localNames.has(br.name) || fs.existsSync(path.join(stRootAbs, br.name))) continue;
+            // Rule 3: extract.
+            try {
+              await extractTrack(entryName, br.name, { uuid: buuid, ...br });
+            } catch (err) {
+              throw new Error(`Failed extracting ${entryName}: ${err && err.message || err}`);
+            }
+          }
+        }
+        // Second pass: any backup file the index didn't reference (or
+        // legacy backups with no index at all). Filename-only union.
+        for (const key of Object.keys(entries)) {
+          if (cancelled) break;
+          if (!key.startsWith(stPrefix)) continue;
+          const e = entries[key];
+          if (e.isDirectory) continue;
+          const fileName = key.substring(stPrefix.length);
+          if (!fileName || fileName.includes('/')) continue;
+          if (handledFiles.has(fileName)) continue;
+          // Legacy .jmt-meta.json (notes sidecar) — feature removed.
+          // Skip extraction so old backups don't reintroduce it.
+          if (fileName === '.jmt-meta.json') continue;
+          // Skip the hash index sidecar — it's handled implicitly by
+          // recordInsert calls above. Re-extracting would overwrite our
+          // freshly-updated local index with the backup's stale state.
+          if (fileName === '.jmt-hashes.json') continue;
+          if (!/\.wav$/i.test(fileName)) continue;
+          if (fs.existsSync(path.join(stRootAbs, fileName))) continue;
+          try {
+            await extractTrack(e.name, fileName, null);
+          } catch (err) {
+            throw new Error(`Failed extracting ${e.name}: ${err && err.message || err}`);
+          }
+        }
+        rollbackLog.push(() => {
+          for (const p of stCreated) { try { fs.unlinkSync(p); } catch {} }
+        });
       }
     }
 
