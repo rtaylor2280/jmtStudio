@@ -2772,8 +2772,11 @@
   /* Backup dropdown is a small menu of two short labels. Right-justify
      so the names anchor to the right edge of the menu with breathing
      room on the left, instead of the cramped left-edge feel of the
-     default flow-list dropdowns. */
-  #sf-backup-dropdown .styles-tag-dropdown-item { justify-content: flex-end; padding-right: 14px; }
+     default flow-list dropdowns. Padding tightened relative to the
+     filter dropdowns (Tags / Creators) since this menu only has two
+     items and the default spacing reads as cavernous at that scale. */
+  #sf-backup-dropdown { padding: 2px 0; }
+  #sf-backup-dropdown .styles-tag-dropdown-item { justify-content: flex-end; padding: 3px 14px 3px 12px; }
   #sf-backup-dropdown .styles-tag-dropdown-name { flex: 0 0 auto; }
   .styles-tag-dropdown-count { color: var(--c-text-faint); font-size: 0.7rem; }
   .styles-tag-dropdown-empty { padding: 8px 12px; font-size: 0.72rem; color: var(--c-text-faint); }
@@ -3266,7 +3269,7 @@
         <div class="toolbar-divider"></div>
         <div class="styles-tag-filter-wrap">
           <button id="btn-sf-backup-menu" class="btn-neutral" title="Library backup">Backup &#9660;</button>
-          <div id="sf-backup-dropdown" class="styles-tag-dropdown" style="display:none;min-width:150px">
+          <div id="sf-backup-dropdown" class="styles-tag-dropdown" style="display:none;min-width:130px">
             <button id="btn-sf-export-backup" class="styles-tag-dropdown-item" title="Export your entire Sound Font library as a single backup file">
               <span class="styles-tag-dropdown-name">&#8599; Export Backup</span>
             </button>
@@ -4739,6 +4742,9 @@
   <div class="modal">
     <h2>Export Sound Font library</h2>
     <p class="sf-import-hint" id="sf-backup-prep-summary">Surveying library&hellip;</p>
+    <div class="sf-import-progress-track" id="sf-backup-prep-progress-track" style="display:none">
+      <div class="sf-import-progress-bar indeterminate"></div>
+    </div>
     <p class="sf-import-hint" style="margin-top:6px; color: var(--c-text-muted);">Backups can take a while. Don't close the app until it finishes. You can Cancel if you change your mind.</p>
     <div class="modal-btns" style="margin-top: 18px">
       <button class="modal-btn-cancel" id="sf-backup-prep-cancel">Cancel</button>
@@ -22159,8 +22165,11 @@ require(['vs/editor/editor.main'], function () {
         const m = Math.floor(sec / 60);
         const s = Math.round(sec - m * 60);
         if (m < 60) {
-          if (s === 0 || m >= 10) return `${m} minute${m === 1 ? '' : 's'}`;
-          return `${m}m ${s}s`;
+          // Always show seconds when the operation is in the minutes
+          // range — drops would-be precision for long runs (a 27-minute
+          // backup reads more honestly as "27m 38s" than "27 minutes").
+          // Bare "Nm" form is reserved for the s === 0 edge.
+          return s === 0 ? `${m} minute${m === 1 ? '' : 's'}` : `${m}m ${s}s`;
         }
         const h = Math.floor(m / 60);
         const mm = m - h * 60;
@@ -22180,12 +22189,15 @@ require(['vs/editor/editor.main'], function () {
         const startBtn = document.getElementById('sf-backup-prep-start');
         const cancelBtn = document.getElementById('sf-backup-prep-cancel');
         if (!prepModal || !summaryEl || !startBtn || !cancelBtn) return;
+        const progTrack = document.getElementById('sf-backup-prep-progress-track');
         summaryEl.textContent = 'Surveying library and benchmarking destination…';
         startBtn.disabled = true;
+        if (progTrack) progTrack.style.display = '';
         prepModal.classList.add('active');
         let prep;
         try { prep = await window.electronAPI.sfBackupPrep({ destPath }); }
         catch (err) { prep = { ok: false, error: String(err && err.message || err) }; }
+        if (progTrack) progTrack.style.display = 'none';
         if (!prep || !prep.ok) {
           prepModal.classList.remove('active');
           alert(`Could not prepare export: ${(prep && prep.error) || 'unknown error'}`);
@@ -22318,9 +22330,27 @@ require(['vs/editor/editor.main'], function () {
           });
           return;
         }
+        // Compose the completion message: destination path, library
+        // summary line that mirrors the pre-backup prep modal (so the
+        // user can verify what was actually packaged matched what was
+        // promised), and the total wall-clock time. Pulls counts from
+        // the survey captured at prep time; elapsed from the local
+        // startMs marker set at the top of this function.
+        const finalElapsedSec = (Date.now() - startMs) / 1000;
+        const cs = survey && survey.counts;
+        const totalSize = _sfFormatBytesShort(survey ? survey.totalBytes : 0);
+        const summaryLine = cs
+          ? `Library: ${cs.sources} source${cs.sources === 1 ? '' : 's'}, ${cs.library} font${cs.library === 1 ? '' : 's'}, ${cs.common} common folder${cs.common === 1 ? '' : 's'}. Total ${totalSize}.`
+          : '';
+        const elapsedLine = `Took ${_sfFormatDuration(finalElapsedSec)}.`;
+        const completionMessage = [
+          `Backup written to:\n${result.destPath}`,
+          summaryLine,
+          elapsedLine,
+        ].filter(Boolean).join('\n\n');
         await promptConfirm({
           title: 'Export complete',
-          message: `Backup written to:\n${result.destPath}`,
+          message: completionMessage,
           confirmText: 'OK',
           confirmKind: 'primary',
           hideCancel: true,

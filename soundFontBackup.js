@@ -263,7 +263,14 @@ async function exportBackup({
   //      agent lock), but it's visibly intermediate by name.
   const partialPath = destPath + '.partial';
   const ws = fs.createWriteStream(partialPath);
-  const archive = archiver('zip', { zlib: { level: 6 } });
+  // forceZip64: archive can grow past the 2 GiB signed-32-bit boundary
+  // that zip-stream (archiver's underlying writer) enforces on the
+  // classic zip32 format. A multi-GB Sound Fonts library will routinely
+  // exceed that ceiling. Modern unzippers (Windows Explorer, 7-Zip,
+  // node-stream-zip) all handle zip64 transparently; the overhead is
+  // a few bytes of extended local headers per entry, no per-file size
+  // ceiling, no archive-wide size ceiling.
+  const archive = archiver('zip', { zlib: { level: 6 }, forceZip64: true });
 
   // Hook cancellation. Aborting the archiver mid-stream + closing the
   // write stream lets us clean up the partial file in the finally block.

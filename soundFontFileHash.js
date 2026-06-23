@@ -28,13 +28,39 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-// Read a single file in one shot and return its sha256 hex. The Sound
-// Fonts library is full of small files (most wavs are under 1 MB), so
-// the buffer-at-a-time path is fine and avoids the bookkeeping of a
-// streamed Hash for thousands of tiny entries.
+// Read a single file and return its sha256 hex. Small files (most wavs
+// are under 1 MB) go through the buffer-at-a-time fast path so we avoid
+// the bookkeeping of a streamed Hash for thousands of tiny entries.
+// Large files (a single source.zip can easily exceed 2 GiB for a
+// Kyberphonic character bundle) MUST be streamed because fs.readFileSync
+// throws ERR_FS_FILE_TOO_LARGE on anything over the signed-32-bit
+// boundary (2 GiB). Threshold of 1 GiB is conservative — well under the
+// hard limit but high enough that the common case stays on the fast path.
+const _STREAM_HASH_THRESHOLD = 1024 * 1024 * 1024; // 1 GiB
 function _hashFile(absPath) {
-  const buf = fs.readFileSync(absPath);
-  return crypto.createHash('sha256').update(buf).digest('hex');
+  let size;
+  try { size = fs.statSync(absPath).size; }
+  catch { size = 0; }
+  if (size < _STREAM_HASH_THRESHOLD) {
+    const buf = fs.readFileSync(absPath);
+    return crypto.createHash('sha256').update(buf).digest('hex');
+  }
+  // Streaming path for files past the readFileSync ceiling. Synchronous
+  // wrapper around a stream so the caller's existing sync API doesn't
+  // change. Uses a 1 MiB chunk size — balance between syscall overhead
+  // and memory pressure on a multi-GB file.
+  const fd = fs.openSync(absPath, 'r');
+  try {
+    const hash = crypto.createHash('sha256');
+    const chunk = Buffer.allocUnsafe(1024 * 1024);
+    let bytesRead;
+    while ((bytesRead = fs.readSync(fd, chunk, 0, chunk.length, null)) > 0) {
+      hash.update(bytesRead === chunk.length ? chunk : chunk.subarray(0, bytesRead));
+    }
+    return hash.digest('hex');
+  } finally {
+    try { fs.closeSync(fd); } catch {}
+  }
 }
 
 // Walk the item root and collect records for every regular file +

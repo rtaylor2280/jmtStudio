@@ -804,7 +804,9 @@ function _createFolderSource({ uuid, uuidDir, meta }) {
       const archiver = require('archiver');
       await new Promise((resolve, reject) => {
         const ws = fs.createWriteStream(destPath);
-        const archive = archiver('zip', { zlib: { level: 6 } });
+        // forceZip64 so individual sources past the 2 GiB classic-zip
+        // ceiling export cleanly. Same rationale as soundFontBackup.js.
+        const archive = archiver('zip', { zlib: { level: 6 }, forceZip64: true });
         ws.on('close', resolve);
         ws.on('error', reject);
         archive.on('error', reject);
