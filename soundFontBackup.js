@@ -688,6 +688,11 @@ async function applyReplace({
     // or vice versa, drop the item from skipDirs so it gets re-extracted
     // (catches "user added an empty folder, content bytes still match"
     // case where survey's file-count + total-bytes check is too loose).
+    const totalToReuse = skipDirs.sources.size + skipDirs.library.size + skipDirs.common.size;
+    let reuseDone = 0;
+    if (totalToReuse > 0) {
+      onProgress({ phase: 'reusing', processedBytes: 0, totalBytes: 0, currentItem: `Reusing ${totalToReuse} unchanged items from your current library…` });
+    }
     for (const bucket of ['sources', 'library', 'common']) {
       const freshBucketDir = path.join(sfRoot, bucket);
       try { fs.mkdirSync(freshBucketDir, { recursive: true }); } catch {}

@@ -12,6 +12,7 @@ const soundFontCandidates = require('./soundFontCandidates');
 const soundFontEntries = require('./soundFontEntries');
 const soundFontCommon = require('./soundFontCommon');
 const soundFontBackup = require('./soundFontBackup');
+const soundFontBulkImport = require('./soundFontBulkImport');
 const soundFontFileOps = require('./soundFontFileOps');
 const soundFontReorganize = require('./soundFontReorganize');
 const soundFontVoicepack = require('./soundFontVoicepack');
@@ -848,6 +849,66 @@ ipcMain.handle('soundFonts:importFont', async (event, { sourcePath, name, metada
 ipcMain.handle('sources:list', () => {
   try { return { ok: true, sources: soundFontSources.listSources(app.getPath('userData')) }; }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+// Bulk import — open a folder picker for the bulk-scan entry point.
+// Returns the chosen path so the renderer can pass it to bulkImport:scan.
+ipcMain.handle('bulkImport:pickRoot', async () => {
+  try {
+    const lastDir = Store.get('lastBulkImportRoot') || app.getPath('home');
+    const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+      title: 'Pick a folder of sound fonts to bulk import…',
+      defaultPath: lastDir,
+      properties: ['openDirectory'],
+    });
+    if (canceled || !filePaths?.length) return { ok: false, canceled: true };
+    Store.set('lastBulkImportRoot', filePaths[0]);
+    return { ok: true, rootDir: filePaths[0] };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
+// Bulk import — phase 1: scan the picked folder and return a plan. Fast,
+// no hashing, no disk writes. The renderer shows a pre-scan summary so
+// the user can review and confirm before any sources get created.
+ipcMain.handle('bulkImport:scan', async (_, { rootDir } = {}) => {
+  try {
+    return soundFontBulkImport.scanForBulkImport({ rootDir });
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
+// Bulk import — phase 2: execute the plan. Hashes each source, dedups
+// against the library, copies and detects candidates, creates entries
+// with needsReview when fields couldn't be auto-filled. Streams progress
+// via the bulkImport:progress event.
+let _bulkImportCancelToken = null;
+ipcMain.handle('bulkImport:run', async (e, { plan } = {}) => {
+  try {
+    _bulkImportCancelToken = { cancelled: false };
+    const myToken = _bulkImportCancelToken;
+    const result = await soundFontBulkImport.runBulkImport(
+      { plan, userData: app.getPath('userData') },
+      {
+        onProgress: (payload) => {
+          try { e.sender.send('bulkImport:progress', payload); } catch {}
+        },
+        shouldCancel: () => myToken.cancelled,
+      },
+    );
+    return result;
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  } finally {
+    _bulkImportCancelToken = null;
+  }
+});
+
+ipcMain.handle('bulkImport:cancel', () => {
+  if (_bulkImportCancelToken) _bulkImportCancelToken.cancelled = true;
+  return { ok: true };
 });
 
 ipcMain.handle('sources:cleanupOrphans', () => {

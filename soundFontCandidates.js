@@ -67,9 +67,13 @@ const EFFECT_FOLDER_NAMES = new Set([
 ]);
 
 // Effect-name prefix for flat-layout Proffie fonts (hum1.wav, hum.wav,
-// boot.wav, font.wav etc). Limited to the three reliable "core" effects so
-// a bonus folder full of unrelated .wav files doesn't get mis-detected.
-const CORE_EFFECT_FILE_PATTERN = /^(boot|hum|font)\d*\.wav$/i;
+// boot.wav, font.wav etc). Limited to the three reliable "core" effects
+// so a bonus folder full of unrelated .wav files doesn't get
+// mis-detected. Trailing variant tokens are tolerated: digits (boot1.wav),
+// underscore-N (hum_1.wav), space-paren-N (font (1).WAV — Shadow Lord
+// uses this shape) — so flat-layout fonts that originated from
+// numbered-export tools still register.
+const CORE_EFFECT_FILE_PATTERN = /^(boot|hum|font)(\s*\(\d+\)|[_\s]?\d+)?\.wav$/i;
 
 // A folder counts as a Proffie font when ANY of:
 //   - it contains at least one standard effect subfolder, or
@@ -264,7 +268,20 @@ function walkForCandidates(byParent, currentDir, candidates, fallbackName) {
 
   // CASE A: this dir IS a Proffie font.
   if (looksLikeProffieFont(childFolders, childFiles)) {
-    const name = currentDir ? currentDir.split('/').pop() : fallbackName;
+    // Walk up the path from the leaf, skipping board names (Proffie,
+    // CFX, Verso, etc.), to find a meaningful candidate name. The leaf
+    // itself is preferred when it's not a board. When all segments are
+    // board names (or there are no segments), fall back to the source
+    // name. Examples:
+    //   1.1-BlasterMode.zip/Proffie/        -> "1.1-BlasterMode"
+    //   JURASSIC/Proffie/                   -> "JURASSIC"
+    //   Mountain_Sabers/STARGATE/Proffie/   -> "STARGATE"
+    //   Cere/                               -> "Cere" (not board, keep leaf)
+    const segments = currentDir ? currentDir.split('/').filter(Boolean) : [];
+    let name = fallbackName;
+    for (let i = segments.length - 1; i >= 0; i--) {
+      if (!identifyBoard(segments[i])) { name = segments[i]; break; }
+    }
     candidates.push({
       name,
       path: currentDir,
@@ -318,10 +335,15 @@ function walkForCandidates(byParent, currentDir, candidates, fallbackName) {
   }
 
   // CASE D: descend. Each child folder may be its own candidate or another
-  // wrapper layer.
+  // wrapper layer. fallbackName is NOT overwritten with folder.name on
+  // recursion: it's only consulted at the root level (when currentDir is
+  // empty), so threading it unchanged lets deep cases like the CASE A
+  // board-override use the source name as the real fallback (e.g.
+  // 1.1-BlasterMode.zip's only child "Proffie/" can now correctly fall
+  // back to "1.1-BlasterMode" instead of "Proffie").
   if (childFolders.length === 0) return;
   for (const folder of childFolders) {
-    walkForCandidates(byParent, folder.fileName, candidates, folder.name);
+    walkForCandidates(byParent, folder.fileName, candidates, fallbackName);
   }
 }
 

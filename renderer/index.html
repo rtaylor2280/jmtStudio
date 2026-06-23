@@ -10,6 +10,7 @@
   /* ── Theme variables ── */
   :root {
     --jmt-blue:       #025192;
+    --jmt-amber:      #d49b3a;
     --c-bg:           #111111;
     --c-bg-toolbar:   #0e0e0e;
     --c-bg-raised:    #181818;
@@ -2004,8 +2005,15 @@
   .sf-empty-action:hover { filter: brightness(1.1); }
   .sf-empty-action[disabled] { opacity: 0.5; cursor: default; }
   .sf-empty-hint { font-size: 0.72rem; color: var(--c-text-faint); margin: 0; }
-  /* Browse view (card grid) */
-  .sf-browse-wrap { flex: 1; display: none; flex-direction: column; min-height: 0; overflow: hidden; }
+  /* Browse view (card grid) — always rendered now that the sidecar lives
+     inside and must stay visible whether or not entries exist. The
+     historical .active toggle is preserved for legacy callers but the
+     base rule is display:flex so first-paint doesn't show an empty
+     #soundfonts-view while the async refresh chain runs and finally
+     adds .active. Without this, a quick tab-click at app launch left
+     the SF view empty for a few ticks, letting other body flex children
+     (the config view) bleed through underneath. */
+  .sf-browse-wrap { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
   .sf-browse-wrap.active { display: flex; }
   .sf-search-bar { display: flex; align-items: center; gap: 8px; flex-shrink: 0; background: var(--c-bg); padding: 0 20px; box-sizing: border-box; height: 42px; border-bottom: 1px solid var(--c-border); }
   .sf-search-input-wrap { position: relative; flex: 1; max-width: 320px; display: flex; align-items: center; }
@@ -2064,6 +2072,7 @@
      common-folder sidecar on the right share horizontal space, sandwiched
      between the search bar above and the missing/legend bars below. */
   .sf-main-row { flex: 1; min-height: 0; display: flex; overflow: hidden; }
+  .sf-content-column { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
   /* Common folder sidecar — fixed width on the LEFT, collapsible to a thin
      vertical strip with a rotated label, matching the preset sidecar
      convention so users who already know one know both. */
@@ -2314,6 +2323,53 @@
     100% { transform: translateX(250%); }
   }
   .sf-import-progress-detail { font-size: 0.72rem; color: var(--c-text-dim); margin: 4px 0 0 0; font-variant-numeric: tabular-nums; min-height: 1em; word-break: break-all; }
+  .sf-bulk-review-breakdown { margin: 12px 0 0 0; padding: 10px 12px; background: var(--c-bg-inset); border-radius: 4px; font-size: 0.82rem; line-height: 1.55; max-height: 280px; overflow-y: auto; }
+  .sf-bulk-review-breakdown .br-row { display: flex; justify-content: space-between; gap: 12px; }
+  .sf-bulk-review-breakdown .br-row + .br-row { margin-top: 4px; }
+  .sf-bulk-review-breakdown .br-label { color: var(--c-text-sub); }
+  .sf-bulk-review-breakdown .br-val   { color: var(--c-text); font-weight: 500; font-variant-numeric: tabular-nums; }
+  .sf-bulk-review-breakdown .br-fail-list { font-size: 0.76rem; color: var(--c-text-dim); margin-top: 8px; }
+  .sf-bulk-review-breakdown .br-fail-list li { margin-top: 2px; word-break: break-all; }
+  /* Failure list in the bulk-import summary phase. Two columns per row:
+     source basename (left) and reason (right). Hovering reveals the full
+     path. Cleaner than a bulleted list and easier to skim when many
+     failures stack up. */
+  .sf-bulk-failure-head { font-size: 0.82rem; font-weight: 600; color: var(--c-text); margin-bottom: 6px; }
+  .sf-bulk-failure-list { max-height: 200px; overflow-y: auto; }
+  .sf-bulk-failure-row { display: flex; justify-content: space-between; gap: 14px; padding: 4px 0; border-bottom: 1px solid var(--c-border-faint); font-size: 0.78rem; }
+  .sf-bulk-failure-row:last-child { border-bottom: none; }
+  .sf-bulk-failure-name { color: var(--c-text); flex-shrink: 0; min-width: 0; word-break: break-all; max-width: 50%; }
+  .sf-bulk-failure-reason { color: var(--c-text-dim); text-align: right; flex: 1; min-width: 0; word-break: break-word; }
+  /* Needs Review card border + chip. Amber accent without leaning into
+     full danger styling — this is a "remember to come back" signal, not
+     an error state. */
+  .sf-card.needs-review { border-color: var(--jmt-amber, #d49b3a) !important; }
+  .sf-card-needs-review-chip {
+    display: inline-block; font-size: 0.66rem; font-weight: 600;
+    padding: 1px 6px; border-radius: 3px; letter-spacing: 0.02em;
+    text-transform: uppercase; background: rgba(212, 155, 58, 0.18);
+    color: var(--jmt-amber, #d49b3a); border: 1px solid rgba(212, 155, 58, 0.5);
+  }
+  /* Banner inside the entry detail surfacing review reasons + a one-click
+     dismiss. Sits between the byline and the meta rows. */
+  .sf-needs-review-banner {
+    margin: 8px 0 4px 0; padding: 8px 10px;
+    background: rgba(212, 155, 58, 0.08);
+    border: 1px solid rgba(212, 155, 58, 0.35);
+    border-radius: 4px;
+  }
+  .sf-needs-review-banner-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .sf-mark-reviewed-btn {
+    background: transparent; border: 1px solid rgba(212, 155, 58, 0.5);
+    color: var(--jmt-amber, #d49b3a); font-size: 0.72rem; padding: 2px 8px;
+    border-radius: 3px; cursor: pointer;
+  }
+  .sf-mark-reviewed-btn:hover { background: rgba(212, 155, 58, 0.12); }
+  .sf-needs-review-reasons {
+    margin: 6px 0 0 0; padding-left: 18px;
+    font-size: 0.74rem; color: var(--c-text-sub); line-height: 1.4;
+  }
+  .sf-needs-review-reasons li { margin-top: 2px; }
   /* Backup export/restore stream long zip-entry paths through the detail
      line; without a stable 2-line allotment the modal pumps up and down on
      every wrap/unwrap. Fixed line-clamped box keeps the chrome still. */
@@ -2699,6 +2755,12 @@
   .styles-tag-filter-btn { background: var(--c-bg-raised); border: 1px solid var(--c-border-heavy); border-radius: 4px; color: var(--c-text-muted); padding: 4px 10px; font-size: 0.75rem; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
   .styles-tag-filter-btn:hover { color: var(--jmt-blue); }
   .styles-tag-filter-btn.has-active { color: var(--jmt-blue); border-color: rgba(0,130,255,0.35); }
+  /* Needs Review filter uses amber to match its card chip + border. */
+  #btn-sf-needs-review-filter:hover { color: var(--jmt-amber); }
+  #btn-sf-needs-review-filter.active { color: var(--jmt-amber); border-color: rgba(212,155,58,0.5); background: rgba(212,155,58,0.08); }
+  #btn-sf-needs-review-filter #sf-needs-review-count { background: var(--jmt-amber); }
+  .styles-active-filter-chip.sf-active-filter-needs-review { color: var(--jmt-amber); background: rgba(212,155,58,0.10); border-color: rgba(212,155,58,0.5); }
+  .styles-active-filter-chip.sf-active-filter-needs-review .styles-active-filter-remove { color: var(--jmt-amber); }
   .styles-tag-filter-icon { font-size: 0.6rem; opacity: 0.7; }
   .styles-tag-filter-badge { background: var(--jmt-blue); color: #fff; font-size: 0.62rem; font-weight: 600; padding: 0 5px; border-radius: 9px; margin-left: 2px; line-height: 1.4; }
   .styles-tag-dropdown { position: absolute; top: calc(100% + 4px); right: 0; background: var(--c-bg-raised); border: 1px solid var(--c-border-heavy); border-radius: 4px; padding: 4px 0; min-width: 200px; max-width: 280px; max-height: 320px; overflow-y: auto; z-index: 100; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
@@ -3319,34 +3381,10 @@
        fonts. The "no fonts yet" empty card is rendered inside the grid
        scroll area below, replacing the cards when the library is empty. -->
   <div class="sf-browse-wrap" id="sf-browse">
-    <div class="sf-search-bar">
-      <div class="sf-search-input-wrap">
-        <input type="text" id="sf-search" class="sf-search-input" placeholder="Search sound fonts…" autocomplete="off" spellcheck="false">
-        <span id="sf-search-clear" class="vp-search-clear" style="display:none" title="Clear">&#x2715;</span>
-      </div>
-      <span class="sf-search-count" id="sf-search-count"></span>
-      <div class="styles-tag-filter-wrap">
-        <button id="btn-sf-tag-filter" class="styles-tag-filter-btn" title="Filter by tag">
-          <span class="styles-tag-filter-icon">&#9662;</span> Tags<span id="sf-tag-filter-badge" class="styles-tag-filter-badge" style="display:none">0</span>
-        </button>
-        <div id="sf-tag-dropdown" class="styles-tag-dropdown" style="display:none">
-          <div id="sf-tag-dropdown-list"></div>
-        </div>
-      </div>
-      <div class="styles-tag-filter-wrap">
-        <button id="btn-sf-creator-filter" class="styles-tag-filter-btn" title="Filter by creator">
-          <span class="styles-tag-filter-icon">&#9662;</span> Creators<span id="sf-creator-filter-badge" class="styles-tag-filter-badge" style="display:none">0</span>
-        </button>
-        <div id="sf-creator-dropdown" class="styles-tag-dropdown" style="display:none">
-          <div id="sf-creator-dropdown-list"></div>
-        </div>
-      </div>
-    </div>
-    <div id="sf-active-filters" class="styles-active-filters" style="display:none"></div>
-    <!-- Main horizontal row: common-folder sidecar on the LEFT (matching the
-         preset sidecar convention), card grid on the right. Both share the
-         vertical space between the search bar above and the missing/legend
-         bars below. -->
+    <!-- Main horizontal row: common-folder sidecar on the LEFT (extends
+         top-to-bottom of the SF view, mirroring the Style Library helpers
+         sidebar), search bar + cards + missing-bar + legend stacked in
+         the column to the right. -->
     <div class="sf-main-row">
       <div class="sf-common-sidecar" id="sf-common-sidecar">
         <div class="sf-common-inner">
@@ -3362,36 +3400,65 @@
         </div>
         <div id="sf-common-sidecar-resizer" class="sf-common-sidecar-resizer"></div>
       </div>
-      <div class="sf-grid-scroll">
-        <!-- Empty state shown when no fonts in the library. Sidecar (and
-             its own empty state) sits to the left independently, so the
-             user still sees their commons even with zero fonts. -->
-        <div class="sf-empty-wrap" id="sf-empty-nofonts" style="display:none">
-          <div class="sf-empty-card">
-            <svg class="sf-empty-icon" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-              <polyline points="17 8 12 3 7 8"/>
-              <line x1="12" y1="3" x2="12" y2="15"/>
-            </svg>
-            <h2 class="sf-empty-title">Import your first sound font</h2>
-            <p class="sf-empty-desc">Pick a vendor's .zip file or an unzipped folder. JMT Studio archives it, identifies the fonts inside, and adds your picks to the library.</p>
-            <button class="sf-empty-action" id="btn-sf-import-font">Import Sound Font</button>
+      <div class="sf-content-column">
+        <div class="sf-search-bar">
+          <div class="sf-search-input-wrap">
+            <input type="text" id="sf-search" class="sf-search-input" placeholder="Search sound fonts…" autocomplete="off" spellcheck="false">
+            <span id="sf-search-clear" class="vp-search-clear" style="display:none" title="Clear">&#x2715;</span>
           </div>
+          <span class="sf-search-count" id="sf-search-count"></span>
+          <div class="styles-tag-filter-wrap">
+            <button id="btn-sf-tag-filter" class="styles-tag-filter-btn" title="Filter by tag">
+              <span class="styles-tag-filter-icon">&#9662;</span> Tags<span id="sf-tag-filter-badge" class="styles-tag-filter-badge" style="display:none">0</span>
+            </button>
+            <div id="sf-tag-dropdown" class="styles-tag-dropdown" style="display:none">
+              <div id="sf-tag-dropdown-list"></div>
+            </div>
+          </div>
+          <div class="styles-tag-filter-wrap">
+            <button id="btn-sf-creator-filter" class="styles-tag-filter-btn" title="Filter by creator">
+              <span class="styles-tag-filter-icon">&#9662;</span> Creators<span id="sf-creator-filter-badge" class="styles-tag-filter-badge" style="display:none">0</span>
+            </button>
+            <div id="sf-creator-dropdown" class="styles-tag-dropdown" style="display:none">
+              <div id="sf-creator-dropdown-list"></div>
+            </div>
+          </div>
+          <button id="btn-sf-needs-review-filter" class="styles-tag-filter-btn" title="Show only entries with missing fields" style="display:none">
+            Needs review<span id="sf-needs-review-count" class="styles-tag-filter-badge" style="display:none">0</span>
+          </button>
         </div>
-        <div class="sf-cards" id="sf-cards"></div>
+        <div id="sf-active-filters" class="styles-active-filters" style="display:none"></div>
+        <div class="sf-grid-scroll">
+          <!-- Empty state shown when no fonts in the library. Sidecar (and
+               its own empty state) sits to the left independently, so the
+               user still sees their commons even with zero fonts. -->
+          <div class="sf-empty-wrap" id="sf-empty-nofonts" style="display:none">
+            <div class="sf-empty-card">
+              <svg class="sf-empty-icon" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+              <h2 class="sf-empty-title">Import your first sound font</h2>
+              <p class="sf-empty-desc">Pick a vendor's .zip file or an unzipped folder. JMT Studio archives it, identifies the fonts inside, and adds your picks to the library.</p>
+              <button class="sf-empty-action" id="btn-sf-import-font">Import Sound Font</button>
+            </div>
+          </div>
+          <div class="sf-cards" id="sf-cards"></div>
+        </div>
+        <!-- Missing fonts banner: surfaces font directories the open config
+             references that the user hasn't imported. Click a chip to copy the
+             name. Common-style shared folders (e.g. "common") are excluded. -->
+        <div id="sf-missing-bar" class="sf-missing-bar" style="display:none">
+          <span class="sf-missing-label">Not in your library:</span>
+          <span class="sf-missing-chips" id="sf-missing-chips"></span>
+        </div>
+        <!-- Legend mirrors Style Library's footer key — same colored swatches +
+             labels, surfacing card-state meanings without forcing the user to
+             hover or guess. Hidden when nothing in the library is in any state. -->
+        <div id="sf-legend" class="styles-legend" style="display:none"></div>
       </div>
     </div>
-    <!-- Missing fonts banner: surfaces font directories the open config
-         references that the user hasn't imported. Click a chip to copy the
-         name. Common-style shared folders (e.g. "common") are excluded. -->
-    <div id="sf-missing-bar" class="sf-missing-bar" style="display:none">
-      <span class="sf-missing-label">Not in your library:</span>
-      <span class="sf-missing-chips" id="sf-missing-chips"></span>
-    </div>
-    <!-- Legend mirrors Style Library's footer key — same colored swatches +
-         labels, surfacing card-state meanings without forcing the user to
-         hover or guess. Hidden when nothing in the library is in any state. -->
-    <div id="sf-legend" class="styles-legend" style="display:none"></div>
   </div>
 </div>
 
@@ -4024,6 +4091,13 @@
       </div>
     </div>
     <div class="sf-entry-detail-body">
+      <div class="sf-needs-review-banner" id="sf-detail-needs-review-banner" style="display:none">
+        <div class="sf-needs-review-banner-head">
+          <span class="sf-card-needs-review-chip">Needs review</span>
+          <button id="btn-sf-mark-reviewed" class="sf-mark-reviewed-btn" title="Clear the Needs review flag for this entry">Mark reviewed</button>
+        </div>
+        <ul class="sf-needs-review-reasons" id="sf-detail-needs-review-reasons"></ul>
+      </div>
       <div class="sf-entry-detail-meta">
         <div class="sf-meta-row">
           <span class="sf-meta-label">Acquired</span>
@@ -4618,6 +4692,46 @@
   </div>
 </div>
 
+<!-- ── Bulk import — four phases inside one overlay: scan (brief survey),
+     review (pre-scan summary with Start button), progress (per-source
+     bar), summary (final counts + failure list). Lives in Settings so
+     it's discoverable but not in the main workflow. ── -->
+<div class="modal-overlay" id="modal-sf-bulk-import">
+  <div class="modal sf-import-modal">
+    <h2 id="sf-bulk-import-title">Bulk import sound fonts</h2>
+
+    <div class="sf-import-phase" id="sf-bulk-import-phase-scan">
+      <p class="sf-import-progress-label">Scanning folder&hellip;</p>
+      <p class="sf-import-progress-detail" id="sf-bulk-import-scan-detail"></p>
+    </div>
+
+    <div class="sf-import-phase" id="sf-bulk-import-phase-review" style="display:none">
+      <p class="sf-import-hint" id="sf-bulk-import-review-summary"></p>
+      <div id="sf-bulk-import-review-breakdown" class="sf-bulk-review-breakdown"></div>
+      <p class="sf-import-hint" id="sf-bulk-import-review-note" style="color: var(--c-text-muted); margin-top: 10px;">
+        Sources already in your library will be skipped automatically. Items missing required fields land with a <span style="color: var(--jmt-amber, #d49b3a)">Needs review</span> flag you can resolve later.
+      </p>
+    </div>
+
+    <div class="sf-import-phase" id="sf-bulk-import-phase-progress" style="display:none">
+      <p class="sf-import-progress-label" id="sf-bulk-import-prog-label">Importing&hellip;</p>
+      <div class="sf-import-progress-track"><div class="sf-import-progress-bar" id="sf-bulk-import-prog-bar"></div></div>
+      <p class="sf-import-progress-detail" id="sf-bulk-import-prog-detail"></p>
+    </div>
+
+    <div class="sf-import-phase" id="sf-bulk-import-phase-summary" style="display:none">
+      <p class="sf-import-hint" id="sf-bulk-import-summary-text"></p>
+      <div id="sf-bulk-import-summary-failures" class="sf-bulk-review-breakdown" style="display:none"></div>
+    </div>
+
+    <div class="modal-btns sf-import-btn-row" style="margin-top: 18px;">
+      <button class="modal-btn-cancel" id="sf-bulk-import-cancel-btn">Cancel</button>
+      <button class="modal-btn-primary" id="sf-bulk-import-start-btn" style="display:none">Start bulk import</button>
+      <button class="modal-btn-primary" id="sf-bulk-import-done-btn" style="display:none">Done</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── Backup export prep — shows the survey + time estimate so the user
      can confirm or bail before the long-running archive step starts. ── -->
 <div class="modal-overlay" id="modal-sf-backup-prep">
@@ -4858,6 +4972,13 @@
       </label>
     </div>
 
+    <div class="settings-item" id="setting-sf-bulk-import-item">
+      <span class="settings-item-label">
+        Bulk import sound fonts <span style="color:var(--c-text-dim);font-weight:400">(point at a folder containing many fonts or zips; skips anything you already have, flags items needing review)</span>
+      </span>
+      <button class="settings-item-btn enabled" id="btn-sf-bulk-import">Pick folder&hellip;</button>
+    </div>
+
     <div class="about-section-heading">About</div>
 
     <div class="about-desc">Desktop tools for editing, compiling, and flashing ProffieOS configurations.</div>
@@ -5006,7 +5127,14 @@ window.getEditorContent = () => {
 function setFileOpen(open) {
   fileIsOpen = open;
   document.getElementById('empty-state').classList.toggle('visible', !open);
-  document.getElementById('config-editor-row').style.display = open ? '' : 'none';
+  // Only show the config editor row when the user is actually on the
+  // config tab. If they've switched away to Style Library / Sound Fonts
+  // / OS Versions while a file is loading, restoring display:'' here
+  // would force the editor visible underneath the other tab and leak
+  // its layout through. switchTab already re-applies the right display
+  // when the user comes back.
+  const showEditor = open && _activeTab === 'config';
+  document.getElementById('config-editor-row').style.display = showEditor ? '' : 'none';
   document.getElementById('editor-container').classList.toggle('visible', open);
   ['btn-close','btn-save','btn-saveas','btn-download','btn-undo','btn-redo',
    'input-desc','input-board','input-version','bp-usb-select'].forEach(id => {
@@ -6859,6 +6987,233 @@ document.getElementById('btn-cache-confirm').addEventListener('click', async () 
 });
 
 document.getElementById('btn-settings').addEventListener('click', openAboutModal);
+
+// ── Bulk import (Settings → Bulk import sound fonts) ──
+// Four-phase modal: scan → review → progress → summary. Lives in
+// Settings because it's a one-off catch-up workflow, not the day-to-day
+// import path. Hash dedup makes re-runs against the same folder safe;
+// already-in-library sources skip silently.
+(() => {
+  const els = {
+    modal:        document.getElementById('modal-sf-bulk-import'),
+    title:        document.getElementById('sf-bulk-import-title'),
+    phaseScan:    document.getElementById('sf-bulk-import-phase-scan'),
+    phaseReview:  document.getElementById('sf-bulk-import-phase-review'),
+    phaseProg:    document.getElementById('sf-bulk-import-phase-progress'),
+    phaseSummary: document.getElementById('sf-bulk-import-phase-summary'),
+    scanDetail:   document.getElementById('sf-bulk-import-scan-detail'),
+    reviewSummary:    document.getElementById('sf-bulk-import-review-summary'),
+    reviewBreakdown:  document.getElementById('sf-bulk-import-review-breakdown'),
+    progLabel:    document.getElementById('sf-bulk-import-prog-label'),
+    progBar:      document.getElementById('sf-bulk-import-prog-bar'),
+    progDetail:   document.getElementById('sf-bulk-import-prog-detail'),
+    summaryText:  document.getElementById('sf-bulk-import-summary-text'),
+    summaryFailures: document.getElementById('sf-bulk-import-summary-failures'),
+    cancelBtn:    document.getElementById('sf-bulk-import-cancel-btn'),
+    startBtn:     document.getElementById('sf-bulk-import-start-btn'),
+    doneBtn:      document.getElementById('sf-bulk-import-done-btn'),
+  };
+  let currentPlan = null;
+  let progressUnsub = null;
+  let runInFlight = false;
+
+  const showPhase = (phase) => {
+    if (els.phaseScan)    els.phaseScan.style.display    = phase === 'scan'    ? '' : 'none';
+    if (els.phaseReview)  els.phaseReview.style.display  = phase === 'review'  ? '' : 'none';
+    if (els.phaseProg)    els.phaseProg.style.display    = phase === 'progress' ? '' : 'none';
+    if (els.phaseSummary) els.phaseSummary.style.display = phase === 'summary' ? '' : 'none';
+    // Button visibility
+    if (els.startBtn) els.startBtn.style.display = phase === 'review' ? '' : 'none';
+    if (els.doneBtn)  els.doneBtn.style.display  = phase === 'summary' ? '' : 'none';
+    // Cancel label changes meaning by phase
+    if (els.cancelBtn) {
+      els.cancelBtn.style.display = phase === 'summary' ? 'none' : '';
+      els.cancelBtn.textContent = phase === 'progress' ? 'Cancel import' : 'Cancel';
+    }
+  };
+
+  const fmtBytes = (n) => {
+    if (!n) return '0 B';
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+    if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+    return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+  };
+
+  const escapeHtml = (s) => String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+
+  const closeModal = () => {
+    if (progressUnsub) { try { progressUnsub(); } catch {} progressUnsub = null; }
+    els.modal?.classList.remove('active');
+    currentPlan = null;
+    runInFlight = false;
+  };
+
+  const showReview = (plan) => {
+    currentPlan = plan;
+    const byKind = {};
+    for (const s of plan.sources) byKind[s.kind] = (byKind[s.kind] || 0) + 1;
+    const total = plan.sources.length;
+    if (total === 0) {
+      els.reviewSummary.textContent = 'No sound fonts found in that folder.';
+      els.reviewBreakdown.innerHTML = '';
+      els.startBtn.disabled = true;
+    } else {
+      els.reviewSummary.innerHTML =
+        `Found <strong>${total}</strong> source${total === 1 ? '' : 's'} ` +
+        `(${fmtBytes(plan.totalSizeBytes)} total) ready to import from ` +
+        `<code>${escapeHtml(plan.rootDir)}</code>.`;
+      const rows = [];
+      if (byKind['zip'])         rows.push(['Zip archives',          byKind['zip']]);
+      if (byKind['folder-solo']) rows.push(['Folder fonts',          byKind['folder-solo']]);
+      if (plan.commonFolders.length) rows.push(['Common folders (skipped in bulk)', plan.commonFolders.length]);
+      if (plan.skipped.length)   rows.push(['Skipped (no Proffie content)', plan.skipped.length]);
+      let html = rows.map(([l, v]) =>
+        `<div class="br-row"><span class="br-label">${escapeHtml(l)}</span><span class="br-val">${v}</span></div>`).join('');
+      if (plan.depthHalted) {
+        html += `<div class="br-row" style="margin-top:8px"><span class="br-label" style="color: var(--jmt-amber)">Scan halted at depth ${6} — nothing found yet. Pick a closer folder if you have more nested fonts.</span></div>`;
+      }
+      els.reviewBreakdown.innerHTML = html;
+      els.startBtn.disabled = false;
+    }
+    showPhase('review');
+  };
+
+  const startScan = async () => {
+    showPhase('scan');
+    els.modal?.classList.add('active');
+    els.scanDetail.textContent = '';
+    const pick = await window.electronAPI.bulkImportPickRoot();
+    if (!pick || pick.canceled) { closeModal(); return; }
+    if (!pick.ok) {
+      alert(`Could not open folder: ${pick.error || 'unknown error'}`);
+      closeModal();
+      return;
+    }
+    els.scanDetail.textContent = pick.rootDir;
+    const scanRes = await window.electronAPI.bulkImportScan({ rootDir: pick.rootDir });
+    if (!scanRes || !scanRes.ok) {
+      alert(`Scan failed: ${(scanRes && scanRes.error) || 'unknown error'}`);
+      closeModal();
+      return;
+    }
+    showReview(scanRes.plan);
+  };
+
+  const runImport = async () => {
+    if (!currentPlan) return;
+    runInFlight = true;
+    showPhase('progress');
+    els.progLabel.textContent = 'Starting…';
+    els.progBar.style.width = '0%';
+    els.progDetail.textContent = '';
+    const total = currentPlan.sources.length;
+    // Bar position is computed as: (completed sources + current source
+    // sub-percent) / total. That way it advances smoothly during the
+    // hash/copy/extract phases of a single source instead of jumping
+    // only at source-start ticks. Phase transitions cause small
+    // discontinuities within the per-source slice but never exceed it.
+    const setBarFromPosition = (sourceIdx, total, subPct) => {
+      const t = Math.max(1, total);
+      const completed = sourceIdx || 0;
+      const within = Math.max(0, Math.min(100, subPct || 0)) / 100;
+      const overall = Math.min(100, ((completed + within) / t) * 100);
+      els.progBar.style.width = `${overall.toFixed(1)}%`;
+      return overall;
+    };
+    progressUnsub = window.electronAPI.onBulkImportProgress((data) => {
+      if (!data) return;
+      if (data.stage === 'source-start') {
+        const idx = (data.sourceIdx || 0) + 1;
+        const t = data.total || total;
+        const overall = setBarFromPosition(data.sourceIdx, t, 0);
+        els.progLabel.textContent = `Importing ${idx} of ${t} (${Math.floor(overall)}% overall): ${data.label || ''}`;
+      } else if (data.stage === 'source-progress') {
+        if (data.sub && data.sub.percent != null) {
+          els.progDetail.textContent = `${data.sub.phase || ''} — ${data.sub.percent}%`;
+          const idx = (data.sourceIdx || 0) + 1;
+          const t = data.total || total;
+          const overall = setBarFromPosition(data.sourceIdx, t, data.sub.percent);
+          els.progLabel.textContent = `Importing ${idx} of ${t} (${Math.floor(overall)}% overall): ${data.label || ''}`;
+        }
+      } else if (data.stage === 'done') {
+        els.progBar.style.width = '100%';
+        els.progLabel.textContent = `Done (100% overall)`;
+      }
+    });
+    const runRes = await window.electronAPI.bulkImportRun({ plan: currentPlan });
+    if (progressUnsub) { try { progressUnsub(); } catch {} progressUnsub = null; }
+    runInFlight = false;
+    if (!runRes || !runRes.ok) {
+      alert(`Bulk import failed: ${(runRes && runRes.error) || 'unknown error'}`);
+      closeModal();
+      try { await window.refreshSoundFontsView?.(); } catch {}
+      return;
+    }
+    const sum = runRes.summary;
+    let text = '';
+    if (sum.cancelled) text += 'Cancelled. ';
+    text += `<strong>${sum.imported.length}</strong> imported`;
+    if (sum.skipped.length) text += `, <strong>${sum.skipped.length}</strong> already in library (skipped)`;
+    if (sum.failed.length)  text += `, <strong>${sum.failed.length}</strong> failed`;
+    text += '.';
+    els.summaryText.innerHTML = text;
+    if (sum.failed.length) {
+      const rows = sum.failed.map(f => {
+        // Show just the basename of the source path so the list is
+        // scannable; the full path is in the title for the tooltip.
+        const full = String(f.src || '');
+        const base = full.split(/[\\/]/).pop() || full;
+        return `<div class="sf-bulk-failure-row" title="${escapeHtml(full)}">`
+          + `<span class="sf-bulk-failure-name">${escapeHtml(base)}</span>`
+          + `<span class="sf-bulk-failure-reason">${escapeHtml(f.reason || 'unknown error')}</span>`
+          + `</div>`;
+      }).join('');
+      els.summaryFailures.innerHTML =
+        `<div class="sf-bulk-failure-head">Failures (${sum.failed.length})</div>`
+        + `<div class="sf-bulk-failure-list">${rows}</div>`;
+      els.summaryFailures.style.display = 'block';
+    } else {
+      els.summaryFailures.innerHTML = '';
+      els.summaryFailures.style.display = 'none';
+    }
+    showPhase('summary');
+    try { await window.refreshSoundFontsView?.(); } catch {}
+  };
+
+  els.cancelBtn?.addEventListener('click', () => {
+    if (runInFlight) {
+      window.electronAPI.bulkImportCancel?.();
+      els.progLabel.textContent = 'Cancelling… (finishing current source)';
+      return;
+    }
+    closeModal();
+  });
+  els.startBtn?.addEventListener('click', runImport);
+  els.doneBtn?.addEventListener('click', closeModal);
+  // Backdrop click + Esc are silently blocked while an import is in
+  // flight so the user can't accidentally dismiss the modal mid-run
+  // and lose progress visibility (the import keeps running in main
+  // even if the modal closes, but the user has no way to see when it
+  // finishes). The Cancel button stays the single explicit escape.
+  els.modal?.addEventListener('click', (e) => {
+    if (e.target !== els.modal) return;
+    if (runInFlight) return;
+    closeModal();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (!els.modal?.classList.contains('active')) return;
+    if (runInFlight) return;
+    closeModal();
+  });
+  document.getElementById('btn-sf-bulk-import')?.addEventListener('click', () => {
+    document.getElementById('modal-about')?.classList.remove('active');
+    startScan();
+  });
+})();
 document.getElementById('theme-selector').addEventListener('click', (e) => {
   const btn = e.target.closest('.theme-btn');
   if (btn) applyTheme(btn.dataset.theme);
@@ -12103,6 +12458,7 @@ require(['vs/editor/editor.main'], function () {
       let _sfSearchQuery = '';
       let _sfActiveFilterTags = new Set();
       let _sfActiveFilterCreators = new Set();
+      let _sfNeedsReviewFilterOn = false;
       // Set of font directory strings currently referenced by presets in the
       // open config. Recomputed on each grid render so editing the config
       // and switching back updates the visual immediately. Empty set when no
@@ -12267,15 +12623,37 @@ require(['vs/editor/editor.main'], function () {
           if (!a) return false;
           return filterCreatorsLower.includes(a);
         };
+        const matchesNeedsReviewFilter = (f) => {
+          if (!_sfNeedsReviewFilterOn) return true;
+          return !!(f.meta && f.meta.needsReview);
+        };
         // Selected cards bypass the current filter — they stay visible even
         // when the search/tag/creator filter would otherwise hide them. The
         // mental model: selection is a "keep this" override on top of the
         // filter. Clearing the selection lets the filter take over again.
         const matching = sorted.filter(f =>
           _sfSelectedNames.has(f.name) ||
-          (matchesSearch(f) && matchesTagFilter(f) && matchesCreatorFilter(f))
+          (matchesSearch(f) && matchesTagFilter(f) && matchesCreatorFilter(f) && matchesNeedsReviewFilter(f))
         );
-        const isFiltering = !!q || _sfActiveFilterTags.size > 0 || _sfActiveFilterCreators.size > 0;
+        const isFiltering = !!q || _sfActiveFilterTags.size > 0 || _sfActiveFilterCreators.size > 0 || _sfNeedsReviewFilterOn;
+        // Needs Review filter button: visible only when at least one entry
+        // has the flag. Badge shows the count; button gets the active style
+        // when the filter is on.
+        const needsReviewCount = sorted.filter(f => f.meta && f.meta.needsReview).length;
+        const nrBtn = document.getElementById('btn-sf-needs-review-filter');
+        const nrBadge = document.getElementById('sf-needs-review-count');
+        if (nrBtn) {
+          nrBtn.style.display = needsReviewCount > 0 ? '' : 'none';
+          nrBtn.classList.toggle('active', _sfNeedsReviewFilterOn);
+        }
+        if (nrBadge) {
+          if (needsReviewCount > 0) {
+            nrBadge.style.display = '';
+            nrBadge.textContent = String(needsReviewCount);
+          } else {
+            nrBadge.style.display = 'none';
+          }
+        }
         // In-use lookup for visual indicator + the "Select in-use" affordance.
         // Computed once per render and reused inside the card-map loop and
         // the action-bar sync below.
@@ -12343,13 +12721,18 @@ require(['vs/editor/editor.main'], function () {
           const linkBtn = linkUrl ? `<button class="sf-card-link" data-card-link="${_sfEscape(linkUrl)}" title="${_sfEscape(linkUrl)}">${_sfEscape(linkLabel)}</button>` : '';
           const isSelected = _sfSelectedNames.has(f.name);
           const isInUse = inUseFonts.has(f.name);
+          const needsReview = !!meta.needsReview;
+          const reviewChip = needsReview
+            ? '<span class="sf-card-needs-review-chip" title="Open the entry to fill in missing fields">Needs review</span>'
+            : '';
           const checkmark = isSelected ? '&#10003;' : '';
-          const cardClass = `sf-card${isSelected ? ' selected' : ''}${isInUse ? ' in-use' : ''}`;
+          const cardClass = `sf-card${isSelected ? ' selected' : ''}${isInUse ? ' in-use' : ''}${needsReview ? ' needs-review' : ''}`;
           return `<div class="${cardClass}" data-font="${_sfEscape(f.name)}">
             <button class="card-delete-btn" data-card-delete="${_sfEscape(f.name)}" title="Delete font">&#10005;</button>
             <div class="sf-card-name-row">
               <span class="sf-card-name">${_sfEscape(f.name)}</span>
               ${linkBtn}
+              ${reviewChip}
             </div>
             ${author}${desc}${tags}
             <button class="sf-card-select-btn" data-card-select="${_sfEscape(f.name)}" title="Select">${checkmark}</button>
@@ -14086,7 +14469,8 @@ require(['vs/editor/editor.main'], function () {
       const _sfRenderActiveFilters = () => {
         const strip = document.getElementById('sf-active-filters');
         if (!strip) return;
-        const total = _sfActiveFilterTags.size + _sfActiveFilterCreators.size;
+        const needsReviewActive = _sfNeedsReviewFilterOn ? 1 : 0;
+        const total = _sfActiveFilterTags.size + _sfActiveFilterCreators.size + needsReviewActive;
         if (total === 0) {
           strip.style.display = 'none';
           strip.innerHTML = '';
@@ -14095,6 +14479,7 @@ require(['vs/editor/editor.main'], function () {
         strip.style.display = '';
         // Match the Style Library active-filter chip pattern (JMT blue) for
         // consistency. "free" keeps its green identity as the one exception.
+        // Needs review uses the amber accent to match its card chip.
         const tagChips = Array.from(_sfActiveFilterTags).map(tag => {
           const isFree = tag.toLowerCase() === 'free';
           const cls = isFree ? 'styles-active-filter-chip sf-active-filter-free' : 'styles-active-filter-chip';
@@ -14103,10 +14488,13 @@ require(['vs/editor/editor.main'], function () {
         const creatorChips = Array.from(_sfActiveFilterCreators).map(c =>
           `<span class="styles-active-filter-chip" data-creator="${_sfEscape(c)}">${_sfEscape(c)}<button class="styles-active-filter-remove" data-filter-remove-creator="${_sfEscape(c)}" title="Remove">&#10005;</button></span>`
         ).join('');
+        const needsReviewChip = _sfNeedsReviewFilterOn
+          ? `<span class="styles-active-filter-chip sf-active-filter-needs-review" data-needs-review="1">Needs review<button class="styles-active-filter-remove" data-filter-remove-needs-review="1" title="Remove">&#10005;</button></span>`
+          : '';
         const clearAll = total >= 2
           ? `<button class="styles-active-filter-clear" id="sf-clear-all-filters">Clear all</button>`
           : '';
-        strip.innerHTML = `<span class="styles-active-filters-label">Filtering by:</span>${tagChips}${creatorChips}${clearAll}`;
+        strip.innerHTML = `<span class="styles-active-filters-label">Filtering by:</span>${tagChips}${creatorChips}${needsReviewChip}${clearAll}`;
       };
       const _sfToggleFilterTag = (tag) => {
         if (!tag) return;
@@ -15420,9 +15808,11 @@ require(['vs/editor/editor.main'], function () {
         if (wasActive) modal.classList.remove('active');
         const sourcePath = await window.electronAPI.selectSoundFontSource({ mode });
         if (!sourcePath) {
-          // Cancel: restore the modal at the 'pick' phase so the user can
-          // try the other mode (zip vs folder) without re-opening Import.
-          if (wasActive) modal.classList.add('active');
+          // Cancel the picker = cancel the import. Don't restore the
+          // chooser modal; that previously forced the user to click
+          // Cancel a second time to leave a flow they already left.
+          // If they meant to switch modes (zip vs folder), they re-open
+          // Import — one extra click but matches expectation.
           return;
         }
         // Transition the modal's internal phase BEFORE making it visible
@@ -15512,6 +15902,15 @@ require(['vs/editor/editor.main'], function () {
         if (_sfEntryDetailEls.saveBtn) _sfEntryDetailEls.saveBtn.disabled = false;
         if (_sfEntryDetailEls.discardBtn) _sfEntryDetailEls.discardBtn.textContent = 'Discard';
       };
+      // Friendly text for each review-trigger reason key. Kept in sync
+      // with the keys emitted by soundFontBulkImport.runBulkImport.
+      const _SF_REVIEW_REASON_TEXT = {
+        creator_empty: 'Creator field is empty.',
+        creator_unknown_no_website: 'Creator was set but isn’t in our known list and has no website on file.',
+        creator_structural_match: 'Creator was guessed from the file structure rather than a readme. Verify it’s correct.',
+        name_collision_renamed: 'Name was suffixed to avoid colliding with an existing entry.',
+        acquisition_date_fallback: 'Acquired date couldn’t be read from the file and defaulted to today.',
+      };
       const _sfRefreshDisplayValues = () => {
         if (!_sfDetailEdit) return;
         if (_sfEntryDetailEls.name) _sfEntryDetailEls.name.textContent = _sfDetailEdit.name;
@@ -15519,6 +15918,38 @@ require(['vs/editor/editor.main'], function () {
         if (_sfEntryDetailEls.bylinePrefix) _sfEntryDetailEls.bylinePrefix.style.display = _sfDetailEdit.author ? '' : 'none';
         if (_sfEntryDetailEls.acquiredDisplay) _sfEntryDetailEls.acquiredDisplay.textContent = _sfDetailEdit.acquisitionDate ? _sfFormatDate(_sfDetailEdit.acquisitionDate) : '';
         if (_sfEntryDetailEls.descDisplay) _sfEntryDetailEls.descDisplay.textContent = _sfDetailEdit.description || '';
+        // Needs Review banner: visible only when the flag is set on the
+        // entry. Lists each reason in plain English. Mark Reviewed button
+        // clears the flag explicitly so the user can dismiss without
+        // editing any field.
+        const banner = document.getElementById('sf-detail-needs-review-banner');
+        const reasonsList = document.getElementById('sf-detail-needs-review-reasons');
+        if (banner) {
+          if (_sfDetailEdit.needsReview) {
+            banner.style.display = '';
+            const reasons = Array.isArray(_sfDetailEdit.reviewReasons) ? _sfDetailEdit.reviewReasons : [];
+            if (reasonsList) {
+              reasonsList.innerHTML = reasons.length === 0
+                ? '<li>No specific reason recorded.</li>'
+                : reasons.map(r => `<li>${_sfEscape(_SF_REVIEW_REASON_TEXT[r] || r)}</li>`).join('');
+            }
+            // Mark reviewed is only available when no REQUIRED-field reason
+            // is still active. Today the only required field is Creator —
+            // if `creator_empty` is in the reasons and the field is still
+            // blank, the user has to fill it before they can dismiss the
+            // banner. All other reasons (structural-match verification,
+            // name-collision rename, date fallback) are advisory and can
+            // be dismissed at any time.
+            const markBtn = document.getElementById('btn-sf-mark-reviewed');
+            if (markBtn) {
+              const creatorMissing = reasons.includes('creator_empty')
+                && !(_sfDetailEdit.author && String(_sfDetailEdit.author).trim());
+              markBtn.style.display = creatorMissing ? 'none' : '';
+            }
+          } else {
+            banner.style.display = 'none';
+          }
+        }
         _sfRenderDetailTags();
         _sfSyncLinkDisplay();
       };
@@ -15659,6 +16090,8 @@ require(['vs/editor/editor.main'], function () {
           purchased: m.purchased !== false, // default true when undefined
           linkUrl: m.linkUrl || '',
           linkLabel: (m.linkLabel || '').trim(),
+          needsReview: !!m.needsReview,
+          reviewReasons: Array.isArray(m.reviewReasons) ? m.reviewReasons.slice() : [],
         };
         _sfDetailDirty = false;
         if (_sfEntryDetailEls.saveBtn) _sfEntryDetailEls.saveBtn.disabled = true;
@@ -15942,6 +16375,8 @@ require(['vs/editor/editor.main'], function () {
           purchased: _sfDetailEdit.purchased,
           linkUrl: _sfDetailEdit.linkUrl,
           linkLabel: _sfDetailEdit.linkLabel,
+          needsReview: !!_sfDetailEdit.needsReview,
+          reviewReasons: Array.isArray(_sfDetailEdit.reviewReasons) ? _sfDetailEdit.reviewReasons : [],
         };
         const sanitizedName = _sfSanitizeName(_sfDetailEdit.name);
         const isRename = sanitizedName !== _sfDetailOriginalName;
@@ -16015,6 +16450,17 @@ require(['vs/editor/editor.main'], function () {
       // intent is ambiguous.
       _sfEntryDetailEls.discardBtn?.addEventListener('click', _sfCloseEntryDetail);
       _sfEntryDetailEls.saveBtn?.addEventListener('click', _sfSaveEntryDetail);
+      // Mark reviewed: clears the needsReview flag + reasons, marks the
+      // entry dirty so Save persists it. User can also still edit fields
+      // and Save like normal — the flag clears either way once Save
+      // commits a meta where needsReview is false.
+      document.getElementById('btn-sf-mark-reviewed')?.addEventListener('click', () => {
+        if (!_sfDetailEdit) return;
+        _sfDetailEdit.needsReview = false;
+        _sfDetailEdit.reviewReasons = [];
+        _sfMarkDetailDirty();
+        _sfRefreshDisplayValues();
+      });
       // Backdrop click: silent block when dirty so an accidental click
       // outside doesn't pop a discard prompt over half-written edits.
       // X / Close / Esc still go through the explicit-prompt path.
@@ -20885,6 +21331,14 @@ require(['vs/editor/editor.main'], function () {
         _sfTagDropdown.style.display = opening ? '' : 'none';
         if (opening) _sfRenderTagDropdown();
       });
+      // Needs Review filter is a plain toggle (no dropdown — it's a
+      // single boolean, not a multi-select). Re-render flips the badge
+      // active state and re-applies the filter.
+      document.getElementById('btn-sf-needs-review-filter')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        _sfNeedsReviewFilterOn = !_sfNeedsReviewFilterOn;
+        _sfRenderGrid();
+      });
       _sfTagDropdown?.addEventListener('click', (e) => {
         const item = e.target.closest('.styles-tag-dropdown-item');
         if (!item) return;
@@ -20956,11 +21410,19 @@ require(['vs/editor/editor.main'], function () {
           if (c) _sfToggleFilterCreator(c);
           return;
         }
+        const nrRemove = e.target.closest('[data-filter-remove-needs-review]');
+        if (nrRemove) {
+          e.stopPropagation();
+          _sfNeedsReviewFilterOn = false;
+          _sfRenderGrid();
+          return;
+        }
         const clear = e.target.closest('#sf-clear-all-filters');
         if (clear) {
           e.stopPropagation();
           _sfActiveFilterTags = new Set();
           _sfActiveFilterCreators = new Set();
+          _sfNeedsReviewFilterOn = false;
           _sfRenderGrid();
         }
       });

@@ -48,41 +48,72 @@ const vendors = [
         fileMatch: /(^|\/)readme\.txt$/i,
         contentMatch: /by\s+KSith/i,
       },
+      // KSith ships every font with the prefix "KSith_" in the zip
+      // filename (KSith_Ghost.zip, KSith_Rescue.zip, KSith_ShadowBlade.zip,
+      // etc.). Catches the few KSith zips that ship without a readme.
+      // Does NOT help Cere.zip — Cere is unsigned KSith and the
+      // filename doesn't carry the prefix; hash registry is the only
+      // path for that one.
+      {
+        type: 'sourceFilename',
+        match: /^KSith_/i,
+      },
+    ],
+  },
+  // The next three vendors share a filename convention that's
+  // self-identifying: "ReadMe - <VendorName> (Font Creator).txt". The
+  // filename alone is the declaration — structuralAll file-existence
+  // check is enough. Verified against Ryan's archive: each pattern
+  // catches the right vendor with no overlap (DoubleAgent.zip ->
+  // Mountain Sabers, Shadow Lord.zip -> Orlando Dove, The_Water_Saber.zip
+  // -> Synthetic Epiphany). If a vendor outside this trio ever adopts
+  // the same shape, add their entry alongside.
+  {
+    id: 'mountainsabers',
+    displayName: 'Mountain Sabers',
+    website: 'https://www.mountainsabersfonts.com',
+    purchasedDefault: true,
+    patterns: [
+      {
+        type: 'structuralAll',
+        requireAll: [
+          /(^|\/)ReadMe\s*-\s*Mountain\s+Sabers\s*\(Font\s+Creator\)\.txt$/i,
+        ],
+      },
+      // Filename fallback for Mountain Sabers' bundle archives that
+      // ship without per-font readmes (Mountain Sabers Free Pack
+      // contains JURASSIC/, STARGATE/, etc. with no readmes inside).
+      // Source archive name carries the vendor.
+      {
+        type: 'sourceFilename',
+        match: /^Mountain\s+Sabers/i,
+      },
     ],
   },
   {
-    id: 'greyscale',
-    displayName: 'Greyscale Fonts',
-    website: 'https://www.greyscalefonts.com',
-    purchasedDefault: undefined,
+    id: 'orlandodove',
+    displayName: 'Orlando Dove',
+    website: null,
+    purchasedDefault: false, // Distributed free via YouTube
     patterns: [
-      // Greyscale's own readme template carries an authorial signature
-      // ("copyright (C) Greyscale Fonts <year>"). Match against the
-      // copyright-adjacent phrasing rather than the bare brand name so
-      // collaboration fonts that merely credit Greyscale as a contributor
-      // (e.g. JayDalorian's Decimate, where the readme lists "Greyscale
-      // Fonts- Blasters and Clashes") don't false-positive here.
       {
-        type: 'readmeContent',
-        fileMatch: /(^|\/)(read.?me|ReadMe)\.txt$/i,
-        contentMatch: /(?:copyright|©|\(c\))[^\n]{0,40}Greyscale Fonts/i,
-      },
-      // The remaining ~17 Greyscale fonts ship no readme but have a
-      // distinctive INNER-ZIP five-board set at a common depth
-      // (Asteria.zip / CFX-GHv3.zip / Proffie.zip / Verso.zip / Xeno3.zip).
-      // The unpacked-folder form of the same names is NOT a Greyscale
-      // signature: it's the community-standard multi-board export shape
-      // and is used by many other vendors including character-font
-      // makers. Don't extend this pattern to folders without additional
-      // textual evidence.
-      {
-        type: 'structuralSiblings',
+        type: 'structuralAll',
         requireAll: [
-          /^Asteria\.zip$/i,
-          /^CFX-GH(?:V|v)3\.zip$/i,
-          /^Proffie\.zip$/i,
-          /^Verso\.zip$/i,
-          /^Xeno3?\.zip$/i,
+          /(^|\/)ReadMe\s*-\s*Orlando\s+Dove\s*\(Font\s+Creator\)\.txt$/i,
+        ],
+      },
+    ],
+  },
+  {
+    id: 'syntheticepiphany',
+    displayName: 'Synthetic Epiphany',
+    website: 'https://www.etsy.com/shop/syntheticepiphany',
+    purchasedDefault: true,
+    patterns: [
+      {
+        type: 'structuralAll',
+        requireAll: [
+          /(^|\/)ReadMe\s*-\s*Synthetic\s+Epiphany\s*\(Font\s+Creator\)\.txt$/i,
         ],
       },
     ],
@@ -97,6 +128,15 @@ const vendors = [
         type: 'readmeContent',
         fileMatch: /(^|\/)Read me\.txt$/i,
         contentMatch: /JUANSITH/i,
+      },
+      // Juansith always names their zips "JUANSITH'S <FontName>.zip"
+      // (or with the acute-S variant "JUANSITH´S"). The TALZIN BLADE
+      // and SKOLL zips ship without any text files at all, so the
+      // filename is the only signal. Matches on the JUANSITH stem so
+      // both apostrophe variants land.
+      {
+        type: 'sourceFilename',
+        match: /^JUANSITH/i,
       },
     ],
   },
@@ -113,6 +153,21 @@ const vendors = [
         // also reference saberfont.com.
         contentMatch: /Rob Petkau/i,
         contentMatchAll: [/Rob Petkau/i, /saberfont\.com/i],
+      },
+    ],
+  },
+  {
+    id: 'projectfonts',
+    displayName: 'Project Fonts',
+    website: 'https://www.saberfont.com',
+    purchasedDefault: undefined,
+    patterns: [
+      {
+        type: 'readmeContent',
+        fileMatch: /(^|\/)readme\.txt$/i,
+        // Both signals required so we don't false-match Rob Petkau or
+        // Juansith readmes that also mention saberfont.com.
+        contentMatchAll: [/by\s+Project\s+Fonts/i, /saberfont\.com/i],
       },
     ],
   },
@@ -139,6 +194,96 @@ const vendors = [
           /(^|\/)[Pp]roffie\/resource\.txt$/i,
           /(^|\/)Cfx\/Blade Style \+ config\.txt$/i,
         ],
+      },
+      // JayDalorian's free releases (and many older paid releases)
+      // prefix the zip filename with a version like "1.1-" or "1.2-".
+      // Catches the few that ship without a readme or the structural
+      // helper files: 1.1-BlasterMode.zip, 1.1-The New Year Saber,
+      // 1.2-lightsaber of the bells, etc. Pattern is narrow enough
+      // (leading digit.digit followed by a separator) that other
+      // vendors don't accidentally match — checked against Ryan's full
+      // collection.
+      {
+        type: 'sourceFilename',
+        match: /^\s*\d+\.\d+\s*[-_\s]/,
+      },
+    ],
+  },
+  // Greyscale sits LAST in the vendor list because its phrase-content
+  // pattern reads every .txt file in the archive. Putting it last means
+  // we only pay that cost on sources that have already failed every
+  // other vendor's cheap, narrowly-targeted pattern. Within Greyscale's
+  // own patterns the order is also cheapest-first (narrow-filename
+  // readme content, then two structural file/shape checks) so even
+  // most Greyscale fonts skip the broad scan.
+  {
+    id: 'greyscale',
+    displayName: 'Greyscale Fonts',
+    website: 'https://www.greyscalefonts.com',
+    purchasedDefault: undefined,
+    patterns: [
+      // Pattern 1 (cheap): Greyscale credits themselves in their readmes
+      // via one of two phrasings: a copyright line ("copyright (C)
+      // Greyscale Fonts <year>", "© Greyscale Fonts") OR a "created by
+      // Greyscale Fonts" tagline (Engine Grip, Exalted, etc.). Pattern
+      // accepts both. Collaboration fonts that list Greyscale further
+      // down as a contributor (e.g. JayDalorian's Decimate, where the
+      // readme has a "Greyscale Fonts- Blasters and Clashes" line)
+      // don't match because that phrasing isn't preceded by "created
+      // by" / copyright.
+      {
+        type: 'readmeContent',
+        fileMatch: /(^|\/)(read.?me|ReadMe)\.txt$/i,
+        contentMatch: /(?:created\s+by|copyright|©|\(c\))[^\n]{0,40}Greyscale Fonts/i,
+      },
+      // Pattern 2 (cheap): inner-zip five-board set at a common depth
+      // (Asteria.zip / CFX-GHv3.zip / Proffie.zip / Verso.zip /
+      // Xeno3.zip). The unpacked-folder form of the same names is NOT a
+      // Greyscale signature: it's the community-standard multi-board
+      // export shape used by many other vendors including character-
+      // font makers. Don't extend this pattern to folders without
+      // additional textual evidence.
+      {
+        type: 'structuralSiblings',
+        requireAll: [
+          /^Asteria\.zip$/i,
+          /^CFX-GH(?:V|v)3\.zip$/i,
+          /^Proffie\.zip$/i,
+          /^Verso\.zip$/i,
+          /^Xeno3?\.zip$/i,
+        ],
+      },
+      // Pattern 3 (cheap): Greyscale ships a distinctive style helper
+      // file inside most of their fonts (paid and free, with or without
+      // a readme): exact filename `proffie_blade_style.txt`, anywhere in
+      // the archive tree. Verified against Ryan's archive: 7/7 known
+      // Greyscale fonts with the standard filename include it
+      // (Stitched, Skotos, Null, EngineGrip, Apocalypse, Decay,
+      // Volatile), 6/6 known non-Greyscale fonts don't (Cere, KSith_Ghost,
+      // KSith_Rescue, Father (Kyberphonic), Dark_Apprentice
+      // (BKSaberSounds), SATELE (Juansith)). Catches the no-readme paid
+      // Greyscale fonts that the readme content pattern misses.
+      {
+        type: 'structuralAll',
+        requireAll: [
+          /(^|\/)proffie_blade_style\.txt$/i,
+        ],
+      },
+      // Pattern 4 (expensive — broad .txt scan, kept LAST): some
+      // Greyscale fonts name the style file differently
+      // (paradise_proffie_style.txt, binary_dark_and_light.txt,
+      // magnetic_blade_style.txt etc.) so the file-existence pattern
+      // above misses them. We fall through to scanning every .txt file
+      // in the archive for an authorial disclaimer phrase that is
+      // distinctive to Greyscale. Verified against Ryan's archive: 21/24
+      // known Greyscale fonts contain this exact sentence somewhere in
+      // a .txt file; 0/11 non-Greyscale fonts contain it anywhere. The
+      // 3 still-uncovered fonts (Coda, Defect, Masterless) need manual
+      // creator entry or the future hash registry.
+      {
+        type: 'readmeContent',
+        fileMatch: /\.txt$/i,
+        contentMatch: /I'm not claiming to be an expert, I'm still learning too/,
       },
     ],
   },
@@ -345,6 +490,25 @@ async function detectVendor(source) {
             purchasedDefault: vendor.purchasedDefault,
             matchedFile: null,
             matchType: 'structuralAll',
+          };
+        }
+      } else if (pattern.type === 'sourceFilename') {
+        // Match against source.meta.originalName (the source archive's
+        // delivered filename). Useful for vendors who consistently
+        // prefix their zips (Juansith always ships "JUANSITH<...>.zip",
+        // KSith always ships "KSith_<...>.zip", etc.). Cheap — no
+        // reads, just a regex against a known string.
+        const originalName = source.meta && source.meta.originalName;
+        if (originalName && pattern.match.test(originalName)) {
+          return {
+            vendorId: vendor.id,
+            vendor: vendor.displayName,
+            vendorWebsite: vendor.website,
+            vendorAutoDetected: true,
+            confidence: 'structural',
+            purchasedDefault: vendor.purchasedDefault,
+            matchedFile: originalName,
+            matchType: 'sourceFilename',
           };
         }
       }
