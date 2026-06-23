@@ -4002,6 +4002,7 @@
       <p class="sf-import-progress-label" id="sf-import-progress-label">Importing source…</p>
       <div class="sf-import-progress-track"><div class="sf-import-progress-bar" id="sf-import-progress-bar"></div></div>
       <p class="sf-import-progress-detail" id="sf-import-progress-detail"></p>
+      <p class="sf-import-progress-detail" id="sf-import-progress-elapsed" style="color:var(--c-text-sub)"></p>
       <p class="sf-import-progress-tip" id="sf-import-progress-tip" style="display:none">Folder imports have to read every file to confirm this is a unique source, which is slow on large fonts. If you still have the original .zip from the vendor, importing that is much faster — and keeping your purchases zipped is the cleanest way to archive them long-term.</p>
     </div>
 
@@ -4721,10 +4722,12 @@
       <p class="sf-import-progress-label" id="sf-bulk-import-prog-label">Importing&hellip;</p>
       <div class="sf-import-progress-track"><div class="sf-import-progress-bar" id="sf-bulk-import-prog-bar"></div></div>
       <p class="sf-import-progress-detail" id="sf-bulk-import-prog-detail"></p>
+      <p class="sf-import-progress-detail" id="sf-bulk-import-prog-elapsed" style="color:var(--c-text-sub);font-size:0.78rem;margin-top:4px"></p>
     </div>
 
     <div class="sf-import-phase" id="sf-bulk-import-phase-summary" style="display:none">
       <p class="sf-import-hint" id="sf-bulk-import-summary-text"></p>
+      <p class="sf-import-hint" id="sf-bulk-import-summary-elapsed" style="color:var(--c-text-sub);margin-top:6px"></p>
       <div id="sf-bulk-import-summary-failures" class="sf-bulk-review-breakdown" style="display:none"></div>
     </div>
 
@@ -7029,7 +7032,9 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     progLabel:    document.getElementById('sf-bulk-import-prog-label'),
     progBar:      document.getElementById('sf-bulk-import-prog-bar'),
     progDetail:   document.getElementById('sf-bulk-import-prog-detail'),
+    progElapsed:  document.getElementById('sf-bulk-import-prog-elapsed'),
     summaryText:  document.getElementById('sf-bulk-import-summary-text'),
+    summaryElapsed: document.getElementById('sf-bulk-import-summary-elapsed'),
     summaryFailures: document.getElementById('sf-bulk-import-summary-failures'),
     cancelBtn:    document.getElementById('sf-bulk-import-cancel-btn'),
     startBtn:     document.getElementById('sf-bulk-import-start-btn'),
@@ -7131,6 +7136,18 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     els.progLabel.textContent = 'Starting…';
     els.progBar.style.width = '0%';
     els.progDetail.textContent = '';
+    // Elapsed clock: independent 1s tick so the user sees motion even
+    // during a phase that doesn't emit progress events (a giant single
+    // source mid-hash, mid-extract, etc.). Same "no estimates we can't
+    // back up" rule as the backup export path — elapsed only.
+    const bulkStartMs = Date.now();
+    const _fmtDur = (sec) => (window._sfFormatDuration ? window._sfFormatDuration(sec) : `${Math.round(sec)}s`);
+    if (els.progElapsed) els.progElapsed.textContent = `${_fmtDur(0)} elapsed`;
+    const bulkElapsedTicker = setInterval(() => {
+      if (!els.progElapsed) return;
+      const sec = (Date.now() - bulkStartMs) / 1000;
+      els.progElapsed.textContent = `${_fmtDur(sec)} elapsed`;
+    }, 1000);
     const total = currentPlan.sources.length;
     // Bar position is computed as: (completed sources + current source
     // sub-percent) / total. That way it advances smoothly during the
@@ -7154,7 +7171,34 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         els.progLabel.textContent = `Importing ${idx} of ${t} (${Math.floor(overall)}% overall): ${data.label || ''}`;
       } else if (data.stage === 'source-progress') {
         if (data.sub && data.sub.percent != null) {
-          els.progDetail.textContent = `${data.sub.phase || ''} — ${data.sub.percent}%`;
+          // Map raw backend phase tokens to gerund-cased user-facing
+          // labels so the detail line reads as a complete present-tense
+          // status. Unknown phases fall back to title-case of whatever
+          // the backend emits so a future phase shows up sensibly
+          // without renderer changes.
+          const phaseLabels = {
+            import: 'Importing',
+            extract: 'Extracting',
+            hash: 'Hashing',
+            copy: 'Copying',
+            scan: 'Scanning',
+            finalize: 'Finalizing',
+          };
+          const rawPhase = data.sub.phase || '';
+          const phaseStr = phaseLabels[rawPhase] || (rawPhase ? rawPhase.charAt(0).toUpperCase() + rawPhase.slice(1) : '');
+          // Detail line format matches the single-source import: show
+          // bytes when available so the user sees the same shape across
+          // both flows (size / total (percent)). Falls back to bare
+          // "Phase Percent%" when no byte info is in the sub event.
+          const _fmtBytes = (n) => (window._sfFormatBytes ? window._sfFormatBytes(n) : `${n} B`);
+          let detail;
+          if (data.sub.bytes && data.sub.totalBytes) {
+            const bytesStr = `${_fmtBytes(data.sub.bytes)} / ${_fmtBytes(data.sub.totalBytes)} (${Math.floor(data.sub.percent)}%)`;
+            detail = phaseStr ? `${phaseStr} ${bytesStr}` : bytesStr;
+          } else {
+            detail = phaseStr ? `${phaseStr} ${data.sub.percent}%` : `${data.sub.percent}%`;
+          }
+          els.progDetail.textContent = detail;
           const idx = (data.sourceIdx || 0) + 1;
           const t = data.total || total;
           const overall = setBarFromPosition(data.sourceIdx, t, data.sub.percent);
@@ -7167,6 +7211,12 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     });
     const runRes = await window.electronAPI.bulkImportRun({ plan: currentPlan });
     if (progressUnsub) { try { progressUnsub(); } catch {} progressUnsub = null; }
+    // Stop the elapsed-clock interval and capture the final wall-clock
+    // duration for the summary stamp. Cleared regardless of outcome
+    // (success, fail, or cancel) so the ticker can't leak past the
+    // modal close.
+    clearInterval(bulkElapsedTicker);
+    const bulkFinalElapsedSec = (Date.now() - bulkStartMs) / 1000;
     runInFlight = false;
     if (!runRes || !runRes.ok) {
       alert(`Bulk import failed: ${(runRes && runRes.error) || 'unknown error'}`);
@@ -7182,6 +7232,9 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     if (sum.failed.length)  text += `, <strong>${sum.failed.length}</strong> failed`;
     text += '.';
     els.summaryText.innerHTML = text;
+    if (els.summaryElapsed) {
+      els.summaryElapsed.textContent = `Took ${_fmtDur(bulkFinalElapsedSec)}.`;
+    }
     if (sum.failed.length) {
       const rows = sum.failed.map(f => {
         // Show just the basename of the source path so the list is
@@ -14827,6 +14880,7 @@ require(['vs/editor/editor.main'], function () {
         progLabel:   document.getElementById('sf-import-progress-label'),
         progBar:     document.getElementById('sf-import-progress-bar'),
         progDetail:  document.getElementById('sf-import-progress-detail'),
+        progElapsed: document.getElementById('sf-import-progress-elapsed'),
         progTip:     document.getElementById('sf-import-progress-tip'),
         createLabel: document.getElementById('sf-create-progress-label'),
         createBar:   document.getElementById('sf-create-progress-bar'),
@@ -15284,6 +15338,9 @@ require(['vs/editor/editor.main'], function () {
         if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
         return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
       };
+      // Expose for other SF modules (bulk import, etc.) so byte formatting
+      // is consistent across every progress surface in the app.
+      if (typeof window !== 'undefined') window._sfFormatBytes = _sfFormatBytes;
       // Mirror of soundFontEntries._sanitizeEntryName so the UI shows the
       // disk-safe form before the user commits.
       const _sfSanitizeName = (name) => String(name || '').trim()
@@ -15326,6 +15383,7 @@ require(['vs/editor/editor.main'], function () {
         if (_sfImportEls.progLabel) _sfImportEls.progLabel.textContent = 'Reading source…';
         if (_sfImportEls.progBar) _sfImportEls.progBar.style.width = '0%';
         if (_sfImportEls.progDetail) _sfImportEls.progDetail.textContent = '';
+        if (_sfImportEls.progElapsed) _sfImportEls.progElapsed.textContent = '';
         // Folder imports stream every file's content through the hash, which
         // is noticeably slow on multi-GB sources. Surface the zip-is-faster
         // hint only in that case.
@@ -15333,6 +15391,17 @@ require(['vs/editor/editor.main'], function () {
           const isZip = /\.zip$/i.test(sourcePath);
           _sfImportEls.progTip.style.display = isZip ? 'none' : '';
         }
+        // Elapsed clock: same "no estimates, elapsed only" pattern as the
+        // bulk import and backup export flows. Independent 1s tick so the
+        // display moves even during a phase that doesn't emit byte ticks.
+        const importStartMs = Date.now();
+        const _fmtDurForImport = (sec) => (window._sfFormatDuration ? window._sfFormatDuration(sec) : `${Math.round(sec)}s`);
+        if (_sfImportEls.progElapsed) _sfImportEls.progElapsed.textContent = `${_fmtDurForImport(0)} elapsed`;
+        const importElapsedTicker = setInterval(() => {
+          if (!_sfImportEls.progElapsed) return;
+          const sec = (Date.now() - importStartMs) / 1000;
+          _sfImportEls.progElapsed.textContent = `${_fmtDurForImport(sec)} elapsed`;
+        }, 1000);
         if (_sfImportProgressUnsub) { try { _sfImportProgressUnsub(); } catch {} }
         _sfImportProgressUnsub = window.electronAPI.onSourceImportProgress((data) => {
           if (!data || !_sfImportEls.progBar) return;
@@ -15342,13 +15411,19 @@ require(['vs/editor/editor.main'], function () {
           _sfImportEls.progBar.style.width = `${Math.min(100, Math.max(0, pct))}%`;
           if (_sfImportEls.progDetail) {
             let detail = '';
-            if (data.bytes && data.totalBytes) detail = `${_sfFormatBytes(data.bytes)} / ${_sfFormatBytes(data.totalBytes)}`;
-            else if (data.currentFile) detail = data.currentFile;
+            if (data.bytes && data.totalBytes) {
+              // Include the percent inline so the byte count and the bar
+              // position corroborate each other at a glance.
+              detail = `${_sfFormatBytes(data.bytes)} / ${_sfFormatBytes(data.totalBytes)} (${Math.floor(pct)}%)`;
+            } else if (data.currentFile) detail = data.currentFile;
             _sfImportEls.progDetail.textContent = detail;
           }
         });
         const importRes = await window.electronAPI.importSource({ sourcePath, forceNewSource });
         if (_sfImportProgressUnsub) { try { _sfImportProgressUnsub(); } catch {} _sfImportProgressUnsub = null; }
+        // Stop the elapsed clock regardless of outcome so the ticker
+        // can't leak past the modal close or into the next phase.
+        clearInterval(importElapsedTicker);
         // If the user cancelled (or started another run) while the import
         // was in flight, _sfImport's runId no longer matches ours. Clean up
         // the orphan source if we did successfully write one.
@@ -22175,6 +22250,9 @@ require(['vs/editor/editor.main'], function () {
         const mm = m - h * 60;
         return mm === 0 ? `${h} hour${h === 1 ? '' : 's'}` : `${h}h ${mm}m`;
       };
+      // Expose for other SF modules (bulk import, etc.) so the
+      // "elapsed only, no estimates" formatter has one source of truth.
+      if (typeof window !== 'undefined') window._sfFormatDuration = _sfFormatDuration;
       const _sfOpenExportBackup = async () => {
         // Pick the destination zip path first so the benchmark can run on
         // the actual target drive (USB vs internal SSD make a real diff).
