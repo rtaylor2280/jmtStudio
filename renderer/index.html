@@ -3280,7 +3280,17 @@
         </div>
         <div class="toolbar-divider"></div>
         <button id="btn-sf-create-shared-tracks" class="btn-blue" style="display:none" title="Create a shared tracks folder. Maps to /tracks/ at the SD card root — the universal track location ProffieOS scans for all presets.">&#43; Create Shared Tracks Folder</button>
-        <button id="btn-sf-import-toolbar" class="btn-blue" style="display:none" title="Import a sound font folder into your library">&#43; Import Sound Font</button>
+        <div class="styles-tag-filter-wrap" id="sf-import-toolbar-wrap" style="display:none">
+          <button id="btn-sf-import-toolbar" class="btn-blue" title="Import sound fonts into your library">&#43; Import Sound Font &#9660;</button>
+          <div id="sf-import-dropdown" class="styles-tag-dropdown" style="display:none;min-width:200px">
+            <button id="btn-sf-import-single-menu" class="styles-tag-dropdown-item" title="Import one sound font from a vendor .zip or unzipped folder">
+              <span class="styles-tag-dropdown-name">&#43; Single source&hellip;</span>
+            </button>
+            <button id="btn-sf-import-bulk-menu" class="styles-tag-dropdown-item" title="Point at a folder containing many fonts or zips. Anything already in your library is skipped automatically.">
+              <span class="styles-tag-dropdown-name">&#43; Bulk import folder&hellip;</span>
+            </button>
+          </div>
+        </div>
       </div>
       <div class="tab-btns" id="tab-btns-styles">
         <button id="btn-styles-undo"    class="btn-neutral" title="Undo (Ctrl+Z)" style="display:none">&#8634;</button>
@@ -3445,6 +3455,7 @@
               <h2 class="sf-empty-title">Import your first sound font</h2>
               <p class="sf-empty-desc">Pick a vendor's .zip file or an unzipped folder. JMT Studio archives it, identifies the fonts inside, and adds your picks to the library.</p>
               <button class="sf-empty-action" id="btn-sf-import-font">Import Sound Font</button>
+              <p style="margin-top:14px;font-size:0.78rem;color:var(--c-text-sub)">Already have many fonts to add? <a href="#" id="btn-sf-import-bulk-empty" style="color:var(--jmt-blue);text-decoration:underline;cursor:pointer">Bulk import from a folder</a></p>
             </div>
           </div>
           <div class="sf-cards" id="sf-cards"></div>
@@ -4003,7 +4014,7 @@
       <div class="sf-import-progress-track"><div class="sf-import-progress-bar" id="sf-import-progress-bar"></div></div>
       <p class="sf-import-progress-detail" id="sf-import-progress-detail"></p>
       <p class="sf-import-progress-detail" id="sf-import-progress-elapsed" style="color:var(--c-text-sub)"></p>
-      <p class="sf-import-progress-tip" id="sf-import-progress-tip" style="display:none">Folder imports have to read every file to confirm this is a unique source, which is slow on large fonts. If you still have the original .zip from the vendor, importing that is much faster — and keeping your purchases zipped is the cleanest way to archive them long-term.</p>
+      <p class="sf-import-progress-tip" id="sf-import-progress-tip" style="display:none">Based on bench tests, folder imports typically run 5-10x slower than zip imports because every file has to be read individually to confirm uniqueness. If you still have the original .zip from the vendor, importing that is much faster. Keeping your purchases zipped is the cleanest way to archive them long-term.</p>
     </div>
 
     <div class="sf-import-phase" id="sf-import-phase-review" style="display:none">
@@ -4707,12 +4718,14 @@
 
     <div class="sf-import-phase" id="sf-bulk-import-phase-scan">
       <p class="sf-import-progress-label">Scanning folder&hellip;</p>
+      <div class="sf-import-progress-track"><div class="sf-import-progress-bar indeterminate"></div></div>
       <p class="sf-import-progress-detail" id="sf-bulk-import-scan-detail"></p>
     </div>
 
     <div class="sf-import-phase" id="sf-bulk-import-phase-review" style="display:none">
       <p class="sf-import-hint" id="sf-bulk-import-review-summary"></p>
       <div id="sf-bulk-import-review-breakdown" class="sf-bulk-review-breakdown"></div>
+      <p class="sf-import-progress-tip" id="sf-bulk-import-folder-tip" style="display:none;margin-top:10px">Based on bench tests, folder imports typically run 5-10x slower than zip imports because every file inside has to be read individually to confirm each source is unique. If you still have the original vendor .zip files somewhere, importing that folder is much faster. Keeping purchases zipped is the cleanest way to archive them long-term.</p>
       <p class="sf-import-hint" id="sf-bulk-import-review-note" style="color: var(--c-text-muted); margin-top: 10px;">
         Sources already in your library will be skipped automatically. Items missing required fields land with a <span style="color: var(--jmt-amber, #d49b3a)">Needs review</span> flag you can resolve later.
       </p>
@@ -7095,7 +7108,8 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       const rows = [];
       if (byKind['zip'])         rows.push(['Zip archives',          byKind['zip']]);
       if (byKind['folder-solo']) rows.push(['Folder fonts',          byKind['folder-solo']]);
-      if (plan.commonFolders.length) rows.push(['Common folders (skipped in bulk)', plan.commonFolders.length]);
+      if (plan.commonFolders.length) rows.push(['Common folders (will be imported)', plan.commonFolders.length]);
+      if (plan.tracksFolders && plan.tracksFolders.length) rows.push(['Shared tracks folder (will be imported)', plan.tracksFolders.length]);
       if (plan.skipped.length)   rows.push(['Skipped (no Proffie content)', plan.skipped.length]);
       let html = rows.map(([l, v]) =>
         `<div class="br-row"><span class="br-label">${escapeHtml(l)}</span><span class="br-val">${v}</span></div>`).join('');
@@ -7103,6 +7117,18 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         html += `<div class="br-row" style="margin-top:8px"><span class="br-label" style="color: var(--jmt-amber)">Scan halted at depth ${6} — nothing found yet. Pick a closer folder if you have more nested fonts.</span></div>`;
       }
       els.reviewBreakdown.innerHTML = html;
+      // Folder-import slowness hint: surfaces when folder-solo sources
+      // dominate the plan (>= 50% AND >= 5 absolute). Same rationale as
+      // the single-source flow's tip — folder imports stream every file
+      // through the hash so the user has a real-world reason for the
+      // wait. Hidden for zip-majority plans where the hash is much
+      // faster.
+      const folderTip = document.getElementById('sf-bulk-import-folder-tip');
+      if (folderTip) {
+        const folderCount = byKind['folder-solo'] || 0;
+        const folderDominant = folderCount >= 5 && folderCount >= total / 2;
+        folderTip.style.display = folderDominant ? '' : 'none';
+      }
       els.startBtn.disabled = false;
     }
     showPhase('review');
@@ -7227,9 +7253,35 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     const sum = runRes.summary;
     let text = '';
     if (sum.cancelled) text += 'Cancelled. ';
-    text += `<strong>${sum.imported.length}</strong> imported`;
+    text += `<strong>${sum.imported.length}</strong> font${sum.imported.length === 1 ? '' : 's'} imported`;
     if (sum.skipped.length) text += `, <strong>${sum.skipped.length}</strong> already in library (skipped)`;
     if (sum.failed.length)  text += `, <strong>${sum.failed.length}</strong> failed`;
+    // Common folder line is separate so it stays scannable even when zero.
+    const commonsImported = (sum.commonsImported || []).length;
+    const commonsSkipped  = (sum.commonsSkipped  || []).length;
+    const commonsFailed   = (sum.commonsFailed   || []).length;
+    if (commonsImported || commonsSkipped || commonsFailed) {
+      text += '.<br>';
+      const parts = [];
+      if (commonsImported) parts.push(`<strong>${commonsImported}</strong> common folder${commonsImported === 1 ? '' : 's'} imported`);
+      if (commonsSkipped)  parts.push(`<strong>${commonsSkipped}</strong> already in library`);
+      if (commonsFailed)   parts.push(`<strong>${commonsFailed}</strong> failed`);
+      text += parts.join(', ');
+    }
+    // Shared tracks line — same scannable pattern. addFiles counts at the
+    // file level (not folder level) so we report tracks added rather than
+    // folders processed.
+    const tracksAdded   = sum.tracksAdded   || 0;
+    const tracksSkipped = sum.tracksSkipped || 0;
+    const tracksFailed  = sum.tracksFailed  || 0;
+    if (tracksAdded || tracksSkipped || tracksFailed) {
+      text += '.<br>';
+      const parts = [];
+      if (tracksAdded)   parts.push(`<strong>${tracksAdded}</strong> shared track${tracksAdded === 1 ? '' : 's'} imported`);
+      if (tracksSkipped) parts.push(`<strong>${tracksSkipped}</strong> already in library`);
+      if (tracksFailed)  parts.push(`<strong>${tracksFailed}</strong> failed`);
+      text += parts.join(', ');
+    }
     text += '.';
     els.summaryText.innerHTML = text;
     if (els.summaryElapsed) {
@@ -7288,6 +7340,9 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     document.getElementById('modal-about')?.classList.remove('active');
     startScan();
   });
+  // Expose so the toolbar dropdown and empty-state secondary link can
+  // start the bulk-import flow without reaching into this IIFE.
+  if (typeof window !== 'undefined') window._sfStartBulkImport = startScan;
 })();
 document.getElementById('theme-selector').addEventListener('click', (e) => {
   const btn = e.target.closest('.theme-btn');
@@ -14740,7 +14795,7 @@ require(['vs/editor/editor.main'], function () {
         await _refreshSoundFontsToggleLock();
         const layerNoFonts = document.getElementById('sf-empty-nofonts');
         const layerBrowse  = document.getElementById('sf-browse');
-        const toolbarBtn   = document.getElementById('btn-sf-import-toolbar');
+        const toolbarBtn   = document.getElementById('sf-import-toolbar-wrap');
         // Sweep corrupt source dirs (meta without archive, or archive
         // without meta) before listing. Safe no-op when none exist.
         // Suppressed mid-import so we don't race the in-flight write.
@@ -21629,7 +21684,35 @@ require(['vs/editor/editor.main'], function () {
         }
       });
 
-      document.getElementById('btn-sf-import-toolbar')?.addEventListener('click', _sfOpenImport);
+      // Toolbar import dropdown: button toggles the menu, items dispatch
+      // to single-source flow (_sfOpenImport, the existing modal) or to
+      // bulk flow (window._sfStartBulkImport exposed by the bulk import
+      // IIFE). Outside-click and Esc close the dropdown.
+      const _sfImportDropdownToggle = (e) => {
+        const dd = document.getElementById('sf-import-dropdown');
+        if (!dd) return;
+        const opening = dd.style.display === 'none' || !dd.style.display;
+        dd.style.display = opening ? '' : 'none';
+        if (e) e.stopPropagation();
+      };
+      const _sfImportDropdownClose = () => {
+        const dd = document.getElementById('sf-import-dropdown');
+        if (dd) dd.style.display = 'none';
+      };
+      document.getElementById('btn-sf-import-toolbar')?.addEventListener('click', _sfImportDropdownToggle);
+      document.getElementById('btn-sf-import-single-menu')?.addEventListener('click', () => {
+        _sfImportDropdownClose();
+        _sfOpenImport();
+      });
+      document.getElementById('btn-sf-import-bulk-menu')?.addEventListener('click', () => {
+        _sfImportDropdownClose();
+        if (window._sfStartBulkImport) window._sfStartBulkImport();
+      });
+      document.addEventListener('click', (e) => {
+        const wrap = document.getElementById('sf-import-toolbar-wrap');
+        if (wrap && !wrap.contains(e.target)) _sfImportDropdownClose();
+      });
+      document.addEventListener('keydown', (e) => { if (e.key === 'Escape') _sfImportDropdownClose(); });
 
       // Shared Tracks: create-on-click then refresh the view so the toolbar
       // button collapses and the card surfaces in the grid. The folder is
@@ -23320,6 +23403,10 @@ require(['vs/editor/editor.main'], function () {
         _sfRenderGrid();
       });
       document.getElementById('btn-sf-import-font')?.addEventListener('click', _sfOpenImport);
+      document.getElementById('btn-sf-import-bulk-empty')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (window._sfStartBulkImport) window._sfStartBulkImport();
+      });
       _sfImportEls.pickZipBtn?.addEventListener('click', () => _sfPickAndImport('zip'));
       _sfImportEls.pickFolderBtn?.addEventListener('click', () => _sfPickAndImport('folder'));
       _sfImportEls.cancelBtn?.addEventListener('click', _sfCloseImportAndReturn);

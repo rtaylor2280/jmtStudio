@@ -40,6 +40,8 @@ const soundFontSources = require('./soundFontSources');
 const soundFontCandidates = require('./soundFontCandidates');
 const soundFontEntries = require('./soundFontEntries');
 const soundFontVendors = require('./soundFontVendors');
+const soundFontCommon = require('./soundFontCommon');
+const soundFontSharedTracks = require('./soundFontSharedTracks');
 
 const MAX_SCAN_DEPTH_BEFORE_HALT = 6;
 
@@ -89,6 +91,15 @@ function looksLikeCommonDir(name) {
   return /^common$/i.test(name);
 }
 
+// Detect Proffie's "tracks" shared-music folder convention. A tracks
+// folder is one named "tracks" (any case) — the SD-card convention for
+// menu/background music. Like common, this gets routed to its own
+// bucket so the bulk runner can wire it into the shared-tracks importer
+// rather than treating it as a font or skipping it.
+function looksLikeTracksDir(name) {
+  return /^tracks$/i.test(name);
+}
+
 // Classify direct children of a folder into four buckets used by the
 // walker. Common folders are checked by NAME before Proffie-shape so
 // "common" wins over the shape match (a common folder's shared wavs like
@@ -99,9 +110,10 @@ function looksLikeCommonDir(name) {
 function classifyChildrenAt(absDir) {
   let entries;
   try { entries = fs.readdirSync(absDir, { withFileTypes: true }); }
-  catch { return { kind: 'unreadable', proffieChildren: [], commonChildren: [], otherFolders: [], zips: [] }; }
+  catch { return { kind: 'unreadable', proffieChildren: [], commonChildren: [], tracksChildren: [], otherFolders: [], zips: [] }; }
   const proffieChildren = [];
   const commonChildren = [];
+  const tracksChildren = [];
   const otherFolders = [];
   const zips = [];
   for (const e of entries) {
@@ -110,6 +122,8 @@ function classifyChildrenAt(absDir) {
     if (e.isDirectory()) {
       if (looksLikeCommonDir(e.name)) {
         commonChildren.push({ name: e.name, absPath: full });
+      } else if (looksLikeTracksDir(e.name)) {
+        tracksChildren.push({ name: e.name, absPath: full });
       } else if (looksLikeProffieDir(full)) {
         const board = soundFontCandidates.identifyBoard(e.name);
         proffieChildren.push({ name: e.name, absPath: full, board });
@@ -120,7 +134,7 @@ function classifyChildrenAt(absDir) {
       if (/\.zip$/i.test(e.name)) zips.push({ name: e.name, absPath: full });
     }
   }
-  return { kind: 'classified', proffieChildren, commonChildren, otherFolders, zips };
+  return { kind: 'classified', proffieChildren, commonChildren, tracksChildren, otherFolders, zips };
 }
 
 // Recursive walk: at each directory, decide one of:
@@ -133,7 +147,8 @@ function classifyChildrenAt(absDir) {
 //   - All other folders, no Proffie -> recurse into each
 function walkForSources(absDir, relPath, depth, ctx) {
   if (depth > MAX_SCAN_DEPTH_BEFORE_HALT && ctx.results.sources.length === 0
-      && ctx.results.commonFolders.length === 0) {
+      && ctx.results.commonFolders.length === 0
+      && ctx.results.tracksFolders.length === 0) {
     ctx.results.depthHalted = true;
     return;
   }
@@ -142,15 +157,26 @@ function walkForSources(absDir, relPath, depth, ctx) {
     ctx.results.skipped.push({ absPath: absDir, reason: 'unreadable' });
     return;
   }
-  const { proffieChildren, commonChildren, otherFolders, zips } = classification;
-  // Common folders surface as their own bucket so the caller can wire
-  // them into the common-folder importer (out of scope for v1 bulk; just
-  // catalogued).
+  const { proffieChildren, commonChildren, tracksChildren, otherFolders, zips } = classification;
+  // Common folders surface as their own bucket. The runner wires them
+  // into soundFontCommon.importCommonFromFolder.
   for (const c of commonChildren) {
     ctx.results.commonFolders.push({
       absPath: c.absPath,
       relPath: path.join(relPath, c.name),
       name: c.name,
+    });
+  }
+  // Tracks folders surface as their own bucket. The runner wires the
+  // .wav files inside into soundFontSharedTracks.addFiles. Bulk import
+  // doesn't try to merge multiple tracks folders into one bucket — the
+  // shared-tracks dest is global, so addFiles handles dedup-by-name
+  // across all sources automatically.
+  for (const t of tracksChildren) {
+    ctx.results.tracksFolders.push({
+      absPath: t.absPath,
+      relPath: path.join(relPath, t.name),
+      name: t.name,
     });
   }
   // Zips at this level: each is its own source.
@@ -269,6 +295,7 @@ function scanForBulkImport({ rootDir }) {
       rootDir,
       sources: [],
       commonFolders: [],
+      tracksFolders: [],
       skipped: [],
       depthHalted: false,
       totalSizeBytes: 0,
@@ -307,7 +334,7 @@ function scanForBulkImport({ rootDir }) {
 async function runBulkImport({ plan, userData }, callbacks = {}) {
   const onProgress = typeof callbacks.onProgress === 'function' ? callbacks.onProgress : () => {};
   const shouldCancel = typeof callbacks.shouldCancel === 'function' ? callbacks.shouldCancel : () => false;
-  const summary = { imported: [], skipped: [], failed: [], cancelled: false };
+  const summary = { imported: [], skipped: [], failed: [], commonsImported: [], commonsSkipped: [], commonsFailed: [], tracksAdded: 0, tracksSkipped: 0, tracksFailed: 0, cancelled: false };
   if (!plan || !Array.isArray(plan.sources)) return { ok: false, error: 'Invalid plan' };
   const total = plan.sources.length;
   for (let i = 0; i < total; i++) {
@@ -331,6 +358,68 @@ async function runBulkImport({ plan, userData }, callbacks = {}) {
       }
     } catch (err) {
       summary.failed.push({ src: src.relPath || src.absPath, reason: String(err && err.message || err) });
+    }
+  }
+  // Common folders: now imported as part of bulk (previously catalogued
+  // but skipped per v1 scope). Each folder lands in the common bucket via
+  // the same importCommonFromFolder API the manual common-import flow
+  // uses, so dedup-by-name and wav-presence checks apply identically.
+  // Name comes from the folder basename; user can rename post-import.
+  const commons = Array.isArray(plan.commonFolders) ? plan.commonFolders : [];
+  for (let i = 0; i < commons.length; i++) {
+    if (shouldCancel()) { summary.cancelled = true; break; }
+    const c = commons[i];
+    onProgress({ stage: 'common-start', commonIdx: i, totalCommons: commons.length, label: c.name });
+    try {
+      const result = await soundFontCommon.importCommonFromFolder(userData, c.absPath, c.name);
+      if (result && result.ok) {
+        summary.commonsImported.push({ src: c.relPath || c.absPath, uuid: result.uuid, name: result.name });
+      } else if (result && /already exists/i.test(result.error || '')) {
+        summary.commonsSkipped.push({ src: c.relPath || c.absPath, reason: 'already-in-library' });
+      } else {
+        summary.commonsFailed.push({ src: c.relPath || c.absPath, reason: (result && result.error) || 'unknown error' });
+      }
+    } catch (err) {
+      summary.commonsFailed.push({ src: c.relPath || c.absPath, reason: String(err && err.message || err) });
+    }
+  }
+  // Tracks folders: each is a directory of .wav files (the SD-card
+  // shared-tracks convention). Bulk gathers every .wav across all
+  // tracks folders and pipes them through soundFontSharedTracks.addFiles
+  // in one call so dedup-by-name applies across the union. The shared-
+  // tracks bucket is a single global flat folder, so multiple "tracks"
+  // dirs across the scanned tree all merge into the same destination —
+  // identical-name files get a "(N)" suffix per the existing _uniqueName
+  // contract in soundFontSharedTracks.
+  const tracksDirs = Array.isArray(plan.tracksFolders) ? plan.tracksFolders : [];
+  if (tracksDirs.length > 0 && !shouldCancel()) {
+    onProgress({ stage: 'tracks-start', totalTracksFolders: tracksDirs.length });
+    const wavPaths = [];
+    for (const t of tracksDirs) {
+      try {
+        const entries = fs.readdirSync(t.absPath, { withFileTypes: true });
+        for (const e of entries) {
+          if (e.isFile() && /\.wav$/i.test(e.name)) {
+            wavPaths.push(path.join(t.absPath, e.name));
+          }
+        }
+      } catch {}
+    }
+    if (wavPaths.length > 0) {
+      try {
+        const result = soundFontSharedTracks.addFiles(userData, wavPaths);
+        if (result && result.ok) {
+          summary.tracksAdded = (result.added || []).length;
+          // addFiles' skipped is per-file (Invalid filename, copy error,
+          // etc.). It does NOT skip on duplicate name — uniqueName
+          // suffix-numbers instead. So skipped here is genuine failure.
+          summary.tracksFailed = (result.skipped || []).length;
+        } else {
+          summary.tracksFailed = wavPaths.length;
+        }
+      } catch (err) {
+        summary.tracksFailed = wavPaths.length;
+      }
     }
   }
   onProgress({ stage: 'done', total });
