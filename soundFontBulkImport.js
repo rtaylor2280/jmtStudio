@@ -337,77 +337,6 @@ async function runBulkImport({ plan, userData }, callbacks = {}) {
   return { ok: true, summary };
 }
 
-// When an outer source has no detectable vendor and contains nested
-// inner zips (Kyberphonic's "Tales" / "Power of Many" style bundles
-// where each character ships as its own .zip inside an outer .zip),
-// peek inside the first inner zip and run the same vendor detection
-// against its entries. We assume all inner zips in a bundle are from
-// the same vendor (true for every multi-font bundle in Ryan's
-// collection). Inner zips that AREN'T fonts (like Kyberphonic's
-// "_Extras.zip" sidecar) are skipped — pick a real font zip first.
-async function _detectVendorInNestedZip(sourceObj) {
-  let entries;
-  try { entries = await sourceObj.listAll(); }
-  catch { return null; }
-  // Inner-zip candidates: top-level zip entries that aren't "_extras"
-  // or otherwise sidecar-shaped.
-  const innerZips = entries.filter(e =>
-    !e.isDir
-    && /\.zip$/i.test(e.fileName)
-    && !e.fileName.includes('/')
-    && !/^_extras\.zip$/i.test(e.fileName)
-  );
-  if (innerZips.length === 0) return null;
-  // Pick the first non-sidecar inner zip and read its bytes via the
-  // source object's readFile.
-  const target = innerZips[0];
-  let innerBuf;
-  try { innerBuf = await sourceObj.readFile(target.fileName); }
-  catch { return null; }
-  // Open the inner zip from a temp file. node-stream-zip works with
-  // file paths rather than buffers; cheaper to spill once than swap
-  // libraries.
-  const tmpDir = require('os').tmpdir();
-  const crypto = require('crypto');
-  const tmpPath = path.join(tmpDir, `jmt-vendor-peek-${crypto.randomUUID()}.zip`);
-  try { fs.writeFileSync(tmpPath, innerBuf); }
-  catch { return null; }
-  let result = null;
-  try {
-    const StreamZip = require('node-stream-zip');
-    const innerZip = new StreamZip.async({ file: tmpPath, skipEntryNameValidation: true });
-    try {
-      const map = await innerZip.entries();
-      const innerEntries = [];
-      for (const key of Object.keys(map)) {
-        const e = map[key];
-        if (!e.name || e.name === '/') continue;
-        innerEntries.push({
-          fileName: e.name,
-          size: e.size,
-          isDir: e.isDirectory || /\/$/.test(e.name),
-        });
-      }
-      // Build a minimal source-like object that detectVendor accepts.
-      // listAll returns the inner entries; readFile streams bytes out
-      // of the inner zip when a pattern needs to read text. meta is
-      // carried from the outer source so the originalName-based
-      // sourceFilename pattern still tests against the OUTER name (the
-      // bundle name typically carries vendor info too).
-      const virtualSource = {
-        meta: sourceObj.meta,
-        listAll: async () => innerEntries,
-        readFile: async (fileName) => innerZip.entryData(fileName),
-      };
-      result = await soundFontVendors.detectVendor(virtualSource);
-    } finally {
-      await innerZip.close();
-    }
-  } catch {}
-  try { fs.unlinkSync(tmpPath); } catch {}
-  return result;
-}
-
 // Import one planned source end-to-end: hash + copy via importSource,
 // detect candidates, create entries with needsReview when applicable.
 async function importPlannedSource({ userData, src }, onSubProgress) {
@@ -430,22 +359,14 @@ async function importPlannedSource({ userData, src }, onSubProgress) {
     return { ok: true, dedup: true, existingUuid: importRes.uuid };
   }
   const sourceUuid = importRes.uuid;
-  // Vendor detection on the just-imported source. If the outer source
-  // doesn't reveal a vendor and it's a bundle of nested zips (each
-  // candidate carrying nested:true), peek inside the first inner zip
-  // and re-run detection there. Kyberphonic's bundle releases (Tales,
-  // Power of Many, etc.) put their _ReadMe.rtf inside each inner zip
-  // rather than at the bundle root, so the outer-only scan misses them.
+  // Vendor detection on the just-imported source. detectVendor handles
+  // nested-zip bundle drilling internally so this single call covers
+  // both Kyberphonic-style bundle-of-inner-zips and ordinary single-zip
+  // shapes.
   let vendorRes = null;
   try {
     const sourceObj = soundFontSources.openSource(userData, sourceUuid);
-    if (sourceObj) {
-      vendorRes = await soundFontVendors.detectVendor(sourceObj);
-      if ((!vendorRes || !vendorRes.vendor)) {
-        const peeked = await _detectVendorInNestedZip(sourceObj);
-        if (peeked && peeked.vendor) vendorRes = peeked;
-      }
-    }
+    if (sourceObj) vendorRes = await soundFontVendors.detectVendor(sourceObj);
   } catch {}
   const detectedVendor = vendorRes && vendorRes.vendor ? vendorRes.vendor : null;
   const detectedConfidence = vendorRes && vendorRes.confidence ? vendorRes.confidence : null;

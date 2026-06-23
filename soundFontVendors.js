@@ -515,7 +515,81 @@ async function detectVendor(source) {
     }
   }
 
+  // Outer-source detection found nothing. If the source is a bundle of
+  // inner zips (Kyberphonic ships Tales / Power of Many bundles where
+  // each character is its own .zip inside the outer .zip and the
+  // _ReadMe.rtf lives inside each inner zip rather than at the bundle
+  // root), peek inside the first non-sidecar inner zip and re-run
+  // detection against it.
+  try {
+    const nestedRes = await _detectVendorInNestedZip(source);
+    if (nestedRes && nestedRes.vendor) return nestedRes;
+  } catch {}
+
   return { vendorId: null, vendor: null, vendorAutoDetected: false };
+}
+
+// Helper: when an outer source has no detectable vendor and contains
+// nested inner zips, open the first inner zip and run detectVendor
+// against its entries. Assumes all inner zips in a bundle share the
+// same vendor (verified true across every multi-font bundle observed
+// in the field). Inner zips named "_extras.zip" are skipped because
+// they're sidecars, not real fonts.
+async function _detectVendorInNestedZip(source) {
+  if (!source || typeof source.listAll !== 'function' || typeof source.readFile !== 'function') return null;
+  let entries;
+  try { entries = await source.listAll(); }
+  catch { return null; }
+  const innerZips = entries.filter(e =>
+    !e.isDir
+    && /\.zip$/i.test(e.fileName)
+    && !e.fileName.includes('/')
+    && !/^_extras\.zip$/i.test(e.fileName)
+  );
+  if (innerZips.length === 0) return null;
+  const target = innerZips[0];
+  let innerBuf;
+  try { innerBuf = await source.readFile(target.fileName); }
+  catch { return null; }
+  const fs = require('fs');
+  const path = require('path');
+  const os = require('os');
+  const crypto = require('crypto');
+  const tmpPath = path.join(os.tmpdir(), `jmt-vendor-peek-${crypto.randomUUID()}.zip`);
+  try { fs.writeFileSync(tmpPath, innerBuf); }
+  catch { return null; }
+  let result = null;
+  try {
+    const StreamZip = require('node-stream-zip');
+    const innerZip = new StreamZip.async({ file: tmpPath, skipEntryNameValidation: true });
+    try {
+      const map = await innerZip.entries();
+      const innerEntries = [];
+      for (const key of Object.keys(map)) {
+        const e = map[key];
+        if (!e.name || e.name === '/') continue;
+        innerEntries.push({
+          fileName: e.name,
+          size: e.size,
+          isDir: e.isDirectory || /\/$/.test(e.name),
+        });
+      }
+      // Virtual source-like wrapper. meta carries the OUTER source's
+      // meta so sourceFilename patterns continue to test against the
+      // delivered archive name (the bundle name often carries vendor
+      // info too) rather than the inner zip's name.
+      const virtualSource = {
+        meta: source.meta,
+        listAll: async () => innerEntries,
+        readFile: async (fileName) => innerZip.entryData(fileName),
+      };
+      result = await detectVendor(virtualSource);
+    } finally {
+      await innerZip.close();
+    }
+  } catch {}
+  try { fs.unlinkSync(tmpPath); } catch {}
+  return result;
 }
 
 module.exports = {
