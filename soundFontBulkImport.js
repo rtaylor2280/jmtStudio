@@ -461,10 +461,29 @@ async function importPlannedSource({ userData, src }, onSubProgress) {
     // becomes noise. The vendorAutoDetected flag on the source meta
     // still indicates the auto-application for users who want to audit.
     const tags = bundleName ? [bundleName] : [];
+    // Multi-version sibling info: when the candidate detector collapsed
+    // a group of X_V1/X_V2/... siblings down to the highest version,
+    // surface the version in the description so the user can tell at a
+    // glance which one this is, and add a review reason so bulk imports
+    // get flagged for the user to acknowledge (single-import users see
+    // the same info live in the review modal). Description is built
+    // here only when the field would otherwise be empty — if the user
+    // ever provides their own description during import, we don't
+    // clobber it.
+    let initialDescription = '';
+    let versionInfo = null;
+    if (cand.takenVersion && Array.isArray(cand.skippedVersions) && cand.skippedVersions.length > 0) {
+      initialDescription = cand.takenVersion;
+      versionInfo = {
+        taken: cand.takenVersion,
+        skipped: cand.skippedVersions.map(s => s.version),
+      };
+    }
     const meta = {
       tags,
       author: detectedVendor || '',
       purchased: purchasedDefault,
+      description: initialDescription,
       // Other fields default through createEntry's existing logic
       // (acquisitionDate falls back to sourceFileDate -> importedAt).
     };
@@ -475,6 +494,7 @@ async function importPlannedSource({ userData, src }, onSubProgress) {
     // via YouTube only) or absent entirely. So only creator_empty
     // matters as a review trigger here.
     if (!detectedVendor) reviewReasons.push('creator_empty');
+    if (versionInfo) reviewReasons.push('multiple_versions_in_source');
     const entryRes = await soundFontEntries.createEntry({
       userData, sourceUuid, candidate: cand, name: finalName, metadata: meta,
       onProgress: (p) => onSubProgress && onSubProgress({ phase: 'extract', candidate: cIdx + 1, totalCandidates: candidates.length, ...p }),
@@ -483,13 +503,18 @@ async function importPlannedSource({ userData, src }, onSubProgress) {
       entries.push({ name: finalName, ok: false, error: entryRes && entryRes.error });
       continue;
     }
-    // Stamp needsReview + reasons via updateEntryMeta if any reason fired.
+    // Stamp needsReview + reasons + structured versionInfo via
+    // updateEntryMeta if any reason fired. versionInfo travels alongside
+    // reviewReasons so the renderer can format the dynamic message
+    // ("Source contained N versions...") without re-parsing the candidate.
     if (reviewReasons.length > 0) {
       try {
+        const updates = { needsReview: true, reviewReasons };
+        if (versionInfo) updates.versionInfo = versionInfo;
         soundFontEntries.updateEntryMeta({
           userData,
           currentName: finalName,
-          updates: { needsReview: true, reviewReasons },
+          updates,
         });
       } catch {}
     }

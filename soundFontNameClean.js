@@ -48,11 +48,17 @@ const TRAILING_TOKENS = [
   'GHV3',
   'CFX',
   'WAV',
-  'PACK',
-  'BUNDLE',
+  'UPDATE',
   'AND',
   '&',
 ];
+
+// Words that are MEANINGFUL in a source name (a "bundle" really is a
+// bundle, a "pack" really is a pack) but are noise when prepended as a
+// prefix to the per-font entry name (Mountain_Sabers_Free_Pack_JURASSIC
+// reads worse than Mountain_Sabers_Free_JURASSIC). The bundle-name
+// cleaner keeps them; the prefix derivation strips them.
+const BUNDLE_PREFIX_STRIPPABLE = ['BUNDLE', 'PACK'];
 
 // Trailing version stamp. Anchored at end of string and allows either
 // a separator-led attachment (_v1.1, -V2.4,  V3) OR letter-attached
@@ -60,6 +66,24 @@ const TRAILING_TOKENS = [
 // prefix or a decimal segment; bare integers (Spectre_5, Survivor2)
 // are preserved because they are identity, not version.
 const TRAILING_VERSION_RX = /(?:[\s_-]+|(?<=[A-Za-z]))(?:[vV]\d+(?:\.\d+)*|\d+\.\d+(?:\.\d+)*)\s*$/;
+
+// Trailing date/release stamp. Catches vendor zip names that bake an
+// update date into the filename:
+//   "Fallen Order CAL Bundle Proffie Update May 2024" → strips " Update May 2024"
+//   "Mando Saber S 3 Proffie update August 2023" → strips " update August 2023"
+//   "Some Font Update 2024" → strips " Update 2024"
+//   "Foo September 2025" → strips " September 2025"
+// Requires either an "Update" lead-in OR a month name (or both) to
+// avoid eating bare 4-digit years that might be identity ("ANH 1977",
+// "Episode 2008"). Months accept full name + common abbreviations.
+const _MONTH_RX = '(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)';
+const TRAILING_DATE_RX = new RegExp(
+  '[\\s_-]+(?:'
+  + 'update[\\s_-]+(?:' + _MONTH_RX + '[\\s_-]+)?\\d{4}'
+  + '|' + _MONTH_RX + '[\\s_-]+\\d{4}'
+  + ')\\s*$',
+  'i'
+);
 
 // Leading vendor-version prefix (1.1-, 2.0_, 1.2 ).
 const LEADING_VERSION_RX = /^\s*\d+(?:\.\d+)?\s*[-_\s]+\s*/;
@@ -117,6 +141,8 @@ function stripTrailingTail(s) {
   for (let guard = 0; guard < 20; guard++) {
     const versionStripped = cur.replace(TRAILING_VERSION_RX, '');
     if (versionStripped !== cur) { cur = versionStripped; continue; }
+    const dateStripped = cur.replace(TRAILING_DATE_RX, '');
+    if (dateStripped !== cur) { cur = dateStripped; continue; }
     let matched = false;
     for (const tok of TRAILING_TOKENS) {
       const escaped = tok.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -147,21 +173,29 @@ function collapseSeparators(s) {
     .replace(/^[_\-]+/g, '');
 }
 
-// Title-case segments under two rules:
+// Title-case segments under three rules:
 //   - All-lowercase ASCII letters: always (windu -> Windu).
+//   - All-uppercase ASCII letters in the common-word exception list:
+//     always (THE -> The, AND -> And, OF -> Of). These are short
+//     English words that show up frequently in font titles, never as
+//     acronyms in the saber-font space, so the length floor below
+//     would mis-protect them.
 //   - All-uppercase ASCII letters: only when length >= ALL_CAPS_MIN_LEN
 //     (SATELE -> Satele) so short acronyms like ANH, ESB, ROTJ, HE, MAN
 //     stay as acronyms rather than becoming Anh / Esb / Rotj.
 // Mixed case (KSith, Survivor2, Dark2V3) is always left as-is.
 const ALL_CAPS_MIN_LEN = 5;
+const COMMON_WORDS_FORCE_TITLECASE = new Set(['THE', 'AND', 'OF', 'A', 'FOR']);
 function titleCase(s) {
   return s.split(/([_\-])/).map((part, i) => {
     if (i % 2 === 1) return part;
     if (/^[a-z]+$/.test(part)) {
       return part.charAt(0).toUpperCase() + part.slice(1);
     }
-    if (/^[A-Z]+$/.test(part) && part.length >= ALL_CAPS_MIN_LEN) {
-      return part.charAt(0) + part.slice(1).toLowerCase();
+    if (/^[A-Z]+$/.test(part)) {
+      if (COMMON_WORDS_FORCE_TITLECASE.has(part) || part.length >= ALL_CAPS_MIN_LEN) {
+        return part.charAt(0) + part.slice(1).toLowerCase();
+      }
     }
     return part;
   }).join('');
@@ -189,9 +223,35 @@ function cleanSuggestedName(raw) {
   return s;
 }
 
+// Derive the per-font prefix from a (cleaned) bundle name. Strips
+// trailing "Bundle" / "Pack" words because while they belong in the
+// source's display name, they're noise when stamped on each child
+// font's name. Idempotent: deriveBundlePrefix(deriveBundlePrefix(x))
+// === deriveBundlePrefix(x). Trailing separators get cleaned up so the
+// result is suitable for immediate use as a prefix.
+function deriveBundlePrefix(bundleName) {
+  let cur = String(bundleName || '').trim();
+  if (!cur) return '';
+  for (let guard = 0; guard < 5; guard++) {
+    let matched = false;
+    for (const tok of BUNDLE_PREFIX_STRIPPABLE) {
+      const rx = new RegExp(`[\\s_-]+${tok}\\s*$`, 'i');
+      if (rx.test(cur)) {
+        cur = cur.replace(rx, '');
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) break;
+  }
+  return cur.replace(/[_\-\s]+$/g, '');
+}
+
 module.exports = {
   cleanSuggestedName,
+  deriveBundlePrefix,
   VENDOR_PREFIXES,
   TRAILING_TOKENS,
+  BUNDLE_PREFIX_STRIPPABLE,
   ACCENT_MAP,
 };

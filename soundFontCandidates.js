@@ -1,4 +1,4 @@
-const { cleanSuggestedName } = require('./soundFontNameClean');
+const { cleanSuggestedName, deriveBundlePrefix } = require('./soundFontNameClean');
 
 // Sound Fonts — candidate detection (Phase 1, slice 4).
 //
@@ -32,7 +32,7 @@ const { cleanSuggestedName } = require('./soundFontNameClean');
 // register as the Proffie board.
 
 const BOARD_PATTERNS = [
-  { key: 'proffie',       rx: /(^|[\s_\-/])proffie([\s_\-/]|$)/i },
+  { key: 'proffie',       rx: /(^|[\s_\-/])proffie(?:board)?(\b|[\s_\-/]|$)/i },
   { key: 'cfx',           rx: /(^|[\s_\-/])cfx(\b|[\s_\-/]|$)/i },
   { key: 'ghv3',          rx: /(^|[\s_\-/])gh\s?v\s?3([\s_\-/]|$)/i },
   { key: 'cfx-ghv3',      rx: /(^|[\s_\-/])cfx[\s_\-]?gh\s?v\s?3([\s_\-/]|$)/i },
@@ -370,17 +370,89 @@ function detectBundleName(candidates) {
   return last;
 }
 
+// Parse a candidate's raw inner-folder name for a trailing version
+// suffix (X_V1 / X_V2.4 / X v3 / X-v1.0). Returns { stem, version,
+// versionParts } when the name ends in v<number>, or null when it
+// doesn't. Used to identify "multi-version sibling" candidates that
+// the vendor bundled together (V1 + V2 of the same font); the highest
+// gets taken, the others are noted as skipped.
+function _parseVersionFromName(name) {
+  const m = String(name || '').match(/^(.+?)[\s_-]+[vV](\d+(?:\.\d+)*)$/);
+  if (!m) return null;
+  const parts = m[2].split('.').map(s => parseInt(s, 10));
+  if (parts.some(n => Number.isNaN(n))) return null;
+  return { stem: m[1], version: 'V' + m[2], versionParts: parts };
+}
+
+function _compareVersionParts(a, b) {
+  const maxLen = Math.max(a.length, b.length);
+  for (let i = 0; i < maxLen; i++) {
+    const av = a[i] || 0;
+    const bv = b[i] || 0;
+    if (av !== bv) return av < bv ? -1 : 1;
+  }
+  return 0;
+}
+
+// Collapse groups of candidates whose raw names share a stem and
+// differ only by a trailing version suffix. The highest-version
+// member wins, its name becomes the stem (the cleaner downstream then
+// idempotently strips any nested version stamp), and the other
+// members are attached as `skippedVersions` metadata so the import
+// path can stamp the version on the new entry and surface a review
+// reason. Single-version sibling groups are left untouched. Mixed
+// groups (some with versions, some without) treat the versioned ones
+// as their own group and leave the unversioned one alone.
+function _collapseVersionSiblings(candidates) {
+  const parsed = candidates.map(c => ({ c, v: _parseVersionFromName(c.name) }));
+  const groups = new Map();
+  const ungrouped = [];
+  for (const item of parsed) {
+    if (!item.v) { ungrouped.push(item.c); continue; }
+    const k = item.v.stem.toLowerCase();
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(item);
+  }
+  const out = ungrouped.slice();
+  for (const items of groups.values()) {
+    if (items.length === 1) {
+      // Solo versioned candidate — leave as is; downstream name
+      // cleaner strips the trailing version.
+      out.push(items[0].c);
+      continue;
+    }
+    items.sort((a, b) => _compareVersionParts(a.v.versionParts, b.v.versionParts));
+    const winner = items[items.length - 1];
+    const losers = items.slice(0, -1);
+    const merged = { ...winner.c };
+    merged.name = winner.v.stem;
+    merged.takenVersion = winner.v.version;
+    merged.skippedVersions = losers.map(l => ({
+      version: l.v.version,
+      path: l.c.path,
+      rawName: l.c.name,
+    }));
+    out.push(merged);
+  }
+  return out;
+}
+
 async function detectCandidates(source) {
   if (!source || typeof source.listAll !== 'function') {
     return { candidates: [] };
   }
   const entries = await source.listAll();
   const byParent = groupByParent(entries);
-  const candidates = [];
+  const rawCandidates = [];
   const sourceFallbackName = (source.meta && source.meta.originalName)
     ? source.meta.originalName.replace(/\.zip$/i, '')
     : 'source';
-  walkForCandidates(byParent, '', candidates, sourceFallbackName);
+  walkForCandidates(byParent, '', rawCandidates, sourceFallbackName);
+  // Multi-version sibling collapse runs BEFORE name cleaning so the
+  // sibling-detection regex sees the original `X_V1` / `X_V2` shape
+  // (cleaning would strip the version and merge them via name
+  // collision instead, which loses the version info).
+  const candidates = _collapseVersionSiblings(rawCandidates);
   // Clean every candidate name through the shared pipeline before the
   // renderer sees them. Original name is preserved on rawName for any
   // future caller that needs the unmodified inner-folder string.
@@ -397,12 +469,20 @@ async function detectCandidates(source) {
   // a separate concern handled by the renderer when saving source meta.
   let bundleName = candidates.length >= 2 ? detectBundleName(candidates) : null;
   if (!bundleName && candidates.length >= 2) bundleName = sourceFallbackName;
+  let bundlePrefix = null;
   if (bundleName) {
     const cleanedBundle = cleanSuggestedName(bundleName);
     if (cleanedBundle) bundleName = cleanedBundle;
-    for (const c of candidates) c.bundleName = bundleName;
+    // Prefix is derived from the cleaned bundle name with Bundle/Pack
+    // additionally stripped — those belong in the source's display name
+    // but not on every per-font prefix.
+    bundlePrefix = deriveBundlePrefix(bundleName) || bundleName;
+    for (const c of candidates) {
+      c.bundleName = bundleName;
+      c.bundlePrefix = bundlePrefix;
+    }
   }
-  return { candidates, bundleName };
+  return { candidates, bundleName, bundlePrefix };
 }
 
 module.exports = {

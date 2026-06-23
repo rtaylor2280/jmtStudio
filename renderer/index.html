@@ -2763,7 +2763,7 @@
   .styles-active-filter-chip.sf-active-filter-needs-review .styles-active-filter-remove { color: var(--jmt-amber); }
   .styles-tag-filter-icon { font-size: 0.6rem; opacity: 0.7; }
   .styles-tag-filter-badge { background: var(--jmt-blue); color: #fff; font-size: 0.62rem; font-weight: 600; padding: 0 5px; border-radius: 9px; margin-left: 2px; line-height: 1.4; }
-  .styles-tag-dropdown { position: absolute; top: calc(100% + 4px); right: 0; background: var(--c-bg-raised); border: 1px solid var(--c-border-heavy); border-radius: 4px; padding: 4px 0; min-width: 200px; max-width: 280px; max-height: 320px; overflow-y: auto; z-index: 100; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+  .styles-tag-dropdown { position: absolute; top: calc(100% + 4px); right: 0; background: var(--c-bg-raised); border: 1px solid var(--c-border-heavy); border-radius: 4px; padding: 4px 0; min-width: 200px; max-width: 280px; max-height: calc(100vh - 160px); overflow-y: auto; z-index: 100; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
   .styles-tag-dropdown-item { display: flex; align-items: center; gap: 8px; width: 100%; background: transparent; border: none; color: var(--c-text); padding: 5px 12px; font-size: 0.75rem; cursor: pointer; text-align: left; }
   .styles-tag-dropdown-item:hover { background: var(--c-bg-inset); }
   .styles-tag-dropdown-item.selected { color: var(--jmt-blue); background: rgba(0,130,255,0.08); }
@@ -4039,9 +4039,10 @@
         <h3>Sound fonts found <span class="sf-review-cand-count" id="sf-review-cand-count"></span></h3>
         <p class="sf-import-hint" id="sf-review-cand-hint">Pick which fonts to add to your library. Names must use letters, numbers, underscores, or hyphens (Proffie can't read spaces).</p>
         <p class="sf-import-hint sf-bundle-followup" id="sf-bundle-followup" style="display:none">This is a bundle with several fonts inside. You don't have to import them all now — the source stays in your library, so you can come back and add the rest later.</p>
-        <div class="sf-import-checkbox-row" id="sf-bundle-prepend-row" style="display:none;margin-bottom:10px">
+        <div class="sf-import-checkbox-row" id="sf-bundle-prepend-row" style="display:none;margin-bottom:10px;flex-wrap:wrap;row-gap:6px">
           <input type="checkbox" id="sf-review-prepend-bundle" checked>
-          <label for="sf-review-prepend-bundle" style="margin:0;cursor:pointer">Prefix font names with bundle name <span id="sf-bundle-name-hint" style="color:var(--c-text-dim)"></span></label>
+          <label for="sf-review-prepend-bundle" style="margin:0;cursor:pointer">Prefix font names with:</label>
+          <input type="text" id="sf-bundle-prefix-input" class="sf-edit-input" maxlength="80" style="flex:1;min-width:140px;max-width:280px" title="Prefix that will be prepended to each font name on import. Edit to override the auto-derived value.">
         </div>
         <div class="sf-review-candidate-list" id="sf-review-candidate-list"></div>
       </div>
@@ -5287,6 +5288,21 @@ function promptConfirm(opts) {
   });
 }
 window.promptConfirm = promptConfirm;
+
+// Info-only modal — single OK button, app-styled (vs the native alert()
+// dialog which carries OS chrome and bypasses our visual language).
+// Used for non-recoverable error messages where the user just needs to
+// acknowledge. Returns a promise that resolves when the user dismisses.
+function promptError(title, message) {
+  return promptConfirm({
+    title: title || 'Error',
+    message: message || '',
+    confirmText: 'OK',
+    confirmKind: 'primary',
+    hideCancel: true,
+  });
+}
+window.promptError = promptError;
 
 // ── Dirty ──────────────────────────────────────────────
 function setDirty(v) {
@@ -12459,6 +12475,12 @@ require(['vs/editor/editor.main'], function () {
       let _sfActiveFilterTags = new Set();
       let _sfActiveFilterCreators = new Set();
       let _sfNeedsReviewFilterOn = false;
+      // Sentinel value for the "missing creator" row in the Creators filter
+      // dropdown. Stored verbatim in _sfActiveFilterCreators when the user
+      // toggles it; filter predicates special-case it against entries with
+      // empty author. Leading paren plus all-lowercase makes a realistic
+      // collision with a real creator's name vanishingly improbable.
+      const _SF_NO_CREATOR_KEY = '(no creator)';
       // Set of font directory strings currently referenced by presets in the
       // open config. Recomputed on each grid render so editing the config
       // and switching back updates the visual immediately. Empty set when no
@@ -12620,7 +12642,7 @@ require(['vs/editor/editor.main'], function () {
         const matchesCreatorFilter = (f) => {
           if (filterCreatorsLower.length === 0) return true;
           const a = (f.meta && f.meta.author || '').toLowerCase();
-          if (!a) return false;
+          if (!a) return filterCreatorsLower.includes(_SF_NO_CREATOR_KEY);
           return filterCreatorsLower.includes(a);
         };
         const matchesNeedsReviewFilter = (f) => {
@@ -13980,7 +14002,7 @@ require(['vs/editor/editor.main'], function () {
         const name = await _sfPromptCommonName({ title: 'Rename common folder', defaultValue: c.meta.name, excludeUuid: uuid });
         if (!name || name === c.meta.name) return;
         const res = await window.electronAPI.renameCommon({ uuid, newName: name });
-        if (!res || !res.ok) { alert(`Rename failed: ${(res && res.error) || 'unknown error'}`); return; }
+        if (!res || !res.ok) { promptError('Rename failed', (res && res.error) || 'unknown error'); return; }
         await _sfRefreshCommons();
       };
       const _sfDuplicateCommon = async (uuid) => {
@@ -14093,7 +14115,7 @@ require(['vs/editor/editor.main'], function () {
         const res = await window.electronAPI.fileOpsRename({
           kind: 'common', id: _sfSelectedCommonUuid, subPath, newName: name,
         });
-        if (!res || !res.ok) { alert(`Rename failed: ${(res && res.error) || 'unknown'}`); return; }
+        if (!res || !res.ok) { promptError('Rename failed', (res && res.error) || 'unknown'); return; }
         await _sfRefreshCommons();
       };
       const _sfRenameCommonFile = async (subPath) => {
@@ -14113,7 +14135,7 @@ require(['vs/editor/editor.main'], function () {
         const name = typed.trim() + ext;
         if (name === current) return;
         const res = await window.electronAPI.renameCommonFile({ uuid: _sfSelectedCommonUuid, subPath, newName: name });
-        if (!res || !res.ok) { alert(`Rename failed: ${(res && res.error) || 'unknown error'}`); return; }
+        if (!res || !res.ok) { promptError('Rename failed', (res && res.error) || 'unknown error'); return; }
         await _sfRefreshCommons();
       };
       const _sfDeleteCommonFilePrompt = async (subPath) => {
@@ -14429,7 +14451,11 @@ require(['vs/editor/editor.main'], function () {
           }
           if (filterCreatorsLower.length) {
             const a = ((f.meta && f.meta.author) || '').toLowerCase();
-            if (!a || !filterCreatorsLower.includes(a)) return false;
+            if (!a) {
+              if (!filterCreatorsLower.includes(_SF_NO_CREATOR_KEY)) return false;
+            } else if (!filterCreatorsLower.includes(a)) {
+              return false;
+            }
           }
           return true;
         });
@@ -14537,15 +14563,21 @@ require(['vs/editor/editor.main'], function () {
         const list = document.getElementById('sf-creator-dropdown-list');
         const badge = document.getElementById('sf-creator-filter-badge');
         const btn = document.getElementById('btn-sf-creator-filter');
-        // Single-creator libraries (or empty libraries) don't need a creator
-        // filter — there's nothing to choose between. Hide the whole control
-        // and drop any stale active filter so the chip strip stays clean.
+        // Hide the filter when there's nothing meaningful to choose between.
+        // "Meaningful" = at least two of the following: distinct named
+        // creators, presence of empty-author entries. So a library with
+        // one named creator AND some entries missing a creator gets the
+        // dropdown (user might want to surface the missing ones); a library
+        // with one named creator and zero missing doesn't.
         const distinctCreators = new Set();
+        let anyEmptyOverall = false;
         for (const f of _sfAllEntries) {
           const a = (f.meta && f.meta.author || '').trim();
           if (a) distinctCreators.add(a.toLowerCase());
+          else anyEmptyOverall = true;
         }
-        if (distinctCreators.size <= 1) {
+        const choiceCount = distinctCreators.size + (anyEmptyOverall ? 1 : 0);
+        if (choiceCount <= 1) {
           if (btn) btn.style.display = 'none';
           const dd = document.getElementById('sf-creator-dropdown');
           if (dd) dd.style.display = 'none';
@@ -14574,14 +14606,19 @@ require(['vs/editor/editor.main'], function () {
           }
           if (filterCreatorsLower.length) {
             const a = ((f.meta && f.meta.author) || '').toLowerCase();
-            if (!a || !filterCreatorsLower.includes(a)) return false;
+            if (!a) {
+              if (!filterCreatorsLower.includes(_SF_NO_CREATOR_KEY)) return false;
+            } else if (!filterCreatorsLower.includes(a)) {
+              return false;
+            }
           }
           return true;
         });
         const counts = new Map();
+        let emptyCount = 0;
         for (const f of matchSet) {
           const a = (f.meta && f.meta.author) || '';
-          if (!a) continue;
+          if (!a) { emptyCount++; continue; }
           const key = a.toLowerCase();
           const ent = counts.get(key);
           if (ent) ent.count++;
@@ -14595,11 +14632,16 @@ require(['vs/editor/editor.main'], function () {
             if (a[1].count !== b[1].count) return b[1].count - a[1].count;
             return a[1].display.localeCompare(b[1].display);
           });
-        if (entries.length === 0) {
+        // Append the "(no creator)" pseudo-row when ANY entry in the library
+        // is missing a creator. Showing it even when filtered down to zero
+        // empties in the current matchSet would be confusing (the count
+        // would say 0). Only render when emptyCount > 0 in the current
+        // filter slice, which is the consistent meaning.
+        if (entries.length === 0 && emptyCount === 0) {
           list.innerHTML = '<div class="styles-tag-dropdown-empty">No creators on current results.</div>';
           return;
         }
-        list.innerHTML = entries.map(([key, info]) => {
+        const namedRows = entries.map(([key, info]) => {
           const sel = _sfActiveFilterCreators.has(info.display);
           return `<button class="styles-tag-dropdown-item${sel ? ' selected' : ''}" data-creator="${_sfEscape(info.display)}">
             <span class="styles-tag-dropdown-check">${sel ? '&#10003;' : ''}</span>
@@ -14607,6 +14649,16 @@ require(['vs/editor/editor.main'], function () {
             <span class="styles-tag-dropdown-count">${info.count}</span>
           </button>`;
         }).join('');
+        let noCreatorRow = '';
+        if (emptyCount > 0) {
+          const sel = _sfActiveFilterCreators.has(_SF_NO_CREATOR_KEY);
+          noCreatorRow = `<button class="styles-tag-dropdown-item${sel ? ' selected' : ''}" data-creator="${_sfEscape(_SF_NO_CREATOR_KEY)}" style="font-style:italic;opacity:0.85">
+            <span class="styles-tag-dropdown-check">${sel ? '&#10003;' : ''}</span>
+            <span class="styles-tag-dropdown-name">${_sfEscape(_SF_NO_CREATOR_KEY)}</span>
+            <span class="styles-tag-dropdown-count">${emptyCount}</span>
+          </button>`;
+        }
+        list.innerHTML = namedRows + noCreatorRow;
       };
       const _sfToggleFilterCreator = (creator) => {
         if (!creator) return;
@@ -14787,7 +14839,7 @@ require(['vs/editor/editor.main'], function () {
         candList:    document.getElementById('sf-review-candidate-list'),
         bundleRow:    document.getElementById('sf-bundle-prepend-row'),
         bundleCheck:  document.getElementById('sf-review-prepend-bundle'),
-        bundleHint:   document.getElementById('sf-bundle-name-hint'),
+        bundlePrefixInput: document.getElementById('sf-bundle-prefix-input'),
         bundleFollow: document.getElementById('sf-bundle-followup'),
         cancelBtn:   document.getElementById('sf-import-cancel-btn'),
         confirmBtn:  document.getElementById('sf-import-confirm-btn'),
@@ -15149,7 +15201,7 @@ require(['vs/editor/editor.main'], function () {
         if (newName === oldName) return;
         const res = await window.electronAPI.sharedTracksRenameFile({ oldName, newName });
         if (!res || !res.ok) {
-          alert('Rename failed: ' + (res?.error || 'unknown error'));
+          promptError('Rename failed', res?.error || 'unknown error');
           return;
         }
         // Keep the renamed file in the selection.
@@ -15497,8 +15549,13 @@ require(['vs/editor/editor.main'], function () {
         if (_sfImportEls.bundleRow) {
           _sfImportEls.bundleRow.style.display = (cands.length >= 2 && bundleName) ? '' : 'none';
         }
-        if (_sfImportEls.bundleHint) {
-          _sfImportEls.bundleHint.textContent = bundleName ? `(${bundleName})` : '';
+        // Bundle name is the SOURCE-side display name (keeps "Bundle"/"Pack").
+        // bundlePrefix is the auto-derived prepend value (strips Bundle/Pack
+        // so per-font names read cleanly). The input is editable: whatever
+        // text the user types becomes the prepend, live.
+        const autoBundlePrefix = cands[0]?.bundlePrefix || bundleName || '';
+        if (_sfImportEls.bundlePrefixInput) {
+          _sfImportEls.bundlePrefixInput.value = autoBundlePrefix;
         }
         // Default off — the bundle name is already searchable as a tag, so
         // prefixing the font names too is redundant. Available as opt-in for
@@ -15511,7 +15568,8 @@ require(['vs/editor/editor.main'], function () {
         if (_sfImportEls.bundleFollow) {
           _sfImportEls.bundleFollow.style.display = (cands.length >= 2) ? '' : 'none';
         }
-        const prependBundle = bundleName && _sfImportEls.bundleCheck ? _sfImportEls.bundleCheck.checked : false;
+        const currentPrefix = autoBundlePrefix;
+        const prependBundle = currentPrefix && _sfImportEls.bundleCheck ? _sfImportEls.bundleCheck.checked : false;
         if (_sfImportEls.candList) {
           if (cands.length === 0) {
             _sfImportEls.candList.innerHTML = '<div class="sf-import-hint">No Proffie-shaped fonts detected inside this source.</div>';
@@ -15547,7 +15605,7 @@ require(['vs/editor/editor.main'], function () {
             // user has to pick which ones explicitly.
             const _autoCheckDup = isDuplicate && cands.length === 1;
             _sfImportEls.candList.innerHTML = cands.map((c, i) => {
-              const initialName = _sfSuggestName(c, i, bundleName, prependBundle);
+              const initialName = _sfSuggestName(c, i, currentPrefix, prependBundle);
               const alreadyName = existingByPath.get(c.path || '');
               const isAlready = !!alreadyName;
               const badges = [];
@@ -15614,20 +15672,19 @@ require(['vs/editor/editor.main'], function () {
         });
         // Recompute the suggested names for every row that hasn't been
         // manually edited. Called when the user toggles the prepend
-        // checkbox OR when they edit the bundle name itself. Manual name
-        // edits always win.
+        // checkbox, edits the bundle prefix input, or edits the source
+        // name. Manual per-row name edits always win.
         const _rebuildSuggestedNames = () => {
           const prepend = _sfImportEls.bundleCheck?.checked || false;
           const currentBundle = (_sfImportEls.bundleNameInput?.value || '').trim() || null;
           _sfImport.bundleName = currentBundle;
-          if (_sfImportEls.bundleHint) {
-            _sfImportEls.bundleHint.textContent = currentBundle ? `(${currentBundle})` : '';
-          }
+          const currentPrefix = (_sfImportEls.bundlePrefixInput?.value || '').trim() || currentBundle || '';
+          _sfImport.bundlePrefix = currentPrefix;
           _sfImportEls.candList?.querySelectorAll('.sf-review-candidate-row').forEach(row => {
             if (row.dataset.edited === 'true') return;
             const idx = parseInt(row.dataset.idx, 10);
             const c = _sfImport.candidates[idx];
-            const newName = _sfSuggestName(c, idx, currentBundle, prepend);
+            const newName = _sfSuggestName(c, idx, currentPrefix, prepend);
             const nameEl = row.querySelector('.cand-name');
             if (nameEl) nameEl.value = newName;
             row.dataset.suggested = newName;
@@ -15639,6 +15696,9 @@ require(['vs/editor/editor.main'], function () {
         }
         if (_sfImportEls.bundleNameInput) {
           _sfImportEls.bundleNameInput.oninput = _rebuildSuggestedNames;
+        }
+        if (_sfImportEls.bundlePrefixInput) {
+          _sfImportEls.bundlePrefixInput.oninput = _rebuildSuggestedNames;
         }
         _sfRevalidateCandidates();
       };
@@ -15904,12 +15964,39 @@ require(['vs/editor/editor.main'], function () {
       };
       // Friendly text for each review-trigger reason key. Kept in sync
       // with the keys emitted by soundFontBulkImport.runBulkImport.
+      // Values can be static strings OR functions(entry) -> string for
+      // reasons that need to reference structured detail data on the
+      // entry meta (e.g. multiple_versions_in_source uses entry.versionInfo
+      // to name the actual version numbers).
       const _SF_REVIEW_REASON_TEXT = {
         creator_empty: 'Creator field is empty.',
         creator_unknown_no_website: 'Creator was set but isn’t in our known list and has no website on file.',
         creator_structural_match: 'Creator was guessed from the file structure rather than a readme. Verify it’s correct.',
         name_collision_renamed: 'Name was suffixed to avoid colliding with an existing entry.',
         acquisition_date_fallback: 'Acquired date couldn’t be read from the file and defaulted to today.',
+        multiple_versions_in_source: (entry) => {
+          const info = entry && entry.versionInfo;
+          if (!info || !info.taken) return 'Source contains multiple versions; the latest was imported.';
+          const skipped = Array.isArray(info.skipped) ? info.skipped : [];
+          const allVersions = [...skipped, info.taken];
+          const total = allVersions.length;
+          const skippedJoined = skipped.length === 1
+            ? skipped[0]
+            : skipped.length === 2
+              ? `${skipped[0]} and ${skipped[1]}`
+              : skipped.slice(0, -1).join(', ') + ', and ' + skipped[skipped.length - 1];
+          const verb = skipped.length === 1 ? 'is' : 'are';
+          return `Source contained ${total} versions (${allVersions.join(', ')}). ${info.taken} was imported; ${skippedJoined} ${verb} still in the source if you want to add ${skipped.length === 1 ? 'it' : 'them'} separately.`;
+        },
+      };
+      // Resolve a reason key into its display text, calling the formatter
+      // function with the entry context when the entry needs to drive
+      // the message content (multi-version case).
+      const _sfResolveReviewReasonText = (reason, entry) => {
+        const v = _SF_REVIEW_REASON_TEXT[reason];
+        if (typeof v === 'function') return v(entry);
+        if (typeof v === 'string') return v;
+        return reason;
       };
       const _sfRefreshDisplayValues = () => {
         if (!_sfDetailEdit) return;
@@ -15931,7 +16018,7 @@ require(['vs/editor/editor.main'], function () {
             if (reasonsList) {
               reasonsList.innerHTML = reasons.length === 0
                 ? '<li>No specific reason recorded.</li>'
-                : reasons.map(r => `<li>${_sfEscape(_SF_REVIEW_REASON_TEXT[r] || r)}</li>`).join('');
+                : reasons.map(r => `<li>${_sfEscape(_sfResolveReviewReasonText(r, _sfDetailEdit))}</li>`).join('');
             }
             // Mark reviewed is only available when no REQUIRED-field reason
             // is still active. Today the only required field is Creator —
@@ -16092,6 +16179,10 @@ require(['vs/editor/editor.main'], function () {
           linkLabel: (m.linkLabel || '').trim(),
           needsReview: !!m.needsReview,
           reviewReasons: Array.isArray(m.reviewReasons) ? m.reviewReasons.slice() : [],
+          versionInfo: (m.versionInfo && typeof m.versionInfo === 'object') ? {
+            taken: m.versionInfo.taken || '',
+            skipped: Array.isArray(m.versionInfo.skipped) ? m.versionInfo.skipped.slice() : [],
+          } : null,
         };
         _sfDetailDirty = false;
         if (_sfEntryDetailEls.saveBtn) _sfEntryDetailEls.saveBtn.disabled = true;
@@ -16366,6 +16457,20 @@ require(['vs/editor/editor.main'], function () {
         const oldEffective = origLabelExplicit || prefAtSaveStart;
         const newLabelExplicit = (_sfDetailEdit.linkLabel || '').trim();
         const newEffective = newLabelExplicit || prefAtSaveStart;
+        // Auto-clear self-resolving review reasons before saving. Today
+        // creator_empty is the only reason that resolves automatically:
+        // once the user fills in the author field, the reason no longer
+        // applies and shouldn't keep the needsReview banner alive on its
+        // own. Other reasons (structural match, collision rename,
+        // version-skipped notice) are informational and still require
+        // the explicit "Mark reviewed" action to dismiss.
+        const _currentAuthor = (_sfDetailEdit.author || '').trim();
+        const _rawReasons = Array.isArray(_sfDetailEdit.reviewReasons) ? _sfDetailEdit.reviewReasons : [];
+        const activeReviewReasons = _rawReasons.filter(r => {
+          if (r === 'creator_empty') return !_currentAuthor;
+          return true;
+        });
+        const activeNeedsReview = !!_sfDetailEdit.needsReview && activeReviewReasons.length > 0;
         const updates = {
           author: _sfDetailEdit.author,
           acquisitionDate: _sfDetailEdit.acquisitionDate,
@@ -16375,8 +16480,8 @@ require(['vs/editor/editor.main'], function () {
           purchased: _sfDetailEdit.purchased,
           linkUrl: _sfDetailEdit.linkUrl,
           linkLabel: _sfDetailEdit.linkLabel,
-          needsReview: !!_sfDetailEdit.needsReview,
-          reviewReasons: Array.isArray(_sfDetailEdit.reviewReasons) ? _sfDetailEdit.reviewReasons : [],
+          needsReview: activeNeedsReview,
+          reviewReasons: activeReviewReasons,
         };
         const sanitizedName = _sfSanitizeName(_sfDetailEdit.name);
         const isRename = sanitizedName !== _sfDetailOriginalName;
@@ -16390,15 +16495,27 @@ require(['vs/editor/editor.main'], function () {
           return;
         }
         // Decide scope of label propagation. Only ask when:
-        //   - this entry has a linkUrl (label only makes sense with a link)
+        //   - this entry HAD a link before this save (adding a brand-new
+        //     link doesn't count as changing an old label — the
+        //     "previous label" was just the fallback pref shown in an
+        //     empty field, not a real label on this entry)
+        //   - this entry still has a linkUrl after the save
         //   - the effective label actually changed
-        //   - and there are OTHER linked entries to potentially update
+        //   - AND at least one other linked entry currently shows the
+        //     SAME old label that this entry used to show — without that,
+        //     there's literally nothing the "matching" choice could
+        //     update, so the prompt has no useful answer
         // Otherwise: no prompt, no propagation.
-        const labelChanged = !!_sfDetailEdit.linkUrl && oldEffective !== newEffective;
+        const hadLinkBefore = !!origLinkUrl;
+        const labelChanged = hadLinkBefore && !!_sfDetailEdit.linkUrl && oldEffective !== newEffective;
         const otherLinkedEntries = _sfAllEntries.filter(e =>
           e.name !== _sfDetailOriginalName && e.meta && e.meta.linkUrl);
+        const othersWithSameOldLabel = otherLinkedEntries.filter(e => {
+          const otherEffective = (e.meta.linkLabel || '').trim() || prefAtSaveStart;
+          return otherEffective === oldEffective;
+        });
         let scope = 'current';
-        if (labelChanged && otherLinkedEntries.length > 0) {
+        if (labelChanged && othersWithSameOldLabel.length > 0) {
           const choice = await _sfPromptLabelScope(oldEffective, newEffective);
           if (choice) scope = choice;
         }
@@ -16429,10 +16546,14 @@ require(['vs/editor/editor.main'], function () {
         if (propagationFailures.length) {
           alert(`The label change saved, but some other entries failed to update:\n${propagationFailures.map(f => ` • ${f.name}: ${f.error}`).join('\n')}`);
         }
-        // Update the stored preference whenever the label effectively changed
-        // and a URL is attached. The most recent label choice becomes the
-        // new default for future linked entries, regardless of scope picked.
-        if (labelChanged && newEffective !== prefAtSaveStart) {
+        // Update the stored preference whenever the user has a URL
+        // attached and the effective label differs from the current pref.
+        // Fires both when an existing label was changed (the propagation
+        // case above) AND when a brand-new link was added with an
+        // explicit label — the latter still represents the user's most
+        // recent label choice and should drive the default for the next
+        // link they add.
+        if (_sfDetailEdit.linkUrl && newEffective && newEffective !== prefAtSaveStart) {
           _sfLinkLabelPref = newEffective;
           try { await window.electronAPI.setSetting('soundFontLinkLabel', newEffective); } catch {}
         }
@@ -17788,7 +17909,7 @@ require(['vs/editor/editor.main'], function () {
         const res = await window.electronAPI.fileOpsRename({
           kind: 'entry', id: _sfDetailOriginalName, subPath, newName: name,
         });
-        if (!res || !res.ok) { alert(`Rename failed: ${(res && res.error) || 'unknown'}`); return; }
+        if (!res || !res.ok) { promptError('Rename failed', (res && res.error) || 'unknown'); return; }
         try {
           const fr = await window.electronAPI.listEntryFiles({ name: _sfDetailOriginalName });
           _sfEntryFilesTree = (fr && fr.ok && fr.files) || [];
@@ -17816,7 +17937,7 @@ require(['vs/editor/editor.main'], function () {
         const res = await window.electronAPI.fileOpsRename({
           kind: 'entry', id: _sfDetailOriginalName, subPath, newName: name,
         });
-        if (!res || !res.ok) { alert(`Rename failed: ${(res && res.error) || 'unknown'}`); return; }
+        if (!res || !res.ok) { promptError('Rename failed', (res && res.error) || 'unknown'); return; }
         try {
           const fr = await window.electronAPI.listEntryFiles({ name: _sfDetailOriginalName });
           _sfEntryFilesTree = (fr && fr.ok && fr.files) || [];

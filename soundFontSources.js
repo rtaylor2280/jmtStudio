@@ -967,6 +967,7 @@ module.exports = {
   openSource,
   deleteSource,
   updateSourceMeta,
+  readSourceMeta,
   listSourceDocs,
   readSourceFileBytes,
   exportSourceFileTo,

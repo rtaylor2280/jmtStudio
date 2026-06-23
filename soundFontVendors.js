@@ -80,6 +80,17 @@ const vendors = [
           /(^|\/)ReadMe\s*-\s*Mountain\s+Sabers\s*\(Font\s+Creator\)\.txt$/i,
         ],
       },
+      // Content-phrase fallback for fonts whose readme uses a non-standard
+      // filename ("READ ME.txt", "ReadMe.txt", "README.md", etc.) but whose
+      // body still names Mountain Sabers. Angelic Plazma ships with
+      // "READ ME.txt" that opens "This is a Mountain Sabers Signature
+      // Series sound font." — the structuralAll above misses it on
+      // filename alone, but the body is a clean signal.
+      {
+        type: 'readmeContent',
+        fileMatch: /(^|\/)read[\s_-]?me\b[^/]*\.(txt|rtf|md)$/i,
+        contentMatch: /Mountain\s+Sabers/i,
+      },
       // Filename fallback for Mountain Sabers' bundle archives that
       // ship without per-font readmes (Mountain Sabers Free Pack
       // contains JURASSIC/, STARGATE/, etc. with no readmes inside).
@@ -178,12 +189,16 @@ const vendors = [
     purchasedDefault: undefined,
     patterns: [
       // Older shape: ReadMe.txt at bundle root. Newer shape: Copyright ©.txt.
-      // Both contain the same identifier text. Case-insensitive match catches
-      // the variant cap "JayDaloRian" some readmes use vs the website's
-      // canonical "JayDalorian".
+      // Standalone single-board fonts (e.g. Heavy) ship without a readme at
+      // all — the attribution is the last line of Blade_Style.txt instead.
+      // Three filename forms accepted; contentMatch is narrow enough
+      // ("Jaydalorian" or "Jérôme Tremblay") that broadening the filename
+      // surface doesn't introduce false positives.
+      // Case-insensitive match catches the variant cap "JayDaloRian" some
+      // readmes use vs the website's canonical "JayDalorian".
       {
         type: 'readmeContent',
-        fileMatch: /(^|\/)(ReadMe\.txt|Copyright .+\.txt)$/i,
+        fileMatch: /(^|\/)(ReadMe\.txt|Copyright .+\.txt|Blade[\s_-]?Style\.txt)$/i,
         contentMatch: /jaydalorian|J[ée]r[ôo]me\s+Tremblay/i,
       },
       // Structural fallback for variants that ship without any text identifier
@@ -400,6 +415,74 @@ function _contentPasses(content, pattern) {
   return false;
 }
 
+// Header-line attribution shapes used across community-shared fonts:
+//   "by Dayad Jocen (http://therebelarmory.com/user/1738)"
+//   "Created by Joe Smith"
+//   "Author: Jane Doe"
+//   "Font by Greyscale Fonts"
+// Anchored at line start, no /i — the lead-in tokens are listed in both
+// cases explicitly to keep the captured-name section strict ([A-Z] start
+// downstream). Name body excludes parens/commas/semicolons so list forms
+// ("Joe Smith, contributor") don't get over-captured. Trailing
+// parenthetical is captured as a URL candidate; validated downstream.
+const _CREATOR_LINE_RX = /^\s*(?:[Bb]y|[Cc]reated\s+[Bb]y|[Aa]uthor|[Ff]ont\s+[Bb]y|[Dd]esigned\s+[Bb]y|[Mm]ade\s+[Bb]y|[Ss]ound\s+[Ff]ont\s+[Bb]y)[\s:]+([^(),;\n]{1,60}?)\s*(?:\(([^)]+)\))?\s*$/;
+
+// Readme-shape filenames the generic extractor will scan. Tighter than
+// the per-vendor patterns: only files whose stem starts with read[ _-]?me
+// or credits/author/about. Excludes Blade_Style.txt and other in-font
+// config files (no "by NAME" header convention there).
+const _README_SHAPE_RX = /(^|\/)(read[\s_-]?me|credits|authors?|about)[^/]*\.(txt|rtf|md)$/i;
+
+function _extractCreatorLineFromText(text) {
+  const lines = text.split(/\r?\n/);
+  let nonBlank = 0;
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    nonBlank++;
+    if (nonBlank > 8) break;
+    const m = line.match(_CREATOR_LINE_RX);
+    if (!m) continue;
+    const rawName = m[1].trim();
+    if (rawName.length < 2) continue;
+    // Capital-start guard filters noise lines that happened to start
+    // with a lead-in token but whose "name" is lowercase prose.
+    if (!/^[A-Z]/.test(rawName)) continue;
+    let url = null;
+    if (m[2]) {
+      const cand = m[2].trim();
+      if (/^https?:\/\/|^www\./i.test(cand)) url = cand;
+    }
+    return { name: rawName, url };
+  }
+  return null;
+}
+
+async function _extractGenericCreator(source, entries) {
+  for (const e of entries) {
+    if (e.isDir) continue;
+    if (!_README_SHAPE_RX.test(e.fileName)) continue;
+    let content;
+    try {
+      const buf = await source.readFile(e.fileName);
+      content = _decodeText(buf);
+    } catch { continue; }
+    const hit = _extractCreatorLineFromText(content);
+    if (hit) {
+      return {
+        vendorId: null,
+        vendor: hit.name,
+        vendorWebsite: hit.url || null,
+        vendorAutoDetected: true,
+        confidence: 'content',
+        purchasedDefault: undefined,
+        matchedFile: e.fileName,
+        matchType: 'genericCreator',
+      };
+    }
+  }
+  return null;
+}
+
 async function _findReadmeMatch(source, entries, pattern) {
   // Read each matched file once; cache by path so multiple patterns scanning
   // the same files don't reread.
@@ -514,6 +597,17 @@ async function detectVendor(source) {
       }
     }
   }
+
+  // No named vendor matched. Try generic creator extraction on
+  // readme-shape files: catches one-off community contributors whose
+  // README has a "by NAME" header but who aren't in the named-vendor
+  // list (e.g. Tythonian Crystal by Dayad Jocen, hosted on rebelarmory).
+  // matchType: 'genericCreator' so downstream code can distinguish from
+  // named-vendor readmeContent matches.
+  try {
+    const generic = await _extractGenericCreator(source, entries);
+    if (generic) return generic;
+  } catch {}
 
   // Outer-source detection found nothing. If the source is a bundle of
   // inner zips (Kyberphonic ships Tales / Power of Many bundles where

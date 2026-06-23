@@ -51,11 +51,25 @@ function _readEntryMeta(entryDir) {
 function listEntries(userData) {
   const root = entriesRoot(userData);
   if (!fs.existsSync(root)) return [];
+  const srcRoot = soundFontSources.sourcesRoot(userData);
+  const sourceMetaCache = new Map();
   const out = [];
   for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
     const meta = _readEntryMeta(path.join(root, entry.name));
     if (!meta) continue;
+    // Project source-level fields (vendor / vendorWebsite / purchased /
+    // acquisitionDate) onto the returned entry meta. Source is the single
+    // source of truth — any entry-level stored values are stale carryover
+    // from before the refactor and get overwritten in the response.
+    if (meta.sourceUuid) {
+      let srcMeta = sourceMetaCache.get(meta.sourceUuid);
+      if (srcMeta === undefined) {
+        srcMeta = soundFontSources.readSourceMeta(path.join(srcRoot, meta.sourceUuid)) || null;
+        sourceMetaCache.set(meta.sourceUuid, srcMeta);
+      }
+      if (srcMeta) _projectSourceFieldsOntoEntry(meta, srcMeta);
+    }
     // hasTracks: surfaces in the preset sidecar's track picker so only
     // entries with a ProffieOS-conventional tracks/ subfolder appear in
     // the dropdown. A singular "track/" is a common typo the prop won't
@@ -253,6 +267,33 @@ async function createEntry({ userData, sourceUuid, candidate, name, metadata, on
     };
 
     fs.writeFileSync(path.join(entryDir, 'meta.json'), JSON.stringify(meta, null, 2));
+
+    // Propagate source-level fields to source meta if the source is
+    // missing them. Keeps freshly-imported sources consistent with the
+    // single-source-of-truth design without waiting for the next
+    // migration pass. Vendor + website are typically already on source
+    // (set during import-time detection); purchased + acquisitionDate
+    // historically lived only on entries and need this push.
+    try {
+      const srcMetaCur = soundFontSources.readSourceMeta(path.join(soundFontSources.sourcesRoot(userData), sourceUuid));
+      if (srcMetaCur) {
+        const srcUpdates = {};
+        if (srcMetaCur.purchased == null) srcUpdates.purchased = meta.purchased;
+        if (!srcMetaCur.acquisitionDate && meta.acquisitionDate) srcUpdates.acquisitionDate = meta.acquisitionDate;
+        if (!srcMetaCur.vendor && meta.author) srcUpdates.vendor = meta.author;
+        if (Object.keys(srcUpdates).length > 0) {
+          soundFontSources.updateSourceMeta(userData, sourceUuid, srcUpdates);
+        }
+      }
+    } catch {}
+
+    // Re-project the (possibly just-updated) source values onto the
+    // returned meta so the caller sees canonical post-write state.
+    try {
+      const srcMetaPost = soundFontSources.readSourceMeta(path.join(soundFontSources.sourcesRoot(userData), sourceUuid));
+      if (srcMetaPost) _projectSourceFieldsOntoEntry(meta, srcMetaPost);
+    } catch {}
+
     emit('done', { fileCount: result.fileCount, totalBytes: result.totalBytes });
     return { ok: true, name: entryName, meta };
   } catch (err) {
@@ -378,6 +419,110 @@ const _ENTRY_META_IMMUTABLE = new Set([
   'schemaVersion', 'entryUuid', 'sourceUuid', 'candidatePath', 'multiBoard',
   'otherFlavors', 'nested', 'fileCount', 'totalBytes', 'createdAt',
 ]);
+
+// Source-level fields that the entry-detail UI presents as if they were
+// entry fields, but that actually live on the source meta. The single
+// source per source-of-truth design (decided 2026-06-23): one creator,
+// one website, one purchased flag, one acquisition date per source —
+// every entry derived from that source displays and edits the same value.
+//
+// Read path: listEntries() joins to source meta and projects these onto
+// each returned entry.meta (overriding any stale entry-level values that
+// may still exist on disk from before the refactor).
+//
+// Write path: updateEntryMeta() routes updates touching these keys to
+// updateSourceMeta() instead of writing them to entry meta. The user can
+// edit on either the entry-detail or source-detail UI surface; both
+// converge on the same source row on disk.
+//
+// Map: entry-side key → source-side key (the names differ because the
+// schemas grew independently before the unification).
+const _ENTRY_TO_SOURCE_FIELD_MAP = {
+  author: 'vendor',
+  vendorWebsite: 'vendorWebsite',
+  purchased: 'purchased',
+  acquisitionDate: 'acquisitionDate',
+};
+const _ENTRY_FIELDS_ON_SOURCE = new Set(Object.keys(_ENTRY_TO_SOURCE_FIELD_MAP));
+
+// Cache the source-meta load per entry-list call so a bundle with N
+// derived entries only reads its source once.
+function _projectSourceFieldsOntoEntry(entryMeta, sourceMeta) {
+  if (!entryMeta || !sourceMeta) return;
+  entryMeta.author = sourceMeta.vendor || '';
+  entryMeta.vendorWebsite = sourceMeta.vendorWebsite || '';
+  entryMeta.purchased = sourceMeta.purchased === true;
+  entryMeta.acquisitionDate = sourceMeta.acquisitionDate || '';
+  // Expose the auto-detected flag so the renderer can show a "verified"
+  // badge or de-emphasize when the user later confirms a heuristic match.
+  entryMeta.vendorAutoDetected = sourceMeta.vendorAutoDetected === true;
+}
+
+// Migration: hoist source-level fields from any derived entry up to its
+// source when the source is missing them. Idempotent — runs to completion
+// then becomes a no-op (the source will have the fields and the projection
+// at read time will mirror them back). Called on startup (main.js) so
+// existing libraries from before this refactor transparently migrate.
+function migrateSourceLevelFields(userData) {
+  const libRoot = entriesRoot(userData);
+  const srcRoot = soundFontSources.sourcesRoot(userData);
+  if (!fs.existsSync(libRoot) || !fs.existsSync(srcRoot)) {
+    return { ok: true, migrated: 0, skipped: 0 };
+  }
+
+  // Group entries by sourceUuid; pick the most-informative values
+  // (any-true for purchased, earliest for acquisitionDate, first
+  // non-empty for the strings).
+  const bySrc = new Map();
+  for (const e of fs.readdirSync(libRoot, { withFileTypes: true })) {
+    if (!e.isDirectory()) continue;
+    const meta = _readEntryMeta(path.join(libRoot, e.name));
+    if (!meta || !meta.sourceUuid) continue;
+    if (!bySrc.has(meta.sourceUuid)) bySrc.set(meta.sourceUuid, []);
+    bySrc.get(meta.sourceUuid).push(meta);
+  }
+
+  let migrated = 0;
+  let skipped = 0;
+  for (const [uuid, entries] of bySrc.entries()) {
+    const srcDir = path.join(srcRoot, uuid);
+    const srcMeta = soundFontSources.readSourceMeta(srcDir);
+    if (!srcMeta) { skipped++; continue; }
+
+    const updates = {};
+    // purchased: any entry true → source true. The whole-bundle-same-tier
+    // assumption (vendors never mix free/paid in a single source) means
+    // we don't need a tiebreaker.
+    if (srcMeta.purchased == null) {
+      const any = entries.some(en => en.purchased === true);
+      if (any || entries.some(en => en.purchased === false)) {
+        updates.purchased = any;
+      }
+    }
+    // acquisitionDate: earliest non-empty wins (the moment the bundle
+    // entered the user's library — re-imports of the same source might
+    // have different sourceFileDate values across entries).
+    if (!srcMeta.acquisitionDate) {
+      const dates = entries.map(en => en.acquisitionDate).filter(Boolean).sort();
+      if (dates.length) updates.acquisitionDate = dates[0];
+    }
+    // vendor (author): first non-empty (entries should agree if vendor
+    // detection fired; if they disagree it's user edits and we take any).
+    if (!srcMeta.vendor) {
+      const authors = entries.map(en => en.author).filter(Boolean);
+      if (authors.length) updates.vendor = authors[0];
+    }
+    if (!srcMeta.vendorWebsite) {
+      const sites = entries.map(en => en.vendorWebsite).filter(Boolean);
+      if (sites.length) updates.vendorWebsite = sites[0];
+    }
+
+    if (Object.keys(updates).length === 0) { skipped++; continue; }
+    const res = soundFontSources.updateSourceMeta(userData, uuid, updates);
+    if (res && res.ok) migrated++;
+  }
+  return { ok: true, migrated, skipped };
+}
 function updateEntryMeta({ userData, currentName, newName, updates }) {
   if (!userData) return { ok: false, error: 'Missing userData' };
   if (!currentName) return { ok: false, error: 'Missing currentName' };
@@ -401,12 +546,31 @@ function updateEntryMeta({ userData, currentName, newName, updates }) {
   try { meta = JSON.parse(fs.readFileSync(curMetaPath, 'utf8')); }
   catch (err) { return { ok: false, error: `Cannot read meta: ${err.message}` }; }
 
-  // Apply updates, skipping immutable fields.
+  // Split updates into source-level (routed to updateSourceMeta) and
+  // entry-level (written here). Source-level keys are mapped to their
+  // source-side name (e.g. author → vendor) before forwarding. When the
+  // user touches vendor or vendorWebsite from the entry-detail UI, we
+  // also clear vendorAutoDetected so future re-detection passes don't
+  // overwrite their decision.
+  const sourceUpdates = {};
   if (updates && typeof updates === 'object') {
     for (const key of Object.keys(updates)) {
       if (_ENTRY_META_IMMUTABLE.has(key)) continue;
+      if (_ENTRY_FIELDS_ON_SOURCE.has(key)) {
+        const sourceKey = _ENTRY_TO_SOURCE_FIELD_MAP[key];
+        sourceUpdates[sourceKey] = updates[key];
+        continue;
+      }
       meta[key] = updates[key];
     }
+  }
+  if (Object.keys(sourceUpdates).length > 0) {
+    if (!meta.sourceUuid) return { ok: false, error: 'Entry has no sourceUuid; cannot route source-level update' };
+    if ('vendor' in sourceUpdates || 'vendorWebsite' in sourceUpdates) {
+      sourceUpdates.vendorAutoDetected = false;
+    }
+    const srcRes = soundFontSources.updateSourceMeta(userData, meta.sourceUuid, sourceUpdates);
+    if (!srcRes || !srcRes.ok) return { ok: false, error: (srcRes && srcRes.error) || 'Source update failed' };
   }
 
   // Apply rename if requested.
@@ -428,6 +592,14 @@ function updateEntryMeta({ userData, currentName, newName, updates }) {
   try { fs.writeFileSync(path.join(finalDir, 'meta.json'), JSON.stringify(meta, null, 2)); }
   catch (err) { return { ok: false, error: `Cannot write meta: ${err.message}` }; }
 
+  // Re-project the (possibly just-updated) source meta onto the response
+  // so callers see the canonical post-write state, not the stale entry
+  // fields. Mirrors what listEntries() does on read.
+  if (meta.sourceUuid) {
+    const srcRoot = soundFontSources.sourcesRoot(userData);
+    const srcMeta = soundFontSources.readSourceMeta(path.join(srcRoot, meta.sourceUuid));
+    if (srcMeta) _projectSourceFieldsOntoEntry(meta, srcMeta);
+  }
   return { ok: true, name: finalName, meta };
 }
 
@@ -664,4 +836,5 @@ module.exports = {
   exportEntryToFolder,
   entryFolderExistsAt,
   listEntryFiles,
+  migrateSourceLevelFields,
 };

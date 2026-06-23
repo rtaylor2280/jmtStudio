@@ -1014,8 +1014,22 @@ ipcMain.handle('sources:detectCandidates', async (_, { uuid } = {}) => {
 // Entries are curated subsets of a source, extracted into
 // userData/soundFonts/library/<name>/ with a meta.json linking back to the
 // source by UUID. Phase 2 wires these into the browse grid and migration.
+// One-shot migration guard: source-level fields (vendor/website/purchased/
+// acquisitionDate) became canonical on the source meta on 2026-06-23, but
+// legacy entries from before that landed have these values stored on the
+// entry meta. First entries:list call after launch runs the migration,
+// which hoists any non-empty entry-level values up to their source if the
+// source is missing them. Idempotent — subsequent runs short-circuit
+// because the source already has the field.
+let _entriesMigrationRan = false;
 ipcMain.handle('entries:list', () => {
-  try { return { ok: true, entries: soundFontEntries.listEntries(app.getPath('userData')) }; }
+  try {
+    if (!_entriesMigrationRan) {
+      _entriesMigrationRan = true;
+      try { soundFontEntries.migrateSourceLevelFields(app.getPath('userData')); } catch {}
+    }
+    return { ok: true, entries: soundFontEntries.listEntries(app.getPath('userData')) };
+  }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
