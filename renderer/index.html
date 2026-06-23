@@ -3280,17 +3280,7 @@
         </div>
         <div class="toolbar-divider"></div>
         <button id="btn-sf-create-shared-tracks" class="btn-blue" style="display:none" title="Create a shared tracks folder. Maps to /tracks/ at the SD card root — the universal track location ProffieOS scans for all presets.">&#43; Create Shared Tracks Folder</button>
-        <div class="styles-tag-filter-wrap" id="sf-import-toolbar-wrap" style="display:none">
-          <button id="btn-sf-import-toolbar" class="btn-blue" title="Import sound fonts into your library">&#43; Import Sound Font &#9660;</button>
-          <div id="sf-import-dropdown" class="styles-tag-dropdown" style="display:none;min-width:200px">
-            <button id="btn-sf-import-single-menu" class="styles-tag-dropdown-item" title="Import one sound font from a vendor .zip or unzipped folder">
-              <span class="styles-tag-dropdown-name">&#43; Single source&hellip;</span>
-            </button>
-            <button id="btn-sf-import-bulk-menu" class="styles-tag-dropdown-item" title="Point at a folder containing many fonts or zips. Anything already in your library is skipped automatically.">
-              <span class="styles-tag-dropdown-name">&#43; Bulk import folder&hellip;</span>
-            </button>
-          </div>
-        </div>
+        <button id="btn-sf-import-toolbar" class="btn-blue" style="display:none" title="Import a sound font into your library. Bulk-import many at once is offered inside.">&#43; Import Sound Font</button>
       </div>
       <div class="tab-btns" id="tab-btns-styles">
         <button id="btn-styles-undo"    class="btn-neutral" title="Undo (Ctrl+Z)" style="display:none">&#8634;</button>
@@ -4007,6 +3997,7 @@
         <button class="modal-btn-primary" id="sf-import-pick-zip">Pick .zip file…</button>
         <button class="modal-btn-primary" id="sf-import-pick-folder">Pick folder…</button>
       </div>
+      <p style="margin-top:14px;font-size:0.78rem;color:var(--c-text-sub)">Already have many fonts to add? <a href="#" id="btn-sf-import-bulk-from-picker" style="color:var(--jmt-blue);text-decoration:underline;cursor:pointer">Bulk import from a folder</a></p>
     </div>
 
     <div class="sf-import-phase" id="sf-import-phase-progress" style="display:none">
@@ -4993,13 +4984,6 @@
         <input type="checkbox" id="setting-sf-dupcheck-enabled" checked>
         <span class="settings-toggle-track"></span>
       </label>
-    </div>
-
-    <div class="settings-item" id="setting-sf-bulk-import-item">
-      <span class="settings-item-label">
-        Bulk import sound fonts <span style="color:var(--c-text-dim);font-weight:400">(point at a folder containing many fonts or zips; skips anything you already have, flags items needing review)</span>
-      </span>
-      <button class="settings-item-btn enabled" id="btn-sf-bulk-import">Pick folder&hellip;</button>
     </div>
 
     <div class="about-section-heading">About</div>
@@ -7336,12 +7320,9 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     if (runInFlight) return;
     closeModal();
   });
-  document.getElementById('btn-sf-bulk-import')?.addEventListener('click', () => {
-    document.getElementById('modal-about')?.classList.remove('active');
-    startScan();
-  });
-  // Expose so the toolbar dropdown and empty-state secondary link can
-  // start the bulk-import flow without reaching into this IIFE.
+  // Expose so the empty-state link and the single-source picker modal's
+  // secondary "Bulk import from a folder" link can start the bulk-import
+  // flow without reaching into this IIFE.
   if (typeof window !== 'undefined') window._sfStartBulkImport = startScan;
 })();
 document.getElementById('theme-selector').addEventListener('click', (e) => {
@@ -14795,7 +14776,7 @@ require(['vs/editor/editor.main'], function () {
         await _refreshSoundFontsToggleLock();
         const layerNoFonts = document.getElementById('sf-empty-nofonts');
         const layerBrowse  = document.getElementById('sf-browse');
-        const toolbarBtn   = document.getElementById('sf-import-toolbar-wrap');
+        const toolbarBtn   = document.getElementById('btn-sf-import-toolbar');
         // Sweep corrupt source dirs (meta without archive, or archive
         // without meta) before listing. Safe no-op when none exist.
         // Suppressed mid-import so we don't race the in-flight write.
@@ -21684,35 +21665,7 @@ require(['vs/editor/editor.main'], function () {
         }
       });
 
-      // Toolbar import dropdown: button toggles the menu, items dispatch
-      // to single-source flow (_sfOpenImport, the existing modal) or to
-      // bulk flow (window._sfStartBulkImport exposed by the bulk import
-      // IIFE). Outside-click and Esc close the dropdown.
-      const _sfImportDropdownToggle = (e) => {
-        const dd = document.getElementById('sf-import-dropdown');
-        if (!dd) return;
-        const opening = dd.style.display === 'none' || !dd.style.display;
-        dd.style.display = opening ? '' : 'none';
-        if (e) e.stopPropagation();
-      };
-      const _sfImportDropdownClose = () => {
-        const dd = document.getElementById('sf-import-dropdown');
-        if (dd) dd.style.display = 'none';
-      };
-      document.getElementById('btn-sf-import-toolbar')?.addEventListener('click', _sfImportDropdownToggle);
-      document.getElementById('btn-sf-import-single-menu')?.addEventListener('click', () => {
-        _sfImportDropdownClose();
-        _sfOpenImport();
-      });
-      document.getElementById('btn-sf-import-bulk-menu')?.addEventListener('click', () => {
-        _sfImportDropdownClose();
-        if (window._sfStartBulkImport) window._sfStartBulkImport();
-      });
-      document.addEventListener('click', (e) => {
-        const wrap = document.getElementById('sf-import-toolbar-wrap');
-        if (wrap && !wrap.contains(e.target)) _sfImportDropdownClose();
-      });
-      document.addEventListener('keydown', (e) => { if (e.key === 'Escape') _sfImportDropdownClose(); });
+      document.getElementById('btn-sf-import-toolbar')?.addEventListener('click', _sfOpenImport);
 
       // Shared Tracks: create-on-click then refresh the view so the toolbar
       // button collapses and the card surfaces in the grid. The folder is
@@ -23405,6 +23358,13 @@ require(['vs/editor/editor.main'], function () {
       document.getElementById('btn-sf-import-font')?.addEventListener('click', _sfOpenImport);
       document.getElementById('btn-sf-import-bulk-empty')?.addEventListener('click', (e) => {
         e.preventDefault();
+        if (window._sfStartBulkImport) window._sfStartBulkImport();
+      });
+      // Bulk link inside the single-source picker modal: close the single
+      // import modal first so the bulk scan modal doesn't open on top.
+      document.getElementById('btn-sf-import-bulk-from-picker')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        _sfCloseImport();
         if (window._sfStartBulkImport) window._sfStartBulkImport();
       });
       _sfImportEls.pickZipBtn?.addEventListener('click', () => _sfPickAndImport('zip'));
