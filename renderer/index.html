@@ -4124,6 +4124,15 @@
             <button class="detail-confirm" id="btn-sf-description-confirm" title="Confirm" style="display:none">&#10003;</button>
           </div>
         </div>
+        <div class="sf-meta-row" id="sf-detail-last-style-row" style="display:none">
+          <span class="sf-meta-label">Last used style</span>
+          <div class="sf-meta-val sf-edit-group">
+            <span id="sf-detail-last-style-display" class="sf-edit-display" title="The last Style Library entry paired with this font in a saved config. Auto-updates on save, manually overridable here."></span>
+            <select id="sf-detail-last-style-select" class="sf-edit-input" style="display:none"></select>
+            <button class="detail-pencil" id="btn-sf-last-style-edit" title="Edit linked style">&#9998;</button>
+            <button class="detail-confirm" id="btn-sf-last-style-confirm" title="Confirm" style="display:none">&#10003;</button>
+          </div>
+        </div>
         <div class="sf-meta-row">
           <span class="sf-meta-label">Contents</span>
           <span class="sf-meta-val" id="sf-detail-contents"></span>
@@ -6271,6 +6280,89 @@ function _validatePresetIdentifiers() {
 // Callers (compile / close guards) use this to bail instead of continuing under
 // the assumption it saved. Browser-mode (doDownload) returns true since download
 // is always initiated.
+// "Last used style" write-back. Called after every successful save of
+// the active config. For each preset, if blade 1 references a Style
+// Library entry by name AND the preset's font matches a Sound Font
+// library entry, update that entry's linkedStyleLibraryEntry to match.
+// Silent side-effect of save: errors are swallowed (we don't want a
+// metadata write hiccup to block the user's main save flow).
+async function _sfWriteBackLastUsedStyles() {
+  try {
+    if (typeof presetParser === 'undefined' || !presetParser) return;
+    const entries = window._sfEntriesCache || [];
+    if (!entries.length) return;
+    const text = window.getEditorContent ? window.getEditorContent() : '';
+    if (!text) return;
+    let parsed;
+    try { parsed = presetParser.parsePresets(text); } catch { return; }
+    if (!parsed || !Array.isArray(parsed.arrays)) return;
+    // The Style Library's user-defined helpers (function names in
+    // my_styles.h) classify as styleClass='helper', not 'ref'. The 'ref'
+    // class is reserved for parsed StylePtr<T>() / RefPtr<...> patterns.
+    // For our purposes, both qualify as "a Style Library entry the user
+    // picked" as long as the leading identifier matches a current
+    // library entry by name. We validate against _getLibraryStyles() so
+    // helpers that don't actually exist in my_styles.h (random
+    // identifiers, typos, references to externally-defined helpers)
+    // don't accidentally get recorded as the user's intentional pick.
+    const libStyleSet = new Set(
+      (typeof window._getLibraryStyles === 'function')
+        ? window._getLibraryStyles()
+        : []
+    );
+    // Build font name → blade-1 style name map. Last write wins, which
+    // matches the "last used" semantics — the latest preset edit's
+    // style sticks for that font.
+    const fontToStyle = new Map();
+    for (const arr of parsed.arrays) {
+      for (const preset of (arr.presets || [])) {
+        const fontRaw = (preset.font || '');
+        const font = fontRaw.split(';').filter(p => p.trim() !== 'common').join(';').trim();
+        if (!font) continue;
+        const slot0 = preset.styles && preset.styles[0];
+        if (!slot0) continue;
+        if (slot0.styleClass !== 'ref' && slot0.styleClass !== 'helper') continue;
+        const styleName = (slot0.expr || '').match(/^[A-Za-z_]\w*/)?.[0];
+        if (!styleName) continue;
+        // For helpers, double-check the name is actually a known Style
+        // Library entry. Skips when my_styles.h isn't loaded yet (the
+        // set is empty) so we don't write incorrect data during cold
+        // start.
+        if (slot0.styleClass === 'helper') {
+          if (libStyleSet.size === 0) continue;
+          if (!libStyleSet.has(styleName)) continue;
+        }
+        fontToStyle.set(font, styleName);
+      }
+    }
+    if (fontToStyle.size === 0) return;
+    // Diff against current entries; queue only the rows that actually
+    // change so we don't fire a no-op IPC per preset on every save.
+    const updates = [];
+    for (const e of entries) {
+      const desired = fontToStyle.get(e.name);
+      if (!desired) continue;
+      const current = (e.meta && e.meta.linkedStyleLibraryEntry || '').toString();
+      if (current === desired) continue;
+      updates.push({ name: e.name, value: desired });
+    }
+    if (updates.length === 0) return;
+    await Promise.allSettled(updates.map(u =>
+      window.electronAPI.updateEntryMeta({
+        currentName: u.name,
+        updates: { linkedStyleLibraryEntry: u.value },
+      }).catch(() => {})
+    ));
+    // Refresh the entries cache so the Sound Fonts view (and the
+    // preset sidecar font-pick auto-populate) sees the new values
+    // on next read without a full view refresh.
+    try {
+      const r = await window.electronAPI.listEntries();
+      if (r && r.ok) window._sfEntriesCache = r.entries || [];
+    } catch {}
+  } catch {}
+}
+
 async function doSave() {
   const content = injectMetadata(window.getEditorContent());
   if (isElectron) {
@@ -6302,6 +6394,12 @@ async function doSave() {
       if (usbEl) baselineUsb = usbEl.value || null;
       updateChangedIndicators();
       if (window.updateUsbChangedIndicator) window.updateUsbChangedIndicator();
+      // Background side-effect: walk presets and update each font's
+      // "Last used style" to whatever blade 1 references in this saved
+      // config. Not awaited blocking the return because the user's
+      // save is already complete; metadata reconciliation runs in
+      // parallel and any failure is invisible.
+      _sfWriteBackLastUsedStyles();
       return true;
     }
     return await doSaveAs();
@@ -6339,6 +6437,8 @@ async function doSaveAs() {
   if (usbEl) baselineUsb = usbEl.value || null;
   updateChangedIndicators();
   if (window.updateUsbChangedIndicator) window.updateUsbChangedIndicator();
+  // Same "Last used style" write-back as doSave above.
+  _sfWriteBackLastUsedStyles();
   return true;
 }
 
@@ -16025,6 +16125,11 @@ require(['vs/editor/editor.main'], function () {
         descInput:       document.getElementById('sf-detail-description-input'),
         descEditBtn:     document.getElementById('btn-sf-description-edit'),
         descConfirmBtn:  document.getElementById('btn-sf-description-confirm'),
+        lastStyleRow:        document.getElementById('sf-detail-last-style-row'),
+        lastStyleDisplay:    document.getElementById('sf-detail-last-style-display'),
+        lastStyleSelect:     document.getElementById('sf-detail-last-style-select'),
+        lastStyleEditBtn:    document.getElementById('btn-sf-last-style-edit'),
+        lastStyleConfirmBtn: document.getElementById('btn-sf-last-style-confirm'),
         contents:        document.getElementById('sf-detail-contents'),
         tagsChips:       document.getElementById('sf-detail-tags-chips'),
         tagsInput:       document.getElementById('sf-detail-tags-input'),
@@ -16122,6 +16227,35 @@ require(['vs/editor/editor.main'], function () {
         if (_sfEntryDetailEls.bylinePrefix) _sfEntryDetailEls.bylinePrefix.style.display = _sfDetailEdit.author ? '' : 'none';
         if (_sfEntryDetailEls.acquiredDisplay) _sfEntryDetailEls.acquiredDisplay.textContent = _sfDetailEdit.acquisitionDate ? _sfFormatDate(_sfDetailEdit.acquisitionDate) : '';
         if (_sfEntryDetailEls.descDisplay) _sfEntryDetailEls.descDisplay.textContent = _sfDetailEdit.description || '';
+        // "Last used style" row visibility: hidden when no Style Library
+        // exists in the current session. When the library exists but the
+        // stored name doesn't match any current style, the display reads
+        // red (ghost-selected class on the display span) so the broken
+        // reference is obvious without opening the picker. Same shape
+        // configs already use for missing common-folder refs.
+        if (_sfEntryDetailEls.lastStyleRow) {
+          const styles = (typeof window._getLibraryStyles === 'function')
+            ? window._getLibraryStyles()
+            : [];
+          if (!styles || styles.length === 0) {
+            _sfEntryDetailEls.lastStyleRow.style.display = 'none';
+          } else {
+            _sfEntryDetailEls.lastStyleRow.style.display = '';
+            const stored = (_sfDetailEdit.lastUsedStyleName || '').trim();
+            if (_sfEntryDetailEls.lastStyleDisplay) {
+              if (!stored) {
+                _sfEntryDetailEls.lastStyleDisplay.textContent = '(none)';
+                _sfEntryDetailEls.lastStyleDisplay.classList.remove('ghost-selected');
+              } else if (styles.includes(stored)) {
+                _sfEntryDetailEls.lastStyleDisplay.textContent = stored;
+                _sfEntryDetailEls.lastStyleDisplay.classList.remove('ghost-selected');
+              } else {
+                _sfEntryDetailEls.lastStyleDisplay.textContent = `${stored} (not in library)`;
+                _sfEntryDetailEls.lastStyleDisplay.classList.add('ghost-selected');
+              }
+            }
+          }
+        }
         // Needs Review banner: visible only when the flag is set on the
         // entry. Lists each reason in plain English. Mark Reviewed button
         // clears the flag explicitly so the user can dismiss without
@@ -16300,6 +16434,12 @@ require(['vs/editor/editor.main'], function () {
             taken: m.versionInfo.taken || '',
             skipped: Array.isArray(m.versionInfo.skipped) ? m.versionInfo.skipped.slice() : [],
           } : null,
+          // "Last used style" — the legacy linkedStyleLibraryEntry field
+          // was dead schema; activated 2026-06-23 with new semantics:
+          // holds the NAME of the Style Library entry that was paired
+          // with this font on blade 1 in the most recent config save.
+          // Auto-updates on config save; user can manually override here.
+          lastUsedStyleName: (m.linkedStyleLibraryEntry || '').toString(),
         };
         _sfDetailDirty = false;
         if (_sfEntryDetailEls.saveBtn) _sfEntryDetailEls.saveBtn.disabled = true;
@@ -16544,6 +16684,7 @@ require(['vs/editor/editor.main'], function () {
           _sfEntryDetailEls.bylineConfirmBtn,
           _sfEntryDetailEls.acquiredConfirmBtn,
           _sfEntryDetailEls.descConfirmBtn,
+          _sfEntryDetailEls.lastStyleConfirmBtn,
         ];
         for (const b of btns) {
           if (!b || b.style.display === 'none') continue;
@@ -16599,6 +16740,9 @@ require(['vs/editor/editor.main'], function () {
           linkLabel: _sfDetailEdit.linkLabel,
           needsReview: activeNeedsReview,
           reviewReasons: activeReviewReasons,
+          // "Last used style" — stored on the legacy linkedStyleLibraryEntry
+          // field for back-compat with existing entry meta on disk.
+          linkedStyleLibraryEntry: _sfDetailEdit.lastUsedStyleName || '',
         };
         const sanitizedName = _sfSanitizeName(_sfDetailEdit.name);
         const isRename = sanitizedName !== _sfDetailOriginalName;
@@ -16766,6 +16910,55 @@ require(['vs/editor/editor.main'], function () {
         }
         _sfRefreshDisplayValues();
         _sfEndFieldEdit(_sfEntryDetailEls.descDisplay, _sfEntryDetailEls.descInput, _sfEntryDetailEls.descEditBtn, _sfEntryDetailEls.descConfirmBtn);
+      });
+      // "Last used style" pencil → populate the select with all current
+      // Style Library styles, plus a "(none)" option and a ghost option
+      // for the stored name if it isn't in the current library. Select
+      // → display swap reuses _sfStartFieldEdit / _sfEndFieldEdit so the
+      // pencil + confirm visibility matches every other field in the
+      // detail modal.
+      _sfEntryDetailEls.lastStyleEditBtn?.addEventListener('click', () => {
+        if (!_sfDetailEdit) return;
+        const sel = _sfEntryDetailEls.lastStyleSelect;
+        if (!sel) return;
+        const styles = (typeof window._getLibraryStyles === 'function')
+          ? window._getLibraryStyles()
+          : [];
+        const stored = (_sfDetailEdit.lastUsedStyleName || '').trim();
+        sel.innerHTML = '';
+        const noneOpt = document.createElement('option');
+        noneOpt.value = '';
+        noneOpt.textContent = '(none)';
+        sel.appendChild(noneOpt);
+        const inLib = stored && styles.includes(stored);
+        if (stored && !inLib) {
+          // Ghost option preserves the stored name even though it's not
+          // in the current library, so the user can keep the value or
+          // pick a new one without losing what was there.
+          const ghost = document.createElement('option');
+          ghost.value = stored;
+          ghost.textContent = `${stored} (not in library)`;
+          ghost.dataset.ghost = '1';
+          sel.appendChild(ghost);
+        }
+        for (const name of styles) {
+          const opt = document.createElement('option');
+          opt.value = name;
+          opt.textContent = name;
+          sel.appendChild(opt);
+        }
+        sel.value = stored;
+        _sfStartFieldEdit(_sfEntryDetailEls.lastStyleDisplay, sel, _sfEntryDetailEls.lastStyleEditBtn, _sfEntryDetailEls.lastStyleConfirmBtn, stored);
+      });
+      _sfEntryDetailEls.lastStyleConfirmBtn?.addEventListener('click', () => {
+        if (!_sfDetailEdit) return;
+        const v = (_sfEntryDetailEls.lastStyleSelect?.value || '').trim();
+        if (v !== (_sfDetailEdit.lastUsedStyleName || '')) {
+          _sfDetailEdit.lastUsedStyleName = v;
+          _sfMarkDetailDirty();
+        }
+        _sfRefreshDisplayValues();
+        _sfEndFieldEdit(_sfEntryDetailEls.lastStyleDisplay, _sfEntryDetailEls.lastStyleSelect, _sfEntryDetailEls.lastStyleEditBtn, _sfEntryDetailEls.lastStyleConfirmBtn);
       });
       // Enter commits each field, Escape cancels and reverts the input back
       // to display mode without mutating _sfDetailEdit.
@@ -24030,6 +24223,15 @@ require(['vs/editor/editor.main'], function () {
       // ;common in a preset (or any edit that adds/removes the marker)
       // flips the field's missing/needed state immediately.
       try { window._sfRenderPresetSidecarCommonRow?.(); } catch {}
+      // "Last used style" write-back debounce — selection-time semantics
+      // per Ryan's design (saving is a backstop, not the primary trigger).
+      // Schedules the write-back 500ms after the last edit so fast typing
+      // doesn't fire IPC per keystroke. Independent timer from
+      // _scheduleRebuild's 50ms paint debounce.
+      clearTimeout(_sfLastUsedStyleWriteBackTimer);
+      _sfLastUsedStyleWriteBackTimer = setTimeout(() => {
+        if (typeof _sfWriteBackLastUsedStyles === 'function') _sfWriteBackLastUsedStyles();
+      }, 500);
       if (!_sidecarOpen) return;
       if (_editingSlot) { _refreshBladeSectionLabel(); return; }
       // Skip the destructive detail re-render while a field input is open OR the Common
@@ -24071,6 +24273,11 @@ require(['vs/editor/editor.main'], function () {
       clearTimeout(_rebuildTimer);
       _rebuildTimer = setTimeout(_rebuildSidecar, 50);
     }
+
+    // Debounced timer for the "Last used style" write-back. Sits at
+    // IIFE scope so _rebuildSidecar can reset it on every edit and the
+    // actual IPC fires only after the user pauses typing.
+    let _sfLastUsedStyleWriteBackTimer = null;
 
     // Lightweight update used while the slot editor is open — updates only the
     // "Styles (X/Y blades)" label so NUM_BLADES changes are visible without
@@ -24811,6 +25018,63 @@ require(['vs/editor/editor.main'], function () {
       return btn;
     }
 
+    // Helper for the "Last used style" auto-populate flow on font pick.
+    // Called from the font-field commit closure. Guard rails:
+    //   - Skip when no font name (user cleared the field).
+    //   - Skip when no SF entry matches the font name (user typed
+    //     something not in the library).
+    //   - Skip when the entry's linkedStyleLibraryEntry is empty
+    //     (no last-used style recorded yet for this font).
+    //   - Skip when the named style isn't in the current Style Library
+    //     (stale reference; the SF entry detail will surface it red but
+    //     auto-populating with a name that won't compile is worse than
+    //     leaving the slot empty).
+    //   - Skip when blade 1 already has a non-empty user-set expression
+    //     (never override what the user already wrote).
+    // Auto-populate writes blade 1's slot expression to the style's
+    // name followed by `()` — the standard library-style invocation
+    // shape. _scheduleRebuild fires so the sidecar re-renders with the
+    // new slot tile visible immediately.
+    function _sfMaybeAutoPopulateBlade1Style(preset, fontName) {
+      try {
+        if (!fontName) return;
+        const entries = window._sfEntriesCache || [];
+        const entry = entries.find(e => e.name === fontName);
+        if (!entry) return;
+        const linkedName = (entry.meta && entry.meta.linkedStyleLibraryEntry || '').toString().trim();
+        if (!linkedName) return;
+        const libStyles = (typeof window._getLibraryStyles === 'function')
+          ? window._getLibraryStyles()
+          : [];
+        if (!libStyles.includes(linkedName)) return;
+        // Blade 1 occupancy check. preset.styles is the parsed snapshot
+        // from the last render; styles[0] is blade 1. Treat as occupied
+        // when present with a non-empty expr.
+        const slot0 = preset.styles && preset.styles[0];
+        if (slot0 && slot0.expr && slot0.expr.trim()) return;
+        // Build the slot's text. Standard library-style invocation is
+        // `StyleName()`. Matches what the Style Library picker produces
+        // when the user picks a library entry into a slot.
+        const expr = `${linkedName}()`;
+        // Only replace an existing blade-1 slot. When blade 1 doesn't
+        // exist at all (preset has zero styles), skip auto-populate
+        // and leave the user to use the regular missing-slot click
+        // flow — slot creation has nuanced insertion rules around
+        // display-name range and trailing brace that aren't worth
+        // duplicating here.
+        if (!slot0 || !slot0.startLine || !slot0.endLine) return;
+        if (!editor) return;
+        _atomicEdit(editor, 'autopopulate-b1-style', [{
+          range: {
+            startLineNumber: slot0.startLine, startColumn: slot0.startCol || 1,
+            endLineNumber:   slot0.endLine,   endColumn:   (slot0.endCol || 1) + 1,
+          },
+          text: expr,
+        }]);
+        _scheduleRebuild();
+      } catch {}
+    }
+
     function _buildFontField(preset) {
       const wrap = document.createElement('div');
       wrap.className = 'preset-detail-field';
@@ -24835,6 +25099,12 @@ require(['vs/editor/editor.main'], function () {
       const commit = (newName) => {
         const full = cb.checked ? (newName ? newName + ';common' : 'common') : (newName || '');
         _commitFieldEdit(_getFreshFieldRange('font') || preset.fontRange, full);
+        // "Last used style" auto-populate. When the user picks a font
+        // that has a linkedStyleLibraryEntry pointing at a style still
+        // present in the current Style Library, AND blade 1 is empty
+        // or missing, populate blade 1 with that style. Never override
+        // a slot the user has already filled in.
+        _sfMaybeAutoPopulateBlade1Style(preset, (newName || '').trim());
       };
 
       // Library combo (input + arrow + dropdown) — same pattern the Style
@@ -28649,6 +28919,11 @@ require(['vs/editor/editor.main'], function () {
     function _getLibraryStyles() {
       return _libraryEntries().filter(e => !e.isHelper).map(e => e.name);
     }
+    // Exposed so the Sound Fonts entry detail can render its "Last used
+    // style" picker against the same source-of-truth list. Parses the
+    // Monaco editor's current value on every call so live edits are
+    // reflected without a cache invalidation step.
+    if (typeof window !== 'undefined') window._getLibraryStyles = _getLibraryStyles;
 
     function _openLibraryPickerForTextarea(anchorBtn, textarea) {
       const helpers = _getLibraryHelpers();
