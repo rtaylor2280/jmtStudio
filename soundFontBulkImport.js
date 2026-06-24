@@ -449,6 +449,15 @@ async function importPlannedSource({ userData, src }, onSubProgress) {
     return { ok: false, error: (importRes && importRes.error) || 'Import failed' };
   }
   if (importRes.isDuplicate) {
+    // Emit the 'skipped' tick then HOLD for ~1.5s before returning.
+    // Without the delay the next source's source-start event fires
+    // immediately and overwrites the "Skipped" label before the user
+    // sees it. The hold is per-skip; for a run with many duplicates
+    // it sums up but every skip becomes visible.
+    if (onSubProgress) {
+      try { onSubProgress({ phase: 'import', stage: 'skipped', percent: 100 }); } catch {}
+    }
+    await new Promise(r => setTimeout(r, 1500));
     return { ok: true, dedup: true, existingUuid: importRes.uuid };
   }
   const sourceUuid = importRes.uuid;

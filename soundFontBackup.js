@@ -196,41 +196,74 @@ async function exportBackup({
   // tens of seconds at this step on a spinning disk).
   const { hashItemDir } = require('./soundFontFileHash');
   const contentHashes = { sources: {}, library: {}, common: {} };
-  // Pre-count items across all buckets so the renderer can show a
-  // proportional progress bar instead of three step-changes.
-  const hashJobs = [];
+  // Pre-scan each bucket up front: per-bucket top-level item arrays
+  // (drives both phase counters), plus per-item file counts (drives
+  // the per-font / per-folder archive labels). One disk walk now
+  // instead of duplicate walks per phase.
+  const bucketTops = { sources: [], library: [], common: [] };
+  const filesPerTopItem = new Map();
   for (const bucket of ['sources', 'library', 'common']) {
     const root = path.join(_soundFontsRoot(userData), bucket);
     if (!fs.existsSync(root)) continue;
-    let entries;
-    try { entries = fs.readdirSync(root, { withFileTypes: true }); }
+    let topEntries;
+    try { topEntries = fs.readdirSync(root, { withFileTypes: true }); }
     catch { continue; }
-    for (const e of entries) {
-      if (e.isDirectory()) hashJobs.push({ bucket, name: e.name, abs: path.join(root, e.name) });
+    for (const top of topEntries) {
+      if (!top.isDirectory()) continue;
+      const abs = path.join(root, top.name);
+      bucketTops[bucket].push({ name: top.name, abs });
+      let count = 0;
+      const walk = (dir) => {
+        let items;
+        try { items = fs.readdirSync(dir, { withFileTypes: true }); }
+        catch { return; }
+        for (const it of items) {
+          if (it.isDirectory()) walk(path.join(dir, it.name));
+          else if (it.isFile()) count++;
+        }
+      };
+      walk(abs);
+      filesPerTopItem.set(`${bucket}/${top.name}`, count);
     }
   }
-  let hashed = 0;
-  for (const job of hashJobs) {
-    if (signal && signal.aborted) {
-      const e = new Error('Cancelled');
-      e.cancelled = true;
-      throw e;
+  // sharedTracks: flat bucket, count individual .wav files.
+  let sharedTracksItemCount = 0;
+  try {
+    const stRoot = path.join(_soundFontsRoot(userData), 'sharedTracks');
+    if (fs.existsSync(stRoot)) {
+      for (const f of fs.readdirSync(stRoot, { withFileTypes: true })) {
+        if (f.isFile() && /\.wav$/i.test(f.name)) sharedTracksItemCount++;
+      }
     }
-    onProgress({
-      phase: 'hashing',
-      currentItem: `${job.bucket}/${job.name}`,
-      processedItems: hashed,
-      totalItems: hashJobs.length,
-    });
-    const h = hashItemDir(job.abs);
-    if (h) contentHashes[job.bucket][job.name] = h;
-    hashed++;
-  }
-  // Final tick so the bar visibly hits 100% before the archive phase
-  // starts and the meter resets to bytes-based progress.
-  if (hashJobs.length > 0) {
-    onProgress({ phase: 'hashing', currentItem: '', processedItems: hashJobs.length, totalItems: hashJobs.length });
-  }
+  } catch {}
+
+  // HASH PHASE — per-bucket aggregate counters, "Preparing" verb so
+  // the user doesn't see the implementation term. Each phase emits
+  // per-item progress; the label shape matches the archive phase so
+  // the user reads one continuous mental model across both halves.
+  const hashPhaseBucket = async (bucket, bucketLabel) => {
+    const items = bucketTops[bucket];
+    for (let i = 0; i < items.length; i++) {
+      if (signal && signal.aborted) {
+        const e = new Error('Cancelled');
+        e.cancelled = true;
+        throw e;
+      }
+      const item = items[i];
+      onProgress({
+        verb: 'Preparing',
+        currentItem: `${bucket}/${item.name}`,
+        topItemName: bucketLabel,
+        topItemFilesProcessed: i + 1,
+        topItemFilesTotal: items.length,
+      });
+      const h = hashItemDir(item.abs);
+      if (h) contentHashes[bucket][item.name] = h;
+    }
+  };
+  await hashPhaseBucket('sources', 'Source Files');
+  await hashPhaseBucket('library', 'Font Files');
+  await hashPhaseBucket('common', 'Common Folder Files');
 
   // Build the manifest first so a corrupted partial zip still gets the
   // type marker even if it doesn't finish.
@@ -332,14 +365,62 @@ async function exportBackup({
   });
 
   let processedBytes = 0;
+  // Per-bucket counter state for the archive phase. Sources and
+  // sharedTracks aggregate at the bucket level (counter = item index
+  // / total items in bucket). Library and common are per-item — each
+  // font / common folder has its own file counter that climbs as
+  // its files stream into the zip.
+  const archiveSources = { idx: 0, total: bucketTops.sources.length, seenTops: new Set() };
+  const archiveSharedTracks = { idx: 0, total: sharedTracksItemCount };
+  const archiveLibFile = new Map();   // fontName -> filesEmittedSoFar
+  const archiveComFile = new Map();   // folderName -> filesEmittedSoFar
   archive.on('entry', (entry) => {
     if (entry.stats && entry.stats.size) processedBytes += entry.stats.size;
-    onProgress({
-      phase: 'archiving',
-      processedBytes,
-      totalBytes: survey.totalBytes,
-      currentItem: entry.name,
-    });
+    const parts = String(entry.name || '').split('/');
+    const bucket = parts[0] || '';
+    const topName = parts[1] || '';
+    if (!topName) return;
+    if (bucket === 'sources') {
+      const topKey = `${bucket}/${topName}`;
+      if (!archiveSources.seenTops.has(topKey)) {
+        archiveSources.seenTops.add(topKey);
+        archiveSources.idx++;
+      }
+      onProgress({
+        verb: 'Backing up',
+        processedBytes,
+        totalBytes: survey.totalBytes,
+        currentItem: entry.name,
+        topItemName: 'Source Files',
+        topItemFilesProcessed: archiveSources.idx,
+        topItemFilesTotal: archiveSources.total,
+      });
+    } else if (bucket === 'library' || bucket === 'common') {
+      const counterMap = bucket === 'library' ? archiveLibFile : archiveComFile;
+      const itemTotal = filesPerTopItem.get(`${bucket}/${topName}`) || 0;
+      const newIdx = (counterMap.get(topName) || 0) + 1;
+      counterMap.set(topName, newIdx);
+      onProgress({
+        verb: 'Backing up',
+        processedBytes,
+        totalBytes: survey.totalBytes,
+        currentItem: entry.name,
+        topItemName: `${topName} Files`,
+        topItemFilesProcessed: newIdx,
+        topItemFilesTotal: itemTotal,
+      });
+    } else if (bucket === 'sharedTracks') {
+      archiveSharedTracks.idx++;
+      onProgress({
+        verb: 'Backing up',
+        processedBytes,
+        totalBytes: survey.totalBytes,
+        currentItem: entry.name,
+        topItemName: 'Shared Tracks',
+        topItemFilesProcessed: archiveSharedTracks.idx,
+        topItemFilesTotal: archiveSharedTracks.total,
+      });
+    }
   });
 
   const done = new Promise((resolve, reject) => {
@@ -371,17 +452,38 @@ async function exportBackup({
     // ours when someone tries to peek into it.
     archive.append(JSON.stringify(manifest, null, 2), { name: 'manifest.json' });
 
-    // Each bucket walked separately so empty buckets just contribute no
-    // entries. archiver.directory handles permission errors per file
-    // (surfaced via 'warning' which we re-route above). sharedTracks is
-    // walked the same way — it's the only flat bucket but archiver
-    // handles file lists, directories, and trees identically.
-    for (const bucket of ['sources', 'library', 'common', 'sharedTracks']) {
-      if (cancelled) break;
-      const root = path.join(_soundFontsRoot(userData), bucket);
-      if (!fs.existsSync(root)) continue;
-      onProgress({ phase: 'archiving', processedBytes, totalBytes: survey.totalBytes, currentItem: bucket });
-      archive.directory(root, bucket);
+    // Bucket-by-bucket archive order. For sources and sharedTracks the
+    // whole bucket is walked at once (one archive.directory call) since
+    // they're aggregate-labelled — interleaving within them doesn't
+    // affect the user-facing counter. For library and common, each
+    // top-level item is added separately so the per-item label stays
+    // stable on one font / folder while its files stream through, then
+    // flips to the next.
+    if (!cancelled) {
+      const srcRoot = path.join(_soundFontsRoot(userData), 'sources');
+      if (fs.existsSync(srcRoot)) archive.directory(srcRoot, 'sources');
+    }
+    if (!cancelled) {
+      const libRoot = path.join(_soundFontsRoot(userData), 'library');
+      if (fs.existsSync(libRoot)) {
+        for (const item of bucketTops.library) {
+          if (cancelled) break;
+          archive.directory(item.abs, `library/${item.name}`);
+        }
+      }
+    }
+    if (!cancelled) {
+      const comRoot = path.join(_soundFontsRoot(userData), 'common');
+      if (fs.existsSync(comRoot)) {
+        for (const item of bucketTops.common) {
+          if (cancelled) break;
+          archive.directory(item.abs, `common/${item.name}`);
+        }
+      }
+    }
+    if (!cancelled) {
+      const stRoot = path.join(_soundFontsRoot(userData), 'sharedTracks');
+      if (fs.existsSync(stRoot)) archive.directory(stRoot, 'sharedTracks');
     }
 
     if (!cancelled) await archive.finalize();
@@ -627,8 +729,12 @@ async function applyReplace({
   // Items we move from snapshot to fresh root because they're 100%
   // identical to the backup. Tracked so a mid-run failure can move them
   // back to the snapshot during rollback and the user lands exactly
-  // where they started.
+  // where they started. Both are hoisted to the function scope so the
+  // catch block can iterate them without a ReferenceError when the
+  // throw happens before their original (in-try) declarations would
+  // have executed — the empty-library case used to hit exactly that.
   const reusedItems = []; // [{ snapshotAbs, freshAbs }, ...]
+  const reusedFiles = []; // { snapshotAbs, freshAbs } for sharedTracks rollback
 
   try {
     const entries = await zip.entries();
@@ -746,7 +852,8 @@ async function applyReplace({
     // backup hash indexes — both ship in the sharedTracks folder so
     // they're available before any extraction has happened.
     const skipFiles = new Set();      // zip entry names to skip extracting
-    const reusedFiles = [];           // { snapshotAbs, freshAbs } for rollback
+    // reusedFiles hoisted to outer scope above so the catch can iterate
+    // it without a ReferenceError on early-throw paths.
     if (hadOriginal) {
       try {
         // Load the snapshot's hash index. ensureIndex would mutate the
@@ -809,40 +916,255 @@ async function applyReplace({
       const id = parts[1];
       return skipDirs[bucket] && skipDirs[bucket].has(id);
     };
+    // Pre-pass: build totals once over the entries list.
+    //   - totalBytes: denominator for the bar (overall byte progress)
+    //   - filesPerTopItem: map "bucket/topName" → file count, so the
+    //     renderer can show "Restoring Apocalypse (234 of 567 files)"
+    //     as we process each top-level item.
+    //   - sourceNameByUuid: friendly name for source uuids (sources
+    //     are uuid-keyed on disk; library/common already use friendly
+    //     names as their dir names).
+    const filesPerTopItem = new Map();
+    const sourceUuidSet = new Set();
+    for (const key of Object.keys(entries)) {
+      const e = entries[key];
+      if (!e.name || e.name === 'manifest.json') continue;
+      const parts = e.name.split('/');
+      if (parts.length < 2) continue;
+      const bucket = parts[0];
+      // sharedTracks is a flat bucket — each file IS the top item.
+      const topName = bucket === 'sharedTracks'
+        ? (parts[parts.length - 1] || '')
+        : (parts[1] || '');
+      if (!topName) continue;
+      const topKey = `${bucket}/${topName}`;
+      if (bucket === 'sources') sourceUuidSet.add(topName);
+      if (e.isDirectory) continue;
+      if (isSkipped(e.name)) continue;
+      totalBytes += (e.size || 0);
+      filesPerTopItem.set(topKey, (filesPerTopItem.get(topKey) || 0) + 1);
+    }
+    const sourceNameByUuid = new Map();
+    for (const uuid of sourceUuidSet) {
+      try {
+        const buf = await zip.entryData(`sources/${uuid}/meta.json`);
+        const m = JSON.parse(buf.toString('utf8'));
+        const friendly = (m && (m.bundleName || m.originalName)) || '';
+        if (friendly) sourceNameByUuid.set(uuid, String(friendly).replace(/\.zip$/i, ''));
+      } catch {}
+    }
+    const friendlyTopName = (bucket, raw) => {
+      if (bucket === 'sources' && sourceNameByUuid.has(raw)) return sourceNameByUuid.get(raw);
+      return raw;
+    };
+    // Emit progress for reused items so the modal motion stays alive
+    // during the snapshot-rehome phase. Each reused item gets a single
+    // tick at its "100%" state.
+    if (reusedItems.length > 0) {
+      for (const r of reusedItems) {
+        const rawName = path.basename(r.freshAbs);
+        const bucketName = path.basename(path.dirname(r.freshAbs));
+        const friendlyName = friendlyTopName(bucketName, rawName);
+        const topKey = `${bucketName}/${rawName}`;
+        const filesInItem = filesPerTopItem.get(topKey) || 0;
+        onProgress({
+          processedBytes,
+          totalBytes,
+          currentItem: `${bucketName}/${rawName}`,
+          topItemName: friendlyName,
+          topItemFilesProcessed: filesInItem,
+          topItemFilesTotal: filesInItem,
+        });
+      }
+    }
+    // Pre-create empty directory entries up front. archiver emits
+    // these for empty effect dirs (e.g., a font with an empty blst/
+    // folder); we mkdirSync them once before the file-extract loop so
+    // the per-bucket iteration below only handles files.
+    for (const key of Object.keys(entries)) {
+      const e = entries[key];
+      if (!e.isDirectory) continue;
+      if (!e.name || e.name === '/' || e.name === 'manifest.json') continue;
+      if (isSkipped(e.name)) continue;
+      const normalized = e.name.replace(/\\/g, '/');
+      const target = path.resolve(sfRoot, normalized);
+      if (!target.startsWith(path.resolve(sfRoot) + path.sep) && target !== path.resolve(sfRoot)) continue;
+      try { fs.mkdirSync(target, { recursive: true }); } catch {}
+    }
+
+    // Group files by bucket and (where useful) by top-level item.
+    // Sources and sharedTracks are AGGREGATE-labelled: each source is
+    // just source.zip + meta.json so a "1 of 2 files" per-source label
+    // would be noise, and each shared track is a single file so per-
+    // item labelling is meaningless. Library and common are PER-ITEM
+    // labelled: each font / common folder has many files and the
+    // user wants the current font name on screen as the work
+    // progresses.
+    //
+    // The label the renderer reads (topItemName) is constructed here
+    // already with the right noun ("Source Files", "Ahsoka Files",
+    // "Shared Tracks") so the renderer doesn't have to know about
+    // per-bucket grammar.
+    const bucketFiles = { sources: [], library: [], common: [], sharedTracks: [] };
     for (const key of Object.keys(entries)) {
       const e = entries[key];
       if (e.isDirectory) continue;
-      if (e.name === 'manifest.json') continue;
+      if (!e.name || e.name === '/' || e.name === 'manifest.json') continue;
       if (isSkipped(e.name)) continue;
-      totalBytes += (e.size || 0);
+      const parts = e.name.split('/');
+      const bucket = parts[0] || '';
+      if (bucketFiles[bucket]) bucketFiles[bucket].push(e);
     }
 
-    // Extract each entry, validating that the resolved path stays inside
-    // sfRoot (defense against a malicious zip with "../" entries). Skip
-    // anything that lives under a top-level dir we already moved across
-    // from the snapshot.
-    for (const key of Object.keys(entries)) {
-      if (cancelled) break;
-      const e = entries[key];
-      if (e.name === 'manifest.json') continue; // not a library file
-      if (!e.name || e.name === '/') continue;
-      if (isSkipped(e.name)) continue; // identical — already in place
+    const extractFile = async (e) => {
       const normalized = e.name.replace(/\\/g, '/');
       const target = path.resolve(sfRoot, normalized);
-      if (!target.startsWith(path.resolve(sfRoot) + path.sep) && target !== path.resolve(sfRoot)) {
-        continue;
-      }
-      if (e.isDirectory) {
-        try { fs.mkdirSync(target, { recursive: true }); } catch {}
-        continue;
-      }
+      if (!target.startsWith(path.resolve(sfRoot) + path.sep) && target !== path.resolve(sfRoot)) return false;
       try { fs.mkdirSync(path.dirname(target), { recursive: true }); } catch {}
       try {
         await zip.extract(e.name, target);
         processedBytes += (e.size || 0);
-        onProgress({ phase: 'extracting', processedBytes, totalBytes, currentItem: e.name });
+        return true;
       } catch (err) {
         throw new Error(`Failed extracting ${e.name}: ${err && err.message || err}`);
+      }
+    };
+
+    // Phase order: sources → library → common → sharedTracks.
+    // Within sources and sharedTracks the label aggregates ("Source
+    // Files (N of M, P%)") with all files in the bucket flying by
+    // underneath. Within library and common the label flips per item
+    // ("Ahsoka Files (45 of 451, 10%)") and stays on that item until
+    // all of its files are extracted.
+
+    // --- AGGREGATE: sources ---
+    // Counter unit is SOURCES (top-level uuid), not files within
+    // sources — folder-format sources have their full extracted tree
+    // on disk so they contribute many files each, but the user's
+    // mental unit is "129 sources" not "2222 source files." File
+    // names still flash by underneath as each one extracts; the
+    // top-line counter advances when we move to a new uuid.
+    if (!cancelled && bucketFiles.sources.length > 0) {
+      const sourcesByUuid = new Map();
+      const sourceOrder = [];
+      for (const e of bucketFiles.sources) {
+        const parts = e.name.split('/');
+        const uuid = parts[1] || '';
+        if (!uuid) continue;
+        if (!sourcesByUuid.has(uuid)) {
+          sourcesByUuid.set(uuid, []);
+          sourceOrder.push(uuid);
+        }
+        sourcesByUuid.get(uuid).push(e);
+      }
+      const totalSources = sourceOrder.length;
+      for (let i = 0; i < totalSources; i++) {
+        if (cancelled) break;
+        const files = sourcesByUuid.get(sourceOrder[i]);
+        for (const e of files) {
+          if (cancelled) break;
+          const ok = await extractFile(e);
+          if (!ok) continue;
+          onProgress({
+            processedBytes,
+            totalBytes,
+            currentItem: e.name,
+            topItemName: 'Source Files',
+            topItemFilesProcessed: i + 1,
+            topItemFilesTotal: totalSources,
+          });
+        }
+      }
+    }
+
+    // --- PER-ITEM: library (fonts) ---
+    if (!cancelled && bucketFiles.library.length > 0) {
+      const byItem = new Map();
+      const itemOrder = [];
+      for (const e of bucketFiles.library) {
+        const parts = e.name.split('/');
+        const rawTopName = parts[1] || '';
+        if (!rawTopName) continue;
+        if (!byItem.has(rawTopName)) {
+          byItem.set(rawTopName, []);
+          itemOrder.push(rawTopName);
+        }
+        byItem.get(rawTopName).push(e);
+      }
+      for (const itemName of itemOrder) {
+        if (cancelled) break;
+        const files = byItem.get(itemName);
+        const itemTotal = files.length;
+        const labelName = `${itemName} Files`;
+        for (let i = 0; i < itemTotal; i++) {
+          if (cancelled) break;
+          const e = files[i];
+          const ok = await extractFile(e);
+          if (!ok) continue;
+          onProgress({
+            processedBytes,
+            totalBytes,
+            currentItem: e.name,
+            topItemName: labelName,
+            topItemFilesProcessed: i + 1,
+            topItemFilesTotal: itemTotal,
+          });
+        }
+      }
+    }
+
+    // --- PER-ITEM: common folders ---
+    if (!cancelled && bucketFiles.common.length > 0) {
+      const byItem = new Map();
+      const itemOrder = [];
+      for (const e of bucketFiles.common) {
+        const parts = e.name.split('/');
+        const rawTopName = parts[1] || '';
+        if (!rawTopName) continue;
+        if (!byItem.has(rawTopName)) {
+          byItem.set(rawTopName, []);
+          itemOrder.push(rawTopName);
+        }
+        byItem.get(rawTopName).push(e);
+      }
+      for (const itemName of itemOrder) {
+        if (cancelled) break;
+        const files = byItem.get(itemName);
+        const itemTotal = files.length;
+        const labelName = `${itemName} Files`;
+        for (let i = 0; i < itemTotal; i++) {
+          if (cancelled) break;
+          const e = files[i];
+          const ok = await extractFile(e);
+          if (!ok) continue;
+          onProgress({
+            processedBytes,
+            totalBytes,
+            currentItem: e.name,
+            topItemName: labelName,
+            topItemFilesProcessed: i + 1,
+            topItemFilesTotal: itemTotal,
+          });
+        }
+      }
+    }
+
+    // --- AGGREGATE: shared tracks ---
+    if (!cancelled && bucketFiles.sharedTracks.length > 0) {
+      const totalInBucket = bucketFiles.sharedTracks.length;
+      for (let i = 0; i < totalInBucket; i++) {
+        if (cancelled) break;
+        const e = bucketFiles.sharedTracks[i];
+        const ok = await extractFile(e);
+        if (!ok) continue;
+        onProgress({
+          processedBytes,
+          totalBytes,
+          currentItem: e.name,
+          topItemName: 'Shared Tracks',
+          topItemFilesProcessed: i + 1,
+          topItemFilesTotal: totalInBucket,
+        });
       }
     }
 
@@ -877,7 +1199,24 @@ async function applyReplace({
   if (hadOriginal) {
     try { fs.rmSync(snapshotPath, { recursive: true, force: true }); } catch {}
   }
-  return { manifest };
+
+  // Tally what landed in the fresh library so the renderer's completion
+  // modal can stamp "Restored N sources, M fonts, P common folders." The
+  // bucket dirs are authoritative — counts whatever's actually on disk
+  // post-restore, which includes reused items moved from the snapshot.
+  const counts = { sources: 0, library: 0, common: 0, sharedTracks: 0 };
+  for (const bucket of ['sources', 'library', 'common']) {
+    try {
+      const d = fs.readdirSync(path.join(sfRoot, bucket), { withFileTypes: true });
+      counts[bucket] = d.filter(x => x.isDirectory()).length;
+    } catch {}
+  }
+  try {
+    const d = fs.readdirSync(path.join(sfRoot, 'sharedTracks'), { withFileTypes: true });
+    counts.sharedTracks = d.filter(x => x.isFile() && /\.wav$/i.test(x.name)).length;
+  } catch {}
+
+  return { manifest, counts };
 }
 
 // Survey both the backup zip and the current library to classify every
@@ -1428,112 +1767,232 @@ async function applyMerge({
 
   let processedBytes = 0;
 
+  // Per-bucket / per-mode tallies feed the renderer's completion-modal
+  // summary so the user sees what actually changed instead of a generic
+  // "Merge complete." line. The plan's "keep" decisions don't reach this
+  // loop (filtered to work[] above), but we still count them from the
+  // plan itself so the summary can mention "N kept yours" when the user
+  // resolved conflicts conservatively.
+  const counts = {
+    sources: { added: 0, replaced: 0, keptBoth: 0, keptYours: 0 },
+    library: { added: 0, replaced: 0, keptBoth: 0, keptYours: 0 },
+    common:  { added: 0, replaced: 0, keptBoth: 0, keptYours: 0 },
+    sharedTracks: { added: 0 },
+  };
+  for (const cat of Object.keys(counts)) {
+    if (cat === 'sharedTracks') continue;
+    const decisions = plan[cat] || {};
+    for (const id of Object.keys(decisions)) {
+      const raw = decisions[id];
+      const mode = typeof raw === 'string' ? raw : (raw && raw.mode);
+      if (mode === 'keep') counts[cat].keptYours++;
+    }
+  }
+
+  // Group user-chosen work items by bucket for the phased extract
+  // below. Each bucket's progress is labelled per the user's mental
+  // unit — sources/sharedTracks aggregate ("Source Files X of Y"),
+  // library/common per-item ("Ahsoka Files X of Y").
+  const workByBucket = { sources: [], library: [], common: [] };
+  for (const w of work) {
+    if (workByBucket[w.bucket]) workByBucket[w.bucket].push(w);
+  }
+
+  // Pre-count tracks the sharedTracks evaluation will walk through.
+  // Counter advances per evaluation step (extract or skip-as-already-
+  // present) so the user sees motion through the whole bucket.
+  let sharedTracksEvalTotal = 0;
+  for (const key of Object.keys(entries)) {
+    if (!key.startsWith('sharedTracks/')) continue;
+    const e = entries[key];
+    if (!e.isDirectory && /\.wav$/i.test(e.name)) sharedTracksEvalTotal++;
+  }
+
   // Extract every file under a zip prefix into a target dir on disk.
-  // Validates path-escape per entry (defense against malicious zips).
-  const extractPrefix = async (prefix, targetDir) => {
+  // Validates path-escape per entry. The onFile callback fires per
+  // extracted file so the caller can emit bucket-specific progress
+  // (aggregate vs per-item) without the helper knowing about labels.
+  const extractPrefix = async (prefix, targetDir, onFile) => {
     fs.mkdirSync(targetDir, { recursive: true });
+    // First pass — mkdir all dir entries; collect file entries.
+    const fileEntries = [];
     for (const key of Object.keys(entries)) {
-      if (cancelled) return;
       if (!key.startsWith(prefix)) continue;
       const e = entries[key];
-      if (e.name === prefix) continue; // bare top-dir entry
+      if (e.name === prefix) continue;
       const relUnderTop = e.name.substring(prefix.length);
       if (!relUnderTop) continue;
       const target = path.resolve(targetDir, relUnderTop);
-      if (!target.startsWith(path.resolve(targetDir) + path.sep) && target !== path.resolve(targetDir)) {
-        continue; // path escape — skip
-      }
+      if (!target.startsWith(path.resolve(targetDir) + path.sep) && target !== path.resolve(targetDir)) continue;
       if (e.isDirectory) {
         try { fs.mkdirSync(target, { recursive: true }); } catch {}
         continue;
       }
+      fileEntries.push({ entry: e, target });
+    }
+    for (let i = 0; i < fileEntries.length; i++) {
+      if (cancelled) return;
+      const { entry: e, target } = fileEntries[i];
       try { fs.mkdirSync(path.dirname(target), { recursive: true }); } catch {}
       try {
         await zip.extract(e.name, target);
         processedBytes += (e.size || 0);
-        onProgress({ phase: 'merging', processedBytes, totalBytes, currentItem: e.name });
+        if (onFile) onFile({ fileIdx: i + 1, fileTotal: fileEntries.length, fileName: e.name });
       } catch (err) {
         throw new Error(`Failed extracting ${e.name}: ${err && err.message || err}`);
       }
     }
   };
 
+  // Process one work item's install/replace/both mode, invoking
+  // onFile per extracted file. The mode-specific snapshot/rename
+  // logic stays in place; only the progress emit shape moves to the
+  // caller.
+  const processWorkItem = async (w, onFile) => {
+    const bucketRoot = path.join(sfRoot, w.bucket);
+    if (w.mode === 'install') {
+      const target = path.join(bucketRoot, w.id);
+      if (fs.existsSync(target)) return;
+      await extractPrefix(`${w.bucket}/${w.id}/`, target, onFile);
+      rollbackLog.push(() => { try { fs.rmSync(target, { recursive: true, force: true }); } catch {} });
+      if (counts[w.bucket]) counts[w.bucket].added++;
+    } else if (w.mode === 'replace') {
+      const currentDir = path.join(bucketRoot, w.currentName);
+      const target = path.join(bucketRoot, w.id);
+      const snap = `${currentDir}.preimport-bak-${Date.now()}`;
+      const hadOriginal = fs.existsSync(currentDir);
+      if (hadOriginal) {
+        try { fs.renameSync(currentDir, snap); }
+        catch (err) { throw new Error(`Snapshot failed for ${w.currentName}: ${err.message}`); }
+      }
+      rollbackLog.push(() => {
+        try { fs.rmSync(target, { recursive: true, force: true }); } catch {}
+        if (hadOriginal) { try { fs.renameSync(snap, currentDir); } catch {} }
+      });
+      await extractPrefix(`${w.bucket}/${w.id}/`, target, onFile);
+      if (hadOriginal) {
+        try { fs.rmSync(snap, { recursive: true, force: true }); } catch {}
+      }
+      rollbackLog[rollbackLog.length - 1] = () => {};
+      if (counts[w.bucket]) counts[w.bucket].replaced++;
+    } else if (w.mode === 'both') {
+      // Library only — keep the current alongside the backup version.
+      const sanitize = (s) => String(s || '').trim()
+        .replace(/\s+/g, '_')
+        .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
+        .slice(0, 200);
+      const userPick = sanitize(w.customName);
+      let chosenName;
+      if (userPick && !fs.existsSync(path.join(bucketRoot, userPick))) {
+        chosenName = userPick;
+      } else {
+        chosenName = w.id;
+        let n = 0;
+        while (fs.existsSync(path.join(bucketRoot, chosenName))) {
+          n++;
+          chosenName = `${w.id}_${n}`;
+        }
+      }
+      const target = path.join(bucketRoot, chosenName);
+      await extractPrefix(`${w.bucket}/${w.id}/`, target, onFile);
+      rollbackLog.push(() => { try { fs.rmSync(target, { recursive: true, force: true }); } catch {} });
+      if (w.bucket === 'library' && chosenName !== w.id) {
+        const metaPath = path.join(target, 'meta.json');
+        try {
+          const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+          meta.name = chosenName;
+          fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+        } catch {}
+      }
+      if (counts[w.bucket]) counts[w.bucket].keptBoth++;
+    }
+  };
+
+  // Emit one progress event indicating a bucket had nothing to do
+  // (all items confirmed-matching), then briefly hold so the user
+  // sees the message before the next phase overwrites it.
+  const emitBucketSkip = async (label) => {
+    onProgress({
+      processedBytes,
+      totalBytes,
+      currentItem: 'all already in your library',
+      topItemName: label,
+      topItemFilesProcessed: 0,
+      topItemFilesTotal: 0,
+    });
+    await new Promise(r => setTimeout(r, 800));
+  };
+
   try {
-    for (const w of work) {
-      if (cancelled) break;
-      const bucketRoot = path.join(sfRoot, w.bucket);
-      if (w.mode === 'install') {
-        // No collision — extract to <bucket>/<id>/. Rollback: delete it.
-        const target = path.join(bucketRoot, w.id);
-        // If somehow already exists (race), treat as no-op rather than
-        // overwriting silently. The survey would have flagged this.
-        if (fs.existsSync(target)) continue;
-        await extractPrefix(`${w.bucket}/${w.id}/`, target);
-        rollbackLog.push(() => { try { fs.rmSync(target, { recursive: true, force: true }); } catch {} });
-      } else if (w.mode === 'replace') {
-        // Snapshot the CURRENT dir (which may have a different name than
-        // the backup's id when an identity-matched library entry was
-        // renamed locally), extract backup under the backup's name, then
-        // on rollback restore the snapshot.
-        const currentDir = path.join(bucketRoot, w.currentName);
-        const target = path.join(bucketRoot, w.id);
-        const snap = `${currentDir}.preimport-bak-${Date.now()}`;
-        const hadOriginal = fs.existsSync(currentDir);
-        if (hadOriginal) {
-          try { fs.renameSync(currentDir, snap); }
-          catch (err) { throw new Error(`Snapshot failed for ${w.currentName}: ${err.message}`); }
+    // PHASE 1 — sources (aggregate). Counter unit is source archives
+    // (each work item = one source). Files within each source flash by
+    // in currentItem; the counter advances when crossing to the next
+    // source.
+    if (!cancelled) {
+      const items = workByBucket.sources;
+      if (items.length === 0) {
+        await emitBucketSkip('Source Files');
+      } else {
+        for (let i = 0; i < items.length; i++) {
+          if (cancelled) break;
+          const w = items[i];
+          await processWorkItem(w, ({ fileName }) => {
+            onProgress({
+              processedBytes,
+              totalBytes,
+              currentItem: fileName,
+              topItemName: 'Source Files',
+              topItemFilesProcessed: i + 1,
+              topItemFilesTotal: items.length,
+            });
+          });
         }
-        // Rollback restores the original current dir from snapshot AND
-        // removes anything we may have written to the backup's target.
-        rollbackLog.push(() => {
-          try { fs.rmSync(target, { recursive: true, force: true }); } catch {}
-          if (hadOriginal) { try { fs.renameSync(snap, currentDir); } catch {} }
-        });
-        await extractPrefix(`${w.bucket}/${w.id}/`, target);
-        // Success — discard the per-item snapshot and no-op the rollback
-        // so a later item failure can't half-undo this committed item.
-        if (hadOriginal) {
-          try { fs.rmSync(snap, { recursive: true, force: true }); } catch {}
+      }
+    }
+
+    // PHASE 2 — library (per-item). Each font is its own scope, label
+    // flips to the font name with files within it counted out.
+    if (!cancelled) {
+      const items = workByBucket.library;
+      if (items.length === 0) {
+        await emitBucketSkip('Fonts');
+      } else {
+        for (const w of items) {
+          if (cancelled) break;
+          const labelName = `${w.id} Files`;
+          await processWorkItem(w, ({ fileIdx, fileTotal, fileName }) => {
+            onProgress({
+              processedBytes,
+              totalBytes,
+              currentItem: fileName,
+              topItemName: labelName,
+              topItemFilesProcessed: fileIdx,
+              topItemFilesTotal: fileTotal,
+            });
+          });
         }
-        rollbackLog[rollbackLog.length - 1] = () => {};
-      } else if (w.mode === 'both') {
-        // Library only — keep the current alongside the backup version.
-        // Pick the on-disk name in priority order:
-        //   1. User-provided custom name (sanitized for filesystem safety)
-        //   2. Backup's name as-is, if free
-        //   3. "<backupName>_N" with N=1,2,... until free
-        // Underscore (not parens) so the resulting folder name is safe on
-        // every filesystem AND inside Proffie/embedded sound players that
-        // might be picky about spaces or punctuation in font dir names.
-        const sanitize = (s) => String(s || '').trim()
-          .replace(/\s+/g, '_')
-          .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
-          .slice(0, 200);
-        const userPick = sanitize(w.customName);
-        let chosenName;
-        if (userPick && !fs.existsSync(path.join(bucketRoot, userPick))) {
-          chosenName = userPick;
-        } else {
-          chosenName = w.id;
-          let n = 0;
-          while (fs.existsSync(path.join(bucketRoot, chosenName))) {
-            n++;
-            chosenName = `${w.id}_${n}`;
-          }
-        }
-        const target = path.join(bucketRoot, chosenName);
-        await extractPrefix(`${w.bucket}/${w.id}/`, target);
-        rollbackLog.push(() => { try { fs.rmSync(target, { recursive: true, force: true }); } catch {} });
-        // Patch meta.json's 'name' field to match the on-disk dir so the
-        // entry's UI display lines up. Only relevant for library bucket;
-        // sources/common shouldn't hit 'both' under the v1 scope.
-        if (w.bucket === 'library' && chosenName !== w.id) {
-          const metaPath = path.join(target, 'meta.json');
-          try {
-            const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
-            meta.name = chosenName;
-            fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
-          } catch {}
+      }
+    }
+
+    // PHASE 3 — common folders (per-item). Same shape as library.
+    if (!cancelled) {
+      const items = workByBucket.common;
+      if (items.length === 0) {
+        await emitBucketSkip('Common Folders');
+      } else {
+        for (const w of items) {
+          if (cancelled) break;
+          const labelName = `${w.id} Files`;
+          await processWorkItem(w, ({ fileIdx, fileTotal, fileName }) => {
+            onProgress({
+              processedBytes,
+              totalBytes,
+              currentItem: fileName,
+              topItemName: labelName,
+              topItemFilesProcessed: fileIdx,
+              topItemFilesTotal: fileTotal,
+            });
+          });
         }
       }
     }
@@ -1574,6 +2033,21 @@ async function applyMerge({
           if (localIndex.tracks[u].hash) localHashes.add(localIndex.tracks[u].hash);
           if (localIndex.tracks[u].name) localNames.add(localIndex.tracks[u].name);
         }
+        // sharedTracks counter advances per evaluation step (extract
+        // OR skip-as-already-present) so the user sees motion through
+        // the whole bucket, not just the few that get extracted.
+        let stEvalDone = 0;
+        const emitSharedTracksProgress = (currentItemPath) => {
+          stEvalDone++;
+          onProgress({
+            processedBytes,
+            totalBytes,
+            currentItem: currentItemPath,
+            topItemName: 'Shared Tracks',
+            topItemFilesProcessed: stEvalDone,
+            topItemFilesTotal: sharedTracksEvalTotal,
+          });
+        };
         // Helper that extracts a single backup track + records it.
         const extractTrack = async (entryName, fileName, backupRecord) => {
           const target = path.join(stRootAbs, fileName);
@@ -1581,7 +2055,7 @@ async function applyMerge({
           stCreated.push(target);
           const e = entries[entryName];
           if (e) processedBytes += (e.size || 0);
-          onProgress({ phase: 'merging', processedBytes, totalBytes, currentItem: entryName });
+          emitSharedTracksProgress(entryName);
           // Record into the local index. Carry the backup's UUID so the
           // file's identity survives the round-trip across backups.
           if (backupRecord && backupRecord.uuid) {
@@ -1608,7 +2082,9 @@ async function applyMerge({
         };
         // First pass: process files we DO have an index record for.
         // Lets us make hash-based decisions without re-hashing the
-        // backup files on the fly.
+        // backup files on the fly. Every evaluation step (extract OR
+        // skip) advances the counter so the user sees motion through
+        // the whole bucket, not just the extracted subset.
         const handledFiles = new Set(); // by filename
         if (backupIndex) {
           for (const buuid of Object.keys(backupIndex.tracks)) {
@@ -1617,13 +2093,13 @@ async function applyMerge({
             if (!br || !br.name) continue;
             handledFiles.add(br.name);
             const entryName = `${stPrefix}${br.name}`;
-            if (!entries[entryName]) continue; // index references a missing file
+            if (!entries[entryName]) continue; // index references a missing file (silent)
             // Rule 1: content already present locally under ANY name.
-            if (br.hash && localHashes.has(br.hash)) continue;
+            if (br.hash && localHashes.has(br.hash)) { emitSharedTracksProgress(entryName); continue; }
             // Rule 2: filename collision with different content (or
             // local lacks a record for it — defensive). Local wins.
-            if (localNames.has(br.name) || fs.existsSync(path.join(stRootAbs, br.name))) continue;
-            // Rule 3: extract.
+            if (localNames.has(br.name) || fs.existsSync(path.join(stRootAbs, br.name))) { emitSharedTracksProgress(entryName); continue; }
+            // Rule 3: extract (extractTrack emits its own progress).
             try {
               await extractTrack(entryName, br.name, { uuid: buuid, ...br });
             } catch (err) {
@@ -1633,6 +2109,7 @@ async function applyMerge({
         }
         // Second pass: any backup file the index didn't reference (or
         // legacy backups with no index at all). Filename-only union.
+        // Same evaluation-step counter advancement as the first pass.
         for (const key of Object.keys(entries)) {
           if (cancelled) break;
           if (!key.startsWith(stPrefix)) continue;
@@ -1641,15 +2118,13 @@ async function applyMerge({
           const fileName = key.substring(stPrefix.length);
           if (!fileName || fileName.includes('/')) continue;
           if (handledFiles.has(fileName)) continue;
-          // Legacy .jmt-meta.json (notes sidecar) — feature removed.
-          // Skip extraction so old backups don't reintroduce it.
+          // Legacy sidecars — silent skip (these aren't .wav and don't
+          // count toward sharedTracksEvalTotal).
           if (fileName === '.jmt-meta.json') continue;
-          // Skip the hash index sidecar — it's handled implicitly by
-          // recordInsert calls above. Re-extracting would overwrite our
-          // freshly-updated local index with the backup's stale state.
           if (fileName === '.jmt-hashes.json') continue;
           if (!/\.wav$/i.test(fileName)) continue;
-          if (fs.existsSync(path.join(stRootAbs, fileName))) continue;
+          // Filename collision: local wins. Counter still advances.
+          if (fs.existsSync(path.join(stRootAbs, fileName))) { emitSharedTracksProgress(e.name); continue; }
           try {
             await extractTrack(e.name, fileName, null);
           } catch (err) {
@@ -1659,6 +2134,14 @@ async function applyMerge({
         rollbackLog.push(() => {
           for (const p of stCreated) { try { fs.unlinkSync(p); } catch {} }
         });
+        counts.sharedTracks.added = stCreated.length;
+      } else if (sharedTracksEvalTotal > 0) {
+        // sharedTracks bucket has no zip entries — shouldn't happen
+        // when hasStEntries is true above, but defensive for empty.
+      } else {
+        // No sharedTracks in backup — flash the bucket skip so the
+        // user sees the phase was checked, then move on.
+        await emitBucketSkip('Shared Tracks');
       }
     }
 
@@ -1684,7 +2167,7 @@ async function applyMerge({
   } catch {}
 
   try { await zip.close(); } catch {}
-  return { manifest: manifestApplied };
+  return { manifest: manifestApplied, counts };
 }
 
 module.exports = {

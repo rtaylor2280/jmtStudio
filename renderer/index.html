@@ -1311,7 +1311,7 @@
     width: 90%;
   }
   .modal h2 { font-size: 0.95rem; color: var(--c-text-bright); margin-bottom: 8px; }
-  .modal p  { font-size: 0.82rem; color: var(--c-text-sub); margin-bottom: 20px; line-height: 1.5; }
+  .modal p  { font-size: 0.82rem; color: var(--c-text-sub); margin-bottom: 20px; line-height: 1.5; text-wrap: balance; }
   .modal-btns { display: flex; justify-content: flex-end; gap: 8px; }
   .modal-btn-cancel  { background: var(--c-border); color: var(--c-text-sub); border: 1px solid var(--c-border-heavy); }
   .modal-btn-discard { background: var(--c-danger-bg);  color: var(--c-danger-text);  border: 1px solid var(--c-danger-border); }
@@ -2306,6 +2306,47 @@
   .sf-voicepack-fallback a { color: var(--jmt-blue); text-decoration: underline; }
   .sf-voicepack-fallback a:hover { color: #036bb8; }
   .sf-import-progress-label { font-size: 0.85rem; color: var(--c-text); margin: 8px 0; }
+  /* Item-name line lives between the label and the bar in the backup
+     progress modal. white-space:nowrap + overflow:hidden + ellipsis
+     keeps the modal width stable even when names flash through long
+     uuids (sources bucket) or deep paths. Names are intentionally
+     allowed to flash by — the value isn't reading every one, it's
+     seeing the work move. */
+  /* !important everywhere here because .modal p (line ~1314) is a
+     more-specific selector that fights this class on margin / font /
+     color, and the global .sf-import-progress-detail rule sets
+     word-break: break-all which would force wrap. Belt-and-suspenders
+     so the file-path line can never expand the modal vertically. */
+  /* display intentionally NOT !important — p is block by default and
+     the cancel handler sets style.display='none' inline to collapse
+     this row during rollback. An !important on display here would
+     fight that. Other properties stay !important to win over the
+     global .modal p / .sf-import-progress-detail rules. */
+  #modal-sf-backup-progress .sf-backup-progress-item-name { font-size: 0.78rem !important; color: var(--c-text-sub) !important; margin: 0 0 20px 0 !important; white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important; min-height: 1em !important; max-height: 1.4em !important; width: 100% !important; max-width: 100% !important; box-sizing: border-box !important; word-break: keep-all !important; overflow-wrap: normal !important; }
+  /* And clamp the detail line below the bar to one line as well —
+     same word-break-all problem from the shared detail class. */
+  #modal-sf-backup-progress .sf-import-progress-detail { white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important; word-break: keep-all !important; max-width: 100% !important; }
+  /* Defense-in-depth: also clamp the modal body so children can't
+     push width past the modal's max. Without this, an absolutely-
+     positioned child or one with min-content could force a horizontal
+     scroll or, worse, push the modal wider for a frame and back —
+     which is exactly the size-flicker Ryan called out. */
+  #modal-sf-backup-progress .modal { overflow: hidden; }
+  /* Backup progress modal sized to match bulk import's feel — narrower
+     than the bulk-import modal (which has to hold review/summary)
+     but wider than the 380px default so the byte-and-elapsed status
+     line fits on one row without wrapping. */
+  #modal-sf-backup-progress .modal { max-width: 520px; }
+  /* Backup label sits flush against the item-name line below it so
+     the two read as one cohesive status block. Overrides the shared
+     `.sf-import-progress-label` margin (which the bulk-import modal
+     still uses unchanged). */
+  #modal-sf-backup-progress .sf-import-progress-label { margin-bottom: 0; }
+  /* Bulk import file-flash line — same shape as the backup modal's
+     item-name. Sits between the label and the bytes detail; shows
+     the current sub-file being extracted within the active source so
+     the user sees motion at the file level too. Truncates with
+     ellipsis when paths are long. */
   .sf-import-progress-track { height: 6px; background: var(--c-bg-inset); border-radius: 3px; overflow: hidden; margin: 6px 0; }
   .sf-import-progress-bar { height: 100%; width: 0%; background: var(--jmt-blue); transition: width 0.15s; }
   /* Indeterminate cleanup state. Used during cancel while the backend
@@ -4733,9 +4774,19 @@
     </div>
 
     <div class="sf-import-phase" id="sf-bulk-import-phase-progress" style="display:none">
+      <!-- Reversed mental model (2026-06-24): the bar represents the
+           OVERALL progress, so the line labeling it sits BELOW it
+           (overall count + percent + elapsed). Above the bar lives the
+           incremental progress — current item label + the within-item
+           extract detail flashing by. Mirrors the backup-restore modal
+           shape. -->
+      <!-- Label carries verb + source name + within-source bytes on
+           one line. Bulk import doesn't show per-file flashes during
+           the dominant hash/copy phases (zip sources hash as a single
+           byte stream), so we omit the file-flash row entirely and
+           keep the modal compact. -->
       <p class="sf-import-progress-label" id="sf-bulk-import-prog-label">Importing&hellip;</p>
       <div class="sf-import-progress-track"><div class="sf-import-progress-bar" id="sf-bulk-import-prog-bar"></div></div>
-      <p class="sf-import-progress-detail" id="sf-bulk-import-prog-detail"></p>
       <p class="sf-import-progress-detail" id="sf-bulk-import-prog-elapsed" style="color:var(--c-text-sub);font-size:0.78rem;margin-top:4px"></p>
     </div>
 
@@ -4810,11 +4861,20 @@
 <div class="modal-overlay" id="modal-sf-backup-progress">
   <div class="modal">
     <h2 id="sf-backup-progress-title">Exporting Sound Font library&hellip;</h2>
-    <p class="sf-import-progress-detail" id="sf-backup-progress-detail">Preparing&hellip;</p>
+    <!-- Three-line progress shape mirrors the bulk import modal:
+         label above bar (item N of M, overall %), item-name on its
+         OWN line right under the label so a long name (uuid, deep
+         path) truncates with ellipsis instead of wrapping and
+         resizing the modal, bar shows continuous overall progress,
+         detail below bar combines phase + bytes + within-item % +
+         elapsed time so the user reads one cohesive status line
+         instead of two separate stats. -->
+    <p class="sf-import-progress-label" id="sf-backup-progress-label">Preparing&hellip;</p>
+    <p class="sf-backup-progress-item-name" id="sf-backup-progress-item-name">&nbsp;</p>
     <div class="sf-import-progress-track">
       <div class="sf-import-progress-bar" id="sf-backup-progress-bar" style="width:0%"></div>
     </div>
-    <p class="sf-import-hint" id="sf-backup-progress-stats" style="margin-top:10px; color: var(--c-text-muted); font-size: 0.72rem;">&nbsp;</p>
+    <p class="sf-import-progress-detail" id="sf-backup-progress-detail">&nbsp;</p>
     <div class="modal-btns" style="margin-top: 14px">
       <button class="modal-btn-cancel" id="sf-backup-progress-cancel">Cancel</button>
     </div>
@@ -5230,6 +5290,7 @@ function promptConfirm(opts) {
     const {
       title       = 'Confirm',
       message     = 'Are you sure?',
+      messageHtml = null,
       confirmText = 'OK',
       confirmKind = 'danger',
       cancelText  = 'Cancel',
@@ -5239,11 +5300,19 @@ function promptConfirm(opts) {
     } = opts || {};
     document.getElementById('modal-confirm-title').textContent = title;
     const msgEl = document.getElementById('modal-confirm-msg');
-    msgEl.textContent = '';
-    String(message).split('\n').forEach((line, i) => {
-      if (i > 0) msgEl.appendChild(document.createElement('br'));
-      msgEl.appendChild(document.createTextNode(line));
-    });
+    // messageHtml takes precedence when present — caller controls
+    // formatting (e.g., <strong> on counts to match the bulk-import
+    // summary look). Caller is responsible for safe-by-construction
+    // content (no user input interpolated without escaping).
+    if (messageHtml) {
+      msgEl.innerHTML = messageHtml;
+    } else {
+      msgEl.textContent = '';
+      String(message).split('\n').forEach((line, i) => {
+        if (i > 0) msgEl.appendChild(document.createElement('br'));
+        msgEl.appendChild(document.createTextNode(line));
+      });
+    }
     const cbRow   = document.getElementById('modal-confirm-checkbox-row');
     const cbInput = document.getElementById('modal-confirm-checkbox');
     const cbLabel = document.getElementById('modal-confirm-checkbox-label');
@@ -7129,7 +7198,6 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     reviewBreakdown:  document.getElementById('sf-bulk-import-review-breakdown'),
     progLabel:    document.getElementById('sf-bulk-import-prog-label'),
     progBar:      document.getElementById('sf-bulk-import-prog-bar'),
-    progDetail:   document.getElementById('sf-bulk-import-prog-detail'),
     progElapsed:  document.getElementById('sf-bulk-import-prog-elapsed'),
     summaryText:  document.getElementById('sf-bulk-import-summary-text'),
     summaryElapsed: document.getElementById('sf-bulk-import-summary-elapsed'),
@@ -7246,20 +7314,31 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     showPhase('progress');
     els.progLabel.textContent = 'Starting…';
     els.progBar.style.width = '0%';
-    els.progDetail.textContent = '';
     // Elapsed clock: independent 1s tick so the user sees motion even
     // during a phase that doesn't emit progress events (a giant single
     // source mid-hash, mid-extract, etc.). Same "no estimates we can't
     // back up" rule as the backup export path — elapsed only.
     const bulkStartMs = Date.now();
     const _fmtDur = (sec) => (window._sfFormatDuration ? window._sfFormatDuration(sec) : `${Math.round(sec)}s`);
-    if (els.progElapsed) els.progElapsed.textContent = `${_fmtDur(0)} elapsed`;
-    const bulkElapsedTicker = setInterval(() => {
+    const total = currentPlan.sources.length;
+    // Overall progress lives BELOW the bar now (the line labels what the
+    // bar visualizes). Latest count+percent get cached so the elapsed
+    // ticker can re-render the combined "X of Y (Z% overall) · elapsed"
+    // line without needing the progress event handler to fire.
+    let lastOverallIdx = 0;
+    let lastOverallPct = 0;
+    const renderOverallLine = () => {
       if (!els.progElapsed) return;
       const sec = (Date.now() - bulkStartMs) / 1000;
-      els.progElapsed.textContent = `${_fmtDur(sec)} elapsed`;
-    }, 1000);
-    const total = currentPlan.sources.length;
+      const parts = [];
+      if (lastOverallIdx > 0) {
+        parts.push(`${lastOverallIdx} of ${total} (${Math.floor(lastOverallPct)}% overall)`);
+      }
+      parts.push(`${_fmtDur(sec)} elapsed`);
+      els.progElapsed.textContent = parts.join(' · ');
+    };
+    renderOverallLine();
+    const bulkElapsedTicker = setInterval(renderOverallLine, 1000);
     // Bar position is computed as: (completed sources + current source
     // sub-percent) / total. That way it advances smoothly during the
     // hash/copy/extract phases of a single source instead of jumping
@@ -7279,45 +7358,71 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         const idx = (data.sourceIdx || 0) + 1;
         const t = data.total || total;
         const overall = setBarFromPosition(data.sourceIdx, t, 0);
-        els.progLabel.textContent = `Importing ${idx} of ${t} (${Math.floor(overall)}% overall): ${data.label || ''}`;
+        lastOverallIdx = idx;
+        lastOverallPct = overall;
+        // Initial verb is "Inspecting" — that's what we do first (hash
+        // the archive to dedup-check). Source-progress events will swap
+        // to Copying / Importing / Skipping as the actual stage advances.
+        els.progLabel.textContent = `Inspecting ${data.label || ''}`;
+        renderOverallLine();
       } else if (data.stage === 'source-progress') {
-        if (data.sub && data.sub.percent != null) {
-          // Map raw backend phase tokens to gerund-cased user-facing
-          // labels so the detail line reads as a complete present-tense
-          // status. Unknown phases fall back to title-case of whatever
-          // the backend emits so a future phase shows up sensibly
-          // without renderer changes.
-          const phaseLabels = {
-            import: 'Importing',
-            extract: 'Extracting',
-            hash: 'Hashing',
-            copy: 'Copying',
-            scan: 'Scanning',
-            finalize: 'Finalizing',
+        if (data.sub) {
+          // Verb in the label is driven by the sub-stage so the user
+          // sees what's happening to this source RIGHT NOW. "Hashing"
+          // isn't user-facing — it reads as "Inspecting" because that's
+          // the user's mental model of the read-the-archive step.
+          // Skipping is shown briefly for dedup hits before the next
+          // source's source-start event arrives.
+          const stageVerbs = {
+            hashing:    'Inspecting',
+            copying:    'Copying',
+            extracting: 'Importing',
+            skipped:    'Skipped',
           };
-          const rawPhase = data.sub.phase || '';
-          const phaseStr = phaseLabels[rawPhase] || (rawPhase ? rawPhase.charAt(0).toUpperCase() + rawPhase.slice(1) : '');
-          // Detail line format matches the single-source import: show
-          // bytes when available so the user sees the same shape across
-          // both flows (size / total (percent)). Falls back to bare
-          // "Phase Percent%" when no byte info is in the sub event.
+          const verb = stageVerbs[data.sub.stage] || 'Importing';
           const _fmtBytes = (n) => (window._sfFormatBytes ? window._sfFormatBytes(n) : `${n} B`);
-          let detail;
-          if (data.sub.bytes && data.sub.totalBytes) {
-            const bytesStr = `${_fmtBytes(data.sub.bytes)} / ${_fmtBytes(data.sub.totalBytes)} (${Math.floor(data.sub.percent)}%)`;
-            detail = phaseStr ? `${phaseStr} ${bytesStr}` : bytesStr;
-          } else {
-            detail = phaseStr ? `${phaseStr} ${data.sub.percent}%` : `${data.sub.percent}%`;
+          // Build the metric string from whatever the stage gave us.
+          // Hash/copy: percent + bytes/totalBytes both present.
+          // Extract: only fileCount + totalBytes (running, no
+          // pre-known totals) — show running file count + bytes.
+          // Skipped: no metric at all.
+          let metricStr = '';
+          if (data.sub.stage === 'skipped') {
+            metricStr = '';
+          } else if (data.sub.bytes != null && data.sub.totalBytes && data.sub.percent != null) {
+            metricStr = `${_fmtBytes(data.sub.bytes)} / ${_fmtBytes(data.sub.totalBytes)} (${Math.floor(data.sub.percent)}%)`;
+          } else if (data.sub.fileCount != null && data.sub.totalBytes != null) {
+            const filesPart = `${data.sub.fileCount} file${data.sub.fileCount === 1 ? '' : 's'}`;
+            metricStr = `${filesPart} · ${_fmtBytes(data.sub.totalBytes)}`;
+          } else if (data.sub.percent != null) {
+            metricStr = `${Math.floor(data.sub.percent)}%`;
           }
-          els.progDetail.textContent = detail;
-          const idx = (data.sourceIdx || 0) + 1;
-          const t = data.total || total;
-          const overall = setBarFromPosition(data.sourceIdx, t, data.sub.percent);
-          els.progLabel.textContent = `Importing ${idx} of ${t} (${Math.floor(overall)}% overall): ${data.label || ''}`;
+          if (data.sub.stage === 'skipped') {
+            els.progLabel.textContent = `${verb} ${data.label || ''} (Already in library)`;
+          } else if (metricStr) {
+            els.progLabel.textContent = `${verb} ${data.label || ''} · ${metricStr}`;
+          } else {
+            els.progLabel.textContent = `${verb} ${data.label || ''}`;
+          }
+          // Bar only advances when we have a within-source percent
+          // (hash/copy phases). Extract phase holds the bar where copy
+          // left it; the source-start of the NEXT source then steps
+          // it forward by one full source slice.
+          if (data.sub.percent != null) {
+            const idx = (data.sourceIdx || 0) + 1;
+            const t = data.total || total;
+            const overall = setBarFromPosition(data.sourceIdx, t, data.sub.percent);
+            lastOverallIdx = idx;
+            lastOverallPct = overall;
+          }
+          renderOverallLine();
         }
       } else if (data.stage === 'done') {
         els.progBar.style.width = '100%';
-        els.progLabel.textContent = `Done (100% overall)`;
+        lastOverallIdx = total;
+        lastOverallPct = 100;
+        els.progLabel.textContent = 'Done';
+        renderOverallLine();
       }
     });
     const runRes = await window.electronAPI.bulkImportRun({ plan: currentPlan });
@@ -22593,44 +22698,44 @@ require(['vs/editor/editor.main'], function () {
       // predictor, and a wrong number is worse than no number.
       const _sfRunExportBackup = async (destPath, survey) => {
         const opId = `sfBackup-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        const modal = document.getElementById('modal-sf-backup-progress');
-        const detail = document.getElementById('sf-backup-progress-detail');
-        const bar = document.getElementById('sf-backup-progress-bar');
-        const stats = document.getElementById('sf-backup-progress-stats');
-        const cancelBtn = document.getElementById('sf-backup-progress-cancel');
-        if (!modal || !bar || !detail || !cancelBtn) return;
-        const startMs = Date.now();
-        let lastProcessed = 0;
+        const els = _sfBackupProgressEls();
+        if (!els) return;
         // Mark the SF backup pipeline busy so the app close guard can
         // refuse OS-level X clicks while atomic disk work is mid-flight.
         // The in-app Cancel button is the only safe exit; it triggers
         // AbortController which unlinks the partial zip.
         window._sfBackupBusy = true;
-        modal.classList.add('active');
-        bar.style.width = '0%';
-        detail.textContent = 'Starting…';
-        stats.textContent = '';
-        cancelBtn.disabled = false;
-        cancelBtn.textContent = 'Cancel';
+        if (els.title) els.title.textContent = 'Exporting Sound Font library…';
+        els.modal.classList.add('active');
+        els.cancel.disabled = false;
+        els.cancel.textContent = 'Cancel';
         let userCancelRequested = false;
-        // Render the stats line from current state. Called both on progress
-        // events (which update byte counts) and on a 1s tick (so the elapsed
-        // clock keeps moving even mid-large-file when progress events go
-        // silent for several seconds at a stretch).
-        const renderStats = () => {
-          const elapsedSec = (Date.now() - startMs) / 1000;
-          stats.textContent =
-            `${_sfFormatBytesShort(lastProcessed)} of ${_sfFormatBytesShort(survey.totalBytes)} · ` +
-            `${_sfFormatDuration(elapsedSec)} elapsed`;
+        // State carried across both progress events and the 1s tick.
+        // Backend sends a verb override per phase ("Preparing" during
+        // the hash pre-pass, "Backing up" once archive starts) so the
+        // label flips correctly at phase boundary.
+        const state = {
+          verb: 'Backing up',
+          startMs: Date.now(),
+          processedBytes: 0,
+          totalBytes: survey.totalBytes,
+          topItemName: '',
+          topItemFilesProcessed: 0,
+          topItemFilesTotal: 0,
+          currentItem: '',
         };
-        const tickHandle = setInterval(renderStats, 1000);
+        _sfRenderBackupProgress(els, state);
+        const tickHandle = setInterval(() => _sfRenderBackupProgress(els, state), 1000);
         const off = window.electronAPI.onSfBackupProgress((p) => {
           if (p.opId !== opId) return;
-          lastProcessed = p.processedBytes || 0;
-          const pct = survey.totalBytes > 0 ? Math.min(100, (lastProcessed / survey.totalBytes) * 100) : 0;
-          bar.style.width = `${pct}%`;
-          if (p.currentItem) detail.textContent = p.currentItem;
-          renderStats();
+          if (p.processedBytes != null) state.processedBytes = p.processedBytes;
+          if (p.totalBytes) state.totalBytes = p.totalBytes;
+          if (p.verb) state.verb = p.verb;
+          if (p.topItemName != null) state.topItemName = p.topItemName;
+          if (p.topItemFilesProcessed != null) state.topItemFilesProcessed = p.topItemFilesProcessed;
+          if (p.topItemFilesTotal != null) state.topItemFilesTotal = p.topItemFilesTotal;
+          if (p.currentItem) state.currentItem = p.currentItem;
+          _sfRenderBackupProgress(els, state);
         });
         const onCancel = async () => {
           if (userCancelRequested) return;
@@ -22653,22 +22758,26 @@ require(['vs/editor/editor.main'], function () {
           // the backend can't overwrite the cleanup message.
           try { off && off(); } catch {}
           clearInterval(tickHandle);
-          bar.classList.add('indeterminate');
-          detail.textContent = 'Cleaning up partial file…';
-          stats.textContent = '';
-          cancelBtn.disabled = true;
-          cancelBtn.textContent = 'Cancelling…';
+          els.bar.classList.add('indeterminate');
+          if (els.label) els.label.textContent = 'Cleaning up partial file…';
+          // Collapse the item-name and detail rows so the cancel state
+          // is the label + bar + cancel button only — no empty rows
+          // reserving space via min-height.
+          if (els.itemName) els.itemName.style.display = 'none';
+          if (els.detail) els.detail.style.display = 'none';
+          els.cancel.disabled = true;
+          els.cancel.textContent = 'Cancelling…';
           try { await window.electronAPI.sfBackupCancel({ opId }); } catch {}
         };
-        cancelBtn.addEventListener('click', onCancel);
+        els.cancel.addEventListener('click', onCancel);
         let result;
         try { result = await window.electronAPI.sfBackupExport({ opId, destPath }); }
         catch (err) { result = { ok: false, error: String(err && err.message || err) }; }
         clearInterval(tickHandle);
         try { off && off(); } catch {}
-        cancelBtn.removeEventListener('click', onCancel);
-        bar.classList.remove('indeterminate');
-        modal.classList.remove('active');
+        els.cancel.removeEventListener('click', onCancel);
+        els.bar.classList.remove('indeterminate');
+        els.modal.classList.remove('active');
         window._sfBackupBusy = false;
         if (result && result.cancelled) {
           const residualMsg = result.residualPath
@@ -22724,12 +22833,206 @@ require(['vs/editor/editor.main'], function () {
       // present the plan modal so the user can choose per-item, then
       // apply with progress + cancel + rollback. Identical items are
       // skipped silently; new items install without prompting.
+      // Build the completion-modal message for a merge import as a
+      // flowing paragraph (not line-per-category). Each per-mode count
+      // becomes a comma-separated phrase including the bucket noun
+      // ("3 sources added, 2 replaced, 14 fonts added"); the trailing
+      // "Took Xs" sentence sits on its own line. Reads like the bulk-
+      // import summary instead of a table.
+      const _sfBuildMergeCompleteMessage = (counts, elapsedSec) => {
+        const phrases = [];
+        const addPhrase = (n, singular, plural, verb) => {
+          if (!n) return;
+          phrases.push(`<strong>${n}</strong> ${n === 1 ? singular : plural} ${verb}`);
+        };
+        const addCatPhrases = (singular, plural, c) => {
+          if (!c) return;
+          // Lead with bucket noun on the first phrase per category so the
+          // user reads "3 sources added, 2 replaced" — count of follow-ons
+          // share the same noun implicitly. Subsequent phrases use the
+          // bare verb-phrase shape ("2 replaced") since the noun is
+          // already established.
+          let nounUsed = false;
+          const push = (n, verb) => {
+            if (!n) return;
+            if (!nounUsed) {
+              phrases.push(`<strong>${n}</strong> ${n === 1 ? singular : plural} ${verb}`);
+              nounUsed = true;
+            } else {
+              phrases.push(`<strong>${n}</strong> ${verb}`);
+            }
+          };
+          push(c.added, 'added');
+          push(c.replaced, 'replaced');
+          push(c.keptBoth, 'kept both');
+          push(c.keptYours, 'kept yours');
+        };
+        if (counts) {
+          addCatPhrases('source', 'sources', counts.sources);
+          addCatPhrases('font',   'fonts',   counts.library);
+          addCatPhrases('common folder', 'common folders', counts.common);
+        }
+        const lines = [];
+        if (phrases.length > 0) {
+          lines.push(phrases.join(', ') + '.');
+        } else {
+          lines.push('Backup merged into your library.');
+        }
+        lines.push(`Took <strong>${_sfFormatDuration(elapsedSec)}</strong>.`);
+        return lines.join('<br>');
+      };
+
+      // Replace-import completion message. Returns HTML so the modal
+      // can show bold numbers — matches the bulk-import summary's
+      // visual weight. Falls back to the observed survey counts when
+      // the backend doesn't return its own (older backend, defensive).
+      //
+      // Shape mirrors bulk-import: lead with the headline number
+      // bolded, parenthetical for the derived count, comma-separated
+      // breakdown for the smaller categories, elapsed on its own
+      // trailing line with the duration bolded.
+      const _sfBuildReplaceCompleteMessage = (counts, elapsedSec) => {
+        const lines = [];
+        if (counts) {
+          const main = [];
+          if (counts.sources) {
+            let s = `<strong>${counts.sources}</strong> source${counts.sources === 1 ? '' : 's'} restored`;
+            if (counts.library) s += ` (<strong>${counts.library}</strong> font${counts.library === 1 ? '' : 's'})`;
+            main.push(s);
+          } else if (counts.library) {
+            main.push(`<strong>${counts.library}</strong> font${counts.library === 1 ? '' : 's'} restored`);
+          }
+          if (main.length > 0) lines.push(main.join(', '));
+          const aux = [];
+          if (counts.common)       aux.push(`<strong>${counts.common}</strong> common folder${counts.common === 1 ? '' : 's'}`);
+          if (counts.sharedTracks) aux.push(`<strong>${counts.sharedTracks}</strong> shared track${counts.sharedTracks === 1 ? '' : 's'}`);
+          if (aux.length > 0) lines.push(aux.join(', '));
+        }
+        if (lines.length === 0) lines.push('Library restored from backup.');
+        lines.push(`Took <strong>${_sfFormatDuration(elapsedSec)}</strong>.`);
+        return lines.join('<br>');
+      };
+
+      // Shared backup-progress renderer. Mirrors the bulk-import progress
+      // shape exactly: label above bar (verb + item N of M + overall %),
+      // bar showing overall byte progress, detail below (phase + bytes /
+      // total + within-item %), elapsed on its own muted line. Called
+      // both from progress-event handlers (which update byte counts)
+      // and from a 1s tick (so elapsed keeps moving when events fall
+      // silent mid-large-file). state is an object the caller mutates
+      // in place and passes back each call; the helper has no internal
+      // state of its own.
+      // Render one tick of the backup progress modal.
+      //
+      // ABOVE THE BAR (incremental — what we're working on RIGHT now):
+      //   Label:    "Restoring <topItemName> (N of M files)"
+      //             — name of the current top-level item (font / source /
+      //             common folder / shared track), plus its internal
+      //             file counter so the user sees fast in-item motion.
+      //   ItemName: current file path inside that item, flashing per
+      //             file as the extract progresses.
+      //
+      // BELOW THE BAR (overall — pre-rework wording, the only number
+      // we used to track):
+      //   Detail:   "X GB of Y GB (Z%) · Nm Ss elapsed"
+      const _sfRenderBackupProgress = (els, state) => {
+        // Reset any cancel-state collapses (item-name / detail were
+        // hidden during a prior cancel cleanup) so a fresh run shows
+        // the full layout.
+        if (els.itemName && els.itemName.style.display === 'none') els.itemName.style.display = '';
+        if (els.detail && els.detail.style.display === 'none') els.detail.style.display = '';
+        const totalBytes = state.totalBytes || 0;
+        const processed = state.processedBytes || 0;
+        const elapsedSec = (Date.now() - state.startMs) / 1000;
+        const pct = totalBytes > 0 ? Math.min(100, (processed / totalBytes) * 100) : 0;
+        const pctInt = Math.floor(pct);
+        // ABOVE THE BAR — incremental: current scope's friendly name
+        // plus its file counter and within-scope percent. The backend
+        // hands the renderer a pre-formed topItemName that includes
+        // the right noun ("Source Files", "Ahsoka Files", "Shared
+        // Tracks") so a single format string covers every phase.
+        // Example: "Restoring Ahsoka Files 45 of 451 (10%)".
+        let label;
+        if (state.topItemName && state.topItemFilesTotal > 0) {
+          const itemPct = Math.floor((state.topItemFilesProcessed / state.topItemFilesTotal) * 100);
+          label = `${state.verb} ${state.topItemName} ${state.topItemFilesProcessed} of ${state.topItemFilesTotal} (${itemPct}%)`;
+        } else if (state.topItemName) {
+          label = `${state.verb} ${state.topItemName}`;
+        } else {
+          label = `${state.verb}…`;
+        }
+        if (els.label) els.label.textContent = label;
+        // Item-name line shows the current file path, flashing per
+        // file as the extract progresses. CSS truncates with ellipsis
+        // when the path is longer than the modal width.
+        if (els.itemName) els.itemName.textContent = state.currentItem || ' ';
+        // BELOW THE BAR — overall: byte progress + percent + elapsed,
+        // matching the pre-rework wording exactly. This is the only
+        // measurement the original modal carried; restored to the
+        // bottom of the layout where it's always lived.
+        const bytesStr = `${_sfFormatBytesShort(processed)} of ${_sfFormatBytesShort(totalBytes)} (${pctInt}%)`;
+        const elapsedStr = `${_sfFormatDuration(elapsedSec)} elapsed`;
+        if (els.detail) els.detail.textContent = `${bytesStr} · ${elapsedStr}`;
+        if (els.bar) els.bar.style.width = `${pct}%`;
+      };
+
+      // Look up the four backup-progress modal element handles in one
+      // call so the per-flow render code doesn't repeat the getElementById
+      // litany. Returns null if the modal markup is missing (defensive
+      // for tests / partial mounts).
+      const _sfBackupProgressEls = () => {
+        const modal = document.getElementById('modal-sf-backup-progress');
+        if (!modal) return null;
+        return {
+          modal,
+          title:    document.getElementById('sf-backup-progress-title'),
+          label:    document.getElementById('sf-backup-progress-label'),
+          itemName: document.getElementById('sf-backup-progress-item-name'),
+          bar:      document.getElementById('sf-backup-progress-bar'),
+          detail:   document.getElementById('sf-backup-progress-detail'),
+          cancel:   document.getElementById('sf-backup-progress-cancel'),
+        };
+      };
+
+      // Show the backup progress modal in knight-rider mode for an
+      // unmeasured wait (inspect phase). Returns a hide() function the
+      // caller invokes when the work finishes. Mirrors the indeterminate
+      // styling the apply-phase cancel path uses, so the user sees
+      // movement instead of the frozen 50% bar the old _sfDeleteProgress
+      // showed.
+      const _sfShowBackupIndeterminate = (titleText, labelText) => {
+        const els = _sfBackupProgressEls();
+        if (!els) return () => {};
+        if (els.title) els.title.textContent = titleText;
+        if (els.label) els.label.textContent = labelText || '';
+        // Hide item-name and detail rows in indeterminate mode so the
+        // inspect / scan phase reads as title + label + knight-rider +
+        // cancel (no empty rows underneath the bar).
+        if (els.itemName) els.itemName.style.display = 'none';
+        if (els.detail) els.detail.style.display = 'none';
+        els.bar.style.width = '100%';
+        els.bar.classList.add('indeterminate');
+        if (els.cancel) els.cancel.style.display = 'none';
+        els.modal.classList.add('active');
+        return () => {
+          els.modal.classList.remove('active');
+          els.bar.classList.remove('indeterminate');
+          els.bar.style.width = '0%';
+          if (els.cancel) els.cancel.style.display = '';
+          if (els.title) els.title.textContent = 'Exporting Sound Font library…';
+          // Restore the per-row display so the next non-indeterminate
+          // open sees the full layout.
+          if (els.itemName) els.itemName.style.display = '';
+          if (els.detail) els.detail.style.display = '';
+        };
+      };
+
       const _sfRunMergeImport = async (zipPath, observed) => {
-        _sfDeleteProgress.show('Inspecting backup', '');
+        const hideInspect = _sfShowBackupIndeterminate('Inspecting backup…', 'Scanning archive and matching against your library.');
         let survey;
         try { survey = await window.electronAPI.sfBackupSurveyMerge({ zipPath }); }
         catch (err) { survey = { ok: false, error: String(err && err.message || err) }; }
-        await _sfDeleteProgress.hide();
+        hideInspect();
         if (!survey || !survey.ok) {
           await promptConfirm({
             title: 'Could not inspect backup',
@@ -23077,13 +23380,8 @@ require(['vs/editor/editor.main'], function () {
       // undoes per-item snapshots on AbortController fire.
       const _sfRunMergeApply = async (zipPath, plan, survey) => {
         const opId = `sfBackupMerge-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        const modal = document.getElementById('modal-sf-backup-progress');
-        const titleEl = document.getElementById('sf-backup-progress-title');
-        const detail = document.getElementById('sf-backup-progress-detail');
-        const bar = document.getElementById('sf-backup-progress-bar');
-        const stats = document.getElementById('sf-backup-progress-stats');
-        const cancelBtn = document.getElementById('sf-backup-progress-cancel');
-        if (!modal || !bar || !detail || !cancelBtn) return;
+        const els = _sfBackupProgressEls();
+        if (!els) return;
         // Total bytes for progress — only the items we'll actually write.
         // Library plan entries are objects { mode, currentName }; sources
         // and commons use bare strings. modeOf() normalizes the lookup.
@@ -23109,30 +23407,33 @@ require(['vs/editor/editor.main'], function () {
         sumConflictWritable('common',  survey.common.conflict);
 
         const startMs = Date.now();
-        let lastProcessed = 0;
-        if (titleEl) titleEl.textContent = 'Merging Sound Font library backup…';
+        if (els.title) els.title.textContent = 'Merging Sound Font library backup…';
         window._sfBackupBusy = true;
-        modal.classList.add('active');
-        bar.style.width = '0%';
-        detail.textContent = 'Starting…';
-        stats.textContent = '';
-        cancelBtn.disabled = false;
-        cancelBtn.textContent = 'Cancel';
+        els.modal.classList.add('active');
+        els.cancel.disabled = false;
+        els.cancel.textContent = 'Cancel';
         let userCancelRequested = false;
-        const renderStats = () => {
-          const elapsedSec = (Date.now() - startMs) / 1000;
-          stats.textContent =
-            `${_sfFormatBytesShort(lastProcessed)} of ${_sfFormatBytesShort(totalBytes)} · ` +
-            `${_sfFormatDuration(elapsedSec)} elapsed`;
+        const state = {
+          verb: 'Merging',
+          startMs,
+          processedBytes: 0,
+          totalBytes,
+          topItemName: '',
+          topItemFilesProcessed: 0,
+          topItemFilesTotal: 0,
+          currentItem: '',
         };
-        const tickHandle = setInterval(renderStats, 1000);
+        _sfRenderBackupProgress(els, state);
+        const tickHandle = setInterval(() => _sfRenderBackupProgress(els, state), 1000);
         const off = window.electronAPI.onSfBackupProgress((p) => {
           if (p.opId !== opId) return;
-          lastProcessed = p.processedBytes || 0;
-          const pct = totalBytes > 0 ? Math.min(100, (lastProcessed / totalBytes) * 100) : 0;
-          bar.style.width = `${pct}%`;
-          if (p.currentItem) detail.textContent = p.currentItem;
-          renderStats();
+          if (p.processedBytes != null) state.processedBytes = p.processedBytes;
+          if (p.totalBytes) state.totalBytes = p.totalBytes;
+          if (p.topItemName != null) state.topItemName = p.topItemName;
+          if (p.topItemFilesProcessed != null) state.topItemFilesProcessed = p.topItemFilesProcessed;
+          if (p.topItemFilesTotal != null) state.topItemFilesTotal = p.topItemFilesTotal;
+          if (p.currentItem) state.currentItem = p.currentItem;
+          _sfRenderBackupProgress(els, state);
         });
         const onCancel = async () => {
           if (userCancelRequested) return;
@@ -23147,24 +23448,32 @@ require(['vs/editor/editor.main'], function () {
           userCancelRequested = true;
           try { off && off(); } catch {}
           clearInterval(tickHandle);
-          bar.classList.add('indeterminate');
-          detail.textContent = 'Rolling back changes…';
-          stats.textContent = '';
-          cancelBtn.disabled = true;
-          cancelBtn.textContent = 'Cancelling…';
+          els.bar.classList.add('indeterminate');
+          if (els.label) els.label.textContent = 'Rolling back changes…';
+          // Collapse the item-name and detail rows so cancel state is
+          // just label + bar + cancel button; no empty rows reserving
+          // vertical space.
+          if (els.itemName) els.itemName.style.display = 'none';
+          if (els.detail) els.detail.style.display = 'none';
+          els.cancel.disabled = true;
+          els.cancel.textContent = 'Cancelling…';
           try { await window.electronAPI.sfBackupCancel({ opId }); } catch {}
         };
-        cancelBtn.addEventListener('click', onCancel);
+        els.cancel.addEventListener('click', onCancel);
         let result;
         try { result = await window.electronAPI.sfBackupApplyMerge({ opId, zipPath, plan }); }
         catch (err) { result = { ok: false, error: String(err && err.message || err) }; }
+        // Capture final elapsed before tearing down the tick, so the
+        // completion summary can stamp how long the merge took. Mirrors
+        // bulk import's "Took Nm Ss." line.
+        const finalElapsedSec = (Date.now() - startMs) / 1000;
         clearInterval(tickHandle);
         try { off && off(); } catch {}
-        cancelBtn.removeEventListener('click', onCancel);
-        bar.classList.remove('indeterminate');
-        modal.classList.remove('active');
+        els.cancel.removeEventListener('click', onCancel);
+        els.bar.classList.remove('indeterminate');
+        els.modal.classList.remove('active');
         window._sfBackupBusy = false;
-        if (titleEl) titleEl.textContent = 'Exporting Sound Font library…';
+        if (els.title) els.title.textContent = 'Exporting Sound Font library…';
         if (result && result.cancelled) {
           await promptConfirm({
             title: 'Merge cancelled',
@@ -23186,9 +23495,14 @@ require(['vs/editor/editor.main'], function () {
           return;
         }
         try { await window.refreshSoundFontsView(); } catch {}
+        // Granular breakdown comes from result.counts when the backend
+        // provides it; falls back to a generic "merged" line for older
+        // backends. Built as separate lines so each category reads clean
+        // and the elapsed-time stamp always lands on its own line at the
+        // bottom (same shape as the bulk import "Took Xm Ys." stamp).
         await promptConfirm({
           title: 'Merge complete',
-          message: 'The backup was merged into your library.',
+          messageHtml: _sfBuildMergeCompleteMessage(result.counts, finalElapsedSec),
           confirmText: 'OK',
           confirmKind: 'primary',
           hideCancel: true,
@@ -23201,41 +23515,37 @@ require(['vs/editor/editor.main'], function () {
       // bar + bytes/total + elapsed; no time estimate by design).
       const _sfRunReplaceImport = async (zipPath, observed) => {
         const opId = `sfBackupReplace-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        const modal = document.getElementById('modal-sf-backup-progress');
-        const titleEl = document.getElementById('sf-backup-progress-title');
-        const detail = document.getElementById('sf-backup-progress-detail');
-        const bar = document.getElementById('sf-backup-progress-bar');
-        const stats = document.getElementById('sf-backup-progress-stats');
-        const cancelBtn = document.getElementById('sf-backup-progress-cancel');
-        if (!modal || !bar || !detail || !cancelBtn) return;
+        const els = _sfBackupProgressEls();
+        if (!els) return;
         const totalBytes = observed?.totals?.totalBytes || 0;
         const startMs = Date.now();
-        if (titleEl) titleEl.textContent = 'Restoring Sound Font library…';
+        if (els.title) els.title.textContent = 'Restoring Sound Font library…';
         window._sfBackupBusy = true;
-        modal.classList.add('active');
-        bar.style.width = '0%';
-        detail.textContent = 'Starting…';
-        stats.textContent = '';
-        cancelBtn.disabled = false;
-        cancelBtn.textContent = 'Cancel';
+        els.modal.classList.add('active');
+        els.cancel.disabled = false;
+        els.cancel.textContent = 'Cancel';
         let userCancelRequested = false;
-        let lastProcessed = 0;
-        // Same independent-tick pattern as the export — keeps the elapsed
-        // clock honest even when single-entry extracts take several seconds.
-        const renderStats = () => {
-          const elapsedSec = (Date.now() - startMs) / 1000;
-          stats.textContent =
-            `${_sfFormatBytesShort(lastProcessed)} of ${_sfFormatBytesShort(totalBytes)} · ` +
-            `${_sfFormatDuration(elapsedSec)} elapsed`;
+        const state = {
+          verb: 'Restoring',
+          startMs,
+          processedBytes: 0,
+          totalBytes,
+          topItemName: '',
+          topItemFilesProcessed: 0,
+          topItemFilesTotal: 0,
+          currentItem: '',
         };
-        const tickHandle = setInterval(renderStats, 1000);
+        _sfRenderBackupProgress(els, state);
+        const tickHandle = setInterval(() => _sfRenderBackupProgress(els, state), 1000);
         const off = window.electronAPI.onSfBackupProgress((p) => {
           if (p.opId !== opId) return;
-          lastProcessed = p.processedBytes || 0;
-          const pct = totalBytes > 0 ? Math.min(100, (lastProcessed / totalBytes) * 100) : 0;
-          bar.style.width = `${pct}%`;
-          if (p.currentItem) detail.textContent = p.currentItem;
-          renderStats();
+          if (p.processedBytes != null) state.processedBytes = p.processedBytes;
+          if (p.totalBytes) state.totalBytes = p.totalBytes;
+          if (p.topItemName != null) state.topItemName = p.topItemName;
+          if (p.topItemFilesProcessed != null) state.topItemFilesProcessed = p.topItemFilesProcessed;
+          if (p.topItemFilesTotal != null) state.topItemFilesTotal = p.topItemFilesTotal;
+          if (p.currentItem) state.currentItem = p.currentItem;
+          _sfRenderBackupProgress(els, state);
         });
         const onCancel = async () => {
           if (userCancelRequested) return;
@@ -23250,29 +23560,36 @@ require(['vs/editor/editor.main'], function () {
           userCancelRequested = true;
           try { off && off(); } catch {}
           clearInterval(tickHandle);
-          bar.classList.add('indeterminate');
-          detail.textContent = 'Restoring original library…';
-          stats.textContent = '';
-          cancelBtn.disabled = true;
-          cancelBtn.textContent = 'Cancelling…';
+          els.bar.classList.add('indeterminate');
+          if (els.label) els.label.textContent = 'Restoring original library…';
+          // Collapse the item-name and detail rows so cancel state is
+          // just label + bar + cancel button; no empty rows reserving
+          // vertical space.
+          if (els.itemName) els.itemName.style.display = 'none';
+          if (els.detail) els.detail.style.display = 'none';
+          els.cancel.disabled = true;
+          els.cancel.textContent = 'Cancelling…';
           try { await window.electronAPI.sfBackupCancel({ opId }); } catch {}
         };
-        cancelBtn.addEventListener('click', onCancel);
+        els.cancel.addEventListener('click', onCancel);
         let result;
         try { result = await window.electronAPI.sfBackupApplyReplace({ opId, zipPath }); }
         catch (err) { result = { ok: false, error: String(err && err.message || err) }; }
+        // Final elapsed captured before tearing down the tick — feeds
+        // the completion summary's elapsed-time stamp.
+        const finalElapsedSec = (Date.now() - startMs) / 1000;
         clearInterval(tickHandle);
         try { off && off(); } catch {}
-        cancelBtn.removeEventListener('click', onCancel);
-        bar.classList.remove('indeterminate');
-        modal.classList.remove('active');
+        els.cancel.removeEventListener('click', onCancel);
+        els.bar.classList.remove('indeterminate');
+        els.modal.classList.remove('active');
         window._sfBackupBusy = false;
         // Reset title for the next time the modal is reused by export.
-        if (titleEl) titleEl.textContent = 'Exporting Sound Font library…';
+        if (els.title) els.title.textContent = 'Exporting Sound Font library…';
         if (result && result.cancelled) {
           await promptConfirm({
             title: 'Import cancelled',
-            message: 'Your original library was restored. No changes were kept.',
+            message: 'Original library restored. No changes kept.',
             confirmText: 'OK',
             confirmKind: 'primary',
             hideCancel: true,
@@ -23295,7 +23612,7 @@ require(['vs/editor/editor.main'], function () {
         try { await window.refreshSoundFontsView(); } catch {}
         await promptConfirm({
           title: 'Import complete',
-          message: 'Your Sound Font library was restored from the backup.',
+          messageHtml: _sfBuildReplaceCompleteMessage(result.counts || observed.counts, finalElapsedSec),
           confirmText: 'OK',
           confirmKind: 'primary',
           hideCancel: true,
@@ -23311,14 +23628,14 @@ require(['vs/editor/editor.main'], function () {
         catch (err) { alert(`Could not open the picker: ${err && err.message || err}`); return; }
         if (!pick || !pick.ok) return;
         const zipPath = pick.filePath;
-        // Inspection can take a moment on a big zip — show a brief progress
-        // modal so the UI doesn't appear hung. Reusing the bulk progress
-        // helper since the work is short and unitless.
-        _sfDeleteProgress.show('Reading backup', '');
+        // Inspection can take a moment on a big zip — show the backup
+        // progress modal with the knight-rider animation so the user
+        // sees movement, not a frozen percent.
+        const hideInspect = _sfShowBackupIndeterminate('Reading backup…', 'Validating manifest and surveying contents.');
         let inspect;
         try { inspect = await window.electronAPI.sfBackupInspect({ zipPath }); }
         catch (err) { inspect = { ok: false, reason: 'unknown', error: String(err && err.message || err) }; }
-        await _sfDeleteProgress.hide();
+        hideInspect();
         if (!inspect || !inspect.ok) {
           // Branch the user-facing copy by reason so the message matches
           // what actually went wrong. The backend reason codes are stable
@@ -23412,7 +23729,7 @@ require(['vs/editor/editor.main'], function () {
             // destructive flows use.
             const go = await promptConfirm({
               title: 'Replace your library?',
-              message: 'This wipes your current Sound Font library (sources, fonts, common folders) and restores the backup exactly. This cannot be undone.',
+              message: 'This wipes your current Sound Font library (sources, fonts, common folders) and restores the backup exactly. Once completed, this cannot be undone.',
               confirmText: 'Wipe and restore',
               confirmKind: 'danger',
               cancelText: 'Cancel',

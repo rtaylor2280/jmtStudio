@@ -1844,7 +1844,7 @@ ipcMain.handle('sfBackup:applyMerge', async (event, { opId, zipPath, plan } = {}
     // Merge doesn't auto-apply starredCommon — the user keeping their
     // current library implies keeping their current default. (Replace
     // does apply it; that path is for "wipe and restore exactly.")
-    return { ok: true, manifest: result.manifest };
+    return { ok: true, manifest: result.manifest, counts: result.counts };
   } catch (err) {
     if (err && err.cancelled) return { ok: false, cancelled: true };
     return { ok: false, error: String(err && err.message || err) };
@@ -1873,7 +1873,7 @@ ipcMain.handle('sfBackup:applyReplace', async (event, { opId, zipPath } = {}) =>
     if (m && m.settings && typeof m.settings.starredCommon === 'string') {
       Store.set('settings.soundFontStarredCommon', m.settings.starredCommon);
     }
-    return { ok: true, manifest: m };
+    return { ok: true, manifest: m, counts: result && result.counts };
   } catch (err) {
     if (err && err.cancelled) return { ok: false, cancelled: true };
     return { ok: false, error: String(err && err.message || err) };
