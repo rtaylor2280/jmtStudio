@@ -2440,6 +2440,7 @@
   .sf-review-candidate-row .cand-badge { font-size: 0.62rem; padding: 1px 5px; border-radius: 3px; border: 1px solid var(--c-border-faint); color: var(--c-text-dim); background: var(--c-bg-raised); white-space: nowrap; }
   .sf-review-candidate-row .cand-badge.multi-board { color: var(--jmt-blue); border-color: rgba(0,130,255,0.35); background: rgba(0,130,255,0.08); }
   .sf-review-candidate-row .cand-badge.nested { color: #cb6; border-color: rgba(204,180,100,0.35); background: rgba(204,180,100,0.08); }
+  .sf-review-candidate-row .cand-badge.alt-version { color: var(--c-text-sub); border-color: var(--c-border-faint); background: var(--c-bg-inset); font-style: italic; }
   .sf-import-btn-row { display: flex; gap: 8px; justify-content: flex-end; flex-shrink: 0; }
   .sf-dup-btn-stack { display: flex; flex-direction: column; gap: 8px; margin-top: 18px; }
   .sf-dup-btn-stack button { width: 100%; padding: 8px 14px; font-size: 0.85rem; }
@@ -7337,9 +7338,44 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     const sum = runRes.summary;
     let text = '';
     if (sum.cancelled) text += 'Cancelled. ';
-    text += `<strong>${sum.imported.length}</strong> font${sum.imported.length === 1 ? '' : 's'} imported`;
+    // Sources vs fonts distinction: one source can produce many fonts
+    // (bundles, multi-board+variant, multi-version collapse). The old
+    // line conflated the two and called every source a font, which
+    // undersold sources with 3+ variants and made the count read low.
+    const sourceCount = sum.imported.length;
+    let fontCount = 0;
+    let multiCandidateSources = 0;
+    let totalVersionsSkipped = 0;
+    let totalVariantsEmitted = 0;
+    for (const imp of sum.imported) {
+      const okEntries = (imp.entries || []).filter(e => e && e.ok);
+      fontCount += okEntries.length;
+      if (imp.multiCandidate) multiCandidateSources++;
+      totalVersionsSkipped += imp.versionsSkipped || 0;
+      totalVariantsEmitted += imp.variantsEmitted || 0;
+    }
+    text += `<strong>${sourceCount}</strong> source${sourceCount === 1 ? '' : 's'} imported`;
+    if (fontCount !== sourceCount) {
+      text += ` (<strong>${fontCount}</strong> font${fontCount === 1 ? '' : 's'})`;
+    }
     if (sum.skipped.length) text += `, <strong>${sum.skipped.length}</strong> already in library (skipped)`;
     if (sum.failed.length)  text += `, <strong>${sum.failed.length}</strong> failed`;
+    // Breakdown line: only render when there's something interesting to
+    // call out. Suppress the line entirely on a flat all-singleton run
+    // so users importing a single font don't get a noise paragraph.
+    const breakdownParts = [];
+    if (multiCandidateSources > 0) {
+      breakdownParts.push(`<strong>${multiCandidateSources}</strong> multi-font source${multiCandidateSources === 1 ? '' : 's'}`);
+    }
+    if (totalVariantsEmitted > 0) {
+      breakdownParts.push(`<strong>${totalVariantsEmitted}</strong> variant entr${totalVariantsEmitted === 1 ? 'y' : 'ies'}`);
+    }
+    if (totalVersionsSkipped > 0) {
+      breakdownParts.push(`<strong>${totalVersionsSkipped}</strong> older version${totalVersionsSkipped === 1 ? '' : 's'} skipped`);
+    }
+    if (breakdownParts.length > 0) {
+      text += `.<br>${breakdownParts.join(', ')}`;
+    }
     // Common folder line is separate so it stays scannable even when zero.
     const commonsImported = (sum.commonsImported || []).length;
     const commonsSkipped  = (sum.commonsSkipped  || []).length;
@@ -15835,6 +15871,15 @@ require(['vs/editor/editor.main'], function () {
               if (c.nested) {
                 badges.push('<span class="cand-badge nested" title="The Proffie content lives inside a nested zip. JMT Studio extracts it during import.">nested zip</span>');
               }
+              if (c.alternateVersion) {
+                // Older version of a sibling that ships in the same source.
+                // The preferred (newer) version is auto-imported by bulk;
+                // this row stays unchecked by default but the user can opt
+                // in if they want both versions in their library.
+                const sibV = c.preferredSiblingVersion ? ` (preferred sibling: ${c.preferredSiblingVersion})` : '';
+                const thisV = c.takenVersion ? ` ${c.takenVersion}` : '';
+                badges.push(`<span class="cand-badge alt-version" title="Older version${thisV}${sibV}. Newer version auto-imports; this stays available for manual pickup.">alternate version${thisV}</span>`);
+              }
               const wavLine = c.wavCount != null ? `${c.wavCount} .wav` : 'wav count inside nested zip';
               // Duplicate mode flips the existing-import logic: nothing
               // is locked, nothing is checked by default, and already-
@@ -15849,7 +15894,11 @@ require(['vs/editor/editor.main'], function () {
                 rowAlreadyData = '0'; // not locked — duplicate flow
                 rowAlreadyClass = '';
               } else {
-                checkAttrs = isAlready ? 'disabled' : 'checked';
+                // Default check state: checked unless already-imported (locked
+                // off) or this is an alternate-version row (off by default but
+                // user can opt in — they're real candidates, not noise).
+                const defaultChecked = !c.alternateVersion;
+                checkAttrs = isAlready ? 'disabled' : (defaultChecked ? 'checked' : '');
                 nameAttrs = isAlready ? 'disabled' : '';
                 nameVal = isAlready ? alreadyName : initialName;
                 statusHtml = isAlready ? `Already in your library as ${_sfEscape(alreadyName)}` : '';
@@ -17091,6 +17140,16 @@ require(['vs/editor/editor.main'], function () {
           const r = await window.electronAPI.listEntriesBySource({ sourceUuid: uuid });
           entries = (r && r.ok && r.entries) || [];
         } catch {}
+        // Fetch candidates once up front. Used to decide the "Add more
+        // fonts" button visibility — when the source contains candidates
+        // that haven't been imported yet (including alternate versions
+        // like V1 of a V2 winner), the button stays visible so the user
+        // can pick them up.
+        let candidates = [];
+        try {
+          const cr = await window.electronAPI.detectSourceCandidates({ uuid });
+          candidates = (cr && cr.ok && cr.candidates) || [];
+        } catch {}
         // Refresh the cached snapshot so the inline-edit pencils read from
         // current disk state (this list lags slightly behind disk after deletes
         // and the bulk-tag flush from earlier saves).
@@ -17140,16 +17199,13 @@ require(['vs/editor/editor.main'], function () {
             </div>`;
           }).join('');
         }
-        // Check whether any candidates remain in the source that haven't been
-        // imported. If everything's already in the library, hide the "Add
-        // more" button so the user isn't offered something they can't do.
+        // "Add more" button visibility — reuses the candidates fetched at
+        // the top of this function so we don't pay a second detection cost.
         if (_sfSourceDetailEls.addMoreBtn) {
           _sfSourceDetailEls.addMoreBtn.style.display = 'none';
           try {
-            const cr = await window.electronAPI.detectSourceCandidates({ uuid });
-            const cands = (cr && cr.ok && cr.candidates) || [];
             const importedPaths = new Set(entries.map(e => (e.meta && e.meta.candidatePath) || ''));
-            const remaining = cands.filter(c => !importedPaths.has(c.path || ''));
+            const remaining = candidates.filter(c => !importedPaths.has(c.path || ''));
             _sfSourceDetailEls.addMoreBtn.style.display = remaining.length > 0 ? '' : 'none';
           } catch {}
         }

@@ -55,42 +55,75 @@ function isProffieBoardName(name) {
 
 // ── Proffie font shape detection ────────────────────────
 
-// Standard Proffie effect subfolder names. tracks/quote/quotes are excluded
-// here on purpose: they are auxiliary content (menu music, movie quotes)
-// commonly bundled alongside a font but never on their own. A folder
-// containing only tracks/ or quote/ is NOT a Proffie font.
-const EFFECT_FOLDER_NAMES = new Set([
-  'boot', 'hum', 'swingh', 'swingl', 'clsh', 'blst', 'lock', 'force', 'in',
-  'out', 'font', 'lb', 'bgnlb', 'endlb', 'bgnlock', 'endlock', 'melt',
+// Canonical Proffie effect names. Used both as subfolder names (hum/,
+// swingh/, blst/) and as file-name prefixes for flat-layout fonts
+// (hum01.wav, swingh1.wav, blst1.wav). tracks/quote/quotes are excluded:
+// they're auxiliary content (menu music, movie quotes) bundled alongside
+// a font but never a font on their own. Utility-font effects (altchng,
+// trloop, ccchange, choosefont) are included so minimal alt-driven fonts
+// like Fett263's HeMan still register.
+const EFFECT_NAMES = new Set([
+  'boot', 'hum', 'swingh', 'swingl', 'swing', 'clsh', 'blst', 'lock', 'force',
+  'in', 'out', 'font', 'lb', 'bgnlb', 'endlb', 'bgnlock', 'endlock', 'melt',
   'bgnmelt', 'endmelt', 'drag', 'bgndrag', 'enddrag', 'swng', 'spin', 'stab',
   'preon', 'pwroff', 'pstoff',
+  'altchng', 'trloop', 'ccchange', 'choosefont',
 ]);
 
-// Effect-name prefix for flat-layout Proffie fonts (hum1.wav, hum.wav,
-// boot.wav, font.wav etc). Limited to the three reliable "core" effects
-// so a bonus folder full of unrelated .wav files doesn't get
-// mis-detected. Trailing variant tokens are tolerated: digits (boot1.wav),
-// underscore-N (hum_1.wav), space-paren-N (font (1).WAV — Shadow Lord
-// uses this shape) — so flat-layout fonts that originated from
-// numbered-export tools still register.
-const CORE_EFFECT_FILE_PATTERN = /^(boot|hum|font)(\s*\(\d+\)|[_\s]?\d+)?\.wav$/i;
+// Minimum distinct effect types a folder must have (counting alt expansion)
+// to register as a Proffie font. Empirically verified across 69 sources:
+// every real font in the library passes 3+, every bonus / not-a-font folder
+// caps at 2. See local/analyze-detection.js for the data.
+const MIN_EFFECT_TYPES = 3;
 
-// A folder counts as a Proffie font when ANY of:
-//   - it contains at least one standard effect subfolder, or
-//   - it contains at least one alt### subfolder, or
-//   - it contains at least one core-effect-named .wav at root (flat layout).
-// The presence of arbitrary .wav files alone is not enough; we need a Proffie
-// naming signal to avoid mistaking a "bonus music" folder for a font.
-function looksLikeProffieFont(childFolders, childFiles) {
-  for (const f of childFolders) {
+// Extract the effect-name stem from a .wav filename. Recognizes flat-layout
+// shapes: hum.wav, hum01.wav, hum_1.wav, hum 1.wav, hum (1).wav, font (1).WAV.
+// Returns the lowercased stem if it's a known effect, else null.
+function effectStemFromFile(name) {
+  const m = String(name).match(/^([a-zA-Z]+)(?:\s*\(\d+\)|[_\s]?\d+)?\.wav$/i);
+  if (!m) return null;
+  const stem = m[1].toLowerCase();
+  return EFFECT_NAMES.has(stem) ? stem : null;
+}
+
+// Collect the distinct effect-type set at a folder's immediate level,
+// without descending into alt children.
+function _collectRootEffectTypes(folders, files) {
+  const types = new Set();
+  for (const f of folders) {
     const lower = f.name.toLowerCase();
-    if (EFFECT_FOLDER_NAMES.has(lower)) return true;
-    if (/^alt\d{3}$/i.test(f.name)) return true;
+    if (EFFECT_NAMES.has(lower)) types.add(lower);
   }
-  for (const f of childFiles) {
-    if (CORE_EFFECT_FILE_PATTERN.test(f.name)) return true;
+  for (const f of files) {
+    const stem = effectStemFromFile(f.name);
+    if (stem) types.add(stem);
   }
-  return false;
+  return types;
+}
+
+// Collect effect types including a peek into the first alt### sibling.
+// Alts mirror each other (the maker MUST ship identical effect shapes
+// across alts), so one is enough. Alt-only effects (hum1+hum2 inside the
+// alts, with in/out shared at root) get unioned into the parent's count
+// so the parent registers as the font.
+function _collectEffectTypes(folders, files, byParent) {
+  const types = _collectRootEffectTypes(folders, files);
+  const firstAlt = folders.find(f => /^alt\d{3}$/i.test(f.name));
+  if (!firstAlt) return types;
+  const altChildren = byParent.get(firstAlt.fileName) || [];
+  const altFolders = altChildren.filter(c => c.isDir);
+  const altFiles = altChildren.filter(c => !c.isDir);
+  const altTypes = _collectRootEffectTypes(altFolders, altFiles);
+  for (const t of altTypes) types.add(t);
+  return types;
+}
+
+// A folder counts as a Proffie font when it contains at least
+// MIN_EFFECT_TYPES distinct recognized effect types at its immediate
+// level (with alt expansion). The threshold and vocabulary were tuned
+// against the real-world library — see analyzer notes above.
+function looksLikeProffieFont(childFolders, childFiles, byParent) {
+  return _collectEffectTypes(childFolders, childFiles, byParent || new Map()).size >= MIN_EFFECT_TYPES;
 }
 
 // ── Entry tree helpers ──────────────────────────────────
@@ -233,30 +266,40 @@ function detectBundleOfZips(childFiles) {
   return candidateZips;
 }
 
-// Walk down from startDir looking for the actual Proffie-font root. Many
-// vendor archives wrap the real content in extra layers: JayDaloRian's
-// Proffie/ holds an instruction `resource.txt` plus the actual font inside
-// a `<FontName>/` subfolder. This helper descends through such wrappers
-// until it finds a folder whose direct contents satisfy looksLikeProffieFont.
-// Returns null if multiple sibling folders match (ambiguous, leave it to the
-// caller) or if nothing matches.
-function findDeepestProffieRoot(byParent, startDir) {
+// Walk down from startDir looking for Proffie-font roots. Returns an
+// array of paths — empty when nothing matches, one entry when there's a
+// single unambiguous root (e.g. JayDaloRian's wrapper `Proffie/<Font>/`),
+// or multiple entries when the maker shipped sibling variants inside one
+// board folder (e.g. Excalibur's `Proffie/long ignition/` +
+// `Proffie/short ignition/`, Quantum's `Proffie/style 1..3/`).
+//
+// Caller decides what to do with multiple roots: CASE B (multi-board)
+// emits one candidate per root; CASE A's wrapper-traversal at the leaf
+// uses the single-root form below.
+function findAllProffieRoots(byParent, startDir) {
   const children = byParent.get(startDir) || [];
   const folders = children.filter(c => c.isDir);
   const files = children.filter(c => !c.isDir);
 
-  if (looksLikeProffieFont(folders, files)) return startDir;
-  if (folders.length === 0) return null;
+  if (looksLikeProffieFont(folders, files, byParent)) return [startDir];
+  if (folders.length === 0) return [];
 
   const matches = [];
   for (const f of folders) {
-    const sub = findDeepestProffieRoot(byParent, f.fileName);
-    if (sub) matches.push(sub);
+    for (const sub of findAllProffieRoots(byParent, f.fileName)) {
+      matches.push(sub);
+    }
   }
-  // Exactly one descendant is a real Proffie root → that's the path. More
-  // than one is multi-version-inside-Proffie, which we don't try to flatten
-  // automatically; the caller falls back to the original multi-board path.
-  return matches.length === 1 ? matches[0] : null;
+  return matches;
+}
+
+// Single-root form for callers that don't want the variant-emission
+// behavior. Returns null when zero or multiple roots are found, the
+// single path otherwise. Preserved for back-compat with CASE A's
+// segment-walk-up naming logic.
+function findDeepestProffieRoot(byParent, startDir) {
+  const all = findAllProffieRoots(byParent, startDir);
+  return all.length === 1 ? all[0] : null;
 }
 
 // ── Main walker ─────────────────────────────────────────
@@ -267,7 +310,7 @@ function walkForCandidates(byParent, currentDir, candidates, fallbackName) {
   const childFiles = children.filter(c => !c.isDir);
 
   // CASE A: this dir IS a Proffie font.
-  if (looksLikeProffieFont(childFolders, childFiles)) {
+  if (looksLikeProffieFont(childFolders, childFiles, byParent)) {
     // Walk up the path from the leaf, skipping board names (Proffie,
     // CFX, Verso, etc.), to find a meaningful candidate name. The leaf
     // itself is preferred when it's not a board. When all segments are
@@ -293,28 +336,79 @@ function walkForCandidates(byParent, currentDir, candidates, fallbackName) {
     return;
   }
 
-  // CASE B: multi-board siblings (folders or inner zips). One candidate.
+  // CASE B: multi-board siblings (folders or inner zips).
   const multiBoard = detectMultiBoardSiblings(childFolders, childFiles);
   if (multiBoard) {
-    const name = currentDir ? currentDir.split('/').pop() : fallbackName;
+    const outerName = currentDir ? currentDir.split('/').pop() : fallbackName;
     const initialPath = multiBoard.proffieChild.fileName;
     const isInnerZip = multiBoard.matchType === 'inner-zip-siblings';
-    // For folder-form multi-board, descend through any wrapper layers (e.g.
-    // JayDaloRian's Proffie/resource.txt + Proffie/<FontName>/) so the path
-    // points at the actual font root. For inner-zip form we can't peek
-    // inside the nested archive at detection time; the extractor handles
-    // wrapper stripping on its end.
-    const proffiePath = isInnerZip
-      ? initialPath
-      : (findDeepestProffieRoot(byParent, initialPath) || initialPath);
-    candidates.push({
-      name,
-      path: proffiePath,
-      wavCount: isInnerZip ? null : countWavsUnder(byParent, proffiePath),
-      multiBoard: true,
-      otherFlavors: multiBoard.otherFlavors,
-      nested: isInnerZip,
-    });
+
+    if (isInnerZip) {
+      // Can't peek inside nested archives at detection time; emit one
+      // deferred candidate and let the extractor strip wrappers later.
+      candidates.push({
+        name: outerName,
+        path: initialPath,
+        wavCount: null,
+        multiBoard: true,
+        otherFlavors: multiBoard.otherFlavors,
+        nested: true,
+      });
+      return;
+    }
+
+    // For folder-form multi-board, descend through any wrapper layers
+    // (e.g. JayDaloRian's Proffie/resource.txt + Proffie/<FontName>/) so
+    // the path points at the actual font root.
+    const proffieRoots = findAllProffieRoots(byParent, initialPath);
+
+    if (proffieRoots.length === 0) {
+      // No font shape found inside Proffie — defensive fallback to the
+      // bare board folder, same as the pre-variant behavior.
+      candidates.push({
+        name: outerName,
+        path: initialPath,
+        wavCount: countWavsUnder(byParent, initialPath),
+        multiBoard: true,
+        otherFlavors: multiBoard.otherFlavors,
+        nested: false,
+      });
+      return;
+    }
+
+    if (proffieRoots.length === 1) {
+      // Single unambiguous font inside the Proffie wrapper.
+      candidates.push({
+        name: outerName,
+        path: proffieRoots[0],
+        wavCount: countWavsUnder(byParent, proffieRoots[0]),
+        multiBoard: true,
+        otherFlavors: multiBoard.otherFlavors,
+        nested: false,
+      });
+      return;
+    }
+
+    // Multi-variant: the Proffie folder contains multiple complete fonts
+    // (e.g. JayDalorian Excalibur's long ignition + short ignition,
+    // Quantum's style 1/2/3). Emit one candidate per variant, each
+    // keeping the multi-board flag and otherFlavors list since the same
+    // variants exist across all board folders. isVariant tells the
+    // importer to ALWAYS prepend the bundle/source name to the variant
+    // name so library entries surface as "Excalibur_Long_Ignition" etc
+    // instead of bare "Long_Ignition" with no parent context.
+    for (const rootPath of proffieRoots) {
+      const variantName = rootPath.split('/').pop();
+      candidates.push({
+        name: variantName,
+        path: rootPath,
+        wavCount: countWavsUnder(byParent, rootPath),
+        multiBoard: true,
+        otherFlavors: multiBoard.otherFlavors,
+        nested: false,
+        isVariant: true,
+      });
+    }
     return;
   }
 
@@ -394,16 +488,25 @@ function _compareVersionParts(a, b) {
   return 0;
 }
 
-// Collapse groups of candidates whose raw names share a stem and
-// differ only by a trailing version suffix. The highest-version
-// member wins, its name becomes the stem (the cleaner downstream then
-// idempotently strips any nested version stamp), and the other
-// members are attached as `skippedVersions` metadata so the import
-// path can stamp the version on the new entry and surface a review
-// reason. Single-version sibling groups are left untouched. Mixed
-// groups (some with versions, some without) treat the versioned ones
-// as their own group and leave the unversioned one alone.
-function _collapseVersionSiblings(candidates) {
+// Mark version-sibling groups (candidates whose raw names share a stem
+// and differ only by a trailing version suffix). The highest-version
+// member becomes the "preferred" pick — its name is stripped to the
+// stem so the entry presents cleanly, and downstream auto-import paths
+// (bulk, default-checked review rows) take only this one. The OTHER
+// versions remain in the candidate list flagged `alternateVersion: true`
+// so manual paths (single-source review modal, "Add more fonts from
+// source" picker, source detail) can surface them as available-but-
+// not-auto-imported. Single-version sibling groups are left untouched.
+// Mixed groups (some with versions, some without) treat the versioned
+// ones as their own group and leave the unversioned one alone.
+//
+// Older design (2026-06-23, commit e2d301a) collapsed the losers INTO
+// the winner via a `skippedVersions[]` metadata field, hiding them from
+// every consumer including the picker. Ryan's correction (2026-06-24):
+// "they are still fonts. just because we don't add them to the library
+// doesn't mean they aren't still available for the user." So we no
+// longer collapse — we annotate.
+function _markVersionPreferences(candidates) {
   const parsed = candidates.map(c => ({ c, v: _parseVersionFromName(c.name) }));
   const groups = new Map();
   const ungrouped = [];
@@ -424,15 +527,31 @@ function _collapseVersionSiblings(candidates) {
     items.sort((a, b) => _compareVersionParts(a.v.versionParts, b.v.versionParts));
     const winner = items[items.length - 1];
     const losers = items.slice(0, -1);
-    const merged = { ...winner.c };
-    merged.name = winner.v.stem;
-    merged.takenVersion = winner.v.version;
-    merged.skippedVersions = losers.map(l => ({
+    // Winner: name strips to stem, takenVersion records which one,
+    // versionGroupSiblings carries the loser shapes for UI surfaces
+    // that want to enumerate alternates without re-grouping.
+    const wOut = { ...winner.c };
+    wOut.name = winner.v.stem;
+    wOut.takenVersion = winner.v.version;
+    wOut.preferredInVersionGroup = true;
+    wOut.versionGroupSiblings = losers.map(l => ({
       version: l.v.version,
       path: l.c.path,
       rawName: l.c.name,
     }));
-    out.push(merged);
+    out.push(wOut);
+    // Each loser remains a candidate. We keep the FULL versioned name
+    // (Grumpy_Uncle_V1) so the entry-name collision check in the
+    // importer can pick a unique name; downstream cleanup at user
+    // commit time can rename. alternateVersion flips the default
+    // check state in the review modal and tells bulk to skip.
+    for (const l of losers) {
+      const lOut = { ...l.c };
+      lOut.alternateVersion = true;
+      lOut.takenVersion = l.v.version;
+      lOut.preferredSiblingVersion = winner.v.version;
+      out.push(lOut);
+    }
   }
   return out;
 }
@@ -448,11 +567,11 @@ async function detectCandidates(source) {
     ? source.meta.originalName.replace(/\.zip$/i, '')
     : 'source';
   walkForCandidates(byParent, '', rawCandidates, sourceFallbackName);
-  // Multi-version sibling collapse runs BEFORE name cleaning so the
+  // Multi-version sibling marking runs BEFORE name cleaning so the
   // sibling-detection regex sees the original `X_V1` / `X_V2` shape
   // (cleaning would strip the version and merge them via name
   // collision instead, which loses the version info).
-  const candidates = _collapseVersionSiblings(rawCandidates);
+  const candidates = _markVersionPreferences(rawCandidates);
   // Clean every candidate name through the shared pipeline before the
   // renderer sees them. Original name is preserved on rawName for any
   // future caller that needs the unmodified inner-folder string.

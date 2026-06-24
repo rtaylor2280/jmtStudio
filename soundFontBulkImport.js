@@ -352,6 +352,10 @@ async function runBulkImport({ plan, userData }, callbacks = {}) {
           src: src.relPath || src.absPath,
           sourceUuid: result.sourceUuid,
           entries: result.entries,
+          bundleName: result.bundleName,
+          multiCandidate: !!result.multiCandidate,
+          versionsSkipped: result.versionsSkipped || 0,
+          variantsEmitted: result.variantsEmitted || 0,
         });
       } else {
         summary.failed.push({ src: src.relPath || src.absPath, reason: result.error });
@@ -497,7 +501,13 @@ async function importPlannedSource({ userData, src }, onSubProgress) {
   } catch (err) {
     return { ok: false, error: `Candidate detection failed: ${err.message}` };
   }
-  const candidates = (candidatesRes && candidatesRes.candidates) || [];
+  const allCandidates = (candidatesRes && candidatesRes.candidates) || [];
+  // Bulk auto-imports only the "preferred" pick from each version group.
+  // Alternate versions (older V1 when V2 also shipped) stay in the source
+  // and surface in the source-detail picker for manual import — the user
+  // explicitly opts in, rather than getting both versions auto-installed.
+  const candidates = allCandidates.filter(c => !c.alternateVersion);
+  const alternatesSkipped = allCandidates.length - candidates.length;
   if (candidates.length === 0) {
     // Source imported but no fonts found inside. Delete the source so the
     // orphan cleanup doesn't have to and the user can re-pick later.
@@ -505,6 +515,28 @@ async function importPlannedSource({ userData, src }, onSubProgress) {
     return { ok: false, error: 'No fonts found in source' };
   }
   const bundleName = candidatesRes.bundleName || null;
+  // Persist bundleName + multiCandidate on source meta so the renderer
+  // can show "this source produced N fonts" without re-running detection,
+  // and the entry detail can surface the bundle link for variants.
+  // Single-source manual imports already set these on the source meta;
+  // bulk was historically dropping them. Single-candidate sources still
+  // get multiCandidate=false explicitly so the field is never absent.
+  try {
+    soundFontSources.updateSourceMeta(userData, sourceUuid, {
+      bundleName: bundleName || undefined,
+      multiCandidate: candidates.length >= 2,
+    });
+  } catch {}
+  // Per-source stat tallies aggregated into the bulk summary so the
+  // completion screen can show fonts-vs-sources granularity.
+  // versionsSkippedHere counts how many alternate-version candidates we
+  // skipped over at the filter step; variantsEmittedHere counts how
+  // many isVariant rows we WILL import.
+  const versionsSkippedHere = alternatesSkipped;
+  let variantsEmittedHere = 0;
+  for (const c of candidates) {
+    if (c.isVariant) variantsEmittedHere++;
+  }
   const entries = [];
   const existingEntryNames = new Set();
   try {
@@ -514,17 +546,25 @@ async function importPlannedSource({ userData, src }, onSubProgress) {
     const cand = candidates[cIdx];
     let proposedName = cand.name || `font_${cIdx + 1}`;
     const reviewReasons = [];
-    // Bundle prepend for ambiguous candidate names. In a multi-candidate
-    // bundle, very short candidates (ANH / ESB / R1 / ROTJ from the
-    // Father bundle) or pure version stubs (v1, 2.0) are meaningless
-    // without bundle context, so we prepend automatically. The earlier
-    // "all-caps" trigger was too aggressive — it caught real names like
-    // JURASSIC / ULTRON / STARGATE (Mountain Sabers Free Pack) that
-    // read fine on their own. Length <= 4 catches the actual acronyms
-    // (longest Star Wars film code is ROTJ at 4) without over-firing.
+    // Bundle prepend for ambiguous candidate names. Two triggers:
+    //   1. Variants (cand.isVariant): the detector emitted multiple
+    //      sibling fonts from inside one wrapper (e.g. JayDalorian
+    //      Excalibur's long_ignition + short_ignition, Quantum's
+    //      style_1/2/3). These names describe a variation, not an
+    //      identity, so they MUST carry the parent name to be legible
+    //      in the library ("Excalibur_Long_Ignition" not bare
+    //      "Long_Ignition").
+    //   2. Short / version-stub names in a multi-candidate bundle
+    //      (ANH / ESB / R1 / ROTJ from Father; v1 / 2.0). The earlier
+    //      "all-caps" trigger was too aggressive — caught real names
+    //      like JURASSIC / ULTRON / STARGATE (Mountain Sabers Free
+    //      Pack). Length <= 4 catches the acronyms (longest Star
+    //      Wars film code is ROTJ at 4) without over-firing.
     if (bundleName && candidates.length >= 2) {
-      const needsContext = proposedName.length <= 4
+      const isVariant = !!cand.isVariant;
+      const isShortAcronym = proposedName.length <= 4
         || /^[vV]?\d+(\.\d+)*$/.test(proposedName);
+      const needsContext = isVariant || isShortAcronym;
       if (needsContext && !proposedName.toLowerCase().startsWith(bundleName.toLowerCase())) {
         proposedName = `${bundleName}_${proposedName}`;
       }
@@ -609,7 +649,15 @@ async function importPlannedSource({ userData, src }, onSubProgress) {
     }
     entries.push({ name: finalName, ok: true });
   }
-  return { ok: true, sourceUuid, entries };
+  return {
+    ok: true,
+    sourceUuid,
+    entries,
+    bundleName,
+    multiCandidate: candidates.length >= 2,
+    versionsSkipped: versionsSkippedHere,
+    variantsEmitted: variantsEmittedHere,
+  };
 }
 
 module.exports = {
