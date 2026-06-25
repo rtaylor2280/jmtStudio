@@ -17129,9 +17129,14 @@ require(['vs/editor/editor.main'], function () {
         }
         return true;
       };
-      const _sfSaveEntryDetail = async () => {
-        if (!_sfDetailEdit || !_sfDetailOriginalName) return;
-        if (!_sfFlushEntryFieldEdits()) return;
+      // closeAfter: false leaves the modal open after a successful save —
+      // used by the "save and continue" branch of navigation prompts so
+      // the swap-to-next-modal logic still finds entry detail active.
+      // Returns true on success, false on validation refusal or IPC fail
+      // so callers can abort their follow-up action.
+      const _sfSaveEntryDetail = async ({ closeAfter = true } = {}) => {
+        if (!_sfDetailEdit || !_sfDetailOriginalName) return false;
+        if (!_sfFlushEntryFieldEdits()) return false;
         // Symmetric auto-handling of the creator_empty review reason
         // so the field tracks the author state on every save:
         //   - author NOW filled → drop creator_empty if present
@@ -17182,7 +17187,7 @@ require(['vs/editor/editor.main'], function () {
         });
         if (!res || !res.ok) {
           alert(`Save failed: ${(res && res.error) || 'unknown error'}`);
-          return;
+          return false;
         }
         // After a rename, the on-disk dir is at the new name; keep
         // _sfDetailOriginalName in sync so the modal-close content-hash
@@ -17191,8 +17196,9 @@ require(['vs/editor/editor.main'], function () {
         _sfDetailDirty = false;
         if (_sfEntryDetailEls.saveBtn) _sfEntryDetailEls.saveBtn.disabled = true;
         if (_sfEntryDetailEls.discardBtn) _sfEntryDetailEls.discardBtn.textContent = 'Close';
-        _sfCloseEntryDetail();
+        if (closeAfter) _sfCloseEntryDetail();
         await window.refreshSoundFontsView();
+        return true;
       };
       _sfEntryDetailEls.closeX?.addEventListener('click', _sfTryCloseEntryDetail);
       // Bottom button is labeled "Discard" when dirty and "Close" when
@@ -20897,7 +20903,17 @@ require(['vs/editor/editor.main'], function () {
         const uuid = entry && entry.meta && entry.meta.sourceUuid;
         if (!uuid) return;
         if (_sfDetailDirty) {
-          if (!await _promptDiscard('Unsaved changes to this font — discard them and go to source?')) return;
+          // Three-way prompt: Cancel (stay) / Discard (lose edits, go) /
+          // Save (persist edits, then go). The Save path keeps the entry
+          // modal active so the swap-to-source-detail handshake below
+          // still has a from-modal to atomically deactivate.
+          const choice = await promptUnsaved('Unsaved changes to this font — save before going to source?');
+          if (choice === 'cancel') return;
+          if (choice === 'save') {
+            const saved = await _sfSaveEntryDetail({ closeAfter: false });
+            if (!saved) return;
+          }
+          // 'discard' falls through — pending edits are abandoned.
         }
         // Remember the entry to come back to after the source modal closes,
         // so the user doesn't get dropped to the card grid when they're
