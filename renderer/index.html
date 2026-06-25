@@ -2049,8 +2049,8 @@
   #sf-shared-tracks-file-list .sf-entry-files-row { width: 230px; }
   .sf-card-name-row { display: flex; align-items: baseline; gap: 5px; min-width: 0; }
   .sf-card-name { font-size: 0.84rem; font-weight: 600; color: var(--c-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
-  .sf-card-link { font-size: 0.72rem; color: var(--jmt-blue); text-decoration: underline; text-underline-offset: 2px; background: none; border: none; padding: 0; cursor: pointer; flex-shrink: 0; font-family: inherit; }
-  .sf-card-link:hover { opacity: 0.8; }
+  .sf-card-link { font-size: 0.66rem; color: var(--jmt-blue); background: rgba(60, 130, 200, 0.12); border: 1px solid rgba(60, 130, 200, 0.35); border-radius: 3px; padding: 1px 6px; cursor: pointer; flex-shrink: 0; font-family: inherit; line-height: 1.3; }
+  .sf-card-link:hover { background: rgba(60, 130, 200, 0.22); border-color: var(--jmt-blue); }
   .sf-card-author { font-size: 0.71rem; color: var(--c-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sf-card-desc { font-size: 0.7rem; color: var(--c-text-dim); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .sf-card-tags { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 2px; }
@@ -2235,6 +2235,20 @@
   /* Import modal */
   #modal-sf-import .import-field { margin-bottom: 12px; }
   #modal-sf-import label { display: block; font-size: 0.76rem; color: var(--c-text-sub); margin-bottom: 4px; font-weight: 500; }
+  /* URL field shell — paste + clear icons sit inside the input's
+     right edge instead of consuming external width. The input gets
+     right-padding so the text never runs under the buttons. Used by
+     the import modal Website / Link, the entry detail Demo / Link
+     rows, and the source detail Website / Link rows. */
+  .sf-url-input-wrap { position: relative; flex: 1; min-width: 0; display: flex; }
+  .sf-url-input-wrap > input { width: 100%; padding-right: 46px !important; box-sizing: border-box; }
+  .sf-url-input-paste,
+  .sf-url-input-clear { position: absolute; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--c-text-sub); cursor: pointer; padding: 2px 4px; font-size: 0.85rem; line-height: 1; opacity: 0.55; transition: opacity 0.1s, color 0.1s; }
+  .sf-url-input-paste:hover,
+  .sf-url-input-clear:hover { opacity: 1; color: var(--c-text); }
+  .sf-url-input-paste { right: 22px; }
+  .sf-url-input-clear { right: 4px; }
+  .sf-url-input-paste svg { width: 13px; height: 13px; display: block; pointer-events: none; }
   /* Checkbox rows opt out of the block-label default: the checkbox and its
      label sit inline so the label reads as the checkbox's caption, not a
      separate field heading above it. */
@@ -2463,14 +2477,25 @@
   .sf-import-field-hint { font-size: 0.7rem; color: var(--c-text-dim); margin-top: 4px; line-height: 1.4; }
   .sf-review-cand-count { font-size: 0.72rem; color: var(--c-text-dim); font-weight: 400; margin-left: 6px; }
   .sf-review-candidate-list { display: flex; flex-direction: column; gap: 6px; }
-  .sf-review-candidate-row { display: grid; grid-template-columns: 22px 1fr auto; gap: 8px; align-items: start; padding: 8px 10px; background: var(--c-bg-inset); border: 1px solid var(--c-border-faint); border-radius: 4px; }
+  .sf-review-candidate-row { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; background: var(--c-bg-inset); border: 1px solid var(--c-border-faint); border-radius: 4px; }
+  .sf-review-candidate-row .cand-row-main { display: grid; grid-template-columns: 22px 1fr auto auto; gap: 8px; align-items: start; }
+  .sf-review-candidate-row .cand-link-toggle { background: transparent; border: 1px solid var(--c-border-faint); color: var(--c-text-sub); border-radius: 3px; width: 26px; height: 26px; cursor: pointer; font-size: 0.85rem; line-height: 1; padding: 0; display: flex; align-items: center; justify-content: center; flex-shrink: 0; align-self: center; }
+  .sf-review-candidate-row .cand-link-toggle:hover { color: var(--c-text); border-color: var(--c-border-strong); }
+  .sf-review-candidate-row .cand-link-toggle.has-url { color: var(--jmt-blue); border-color: var(--jmt-blue); }
+  .sf-review-candidate-row .cand-demo-row { display: flex; align-items: center; gap: 6px; padding-left: 30px; }
+  .sf-review-candidate-row .cand-demo-label { font-size: 0.78rem; color: var(--c-text-sub); width: 50px; flex-shrink: 0; }
+  .sf-review-candidate-row .cand-demo-input { flex: 1; }
+  .sf-review-candidate-row .cand-demo-clear { background: transparent; border: none; color: var(--c-text-sub); cursor: pointer; padding: 4px 6px; opacity: 0.45; font-size: 0.85rem; }
+  .sf-review-candidate-row .cand-demo-clear:hover { opacity: 1; color: var(--c-text); }
   .sf-review-candidate-row.disabled { opacity: 0.55; }
   .sf-review-candidate-row.already-imported { opacity: 0.6; }
   .sf-review-candidate-row.already-imported .cand-status { color: var(--jmt-blue); font-style: italic; }
   .sf-review-candidate-row input[type="checkbox"] { margin-top: 4px; }
   .sf-review-candidate-row .cand-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-  .sf-review-candidate-row input[type="text"] { width: 100%; background: var(--c-bg-raised); border: 1px solid var(--c-border-input); border-radius: 3px; color: var(--c-text); padding: 4px 7px; font-size: 0.82rem; outline: none; box-sizing: border-box; font-family: inherit; }
-  .sf-review-candidate-row input[type="text"]:focus { border-color: var(--jmt-blue); }
+  .sf-review-candidate-row input[type="text"],
+  .sf-review-candidate-row input[type="url"] { width: 100%; background: var(--c-bg-raised); border: 1px solid var(--c-border-input); border-radius: 3px; color: var(--c-text); padding: 4px 7px; font-size: 0.82rem; outline: none; box-sizing: border-box; font-family: inherit; }
+  .sf-review-candidate-row input[type="text"]:focus,
+  .sf-review-candidate-row input[type="url"]:focus { border-color: var(--jmt-blue); }
   .sf-review-candidate-row input[type="text"].invalid { border-color: #e44; }
   .sf-review-candidate-row .cand-path { font-size: 0.68rem; color: var(--c-text-dim); font-family: monospace; word-break: break-all; }
   .sf-review-candidate-row .cand-status { font-size: 0.68rem; min-height: 1em; }
@@ -2559,9 +2584,26 @@
   .sf-entry-name-wrap > h2 { flex: 0 0 auto; }
   .sf-entry-name-wrap > .detail-pencil,
   .sf-entry-name-wrap > .detail-confirm { flex: 0 0 auto; margin-right: auto; }
+  /* Chromium browser autofill applies its own white background that
+     overrides custom CSS. Counter it across every SF modal so dark-
+     theme inputs stay dark when the browser tries to be helpful. The
+     30px inset shadow draws over the browser's autofill highlight. */
+  #modal-sf-entry-detail input:-webkit-autofill,
+  #modal-sf-entry-detail input:-webkit-autofill:hover,
+  #modal-sf-entry-detail input:-webkit-autofill:focus,
+  #modal-sf-source-detail input:-webkit-autofill,
+  #modal-sf-source-detail input:-webkit-autofill:hover,
+  #modal-sf-source-detail input:-webkit-autofill:focus,
+  #modal-sf-import input:-webkit-autofill,
+  #modal-sf-import input:-webkit-autofill:hover,
+  #modal-sf-import input:-webkit-autofill:focus {
+    -webkit-box-shadow: 0 0 0 30px var(--c-bg-raised) inset !important;
+    -webkit-text-fill-color: var(--c-text) !important;
+    caret-color: var(--c-text) !important;
+  }
   .sf-link-edit-row { margin-top: 4px; display: flex; align-items: center; gap: 6px; }
-  .sf-url-display { background: none; border: none; padding: 0; font-size: 0.78rem; font-family: inherit; color: var(--jmt-blue); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; min-width: 0; flex: 0 1 auto; }
-  .sf-url-display:hover { text-decoration: underline; }
+  .sf-url-display { font-size: 0.72rem; font-family: inherit; color: var(--jmt-blue); background: rgba(60, 130, 200, 0.12); border: 1px solid rgba(60, 130, 200, 0.35); border-radius: 3px; padding: 1px 7px; cursor: pointer; white-space: nowrap; flex: 0 0 auto; line-height: 1.4; }
+  .sf-url-display:hover { background: rgba(60, 130, 200, 0.22); border-color: var(--jmt-blue); }
   /* Inline edit pattern (pencil → input → confirm). Pencil/confirm buttons
      use the shared .detail-pencil / .detail-confirm classes. */
   .sf-entry-name-wrap { display: flex; align-items: center; gap: 6px; }
@@ -2848,6 +2890,19 @@
   .style-detail-name-input { flex: 1; font-size: 1.1rem; font-weight: 700; background: var(--c-bg-inset); color: var(--c-text); border: 1px solid var(--jmt-blue); border-radius: 4px; padding: 2px 8px; outline: none; min-width: 0; display: none; }
   .detail-pencil { font-size: 0.72rem; opacity: 0.35; cursor: pointer; padding: 2px 4px; border-radius: 3px; border: none; background: none; color: var(--c-text); flex-shrink: 0; transition: opacity 0.1s, background 0.1s; }
   .detail-pencil:hover { opacity: 1; background: var(--c-bg-hover); }
+  /* Paste icon — same shape as .detail-pencil but uses a clipboard glyph
+     and sits to the left of the X (clear) inside URL edit rows. Brief
+     red-glow animation on the input flags an invalid paste so the
+     user knows the click registered but the clipboard wasn't a URL. */
+  .detail-paste { font-size: 0.78rem; opacity: 0.45; cursor: pointer; padding: 2px 4px; border-radius: 3px; border: none; background: none; color: var(--c-text); flex-shrink: 0; transition: opacity 0.1s, background 0.1s; }
+  .detail-paste:hover { opacity: 1; background: var(--c-bg-hover); }
+  @keyframes sfUrlPasteInvalid {
+    0%   { box-shadow: 0 0 0 0 rgba(228, 68, 68, 0); }
+    12%  { box-shadow: 0 0 0 3px rgba(228, 68, 68, 0.5); }
+    40%  { box-shadow: 0 0 0 3px rgba(228, 68, 68, 0.5); }
+    100% { box-shadow: 0 0 0 0 rgba(228, 68, 68, 0); }
+  }
+  .sf-url-paste-invalid { animation: sfUrlPasteInvalid 3s ease-out 1; }
   .detail-confirm { font-size: 0.72rem; cursor: pointer; padding: 2px 4px; border-radius: 3px; border: none; background: none; color: #4a4; opacity: 0.7; flex-shrink: 0; transition: opacity 0.1s, background 0.1s; }
   .detail-confirm:hover { opacity: 1; background: rgba(40,160,40,0.12); }
   #btn-detail-url-confirm { color: #4a4; opacity: 0.7; }
@@ -4061,7 +4116,19 @@
         </div>
         <div class="import-field">
           <label>Website</label>
-          <input type="text" id="sf-review-website" placeholder="https://..." maxlength="200" autocomplete="off">
+          <div class="sf-url-input-wrap">
+            <input type="text" id="sf-review-website" placeholder="https://..." maxlength="200" autocomplete="off">
+            <button type="button" class="sf-url-input-paste" id="btn-sf-review-website-paste" title="Paste clipboard URL"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="4" width="8" height="4" rx="1"/><path d="M16 6h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2"/></svg></button>
+            <button type="button" class="sf-url-input-clear" id="btn-sf-review-website-clear" title="Clear">&#10005;</button>
+          </div>
+        </div>
+        <div class="import-field">
+          <label>Link</label>
+          <div class="sf-url-input-wrap">
+            <input type="text" id="sf-review-link" placeholder="Where to learn more or get this font" maxlength="200" autocomplete="off">
+            <button type="button" class="sf-url-input-paste" id="btn-sf-review-link-paste" title="Paste clipboard URL"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="4" width="8" height="4" rx="1"/><path d="M16 6h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2"/></svg></button>
+            <button type="button" class="sf-url-input-clear" id="btn-sf-review-link-clear" title="Clear">&#10005;</button>
+          </div>
         </div>
         <div class="import-field">
           <label>Acquisition Date</label>
@@ -4127,13 +4194,19 @@
       <div class="sf-link-edit-row" id="sf-link-edit-row" style="display:none; flex-direction: column; gap: 4px; align-items: stretch;">
         <div style="display: flex; align-items: center; gap: 6px;">
           <span class="sf-edit-row-label" style="width: 50px; flex-shrink: 0; font-size: 0.78rem; color: var(--c-text-sub);">Demo</span>
-          <input type="url" id="sf-demo-input" class="sf-edit-input" placeholder="Link to a demo of this font" style="flex:1">
-          <button class="detail-pencil" id="btn-sf-demo-clear" title="Clear demo link" style="opacity:0.45">&#10005;</button>
+          <div class="sf-url-input-wrap">
+            <input type="url" id="sf-demo-input" class="sf-edit-input" placeholder="Link to a demo of this font">
+            <button class="sf-url-input-paste" id="btn-sf-demo-paste" title="Paste clipboard URL"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="4" width="8" height="4" rx="1"/><path d="M16 6h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2"/></svg></button>
+            <button class="sf-url-input-clear" id="btn-sf-demo-clear" title="Clear demo link">&#10005;</button>
+          </div>
         </div>
         <div style="display: flex; align-items: center; gap: 6px;">
           <span class="sf-edit-row-label" style="width: 50px; flex-shrink: 0; font-size: 0.78rem; color: var(--c-text-sub);">Link</span>
-          <input type="url" id="sf-link-input" class="sf-edit-input" placeholder="Where to learn more or get this font" style="flex:1">
-          <button class="detail-pencil" id="btn-sf-link-clear" title="Clear link" style="opacity:0.45">&#10005;</button>
+          <div class="sf-url-input-wrap">
+            <input type="url" id="sf-link-input" class="sf-edit-input" placeholder="Where to learn more or get this font">
+            <button class="sf-url-input-paste" id="btn-sf-link-paste" title="Paste clipboard URL"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="4" width="8" height="4" rx="1"/><path d="M16 6h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2"/></svg></button>
+            <button class="sf-url-input-clear" id="btn-sf-link-clear" title="Clear link">&#10005;</button>
+          </div>
         </div>
       </div>
       <div class="sf-entry-byline-wrap">
@@ -4261,8 +4334,9 @@
         <button class="detail-pencil" id="btn-sf-source-name-edit" title="Edit name">&#9998;</button>
         <button class="detail-confirm" id="btn-sf-source-name-confirm" title="Confirm" style="display:none">&#10003;</button>
         <div class="sf-link-area">
-          <button id="sf-source-link-display" class="sf-url-display" style="display:none"></button>
-          <button class="detail-link-btn" id="btn-sf-source-link-toggle" title="Vendor or storefront URL">&#128279;</button>
+          <button id="sf-source-website-display" class="sf-url-display" style="display:none">Website</button>
+          <button id="sf-source-link-display" class="sf-url-display" style="display:none">Link</button>
+          <button class="detail-link-btn" id="btn-sf-source-link-toggle" title="Edit creator website and source link">&#128279;</button>
         </div>
       </div>
       <div class="sf-entry-byline-wrap">
@@ -4274,10 +4348,23 @@
         <button class="detail-confirm" id="btn-sf-source-creator-confirm" title="Confirm" style="display:none">&#10003;</button>
       </div>
     </div>
-    <div class="sf-link-edit-row" id="sf-source-link-edit-row" style="display:none">
-      <input type="url" id="sf-source-link-input" class="sf-edit-input" placeholder="https://&hellip;" style="flex:1">
-      <button class="detail-confirm" id="btn-sf-source-link-confirm" title="Confirm link">&#10003;</button>
-      <button class="detail-pencil" id="btn-sf-source-link-clear" title="Clear link" style="opacity:0.45">&#10005;</button>
+    <div class="sf-link-edit-row" id="sf-source-link-edit-row" style="display:none; flex-direction: column; gap: 4px; align-items: stretch;">
+      <div style="display: flex; align-items: center; gap: 6px;">
+        <span class="sf-edit-row-label" style="width: 70px; flex-shrink: 0; font-size: 0.78rem; color: var(--c-text-sub);">Website</span>
+        <div class="sf-url-input-wrap">
+          <input type="url" id="sf-source-website-input" class="sf-edit-input" placeholder="Creator's homepage">
+          <button class="sf-url-input-paste" id="btn-sf-source-website-paste" title="Paste clipboard URL"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="4" width="8" height="4" rx="1"/><path d="M16 6h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2"/></svg></button>
+          <button class="sf-url-input-clear" id="btn-sf-source-website-clear" title="Clear website">&#10005;</button>
+        </div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 6px;">
+        <span class="sf-edit-row-label" style="width: 70px; flex-shrink: 0; font-size: 0.78rem; color: var(--c-text-sub);">Link</span>
+        <div class="sf-url-input-wrap">
+          <input type="url" id="sf-source-link-input" class="sf-edit-input" placeholder="Where to learn more or get this source">
+          <button class="sf-url-input-paste" id="btn-sf-source-link-paste" title="Paste clipboard URL"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="4" width="8" height="4" rx="1"/><path d="M16 6h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2"/></svg></button>
+          <button class="sf-url-input-clear" id="btn-sf-source-link-clear" title="Clear link">&#10005;</button>
+        </div>
+      </div>
     </div>
     <div class="sf-entry-detail-body">
       <div class="sf-entry-detail-meta">
@@ -13173,9 +13260,10 @@ require(['vs/editor/editor.main'], function () {
       // Group state. _sfCommonGroupOrder is the user-preferred order
       // of group headers in the sidecar (drag-reorderable, persisted
       // via setting). _sfCommonGroupOpen is per-group collapsed/open
-      // state, also persisted; default for a new group is "open" and
-      // the group containing the starred common stays open on first
-      // load if user hasn't toggled anything.
+      // state — session-only per the v1.8 fresh-open consistency rule:
+      // every relaunch starts with all groups collapsed except the one
+      // containing the starred common. Mid-session toggles still work
+      // normally, they just don't survive a relaunch.
       let _sfCommonGroupOrder = [];
       let _sfCommonGroupOpen = {};
       let _sfCommonGroupOpenLoaded = false;
@@ -13304,17 +13392,17 @@ require(['vs/editor/editor.main'], function () {
         try {
           const order = await window.electronAPI.getSetting('soundFontGroupOrder', []);
           if (Array.isArray(order)) _sfCommonGroupOrder = order;
-          const openMap = await window.electronAPI.getSetting('soundFontGroupOpen', {});
-          if (openMap && typeof openMap === 'object') _sfCommonGroupOpen = openMap;
         } catch {}
         _sfCommonGroupOpenLoaded = true;
       };
       const _sfSaveCommonGroupOrder = async () => {
         try { await window.electronAPI.setSetting('soundFontGroupOrder', _sfCommonGroupOrder); } catch {}
       };
-      const _sfSaveCommonGroupOpen = async () => {
-        try { await window.electronAPI.setSetting('soundFontGroupOpen', _sfCommonGroupOpen); } catch {}
-      };
+      // Per-group open/closed is session-only — keep the call sites that
+      // write to _sfCommonGroupOpen, just don't push to disk. Implicit
+      // default in _sfIsGroupOpen takes over on relaunch (open iff the
+      // group contains the starred common).
+      const _sfSaveCommonGroupOpen = async () => { /* no-op — session-only */ };
       // Bucket the loaded commons into { ungrouped: [], groups: Map<name, []> }.
       // Group order is the user's drag-set order with any newly-discovered
       // groups appended in their creation-time order (which we can't fully
@@ -13465,6 +13553,24 @@ require(['vs/editor/editor.main'], function () {
       const _sfSetStarredCommon = async (uuid) => {
         if (!uuid || uuid === _sfStarredCommonUuid) return;
         if (!_sfCommons.some(c => c.uuid === uuid)) return;
+        // Freeze the visible open state for the two groups whose implicit
+        // default is about to flip — old-starred group and new-starred
+        // group. Without this, _sfIsGroupOpen's implicit rule re-evaluates
+        // post-change and snaps the old-starred group closed under the
+        // user, even though they only clicked a star, not a group toggle.
+        const _groupOf = (u) => {
+          if (!u) return null;
+          const c = _sfCommons.find(x => x.uuid === u);
+          return (c?.meta?.group || '').trim() || null;
+        };
+        const _freezeGroupOpenState = (groupName) => {
+          if (!groupName) return;
+          if (Object.prototype.hasOwnProperty.call(_sfCommonGroupOpen, groupName)) return;
+          const groupCommons = _sfCommons.filter(c => (c.meta?.group || '').trim() === groupName);
+          _sfCommonGroupOpen[groupName] = groupCommons.some(c => c.uuid === _sfStarredCommonUuid);
+        };
+        _freezeGroupOpenState(_groupOf(_sfStarredCommonUuid));
+        _freezeGroupOpenState(_groupOf(uuid));
         _sfStarredCommonUuid = uuid;
         await _sfSaveStarredCommon();
         await _sfRenderCommonList();
@@ -15144,6 +15250,11 @@ require(['vs/editor/editor.main'], function () {
         vendorList:  document.getElementById('sf-review-vendor-list'),
         vendorInfo:  document.getElementById('sf-review-vendor-info'),
         website:     document.getElementById('sf-review-website'),
+        websitePaste: document.getElementById('btn-sf-review-website-paste'),
+        websiteClear: document.getElementById('btn-sf-review-website-clear'),
+        link:        document.getElementById('sf-review-link'),
+        linkPaste:   document.getElementById('btn-sf-review-link-paste'),
+        linkClear:   document.getElementById('btn-sf-review-link-clear'),
         purchased:   document.getElementById('sf-review-purchased'),
         purchaseDate:document.getElementById('sf-review-purchase-date'),
         notes:       document.getElementById('sf-review-notes'),
@@ -15585,6 +15696,45 @@ require(['vs/editor/editor.main'], function () {
         }
         _sfCloseImport();
       };
+      // URL validity check used by both the import smart-paste path
+      // and the inline paste buttons on entry / source / import URL
+      // fields. Conservative — must start with http(s):// and have at
+      // least one non-space character after.
+      const _sfIsHttpUrl = (s) => /^https?:\/\/\S+$/i.test(String(s || '').trim());
+      // Inline paste helper. Reads clipboard, validates as URL. On
+      // success: overwrites the input value and calls onSuccess (so
+      // the caller can sync dirty / state / display). On failure:
+      // triggers a brief red-glow animation on the input so the user
+      // knows the paste fired but was rejected (vs. nothing happening
+      // because the click didn't register). onSuccess receives the
+      // pasted URL string for any post-paste bookkeeping.
+      const _sfTryPasteUrlInto = async (inputEl, onSuccess) => {
+        if (!inputEl) return false;
+        let clip = '';
+        try {
+          if (!navigator.clipboard || !navigator.clipboard.readText) return false;
+          clip = await navigator.clipboard.readText();
+        } catch { return false; }
+        const trimmed = (clip || '').trim();
+        if (!_sfIsHttpUrl(trimmed)) {
+          // Invalid → flash red briefly. The animation lives on the
+          // wrap (when present) rather than the input itself so the
+          // box-shadow extends outside the whole field rather than
+          // appearing "around" the absolutely-positioned paste/clear
+          // buttons that sit on top of the input.
+          const target = inputEl.closest('.sf-url-input-wrap') || inputEl;
+          target.classList.remove('sf-url-paste-invalid');
+          // Force reflow so the re-added class restarts the animation
+          // even if the user clicks paste twice in quick succession.
+          void target.offsetWidth;
+          target.classList.add('sf-url-paste-invalid');
+          setTimeout(() => target.classList.remove('sf-url-paste-invalid'), 3000);
+          return false;
+        }
+        inputEl.value = trimmed;
+        if (typeof onSuccess === 'function') onSuccess(trimmed);
+        return true;
+      };
       const _sfFormatBytes = (n) => {
         if (!n) return '0 B';
         if (n < 1024) return `${n} B`;
@@ -15774,6 +15924,18 @@ require(['vs/editor/editor.main'], function () {
         if (_sfImportEls.vendorList) {
           _sfImportEls.vendorList.innerHTML = _sfKnownVendors.map(v => `<option value="${_sfEscape(v.name)}"></option>`).join('');
         }
+        // Source-level Link starts empty on every fresh source import —
+        // there's no auto-detection signal for "this bundle's page" so the
+        // field is purely user-input. Add-more / duplicate flows hide the
+        // source section entirely, so this reset only ever runs in the
+        // user-facing case.
+        if (_sfImportEls.link) _sfImportEls.link.value = '';
+        // Track the last demoUrl committed during this import session.
+        // Smart paste on each candidate row compares clipboard against
+        // this value to decide whether to auto-paste — if the clipboard
+        // is the same URL we already entered on a sibling, it's stale
+        // and we open the field empty instead of repeating.
+        if (_sfImport) _sfImport._lastDemoUrl = '';
         const knownLookup = (name) => _sfKnownVendors.find(k => k.name.toLowerCase() === String(name || '').toLowerCase());
         const v = _sfImport.vendor;
         // Two confidence levels matter here:
@@ -15980,21 +16142,79 @@ require(['vs/editor/editor.main'], function () {
                 rowAlreadyData = isAlready ? '1' : '0';
                 rowAlreadyClass = isAlready ? ' already-imported' : '';
               }
-              return `<div class="sf-review-candidate-row${rowAlreadyClass}" data-idx="${i}" data-already="${rowAlreadyData}">
-                <input type="checkbox" class="cand-check" ${checkAttrs}>
-                <div class="cand-main">
-                  <input type="text" class="cand-name" value="${_sfEscape(nameVal)}" maxlength="64" autocomplete="off" ${nameAttrs}>
-                  <div class="cand-path">${_sfEscape(c.path || '(source root)')}</div>
-                  <div class="cand-status">${statusHtml}</div>
+              // Each candidate gets its own demo-URL slot. The chain icon
+              // toggles an inline edit row below; behavior mirrors the
+              // entry detail link panel (chain swaps to checkmark when
+              // open, single click commits and closes, Enter/Escape work
+              // the same way, X clears).
+              return `<div class="sf-review-candidate-row${rowAlreadyClass}" data-idx="${i}" data-already="${rowAlreadyData}" data-demourl="">
+                <div class="cand-row-main">
+                  <input type="checkbox" class="cand-check" ${checkAttrs}>
+                  <div class="cand-main">
+                    <input type="text" class="cand-name" value="${_sfEscape(nameVal)}" maxlength="64" autocomplete="off" ${nameAttrs}>
+                    <div class="cand-path">${_sfEscape(c.path || '(source root)')}</div>
+                    <div class="cand-status">${statusHtml}</div>
+                  </div>
+                  <div class="cand-meta">
+                    <div class="cand-badges">${badges.join('')}</div>
+                    <div>${_sfEscape(wavLine)}</div>
+                  </div>
+                  <button class="cand-link-toggle" title="Add demo link" data-cand-link-toggle="${i}">&#128279;</button>
                 </div>
-                <div class="cand-meta">
-                  <div class="cand-badges">${badges.join('')}</div>
-                  <div>${_sfEscape(wavLine)}</div>
+                <div class="cand-demo-row" data-cand-demo-row="${i}" style="display:none">
+                  <span class="cand-demo-label">Demo</span>
+                  <input type="url" class="cand-demo-input" placeholder="Link to a demo of this font" data-cand-demo-input="${i}">
+                  <button class="cand-demo-clear" title="Clear demo link" data-cand-demo-clear="${i}">&#10005;</button>
                 </div>
               </div>`;
             }).join('');
           }
         }
+        // Smart paste helper for the candidate-row demo link toggle.
+        // Reads clipboard, validates as URL, then suppresses auto-paste
+        // when the clipboard matches any of three values:
+        //   1. The last demoUrl committed earlier in this import session
+        //      (stale clipboard from font 1 → don't repeat on font 2).
+        //   2. The source-level Website value (creator's homepage).
+        //   3. The source-level Link value (bundle's product page).
+        // Cases 2 and 3 aren't "the demo can't possibly be the same URL"
+        // — sometimes a product page does embed the demo video, so they
+        // legitimately can match. The suppression is about deliberateness:
+        // when the same URL is going into multiple distinct slots, the
+        // user should make that decision by hand (focus the input and
+        // Ctrl+V), not have it auto-applied silently.
+        // Returns the URL to paste, or null when no auto-paste should fire.
+        const _isHttpUrl = (s) => /^https?:\/\/\S+$/i.test(String(s || '').trim());
+        const _trySmartPaste = async () => {
+          if (!navigator.clipboard || !navigator.clipboard.readText) return null;
+          let clip = '';
+          try { clip = await navigator.clipboard.readText(); } catch { return null; }
+          const trimmed = (clip || '').trim();
+          if (!trimmed || !_isHttpUrl(trimmed)) return null;
+          const last = (_sfImport && _sfImport._lastDemoUrl) || '';
+          if (last && trimmed === last) return null;
+          const websiteVal = (_sfImportEls.website?.value || '').trim();
+          const linkVal    = (_sfImportEls.link?.value    || '').trim();
+          if (websiteVal && trimmed === websiteVal) return null;
+          if (linkVal    && trimmed === linkVal)    return null;
+          return trimmed;
+        };
+        // Sync the row's tracking state from the current input value.
+        // Used after smart paste (which fills the input) and on input
+        // change (fires on blur / Enter). Does NOT close the row — the
+        // chain icon is a pure toggle in this context; users can leave
+        // the input visible across siblings so the value is its own
+        // confirmation.
+        const _syncCandDemoState = (row, url) => {
+          const trimmed = (url || '').trim();
+          row.dataset.demourl = trimmed;
+          const toggleBtn = row.querySelector('.cand-link-toggle');
+          if (toggleBtn) {
+            toggleBtn.title = trimmed ? 'Demo link set — toggle to show/hide' : 'Add demo link';
+            toggleBtn.classList.toggle('has-url', !!trimmed);
+          }
+          if (trimmed && _sfImport) _sfImport._lastDemoUrl = trimmed;
+        };
         _sfImportEls.candList?.querySelectorAll('.sf-review-candidate-row').forEach(row => {
           if (row.dataset.already === '1') return; // already-imported rows are locked
           const check = row.querySelector('.cand-check');
@@ -16009,6 +16229,88 @@ require(['vs/editor/editor.main'], function () {
           name?.addEventListener('input', () => {
             if (name.value !== row.dataset.suggested) row.dataset.edited = 'true';
             validate();
+          });
+          // Demo link toggle: chain icon → expand row → swap to checkmark.
+          // Smart paste fires when opening an empty field if the clipboard
+          // holds a fresh URL.
+          const toggleBtn = row.querySelector('.cand-link-toggle');
+          const demoRow = row.querySelector('.cand-demo-row');
+          const demoInput = row.querySelector('.cand-demo-input');
+          const demoClear = row.querySelector('.cand-demo-clear');
+          // Chain link is a pure open/close toggle here — no icon swap,
+          // no commit-by-icon. The input value itself is the confirmation
+          // ("here's the URL I just captured"), so closing the row after
+          // smart paste would actually hide the feedback the user came
+          // here for. Normal workflow: open → see/paste the URL → leave
+          // it open across siblings. Close is optional.
+          toggleBtn?.addEventListener('click', async () => {
+            if (!demoRow || !demoInput) return;
+            const opening = demoRow.style.display === 'none';
+            if (opening) {
+              const existing = row.dataset.demourl || '';
+              demoInput.value = existing;
+              demoRow.style.display = '';
+              // Smart paste only fires on an empty field — don't overwrite
+              // a value the user already chose. Auto-fills the input but
+              // leaves the row open so the URL is visible.
+              if (!existing) {
+                const pasted = await _trySmartPaste();
+                if (pasted) {
+                  demoInput.value = pasted;
+                  _syncCandDemoState(row, pasted);
+                  return;
+                }
+              }
+              setTimeout(() => { demoInput.focus(); demoInput.select?.(); }, 0);
+            } else {
+              // Open + empty + fresh clipboard URL → smart-paste into
+              // the visible input rather than closing. Clicking the
+              // chain on an empty open row reads as "fill this" intent;
+              // a no-value close wastes a click and forces a re-open to
+              // trigger the same paste.
+              const currentValue = (demoInput.value || '').trim();
+              if (!currentValue) {
+                const pasted = await _trySmartPaste();
+                if (pasted) {
+                  demoInput.value = pasted;
+                  _syncCandDemoState(row, pasted);
+                  setTimeout(() => { demoInput.focus(); demoInput.select?.(); }, 0);
+                  return;
+                }
+              }
+              // No smart paste available, or input already has a value
+              // → close. Capture the current input as the tracked value
+              // before hiding.
+              _syncCandDemoState(row, demoInput.value);
+              demoRow.style.display = 'none';
+            }
+          });
+          // Sync tracking state whenever the user finishes editing the
+          // input (fires on blur or Enter). Updates _lastDemoUrl so smart
+          // paste dedup works across siblings even though there's no
+          // explicit commit gesture.
+          demoInput?.addEventListener('change', () => {
+            _syncCandDemoState(row, demoInput.value);
+          });
+          demoInput?.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              _syncCandDemoState(row, demoInput.value);
+              demoInput.blur();
+            } else if (e.key === 'Escape') {
+              e.preventDefault();
+              // Revert input to last tracked value, then close.
+              demoInput.value = row.dataset.demourl || '';
+              demoRow.style.display = 'none';
+            }
+          });
+          demoClear?.addEventListener('click', () => {
+            demoInput.value = '';
+            _syncCandDemoState(row, '');
+            // Keep the row open so the user can paste a new URL right
+            // away. Closing it would feel like a confirmation when they
+            // just cleared.
+            demoInput.focus();
           });
         });
         // Recompute the suggested names for every row that hasn't been
@@ -16099,7 +16401,20 @@ require(['vs/editor/editor.main'], function () {
           const check = row.querySelector('.cand-check');
           const nameEl = row.querySelector('.cand-name');
           if (!check?.checked) continue;
-          picks.push({ candidate: _sfImport.candidates[idx], name: _sfSanitizeName(nameEl?.value || '') });
+          // If the demo edit row is still open at submit time, pull the
+          // current input value as the source of truth — the user may
+          // have typed without clicking the toggle to commit.
+          const demoEditRow = row.querySelector('.cand-demo-row');
+          let demoUrl = row.dataset.demourl || '';
+          if (demoEditRow && demoEditRow.style.display !== 'none') {
+            const liveInput = row.querySelector('.cand-demo-input');
+            demoUrl = (liveInput?.value || '').trim();
+          }
+          picks.push({
+            candidate: _sfImport.candidates[idx],
+            name: _sfSanitizeName(nameEl?.value || ''),
+            demoUrl,
+          });
         }
         if (picks.length === 0) return;
         const isAddMore = !!_sfImport.isExistingReview;
@@ -16117,6 +16432,7 @@ require(['vs/editor/editor.main'], function () {
         } else {
           entryAuthor = (_sfImportEls.vendor?.value || '').trim() || null;
           const entryWebsite = (_sfImportEls.website?.value || '').trim() || null;
+          const entryLink = (_sfImportEls.link?.value || '').trim() || null;
           purchaseDate = _sfImportEls.purchaseDate?.value || new Date().toISOString().slice(0, 10);
           purchased = !(_sfImportEls.purchased && _sfImportEls.purchased.checked);
           userBundle = (_sfImportEls.bundleNameInput?.value || '').trim() || null;
@@ -16130,6 +16446,7 @@ require(['vs/editor/editor.main'], function () {
               bundleName: userBundle,
               vendor: entryAuthor,
               vendorWebsite: entryWebsite,
+              linkUrl: entryLink,
               purchased,
               purchaseDate,
               userNotes: sourceNotes,
@@ -16170,6 +16487,7 @@ require(['vs/editor/editor.main'], function () {
               acquisitionDate: purchaseDate,
               description: '',
               tags,
+              demoUrl: pick.demoUrl || '',
             },
           });
           if (!res || !res.ok) failures.push({ name: pick.name, error: (res && res.error) || 'unknown error' });
@@ -16268,7 +16586,9 @@ require(['vs/editor/editor.main'], function () {
         demoInput:       document.getElementById('sf-demo-input'),
         linkInput:       document.getElementById('sf-link-input'),
         demoClear:       document.getElementById('btn-sf-demo-clear'),
+        demoPaste:       document.getElementById('btn-sf-demo-paste'),
         linkClearBtn:    document.getElementById('btn-sf-link-clear'),
+        linkPaste:       document.getElementById('btn-sf-link-paste'),
         // Source block (read-only here; source editing comes in slice 10)
         source:          document.getElementById('sf-entry-detail-source'),
         // Action buttons
@@ -17057,10 +17377,14 @@ require(['vs/editor/editor.main'], function () {
         creatorEditBtn:  document.getElementById('btn-sf-source-creator-edit'),
         creatorConfirmBtn: document.getElementById('btn-sf-source-creator-confirm'),
         linkBtn:         document.getElementById('btn-sf-source-link-toggle'),
+        websiteDisplay:  document.getElementById('sf-source-website-display'),
+        websiteInput:    document.getElementById('sf-source-website-input'),
+        websitePaste:    document.getElementById('btn-sf-source-website-paste'),
+        websiteClear:    document.getElementById('btn-sf-source-website-clear'),
         linkDisplay:     document.getElementById('sf-source-link-display'),
         linkEditRow:     document.getElementById('sf-source-link-edit-row'),
         linkInput:       document.getElementById('sf-source-link-input'),
-        linkConfirmBtn:  document.getElementById('btn-sf-source-link-confirm'),
+        linkPaste:       document.getElementById('btn-sf-source-link-paste'),
         linkClearBtn:    document.getElementById('btn-sf-source-link-clear'),
         acquiredDisplay: document.getElementById('sf-source-acquired-display'),
         acquiredInput:   document.getElementById('sf-source-acquired-input'),
@@ -17113,15 +17437,22 @@ require(['vs/editor/editor.main'], function () {
       };
       const _sfSyncSourceLinkDisplay = () => {
         if (!_sfSourceEdit) return;
-        const has = !!_sfSourceEdit.vendorWebsite;
+        const hasWebsite = !!_sfSourceEdit.vendorWebsite;
+        const hasLink = !!_sfSourceEdit.linkUrl;
+        const hasAny = hasWebsite || hasLink;
         if (_sfSourceDetailEls.linkBtn) {
-          _sfSourceDetailEls.linkBtn.classList.toggle('has-url', has);
-          _sfSourceDetailEls.linkBtn.title = has ? 'Edit link' : 'Add a vendor or storefront URL';
+          _sfSourceDetailEls.linkBtn.classList.toggle('has-url', hasAny);
+          // Revert chain icon (the panel just closed via sync).
+          _sfSourceDetailEls.linkBtn.innerHTML = '\u{1F517}';
+          _sfSourceDetailEls.linkBtn.title = hasAny ? 'Edit creator website and source link' : 'Add creator website and source link';
+        }
+        if (_sfSourceDetailEls.websiteDisplay) {
+          _sfSourceDetailEls.websiteDisplay.title = _sfSourceEdit.vendorWebsite || '';
+          _sfSourceDetailEls.websiteDisplay.style.display = hasWebsite ? 'inline-block' : 'none';
         }
         if (_sfSourceDetailEls.linkDisplay) {
-          _sfSourceDetailEls.linkDisplay.textContent = _sfSourceEdit.vendorWebsite || '';
-          _sfSourceDetailEls.linkDisplay.title = _sfSourceEdit.vendorWebsite || '';
-          _sfSourceDetailEls.linkDisplay.style.display = has ? 'inline-block' : 'none';
+          _sfSourceDetailEls.linkDisplay.title = _sfSourceEdit.linkUrl || '';
+          _sfSourceDetailEls.linkDisplay.style.display = hasLink ? 'inline-block' : 'none';
         }
         if (_sfSourceDetailEls.linkEditRow) _sfSourceDetailEls.linkEditRow.style.display = 'none';
       };
@@ -17273,6 +17604,7 @@ require(['vs/editor/editor.main'], function () {
           originalName: sm.originalName || '',
           vendor: sm.vendor || '',
           vendorWebsite: sm.vendorWebsite || '',
+          linkUrl: sm.linkUrl || '',
           purchaseDate: sm.purchaseDate || '',
           purchased: sm.purchased !== false, // default true
           userNotes: sm.userNotes || '',
@@ -17393,7 +17725,7 @@ require(['vs/editor/editor.main'], function () {
           if (b.style.display !== 'none') return false;
         }
         if (_sfSourceDetailEls.linkEditRow && _sfSourceDetailEls.linkEditRow.style.display !== 'none') {
-          _sfSourceDetailEls.linkConfirmBtn?.click();
+          _sfCommitSourceLinkInputs();
           if (_sfSourceDetailEls.linkEditRow.style.display !== 'none') return false;
         }
         return true;
@@ -17405,6 +17737,7 @@ require(['vs/editor/editor.main'], function () {
           bundleName: _sfSourceEdit.bundleName,
           vendor: _sfSourceEdit.vendor,
           vendorWebsite: _sfSourceEdit.vendorWebsite,
+          linkUrl: _sfSourceEdit.linkUrl,
           purchaseDate: _sfSourceEdit.purchaseDate,
           purchased: _sfSourceEdit.purchased,
           userNotes: _sfSourceEdit.userNotes,
@@ -17561,58 +17894,96 @@ require(['vs/editor/editor.main'], function () {
         _sfSourceDetailEls.nameInput,
         _sfSourceDetailEls.creatorInput,
         _sfSourceDetailEls.acquiredInput,
+        _sfSourceDetailEls.websiteInput,
         _sfSourceDetailEls.linkInput,
       ]) {
         inp?.addEventListener('input', _sfMarkSourceDirty);
       }
-      // Link button: open edit row.
+      // Source link panel mirrors the entry detail pattern: chain icon
+      // doubles as the open/close toggle and commit signal (swaps to a
+      // checkmark when the panel is open, single click commits both
+      // inputs and closes). Two stacked rows for Website (creator's
+      // homepage, stored as vendorWebsite) and Link (the source
+      // bundle's "where to get it" page, stored as linkUrl).
+      const _sfCommitSourceLinkInputs = () => {
+        if (!_sfSourceEdit) return;
+        const websiteVal = (_sfSourceDetailEls.websiteInput?.value || '').trim();
+        const linkVal = (_sfSourceDetailEls.linkInput?.value || '').trim();
+        if (websiteVal !== _sfSourceEdit.vendorWebsite) {
+          _sfSourceEdit.vendorWebsite = websiteVal;
+          _sfMarkSourceDirty();
+        }
+        if (linkVal !== _sfSourceEdit.linkUrl) {
+          _sfSourceEdit.linkUrl = linkVal;
+          _sfMarkSourceDirty();
+        }
+        _sfSyncSourceLinkDisplay();
+      };
       _sfSourceDetailEls.linkBtn?.addEventListener('click', () => {
         if (!_sfSourceEdit) return;
         const editRow = _sfSourceDetailEls.linkEditRow;
         if (!editRow) return;
         const opening = editRow.style.display === 'none';
         if (opening) {
-          editRow.style.display = '';
-          if (_sfSourceDetailEls.linkInput) {
-            _sfSourceDetailEls.linkInput.value = _sfSourceEdit.vendorWebsite || '';
-            setTimeout(() => { _sfSourceDetailEls.linkInput.focus(); _sfSourceDetailEls.linkInput.select?.(); }, 0);
-          }
+          editRow.style.display = 'flex';
+          if (_sfSourceDetailEls.websiteInput) _sfSourceDetailEls.websiteInput.value = _sfSourceEdit.vendorWebsite || '';
+          if (_sfSourceDetailEls.linkInput)    _sfSourceDetailEls.linkInput.value    = _sfSourceEdit.linkUrl || '';
+          _sfSourceDetailEls.linkBtn.innerHTML = '\u{2713}';
+          _sfSourceDetailEls.linkBtn.title = 'Save links';
+          setTimeout(() => { _sfSourceDetailEls.websiteInput?.focus(); _sfSourceDetailEls.websiteInput?.select?.(); }, 0);
         } else {
-          editRow.style.display = 'none';
+          _sfCommitSourceLinkInputs();
         }
       });
-      _sfSourceDetailEls.linkDisplay?.addEventListener('click', () => {
+      _sfSourceDetailEls.websiteDisplay?.addEventListener('click', () => {
         if (!_sfSourceEdit?.vendorWebsite) return;
         window.electronAPI.openExternal(_sfSourceEdit.vendorWebsite);
       });
-      _sfSourceDetailEls.linkConfirmBtn?.addEventListener('click', () => {
-        if (!_sfSourceEdit) return;
-        const v = (_sfSourceDetailEls.linkInput?.value || '').trim();
-        if (v !== _sfSourceEdit.vendorWebsite) {
-          _sfSourceEdit.vendorWebsite = v;
-          _sfMarkSourceDirty();
-        }
-        _sfSyncSourceLinkDisplay();
+      _sfSourceDetailEls.linkDisplay?.addEventListener('click', () => {
+        if (!_sfSourceEdit?.linkUrl) return;
+        window.electronAPI.openExternal(_sfSourceEdit.linkUrl);
       });
-      _sfSourceDetailEls.linkClearBtn?.addEventListener('click', () => {
+      _sfSourceDetailEls.websiteClear?.addEventListener('click', () => {
         if (!_sfSourceEdit) return;
         if (_sfSourceEdit.vendorWebsite) {
           _sfSourceEdit.vendorWebsite = '';
           _sfMarkSourceDirty();
         }
-        if (_sfSourceDetailEls.linkInput) _sfSourceDetailEls.linkInput.value = '';
-        _sfSyncSourceLinkDisplay();
+        if (_sfSourceDetailEls.websiteInput) _sfSourceDetailEls.websiteInput.value = '';
       });
-      _sfSourceDetailEls.linkInput?.addEventListener('keydown', (e) => {
+      _sfSourceDetailEls.linkClearBtn?.addEventListener('click', () => {
+        if (!_sfSourceEdit) return;
+        if (_sfSourceEdit.linkUrl) {
+          _sfSourceEdit.linkUrl = '';
+          _sfMarkSourceDirty();
+        }
+        if (_sfSourceDetailEls.linkInput) _sfSourceDetailEls.linkInput.value = '';
+      });
+      _sfSourceDetailEls.websitePaste?.addEventListener('click', async () => {
+        if (!_sfSourceEdit || !_sfSourceDetailEls.websiteInput) return;
+        await _sfTryPasteUrlInto(_sfSourceDetailEls.websiteInput, (url) => {
+          _sfSourceEdit.vendorWebsite = url;
+          _sfMarkSourceDirty();
+        });
+      });
+      _sfSourceDetailEls.linkPaste?.addEventListener('click', async () => {
+        if (!_sfSourceEdit || !_sfSourceDetailEls.linkInput) return;
+        await _sfTryPasteUrlInto(_sfSourceDetailEls.linkInput, (url) => {
+          _sfSourceEdit.linkUrl = url;
+          _sfMarkSourceDirty();
+        });
+      });
+      const _sfSourceLinkKeydown = (e) => {
         if (e.key === 'Enter') {
           e.preventDefault();
-          _sfSourceDetailEls.linkConfirmBtn?.click();
+          _sfCommitSourceLinkInputs();
         } else if (e.key === 'Escape') {
           e.preventDefault();
-          if (_sfSourceDetailEls.linkEditRow) _sfSourceDetailEls.linkEditRow.style.display = 'none';
           _sfSyncSourceLinkDisplay();
         }
-      });
+      };
+      _sfSourceDetailEls.websiteInput?.addEventListener('keydown', _sfSourceLinkKeydown);
+      _sfSourceDetailEls.linkInput?.addEventListener('keydown', _sfSourceLinkKeydown);
       // Tag chip remove. "free" stays the source-level purchased toggle;
       // any other chip is part of the bulk-tag set that will be applied to
       // every entry on Save.
@@ -20681,6 +21052,23 @@ require(['vs/editor/editor.main'], function () {
         }
         if (_sfEntryDetailEls.linkInput) _sfEntryDetailEls.linkInput.value = '';
         _sfSyncLinkDisplay();
+      });
+      // Inline paste buttons. Read clipboard, overwrite the input on
+      // a valid URL (committing into the in-memory edit so Save catches
+      // it), flash the input red on an invalid clipboard.
+      _sfEntryDetailEls.demoPaste?.addEventListener('click', async () => {
+        if (!_sfDetailEdit || !_sfEntryDetailEls.demoInput) return;
+        await _sfTryPasteUrlInto(_sfEntryDetailEls.demoInput, (url) => {
+          _sfDetailEdit.demoUrl = url;
+          _sfMarkDetailDirty();
+        });
+      });
+      _sfEntryDetailEls.linkPaste?.addEventListener('click', async () => {
+        if (!_sfDetailEdit || !_sfEntryDetailEls.linkInput) return;
+        await _sfTryPasteUrlInto(_sfEntryDetailEls.linkInput, (url) => {
+          _sfDetailEdit.linkUrl = url;
+          _sfMarkDetailDirty();
+        });
       });
       const _sfLinkKeydown = (e) => {
         if (e.key === 'Enter') {
@@ -23931,6 +24319,22 @@ require(['vs/editor/editor.main'], function () {
       _sfImportEls.pickFolderBtn?.addEventListener('click', () => _sfPickAndImport('folder'));
       _sfImportEls.cancelBtn?.addEventListener('click', _sfCloseImportAndReturn);
       _sfImportEls.confirmBtn?.addEventListener('click', _sfConfirmImport);
+      // Paste + clear icons on the Website and Link URL fields. Inside-
+      // the-field positioning via the .sf-import-url-wrap shell.
+      _sfImportEls.websitePaste?.addEventListener('click', async () => {
+        if (!_sfImportEls.website) return;
+        await _sfTryPasteUrlInto(_sfImportEls.website);
+      });
+      _sfImportEls.websiteClear?.addEventListener('click', () => {
+        if (_sfImportEls.website) _sfImportEls.website.value = '';
+      });
+      _sfImportEls.linkPaste?.addEventListener('click', async () => {
+        if (!_sfImportEls.link) return;
+        await _sfTryPasteUrlInto(_sfImportEls.link);
+      });
+      _sfImportEls.linkClear?.addEventListener('click', () => {
+        if (_sfImportEls.link) _sfImportEls.link.value = '';
+      });
       // Search bar wiring for the browse grid
       document.getElementById('sf-search')?.addEventListener('input', function() {
         _sfSearchQuery = this.value;

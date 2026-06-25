@@ -258,6 +258,7 @@ async function createEntry({ userData, sourceUuid, candidate, name, metadata, on
         || (source.meta && source.meta.importedAt && source.meta.importedAt.slice(0, 10))
         || new Date().toISOString().slice(0, 10),
       description: (metadata && metadata.description) || '',
+      demoUrl: (metadata && metadata.demoUrl) || '',
       userNotes: (metadata && metadata.userNotes) || '',
       addedFromSource: [],
       contentFileCount: result.fileCount,
