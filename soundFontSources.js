@@ -957,6 +957,109 @@ function openSource(userData, uuid) {
   throw new Error(`Unknown source format: ${meta.format}`);
 }
 
+// ── Persistent content hash (backup-side) ────────────────
+// Sources are effectively immutable once imported — there's no in-app
+// edit path that mutates the on-disk source.zip / source/ tree. So the
+// hashItemDir result for a given source dir is stable across the source's
+// lifetime, and stamping it onto meta.json once means every subsequent
+// export reads it back instead of re-hashing multi-GB voicepacks. Mirrors
+// the entries/common helpers (see soundFontEntries.recomputeEntryContentHash)
+// so the surveyMerge + exportBackup paths can route all three buckets
+// through the same shape.
+//
+// NB: source meta also has a `hash` field set at import time — that's the
+// IDENTITY hash (zip bytes or canonical folder walk) used for import-dedup.
+// That's a different shape from hashItemDir (which hashes the on-disk
+// uuid dir contents including meta.json) and would NOT match what the
+// restore side checks against. Keep them separate.
+function _walkSourceContentSignals(sourceDir) {
+  let fileCount = 0;
+  let totalBytes = 0;
+  const walk = (absDir, relBase) => {
+    let entries;
+    try { entries = fs.readdirSync(absDir, { withFileTypes: true }); }
+    catch { return; }
+    for (const e of entries) {
+      if (!relBase && e.name === 'meta.json') continue;
+      const abs = path.join(absDir, e.name);
+      if (e.isDirectory()) {
+        walk(abs, relBase ? `${relBase}/${e.name}` : e.name);
+      } else if (e.isFile()) {
+        fileCount++;
+        try { totalBytes += fs.statSync(abs).size; } catch {}
+      }
+    }
+  };
+  walk(sourceDir, '');
+  return { fileCount, totalBytes };
+}
+
+function recomputeSourceContentHash(userData, uuid) {
+  if (!uuid) return null;
+  const sourceDir = path.join(sourcesRoot(userData), uuid);
+  const metaPath = path.join(sourceDir, 'meta.json');
+  if (!fs.existsSync(metaPath)) return null;
+  let meta;
+  try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); }
+  catch { return null; }
+  const { hashItemDir } = require('./soundFontFileHash');
+  const h = hashItemDir(sourceDir);
+  if (!h) return null;
+  const { fileCount, totalBytes } = _walkSourceContentSignals(sourceDir);
+  meta.contentHash = h;
+  meta.contentFileCount = fileCount;
+  meta.contentTotalBytes = totalBytes;
+  meta.contentHashedAt = new Date().toISOString();
+  meta.contentHashDirty = false;
+  try { fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2)); }
+  catch {}
+  return h;
+}
+
+function markSourceContentDirty(userData, uuid) {
+  if (!uuid) return;
+  const metaPath = path.join(sourcesRoot(userData), uuid, 'meta.json');
+  if (!fs.existsSync(metaPath)) return;
+  let meta;
+  try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); }
+  catch { return; }
+  if (meta.contentHashDirty) return;
+  meta.contentHashDirty = true;
+  try { fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2)); }
+  catch {}
+}
+
+function resolveSourceContentDirty(userData, uuid) {
+  if (!uuid) return null;
+  const metaPath = path.join(sourcesRoot(userData), uuid, 'meta.json');
+  if (!fs.existsSync(metaPath)) return null;
+  let meta;
+  try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); }
+  catch { return null; }
+  if (!meta.contentHashDirty) return null;
+  return recomputeSourceContentHash(userData, uuid);
+}
+
+function getSourceContentHash(userData, uuid) {
+  if (!uuid) return null;
+  const sourceDir = path.join(sourcesRoot(userData), uuid);
+  const metaPath = path.join(sourceDir, 'meta.json');
+  if (!fs.existsSync(metaPath)) return null;
+  let meta;
+  try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); }
+  catch { return null; }
+  if (!meta.contentHashDirty
+      && meta.contentHash
+      && typeof meta.contentFileCount === 'number'
+      && typeof meta.contentTotalBytes === 'number') {
+    const live = _walkSourceContentSignals(sourceDir);
+    if (live.fileCount === meta.contentFileCount && live.totalBytes === meta.contentTotalBytes) {
+      return meta.contentHash;
+    }
+  }
+  return recomputeSourceContentHash(userData, uuid);
+}
+
 module.exports = {
   sourcesRoot,
   ensureSourcesRoot,
@@ -975,4 +1078,8 @@ module.exports = {
   exportSourceFileTo,
   listSourceFiles,
   extractSourceFileTo,
+  recomputeSourceContentHash,
+  getSourceContentHash,
+  markSourceContentDirty,
+  resolveSourceContentDirty,
 };

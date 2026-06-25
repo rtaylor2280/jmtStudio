@@ -33,6 +33,21 @@ function _resolve(userData, kind, id, subPath) {
   return target;
 }
 
+// Flag a location's content hash as stale. Cheap — single meta.json
+// write of one boolean — so we can call it on every modifying op
+// without worrying about op-rate. The actual rehash batches at modal
+// close (or lazy on next read). sharedTracks has its own per-file hash
+// index that maintains itself, so no flag needed for that kind.
+function _markLocationDirty(userData, kind, id) {
+  try {
+    if (kind === 'entry') {
+      require('./soundFontEntries').markEntryContentDirty(userData, id);
+    } else if (kind === 'common') {
+      require('./soundFontCommon').markCommonContentDirty(userData, id);
+    }
+  } catch {}
+}
+
 // Proffie-style variant naming with destination-aware convention. Scans
 // the destination directory for files matching <base>\d*<ext>, finds the
 // padding pattern in use (1/2/3-digit, or none), and walks from the
@@ -240,6 +255,12 @@ async function copyAcrossLocations({
   // needs an index entry so backup merge/replace can use content-identity
   // instead of bare filename matching.
   _maybeIndexSharedTracksAdds(userData, dest, added);
+  // Source is unmodified by a copy; only the destination location's
+  // content changes. sharedTracks already maintains its own per-file
+  // hash index — only entry/common destinations need the dirty flag.
+  if (added.length > 0 && dest && (dest.kind === 'entry' || dest.kind === 'common')) {
+    _markLocationDirty(userData, dest.kind, dest.id);
+  }
   return { ok: true, added, failed };
 }
 
@@ -310,6 +331,7 @@ function moveWithinLocation({
       failed.push({ source: srcSubPath, error: String(err && err.message || err) });
     }
   }
+  if (moved.length > 0) _markLocationDirty(userData, kind, id);
   return { ok: true, moved, failed };
 }
 
@@ -340,6 +362,7 @@ function deleteFilesAt({ userData, kind, id, subPaths }) {
       failed.push({ source: sub, error: String(err && err.message || err) });
     }
   }
+  if (deleted.length > 0) _markLocationDirty(userData, kind, id);
   return { ok: true, deleted, failed };
 }
 
@@ -368,6 +391,7 @@ function renameFileAt({ userData, kind, id, subPath, newName }) {
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
   const root = path.resolve(_root(userData, kind, id));
   const rel = path.relative(root, destAbs).replace(/\\/g, '/');
+  _markLocationDirty(userData, kind, id);
   return { ok: true, path: rel, isDir };
 }
 
@@ -393,6 +417,10 @@ function createSubfolderAt({ userData, kind, id, parentSubPath, name }) {
   try { fs.mkdirSync(newDir); }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
   const rel = path.join(parentSubPath || '', clean).replace(/\\/g, '/');
+  // An empty subfolder counts as a content change because the canonical
+  // hash captures empty-dir markers, so getEntryContentHash needs to
+  // see this as a reason to recompute.
+  _markLocationDirty(userData, kind, id);
   return { ok: true, path: rel };
 }
 
@@ -432,6 +460,7 @@ function addFilesAt({ userData, kind, id, subPath, sourceFilePaths, destNames })
       failed.push({ source: src, error: String(err && err.message || err) });
     }
   }
+  if (added.length > 0) _markLocationDirty(userData, kind, id);
   return { ok: true, added, failed };
 }
 

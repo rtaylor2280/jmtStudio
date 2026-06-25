@@ -202,6 +202,15 @@ async function exportBackup({
   // instead of duplicate walks per phase.
   const bucketTops = { sources: [], library: [], common: [] };
   const filesPerTopItem = new Map();
+  // Commons live on disk under <uuid>/ — the user-facing label needs the
+  // friendly name from meta.json. Read it once during pre-scan and look
+  // it up by uuid in the archive entry handler.
+  const commonNameByUuid = new Map();
+  // Sources also live on disk under <uuid>/ — same idea for the
+  // currentItem display path. The bucket label stays aggregate
+  // ("Source Files") but the per-file line under the bar reads
+  // "sources/<friendly>/file.ext" instead of leaking a raw uuid.
+  const sourceNameByUuid = new Map();
   for (const bucket of ['sources', 'library', 'common']) {
     const root = path.join(_soundFontsRoot(userData), bucket);
     if (!fs.existsSync(root)) continue;
@@ -212,6 +221,10 @@ async function exportBackup({
       if (!top.isDirectory()) continue;
       const abs = path.join(root, top.name);
       bucketTops[bucket].push({ name: top.name, abs });
+      // archive.directory() emits 'entry' events for files AND
+      // sub-directories. The user-facing counter should only track
+      // files, so the pre-scan and the entry handler must agree on
+      // "files only."
       let count = 0;
       const walk = (dir) => {
         let items;
@@ -224,6 +237,19 @@ async function exportBackup({
       };
       walk(abs);
       filesPerTopItem.set(`${bucket}/${top.name}`, count);
+      if (bucket === 'common') {
+        try {
+          const m = JSON.parse(fs.readFileSync(path.join(abs, 'meta.json'), 'utf8'));
+          if (m && m.name) commonNameByUuid.set(top.name, m.name);
+        } catch {}
+      }
+      if (bucket === 'sources') {
+        try {
+          const m = JSON.parse(fs.readFileSync(path.join(abs, 'meta.json'), 'utf8'));
+          const friendly = (m && (m.bundleName || m.originalName)) || '';
+          if (friendly) sourceNameByUuid.set(top.name, friendly);
+        } catch {}
+      }
     }
   }
   // sharedTracks: flat bucket, count individual .wav files.
@@ -241,6 +267,29 @@ async function exportBackup({
   // the user doesn't see the implementation term. Each phase emits
   // per-item progress; the label shape matches the archive phase so
   // the user reads one continuous mental model across both halves.
+  //
+  // Library + common route through the stored-hash helpers, which read
+  // meta.contentHash when the cheap-signal safety net passes (file
+  // count + total bytes match the on-disk reality). Skips the full
+  // tree walk + sha256 for items that haven't been touched since the
+  // last hash, which is the steady state. First export after this
+  // slice triggers backfill — same cost as the old behavior; later
+  // exports return near-instantly. Sources stay on hashItemDir
+  // because source hashes live on source meta separately (different
+  // identity model) and don't go through this path.
+  const sfEntriesMod = require('./soundFontEntries');
+  const sfCommonMod = require('./soundFontCommon');
+  const sfSourcesMod = require('./soundFontSources');
+  const hashForItem = (bucket, name, abs) => {
+    if (bucket === 'library') return sfEntriesMod.getEntryContentHash(userData, name);
+    if (bucket === 'common')  return sfCommonMod.getCommonContentHash(userData, name);
+    // Sources are uuid-keyed on disk and effectively immutable post-
+    // import — once the hash is stamped onto source meta.json, every
+    // subsequent export reads it back instead of re-hashing multi-GB
+    // voicepacks. Cheap-signal safety net catches manual on-disk edits.
+    if (bucket === 'sources') return sfSourcesMod.getSourceContentHash(userData, name);
+    return hashItemDir(abs);
+  };
   const hashPhaseBucket = async (bucket, bucketLabel) => {
     const items = bucketTops[bucket];
     for (let i = 0; i < items.length; i++) {
@@ -250,14 +299,23 @@ async function exportBackup({
         throw e;
       }
       const item = items[i];
+      // Sources and commons live under uuid-keyed dirs on disk; resolve
+      // to the friendly name so the user-facing line doesn't leak a
+      // raw uuid. Library items are already name-keyed.
+      let friendlyItemName = item.name;
+      if (bucket === 'sources' && sourceNameByUuid.has(item.name)) {
+        friendlyItemName = sourceNameByUuid.get(item.name);
+      } else if (bucket === 'common' && commonNameByUuid.has(item.name)) {
+        friendlyItemName = commonNameByUuid.get(item.name);
+      }
       onProgress({
         verb: 'Preparing',
-        currentItem: `${bucket}/${item.name}`,
+        currentItem: `${bucket}/${friendlyItemName}`,
         topItemName: bucketLabel,
         topItemFilesProcessed: i + 1,
         topItemFilesTotal: items.length,
       });
-      const h = hashItemDir(item.abs);
+      const h = hashForItem(bucket, item.name, item.abs);
       if (h) contentHashes[bucket][item.name] = h;
     }
   };
@@ -372,14 +430,71 @@ async function exportBackup({
   // its files stream into the zip.
   const archiveSources = { idx: 0, total: bucketTops.sources.length, seenTops: new Set() };
   const archiveSharedTracks = { idx: 0, total: sharedTracksItemCount };
+  // Bucket-level file counters drive the inter-bucket gates. archiver
+  // can interleave entries across bucket boundaries too (the whole
+  // sources/ bucket dispatches as one archive.directory() call which
+  // starts streaming while we move on to library) so the dispatch
+  // loop awaits each bucket's full file count before queuing the next.
+  let sourcesFilesEmitted = 0;
+  const sourcesFilesExpected = bucketTops.sources.reduce(
+    (sum, it) => sum + (filesPerTopItem.get(`sources/${it.name}`) || 0), 0
+  );
+  let sharedTracksFilesEmitted = 0;
+  const sourcesBucketGate = (() => {
+    let resolve;
+    const promise = new Promise(r => { resolve = r; });
+    return { promise, resolve };
+  })();
+  const sharedTracksBucketGate = (() => {
+    let resolve;
+    const promise = new Promise(r => { resolve = r; });
+    return { promise, resolve };
+  })();
   const archiveLibFile = new Map();   // fontName -> filesEmittedSoFar
   const archiveComFile = new Map();   // folderName -> filesEmittedSoFar
+  // Per-item completion gates. archiver's internal queue does NOT
+  // guarantee strict serialization between archive.directory() calls in
+  // practice — the entry stream can interleave files from sibling top
+  // items, which surfaces as the per-font label flipping back and forth
+  // (Ahsoka 50, Apocalypse 1, Ahsoka 51, …). To fix, the dispatch loop
+  // awaits this gate per item: when the entry handler observes the
+  // counter reach the pre-scan total for that item, the gate resolves
+  // and the next archive.directory() call gets queued. One font at a
+  // time, contiguously.
+  const itemDoneGates = new Map(); // topKey -> { promise, resolve }
+  const _gateFor = (topKey) => {
+    if (!itemDoneGates.has(topKey)) {
+      let resolve;
+      const promise = new Promise(r => { resolve = r; });
+      itemDoneGates.set(topKey, { promise, resolve });
+    }
+    return itemDoneGates.get(topKey);
+  };
   archive.on('entry', (entry) => {
+    // Skip directory entries — archive.directory() emits an 'entry'
+    // for every sub-folder as well as every file. The user-facing
+    // counter and the pre-scan total both treat "files only" so we
+    // need to match here or the counter overshoots 100%.
+    const isDir = (entry.type === 'directory')
+      || (entry.stats && typeof entry.stats.isDirectory === 'function' && entry.stats.isDirectory());
+    if (isDir) return;
     if (entry.stats && entry.stats.size) processedBytes += entry.stats.size;
     const parts = String(entry.name || '').split('/');
     const bucket = parts[0] || '';
     const topName = parts[1] || '';
     if (!topName) return;
+    // Build the user-facing path: zip paths under sources/ and common/
+    // are keyed by uuid on disk, but the user shouldn't see raw uuids
+    // flashing through. Library zip paths are already name-keyed.
+    const displayName = (() => {
+      if (bucket === 'sources' && sourceNameByUuid.has(topName)) {
+        return `sources/${sourceNameByUuid.get(topName)}/${parts.slice(2).join('/')}`;
+      }
+      if (bucket === 'common' && commonNameByUuid.has(topName)) {
+        return `common/${commonNameByUuid.get(topName)}/${parts.slice(2).join('/')}`;
+      }
+      return entry.name;
+    })();
     if (bucket === 'sources') {
       const topKey = `${bucket}/${topName}`;
       if (!archiveSources.seenTops.has(topKey)) {
@@ -390,25 +505,41 @@ async function exportBackup({
         verb: 'Backing up',
         processedBytes,
         totalBytes: survey.totalBytes,
-        currentItem: entry.name,
+        currentItem: displayName,
         topItemName: 'Source Files',
         topItemFilesProcessed: archiveSources.idx,
         topItemFilesTotal: archiveSources.total,
       });
+      sourcesFilesEmitted++;
+      if (sourcesFilesExpected > 0 && sourcesFilesEmitted >= sourcesFilesExpected) {
+        sourcesBucketGate.resolve();
+      }
     } else if (bucket === 'library' || bucket === 'common') {
       const counterMap = bucket === 'library' ? archiveLibFile : archiveComFile;
       const itemTotal = filesPerTopItem.get(`${bucket}/${topName}`) || 0;
       const newIdx = (counterMap.get(topName) || 0) + 1;
       counterMap.set(topName, newIdx);
+      // Library dirs are name-keyed; common dirs are uuid-keyed and
+      // must be translated to the friendly name from meta.json so the
+      // user doesn't see a raw uuid in the label.
+      const friendlyTop = bucket === 'common'
+        ? (commonNameByUuid.get(topName) || topName)
+        : topName;
       onProgress({
         verb: 'Backing up',
         processedBytes,
         totalBytes: survey.totalBytes,
-        currentItem: entry.name,
-        topItemName: `${topName} Files`,
+        currentItem: displayName,
+        topItemName: `${friendlyTop} Files`,
         topItemFilesProcessed: newIdx,
         topItemFilesTotal: itemTotal,
       });
+      // Resolve the per-item gate once all files for this top item have
+      // arrived. The dispatch loop awaits this before queuing the next
+      // archive.directory() call so entries can't interleave.
+      if (itemTotal > 0 && newIdx >= itemTotal) {
+        _gateFor(`${bucket}/${topName}`).resolve();
+      }
     } else if (bucket === 'sharedTracks') {
       archiveSharedTracks.idx++;
       onProgress({
@@ -420,6 +551,10 @@ async function exportBackup({
         topItemFilesProcessed: archiveSharedTracks.idx,
         topItemFilesTotal: archiveSharedTracks.total,
       });
+      sharedTracksFilesEmitted++;
+      if (archiveSharedTracks.total > 0 && sharedTracksFilesEmitted >= archiveSharedTracks.total) {
+        sharedTracksBucketGate.resolve();
+      }
     }
   });
 
@@ -461,14 +596,26 @@ async function exportBackup({
     // flips to the next.
     if (!cancelled) {
       const srcRoot = path.join(_soundFontsRoot(userData), 'sources');
-      if (fs.existsSync(srcRoot)) archive.directory(srcRoot, 'sources');
+      if (fs.existsSync(srcRoot)) {
+        archive.directory(srcRoot, 'sources');
+        // Wait for the entire sources bucket to flush before starting
+        // library, otherwise archiver interleaves sources entries with
+        // the first library entries and the user-facing label flips
+        // mid-bucket.
+        if (sourcesFilesExpected > 0) await sourcesBucketGate.promise;
+      }
     }
     if (!cancelled) {
       const libRoot = path.join(_soundFontsRoot(userData), 'library');
       if (fs.existsSync(libRoot)) {
         for (const item of bucketTops.library) {
           if (cancelled) break;
-          archive.directory(item.abs, `library/${item.name}`);
+          const topKey = `library/${item.name}`;
+          const expected = filesPerTopItem.get(topKey) || 0;
+          archive.directory(item.abs, topKey);
+          // Empty dirs would never resolve via the entry handler; just
+          // skip the await in that case so the loop doesn't hang.
+          if (expected > 0) await _gateFor(topKey).promise;
         }
       }
     }
@@ -477,13 +624,19 @@ async function exportBackup({
       if (fs.existsSync(comRoot)) {
         for (const item of bucketTops.common) {
           if (cancelled) break;
-          archive.directory(item.abs, `common/${item.name}`);
+          const topKey = `common/${item.name}`;
+          const expected = filesPerTopItem.get(topKey) || 0;
+          archive.directory(item.abs, topKey);
+          if (expected > 0) await _gateFor(topKey).promise;
         }
       }
     }
     if (!cancelled) {
       const stRoot = path.join(_soundFontsRoot(userData), 'sharedTracks');
-      if (fs.existsSync(stRoot)) archive.directory(stRoot, 'sharedTracks');
+      if (fs.existsSync(stRoot)) {
+        archive.directory(stRoot, 'sharedTracks');
+        if (archiveSharedTracks.total > 0) await sharedTracksBucketGate.promise;
+      }
     }
 
     if (!cancelled) await archive.finalize();
@@ -953,9 +1106,42 @@ async function applyReplace({
         if (friendly) sourceNameByUuid.set(uuid, String(friendly).replace(/\.zip$/i, ''));
       } catch {}
     }
+    // Same translation for commons — they're also uuid-keyed on disk +
+    // in the zip, but the user sees friendly names everywhere else in
+    // the app and shouldn't see raw uuids flashing through during
+    // restore/merge.
+    const commonNameByUuid = new Map();
+    const commonUuidSet = new Set();
+    for (const key of Object.keys(entries)) {
+      const parts = (entries[key].name || '').split('/');
+      if (parts[0] === 'common' && parts[1]) commonUuidSet.add(parts[1]);
+    }
+    for (const uuid of commonUuidSet) {
+      try {
+        const buf = await zip.entryData(`common/${uuid}/meta.json`);
+        const m = JSON.parse(buf.toString('utf8'));
+        if (m && m.name) commonNameByUuid.set(uuid, m.name);
+      } catch {}
+    }
     const friendlyTopName = (bucket, raw) => {
       if (bucket === 'sources' && sourceNameByUuid.has(raw)) return sourceNameByUuid.get(raw);
+      if (bucket === 'common'  && commonNameByUuid.has(raw))  return commonNameByUuid.get(raw);
       return raw;
+    };
+    // Translate a zip entry path so users see friendly names instead of
+    // raw uuids in the currentItem display ("sources/Ahsoka/source.zip"
+    // not "sources/76ec9d60-...-/source.zip"). Library entries are
+    // already name-keyed in the zip, and sharedTracks are flat — so the
+    // remap only fires for sources and commons.
+    const friendlyZipPath = (zipName) => {
+      const parts = String(zipName || '').split('/');
+      if (parts[0] === 'sources' && parts[1] && sourceNameByUuid.has(parts[1])) {
+        return `sources/${sourceNameByUuid.get(parts[1])}/${parts.slice(2).join('/')}`;
+      }
+      if (parts[0] === 'common' && parts[1] && commonNameByUuid.has(parts[1])) {
+        return `common/${commonNameByUuid.get(parts[1])}/${parts.slice(2).join('/')}`;
+      }
+      return zipName;
     };
     // Emit progress for reused items so the modal motion stays alive
     // during the snapshot-rehome phase. Each reused item gets a single
@@ -970,7 +1156,7 @@ async function applyReplace({
         onProgress({
           processedBytes,
           totalBytes,
-          currentItem: `${bucketName}/${rawName}`,
+          currentItem: `${bucketName}/${friendlyName}`,
           topItemName: friendlyName,
           topItemFilesProcessed: filesInItem,
           topItemFilesTotal: filesInItem,
@@ -1068,7 +1254,7 @@ async function applyReplace({
           onProgress({
             processedBytes,
             totalBytes,
-            currentItem: e.name,
+            currentItem: friendlyZipPath(e.name),
             topItemName: 'Source Files',
             topItemFilesProcessed: i + 1,
             topItemFilesTotal: totalSources,
@@ -1131,7 +1317,10 @@ async function applyReplace({
         if (cancelled) break;
         const files = byItem.get(itemName);
         const itemTotal = files.length;
-        const labelName = `${itemName} Files`;
+        // commons are uuid-keyed; use the friendly name from meta.json
+        // for the label so the user sees the folder's display name.
+        const friendlyItemName = friendlyTopName('common', itemName);
+        const labelName = `${friendlyItemName} Files`;
         for (let i = 0; i < itemTotal; i++) {
           if (cancelled) break;
           const e = files[i];
@@ -1140,7 +1329,7 @@ async function applyReplace({
           onProgress({
             processedBytes,
             totalBytes,
-            currentItem: e.name,
+            currentItem: friendlyZipPath(e.name),
             topItemName: labelName,
             topItemFilesProcessed: i + 1,
             topItemFilesTotal: itemTotal,
@@ -1220,30 +1409,29 @@ async function applyReplace({
 }
 
 // Survey both the backup zip and the current library to classify every
-// item into one of three buckets per category:
-//   identical — full match (content + user-curated meta), no prompt, no write
-//   new       — no match in current, added silently if user applies
-//   conflict  — same identity, but content or curated meta differs, needs choice
+// item into one of four buckets per category:
+//   identical  — content match, no prompt, no write
+//   conflict   — same identity, content or curated meta differs, needs choice
+//   add        — in backup, not in current; added silently on merge apply
+//   currentOnly — in current, not in backup; Replace would wipe, Merge keeps
 //
 // Identity per category — what makes two items "the same item":
 //   sources — uuid (the dir name under sources/)
-//   library — sourceUuid + candidatePath from meta.json (stable across local
-//             renames; the on-disk dir name can change but the source-origin
-//             pair doesn't)
+//   library — entryUuid (primary) or sourceUuid+candidatePath (legacy fallback)
 //   common  — uuid (the dir name under common/)
 //
-// "Match" check per category — when identity matches, are they identical:
-//   sources — meta.hash (sha256 streamed at import; in meta.json already)
-//   library — fileCount + totalBytes only. Content match is identical;
-//             metadata differences (rename, tag edits, description edits)
-//             on identical content are NOT a conflict — silent skip. The
-//             user renaming a font isn't asking to be re-prompted about
-//             their own rename.
-//   common  — fileCount + totalBytes only. Same logic as library.
+// Content match per category uses the canonical-tree hash from
+// manifest.contentHashes against the live on-disk hash via
+// getXContentHash. The live side reads stored meta.contentHash when the
+// cheap-signal safety net (contentFileCount + contentTotalBytes) passes,
+// so most items short-circuit without re-walking the tree. Both sides
+// exclude the item-root meta.json so a pure rename/tag-edit doesn't
+// register as a content diff.
 //
-// For library/common the byte-count heuristic isn't bit-perfect (a file swap
-// keeping total bytes would slip through) but it's cheap and catches the
-// 99% case. Users who need perfect equivalence can pick Replace instead.
+// sharedTracks aren't classified per-item (flat bucket of audio files,
+// no curated meta) but the survey returns counts on both sides so the
+// renderer's "Library matches backup" detection can see a delta there
+// even when the three named buckets are all-identical.
 async function surveyMerge({ userData, zipPath }) {
   if (!zipPath) throw new Error('Missing zipPath');
   if (!userData) throw new Error('Missing userData');
@@ -1260,13 +1448,28 @@ async function surveyMerge({ userData, zipPath }) {
   // identical decision can compare against manifest.contentHashes when
   // present. Cached so repeated calls (e.g. one per bucket) only walk
   // the tree once per item.
+  //
+  // All three buckets (sources, library, common) route through their
+  // persistent-hash helpers (getXContentHash). Each reads stored
+  // meta.contentHash when the cheap-signal safety net
+  // (contentFileCount + contentTotalBytes match current on-disk state)
+  // passes; otherwise it recomputes and persists. Steady state: every
+  // item short-circuits to a stat-walk, no byte reading. sharedTracks
+  // and any future bucket fall through to direct hashItemDir.
   const { hashItemDir } = require('./soundFontFileHash');
+  const sfEntriesMod = require('./soundFontEntries');
+  const sfCommonMod = require('./soundFontCommon');
+  const sfSourcesMod = require('./soundFontSources');
   const sfRoot = _soundFontsRoot(userData);
   const liveHashCache = new Map(); // "bucket/id" → hex or null
   const liveHashOf = (bucket, id) => {
     const k = `${bucket}/${id}`;
     if (liveHashCache.has(k)) return liveHashCache.get(k);
-    const h = hashItemDir(path.join(sfRoot, bucket, id));
+    let h = null;
+    if (bucket === 'library') h = sfEntriesMod.getEntryContentHash(userData, id);
+    else if (bucket === 'common') h = sfCommonMod.getCommonContentHash(userData, id);
+    else if (bucket === 'sources') h = sfSourcesMod.getSourceContentHash(userData, id);
+    else h = hashItemDir(path.join(sfRoot, bucket, id));
     liveHashCache.set(k, h);
     return h;
   };
@@ -1478,22 +1681,17 @@ async function surveyMerge({ userData, zipPath }) {
     // compat with older backup files.
     const sourceManifestHashes = (manifestHashes && manifestHashes.sources) || null;
     const classifySources = () => {
-      const out = { identical: [], conflict: [], add: [] };
+      const out = { identical: [], conflict: [], add: [], currentOnly: [] };
+      const matched = new Set();
       for (const [uuid, z] of zipSources) {
         const c = curSources.get(uuid);
         if (!c) { out.add.push({ id: uuid, name: z.name || uuid, fileCount: z.fileCount, totalBytes: z.totalBytes }); continue; }
-        // Strict path: canonical-tree hash from the manifest vs the
-        // current on-disk tree hash. Catches local edits to a source
-        // (trim, file removal) that the import-time stream hash can't.
-        let identical = false;
-        if (sourceManifestHashes && sourceManifestHashes[uuid]) {
-          identical = sourceManifestHashes[uuid] === liveHashOf('sources', uuid);
-        } else if (z.hash && c.hash && z.hash === c.hash) {
-          // Legacy backups don't carry contentHashes — fall back to
-          // the import-time stream hash that's been on source meta.json
-          // since the original backup format.
-          identical = true;
-        }
+        matched.add(uuid);
+        // Canonical-tree hash from the manifest vs the current on-disk
+        // tree hash. Catches local edits to a source (trim, file removal)
+        // that the import-time stream hash can't.
+        const identical = !!(sourceManifestHashes && sourceManifestHashes[uuid]
+          && sourceManifestHashes[uuid] === liveHashOf('sources', uuid));
         if (identical) {
           out.identical.push({ id: uuid, name: z.name || uuid });
         } else {
@@ -1510,6 +1708,14 @@ async function surveyMerge({ userData, zipPath }) {
           });
         }
       }
+      // currentOnly — sources in the live library that aren't in the
+      // backup at all. Drives the Replace-vs-Merge choice modal's
+      // "would be removed" tally so the user sees the destructive
+      // consequence before committing.
+      for (const [uuid, c] of curSources) {
+        if (matched.has(uuid)) continue;
+        out.currentOnly.push({ id: uuid, name: c.name || uuid, fileCount: c.fileCount, totalBytes: c.totalBytes });
+      }
       return out;
     };
 
@@ -1520,7 +1726,8 @@ async function surveyMerge({ userData, zipPath }) {
     // acquisition date, tags" instead of a generic "metadata differs."
     const libraryManifestHashes = (manifestHashes && manifestHashes.library) || null;
     const classifyLibrary = () => {
-      const out = { identical: [], conflict: [], add: [] };
+      const out = { identical: [], conflict: [], add: [], currentOnly: [] };
+      const matchedDirs = new Set();
       // Primary identity (entryUuid) is unique per library folder, so a
       // single-value lookup is unambiguous. Legacy identity
       // (sourceUuid|candidatePath) is shared by duplicates, so its
@@ -1586,19 +1793,16 @@ async function surveyMerge({ userData, zipPath }) {
           out.add.push({ id: backupDirName, name: z.name || backupDirName, fileCount: z.fileCount, totalBytes: z.totalBytes });
           continue;
         }
+        matchedDirs.add(curDirName);
         const c = curLibrary.get(curDirName);
-        // Strict content comparison via the manifest's canonical-tree
-        // hash when available; older backups without contentHashes
-        // fall back to the count+bytes proxy. The manifest key is the
-        // BACKUP-time dir name (curDirName may have been locally
-        // renamed by the user); content identity ignores the name and
-        // is what we're checking here.
-        let contentDiffers;
-        if (libraryManifestHashes && libraryManifestHashes[backupDirName]) {
-          contentDiffers = libraryManifestHashes[backupDirName] !== liveHashOf('library', curDirName);
-        } else {
-          contentDiffers = !(c.fileCount === z.fileCount && c.totalBytes === z.totalBytes);
-        }
+        // Canonical-tree hash from the manifest vs the current on-disk
+        // tree hash. The manifest key is the BACKUP-time dir name
+        // (curDirName may have been locally renamed by the user);
+        // content identity ignores the name and is what we're checking
+        // here.
+        const contentDiffers = !(libraryManifestHashes
+          && libraryManifestHashes[backupDirName]
+          && libraryManifestHashes[backupDirName] === liveHashOf('library', curDirName));
         const { labels: diffFields, details: diffDetails } = computeMetaDiff(z, c);
         const metaDiffers = diffFields.length > 0;
         if (!contentDiffers && !metaDiffers) {
@@ -1616,6 +1820,12 @@ async function surveyMerge({ userData, zipPath }) {
           });
         }
       }
+      // currentOnly — library entries in the live library that aren't
+      // present in the backup. Drives Replace's "would be removed" tally.
+      for (const [dirName, c] of curLibrary) {
+        if (matchedDirs.has(dirName)) continue;
+        out.currentOnly.push({ id: dirName, name: c.name || dirName, fileCount: c.fileCount, totalBytes: c.totalBytes });
+      }
       return out;
     };
 
@@ -1624,20 +1834,19 @@ async function surveyMerge({ userData, zipPath }) {
     // file-content diff.
     const commonManifestHashes = (manifestHashes && manifestHashes.common) || null;
     const classifyCommon = () => {
-      const out = { identical: [], conflict: [], add: [] };
+      const out = { identical: [], conflict: [], add: [], currentOnly: [] };
+      const matched = new Set();
       for (const [uuid, z] of zipCommon) {
         const c = curCommon.get(uuid);
         const zName = z.displayName || uuid;
         if (!c) { out.add.push({ id: uuid, name: zName, fileCount: z.fileCount, totalBytes: z.totalBytes }); continue; }
+        matched.add(uuid);
         const cName = c.displayName || uuid;
-        // Strict content comparison via the manifest's canonical-tree
-        // hash when available; older backups fall back to count+bytes.
-        let contentDiffers;
-        if (commonManifestHashes && commonManifestHashes[uuid]) {
-          contentDiffers = commonManifestHashes[uuid] !== liveHashOf('common', uuid);
-        } else {
-          contentDiffers = !(c.fileCount === z.fileCount && c.totalBytes === z.totalBytes);
-        }
+        // Canonical-tree hash from the manifest vs the current on-disk
+        // tree hash.
+        const contentDiffers = !(commonManifestHashes
+          && commonManifestHashes[uuid]
+          && commonManifestHashes[uuid] === liveHashOf('common', uuid));
         const metaDiffers = cName !== zName;
         if (!contentDiffers && !metaDiffers) {
           out.identical.push({ id: uuid, name: zName });
@@ -1652,14 +1861,46 @@ async function surveyMerge({ userData, zipPath }) {
           });
         }
       }
+      // currentOnly — commons in the live library that aren't in the
+      // backup. Drives Replace's "would be removed" tally.
+      for (const [uuid, c] of curCommon) {
+        if (matched.has(uuid)) continue;
+        out.currentOnly.push({ id: uuid, name: c.displayName || uuid, fileCount: c.fileCount, totalBytes: c.totalBytes });
+      }
       return out;
     };
 
+    // SharedTracks aren't part of the per-item conflict/add classification
+    // (they're a flat bucket of audio files, not user-curated entities)
+    // but the choice modal needs to know if backup vs current differ so
+    // "Library matches backup" can be honest about whether Replace would
+    // be a true no-op. Count alone is the cheap signal — a sharedTracks
+    // delta forces the "not identical" path even when sources/library/
+    // common all match.
+    let zipSharedTracksCount = 0;
+    for (const key of Object.keys(entries)) {
+      const e = entries[key];
+      if (!e.name) continue;
+      const parts = e.name.split('/');
+      if (parts[0] !== 'sharedTracks') continue;
+      if (e.isDirectory) continue;
+      if (parts.length === 2 && /\.wav$/i.test(parts[1])) zipSharedTracksCount++;
+    }
+    let curSharedTracksCount = 0;
+    try {
+      const stRoot = path.join(_soundFontsRoot(userData), 'sharedTracks');
+      if (fs.existsSync(stRoot)) {
+        for (const f of fs.readdirSync(stRoot, { withFileTypes: true })) {
+          if (f.isFile() && /\.wav$/i.test(f.name)) curSharedTracksCount++;
+        }
+      }
+    } catch {}
     return {
       ok: true,
       sources: classifySources(),
       library: classifyLibrary(),
       common:  classifyCommon(),
+      sharedTracks: { backup: zipSharedTracksCount, current: curSharedTracksCount },
     };
   } finally {
     try { await zip.close(); } catch {}
@@ -1797,6 +2038,42 @@ async function applyMerge({
   for (const w of work) {
     if (workByBucket[w.bucket]) workByBucket[w.bucket].push(w);
   }
+
+  // Friendly-name maps for the two uuid-keyed buckets so the user-facing
+  // progress lines don't leak raw uuids. Sources and commons live under
+  // uuid dirs both in the zip and on disk; library is already name-keyed.
+  // Only build entries for items the user actually selected work for,
+  // since the maps are progress-only — no need to pay the meta.json
+  // reads for items being skipped.
+  const sourceNameByUuid = new Map();
+  const commonNameByUuid = new Map();
+  for (const w of workByBucket.sources) {
+    try {
+      const buf = await zip.entryData(`sources/${w.id}/meta.json`);
+      const m = JSON.parse(buf.toString('utf8'));
+      const friendly = (m && (m.bundleName || m.originalName)) || '';
+      if (friendly) sourceNameByUuid.set(w.id, String(friendly).replace(/\.zip$/i, ''));
+    } catch {}
+  }
+  for (const w of workByBucket.common) {
+    try {
+      const buf = await zip.entryData(`common/${w.id}/meta.json`);
+      const m = JSON.parse(buf.toString('utf8'));
+      if (m && m.name) commonNameByUuid.set(w.id, m.name);
+    } catch {}
+  }
+  // Translate a zip entry path so users see friendly names instead of
+  // raw uuids — same shape as applyReplace's helper.
+  const friendlyZipPath = (zipName) => {
+    const parts = String(zipName || '').split('/');
+    if (parts[0] === 'sources' && parts[1] && sourceNameByUuid.has(parts[1])) {
+      return `sources/${sourceNameByUuid.get(parts[1])}/${parts.slice(2).join('/')}`;
+    }
+    if (parts[0] === 'common' && parts[1] && commonNameByUuid.has(parts[1])) {
+      return `common/${commonNameByUuid.get(parts[1])}/${parts.slice(2).join('/')}`;
+    }
+    return zipName;
+  };
 
   // Pre-count tracks the sharedTracks evaluation will walk through.
   // Counter advances per evaluation step (extract or skip-as-already-
@@ -1940,7 +2217,7 @@ async function applyMerge({
             onProgress({
               processedBytes,
               totalBytes,
-              currentItem: fileName,
+              currentItem: friendlyZipPath(fileName),
               topItemName: 'Source Files',
               topItemFilesProcessed: i + 1,
               topItemFilesTotal: items.length,
@@ -1959,6 +2236,7 @@ async function applyMerge({
       } else {
         for (const w of items) {
           if (cancelled) break;
+          // Library is name-keyed in the zip; w.id is already the friendly name.
           const labelName = `${w.id} Files`;
           await processWorkItem(w, ({ fileIdx, fileTotal, fileName }) => {
             onProgress({
@@ -1974,7 +2252,9 @@ async function applyMerge({
       }
     }
 
-    // PHASE 3 — common folders (per-item). Same shape as library.
+    // PHASE 3 — common folders (per-item). Same shape as library, but
+    // commons are uuid-keyed both in the zip and on disk, so the label
+    // and the per-file path both need the friendly-name translation.
     if (!cancelled) {
       const items = workByBucket.common;
       if (items.length === 0) {
@@ -1982,12 +2262,13 @@ async function applyMerge({
       } else {
         for (const w of items) {
           if (cancelled) break;
-          const labelName = `${w.id} Files`;
+          const friendlyName = commonNameByUuid.get(w.id) || w.id;
+          const labelName = `${friendlyName} Files`;
           await processWorkItem(w, ({ fileIdx, fileTotal, fileName }) => {
             onProgress({
               processedBytes,
               totalBytes,
-              currentItem: fileName,
+              currentItem: friendlyZipPath(fileName),
               topItemName: labelName,
               topItemFilesProcessed: fileIdx,
               topItemFilesTotal: fileTotal,

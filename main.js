@@ -1287,6 +1287,19 @@ ipcMain.handle('entries:existsAt', (_, { name, destDir } = {}) => {
   }
 });
 
+// Resolve a flagged entry's content hash — called from the renderer when
+// the user leaves the entry detail view. No-op when not flagged dirty;
+// otherwise rehashes once and clears the flag. Many ops collapse into
+// one rehash this way instead of rehashing per op.
+ipcMain.handle('entries:resolveContentDirty', (_, { name } = {}) => {
+  try {
+    const hash = soundFontEntries.resolveEntryContentDirty(app.getPath('userData'), name);
+    return { ok: true, rehashed: hash != null };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
 // ── Common folder IPC ──────────────────────────────────
 ipcMain.handle('common:list', () => {
   try { return { ok: true, commons: soundFontCommon.listCommons(app.getPath('userData')) }; }
@@ -1373,6 +1386,19 @@ ipcMain.handle('common:folderExistsAt', (_, { destDir } = {}) => {
 ipcMain.handle('common:exportToFolder', (_, { uuid, destDir, mode } = {}) => {
   try { return soundFontCommon.exportCommonToFolder(app.getPath('userData'), uuid, destDir, mode); }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+// Resolve a flagged common folder's content hash — called from the
+// renderer when the user navigates away from this common (select a
+// different common, switch tabs, open a font detail). Mirrors the
+// entry-side handler. No-op when not flagged dirty.
+ipcMain.handle('common:resolveContentDirty', (_, { uuid } = {}) => {
+  try {
+    const hash = soundFontCommon.resolveCommonContentDirty(app.getPath('userData'), uuid);
+    return { ok: true, rehashed: hash != null };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
 });
 
 // Group management — assign/unassign, rename across all members,
@@ -1737,6 +1763,11 @@ ipcMain.handle('sfBackup:prep', async () => {
 ipcMain.handle('dialog:selectBackupExportPath', async () => {
   const lastDir = Store.get('lastSfBackupDir') || Store.get('lastDir') || app.getPath('documents');
   const defaultName = soundFontBackup.suggestedFileName();
+  // On Windows the native COM save dialog always shows its own
+  // overwrite-confirm and Electron has no option to suppress it
+  // (showOverwriteConfirmation is macOS/Linux only). So we lean on the
+  // native prompt and skip our own in the renderer — adding ours on top
+  // would surface as a double-prompt.
   const { canceled, filePath } = await dialog.showSaveDialog(win, {
     title: 'Export Sound Font library backup',
     defaultPath: path.join(lastDir, defaultName),

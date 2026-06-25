@@ -282,6 +282,9 @@ function restructureToGrouped(userData, entryName) {
       moved.push({ from: f.name, to: `${b.effect}/${f.name}` });
     }
   }
+  if (moved.length) {
+    try { require('./soundFontEntries').markEntryContentDirty(userData, entryName); } catch {}
+  }
   return { ok: true, moved };
 }
 
@@ -321,6 +324,9 @@ function restructureToFlat(userData, entryName) {
     }
     // Folder should be empty now; remove it.
     try { fs.rmdirSync(path.join(root, b.subfolderName)); } catch {}
+  }
+  if (moved.length) {
+    try { require('./soundFontEntries').markEntryContentDirty(userData, entryName); } catch {}
   }
   return { ok: true, moved };
 }
@@ -379,6 +385,9 @@ function applyReorder(userData, entryName, bucketId, orderedPaths) {
     if (oldBasename !== newBasename) pairs.push({ from: oldBasename, to: newBasename });
   }
   _atomicRenameBatch(workingDir, pairs);
+  if (pairs.length) {
+    try { require('./soundFontEntries').markEntryContentDirty(userData, entryName); } catch {}
+  }
   return {
     ok: true,
     renamed: pairs.map(p => ({
@@ -454,6 +463,9 @@ function renumberFolder(userData, entryName, subPath) {
     if (pairs.length === 0) continue;
     _atomicRenameBatch(dir, pairs);
     for (const p of pairs) renamed.push(p);
+  }
+  if (renamed.length) {
+    try { require('./soundFontEntries').markEntryContentDirty(userData, entryName); } catch {}
   }
   return { ok: true, renamed };
 }
@@ -607,6 +619,9 @@ function findReplaceInEntry(userData, entryName, find, replace, opts = {}) {
     const ok = v.proposals.filter(p => !p.error);
     _atomicRenameBatch(absDir, ok.map(p => ({ from: p.from, to: p.to })));
     for (const p of ok) renamed.push(p);
+  }
+  if (renamed.length) {
+    try { require('./soundFontEntries').markEntryContentDirty(userData, entryName); } catch {}
   }
   return { ok: true, renamed };
 }

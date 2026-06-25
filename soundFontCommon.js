@@ -180,6 +180,9 @@ async function importCommonFromFolder(userData, folderPath, name) {
       importedFrom: path.basename(folderPath),
     };
     fs.writeFileSync(path.join(uuidDir, 'meta.json'), JSON.stringify(meta, null, 2));
+    // Stamp content hash at creation so surveyMerge / exportBackup
+    // skip the per-item walk for this common on future calls.
+    try { recomputeCommonContentHash(userData, uuid); } catch {}
     return { ok: true, uuid, name: cleanName };
   } catch (err) {
     _cleanupPartial(uuidDir);
@@ -331,6 +334,7 @@ function duplicateCommon(userData, sourceUuid, newName) {
       importedFrom: sourceMeta.name ? `Duplicate of ${sourceMeta.name}` : 'Duplicate',
     };
     fs.writeFileSync(path.join(newDir, 'meta.json'), JSON.stringify(meta, null, 2));
+    try { recomputeCommonContentHash(userData, newUuid); } catch {}
     return { ok: true, uuid: newUuid, name: cleanName };
   } catch (err) {
     _cleanupPartial(newDir);
@@ -485,6 +489,9 @@ function addFilesToCommon(userData, uuid, subPath, sourceFilePaths) {
       failed.push({ source: src, error: String(err && err.message || err) });
     }
   }
+  if (added.length) {
+    try { markCommonContentDirty(userData, uuid); } catch {}
+  }
   return { ok: true, added, failed };
 }
 
@@ -503,6 +510,7 @@ function renameCommonFile(userData, uuid, subPath, newName) {
   if (fs.existsSync(dest)) return { ok: false, error: `A file named "${cleanName}" already exists here` };
   try {
     fs.renameSync(src, dest);
+    try { markCommonContentDirty(userData, uuid); } catch {}
     return { ok: true };
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };
@@ -529,6 +537,7 @@ function deleteCommonFile(userData, uuid, subPath) {
     } else {
       fs.unlinkSync(target);
     }
+    try { markCommonContentDirty(userData, uuid); } catch {}
     return { ok: true };
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };
@@ -558,6 +567,7 @@ function createCommonSubfolder(userData, uuid, parentSubPath, name) {
   try {
     fs.mkdirSync(newDir);
     const rel = path.join(parentSubPath || '', cleanName).replace(/\\/g, '/');
+    try { markCommonContentDirty(userData, uuid); } catch {}
     return { ok: true, path: rel };
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };
@@ -602,6 +612,9 @@ function copyCommonFiles(userData, sourceUuid, sourcePaths, destUuid, destSubPat
       failed.push({ source: srcSubPath, error: String(err && err.message || err) });
     }
   }
+  if (added.length) {
+    try { markCommonContentDirty(userData, destUuid); } catch {}
+  }
   return { ok: true, added, failed };
 }
 
@@ -627,6 +640,7 @@ function moveCommonFiles(userData, uuid, sourcePaths, destSubPath) {
   const cleanDest = (destSubPath || '').replace(/\\/g, '/').replace(/\/+$/g, '');
   const moved = [];
   const failed = [];
+  let actuallyMoved = 0;
   for (const srcSubPath of sourcePaths) {
     try {
       let srcAbs;
@@ -649,9 +663,13 @@ function moveCommonFiles(userData, uuid, sourcePaths, destSubPath) {
       fs.renameSync(srcAbs, destPath);
       const rel = path.relative(filesRoot, destPath).replace(/\\/g, '/');
       moved.push(rel);
+      actuallyMoved++;
     } catch (err) {
       failed.push({ source: srcSubPath, error: String(err && err.message || err) });
     }
+  }
+  if (actuallyMoved > 0) {
+    try { markCommonContentDirty(userData, uuid); } catch {}
   }
   return { ok: true, moved, failed };
 }
@@ -738,6 +756,117 @@ function readCommonFileBytes(userData, uuid, subPath) {
   return fs.readFileSync(target);
 }
 
+// Walk a common's tree to count files + sum bytes, excluding the
+// root-level meta.json (matches the content hash's scope). Same shape
+// as the entry-side helper; used both for stamping the content hash
+// and for the cheap-signal safety check.
+function _walkCommonContentSignals(commonDir) {
+  let fileCount = 0;
+  let totalBytes = 0;
+  const walk = (absDir, relBase) => {
+    let entries;
+    try { entries = fs.readdirSync(absDir, { withFileTypes: true }); }
+    catch { return; }
+    for (const e of entries) {
+      if (!relBase && e.name === 'meta.json') continue;
+      const abs = path.join(absDir, e.name);
+      if (e.isDirectory()) {
+        walk(abs, relBase ? `${relBase}/${e.name}` : e.name);
+      } else if (e.isFile()) {
+        fileCount++;
+        try { totalBytes += fs.statSync(abs).size; } catch {}
+      }
+    }
+  };
+  walk(commonDir, '');
+  return { fileCount, totalBytes };
+}
+
+// Compute + persist the content hash for a common folder. Mirrors the
+// entry-side helper exactly: hash the tree, walk the signals, write
+// contentHash + contentFileCount + contentTotalBytes + contentHashedAt
+// onto meta. Clears the dirty flag on success.
+//
+// Field naming: contentFileCount / contentTotalBytes are the canonical
+// signal field names, shared with the sources + entries helpers so the
+// persistent-hash contract is identical across all three buckets.
+function recomputeCommonContentHash(userData, uuid) {
+  if (!uuid) return null;
+  const commonDir = path.join(commonRoot(userData), uuid);
+  const metaPath = path.join(commonDir, 'meta.json');
+  if (!fs.existsSync(metaPath)) return null;
+  let meta;
+  try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); }
+  catch { return null; }
+  const { hashItemDir } = require('./soundFontFileHash');
+  const hash = hashItemDir(commonDir);
+  if (!hash) return null;
+  const { fileCount, totalBytes } = _walkCommonContentSignals(commonDir);
+  meta.contentHash = hash;
+  meta.contentFileCount = fileCount;
+  meta.contentTotalBytes = totalBytes;
+  meta.contentHashedAt = new Date().toISOString();
+  meta.contentHashDirty = false;
+  try { fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2)); }
+  catch {}
+  return hash;
+}
+
+// Mark a common folder as content-modified — cheap meta.json write of
+// one boolean. Set by every content-modifying op so the eventual
+// rehash knows to recompute. Many ops collapse into one rehash.
+function markCommonContentDirty(userData, uuid) {
+  if (!uuid) return;
+  const metaPath = path.join(commonRoot(userData), uuid, 'meta.json');
+  if (!fs.existsSync(metaPath)) return;
+  let meta;
+  try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); }
+  catch { return; }
+  if (meta.contentHashDirty) return;
+  meta.contentHashDirty = true;
+  try { fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2)); }
+  catch {}
+}
+
+// Called from the renderer when a common-folder detail modal closes —
+// triggers a batched rehash IF the common is flagged dirty. No-op
+// otherwise.
+function resolveCommonContentDirty(userData, uuid) {
+  if (!uuid) return null;
+  const metaPath = path.join(commonRoot(userData), uuid, 'meta.json');
+  if (!fs.existsSync(metaPath)) return null;
+  let meta;
+  try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); }
+  catch { return null; }
+  if (!meta.contentHashDirty) return null;
+  return recomputeCommonContentHash(userData, uuid);
+}
+
+// Trusted read of a common's content hash. Stored hash trusted when
+// (a) meta.contentHashDirty is not set AND (b) the cheap-signal walk
+// matches stored fileCount + totalBytes. Either failing forces a
+// recompute. The dirty flag is the primary signal; the cheap-signal
+// walk is the backup catch.
+function getCommonContentHash(userData, uuid) {
+  if (!uuid) return null;
+  const commonDir = path.join(commonRoot(userData), uuid);
+  const metaPath = path.join(commonDir, 'meta.json');
+  if (!fs.existsSync(metaPath)) return null;
+  let meta;
+  try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); }
+  catch { return null; }
+  if (!meta.contentHashDirty
+      && meta.contentHash
+      && typeof meta.contentFileCount === 'number'
+      && typeof meta.contentTotalBytes === 'number') {
+    const live = _walkCommonContentSignals(commonDir);
+    if (live.fileCount === meta.contentFileCount && live.totalBytes === meta.contentTotalBytes) {
+      return meta.contentHash;
+    }
+  }
+  return recomputeCommonContentHash(userData, uuid);
+}
+
 module.exports = {
   commonRoot,
   ensureCommonRoot,
@@ -763,4 +892,8 @@ module.exports = {
   readCommonFileBytes,
   commonFolderExistsAt,
   exportCommonToFolder,
+  recomputeCommonContentHash,
+  getCommonContentHash,
+  markCommonContentDirty,
+  resolveCommonContentDirty,
 };

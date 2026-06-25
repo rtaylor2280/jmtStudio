@@ -248,6 +248,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   exportEntryDoc:        (params)     => ipcRenderer.invoke('entries:exportDoc', params),
   exportEntryToFolder:   (params)     => ipcRenderer.invoke('entries:exportToFolder', params),
   entryFolderExistsAt:   (params)     => ipcRenderer.invoke('entries:existsAt', params),
+  resolveEntryContentDirty: (params)  => ipcRenderer.invoke('entries:resolveContentDirty', params),
   selectSaveDestination: ()           => ipcRenderer.invoke('dialog:selectSaveDestination'),
 
   // Common folder management (Sound Fonts → side panel)
@@ -268,6 +269,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readCommonFileBytes:   (params)     => ipcRenderer.invoke('common:readFileBytes', params),
   commonFolderExistsAt:  (params)     => ipcRenderer.invoke('common:folderExistsAt', params),
   exportCommonToFolder:  (params)     => ipcRenderer.invoke('common:exportToFolder', params),
+  resolveCommonContentDirty: (params) => ipcRenderer.invoke('common:resolveContentDirty', params),
   setCommonGroup:        (params)     => ipcRenderer.invoke('common:setGroup', params),
   setCommonGroupMany:    (params)     => ipcRenderer.invoke('common:setGroupMany', params),
   renameCommonGroup:     (params)     => ipcRenderer.invoke('common:renameGroup', params),

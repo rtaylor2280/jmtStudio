@@ -260,13 +260,19 @@ async function createEntry({ userData, sourceUuid, candidate, name, metadata, on
       description: (metadata && metadata.description) || '',
       userNotes: (metadata && metadata.userNotes) || '',
       addedFromSource: [],
-      fileCount: result.fileCount,
-      totalBytes: result.totalBytes,
+      contentFileCount: result.fileCount,
+      contentTotalBytes: result.totalBytes,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
 
     fs.writeFileSync(path.join(entryDir, 'meta.json'), JSON.stringify(meta, null, 2));
+
+    // Stamp the content hash at creation so future surveyMerge /
+    // exportBackup calls can skip the per-item tree walk and read the
+    // stored value directly. Lazy backfill in getEntryContentHash
+    // catches any entries that pre-date this slice.
+    try { recomputeEntryContentHash(userData, entryName); } catch {}
 
     // Propagate source-level fields to source meta if the source is
     // missing them. Keeps freshly-imported sources consistent with the
@@ -357,7 +363,13 @@ async function duplicateEntry({ userData, sourceName, newName, mode = 'current' 
       meta.createdAt = now;
       meta.updatedAt = now;
       meta.addedFromSource = [];
+      // Drop the source's stamped hash — content matches now, but
+      // recomputing keeps fileCount/totalBytes/contentHashedAt accurate
+      // for this duplicate.
+      delete meta.contentHash;
+      delete meta.contentHashedAt;
       fs.writeFileSync(path.join(destDir, 'meta.json'), JSON.stringify(meta, null, 2));
+      try { recomputeEntryContentHash(userData, sanitized); } catch {}
       return { ok: true, name: sanitized, meta };
     } catch (err) {
       try { fs.rmSync(destDir, { recursive: true, force: true }); } catch {}
@@ -417,7 +429,7 @@ async function duplicateEntry({ userData, sourceName, newName, mode = 'current' 
 // is kept in sync. Rename collisions surface as an error.
 const _ENTRY_META_IMMUTABLE = new Set([
   'schemaVersion', 'entryUuid', 'sourceUuid', 'candidatePath', 'multiBoard',
-  'otherFlavors', 'nested', 'fileCount', 'totalBytes', 'createdAt',
+  'otherFlavors', 'nested', 'contentFileCount', 'contentTotalBytes', 'createdAt',
 ]);
 
 // Source-level fields that the entry-detail UI presents as if they were
@@ -820,6 +832,122 @@ function listEntryFiles(userData, name) {
   return walk(root, '');
 }
 
+// Walk an entry's tree to count files + sum bytes, EXCLUDING the
+// root-level meta.json (same exclusion the content hash uses, so the
+// safety-net signal matches the hash's content scope). Used both for
+// recomputing the meta's fileCount/totalBytes when computing the
+// content hash AND for the cheap-signal safety check that decides
+// whether a stored hash is still trustworthy.
+function _walkContentSignals(entryDir) {
+  let fileCount = 0;
+  let totalBytes = 0;
+  const walk = (absDir, relBase) => {
+    let entries;
+    try { entries = fs.readdirSync(absDir, { withFileTypes: true }); }
+    catch { return; }
+    for (const e of entries) {
+      if (!relBase && e.name === 'meta.json') continue;
+      const abs = path.join(absDir, e.name);
+      if (e.isDirectory()) {
+        walk(abs, relBase ? `${relBase}/${e.name}` : e.name);
+      } else if (e.isFile()) {
+        fileCount++;
+        try { totalBytes += fs.statSync(abs).size; } catch {}
+      }
+    }
+  };
+  walk(entryDir, '');
+  return { fileCount, totalBytes };
+}
+
+// Compute the entry's content hash and persist it (plus the matching
+// contentFileCount + contentTotalBytes signals) to meta.json. Clears
+// the dirty flag on success — this IS the resolve path for a flagged
+// entry. Returns the hash, or null if the entry / meta is unreadable.
+//
+// Field naming: contentFileCount / contentTotalBytes are the canonical
+// signal field names, shared with the sources + common helpers so the
+// persistent-hash contract is identical across all three buckets.
+function recomputeEntryContentHash(userData, entryName) {
+  const root = entriesRoot(userData);
+  const entryDir = path.join(root, entryName);
+  const metaPath = path.join(entryDir, 'meta.json');
+  if (!fs.existsSync(metaPath)) return null;
+  let meta;
+  try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); }
+  catch { return null; }
+  const { hashItemDir } = require('./soundFontFileHash');
+  const hash = hashItemDir(entryDir);
+  if (!hash) return null;
+  const { fileCount, totalBytes } = _walkContentSignals(entryDir);
+  meta.contentHash = hash;
+  meta.contentFileCount = fileCount;
+  meta.contentTotalBytes = totalBytes;
+  meta.contentHashedAt = new Date().toISOString();
+  meta.contentHashDirty = false;
+  try { fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2)); }
+  catch {}
+  return hash;
+}
+
+// Mark the entry as having been content-modified since its last hash
+// stamp. Cheap — just a meta.json write of one boolean. Called by every
+// file-op site so the eventual rehash (at modal close OR on next read)
+// knows to recompute instead of trusting the stored value. Many ops in
+// a row collapse into one rehash.
+function markEntryContentDirty(userData, entryName) {
+  const root = entriesRoot(userData);
+  const metaPath = path.join(root, entryName, 'meta.json');
+  if (!fs.existsSync(metaPath)) return;
+  let meta;
+  try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); }
+  catch { return; }
+  if (meta.contentHashDirty) return; // already flagged
+  meta.contentHashDirty = true;
+  try { fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2)); }
+  catch {}
+}
+
+// Resolve the dirty flag if set — call from the renderer when an
+// entry's detail modal closes so a batched rehash happens once per
+// editing session instead of per file op. No-op when not flagged.
+function resolveEntryContentDirty(userData, entryName) {
+  const root = entriesRoot(userData);
+  const metaPath = path.join(root, entryName, 'meta.json');
+  if (!fs.existsSync(metaPath)) return null;
+  let meta;
+  try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); }
+  catch { return null; }
+  if (!meta.contentHashDirty) return null;
+  return recomputeEntryContentHash(userData, entryName);
+}
+
+// Trusted read of the entry's content hash. Stored hash trusted when
+// (a) meta.contentHashDirty is not set AND (b) the cheap-signal walk
+// (fileCount + totalBytes) matches what's stored. Either failing
+// condition forces a recompute. The dirty flag is the primary signal
+// for "content changed since last stamp"; the cheap-signal walk is the
+// backup catch for any op path that forgot to mark dirty.
+function getEntryContentHash(userData, entryName) {
+  const root = entriesRoot(userData);
+  const entryDir = path.join(root, entryName);
+  const metaPath = path.join(entryDir, 'meta.json');
+  if (!fs.existsSync(metaPath)) return null;
+  let meta;
+  try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); }
+  catch { return null; }
+  if (!meta.contentHashDirty
+      && meta.contentHash
+      && typeof meta.contentFileCount === 'number'
+      && typeof meta.contentTotalBytes === 'number') {
+    const live = _walkContentSignals(entryDir);
+    if (live.fileCount === meta.contentFileCount && live.totalBytes === meta.contentTotalBytes) {
+      return meta.contentHash;
+    }
+  }
+  return recomputeEntryContentHash(userData, entryName);
+}
+
 module.exports = {
   entriesRoot,
   ensureEntriesRoot,
@@ -837,4 +965,8 @@ module.exports = {
   entryFolderExistsAt,
   listEntryFiles,
   migrateSourceLevelFields,
+  recomputeEntryContentHash,
+  getEntryContentHash,
+  markEntryContentDirty,
+  resolveEntryContentDirty,
 };

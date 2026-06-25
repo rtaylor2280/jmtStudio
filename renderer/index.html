@@ -16608,9 +16608,11 @@ require(['vs/editor/editor.main'], function () {
         // Populate displays.
         _sfRefreshDisplayValues();
 
-        // Contents row (read-only).
-        const fileCount = m.fileCount || 0;
-        const sizeStr = _sfFormatBytes(m.totalBytes || 0);
+        // Contents row (read-only). Pulls the stored content signals
+        // written by the persistent-hash slice (see
+        // soundFontEntries.recomputeEntryContentHash).
+        const fileCount = m.contentFileCount || 0;
+        const sizeStr = _sfFormatBytes(m.contentTotalBytes || 0);
         if (_sfEntryDetailEls.contents) {
           _sfEntryDetailEls.contents.textContent = `${fileCount} file${fileCount === 1 ? '' : 's'} (${sizeStr})`;
         }
@@ -16777,6 +16779,13 @@ require(['vs/editor/editor.main'], function () {
       };
       const _sfCloseEntryDetail = () => {
         if (_sfEntryDetailEls.modal) _sfEntryDetailEls.modal.classList.remove('active');
+        // Fire-and-forget resolve of any dirty content hash. No-op when
+        // the entry isn't flagged; otherwise the rehash runs in the
+        // background and the next survey/export reads the fresh value.
+        const resolveName = _sfDetailOriginalName;
+        if (resolveName) {
+          try { window.electronAPI.resolveEntryContentDirty?.({ name: resolveName }); } catch {}
+        }
         _sfDetailEdit = null;
         _sfDetailDirty = false;
       };
@@ -16909,6 +16918,10 @@ require(['vs/editor/editor.main'], function () {
           alert(`Save failed: ${(res && res.error) || 'unknown error'}`);
           return;
         }
+        // After a rename, the on-disk dir is at the new name; keep
+        // _sfDetailOriginalName in sync so the modal-close content-hash
+        // resolve hits the right entry.
+        if (isRename) _sfDetailOriginalName = sanitizedName;
         // Decide scope of label propagation. Only ask when:
         //   - this entry HAD a link before this save (adding a brand-new
         //     link doesn't count as changing an old label — the
@@ -17266,8 +17279,8 @@ require(['vs/editor/editor.main'], function () {
           entries.sort((a, b) => a.name.localeCompare(b.name));
           const edits = (_sfSourceEdit && _sfSourceEdit.entryEdits) || new Map();
           _sfSourceDetailEls.entriesList.innerHTML = entries.map(e => {
-            const fc = (e.meta && e.meta.fileCount) || 0;
-            const sz = (e.meta && e.meta.totalBytes) || 0;
+            const fc = (e.meta && e.meta.contentFileCount) || 0;
+            const sz = (e.meta && e.meta.contentTotalBytes) || 0;
             const stored = edits.get(e.name);
             const isEditing = !!(stored && stored.editing);
             const effName = stored ? stored.name : e.name;
@@ -22226,11 +22239,20 @@ require(['vs/editor/editor.main'], function () {
         // Plain click: clear multi-select, toggle expanded.
         _sfMultiSelectedCommonUuids.clear();
         _sfMultiSelectAnchor = null;
+        // User is navigating away from the currently-expanded common —
+        // either by collapsing it or by opening a different one. Fire the
+        // dirty-resolve on the previous selection so a batched rehash
+        // happens once per edit session. Fire-and-forget; the safety net
+        // (cheap fileCount + totalBytes walk) catches anything missed.
+        const _sfPrevCommonUuid = _sfSelectedCommonUuid;
         if (uuid === _sfSelectedCommonUuid) {
           _sfSelectedCommonUuid = null;
         } else {
           _sfSelectedCommonUuid = uuid;
           _sfMultiSelectAnchor = uuid;
+        }
+        if (_sfPrevCommonUuid && _sfPrevCommonUuid !== _sfSelectedCommonUuid) {
+          try { window.electronAPI.resolveCommonContentDirty?.({ uuid: _sfPrevCommonUuid }); } catch {}
         }
         _sfCommonFilesSelected.clear();
         _sfCommonFilesAnchor = null;
@@ -23027,12 +23049,19 @@ require(['vs/editor/editor.main'], function () {
         };
       };
 
-      const _sfRunMergeImport = async (zipPath, observed) => {
-        const hideInspect = _sfShowBackupIndeterminate('Inspecting backup…', 'Scanning archive and matching against your library.');
-        let survey;
-        try { survey = await window.electronAPI.sfBackupSurveyMerge({ zipPath }); }
-        catch (err) { survey = { ok: false, error: String(err && err.message || err) }; }
-        hideInspect();
+      const _sfRunMergeImport = async (zipPath, observed, preSurvey = null) => {
+        // The caller (_sfOpenImportBackup) already surveys upfront for
+        // the choice modal's delta line, so when it routes here it can
+        // hand off the survey result and skip the duplicate work. If
+        // called from anywhere else without a pre-survey, fall back to
+        // running one here.
+        let survey = preSurvey;
+        if (!survey) {
+          const hideInspect = _sfShowBackupIndeterminate('Inspecting backup…', 'Scanning archive and matching against your library.');
+          try { survey = await window.electronAPI.sfBackupSurveyMerge({ zipPath }); }
+          catch (err) { survey = { ok: false, error: String(err && err.message || err) }; }
+          hideInspect();
+        }
         if (!survey || !survey.ok) {
           await promptConfirm({
             title: 'Could not inspect backup',
@@ -23680,26 +23709,111 @@ require(['vs/editor/editor.main'], function () {
           await _sfRunReplaceImport(zipPath, observed);
           return;
         }
-        // Show counts from the manifest, but cross-check against what's
-        // actually in the zip so a tampered manifest doesn't deceive the
-        // summary. When they disagree we trust the observed numbers — it's
-        // the file we're going to extract from, not the manifest.
+        // Survey upfront so the choice modal can show a real delta vs the
+        // user's current library, not just what's in the backup. With
+        // persistent hashes this is essentially free (stat-walk per item,
+        // no byte reading). The all-identical short-circuit also lives
+        // here: if everything matches, there's nothing for Replace or
+        // Merge to do and we tell the user directly instead of running a
+        // restore that would produce a "0 bytes restored" no-op.
+        const hideInspect2 = _sfShowBackupIndeterminate('Comparing against your library…', 'Checking which items match, differ, or are only on one side.');
+        let survey;
+        try { survey = await window.electronAPI.sfBackupSurveyMerge({ zipPath }); }
+        catch (err) { survey = { ok: false, error: String(err && err.message || err) }; }
+        hideInspect2();
+        if (!survey || !survey.ok) {
+          await promptConfirm({
+            title: 'Could not inspect backup',
+            message: (survey && survey.error) || 'Unknown error.',
+            confirmText: 'OK',
+            confirmKind: 'danger',
+            hideCancel: true,
+          });
+          return;
+        }
+        // Per-bucket deltas drive both the all-identical detection and
+        // the choice modal's delta line. SharedTracks counts on both
+        // sides are compared as a fourth signal — a delta there forces
+        // "not identical" even when sources/library/common all match.
+        const dSources = {
+          identical: survey.sources.identical.length,
+          conflict:  survey.sources.conflict.length,
+          add:       survey.sources.add.length,
+          currentOnly: survey.sources.currentOnly.length,
+        };
+        const dLibrary = {
+          identical: survey.library.identical.length,
+          conflict:  survey.library.conflict.length,
+          add:       survey.library.add.length,
+          currentOnly: survey.library.currentOnly.length,
+        };
+        const dCommon = {
+          identical: survey.common.identical.length,
+          conflict:  survey.common.conflict.length,
+          add:       survey.common.add.length,
+          currentOnly: survey.common.currentOnly.length,
+        };
+        const stDelta = (survey.sharedTracks && (survey.sharedTracks.backup !== survey.sharedTracks.current));
+        const anyConflict   = dSources.conflict + dLibrary.conflict + dCommon.conflict;
+        const anyAdd        = dSources.add + dLibrary.add + dCommon.add;
+        const anyCurrentOnly = dSources.currentOnly + dLibrary.currentOnly + dCommon.currentOnly;
+        const allIdentical = (anyConflict === 0) && (anyAdd === 0) && (anyCurrentOnly === 0) && !stDelta;
+        if (allIdentical) {
+          // Nothing to do. Both Replace and Merge would be no-ops — Replace
+          // would walk every item to decide "identical, reuse from current"
+          // (the awkward "0 bytes restored" the user used to see); Merge
+          // would just show "Library already up to date". Skip both and
+          // tell the user directly.
+          await promptConfirm({
+            title: 'Library matches backup',
+            message: 'Every item in this backup is already in your library and matches byte-for-byte. There is nothing to restore.',
+            confirmText: 'OK',
+            confirmKind: 'primary',
+            hideCancel: true,
+          });
+          return;
+        }
+        // Build the summary lines for the choice modal. Backup info on
+        // top, comparison on the bottom — the user reads the comparison
+        // and then picks Replace or Merge with the consequences visible.
         const cs = observed.counts;
         const totalSize = _sfFormatBytesShort(observed.totals.totalBytes);
         const exportedAt = manifest.exportedAt ? new Date(manifest.exportedAt).toLocaleString() : '';
         const summaryEl = document.getElementById('sf-backup-import-summary');
         if (summaryEl) {
-          // Shared tracks only mentioned when present — keeps the line
-          // tight on the common no-shared-tracks case while still
-          // surfacing the count when one was backed up.
           const stCount = cs.sharedTracks || 0;
           const stPart = stCount > 0
             ? `, ${stCount} shared track${stCount === 1 ? '' : 's'}`
             : '';
-          summaryEl.textContent =
+          const backupLine =
             `Backup contains ${cs.sources} source${cs.sources === 1 ? '' : 's'}, ${cs.library} font${cs.library === 1 ? '' : 's'}, ${cs.common} common folder${cs.common === 1 ? '' : 's'}${stPart}. ` +
             `Total ${totalSize}.` +
             (exportedAt ? ` Exported ${exportedAt}.` : '');
+          const totalIdentical = dSources.identical + dLibrary.identical + dCommon.identical;
+          // One short delta line summarizing every category against the
+          // backup. "X items match" + the non-zero deltas — zero-count
+          // segments drop out so the line stays tight on the common case
+          // (mostly-identical libraries).
+          const deltaParts = [];
+          deltaParts.push(`${totalIdentical} item${totalIdentical === 1 ? '' : 's'} match`);
+          if (anyConflict > 0) deltaParts.push(`${anyConflict} differ${anyConflict === 1 ? 's' : ''}`);
+          if (anyAdd > 0) deltaParts.push(`${anyAdd} in backup only`);
+          if (anyCurrentOnly > 0) deltaParts.push(`${anyCurrentOnly} in your library only`);
+          if (stDelta) {
+            const stD = Math.abs(survey.sharedTracks.backup - survey.sharedTracks.current);
+            const which = survey.sharedTracks.backup > survey.sharedTracks.current ? 'backup' : 'your library';
+            deltaParts.push(`${stD} shared track${stD === 1 ? '' : 's'} only in ${which}`);
+          }
+          const deltaLine = `Vs your library: ${deltaParts.join(', ')}.`;
+          // Two lines: backup info on top, delta line below. Separated
+          // by a hard line break so the visual weight makes the user
+          // read them as two distinct beats ("what's in the backup",
+          // "how it compares to my library").
+          summaryEl.textContent = '';
+          summaryEl.appendChild(document.createTextNode(backupLine));
+          summaryEl.appendChild(document.createElement('br'));
+          summaryEl.appendChild(document.createElement('br'));
+          summaryEl.appendChild(document.createTextNode(deltaLine));
         }
         const modal = document.getElementById('modal-sf-backup-import-choose');
         const cancelBtn = document.getElementById('sf-backup-import-cancel');
@@ -23718,23 +23832,19 @@ require(['vs/editor/editor.main'], function () {
           const onCancel = () => cleanup();
           const onMerge = async () => {
             cleanup();
-            await _sfRunMergeImport(zipPath, observed);
+            // Pass the survey we already ran so the merge path doesn't
+            // resurvey (the original _sfRunMergeImport runs its own
+            // sfBackupSurveyMerge; with the pre-survey flow that would
+            // be wasted work).
+            await _sfRunMergeImport(zipPath, observed, survey);
           };
           const onReplace = async () => {
             cleanup();
-            // Final-yes confirm before the destructive action. The choose
-            // modal already noted "cannot be undone", but a separate beat
-            // forces the user to acknowledge the wipe right before it
-            // happens — same convention the styles Discard / preset
-            // destructive flows use.
-            const go = await promptConfirm({
-              title: 'Replace your library?',
-              message: 'This wipes your current Sound Font library (sources, fonts, common folders) and restores the backup exactly. Once completed, this cannot be undone.',
-              confirmText: 'Wipe and restore',
-              confirmKind: 'danger',
-              cancelText: 'Cancel',
-            });
-            if (!go) return;
+            // No secondary "are you really sure?" confirm here anymore.
+            // The choice modal showed the delta explicitly — including
+            // how many items would be wiped — so the user has already
+            // acknowledged the destructive consequence by clicking
+            // Replace. A second prompt would be redundant friction.
             await _sfRunReplaceImport(zipPath, observed);
           };
           cancelBtn.addEventListener('click', onCancel);
