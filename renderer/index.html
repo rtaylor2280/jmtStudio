@@ -2569,6 +2569,7 @@
   .sf-entry-name-input { flex: 1; font-size: 1.1rem; font-weight: 700; background: var(--c-bg-inset); color: var(--c-text); border: 1px solid var(--jmt-blue); border-radius: 4px; padding: 2px 8px; outline: none; min-width: 0; display: none; }
   .sf-entry-byline-wrap { display: flex; align-items: center; gap: 6px; margin-top: 2px; font-size: 0.85rem; color: var(--c-text-sub); }
   .sf-byline-prefix { color: var(--c-text-sub); }
+  .sf-byline-empty { color: var(--c-text-dim); font-style: italic; }
   .sf-edit-display { color: var(--c-text); }
   .sf-edit-input { background: var(--c-bg-raised); color: var(--c-text); border: 1px solid var(--jmt-blue); border-radius: 3px; padding: 2px 6px; outline: none; font-size: 0.82rem; font-family: inherit; }
   .sf-edit-input[type="text"] { flex: 1; min-width: 0; }
@@ -4118,15 +4119,22 @@
         <button class="detail-pencil" id="btn-sf-name-edit" title="Edit name">&#9998;</button>
         <button class="detail-confirm" id="btn-sf-name-confirm" title="Confirm" style="display:none">&#10003;</button>
         <div class="sf-link-area">
-          <button id="sf-link-display" class="sf-url-display" style="display:none"></button>
-          <button class="detail-link-btn" id="btn-sf-link-toggle" title="Add a link (video demo, vendor page, etc.)">&#128279;</button>
+          <button id="sf-demo-display" class="sf-url-display" style="display:none">Demo</button>
+          <button id="sf-link-display" class="sf-url-display" style="display:none">Link</button>
+          <button class="detail-link-btn" id="btn-sf-link-toggle" title="Edit demo and font page links">&#128279;</button>
         </div>
       </div>
-      <div class="sf-link-edit-row" id="sf-link-edit-row" style="display:none">
-        <input type="url" id="sf-link-input" class="sf-edit-input" placeholder="https://&hellip;" style="flex:1">
-        <input type="text" id="sf-link-label-input" class="sf-edit-input" placeholder="Demo" maxlength="32" style="width: 90px; flex-shrink: 0" title="What the link reads as (e.g. Demo, YouTube, Vendor)">
-        <button class="detail-confirm" id="btn-sf-link-confirm" title="Confirm link">&#10003;</button>
-        <button class="detail-pencil" id="btn-sf-link-clear" title="Clear link" style="opacity:0.45">&#10005;</button>
+      <div class="sf-link-edit-row" id="sf-link-edit-row" style="display:none; flex-direction: column; gap: 4px; align-items: stretch;">
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <span class="sf-edit-row-label" style="width: 50px; flex-shrink: 0; font-size: 0.78rem; color: var(--c-text-sub);">Demo</span>
+          <input type="url" id="sf-demo-input" class="sf-edit-input" placeholder="Link to a demo of this font" style="flex:1">
+          <button class="detail-pencil" id="btn-sf-demo-clear" title="Clear demo link" style="opacity:0.45">&#10005;</button>
+        </div>
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <span class="sf-edit-row-label" style="width: 50px; flex-shrink: 0; font-size: 0.78rem; color: var(--c-text-sub);">Link</span>
+          <input type="url" id="sf-link-input" class="sf-edit-input" placeholder="Where to learn more or get this font" style="flex:1">
+          <button class="detail-pencil" id="btn-sf-link-clear" title="Clear link" style="opacity:0.45">&#10005;</button>
+        </div>
       </div>
       <div class="sf-entry-byline-wrap">
         <span class="sf-byline-prefix" id="sf-byline-prefix">by</span>
@@ -4361,18 +4369,6 @@
       <button class="modal-btn-primary" id="sf-paste-rename-yes">Rename to match</button>
       <button class="modal-btn-cancel"  id="sf-paste-rename-no">Keep names</button>
       <button class="modal-btn-cancel"  id="sf-paste-rename-cancel">Cancel</button>
-    </div>
-  </div>
-</div>
-
-<div class="modal-overlay" id="modal-sf-label-scope">
-  <div class="modal">
-    <h2>Change link label</h2>
-    <p>You changed the link label from "<strong id="sf-label-scope-old"></strong>" to "<strong id="sf-label-scope-new"></strong>". How widely should this apply?</p>
-    <div class="sf-dup-btn-stack">
-      <button class="modal-btn-primary" id="sf-label-scope-current">This font only</button>
-      <button class="modal-btn-cancel"  id="sf-label-scope-matching">All fonts currently labeled "<span id="sf-label-scope-matching-text"></span>"</button>
-      <button class="modal-btn-cancel"  id="sf-label-scope-all">All fonts with links</button>
     </div>
   </div>
 </div>
@@ -12785,13 +12781,6 @@ require(['vs/editor/editor.main'], function () {
         }
         return td('utf-8').decode(bytes);
       };
-      let _sfLinkLabelPref = 'Demo';
-      (async () => {
-        try {
-          const v = await window.electronAPI.getSetting('soundFontLinkLabel', 'Demo');
-          if (v && typeof v === 'string') _sfLinkLabelPref = v;
-        } catch {}
-      })();
       let _sfSearchQuery = '';
       let _sfActiveFilterTags = new Set();
       let _sfActiveFilterCreators = new Set();
@@ -13056,12 +13045,15 @@ require(['vs/editor/editor.main'], function () {
           // free content gets a small badge so the user can spot it at a glance.
           if (meta.purchased === false) tagBits.push('<span class="sf-card-tag free">free</span>');
           const tags = tagBits.length ? `<div class="sf-card-tags">${tagBits.join('')}</div>` : '';
-          // Inline link button sits next to the name. Label defaults to "Demo"
-          // when not customized; the linkUrl is kept in the title attribute
-          // so hovering still reveals the destination.
+          // Two inline link buttons sit next to the name: "Demo" (per-font
+          // audition link, lives on entry meta) and "Link" (per-source
+          // "where to get it" page, lives on source meta and gets projected
+          // onto each entry at read time). Each carries its URL in the
+          // title attribute so hovering reveals the destination.
+          const demoUrl = meta.demoUrl || '';
           const linkUrl = meta.linkUrl || '';
-          const linkLabel = (meta.linkLabel || '').trim() || _sfLinkLabelPref || 'Demo';
-          const linkBtn = linkUrl ? `<button class="sf-card-link" data-card-link="${_sfEscape(linkUrl)}" title="${_sfEscape(linkUrl)}">${_sfEscape(linkLabel)}</button>` : '';
+          const demoBtn = demoUrl ? `<button class="sf-card-link" data-card-link="${_sfEscape(demoUrl)}" title="${_sfEscape(demoUrl)}">Demo</button>` : '';
+          const linkBtn = linkUrl ? `<button class="sf-card-link" data-card-link="${_sfEscape(linkUrl)}" title="${_sfEscape(linkUrl)}">Link</button>` : '';
           const isSelected = _sfSelectedNames.has(f.name);
           const isInUse = inUseFonts.has(f.name);
           const needsReview = !!meta.needsReview;
@@ -13074,6 +13066,7 @@ require(['vs/editor/editor.main'], function () {
             <button class="card-delete-btn" data-card-delete="${_sfEscape(f.name)}" title="Delete font">&#10005;</button>
             <div class="sf-card-name-row">
               <span class="sf-card-name">${_sfEscape(f.name)}</span>
+              ${demoBtn}
               ${linkBtn}
               ${reviewChip}
             </div>
@@ -16269,11 +16262,12 @@ require(['vs/editor/editor.main'], function () {
         notesInput:      document.getElementById('sf-detail-notes-input'),
         // Per-entry link (video demo / vendor page / anything)
         linkBtn:         document.getElementById('btn-sf-link-toggle'),
+        demoDisplay:     document.getElementById('sf-demo-display'),
         linkDisplay:     document.getElementById('sf-link-display'),
         linkEditRow:     document.getElementById('sf-link-edit-row'),
+        demoInput:       document.getElementById('sf-demo-input'),
         linkInput:       document.getElementById('sf-link-input'),
-        linkLabelInput:  document.getElementById('sf-link-label-input'),
-        linkConfirmBtn:  document.getElementById('btn-sf-link-confirm'),
+        demoClear:       document.getElementById('btn-sf-demo-clear'),
         linkClearBtn:    document.getElementById('btn-sf-link-clear'),
         // Source block (read-only here; source editing comes in slice 10)
         source:          document.getElementById('sf-entry-detail-source'),
@@ -16354,8 +16348,16 @@ require(['vs/editor/editor.main'], function () {
       const _sfRefreshDisplayValues = () => {
         if (!_sfDetailEdit) return;
         if (_sfEntryDetailEls.name) _sfEntryDetailEls.name.textContent = _sfDetailEdit.name;
-        if (_sfEntryDetailEls.byline) _sfEntryDetailEls.byline.textContent = _sfDetailEdit.author || '';
-        if (_sfEntryDetailEls.bylinePrefix) _sfEntryDetailEls.bylinePrefix.style.display = _sfDetailEdit.author ? '' : 'none';
+        // Byline shows "by <creator>" when set, "(no creator)" muted/
+        // italic when empty so the field reads as editable instead of
+        // an orphan pencil button. The "by" prefix only renders when
+        // a creator is actually present — "by (no creator)" reads odd.
+        const _bylineAuthor = (_sfDetailEdit.author || '').trim();
+        if (_sfEntryDetailEls.byline) {
+          _sfEntryDetailEls.byline.textContent = _bylineAuthor || '(no creator)';
+          _sfEntryDetailEls.byline.classList.toggle('sf-byline-empty', !_bylineAuthor);
+        }
+        if (_sfEntryDetailEls.bylinePrefix) _sfEntryDetailEls.bylinePrefix.style.display = _bylineAuthor ? '' : 'none';
         if (_sfEntryDetailEls.acquiredDisplay) _sfEntryDetailEls.acquiredDisplay.textContent = _sfDetailEdit.acquisitionDate ? _sfFormatDate(_sfDetailEdit.acquisitionDate) : '';
         if (_sfEntryDetailEls.descDisplay) _sfEntryDetailEls.descDisplay.textContent = _sfDetailEdit.description || '';
         // "Last used style" row visibility: hidden when no Style Library
@@ -16424,19 +16426,27 @@ require(['vs/editor/editor.main'], function () {
       };
       const _sfSyncLinkDisplay = () => {
         if (!_sfDetailEdit) return;
-        const has = !!_sfDetailEdit.linkUrl;
+        const hasDemo = !!_sfDetailEdit.demoUrl;
+        const hasLink = !!_sfDetailEdit.linkUrl;
+        const hasAny = hasDemo || hasLink;
         if (_sfEntryDetailEls.linkBtn) {
-          _sfEntryDetailEls.linkBtn.classList.toggle('has-url', has);
-          _sfEntryDetailEls.linkBtn.title = has ? 'Edit link' : 'Add a link (video demo, vendor page, etc.)';
+          _sfEntryDetailEls.linkBtn.classList.toggle('has-url', hasAny);
+          // Sync closes the row, so revert the icon back to the chain
+          // (the open-toggle state) so the button reads correctly on
+          // the next open.
+          _sfEntryDetailEls.linkBtn.innerHTML = '\u{1F517}';
+          _sfEntryDetailEls.linkBtn.title = hasAny ? 'Edit demo and font page links' : 'Add demo and font page links';
         }
-        // Link label sits inline next to the link icon — what reads as the
-        // link to the user (e.g. "Demo", "YouTube"). Full URL surfaces via
-        // the title attribute on hover so the destination is still verifiable.
+        // Two display buttons sit inline next to the link icon — "Demo"
+        // when demoUrl is set, "Link" when linkUrl is set. Each carries
+        // its URL in the title attribute so hover reveals the destination.
+        if (_sfEntryDetailEls.demoDisplay) {
+          _sfEntryDetailEls.demoDisplay.title = _sfDetailEdit.demoUrl || '';
+          _sfEntryDetailEls.demoDisplay.style.display = hasDemo ? 'inline-block' : 'none';
+        }
         if (_sfEntryDetailEls.linkDisplay) {
-          const labelForDisplay = (_sfDetailEdit.linkLabel || '').trim() || _sfLinkLabelPref || 'Demo';
-          _sfEntryDetailEls.linkDisplay.textContent = labelForDisplay;
           _sfEntryDetailEls.linkDisplay.title = _sfDetailEdit.linkUrl || '';
-          _sfEntryDetailEls.linkDisplay.style.display = has ? 'inline-block' : 'none';
+          _sfEntryDetailEls.linkDisplay.style.display = hasLink ? 'inline-block' : 'none';
         }
         if (_sfEntryDetailEls.linkEditRow) _sfEntryDetailEls.linkEditRow.style.display = 'none';
       };
@@ -16557,8 +16567,8 @@ require(['vs/editor/editor.main'], function () {
           tags: Array.isArray(m.tags) ? m.tags.slice() : [],
           userNotes: m.userNotes || '',
           purchased: m.purchased !== false, // default true when undefined
+          demoUrl: m.demoUrl || '',
           linkUrl: m.linkUrl || '',
-          linkLabel: (m.linkLabel || '').trim(),
           needsReview: !!m.needsReview,
           reviewReasons: Array.isArray(m.reviewReasons) ? m.reviewReasons.slice() : [],
           versionInfo: (m.versionInfo && typeof m.versionInfo === 'object') ? {
@@ -16772,46 +16782,6 @@ require(['vs/editor/editor.main'], function () {
         }
         _sfCloseEntryDetail();
       };
-      // Three-way prompt: when the user changes a link label on one entry,
-      // ask whether to apply the change to just this entry, to every other
-      // entry currently showing the same (old) label, or to every linked
-      // entry across the library. Resolves 'current' | 'matching' | 'all'
-      // or null if the user closes the modal without choosing.
-      const _sfPromptLabelScope = (oldEffectiveLabel, newLabel) => {
-        const modal = document.getElementById('modal-sf-label-scope');
-        if (!modal) return Promise.resolve('current');
-        const oldEl = document.getElementById('sf-label-scope-old');
-        const newEl = document.getElementById('sf-label-scope-new');
-        const matchTxt = document.getElementById('sf-label-scope-matching-text');
-        if (oldEl) oldEl.textContent = oldEffectiveLabel;
-        if (newEl) newEl.textContent = newLabel;
-        if (matchTxt) matchTxt.textContent = oldEffectiveLabel;
-        return new Promise(resolve => {
-          const curBtn   = document.getElementById('sf-label-scope-current');
-          const matchBtn = document.getElementById('sf-label-scope-matching');
-          const allBtn   = document.getElementById('sf-label-scope-all');
-          const cleanup = (val) => {
-            modal.classList.remove('active');
-            curBtn?.removeEventListener('click', onCur);
-            matchBtn?.removeEventListener('click', onMatch);
-            allBtn?.removeEventListener('click', onAll);
-            modal.removeEventListener('click', onBackdrop);
-            document.removeEventListener('keydown', onKey);
-            resolve(val);
-          };
-          const onCur   = () => cleanup('current');
-          const onMatch = () => cleanup('matching');
-          const onAll   = () => cleanup('all');
-          const onBackdrop = (e) => { if (e.target === modal) cleanup(null); };
-          const onKey = (e) => { if (e.key === 'Escape') cleanup(null); };
-          curBtn?.addEventListener('click', onCur);
-          matchBtn?.addEventListener('click', onMatch);
-          allBtn?.addEventListener('click', onAll);
-          modal.addEventListener('click', onBackdrop);
-          document.addEventListener('keydown', onKey);
-          modal.classList.add('active');
-        });
-      };
       // Flush any pencil-edit field that's still open into the working
       // edit state — clicking each visible confirm button triggers the
       // existing per-field commit handler. The user shouldn't have to
@@ -16834,7 +16804,7 @@ require(['vs/editor/editor.main'], function () {
           if (b.style.display !== 'none') return false;
         }
         if (_sfEntryDetailEls.linkEditRow && _sfEntryDetailEls.linkEditRow.style.display !== 'none') {
-          _sfEntryDetailEls.linkConfirmBtn?.click();
+          _sfCommitLinkInputs();
           if (_sfEntryDetailEls.linkEditRow.style.display !== 'none') return false;
         }
         return true;
@@ -16842,33 +16812,32 @@ require(['vs/editor/editor.main'], function () {
       const _sfSaveEntryDetail = async () => {
         if (!_sfDetailEdit || !_sfDetailOriginalName) return;
         if (!_sfFlushEntryFieldEdits()) return;
-        // Snapshot the entry's pre-save state so we can decide whether the
-        // label changed in a way that affects display, and propagate to
-        // matching entries if the user asks.
-        const origEntry = _sfAllEntries.find(e => e.name === _sfDetailOriginalName);
-        const origMeta = (origEntry && origEntry.meta) || {};
-        const origLabelExplicit = (origMeta.linkLabel || '').trim();
-        const origLinkUrl = origMeta.linkUrl || '';
-        const prefAtSaveStart = _sfLinkLabelPref || 'Demo';
-        // Effective label = explicit if set, else the current preference. The
-        // "old effective" reflects what the card actually showed before save.
-        const oldEffective = origLabelExplicit || prefAtSaveStart;
-        const newLabelExplicit = (_sfDetailEdit.linkLabel || '').trim();
-        const newEffective = newLabelExplicit || prefAtSaveStart;
-        // Auto-clear self-resolving review reasons before saving. Today
-        // creator_empty is the only reason that resolves automatically:
-        // once the user fills in the author field, the reason no longer
-        // applies and shouldn't keep the needsReview banner alive on its
-        // own. Other reasons (structural match, collision rename,
-        // version-skipped notice) are informational and still require
-        // the explicit "Mark reviewed" action to dismiss.
+        // Symmetric auto-handling of the creator_empty review reason
+        // so the field tracks the author state on every save:
+        //   - author NOW filled → drop creator_empty if present
+        //   - author NOW empty → add creator_empty if not present
+        // Other reasons (structural match, collision rename, version-
+        // skipped notice) stay informational and still require the
+        // explicit "Mark reviewed" action to dismiss.
+        // needsReview is fully derived from "any active reason after
+        // the symmetric pass" so the banner state stays honest: filling
+        // the field clears it (when creator_empty was the only reason)
+        // and clearing the field surfaces it back (re-triggering the
+        // banner just like the user added a new gap).
         const _currentAuthor = (_sfDetailEdit.author || '').trim();
-        const _rawReasons = Array.isArray(_sfDetailEdit.reviewReasons) ? _sfDetailEdit.reviewReasons : [];
-        const activeReviewReasons = _rawReasons.filter(r => {
-          if (r === 'creator_empty') return !_currentAuthor;
-          return true;
-        });
-        const activeNeedsReview = !!_sfDetailEdit.needsReview && activeReviewReasons.length > 0;
+        const _rawReasons = Array.isArray(_sfDetailEdit.reviewReasons)
+          ? [..._sfDetailEdit.reviewReasons]
+          : [];
+        const _hasCreatorEmpty = _rawReasons.includes('creator_empty');
+        let activeReviewReasons;
+        if (_currentAuthor && _hasCreatorEmpty) {
+          activeReviewReasons = _rawReasons.filter(r => r !== 'creator_empty');
+        } else if (!_currentAuthor && !_hasCreatorEmpty) {
+          activeReviewReasons = [..._rawReasons, 'creator_empty'];
+        } else {
+          activeReviewReasons = _rawReasons;
+        }
+        const activeNeedsReview = activeReviewReasons.length > 0;
         const updates = {
           author: _sfDetailEdit.author,
           acquisitionDate: _sfDetailEdit.acquisitionDate,
@@ -16876,8 +16845,8 @@ require(['vs/editor/editor.main'], function () {
           tags: _sfDetailEdit.tags,
           userNotes: _sfDetailEdit.userNotes,
           purchased: _sfDetailEdit.purchased,
+          demoUrl: _sfDetailEdit.demoUrl,
           linkUrl: _sfDetailEdit.linkUrl,
-          linkLabel: _sfDetailEdit.linkLabel,
           needsReview: activeNeedsReview,
           reviewReasons: activeReviewReasons,
           // "Last used style" — stored on the legacy linkedStyleLibraryEntry
@@ -16899,69 +16868,6 @@ require(['vs/editor/editor.main'], function () {
         // _sfDetailOriginalName in sync so the modal-close content-hash
         // resolve hits the right entry.
         if (isRename) _sfDetailOriginalName = sanitizedName;
-        // Decide scope of label propagation. Only ask when:
-        //   - this entry HAD a link before this save (adding a brand-new
-        //     link doesn't count as changing an old label — the
-        //     "previous label" was just the fallback pref shown in an
-        //     empty field, not a real label on this entry)
-        //   - this entry still has a linkUrl after the save
-        //   - the effective label actually changed
-        //   - AND at least one other linked entry currently shows the
-        //     SAME old label that this entry used to show — without that,
-        //     there's literally nothing the "matching" choice could
-        //     update, so the prompt has no useful answer
-        // Otherwise: no prompt, no propagation.
-        const hadLinkBefore = !!origLinkUrl;
-        const labelChanged = hadLinkBefore && !!_sfDetailEdit.linkUrl && oldEffective !== newEffective;
-        const otherLinkedEntries = _sfAllEntries.filter(e =>
-          e.name !== _sfDetailOriginalName && e.meta && e.meta.linkUrl);
-        const othersWithSameOldLabel = otherLinkedEntries.filter(e => {
-          const otherEffective = (e.meta.linkLabel || '').trim() || prefAtSaveStart;
-          return otherEffective === oldEffective;
-        });
-        let scope = 'current';
-        if (labelChanged && othersWithSameOldLabel.length > 0) {
-          const choice = await _sfPromptLabelScope(oldEffective, newEffective);
-          if (choice) scope = choice;
-        }
-        // Propagate explicit linkLabel to other entries according to scope.
-        // Set them explicitly (not relying on pref fallback) so the intent is
-        // clear at the data layer and surviving future pref changes.
-        const propagationFailures = [];
-        if (scope === 'matching' || scope === 'all') {
-          const newLabelForOthers = newLabelExplicit || prefAtSaveStart;
-          for (const other of otherLinkedEntries) {
-            const otherExplicit = (other.meta.linkLabel || '').trim();
-            const otherEffective = otherExplicit || prefAtSaveStart;
-            const shouldUpdate = scope === 'all'
-              ? otherEffective !== newLabelForOthers
-              : otherEffective === oldEffective && otherEffective !== newLabelForOthers;
-            if (!shouldUpdate) continue;
-            try {
-              const er = await window.electronAPI.updateEntryMeta({
-                currentName: other.name,
-                updates: { linkLabel: newLabelForOthers },
-              });
-              if (!er || !er.ok) propagationFailures.push({ name: other.name, error: (er && er.error) || 'unknown error' });
-            } catch (err) {
-              propagationFailures.push({ name: other.name, error: String(err && err.message || err) });
-            }
-          }
-        }
-        if (propagationFailures.length) {
-          alert(`The label change saved, but some other entries failed to update:\n${propagationFailures.map(f => ` • ${f.name}: ${f.error}`).join('\n')}`);
-        }
-        // Update the stored preference whenever the user has a URL
-        // attached and the effective label differs from the current pref.
-        // Fires both when an existing label was changed (the propagation
-        // case above) AND when a brand-new link was added with an
-        // explicit label — the latter still represents the user's most
-        // recent label choice and should drive the default for the next
-        // link they add.
-        if (_sfDetailEdit.linkUrl && newEffective && newEffective !== prefAtSaveStart) {
-          _sfLinkLabelPref = newEffective;
-          try { await window.electronAPI.setSetting('soundFontLinkLabel', newEffective); } catch {}
-        }
         _sfDetailDirty = false;
         if (_sfEntryDetailEls.saveBtn) _sfEntryDetailEls.saveBtn.disabled = true;
         if (_sfEntryDetailEls.discardBtn) _sfEntryDetailEls.discardBtn.textContent = 'Close';
@@ -17130,8 +17036,8 @@ require(['vs/editor/editor.main'], function () {
         _sfEntryDetailEls.bylineInput,
         _sfEntryDetailEls.acquiredInput,
         _sfEntryDetailEls.descInput,
+        _sfEntryDetailEls.demoInput,
         _sfEntryDetailEls.linkInput,
-        _sfEntryDetailEls.linkLabelInput,
       ]) {
         inp?.addEventListener('input', _sfMarkDetailDirty);
       }
@@ -20705,46 +20611,66 @@ require(['vs/editor/editor.main'], function () {
         _sfPopulateReview(sourcePath);
         _sfShowPhase('review');
       };
-      // Per-entry link: icon toggles to edit row (whether URL set or not).
-      // Display row's URL button opens external on click.
+      // Link icon does double duty: when the edit row is closed it
+      // reads as the chain link icon and opens the row; when open it
+      // swaps to a checkmark and commits the inputs. The single
+      // button keeps the two URL rows visually symmetric (no inline
+      // confirm cluttering the right edge of one row but not the other).
+      const LINK_ICON_CHAIN = '\u{1F517}';
+      const LINK_ICON_CONFIRM = '\u{2713}';
+      const _sfCommitLinkInputs = () => {
+        if (!_sfDetailEdit) return;
+        const demoVal = (_sfEntryDetailEls.demoInput?.value || '').trim();
+        const linkVal = (_sfEntryDetailEls.linkInput?.value || '').trim();
+        if (demoVal !== _sfDetailEdit.demoUrl) {
+          _sfDetailEdit.demoUrl = demoVal;
+          _sfMarkDetailDirty();
+        }
+        if (linkVal !== _sfDetailEdit.linkUrl) {
+          _sfDetailEdit.linkUrl = linkVal;
+          _sfMarkDetailDirty();
+        }
+        _sfSyncLinkDisplay();
+      };
       _sfEntryDetailEls.linkBtn?.addEventListener('click', () => {
         if (!_sfDetailEdit) return;
         const editRow = _sfEntryDetailEls.linkEditRow;
         if (!editRow) return;
         const opening = editRow.style.display === 'none';
         if (opening) {
-          editRow.style.display = '';
-          if (_sfEntryDetailEls.linkInput) {
-            _sfEntryDetailEls.linkInput.value = _sfDetailEdit.linkUrl || '';
-          }
-          // Label seeds from this entry's stored label, otherwise the user's
-          // last-chosen label across the library, otherwise "Demo".
-          if (_sfEntryDetailEls.linkLabelInput) {
-            _sfEntryDetailEls.linkLabelInput.value = _sfDetailEdit.linkLabel || _sfLinkLabelPref || 'Demo';
-          }
-          // Focus the URL field — that's the field the user came here to
-          // fill in. The label has a sensible default already.
-          setTimeout(() => { _sfEntryDetailEls.linkInput?.focus(); _sfEntryDetailEls.linkInput?.select?.(); }, 0);
+          editRow.style.display = 'flex';
+          if (_sfEntryDetailEls.demoInput) _sfEntryDetailEls.demoInput.value = _sfDetailEdit.demoUrl || '';
+          if (_sfEntryDetailEls.linkInput) _sfEntryDetailEls.linkInput.value = _sfDetailEdit.linkUrl || '';
+          // Swap the icon to a checkmark so a second click reads as
+          // "commit and close" rather than "toggle again."
+          _sfEntryDetailEls.linkBtn.innerHTML = LINK_ICON_CONFIRM;
+          _sfEntryDetailEls.linkBtn.title = 'Save links';
+          // Focus the demo input — it's the per-font one and the more
+          // common edit target. The shared link below stays sticky across
+          // siblings so users edit it less often.
+          setTimeout(() => { _sfEntryDetailEls.demoInput?.focus(); _sfEntryDetailEls.demoInput?.select?.(); }, 0);
         } else {
-          editRow.style.display = 'none';
+          _sfCommitLinkInputs();
         }
+      });
+      // Click on either display button opens that URL externally (the
+      // card-link handler upstream covers cards; these cover the detail
+      // modal's own display buttons).
+      _sfEntryDetailEls.demoDisplay?.addEventListener('click', () => {
+        if (!_sfDetailEdit?.demoUrl) return;
+        window.electronAPI.openExternal(_sfDetailEdit.demoUrl);
       });
       _sfEntryDetailEls.linkDisplay?.addEventListener('click', () => {
         if (!_sfDetailEdit?.linkUrl) return;
         window.electronAPI.openExternal(_sfDetailEdit.linkUrl);
       });
-      _sfEntryDetailEls.linkConfirmBtn?.addEventListener('click', () => {
+      _sfEntryDetailEls.demoClear?.addEventListener('click', () => {
         if (!_sfDetailEdit) return;
-        const v = (_sfEntryDetailEls.linkInput?.value || '').trim();
-        const lbl = (_sfEntryDetailEls.linkLabelInput?.value || '').trim();
-        if (v !== _sfDetailEdit.linkUrl) {
-          _sfDetailEdit.linkUrl = v;
+        if (_sfDetailEdit.demoUrl) {
+          _sfDetailEdit.demoUrl = '';
           _sfMarkDetailDirty();
         }
-        if (lbl !== _sfDetailEdit.linkLabel) {
-          _sfDetailEdit.linkLabel = lbl;
-          _sfMarkDetailDirty();
-        }
+        if (_sfEntryDetailEls.demoInput) _sfEntryDetailEls.demoInput.value = '';
         _sfSyncLinkDisplay();
       });
       _sfEntryDetailEls.linkClearBtn?.addEventListener('click', () => {
@@ -20753,37 +20679,20 @@ require(['vs/editor/editor.main'], function () {
           _sfDetailEdit.linkUrl = '';
           _sfMarkDetailDirty();
         }
-        if (_sfDetailEdit.linkLabel) {
-          _sfDetailEdit.linkLabel = '';
-          _sfMarkDetailDirty();
-        }
         if (_sfEntryDetailEls.linkInput) _sfEntryDetailEls.linkInput.value = '';
-        if (_sfEntryDetailEls.linkLabelInput) _sfEntryDetailEls.linkLabelInput.value = '';
         _sfSyncLinkDisplay();
       });
       const _sfLinkKeydown = (e) => {
         if (e.key === 'Enter') {
           e.preventDefault();
-          _sfEntryDetailEls.linkConfirmBtn?.click();
+          _sfCommitLinkInputs();
         } else if (e.key === 'Escape') {
           e.preventDefault();
-          if (_sfEntryDetailEls.linkEditRow) _sfEntryDetailEls.linkEditRow.style.display = 'none';
           _sfSyncLinkDisplay();
         }
       };
+      _sfEntryDetailEls.demoInput?.addEventListener('keydown', _sfLinkKeydown);
       _sfEntryDetailEls.linkInput?.addEventListener('keydown', _sfLinkKeydown);
-      _sfEntryDetailEls.linkLabelInput?.addEventListener('keydown', _sfLinkKeydown);
-      // After the user pastes into the URL field, shift focus to the label
-      // input and pre-select its contents so they can immediately type a new
-      // label, hit Tab to accept the default, or Enter to commit. setTimeout
-      // gives the browser a tick to apply the paste before we read/select.
-      _sfEntryDetailEls.linkInput?.addEventListener('paste', () => {
-        setTimeout(() => {
-          if (!_sfEntryDetailEls.linkLabelInput) return;
-          _sfEntryDetailEls.linkLabelInput.focus();
-          _sfEntryDetailEls.linkLabelInput.select?.();
-        }, 0);
-      });
       // Tag chip remove (delegated).
       _sfEntryDetailEls.tagsChips?.addEventListener('click', (e) => {
         const btn = e.target.closest('.sf-tag-chip-remove');

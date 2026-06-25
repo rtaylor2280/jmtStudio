@@ -407,13 +407,14 @@ async function duplicateEntry({ userData, sourceName, newName, mode = 'current' 
       metadata,
     });
     if (!r || !r.ok) return r || { ok: false, error: 'Duplicate from source failed' };
-    // Propagate link fields if any were set on the source entry.
-    if (srcMeta.linkUrl || srcMeta.linkLabel) {
+    // Propagate the entry-level demoUrl from the duplicated entry.
+    // linkUrl lives on source meta now and is naturally shared across
+    // every entry from the same source — no propagation needed for it.
+    if (srcMeta.demoUrl) {
       try {
         const newMetaPath = path.join(destDir, 'meta.json');
         const written = JSON.parse(fs.readFileSync(newMetaPath, 'utf8'));
-        if (srcMeta.linkUrl)   written.linkUrl   = srcMeta.linkUrl;
-        if (srcMeta.linkLabel) written.linkLabel = srcMeta.linkLabel;
+        written.demoUrl = srcMeta.demoUrl;
         fs.writeFileSync(newMetaPath, JSON.stringify(written, null, 2));
       } catch {}
     }
@@ -454,6 +455,14 @@ const _ENTRY_TO_SOURCE_FIELD_MAP = {
   vendorWebsite: 'vendorWebsite',
   purchased: 'purchased',
   acquisitionDate: 'acquisitionDate',
+  // linkUrl — "where to get this font" — is a per-source property
+  // (one purchase / download page per bundle, shared across every
+  // font from the source). Lives on source meta; projected onto
+  // entries the same way author / website / purchased do, so the
+  // entry detail UI can edit it without knowing where it physically
+  // lives. demoUrl stays purely entry-level since each font in a
+  // bundle can have its own demo.
+  linkUrl: 'linkUrl',
 };
 const _ENTRY_FIELDS_ON_SOURCE = new Set(Object.keys(_ENTRY_TO_SOURCE_FIELD_MAP));
 
@@ -465,6 +474,7 @@ function _projectSourceFieldsOntoEntry(entryMeta, sourceMeta) {
   entryMeta.vendorWebsite = sourceMeta.vendorWebsite || '';
   entryMeta.purchased = sourceMeta.purchased === true;
   entryMeta.acquisitionDate = sourceMeta.acquisitionDate || '';
+  entryMeta.linkUrl = sourceMeta.linkUrl || '';
   // Expose the auto-detected flag so the renderer can show a "verified"
   // badge or de-emphasize when the user later confirms a heuristic match.
   entryMeta.vendorAutoDetected = sourceMeta.vendorAutoDetected === true;
