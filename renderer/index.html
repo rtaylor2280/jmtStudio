@@ -2452,7 +2452,6 @@
   .sf-merge-row-rename label { color: var(--c-text-sub); flex-shrink: 0; }
   .sf-merge-row-rename input { background: var(--c-bg-inset); border: 1px solid var(--c-border-strong); border-radius: 3px; padding: 2px 6px; color: var(--c-text); font-size: 0.7rem; flex: 1; min-width: 0; font-family: inherit; }
   .sf-merge-row-rename input:focus { border-color: var(--jmt-blue); outline: none; }
-  .sf-import-progress-tip { font-size: 0.74rem; color: var(--c-text-sub); font-style: italic; line-height: 1.45; padding: 8px 10px; margin: 14px 0 0 0; background: var(--c-bg-inset); border-left: 2px solid var(--jmt-blue); border-radius: 2px; }
   .sf-import-review-section { margin-bottom: 16px; }
   .sf-import-review-section h3 { font-size: 0.85rem; color: var(--c-text); margin: 0 0 10px 0; font-weight: 600; }
   .sf-import-review-source-path { font-size: 0.7rem; color: var(--c-text-dim); margin-bottom: 10px; word-break: break-all; font-family: monospace; }
@@ -4047,7 +4046,6 @@
       <div class="sf-import-progress-track"><div class="sf-import-progress-bar" id="sf-import-progress-bar"></div></div>
       <p class="sf-import-progress-detail" id="sf-import-progress-detail"></p>
       <p class="sf-import-progress-detail" id="sf-import-progress-elapsed" style="color:var(--c-text-sub)"></p>
-      <p class="sf-import-progress-tip" id="sf-import-progress-tip" style="display:none">Based on bench tests, folder imports typically run 5-10x slower than zip imports because every file has to be read individually to confirm uniqueness. If you still have the original .zip from the vendor, importing that is much faster. Keeping your purchases zipped is the cleanest way to archive them long-term.</p>
     </div>
 
     <div class="sf-import-phase" id="sf-import-phase-review" style="display:none">
@@ -4767,7 +4765,6 @@
     <div class="sf-import-phase" id="sf-bulk-import-phase-review" style="display:none">
       <p class="sf-import-hint" id="sf-bulk-import-review-summary"></p>
       <div id="sf-bulk-import-review-breakdown" class="sf-bulk-review-breakdown"></div>
-      <p class="sf-import-progress-tip" id="sf-bulk-import-folder-tip" style="display:none;margin-top:10px">Based on bench tests, folder imports typically run 5-10x slower than zip imports because every file inside has to be read individually to confirm each source is unique. If you still have the original vendor .zip files somewhere, importing that folder is much faster. Keeping purchases zipped is the cleanest way to archive them long-term.</p>
       <p class="sf-import-hint" id="sf-bulk-import-review-note" style="color: var(--c-text-muted); margin-top: 10px;">
         Sources already in your library will be skipped automatically. Items missing required fields land with a <span style="color: var(--jmt-amber, #d49b3a)">Needs review</span> flag you can resolve later.
       </p>
@@ -7270,18 +7267,6 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         html += `<div class="br-row" style="margin-top:8px"><span class="br-label" style="color: var(--jmt-amber)">Scan halted at depth ${6} — nothing found yet. Pick a closer folder if you have more nested fonts.</span></div>`;
       }
       els.reviewBreakdown.innerHTML = html;
-      // Folder-import slowness hint: surfaces when folder-solo sources
-      // dominate the plan (>= 50% AND >= 5 absolute). Same rationale as
-      // the single-source flow's tip — folder imports stream every file
-      // through the hash so the user has a real-world reason for the
-      // wait. Hidden for zip-majority plans where the hash is much
-      // faster.
-      const folderTip = document.getElementById('sf-bulk-import-folder-tip');
-      if (folderTip) {
-        const folderCount = byKind['folder-solo'] || 0;
-        const folderDominant = folderCount >= 5 && folderCount >= total / 2;
-        folderTip.style.display = folderDominant ? '' : 'none';
-      }
       els.startBtn.disabled = false;
     }
     showPhase('review');
@@ -15158,7 +15143,6 @@ require(['vs/editor/editor.main'], function () {
         progBar:     document.getElementById('sf-import-progress-bar'),
         progDetail:  document.getElementById('sf-import-progress-detail'),
         progElapsed: document.getElementById('sf-import-progress-elapsed'),
-        progTip:     document.getElementById('sf-import-progress-tip'),
         createLabel: document.getElementById('sf-create-progress-label'),
         createBar:   document.getElementById('sf-create-progress-bar'),
         createDetail:document.getElementById('sf-create-progress-detail'),
@@ -15661,13 +15645,6 @@ require(['vs/editor/editor.main'], function () {
         if (_sfImportEls.progBar) _sfImportEls.progBar.style.width = '0%';
         if (_sfImportEls.progDetail) _sfImportEls.progDetail.textContent = '';
         if (_sfImportEls.progElapsed) _sfImportEls.progElapsed.textContent = '';
-        // Folder imports stream every file's content through the hash, which
-        // is noticeably slow on multi-GB sources. Surface the zip-is-faster
-        // hint only in that case.
-        if (_sfImportEls.progTip) {
-          const isZip = /\.zip$/i.test(sourcePath);
-          _sfImportEls.progTip.style.display = isZip ? 'none' : '';
-        }
         // Elapsed clock: same "no estimates, elapsed only" pattern as the
         // bulk import and backup export flows. Independent 1s tick so the
         // display moves even during a phase that doesn't emit byte ticks.
@@ -20676,7 +20653,6 @@ require(['vs/editor/editor.main'], function () {
         if (_sfImportEls.progLabel) _sfImportEls.progLabel.textContent = 'Reading source…';
         if (_sfImportEls.progBar) _sfImportEls.progBar.style.width = '50%';
         if (_sfImportEls.progDetail) _sfImportEls.progDetail.textContent = '';
-        if (_sfImportEls.progTip) _sfImportEls.progTip.style.display = 'none';
         if (opts.swapFromModalId) {
           document.getElementById(opts.swapFromModalId)?.classList.remove('active');
         }
@@ -20715,7 +20691,6 @@ require(['vs/editor/editor.main'], function () {
         if (_sfImportEls.progLabel) _sfImportEls.progLabel.textContent = 'Reading source…';
         if (_sfImportEls.progBar) _sfImportEls.progBar.style.width = '50%';
         if (_sfImportEls.progDetail) _sfImportEls.progDetail.textContent = '';
-        if (_sfImportEls.progTip) _sfImportEls.progTip.style.display = 'none';
         if (opts.swapFromModalId) {
           document.getElementById(opts.swapFromModalId)?.classList.remove('active');
         }
