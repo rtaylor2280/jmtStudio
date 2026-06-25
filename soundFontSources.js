@@ -91,6 +91,109 @@ async function copyFileStreamed(srcPath, destPath, onProgress) {
   });
 }
 
+// Zip-on-folder-import optimization (zips a folder into source.zip during
+// import, then operates on it as a zip source for the rest of its life).
+//
+// Why: folder imports used to do TWO file-by-file walks of the source —
+// once to hash for dedup (hashFolder), once to copy file-by-file
+// (copyFolderRecursive). Bench data from 2026-06-23: 143 folder-solo
+// sources at 6.64 GB took 58m32s vs 130 zip-majority sources at ~30 GB
+// taking 10m17s, an asymmetric ~5x per-source / ~26x per-GB cost from
+// the second walk alone. This helper collapses the work into one pass:
+// walk the folder once (sorted, noise-filtered), pipe each file through
+// archiver, hash the resulting zip bytes as they stream out to disk.
+//
+// Determinism — the resulting source.zip must be byte-identical across
+// re-imports of the same content for the dedup hash to land in the same
+// spot. Three rules:
+//   1. Files added in lexicographic relative-path order (walkFolderSorted).
+//   2. Per-file mtime forced to epoch and mode forced to 0o644 so OS
+//      metadata (file-system mtimes, varying permissions) can't leak
+//      into the zip and break dedup across machines / sync states.
+//   3. Compression level 1 (fast deterministic deflate) — audio doesn't
+//      compress much anyway and level 1 saves real seconds on multi-GB
+//      voicepacks.
+// Noise files (__MACOSX, .DS_Store, ._*, Thumbs.db, desktop.ini) are
+// filtered the same way they are at extractTo time so the stored zip
+// contains clean content.
+//
+// Hash-while-writing — a Transform between archive.pipe and the file
+// write stream taps every output chunk into a sha256 update. The hash
+// is the source identity hash by the time the write stream's 'close'
+// event fires, so we get dedup-grade content identity for free as part
+// of the import work, with no separate read pass.
+//
+// Compat — old format=folder sources continue to work; openSource()
+// dispatches on meta.format, and existing folder-format sources have
+// their `source/` tree intact. Only NEW folder picks get the zip
+// transform; re-importing a folder that's already in the library as
+// format=folder will not find the prior import via findByHash (the old
+// hash was an aggregate of per-file hashes, the new one is a hash of
+// the zip stream — different shape). Acceptable edge case for the
+// one-time format transition.
+async function zipFolderToFile(srcDir, destZipPath, onProgress) {
+  const archiver = require('archiver');
+  const { Transform } = require('stream');
+
+  const files = walkFolderSorted(srcDir).filter(f => !_isNoisePath(f.relPath));
+  const totalBytes = files.reduce((s, f) => s + f.size, 0);
+  const fileCount = files.length;
+
+  const archive = archiver('zip', {
+    zlib: { level: 1 },
+    forceZip64: true,
+  });
+
+  const hasher = crypto.createHash('sha256');
+  const hashTap = new Transform({
+    transform(chunk, _encoding, callback) {
+      hasher.update(chunk);
+      this.push(chunk);
+      callback();
+    },
+  });
+  const fileStream = fs.createWriteStream(destZipPath);
+  archive.pipe(hashTap).pipe(fileStream);
+
+  const EPOCH = new Date(0);
+  const MODE = 0o644;
+
+  let bytesProcessed = 0;
+  let filesProcessed = 0;
+  let lastEmit = Date.now();
+  archive.on('entry', (entry) => {
+    filesProcessed++;
+    if (entry.stats && entry.stats.size) bytesProcessed += entry.stats.size;
+    if (!onProgress) return;
+    const now = Date.now();
+    if (now - lastEmit > 100 || filesProcessed === fileCount) {
+      onProgress({ bytesProcessed, totalBytes, currentFile: entry.name });
+      lastEmit = now;
+    }
+  });
+
+  // Add files in pre-sorted order. archiver's internal queue is FIFO so
+  // submission order = on-disk order = deterministic zip bytes.
+  for (const f of files) {
+    archive.file(f.absPath, { name: f.relPath, date: EPOCH, mode: MODE });
+  }
+
+  await new Promise((resolve, reject) => {
+    fileStream.on('close', resolve);
+    fileStream.on('error', reject);
+    archive.on('error', reject);
+    archive.on('warning', (err) => {
+      // ENOENT during walk just means a file vanished between readdir
+      // and read — rare but not fatal; surface anything else.
+      if (err.code === 'ENOENT') return;
+      reject(err);
+    });
+    archive.finalize();
+  });
+
+  return { hash: hasher.digest('hex'), totalBytes, fileCount };
+}
+
 // Walk a folder tree, return an array of {relPath, absPath, size} sorted
 // deterministically by forward-slash relative path. Used by both the hash
 // pass and the import-copy pass so they see the same files in the same order.
@@ -345,10 +448,16 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
     return { ok: false, error: 'Source must be a folder or a .zip file' };
   }
 
-  const format = isZip ? 'zip' : 'folder';
+  // Folder-picked sources get zip-transformed on import (see
+  // zipFolderToFile above for the why). format flips to 'zip' even
+  // when the user picked a folder, so the rest of the source layer
+  // (openSource, listSourceFiles, browse paths) treats it uniformly
+  // as a zip source for the rest of its lifetime. originalName still
+  // preserves the folder basename so the user-facing label is honest
+  // about what they imported.
+  const format = 'zip';
   const name = originalName || path.basename(sourcePath);
 
-  // Phase 1: hash the source. For folders we also collect totalBytes/fileCount.
   const emit = (stage, payload) => {
     if (onProgress) onProgress({ stage, ...payload });
   };
@@ -359,8 +468,11 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
   let totalBytes = 0;
   let fileCount = 0;
 
-  try {
-    if (isZip) {
+  // Zip-format input: hash THEN dedup THEN copy, like before. Dedup
+  // can short-circuit cleanly before we write anything because the
+  // input is already a single file we can stream-hash in place.
+  if (isZip) {
+    try {
       hash = await hashZipFile(sourcePath, ({ bytesHashed, totalBytes: tb }) => {
         emit('hashing', {
           percent: tb > 0 ? Math.floor((bytesHashed / tb) * 100) : 0,
@@ -371,37 +483,18 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
       fileSize = stat.size;
       totalBytes = stat.size;
       fileCount = 1;
-    } else {
-      const r = await hashFolder(sourcePath, ({ bytesHashed, totalBytes: tb, currentFile }) => {
-        emit('hashing', {
-          percent: tb > 0 ? Math.floor((bytesHashed / tb) * 100) : 0,
-          bytes: bytesHashed,
-          totalBytes: tb,
-          currentFile,
-        });
-      });
-      hash = r.hash;
-      totalBytes = r.totalBytes;
-      fileCount = r.fileCount;
-      fileSize = r.totalBytes;
+    } catch (err) {
+      return { ok: false, error: `Hash failed: ${err.message}` };
     }
-  } catch (err) {
-    return { ok: false, error: `Hash failed: ${err.message}` };
-  }
-
-  // Phase 2: dedup check. If hash matches an existing source, short-circuit
-  // unless the caller is explicitly asking to re-import as a new source
-  // (Q1's "Re-import as new" branch in the renderer flow).
-  if (!forceNewSource) {
-    const existing = findByHash(userData, hash);
-    if (existing) {
-      emit('done', { isDuplicate: true });
-      return { ok: true, isDuplicate: true, uuid: existing.uuid, hash, format };
+    if (!forceNewSource) {
+      const existing = findByHash(userData, hash);
+      if (existing) {
+        emit('done', { isDuplicate: true });
+        return { ok: true, isDuplicate: true, uuid: existing.uuid, hash, format };
+      }
     }
   }
 
-  // Phase 3: copy source into storage under a new UUID. On any error during
-  // copy, the partial UUID dir is cleaned up so the library stays consistent.
   ensureSourcesRoot(userData);
   const uuid = crypto.randomUUID();
   const uuidDir = path.join(sourcesRoot(userData), uuid);
@@ -420,17 +513,35 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
         });
       });
     } else {
-      const destFolder = path.join(uuidDir, 'source');
-      let copied = 0;
-      emit('copying', { percent: 0, total: fileCount });
-      await copyFolderRecursive(sourcePath, destFolder, (_srcFile) => {
-        copied++;
-        emit('copying', {
-          percent: fileCount > 0 ? Math.floor((copied / fileCount) * 100) : 0,
-          current: copied,
-          total: fileCount,
+      // Folder-format input: zip directly into the uuid dir in one pass.
+      // The hash is the sha256 of the produced zip's bytes (tapped via
+      // a Transform between archiver and the file write stream). Dedup
+      // happens AFTER the write rather than before because the hash
+      // doesn't exist until the zip pass completes; on a dup hit we
+      // clean up the just-written zip via cleanupPartialSource below.
+      // Same total I/O as the old two-walk shape (one pass instead of
+      // two) so there's no extra cost paid for the post-write dedup.
+      const destZip = path.join(uuidDir, 'source.zip');
+      const result = await zipFolderToFile(sourcePath, destZip, ({ bytesProcessed, totalBytes: tb, currentFile }) => {
+        emit('hashing', {
+          percent: tb > 0 ? Math.floor((bytesProcessed / tb) * 100) : 0,
+          bytes: bytesProcessed,
+          totalBytes: tb,
+          currentFile,
         });
       });
+      hash = result.hash;
+      totalBytes = result.totalBytes;
+      fileCount = result.fileCount;
+      fileSize = fs.statSync(destZip).size;
+      if (!forceNewSource) {
+        const existing = findByHash(userData, hash);
+        if (existing) {
+          cleanupPartialSource(uuidDir);
+          emit('done', { isDuplicate: true });
+          return { ok: true, isDuplicate: true, uuid: existing.uuid, hash, format };
+        }
+      }
     }
 
     // Capture the original archive's modification date as the default
