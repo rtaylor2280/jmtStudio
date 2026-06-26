@@ -26715,7 +26715,12 @@ require(['vs/editor/editor.main'], function () {
           for (const n of files) {
             const item = document.createElement('div');
             item.className = 'preset-lib-combo-item';
-            item.textContent = `${dropdownState.font}/${n.path}`;
+            // Display matches the sibling-folder render — bare name only.
+            // The header above already states the current path
+            // ("Father_ROTJ/" or "Father_ROTJ/swingh/"), so repeating the
+            // font prefix on every file row was redundant noise. The
+            // committed value still carries the full font-relative path.
+            item.textContent = n.name;
             item.addEventListener('mousedown', (e) => {
               e.preventDefault();
               const full = `${dropdownState.font}/${n.path}`;
