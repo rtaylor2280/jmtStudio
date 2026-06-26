@@ -283,7 +283,7 @@ function restructureToGrouped(userData, entryName) {
     }
   }
   if (moved.length) {
-    try { require('./soundFontEntries').markEntryContentDirty(userData, entryName); } catch {}
+    try { const _e = require('./soundFontEntries'); _e.markEntryContentDirty(userData, entryName); _e.markEntryEffectsDirty(userData, entryName); } catch {}
   }
   return { ok: true, moved };
 }
@@ -326,7 +326,7 @@ function restructureToFlat(userData, entryName) {
     try { fs.rmdirSync(path.join(root, b.subfolderName)); } catch {}
   }
   if (moved.length) {
-    try { require('./soundFontEntries').markEntryContentDirty(userData, entryName); } catch {}
+    try { const _e = require('./soundFontEntries'); _e.markEntryContentDirty(userData, entryName); _e.markEntryEffectsDirty(userData, entryName); } catch {}
   }
   return { ok: true, moved };
 }
@@ -386,7 +386,7 @@ function applyReorder(userData, entryName, bucketId, orderedPaths) {
   }
   _atomicRenameBatch(workingDir, pairs);
   if (pairs.length) {
-    try { require('./soundFontEntries').markEntryContentDirty(userData, entryName); } catch {}
+    try { const _e = require('./soundFontEntries'); _e.markEntryContentDirty(userData, entryName); _e.markEntryEffectsDirty(userData, entryName); } catch {}
   }
   return {
     ok: true,
@@ -465,7 +465,7 @@ function renumberFolder(userData, entryName, subPath) {
     for (const p of pairs) renamed.push(p);
   }
   if (renamed.length) {
-    try { require('./soundFontEntries').markEntryContentDirty(userData, entryName); } catch {}
+    try { const _e = require('./soundFontEntries'); _e.markEntryContentDirty(userData, entryName); _e.markEntryEffectsDirty(userData, entryName); } catch {}
   }
   return { ok: true, renamed };
 }
@@ -621,7 +621,7 @@ function findReplaceInEntry(userData, entryName, find, replace, opts = {}) {
     for (const p of ok) renamed.push(p);
   }
   if (renamed.length) {
-    try { require('./soundFontEntries').markEntryContentDirty(userData, entryName); } catch {}
+    try { const _e = require('./soundFontEntries'); _e.markEntryContentDirty(userData, entryName); _e.markEntryEffectsDirty(userData, entryName); } catch {}
   }
   return { ok: true, renamed };
 }

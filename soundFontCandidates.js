@@ -1,4 +1,16 @@
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+const StreamZip = require('node-stream-zip');
 const { cleanSuggestedName, deriveBundlePrefix } = require('./soundFontNameClean');
+
+// Composite-path separator that encodes "inside an inner zip." When a
+// candidate's path contains this character, the part before it is the
+// inner zip name (within the outer source), and the part after is the
+// subtree prefix inside the inner zip's contents. _extractNestedZipToDir
+// reads this to extract exactly the right slice instead of dumping the
+// whole inner zip and post-processing.
+const INNER_ZIP_SEP = '!';
 
 // Sound Fonts — candidate detection (Phase 1, slice 4).
 //
@@ -55,20 +67,94 @@ function isProffieBoardName(name) {
 
 // ── Proffie font shape detection ────────────────────────
 
-// Canonical Proffie effect names. Used both as subfolder names (hum/,
-// swingh/, blst/) and as file-name prefixes for flat-layout fonts
-// (hum01.wav, swingh1.wav, blst1.wav). tracks/quote/quotes are excluded:
-// they're auxiliary content (menu music, movie quotes) bundled alongside
-// a font but never a font on their own. Utility-font effects (altchng,
-// trloop, ccchange, choosefont) are included so minimal alt-driven fonts
-// like Fett263's HeMan still register.
+// ── Effect vocabulary ──────────────────────────────────────
+//
+// EFFECT_NAMES is the canonical set of Proffie effect names this app
+// recognizes. Used as subfolder names (hum/, swingh/, blst/) and as
+// file-name prefixes for flat-layout fonts (hum01.wav, swingh1.wav,
+// blst1.wav). Drives both the looksLikeProffieFont gating and the
+// per-entry effects array that renders the entry-detail chip row.
+//
+// Source: empirically curated against the real-world Proffie ecosystem
+// (Fett263, Kyberphonic, Greyscale, BKSaberSounds, JayDalorian, etc.).
+// Utility-font effects (altchng, trloop, ccchange, choosefont) are
+// included so minimal alt-driven fonts like Fett263's HeMan still
+// register. Auxiliary content (tracks/, quote/, quotes/, common/) is
+// excluded — these are bundled alongside fonts but are not effects in
+// the ProffieOS sense.
+//
+// Maintenance discipline (do this when surfaces start mentioning effects
+// we don't recognize):
+//   1. Diff-check against the canonical ProffieOS sources:
+//      - Fredrik Hubbe's docs: https://fredrik.hubbe.net/lightsaber/sound.html
+//      - ProffieOS source: the Effect class registrations (search for
+//        EFFECT() macro usages in proffieboard/sound/effect.h or
+//        equivalent).
+//   2. Monitor the unknownEffects array surfaced by entry meta after
+//      backfill. When an unknown name shows up repeatedly across user
+//      libraries, that's organic feedback that it should be promoted
+//      to EFFECT_NAMES.
+//   3. When adding here, also update _SF_KNOWN_EFFECTS in
+//      renderer/index.html (the renderer mirrors this list because it
+//      computes "missing" client-side; an IPC bridge is overkill until
+//      the list starts churning).
+//
+// Safety net for delayed maintenance: the unknown-effect detection in
+// _collectRootEffectTypesWithUnknown surfaces any "looks like an effect
+// dir" folder (numbered .wav children) that isn't in EFFECT_NAMES.
+// Those render as gray chips in the entry detail so users see the
+// effect even if our vocabulary is behind. Missing chips stay against
+// the known set only (we can't predict what's not there if we don't
+// know the universe).
 const EFFECT_NAMES = new Set([
   'boot', 'hum', 'swingh', 'swingl', 'swing', 'clsh', 'blst', 'lock', 'force',
   'in', 'out', 'font', 'lb', 'bgnlb', 'endlb', 'bgnlock', 'endlock', 'melt',
   'bgnmelt', 'endmelt', 'drag', 'bgndrag', 'enddrag', 'swng', 'spin', 'stab',
   'preon', 'pwroff', 'pstoff',
+  // 2026-06-26 promotions from the unknown-effect safety-net (color
+  // landed in 64 of 186 entries, lowbatt in 53; both are legit Proffie
+  // effects ProffieOS recognizes at runtime).
+  'color', 'lowbatt',
   'altchng', 'trloop', 'ccchange', 'choosefont',
 ]);
+
+// Folders we explicitly skip when looking for "is this an effect dir?"
+// because they're known non-effect content. Comparing lowercase.
+//   - tracks/track: menu music / blade music (both pluralizations seen)
+//   - quote, quotes: movie quote samples
+//   - common: Proffie SD-card convention for shared sounds (lives at
+//     SD root in deployment but vendors sometimes ship inside font)
+//   - __macosx: Mac OS zip metadata artifact
+//   - _extras, extras, extra, bonus: vendor-pack auxiliary content
+//   - proffie/asteria/cfx/cfx-ghv3/ghv3/verso/xeno3/xenopixel/
+//     goldenharvest: board-format wrapper folders. These should never
+//     appear at the entry root in a properly-imported font; when they
+//     do it's the architecture issue tracked in backlog (nested-zip
+//     extraction not stripping the wrapper). Excluding here keeps the
+//     unknown-effect surface clean of those false positives.
+const EFFECT_DIR_EXCLUSIONS = new Set([
+  'tracks', 'track', 'quote', 'quotes', 'common', '__macosx',
+  '_extras', 'extras', 'extra', 'bonus',
+  'proffie', 'proffieboard', 'asteria', 'cfx', 'cfx-ghv3', 'cfxghv3',
+  'ghv3', 'verso', 'xeno3', 'xenopixel', 'xeno', 'goldenharvest',
+]);
+
+// "Does this folder look like an effect dir?" Conservative heuristic:
+// only true when the folder name is not on the exclusion list AND it
+// contains at least one .wav file (numbered or flat). Empty folders
+// and folders with random non-audio content don't auto-promote to
+// "effect." Caller supplies the folder's immediate children.
+function looksLikeEffectDir(folderName, childDirents) {
+  if (!folderName) return false;
+  const lower = String(folderName).toLowerCase();
+  if (EFFECT_DIR_EXCLUSIONS.has(lower)) return false;
+  if (lower.startsWith('.')) return false; // hidden dirs
+  if (!Array.isArray(childDirents)) return false;
+  for (const c of childDirents) {
+    if (c && !c.isDir && /\.wav$/i.test(String(c.name || c.fileName || ''))) return true;
+  }
+  return false;
+}
 
 // Minimum distinct effect types a folder must have (counting alt expansion)
 // to register as a Proffie font. Empirically verified across 69 sources:
@@ -612,6 +698,54 @@ function _markVersionPreferences(candidates) {
   return out;
 }
 
+// Descend into an inner zip and run the same candidate walker against
+// its contents. Returns the sub-candidates found, with their paths
+// rewritten to the composite form "<innerZipName>!<subPath>" so
+// extraction knows which inner zip to open and which slice to pull.
+//
+// If the inner zip's contents don't pass looksLikeProffieFont at any
+// level, this returns an empty array — the user never sees a non-font
+// surfaced as a font. That's the invariant that makes nested-zip
+// imports honest: each inner zip is its own source, gated by the same
+// detection rules as everything else.
+async function _walkInnerZipCandidates(source, innerZipName, fallbackName) {
+  const bytes = await source.readFile(innerZipName);
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jmt-sf-detect-'));
+  const tmpZip = path.join(tmpDir, 'inner.zip');
+  try {
+    fs.writeFileSync(tmpZip, bytes);
+    const zip = new StreamZip.async({ file: tmpZip, skipEntryNameValidation: true });
+    try {
+      const entryMap = await zip.entries();
+      // Reshape the inner zip entries into the form groupByParent
+      // expects (fileName, isDir, size). groupByParent already filters
+      // noise segments (__MACOSX, .DS_Store, ._*) during grouping, so
+      // we don't need to pre-filter here.
+      const entries = [];
+      for (const k of Object.keys(entryMap)) {
+        const e = entryMap[k];
+        if (!e.name || e.name === '/') continue;
+        entries.push({ fileName: e.name, isDir: !!e.isDirectory, size: e.size || 0 });
+      }
+      const byParent = groupByParent(entries);
+      const subCandidates = [];
+      walkForCandidates(byParent, '', subCandidates, fallbackName);
+      // Rewrite each sub-candidate's path to the composite form. They
+      // remain nested:true so the extractor knows to open the inner
+      // zip rather than read directly from the source.
+      for (const sc of subCandidates) {
+        sc.path = innerZipName + INNER_ZIP_SEP + sc.path;
+        sc.nested = true;
+      }
+      return subCandidates;
+    } finally {
+      await zip.close();
+    }
+  } finally {
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+  }
+}
+
 async function detectCandidates(source) {
   if (!source || typeof source.listAll !== 'function') {
     return { candidates: [] };
@@ -623,6 +757,39 @@ async function detectCandidates(source) {
     ? source.meta.originalName.replace(/\.zip$/i, '')
     : 'source';
   walkForCandidates(byParent, '', rawCandidates, sourceFallbackName);
+  // Nested-zip descent. Any candidate the top-level walker emitted with
+  // nested:true is a placeholder for an inner zip whose contents we
+  // haven't actually examined. Open each one and rerun the full walker
+  // against its contents. The result REPLACES the placeholder: an
+  // inner zip might produce 0, 1, or many real candidates. Zero means
+  // the inner zip isn't a Proffie font — the placeholder gets dropped
+  // silently and the user never sees a phantom entry. This is the
+  // invariant Ryan called out: never serve something as a font unless
+  // it looks like one at the level we're pointing at.
+  const expanded = [];
+  const canReadInnerZips = typeof source.readFile === 'function';
+  for (const c of rawCandidates) {
+    if (!c.nested) { expanded.push(c); continue; }
+    // If the source doesn't expose readFile (test mocks synthesize
+    // sources from listAll only), the descent can't run — keep the
+    // placeholder candidate so test fixtures don't regress. Real
+    // import flows always have readFile.
+    if (!canReadInnerZips) { expanded.push(c); continue; }
+    try {
+      // The inner zip's own basename (minus .zip) is the natural fallback
+      // name if its internal walker can't pick a better one.
+      const fallback = String(c.name || c.path || 'font').replace(/\.zip$/i, '');
+      const inner = await _walkInnerZipCandidates(source, c.path, fallback);
+      for (const sc of inner) expanded.push(sc);
+    } catch (err) {
+      // Couldn't open / walk this inner zip — drop the placeholder
+      // rather than emit a known-broken entry. Log so the failure is
+      // visible at the import level.
+      console.warn(`[candidates] inner-zip descent failed for ${c.path}: ${err && err.message || err}`);
+    }
+  }
+  rawCandidates.length = 0;
+  for (const c of expanded) rawCandidates.push(c);
   // Multi-version sibling marking runs BEFORE name cleaning so the
   // sibling-detection regex sees the original `X_V1` / `X_V2` shape
   // (cleaning would strip the version and merge them via name
@@ -666,4 +833,12 @@ module.exports = {
   // exported for testing / introspection
   identifyBoard,
   looksLikeProffieFont,
+  // Effect-detection primitives — used by the persistent effects field
+  // on entry meta (computed at import + recomputed when entry contents
+  // mutate). soundFontEntries.computeEntryEffects walks the extracted
+  // entry dir using these.
+  EFFECT_NAMES,
+  EFFECT_DIR_EXCLUSIONS,
+  effectStemFromFile,
+  looksLikeEffectDir,
 };

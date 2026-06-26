@@ -1287,14 +1287,18 @@ ipcMain.handle('entries:existsAt', (_, { name, destDir } = {}) => {
   }
 });
 
-// Resolve a flagged entry's content hash — called from the renderer when
-// the user leaves the entry detail view. No-op when not flagged dirty;
-// otherwise rehashes once and clears the flag. Many ops collapse into
-// one rehash this way instead of rehashing per op.
+// Resolve a flagged entry's content hash AND effects — called from
+// the renderer when the user leaves the entry detail view. No-op when
+// neither flag is set; otherwise rehashes / re-detects once and clears
+// the flags. Many file ops collapse into one rehash/re-detect this way
+// instead of one per op. Both batches piggyback on a single IPC call
+// because they share the same "user finished editing" moment.
 ipcMain.handle('entries:resolveContentDirty', (_, { name } = {}) => {
   try {
-    const hash = soundFontEntries.resolveEntryContentDirty(app.getPath('userData'), name);
-    return { ok: true, rehashed: hash != null };
+    const userData = app.getPath('userData');
+    const hash = soundFontEntries.resolveEntryContentDirty(userData, name);
+    const effects = soundFontEntries.resolveEntryEffectsDirty(userData, name);
+    return { ok: true, rehashed: hash != null, effectsRecomputed: effects != null };
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };
   }

@@ -41,7 +41,12 @@ function _resolve(userData, kind, id, subPath) {
 function _markLocationDirty(userData, kind, id) {
   try {
     if (kind === 'entry') {
-      require('./soundFontEntries').markEntryContentDirty(userData, id);
+      const entries = require('./soundFontEntries');
+      entries.markEntryContentDirty(userData, id);
+      // Effects share the same op-time→batched-recompute pattern, so
+      // every file-op that flags content-dirty also flags effects-dirty.
+      // Both resolve in one IPC call at modal close.
+      entries.markEntryEffectsDirty(userData, id);
     } else if (kind === 'common') {
       require('./soundFontCommon').markCommonContentDirty(userData, id);
     }

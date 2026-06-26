@@ -74,7 +74,13 @@ function listCommons(userData) {
     if (!meta) continue;
     const files = _walkFiles(path.join(dir, 'files'));
     const totalBytes = files.reduce((s, f) => s + f.size, 0);
-    out.push({ uuid: entry.name, meta, fileCount: files.length, totalBytes });
+    // mmain.wav is the Proffie-convention "main voice" — a common
+    // folder that ships one is auditionable via a quick-play affordance
+    // in the side panel. Cheap check: walk already happened, just look
+    // for the relative path. Case-insensitive in case a maker shipped
+    // MMain.wav or similar.
+    const hasMmain = files.some(f => String(f.rel).toLowerCase() === 'mmain.wav');
+    out.push({ uuid: entry.name, meta, fileCount: files.length, totalBytes, hasMmain });
   }
   out.sort((a, b) => (a.meta.name || '').localeCompare(b.meta.name || ''));
   return out;

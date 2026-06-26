@@ -106,8 +106,47 @@ function _sanitizeEntryName(name) {
 // Spool the bytes of an inner zip from a source to a temp file, open it,
 // extract its contents to destDir. Used for the nested-zip candidate case
 // (Greyscale Proffie.zip, Power_Of_Many's per-character zips).
+// Filesystem-metadata noise that hitchhikes inside zips and should
+// never land on disk. Mirrors soundFontSources._isNoisePath which the
+// non-nested extractTo already applies; the nested extractor needs
+// its own copy because the source-side helper isn't exported.
+//   __MACOSX/   — Mac Finder AppleDouble sidecar tree
+//   .DS_Store  — Mac Finder per-folder metadata
+//   ._<name>   — Mac AppleDouble companion files (flat alongside their real twin)
+//   Thumbs.db, desktop.ini — Windows Explorer leftovers
+function _isNoisePath(relPath) {
+  const parts = String(relPath || '').split('/').filter(Boolean);
+  for (const seg of parts) {
+    if (seg === '__MACOSX') return true;
+    if (seg === '.DS_Store') return true;
+    if (seg === 'Thumbs.db' || seg === 'desktop.ini') return true;
+    if (seg.startsWith('._')) return true;
+  }
+  return false;
+}
+// Composite-path separator matching soundFontCandidates.INNER_ZIP_SEP.
+// Detection writes paths like "Ahsoka.zip!Ahsoka/Proffie" — left of the
+// separator is the inner zip name within the source, right is the
+// subtree prefix inside that inner zip whose contents we want at the
+// entry root. Extraction trusts detection: no wrapper-stripping, no
+// heuristics, just open the inner zip and pull exactly the slice the
+// candidate points at.
+const _NESTED_INNER_ZIP_SEP = '!';
 async function _extractNestedZipToDir(source, innerZipPath, destDir, onProgress) {
-  const buf = await source.readFile(innerZipPath);
+  // Parse the composite path. Older candidates that pre-date the
+  // architecture fix (or any case where detection couldn't identify a
+  // sub-path) extract the whole inner zip — preserved for safety, but
+  // any candidate that goes through detectCandidates today carries a
+  // composite path.
+  let innerZipName = innerZipPath;
+  let subTreePrefix = '';
+  const sepIdx = innerZipPath.indexOf(_NESTED_INNER_ZIP_SEP);
+  if (sepIdx !== -1) {
+    innerZipName = innerZipPath.slice(0, sepIdx);
+    const rawSub = innerZipPath.slice(sepIdx + 1);
+    subTreePrefix = rawSub && !rawSub.endsWith('/') ? rawSub + '/' : rawSub;
+  }
+  const buf = await source.readFile(innerZipName);
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jmt-sf-nested-'));
   const tmpZip = path.join(tmpDir, 'nested.zip');
   try {
@@ -119,31 +158,12 @@ async function _extractNestedZipToDir(source, innerZipPath, destDir, onProgress)
       let fileCount = 0;
       let totalBytes = 0;
       const keys = Object.keys(entryMap).sort();
-      // Wrapper-strip detection: if every meaningful entry inside the inner
-      // zip shares a single top-level folder prefix (Greyscale's Proffie.zip
-      // wraps everything under "Proffie/"), strip it so the extracted entry
-      // dir has the real Proffie content at root.
-      const meaningfulNames = keys
-        .map(k => entryMap[k].name)
-        .filter(n => n && n !== '/' && !/\/$/.test(n));
-      const topLevels = new Set();
-      for (const n of meaningfulNames) {
-        const slash = n.indexOf('/');
-        topLevels.add(slash === -1 ? n : n.slice(0, slash));
-      }
-      let stripPrefix = '';
-      if (topLevels.size === 1) {
-        const only = [...topLevels][0];
-        // Confirm it's a folder (something lives under it).
-        if (meaningfulNames.some(n => n.startsWith(only + '/'))) {
-          stripPrefix = only + '/';
-        }
-      }
       for (const key of keys) {
         const e = entryMap[key];
         if (!e.name || e.name === '/' || e.isDirectory) continue;
-        if (stripPrefix && !e.name.startsWith(stripPrefix)) continue;
-        const relName = stripPrefix ? e.name.slice(stripPrefix.length) : e.name;
+        if (_isNoisePath(e.name)) continue;
+        if (subTreePrefix && !e.name.startsWith(subTreePrefix)) continue;
+        const relName = subTreePrefix ? e.name.slice(subTreePrefix.length) : e.name;
         if (!relName) continue;
         const destPath = path.join(destDir, relName.replace(/\//g, path.sep));
         const resolved = path.resolve(destPath);
@@ -294,6 +314,23 @@ async function createEntry({ userData, sourceUuid, candidate, name, metadata, on
       addedFromSource: [],
       contentFileCount: result.fileCount,
       contentTotalBytes: result.totalBytes,
+      // Persisted effects fields — Proffie effect types present in
+      // this entry's file tree. `effects` is the canonical-known set
+      // (boot, hum, swingh, etc.), drives the entry-detail blue chips
+      // and the missing-effect rubric. `unknownEffects` is the safety
+      // net for forward-compat: any folder that looks effect-shaped
+      // (has .wav children, not in the exclusion list) but isn't in
+      // EFFECT_NAMES renders as a gray chip so users see the effect
+      // even when our vocabulary lags ProffieOS. Both are maintained
+      // by the markEntryEffectsDirty / resolveEntryEffectsDirty pair
+      // mirroring contentHash's dirty-flag pattern. The vocabulary
+      // maintenance discipline is documented at EFFECT_NAMES in
+      // soundFontCandidates.js.
+      ...(() => {
+        const { effects, unknownEffects } = computeEntryEffects(entryDir);
+        return { effects, unknownEffects };
+      })(),
+      effectsDirty: false,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -964,6 +1001,125 @@ function resolveEntryContentDirty(userData, entryName) {
   return recomputeEntryContentHash(userData, entryName);
 }
 
+// ── Effects detection (persisted on entry meta) ──────────
+// Mirrors the contentHash dirty-flag pattern. computeEntryEffects walks
+// the entry's extracted file tree and returns a sorted array of the
+// Proffie effect types present (boot, hum, swingh, etc.). createEntry
+// stamps it at import time using the same EFFECT_NAMES vocabulary
+// soundFontCandidates.js uses for looksLikeProffieFont gating, so the
+// import-time detection cost is already paid — we just persist the
+// result. markEntryEffectsDirty / resolveEntryEffectsDirty handle the
+// post-import maintenance loop when the user adds/deletes/renames
+// files in the entry.
+
+function computeEntryEffects(entryDir) {
+  const { EFFECT_NAMES, EFFECT_DIR_EXCLUSIONS, effectStemFromFile } = require('./soundFontCandidates');
+  // Two sets are tracked in parallel: `known` is the canonical Proffie
+  // vocabulary that drives "missing" detection, and `unknown` is the
+  // safety-net catch-all for any folder that looks effect-shaped but
+  // isn't in our list. The unknown set is what keeps the app honest
+  // about forward-compat: a future ProffieOS effect lands cleanly as
+  // a gray chip without needing a release here. See the comment block
+  // on EFFECT_NAMES in soundFontCandidates.js for the maintenance
+  // discipline that drains the unknown set back into the known one.
+  const known = new Set();
+  const unknown = new Set();
+  // Walk a single directory level. For each folder: known-name → add
+  // to known set; non-excluded folder name not on the known set →
+  // check its children for a .wav file (the "looks effect-shaped"
+  // heuristic) and add to unknown if so. For each .wav file at this
+  // level: apply the file-stem extractor (which already filters to
+  // EFFECT_NAMES — flat-layout fonts use known names for their root
+  // wavs, so unknown-stem files don't need surfacing).
+  const harvest = (dir) => {
+    let children;
+    try { children = fs.readdirSync(dir, { withFileTypes: true }); }
+    catch { return []; }
+    for (const c of children) {
+      if (c.isDirectory()) {
+        const lower = c.name.toLowerCase();
+        if (EFFECT_NAMES.has(lower)) { known.add(lower); continue; }
+        if (EFFECT_DIR_EXCLUSIONS.has(lower)) continue;
+        if (lower.startsWith('.')) continue;
+        // Alt expansion folders (alt000, alt001, ...) are walked
+        // separately by expandAlt below — they aren't effects in their
+        // own right, they're alt variant containers. Skip them at the
+        // outer harvest so they don't surface as unknown.
+        if (/^alt\d{3}$/.test(lower)) continue;
+        // Heuristic: folder contains at least one .wav child? If so it
+        // walks like an effect dir. Cheap one-level readdir per
+        // unknown folder, only paid for non-canonical names.
+        try {
+          const inner = fs.readdirSync(path.join(dir, c.name), { withFileTypes: true });
+          if (inner.some(g => g.isFile() && /\.wav$/i.test(g.name))) {
+            unknown.add(lower);
+          }
+        } catch {}
+      } else if (c.isFile()) {
+        const stem = effectStemFromFile(c.name);
+        if (stem) known.add(stem);
+      }
+    }
+    return children;
+  };
+  // Alt expansion: peek into the first alt### subfolder. Alts mirror
+  // each other so one is representative of the rest. Effects that live
+  // only inside alts (alt-only hum variants, etc.) get unioned into
+  // the parent's sets so the entry registers what's actually present.
+  const expandAlt = (dir, dirents) => {
+    const altDirent = dirents.find(c => c.isDirectory() && /^alt\d{3}$/i.test(c.name));
+    if (!altDirent) return;
+    harvest(path.join(dir, altDirent.name));
+  };
+  const rootDirents = harvest(entryDir);
+  expandAlt(entryDir, rootDirents);
+  return {
+    effects: Array.from(known).sort(),
+    unknownEffects: Array.from(unknown).sort(),
+  };
+}
+
+function recomputeEntryEffects(userData, entryName) {
+  const root = entriesRoot(userData);
+  const entryDir = path.join(root, entryName);
+  const metaPath = path.join(entryDir, 'meta.json');
+  if (!fs.existsSync(metaPath)) return null;
+  let meta;
+  try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); }
+  catch { return null; }
+  const { effects, unknownEffects } = computeEntryEffects(entryDir);
+  meta.effects = effects;
+  meta.unknownEffects = unknownEffects;
+  meta.effectsDirty = false;
+  try { fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2)); }
+  catch {}
+  return { effects, unknownEffects };
+}
+
+function markEntryEffectsDirty(userData, entryName) {
+  const root = entriesRoot(userData);
+  const metaPath = path.join(root, entryName, 'meta.json');
+  if (!fs.existsSync(metaPath)) return;
+  let meta;
+  try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); }
+  catch { return; }
+  if (meta.effectsDirty) return;
+  meta.effectsDirty = true;
+  try { fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2)); }
+  catch {}
+}
+
+function resolveEntryEffectsDirty(userData, entryName) {
+  const root = entriesRoot(userData);
+  const metaPath = path.join(root, entryName, 'meta.json');
+  if (!fs.existsSync(metaPath)) return null;
+  let meta;
+  try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); }
+  catch { return null; }
+  if (!meta.effectsDirty) return null;
+  return recomputeEntryEffects(userData, entryName);
+}
+
 // Trusted read of the entry's content hash. Stored hash trusted when
 // (a) meta.contentHashDirty is not set AND (b) the cheap-signal walk
 // (fileCount + totalBytes) matches what's stored. Either failing
@@ -1011,4 +1167,8 @@ module.exports = {
   getEntryContentHash,
   markEntryContentDirty,
   resolveEntryContentDirty,
+  computeEntryEffects,
+  recomputeEntryEffects,
+  markEntryEffectsDirty,
+  resolveEntryEffectsDirty,
 };

@@ -2058,6 +2058,16 @@
   .sf-card-tag.active { color: var(--jmt-blue); background: rgba(0,130,255,0.1); border-color: rgba(0,130,255,0.35); }
   .sf-card-tag.purchased { color: var(--jmt-blue); border-color: rgba(0,130,255,0.35); background: rgba(0,130,255,0.08); }
   .sf-card-tag.free { color: #7c5; border-color: rgba(120,200,80,0.35); background: rgba(120,200,80,0.10); }
+  /* On-card effect chips appear only when the Effects filter is active.
+     Mirror the modal's chip language (JMT blue tint, with a gray unknown
+     variant) so the user sees the same affordance on cards and modal. */
+  .sf-card-effects { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 2px; }
+  .sf-card-effect-chip { font-size: 0.63rem; color: var(--jmt-blue); background: rgba(60, 120, 200, 0.10); border: 1px solid rgba(60, 120, 200, 0.30); border-radius: 3px; padding: 1px 5px; white-space: nowrap; cursor: pointer; font-family: inherit; transition: background 0.25s, color 0.25s, border-color 0.25s; }
+  .sf-card-effect-chip:hover { background: rgba(60, 120, 200, 0.22); border-color: var(--jmt-blue); }
+  .sf-card-effect-chip.unknown { color: var(--c-text-sub); background: var(--c-bg-raised); border-color: var(--c-border); }
+  .sf-card-effect-chip.unknown:hover { background: var(--c-bg-elev); border-color: var(--c-border-strong); }
+  .sf-card-effect-chip.playing { color: #fff; background: var(--jmt-blue); border-color: var(--jmt-blue); }
+  .sf-card-effect-chip.unknown.playing { color: var(--c-text); background: var(--c-border-strong); border-color: var(--c-border-strong); }
   /* Multi-select checkbox in the bottom-right corner. Hover-revealed (matches
      the top-right × delete pattern); persists visible when checked. Selected
      cards adopt the same border + background as the hover state so the chosen
@@ -2137,7 +2147,16 @@
   .sf-common-row.is-dimmed > .sf-common-row-header:hover { opacity: 0.85; }
   .sf-common-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
   .sf-common-row-name { font-size: 0.78rem; color: var(--c-text); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .sf-common-row-meta { font-size: 0.66rem; color: var(--c-text-dim); white-space: nowrap; }
+  .sf-common-row-meta { font-size: 0.66rem; color: var(--c-text-dim); white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; }
+  /* mmain.wav quick-play button — inline before the file-count line so
+     it reads as "press play to hear what this voice pack sounds like."
+     Outlined when idle, filled (and a "stop" square glyph) while
+     playing. Click-bubbling is stopped at the handler so the row's
+     expand-toggle is unaffected. Hidden entirely when the common
+     doesn't ship an mmain.wav. */
+  .sf-common-mmain-play { background: transparent; border: 1px solid rgba(60, 120, 200, 0.45); color: var(--jmt-blue); border-radius: 3px; padding: 0 4px; font-size: 0.62rem; line-height: 1.2; cursor: pointer; font-family: inherit; transition: background 0.2s, color 0.2s, border-color 0.2s; }
+  .sf-common-mmain-play:hover { background: rgba(60, 120, 200, 0.18); border-color: var(--jmt-blue); }
+  .sf-common-mmain-play.playing { background: var(--jmt-blue); color: #fff; border-color: var(--jmt-blue); }
   .sf-common-row-chevron { font-size: 0.55rem; color: var(--c-text-dim); flex-shrink: 0; transition: transform 0.15s; }
   .sf-common-row.expanded .sf-common-row-chevron { transform: rotate(90deg); }
   .sf-common-empty { padding: 20px 14px; text-align: center; font-size: 0.78rem; color: var(--c-text-muted); line-height: 1.5; }
@@ -2625,6 +2644,61 @@
   .sf-tag-chip-remove:hover { opacity: 1; color: #e55; }
   .sf-tag-add-input { font-size: 0.72rem; background: transparent; color: var(--c-text); border: none; border-bottom: 1px dashed var(--c-border-strong); outline: none; padding: 0 4px; width: 90px; font-family: inherit; margin-left: auto; }
   .sf-tag-add-input:focus { border-bottom-color: var(--jmt-blue); }
+  /* Effects chips — detected effect types present in the entry's file
+     tree (boot, hum, swingh, etc.). Read-only badges: distinct visual
+     vs. tags (subtle JMT-blue tint matches the existing URL chip family
+     so the user reads them as "structural fact about this font" rather
+     than "categorization the user chose"). No remove button. Click
+     handler hookup lands in the Step 5 audition slice. */
+  .sf-effects-chips { display: flex; flex-wrap: wrap; gap: 3px; align-items: flex-start; }
+  /* The inner span wrapping the chips is a JS-target seam — make it
+     transparent to layout so its chip children become direct flex
+     siblings of the "show missing" toggle. Without this the span is
+     one big flex item that always wraps as a block, pushing the
+     toggle onto its own line. */
+  #sf-detail-effects-chips { display: contents; }
+  .sf-effect-chip { display: inline-flex; align-items: center; font-size: 0.68rem; color: var(--jmt-blue); background: rgba(60, 120, 200, 0.10); border: 1px solid rgba(60, 120, 200, 0.30); border-radius: 3px; padding: 1px 6px; font-family: inherit; order: 1; cursor: pointer; transition: background 0.25s, color 0.25s, border-color 0.25s; }
+  .sf-effect-chip:hover { background: rgba(60, 120, 200, 0.22); border-color: var(--jmt-blue); }
+  /* Playing state: chip flips from outline → filled while the quick-
+     play audio is going. Transition matches the chip's hover speed so
+     the fade-out feels natural when the sound ends or a new chip
+     starts. Same shape for card chips below; unknown chips use the
+     gray-tone equivalent. */
+  .sf-effect-chip.playing { color: #fff; background: var(--jmt-blue); border-color: var(--jmt-blue); }
+  /* Unknown-effect chip: gray-tinted variant of the present chip.
+     Surfaces folders that look effect-shaped (have .wav children, not
+     in the exclusion list) but aren't in EFFECT_NAMES — the forward-
+     compat safety net for ProffieOS additions our vocabulary hasn't
+     caught up with yet. Tooltip hints at the meaning. Same flex order
+     as the known chips so they intermix naturally. */
+  .sf-effect-chip-unknown { display: inline-flex; align-items: center; font-size: 0.68rem; color: var(--c-text-sub); background: var(--c-bg-raised); border: 1px solid var(--c-border); border-radius: 3px; padding: 1px 6px; font-family: inherit; order: 1; cursor: pointer; transition: background 0.25s, color 0.25s, border-color 0.25s; }
+  .sf-effect-chip-unknown:hover { background: var(--c-bg-elev); border-color: var(--c-border-strong); }
+  .sf-effect-chip-unknown.playing { color: var(--c-text); background: var(--c-border-strong); border-color: var(--c-border-strong); }
+  .sf-effects-empty { font-size: 0.72rem; color: var(--c-text-dim); font-style: italic; }
+  /* Effects row uses top-aligned label so when chips wrap to multiple
+     lines the "Effects" label sits at the start of the first row
+     rather than vertically centered against the whole chip block. */
+  #sf-detail-effects-row { align-items: flex-start; }
+  /* Val cell stacks the present-chips row and the missing-chips wrap
+     vertically so the toggle + missing strip live directly under the
+     present effects. */
+  .sf-effects-val { display: flex; flex-direction: column; gap: 0; flex: 1; min-width: 0; }
+  /* "show missing" toggle and the missing-chips span both live INSIDE
+     the same wrap container as the present chips so the blue + toggle
+     + red form one continuous flowing line that wraps naturally.
+     Toggle is smaller than the chips so it reads as a secondary
+     affordance, not another chip. Red tint on the missing chips
+     signals "absence" without reading as error or warning. */
+  .sf-effects-missing-toggle { background: none; border: none; padding: 0 4px; font: inherit; font-size: 0.62rem; color: var(--c-text-dim); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; align-self: center; order: 3; }
+  .sf-effects-missing-toggle:hover { color: var(--c-text-sub); }
+  /* Missing-chips span follows the toggle in the wrap flow; like the
+     present-chips span it uses display:contents so its red chip
+     children become direct flex siblings. is-open controls visibility
+     of the chip children (the chips stay in the DOM either way so the
+     toggle is a cheap class flip, not an innerHTML rebuild). */
+  #sf-detail-effects-missing-chips { display: contents; }
+  #sf-detail-effects-missing-chips:not(.is-open) .sf-effect-chip-missing { display: none; }
+  .sf-effect-chip-missing { display: inline-flex; align-items: center; font-size: 0.68rem; color: #d77; background: rgba(200, 80, 80, 0.08); border: 1px solid rgba(200, 80, 80, 0.30); border-radius: 3px; padding: 1px 6px; font-family: inherit; order: 2; }
   .sf-notes-textarea { width: 100%; min-height: 60px; resize: vertical; background: var(--c-bg-inset); color: var(--c-text); border: 1px solid var(--c-border-input); border-radius: 3px; padding: 6px 8px; font-size: 0.82rem; outline: none; font-family: inherit; box-sizing: border-box; }
   .sf-notes-textarea:focus { border-color: var(--jmt-blue); }
   /* Included files — vendor-supplied docs at the source level (readmes,
@@ -2845,6 +2919,18 @@
   #btn-sf-needs-review-filter #sf-needs-review-count { background: var(--jmt-amber); }
   .styles-active-filter-chip.sf-active-filter-needs-review { color: var(--jmt-amber); background: rgba(212,155,58,0.10); border-color: rgba(212,155,58,0.5); }
   .styles-active-filter-chip.sf-active-filter-needs-review .styles-active-filter-remove { color: var(--jmt-amber); }
+  /* Active-filter chip for missing-effect filters — red tint so the
+     "no preon" reads visually distinct from the present "preon" chip.
+     Matches the red of the entry-detail missing chip language. */
+  .styles-active-filter-chip.sf-active-filter-effect-missing { color: #d77; background: rgba(200, 80, 80, 0.08); border-color: rgba(200, 80, 80, 0.45); }
+  .styles-active-filter-chip.sf-active-filter-effect-missing .styles-active-filter-remove { color: #d77; }
+  /* 3-state Effects dropdown row indicators. .sf-effect-state-present
+     keeps the existing blue selected look; .sf-effect-state-absent
+     swaps to a red tint and a red ✕ glyph so the inverse polarity is
+     instantly readable. */
+  .styles-tag-dropdown-item.sf-effect-state-absent { color: #d77; background: rgba(200, 80, 80, 0.08); }
+  .styles-tag-dropdown-item.sf-effect-state-absent .styles-tag-dropdown-check { color: #d77; }
+  .styles-tag-dropdown-item.sf-effect-state-absent .styles-tag-dropdown-name { color: #d77; }
   .styles-tag-filter-icon { font-size: 0.6rem; opacity: 0.7; }
   .styles-tag-filter-badge { background: var(--jmt-blue); color: #fff; font-size: 0.62rem; font-weight: 600; padding: 0 5px; border-radius: 9px; margin-left: 2px; line-height: 1.4; }
   .styles-tag-dropdown { position: absolute; top: calc(100% + 4px); right: 0; background: var(--c-bg-raised); border: 1px solid var(--c-border-heavy); border-radius: 4px; padding: 4px 0; min-width: 200px; max-width: 280px; max-height: calc(100vh - 160px); overflow-y: auto; z-index: 100; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
@@ -3521,6 +3607,14 @@
             </button>
             <div id="sf-creator-dropdown" class="styles-tag-dropdown" style="display:none">
               <div id="sf-creator-dropdown-list"></div>
+            </div>
+          </div>
+          <div class="styles-tag-filter-wrap">
+            <button id="btn-sf-effects-filter" class="styles-tag-filter-btn" title="Filter by effect">
+              <span class="styles-tag-filter-icon">&#9662;</span> Effects<span id="sf-effects-filter-badge" class="styles-tag-filter-badge" style="display:none">0</span>
+            </button>
+            <div id="sf-effects-dropdown" class="styles-tag-dropdown" style="display:none">
+              <div id="sf-effects-dropdown-list"></div>
             </div>
           </div>
           <button id="btn-sf-needs-review-filter" class="styles-tag-filter-btn" title="Show only entries with missing fields" style="display:none">
@@ -4257,6 +4351,14 @@
         <div class="sf-meta-row">
           <span class="sf-meta-label">Contents</span>
           <span class="sf-meta-val" id="sf-detail-contents"></span>
+        </div>
+        <div class="sf-meta-row" id="sf-detail-effects-row" style="display:none">
+          <span class="sf-meta-label">Effects</span>
+          <div class="sf-meta-val sf-effects-chips" id="sf-detail-effects-chips-row">
+            <span id="sf-detail-effects-chips"></span>
+            <button type="button" class="sf-effects-missing-toggle" id="btn-sf-effects-show-missing">show missing</button>
+            <span id="sf-detail-effects-missing-chips"></span>
+          </div>
         </div>
         <div class="sf-meta-row">
           <span class="sf-meta-label">Tags</span>
@@ -12871,6 +12973,13 @@ require(['vs/editor/editor.main'], function () {
       let _sfSearchQuery = '';
       let _sfActiveFilterTags = new Set();
       let _sfActiveFilterCreators = new Set();
+      let _sfActiveFilterEffects = new Set();
+      // Inverse polarity of the Effects filter — entries that match
+      // these are EXCLUDED from results. Lets the user say "fonts with
+      // melt but missing preon" with one combined facet. Both sets are
+      // toggled via the same dropdown via the 3-state cycle in
+      // _sfToggleFilterEffect: off → present → absent → off.
+      let _sfActiveFilterEffectsMissing = new Set();
       let _sfNeedsReviewFilterOn = false;
       // Sentinel value for the "missing creator" row in the Creators filter
       // dropdown. Stored verbatim in _sfActiveFilterCreators when the user
@@ -12878,6 +12987,21 @@ require(['vs/editor/editor.main'], function () {
       // empty author. Leading paren plus all-lowercase makes a realistic
       // collision with a real creator's name vanishingly improbable.
       const _SF_NO_CREATOR_KEY = '(no creator)';
+      // Canonical Proffie effect vocabulary — mirrors EFFECT_NAMES in
+      // soundFontCandidates.js. Used by the entry-detail "Show missing"
+      // affordance and (later) the Effects filter dropdown. Kept in
+      // sorted form so missing-chips render in a stable order. If a
+      // new effect name lands in soundFontCandidates.EFFECT_NAMES, add
+      // it here too — two-place edit is acceptable for a stable
+      // vocabulary; if the list starts churning we'll wire an IPC
+      // bridge.
+      const _SF_KNOWN_EFFECTS = [
+        'altchng', 'bgndrag', 'bgnlb', 'bgnlock', 'bgnmelt', 'blst', 'boot',
+        'ccchange', 'choosefont', 'clsh', 'color', 'drag', 'enddrag', 'endlb',
+        'endlock', 'endmelt', 'font', 'force', 'hum', 'in', 'lb', 'lock',
+        'lowbatt', 'melt', 'out', 'preon', 'pstoff', 'pwroff', 'spin', 'stab',
+        'swing', 'swingh', 'swingl', 'swng', 'trloop',
+      ];
       // Set of font directory strings currently referenced by presets in the
       // open config. Recomputed on each grid render so editing the config
       // and switching back updates the visual immediately. Empty set when no
@@ -13042,19 +13166,40 @@ require(['vs/editor/editor.main'], function () {
           if (!a) return filterCreatorsLower.includes(_SF_NO_CREATOR_KEY);
           return filterCreatorsLower.includes(a);
         };
+        // Effects filter: bidirectional. Present-set requires the entry
+        // to carry every listed effect (AND); absent-set requires the
+        // entry to LACK every listed effect (AND). Across both,
+        // semantics are still AND — the entry has to satisfy every
+        // condition simultaneously. Includes unknownEffects in the
+        // entry's effective set so the safety-net chips are filterable
+        // in either polarity.
+        const filterEffectsLower = Array.from(_sfActiveFilterEffects).map(e => e.toLowerCase());
+        const filterEffectsMissingLower = Array.from(_sfActiveFilterEffectsMissing).map(e => e.toLowerCase());
+        const matchesEffectsFilter = (f) => {
+          if (filterEffectsLower.length === 0 && filterEffectsMissingLower.length === 0) return true;
+          const effSet = new Set();
+          const known = Array.isArray(f.meta && f.meta.effects) ? f.meta.effects : [];
+          const unknown = Array.isArray(f.meta && f.meta.unknownEffects) ? f.meta.unknownEffects : [];
+          for (const e of known) effSet.add(String(e).toLowerCase());
+          for (const e of unknown) effSet.add(String(e).toLowerCase());
+          for (const e of filterEffectsLower) if (!effSet.has(e)) return false;
+          for (const e of filterEffectsMissingLower) if (effSet.has(e)) return false;
+          return true;
+        };
         const matchesNeedsReviewFilter = (f) => {
           if (!_sfNeedsReviewFilterOn) return true;
           return !!(f.meta && f.meta.needsReview);
         };
         // Selected cards bypass the current filter — they stay visible even
-        // when the search/tag/creator filter would otherwise hide them. The
-        // mental model: selection is a "keep this" override on top of the
-        // filter. Clearing the selection lets the filter take over again.
+        // when the search/tag/creator/effects filter would otherwise hide
+        // them. The mental model: selection is a "keep this" override on
+        // top of the filter. Clearing the selection lets the filter take
+        // over again.
         const matching = sorted.filter(f =>
           _sfSelectedNames.has(f.name) ||
-          (matchesSearch(f) && matchesTagFilter(f) && matchesCreatorFilter(f) && matchesNeedsReviewFilter(f))
+          (matchesSearch(f) && matchesTagFilter(f) && matchesCreatorFilter(f) && matchesEffectsFilter(f) && matchesNeedsReviewFilter(f))
         );
-        const isFiltering = !!q || _sfActiveFilterTags.size > 0 || _sfActiveFilterCreators.size > 0 || _sfNeedsReviewFilterOn;
+        const isFiltering = !!q || _sfActiveFilterTags.size > 0 || _sfActiveFilterCreators.size > 0 || _sfActiveFilterEffects.size > 0 || _sfActiveFilterEffectsMissing.size > 0 || _sfNeedsReviewFilterOn;
         // Needs Review filter button: visible only when at least one entry
         // has the flag. Badge shows the count; button gets the active style
         // when the filter is on.
@@ -13090,6 +13235,7 @@ require(['vs/editor/editor.main'], function () {
           if (countEl) countEl.textContent = `0 of ${sorted.length}`;
           _sfRenderTagDropdown();
           _sfRenderCreatorDropdown();
+          _sfRenderEffectsDropdown();
           _sfRenderActiveFilters();
           return;
         }
@@ -13132,6 +13278,26 @@ require(['vs/editor/editor.main'], function () {
           // free content gets a small badge so the user can spot it at a glance.
           if (meta.purchased === false) tagBits.push('<span class="sf-card-tag free">free</span>');
           const tags = tagBits.length ? `<div class="sf-card-tags">${tagBits.join('')}</div>` : '';
+          // Active-effect-filter chips on the card. Only renders when at
+          // least one effect filter is active; only includes effects
+          // that this entry actually has (matchesEffectsFilter already
+          // guaranteed the entry has ALL active effects, so every chip
+          // here is a real "click to audition this sound on this font").
+          // Same left/right-click semantics as the entry-detail chip
+          // row — handled by delegated listeners below.
+          let cardEffectsHtml = '';
+          if (filterEffectsLower.length > 0) {
+            const eKnown = new Set((Array.isArray(meta.effects) ? meta.effects : []).map(x => String(x).toLowerCase()));
+            const eUnknown = new Set((Array.isArray(meta.unknownEffects) ? meta.unknownEffects : []).map(x => String(x).toLowerCase()));
+            const chips = filterEffectsLower
+              .filter(e => eKnown.has(e) || eUnknown.has(e))
+              .map(e => {
+                const cls = eUnknown.has(e) && !eKnown.has(e) ? 'sf-card-effect-chip unknown' : 'sf-card-effect-chip';
+                return `<button class="${cls}" data-card-effect="${_sfEscape(e)}" title="Click to play; right-click for variants">${_sfEscape(e)}</button>`;
+              })
+              .join('');
+            if (chips) cardEffectsHtml = `<div class="sf-card-effects">${chips}</div>`;
+          }
           // Two inline link buttons sit next to the name: "Demo" (per-font
           // audition link, lives on entry meta) and "Link" (per-source
           // "where to get it" page, lives on source meta and gets projected
@@ -13157,7 +13323,7 @@ require(['vs/editor/editor.main'], function () {
               ${linkBtn}
               ${reviewChip}
             </div>
-            ${author}${desc}${tags}
+            ${author}${desc}${tags}${cardEffectsHtml}
             <button class="sf-card-select-btn" data-card-select="${_sfEscape(f.name)}" title="Select">${checkmark}</button>
           </div>`;
         }).join('');
@@ -13756,12 +13922,22 @@ require(['vs/editor/editor.main'], function () {
           if (isConfigSelected) rowClasses.push('config-selected');
           if (isDimmed) rowClasses.push('is-dimmed');
           if (isMultiSelected) rowClasses.push('multi-selected');
+          // Quick-play affordance: when a common ships mmain.wav at its
+          // root (Proffie convention for the "main voice" of a voice-
+          // pack), surface a small play button inline at the start of
+          // the meta line. Clicking it auditions mmain.wav via
+          // _sfQuickPlay; not expand/collapse. Stop-on-second-click +
+          // stop-previous semantics come for free since it routes
+          // through the same quick-play engine the effect chips use.
+          const mmainBtn = c.hasMmain
+            ? `<button class="sf-common-mmain-play" data-common-mmain="${_sfEscape(c.uuid)}" title="Play mmain.wav">&#9654;</button>`
+            : '';
           return `<div class="${rowClasses.join(' ')}" data-common-uuid="${_sfEscape(c.uuid)}">
             <div class="sf-common-row-header" title="${_sfEscape(headerTitle)}">
               <span class="sf-common-row-chevron">&#9656;</span>
               <div class="sf-common-row-main">
                 <div class="sf-common-row-name">${_sfEscape(c.meta.name || '')}</div>
-                <div class="sf-common-row-meta">${c.fileCount} file${c.fileCount === 1 ? '' : 's'} &middot; ${_sfFmtBytes(c.totalBytes)}</div>
+                <div class="sf-common-row-meta">${mmainBtn}${c.fileCount} file${c.fileCount === 1 ? '' : 's'} &middot; ${_sfFmtBytes(c.totalBytes)}</div>
               </div>
               ${starBtn}
             </div>
@@ -14863,6 +15039,8 @@ require(['vs/editor/editor.main'], function () {
         if (!list) return;
         const q = (_sfSearchQuery || '').toLowerCase();
         const filterCreatorsLower = Array.from(_sfActiveFilterCreators).map(c => c.toLowerCase());
+        const filterEffectsLower = Array.from(_sfActiveFilterEffects).map(e => e.toLowerCase());
+        const filterEffectsMissingLower = Array.from(_sfActiveFilterEffectsMissing).map(e => e.toLowerCase());
         const matchSet = _sfAllEntries.filter(f => {
           if (q && !_sfEntrySearchBlob(f).includes(q)) return false;
           if (filterCreatorsLower.length) {
@@ -14872,6 +15050,15 @@ require(['vs/editor/editor.main'], function () {
             } else if (!filterCreatorsLower.includes(a)) {
               return false;
             }
+          }
+          if (filterEffectsLower.length || filterEffectsMissingLower.length) {
+            const effSet = new Set();
+            const known = Array.isArray(f.meta && f.meta.effects) ? f.meta.effects : [];
+            const unknown = Array.isArray(f.meta && f.meta.unknownEffects) ? f.meta.unknownEffects : [];
+            for (const e of known) effSet.add(String(e).toLowerCase());
+            for (const e of unknown) effSet.add(String(e).toLowerCase());
+            for (const e of filterEffectsLower) if (!effSet.has(e)) return false;
+            for (const e of filterEffectsMissingLower) if (effSet.has(e)) return false;
           }
           return true;
         });
@@ -14912,7 +15099,7 @@ require(['vs/editor/editor.main'], function () {
         const strip = document.getElementById('sf-active-filters');
         if (!strip) return;
         const needsReviewActive = _sfNeedsReviewFilterOn ? 1 : 0;
-        const total = _sfActiveFilterTags.size + _sfActiveFilterCreators.size + needsReviewActive;
+        const total = _sfActiveFilterTags.size + _sfActiveFilterCreators.size + _sfActiveFilterEffects.size + _sfActiveFilterEffectsMissing.size + needsReviewActive;
         if (total === 0) {
           strip.style.display = 'none';
           strip.innerHTML = '';
@@ -14930,13 +15117,18 @@ require(['vs/editor/editor.main'], function () {
         const creatorChips = Array.from(_sfActiveFilterCreators).map(c =>
           `<span class="styles-active-filter-chip" data-creator="${_sfEscape(c)}">${_sfEscape(c)}<button class="styles-active-filter-remove" data-filter-remove-creator="${_sfEscape(c)}" title="Remove">&#10005;</button></span>`
         ).join('');
+        const effectChips = Array.from(_sfActiveFilterEffects).map(e =>
+          `<span class="styles-active-filter-chip" data-effect="${_sfEscape(e)}">${_sfEscape(e)}<button class="styles-active-filter-remove" data-filter-remove-effect="${_sfEscape(e)}" title="Remove">&#10005;</button></span>`
+        ).join('') + Array.from(_sfActiveFilterEffectsMissing).map(e =>
+          `<span class="styles-active-filter-chip sf-active-filter-effect-missing" data-effect="${_sfEscape(e)}">no ${_sfEscape(e)}<button class="styles-active-filter-remove" data-filter-remove-effect="${_sfEscape(e)}" title="Remove">&#10005;</button></span>`
+        ).join('');
         const needsReviewChip = _sfNeedsReviewFilterOn
           ? `<span class="styles-active-filter-chip sf-active-filter-needs-review" data-needs-review="1">Needs review<button class="styles-active-filter-remove" data-filter-remove-needs-review="1" title="Remove">&#10005;</button></span>`
           : '';
         const clearAll = total >= 2
           ? `<button class="styles-active-filter-clear" id="sf-clear-all-filters">Clear all</button>`
           : '';
-        strip.innerHTML = `<span class="styles-active-filters-label">Filtering by:</span>${tagChips}${creatorChips}${needsReviewChip}${clearAll}`;
+        strip.innerHTML = `<span class="styles-active-filters-label">Filtering by:</span>${tagChips}${creatorChips}${effectChips}${needsReviewChip}${clearAll}`;
       };
       const _sfToggleFilterTag = (tag) => {
         if (!tag) return;
@@ -15013,16 +15205,27 @@ require(['vs/editor/editor.main'], function () {
         if (!list) return;
         const q = (_sfSearchQuery || '').toLowerCase();
         const filterTagsLower = Array.from(_sfActiveFilterTags).map(t => t.toLowerCase());
+        const filterEffectsLower = Array.from(_sfActiveFilterEffects).map(e => e.toLowerCase());
+        const filterEffectsMissingLower = Array.from(_sfActiveFilterEffectsMissing).map(e => e.toLowerCase());
         // Mirrors the tag-dropdown rule: do NOT self-apply the creator
         // filter when computing the dropdown's matchSet. Picking the
         // first creator would otherwise hide every other creator and
-        // prevent multi-select. Tags + search still apply across
-        // dimensions.
+        // prevent multi-select. Tags + search + effects still apply
+        // across dimensions.
         const matchSet = _sfAllEntries.filter(f => {
           if (q && !_sfEntrySearchBlob(f).includes(q)) return false;
           if (filterTagsLower.length) {
             const t = new Set(_sfEntryAllTags(f).map(x => x.toLowerCase()));
             for (const ft of filterTagsLower) if (!t.has(ft)) return false;
+          }
+          if (filterEffectsLower.length || filterEffectsMissingLower.length) {
+            const effSet = new Set();
+            const known = Array.isArray(f.meta && f.meta.effects) ? f.meta.effects : [];
+            const unknown = Array.isArray(f.meta && f.meta.unknownEffects) ? f.meta.unknownEffects : [];
+            for (const e of known) effSet.add(String(e).toLowerCase());
+            for (const e of unknown) effSet.add(String(e).toLowerCase());
+            for (const e of filterEffectsLower) if (!effSet.has(e)) return false;
+            for (const e of filterEffectsMissingLower) if (effSet.has(e)) return false;
           }
           return true;
         });
@@ -15082,6 +15285,204 @@ require(['vs/editor/editor.main'], function () {
           }
         }
         _sfActiveFilterCreators.add(creator);
+        _sfRenderGrid();
+      };
+      // ── Effects filter (Step 6 of the effects-catalog slice) ──────
+      // Mirrors the Tags / Creators filter shape: dropdown lists every
+      // effect that appears in at least one entry from the current
+      // search + tag + creator scope (effects filter intentionally
+      // NOT self-applied so the user can multi-select within this
+      // dimension — same fix we landed on tag/creator yesterday).
+      // Filter semantics within the effects dimension: AND (entry must
+      // carry every active effect). Cross-dimension stays AND.
+      const _sfRenderEffectsDropdown = () => {
+        const list = document.getElementById('sf-effects-dropdown-list');
+        const badge = document.getElementById('sf-effects-filter-badge');
+        const btn = document.getElementById('btn-sf-effects-filter');
+        const effectsTotal = _sfActiveFilterEffects.size + _sfActiveFilterEffectsMissing.size;
+        if (badge) {
+          if (effectsTotal > 0) {
+            badge.textContent = String(effectsTotal);
+            badge.style.display = '';
+          } else {
+            badge.style.display = 'none';
+          }
+        }
+        if (btn) btn.classList.toggle('has-active', effectsTotal > 0);
+        if (!list) return;
+        const q = (_sfSearchQuery || '').toLowerCase();
+        const filterTagsLower = Array.from(_sfActiveFilterTags).map(t => t.toLowerCase());
+        const filterCreatorsLower = Array.from(_sfActiveFilterCreators).map(c => c.toLowerCase());
+        const filterEffectsLower = Array.from(_sfActiveFilterEffects).map(e => e.toLowerCase());
+        const filterEffectsMissingLower = Array.from(_sfActiveFilterEffectsMissing).map(e => e.toLowerCase());
+        // Counts reflect the FULL filtered scope (every active filter,
+        // including effects), so "hum 0" honestly tells the user that
+        // no entry in their current view has hum when no-hum is active.
+        // The OPTIONS list isn't trimmed though — every effect that
+        // appears anywhere in the library still renders so the user
+        // can cycle any effect's state without having to clear other
+        // filters first.
+        const matchSet = _sfAllEntries.filter(f => {
+          if (q && !_sfEntrySearchBlob(f).includes(q)) return false;
+          if (filterTagsLower.length) {
+            const t = new Set(_sfEntryAllTags(f).map(x => x.toLowerCase()));
+            for (const ft of filterTagsLower) if (!t.has(ft)) return false;
+          }
+          if (filterCreatorsLower.length) {
+            const a = ((f.meta && f.meta.author) || '').toLowerCase();
+            if (!a) {
+              if (!filterCreatorsLower.includes(_SF_NO_CREATOR_KEY)) return false;
+            } else if (!filterCreatorsLower.includes(a)) {
+              return false;
+            }
+          }
+          if (filterEffectsLower.length || filterEffectsMissingLower.length) {
+            const effSet = new Set();
+            const known = Array.isArray(f.meta && f.meta.effects) ? f.meta.effects : [];
+            const unknown = Array.isArray(f.meta && f.meta.unknownEffects) ? f.meta.unknownEffects : [];
+            for (const e of known) effSet.add(String(e).toLowerCase());
+            for (const e of unknown) effSet.add(String(e).toLowerCase());
+            for (const e of filterEffectsLower) if (!effSet.has(e)) return false;
+            for (const e of filterEffectsMissingLower) if (effSet.has(e)) return false;
+          }
+          return true;
+        });
+        // Seed counts at 0 for every effect that appears anywhere in
+        // the library — that way effects currently filtered to absent
+        // (count=0 in matchSet) still render with their state indicator
+        // so the user can cycle them off without leaving the dropdown.
+        const counts = new Map();
+        for (const f of _sfAllEntries) {
+          const known = Array.isArray(f.meta && f.meta.effects) ? f.meta.effects : [];
+          const unknown = Array.isArray(f.meta && f.meta.unknownEffects) ? f.meta.unknownEffects : [];
+          for (const e of known) {
+            const k = String(e).toLowerCase();
+            if (!counts.has(k)) counts.set(k, { display: k, count: 0, isUnknown: false });
+          }
+          for (const e of unknown) {
+            const k = String(e).toLowerCase();
+            if (!counts.has(k)) counts.set(k, { display: k, count: 0, isUnknown: true });
+          }
+        }
+        for (const f of matchSet) {
+          const known = Array.isArray(f.meta && f.meta.effects) ? f.meta.effects : [];
+          const unknown = Array.isArray(f.meta && f.meta.unknownEffects) ? f.meta.unknownEffects : [];
+          const seen = new Set();
+          for (const e of known) {
+            const k = String(e).toLowerCase();
+            if (seen.has(k)) continue;
+            seen.add(k);
+            const ent = counts.get(k);
+            if (ent) ent.count++;
+            else counts.set(k, { display: k, count: 1, isUnknown: false });
+          }
+          for (const e of unknown) {
+            const k = String(e).toLowerCase();
+            if (seen.has(k)) continue;
+            seen.add(k);
+            const ent = counts.get(k);
+            if (ent) ent.count++;
+            else counts.set(k, { display: k, count: 1, isUnknown: true });
+          }
+        }
+        const presentSet = new Set(Array.from(_sfActiveFilterEffects).map(e => e.toLowerCase()));
+        const absentSet = new Set(Array.from(_sfActiveFilterEffectsMissing).map(e => e.toLowerCase()));
+        const entries = Array.from(counts.entries())
+          .sort((a, b) => {
+            // Active filters at top (present or absent), then by count
+            // desc, then alpha.
+            const aSel = presentSet.has(a[0]) || absentSet.has(a[0]);
+            const bSel = presentSet.has(b[0]) || absentSet.has(b[0]);
+            if (aSel !== bSel) return aSel ? -1 : 1;
+            if (a[1].count !== b[1].count) return b[1].count - a[1].count;
+            return a[1].display.localeCompare(b[1].display);
+          });
+        if (entries.length === 0) {
+          list.innerHTML = '<div class="styles-tag-dropdown-empty">No effects on current results.</div>';
+          return;
+        }
+        list.innerHTML = entries.map(([key, info]) => {
+          const isPresent = presentSet.has(key);
+          const isAbsent = absentSet.has(key);
+          let stateClass = '';
+          let stateIndicator = '';
+          if (isPresent) {
+            stateClass = ' selected sf-effect-state-present';
+            stateIndicator = '&#10003;'; // ✓
+          } else if (isAbsent) {
+            stateClass = ' selected sf-effect-state-absent';
+            stateIndicator = '&#10005;'; // ✕
+          }
+          const unknownStyle = info.isUnknown ? ' style="opacity:0.75;font-style:italic"' : '';
+          // Tooltip explains the two-gesture model. Each polarity is
+          // a binary toggle owned by its own gesture; toggling one
+          // implicitly clears the other so an effect is never set in
+          // both directions at once.
+          const tipLines = [];
+          if (info.isUnknown) tipLines.push('Unknown effect (not in JMT Studio\'s known vocabulary).');
+          tipLines.push('Left click: filter for fonts that have this effect.');
+          tipLines.push('Right click: filter for fonts that don\'t have this effect.');
+          const tip = ' title="' + _sfEscape(tipLines.join('\n')) + '"';
+          return `<button class="styles-tag-dropdown-item${stateClass}" data-effect="${_sfEscape(info.display)}"${unknownStyle}${tip}>
+            <span class="styles-tag-dropdown-check">${stateIndicator}</span>
+            <span class="styles-tag-dropdown-name">${_sfEscape(info.display)}</span>
+            <span class="styles-tag-dropdown-count">${info.count}</span>
+          </button>`;
+        }).join('');
+      };
+      // Left-click toggle: manages the present polarity. If currently
+      // present, clears it. Otherwise sets present and clears any
+      // existing absent flag (only one polarity can be active per
+      // effect at a time).
+      const _sfToggleFilterEffect = (effect) => {
+        if (!effect) return;
+        const lower = effect.toLowerCase();
+        let inPresent = null;
+        for (const existing of _sfActiveFilterEffects) {
+          if (existing.toLowerCase() === lower) { inPresent = existing; break; }
+        }
+        if (inPresent) {
+          _sfActiveFilterEffects.delete(inPresent);
+        } else {
+          for (const existing of _sfActiveFilterEffectsMissing) {
+            if (existing.toLowerCase() === lower) { _sfActiveFilterEffectsMissing.delete(existing); break; }
+          }
+          _sfActiveFilterEffects.add(effect);
+        }
+        _sfRenderGrid();
+      };
+      // Right-click toggle: mirror of the left-click handler but for
+      // the absent polarity. If currently absent, clears it. Otherwise
+      // sets absent and clears any existing present flag.
+      const _sfRightToggleFilterEffect = (effect) => {
+        if (!effect) return;
+        const lower = effect.toLowerCase();
+        let inAbsent = null;
+        for (const existing of _sfActiveFilterEffectsMissing) {
+          if (existing.toLowerCase() === lower) { inAbsent = existing; break; }
+        }
+        if (inAbsent) {
+          _sfActiveFilterEffectsMissing.delete(inAbsent);
+        } else {
+          for (const existing of _sfActiveFilterEffects) {
+            if (existing.toLowerCase() === lower) { _sfActiveFilterEffects.delete(existing); break; }
+          }
+          _sfActiveFilterEffectsMissing.add(effect);
+        }
+        _sfRenderGrid();
+      };
+      // Dedicated removal for the active-filters strip X-button. Skips
+      // the 3-state cycle so clicking the X clears either polarity
+      // outright instead of cycling.
+      const _sfRemoveEffectFilter = (effect) => {
+        if (!effect) return;
+        const lower = effect.toLowerCase();
+        for (const existing of _sfActiveFilterEffects) {
+          if (existing.toLowerCase() === lower) { _sfActiveFilterEffects.delete(existing); break; }
+        }
+        for (const existing of _sfActiveFilterEffectsMissing) {
+          if (existing.toLowerCase() === lower) { _sfActiveFilterEffectsMissing.delete(existing); break; }
+        }
         _sfRenderGrid();
       };
       const _sfEscape = (s) => String(s ?? '')
@@ -16915,6 +17316,63 @@ require(['vs/editor/editor.main'], function () {
         if (_sfEntryDetailEls.contents) {
           _sfEntryDetailEls.contents.textContent = `${fileCount} file${fileCount === 1 ? '' : 's'} (${sizeStr})`;
         }
+        // Effects chip row — detected Proffie effect types present in
+        // the entry's file tree. Read directly from entry.meta.effects
+        // which was persisted at import (or by the local backfill for
+        // pre-existing entries). The chip row is hidden when the array
+        // is empty so entries that fell out of detection (e.g. the
+        // board-wrapper architecture issue tracked in backlog) don't
+        // show an awkward empty row.
+        // The "Show missing" toggle under the chips reveals every
+        // EFFECT_NAMES entry the font lacks. Off by default on every
+        // modal open. Red tint signals absence without reading as a
+        // warning or error.
+        const _sfDetailEffectsRow = document.getElementById('sf-detail-effects-row');
+        const _sfDetailEffectsChips = document.getElementById('sf-detail-effects-chips');
+        const _sfDetailEffectsMissing = document.getElementById('sf-detail-effects-missing-chips');
+        const _sfDetailEffectsMissingBtn = document.getElementById('btn-sf-effects-show-missing');
+        if (_sfDetailEffectsRow && _sfDetailEffectsChips) {
+          const effects = Array.isArray(entry.meta && entry.meta.effects) ? entry.meta.effects : [];
+          const unknownEffects = Array.isArray(entry.meta && entry.meta.unknownEffects)
+            ? entry.meta.unknownEffects
+            : [];
+          if (effects.length === 0 && unknownEffects.length === 0) {
+            _sfDetailEffectsRow.style.display = 'none';
+            _sfDetailEffectsChips.innerHTML = '';
+            if (_sfDetailEffectsMissing) _sfDetailEffectsMissing.innerHTML = '';
+          } else {
+            _sfDetailEffectsRow.style.display = '';
+            // Known effects render as blue chips; unknown effects (the
+            // safety-net set for forward-compat with ProffieOS additions
+            // we haven't promoted to EFFECT_NAMES yet) render as gray
+            // chips with a tooltip explaining the meaning. They share
+            // flex order: 1 so they intermix naturally in the wrap.
+            const knownHtml = effects
+              .map(name => `<span class="sf-effect-chip" data-effect="${_sfEscape(name)}">${_sfEscape(name)}</span>`)
+              .join('');
+            const unknownHtml = unknownEffects
+              .map(name => `<span class="sf-effect-chip-unknown" data-effect="${_sfEscape(name)}" title="Not in JMT Studio's known Proffie effect vocabulary. Looks effect-shaped (has .wav children) so it's surfaced as a safety net — the canonical list is updated periodically against ProffieOS releases.">${_sfEscape(name)}</span>`)
+              .join('');
+            _sfDetailEffectsChips.innerHTML = knownHtml + unknownHtml;
+            if (_sfDetailEffectsMissing && _sfDetailEffectsMissingBtn) {
+              // Missing rubric stays against the KNOWN vocabulary only:
+              // we can't list what we don't know. If new effects land
+              // in the unknown set across many entries, the maintenance
+              // discipline promotes them to EFFECT_NAMES and they then
+              // become eligible for the missing chips on entries that
+              // lack them. Documented at EFFECT_NAMES.
+              const present = new Set(effects.map(e => String(e).toLowerCase()));
+              const missing = _SF_KNOWN_EFFECTS.filter(e => !present.has(e));
+              _sfDetailEffectsMissing.innerHTML = missing
+                .map(name => `<span class="sf-effect-chip-missing" data-effect="${_sfEscape(name)}">${_sfEscape(name)}</span>`)
+                .join('');
+              // Reset toggle state on every modal open — collapsed by
+              // default per the design.
+              _sfDetailEffectsMissing.classList.remove('is-open');
+              _sfDetailEffectsMissingBtn.textContent = 'show missing';
+            }
+          }
+        }
         // Included files row (read-only chips). Non-wav files inside the
         // entry folder — readmes, blade-style snippets, .tg config, etc.
         try {
@@ -17243,6 +17701,187 @@ require(['vs/editor/editor.main'], function () {
       // intent is ambiguous.
       _sfEntryDetailEls.discardBtn?.addEventListener('click', _sfCloseEntryDetail);
       _sfEntryDetailEls.saveBtn?.addEventListener('click', _sfSaveEntryDetail);
+      // "Show missing" toggle on the Effects row — flips the missing-
+      // chips strip in/out with a matching label swap. Modal-open path
+      // resets to collapsed every time (see _sfOpenEntryDetail).
+      document.getElementById('btn-sf-effects-show-missing')?.addEventListener('click', () => {
+        const strip = document.getElementById('sf-detail-effects-missing-chips');
+        const btn = document.getElementById('btn-sf-effects-show-missing');
+        if (!strip || !btn) return;
+        const open = strip.classList.toggle('is-open');
+        btn.textContent = open ? 'hide missing' : 'show missing';
+      });
+      // Effect chip click → find a representative wav file for that
+      // effect inside the entry's file tree and open the audio player
+      // on it. Works for both known (blue) and unknown (gray) chips;
+      // missing chips (red) are intentionally not wired since there's
+      // nothing to play. Delegated handler on the row so we don't
+      // re-bind per chip on each modal open.
+      //
+      // Representative-file pick: first .wav inside <effect>/ folder if
+      // it exists, else <effect>.wav flat at root, else look inside the
+      // first alt### subfolder for the same shapes. Stable choice on
+      // repeat clicks (always first sorted child) — variant rotation
+      // could land as a follow-up if useful for audition.
+      // Tree-aware variants of the effect-file finders. The modal uses
+      // _sfEntryFilesTree (already loaded on modal open); cards need
+      // these to operate on a freshly-fetched tree per click.
+      const _sfFindAllEffectFilesInTree = (tree, effectName) => {
+        if (!effectName || !Array.isArray(tree)) return [];
+        const eff = String(effectName).toLowerCase();
+        const matchesFlat = (nodeName) => {
+          if (!/\.wav$/i.test(nodeName)) return false;
+          const stem = nodeName.replace(/\.wav$/i, '').toLowerCase();
+          if (stem === eff) return true;
+          if (stem.replace(/[\s_]?\d+$/, '') === eff) return true;
+          if (stem.replace(/\s*\(\d+\)$/, '') === eff) return true;
+          return false;
+        };
+        const collect = (nodes, prefix, into) => {
+          if (!Array.isArray(nodes)) return;
+          const folder = nodes.find(n => n && n.isDir && String(n.name || '').toLowerCase() === eff);
+          if (folder && Array.isArray(folder.children)) {
+            const wavs = folder.children
+              .filter(c => c && !c.isDir && /\.wav$/i.test(String(c.name || '')))
+              .map(c => c.name)
+              .sort();
+            for (const w of wavs) into.push(`${prefix}${folder.name}/${w}`);
+          }
+          const flats = nodes
+            .filter(n => n && !n.isDir && matchesFlat(String(n.name || '')))
+            .map(n => n.name)
+            .sort();
+          for (const f of flats) into.push(`${prefix}${f}`);
+        };
+        const out = [];
+        collect(tree, '', out);
+        if (out.length === 0) {
+          const alt = tree.find(n => n && n.isDir && /^alt\d{3}$/i.test(String(n.name || '')));
+          if (alt && Array.isArray(alt.children)) {
+            collect(alt.children, `${alt.name}/`, out);
+          }
+        }
+        return out;
+      };
+      const _sfFindFirstEffectFileInTree = (tree, effectName) => {
+        const all = _sfFindAllEffectFilesInTree(tree, effectName);
+        return all.length > 0 ? all[0] : null;
+      };
+      // Find every wav file in the entry tree that belongs to this
+      // effect. Returns array of relative paths (sorted). Covers folder
+      // layout (effect/foo.wav), flat layout (effect.wav, effect01.wav),
+      // and alt fallback (alt000/...). Left-click audition uses the
+      // first item; right-click context menu lists them all.
+      const _sfFindAllEffectFiles = (effectName) => {
+        if (!effectName || !Array.isArray(_sfEntryFilesTree)) return [];
+        const eff = String(effectName).toLowerCase();
+        const matchesFlat = (nodeName) => {
+          if (!/\.wav$/i.test(nodeName)) return false;
+          const stem = nodeName.replace(/\.wav$/i, '').toLowerCase();
+          if (stem === eff) return true;
+          if (stem.replace(/[\s_]?\d+$/, '') === eff) return true;
+          if (stem.replace(/\s*\(\d+\)$/, '') === eff) return true;
+          return false;
+        };
+        const collect = (nodes, prefix, into) => {
+          if (!Array.isArray(nodes)) return;
+          // Effect folder: include every wav inside (alphabetical).
+          const folder = nodes.find(n => n && n.isDir && String(n.name || '').toLowerCase() === eff);
+          if (folder && Array.isArray(folder.children)) {
+            const wavs = folder.children
+              .filter(c => c && !c.isDir && /\.wav$/i.test(String(c.name || '')))
+              .map(c => c.name)
+              .sort();
+            for (const w of wavs) into.push(`${prefix}${folder.name}/${w}`);
+          }
+          // Flat-layout siblings at this level.
+          const flats = nodes
+            .filter(n => n && !n.isDir && matchesFlat(String(n.name || '')))
+            .map(n => n.name)
+            .sort();
+          for (const f of flats) into.push(`${prefix}${f}`);
+        };
+        const out = [];
+        collect(_sfEntryFilesTree, '', out);
+        if (out.length === 0) {
+          // Alt fallback when nothing landed at root.
+          const alt = _sfEntryFilesTree.find(n => n && n.isDir && /^alt\d{3}$/i.test(String(n.name || '')));
+          if (alt && Array.isArray(alt.children)) {
+            collect(alt.children, `${alt.name}/`, out);
+          }
+        }
+        return out;
+      };
+      const _sfFindEffectFile = (effectName) => {
+        const all = _sfFindAllEffectFiles(effectName);
+        return all.length > 0 ? all[0] : null;
+      };
+      document.getElementById('sf-detail-effects-chips-row')?.addEventListener('click', (e) => {
+        const chip = e.target.closest('.sf-effect-chip, .sf-effect-chip-unknown');
+        if (!chip) return;
+        // Toggle: clicking the chip that's currently playing stops it
+        // instead of restarting. Lets users dismiss audition without
+        // having to navigate elsewhere. Right-click variant picks stay
+        // always-play since picking a specific variant is explicit.
+        if (_sfQuickAudioChip === chip) {
+          _sfQuickAudioStop();
+          return;
+        }
+        const effectName = chip.getAttribute('data-effect');
+        if (!effectName || !_sfDetailOriginalName) return;
+        const subPath = _sfFindEffectFile(effectName);
+        if (!subPath) return; // no file found — silently no-op
+        _sfQuickPlay({ entryName: _sfDetailOriginalName, subPath, chipEl: chip });
+      });
+      // Right-click on a chip → context menu listing every wav variant
+      // for that effect. User can pick a specific one (e.g. clsh07 vs
+      // clsh01). Left-click stays stable on the first one for quick
+      // audition; right-click is the deliberate-picker affordance.
+      document.getElementById('sf-detail-effects-chips-row')?.addEventListener('contextmenu', (e) => {
+        const chip = e.target.closest('.sf-effect-chip, .sf-effect-chip-unknown');
+        if (!chip) return;
+        const effectName = chip.getAttribute('data-effect');
+        if (!effectName || !_sfDetailOriginalName) return;
+        const files = _sfFindAllEffectFiles(effectName);
+        if (files.length === 0) return; // nothing to offer
+        e.preventDefault();
+        const menu = document.getElementById('preset-ctx-menu');
+        if (!menu) return;
+        menu.innerHTML = '';
+        // Compact width — short effect filenames (boot01, hum02) don't
+        // need the 150px min-width the shared menu defaults to. Cleared
+        // by _hidePresetContextMenu so the next non-compact use of the
+        // menu (reorder rows, file-tree right-click) keeps its default.
+        menu.style.minWidth = '0';
+        const mkItem = (text, fn) => {
+          const d = document.createElement('div');
+          d.className = 'preset-ctx-item';
+          d.textContent = text;
+          d.addEventListener('mousedown', (ev) => { ev.stopPropagation(); menu.style.display = 'none'; menu.style.minWidth = ''; fn(); });
+          menu.appendChild(d);
+        };
+        for (const subPath of files) {
+          const fullName = subPath.split('/').pop();
+          // Strip the .wav extension from the display only — the actual
+          // file path passed to playback keeps the extension.
+          const display = fullName.replace(/\.wav$/i, '');
+          mkItem('▶ ' + display, () => _sfQuickPlay({
+            entryName: _sfDetailOriginalName,
+            subPath,
+            chipEl: chip,
+          }));
+        }
+        // Position-clamping uses the menu's natural width AFTER content
+        // is in. Read offsetWidth post-append so a long filename still
+        // gets a clean right edge against the viewport.
+        const menuWidth = menu.offsetWidth || 160;
+        const itemHeight = 22;
+        const x = Math.min(e.clientX, window.innerWidth - menuWidth - 8);
+        const y = Math.min(e.clientY, window.innerHeight - 40 - Math.min(files.length, 14) * itemHeight);
+        menu.style.left = x + 'px';
+        menu.style.top = y + 'px';
+        menu.style.display = 'block';
+      });
       // Mark reviewed: clears the needsReview flag + reasons, marks the
       // entry dirty so Save persists it. User can also still edit fields
       // and Save like normal — the flag clears either way once Save
@@ -19625,6 +20264,79 @@ require(['vs/editor/editor.main'], function () {
       // Pull bytes for the requested file from the kind-specific IPC.
       // All three return shapes get normalized to a single Uint8Array
       // so the decode path doesn't care where the file lives.
+      // ── Quick-play (chip-click audition, no modal) ────────────────
+      // One shared HTMLAudioElement plays whatever effect chip was just
+      // clicked. Bytes come from the same IPC the modal player uses;
+      // we skip waveform decode + canvas + controls so audition feels
+      // weightless across rapid clicks. Visual feedback is per-chip:
+      // add .playing → CSS flips outline to filled; remove on stop or
+      // when another chip starts. The modal player is still the right
+      // path for "open this file" via the entry's file browser — those
+      // launches preserve waveform + scrub + loop.
+      let _sfQuickAudio = null;       // shared <audio>
+      let _sfQuickAudioChip = null;   // chip currently flagged .playing
+      let _sfQuickAudioUrl = null;    // object URL to revoke on stop
+      let _sfQuickAudioToken = 0;     // race guard for async byte fetch
+      const _sfQuickAudioStop = () => {
+        if (_sfQuickAudio) {
+          try { _sfQuickAudio.pause(); } catch {}
+          try { _sfQuickAudio.removeAttribute('src'); _sfQuickAudio.load(); } catch {}
+        }
+        if (_sfQuickAudioChip) {
+          _sfQuickAudioChip.classList.remove('playing');
+          _sfQuickAudioChip = null;
+        }
+        if (_sfQuickAudioUrl) {
+          try { URL.revokeObjectURL(_sfQuickAudioUrl); } catch {}
+          _sfQuickAudioUrl = null;
+        }
+      };
+      const _sfQuickPlay = async ({ kind = 'entry', id, entryName, subPath, chipEl }) => {
+        const sourceId = id || entryName; // accept legacy entryName arg
+        if (!sourceId || !subPath) return;
+        _sfQuickAudioStop();
+        const token = ++_sfQuickAudioToken;
+        if (chipEl) {
+          chipEl.classList.add('playing');
+          _sfQuickAudioChip = chipEl;
+        }
+        let bytes;
+        try {
+          bytes = await _sfAudioReadBytes({ kind, id: sourceId, subPath });
+        } catch (err) {
+          if (token === _sfQuickAudioToken && chipEl) chipEl.classList.remove('playing');
+          if (token === _sfQuickAudioToken) _sfQuickAudioChip = null;
+          console.warn('quick-play read failed:', err);
+          return;
+        }
+        // Race: another chip click started while we were fetching.
+        if (token !== _sfQuickAudioToken) return;
+        const blob = new Blob([bytes], { type: 'audio/wav' });
+        const url = URL.createObjectURL(blob);
+        _sfQuickAudioUrl = url;
+        if (!_sfQuickAudio) _sfQuickAudio = new Audio();
+        _sfQuickAudio.src = url;
+        _sfQuickAudio.onended = () => {
+          // Only clear if this is still the live playback (a new click
+          // would have replaced state via _sfQuickAudioStop already).
+          if (_sfQuickAudioUrl !== url) return;
+          if (_sfQuickAudioChip === chipEl && chipEl) chipEl.classList.remove('playing');
+          if (_sfQuickAudioChip === chipEl) _sfQuickAudioChip = null;
+          try { URL.revokeObjectURL(url); } catch {}
+          if (_sfQuickAudioUrl === url) _sfQuickAudioUrl = null;
+        };
+        _sfQuickAudio.onerror = () => {
+          if (_sfQuickAudioChip === chipEl && chipEl) chipEl.classList.remove('playing');
+          if (_sfQuickAudioChip === chipEl) _sfQuickAudioChip = null;
+          console.warn('quick-play decode/play failed for', subPath);
+        };
+        try { await _sfQuickAudio.play(); }
+        catch (err) {
+          if (chipEl) chipEl.classList.remove('playing');
+          if (_sfQuickAudioChip === chipEl) _sfQuickAudioChip = null;
+          console.warn('quick-play play() rejected:', err);
+        }
+      };
       const _sfAudioReadBytes = async ({ kind, id, subPath }) => {
         if (kind === 'entry') {
           const r = await window.electronAPI.readEntryDocBytes({ name: id, path: subPath });
@@ -22254,6 +22966,36 @@ require(['vs/editor/editor.main'], function () {
           if (href) window.electronAPI.openExternal(href);
           return;
         }
+        const cardEffectChip = e.target.closest('[data-card-effect]');
+        if (cardEffectChip) {
+          e.stopPropagation();
+          // Toggle: clicking the currently-playing card chip stops it
+          // instead of restarting. Same shape as the modal chip handler
+          // above. Right-click variant picks remain always-play.
+          if (_sfQuickAudioChip === cardEffectChip) {
+            _sfQuickAudioStop();
+            return;
+          }
+          // Card-level effect chip: quick-play the first representative
+          // wav for this effect without opening the audio modal. Fetches
+          // the entry's tree on demand (cards don't preload trees) and
+          // hands the file off to _sfQuickPlay, which flips the chip
+          // visual to "playing" and clears it when audio ends.
+          const card = cardEffectChip.closest('[data-font]');
+          const effectName = cardEffectChip.getAttribute('data-card-effect');
+          const fontName = card && card.getAttribute('data-font');
+          if (!effectName || !fontName) return;
+          (async () => {
+            try {
+              const fr = await window.electronAPI.listEntryFiles({ name: fontName });
+              const tree = (fr && fr.ok && fr.files) || [];
+              const file = _sfFindFirstEffectFileInTree(tree, effectName);
+              if (!file) return;
+              _sfQuickPlay({ entryName: fontName, subPath: file, chipEl: cardEffectChip });
+            } catch {}
+          })();
+          return;
+        }
         const chip = e.target.closest('.sf-card-tag');
         if (chip) {
           e.stopPropagation();
@@ -22271,16 +23013,67 @@ require(['vs/editor/editor.main'], function () {
         const name = card.getAttribute('data-font');
         if (name) _sfOpenEntryDetail(name);
       });
-      // Tag + Creator filter buttons + dropdowns wiring.
+      // Right-click on a card-level effect chip → context menu listing
+      // every wav variant for that effect (mirrors the modal's behavior
+      // so the user can quickly audition specific variants without
+      // opening the entry). Fetches the entry's tree on demand.
+      document.getElementById('sf-cards')?.addEventListener('contextmenu', async (e) => {
+        const chip = e.target.closest('[data-card-effect]');
+        if (!chip) return;
+        const card = chip.closest('[data-font]');
+        const effectName = chip.getAttribute('data-card-effect');
+        const fontName = card && card.getAttribute('data-font');
+        if (!effectName || !fontName) return;
+        e.preventDefault();
+        e.stopPropagation();
+        let tree = [];
+        try {
+          const fr = await window.electronAPI.listEntryFiles({ name: fontName });
+          tree = (fr && fr.ok && fr.files) || [];
+        } catch {}
+        const files = _sfFindAllEffectFilesInTree(tree, effectName);
+        if (files.length === 0) return;
+        const menu = document.getElementById('preset-ctx-menu');
+        if (!menu) return;
+        menu.innerHTML = '';
+        menu.style.minWidth = '0';
+        const mkItem = (text, fn) => {
+          const d = document.createElement('div');
+          d.className = 'preset-ctx-item';
+          d.textContent = text;
+          d.addEventListener('mousedown', (ev) => { ev.stopPropagation(); menu.style.display = 'none'; menu.style.minWidth = ''; fn(); });
+          menu.appendChild(d);
+        };
+        for (const subPath of files) {
+          const fullName = subPath.split('/').pop();
+          const display = fullName.replace(/\.wav$/i, '');
+          mkItem('▶ ' + display, () => _sfQuickPlay({
+            entryName: fontName,
+            subPath,
+            chipEl: chip,
+          }));
+        }
+        const menuWidth = menu.offsetWidth || 160;
+        const itemHeight = 22;
+        const x = Math.min(e.clientX, window.innerWidth - menuWidth - 8);
+        const y = Math.min(e.clientY, window.innerHeight - 40 - Math.min(files.length, 14) * itemHeight);
+        menu.style.left = x + 'px';
+        menu.style.top = y + 'px';
+        menu.style.display = 'block';
+      });
+      // Tag + Creator + Effects filter buttons + dropdowns wiring.
       const _sfTagFilterBtn = document.getElementById('btn-sf-tag-filter');
       const _sfTagDropdown = document.getElementById('sf-tag-dropdown');
       const _sfCreatorFilterBtn = document.getElementById('btn-sf-creator-filter');
       const _sfCreatorDropdown = document.getElementById('sf-creator-dropdown');
+      const _sfEffectsFilterBtn = document.getElementById('btn-sf-effects-filter');
+      const _sfEffectsDropdown = document.getElementById('sf-effects-dropdown');
       _sfTagFilterBtn?.addEventListener('click', (e) => {
         e.stopPropagation();
         if (!_sfTagDropdown) return;
         const opening = _sfTagDropdown.style.display === 'none';
         if (_sfCreatorDropdown) _sfCreatorDropdown.style.display = 'none';
+        if (_sfEffectsDropdown) _sfEffectsDropdown.style.display = 'none';
         _sfTagDropdown.style.display = opening ? '' : 'none';
         if (opening) _sfRenderTagDropdown();
       });
@@ -22307,6 +23100,7 @@ require(['vs/editor/editor.main'], function () {
         if (!_sfCreatorDropdown) return;
         const opening = _sfCreatorDropdown.style.display === 'none';
         if (_sfTagDropdown) _sfTagDropdown.style.display = 'none';
+        if (_sfEffectsDropdown) _sfEffectsDropdown.style.display = 'none';
         _sfCreatorDropdown.style.display = opening ? '' : 'none';
         if (opening) _sfRenderCreatorDropdown();
       });
@@ -22317,6 +23111,36 @@ require(['vs/editor/editor.main'], function () {
         const creator = item.dataset.creator;
         if (creator) _sfToggleFilterCreator(creator);
         if (_sfCreatorDropdown) _sfCreatorDropdown.style.display = 'none';
+      });
+      _sfEffectsFilterBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!_sfEffectsDropdown) return;
+        const opening = _sfEffectsDropdown.style.display === 'none';
+        if (_sfTagDropdown) _sfTagDropdown.style.display = 'none';
+        if (_sfCreatorDropdown) _sfCreatorDropdown.style.display = 'none';
+        _sfEffectsDropdown.style.display = opening ? '' : 'none';
+        if (opening) _sfRenderEffectsDropdown();
+      });
+      _sfEffectsDropdown?.addEventListener('click', (e) => {
+        const item = e.target.closest('.styles-tag-dropdown-item');
+        if (!item) return;
+        e.stopPropagation();
+        const effect = item.dataset.effect;
+        if (effect) _sfToggleFilterEffect(effect);
+        // Each gesture is a one-shot selection (no cycling), so close
+        // after the click matching the Tags/Creators dropdown behavior.
+        if (_sfEffectsDropdown) _sfEffectsDropdown.style.display = 'none';
+      });
+      // Right-click on a row → toggle the absent polarity. Suppresses
+      // the browser context menu and closes the dropdown on completion.
+      _sfEffectsDropdown?.addEventListener('contextmenu', (e) => {
+        const item = e.target.closest('.styles-tag-dropdown-item');
+        if (!item) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const effect = item.dataset.effect;
+        if (effect) _sfRightToggleFilterEffect(effect);
+        if (_sfEffectsDropdown) _sfEffectsDropdown.style.display = 'none';
       });
       // Backup menu — Export / Import live inside a dropdown so they share
       // one toolbar slot and deemphasize an action the user rarely runs.
@@ -22342,9 +23166,11 @@ require(['vs/editor/editor.main'], function () {
       document.addEventListener('click', (e) => {
         const inTag = _sfTagDropdown?.contains(e.target) || _sfTagFilterBtn?.contains(e.target);
         const inCreator = _sfCreatorDropdown?.contains(e.target) || _sfCreatorFilterBtn?.contains(e.target);
+        const inEffects = _sfEffectsDropdown?.contains(e.target) || _sfEffectsFilterBtn?.contains(e.target);
         const inBackup = _sfBackupDropdown?.contains(e.target) || _sfBackupMenuBtn?.contains(e.target);
         if (!inTag && _sfTagDropdown && _sfTagDropdown.style.display !== 'none') _sfTagDropdown.style.display = 'none';
         if (!inCreator && _sfCreatorDropdown && _sfCreatorDropdown.style.display !== 'none') _sfCreatorDropdown.style.display = 'none';
+        if (!inEffects && _sfEffectsDropdown && _sfEffectsDropdown.style.display !== 'none') _sfEffectsDropdown.style.display = 'none';
         if (!inBackup && _sfBackupDropdown && _sfBackupDropdown.style.display !== 'none') _sfBackupDropdown.style.display = 'none';
       });
       // Active-filter chip remove + clear-all.
@@ -22363,6 +23189,15 @@ require(['vs/editor/editor.main'], function () {
           if (c) _sfToggleFilterCreator(c);
           return;
         }
+        const effectRemove = e.target.closest('[data-filter-remove-effect]');
+        if (effectRemove) {
+          e.stopPropagation();
+          const ef = effectRemove.getAttribute('data-filter-remove-effect');
+          // Use the dedicated remove (not the cycle toggle) so X clears
+          // either polarity to off in one click.
+          if (ef) _sfRemoveEffectFilter(ef);
+          return;
+        }
         const nrRemove = e.target.closest('[data-filter-remove-needs-review]');
         if (nrRemove) {
           e.stopPropagation();
@@ -22375,6 +23210,8 @@ require(['vs/editor/editor.main'], function () {
           e.stopPropagation();
           _sfActiveFilterTags = new Set();
           _sfActiveFilterCreators = new Set();
+          _sfActiveFilterEffects = new Set();
+          _sfActiveFilterEffectsMissing = new Set();
           _sfNeedsReviewFilterOn = false;
           _sfRenderGrid();
         }
@@ -22485,6 +23322,20 @@ require(['vs/editor/editor.main'], function () {
         if (starBtn) {
           e.stopPropagation();
           await _sfSetStarredCommon(starBtn.getAttribute('data-star-uuid'));
+          return;
+        }
+        // 0a. Quick-play mmain.wav button. Caught before the row-header
+        // expand/collapse so playing doesn't open the file tree. Toggle:
+        // clicking the same button while playing stops it.
+        const mmainBtn = e.target.closest('[data-common-mmain]');
+        if (mmainBtn) {
+          e.stopPropagation();
+          if (_sfQuickAudioChip === mmainBtn) {
+            _sfQuickAudioStop();
+            return;
+          }
+          const uuid = mmainBtn.getAttribute('data-common-mmain');
+          if (uuid) _sfQuickPlay({ kind: 'common', id: uuid, subPath: 'mmain.wav', chipEl: mmainBtn });
           return;
         }
         // 1a. + Add button inside the expanded files block.
@@ -25534,7 +26385,13 @@ require(['vs/editor/editor.main'], function () {
 
     function _hidePresetContextMenu() {
       const menu = document.getElementById('preset-ctx-menu');
-      if (menu) menu.style.display = 'none';
+      if (!menu) return;
+      menu.style.display = 'none';
+      // Clear any per-use width override (the SF effect-chip menu sets
+      // minWidth: 0 for a content-fit dropdown). Subsequent menus that
+      // rely on the CSS default min-width: 150px get their breathing
+      // room back.
+      menu.style.minWidth = '';
     }
 
     document.addEventListener('mousedown', e => {
