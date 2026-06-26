@@ -464,18 +464,56 @@ function detectBundleName(candidates) {
   return last;
 }
 
-// Parse a candidate's raw inner-folder name for a trailing version
-// suffix (X_V1 / X_V2.4 / X v3 / X-v1.0). Returns { stem, version,
-// versionParts } when the name ends in v<number>, or null when it
-// doesn't. Used to identify "multi-version sibling" candidates that
-// the vendor bundled together (V1 + V2 of the same font); the highest
-// gets taken, the others are noted as skipped.
-function _parseVersionFromName(name) {
-  const m = String(name || '').match(/^(.+?)[\s_-]+[vV](\d+(?:\.\d+)*)$/);
-  if (!m) return null;
-  const parts = m[2].split('.').map(s => parseInt(s, 10));
-  if (parts.some(n => Number.isNaN(n))) return null;
-  return { stem: m[1], version: 'V' + m[2], versionParts: parts };
+// Parse a candidate's path for a version-marker component (X_V1 /
+// X_V2.4 / X v3 / X-v1.0). Walks the path from the candidate-name end
+// toward the root, returning the first matching component.
+//
+// Two-tier detection lives in one walk:
+//   - Common pattern: vendor names the candidate folder `Font_V1` /
+//     `Font_V2`. Match lands at the deepest path component (the
+//     candidate's own name) — same behavior as the original name-only
+//     parser.
+//   - Divergent pattern: vendor puts the version marker on a PARENT
+//     dir (`Bundle/Bundle_V1/Beskar/Proffie`, `Bundle/Bundle_V2/...`).
+//     The candidate's own name has no version. Walk continues up and
+//     finds the marker on the parent. Stem is the parent's stem, and
+//     parentPath captures everything above so siblings in unrelated
+//     bundles with similar stems don't accidentally group.
+//
+// Returns { stem, version, versionParts, parentPath } on match, null
+// when no path component has a version suffix. Caller groups by
+// `parentPath + '|' + stem` so detection works across both patterns
+// without falling out of sync.
+function _parseVersionFromCandidate(candidate) {
+  const candidatePath = (candidate && candidate.path) || '';
+  const parts = String(candidatePath).split('/').filter(Boolean);
+  // Trailing board-flavor subfolders (Proffie, CFX, Verso, etc.) are
+  // never the version marker — they're how vendors organize a font
+  // for different boards. Skip them so the walk lands on the actual
+  // font/version folder above. The list mirrors the dead-stem set in
+  // detectBundleName.
+  const BOARD_FOLDERS = /^(proffie|cfx|verso|asteria|xenopixel|xeno|goldenharvest|ghv3|cfx-?ghv3)$/i;
+  // Track the deepest non-board index so we know whether the version
+  // marker, if found, was on the candidate's own folder (its "name")
+  // vs on a parent. Caller uses this to decide whether to strip the
+  // version from the display name on a single-winner group.
+  let deepestNonBoardIndex = -1;
+  for (let i = parts.length - 1; i >= 0; i--) {
+    if (BOARD_FOLDERS.test(parts[i])) continue;
+    if (deepestNonBoardIndex === -1) deepestNonBoardIndex = i;
+    const m = parts[i].match(/^(.+?)[\s_-]+[vV](\d+(?:\.\d+)*)$/);
+    if (!m) continue;
+    const versionParts = m[2].split('.').map(s => parseInt(s, 10));
+    if (versionParts.some(n => Number.isNaN(n))) continue;
+    return {
+      stem: m[1],
+      version: 'V' + m[2],
+      versionParts,
+      parentPath: parts.slice(0, i).join('/'),
+      versionFoundInName: i === deepestNonBoardIndex,
+    };
+  }
+  return null;
 }
 
 function _compareVersionParts(a, b) {
@@ -507,12 +545,16 @@ function _compareVersionParts(a, b) {
 // doesn't mean they aren't still available for the user." So we no
 // longer collapse — we annotate.
 function _markVersionPreferences(candidates) {
-  const parsed = candidates.map(c => ({ c, v: _parseVersionFromName(c.name) }));
+  const parsed = candidates.map(c => ({ c, v: _parseVersionFromCandidate(c) }));
   const groups = new Map();
   const ungrouped = [];
   for (const item of parsed) {
     if (!item.v) { ungrouped.push(item.c); continue; }
-    const k = item.v.stem.toLowerCase();
+    // Group by parentPath + stem so siblings under the same conceptual
+    // bundle group together, but items in unrelated bundles with
+    // similar stems don't accidentally collide (e.g. PackA/Font_V1 and
+    // PackB/Font_V1 stay separate).
+    const k = `${item.v.parentPath || ''}|${item.v.stem.toLowerCase()}`;
     if (!groups.has(k)) groups.set(k, []);
     groups.get(k).push(item);
   }
@@ -520,36 +562,50 @@ function _markVersionPreferences(candidates) {
   for (const items of groups.values()) {
     if (items.length === 1) {
       // Solo versioned candidate — leave as is; downstream name
-      // cleaner strips the trailing version.
+      // cleaner strips the trailing version (if any) from the display.
       out.push(items[0].c);
       continue;
     }
     items.sort((a, b) => _compareVersionParts(a.v.versionParts, b.v.versionParts));
-    const winner = items[items.length - 1];
-    const losers = items.slice(0, -1);
-    // Winner: name strips to stem, takenVersion records which one,
-    // versionGroupSiblings carries the loser shapes for UI surfaces
-    // that want to enumerate alternates without re-grouping.
-    const wOut = { ...winner.c };
-    wOut.name = winner.v.stem;
-    wOut.takenVersion = winner.v.version;
-    wOut.preferredInVersionGroup = true;
-    wOut.versionGroupSiblings = losers.map(l => ({
+    // Pick the winning VERSION (not winning item). When multiple items
+    // share the highest version (e.g. Father_V2 has ANH + ESB + R1 +
+    // ROTJ), ALL of them are winners — the user wants the whole V2
+    // generation imported, not just one of its members. Items at any
+    // lower version are alternates.
+    const winningVersion = items[items.length - 1].v.version;
+    const winners = items.filter(it => it.v.version === winningVersion);
+    const losers = items.filter(it => it.v.version !== winningVersion);
+    const siblingsMeta = losers.map(l => ({
       version: l.v.version,
       path: l.c.path,
       rawName: l.c.name,
     }));
-    out.push(wOut);
-    // Each loser remains a candidate. We keep the FULL versioned name
-    // (Grumpy_Uncle_V1) so the entry-name collision check in the
-    // importer can pick a unique name; downstream cleanup at user
-    // commit time can rename. alternateVersion flips the default
-    // check state in the review modal and tells bulk to skip.
+    for (const w of winners) {
+      const wOut = { ...w.c };
+      // Strip the version from the display name only on a single-
+      // winner group where the version was IN the candidate's own
+      // folder name. Multi-winner groups (Father_V2/{ANH,ESB,R1,ROTJ})
+      // would collide on the bare stem; path-found versions don't
+      // touch the candidate's name to begin with (the candidate name
+      // is something like "Beskar", not "Bundle_V2").
+      if (winners.length === 1 && w.v.versionFoundInName) {
+        wOut.name = w.v.stem;
+      }
+      wOut.takenVersion = w.v.version;
+      wOut.preferredInVersionGroup = true;
+      wOut.versionGroupSiblings = siblingsMeta;
+      out.push(wOut);
+    }
+    // Each loser remains a candidate. We keep its raw name so the
+    // entry-name collision check in the importer can pick a unique
+    // name; downstream cleanup at user commit time can rename.
+    // alternateVersion flips the default check state in the review
+    // modal and tells bulk to skip.
     for (const l of losers) {
       const lOut = { ...l.c };
       lOut.alternateVersion = true;
       lOut.takenVersion = l.v.version;
-      lOut.preferredSiblingVersion = winner.v.version;
+      lOut.preferredSiblingVersion = winningVersion;
       out.push(lOut);
     }
   }

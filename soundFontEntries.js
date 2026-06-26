@@ -240,6 +240,23 @@ async function createEntry({ userData, sourceUuid, candidate, name, metadata, on
     } else {
       initialTags = [];
     }
+    // Description seeding for version-grouped imports. When the source
+    // shipped multiple versions (versionGroupSiblings non-empty), seed
+    // the description with the bare version string (e.g. "V2") so the
+    // user has a visible indicator of which version this entry is —
+    // useful when both V1 and V2 of the same bundle land in the library.
+    // Skipped when:
+    //   - user supplied an explicit description (their text wins)
+    //   - solo path-versioned (Dark_Apprentice_V2.4 with no sibling) —
+    //     there's no other version to distinguish from, the bundleName
+    //     already carries the version visibly in the source title.
+    let initialDescription = (metadata && metadata.description) || '';
+    if (!initialDescription
+        && candidate.takenVersion
+        && Array.isArray(candidate.versionGroupSiblings)
+        && candidate.versionGroupSiblings.length > 0) {
+      initialDescription = candidate.takenVersion;
+    }
     const meta = {
       schemaVersion: 1,
       entryUuid: crypto.randomUUID(),
@@ -249,6 +266,20 @@ async function createEntry({ userData, sourceUuid, candidate, name, metadata, on
       multiBoard: !!candidate.multiBoard,
       otherFlavors: candidate.otherFlavors || [],
       nested: !!candidate.nested,
+      // Version-group metadata from the candidate detector — captures
+      // "this entry was V2 of a multi-version bundle, and the bundle
+      // also contained V1 alternates" without forcing future surfaces
+      // to re-run detection. Forward-looking; entries imported before
+      // these fields were persisted carry null/false (no migration —
+      // the detection backfill script under local/ handles those if
+      // needed).
+      takenVersion: candidate.takenVersion || null,
+      preferredInVersionGroup: !!candidate.preferredInVersionGroup,
+      alternateVersion: !!candidate.alternateVersion,
+      preferredSiblingVersion: candidate.preferredSiblingVersion || null,
+      versionGroupSiblings: Array.isArray(candidate.versionGroupSiblings)
+        ? candidate.versionGroupSiblings
+        : [],
       tags: initialTags,
       linkedStyleLibraryEntry: (metadata && metadata.linkedStyleLibraryEntry) || null,
       purchased: !!(metadata && metadata.purchased),
@@ -257,7 +288,7 @@ async function createEntry({ userData, sourceUuid, candidate, name, metadata, on
         || (source.meta && source.meta.sourceFileDate)
         || (source.meta && source.meta.importedAt && source.meta.importedAt.slice(0, 10))
         || new Date().toISOString().slice(0, 10),
-      description: (metadata && metadata.description) || '',
+      description: initialDescription,
       demoUrl: (metadata && metadata.demoUrl) || '',
       userNotes: (metadata && metadata.userNotes) || '',
       addedFromSource: [],
