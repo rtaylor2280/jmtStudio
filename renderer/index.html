@@ -14840,10 +14840,13 @@ require(['vs/editor/editor.main'], function () {
         }
       };
       // ── Tag filter (slice 9) ──────────────────────────
-      // Dropdown of available tags + counts. Available = tags present on
-      // entries that match the current search AND already-active filters
-      // (so picks never produce zero results). Counts reflect how many
-      // matching entries carry that tag.
+      // Dropdown of available tags + counts. matchSet for dropdown options
+      // applies search + active CREATOR filters but intentionally NOT the
+      // active tag filter — if we self-applied the tag filter, picking the
+      // first tag would collapse the dropdown down to only that tag, and
+      // the user couldn't see/add a second tag. Counts reflect how many
+      // entries within the cross-dimension filter carry that tag, which is
+      // honest about "this tag has N matches if you add it."
       const _sfRenderTagDropdown = () => {
         const list = document.getElementById('sf-tag-dropdown-list');
         const badge = document.getElementById('sf-tag-filter-badge');
@@ -14859,16 +14862,9 @@ require(['vs/editor/editor.main'], function () {
         if (btn) btn.classList.toggle('has-active', _sfActiveFilterTags.size > 0);
         if (!list) return;
         const q = (_sfSearchQuery || '').toLowerCase();
-        const filterTagsLower = Array.from(_sfActiveFilterTags).map(t => t.toLowerCase());
-        // Compute entries matching current search + active tag filters +
-        // already-active creator filters.
         const filterCreatorsLower = Array.from(_sfActiveFilterCreators).map(c => c.toLowerCase());
         const matchSet = _sfAllEntries.filter(f => {
           if (q && !_sfEntrySearchBlob(f).includes(q)) return false;
-          if (filterTagsLower.length) {
-            const t = new Set(_sfEntryAllTags(f).map(x => x.toLowerCase()));
-            for (const ft of filterTagsLower) if (!t.has(ft)) return false;
-          }
           if (filterCreatorsLower.length) {
             const a = ((f.meta && f.meta.author) || '').toLowerCase();
             if (!a) {
@@ -15017,20 +15013,16 @@ require(['vs/editor/editor.main'], function () {
         if (!list) return;
         const q = (_sfSearchQuery || '').toLowerCase();
         const filterTagsLower = Array.from(_sfActiveFilterTags).map(t => t.toLowerCase());
-        const filterCreatorsLower = Array.from(_sfActiveFilterCreators).map(c => c.toLowerCase());
+        // Mirrors the tag-dropdown rule: do NOT self-apply the creator
+        // filter when computing the dropdown's matchSet. Picking the
+        // first creator would otherwise hide every other creator and
+        // prevent multi-select. Tags + search still apply across
+        // dimensions.
         const matchSet = _sfAllEntries.filter(f => {
           if (q && !_sfEntrySearchBlob(f).includes(q)) return false;
           if (filterTagsLower.length) {
             const t = new Set(_sfEntryAllTags(f).map(x => x.toLowerCase()));
             for (const ft of filterTagsLower) if (!t.has(ft)) return false;
-          }
-          if (filterCreatorsLower.length) {
-            const a = ((f.meta && f.meta.author) || '').toLowerCase();
-            if (!a) {
-              if (!filterCreatorsLower.includes(_SF_NO_CREATOR_KEY)) return false;
-            } else if (!filterCreatorsLower.includes(a)) {
-              return false;
-            }
           }
           return true;
         });
