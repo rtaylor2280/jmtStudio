@@ -569,7 +569,8 @@ function _vpDuplicate(v) {
 async function _vpExport(v) {
   const result = await window.electronAPI.exportVersion(v.name);
   if (!result.ok && result.error !== 'cancelled') {
-    alert(`Export failed: ${result.error}`);
+    if (window.promptError) window.promptError('Export failed', result.error);
+    else alert(`Export failed: ${result.error}`);
   }
   // On success, shell.showItemInFolder is called from main process
 }

@@ -5687,6 +5687,19 @@ function promptError(title, message) {
 }
 window.promptError = promptError;
 
+// Partial-failures modal — used after a multi-item op (delete N files, paste N,
+// move N, save N, etc.) when some succeeded and some failed. Title carries the
+// verb ("Some files failed to delete"), body is the per-item bullet list.
+// Failed entries can use either `source` or `name` as the identifier field —
+// the helper picks whichever is present so call sites stay simple.
+function _sfShowPartialFailures(title, failed) {
+  const lines = (failed || [])
+    .map(f => ` • ${f.source || f.name || '?'}: ${f.error || 'unknown'}`)
+    .join('\n');
+  return promptError(title, lines);
+}
+window._sfShowPartialFailures = _sfShowPartialFailures;
+
 // ── Dirty ──────────────────────────────────────────────
 function setDirty(v) {
   isDirty = v;
@@ -6300,7 +6313,7 @@ function showDiff(visible) {
 
 async function startCompare(filePath) {
   const res = await window.electronAPI.readFile(filePath);
-  if (!res) { alert('Could not read that file.'); return; }
+  if (!res) { promptError('Compare', 'Could not read that file.'); return; }
 
   _compareMode     = true;
   _compareFilePath = filePath;
@@ -6739,10 +6752,10 @@ async function doSave() {
       if (isTxt) {
         // .txt files: save .txt first (non-destructive), then save as .h and use that going forward
         const txtRes = await window.electronAPI.saveFile(currentFilePath, content);
-        if (!txtRes.ok) { alert('Save failed: ' + txtRes.error); return false; }
+        if (!txtRes.ok) { promptError('Save failed', txtRes.error); return false; }
         const hPath = currentFilePath.replace(/\.txt$/i, '.h');
         const hRes = await window.electronAPI.saveFile(hPath, content);
-        if (!hRes.ok) { alert('Save as .h failed: ' + hRes.error); return false; }
+        if (!hRes.ok) { promptError('Save as .h failed', hRes.error); return false; }
         await window.electronAPI.removeRecentFile(currentFilePath);
         setFilePath(hPath);  // clears notice as side-effect, we re-show below
         document.getElementById('input-filename').value = hPath.split(/[\\/]/).pop().replace(/\.h$/i, '');
@@ -6750,7 +6763,7 @@ async function doSave() {
         _showTxtConvertNotice('Saved as .h — original .txt preserved');
       } else {
         const res = await window.electronAPI.saveFile(currentFilePath, content);
-        if (!res.ok) { alert('Save failed: ' + res.error); return false; }
+        if (!res.ok) { promptError('Save failed', res.error); return false; }
         _hideTxtConvertNotice();
       }
       setDirty(false);
@@ -7580,14 +7593,14 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     const pick = await window.electronAPI.bulkImportPickRoot();
     if (!pick || pick.canceled) { closeModal(); return; }
     if (!pick.ok) {
-      alert(`Could not open folder: ${pick.error || 'unknown error'}`);
+      promptError('Could not open folder', pick.error || 'unknown error');
       closeModal();
       return;
     }
     els.scanDetail.textContent = pick.rootDir;
     const scanRes = await window.electronAPI.bulkImportScan({ rootDir: pick.rootDir });
     if (!scanRes || !scanRes.ok) {
-      alert(`Scan failed: ${(scanRes && scanRes.error) || 'unknown error'}`);
+      promptError('Scan failed', (scanRes && scanRes.error) || 'unknown error');
       closeModal();
       return;
     }
@@ -7721,7 +7734,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     const bulkFinalElapsedSec = (Date.now() - bulkStartMs) / 1000;
     runInFlight = false;
     if (!runRes || !runRes.ok) {
-      alert(`Bulk import failed: ${(runRes && runRes.error) || 'unknown error'}`);
+      promptError('Bulk import failed', (runRes && runRes.error) || 'unknown error');
       closeModal();
       try { await window.refreshSoundFontsView?.(); } catch {}
       return;
@@ -9016,11 +9029,11 @@ function _dedupeAndCheckTemplates(content, allEntries) {
 window.saveStylesFile = async function() {
   if (!_stylesEditorInstance) return;
   if (_conflictStyleNames.size > 0) {
-    alert('Resolve duplicate name conflicts before saving the Style Library.');
+    promptError('Cannot save', 'Resolve duplicate name conflicts before saving the Style Library.');
     return;
   }
   if (_conflictTemplateNames.size > 0) {
-    alert('Resolve template conflicts before saving the Style Library.');
+    promptError('Cannot save', 'Resolve template conflicts before saving the Style Library.');
     return;
   }
   const { content: sorted, conflicts: sortConflicts } = _sortHelpersFirst(_stylesEditorInstance.getValue());
@@ -10165,13 +10178,13 @@ document.getElementById('btn-helper-save').addEventListener('click', async () =>
   // ── Edit existing helper ────────────────────────────
   const targetName = nameInput.value.trim();
   const helperValErr = _validateCollapsedStyle(compacted, targetName || 'helper');
-  if (helperValErr) { alert(`Save aborted — structural error in style:\n\n${helperValErr}`); return; }
+  if (helperValErr) { promptError('Save aborted', `Structural error in style:\n\n${helperValErr}`); return; }
 
   // Lookup by original name (in case target was renamed)
   const lookupName = _helperEditorOrigName || targetName;
   const allEntries = _classifyStyleEntries(_parseStyleEntries(current));
   const target = allEntries.find(e => e.name === lookupName);
-  if (!target) { alert(`Cannot locate helper "${lookupName}" in the file.`); return; }
+  if (!target) { promptError('Helper not found', `Cannot locate helper "${lookupName}" in the file.`); return; }
   const { preamble, segments } = _buildSegments(current, allEntries);
   const targetSeg = segments.find(s => s.entry === target);
   if (!targetSeg) return;
@@ -10765,7 +10778,7 @@ async function _saveDetail() {
   const { prefix: editorTmpl, code: editorUsing } = _splitTemplatePrefix(rawEditor);
   const compacted = _compactStyleCode(editorUsing);
   const detailValErr = _validateCollapsedStyle(compacted, newName);
-  if (detailValErr) { alert(`Save aborted — structural error in style:\n\n${detailValErr}`); return; }
+  if (detailValErr) { promptError('Save aborted', `Structural error in style:\n\n${detailValErr}`); return; }
   // compacted = "using OldName = expr;" — replace identifier with newName
   const newUsingCode = `using ${newName} = ${compacted.replace(/^using\s+\w+\s*=\s*/, '')}`;
 
@@ -10893,7 +10906,7 @@ function _collapseEditorContent() {
     const compacted = _compactStyleCode(e.usingCode);
     const err = _validateCollapsedStyle(compacted, e.name);
     if (err) {
-      alert(`Condense aborted — would corrupt style:\n\n${err}\n\nNo changes made. Please report this with a copy of the style.`);
+      promptError('Condense aborted', `Would corrupt style:\n\n${err}\n\nNo changes made. Please report this with a copy of the style.`);
       return;
     }
     work.push({ entry: e, compacted });
@@ -10975,7 +10988,7 @@ function _transformAllUsing(transformFn, validateCompact = false) {
     if (validateCompact) {
       const err = _validateCollapsedStyle(transformed, e.name);
       if (err) {
-        alert(`Condense aborted — would corrupt style:\n\n${err}\n\nNo changes made. Please report this with a copy of the style.`);
+        promptError('Condense aborted', `Would corrupt style:\n\n${err}\n\nNo changes made. Please report this with a copy of the style.`);
         return;
       }
     }
@@ -11003,7 +11016,7 @@ document.getElementById('btn-styles-expand').addEventListener('click', () => {
     const compacted = _compactStyleCode(e.usingCode);
     const err = _validateCollapsedStyle(compacted, e.name);
     if (err) {
-      alert(`Expand aborted — corrupt intermediate condense:\n\n${err}\n\nNo changes made. Please report this with a copy of the style.`);
+      promptError('Expand aborted', `Corrupt intermediate condense:\n\n${err}\n\nNo changes made. Please report this with a copy of the style.`);
       return;
     }
   }
@@ -14297,7 +14310,7 @@ require(['vs/editor/editor.main'], function () {
           try {
             const r = await window.electronAPI.commonNameInUse({ name, excludeUuid });
             if (r && r.ok && r.inUse) {
-              alert(`A common folder named "${name}" already exists.`);
+              await promptError('Name in use', `A common folder named "${name}" already exists.`);
               suggested = name;
               continue;
             }
@@ -14308,7 +14321,7 @@ require(['vs/editor/editor.main'], function () {
       const _sfImportCommon = async (mode) => {
         let pick;
         try { pick = await window.electronAPI.selectCommonSource({ mode }); }
-        catch (err) { alert(`Could not open the picker: ${err && err.message || err}`); return; }
+        catch (err) { promptError('Could not open picker', err && err.message || err); return; }
         if (!pick || !pick.ok) return;
         const defaultName = _sfDefaultCommonName(pick.filePath);
         const name = await _sfPromptCommonName({ title: 'Import common folder', defaultValue: defaultName });
@@ -14323,7 +14336,7 @@ require(['vs/editor/editor.main'], function () {
         }
         await _sfDeleteProgress.hide();
         if (!res || !res.ok) {
-          alert(`Import failed: ${(res && res.error) || 'unknown error'}`);
+          promptError('Import failed', (res && res.error) || 'unknown error');
           return;
         }
         // Newly imported becomes the selected one for the file tree pivot.
@@ -14361,7 +14374,7 @@ require(['vs/editor/editor.main'], function () {
         });
         if (!name) return;
         const res = await window.electronAPI.setCommonGroupMany({ uuids, groupName: name.trim() });
-        if (!res || !res.ok) { alert(`Group failed: ${(res && res.error) || 'unknown error'}`); return; }
+        if (!res || !res.ok) { promptError('Group failed', (res && res.error) || 'unknown error'); return; }
         _sfMultiSelectedCommonUuids.clear();
         _sfMultiSelectAnchor = null;
         // Ensure the new group is visible (opened) so the user sees
@@ -14372,7 +14385,7 @@ require(['vs/editor/editor.main'], function () {
       };
       const _sfUngroupCommon = async (uuid) => {
         const res = await window.electronAPI.setCommonGroup({ uuid, groupName: '' });
-        if (!res || !res.ok) { alert(`Remove from group failed: ${(res && res.error) || 'unknown error'}`); return; }
+        if (!res || !res.ok) { promptError('Remove from group failed', (res && res.error) || 'unknown error'); return; }
         await _sfRefreshCommons();
       };
       // Apply a group name to many uuids at once (used by both
@@ -14381,7 +14394,7 @@ require(['vs/editor/editor.main'], function () {
       const _sfApplyGroupToCommons = async (uuids, groupName) => {
         if (!uuids || uuids.length === 0) return;
         const res = await window.electronAPI.setCommonGroupMany({ uuids, groupName: groupName || '' });
-        if (!res || !res.ok) { alert(`Action failed: ${(res && res.error) || 'unknown error'}`); return; }
+        if (!res || !res.ok) { promptError('Action failed', (res && res.error) || 'unknown error'); return; }
         _sfMultiSelectedCommonUuids.clear();
         _sfMultiSelectAnchor = null;
         // Ensure target group is visible if non-empty
@@ -14416,7 +14429,7 @@ require(['vs/editor/editor.main'], function () {
         const clean = name.trim();
         if (clean === oldName) return;
         const res = await window.electronAPI.renameCommonGroup({ oldName, newName: clean });
-        if (!res || !res.ok) { alert(`Rename group failed: ${(res && res.error) || 'unknown error'}`); return; }
+        if (!res || !res.ok) { promptError('Rename group failed', (res && res.error) || 'unknown error'); return; }
         // Migrate persisted state from old name to new name.
         const idx = _sfCommonGroupOrder.indexOf(oldName);
         if (idx >= 0) _sfCommonGroupOrder.splice(idx, 1, clean);
@@ -14438,7 +14451,7 @@ require(['vs/editor/editor.main'], function () {
         });
         if (!ok) return;
         const res = await window.electronAPI.deleteCommonGroup({ name: groupName });
-        if (!res || !res.ok) { alert(`Delete group failed: ${(res && res.error) || 'unknown error'}`); return; }
+        if (!res || !res.ok) { promptError('Delete group failed', (res && res.error) || 'unknown error'); return; }
         const idx = _sfCommonGroupOrder.indexOf(groupName);
         if (idx >= 0) _sfCommonGroupOrder.splice(idx, 1);
         delete _sfCommonGroupOpen[groupName];
@@ -14829,7 +14842,7 @@ require(['vs/editor/editor.main'], function () {
         _sfDeleteProgress.show('Duplicating common folder', name);
         const res = await window.electronAPI.duplicateCommon({ uuid, newName: name });
         await _sfDeleteProgress.hide();
-        if (!res || !res.ok) { alert(`Duplicate failed: ${(res && res.error) || 'unknown error'}`); return; }
+        if (!res || !res.ok) { promptError('Duplicate failed', (res && res.error) || 'unknown error'); return; }
         _sfSelectedCommonUuid = res.uuid;
         await _sfRefreshCommons();
       };
@@ -14844,7 +14857,7 @@ require(['vs/editor/editor.main'], function () {
         });
         if (!ok) return;
         const res = await window.electronAPI.deleteCommon({ uuid });
-        if (!res || !res.ok) { alert(`Delete failed: ${(res && res.error) || 'unknown error'}`); return; }
+        if (!res || !res.ok) { promptError('Delete failed', (res && res.error) || 'unknown error'); return; }
         if (_sfSelectedCommonUuid === uuid) {
           _sfSelectedCommonUuid = null;
           await _sfSaveActiveCommon();
@@ -14860,7 +14873,7 @@ require(['vs/editor/editor.main'], function () {
         if (!c) return;
         let pick;
         try { pick = await window.electronAPI.selectSaveDestination(); }
-        catch (err) { alert(`Could not open the folder picker: ${err && err.message || err}`); return; }
+        catch (err) { promptError('Could not open folder picker', err && err.message || err); return; }
         if (!pick || !pick.ok) return;
         const destDir = pick.dirPath;
         // If a "common" already exists at the destination, ask how to handle
@@ -14883,13 +14896,13 @@ require(['vs/editor/editor.main'], function () {
         try { res = await window.electronAPI.exportCommonToFolder({ uuid, destDir, mode }); }
         catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
         await _sfDeleteProgress.hide();
-        if (!res || !res.ok) { alert(`Export failed: ${(res && res.error) || 'unknown error'}`); return; }
+        if (!res || !res.ok) { promptError('Export failed', (res && res.error) || 'unknown error'); return; }
       };
       const _sfAddCommonFiles = async () => {
         if (!_sfSelectedCommonUuid) return;
         let pick;
         try { pick = await window.electronAPI.selectCommonFiles(); }
-        catch (err) { alert(`Could not open picker: ${err && err.message || err}`); return; }
+        catch (err) { promptError('Could not open picker', err && err.message || err); return; }
         if (!pick || !pick.ok || !pick.filePaths?.length) return;
         _sfDeleteProgress.show('Adding files', `${pick.filePaths.length} file${pick.filePaths.length === 1 ? '' : 's'}`);
         const res = await window.electronAPI.addCommonFiles({
@@ -14898,9 +14911,9 @@ require(['vs/editor/editor.main'], function () {
           sourceFilePaths: pick.filePaths,
         });
         await _sfDeleteProgress.hide();
-        if (!res || !res.ok) { alert(`Add failed: ${(res && res.error) || 'unknown error'}`); return; }
+        if (!res || !res.ok) { promptError('Add failed', (res && res.error) || 'unknown error'); return; }
         if (res.failed?.length) {
-          alert(`Some files failed to add:\n${res.failed.map(f => ` • ${f.source}: ${f.error}`).join('\n')}`);
+          await _sfShowPartialFailures('Some files failed to add', res.failed);
         }
         await _sfRefreshCommons();
       };
@@ -14953,7 +14966,7 @@ require(['vs/editor/editor.main'], function () {
         });
         if (!ok) return;
         const res = await window.electronAPI.deleteCommonFile({ uuid: _sfSelectedCommonUuid, subPath });
-        if (!res || !res.ok) { alert(`Delete failed: ${(res && res.error) || 'unknown error'}`); return; }
+        if (!res || !res.ok) { promptError('Delete failed', (res && res.error) || 'unknown error'); return; }
         await _sfRefreshCommons();
       };
       // Copy the current file-tree selection to the clipboard for cross-
@@ -14990,11 +15003,11 @@ require(['vs/editor/editor.main'], function () {
         }
         await _sfDeleteProgress.hide();
         if (!res || !res.ok) {
-          alert(`${verb} failed: ${(res && res.error) || 'unknown error'}`);
+          promptError(`${verb} failed`, (res && res.error) || 'unknown error');
           return;
         }
         if (res.failed?.length) {
-          alert(`Some files failed:\n${res.failed.map(f => ` • ${f.source}: ${f.error}`).join('\n')}`);
+          await _sfShowPartialFailures('Some files failed', res.failed);
         }
         _sfSelectedCommonUuid = destUuid;
         await _sfSaveActiveCommon();
@@ -15030,9 +15043,9 @@ require(['vs/editor/editor.main'], function () {
             });
           } catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
           await _sfDeleteProgress.hide();
-          if (!res || !res.ok) { alert(`Paste failed: ${(res && res.error) || 'unknown'}`); return; }
+          if (!res || !res.ok) { promptError('Paste failed', (res && res.error) || 'unknown'); return; }
           if (res.failed?.length) {
-            alert(`Some files failed to paste:\n${res.failed.map(f => ` • ${f.source}: ${f.error}`).join('\n')}`);
+            await _sfShowPartialFailures('Some files failed to paste', res.failed);
           }
           _sfSelectedCommonUuid = destUuid;
           await _sfSaveActiveCommon();
@@ -15074,11 +15087,11 @@ require(['vs/editor/editor.main'], function () {
         }
         await _sfDeleteProgress.hide();
         if (!res || !res.ok) {
-          alert(`Move failed: ${(res && res.error) || 'unknown error'}`);
+          promptError('Move failed', (res && res.error) || 'unknown error');
           return;
         }
         if (res.failed?.length) {
-          alert(`Some files failed:\n${res.failed.map(f => ` • ${f.source}: ${f.error}`).join('\n')}`);
+          await _sfShowPartialFailures('Some files failed', res.failed);
         }
         for (const p of (res.moved || [])) {
           const parts = p.split('/');
@@ -15119,7 +15132,7 @@ require(['vs/editor/editor.main'], function () {
           parentSubPath,
           name,
         });
-        if (!res || !res.ok) { alert(`Create folder failed: ${(res && res.error) || 'unknown error'}`); return; }
+        if (!res || !res.ok) { promptError('Create folder failed', (res && res.error) || 'unknown error'); return; }
         // Open ancestors + the new folder itself so the empty subdir is
         // visible in the tree right after creation.
         if (parentSubPath) {
@@ -15162,7 +15175,7 @@ require(['vs/editor/editor.main'], function () {
         }
         await _sfDeleteProgress.hide();
         if (failures.length) {
-          alert(`Some files failed to delete:\n${failures.map(f => ` • ${f.name}: ${f.error}`).join('\n')}`);
+          await _sfShowPartialFailures('Some files failed to delete', failures);
         }
         // Prune successful deletions; keep failures for inspection.
         const failedSet = new Set(failures.map(f => f.name));
@@ -16055,12 +16068,12 @@ require(['vs/editor/editor.main'], function () {
         if (!picked || !picked.ok || !Array.isArray(picked.filePaths) || picked.filePaths.length === 0) return;
         const res = await window.electronAPI.sharedTracksAddFiles({ sourceFilePaths: picked.filePaths });
         if (!res || !res.ok) {
-          alert('Failed to add files: ' + (res?.error || 'unknown error'));
+          promptError('Failed to add files', res?.error || 'unknown error');
           return;
         }
         if (res.skipped && res.skipped.length > 0) {
           const lines = res.skipped.map(s => `• ${s.src}: ${s.reason}`).join('\n');
-          alert(`Skipped ${res.skipped.length} file(s):\n${lines}`);
+          await promptError(`Skipped ${res.skipped.length} file(s)`, lines);
         }
         await _sfRefreshSharedTracksModal();
       };
@@ -16203,11 +16216,11 @@ require(['vs/editor/editor.main'], function () {
             dest: { kind: 'sharedTracks' },
           });
           if (!res || !res.ok) {
-            alert('Paste failed: ' + (res?.error || 'unknown error'));
+            promptError('Paste failed', res?.error || 'unknown error');
             return;
           }
           if (res.failed?.length) {
-            alert(`Some files failed to paste:\n${res.failed.map(f => ` • ${f.source}: ${f.error}`).join('\n')}`);
+            await _sfShowPartialFailures('Some files failed to paste', res.failed);
           }
           // Select the pasted files so the user can immediately see what
           // landed. Backend `added` are relative to the sharedTracks
@@ -16217,7 +16230,7 @@ require(['vs/editor/editor.main'], function () {
           _sfSharedTracksAnchor = added.length ? added[0].split('/').pop() : null;
           await _sfRefreshSharedTracksModal();
         } catch (err) {
-          alert('Paste failed: ' + String(err && err.message || err));
+          promptError('Paste failed', String(err && err.message || err));
         }
       };
       const _sfRenameSharedTrackPrompt = async (oldName) => {
@@ -16263,7 +16276,7 @@ require(['vs/editor/editor.main'], function () {
           if (!res || !res.ok) failures.push({ name, error: res?.error || 'unknown' });
         }
         if (failures.length) {
-          alert(`Some tracks failed to delete:\n${failures.map(f => ` • ${f.name}: ${f.error}`).join('\n')}`);
+          await _sfShowPartialFailures('Some tracks failed to delete', failures);
         }
         _sfSharedTracksSelected.clear();
         _sfSharedTracksAnchor = null;
@@ -16441,7 +16454,7 @@ require(['vs/editor/editor.main'], function () {
           return;
         }
         if (!importRes || !importRes.ok) {
-          alert(`Import failed: ${(importRes && importRes.error) || 'unknown error'}`);
+          promptError('Import failed', (importRes && importRes.error) || 'unknown error');
           _sfCloseImport();
           return;
         }
@@ -17105,7 +17118,7 @@ require(['vs/editor/editor.main'], function () {
         if (_sfCreateProgressUnsub) { try { _sfCreateProgressUnsub(); } catch {} _sfCreateProgressUnsub = null; }
         if (_sfImportEls.createBar) _sfImportEls.createBar.style.width = '100%';
         if (failures.length) {
-          alert(`Some entries failed:\n${failures.map(f => ` • ${f.name}: ${f.error}`).join('\n')}`);
+          await _sfShowPartialFailures('Some entries failed', failures);
         }
         // The source is now committed (referenced by at least one entry, or
         // attempted by the user). Clear the orphan-cleanup hook before close.
@@ -17863,7 +17876,7 @@ require(['vs/editor/editor.main'], function () {
           updates,
         });
         if (!res || !res.ok) {
-          alert(`Save failed: ${(res && res.error) || 'unknown error'}`);
+          promptError('Save failed', (res && res.error) || 'unknown error');
           return false;
         }
         // After a rename, the on-disk dir is at the new name; keep
@@ -18127,7 +18140,7 @@ require(['vs/editor/editor.main'], function () {
         if (!_sfDetailEdit) return;
         const raw = (_sfEntryDetailEls.nameInput?.value || '').trim();
         const sanitized = _sfSanitizeName(raw);
-        if (!sanitized) { alert('Name is required.'); return; }
+        if (!sanitized) { promptError('Name required', 'Name is required.'); return; }
         if (sanitized !== _sfDetailEdit.name) {
           _sfDetailEdit.name = sanitized;
           _sfMarkDetailDirty();
@@ -18938,7 +18951,7 @@ require(['vs/editor/editor.main'], function () {
         };
         const res = await window.electronAPI.updateSourceMeta({ uuid: _sfSourceOriginalUuid, updates });
         if (!res || !res.ok) {
-          alert(`Save failed: ${(res && res.error) || 'unknown error'}`);
+          promptError('Save failed', (res && res.error) || 'unknown error');
           return false;
         }
         // Bulk-tag delta: compare the working tag set against the snapshot
@@ -18977,7 +18990,7 @@ require(['vs/editor/editor.main'], function () {
           }
         }
         if (tagFailures.length) {
-          alert(`Source saved, but some entries failed to update tags:\n${tagFailures.map(f => ` • ${f.name}: ${f.error}`).join('\n')}`);
+          await _sfShowPartialFailures('Source saved, but some entries failed to update tags', tagFailures);
         }
         // Per-row inline edits: flush any pending name/description changes,
         // including rows still in edit mode (read the live input value so the
@@ -19017,7 +19030,7 @@ require(['vs/editor/editor.main'], function () {
           }
         }
         if (entryEditFailures.length) {
-          alert(`Source saved, but some entry edits failed:\n${entryEditFailures.map(f => ` • ${f.name}: ${f.error}`).join('\n')}`);
+          await _sfShowPartialFailures('Source saved, but some entry edits failed', entryEditFailures);
         }
         _sfSourceDirty = false;
         if (closeAfter) await _sfCloseSourceDetail();
@@ -19498,7 +19511,7 @@ require(['vs/editor/editor.main'], function () {
           try {
             res = await window.electronAPI.duplicateEntry({ sourceName: name, newName, mode: 'current' });
           } catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
-          if (!res || !res.ok) { alert(`Duplicate failed: ${(res && res.error) || 'unknown'}`); return; }
+          if (!res || !res.ok) { promptError('Duplicate failed', (res && res.error) || 'unknown'); return; }
           await _sfFinishEntryDuplicate(res.name || newName);
         });
         mkItem('Duplicate from source', '', async () => {
@@ -19507,7 +19520,7 @@ require(['vs/editor/editor.main'], function () {
           try {
             res = await window.electronAPI.duplicateEntry({ sourceName: name, newName, mode: 'source' });
           } catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
-          if (!res || !res.ok) { alert(`Duplicate failed: ${(res && res.error) || 'unknown'}`); return; }
+          if (!res || !res.ok) { promptError('Duplicate failed', (res && res.error) || 'unknown'); return; }
           await _sfFinishEntryDuplicate(res.name || newName);
         });
         mkSep();
@@ -19567,7 +19580,7 @@ require(['vs/editor/editor.main'], function () {
           const r = await window.electronAPI.exportSourceToPicked({ uuid });
           if (r && r.canceled) return;
           if (!r || !r.ok) {
-            alert(`Export failed: ${(r && r.error) || 'unknown error'}`);
+            promptError('Export failed', (r && r.error) || 'unknown error');
             return;
           }
           // Success: silent. The user picked the destination via the OS
@@ -19575,7 +19588,7 @@ require(['vs/editor/editor.main'], function () {
           // an "Exported to X" modal would just be a redundant
           // interruption.
         } catch (err) {
-          alert(`Export failed: ${err && err.message || err}`);
+          promptError('Export failed', err && err.message || err);
         }
       });
       // Delete source with cascade warning.
@@ -19656,7 +19669,7 @@ require(['vs/editor/editor.main'], function () {
         else _sfSourceCandidatesCache.delete(uuid);
         await _sfDeleteProgress.hide();
         if (failures.length) {
-          alert(`Some items failed to delete:\n${failures.map(f => ` • ${f.name}: ${f.error}`).join('\n')}`);
+          await _sfShowPartialFailures('Some items failed to delete', failures);
         }
         await _sfCloseSourceDetail();
         await window.refreshSoundFontsView();
@@ -19758,9 +19771,9 @@ require(['vs/editor/editor.main'], function () {
           });
         } catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
         await _sfDeleteProgress.hide();
-        if (!res || !res.ok) { alert(`Paste failed: ${(res && res.error) || 'unknown'}`); return; }
+        if (!res || !res.ok) { promptError('Paste failed', (res && res.error) || 'unknown'); return; }
         if (res.failed?.length) {
-          alert(`Some files failed to paste:\n${res.failed.map(f => ` • ${f.source}: ${f.error}`).join('\n')}`);
+          await _sfShowPartialFailures('Some files failed to paste', res.failed);
         }
         // Reload tree + highlight the newly-pasted files so the user
         // sees what landed (mirrors the common-folder paste UX).
@@ -19792,9 +19805,9 @@ require(['vs/editor/editor.main'], function () {
           res = await window.electronAPI.fileOpsDelete({ kind: 'entry', id: _sfDetailOriginalName, subPaths: paths });
         } catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
         await _sfDeleteProgress.hide();
-        if (!res || !res.ok) { alert(`Delete failed: ${(res && res.error) || 'unknown'}`); return; }
+        if (!res || !res.ok) { promptError('Delete failed', (res && res.error) || 'unknown'); return; }
         if (res.failed?.length) {
-          alert(`Some files could not be deleted:\n${res.failed.map(f => ` • ${f.source}: ${f.error}`).join('\n')}`);
+          await _sfShowPartialFailures('Some files could not be deleted', res.failed);
         }
         try {
           const fr = await window.electronAPI.listEntryFiles({ name: _sfDetailOriginalName });
@@ -19819,7 +19832,7 @@ require(['vs/editor/editor.main'], function () {
         const res = await window.electronAPI.fileOpsDelete({
           kind: 'entry', id: _sfDetailOriginalName, subPaths: [subPath],
         });
-        if (!res || !res.ok) { alert(`Delete failed: ${(res && res.error) || 'unknown'}`); return; }
+        if (!res || !res.ok) { promptError('Delete failed', (res && res.error) || 'unknown'); return; }
         try {
           const fr = await window.electronAPI.listEntryFiles({ name: _sfDetailOriginalName });
           _sfEntryFilesTree = (fr && fr.ok && fr.files) || [];
@@ -19906,7 +19919,7 @@ require(['vs/editor/editor.main'], function () {
         const res = await window.electronAPI.fileOpsCreateSubfolder({
           kind: 'entry', id: _sfDetailOriginalName, parentSubPath, name,
         });
-        if (!res || !res.ok) { alert(`Create folder failed: ${(res && res.error) || 'unknown'}`); return; }
+        if (!res || !res.ok) { promptError('Create folder failed', (res && res.error) || 'unknown'); return; }
         try {
           const fr = await window.electronAPI.listEntryFiles({ name: _sfDetailOriginalName });
           _sfEntryFilesTree = (fr && fr.ok && fr.files) || [];
@@ -20078,7 +20091,7 @@ require(['vs/editor/editor.main'], function () {
             subPath: _sfEntryFilesPath,
           });
         } catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
-        if (!res || !res.ok) { alert(`Renumber failed: ${(res && res.error) || 'unknown'}`); return; }
+        if (!res || !res.ok) { promptError('Renumber failed', (res && res.error) || 'unknown'); return; }
         try {
           const fr = await window.electronAPI.listEntryFiles({ name: _sfDetailOriginalName });
           _sfEntryFilesTree = (fr && fr.ok && fr.files) || [];
@@ -20095,7 +20108,7 @@ require(['vs/editor/editor.main'], function () {
         if (!_sfDetailOriginalName) return;
         let pick;
         try { pick = await window.electronAPI.selectAudioFiles({ title: 'Add files to entry' }); }
-        catch (err) { alert(`Could not open picker: ${err && err.message || err}`); return; }
+        catch (err) { promptError('Could not open picker', err && err.message || err); return; }
         if (!pick || !pick.ok || !pick.filePaths?.length) return;
         // Same rename-to-match-folder prompt as Paste and the library
         // picker. Pull basenames from the absolute paths the OS picker
@@ -20110,9 +20123,9 @@ require(['vs/editor/editor.main'], function () {
           destNames: destNames.length ? destNames : undefined,
         });
         await _sfDeleteProgress.hide();
-        if (!res || !res.ok) { alert(`Add failed: ${(res && res.error) || 'unknown'}`); return; }
+        if (!res || !res.ok) { promptError('Add failed', (res && res.error) || 'unknown'); return; }
         if (res.failed?.length) {
-          alert(`Some files failed to add:\n${res.failed.map(f => ` • ${f.source}: ${f.error}`).join('\n')}`);
+          await _sfShowPartialFailures('Some files failed to add', res.failed);
         }
         try {
           const fr = await window.electronAPI.listEntryFiles({ name: _sfDetailOriginalName });
@@ -20871,7 +20884,7 @@ require(['vs/editor/editor.main'], function () {
         }
         await _sfDeleteProgress.hide();
         if (allFailed.length) {
-          alert(`Some files failed to add:\n${allFailed.map(f => ` • ${f.source}: ${f.error}`).join('\n')}`);
+          await _sfShowPartialFailures('Some files failed to add', allFailed);
         }
         // Refresh the underlying surface and close the picker.
         if (isEntryMode) {
@@ -21368,9 +21381,9 @@ require(['vs/editor/editor.main'], function () {
           res = await window.electronAPI.sfExportFiles({ kind, id, paths: subPaths, asFile });
         } catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
         if (!res || res.canceled) return;
-        if (!res.ok) { alert(`Export failed: ${res.error || 'unknown'}`); return; }
+        if (!res.ok) { promptError('Export failed', res.error || 'unknown'); return; }
         if (res.failed?.length) {
-          alert(`Some files failed to export:\n${res.failed.map(f => ` • ${f.source}: ${f.error}`).join('\n')}`);
+          await _sfShowPartialFailures('Some files failed to export', res.failed);
         }
       };
 
@@ -21409,11 +21422,11 @@ require(['vs/editor/editor.main'], function () {
             throw new Error(`Unknown doc viewer kind: ${kind}`);
           }
         } catch (err) {
-          alert(`Could not read file: ${err && err.message || err}`);
+          promptError('Could not read file', err && err.message || err);
           return;
         }
         if (!res || !res.ok) {
-          alert(`Could not read file: ${(res && res.error) || 'unknown error'}`);
+          promptError('Could not read file', (res && res.error) || 'unknown error');
           return;
         }
         const bytes = Uint8Array.from(res.bytes || []);
@@ -21503,7 +21516,7 @@ require(['vs/editor/editor.main'], function () {
         try { res = await window.electronAPI.reorganizeDetect({ name: _sfDetailOriginalName }); }
         catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
         if (!res || !res.ok) {
-          alert(`Reorganize unavailable: ${(res && res.error) || 'unknown'}`);
+          promptError('Reorganize unavailable', (res && res.error) || 'unknown');
           return;
         }
         _sfReorgBuckets = res.buckets || [];
@@ -21541,7 +21554,7 @@ require(['vs/editor/editor.main'], function () {
         let res;
         try { res = await window.electronAPI.reorganizeGroup({ name: _sfDetailOriginalName }); }
         catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
-        if (!res || !res.ok) { alert(`Group failed: ${(res && res.error) || 'unknown'}`); return; }
+        if (!res || !res.ok) { promptError('Group failed', (res && res.error) || 'unknown'); return; }
         await _sfReorgRefresh();
         await _sfReorgRefreshOuterBrowser();
       });
@@ -21555,7 +21568,7 @@ require(['vs/editor/editor.main'], function () {
         let res;
         try { res = await window.electronAPI.reorganizeFlatten({ name: _sfDetailOriginalName }); }
         catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
-        if (!res || !res.ok) { alert(`Flatten failed: ${(res && res.error) || 'unknown'}`); return; }
+        if (!res || !res.ok) { promptError('Flatten failed', (res && res.error) || 'unknown'); return; }
         await _sfReorgRefresh();
         await _sfReorgRefreshOuterBrowser();
       });
@@ -21841,7 +21854,7 @@ require(['vs/editor/editor.main'], function () {
             orderedPaths: _sfReorgStaged,
           });
         } catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
-        if (!res || !res.ok) { alert(`Reorder failed: ${(res && res.error) || 'unknown'}`); return; }
+        if (!res || !res.ok) { promptError('Reorder failed', (res && res.error) || 'unknown'); return; }
         // Stay open on the same bucket so the user sees the renumbered
         // list. Re-detect to pick up the freshly renamed files, then
         // remap the staged + original arrays to the new paths so the
@@ -21932,7 +21945,7 @@ require(['vs/editor/editor.main'], function () {
             commit: true,
           });
         } catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
-        if (!res || !res.ok) { alert(`Replace failed: ${(res && res.error) || 'unknown'}`); return; }
+        if (!res || !res.ok) { promptError('Replace failed', (res && res.error) || 'unknown'); return; }
         // Clear the inputs and refresh both views — find/replace can
         // change files that buckets also care about.
         document.getElementById('sf-reorg-fr-find').value = '';
@@ -22223,9 +22236,9 @@ require(['vs/editor/editor.main'], function () {
           });
         } catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
         await _sfDeleteProgress.hide();
-        if (!res || !res.ok) { alert(`Move failed: ${(res && res.error) || 'unknown'}`); return; }
+        if (!res || !res.ok) { promptError('Move failed', (res && res.error) || 'unknown'); return; }
         if (res.failed?.length) {
-          alert(`Some files failed:\n${res.failed.map(f => ` • ${f.source}: ${f.error}`).join('\n')}`);
+          await _sfShowPartialFailures('Some files failed', res.failed);
         }
         try {
           const fr = await window.electronAPI.listEntryFiles({ name: _sfDetailOriginalName });
@@ -22794,12 +22807,12 @@ require(['vs/editor/editor.main'], function () {
         try {
           const r = await window.electronAPI.exportSourceToDownloads({ uuid: sourceUuid, destDir });
           if (!r || !r.ok) {
-            alert(`Could not export source: ${(r && r.error) || 'unknown error'}\n\nNothing was deleted.`);
+            promptError('Could not export source', `${(r && r.error) || 'unknown error'}\n\nNothing was deleted.`);
             return false;
           }
           return true;
         } catch (err) {
-          alert(`Could not export source: ${err && err.message || err}\n\nNothing was deleted.`);
+          promptError('Could not export source', `${err && err.message || err}\n\nNothing was deleted.`);
           return false;
         }
       };
@@ -22872,7 +22885,7 @@ require(['vs/editor/editor.main'], function () {
         const sourceUuid = entry && entry.meta && entry.meta.sourceUuid;
         const r = await window.electronAPI.deleteEntry({ name });
         if (!r || !r.ok) {
-          alert(`Delete failed: ${(r && r.error) || 'unknown error'}`);
+          promptError('Delete failed', (r && r.error) || 'unknown error');
           return false;
         }
         // If no other entries reference the same source, the archive is now
@@ -23005,7 +23018,7 @@ require(['vs/editor/editor.main'], function () {
         }
         await _sfDeleteProgress.hide();
         if (failures.length) {
-          alert(`Some entries failed to update tags:\n${failures.map(f => ` • ${f.name}: ${f.error}`).join('\n')}`);
+          await _sfShowPartialFailures('Some entries failed to update tags', failures);
           // Keep selection so user can see what's still in scope and retry.
           await window.refreshSoundFontsView();
           return;
@@ -23229,7 +23242,7 @@ require(['vs/editor/editor.main'], function () {
         }
         let pick;
         try { pick = await window.electronAPI.selectSaveDestination(); }
-        catch (err) { alert(`Could not open the folder picker: ${err && err.message || err}`); return false; }
+        catch (err) { promptError('Could not open folder picker', err && err.message || err); return false; }
         if (!pick || !pick.ok) return false;
         const destDir = pick.dirPath;
         // Pre-scan: which entries already exist at the destination? Also
@@ -23358,7 +23371,7 @@ require(['vs/editor/editor.main'], function () {
         }
         await _sfDeleteProgress.hide();
         if (failures.length) {
-          alert(`Some items failed to save:\n${failures.map(f => ` • ${f.name}: ${f.error}`).join('\n')}`);
+          await _sfShowPartialFailures('Some items failed to save', failures);
           // Keep selection on real failures so the user can see what's still
           // in scope and retry. (Skips don't count as failures — those were
           // deliberate user choices.)
@@ -23461,12 +23474,12 @@ require(['vs/editor/editor.main'], function () {
               const er = await window.electronAPI.exportSourceToDownloads({ uuid: src.uuid, destDir: bulkExportDir });
               if (!er || !er.ok) {
                 hideProgress();
-                alert(`Could not export "${src.label}": ${(er && er.error) || 'unknown error'}\n\nNothing was deleted.`);
+                await promptError(`Could not export "${src.label}"`, `${(er && er.error) || 'unknown error'}\n\nNothing was deleted.`);
                 return false;
               }
             } catch (err) {
               hideProgress();
-              alert(`Could not export "${src.label}": ${err && err.message || err}\n\nNothing was deleted.`);
+              await promptError(`Could not export "${src.label}"`, `${err && err.message || err}\n\nNothing was deleted.`);
               return false;
             }
             stepIdx++;
@@ -23504,7 +23517,7 @@ require(['vs/editor/editor.main'], function () {
         }
         hideProgress();
         if (failures.length) {
-          alert(`Some items failed to delete:\n${failures.map(f => ` • ${f.name}: ${f.error}`).join('\n')}`);
+          await _sfShowPartialFailures('Some items failed to delete', failures);
           // Prune successfully-deleted names so retry won't fail on
           // not-found errors; keep the actual failures selected for the
           // user to investigate.
@@ -23637,7 +23650,7 @@ require(['vs/editor/editor.main'], function () {
               ? await window.electronAPI.readEntryDocBytes({ name: key, path: fileName })
               : await window.electronAPI.readSourceDocBytes({ uuid: key, path: fileName });
             if (!res || !res.ok) {
-              alert(`Could not read file: ${(res && res.error) || 'unknown error'}`);
+              promptError('Could not read file', (res && res.error) || 'unknown error');
               return;
             }
             const bytes = Uint8Array.from(res.bytes || []);
@@ -23648,7 +23661,7 @@ require(['vs/editor/editor.main'], function () {
             const displayText = /\.rtf$/i.test(fileName) ? _sfStripRtf(rawText) : rawText;
             _sfShowDocViewer(fileName, size || bytes.length, displayText);
           } catch (err) {
-            alert(`Could not read file: ${err && err.message || err}`);
+            promptError('Could not read file', err && err.message || err);
           }
         } else {
           // Binary or unrecognized — copy out and show a confirmation that the
@@ -23660,7 +23673,7 @@ require(['vs/editor/editor.main'], function () {
               ? await window.electronAPI.exportEntryDoc({ name: key, path: fileName })
               : await window.electronAPI.exportSourceDoc({ uuid: key, path: fileName });
             if (!res || !res.ok) {
-              alert(`Could not save file: ${(res && res.error) || 'unknown error'}`);
+              promptError('Could not save file', (res && res.error) || 'unknown error');
               return;
             }
             const destBase = String(res.destPath || '').split(/[\\/]/).pop() || baseName;
@@ -23672,7 +23685,7 @@ require(['vs/editor/editor.main'], function () {
               cancelText: 'Close',
             });
           } catch (err) {
-            alert(`Could not save file: ${err && err.message || err}`);
+            promptError('Could not save file', err && err.message || err);
           }
         }
       };
@@ -23761,7 +23774,7 @@ require(['vs/editor/editor.main'], function () {
           if (!ok) return;
           const res = await window.electronAPI.sharedTracksDelete();
           if (!res || !res.ok) {
-            alert('Could not delete the folder: ' + (res?.error || 'unknown error'));
+            promptError('Could not delete the folder', res?.error || 'unknown error');
             return;
           }
           await window.refreshSoundFontsView();
@@ -24502,7 +24515,7 @@ require(['vs/editor/editor.main'], function () {
       document.getElementById('btn-sf-create-shared-tracks')?.addEventListener('click', async () => {
         const res = await window.electronAPI.sharedTracksCreate();
         if (!res || !res.ok) {
-          alert('Could not create the Shared Tracks folder: ' + (res?.error || 'unknown error'));
+          promptError('Could not create the Shared Tracks folder', res?.error || 'unknown error');
           return;
         }
         await window.refreshSoundFontsView();
@@ -24924,7 +24937,7 @@ require(['vs/editor/editor.main'], function () {
             subPath,
           });
           if (!res || !res.ok) {
-            alert(`Could not read file: ${(res && res.error) || 'unknown error'}`);
+            promptError('Could not read file', (res && res.error) || 'unknown error');
             return;
           }
           const bytes = Uint8Array.from(res.bytes || []);
@@ -24932,7 +24945,7 @@ require(['vs/editor/editor.main'], function () {
           const displayText = /\.rtf$/i.test(fileName) ? _sfStripRtf(rawText) : rawText;
           _sfShowDocViewer(fileName, bytes.length, displayText);
         } catch (err) {
-          alert(`Could not read file: ${err && err.message || err}`);
+          promptError('Could not read file', err && err.message || err);
         }
       });
       // Drag-and-drop between commons (and into subfolders). File rows are
@@ -25146,7 +25159,7 @@ require(['vs/editor/editor.main'], function () {
         // the actual target drive (USB vs internal SSD make a real diff).
         let pick;
         try { pick = await window.electronAPI.selectBackupExportPath(); }
-        catch (err) { alert(`Could not open the picker: ${err && err.message || err}`); return; }
+        catch (err) { promptError('Could not open picker', err && err.message || err); return; }
         if (!pick || !pick.ok) return;
         const destPath = pick.filePath;
         // Prep — run survey + benchmark before showing the confirm.
@@ -25166,7 +25179,7 @@ require(['vs/editor/editor.main'], function () {
         if (progTrack) progTrack.style.display = 'none';
         if (!prep || !prep.ok) {
           prepModal.classList.remove('active');
-          alert(`Could not prepare export: ${(prep && prep.error) || 'unknown error'}`);
+          promptError('Could not prepare export', (prep && prep.error) || 'unknown error');
           return;
         }
         const { survey } = prep;
@@ -26130,7 +26143,7 @@ require(['vs/editor/editor.main'], function () {
       const _sfOpenImportBackup = async () => {
         let pick;
         try { pick = await window.electronAPI.selectBackupImportPath(); }
-        catch (err) { alert(`Could not open the picker: ${err && err.message || err}`); return; }
+        catch (err) { promptError('Could not open picker', err && err.message || err); return; }
         if (!pick || !pick.ok) return;
         const zipPath = pick.filePath;
         // Inspection can take a moment on a big zip — show the backup
@@ -26580,11 +26593,13 @@ require(['vs/editor/editor.main'], function () {
   // verb appears in prompts ("save before {verb}?"). Returns true if user opted to proceed.
   async function _runQuitGuards(verb) {
     if (window._isFlashing) {
-      alert('Cannot ' + (verb === 'closing' ? 'close' : 'install update') + ' while flashing. Wait for flash to complete.');
+      const action = verb === 'closing' ? 'close' : 'install update';
+      await promptError(`Cannot ${action}`, `Cannot ${action} while flashing. Wait for flash to complete.`);
       return false;
     }
     if (window._sfBackupBusy) {
-      alert('Cannot ' + (verb === 'closing' ? 'close' : 'install update') + ' while a Sound Font backup is in progress. Click Cancel on the progress dialog first. It will clean up the partial file.');
+      const action = verb === 'closing' ? 'close' : 'install update';
+      await promptError(`Cannot ${action}`, `Cannot ${action} while a Sound Font backup is in progress. Click Cancel on the progress dialog first. It will clean up the partial file.`);
       return false;
     }
     if (isDirty) {
@@ -28542,11 +28557,7 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
           kind: 'entry', id: fontName, subPath: oldFolder, newName: newFolder,
         });
         if (!renameRes || !renameRes.ok) {
-          if (typeof promptError === 'function') {
-            promptError('Rename failed', (renameRes && renameRes.error) || 'unknown');
-          } else {
-            alert(`Rename failed: ${(renameRes && renameRes.error) || 'unknown'}`);
-          }
+          promptError('Rename failed', (renameRes && renameRes.error) || 'unknown');
           return;
         }
         // Cascade: every preset whose track value starts with
