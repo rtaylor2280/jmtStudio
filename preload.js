@@ -206,6 +206,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Format-dispatch reads (slice 2)
   browseSource:          (params)     => ipcRenderer.invoke('sources:browse', params),
   listSourceFiles:       (params)     => ipcRenderer.invoke('sources:listFiles', params),
+  listSourceInnerZipFiles: (params)   => ipcRenderer.invoke('sources:listInnerZipFiles', params),
   readSourceFile:        (params)     => ipcRenderer.invoke('sources:readFile', params),
   extractFromSource:     (params)     => ipcRenderer.invoke('sources:extractTo', params),
   exportSourceToDownloads: (params)   => ipcRenderer.invoke('sources:exportToDownloads', params),

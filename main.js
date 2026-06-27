@@ -952,6 +952,20 @@ ipcMain.handle('sources:listFiles', async (_, { uuid } = {}) => {
   }
 });
 
+// Lazy descent into an inner zip from the source file browser. Pay-for-what-
+// you-use: the outer listFiles call leaves inner zips as zip-shaped folders,
+// and this handler fires only when the user actually navigates into one.
+ipcMain.handle('sources:listInnerZipFiles', async (_, { uuid, innerZipPath } = {}) => {
+  try {
+    const files = await soundFontSources.listSourceInnerZipFiles(
+      app.getPath('userData'), uuid, innerZipPath,
+    );
+    return { ok: true, files };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
 ipcMain.handle('sources:browse', async (_, { uuid, path: subPath } = {}) => {
   try {
     const source = soundFontSources.openSource(app.getPath('userData'), uuid);
@@ -1001,9 +1015,11 @@ ipcMain.handle('sources:detectVendor', async (_, { uuid } = {}) => {
 
 ipcMain.handle('sources:detectCandidates', async (_, { uuid } = {}) => {
   try {
-    const source = soundFontSources.openSource(app.getPath('userData'), uuid);
-    if (!source) return { ok: false, error: `Source not found: ${uuid}` };
-    const result = await soundFontCandidates.detectCandidates(source);
+    // Persistent cache + on-meta storage: first call computes + stamps,
+    // every call after that reads from meta. Survives backup / restore /
+    // app restart because meta.json is the storage medium.
+    const result = await soundFontSources.getCachedCandidates(app.getPath('userData'), uuid);
+    if (!result) return { ok: false, error: `Source not found: ${uuid}` };
     return { ok: true, ...result };
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };
@@ -1507,7 +1523,7 @@ ipcMain.handle('voicepack:install', async (_, { id } = {}) => {
 // mode pops a folder picker and writes each file at the chosen folder
 // with its original name, walking collisions through a " (N)" tail so
 // nothing gets silently overwritten. Returns the list of written paths.
-ipcMain.handle('sfFile:export', async (_, { kind, id, paths, suggestedName } = {}) => {
+ipcMain.handle('sfFile:export', async (_, { kind, id, paths, suggestedName, asFile } = {}) => {
   // sharedTracks is the singleton flat folder — no id required. Every
   // other kind needs one.
   if (!kind || !Array.isArray(paths) || paths.length === 0) {
@@ -1550,12 +1566,82 @@ ipcMain.handle('sfFile:export', async (_, { kind, id, paths, suggestedName } = {
       n++;
     }
   };
+  // Walk an inner-zip's central directory and return flat composite-pathed
+  // entries matching the inside scope (everything under insidePath/, plus
+  // the exact match if any). Used by isDirAtPath + writeDirTo to handle
+  // composite paths like "Indara.zip/clash" — the outer zip's listAll
+  // doesn't surface inner-zip contents, so we open it on the fly. Same
+  // pattern as soundFontSources._resolveCompositeReadBytes but listing
+  // instead of reading bytes. Composite path with no insidePath suffix
+  // (just "Indara.zip") walks the inner zip's root.
+  const _walkInnerZipForExport = async (sourceId, innerZipPath, insidePath) => {
+    const source = soundFontSources.openSource(userData, sourceId);
+    if (!source) return { exact: null, inside: [] };
+    const innerBytes = await source.readFile(innerZipPath);
+    const StreamZip = require('node-stream-zip');
+    const os = require('os');
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jmt-export-inner-'));
+    const tmpZip = path.join(tmpDir, 'inner.zip');
+    try {
+      fs.writeFileSync(tmpZip, innerBytes);
+      const zip = new StreamZip.async({ file: tmpZip, skipEntryNameValidation: true });
+      try {
+        const entryMap = await zip.entries();
+        const insidePrefix = insidePath
+          ? (insidePath.endsWith('/') ? insidePath : insidePath + '/')
+          : ''; // empty means "everything in the inner zip"
+        let exact = null;
+        const inside = [];
+        for (const k of Object.keys(entryMap)) {
+          const e = entryMap[k];
+          if (!e.name || e.name === '/') continue;
+          const flatName = e.name.replace(/\/+$/, '');
+          const isDir = !!e.isDirectory || e.name.endsWith('/');
+          const compositePath = `${innerZipPath}/${flatName}`;
+          if (insidePath && flatName === insidePath) {
+            exact = { fileName: compositePath, size: e.size || 0, isDir };
+          }
+          if (insidePrefix && flatName.startsWith(insidePrefix)) {
+            inside.push({ fileName: compositePath, size: e.size || 0, isDir });
+          } else if (!insidePath) {
+            // Entire inner zip — every entry counts.
+            inside.push({ fileName: compositePath, size: e.size || 0, isDir });
+          }
+        }
+        return { exact, inside };
+      } finally {
+        await zip.close();
+      }
+    } finally {
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+    }
+  };
+  // Match a composite source path: outer-side .zip + optional inside path.
+  // Lazy match so "myname.zipfile" doesn't accidentally split on the .zip
+  // (the lazy + matches the shortest prefix ending in .zip, then the
+  // post-match anchors enforce that the whole input is matched cleanly).
+  const _compositeMatch = (p) => (p.match(/^(.+?\.zip)(?:\/(.+))?$/i));
   // Probe whether a subPath inside the active location refers to a
   // directory. Source kind reads the archive listing; entry/common
-  // resolve to disk.
+  // resolve to disk. Composite paths (anything inside an inner zip)
+  // peek through the inner zip's central directory.
   const isDirAtPath = async (subPath) => {
     if (kind === 'sharedTracks') return false; // flat folder, no subdirs
     if (kind === 'source') {
+      const cm = _compositeMatch(subPath);
+      if (cm) {
+        const innerZipPath = cm[1];
+        const insidePath = cm[2] || '';
+        // An inner zip with no inside path (just "Indara.zip") IS a folder
+        // semantically — it's how the file browser renders it via the
+        // lazy-descent mark. Copy / export folder ops should walk its
+        // contents. The "Export ZIP" affordance for raw-bytes export
+        // lives on a separate menu item.
+        if (!insidePath) return true;
+        const { exact, inside } = await _walkInnerZipForExport(id, innerZipPath, insidePath);
+        if (exact && exact.isDir) return true;
+        return inside.length > 0;
+      }
       const source = soundFontSources.openSource(userData, id);
       if (!source) return false;
       const all = await source.listAll();
@@ -1571,10 +1657,34 @@ ipcMain.handle('sfFile:export', async (_, { kind, id, paths, suggestedName } = {
     try { return fs.statSync(abs).isDirectory(); } catch { return false; }
   };
   // Write a whole directory (source-side or on-disk) into outRoot,
-  // preserving relative structure.
+  // preserving relative structure. Composite paths walk the inner zip.
   const writeDirTo = async (subPath, outRoot) => {
     if (!fs.existsSync(outRoot)) fs.mkdirSync(outRoot, { recursive: true });
     if (kind === 'source') {
+      const cm = _compositeMatch(subPath);
+      if (cm) {
+        const innerZipPath = cm[1];
+        const insidePath = cm[2] || '';
+        const source = soundFontSources.openSource(userData, id);
+        const { inside } = await _walkInnerZipForExport(id, innerZipPath, insidePath);
+        const insidePrefix = insidePath
+          ? (insidePath.endsWith('/') ? insidePath : insidePath + '/')
+          : '';
+        for (const entry of inside) {
+          if (entry.isDir) continue;
+          const innerFlat = entry.fileName.slice(innerZipPath.length + 1);
+          const innerRel = insidePrefix ? innerFlat.slice(insidePrefix.length) : innerFlat;
+          if (!innerRel) continue;
+          const outPath = path.join(outRoot, innerRel.replace(/\//g, path.sep));
+          fs.mkdirSync(path.dirname(outPath), { recursive: true });
+          // source.readFile is composite-aware — entry.fileName carries the
+          // full composite path, so the inner-zip layer gets peeled by the
+          // resolver automatically.
+          const buf = await source.readFile(entry.fileName);
+          fs.writeFileSync(outPath, buf);
+        }
+        return;
+      }
       const source = soundFontSources.openSource(userData, id);
       const all = await source.listAll();
       const prefix = subPath.endsWith('/') ? subPath : subPath + '/';
@@ -1611,7 +1721,12 @@ ipcMain.handle('sfFile:export', async (_, { kind, id, paths, suggestedName } = {
   if (paths.length === 1) {
     const subPath = paths[0];
     const baseName = suggestedName || subPath.split('/').pop() || 'untitled';
-    const isDir = await isDirAtPath(subPath);
+    // asFile=true short-circuits the dir probe — used by "Export ZIP…"
+    // on an inner-zip node, where the user wants the raw .zip bytes
+    // exported as a standalone file rather than the contents extracted.
+    // Same path is conceptually both (file-of-bytes + folder-of-contents)
+    // so the caller picks which semantics with this flag.
+    const isDir = asFile ? false : await isDirAtPath(subPath);
     if (isDir) {
       const { canceled, filePaths } = await dialog.showOpenDialog(win, {
         title: `Export "${baseName}" folder to…`,

@@ -1162,6 +1162,8 @@
   .sf-libpick-left { flex: 1 1 60%; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
   .sf-libpick-right { flex: 1 1 40%; min-width: 240px; display: flex; flex-direction: column; gap: 6px; background: var(--c-bg-inset); border: 1px solid var(--c-border-faint); border-radius: 4px; padding: 8px 10px; }
   .sf-libpick-target-row { display: flex; align-items: center; gap: 8px; }
+  .sf-libpick-filter-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .sf-libpick-filter-row > button { white-space: nowrap; }
   .sf-libpick-target-label { font-size: 0.74rem; color: var(--c-text-sub); }
   .sf-libpick-target-select { flex: 1; background: var(--c-bg-inset); border: 1px solid var(--c-border-input); color: var(--c-text); border-radius: 3px; padding: 4px 8px; font-size: 0.8rem; font-family: inherit; outline: none; }
   .sf-libpick-target-select:focus { border-color: var(--jmt-blue); }
@@ -2761,6 +2763,17 @@
   .sf-source-entry-row:hover .sf-source-entry-delete { opacity: 0.5; }
   .sf-source-entry-delete:hover { opacity: 1 !important; color: #e44; background: rgba(40,10,10,0.7); }
   .sf-source-entries-empty { font-size: 0.78rem; color: var(--c-text-dim); font-style: italic; padding: 6px 0; }
+  /* Loading-state pulse — gentle opacity breathing communicates "work in
+     progress" without being noisy. Slow 1.6s cycle so it reads as steady
+     activity rather than urgency. Reused for any "Loading…" copy and on
+     inputs disabled-pending-load (where it applies only to ::placeholder
+     so the input chrome itself stays its normal disabled appearance). */
+  @keyframes sf-loading-pulse {
+    0%, 100% { opacity: 0.45; }
+    50%      { opacity: 0.95; }
+  }
+  .sf-loading-pulse { animation: sf-loading-pulse 1.6s ease-in-out infinite; }
+  input.sf-loading-pulse::placeholder { animation: sf-loading-pulse 1.6s ease-in-out infinite; }
   .sf-source-add-more-btn { font-size: 0.82rem; padding: 6px 14px; }
   .sf-source-delete-btn { margin-right: auto; color: #e44; }
   .sf-source-delete-btn:hover { background: rgba(228,68,68,0.12); color: #f66; }
@@ -2919,6 +2932,13 @@
   #btn-sf-needs-review-filter #sf-needs-review-count { background: var(--jmt-amber); }
   .styles-active-filter-chip.sf-active-filter-needs-review { color: var(--jmt-amber); background: rgba(212,155,58,0.10); border-color: rgba(212,155,58,0.5); }
   .styles-active-filter-chip.sf-active-filter-needs-review .styles-active-filter-remove { color: var(--jmt-amber); }
+  /* In Use filter mirrors the .sf-card.in-use blue tint so the visual
+     vocabulary is consistent — same color signal in toolbar and card. */
+  #btn-sf-in-use-filter:hover { color: var(--jmt-blue); }
+  #btn-sf-in-use-filter.active { color: var(--jmt-blue); border-color: rgba(0,130,255,0.5); background: rgba(0,100,220,0.08); }
+  #btn-sf-in-use-filter #sf-in-use-count { background: var(--jmt-blue); }
+  .styles-active-filter-chip.sf-active-filter-in-use { color: var(--jmt-blue); background: rgba(0,100,220,0.10); border-color: rgba(0,130,255,0.5); }
+  .styles-active-filter-chip.sf-active-filter-in-use .styles-active-filter-remove { color: var(--jmt-blue); }
   /* Active-filter chip for missing-effect filters — red tint so the
      "no preon" reads visually distinct from the present "preon" chip.
      Matches the red of the entry-detail missing chip language. */
@@ -3067,7 +3087,23 @@
   .preset-array-rename-btn.confirm:hover { opacity: 1; }
 
   .preset-sidecar-inner { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; background: var(--c-bg-raised); }
-  .preset-sidecar-header { display: flex; align-items: center; gap: 4px; padding: 8px 10px 6px; border-bottom: 1px solid var(--c-border); flex-shrink: 0; }
+  .preset-sidecar-header { position: relative; display: flex; align-items: center; gap: 4px; padding: 8px 10px 6px; border-bottom: 1px solid var(--c-border); flex-shrink: 0; }
+  /* Auto-play toggle: "Auto ▶" label, no border/box — sits inline
+     with the other sidecar header buttons. Muted when off, JMT blue
+     when armed, solid blue when audio is live. Loading pulse via
+     .sf-loading-pulse covers the fetch window. */
+  /* Auto ▶ toggle: absolutely positioned at right:42px so its right edge
+     aligns with the right edge of the font-folder column in the preset
+     rows below (rows have padding-right:42px reserving space for the
+     hover-only delete/toggle buttons; the font text right-aligns at the
+     same x as that padding's inner edge). Flex flow keeps the close
+     button at the far right via its own margin-left:auto. */
+  .preset-autoplay-btn { position: absolute; right: 42px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--c-text-muted); cursor: pointer; padding: 1px 6px; font-size: 0.72rem; line-height: 1; transition: color 0.15s; display: inline-flex; align-items: center; gap: 3px; }
+  .preset-autoplay-btn:hover { color: var(--c-text); }
+  .preset-autoplay-btn.on { color: var(--jmt-blue); }
+  .preset-autoplay-btn.on:hover { color: var(--jmt-blue); }
+  .preset-autoplay-label { font-weight: 500; letter-spacing: 0.02em; }
+  .preset-autoplay-arrow { font-size: 0.78rem; }
   .preset-sidecar-title { font-size: 0.7rem; font-weight: 700; color: var(--c-text); letter-spacing: 0.05em; }
   /* Common folder selector row in the preset sidecar. Shown only when
      the SF library has at least one common folder. Selecting a row
@@ -3210,6 +3246,39 @@
   .preset-ctx-item { padding: 6px 14px; cursor: pointer; font-size: 0.78rem; color: var(--c-text-sub); transition: background 0.1s, color 0.1s; white-space: nowrap; }
   .preset-ctx-item:hover { background: var(--c-bg-hover); color: var(--c-text); }
   .preset-ctx-item.danger:hover { background: rgba(40,10,10,0.7); color: #e44; }
+  /* Submenu indicator + spacing for items that open a nested menu. The
+     ▸ glyph sits flush right, matching OS-native cascade menus. The
+     submenu DOM is a sibling .preset-ctx-menu positioned at runtime. */
+  .preset-ctx-item.has-submenu { padding-right: 28px; position: relative; }
+  .preset-ctx-item.has-submenu::after { content: '\25B8'; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 0.72rem; color: var(--c-text-muted); }
+  .preset-ctx-item.has-submenu:hover::after { color: var(--c-text); }
+  .preset-ctx-submenu-section { padding: 4px 14px 2px; font-size: 0.66rem; color: var(--c-text-muted); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
+  .preset-ctx-submenu-empty { padding: 6px 14px; font-size: 0.74rem; color: var(--c-text-muted); font-style: italic; }
+  /* Submenu sizing for the SF card right-click "Replace font folder in…"
+     popup. Caps the height so a long preset list doesn't run off the
+     bottom of the window, and turns on overflow scrolling within the
+     submenu itself. The half-viewport cap matches what feels readable
+     without forcing a tiny inner scrollbar. */
+  .preset-ctx-menu.preset-ctx-submenu-sized { max-height: 50vh; overflow-y: auto; }
+  .preset-ctx-menu.preset-ctx-submenu-sized::-webkit-scrollbar { width: 6px; }
+  .preset-ctx-menu.preset-ctx-submenu-sized::-webkit-scrollbar-thumb { background: var(--c-border-strong); border-radius: 3px; }
+  /* Success highlight for SF cards. Matches the Style Library pattern:
+     amber pulse expanding outward, scrolled-into-view before the
+     animation starts so the user can SEE what got highlighted even when
+     it's off-screen. Box-shadow only (no background) so the underlying
+     in-use blue tint stays visible during and after the highlight. */
+  @keyframes sf-card-highlight-pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(255, 160, 0, 0.9); }
+    40%  { box-shadow: 0 0 0 6px rgba(255, 160, 0, 0.5); }
+    100% { box-shadow: 0 0 0 10px rgba(255, 160, 0, 0); }
+  }
+  .sf-card.highlight { animation: sf-card-highlight-pulse 1.1s ease-out; }
+  /* Same amber pulse for entry-file rows when a wav is picked as the
+     track for a preset. Mirrors the SF card success feedback so the
+     "I picked this for that" UX vocabulary is consistent across the
+     right-click-set-target flows. position: relative so the box-shadow
+     pulse renders above sibling rows instead of being clipped by them. */
+  .sf-entry-files-row.highlight { animation: sf-card-highlight-pulse 1.1s ease-out; position: relative; z-index: 1; }
 
   /* New-row pulse: inset white border that fades. Background is left
      alone so the row's selection color (which lands together with the
@@ -3245,6 +3314,25 @@
   .preset-detail-field-label { width: 90px; flex-shrink: 0; color: var(--c-text-muted); font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; cursor: help; }
   .preset-detail-field-label.field-error { color: #e44; }
   .preset-detail-field-value-wrap { display: inline-flex; align-items: center; gap: 3px; flex: 1; min-width: 0; }
+  /* Warning glyph that surfaces a Proffie-convention issue inline next
+     to the track field. Amber to match the Needs-Review treatment used
+     elsewhere. Hidden by default; validateValue toggles .visible based
+     on whether the current path uses the 'track/' (singular) folder
+     when 'tracks/' (plural) would let the track-player auto-cycle find
+     the file. Click opens a confirm to rename the folder + cascade the
+     path update across every preset track field that referenced it. */
+  /* Informational glyph next to the track field. Surfaces "this works
+     as the preset's default track but won't be picked up by the track
+     player" scenarios (singular 'track/' folders, SD-root 'tracks/',
+     unrecognized roots). Color is a softer info-blue, distinct from
+     --jmt-blue so it doesn't overload with the in-use card tint.
+     Click-to-fix is opt-in via the .clickable modifier — only set when
+     there's actually a one-click rename available (G/H singular-folder
+     cases), default-cursor for purely informational states (D/N). */
+  .preset-track-warning { background: none; border: none; color: #5a9fd4; font-size: 0.95rem; line-height: 1; padding: 0 4px; cursor: default; display: none; flex-shrink: 0; }
+  .preset-track-warning.visible { display: inline-flex; align-items: center; }
+  .preset-track-warning.clickable { cursor: pointer; }
+  .preset-track-warning.clickable:hover { color: #7ab5e0; }
   .preset-detail-field-value { flex: 0 0 auto; min-width: 0; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--c-text); }
   .preset-detail-field-value[data-placeholder]:empty::after { content: attr(data-placeholder); color: var(--c-text-hint); font-style: italic; }
   /* Library-validation: font folder path doesn't match any entry in
@@ -3359,6 +3447,19 @@
   .preset-lib-combo-input { flex: 1; min-width: 0; font: inherit; font-size: 0.7rem; background: transparent; color: var(--c-text); border: none; outline: none; padding: 3px 6px; }
   .preset-lib-combo-input::placeholder { color: var(--c-text-muted); font-style: italic; }
   .preset-lib-combo-arrow { flex-shrink: 0; background: none; border: none; border-left: 1px solid var(--c-border); color: var(--c-text-muted); cursor: pointer; padding: 2px 6px; font-size: 0.62rem; line-height: 1; }
+  /* Inline play button for the Font Folder and Track combos. Just the
+     arrow glyph — no background, no own border, since it lives inside
+     the combo's border already. Color matches the dropdown arrow so the
+     two affordances read as a matched pair (one to play, one to pick).
+     Hover lifts the color a half-step to flag interactivity. Active
+     playback goes JMT blue. Disabled fades. Loading pulse comes from
+     .sf-loading-pulse which the quick-play engine toggles on/off while
+     bytes are being fetched — addresses the "click must always do
+     something" UX standard even when audio takes a beat to load. */
+  .preset-lib-combo-play { flex-shrink: 0; background: none; border: none; color: var(--c-text-muted); cursor: pointer; padding: 2px 6px; font-size: 0.62rem; line-height: 1; transition: color 0.15s; }
+  .preset-lib-combo-play:hover:not(:disabled) { color: var(--c-text); }
+  .preset-lib-combo-play:disabled { color: var(--c-text-faint); cursor: not-allowed; opacity: 0.5; }
+  .preset-lib-combo-play.playing { color: var(--jmt-blue); }
   .preset-lib-combo-arrow:hover { color: var(--c-text); }
   .preset-lib-combo-dropdown { position: fixed; z-index: 9999; background: var(--c-bg-raised); border: 1px solid var(--c-border); border-radius: 4px; box-shadow: 0 4px 16px rgba(0,0,0,0.4); max-height: 200px; overflow-y: auto; }
   .preset-lib-combo-item { padding: 4px 8px; font-size: 0.72rem; font-family: 'Cascadia Code','Consolas',monospace; cursor: pointer; color: var(--c-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -3619,6 +3720,9 @@
           </div>
           <button id="btn-sf-needs-review-filter" class="styles-tag-filter-btn" title="Show only entries with missing fields" style="display:none">
             Needs review<span id="sf-needs-review-count" class="styles-tag-filter-badge" style="display:none">0</span>
+          </button>
+          <button id="btn-sf-in-use-filter" class="styles-tag-filter-btn" title="Show only fonts referenced by the open config's presets" style="display:none">
+            In use<span id="sf-in-use-count" class="styles-tag-filter-badge" style="display:none">0</span>
           </button>
         </div>
         <div id="sf-active-filters" class="styles-active-filters" style="display:none"></div>
@@ -3905,6 +4009,11 @@
         <span class="preset-sidecar-title">PRESET STYLES</span>
         <button id="btn-preset-add" class="btn-blue preset-add-btn" title="Add preset to end">+</button>
         <button id="btn-preset-array-rename" class="preset-array-pencil" title="Rename preset array">&#9998;</button>
+        <!-- Auto-play toggle: when on, opening a preset auto-plays its
+             font.wav using the same engine as the inline play buttons.
+             Gated on SFL existence (hidden when zero entries in the
+             library). Default disabled at app launch — no persistence. -->
+        <button id="btn-preset-autoplay" class="preset-autoplay-btn" title="Auto-play font.wav when opening a preset" style="display:none"><span class="preset-autoplay-label">Auto</span> <span class="preset-autoplay-arrow">&#9654;</span></button>
         <button id="btn-preset-sidecar-close" class="preset-sidecar-close" title="Close">&lsaquo;</button>
       </div>
 
@@ -4737,6 +4846,13 @@
         <div class="sf-libpick-target-row">
           <label class="sf-libpick-target-label">Browse:</label>
           <select id="sf-libpick-target" class="sf-libpick-target-select"></select>
+        </div>
+        <div class="sf-libpick-filter-row">
+          <label class="sf-libpick-target-label">Filter:</label>
+          <select id="sf-libpick-type-filter" class="sf-libpick-target-select" style="flex: 0 0 160px"></select>
+          <button class="btn-sm-secondary" id="btn-sf-libpick-select-all" title="Check every file shown at the current path (respects the filter)">Select visible</button>
+          <button class="btn-sm-secondary" id="btn-sf-libpick-deselect-all" title="Uncheck every file shown at the current path">Deselect visible</button>
+          <button class="btn-sm-secondary" id="btn-sf-libpick-tracks" title="Find tracks/ folders anywhere in this source/font and stage every wav inside">+ All tracks</button>
         </div>
         <div class="sf-libpick-crumb" id="sf-libpick-crumb"></div>
         <div class="sf-libpick-tree" id="sf-libpick-tree"></div>
@@ -12981,6 +13097,14 @@ require(['vs/editor/editor.main'], function () {
       // _sfToggleFilterEffect: off → present → absent → off.
       let _sfActiveFilterEffectsMissing = new Set();
       let _sfNeedsReviewFilterOn = false;
+      // In-use filter: when true, the SF grid shows only entries whose
+      // names appear in the open config's preset font refs. Mirrors the
+      // Needs Review filter shape (toggle button, badge count, active
+      // chip). The data comes from _sfComputeInUseFonts which parses
+      // editor.getValue() through presetParser — same source the card
+      // .in-use class reads from, so toolbar count and card highlight
+      // stay in lockstep.
+      let _sfInUseFilterOn = false;
       // Sentinel value for the "missing creator" row in the Creators filter
       // dropdown. Stored verbatim in _sfActiveFilterCreators when the user
       // toggles it; filter predicates special-case it against entries with
@@ -13190,6 +13314,14 @@ require(['vs/editor/editor.main'], function () {
           if (!_sfNeedsReviewFilterOn) return true;
           return !!(f.meta && f.meta.needsReview);
         };
+        // In-use lookup hoisted above the matching filter so matchesInUseFilter
+        // can read it. Also reused later for the card .in-use class and the
+        // Select-in-use action-bar affordance.
+        const inUseFonts = _sfComputeInUseFonts();
+        const matchesInUseFilter = (f) => {
+          if (!_sfInUseFilterOn) return true;
+          return inUseFonts.has(f.name);
+        };
         // Selected cards bypass the current filter — they stay visible even
         // when the search/tag/creator/effects filter would otherwise hide
         // them. The mental model: selection is a "keep this" override on
@@ -13197,9 +13329,9 @@ require(['vs/editor/editor.main'], function () {
         // over again.
         const matching = sorted.filter(f =>
           _sfSelectedNames.has(f.name) ||
-          (matchesSearch(f) && matchesTagFilter(f) && matchesCreatorFilter(f) && matchesEffectsFilter(f) && matchesNeedsReviewFilter(f))
+          (matchesSearch(f) && matchesTagFilter(f) && matchesCreatorFilter(f) && matchesEffectsFilter(f) && matchesNeedsReviewFilter(f) && matchesInUseFilter(f))
         );
-        const isFiltering = !!q || _sfActiveFilterTags.size > 0 || _sfActiveFilterCreators.size > 0 || _sfActiveFilterEffects.size > 0 || _sfActiveFilterEffectsMissing.size > 0 || _sfNeedsReviewFilterOn;
+        const isFiltering = !!q || _sfActiveFilterTags.size > 0 || _sfActiveFilterCreators.size > 0 || _sfActiveFilterEffects.size > 0 || _sfActiveFilterEffectsMissing.size > 0 || _sfNeedsReviewFilterOn || _sfInUseFilterOn;
         // Needs Review filter button: visible only when at least one entry
         // has the flag. Badge shows the count; button gets the active style
         // when the filter is on.
@@ -13218,10 +13350,30 @@ require(['vs/editor/editor.main'], function () {
             nrBadge.style.display = 'none';
           }
         }
-        // In-use lookup for visual indicator + the "Select in-use" affordance.
-        // Computed once per render and reused inside the card-map loop and
-        // the action-bar sync below.
-        const inUseFonts = _sfComputeInUseFonts();
+        // In-use filter button: visible only when at least one entry is
+        // referenced by an open-config preset. Badge shows the count of
+        // library entries actually referenced (i.e. in the intersection
+        // of inUseFonts and the library), not the raw inUseFonts size —
+        // a preset's font ref that doesn't resolve to a library entry
+        // (missing or typo'd font name) shouldn't inflate the counter.
+        const inUseInLibraryCount = sorted.filter(f => inUseFonts.has(f.name)).length;
+        const inUseBtn = document.getElementById('btn-sf-in-use-filter');
+        const inUseBadge = document.getElementById('sf-in-use-count');
+        if (inUseBtn) {
+          inUseBtn.style.display = inUseInLibraryCount > 0 ? '' : 'none';
+          inUseBtn.classList.toggle('active', _sfInUseFilterOn);
+        }
+        if (inUseBadge) {
+          if (inUseInLibraryCount > 0) {
+            inUseBadge.style.display = '';
+            inUseBadge.textContent = String(inUseInLibraryCount);
+          } else {
+            inUseBadge.style.display = 'none';
+          }
+        }
+        // inUseFonts was computed above the matching filter so the In-use
+        // filter predicate could read it; stash it (and the matching names)
+        // for the action-bar sync below.
         // Stash the matching set and in-use lookup for the action-bar sync
         // below — Select-all and Select-in-use need to know what's visible
         // and which of those are referenced by the open config.
@@ -13285,19 +13437,46 @@ require(['vs/editor/editor.main'], function () {
           // here is a real "click to audition this sound on this font").
           // Same left/right-click semantics as the entry-detail chip
           // row — handled by delegated listeners below.
-          let cardEffectsHtml = '';
+          // Effect chips on the card. Two render rules combine here:
+          //
+          // (1) Pinned: font + hum are the universal identifiers for a
+          //     Proffie font — font.wav speaks the font name, hum1.wav is
+          //     the signature timbre. Quickplay on these two chips gives
+          //     a one-click identify-and-audition loop for browsing the
+          //     library, so they're always shown leftmost when present
+          //     in the entry's detected effects. Missing files (entry
+          //     doesn't ship font.wav or hum*.wav) drop silently — the
+          //     absence is enough signal, no greyed state needed.
+          //
+          // (2) Filter-matched: when the user has effect filters active,
+          //     show chips for any matched effects beyond the pinned set
+          //     so they can see exactly what triggered the match.
+          //
+          // The same data-card-effect attribute on every chip routes
+          // through the existing chip click + context-menu handlers, so
+          // pinned and filtered chips share the same quickplay / variant
+          // picker affordances.
+          const eKnown = new Set((Array.isArray(meta.effects) ? meta.effects : []).map(x => String(x).toLowerCase()));
+          const eUnknown = new Set((Array.isArray(meta.unknownEffects) ? meta.unknownEffects : []).map(x => String(x).toLowerCase()));
+          const _sfRenderCardChip = (e) => {
+            const cls = eUnknown.has(e) && !eKnown.has(e) ? 'sf-card-effect-chip unknown' : 'sf-card-effect-chip';
+            return `<button class="${cls}" data-card-effect="${_sfEscape(e)}" title="Click to play; right-click for variants">${_sfEscape(e)}</button>`;
+          };
+          const _SF_PINNED_CHIPS = ['font', 'hum'];
+          const pinnedChips = _SF_PINNED_CHIPS
+            .filter(e => eKnown.has(e))
+            .map(_sfRenderCardChip)
+            .join('');
+          let filterChips = '';
           if (filterEffectsLower.length > 0) {
-            const eKnown = new Set((Array.isArray(meta.effects) ? meta.effects : []).map(x => String(x).toLowerCase()));
-            const eUnknown = new Set((Array.isArray(meta.unknownEffects) ? meta.unknownEffects : []).map(x => String(x).toLowerCase()));
-            const chips = filterEffectsLower
-              .filter(e => eKnown.has(e) || eUnknown.has(e))
-              .map(e => {
-                const cls = eUnknown.has(e) && !eKnown.has(e) ? 'sf-card-effect-chip unknown' : 'sf-card-effect-chip';
-                return `<button class="${cls}" data-card-effect="${_sfEscape(e)}" title="Click to play; right-click for variants">${_sfEscape(e)}</button>`;
-              })
+            const pinnedSet = new Set(_SF_PINNED_CHIPS);
+            filterChips = filterEffectsLower
+              .filter(e => (eKnown.has(e) || eUnknown.has(e)) && !pinnedSet.has(e))
+              .map(_sfRenderCardChip)
               .join('');
-            if (chips) cardEffectsHtml = `<div class="sf-card-effects">${chips}</div>`;
           }
+          const allChips = pinnedChips + filterChips;
+          const cardEffectsHtml = allChips ? `<div class="sf-card-effects">${allChips}</div>` : '';
           // Two inline link buttons sit next to the name: "Demo" (per-font
           // audition link, lives on entry meta) and "Link" (per-source
           // "where to get it" page, lives on source meta and gets projected
@@ -13339,6 +13518,35 @@ require(['vs/editor/editor.main'], function () {
         _sfUpdateBulkActionBar();
         _sfRenderMissingBarAndLegend(inUseFonts);
       };
+      // Hook the editor's content change so the SF grid's in-use indicators
+      // catch up when:
+      //   (a) the user lands on the SF tab BEFORE the editor has finished
+      //       loading the initial config (race that left the in-use set
+      //       empty + the "Select in-use" toolbar button hidden), and
+      //   (b) the user edits the config on the Config Manager tab and
+      //       then switches back to SF — switchTab already calls
+      //       refreshSoundFontsView, but this hook covers the edge cases
+      //       where the editor loads/changes while SF is already visible.
+      // Debounced to 250ms so a burst of typing doesn't thrash the grid.
+      // Deferred attach because the editor object may not exist at SF
+      // init time (load-order varies across the app's IIFEs).
+      let _sfInUseUpdateTimer = null;
+      const _sfHookEditorForInUse = () => {
+        if (typeof editor === 'undefined' || !editor || typeof editor.onDidChangeModelContent !== 'function') {
+          setTimeout(_sfHookEditorForInUse, 200);
+          return;
+        }
+        editor.onDidChangeModelContent(() => {
+          if (_sfInUseUpdateTimer) clearTimeout(_sfInUseUpdateTimer);
+          _sfInUseUpdateTimer = setTimeout(() => {
+            _sfInUseUpdateTimer = null;
+            if (typeof _activeTab !== 'undefined' && _activeTab === 'soundfonts') {
+              try { _sfRenderGrid(); } catch {}
+            }
+          }, 250);
+        });
+      };
+      _sfHookEditorForInUse();
       // Names that Proffie configs reference but aren't fonts in our sense.
       // "common" is the shared-effects sidecar; flagged for future support
       // (see backlog) but for the missing-fonts banner it's intentionally
@@ -15099,7 +15307,8 @@ require(['vs/editor/editor.main'], function () {
         const strip = document.getElementById('sf-active-filters');
         if (!strip) return;
         const needsReviewActive = _sfNeedsReviewFilterOn ? 1 : 0;
-        const total = _sfActiveFilterTags.size + _sfActiveFilterCreators.size + _sfActiveFilterEffects.size + _sfActiveFilterEffectsMissing.size + needsReviewActive;
+        const inUseActive = _sfInUseFilterOn ? 1 : 0;
+        const total = _sfActiveFilterTags.size + _sfActiveFilterCreators.size + _sfActiveFilterEffects.size + _sfActiveFilterEffectsMissing.size + needsReviewActive + inUseActive;
         if (total === 0) {
           strip.style.display = 'none';
           strip.innerHTML = '';
@@ -15125,10 +15334,13 @@ require(['vs/editor/editor.main'], function () {
         const needsReviewChip = _sfNeedsReviewFilterOn
           ? `<span class="styles-active-filter-chip sf-active-filter-needs-review" data-needs-review="1">Needs review<button class="styles-active-filter-remove" data-filter-remove-needs-review="1" title="Remove">&#10005;</button></span>`
           : '';
+        const inUseChip = _sfInUseFilterOn
+          ? `<span class="styles-active-filter-chip sf-active-filter-in-use" data-in-use="1">In use<button class="styles-active-filter-remove" data-filter-remove-in-use="1" title="Remove">&#10005;</button></span>`
+          : '';
         const clearAll = total >= 2
           ? `<button class="styles-active-filter-clear" id="sf-clear-all-filters">Clear all</button>`
           : '';
-        strip.innerHTML = `<span class="styles-active-filters-label">Filtering by:</span>${tagChips}${creatorChips}${effectChips}${needsReviewChip}${clearAll}`;
+        strip.innerHTML = `<span class="styles-active-filters-label">Filtering by:</span>${tagChips}${creatorChips}${effectChips}${needsReviewChip}${inUseChip}${clearAll}`;
       };
       const _sfToggleFilterTag = (tag) => {
         if (!tag) return;
@@ -15516,6 +15728,11 @@ require(['vs/editor/editor.main'], function () {
         // initial state matches the rule regardless of any persisted
         // collapsed/expanded state from previous sessions.
         _sfApplySidecarRule({ force: true });
+        // Re-evaluate the preset-sidecar auto-play toggle's visibility now
+        // that entries are loaded into the cache. The toggle is gated on
+        // SFL existence — show when there's at least one entry, hide
+        // when zero.
+        try { window._refreshPresetAutoPlayVisibility?.(); } catch {}
         // Fetch sources so the search index can reach into source metadata
         // (original filename, source vendor, bundle name, source notes).
         try {
@@ -16238,12 +16455,12 @@ require(['vs/editor/editor.main'], function () {
         }
         _sfImport.uuid = importRes.uuid;
         _sfImport.sourceFileDate = importRes.sourceFileDate || null;
-        const [vendorRes, candRes] = await Promise.all([
+        const [vendorRes, candidates] = await Promise.all([
           window.electronAPI.detectSourceVendor({ uuid: importRes.uuid }),
-          window.electronAPI.detectSourceCandidates({ uuid: importRes.uuid }),
+          _sfFetchSourceCandidatesCached(importRes.uuid),
         ]);
         _sfImport.vendor = (vendorRes && vendorRes.ok) ? vendorRes : null;
-        _sfImport.candidates = (candRes && candRes.ok && candRes.candidates) ? candRes.candidates : [];
+        _sfImport.candidates = candidates;
         _sfPopulateReview(sourcePath);
         _sfShowPhase('review');
       };
@@ -18088,6 +18305,162 @@ require(['vs/editor/editor.main'], function () {
       let _sfSourceOriginalUuid = null;
       let _sfSourceEdit = null;
       let _sfSourceDirty = false;
+      // Bumped on every _sfOpenSourceDetail call. Async fills compare against
+      // the captured token before writing back into the DOM so a fast second
+      // open (user clicks source A, immediately clicks source B) doesn't let
+      // A's late-arriving data clobber B's now-visible content.
+      let _sfSourceDetailOpToken = 0;
+      // Per-session cache for detectSourceCandidates. Source archives are
+      // immutable post-import, so the candidate set for a uuid never changes.
+      // The "remaining candidates" computation (used to gate the "Add more
+      // fonts" button) compares this against the current entries list, which
+      // changes — but that's a downstream calculation, not the cached value.
+      // Keyed by source uuid; deleted sources leak a few KB until next app
+      // restart (harmless). Re-imported sources get new UUIDs so the cache
+      // miss is automatic.
+      const _sfSourceCandidatesCache = new Map();
+      // Tracks lazy-loaded inner-zip nodes that are currently fetching, keyed
+      // by `<sourceUuid>:<innerZipPath>`. Prevents duplicate IPCs when the
+      // user clicks into the same lazy node multiple times before the first
+      // fetch resolves. Loading state in the files browser is rendered from
+      // this set.
+      const _sfInnerZipLoading = new Set();
+      // Cached fetch wrapper. Falls through to IPC on miss; stores the result
+      // for every subsequent caller. Source-detail open + the import flow's
+      // candidate redetection paths both share this — they all see the same
+      // cached set per uuid.
+      const _sfFetchSourceCandidatesCached = async (uuid) => {
+        if (!uuid) return [];
+        if (_sfSourceCandidatesCache.has(uuid)) {
+          return _sfSourceCandidatesCache.get(uuid);
+        }
+        try {
+          const cr = await window.electronAPI.detectSourceCandidates({ uuid });
+          const cands = (cr && cr.ok && cr.candidates) || [];
+          _sfSourceCandidatesCache.set(uuid, cands);
+          return cands;
+        } catch {
+          return [];
+        }
+      };
+      // Walk the file tree returned by listSourceFiles and convert any zip
+      // file at any depth into a lazy-loadable folder node. The node keeps
+      // its path (so the inner-zip IPC knows what to open) but flips isDir
+      // to true and stamps isInnerZip + children:null so the renderer +
+      // click handler can detect the lazy state. Inner-zip descent is the
+      // file-browser analogue of detectCandidates' inner-zip walk — same
+      // invariant: nested zips are bundles, navigable like folders.
+      const _sfMarkInnerZipsLazy = (tree) => {
+        if (!Array.isArray(tree)) return tree;
+        const walk = (arr, parentPath) => {
+          for (let i = 0; i < arr.length; i++) {
+            const node = arr[i];
+            if (!node) continue;
+            if (node.isDir) {
+              if (Array.isArray(node.children)) walk(node.children, node.path);
+              continue;
+            }
+            // File node — if .zip, transform to lazy folder.
+            if (/\.zip$/i.test(node.name)) {
+              arr[i] = {
+                name: node.name,
+                isDir: true,
+                isInnerZip: true,
+                path: node.path,
+                size: node.size || 0,
+                children: null, // null = not yet loaded; [] = loaded but empty
+              };
+            }
+          }
+          // Re-sort: the transformed nodes now read as dirs, which should
+          // sort before files at this depth. Keep alphabetical natural-numeric
+          // within the dir/file groupings.
+          arr.sort((a, b) => {
+            if (!!a.isDir !== !!b.isDir) return a.isDir ? -1 : 1;
+            return String(a.name).localeCompare(String(b.name), undefined, { numeric: true, sensitivity: 'base' });
+          });
+        };
+        walk(tree, '');
+        return tree;
+      };
+      // Locate a node by path in the file tree. Returns the node object so
+      // the caller can mutate its children in-place (splicing in lazy-loaded
+      // contents). Returns null if the path doesn't resolve — e.g. the modal
+      // was closed and the tree got reset between IPC fire and resolve.
+      const _sfFindNodeAtPath = (tree, navPath) => {
+        if (!navPath) return null;
+        const parts = navPath.split('/').filter(Boolean);
+        let cur = tree;
+        let node = null;
+        for (const p of parts) {
+          node = cur.find(n => n.isDir && n.name === p);
+          if (!node) return null;
+          cur = node.children || [];
+        }
+        return node;
+      };
+      // Rewrite every node's path in a subtree so it joins onto the outer
+      // path namespace. The backend returns inner-zip-relative paths (a wav
+      // at Indara.zip's root comes back with path "boot.wav"); we need them
+      // to be composite from the outer source's root ("Indara.zip/boot.wav")
+      // so navigation, breadcrumbs, and _sfFindNodeAtPath walk one consistent
+      // path space across zip boundaries. Recurse into children since the
+      // marked-lazy step also runs on the subtree; the prefix is constant
+      // for every descendant under the same inner zip.
+      const _sfPrefixSubtreePaths = (subtree, prefix) => {
+        if (!Array.isArray(subtree) || !prefix) return;
+        for (const node of subtree) {
+          if (!node) continue;
+          node.path = `${prefix}/${node.path}`;
+          if (Array.isArray(node.children)) _sfPrefixSubtreePaths(node.children, prefix);
+        }
+      };
+      // Lazy-load the contents of an inner zip on demand. Called from the
+      // file-browser click handler when the user descends into a node that
+      // was marked isInnerZip with children:null. Splices the returned
+      // subtree into the node's children, then re-renders. The loading set
+      // is purely an IPC dedupe — the loading pulse in _sfRenderSourceFiles
+      // reads children === null directly.
+      const _sfLoadInnerZipChildren = async (sourceUuid, innerZipPath) => {
+        const key = `${sourceUuid}:${innerZipPath}`;
+        if (_sfInnerZipLoading.has(key)) return;
+        _sfInnerZipLoading.add(key);
+        try {
+          const r = await window.electronAPI.listSourceInnerZipFiles({
+            uuid: sourceUuid, innerZipPath,
+          });
+          // Modal might have closed during the IPC. Bail if so.
+          if (sourceUuid !== _sfSourceOriginalUuid) return;
+          const node = _sfFindNodeAtPath(_sfSourceFilesTree, innerZipPath);
+          if (!node) return;
+          const children = (r && r.ok && Array.isArray(r.files)) ? r.files : [];
+          // Prefix every inner subtree path with the inner-zip's composite
+          // path so the global path namespace stays coherent — clicking a
+          // folder inside Indara.zip navigates to "Indara.zip/Indara",
+          // which _sfFindNodeAtPath can resolve against the spliced tree.
+          _sfPrefixSubtreePaths(children, innerZipPath);
+          // Same transform — inner zips inside inner zips get the lazy
+          // treatment too. Single-level descent today (the backend opens
+          // exactly one inner zip); a click into a nested-nested zip
+          // would error out and fall to the catch block with children:[].
+          _sfMarkInnerZipsLazy(children);
+          node.children = children;
+          // If the user is currently viewing inside this lazy node (or one
+          // of its children), re-render so they see the content. Otherwise
+          // the splice just primes the cache for when they navigate in.
+          if (_sfSourceFilesPath === innerZipPath
+              || _sfSourceFilesPath.startsWith(innerZipPath + '/')) {
+            _sfRenderSourceFiles();
+          }
+        } catch {
+          // Swallow — render an empty folder rather than blowing up the modal.
+          const node = _sfFindNodeAtPath(_sfSourceFilesTree, innerZipPath);
+          if (node) node.children = [];
+          if (_sfSourceFilesPath === innerZipPath) _sfRenderSourceFiles();
+        } finally {
+          _sfInnerZipLoading.delete(key);
+        }
+      };
       // When the source detail was opened via the "Edit source…" link inside
       // an entry detail modal, remember which entry to reopen after close/save.
       // Null means "user opened source detail standalone" — go back to the
@@ -18145,23 +18518,32 @@ require(['vs/editor/editor.main'], function () {
         _sfRenderSourceTags();
         _sfSyncSourceLinkDisplay();
       };
-      const _sfRenderSourceEntries = async (uuid) => {
+      // preloadedEntries: when the caller already fetched entries (the open
+      // path does, so it can compute the tag intersection in parallel with
+      // the candidate detection), pass them in to skip the redundant IPC.
+      // Post-mutation refreshes (add / duplicate / rename / delete) leave
+      // it null so we always pick up fresh disk state.
+      const _sfRenderSourceEntries = async (uuid, preloadedEntries = null) => {
         if (!_sfSourceDetailEls.entriesList) return;
-        let entries = [];
-        try {
-          const r = await window.electronAPI.listEntriesBySource({ sourceUuid: uuid });
-          entries = (r && r.ok && r.entries) || [];
-        } catch {}
+        let entries;
+        if (Array.isArray(preloadedEntries)) {
+          entries = preloadedEntries;
+        } else {
+          entries = [];
+          try {
+            const r = await window.electronAPI.listEntriesBySource({ sourceUuid: uuid });
+            entries = (r && r.ok && r.entries) || [];
+          } catch {}
+        }
         // Fetch candidates once up front. Used to decide the "Add more
         // fonts" button visibility — when the source contains candidates
         // that haven't been imported yet (including alternate versions
         // like V1 of a V2 winner), the button stays visible so the user
-        // can pick them up.
-        let candidates = [];
-        try {
-          const cr = await window.electronAPI.detectSourceCandidates({ uuid });
-          candidates = (cr && cr.ok && cr.candidates) || [];
-        } catch {}
+        // can pick them up. Cached per-session — the source archive
+        // is immutable so the candidate set is stable across opens.
+        // First open pays the descent cost (which for multi-board bundles
+        // walks every inner zip); subsequent opens are free.
+        let candidates = await _sfFetchSourceCandidatesCached(uuid);
         // Refresh the cached snapshot so the inline-edit pencils read from
         // current disk state (this list lags slightly behind disk after deletes
         // and the bulk-tag flush from earlier saves).
@@ -18228,69 +18610,59 @@ require(['vs/editor/editor.main'], function () {
       // between async data fetches.
       const _sfOpenSourceDetail = async (uuid, opts = {}) => {
         if (!uuid) return;
-        // Refresh the sources map in case it's stale (e.g. another entry
-        // detail was open just now and the source got deleted out from
-        // under us).
-        try {
-          const r = await window.electronAPI.listSources();
-          if (r && r.ok && Array.isArray(r.sources)) {
-            _sfAllSourcesByUuid = {};
-            for (const s of r.sources) _sfAllSourcesByUuid[s.uuid] = s;
-          }
-        } catch {}
-        const src = _sfAllSourcesByUuid[uuid];
-        if (!src) return;
+        // Click-response-first model: render the modal synchronously from the
+        // in-memory source meta, then fan out the per-section IPCs in parallel
+        // and let each one fill its region as it lands. The old flow awaited
+        // every IPC sequentially before adding the .active class, which meant
+        // a click on a 2 GB multi-board bundle could sit on a dead UI for a
+        // few seconds while detectSourceCandidates descended into every inner
+        // zip and listSourceFiles walked the outer archive's central directory.
+        // Now the modal pops on the click, the header is filled instantly from
+        // cached meta, and the Fonts / Files / Included Files regions each
+        // show a "Loading…" placeholder until their IPC resolves.
+        let src = _sfAllSourcesByUuid[uuid];
+        if (!src) {
+          // Cold path — cache miss. Only here do we await the sources refresh
+          // up front, because we have nothing to render without it. Common
+          // case (clicking from an entry detail, source card, or the toolbar)
+          // hits the cache and skips this.
+          try {
+            const r = await window.electronAPI.listSources();
+            if (r && r.ok && Array.isArray(r.sources)) {
+              _sfAllSourcesByUuid = {};
+              for (const s of r.sources) _sfAllSourcesByUuid[s.uuid] = s;
+            }
+          } catch {}
+          src = _sfAllSourcesByUuid[uuid];
+          if (!src) return;
+        }
         const sm = src.meta || {};
         _sfSourceOriginalUuid = uuid;
-        // Load the entries that came from this source so we can compute the
-        // initial tag intersection (the bulk-edit baseline). We also cache the
-        // entries so Save can diff against them and apply per-entry deltas
-        // without a second round trip.
-        let sourceEntries = [];
-        try {
-          const er = await window.electronAPI.listEntriesBySource({ sourceUuid: uuid });
-          sourceEntries = (er && er.ok && er.entries) || [];
-        } catch {}
-        // Singularize the two action buttons when the source has only
-        // one font in the library — drops "more" for the add path so
-        // the grammar reads naturally, and "fonts" → "font" everywhere.
-        // Falls back to the plural defaults when no entries (zero) or
-        // many.
-        const _isSingleFont = sourceEntries.length === 1;
-        const addMoreBtnEl = document.getElementById('btn-sf-source-add-more');
-        const dupBtnEl     = document.getElementById('btn-sf-source-duplicate');
-        if (addMoreBtnEl) addMoreBtnEl.textContent = _isSingleFont
-          ? '+ Add font from source'
-          : '+ Add more fonts from source';
-        if (dupBtnEl) dupBtnEl.textContent = _isSingleFont
-          ? '+ Duplicate font from source'
-          : '+ Duplicate fonts from source';
-        // Tag intersection: a tag is "common" only when every entry in the
-        // bundle has it. Match case-insensitively but preserve the casing
-        // from the first entry that introduced the tag.
-        let commonTags = [];
-        if (sourceEntries.length > 0) {
-          const firstTags = Array.isArray(sourceEntries[0].meta && sourceEntries[0].meta.tags) ? sourceEntries[0].meta.tags : [];
-          commonTags = firstTags.filter(t => {
-            const lc = String(t).toLowerCase();
-            return sourceEntries.every(e => {
-              const et = Array.isArray(e.meta && e.meta.tags) ? e.meta.tags : [];
-              return et.some(x => String(x).toLowerCase() === lc);
-            });
-          });
-        }
+        const opToken = ++_sfSourceDetailOpToken;
+        // Stub edit-state with empty entries/tags. The async entries load
+        // below fills both in once they're known. Save() is disabled and the
+        // discard button reads "Close" until something dirties, both of which
+        // are correct during the loading window.
         _sfSourceEdit = {
           bundleName: sm.bundleName || (sm.originalName || '').replace(/\.zip$/i, ''),
           originalName: sm.originalName || '',
           vendor: sm.vendor || '',
           vendorWebsite: sm.vendorWebsite || '',
           linkUrl: sm.linkUrl || '',
-          purchaseDate: sm.purchaseDate || '',
+          // Fallback chain mirrors the backend projection: purchaseDate is
+          // canonical post-2026-06-26 unification, but legacy data may still
+          // carry the date under acquisitionDate (the old migration hoist
+          // field) or only as sourceFileDate (raw archive mtime). The
+          // fallback lets the source detail render the right date even on
+          // sources that haven't been touched by migrateSourceLevelFields
+          // yet. A user save persists whichever value lands here back to
+          // source.purchaseDate, implicitly migrating it.
+          purchaseDate: sm.purchaseDate || sm.acquisitionDate || sm.sourceFileDate || '',
           purchased: sm.purchased !== false, // default true
           userNotes: sm.userNotes || '',
-          entries: sourceEntries,
-          tagsInitial: commonTags.slice(),
-          tags: commonTags.slice(),
+          entries: [],
+          tagsInitial: [],
+          tags: [],
           // Per-row pending edits: originalName → { name, description, editing }.
           // Nothing here touches disk until the modal Save fires; the in-row ✓
           // just collapses the row visually while keeping the values stashed.
@@ -18311,58 +18683,184 @@ require(['vs/editor/editor.main'], function () {
         if (_sfSourceDetailEls.notesInput) _sfSourceDetailEls.notesInput.value = _sfSourceEdit.userNotes;
         if (_sfSourceDetailEls.notesToggle) _sfSourceDetailEls.notesToggle.classList.toggle('open', !!_sfSourceEdit.userNotes);
         if (_sfSourceDetailEls.notesBody) _sfSourceDetailEls.notesBody.classList.toggle('visible', !!_sfSourceEdit.userNotes);
-        if (_sfSourceDetailEls.tagsInput) _sfSourceDetailEls.tagsInput.value = '';
-        // Included files row (read-only chips).
-        try {
-          const docsRow = document.getElementById('sf-source-docs-row');
-          const docsContainer = document.getElementById('sf-source-docs-chips');
-          if (docsContainer) docsContainer.setAttribute('data-doc-key', uuid);
-          const dr = await window.electronAPI.listSourceDocs({ uuid });
-          _sfRenderDocChips(docsContainer, docsRow, (dr && dr.ok && dr.docs) || []);
-        } catch {}
-        // Creator datalist (same source as entry detail).
+        if (_sfSourceDetailEls.tagsInput) {
+          _sfSourceDetailEls.tagsInput.value = '';
+          // Disabled until the entries-promise resolves and seeds the tag
+          // intersection — typing a tag before that lands would be clobbered
+          // when entries arrive and overwrite _sfSourceEdit.tags. Re-enabled
+          // at the end of the entries-promise.
+          // The placeholder swap + pulse class signals WHY it's disabled so
+          // the user doesn't read it as a broken or read-only field; default
+          // disabled styling alone isn't enough of a cue. The original
+          // "Add tag…" placeholder is restored alongside the enable.
+          _sfSourceDetailEls.tagsInput.disabled = true;
+          _sfSourceDetailEls.tagsInput.placeholder = 'Loading fonts…';
+          _sfSourceDetailEls.tagsInput.classList.add('sf-loading-pulse');
+        }
+        // Creator datalist (same source as entry detail) — synchronous, no IPC.
         if (_sfSourceDetailEls.creatorList) {
           const seen = new Set();
-          const opts = [];
+          const optsList = [];
           for (const v of _sfKnownVendors) {
             if (v.name && !seen.has(v.name.toLowerCase())) {
               seen.add(v.name.toLowerCase());
-              opts.push(v.name);
+              optsList.push(v.name);
             }
           }
           for (const e of _sfAllEntries) {
             const a = e.meta && e.meta.author;
             if (a && !seen.has(a.toLowerCase())) {
               seen.add(a.toLowerCase());
-              opts.push(a);
+              optsList.push(a);
             }
           }
-          opts.sort((a, b) => a.localeCompare(b));
-          _sfSourceDetailEls.creatorList.innerHTML = opts.map(n => `<option value="${_sfEscape(n)}"></option>`).join('');
+          optsList.sort((a, b) => a.localeCompare(b));
+          _sfSourceDetailEls.creatorList.innerHTML = optsList.map(n => `<option value="${_sfEscape(n)}"></option>`).join('');
         }
-        await _sfRenderSourceEntries(uuid);
-        // Load + render the read-only file browser for this source. Same
-        // reset-on-open shape the entry browser uses; the unified
-        // _sfFileClipboard is intentionally NOT cleared so a prior Copy
-        // survives the modal open (cross-modal paste flow).
+        // Skeleton placeholders for the three async-filled regions. The
+        // entries / files skeletons reuse .sf-source-entries-empty which is
+        // already styled italic-dim, matching the empty-state shape so the
+        // visual weight doesn't shift when the data lands.
+        const _entriesCountEl = _sfSourceDetailEls.entriesCount;
+        if (_entriesCountEl) _entriesCountEl.textContent = '';
+        _sfSourceDetailEls.entriesList.innerHTML = '<div class="sf-source-entries-empty sf-loading-pulse">Loading fonts&hellip;</div>';
+        const _docsRow = document.getElementById('sf-source-docs-row');
+        if (_docsRow) _docsRow.style.display = 'none';
+        const _filesListEl = document.getElementById('sf-source-files-list');
+        if (_filesListEl) _filesListEl.innerHTML = '<div class="sf-source-entries-empty sf-loading-pulse">Loading files&hellip;</div>';
         _sfSourceFilesTree = [];
         _sfSourceFilesPath = '';
         _sfSourceFilesSelected = new Set();
         _sfSourceFilesAnchor = null;
-        try {
-          const sf = await window.electronAPI.listSourceFiles({ uuid });
-          _sfSourceFilesTree = (sf && sf.ok && sf.files) || [];
-        } catch { _sfSourceFilesTree = []; }
-        _sfRenderSourceFiles();
+        // Hide both action buttons until candidates resolve — we can't decide
+        // visibility / text without entry count + candidate set in hand.
+        const addMoreBtnEl = document.getElementById('btn-sf-source-add-more');
+        const dupBtnEl     = document.getElementById('btn-sf-source-duplicate');
+        if (addMoreBtnEl) addMoreBtnEl.style.visibility = 'hidden';
+        if (dupBtnEl) dupBtnEl.style.visibility = 'hidden';
         // Atomic visibility swap — remove the caller-specified modal's active
         // class in the same tick we add ours, eliminating the gap that would
-        // otherwise show the card grid through the dim backdrop.
+        // otherwise show the card grid through the dim backdrop. The modal
+        // now activates *before* any async IPC, so the click responds.
         if (opts.swapFromModalId) {
           document.getElementById(opts.swapFromModalId)?.classList.remove('active');
         }
         _sfSourceDetailEls.modal?.classList.add('active');
+        // ── Async fills, all in parallel ─────────────────────────────
+        // Each one checks opToken before writing the DOM so a fast second
+        // open (user clicks source A, then immediately source B) doesn't
+        // let A's late-arriving data clobber B's now-visible content.
+        // Entries + tag intersection + entries-list render. The entries are
+        // also passed through to _sfRenderSourceEntries to skip a redundant
+        // listEntriesBySource on the same IPC channel.
+        const entriesPromise = (async () => {
+          let sourceEntries = [];
+          try {
+            const er = await window.electronAPI.listEntriesBySource({ sourceUuid: uuid });
+            sourceEntries = (er && er.ok && er.entries) || [];
+          } catch {}
+          if (opToken !== _sfSourceDetailOpToken) return;
+          // Singularize the two action buttons when the source has only
+          // one font in the library — drops "more" for the add path so
+          // the grammar reads naturally, and "fonts" → "font" everywhere.
+          const _isSingleFont = sourceEntries.length === 1;
+          if (addMoreBtnEl) addMoreBtnEl.textContent = _isSingleFont
+            ? '+ Add font from source'
+            : '+ Add more fonts from source';
+          if (dupBtnEl) dupBtnEl.textContent = _isSingleFont
+            ? '+ Duplicate font from source'
+            : '+ Duplicate fonts from source';
+          // Tag intersection: a tag is "common" only when every entry in the
+          // bundle has it. Match case-insensitively but preserve the casing
+          // from the first entry that introduced the tag.
+          let commonTags = [];
+          if (sourceEntries.length > 0) {
+            const firstTags = Array.isArray(sourceEntries[0].meta && sourceEntries[0].meta.tags) ? sourceEntries[0].meta.tags : [];
+            commonTags = firstTags.filter(t => {
+              const lc = String(t).toLowerCase();
+              return sourceEntries.every(e => {
+                const et = Array.isArray(e.meta && e.meta.tags) ? e.meta.tags : [];
+                return et.some(x => String(x).toLowerCase() === lc);
+              });
+            });
+          }
+          _sfSourceEdit.entries = sourceEntries;
+          _sfSourceEdit.tagsInitial = commonTags.slice();
+          _sfSourceEdit.tags = commonTags.slice();
+          // Re-render tag chips now that the intersection is known. The
+          // initial call rendered empty; this paints them in.
+          _sfRefreshSourceDisplayValues();
+          // Render the entries list. Pass the entries through so the inner
+          // call skips its own listEntriesBySource (the candidate-detection
+          // IPC inside that call is the one we genuinely can't avoid).
+          await _sfRenderSourceEntries(uuid, sourceEntries);
+          if (opToken !== _sfSourceDetailOpToken) return;
+          // Buttons get visible again now that text + visibility have been
+          // decided (candidate-driven add-more visibility is set inside
+          // _sfRenderSourceEntries).
+          if (addMoreBtnEl) addMoreBtnEl.style.visibility = '';
+          if (dupBtnEl) dupBtnEl.style.visibility = '';
+          // Tags input is safe to use now that the intersection is seeded.
+          // Restore the original placeholder + drop the pulse class.
+          if (_sfSourceDetailEls.tagsInput) {
+            _sfSourceDetailEls.tagsInput.disabled = false;
+            _sfSourceDetailEls.tagsInput.placeholder = 'Add tag…';
+            _sfSourceDetailEls.tagsInput.classList.remove('sf-loading-pulse');
+          }
+        })();
+        // Included files chip row — cheap IPC. Stays hidden when there are no
+        // docs (display:none was set as the skeleton state above).
+        const docsPromise = (async () => {
+          try {
+            const docsContainer = document.getElementById('sf-source-docs-chips');
+            if (docsContainer) docsContainer.setAttribute('data-doc-key', uuid);
+            const dr = await window.electronAPI.listSourceDocs({ uuid });
+            if (opToken !== _sfSourceDetailOpToken) return;
+            _sfRenderDocChips(docsContainer, _docsRow, (dr && dr.ok && dr.docs) || []);
+          } catch {}
+        })();
+        // Read-only file browser — usually the slowest IPC for big archives.
+        const filesPromise = (async () => {
+          try {
+            const sf = await window.electronAPI.listSourceFiles({ uuid });
+            if (opToken !== _sfSourceDetailOpToken) return;
+            _sfSourceFilesTree = (sf && sf.ok && sf.files) || [];
+            // Convert inner .zip files into lazy-loadable folder nodes so the
+            // user can navigate into them. Mirrors detectCandidates' "treat
+            // nested zips as bundles" architecture in the file browser.
+            _sfMarkInnerZipsLazy(_sfSourceFilesTree);
+          } catch {
+            if (opToken !== _sfSourceDetailOpToken) return;
+            _sfSourceFilesTree = [];
+          }
+          if (opToken !== _sfSourceDetailOpToken) return;
+          _sfRenderSourceFiles();
+        })();
+        // Best-effort sources-map refresh in the background. Defensive against
+        // another modal having deleted this source mid-session; doesn't block
+        // anything because the modal is already showing with cached data.
+        (async () => {
+          try {
+            const r = await window.electronAPI.listSources();
+            if (r && r.ok && Array.isArray(r.sources)) {
+              _sfAllSourcesByUuid = {};
+              for (const s of r.sources) _sfAllSourcesByUuid[s.uuid] = s;
+            }
+          } catch {}
+        })();
+        // Intentionally NOT awaited. The function returns once the modal is
+        // visible; the in-flight promises continue to fill their regions and
+        // are self-guarded by opToken. Suppress the floating-promise lints
+        // by referencing them in a void return.
+        void entriesPromise; void docsPromise; void filesPromise;
       };
       const _sfCloseSourceDetail = async () => {
+        // Bump the op token first so any async fills still in flight from the
+        // open path veto themselves and don't write into a nulled _sfSourceEdit.
+        // The opToken-compare-then-write pattern in _sfOpenSourceDetail's
+        // entries/docs/files promises makes close as much an invalidator as a
+        // fresh open is.
+        _sfSourceDetailOpToken++;
         // Snapshot the return target before any state changes, then defer the
         // visibility flip to the entry-detail open step so the transition is
         // atomic (no card grid flash mid-swap).
@@ -19154,6 +19652,8 @@ require(['vs/editor/editor.main'], function () {
         _sfDeleteProgress.show('Removing source', sourceLabel);
         const sr = await window.electronAPI.deleteSource({ uuid });
         if (!sr || !sr.ok) failures.push({ name: sourceLabel, error: sr && sr.error || 'unknown error' });
+        // Free the candidate cache entry — uuid won't be reused.
+        else _sfSourceCandidatesCache.delete(uuid);
         await _sfDeleteProgress.hide();
         if (failures.length) {
           alert(`Some items failed to delete:\n${failures.map(f => ` • ${f.name}: ${f.error}`).join('\n')}`);
@@ -19430,8 +19930,20 @@ require(['vs/editor/editor.main'], function () {
       // the destination folder name (case-insensitive). Used to skip
       // the rename prompt — there's nothing to rename if the names
       // are already what the folder asks for.
+      // Map a folder name to the Proffie file-stem its children use.
+      // Most folders match their files 1:1 ("clash" → "clash1.wav") but
+      // tracks/ is the one Proffie exception: the folder is plural for
+      // the concept, the files are singular for the unit ("tracks/" →
+      // "track1.wav"). Any future folder/stem exceptions get added here
+      // so all three call sites (match-check, rename targets, prompt
+      // copy) read from one place.
+      const _sfFileStemForFolder = (folderName) => {
+        const lower = String(folderName || '').toLowerCase();
+        if (lower === 'tracks') return 'track';
+        return String(folderName || '');
+      };
       const _sfAllNamesMatchFolder = (incomingNames, folderName) => {
-        const target = String(folderName || '').toLowerCase();
+        const target = _sfFileStemForFolder(folderName).toLowerCase();
         if (!target) return true;
         for (const n of incomingNames) {
           const m = String(n).match(/^([a-zA-Z]+)/);
@@ -19447,7 +19959,10 @@ require(['vs/editor/editor.main'], function () {
       // padding. Order of incoming names is respected (so the user's
       // own order in the picker drives 1, 2, 3 …).
       const _sfComputePasteRenameTargets = (folderName, incomingNames, destSubPath) => {
-        const folderLc = folderName.toLowerCase();
+        // Proffie convention: file stem is normally the folder name, but
+        // tracks/ ships singular ("track1.wav") — see _sfFileStemForFolder.
+        const fileStem = _sfFileStemForFolder(folderName);
+        const fileStemLc = fileStem.toLowerCase();
         const existing = _sfEntryChildrenAt(destSubPath || '').filter(n => !n.isDir);
         // For each extension we'll encounter, track the current max
         // number among matching existing files, plus distinct paddings.
@@ -19463,7 +19978,7 @@ require(['vs/editor/editor.main'], function () {
           const stem = f.name.slice(0, dot);
           const m = stem.match(/^([a-zA-Z]+)(\d*)$/);
           if (!m) continue;
-          if (m[1].toLowerCase() !== folderLc) continue;
+          if (m[1].toLowerCase() !== fileStemLc) continue;
           const s = ensureState(ext);
           if (m[2] === '') {
             // Bare file = position 1.
@@ -19486,7 +20001,7 @@ require(['vs/editor/editor.main'], function () {
           s.max += 1;
           const padLen = pickPad(s.padLens);
           const numStr = padLen > 0 ? String(s.max).padStart(padLen, '0') : String(s.max);
-          targets.push(`${folderName}${numStr}${ext}`);
+          targets.push(`${fileStem}${numStr}${ext}`);
         }
         return targets;
       };
@@ -19501,7 +20016,17 @@ require(['vs/editor/editor.main'], function () {
           const no    = document.getElementById('sf-paste-rename-no');
           const cncl  = document.getElementById('sf-paste-rename-cancel');
           if (!modal || !msg || !yes || !no || !cncl) { resolve('cancel'); return; }
-          msg.innerHTML = `${count} file${count === 1 ? '' : 's'} will land in <strong>${_sfEscape(folderName)}</strong>. Rename to match the folder, or keep their current names?`;
+          // When folder name and file stem diverge (tracks/ → track1.wav)
+          // the prompt spells out the target so the user knows what the
+          // rename will produce. Matching folders show the simpler
+          // "match the folder" copy.
+          const fileStem = _sfFileStemForFolder(folderName);
+          const stemDiffers = fileStem.toLowerCase() !== String(folderName).toLowerCase();
+          const renameDesc = stemDiffers
+            ? `Rename to <strong>${_sfEscape(fileStem)}1</strong>, <strong>${_sfEscape(fileStem)}2</strong>…`
+            : 'Rename to match the folder';
+          const nameWord = count === 1 ? 'name' : 'names';
+          msg.innerHTML = `${count} file${count === 1 ? '' : 's'} will land in <strong>${_sfEscape(folderName)}</strong>. ${renameDesc}, or keep their current ${nameWord}?`;
           const cleanup = (val) => {
             modal.classList.remove('active');
             yes.removeEventListener('click', onYes);
@@ -19664,6 +20189,71 @@ require(['vs/editor/editor.main'], function () {
         cancelBtn:    document.getElementById('btn-sf-libpick-cancel'),
         clearBtn:     document.getElementById('btn-sf-libpick-clear'),
         addBtn:       document.getElementById('btn-sf-libpick-add'),
+        typeFilter:   document.getElementById('sf-libpick-type-filter'),
+        selectAllBtn: document.getElementById('btn-sf-libpick-select-all'),
+        deselectAllBtn: document.getElementById('btn-sf-libpick-deselect-all'),
+        tracksBtn:    document.getElementById('btn-sf-libpick-tracks'),
+      };
+      // Active sound-type filter for the library picker tree. Empty string
+      // means "all types"; otherwise an entry from _SF_KNOWN_EFFECTS. The
+      // filter is non-destructive — it hides non-matching files in the
+      // tree but keeps folders visible IF any descendant matches, so the
+      // user can navigate down to filtered hits. Select-visible respects
+      // the filter; Add-all-tracks ignores it (tracks are their own thing).
+      let _sfLibPickTypeFilter = '';
+      // Populate the type-filter dropdown once on first init. "All types"
+      // is the default option; the rest mirror _SF_KNOWN_EFFECTS in the
+      // same alphabetical order they're declared in. Pre-populating here
+      // means the dropdown is ready for every modal open without per-open
+      // rebuilds.
+      if (_sfLibPickEls.typeFilter && _sfLibPickEls.typeFilter.options.length === 0) {
+        const opts = [`<option value="">All types</option>`]
+          .concat(_SF_KNOWN_EFFECTS.map(e => `<option value="${e}">${e}</option>`));
+        _sfLibPickEls.typeFilter.innerHTML = opts.join('');
+      }
+      // Effect-stem detector. Mirrors soundFontCandidates.effectStemFromFile
+      // (the renderer side doesn't share the backend module). Returns the
+      // known-effect type name when the filename matches, or null. The
+      // pattern is: an alphabetical stem optionally followed by " (N)" or
+      // "_N" or "N" (numeric variant), then ".wav".
+      const _sfEffectStemFromFile = (name) => {
+        const m = String(name || '').match(/^([a-zA-Z]+)(?:\s*\(\d+\)|[_\s]?\d+)?\.wav$/i);
+        if (!m) return null;
+        const stem = m[1].toLowerCase();
+        return _SF_KNOWN_EFFECTS.includes(stem) ? stem : null;
+      };
+      // Decide whether a node passes the current type filter. Files match
+      // when their effect-stem equals the filter; folders match if ANY
+      // descendant file matches (so the user can navigate down to the
+      // hits — the path itself doesn't need to be a leaf). Non-wav files
+      // never match a type filter. With no filter active, everything
+      // passes.
+      const _sfLibPickNodePassesFilter = (node, filter) => {
+        if (!filter) return true;
+        if (!node) return false;
+        if (!node.isDir) {
+          return _sfEffectStemFromFile(node.name) === filter;
+        }
+        const kids = Array.isArray(node.children) ? node.children : [];
+        for (const k of kids) {
+          if (_sfLibPickNodePassesFilter(k, filter)) return true;
+        }
+        return false;
+      };
+      // Walk the entire tree starting from a given node, calling visit
+      // on each file (non-dir) leaf. Used by "Add all tracks" — same
+      // visitor pattern but the caller filters by ancestry (inside a
+      // tracks/ folder).
+      const _sfLibPickWalkFiles = (nodes, visit, ancestry = []) => {
+        if (!Array.isArray(nodes)) return;
+        for (const n of nodes) {
+          if (!n) continue;
+          if (n.isDir) {
+            _sfLibPickWalkFiles(n.children, visit, ancestry.concat(n.name));
+          } else {
+            visit(n, ancestry);
+          }
+        }
       };
       // Modals to stash while the picker is on top — same pattern the
       // doc viewer uses.
@@ -19875,11 +20465,21 @@ require(['vs/editor/editor.main'], function () {
         // for a folder that doesn't accept it. Directories stay visible
         // since deeper paths may still have wav content.
         const isSharedTracksMode = _sfLibPickDest && _sfLibPickDest.kind === 'sharedTracks';
-        const children = isSharedTracksMode
+        const sharedFiltered = isSharedTracksMode
           ? allChildren.filter(n => n.isDir || /\.wav$/i.test(n.name))
           : allChildren;
+        // Type filter: applied on top of the sharedTracks pre-filter. Files
+        // must match the active effect type by stem; folders stay visible
+        // only if any descendant file matches (so navigation down to a hit
+        // still works). No filter = pass everything through.
+        const children = _sfLibPickTypeFilter
+          ? sharedFiltered.filter(n => _sfLibPickNodePassesFilter(n, _sfLibPickTypeFilter))
+          : sharedFiltered;
         if (!children.length) {
-          wrap.innerHTML = `<div class="sf-libpick-tree-empty">This folder is empty.</div>`;
+          const msg = _sfLibPickTypeFilter
+            ? `No "${_sfLibPickTypeFilter}" sounds at this path.`
+            : 'This folder is empty.';
+          wrap.innerHTML = `<div class="sf-libpick-tree-empty">${_sfEscape(msg)}</div>`;
           return;
         }
         wrap.innerHTML = children.map(n => {
@@ -19984,6 +20584,12 @@ require(['vs/editor/editor.main'], function () {
         _sfLibPickDestHashes = new Set();
         _sfLibPickSelections = [];
         _sfLibPickPath = '';
+        // Reset the type filter on every open so a previous session's
+        // filter doesn't carry into the next. Dropdown value + state
+        // both clear; tree-render path reads the empty filter and shows
+        // everything.
+        _sfLibPickTypeFilter = '';
+        if (_sfLibPickEls.typeFilter) _sfLibPickEls.typeFilter.value = '';
         _sfLibPickPopulateTargets();
         await _sfLibPickLoadTarget();
         _sfRenderLibPickSelections();
@@ -20019,6 +20625,63 @@ require(['vs/editor/editor.main'], function () {
       };
       // Target switch — load the picked source / font tree.
       _sfLibPickEls.target?.addEventListener('change', _sfLibPickLoadTarget);
+      // Type filter change — just re-render; the filter is applied at
+      // render time so no IPC or tree mutation needed. _sfLibPickPath
+      // stays put so the user keeps their navigation context across
+      // filter changes.
+      _sfLibPickEls.typeFilter?.addEventListener('change', () => {
+        _sfLibPickTypeFilter = _sfLibPickEls.typeFilter.value || '';
+        _sfRenderLibPickTree();
+      });
+      // Select / deselect every file row currently visible in the tree.
+      // Respects the type filter via the same render-time filter logic —
+      // we walk the post-filter children at the current path, treat each
+      // non-dir as a candidate, and route through _sfLibPickToggleFile so
+      // the selections panel + duplicate badges all stay coherent. Dirs
+      // are skipped (the picker stages files, not folders).
+      const _sfLibPickToggleAllVisible = (checked) => {
+        if (!_sfLibPickActive) return;
+        const allChildren = _sfLibPickChildrenAt(_sfLibPickTree, _sfLibPickPath);
+        const isSharedTracksMode = _sfLibPickDest && _sfLibPickDest.kind === 'sharedTracks';
+        const sharedFiltered = isSharedTracksMode
+          ? allChildren.filter(n => n.isDir || /\.wav$/i.test(n.name))
+          : allChildren;
+        const visible = _sfLibPickTypeFilter
+          ? sharedFiltered.filter(n => _sfLibPickNodePassesFilter(n, _sfLibPickTypeFilter))
+          : sharedFiltered;
+        for (const n of visible) {
+          if (n.isDir) continue;
+          _sfLibPickToggleFile(n.path, checked);
+        }
+        _sfRenderLibPickTree();
+      };
+      _sfLibPickEls.selectAllBtn?.addEventListener('click', () => _sfLibPickToggleAllVisible(true));
+      _sfLibPickEls.deselectAllBtn?.addEventListener('click', () => _sfLibPickToggleAllVisible(false));
+      // Add all tracks: walk the WHOLE tree, find every file whose
+      // ancestor chain contains a folder literally named "tracks"
+      // (case-insensitive — the Proffie convention), and stage them all.
+      // Bypasses the type filter (tracks aren't an effect type) and
+      // bypasses the current path (the user's intent is "grab them
+      // wherever they live in this source"). Already-staged files are
+      // a no-op via _sfLibPickToggleFile's existence check.
+      _sfLibPickEls.tracksBtn?.addEventListener('click', () => {
+        if (!_sfLibPickActive) return;
+        let staged = 0;
+        _sfLibPickWalkFiles(_sfLibPickTree, (fileNode, ancestry) => {
+          if (!/\.wav$/i.test(fileNode.name)) return;
+          if (!ancestry.some(seg => String(seg).toLowerCase() === 'tracks')) return;
+          const key = _sfLibPickKey(_sfLibPickActive.kind, _sfLibPickActive.id, fileNode.path);
+          const already = _sfLibPickSelections.some(s => _sfLibPickKey(s.kind, s.id, s.subPath) === key);
+          if (!already) {
+            _sfLibPickToggleFile(fileNode.path, true);
+            staged++;
+          }
+        });
+        _sfRenderLibPickTree();
+        // No alert/toast on zero matches — the visible state (selection
+        // panel count unchanged, no flash) tells the story. The button
+        // tooltip already explains what it's looking for.
+      });
       // Tree clicks — folder rows navigate, checkbox toggles selection.
       _sfLibPickEls.tree?.addEventListener('click', (e) => {
         const cb = e.target.closest('input[type="checkbox"][data-file]');
@@ -20277,6 +20940,11 @@ require(['vs/editor/editor.main'], function () {
       let _sfQuickAudioChip = null;   // chip currently flagged .playing
       let _sfQuickAudioUrl = null;    // object URL to revoke on stop
       let _sfQuickAudioToken = 0;     // race guard for async byte fetch
+      // Window exports for cross-scope callers — the preset editor's
+      // inline Font / Track play buttons live in a different IIFE and
+      // need access to these primitives. Getter on _sfQuickAudioChip so
+      // reads always reflect the current `let` value (a one-shot copy
+      // would freeze at null and never see playback state changes).
       const _sfQuickAudioStop = () => {
         if (_sfQuickAudio) {
           try { _sfQuickAudio.pause(); } catch {}
@@ -20284,6 +20952,10 @@ require(['vs/editor/editor.main'], function () {
         }
         if (_sfQuickAudioChip) {
           _sfQuickAudioChip.classList.remove('playing');
+          // Also drop any in-flight loading pulse — _sfQuickPlay sets it
+          // while bytes are being fetched, and a stop from any path
+          // (replay, modal close, fresh click) needs to clear it too.
+          _sfQuickAudioChip.classList.remove('sf-loading-pulse');
           _sfQuickAudioChip = null;
         }
         if (_sfQuickAudioUrl) {
@@ -20298,13 +20970,24 @@ require(['vs/editor/editor.main'], function () {
         const token = ++_sfQuickAudioToken;
         if (chipEl) {
           chipEl.classList.add('playing');
+          // Loading pulse — the bytes fetch + decode can take a beat
+          // (especially for shared tracks from large source archives or
+          // when listEntryFiles + readBytes round-trip through main).
+          // Without the pulse the user gets no signal between click and
+          // first sound, which feels like the click was lost. Pulse
+          // continues until audio.play() resolves (or the engine errors
+          // out and resets state via the clean-up paths below).
+          chipEl.classList.add('sf-loading-pulse');
           _sfQuickAudioChip = chipEl;
         }
         let bytes;
         try {
           bytes = await _sfAudioReadBytes({ kind, id: sourceId, subPath });
         } catch (err) {
-          if (token === _sfQuickAudioToken && chipEl) chipEl.classList.remove('playing');
+          if (token === _sfQuickAudioToken && chipEl) {
+            chipEl.classList.remove('playing');
+            chipEl.classList.remove('sf-loading-pulse');
+          }
           if (token === _sfQuickAudioToken) _sfQuickAudioChip = null;
           console.warn('quick-play read failed:', err);
           return;
@@ -20320,23 +21003,58 @@ require(['vs/editor/editor.main'], function () {
           // Only clear if this is still the live playback (a new click
           // would have replaced state via _sfQuickAudioStop already).
           if (_sfQuickAudioUrl !== url) return;
-          if (_sfQuickAudioChip === chipEl && chipEl) chipEl.classList.remove('playing');
+          if (_sfQuickAudioChip === chipEl && chipEl) {
+            chipEl.classList.remove('playing');
+            chipEl.classList.remove('sf-loading-pulse');
+          }
           if (_sfQuickAudioChip === chipEl) _sfQuickAudioChip = null;
           try { URL.revokeObjectURL(url); } catch {}
           if (_sfQuickAudioUrl === url) _sfQuickAudioUrl = null;
         };
         _sfQuickAudio.onerror = () => {
-          if (_sfQuickAudioChip === chipEl && chipEl) chipEl.classList.remove('playing');
+          if (_sfQuickAudioChip === chipEl && chipEl) {
+            chipEl.classList.remove('playing');
+            chipEl.classList.remove('sf-loading-pulse');
+          }
           if (_sfQuickAudioChip === chipEl) _sfQuickAudioChip = null;
           console.warn('quick-play decode/play failed for', subPath);
         };
         try { await _sfQuickAudio.play(); }
         catch (err) {
-          if (chipEl) chipEl.classList.remove('playing');
+          if (chipEl) {
+            chipEl.classList.remove('playing');
+            chipEl.classList.remove('sf-loading-pulse');
+          }
           if (_sfQuickAudioChip === chipEl) _sfQuickAudioChip = null;
           console.warn('quick-play play() rejected:', err);
+          return;
+        }
+        // play() resolved → audio is playing, drop the loading pulse and
+        // keep just the .playing color/state. Guard against the chip
+        // having been swapped out by a fresh click during the await.
+        if (token === _sfQuickAudioToken && chipEl) {
+          chipEl.classList.remove('sf-loading-pulse');
         }
       };
+      // Expose the quick-play surface for cross-scope callers. The preset
+      // editor's Font Folder + Track play buttons (config tab, different
+      // IIFE) call into these to reuse the same audio engine + chip-state
+      // bookkeeping the SF view's chip clicks use. _sfQuickAudioChip is
+      // exposed via a getter so window reads always reflect the current
+      // `let` value, never a stale snapshot.
+      window._sfQuickPlay = _sfQuickPlay;
+      window._sfQuickAudioStop = _sfQuickAudioStop;
+      // The effect-file finders use the same fuzzy match the card chip
+      // clicks rely on (font.wav, font1.wav, font01.wav all count as the
+      // "font" effect — the preset Font Folder play button picks the
+      // first one).
+      window._sfFindFirstEffectFileInTree = _sfFindFirstEffectFileInTree;
+      try {
+        Object.defineProperty(window, '_sfQuickAudioChip', {
+          get: () => _sfQuickAudioChip,
+          configurable: true,
+        });
+      } catch {}
       const _sfAudioReadBytes = async ({ kind, id, subPath }) => {
         if (kind === 'entry') {
           const r = await window.electronAPI.readEntryDocBytes({ name: id, path: subPath });
@@ -20639,11 +21357,15 @@ require(['vs/editor/editor.main'], function () {
       // original names, " (N)" collision suffix). Backend handles the
       // dialog and the actual write — renderer just dispatches and
       // surfaces any per-file failures.
-      const _sfExportFiles = async ({ kind, id, subPaths }) => {
+      const _sfExportFiles = async ({ kind, id, subPaths, asFile }) => {
         if (!Array.isArray(subPaths) || subPaths.length === 0) return;
         let res;
         try {
-          res = await window.electronAPI.sfExportFiles({ kind, id, paths: subPaths });
+          // asFile: when true the backend skips the file-vs-dir probe and
+          // exports the raw bytes at the path. Used by "Export ZIP…" on
+          // inner-zip folder nodes so the .zip ships out as a standalone
+          // file rather than its contents extracted.
+          res = await window.electronAPI.sfExportFiles({ kind, id, paths: subPaths, asFile });
         } catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
         if (!res || res.canceled) return;
         if (!res.ok) { alert(`Export failed: ${res.error || 'unknown'}`); return; }
@@ -21258,7 +21980,16 @@ require(['vs/editor/editor.main'], function () {
           const d = document.createElement('div');
           d.className = 'preset-ctx-item' + (cls ? ' ' + cls : '');
           d.textContent = text;
-          d.addEventListener('mousedown', (e2) => { e2.stopPropagation(); menu.style.display = 'none'; fn(); });
+          d.addEventListener('mousedown', (e2) => {
+            e2.stopPropagation();
+            menu.style.display = 'none';
+            // Tear down the "Use as track for…" submenu too — if the
+            // user hovered it open then chose a sibling action, the
+            // submenu shouldn't linger after the main menu closes.
+            const sub = _sfPresetCtxSubmenu && _sfPresetCtxSubmenu();
+            if (sub) { sub.style.display = 'none'; sub.innerHTML = ''; }
+            fn();
+          });
           menu.appendChild(d);
         };
         const mkSep = () => { const s = document.createElement('div'); s.className = 'preset-ctx-separator'; menu.appendChild(s); };
@@ -21279,6 +22010,86 @@ require(['vs/editor/editor.main'], function () {
           if (count === 1) {
             if (_sfIsWavPath(p)) {
               mkItem('▶ Play', '', () => _sfOpenAudioPlayer({ kind: 'entry', id: _sfDetailOriginalName, subPath: p, label: p.split('/').pop() }));
+              // "Use as track for… ▸" — same submenu shape as the SF
+              // card's "Replace in config preset…", but track-only (no
+              // "new preset" sibling since a track needs an existing
+              // preset to attach to). The track value combines the
+              // entry name with the wav's relative path, producing the
+              // canonical Proffie-style path "Father/tracks/track1.wav".
+              const trackValue = `${_sfDetailOriginalName}/${p}`;
+              const trackItem = document.createElement('div');
+              trackItem.className = 'preset-ctx-item has-submenu';
+              trackItem.textContent = 'Use as track for…';
+              menu.appendChild(trackItem);
+              const buildTrackSubmenu = () => {
+                const sub = _sfPresetCtxSubmenu();
+                sub.innerHTML = '';
+                sub.style.minWidth = '240px';
+                sub.classList.add('preset-ctx-submenu-sized');
+                let arrays = [];
+                try {
+                  const result = presetParser.parsePresets(editor.getValue());
+                  arrays = result.arrays || [];
+                } catch {}
+                let anyPreset = false;
+                arrays.forEach((arr, arrayIdx) => {
+                  if (!arr.presets || !arr.presets.length) return;
+                  const head = document.createElement('div');
+                  head.className = 'preset-ctx-submenu-section';
+                  head.textContent = arr.name || `Array ${arrayIdx + 1}`;
+                  sub.appendChild(head);
+                  arr.presets.forEach((preset, presetIdx) => {
+                    anyPreset = true;
+                    const number = presetIdx + 1;
+                    const name = preset.displayName || `(unnamed ${number})`;
+                    const item = document.createElement('div');
+                    item.className = 'preset-ctx-item';
+                    item.textContent = `${number}. ${name}`;
+                    item.dataset.sfArrayIdx = String(arrayIdx);
+                    item.dataset.sfPresetIdx = String(presetIdx);
+                    item.dataset.sfTrackValue = trackValue;
+                    item.addEventListener('mousedown', (ev) => {
+                      ev.stopPropagation();
+                      ev.preventDefault();
+                      const ai = parseInt(item.dataset.sfArrayIdx, 10);
+                      const pi = parseInt(item.dataset.sfPresetIdx, 10);
+                      const tv = item.dataset.sfTrackValue;
+                      _sfCloseCardCtxMenus();
+                      if (Number.isFinite(ai) && Number.isFinite(pi) && tv) {
+                        _sfSetPresetTrack(ai, pi, tv);
+                        // Pulse the wav row that was just picked — same
+                        // amber-highlight signal the SF card flow uses.
+                        _sfFlashEntryFileRow(p);
+                      }
+                    });
+                    sub.appendChild(item);
+                  });
+                });
+                if (!anyPreset) {
+                  const empty = document.createElement('div');
+                  empty.className = 'preset-ctx-submenu-empty';
+                  empty.textContent = 'No presets yet';
+                  sub.appendChild(empty);
+                }
+                const rect = trackItem.getBoundingClientRect();
+                sub.style.display = 'block';
+                sub.style.left = `${rect.right - 2}px`;
+                sub.style.top = `${rect.top - 4}px`;
+                requestAnimationFrame(() => {
+                  const subRect = sub.getBoundingClientRect();
+                  if (subRect.right > window.innerWidth - 8) {
+                    sub.style.left = `${Math.max(8, rect.left - subRect.width + 2)}px`;
+                  }
+                  if (subRect.bottom > window.innerHeight - 8) {
+                    sub.style.top = `${Math.max(8, window.innerHeight - subRect.height - 8)}px`;
+                  }
+                });
+              };
+              trackItem.addEventListener('mouseenter', buildTrackSubmenu);
+              trackItem.addEventListener('mousedown', (ev) => {
+                ev.stopPropagation();
+                buildTrackSubmenu();
+              });
               mkSep();
             } else if (_sfIsTextReadable(p)) {
               mkItem('Open', '', () => _sfOpenDocViewer({ kind: 'entry', id: _sfDetailOriginalName, subPath: p }));
@@ -21484,6 +22295,17 @@ require(['vs/editor/editor.main'], function () {
           crumbs.push(`<span class="sf-entry-files-crumb-sep">›</span><span class="sf-entry-files-crumb${isLast ? ' current' : ''}" data-crumb-path="${_sfEscape(acc)}">${_sfEscape(segs[i])}</span>`);
         }
         crumbEl.innerHTML = crumbs.join('');
+        // If the current path lands inside a lazy inner-zip node whose
+        // children haven't been fetched yet (children === null is the
+        // not-loaded sentinel; [] means loaded but empty), render the
+        // loading pulse skeleton instead of "folder is empty". The descent
+        // click handler kicks off the IPC; this is just the visual state
+        // until that resolves.
+        const currentNode = _sfFindNodeAtPath(_sfSourceFilesTree, _sfSourceFilesPath);
+        if (currentNode && currentNode.isInnerZip && currentNode.children === null) {
+          list.innerHTML = `<div class="sf-entry-files-empty sf-loading-pulse">Loading archive contents&hellip;</div>`;
+          return;
+        }
         const children = _sfChildrenAt(_sfSourceFilesTree, _sfSourceFilesPath);
         if (children.length === 0) {
           list.innerHTML = `<div class="sf-entry-files-empty">This folder is empty.</div>`;
@@ -21543,10 +22365,20 @@ require(['vs/editor/editor.main'], function () {
         }
         const dir = e.target.closest('[data-dir-path]');
         if (!dir) return;
-        _sfSourceFilesPath = dir.getAttribute('data-dir-path') || '';
+        const newPath = dir.getAttribute('data-dir-path') || '';
+        _sfSourceFilesPath = newPath;
         _sfSourceFilesSelected.clear();
         _sfSourceFilesAnchor = null;
         _sfRenderSourceFiles();
+        // Lazy descent: if this dir is an inner-zip whose contents haven't
+        // been loaded yet (children === null), kick off the IPC. The
+        // render above already showed the pulse skeleton because the
+        // loading check reads children === null directly. Helper handles
+        // its own dedupe so a fast double-click doesn't fire two IPCs.
+        const targetNode = _sfFindNodeAtPath(_sfSourceFilesTree, newPath);
+        if (targetNode && targetNode.isInnerZip && targetNode.children === null && _sfSourceOriginalUuid) {
+          _sfLoadInnerZipChildren(_sfSourceOriginalUuid, newPath);
+        }
       });
       document.getElementById('sf-source-files-breadcrumb')?.addEventListener('click', (e) => {
         const crumb = e.target.closest('[data-crumb-path]');
@@ -21610,10 +22442,19 @@ require(['vs/editor/editor.main'], function () {
           const dirRow = e.target.closest('[data-dir-path]');
           if (!dirRow || !_sfSourceOriginalUuid) return;
           const dirSubPath = dirRow.getAttribute('data-dir-path') || '';
+          // Inner-zip nodes (rendered as folders by the lazy-descent
+          // transform) get an extra "Export ZIP…" affordance — exports
+          // the .zip's raw bytes as a standalone file, separate from
+          // "Export folder…" which writes the extracted contents.
+          const dirNode = _sfFindNodeAtPath(_sfSourceFilesTree, dirSubPath);
+          const isInnerZipNode = !!(dirNode && dirNode.isInnerZip);
           mkItem('Copy folder', '', () => {
             _sfFileClipboard = { kind: 'source', id: _sfSourceOriginalUuid, paths: [dirSubPath] };
           });
           mkItem('↗ Export folder…', '', () => _sfExportFiles({ kind: 'source', id: _sfSourceOriginalUuid, subPaths: [dirSubPath] }));
+          if (isInnerZipNode) {
+            mkItem('↗ Export ZIP…', '', () => _sfExportFiles({ kind: 'source', id: _sfSourceOriginalUuid, subPaths: [dirSubPath], asFile: true }));
+          }
         }
         if (!menu.children.length) return;
         const x = Math.min(e.clientX, window.innerWidth - 200);
@@ -21722,13 +22563,13 @@ require(['vs/editor/editor.main'], function () {
           document.getElementById(opts.swapFromModalId)?.classList.remove('active');
         }
         if (_sfImportEls.modal) _sfImportEls.modal.classList.add('active');
-        const [vendorRes, candRes] = await Promise.all([
+        const [vendorRes, candidates] = await Promise.all([
           window.electronAPI.detectSourceVendor({ uuid }),
-          window.electronAPI.detectSourceCandidates({ uuid }),
+          _sfFetchSourceCandidatesCached(uuid),
         ]);
         if (_sfImport?.runId !== myRun) return;
         _sfImport.vendor = (vendorRes && vendorRes.ok) ? vendorRes : null;
-        _sfImport.candidates = (candRes && candRes.ok && candRes.candidates) ? candRes.candidates : [];
+        _sfImport.candidates = candidates;
         _sfPopulateReview(sourcePath);
         _sfShowPhase('review');
       };
@@ -21760,13 +22601,13 @@ require(['vs/editor/editor.main'], function () {
           document.getElementById(opts.swapFromModalId)?.classList.remove('active');
         }
         if (_sfImportEls.modal) _sfImportEls.modal.classList.add('active');
-        const [vendorRes, candRes] = await Promise.all([
+        const [vendorRes, candidates] = await Promise.all([
           window.electronAPI.detectSourceVendor({ uuid }),
-          window.electronAPI.detectSourceCandidates({ uuid }),
+          _sfFetchSourceCandidatesCached(uuid),
         ]);
         if (_sfImport?.runId !== myRun) return;
         _sfImport.vendor = (vendorRes && vendorRes.ok) ? vendorRes : null;
-        _sfImport.candidates = (candRes && candRes.ok && candRes.candidates) ? candRes.candidates : [];
+        _sfImport.candidates = candidates;
         _sfPopulateReview(sourcePath);
         _sfShowPhase('review');
       };
@@ -22042,6 +22883,7 @@ require(['vs/editor/editor.main'], function () {
             const remaining = (er && er.ok && er.entries) || [];
             if (remaining.length === 0) {
               await window.electronAPI.deleteSource({ uuid: sourceUuid });
+              _sfSourceCandidatesCache.delete(sourceUuid);
             }
           } catch {}
         }
@@ -22653,6 +23495,7 @@ require(['vs/editor/editor.main'], function () {
           try {
             const r = await window.electronAPI.deleteSource({ uuid: src.uuid });
             if (!r || !r.ok) failures.push({ name: src.label, error: (r && r.error) || 'unknown error' });
+            else _sfSourceCandidatesCache.delete(src.uuid);
           } catch (err) {
             failures.push({ name: src.label, error: String(err && err.message || err) });
           }
@@ -23061,6 +23904,427 @@ require(['vs/editor/editor.main'], function () {
         menu.style.top = y + 'px';
         menu.style.display = 'block';
       });
+      // ── Right-click on the card body (not on chips / link buttons /
+      // selection / delete) → "Add as new preset" or "Replace font
+      // folder in <existing preset>". Closes the SFL → Config Manager
+      // loop: pick a font from the grid, attach it to a preset in one
+      // gesture without leaving the Sound Fonts tab.
+      //
+      // For "Add as new preset": creates a new preset entry at the end
+      // of the currently-active preset array (falls back to the first
+      // array, or to a fresh scaffold if there are no arrays yet). Font
+      // folder field is seeded with the card's font name, preset name
+      // takes the same.
+      //
+      // For "Replace font folder in…": shows a submenu of every preset
+      // across every array; clicking one swaps that preset's font field
+      // and (if the preset's current display name doesn't match) prompts
+      // to rename the preset to match the new font folder name.
+      // Highlight a single SF card with the amber pulse — same animation
+      // shape the Style Library uses. NO scroll: the user right-clicked
+      // the card and is already looking at it, so movement would be
+      // jarring (Ryan's call). Bails silently when the card isn't in
+      // the DOM (filtered out of view, etc.) — the underlying .in-use
+      // class still updates via the grid re-render.
+      const _sfFlashCard = (fontName) => {
+        if (!fontName) return;
+        let card = null;
+        try { card = document.querySelector(`#sf-cards [data-font="${CSS.escape(fontName)}"]`); }
+        catch { card = null; }
+        if (!card) return;
+        // Force reflow so the animation restarts even when the class is
+        // still on the element from a prior fire.
+        card.classList.remove('highlight');
+        void card.offsetWidth;
+        card.classList.add('highlight');
+        setTimeout(() => card.classList.remove('highlight'), 1200);
+      };
+      // Re-render + highlight. Called after add / replace so the in-use
+      // computation runs against the new editor state, the affected
+      // cards pick up (or drop) their .in-use class, and the amber
+      // highlight plays over the new resting state.
+      const _sfRefreshGridAndFlash = (fontNames) => {
+        setTimeout(() => {
+          try { _sfRenderGrid(); } catch {}
+          for (const name of fontNames) {
+            if (name) _sfFlashCard(name);
+          }
+        }, 60);
+      };
+      const _sfPresetCtxSubmenu = (() => {
+        // Lazy-init shared submenu DOM. Sibling of preset-ctx-menu so
+        // the dismissal listener doesn't fight it.
+        let el = null;
+        return () => {
+          if (!el) {
+            el = document.createElement('div');
+            el.className = 'preset-ctx-menu';
+            el.style.display = 'none';
+            document.body.appendChild(el);
+          }
+          return el;
+        };
+      })();
+      const _sfCloseCardCtxMenus = () => {
+        const main = document.getElementById('preset-ctx-menu');
+        if (main) { main.style.display = 'none'; main.style.minWidth = ''; }
+        const sub = _sfPresetCtxSubmenu();
+        if (sub) { sub.style.display = 'none'; sub.innerHTML = ''; }
+      };
+      // Append a new preset to the active array with font + name pre-
+      // filled. Mirrors _addPreset's source-side logic (indent inference,
+      // blade-count style placeholders, end-of-array insertion) but
+      // seeds the font and name strings instead of leaving them empty.
+      // Falls back to the same _addFirstPreset / _insertFirstEntryIntoArray
+      // helpers when the active array is empty or absent, with a
+      // post-rebuild patch to inject the font name.
+      const _sfAddPresetWithFont = (fontName) => {
+        if (typeof editor === 'undefined' || !editor) return;
+        if (typeof presetParser === 'undefined' || !presetParser) return;
+        const result = presetParser.parsePresets(editor.getValue());
+        const activeIdx = (typeof _activeArrayIndex !== 'undefined' && result.arrays[_activeArrayIndex]) ? _activeArrayIndex : 0;
+        const arr = result.arrays[activeIdx];
+        // Cold paths: no array OR empty array. Use the existing helpers
+        // (they handle scaffolding correctly across all source shapes),
+        // then patch the newly-created preset's font + name on the next
+        // tick once the parse refreshes.
+        if (!arr) {
+          if (typeof _addFirstPreset === 'function') {
+            _addFirstPreset(result.bladeCount || 1);
+            setTimeout(() => _sfPatchFreshPresetFont(0, 0, fontName), 80);
+          }
+          return;
+        }
+        if (!arr.presets.length) {
+          if (typeof _insertFirstEntryIntoArray === 'function') {
+            _insertFirstEntryIntoArray(arr, activeIdx, result.bladeCount || 1);
+            setTimeout(() => _sfPatchFreshPresetFont(activeIdx, 0, fontName), 80);
+          }
+          return;
+        }
+        // Common path: append to the existing array.
+        const bladeCount = result.bladeCount || 1;
+        const lines = editor.getValue().split('\n');
+        const lastEndLine = arr.presets[arr.presets.length - 1].endLine;
+        // Detect whether there's already a blank line separating the
+        // previous preset's `},` from whatever follows (typically the
+        // array's `};`). When the previous preset sits flush against
+        // the array close (no blank), we have to inject one ourselves;
+        // otherwise the new preset's `{` butts directly up against the
+        // prior `},` with no breathing room. The skip-blanks loop below
+        // then no-ops in the flush case, and the leading blank in
+        // newText restores the gap. When a blank already exists, the
+        // skip loop hops past it and the new preset lands cleanly
+        // without doubling up the spacing.
+        const lineAfterPrev = lines[lastEndLine] || '';
+        const prevHasTrailingBlank = lineAfterPrev.trim() === '';
+        let insertLine = lastEndLine + 1;
+        while (insertLine <= lines.length && lines[insertLine - 1].trim() === '') insertLine++;
+        const refLine = (insertLine <= lines.length ? lines[insertLine - 1] : '') || '';
+        const indent = (refLine.match(/^(\s*)/) || ['', ''])[1];
+        const inner = indent + '  ';
+        const styleLines = [];
+        for (let i = 0; i < bladeCount; i++) styleLines.push(`${inner}StylePtr<Black>(),`);
+        const leadIn = prevHasTrailingBlank ? [] : [''];
+        const newText = [
+          ...leadIn,
+          `${indent}{ "${fontName}", "",`,
+          ...styleLines,
+          '',
+          `${inner}"${fontName}" },`,
+          '',
+        ].join('\n') + '\n';
+        _atomicEdit(editor, 'sf-card-add-preset', [{
+          range: { startLineNumber: insertLine, startColumn: 1, endLineNumber: insertLine, endColumn: 1 },
+          text: newText,
+        }]);
+        if (typeof _scheduleRebuild === 'function') _scheduleRebuild();
+        // Success feedback: the card whose font we just attached becomes
+        // .in-use after re-render, then flashes green over the new state.
+        _sfRefreshGridAndFlash([fontName]);
+      };
+      // Patch helper for the cold paths: _addFirstPreset / _insertFirstEntry
+      // ship a generic placeholder name + empty font. After the rebuild
+      // settles, find the newly-created preset and overwrite both fields
+      // with the font name we wanted to seed.
+      const _sfPatchFreshPresetFont = (arrayIdx, presetIdx, fontName) => {
+        try {
+          const r = presetParser.parsePresets(editor.getValue());
+          const arr = r.arrays[arrayIdx];
+          if (!arr || !arr.presets[presetIdx]) return;
+          const p = arr.presets[presetIdx];
+          // window._commitFieldEdit because this runs in the SF view's
+          // IIFE and _commitFieldEdit is scoped to the Config Manager's.
+          if (p.fontRange && window._commitFieldEdit) window._commitFieldEdit(p.fontRange, fontName);
+          if (p.displayNameRange && window._commitFieldEdit) window._commitFieldEdit(p.displayNameRange, fontName);
+        } catch {}
+      };
+      // Replace the font field on a specific preset, preserving the
+      // ;common toggle. After the swap, prompt to rename the preset if
+      // its current display name doesn't already match the new font.
+      // Flash success on the new font's card AND on the previously-used
+      // font's card — the latter may have just lost its in-use status,
+      // and the user wants visible confirmation either way.
+      const _sfReplacePresetFont = async (arrayIdx, presetIdx, fontName) => {
+        if (typeof editor === 'undefined' || !editor) return;
+        if (typeof presetParser === 'undefined' || !presetParser) return;
+        const result = presetParser.parsePresets(editor.getValue());
+        const arr = result.arrays[arrayIdx];
+        if (!arr) return;
+        const preset = arr.presets[presetIdx];
+        if (!preset) return;
+        // Preserve the existing ;common suffix — the user's intent is to
+        // swap the font folder, not drop their common toggle preference.
+        const oldFontRaw = String(preset.font || '');
+        const hasCommon = oldFontRaw.split(';').some(p => p.trim() === 'common');
+        const newFontValue = hasCommon ? `${fontName};common` : fontName;
+        // window._commitFieldEdit because this runs in the SF view's
+        // IIFE and _commitFieldEdit is scoped to the Config Manager's.
+        if (preset.fontRange && window._commitFieldEdit) {
+          window._commitFieldEdit(preset.fontRange, newFontValue);
+        }
+        // No re-render YET — all visual change (old card fade-off + new
+        // card highlight) lands as a single beat AFTER any rename prompt
+        // resolves. The user shouldn't see partial state mid-prompt.
+        // Rename prompt — fires whenever the preset's current name is
+        // not already exactly the new font folder name (case-insensitive
+        // + trimmed compare so "Father" / "father" / " Father" all
+        // count as matching and skip the prompt).
+        const oldName = String(preset.displayName || '').trim();
+        const newName = String(fontName || '').trim();
+        const namesMatch = oldName.toLowerCase() === newName.toLowerCase();
+        if (!namesMatch && preset.displayNameRange) {
+          const ok = await window.promptConfirm({
+            title: 'Rename preset?',
+            message: `The preset is named "${oldName || '(unnamed)'}". Rename to "${fontName}" to match the new font folder?`,
+            confirmText: 'Rename',
+            confirmKind: 'primary',
+            cancelText: 'Keep name',
+          });
+          if (ok) {
+            // Re-parse so the displayNameRange reflects any line shifts
+            // from the font edit. Match by both array index + preset
+            // index — those are stable for this in-place edit.
+            try {
+              const r2 = presetParser.parsePresets(editor.getValue());
+              const a2 = r2.arrays[arrayIdx];
+              const p2 = a2 && a2.presets[presetIdx];
+              if (p2 && p2.displayNameRange && window._commitFieldEdit) {
+                window._commitFieldEdit(p2.displayNameRange, fontName);
+              }
+            } catch {}
+          }
+        }
+        // Single visual beat at the end: re-render the grid (old card's
+        // in-use blue tint fades off via the .sf-card CSS transition,
+        // new card's in-use comes in) and highlight ONLY the NEW font
+        // card with the amber pulse. Everything lands together so the
+        // user sees one coherent confirmation moment instead of partial
+        // updates flickering during the prompt.
+        setTimeout(() => {
+          try { _sfRenderGrid(); } catch {}
+          _sfFlashCard(fontName);
+        }, 60);
+      };
+      // Track-only sibling of _sfReplacePresetFont. Used by the entry
+      // file browser's right-click "Use as track for…" submenu — clicks
+      // land here with the resolved track string (entryName/relPath)
+      // and the preset's editor-position coordinates. No rename prompt
+      // (tracks aren't tied to preset names).
+      const _sfSetPresetTrack = (arrayIdx, presetIdx, trackValue) => {
+        if (typeof editor === 'undefined' || !editor) return;
+        if (typeof presetParser === 'undefined' || !presetParser) return;
+        const result = presetParser.parsePresets(editor.getValue());
+        const arr = result.arrays[arrayIdx];
+        if (!arr) return;
+        const preset = arr.presets[presetIdx];
+        if (!preset) return;
+        if (preset.trackRange && window._commitFieldEdit) {
+          window._commitFieldEdit(preset.trackRange, trackValue);
+        }
+      };
+      // Pulse the entry-file row that just got picked as a track. Same
+      // amber animation the SF card uses for "+ Add to config" and
+      // "Replace in config preset" so the visible-feedback vocabulary
+      // is consistent — a coherent "I picked this for that" signal
+      // wherever the user is in the app.
+      const _sfFlashEntryFileRow = (filePath) => {
+        if (!filePath) return;
+        let row = null;
+        try {
+          row = document.querySelector(`#sf-entry-files-browser [data-file-path="${CSS.escape(filePath)}"]`);
+        } catch { row = null; }
+        if (!row) return;
+        row.classList.remove('highlight');
+        void row.offsetWidth;
+        row.classList.add('highlight');
+        setTimeout(() => row.classList.remove('highlight'), 1200);
+      };
+      document.getElementById('sf-cards')?.addEventListener('contextmenu', (e) => {
+        // The chip handler above runs for right-click on effect chips —
+        // bail here so we don't double up. Same for link buttons +
+        // select/delete buttons; they have their own click semantics
+        // and don't want a card-body context.
+        if (e.target.closest('[data-card-effect]')) return;
+        if (e.target.closest('[data-card-link]')) return;
+        if (e.target.closest('[data-card-select]')) return;
+        if (e.target.closest('[data-card-delete]')) return;
+        const card = e.target.closest('[data-font]');
+        if (!card) return;
+        const fontName = card.getAttribute('data-font');
+        if (!fontName) return;
+        // Shared Tracks card has no font folder — skip.
+        if (fontName === '(__shared_tracks__)' || fontName === '__sf_shared_tracks__') return;
+        e.preventDefault();
+        e.stopPropagation();
+        const menu = document.getElementById('preset-ctx-menu');
+        if (!menu) return;
+        menu.innerHTML = '';
+        menu.style.minWidth = '220px';
+        const mkItem = (text, opts, fn) => {
+          const d = document.createElement('div');
+          d.className = 'preset-ctx-item' + (opts && opts.cls ? ' ' + opts.cls : '');
+          d.textContent = text;
+          if (fn) d.addEventListener('mousedown', (ev) => {
+            ev.stopPropagation();
+            _sfCloseCardCtxMenus();
+            fn();
+          });
+          menu.appendChild(d);
+          return d;
+        };
+        // Item 1: add this font as a new preset in the open config.
+        // Explicit "to config" framing per Ryan's call — being explicit
+        // beats assuming the user knows what we're operating on.
+        mkItem(`+ Add to config`, null, () => _sfAddPresetWithFont(fontName));
+        // Item 2: swap this font into an existing preset (submenu of presets).
+        const replaceItem = mkItem(`Replace in config preset…`, { cls: 'has-submenu' }, null);
+        const buildSubmenu = () => {
+          const sub = _sfPresetCtxSubmenu();
+          sub.innerHTML = '';
+          sub.style.minWidth = '240px';
+          // Cap the submenu at half the viewport height with internal
+          // scroll so long preset lists (Ryan's screenshot showed ~30+
+          // presets running off the bottom) stay reachable. The class
+          // also styles the scrollbar to match the rest of the SF UI.
+          sub.classList.add('preset-ctx-submenu-sized');
+          let arrays = [];
+          try {
+            const result = presetParser.parsePresets(editor.getValue());
+            arrays = result.arrays || [];
+          } catch {}
+          let anyPreset = false;
+          arrays.forEach((arr, arrayIdx) => {
+            if (!arr.presets || !arr.presets.length) return;
+            // Section header for each array so the user can tell which
+            // bank a preset lives in when multiple are present.
+            const head = document.createElement('div');
+            head.className = 'preset-ctx-submenu-section';
+            head.textContent = arr.name || `Array ${arrayIdx + 1}`;
+            sub.appendChild(head);
+            arr.presets.forEach((preset, presetIdx) => {
+              anyPreset = true;
+              // Number prefix mirrors the sidecar preset list shape
+              // ("41 Excalibur", etc.) so the user can cross-reference
+              // a preset's row position when picking which to replace.
+              // 1-based to match the sidecar.
+              const number = presetIdx + 1;
+              const name = preset.displayName || `(unnamed ${number})`;
+              const item = document.createElement('div');
+              item.className = 'preset-ctx-item';
+              item.textContent = `${number}. ${name}`;
+              // Data attributes so the click handler can re-read the
+              // indices from the DOM. Earlier closure-capture version
+              // failed silently for Ryan in some cases — this shape
+              // survives any potential scope quirk.
+              item.dataset.sfArrayIdx = String(arrayIdx);
+              item.dataset.sfPresetIdx = String(presetIdx);
+              item.dataset.sfFontName = fontName;
+              // click (not mousedown) — fires after mouseup, more
+              // consistent with how the OS expects menu picks. Suppress
+              // mousedown only so the document-level outside-click
+              // handler doesn't pre-close anything mid-pick.
+              // Use mousedown directly — same shape the chip context
+              // menu uses, which we know works. Tested click+mousedown
+              // split first; switching back to mousedown-only since the
+              // chip path is the proven pattern in this codebase.
+              item.addEventListener('mousedown', (ev) => {
+                ev.stopPropagation();
+                ev.preventDefault();
+                const ai = parseInt(item.dataset.sfArrayIdx, 10);
+                const pi = parseInt(item.dataset.sfPresetIdx, 10);
+                const fn = item.dataset.sfFontName;
+                _sfCloseCardCtxMenus();
+                if (Number.isFinite(ai) && Number.isFinite(pi) && fn) {
+                  _sfReplacePresetFont(ai, pi, fn);
+                }
+              });
+              sub.appendChild(item);
+            });
+          });
+          if (!anyPreset) {
+            const empty = document.createElement('div');
+            empty.className = 'preset-ctx-submenu-empty';
+            empty.textContent = 'No presets yet';
+            sub.appendChild(empty);
+          }
+          // Position the submenu just outside the right edge of the
+          // parent item, vertically aligned with its top.
+          const rect = replaceItem.getBoundingClientRect();
+          // Defer width measurement to next tick — element needs to be
+          // in-DOM to measure. Position with a sane default, refine.
+          sub.style.display = 'block';
+          sub.style.left = `${rect.right - 2}px`;
+          sub.style.top = `${rect.top - 4}px`;
+          // Edge guard: if the submenu would overflow the right of the
+          // window, flip to the left of the parent item instead.
+          requestAnimationFrame(() => {
+            const subRect = sub.getBoundingClientRect();
+            if (subRect.right > window.innerWidth - 8) {
+              sub.style.left = `${Math.max(8, rect.left - subRect.width + 2)}px`;
+            }
+            if (subRect.bottom > window.innerHeight - 8) {
+              sub.style.top = `${Math.max(8, window.innerHeight - subRect.height - 8)}px`;
+            }
+          });
+        };
+        replaceItem.addEventListener('mouseenter', buildSubmenu);
+        replaceItem.addEventListener('mousedown', (ev) => {
+          // Click on the parent item also opens the submenu, in case the
+          // user is on a touchscreen / arrived via keyboard.
+          ev.stopPropagation();
+          buildSubmenu();
+        });
+        // Hide submenu when hovering a sibling item that isn't the
+        // submenu parent. (The submenu itself stays visible while the
+        // user moves into it.)
+        menu.querySelectorAll('.preset-ctx-item').forEach(item => {
+          if (item === replaceItem) return;
+          item.addEventListener('mouseenter', () => {
+            const sub = _sfPresetCtxSubmenu();
+            if (sub) { sub.style.display = 'none'; sub.innerHTML = ''; }
+          });
+        });
+        // Position the main menu, clamped to viewport.
+        const menuWidth = 240;
+        const x = Math.min(e.clientX, window.innerWidth - menuWidth - 8);
+        const y = Math.min(e.clientY, window.innerHeight - 80);
+        menu.style.left = x + 'px';
+        menu.style.top = y + 'px';
+        menu.style.display = 'block';
+        // Outside-click dismissal. document mousedown clears both menus
+        // unless the click landed inside either of them.
+        const onOutside = (ev) => {
+          if (menu.contains(ev.target)) return;
+          const sub = _sfPresetCtxSubmenu();
+          if (sub && sub.contains(ev.target)) return;
+          _sfCloseCardCtxMenus();
+          document.removeEventListener('mousedown', onOutside);
+        };
+        // Defer attaching the listener so this same mousedown event
+        // (the right-click) doesn't immediately tear the menu down.
+        setTimeout(() => document.addEventListener('mousedown', onOutside), 0);
+      });
       // Tag + Creator + Effects filter buttons + dropdowns wiring.
       const _sfTagFilterBtn = document.getElementById('btn-sf-tag-filter');
       const _sfTagDropdown = document.getElementById('sf-tag-dropdown');
@@ -23083,6 +24347,11 @@ require(['vs/editor/editor.main'], function () {
       document.getElementById('btn-sf-needs-review-filter')?.addEventListener('click', (e) => {
         e.stopPropagation();
         _sfNeedsReviewFilterOn = !_sfNeedsReviewFilterOn;
+        _sfRenderGrid();
+      });
+      document.getElementById('btn-sf-in-use-filter')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        _sfInUseFilterOn = !_sfInUseFilterOn;
         _sfRenderGrid();
       });
       _sfTagDropdown?.addEventListener('click', (e) => {
@@ -23205,6 +24474,13 @@ require(['vs/editor/editor.main'], function () {
           _sfRenderGrid();
           return;
         }
+        const inUseRemove = e.target.closest('[data-filter-remove-in-use]');
+        if (inUseRemove) {
+          e.stopPropagation();
+          _sfInUseFilterOn = false;
+          _sfRenderGrid();
+          return;
+        }
         const clear = e.target.closest('#sf-clear-all-filters');
         if (clear) {
           e.stopPropagation();
@@ -23213,6 +24489,7 @@ require(['vs/editor/editor.main'], function () {
           _sfActiveFilterEffects = new Set();
           _sfActiveFilterEffectsMissing = new Set();
           _sfNeedsReviewFilterOn = false;
+          _sfInUseFilterOn = false;
           _sfRenderGrid();
         }
       });
@@ -26222,6 +27499,10 @@ require(['vs/editor/editor.main'], function () {
           if (arr) _highlightPreset(arr.presets[idx]);
           _navigateToLine(preset.startLine, preset.endLine);
           _renderDetail();
+          // Auto-play hook (fires only when the sidecar toggle is armed).
+          // Same fuzzy matcher the inline preset-editor play button uses:
+          // resolves font.wav / font1.wav / font01.wav / font/foo.wav.
+          try { window._firePresetAutoPlay?.(arr?.presets[idx]); } catch {}
           row.focus();
         }
       });
@@ -26287,6 +27568,11 @@ require(['vs/editor/editor.main'], function () {
       _applySelectionClasses();
       _highlightPreset(arr?.presets[idx]);
       _renderDetail();
+      // No auto-play hook here on purpose: _selectPreset is called by
+      // _rebuildSidecar on every sidecar open / refresh, which would
+      // fire audio just because the user expanded the sidebar. Auto-play
+      // is wired only at the explicit user-action sites (row click,
+      // prev/next nav buttons).
     }
 
     function _suppressLiveSelection() {
@@ -26667,6 +27953,7 @@ require(['vs/editor/editor.main'], function () {
         _selectPreset(arr, idx - 1);
         document.querySelector(`#preset-list-top .preset-row[data-live-idx="${idx - 1}"]`)
           ?.scrollIntoView({ block: 'nearest' });
+        try { window._firePresetAutoPlay?.(arr?.presets[idx - 1]); } catch {}
       });
       heading.appendChild(prevBtn);
 
@@ -26680,6 +27967,7 @@ require(['vs/editor/editor.main'], function () {
         _selectPreset(arr, idx + 1);
         document.querySelector(`#preset-list-top .preset-row[data-live-idx="${idx + 1}"]`)
           ?.scrollIntoView({ block: 'nearest' });
+        try { window._firePresetAutoPlay?.(arr?.presets[idx + 1]); } catch {}
       });
       heading.appendChild(nextBtn);
 
@@ -26779,6 +28067,116 @@ require(['vs/editor/editor.main'], function () {
       } catch {}
     }
 
+    // Shared infrastructure for the inline play buttons next to the Font
+    // Folder and Track combos. Both call into _sfQuickPlay (the same
+    // audio engine the SF view's mmain quick-play uses) and gate
+    // themselves on whether the target file actually exists. Existence
+    // checks are cached so re-renders + repeated focus don't re-IPC.
+    const _presetPlayCheckCache = new Map();
+    const _presetPlayCheckKey = (kind, id, subPath) =>
+      `${kind}:${id || ''}:${String(subPath || '').toLowerCase()}`;
+    // Walk a tree returned by listEntryFiles looking for a leaf file at
+    // the given slash-separated subPath. Returns true when a non-dir
+    // node with the matching path is found.
+    const _presetFileExistsInTree = (tree, subPath) => {
+      const parts = String(subPath || '').split('/').filter(Boolean);
+      if (parts.length === 0) return false;
+      const walk = (arr, idx) => {
+        for (const n of arr) {
+          if (!n || String(n.name).toLowerCase() !== parts[idx].toLowerCase()) continue;
+          if (idx === parts.length - 1) return !n.isDir;
+          if (n.isDir && Array.isArray(n.children)) return walk(n.children, idx + 1);
+          return false;
+        }
+        return false;
+      };
+      return walk(tree, 0);
+    };
+    const _presetCheckEntryFileExists = async (entryName, subPath) => {
+      if (!entryName || !subPath) return false;
+      const key = _presetPlayCheckKey('entry', entryName, subPath);
+      if (_presetPlayCheckCache.has(key)) return _presetPlayCheckCache.get(key);
+      let exists = false;
+      try {
+        const r = await window.electronAPI.listEntryFiles({ name: entryName });
+        const tree = (r && r.ok && r.files) || [];
+        exists = _presetFileExistsInTree(tree, subPath);
+      } catch {}
+      _presetPlayCheckCache.set(key, exists);
+      return exists;
+    };
+    // Find the first file matching an effect stem (font, hum, clash, etc.)
+    // in an entry's tree. The "font" effect is the canonical example —
+    // can ship as font.wav at root, font1.wav, font01.wav, or font/foo.wav.
+    // _sfFindFirstEffectFileInTree (exposed via window) handles all four
+    // shapes. Cached per (entry, effect) so opening different presets
+    // doesn't re-IPC the same entry. Returns the resolved subPath the
+    // play button should hand to _sfQuickPlay, or null when nothing in
+    // the entry matches the effect.
+    const _presetEffectFileCache = new Map(); // "<entry>:<effect>" → subPath|null
+    const _presetResolveEntryEffectFile = async (entryName, effectName) => {
+      if (!entryName || !effectName) return null;
+      const key = `${entryName}:${String(effectName).toLowerCase()}`;
+      if (_presetEffectFileCache.has(key)) return _presetEffectFileCache.get(key);
+      let resolved = null;
+      try {
+        const r = await window.electronAPI.listEntryFiles({ name: entryName });
+        const tree = (r && r.ok && r.files) || [];
+        if (typeof window._sfFindFirstEffectFileInTree === 'function') {
+          resolved = window._sfFindFirstEffectFileInTree(tree, effectName) || null;
+        }
+      } catch {}
+      _presetEffectFileCache.set(key, resolved);
+      return resolved;
+    };
+    // Shared tracks: check the cached file list the SF view populates on
+    // boot. No IPC — the cache is the source of truth (Shared Tracks ops
+    // refresh it).
+    const _presetCheckSharedTrackExists = (subPath) => {
+      const files = window._sfSharedTracksFiles || [];
+      const norm = String(subPath || '').toLowerCase();
+      return files.some(f => String(f.name || f).toLowerCase() === norm);
+    };
+    // Track resolver: turns a preset Track field value + the active font
+    // folder into a play target. Three formats handled:
+    //   "<font>/<rest>"   — entry-relative path (most common)
+    //   "tracks/<file>"   — shared tracks folder reference
+    //   "<file>"          — bare filename, assumed to live at
+    //                       <currentFont>/tracks/<file>
+    // Returns null when the value is empty or unresolvable.
+    const _presetResolveTrackTarget = (trackValue, currentFont) => {
+      const v = String(trackValue || '').trim();
+      if (!v) return null;
+      if (v.indexOf('/') < 0) {
+        if (!currentFont) return null;
+        return { kind: 'entry', id: currentFont, subPath: `tracks/${v}` };
+      }
+      const slash = v.indexOf('/');
+      const head = v.slice(0, slash);
+      const tail = v.slice(slash + 1);
+      if (head.toLowerCase() === 'tracks') {
+        return { kind: 'sharedTracks', id: null, subPath: tail };
+      }
+      return { kind: 'entry', id: head, subPath: tail };
+    };
+    // Factory for the inline play button. Caller wires the update +
+    // click handlers because state lookup differs between font (always
+    // <entry>/font.wav) and track (resolved via _presetResolveTrackTarget).
+    const _makePresetPlayButton = (initialTitle) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'preset-lib-combo-play';
+      btn.innerHTML = '&#9654;';
+      btn.title = initialTitle;
+      btn.disabled = true;
+      btn.tabIndex = -1;
+      // Suppress focus theft on mousedown so clicking the play button
+      // doesn't pull focus out of the input mid-edit. The actual play
+      // fires on click.
+      btn.addEventListener('mousedown', e => e.preventDefault());
+      return btn;
+    };
+
     function _buildFontField(preset) {
       const wrap = document.createElement('div');
       wrap.className = 'preset-detail-field';
@@ -26800,7 +28198,11 @@ require(['vs/editor/editor.main'], function () {
       cb.type = 'checkbox';
       cb.checked = (preset.font || '').split(';').some(p => p.trim() === 'common');
 
-      const commit = (newName) => {
+      // Declared `let` so the inline play-button wiring below can wrap
+      // it to fire an existence re-check whenever a commit lands. Same
+      // shape for the font + track fields; both want play-button state
+      // re-evaluation on programmatic value changes.
+      let commit = (newName) => {
         const full = cb.checked ? (newName ? newName + ';common' : 'common') : (newName || '');
         _commitFieldEdit(_getFreshFieldRange('font') || preset.fontRange, full);
         // "Last used style" auto-populate. When the user picks a font
@@ -26838,7 +28240,9 @@ require(['vs/editor/editor.main'], function () {
       let libLoaded = false;
       let libEmpty = false;
 
-      const applyLibrary = (entries) => {
+      // Declared `let` so the play-button wiring can wrap this to
+      // re-evaluate state when the library load finishes.
+      let applyLibrary = (entries) => {
         libLoaded = true;
         fontNames = entries
           .map(e => e.name || e.meta?.name || '')
@@ -26953,8 +28357,67 @@ require(['vs/editor/editor.main'], function () {
         }
       });
       comboInput.addEventListener('click', (e) => e.stopPropagation());
+      // Inline play button: auditions the first font-type file in the
+      // selected entry. Generic match — font.wav, font1.wav, font01.wav,
+      // or font/foo.wav all count (same matcher the card chips use, via
+      // _sfFindFirstEffectFileInTree). Disabled when no font is selected
+      // or no font-shaped file exists; hidden entirely when the SF
+      // library is empty (same gate as the dropdown arrow). Sits to the
+      // LEFT of the input so it reads as the "play" action attached to
+      // the field, mirroring the audio glyph on the left of a media
+      // bar — Ryan's call.
+      const fontPlayBtn = _makePresetPlayButton('Play font sound');
+      // Resolved subPath gets stashed here so the click handler doesn't
+      // re-IPC. Updated in lockstep with the cache by _updateFontPlayBtn.
+      let fontPlaySubPath = null;
+      fontPlayBtn.addEventListener('click', () => {
+        if (fontPlayBtn.disabled) return;
+        const v = comboInput.value.trim().split(';')[0].trim();
+        if (!v || !fontPlaySubPath) return;
+        if (window._sfQuickAudioChip === fontPlayBtn) {
+          if (typeof window._sfQuickAudioStop === 'function') window._sfQuickAudioStop();
+          return;
+        }
+        if (typeof window._sfQuickPlay === 'function') {
+          window._sfQuickPlay({ kind: 'entry', id: v, subPath: fontPlaySubPath, chipEl: fontPlayBtn });
+        }
+      });
+      const _updateFontPlayBtn = async () => {
+        if (libEmpty) { fontPlayBtn.style.display = 'none'; return; }
+        fontPlayBtn.style.display = '';
+        const v = comboInput.value.trim().split(';')[0].trim();
+        if (!v) {
+          fontPlayBtn.disabled = true;
+          fontPlayBtn.title = 'Pick a font folder to audition';
+          fontPlaySubPath = null;
+          return;
+        }
+        fontPlayBtn.title = 'Checking…';
+        const resolved = await _presetResolveEntryEffectFile(v, 'font');
+        // Guard against the user changing the value during the await.
+        const cur = comboInput.value.trim().split(';')[0].trim();
+        if (cur !== v) return;
+        fontPlaySubPath = resolved;
+        fontPlayBtn.disabled = !resolved;
+        fontPlayBtn.title = resolved
+          ? `Play ${v}/${resolved}`
+          : `No font sound in "${v}"`;
+      };
+      comboInput.addEventListener('input', _updateFontPlayBtn);
+      // Hook the existing applyLibrary + commit so programmatic value
+      // changes (dropdown pick, library-load completion) re-evaluate the
+      // play button. const-by-default in this scope, so we shadow them
+      // here — the original implementations stay intact via the closures.
+      const _origApplyLibrary_font = applyLibrary;
+      applyLibrary = (entries) => { _origApplyLibrary_font(entries); _updateFontPlayBtn(); };
+      const _origCommit_font = commit;
+      commit = (newName) => { _origCommit_font(newName); _updateFontPlayBtn(); };
+      // Layout order: [play] [input] [arrow]. Play on the left matches
+      // the media-bar convention (transport controls precede the field).
+      comboWrap.appendChild(fontPlayBtn);
       comboWrap.appendChild(comboInput);
       comboWrap.appendChild(comboArrow);
+      _updateFontPlayBtn();
       valueWrap.appendChild(comboWrap);
 
       const cbWrap = document.createElement('label');
@@ -27030,7 +28493,10 @@ require(['vs/editor/editor.main'], function () {
         .split(';').filter(p => p.trim() !== 'common').join(';')
         .split('/')[0].trim();
 
-      const commit = (newValue) => {
+      // Declared `let` so the inline play-button wiring below can wrap
+      // it to fire an existence re-check after each commit. Same shape
+      // as the font field uses.
+      let commit = (newValue) => {
         const trimmed = (newValue || '').trim();
         // Auto-append .wav for non-empty values without an extension —
         // matches the previous pencil-edit behavior.
@@ -27038,6 +28504,85 @@ require(['vs/editor/editor.main'], function () {
         _commitFieldEdit(_getFreshFieldRange('track') || preset.trackRange, final);
         return final;
       };
+
+      // Convention-warning glyph (Proffie auto-cycle scans 'tracks/'
+      // plural only — singular 'track/' folder lets the file play via
+      // direct trigger but breaks the prop's track-player auto-advance).
+      // Validator below toggles .visible; click opens the rename+cascade
+      // confirm prompt.
+      const trackWarn = document.createElement('button');
+      trackWarn.type = 'button';
+      trackWarn.className = 'preset-track-warning';
+      trackWarn.innerHTML = '&#9432;'; // ⓘ
+      trackWarn.tabIndex = -1;
+      // Captured per-render so the click handler has the right context
+      // even if multiple presets render at once. validateValue updates
+      // these whenever it detects the typo so the latest values are used.
+      let _trackWarnContext = null; // { fontName, oldFolder, newFolder }
+      trackWarn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        // No-op when there's no actionable fix context. D and N states
+        // surface info via the tooltip but don't open a confirm because
+        // there's no single-folder rename that would help.
+        if (!_trackWarnContext) return;
+        const { fontName, oldFolder, newFolder } = _trackWarnContext;
+        const ok = await window.promptConfirm({
+          title: `Rename "${oldFolder}/" to "${newFolder}/"?`,
+          message: `"${fontName}/${oldFolder}/" is singular. Files here still work as a preset's default track, but track players only scan "tracks/" (plural) inside the font folder or inside common/.
+
+Rename the folder to "${newFolder}/" and update every preset's track field that points into it?`,
+          confirmText: `Rename to ${newFolder}/`,
+          confirmKind: 'primary',
+          cancelText: 'Leave it',
+        });
+        if (!ok) return;
+        // Rename the folder on disk.
+        const renameRes = await window.electronAPI.fileOpsRename({
+          kind: 'entry', id: fontName, subPath: oldFolder, newName: newFolder,
+        });
+        if (!renameRes || !renameRes.ok) {
+          if (typeof promptError === 'function') {
+            promptError('Rename failed', (renameRes && renameRes.error) || 'unknown');
+          } else {
+            alert(`Rename failed: ${(renameRes && renameRes.error) || 'unknown'}`);
+          }
+          return;
+        }
+        // Cascade: every preset whose track value starts with
+        // "<fontName>/<oldFolder>/" gets its path rewritten to the new
+        // folder. One atomic edit across all matches so monaco applies
+        // them as a single undo step + line-shift math stays consistent.
+        try {
+          const parseResult = presetParser.parsePresets(editor.getValue());
+          const oldPrefix = `${fontName}/${oldFolder}/`;
+          const newPrefix = `${fontName}/${newFolder}/`;
+          const edits = [];
+          for (const arr of parseResult.arrays || []) {
+            for (const p of arr.presets || []) {
+              const tv = p.track || '';
+              if (tv.toLowerCase().startsWith(oldPrefix.toLowerCase()) && p.trackRange) {
+                const tail = tv.slice(oldPrefix.length);
+                const newVal = newPrefix + tail;
+                edits.push({
+                  range: {
+                    startLineNumber: p.trackRange.startLine,
+                    startColumn: p.trackRange.startCol + 1,
+                    endLineNumber: p.trackRange.endLine,
+                    endColumn: p.trackRange.endCol + 1,
+                  },
+                  text: '"' + newVal + '"',
+                });
+              }
+            }
+          }
+          if (edits.length) _atomicEdit(editor, 'fix-track-folder-typo', edits);
+        } catch {}
+        // Re-validate so the warning disappears (or stays if something
+        // else flags) and the field's title updates.
+        try { validateValue(); } catch {}
+      });
+      valueWrap.appendChild(trackWarn);
 
       const comboWrap = document.createElement('div');
       comboWrap.className = 'preset-lib-combo preset-track-combo';
@@ -27060,7 +28605,10 @@ require(['vs/editor/editor.main'], function () {
       // the field reads as a plain text input. Same pattern the font
       // field uses for its no-library case.
       let _trackLibEmpty = false;
-      const _applyTrackLibState = () => {
+      // Declared `let` so the inline play-button wiring can wrap it to
+      // re-evaluate state when the library-empty gate flips (e.g. async
+      // library load completes after the field was already rendered).
+      let _applyTrackLibState = () => {
         const entries = window._sfEntriesCache || [];
         const sharedAny = !!(window._sfSharedTracksExists && (window._sfSharedTracksFiles || []).length > 0);
         const empty = entries.length === 0 && !sharedAny;
@@ -27199,19 +28747,30 @@ require(['vs/editor/editor.main'], function () {
           return;
         }
         const parts = v.split('/');
+        // CASE C: not a track-path shape
         if (parts.length < 2) {
           comboInput.classList.add('not-in-library');
           comboInput.title = `"${v}" doesn't look like a track path. Expected: tracks/<file>.wav or <font folder>/tracks/<file>.wav`;
+          _trackWarnContext = null;
+          trackWarn.classList.remove('visible', 'clickable');
           return;
         }
-        // Shared-at-root: tracks/<file>.wav (two parts, first is 'tracks').
-        if (parts.length === 2 && parts[0] === 'tracks') {
+        // Reset info glyph for this run — every branch decides on its own.
+        _trackWarnContext = null;
+        trackWarn.classList.remove('visible', 'clickable');
+        // CASE D: tracks/<file>.wav — SD-root tracks reference
+        if (parts.length === 2 && parts[0].toLowerCase() === 'tracks') {
           const fileName = parts[1];
           const sharedFiles = window._sfSharedTracksFiles || [];
           const hit = sharedFiles.find(f => f.name.toLowerCase() === fileName.toLowerCase());
           if (hit) {
+            // D-hit: file exists in SD-root tracks/. Mark green, then surface
+            // the info ⓘ — this path works as this preset's default track
+            // but track players won't auto-cycle through SD-root tracks/.
             comboInput.classList.remove('not-in-library');
             comboInput.title = `Track exists in the Shared Tracks folder.`;
+            trackWarn.title = `This path uses SD-root "tracks/". Plays as this preset's default track. Track players only scan "tracks/" (plural) inside the font folder or inside common/, so the auto-cycle won't pick this up.`;
+            trackWarn.classList.add('visible'); // no .clickable — informational
           } else if (!window._sfSharedTracksExists) {
             comboInput.classList.add('not-in-library');
             comboInput.title = `No Shared Tracks folder in your library yet. Create one from the Sound Fonts tab. The config may still work if the file is on the SD card.`;
@@ -27221,21 +28780,117 @@ require(['vs/editor/editor.main'], function () {
           }
           return;
         }
-        // Font-specific: <font>/tracks/<file>.wav
+        // CASE K/L/M: common/tracks/<file>.wav — common-folder tracks reference
+        if (parts.length >= 3 && parts[0].toLowerCase() === 'common' && parts[1].toLowerCase() === 'tracks') {
+          const commonUuid = window._sfActiveCommonForConfig || '';
+          // M: no common folder linked to the open config
+          if (!commonUuid) {
+            comboInput.classList.add('not-in-library');
+            comboInput.title = `No common folder in your library yet. Import one from the Sound Fonts tab. The config may still work if the file is on the SD card.`;
+            return;
+          }
+          // Existence check against the linked common folder's files.
+          let commonFiles = [];
+          try {
+            const r = await window.electronAPI.listCommonFiles({ uuid: commonUuid });
+            commonFiles = (r && r.ok && r.files) || [];
+          } catch {}
+          const wantRel = parts.slice(1).join('/').toLowerCase(); // tracks/<file...>
+          const hit = commonFiles.find(f => {
+            const rel = String(f.rel || f.name || '').toLowerCase();
+            return rel === wantRel;
+          });
+          if (hit) {
+            // K: canonical common/tracks/<file> reference — green, no glyph
+            comboInput.classList.remove('not-in-library');
+            comboInput.title = `Track exists at ${v}.`;
+          } else {
+            // L: file not in the linked common's tracks/
+            comboInput.classList.add('not-in-library');
+            comboInput.title = `"${parts.slice(1).join('/')}" wasn't found in your common folder. The config may still work if the file is on the SD card.`;
+          }
+          return;
+        }
+        // Font-specific or unrecognized-root: <something>/<rest>.
+        //   - When <something> is a font folder in the library: cases
+        //     F/G/H/I/J apply (canonical hit / track-singular variants /
+        //     non-tracks-folder / missing file).
+        //   - When <something> isn't a font folder AND wasn't matched
+        //     above as 'tracks' or 'common': CASE N — unrecognized root.
+        //     We can't verify; surface as info, not red. The path may
+        //     still play as this preset's default track if it resolves
+        //     on the SD card.
         const fontName = parts[0];
         const result = await getFontTracks(fontName);
         if (!result.exists) {
-          comboInput.classList.add('not-in-library');
-          comboInput.title = `Font folder "${fontName}" isn't in your JMT Studio library. The config may still work if the file is on the SD card.`;
+          // CASE N: first segment isn't a font, 'common', or 'tracks'.
+          // Not red — we can't verify either way; the user might be
+          // referencing something on the SD card outside the library.
+          comboInput.classList.remove('not-in-library');
+          comboInput.title = `Track exists at ${v} (unverified — not in library).`;
+          trackWarn.title = `"${fontName}" isn't a font folder in your library, "common", or "tracks". This still works as this preset's default track if the file is on the SD card. Track players only scan "tracks/" (plural) inside the font folder or inside common/.`;
+          trackWarn.classList.add('visible'); // no .clickable — informational
           return;
         }
         const hit = result.tracks.find(t => t.path.toLowerCase() === v.toLowerCase());
         if (hit) {
           comboInput.classList.remove('not-in-library');
           comboInput.title = `Track exists at ${hit.path}.`;
+          return;
+        }
+        // Fall back to checking the literal path within the font folder.
+        // Covers tracks organized under 'track/' singular, nested
+        // subfolders, etc. — anywhere the file exists at the typed
+        // path counts as a legit location. The 'track/' vs 'tracks/'
+        // distinction lives in the library-health audit (queued), not
+        // in this field's red-flag logic.
+        const subPath = parts.slice(1).join('/');
+        let literalExists = false;
+        try {
+          literalExists = await _presetCheckEntryFileExists(fontName, subPath);
+        } catch {}
+        if (literalExists) {
+          comboInput.classList.remove('not-in-library');
+          comboInput.title = `Track exists at ${v}.`;
+          // Surface the 'track/' singular typo as an inline warning
+          // ONLY when the path is exactly <font>/track/<file> — i.e.
+          // the typo'd folder sits directly under the font folder
+          // (where Proffie's track-player would have looked). The
+          // warning is specifically about THAT font's structure: the
+          // owning font referenced in the track path, NOT the preset's
+          // main font folder. The two can differ (a preset can have
+          // font A but pull tracks from font B's folder).
+          if (parts.length === 3 && parts[1].toLowerCase() === 'track') {
+            const oldFolderName = parts[1]; // preserves case ('track', 'Track', etc.)
+            _trackWarnContext = { fontName, oldFolder: oldFolderName, newFolder: 'tracks' };
+            // Two variants based on whether the track points at the
+            // preset's own font folder or pulls from a different font.
+            // The cross-font case is the one that catches users off-
+            // guard — they expect "my preset's track folder" but the
+            // path actually targets another font's structure.
+            //
+            // Terminology: "default track" = the single file the preset's
+            // track field points at (plays on direct trigger; can live
+            // anywhere on the SD card). "Track player" = ProffieOS's
+            // auto-cycle feature; finds tracks ONLY in a folder literally
+            // named "tracks/" — either inside the font folder OR inside
+            // common/.
+            const isOwnFont = fontName === currentFontFolder;
+            trackWarn.title = isOwnFont
+              ? `"${fontName}/${oldFolderName}/" is singular. This file still works as this preset's default track, but track players only scan "tracks/" (plural) inside the font folder or inside common/. Click to rename the folder + update every preset's track path that pointed into it.`
+              : `This track points into "${fontName}"—a different font from this preset. "${fontName}/${oldFolderName}/" is singular, so the file still works as this preset's default track, but won't be found by track players. Track players only scan "tracks/" (plural) inside the font folder or inside common/. Click to rename the folder + update every preset's track path that pointed into it.`;
+            // .clickable enables the cursor + hover state since this
+            // case has an actual one-click rename behind the glyph.
+            trackWarn.classList.add('visible', 'clickable');
+          } else {
+            _trackWarnContext = null;
+            trackWarn.classList.remove('visible', 'clickable');
+          }
         } else {
           comboInput.classList.add('not-in-library');
-          comboInput.title = `"${v}" wasn't found in ${fontName}/tracks/. The config may still work if the file is on the SD card.`;
+          comboInput.title = `"${v}" wasn't found in "${fontName}". The config may still work if the file is on the SD card.`;
+          _trackWarnContext = null;
+          trackWarn.classList.remove('visible');
         }
       };
       validateValue();
@@ -27751,8 +29406,72 @@ require(['vs/editor/editor.main'], function () {
         }
       });
       comboInput.addEventListener('click', (e) => e.stopPropagation());
+      // Inline play button: auditions the resolved track. Track values come
+      // in three shapes (entry-relative "<font>/<rest>", shared-tracks
+      // "tracks/<file>", bare "<file>" assumed relative to currentFont's
+      // tracks/ folder); _presetResolveTrackTarget normalizes them.
+      // Disabled when the field is empty, the library is empty, or the
+      // resolved file doesn't exist. Same chip semantics as the font
+      // button — click-while-playing stops; hidden when both libraries
+      // are empty (same gate as the dropdown arrow).
+      const trackPlayBtn = _makePresetPlayButton('Play track');
+      trackPlayBtn.addEventListener('click', () => {
+        if (trackPlayBtn.disabled) return;
+        const target = _presetResolveTrackTarget(comboInput.value.trim(), currentFontFolder);
+        if (!target) return;
+        if (window._sfQuickAudioChip === trackPlayBtn) {
+          if (typeof window._sfQuickAudioStop === 'function') window._sfQuickAudioStop();
+          return;
+        }
+        if (typeof window._sfQuickPlay === 'function') {
+          window._sfQuickPlay({
+            kind: target.kind,
+            id: target.id,
+            subPath: target.subPath,
+            chipEl: trackPlayBtn,
+          });
+        }
+      });
+      const _updateTrackPlayBtn = async () => {
+        if (_trackLibEmpty) { trackPlayBtn.style.display = 'none'; return; }
+        trackPlayBtn.style.display = '';
+        const raw = comboInput.value.trim();
+        if (!raw) {
+          trackPlayBtn.disabled = true;
+          trackPlayBtn.title = 'Pick a track to play';
+          return;
+        }
+        const target = _presetResolveTrackTarget(raw, currentFontFolder);
+        if (!target) {
+          trackPlayBtn.disabled = true;
+          trackPlayBtn.title = 'Track path could not be resolved';
+          return;
+        }
+        trackPlayBtn.title = 'Checking…';
+        let exists = false;
+        if (target.kind === 'sharedTracks') {
+          exists = _presetCheckSharedTrackExists(target.subPath);
+        } else if (target.kind === 'entry') {
+          exists = await _presetCheckEntryFileExists(target.id, target.subPath);
+        }
+        // Guard against the value changing during the await.
+        if (comboInput.value.trim() !== raw) return;
+        trackPlayBtn.disabled = !exists;
+        trackPlayBtn.title = exists ? `Play ${raw}` : `Track not found: ${raw}`;
+      };
+      comboInput.addEventListener('input', _updateTrackPlayBtn);
+      // Wrap _applyTrackLibState + commit so async library loads and
+      // dropdown picks re-evaluate the play button state.
+      const _origApplyTrackLibState = _applyTrackLibState;
+      _applyTrackLibState = () => { _origApplyTrackLibState(); _updateTrackPlayBtn(); };
+      const _origCommit_track = commit;
+      commit = (newValue) => { const res = _origCommit_track(newValue); _updateTrackPlayBtn(); return res; };
+      // Layout order: [play] [input] [arrow] — see Font Folder for the
+      // matching media-bar rationale.
+      comboWrap.appendChild(trackPlayBtn);
       comboWrap.appendChild(comboInput);
       comboWrap.appendChild(comboArrow);
+      _updateTrackPlayBtn();
       valueWrap.appendChild(comboWrap);
       wrap.appendChild(valueWrap);
       return wrap;
@@ -28451,6 +30170,11 @@ require(['vs/editor/editor.main'], function () {
       // but focus was already redirected), forcing users to click pencils twice
       // when leaving a dirty field.
     }
+    // Window export — the SF view's right-click handlers
+    // (_sfReplacePresetFont, _sfPatchFreshPresetFont) live in a different
+    // IIFE and can't reach this function-declaration directly. Same
+    // pattern the quick-play surface uses to bridge scope boundaries.
+    window._commitFieldEdit = _commitFieldEdit;
 
     // After Add Preset / Add Bank, the new entry's Name input opens automatically with
     // the default "Preset N" pre-selected so the user can immediately type-replace it.
@@ -31609,6 +33333,98 @@ require(['vs/editor/editor.main'], function () {
       const arr = _parseResult?.arrays[_activeArrayIndex];
       _addPreset(_activeArrayIndex, arr ? arr.presets.length : 0);
     });
+
+    // ── Sidecar auto-play toggle ──────────────────────────────────────
+    // When ON, clicking a preset in the sidecar fires _sfQuickPlay against
+    // the resolved font.wav (or font1.wav/font01.wav/font/foo.wav — same
+    // fuzzy matcher the preset editor's inline play button uses).
+    // Gated on SFL existence (hidden when zero library entries).
+    // Default OFF at every app launch — no persistence.
+    let _presetAutoPlayOn = false;
+    const _presetAutoPlayBtn = document.getElementById('btn-preset-autoplay');
+    const _refreshPresetAutoPlayVisibility = () => {
+      if (!_presetAutoPlayBtn) return;
+      const haveLib = (window._sfEntriesCache || []).length > 0;
+      _presetAutoPlayBtn.style.display = haveLib ? '' : 'none';
+      if (!haveLib && _presetAutoPlayOn) {
+        // SFL went away under us — flip off and stop any in-flight audio.
+        _presetAutoPlayOn = false;
+        _presetAutoPlayBtn.classList.remove('on');
+        try { window._sfQuickAudioStop?.(); } catch {}
+      }
+    };
+    window._refreshPresetAutoPlayVisibility = _refreshPresetAutoPlayVisibility;
+    _presetAutoPlayBtn?.addEventListener('click', () => {
+      if (!_presetAutoPlayOn) {
+        // OFF → ON: arm the toggle, don't auto-play retroactively.
+        _presetAutoPlayOn = true;
+        _presetAutoPlayBtn.classList.add('on');
+        _presetAutoPlayBtn.title = 'Auto-play armed — click a preset to play its font sound. Click again to stop / disable.';
+        return;
+      }
+      // ON → OFF: disarm and stop any audio still playing. The "playing"
+      // chip lives on the inline font play button now (so its existing
+      // blue/pulse styling carries the playing-state visual), not on
+      // this toggle — so the toggle button has just two visible states:
+      // gray (off) and blue (on / armed).
+      _presetAutoPlayOn = false;
+      _presetAutoPlayBtn.classList.remove('on');
+      _presetAutoPlayBtn.title = 'Auto-play font.wav when opening a preset';
+      try { window._sfQuickAudioStop?.(); } catch {}
+    });
+    // Auto-play hook — called by the preset row click path (and the
+    // prev/next nav buttons) right after _selectPreset's render settles.
+    // Resolves the preset's font folder, finds the first font-shaped wav
+    // in it, plays via the shared engine. The chipEl is the inline font
+    // play button in the preset detail panel, so it picks up the same
+    // playing-state styling as a manual click — the Auto ▶ toggle just
+    // arms/disarms, it isn't the visual playback indicator.
+    // Stops any currently-playing audio first so preset-to-preset
+    // switching always stops the prior track even when the next preset
+    // has no font sound.
+    const _firePresetAutoPlay = async (preset) => {
+      if (!_presetAutoPlayOn) return;
+      // Stop whatever was playing (likely from the previous preset).
+      try { window._sfQuickAudioStop?.(); } catch {}
+      if (!preset || !preset.font) return;
+      const fontName = String(preset.font)
+        .split(';').filter(p => p.trim() !== 'common').join(';')
+        .split('/')[0].trim();
+      if (!fontName) return;
+      let subPath = null;
+      try { subPath = await _presetResolveEntryEffectFile(fontName, 'font'); }
+      catch {}
+      // Re-check the toggle — the await might have spanned a click that
+      // turned auto-play off; honor that.
+      if (!_presetAutoPlayOn || !subPath) return;
+      // Inline font play button in the preset detail — same DOM element
+      // the user would click manually. _renderDetail rebuilds this on
+      // every selection so the element is fresh; if for some reason it
+      // isn't there (detail panel hidden), fall back to no chip so the
+      // engine still plays audio (just without a visible chip lighting
+      // up).
+      const fontPlayBtn = document.querySelector('.preset-detail .preset-font-combo .preset-lib-combo-play');
+      try {
+        window._sfQuickPlay?.({
+          kind: 'entry',
+          id: fontName,
+          subPath,
+          chipEl: fontPlayBtn || undefined,
+        });
+      } catch {}
+    };
+    // Expose for the row-click handlers below; same script-scope so
+    // they could call it directly, but keeping it on window keeps the
+    // wiring style consistent with the other quick-play bridges.
+    window._firePresetAutoPlay = _firePresetAutoPlay;
+    // Initial visibility check — SFL entries are loaded lazily after
+    // boot, so retry briefly until the cache populates.
+    (function _initAutoPlayVisibility() {
+      _refreshPresetAutoPlayVisibility();
+      if (!(window._sfEntriesCache || []).length) {
+        setTimeout(_initAutoPlayVisibility, 500);
+      }
+    })();
 
     editor.onDidChangeModelContent(e => {
       if ((e.isUndoing || e.isRedoing) && e.changes.length) {

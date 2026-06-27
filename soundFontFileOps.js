@@ -150,9 +150,57 @@ async function copyAcrossLocations({
   };
   // Walk a source-side path: returns array of { rel, isDir } for the
   // path itself + everything underneath. Empty when the path doesn't
-  // resolve in the archive.
+  // resolve in the archive. Composite paths (file or folder inside an
+  // inner zip, e.g. "Indara.zip/clash") get peeled — we open the inner
+  // zip on the fly and walk ITS central directory. Returned fileName
+  // values stay composite (full path from outer source root) so the
+  // caller can hand them to source.readFile, which is composite-aware
+  // and resolves them transparently. Same outer/inner walk shape as the
+  // file-read resolver in soundFontSources._resolveCompositeReadBytes,
+  // just listing instead of reading bytes.
   const _enumerateSourceTree = async (sourceId, subPath) => {
     const soundFontSources = require('./soundFontSources');
+    const compositeMatch = subPath.match(/^(.+?\.zip)\/(.+)$/i);
+    if (compositeMatch) {
+      const innerZipPath = compositeMatch[1];
+      const insidePath = compositeMatch[2];
+      const source = soundFontSources.openSource(userData, sourceId);
+      if (!source) throw new Error(`Source not found: ${sourceId}`);
+      const innerBytes = await source.readFile(innerZipPath);
+      const StreamZip = require('node-stream-zip');
+      const os = require('os');
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jmt-sf-enum-'));
+      const tmpZip = path.join(tmpDir, 'inner.zip');
+      try {
+        fs.writeFileSync(tmpZip, innerBytes);
+        const zip = new StreamZip.async({ file: tmpZip, skipEntryNameValidation: true });
+        try {
+          const entryMap = await zip.entries();
+          const insidePrefix = insidePath.endsWith('/') ? insidePath : insidePath + '/';
+          let exact = null;
+          const inside = [];
+          for (const k of Object.keys(entryMap)) {
+            const e = entryMap[k];
+            if (!e.name || e.name === '/') continue;
+            const flatName = e.name.replace(/\/+$/, '');
+            const isDir = !!e.isDirectory || e.name.endsWith('/');
+            const compositePath = `${innerZipPath}/${flatName}`;
+            if (flatName === insidePath) {
+              exact = { fileName: compositePath, size: e.size || 0, isDir };
+            }
+            if (flatName.startsWith(insidePrefix)) {
+              inside.push({ fileName: compositePath, size: e.size || 0, isDir });
+            }
+          }
+          if (!exact && !inside.length) return null;
+          return { exact, inside };
+        } finally {
+          await zip.close();
+        }
+      } finally {
+        try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+      }
+    }
     const source = soundFontSources.openSource(userData, sourceId);
     if (!source) throw new Error(`Source not found: ${sourceId}`);
     const all = await source.listAll();
@@ -171,6 +219,11 @@ async function copyAcrossLocations({
         if (!baseName) { failed.push({ source: srcSubPath, error: 'Invalid source path' }); continue; }
         const desiredName = (destNames && destNames[i]) || baseName;
         // Distinguish file vs directory by probing the source listing.
+        // _enumerateSourceTree handles composite paths (files / folders
+        // inside inner zips) by opening the inner zip and walking its
+        // central directory, returning entries with composite fileName
+        // values so the file branch's source.readFile call resolves them
+        // through the composite-aware reader.
         const tree = await _enumerateSourceTree(src.id, srcSubPath);
         if (!tree) { failed.push({ source: srcSubPath, error: 'Not found in source' }); continue; }
         const isDir = (tree.exact && tree.exact.isDir) || (!tree.exact && tree.inside.length > 0);

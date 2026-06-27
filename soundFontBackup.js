@@ -29,6 +29,35 @@ function _ensureLibraryBackfill(userData) {
   try { soundFontEntries.listEntries(userData); } catch {}
 }
 
+// Warm any source whose candidates haven't been stamped onto meta yet so
+// the backup carries them. Same idempotency contract as the rest of the
+// "ensure" helpers in this module: cold caches get warmed, warm caches are
+// untouched. The cost is a one-time detection per cold source (typically
+// fast; multi-board bundles like Power_Of_Many_Bundle pay the inner-zip
+// walk once and then ride free into every subsequent backup + restore +
+// open). Failures are swallowed because a stamp miss for one source
+// shouldn't block the backup — that source just stays cold and will warm
+// on next open.
+async function _ensureCandidateCaches(userData) {
+  const soundFontSources = require('./soundFontSources');
+  const { CANDIDATES_SCHEMA_VERSION } = require('./soundFontCandidates');
+  const sourcesDir = _sourcesRoot(userData);
+  if (!fs.existsSync(sourcesDir)) return;
+  let entries;
+  try { entries = fs.readdirSync(sourcesDir, { withFileTypes: true }); }
+  catch { return; }
+  for (const e of entries) {
+    if (!e.isDirectory()) continue;
+    const metaPath = path.join(sourcesDir, e.name, 'meta.json');
+    let meta;
+    try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); }
+    catch { continue; }
+    const cachedSchema = Number(meta.candidatesSchemaVersion) || 0;
+    if (cachedSchema === CANDIDATES_SCHEMA_VERSION && Array.isArray(meta.candidates)) continue;
+    try { await soundFontSources.recomputeAndStampCandidates(userData, e.name); } catch {}
+  }
+}
+
 // Path helpers — match the layout the rest of the SF modules use so this
 // stays the single source of truth for "what does the library look like
 // on disk."
@@ -184,6 +213,10 @@ async function exportBackup({
 }) {
   if (!destPath) throw new Error('Missing destPath');
   _ensureLibraryBackfill(userData);
+  // Warm cold candidate caches before the survey + zip. Stamped values
+  // become part of meta.json which lands in the backup archive — restores
+  // get the cache for free, no recomputation needed on the receiving side.
+  await _ensureCandidateCaches(userData);
   const survey = surveyLibrary(userData);
 
   // Content-hash pre-pass. One sha256 per top-level item, written into

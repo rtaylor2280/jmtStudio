@@ -354,7 +354,10 @@ async function createEntry({ userData, sourceUuid, candidate, name, metadata, on
       if (srcMetaCur) {
         const srcUpdates = {};
         if (srcMetaCur.purchased == null) srcUpdates.purchased = meta.purchased;
-        if (!srcMetaCur.acquisitionDate && meta.acquisitionDate) srcUpdates.acquisitionDate = meta.acquisitionDate;
+        // Date unification 2026-06-26: hoist entry.acquisitionDate up to
+        // source.purchaseDate (was acquisitionDate). Both the import-time
+        // default and the bulk-import path now converge here.
+        if (!srcMetaCur.purchaseDate && meta.acquisitionDate) srcUpdates.purchaseDate = meta.acquisitionDate;
         if (!srcMetaCur.vendor && meta.author) srcUpdates.vendor = meta.author;
         if (Object.keys(srcUpdates).length > 0) {
           soundFontSources.updateSourceMeta(userData, sourceUuid, srcUpdates);
@@ -523,7 +526,17 @@ const _ENTRY_TO_SOURCE_FIELD_MAP = {
   author: 'vendor',
   vendorWebsite: 'vendorWebsite',
   purchased: 'purchased',
-  acquisitionDate: 'acquisitionDate',
+  // Date unification 2026-06-26: the source schema previously kept the
+  // user-facing date under two names — `purchaseDate` (set at import +
+  // single-source review modal; read by source detail UI) and
+  // `acquisitionDate` (set by the entry → source migration hoist; read
+  // by the entry-side projection). The two diverged for bulk-imported
+  // sources, leaving the source detail's Acquired field empty even when
+  // the corresponding entry showed a date. Both routings now converge
+  // on source.purchaseDate; acquisitionDate stays as a legacy fallback
+  // in the projection and migrateSourceLevelFields backfills any null
+  // purchaseDate from the legacy field or sourceFileDate.
+  acquisitionDate: 'purchaseDate',
   // linkUrl — "where to get this font" — is a per-source property
   // (one purchase / download page per bundle, shared across every
   // font from the source). Lives on source meta; projected onto
@@ -542,7 +555,16 @@ function _projectSourceFieldsOntoEntry(entryMeta, sourceMeta) {
   entryMeta.author = sourceMeta.vendor || '';
   entryMeta.vendorWebsite = sourceMeta.vendorWebsite || '';
   entryMeta.purchased = sourceMeta.purchased === true;
-  entryMeta.acquisitionDate = sourceMeta.acquisitionDate || '';
+  // Date fallback chain reads source.purchaseDate first (canonical post-
+  // unification), then source.acquisitionDate (legacy migration field),
+  // then source.sourceFileDate (raw archive mtime, always populated at
+  // import). The fallback covers existing on-disk data that pre-dates the
+  // unification — once migrateSourceLevelFields runs, purchaseDate carries
+  // the value and the fallback is a no-op.
+  entryMeta.acquisitionDate = sourceMeta.purchaseDate
+    || sourceMeta.acquisitionDate
+    || sourceMeta.sourceFileDate
+    || '';
   entryMeta.linkUrl = sourceMeta.linkUrl || '';
   // Expose the auto-detected flag so the renderer can show a "verified"
   // badge or de-emphasize when the user later confirms a heuristic match.
@@ -590,12 +612,21 @@ function migrateSourceLevelFields(userData) {
         updates.purchased = any;
       }
     }
-    // acquisitionDate: earliest non-empty wins (the moment the bundle
-    // entered the user's library — re-imports of the same source might
-    // have different sourceFileDate values across entries).
-    if (!srcMeta.acquisitionDate) {
+    // purchaseDate: hoist any per-entry acquisitionDate up to the source.
+    // Earliest non-empty wins (the moment the bundle entered the user's
+    // library — re-imports of the same source might have different
+    // sourceFileDate values across entries). Falls back to the source's
+    // existing acquisitionDate (set by an earlier migration pass) and
+    // finally to sourceFileDate (the archive mtime, always present from
+    // import). Writing to source.purchaseDate is the canonical field
+    // after the 2026-06-26 unification — see _ENTRY_TO_SOURCE_FIELD_MAP.
+    if (!srcMeta.purchaseDate) {
       const dates = entries.map(en => en.acquisitionDate).filter(Boolean).sort();
-      if (dates.length) updates.acquisitionDate = dates[0];
+      const picked = dates[0]
+        || srcMeta.acquisitionDate
+        || srcMeta.sourceFileDate
+        || null;
+      if (picked) updates.purchaseDate = picked;
     }
     // vendor (author): first non-empty (entries should agree if vendor
     // detection fired; if they disagree it's user edits and we take any).

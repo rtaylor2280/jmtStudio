@@ -17,6 +17,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const crypto = require('crypto');
 const StreamZip = require('node-stream-zip');
 
@@ -575,7 +576,14 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
       vendor: (metadata && metadata.vendor) || null,
       vendorWebsite: (metadata && metadata.vendorWebsite) || null,
       vendorAutoDetected: !!(metadata && metadata.vendorAutoDetected),
-      purchaseDate: (metadata && metadata.purchaseDate) || null,
+      // Default to the archive's mtime when no caller-supplied value lands.
+      // Single-source review pre-fills the date input with sourceFileDate and
+      // sends it back through metadata.purchaseDate, so this fallback only
+      // bites the bulk-import path that calls importSource with metadata:{}.
+      // Without this, bulk-imported sources stayed null and the source detail
+      // modal's Acquired field rendered empty — Ryan caught this on
+      // Power_Of_Many_Bundle 2026-06-26.
+      purchaseDate: (metadata && metadata.purchaseDate) || sourceFileDate || null,
       sourceFileDate,
       sourceFileMtimeMs,
       importedAt: new Date().toISOString(),
@@ -585,6 +593,14 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
     };
 
     fs.writeFileSync(path.join(uuidDir, 'meta.json'), JSON.stringify(meta, null, 2));
+
+    // Warm the candidate cache at import time. The user is almost certainly
+    // about to look at this source (single-source import lands them in the
+    // review modal; bulk import goes straight to creating entries) so we'd
+    // pay this cost anyway — paying it here means subsequent opens are
+    // free and the result rides into backup payloads via meta. Best-effort:
+    // a stamp failure doesn't fail the import, just leaves the cache cold.
+    try { await recomputeAndStampCandidates(userData, uuid); } catch {}
 
     emit('done', { isDuplicate: false });
     return { ok: true, isDuplicate: false, uuid, hash, format, sourceFileDate };
@@ -708,8 +724,70 @@ function _normalizeSubPath(p) {
   return String(p).replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
 }
 
+// Composite-path resolver. Source-file paths from the renderer may traverse
+// inner zips: "Indara.zip/Indara/Proffie/boot.wav" means open the outer
+// source, pull Indara.zip out, open IT, then read Indara/Proffie/boot.wav
+// from inside. The renderer's file-browser builds these paths when it
+// splices inner-zip subtrees into the outer tree (see _sfPrefixSubtreePaths
+// in renderer/index.html), and every file action (play, copy, extract,
+// export) needs them resolved transparently so navigation isn't decorative.
+//
+// Takes a `readable` (anything with async readFile(flatPath)) and a path
+// that may contain N levels of inner zips. Recurses once per zip layer:
+// each layer reads the inner zip's bytes from its parent, opens it via a
+// temp file (node-stream-zip can't open buffers in async mode), and runs
+// the resolver on the remaining path against the inner zip's central
+// directory. Multi-level nesting (a.zip/b.zip/c.wav) works the same way.
+async function _resolveCompositeReadBytes(readable, subPath) {
+  const normalized = String(subPath).replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+  if (!normalized) throw new Error('readFile requires a path');
+  const m = normalized.match(/^(.+?\.zip)\/(.+)$/i);
+  if (!m) {
+    // Flat path — read directly from the current readable.
+    return await readable.readFile(normalized);
+  }
+  const innerZipPath = m[1];
+  const insidePath = m[2];
+  const innerBytes = await readable.readFile(innerZipPath);
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jmt-sf-readinner-'));
+  const tmpZip = path.join(tmpDir, 'inner.zip');
+  try {
+    fs.writeFileSync(tmpZip, innerBytes);
+    const zip = new StreamZip.async({ file: tmpZip, skipEntryNameValidation: true });
+    try {
+      const innerReadable = {
+        async readFile(p) { return await zip.entryData(p); },
+      };
+      return await _resolveCompositeReadBytes(innerReadable, insidePath);
+    } finally {
+      await zip.close();
+    }
+  } finally {
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+  }
+}
+
 function _createZipSource({ uuid, uuidDir, meta }) {
   const zipPath = path.join(uuidDir, 'source.zip');
+
+  // Flat-only read of a single file from the OUTER zip. The bottom of the
+  // composite-path recursion in _resolveCompositeReadBytes — every inner
+  // zip layer eventually resolves the leaf file via this function (which
+  // is itself flat-only, no recursion). Separated from readFile so the
+  // composite resolver has a non-recursive primitive to call.
+  async function _readFlat(filePath) {
+    const norm = _normalizeSubPath(filePath);
+    if (!norm) throw new Error('readFile requires a path');
+    const zip = _openZip(zipPath);
+    try {
+      const entries = await _readAllZipEntries(zip);
+      const match = entries.find(e => e.fileName === norm);
+      if (!match) throw new Error(`Not found in source: ${norm}`);
+      return await _readZipEntryToBuffer(zip, match);
+    } finally {
+      await zip.close();
+    }
+  }
 
   return {
     uuid,
@@ -739,17 +817,13 @@ function _createZipSource({ uuid, uuidDir, meta }) {
     },
 
     async readFile(filePath) {
-      const norm = _normalizeSubPath(filePath);
-      if (!norm) throw new Error('readFile requires a path');
-      const zip = _openZip(zipPath);
-      try {
-        const entries = await _readAllZipEntries(zip);
-        const match = entries.find(e => e.fileName === norm);
-        if (!match) throw new Error(`Not found in source: ${norm}`);
-        return await _readZipEntryToBuffer(zip, match);
-      } finally {
-        await zip.close();
-      }
+      // Composite-path support: paths that traverse inner zips
+      // ("Indara.zip/Indara/boot.wav") get peeled one layer at a time
+      // by _resolveCompositeReadBytes. The leaf flat-read for THIS
+      // source goes through _readFlat above. Renderer's file browser
+      // splices inner-zip subtrees with prefixed paths; every action
+      // (play, copy, extract) flows through this entry point.
+      return await _resolveCompositeReadBytes({ readFile: _readFlat }, filePath);
     },
 
     async extractTo(subPath, destDir, onProgress) {
@@ -821,6 +895,18 @@ function _createZipSource({ uuid, uuidDir, meta }) {
 function _createFolderSource({ uuid, uuidDir, meta }) {
   const folderRoot = path.join(uuidDir, 'source');
 
+  // Flat-only read of a single file from the folder source. Same role as
+  // _readFlat in _createZipSource: bottom of the composite-path recursion
+  // for paths that traverse inner zips inside a folder-imported source
+  // (vendor.zip files dropped inside a folder bundle).
+  async function _readFlat(filePath) {
+    const norm = _normalizeSubPath(filePath);
+    if (!norm) throw new Error('readFile requires a path');
+    const abs = path.join(folderRoot, norm);
+    if (!fs.existsSync(abs)) throw new Error(`Not found in source: ${norm}`);
+    return await fs.promises.readFile(abs);
+  }
+
   return {
     uuid,
     meta,
@@ -872,11 +958,11 @@ function _createFolderSource({ uuid, uuidDir, meta }) {
     },
 
     async readFile(filePath) {
-      const norm = _normalizeSubPath(filePath);
-      if (!norm) throw new Error('readFile requires a path');
-      const abs = path.join(folderRoot, norm);
-      if (!fs.existsSync(abs)) throw new Error(`Not found in source: ${norm}`);
-      return await fs.promises.readFile(abs);
+      // Composite-path support — see _createZipSource.readFile for the
+      // full rationale. Folder sources can contain inner zips too
+      // (vendor.zip dropped inside a folder bundle), so the same resolver
+      // applies; the leaf flat read is _readFlat (defined above).
+      return await _resolveCompositeReadBytes({ readFile: _readFlat }, filePath);
     },
 
     async extractTo(subPath, destDir, onProgress) {
@@ -992,10 +1078,15 @@ async function readSourceFileBytes(userData, uuid, subPath) {
 // sort before files at each depth; alphabetical within. Implicit folders
 // (entries with embedded slashes but no own dir entry) are synthesized so
 // every file has a navigable parent in the tree.
-async function listSourceFiles(userData, uuid) {
-  const source = openSource(userData, uuid);
-  if (!source) return [];
-  const all = await source.listAll();
+// Shared tree-builder: takes a flat list of { fileName, isDir, size } entries
+// (the shape exposed by source.listAll and by the node-stream-zip entry map
+// after light reshaping) and returns a tree of { name, isDir, path, size?,
+// children? } nodes. Folders sort before files at each depth, alphabetical
+// natural-numeric within. Implicit folders (entries with embedded slashes but
+// no own dir entry) get synthesized so every file has a navigable parent.
+// Path field on each node is relative to the tree's root — for inner-zip
+// trees that means relative to the INNER zip's root, not the outer source.
+function _buildFileTreeFromEntries(entries) {
   const root = [];
   const dirNodes = new Map(); // 'a/b' → node
   const ensureDir = (relPath) => {
@@ -1010,7 +1101,7 @@ async function listSourceFiles(userData, uuid) {
     parentChildren.push(node);
     return node;
   };
-  for (const e of all) {
+  for (const e of entries) {
     const clean = String(e.fileName).replace(/\\/g, '/').replace(/\/+$/g, '');
     if (!clean) continue;
     if (e.isDir) { ensureDir(clean); continue; }
@@ -1030,6 +1121,50 @@ async function listSourceFiles(userData, uuid) {
   };
   sortRec(root);
   return root;
+}
+
+async function listSourceFiles(userData, uuid) {
+  const source = openSource(userData, uuid);
+  if (!source) return [];
+  const all = await source.listAll();
+  return _buildFileTreeFromEntries(all);
+}
+
+// Inner-zip descent for the file browser. Opens an inner zip embedded in the
+// outer source archive and returns its tree in the same shape listSourceFiles
+// uses, so the renderer can splice the result under the inner-zip node and
+// keep navigating naturally. innerZipPath is relative to the outer source
+// (e.g. "Indara.zip" for a top-level inner zip, "subdir/Indara.zip" for a
+// nested one). Paths in the returned tree are relative to the INNER zip's
+// root. The inner zip is materialized to a temp file because node-stream-zip
+// only opens files, not buffers; temp dir is cleaned up before return. No
+// caching today — every descent re-extracts. The eventual per-session cache
+// for detectSourceCandidates can fold this in.
+async function listSourceInnerZipFiles(userData, uuid, innerZipPath) {
+  const source = openSource(userData, uuid);
+  if (!source) return [];
+  if (!innerZipPath) throw new Error('innerZipPath required');
+  const bytes = await source.readFile(innerZipPath);
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jmt-sf-browse-'));
+  const tmpZip = path.join(tmpDir, 'inner.zip');
+  try {
+    fs.writeFileSync(tmpZip, bytes);
+    const zip = new StreamZip.async({ file: tmpZip, skipEntryNameValidation: true });
+    try {
+      const entryMap = await zip.entries();
+      const entries = [];
+      for (const k of Object.keys(entryMap)) {
+        const e = entryMap[k];
+        if (!e.name || e.name === '/') continue;
+        entries.push({ fileName: e.name, isDir: !!e.isDirectory, size: e.size || 0 });
+      }
+      return _buildFileTreeFromEntries(entries);
+    } finally {
+      await zip.close();
+    }
+  } finally {
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+  }
 }
 
 // Extract a single file from a source into destDir, preserving the source's
@@ -1127,6 +1262,63 @@ function recomputeSourceContentHash(userData, uuid) {
   return h;
 }
 
+// ── Persistent candidate cache ────────────────────────
+// Detection of candidates inside a source is deterministic — same source
+// bytes always produce the same result — so there's no reason to recompute
+// across sessions. Stamp the result onto source meta the first time we
+// compute it; every subsequent call reads from meta. Survives backups
+// because meta is in the backup; survives restores because it's still in
+// meta after the restore unpacks. Pay the cost once per source, ever.
+//
+// Schema version on the cached blob lets us invalidate when detection
+// logic changes meaningfully (the nested-zip refactor 2026-06-26 was such
+// a change — it bumped the version to 2, so any candidates stamped under
+// v1 will get re-detected on next read).
+async function getCachedCandidates(userData, uuid) {
+  if (!uuid) return null;
+  const sourceDir = path.join(sourcesRoot(userData), uuid);
+  const meta = readSourceMeta(sourceDir);
+  if (!meta) return null;
+  const candidatesMod = require('./soundFontCandidates');
+  const currentSchema = candidatesMod.CANDIDATES_SCHEMA_VERSION;
+  const cachedSchema = Number(meta.candidatesSchemaVersion) || 0;
+  if (cachedSchema === currentSchema
+      && Array.isArray(meta.candidates)) {
+    // Fresh cache hit. Return in the same shape detectCandidates returns
+    // so the IPC handler can spread it directly into the response.
+    return {
+      candidates: meta.candidates,
+      bundleName: meta.candidatesBundleName || null,
+      bundlePrefix: meta.candidatesBundlePrefix || null,
+    };
+  }
+  // Cache miss or stale schema — recompute and stamp.
+  return await recomputeAndStampCandidates(userData, uuid);
+}
+
+async function recomputeAndStampCandidates(userData, uuid) {
+  if (!uuid) return null;
+  const source = openSource(userData, uuid);
+  if (!source) return null;
+  const candidatesMod = require('./soundFontCandidates');
+  const result = await candidatesMod.detectCandidates(source);
+  // Best-effort stamp — a stamp failure shouldn't break the call; we just
+  // pay re-detection on the next read until the next successful stamp.
+  try {
+    const sourceDir = path.join(sourcesRoot(userData), uuid);
+    const meta = readSourceMeta(sourceDir);
+    if (meta) {
+      meta.candidates = result.candidates || [];
+      meta.candidatesBundleName = result.bundleName || null;
+      meta.candidatesBundlePrefix = result.bundlePrefix || null;
+      meta.candidatesSchemaVersion = candidatesMod.CANDIDATES_SCHEMA_VERSION;
+      meta.candidatesComputedAt = new Date().toISOString();
+      fs.writeFileSync(path.join(sourceDir, 'meta.json'), JSON.stringify(meta, null, 2));
+    }
+  } catch {}
+  return result;
+}
+
 function markSourceContentDirty(userData, uuid) {
   if (!uuid) return;
   const metaPath = path.join(sourcesRoot(userData), uuid, 'meta.json');
@@ -1188,6 +1380,9 @@ module.exports = {
   readSourceFileBytes,
   exportSourceFileTo,
   listSourceFiles,
+  listSourceInnerZipFiles,
+  getCachedCandidates,
+  recomputeAndStampCandidates,
   extractSourceFileTo,
   recomputeSourceContentHash,
   getSourceContentHash,

@@ -12,6 +12,13 @@ const { cleanSuggestedName, deriveBundlePrefix } = require('./soundFontNameClean
 // whole inner zip and post-processing.
 const INNER_ZIP_SEP = '!';
 
+// Bump when detection logic changes in a way that affects the candidate
+// output for a given source (e.g. nested-zip descent shipped 2026-06-26
+// changed what gets emitted for multi-board bundles). Stored alongside
+// the cached candidates on source meta. A stamped value below the current
+// constant triggers re-detection.
+const CANDIDATES_SCHEMA_VERSION = 2;
+
 // Sound Fonts — candidate detection (Phase 1, slice 4).
 //
 // A "candidate" is something inside a source that could become a library
@@ -830,6 +837,8 @@ async function detectCandidates(source) {
 module.exports = {
   detectCandidates,
   detectBundleName,
+  INNER_ZIP_SEP,
+  CANDIDATES_SCHEMA_VERSION,
   // exported for testing / introspection
   identifyBoard,
   looksLikeProffieFont,
