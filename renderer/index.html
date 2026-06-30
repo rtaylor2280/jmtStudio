@@ -33447,6 +33447,13 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
       _scheduleRebuild();
     });
 
+    // Warm-load the styles file at module init so window._getLibraryStyles
+    // (which the Sound Fonts entry detail reads to populate its "Last used
+    // style" picker) returns real data on cold start, before any tab opens
+    // the Style Library editor or the preset sidecar. Fire-and-forget;
+    // sub-50ms file read; subsequent _ensureStylesLoaded calls no-op.
+    _ensureStylesLoaded();
+
     window._presetSidecar = { open: _openSidecar, close: _closeSidecar, rebuild: _rebuildSidecar, closeSlotEdit: _closeSlotArgEdit, clearLibraryCache: () => { _silentStylesText = null; } };
   })();
 
