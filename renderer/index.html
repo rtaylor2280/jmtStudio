@@ -4452,7 +4452,10 @@
           <span class="sf-meta-label">Last used style</span>
           <div class="sf-meta-val sf-edit-group">
             <span id="sf-detail-last-style-display" class="sf-edit-display" title="The last Style Library entry paired with this font in a saved config. Auto-updates on save, manually overridable here."></span>
-            <select id="sf-detail-last-style-select" class="sf-edit-input" style="display:none"></select>
+            <div class="preset-lib-combo sf-last-style-combo" id="sf-detail-last-style-combo" style="display:none; flex:1; min-width:0;">
+              <input type="text" id="sf-detail-last-style-input" class="preset-lib-combo-input" placeholder="Search styles…" autocomplete="off">
+              <button type="button" class="preset-lib-combo-arrow" id="sf-detail-last-style-arrow" tabindex="-1" title="Browse styles">&#9660;</button>
+            </div>
             <button class="detail-pencil" id="btn-sf-last-style-edit" title="Edit linked style">&#9998;</button>
             <button class="detail-confirm" id="btn-sf-last-style-confirm" title="Confirm" style="display:none">&#10003;</button>
           </div>
@@ -17192,7 +17195,9 @@ require(['vs/editor/editor.main'], function () {
         descConfirmBtn:  document.getElementById('btn-sf-description-confirm'),
         lastStyleRow:        document.getElementById('sf-detail-last-style-row'),
         lastStyleDisplay:    document.getElementById('sf-detail-last-style-display'),
-        lastStyleSelect:     document.getElementById('sf-detail-last-style-select'),
+        lastStyleCombo:      document.getElementById('sf-detail-last-style-combo'),
+        lastStyleInput:      document.getElementById('sf-detail-last-style-input'),
+        lastStyleArrow:      document.getElementById('sf-detail-last-style-arrow'),
         lastStyleEditBtn:    document.getElementById('btn-sf-last-style-edit'),
         lastStyleConfirmBtn: document.getElementById('btn-sf-last-style-confirm'),
         contents:        document.getElementById('sf-detail-contents'),
@@ -18191,54 +18196,110 @@ require(['vs/editor/editor.main'], function () {
         _sfRefreshDisplayValues();
         _sfEndFieldEdit(_sfEntryDetailEls.descDisplay, _sfEntryDetailEls.descInput, _sfEntryDetailEls.descEditBtn, _sfEntryDetailEls.descConfirmBtn);
       });
-      // "Last used style" pencil → populate the select with all current
-      // Style Library styles, plus a "(none)" option and a ghost option
-      // for the stored name if it isn't in the current library. Select
-      // → display swap reuses _sfStartFieldEdit / _sfEndFieldEdit so the
-      // pencil + confirm visibility matches every other field in the
-      // detail modal.
-      _sfEntryDetailEls.lastStyleEditBtn?.addEventListener('click', () => {
-        if (!_sfDetailEdit) return;
-        const sel = _sfEntryDetailEls.lastStyleSelect;
-        if (!sel) return;
+      // "Last used style" — searchable combo (mirrors the preset sidecar's
+      // Font Folder / Track pickers). The pencil opens the combo pre-filled
+      // with the stored name and drops the full style list; typing filters
+      // it; picking an item commits; the ✓ commits a typed or cleared value.
+      // Reuses the sidecar's _openLibComboDropdown via window so the search
+      // behavior matches by construction. The combo lives inside a
+      // z-index:10000 modal, so the dropdown is opened with an override
+      // above that (the shared default 9999 sits below modals on purpose).
+      const _SF_LAST_STYLE_DROPDOWN_Z = 10013;
+      const _sfLastStyleStyles = () => {
         const styles = (typeof window._getLibraryStyles === 'function')
-          ? window._getLibraryStyles()
-          : [];
-        const stored = (_sfDetailEdit.lastUsedStyleName || '').trim();
-        sel.innerHTML = '';
-        const noneOpt = document.createElement('option');
-        noneOpt.value = '';
-        noneOpt.textContent = '(none)';
-        sel.appendChild(noneOpt);
-        const inLib = stored && styles.includes(stored);
-        if (stored && !inLib) {
-          // Ghost option preserves the stored name even though it's not
-          // in the current library, so the user can keep the value or
-          // pick a new one without losing what was there.
-          const ghost = document.createElement('option');
-          ghost.value = stored;
-          ghost.textContent = `${stored} (not in library)`;
-          ghost.dataset.ghost = '1';
-          sel.appendChild(ghost);
-        }
-        for (const name of styles) {
-          const opt = document.createElement('option');
-          opt.value = name;
-          opt.textContent = name;
-          sel.appendChild(opt);
-        }
-        sel.value = stored;
-        _sfStartFieldEdit(_sfEntryDetailEls.lastStyleDisplay, sel, _sfEntryDetailEls.lastStyleEditBtn, _sfEntryDetailEls.lastStyleConfirmBtn, stored);
-      });
-      _sfEntryDetailEls.lastStyleConfirmBtn?.addEventListener('click', () => {
+          ? window._getLibraryStyles() : [];
+        return [...styles].sort((a, b) => a.localeCompare(b));
+      };
+      // Red "not in library" heads-up on the input, matching the font combo.
+      // Empty (→ "(none)") is a valid, non-red state.
+      const _sfLastStyleMarkInLib = (val) => {
+        const inp = _sfEntryDetailEls.lastStyleInput;
+        if (!inp) return;
+        const v = (val || '').trim();
+        const known = !v || _sfLastStyleStyles().includes(v);
+        inp.classList.toggle('not-in-library', !known);
+        inp.title = known
+          ? 'Search and pick a Style Library entry, or clear to (none).'
+          : `"${v}" isn't in your Style Library. It'll show as a broken reference until corrected.`;
+      };
+      const _sfOpenLastStyleDropdown = (filter) => {
+        const combo = _sfEntryDetailEls.lastStyleCombo;
+        if (!combo || typeof window._openLibComboDropdown !== 'function') return;
+        // "(none)" sentinel at the top lets the user clear the field from the
+        // dropdown, replacing the native select's (none) option.
+        const list = ['(none)', ..._sfLastStyleStyles()];
+        window._openLibComboDropdown(combo, filter || '', (picked) => {
+          _sfCommitLastStyle(picked === '(none)' ? '' : picked);
+        }, list, { zIndex: _SF_LAST_STYLE_DROPDOWN_Z });
+      };
+      const _sfEndLastStyleEdit = () => {
+        if (typeof window._closeLibComboDropdown === 'function') window._closeLibComboDropdown();
+        const els = _sfEntryDetailEls;
+        if (els.lastStyleDisplay)    els.lastStyleDisplay.style.display = '';
+        if (els.lastStyleCombo)      els.lastStyleCombo.style.display = 'none';
+        if (els.lastStyleEditBtn)    els.lastStyleEditBtn.style.display = '';
+        if (els.lastStyleConfirmBtn) els.lastStyleConfirmBtn.style.display = 'none';
+      };
+      const _sfCommitLastStyle = (val) => {
         if (!_sfDetailEdit) return;
-        const v = (_sfEntryDetailEls.lastStyleSelect?.value || '').trim();
+        const v = (val || '').trim();
         if (v !== (_sfDetailEdit.lastUsedStyleName || '')) {
           _sfDetailEdit.lastUsedStyleName = v;
           _sfMarkDetailDirty();
         }
+        _sfEndLastStyleEdit();
         _sfRefreshDisplayValues();
-        _sfEndFieldEdit(_sfEntryDetailEls.lastStyleDisplay, _sfEntryDetailEls.lastStyleSelect, _sfEntryDetailEls.lastStyleEditBtn, _sfEntryDetailEls.lastStyleConfirmBtn);
+      };
+      _sfEntryDetailEls.lastStyleEditBtn?.addEventListener('click', () => {
+        if (!_sfDetailEdit) return;
+        const els = _sfEntryDetailEls;
+        const stored = (_sfDetailEdit.lastUsedStyleName || '').trim();
+        if (els.lastStyleDisplay)    els.lastStyleDisplay.style.display = 'none';
+        if (els.lastStyleEditBtn)    els.lastStyleEditBtn.style.display = 'none';
+        if (els.lastStyleConfirmBtn) els.lastStyleConfirmBtn.style.display = 'inline-block';
+        if (els.lastStyleCombo)      els.lastStyleCombo.style.display = 'flex';
+        if (els.lastStyleInput) {
+          els.lastStyleInput.value = stored;
+          _sfLastStyleMarkInLib(stored);
+          setTimeout(() => { els.lastStyleInput.focus(); els.lastStyleInput.select(); }, 0);
+        }
+        _sfOpenLastStyleDropdown('');
+      });
+      _sfEntryDetailEls.lastStyleConfirmBtn?.addEventListener('click', () => {
+        if (!_sfDetailEdit) return;
+        _sfCommitLastStyle((_sfEntryDetailEls.lastStyleInput?.value || '').trim());
+      });
+      _sfEntryDetailEls.lastStyleInput?.addEventListener('focus', () => _sfOpenLastStyleDropdown(''));
+      _sfEntryDetailEls.lastStyleInput?.addEventListener('input', (e) => {
+        e.stopPropagation();
+        const v = (e.target.value || '').trim();
+        _sfLastStyleMarkInLib(v);
+        _sfOpenLastStyleDropdown(v);
+      });
+      _sfEntryDetailEls.lastStyleInput?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          _sfCommitLastStyle((e.target.value || '').trim());
+        } else if (e.key === 'Escape') {
+          // First Escape closes an open dropdown; a second (none open) cancels
+          // the edit and reverts to the stored value untouched.
+          e.preventDefault();
+          if (document.querySelector('.preset-lib-combo-dropdown')) {
+            if (typeof window._closeLibComboDropdown === 'function') window._closeLibComboDropdown();
+          } else {
+            _sfEndLastStyleEdit();
+            _sfRefreshDisplayValues();
+          }
+        }
+      });
+      _sfEntryDetailEls.lastStyleArrow?.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        if (document.querySelector('.preset-lib-combo-dropdown')) {
+          if (typeof window._closeLibComboDropdown === 'function') window._closeLibComboDropdown();
+        } else {
+          _sfOpenLastStyleDropdown('');
+          _sfEntryDetailEls.lastStyleInput?.focus();
+        }
       });
       // Enter commits each field, Escape cancels and reverts the input back
       // to display mode without mutating _sfDetailEdit.
@@ -32036,7 +32097,7 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
         document.removeEventListener('click', _libComboOutside);
       }
     }
-    function _openLibComboDropdown(anchorEl, filter, onSelect, helpersList) {
+    function _openLibComboDropdown(anchorEl, filter, onSelect, helpersList, opts) {
       _closeLibComboDropdown();
       const helpers = helpersList || _getLibraryHelpers();
       const matches = filter
@@ -32045,6 +32106,11 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
 
       const drop = document.createElement('div');
       drop.className = 'preset-lib-combo-dropdown';
+      // Optional z-index override. The shared default (9999) deliberately
+      // sits below modal overlays so the sidecar's dropdown is covered when
+      // a modal opens; callers anchored INSIDE a modal pass a higher value
+      // so their dropdown clears the modal it lives in.
+      if (opts && opts.zIndex) drop.style.zIndex = opts.zIndex;
 
       if (!matches.length) {
         const empty = document.createElement('div');
@@ -33455,6 +33521,13 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
     _ensureStylesLoaded();
 
     window._presetSidecar = { open: _openSidecar, close: _closeSidecar, rebuild: _rebuildSidecar, closeSlotEdit: _closeSlotArgEdit, clearLibraryCache: () => { _silentStylesText = null; } };
+    // Expose the library-combo dropdown so other modules (e.g. the Sound
+    // Fonts entry detail's "Last used style" picker) can reuse the exact
+    // same searchable dropdown instead of reimplementing it. Generic when
+    // handed an explicit item list: behavior matches this sidecar by
+    // construction.
+    window._openLibComboDropdown  = _openLibComboDropdown;
+    window._closeLibComboDropdown = _closeLibComboDropdown;
   })();
 
 });
