@@ -19,6 +19,7 @@ const os = require('os');
 const crypto = require('crypto');
 const StreamZip = require('node-stream-zip');
 const soundFontSources = require('./soundFontSources');
+const { copyTreeWithProgress } = require('./sfExportCopy');
 
 function entriesRoot(userData) {
   return path.join(userData, 'soundFonts', 'library');
@@ -830,7 +831,7 @@ function entryFolderExistsAt(name, destDir) {
 //
 // Returns { ok, destPath } on copy success, { ok, skipped: true } when the
 // caller asked to skip an existing folder, or { ok: false, error } otherwise.
-function exportEntryToFolder(userData, name, destDir, mode = 'rename') {
+async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onBytes = null) {
   if (!name) return { ok: false, error: 'Missing name' };
   if (!destDir) return { ok: false, error: 'Missing destDir' };
   const srcDir = path.join(entriesRoot(userData), name);
@@ -866,24 +867,11 @@ function exportEntryToFolder(userData, name, destDir, mode = 'rename') {
   const targetDir = path.join(destDir, targetName);
   try {
     fs.mkdirSync(targetDir, { recursive: true });
-    const walk = (curSrc, curDest) => {
-      const items = fs.readdirSync(curSrc, { withFileTypes: true });
-      for (const item of items) {
-        // Skip the internal meta.json at the entry root — it's an app
-        // artifact, not a font file. (Nested meta.json files inside font
-        // subdirs are kept on the off chance a vendor shipped one.)
-        if (curSrc === srcDir && item.name === 'meta.json') continue;
-        const srcPath = path.join(curSrc, item.name);
-        const destPath = path.join(curDest, item.name);
-        if (item.isDirectory()) {
-          fs.mkdirSync(destPath, { recursive: true });
-          walk(srcPath, destPath);
-        } else if (item.isFile()) {
-          fs.copyFileSync(srcPath, destPath);
-        }
-      }
-    };
-    walk(srcDir, targetDir);
+    // Streamed copy with write-paced byte progress. The internal meta.json at
+    // the entry root is skipped (app artifact, not a font file); nested
+    // meta.json files inside font subdirs are kept on the off chance a vendor
+    // shipped one.
+    await copyTreeWithProgress(srcDir, targetDir, { skipRootMeta: true, onBytes });
     return { ok: true, destPath: targetDir };
   } catch (err) {
     // Best-effort cleanup of a partial copy on failure so the user doesn't

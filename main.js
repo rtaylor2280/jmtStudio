@@ -1287,9 +1287,35 @@ ipcMain.handle('dialog:selectSaveDestination', async () => {
   return { ok: true, dirPath: result.filePaths[0] };
 });
 
-ipcMain.handle('entries:exportToFolder', (_, { name, destDir, mode } = {}) => {
+// Byte-progress emitter for the bulk-export handlers. Accumulates bytes and
+// forwards them to the renderer as `soundFonts:exportProgress` events, but no
+// more often than every ~80ms so a multi-GB export doesn't flood IPC. The
+// renderer sums the deltas; flush() sends whatever's left so the sum stays
+// exact (every byte copied is accounted for, no drift).
+function _sfExportProgressEmitter(event) {
+  let acc = 0;
+  let last = 0;
+  const send = () => {
+    if (acc <= 0) return;
+    try { event.sender.send('soundFonts:exportProgress', { delta: acc }); } catch {}
+    acc = 0;
+  };
+  return {
+    onBytes: (n) => {
+      acc += n;
+      const now = Date.now();
+      if (now - last >= 80) { last = now; send(); }
+    },
+    flush: send,
+  };
+}
+
+ipcMain.handle('entries:exportToFolder', async (event, { name, destDir, mode } = {}) => {
   try {
-    return soundFontEntries.exportEntryToFolder(app.getPath('userData'), name, destDir, mode);
+    const emit = _sfExportProgressEmitter(event);
+    const r = await soundFontEntries.exportEntryToFolder(app.getPath('userData'), name, destDir, mode, emit.onBytes);
+    emit.flush();
+    return r;
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };
   }
@@ -1403,9 +1429,13 @@ ipcMain.handle('common:folderExistsAt', (_, { destDir } = {}) => {
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
-ipcMain.handle('common:exportToFolder', (_, { uuid, destDir, mode } = {}) => {
-  try { return soundFontCommon.exportCommonToFolder(app.getPath('userData'), uuid, destDir, mode); }
-  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+ipcMain.handle('common:exportToFolder', async (event, { uuid, destDir, mode } = {}) => {
+  try {
+    const emit = _sfExportProgressEmitter(event);
+    const r = await soundFontCommon.exportCommonToFolder(app.getPath('userData'), uuid, destDir, mode, emit.onBytes);
+    emit.flush();
+    return r;
+  } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
 // Resolve a flagged common folder's content hash — called from the
@@ -1479,9 +1509,13 @@ ipcMain.handle('sharedTracks:folderExistsAt', (_, { destDir } = {}) => {
   try { return { ok: true, exists: soundFontSharedTracks.folderExistsAt(destDir) }; }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
-ipcMain.handle('sharedTracks:exportToFolder', (_, { destDir, mode } = {}) => {
-  try { return soundFontSharedTracks.exportToFolder(app.getPath('userData'), destDir, mode); }
-  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+ipcMain.handle('sharedTracks:exportToFolder', async (event, { destDir, mode } = {}) => {
+  try {
+    const emit = _sfExportProgressEmitter(event);
+    const r = await soundFontSharedTracks.exportToFolder(app.getPath('userData'), destDir, mode, emit.onBytes);
+    emit.flush();
+    return r;
+  } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 ipcMain.handle('sharedTracks:readFileBytes', (_, { name } = {}) => {
   try {

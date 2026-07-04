@@ -8,6 +8,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { copyTreeWithProgress } = require('./sfExportCopy');
 const hashIndex = require('./soundFontSharedTracksHash');
 
 function sharedTracksRoot(userData) {
@@ -166,7 +167,7 @@ function folderExistsAt(destDir) {
 // convention pins the destination name to literal "tracks" — rename
 // mode bumps to "tracks_N" on collision since Proffie only matches
 // the literal path.
-function exportToFolder(userData, destDir, mode = 'rename') {
+async function exportToFolder(userData, destDir, mode = 'rename', onBytes = null) {
   if (!destDir) return { ok: false, error: 'Missing destDir' };
   const srcDir = sharedTracksRoot(userData);
   if (!fs.existsSync(srcDir)) return { ok: false, error: 'Shared tracks folder not found' };
@@ -195,15 +196,13 @@ function exportToFolder(userData, destDir, mode = 'rename') {
   try {
     fs.mkdirSync(targetDir, { recursive: true });
     // Flat folder — only .wav files at the top level (matches listFiles
-    // contract). The .jmt-hashes.json sidecar stays in userData and
-    // never ships to the SD card.
-    for (const ent of fs.readdirSync(srcDir, { withFileTypes: true })) {
-      if (!ent.isFile()) continue;
-      if (!/\.wav$/i.test(ent.name)) continue;
-      const srcPath = path.join(srcDir, ent.name);
-      const destPath = path.join(targetDir, ent.name);
-      fs.copyFileSync(srcPath, destPath);
-    }
+    // contract). The .jmt-hashes.json sidecar stays in userData and never
+    // ships to the SD card. Streamed copy with write-paced byte progress.
+    await copyTreeWithProgress(srcDir, targetDir, {
+      recurse: false,
+      fileFilter: (name) => /\.wav$/i.test(name),
+      onBytes,
+    });
     return { ok: true, destPath: targetDir };
   } catch (err) {
     try { fs.rmSync(targetDir, { recursive: true, force: true }); } catch {}

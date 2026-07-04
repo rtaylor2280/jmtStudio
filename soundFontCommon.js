@@ -20,6 +20,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const StreamZip = require('node-stream-zip');
+const { copyTreeWithProgress } = require('./sfExportCopy');
 
 function commonRoot(userData) {
   return path.join(userData, 'soundFonts', 'common');
@@ -694,7 +695,7 @@ function commonFolderExistsAt(destDir) {
 // flow can treat both uniformly. Target name is "common" by Proffie's SD
 // convention; rename mode bumps to "common (N)" if collisions can't be
 // avoided otherwise.
-function exportCommonToFolder(userData, uuid, destDir, mode = 'rename') {
+async function exportCommonToFolder(userData, uuid, destDir, mode = 'rename', onBytes = null) {
   if (!uuid) return { ok: false, error: 'Missing uuid' };
   if (!destDir) return { ok: false, error: 'Missing destDir' };
   const srcDir = path.join(commonRoot(userData), uuid, 'files');
@@ -727,20 +728,10 @@ function exportCommonToFolder(userData, uuid, destDir, mode = 'rename') {
   const targetDir = path.join(destDir, targetName);
   try {
     fs.mkdirSync(targetDir, { recursive: true });
-    const walk = (curSrc, curDest) => {
-      const items = fs.readdirSync(curSrc, { withFileTypes: true });
-      for (const item of items) {
-        const srcPath = path.join(curSrc, item.name);
-        const destPath = path.join(curDest, item.name);
-        if (item.isDirectory()) {
-          fs.mkdirSync(destPath, { recursive: true });
-          walk(srcPath, destPath);
-        } else if (item.isFile()) {
-          fs.copyFileSync(srcPath, destPath);
-        }
-      }
-    };
-    walk(srcDir, targetDir);
+    // Streamed copy with write-paced byte progress. srcDir is the common's
+    // `files/` subtree (its meta.json lives one level up, outside srcDir), so
+    // there's nothing to skip here — every file ships.
+    await copyTreeWithProgress(srcDir, targetDir, { onBytes });
     return { ok: true, destPath: targetDir };
   } catch (err) {
     // Best-effort cleanup of a partial copy so the user doesn't end up with
