@@ -3223,11 +3223,30 @@
     transform: translateY(8px);
     transition: opacity 160ms ease-out, transform 160ms ease-out;
     pointer-events: auto;
+    display: flex;
+    align-items: center;
+    gap: 12px;
   }
+  .toast > span { flex: 1 1 auto; min-width: 0; }
   .toast.visible { opacity: 1; transform: translateY(0); }
   .toast.toast-info  { border-left-color: var(--jmt-blue); }
   .toast.toast-warn  { border-left-color: #c8a020; }
   .toast.toast-error { border-left-color: #e44; }
+  .toast-action {
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    color: var(--jmt-blue);
+    font: inherit;
+    font-weight: 700;
+    font-size: 0.72rem;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    cursor: pointer;
+    padding: 2px 5px;
+    border-radius: 3px;
+  }
+  .toast-action:hover { background: var(--c-bg-hover); text-decoration: underline; }
 
   /* ── Editor line flash (Monaco decoration) ──
      Single class drives the whole animation: solid hold for ~1s then 3s ease-out fade.
@@ -3548,6 +3567,7 @@
         <button id="btn-sf-select-in-use" class="btn-neutral" style="display:none" title="Select fonts referenced by the open config's presets">Select in-use</button>
         <button id="btn-sf-clear-selection" class="btn-neutral" style="display:none" title="Deselect all">Clear selection</button>
         <button id="btn-sf-bulk-tag" class="btn-neutral" style="display:none" title="Edit tags shared across the selected fonts">Tags</button>
+        <button id="btn-sf-bulk-duplicate" class="btn-neutral" style="display:none" title="Duplicate the selected fonts. Each copy shares its source and is numbered (_1, _2, ...) so it doesn't collide with the original">&#10697; Duplicate</button>
         <button id="btn-sf-bulk-save" class="btn-neutral" style="display:none" title="Export the selected fonts as Proffie-shaped folders to a destination (SD card, etc.)">&#8599; Export</button>
         <button id="btn-sf-bulk-delete" class="btn-red" style="display:none" title="Delete the selected fonts">Delete</button>
         <div class="toolbar-divider"></div>
@@ -4628,7 +4648,7 @@
         <div class="sf-source-entries-list" id="sf-source-entries-list"></div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="modal-btn-primary sf-source-add-more-btn" id="btn-sf-source-add-more">+ Add more fonts from source</button>
-          <button class="modal-btn-cancel sf-source-add-more-btn" id="btn-sf-source-duplicate" title="Open the same picker but with every font already in your library available to duplicate (auto-suggests _copy names)">+ Duplicate fonts from source</button>
+          <button class="modal-btn-cancel sf-source-add-more-btn" id="btn-sf-source-duplicate" title="Open the same picker but with every font already in your library available to duplicate (auto-suggests numbered _N names)">+ Duplicate fonts from source</button>
         </div>
       </div>
       <!-- ── Files section ── read-only browser of the whole source
@@ -6024,37 +6044,82 @@ function injectMetadata(content) {
 // instead of stacking another one. Useful when rapid successive events shouldn't
 // produce a flickering toast cascade — they collapse into one persistent toast.
 function showToast(message, opts = {}) {
-  const { kind = 'info', durationMs = 4500, id } = opts;
+  const { kind = 'info', durationMs = 4500, id, action = null } = opts;
   const host = document.getElementById('toast-host');
   if (!host) return;
+  // Render message plus an optional action button (e.g. Undo). Message lives
+  // in its own span so the action can sit beside it via the toast's flex row.
+  const render = (el) => {
+    el.textContent = '';
+    const msg = document.createElement('span');
+    msg.textContent = message;
+    el.appendChild(msg);
+    if (action && action.label && typeof action.onClick === 'function') {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'toast-action';
+      btn.textContent = action.label;
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        clearTimeout(el._dismissTimer);
+        el.classList.remove('visible');
+        setTimeout(() => el.remove(), 200);
+        try { action.onClick(); } catch {}
+      });
+      el.appendChild(btn);
+    }
+  };
+  const arm = (el) => {
+    clearTimeout(el._dismissTimer);
+    el._dismissTimer = setTimeout(() => {
+      el.classList.remove('visible');
+      setTimeout(() => el.remove(), 200);
+    }, durationMs);
+  };
   // Reuse existing toast with same id if present.
   if (id) {
     const existing = host.querySelector(`[data-toast-id="${id}"]`);
     if (existing) {
-      existing.textContent = message;
       existing.className = 'toast toast-' + kind + ' visible';
       existing.dataset.toastId = id; // re-set in case className wipe affected it
-      clearTimeout(existing._dismissTimer);
-      existing._dismissTimer = setTimeout(() => {
-        existing.classList.remove('visible');
-        setTimeout(() => existing.remove(), 200);
-      }, durationMs);
+      render(existing);
+      arm(existing);
       return;
     }
   }
   const t = document.createElement('div');
   t.className = 'toast toast-' + kind;
-  t.textContent = message;
   if (id) t.dataset.toastId = id;
+  render(t);
   host.appendChild(t);
   // Force reflow so the transition kicks in
   requestAnimationFrame(() => t.classList.add('visible'));
-  t._dismissTimer = setTimeout(() => {
-    t.classList.remove('visible');
-    setTimeout(() => t.remove(), 200);
-  }, durationMs);
+  arm(t);
 }
 window.showToast = showToast;
+
+// Suggest a non-colliding "_N" name for a duplicate/conflict, matching the
+// app-wide numbering convention used everywhere except OS Versions. Root-strips
+// an existing _N so a copy-of-a-copy numbers up (Foo_2 -> Foo_3, never
+// Foo_2_2), landing one above the highest existing _N on the root. A non-
+// numeric trailing token (Foo_v2) is left intact. `existingNames` is any
+// iterable of the names already in use (case-insensitive).
+function _jmtNumberedName(base, existingNames) {
+  const taken = new Set();
+  for (const s of (existingNames || [])) taken.add(String(s).toLowerCase());
+  const root = String(base).replace(/_\d+$/, '');
+  const prefix = root.toLowerCase() + '_';
+  let max = 0;
+  for (const nm of taken) {
+    if (!nm.startsWith(prefix)) continue;
+    const rest = nm.slice(prefix.length);
+    if (/^\d+$/.test(rest) && parseInt(rest, 10) > max) max = parseInt(rest, 10);
+  }
+  let n = max + 1;
+  while (taken.has(`${root.toLowerCase()}_${n}`)) n++;
+  return `${root}_${n}`;
+}
+window._jmtNumberedName = _jmtNumberedName;
 
 // Run a Monaco editor edit as a single atomic undo step. Use this for ANY button- or
 // menu-initiated source modification (Add Preset, Delete, Rename, Reorder, dropdown
@@ -14872,18 +14937,9 @@ require(['vs/editor/editor.main'], function () {
       const _sfDuplicateCommon = async (uuid) => {
         const c = _sfCommons.find(x => x.uuid === uuid);
         if (!c) return;
-        // Find a free suggestion: "<name> copy", then " copy 2", " copy 3"...
-        // Names are case-insensitively unique server-side, so compare the
-        // same way here. Cap the loop at something absurd just to avoid
-        // pathological infinite scans if the cache is somehow stale.
-        const taken = new Set(_sfCommons.map(x => (x.meta?.name || '').toLowerCase()));
-        const base = `${c.meta.name} copy`;
-        let suggested = base;
-        let n = 2;
-        while (taken.has(suggested.toLowerCase()) && n < 1000) {
-          suggested = `${base} ${n}`;
-          n++;
-        }
+        // Suggest a non-colliding _N name via the shared numbering helper
+        // (app-wide convention; only OS Versions uses "copy").
+        const suggested = _jmtNumberedName(c.meta.name, _sfCommons.map(x => (x.meta?.name || '')));
         const name = await _sfPromptCommonName({ title: 'Duplicate common folder', defaultValue: suggested });
         if (!name) return;
         _sfDeleteProgress.show('Duplicating common folder', name);
@@ -15239,6 +15295,7 @@ require(['vs/editor/editor.main'], function () {
         const delBtn = document.getElementById('btn-sf-bulk-delete');
         const clearBtn = document.getElementById('btn-sf-clear-selection');
         const tagBtn = document.getElementById('btn-sf-bulk-tag');
+        const dupBtn = document.getElementById('btn-sf-bulk-duplicate');
         const saveBtn = document.getElementById('btn-sf-bulk-save');
         const allBtn = document.getElementById('btn-sf-select-all');
         const inUseBtn = document.getElementById('btn-sf-select-in-use');
@@ -15250,6 +15307,7 @@ require(['vs/editor/editor.main'], function () {
           if (delBtn) delBtn.style.display = 'none';
           if (clearBtn) clearBtn.style.display = 'none';
           if (tagBtn) tagBtn.style.display = 'none';
+          if (dupBtn) dupBtn.style.display = 'none';
           if (saveBtn) saveBtn.style.display = 'none';
         } else {
           if (delBtn) {
@@ -15263,6 +15321,10 @@ require(['vs/editor/editor.main'], function () {
           if (tagBtn) {
             tagBtn.style.display = '';
             tagBtn.textContent = `Tags (${n})`;
+          }
+          if (dupBtn) {
+            dupBtn.style.display = '';
+            dupBtn.textContent = `⧉ Duplicate (${n})`;
           }
           if (saveBtn) {
             saveBtn.style.display = '';
@@ -16746,18 +16808,10 @@ require(['vs/editor/editor.main'], function () {
                 }
               }
             }
-            // For duplicate mode: seed names with a non-colliding
-            // _copy / _copy2 / _copy3 suffix so the import doesn't
+            // For duplicate mode: seed names with a non-colliding _N suffix
+            // (the app-wide numbering convention) so the import doesn't
             // immediately fail validation against the existing entry.
-            const _suggestCopyName = (base) => {
-              const taken = new Set(_sfAllEntries.map(e => e.name.toLowerCase()));
-              let n = 0;
-              while (true) {
-                const cand = n === 0 ? `${base}_copy` : `${base}_copy${n + 1}`;
-                if (!taken.has(cand.toLowerCase())) return cand;
-                n++;
-              }
-            };
+            const _suggestCopyName = (base) => _jmtNumberedName(base, _sfAllEntries.map(e => e.name));
             const isDuplicate = !!(_sfImport && _sfImport.isDuplicateMode);
             // When duplicate-mode opens against a source with exactly
             // one candidate, pre-check it — there's only one thing
@@ -19562,14 +19616,13 @@ require(['vs/editor/editor.main'], function () {
       // name set until we find a free slot. Used by the entry-row
       // context menu's Duplicate items so the new entry name lands
       // valid out of the gate.
-      const _sfSuggestCopyEntryName = (base) => {
-        const taken = new Set((_sfAllEntries || []).map(e => e.name.toLowerCase()));
-        let n = 0;
-        while (true) {
-          const cand = n === 0 ? `${base}_copy` : `${base}_copy${n + 1}`;
-          if (!taken.has(cand.toLowerCase())) return cand;
-          n++;
-        }
+      // Numbered _N suffix via the shared _jmtNumberedName (root-strips so a
+      // copy-of-a-copy numbers up, never Ahsoka_2_2). extraTaken carries names
+      // created earlier in a batch that aren't on disk yet.
+      const _sfSuggestCopyEntryName = (base, extraTaken) => {
+        const names = (_sfAllEntries || []).map(e => e.name);
+        if (extraTaken) extraTaken.forEach(x => names.push(String(x)));
+        return _jmtNumberedName(base, names);
       };
       // Run after a successful duplicate: refresh the source-detail
       // entries list and the global SF view, then pop the newly-created
@@ -24477,6 +24530,21 @@ require(['vs/editor/editor.main'], function () {
           ev.stopPropagation();
           buildSubmenu();
         });
+        // Duplicate this one font (the card that was right-clicked). Shares
+        // the original's source, auto-numbered with a _N suffix. Same silent
+        // "duplicate from source" operation, surfaced directly on the card so
+        // the user doesn't have to drill into the source detail. No icon here:
+        // context-menu items stay text (the ⧉ lives on the toolbar button).
+        // Multi duplicate lives on the selection-gated toolbar button, not here.
+        mkItem('Duplicate', null, async () => {
+          const newName = _sfSuggestCopyEntryName(fontName);
+          let res;
+          try {
+            res = await window.electronAPI.duplicateEntry({ sourceName: fontName, newName, mode: 'current' });
+          } catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
+          if (!res || !res.ok) { promptError('Duplicate failed', (res && res.error) || 'unknown error'); return; }
+          try { await window.refreshSoundFontsView(); } catch {}
+        });
         // Hide submenu when hovering a sibling item that isn't the
         // submenu parent. (The submenu itself stays visible while the
         // user moves into it.)
@@ -26521,6 +26589,64 @@ require(['vs/editor/editor.main'], function () {
       document.getElementById('btn-sf-bulk-save')?.addEventListener('click', async (e) => {
         e.stopPropagation();
         await _sfBulkSave();
+      });
+      // Bulk duplicate — the only surface that duplicates the whole selection
+      // (the card right-click stays single). Each copy shares its original's
+      // source and gets a _copy name.
+      document.getElementById('btn-sf-bulk-duplicate')?.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const names = Array.from(_sfSelectedNames);
+        if (names.length === 0) return;
+        // No confirm gate: duplicating is non-destructive (it only adds _N
+        // copies, never overwrites or deletes), so it goes straight to work and
+        // reports with a success toast. Delete gates because it destroys; this
+        // doesn't.
+        // Batch-safe naming: _sfSuggestCopyEntryName does the _N numbering (and
+        // root-strips so a copy-of-a-copy numbers up rather than stacking, e.g.
+        // _2 -> _3 not _2_2). It only sees the on-disk list, which isn't
+        // refreshed until the batch ends, so feed it the names created so far.
+        const batch = new Set();
+        const failures = [];
+        let i = 0;
+        for (const name of names) {
+          i++;
+          _sfDeleteProgress.show(`Duplicating fonts (${i} of ${names.length})`, name, (i - 1) / names.length);
+          const newName = _sfSuggestCopyEntryName(name, batch);
+          batch.add(newName);
+          try {
+            const r = await window.electronAPI.duplicateEntry({ sourceName: name, newName, mode: 'current' });
+            if (!r || !r.ok) failures.push({ name, error: (r && r.error) || 'unknown error' });
+          } catch (err) {
+            failures.push({ name, error: String(err && err.message || err) });
+          }
+        }
+        _sfDeleteProgress.setProgress(1);
+        await _sfDeleteProgress.hide();
+        try { await window.refreshSoundFontsView(); } catch {}
+        if (failures.length) {
+          await _sfShowPartialFailures('Some fonts failed to duplicate', failures);
+        } else {
+          const made = names.length;
+          const created = Array.from(batch);
+          _sfSelectedNames.clear();
+          _sfRenderGrid();
+          showToast(`Duplicated ${made} font${made === 1 ? '' : 's'}.`, {
+            durationMs: 8000,
+            action: {
+              label: 'Undo',
+              onClick: async () => {
+                // Delete the copies we just made. They share their source with
+                // the still-present originals, so a plain deleteEntry won't
+                // orphan any source archive.
+                for (const nm of created) {
+                  try { await window.electronAPI.deleteEntry({ name: nm }); } catch {}
+                }
+                try { await window.refreshSoundFontsView(); } catch {}
+                showToast(`Removed ${created.length} duplicate${created.length === 1 ? '' : 's'}.`);
+              },
+            },
+          });
+        }
       });
       // Selection helpers — replace the current selection with a computed
       // set. Replace (not extend) matches the standard "Select all" semantic
@@ -33439,10 +33565,7 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
       const arr    = result.arrays[arrayIndex];
       if (!arr) return;
 
-      const used  = new Set(result.arrays.map(a => a.name));
-      let newName = arr.name + '_copy';
-      let n = 2;
-      while (used.has(newName)) { newName = arr.name + '_copy' + (n++); }
+      const newName = _jmtNumberedName(arr.name, result.arrays.map(a => a.name));
 
       const model = editor.getModel();
       const bankText = model.getValueInRange({
