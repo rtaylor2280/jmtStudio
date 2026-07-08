@@ -16059,7 +16059,32 @@ require(['vs/editor/editor.main'], function () {
         { name: 'Juansith',        website: 'https://www.saberfont.com' },
         { name: 'Rob Petkau',      website: 'https://www.saberfont.com' },
         { name: 'JayDalorian',     website: 'https://jaydalorian.com/' },
+        { name: 'Mountain Sabers', website: 'https://www.mountainsabersfonts.com' },
+        { name: 'Synthetic Epiphany', website: 'https://www.etsy.com/shop/syntheticepiphany' },
+        { name: 'Orlando Dove',    website: '' },
+        { name: 'Project Fonts',   website: 'https://www.saberfont.com' },
       ];
+      // Merge the curated seed with every vendor actually present in the
+      // library (name + website from the source meta), so the import picker
+      // offers vendors you've already used — with their URL for auto-fill —
+      // not just the hardcoded set. Dedup by lowercased name; seed website
+      // wins when both have one, library fills the gap otherwise.
+      const _sfGetKnownVendors = () => {
+        const byName = new Map();
+        for (const v of _sfKnownVendors) byName.set(v.name.toLowerCase(), { name: v.name, website: v.website });
+        try {
+          for (const uuid in (_sfAllSourcesByUuid || {})) {
+            const src = _sfAllSourcesByUuid[uuid];
+            const m = (src && src.meta) ? src.meta : src;
+            const name = m && m.vendor;
+            if (!name) continue;
+            const key = String(name).toLowerCase();
+            if (!byName.has(key)) byName.set(key, { name: String(name), website: m.vendorWebsite || '' });
+            else if (!byName.get(key).website && m.vendorWebsite) byName.get(key).website = m.vendorWebsite;
+          }
+        } catch {}
+        return Array.from(byName.values()).sort((a, b) => a.name.localeCompare(b.name));
+      };
       let _sfImport = null; // { sourcePath, uuid, vendor, candidates }
       let _sfImportProgressUnsub = null;
       let _sfCreateProgressUnsub = null;
@@ -16696,7 +16721,7 @@ require(['vs/editor/editor.main'], function () {
         }
         if (_sfImportEls.sourcePath) _sfImportEls.sourcePath.textContent = sourcePath;
         if (_sfImportEls.vendorList) {
-          _sfImportEls.vendorList.innerHTML = _sfKnownVendors.map(v => `<option value="${_sfEscape(v.name)}"></option>`).join('');
+          _sfImportEls.vendorList.innerHTML = _sfGetKnownVendors().map(v => `<option value="${_sfEscape(v.name)}"></option>`).join('');
         }
         // Source-level Link starts empty on every fresh source import —
         // there's no auto-detection signal for "this bundle's page" so the
@@ -16710,7 +16735,7 @@ require(['vs/editor/editor.main'], function () {
         // is the same URL we already entered on a sibling, it's stale
         // and we open the field empty instead of repeating.
         if (_sfImport) _sfImport._lastDemoUrl = '';
-        const knownLookup = (name) => _sfKnownVendors.find(k => k.name.toLowerCase() === String(name || '').toLowerCase());
+        const knownLookup = (name) => _sfGetKnownVendors().find(k => k.name.toLowerCase() === String(name || '').toLowerCase());
         const v = _sfImport.vendor;
         // Two confidence levels matter here:
         //   - 'content'    — readme text references the vendor by name.

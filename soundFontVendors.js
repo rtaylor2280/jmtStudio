@@ -103,8 +103,13 @@ const vendors = [
       // Series sound font." — the structuralAll above misses it on
       // filename alone, but the body is a clean signal.
       {
+        // Mountain Sabers name their attribution file inconsistently: some
+        // fonts ship "READ ME.txt" (Stargate, Ultron), others carry it only
+        // in "disclaimer.txt" ("Mountain Sabers is not affiliated with...").
+        // Read both shapes so a disclaimer-only font still auto-detects the
+        // vendor. The "Mountain Sabers" content match keeps it specific.
         type: 'readmeContent',
-        fileMatch: /(^|\/)read[\s_-]?me\b[^/]*\.(txt|rtf|md)$/i,
+        fileMatch: /(^|\/)(read[\s_-]?me|disclaimer)\b[^/]*\.(txt|rtf|md)$/i,
         contentMatch: /Mountain\s+Sabers/i,
       },
       // Filename fallback for Mountain Sabers' bundle archives that
