@@ -11,6 +11,22 @@
 // { vendorId: null, vendor: null, vendorAutoDetected: false } on no match.
 
 const vendors = [
+  // JMT Sabers — the house brand. Ryan's own fonts carry a readme.txt that
+  // names "JMT Sabers"; the content match is specific enough to sit first
+  // without false-matching any third-party vendor.
+  {
+    id: 'jmtsabers',
+    displayName: 'JMT Sabers',
+    website: 'https://jmtsabers.com',
+    purchasedDefault: false,
+    patterns: [
+      {
+        type: 'readmeContent',
+        fileMatch: /(^|\/)readme\.txt$/i,
+        contentMatch: /JMT\s*Sabers/i,
+      },
+    ],
+  },
   {
     id: 'kyberphonic',
     displayName: 'Kyberphonic',

@@ -2548,18 +2548,26 @@ ipcMain.handle('dialog:selectFolder', async () => {
 // on Windows and Linux the dialog has to commit to one. The renderer shows
 // two buttons so the choice is explicit.
 ipcMain.handle('dialog:selectSoundFontSource', async (_, { mode = 'folder' } = {}) => {
+  const lastDir = Store.get('lastSfSourceDir') || app.getPath('documents');
   const opts = mode === 'zip'
     ? {
         title: 'Select Sound Font Zip',
+        defaultPath: lastDir,
         properties: ['openFile'],
         filters: [{ name: 'Zip files', extensions: ['zip'] }],
       }
     : {
         title: 'Select Sound Font Folder',
+        defaultPath: lastDir,
         properties: ['openDirectory'],
       };
   const { canceled, filePaths } = await dialog.showOpenDialog(win, opts);
   if (canceled || !filePaths.length) return null;
+  // Remember the PARENT of whatever was picked so the next open lands among
+  // siblings: for a folder pick that's the folder's parent (not the imported
+  // folder itself — fixes "you're stuck inside the folder you just imported"),
+  // and for a zip pick it's still the folder of zips.
+  try { Store.set('lastSfSourceDir', path.dirname(filePaths[0])); } catch {}
   return filePaths[0];
 });
 

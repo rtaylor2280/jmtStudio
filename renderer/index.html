@@ -13391,6 +13391,29 @@ require(['vs/editor/editor.main'], function () {
         if (entry.meta && entry.meta.purchased === false) tags.unshift('free');
         return tags;
       };
+      // One-shot flag: delete paths set this true so the NEXT render, if it
+      // lands filtered-empty on a still-non-empty library, auto-clears the
+      // filters instead of showing a confusing "No fonts match." A typed
+      // search that matches nothing does NOT set this, so it stays put.
+      // Consumed on the next render regardless of outcome.
+      let _sfAutoClearOnEmpty = false;
+      // Clear EVERY filter — search included, since search is just another
+      // filter — then re-render. Shared by the Clear-all control, the
+      // no-match "Clear filters" button, and the auto-clear-on-delete path.
+      const _sfClearAllFilters = () => {
+        _sfSearchQuery = '';
+        const _si = document.getElementById('sf-search');
+        if (_si) _si.value = '';
+        const _sc = document.getElementById('sf-search-clear');
+        if (_sc) _sc.style.display = 'none';
+        _sfActiveFilterTags = new Set();
+        _sfActiveFilterCreators = new Set();
+        _sfActiveFilterEffects = new Set();
+        _sfActiveFilterEffectsMissing = new Set();
+        _sfNeedsReviewFilterOn = false;
+        _sfInUseFilterOn = false;
+        _sfRenderGrid();
+      };
       const _sfRenderGrid = () => {
         const list = document.getElementById('sf-cards');
         const countEl = document.getElementById('sf-search-count');
@@ -13504,12 +13527,23 @@ require(['vs/editor/editor.main'], function () {
         // and which of those are referenced by the open config.
         _sfLastMatchingNames = matching.map(f => f.name);
         _sfLastInUseFonts = inUseFonts;
+        // Consume the one-shot auto-clear flag on every render so it can't
+        // leak to a later, unrelated render.
+        const _autoClear = _sfAutoClearOnEmpty;
+        _sfAutoClearOnEmpty = false;
         if (matching.length === 0 && sorted.length > 0 && isFiltering) {
-          // Library has fonts but the current search/filter narrowed to zero.
-          // Match the Style Library "no results" placeholder so the empty
-          // state reads as a deliberate filter outcome, not a missing view.
-          list.innerHTML = '<div class="styles-empty">No fonts match.</div>';
+          // Case 3: a delete (not a typed search) emptied the filtered view
+          // while the library still has fonts. Clear the filters so the
+          // library reappears instead of a confusing false-empty.
+          if (_autoClear) { _sfClearAllFilters(); return; }
+          // Case 2: a live search/filter that genuinely matches nothing.
+          // Keep it (the user is actively searching), but give an escape
+          // hatch so it's never a dead end.
+          list.innerHTML = '<div class="styles-empty">No fonts match. '
+            + '<button type="button" id="sf-nomatch-clear" style="background:none;border:none;color:var(--jmt-blue);cursor:pointer;font:inherit;text-decoration:underline;padding:0">Clear filters</button></div>';
           if (countEl) countEl.textContent = `0 of ${sorted.length}`;
+          const _nmc = document.getElementById('sf-nomatch-clear');
+          if (_nmc) _nmc.addEventListener('click', () => _sfClearAllFilters());
           _sfRenderTagDropdown();
           _sfRenderCreatorDropdown();
           _sfRenderEffectsDropdown();
@@ -15430,7 +15464,8 @@ require(['vs/editor/editor.main'], function () {
         if (!strip) return;
         const needsReviewActive = _sfNeedsReviewFilterOn ? 1 : 0;
         const inUseActive = _sfInUseFilterOn ? 1 : 0;
-        const total = _sfActiveFilterTags.size + _sfActiveFilterCreators.size + _sfActiveFilterEffects.size + _sfActiveFilterEffectsMissing.size + needsReviewActive + inUseActive;
+        const searchActive = (_sfSearchQuery && _sfSearchQuery.trim()) ? 1 : 0;
+        const total = searchActive + _sfActiveFilterTags.size + _sfActiveFilterCreators.size + _sfActiveFilterEffects.size + _sfActiveFilterEffectsMissing.size + needsReviewActive + inUseActive;
         if (total === 0) {
           strip.style.display = 'none';
           strip.innerHTML = '';
@@ -15440,6 +15475,12 @@ require(['vs/editor/editor.main'], function () {
         // Match the Style Library active-filter chip pattern (JMT blue) for
         // consistency. "free" keeps its green identity as the one exception.
         // Needs review uses the amber accent to match its card chip.
+        // Search is just another filter — show the typed query as the first
+        // chip (quoted so it reads as search text, not a tag) with its own
+        // remove ✕, and count it toward the Clear-all threshold above.
+        const searchChip = searchActive
+          ? `<span class="styles-active-filter-chip sf-active-filter-search" data-search="1">&#8220;${_sfEscape(_sfSearchQuery.trim())}&#8221;<button class="styles-active-filter-remove" data-filter-remove-search="1" title="Remove">&#10005;</button></span>`
+          : '';
         const tagChips = Array.from(_sfActiveFilterTags).map(tag => {
           const isFree = tag.toLowerCase() === 'free';
           const cls = isFree ? 'styles-active-filter-chip sf-active-filter-free' : 'styles-active-filter-chip';
@@ -15462,7 +15503,7 @@ require(['vs/editor/editor.main'], function () {
         const clearAll = total >= 2
           ? `<button class="styles-active-filter-clear" id="sf-clear-all-filters">Clear all</button>`
           : '';
-        strip.innerHTML = `<span class="styles-active-filters-label">Filtering by:</span>${tagChips}${creatorChips}${effectChips}${needsReviewChip}${inUseChip}${clearAll}`;
+        strip.innerHTML = `<span class="styles-active-filters-label">Filtering by:</span>${searchChip}${tagChips}${creatorChips}${effectChips}${needsReviewChip}${inUseChip}${clearAll}`;
       };
       const _sfToggleFilterTag = (tag) => {
         if (!tag) return;
@@ -16010,6 +16051,7 @@ require(['vs/editor/editor.main'], function () {
       };
       // Known-vendor list for the datalist hint and website auto-fill.
       const _sfKnownVendors = [
+        { name: 'JMT Sabers',      website: 'https://jmtsabers.com' },
         { name: 'Kyberphonic',     website: 'https://www.kyberphonicfonts.com' },
         { name: 'BKSaberSounds',   website: 'https://www.bksabersounds.com' },
         { name: 'KSith',           website: 'https://www.ksithsaberfonts.com/' },
@@ -23057,6 +23099,7 @@ require(['vs/editor/editor.main'], function () {
           promptError('Delete failed', (r && r.error) || 'unknown error');
           return false;
         }
+        _sfAutoClearOnEmpty = true; // a delete may empty the filtered view — let the next render auto-clear
         // If no other entries reference the same source, the archive is now
         // orphaned. Remove it so the library stays tight.
         if (sourceUuid) {
@@ -23738,6 +23781,7 @@ require(['vs/editor/editor.main'], function () {
           showProgress(`Removing source archives (${i + 1} of ${sourcesToRemove.length})`, src.label);
         }
         hideProgress();
+        _sfAutoClearOnEmpty = true; // bulk delete may empty the filtered view — let the next render auto-clear
         if (failures.length) {
           await _sfShowPartialFailures('Some items failed to delete', failures);
           // Prune successfully-deleted names so retry won't fail on
@@ -24731,16 +24775,21 @@ require(['vs/editor/editor.main'], function () {
           _sfRenderGrid();
           return;
         }
+        const searchRemove = e.target.closest('[data-filter-remove-search]');
+        if (searchRemove) {
+          e.stopPropagation();
+          _sfSearchQuery = '';
+          const _si = document.getElementById('sf-search');
+          if (_si) _si.value = '';
+          const _sc = document.getElementById('sf-search-clear');
+          if (_sc) _sc.style.display = 'none';
+          _sfRenderGrid();
+          return;
+        }
         const clear = e.target.closest('#sf-clear-all-filters');
         if (clear) {
           e.stopPropagation();
-          _sfActiveFilterTags = new Set();
-          _sfActiveFilterCreators = new Set();
-          _sfActiveFilterEffects = new Set();
-          _sfActiveFilterEffectsMissing = new Set();
-          _sfNeedsReviewFilterOn = false;
-          _sfInUseFilterOn = false;
-          _sfRenderGrid();
+          _sfClearAllFilters(); // search included — search is just another filter
         }
       });
 
