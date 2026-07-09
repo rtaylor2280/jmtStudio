@@ -17,6 +17,7 @@ const soundFontFileOps = require('./soundFontFileOps');
 const soundFontReorganize = require('./soundFontReorganize');
 const soundFontVoicepack = require('./soundFontVoicepack');
 const soundFontSharedTracks = require('./soundFontSharedTracks');
+const soundFontAttachments = require('./soundFontAttachments');
 
 // ── Separate userData for dev vs prod ──────────────────
 if (!app.isPackaged) {
@@ -1150,6 +1151,35 @@ ipcMain.handle('sources:exportDoc', async (_, { uuid, path: subPath } = {}) => {
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };
   }
+});
+
+// ── Source attachments (receipts / proof-of-purchase / reference docs) ──
+// Central content-addressed store; sources link by id. Attachments never
+// touch the source archive or its content hash. See soundFontAttachments.js.
+ipcMain.handle('attachments:list', (_, { uuid } = {}) => {
+  try { return { ok: true, attachments: soundFontAttachments.listAttachments(app.getPath('userData'), uuid) }; }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+ipcMain.handle('attachments:add', async (_, { uuid } = {}) => {
+  const res = await dialog.showOpenDialog(win, {
+    title: 'Attach files to this source',
+    properties: ['openFile', 'multiSelections'],
+  });
+  if (res.canceled || !res.filePaths.length) return { ok: false, canceled: true };
+  try { return soundFontAttachments.addAttachments(app.getPath('userData'), uuid, res.filePaths); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+ipcMain.handle('attachments:open', (_, { id } = {}) => {
+  try {
+    const p = soundFontAttachments.attachmentFilePath(app.getPath('userData'), id);
+    if (!p) return { ok: false, error: 'attachment not found' };
+    shell.openPath(p);
+    return { ok: true };
+  } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+ipcMain.handle('attachments:unlink', (_, { uuid, id } = {}) => {
+  try { return soundFontAttachments.unlinkAttachment(app.getPath('userData'), uuid, id); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
 ipcMain.handle('entries:listFiles', (_, { name } = {}) => {

@@ -232,6 +232,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listSourceDocs:        (params)     => ipcRenderer.invoke('sources:listDocs', params),
   readSourceDocBytes:    (params)     => ipcRenderer.invoke('sources:readDocBytes', params),
   exportSourceDoc:       (params)     => ipcRenderer.invoke('sources:exportDoc', params),
+  listAttachments:       (params)     => ipcRenderer.invoke('attachments:list', params),
+  addAttachments:        (params)     => ipcRenderer.invoke('attachments:add', params),
+  openAttachment:        (params)     => ipcRenderer.invoke('attachments:open', params),
+  unlinkAttachment:      (params)     => ipcRenderer.invoke('attachments:unlink', params),
   listEntryDocs:         (params)     => ipcRenderer.invoke('entries:listDocs', params),
   listEntryFiles:        (params)     => ipcRenderer.invoke('entries:listFiles', params),
 

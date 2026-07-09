@@ -2763,6 +2763,14 @@
   .sf-source-entry-row:hover .sf-source-entry-delete { opacity: 0.5; }
   .sf-source-entry-delete:hover { opacity: 1 !important; color: #e44; background: rgba(40,10,10,0.7); }
   .sf-source-entries-empty { font-size: 0.78rem; color: var(--c-text-dim); font-style: italic; padding: 6px 0; }
+  .sf-attachments-list { display: flex; flex-direction: column; gap: 4px; padding: 4px 0; }
+  .sf-attachment-row { display: flex; align-items: center; gap: 8px; font-size: 0.78rem; padding: 5px 8px; background: var(--c-bg-inset); border: 1px solid var(--c-border); border-radius: 4px; }
+  .sf-attachment-name { flex: 1; color: var(--c-text); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sf-attachment-name:hover { color: var(--jmt-blue); text-decoration: underline; }
+  .sf-attachment-size { color: var(--c-text-dim); font-size: 0.72rem; flex-shrink: 0; }
+  .sf-attachment-remove { background: none; border: none; color: var(--c-text-faint); cursor: pointer; font-size: 0.95rem; line-height: 1; padding: 0 4px; flex-shrink: 0; }
+  .sf-attachment-remove:hover { color: #e05555; }
+  .sf-attachments-empty { font-size: 0.74rem; color: var(--c-text-muted); font-style: italic; padding: 6px 4px; }
   /* Loading-state pulse — gentle opacity breathing communicates "work in
      progress" without being noisy. Slow 1.6s cycle so it reads as steady
      activity rather than urgency. Reused for any "Loading…" copy and on
@@ -4664,6 +4672,18 @@
         <div class="sf-entry-files-browser" id="sf-source-files-browser">
           <div class="sf-entry-files-list" id="sf-source-files-list"></div>
         </div>
+      </div>
+      <!-- ── Attachments ── receipts / proof-of-purchase / reference files.
+           Stored in a central content-addressed store and LINKED to this
+           source by id (soundFontAttachments.js) — kept next to the source,
+           never inside the zip, so they can't affect the source content hash,
+           dedup, or the SD export. -->
+      <div class="sf-entry-detail-section">
+        <h3 class="sf-entry-files-head">
+          <span>Attachments:</span>
+          <button class="sf-source-add-more-btn" id="btn-sf-source-add-attachment" title="Attach receipts, proof of purchase, or reference files. Kept with the app next to the source, not inside the font zip.">+ Add file(s)</button>
+        </h3>
+        <div class="sf-attachments-list" id="sf-source-attachments-list"></div>
       </div>
     </div>
     <div class="modal-btns" style="margin-top: 12px;">
@@ -18538,9 +18558,55 @@ require(['vs/editor/editor.main'], function () {
         addMoreBtn:      document.getElementById('btn-sf-source-add-more'),
         deleteBtn:       document.getElementById('btn-sf-source-delete'),
         exportBtn:       document.getElementById('btn-sf-source-export'),
+        addAttachmentBtn: document.getElementById('btn-sf-source-add-attachment'),
+        attachmentsList: document.getElementById('sf-source-attachments-list'),
         discardBtn:      document.getElementById('sf-source-detail-discard'),
         saveBtn:         document.getElementById('sf-source-detail-save'),
       };
+
+      // ── Source attachments (receipts / proof-of-purchase) ──────────
+      // Reads the open source's linked attachments and renders them. Add
+      // stores files in the central content-addressed store and links their
+      // ids to this source; remove unlinks (and GCs the file if orphaned).
+      const _sfRenderSourceAttachments = async () => {
+        const list = _sfSourceDetailEls.attachmentsList;
+        if (!list) return;
+        const uuid = _sfSourceOriginalUuid;
+        if (!uuid) { list.innerHTML = ''; return; }
+        let items = [];
+        try { const r = await window.electronAPI.listAttachments({ uuid }); if (r && r.ok) items = r.attachments || []; } catch {}
+        if (_sfSourceOriginalUuid !== uuid) return; // source changed while loading
+        if (!items.length) { list.innerHTML = '<div class="sf-attachments-empty">No attachments yet. Add a receipt or proof of purchase.</div>'; return; }
+        list.innerHTML = items.map(a =>
+          `<div class="sf-attachment-row" data-att-id="${_sfEscape(a.id)}">`
+          + `<span class="sf-attachment-name" title="Open">${_sfEscape(a.name)}</span>`
+          + `<span class="sf-attachment-size">${_sfFmtSize(a.size)}</span>`
+          + `<button class="sf-attachment-remove" data-att-remove="1" title="Remove from this source">&#10005;</button>`
+          + `</div>`
+        ).join('');
+      };
+      _sfSourceDetailEls.addAttachmentBtn?.addEventListener('click', async () => {
+        const uuid = _sfSourceOriginalUuid;
+        if (!uuid) return;
+        const r = await window.electronAPI.addAttachments({ uuid });
+        if (r && r.ok) _sfRenderSourceAttachments();
+        else if (r && !r.canceled && r.error) promptError('Attach failed', r.error);
+      });
+      _sfSourceDetailEls.attachmentsList?.addEventListener('click', async (e) => {
+        const row = e.target.closest('[data-att-id]');
+        if (!row) return;
+        const id = row.getAttribute('data-att-id');
+        const uuid = _sfSourceOriginalUuid;
+        if (e.target.closest('[data-att-remove]')) {
+          const ok = await promptConfirm({ title: 'Remove attachment', message: 'Remove this file from this source? If no other source uses it, the file is deleted from the app.', confirmText: 'Remove', confirmKind: 'danger' });
+          if (!ok) return;
+          const r = await window.electronAPI.unlinkAttachment({ uuid, id });
+          if (r && r.ok) _sfRenderSourceAttachments();
+          else if (r && r.error) promptError('Remove failed', r.error);
+          return;
+        }
+        await window.electronAPI.openAttachment({ id });
+      });
       let _sfSourceOriginalUuid = null;
       let _sfSourceEdit = null;
       let _sfSourceDirty = false;
@@ -18877,6 +18943,7 @@ require(['vs/editor/editor.main'], function () {
         }
         const sm = src.meta || {};
         _sfSourceOriginalUuid = uuid;
+        _sfRenderSourceAttachments(); // fire-and-forget; fills when its IPC lands
         const opToken = ++_sfSourceDetailOpToken;
         // Stub edit-state with empty entries/tags. The async entries load
         // below fills both in once they're known. Save() is disabled and the
