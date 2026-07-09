@@ -2721,6 +2721,38 @@
   .sf-doc-viewer-body::-webkit-scrollbar { width: 6px; }
   .sf-doc-viewer-body::-webkit-scrollbar-track { background: transparent; }
   .sf-doc-viewer-body::-webkit-scrollbar-thumb { background: var(--c-border-strong); border-radius: 3px; }
+  /* Media preview (image / PDF) fills the body with no monospace padding. */
+  .sf-doc-viewer-body.sf-doc-viewer-media { padding: 0; display: flex; align-items: center; justify-content: center; background: var(--c-bg-inset); overflow: hidden; }
+  .sf-doc-viewer-img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
+  .sf-doc-viewer-frame { width: 100%; height: 100%; border: none; background: #fff; }
+  .sf-doc-viewer-nopreview { color: var(--c-text-dim); font-family: inherit; text-align: center; padding: 24px; }
+  .sf-doc-viewer-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; }
+  /* Proof of Purchase row: chips like Included Files, plus inline add/link. */
+  .sf-pop-val { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+  .sf-pop-actions { display: inline-flex; gap: 10px; }
+  .sf-pop-action { background: none; border: none; padding: 0; font: inherit; font-size: 0.82rem; color: var(--jmt-blue); cursor: pointer; }
+  .sf-pop-action:hover { opacity: 0.8; }
+  /* Link-existing picker: checkbox list of stored attachments. */
+  #modal-sf-pop-link .modal { width: 520px; max-width: 96vw; max-height: min(80vh, 560px); display: flex; flex-direction: column; }
+  .sf-pop-link-sub { font-size: 0.82rem; color: var(--c-text-sub); margin: 4px 0 10px; }
+  .sf-pop-link-list { flex: 1; min-height: 0; overflow: auto; border: 1px solid var(--c-border-faint); border-radius: 4px; }
+  .sf-pop-link-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; cursor: pointer; border-bottom: 1px solid var(--c-border-faint); }
+  .sf-pop-link-row:last-child { border-bottom: none; }
+  .sf-pop-link-row:hover { background: var(--c-bg-inset); }
+  .sf-pop-link-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--c-text); font-size: 0.86rem; }
+  .sf-pop-link-meta { flex-shrink: 0; font-size: 0.72rem; color: var(--c-text-dim); }
+  .sf-pop-link-empty { padding: 16px 12px; text-align: center; color: var(--c-text-dim); font-size: 0.82rem; }
+  .sf-pop-link-row input:disabled + .sf-pop-link-name { color: var(--c-text-dim); }
+  /* Add proof of purchase (import-style modal). */
+  #modal-sf-pop-add .modal { width: 540px; max-width: 96vw; height: auto; max-height: 90vh; display: flex; flex-direction: column; }
+  .sf-pop-add-field { margin-bottom: 12px; }
+  .sf-pop-add-label { display: block; font-size: 0.78rem; color: var(--c-text-sub); margin-bottom: 4px; }
+  .sf-pop-add-opt { color: var(--c-text-dim); font-weight: 400; }
+  .sf-pop-add-file-row { display: flex; gap: 8px; align-items: center; }
+  .sf-pop-add-file-row .sf-edit-input { flex: 1; min-width: 0; }
+  /* The source picker inside the add modal is a bounded scroll box, not a
+     full-height list (that was the old fan-out modal's sizing bug). */
+  #modal-sf-pop-add .sf-pop-add-list { flex: none; max-height: 220px; }
   /* Bulk save conflict modal: list of rows, each with a per-entry choice. */
   #modal-sf-save-conflict .modal { width: 560px; max-width: 96vw; max-height: min(80vh, 600px); display: flex; flex-direction: column; }
   .sf-save-conflict-bulk { display: flex; gap: 8px; margin: 6px 0 10px; }
@@ -2736,7 +2768,7 @@
   .sf-save-conflict-choices label { display: inline-flex; align-items: center; gap: 4px; font-size: 0.76rem; color: var(--c-text-sub); cursor: pointer; user-select: none; }
   .sf-save-conflict-choices input[type="radio"] { margin: 0; }
   /* Slice 10: source detail modal */
-  #modal-sf-source-detail .modal { width: 820px; max-width: 96vw; height: min(90vh, 700px); display: flex; flex-direction: column; padding-bottom: 16px; }
+  #modal-sf-source-detail .modal { width: 820px; max-width: 96vw; height: auto; max-height: 90vh; display: flex; flex-direction: column; padding-bottom: 16px; }
   /* Container is a 4-column grid so all display rows can share column widths
      via subgrid — name column auto-fits the widest name in view, description
      column flexes to take remaining space, meta column sits right-aligned. */
@@ -2763,14 +2795,6 @@
   .sf-source-entry-row:hover .sf-source-entry-delete { opacity: 0.5; }
   .sf-source-entry-delete:hover { opacity: 1 !important; color: #e44; background: rgba(40,10,10,0.7); }
   .sf-source-entries-empty { font-size: 0.78rem; color: var(--c-text-dim); font-style: italic; padding: 6px 0; }
-  .sf-attachments-list { display: flex; flex-direction: column; gap: 4px; padding: 4px 0; }
-  .sf-attachment-row { display: flex; align-items: center; gap: 8px; font-size: 0.78rem; padding: 5px 8px; background: var(--c-bg-inset); border: 1px solid var(--c-border); border-radius: 4px; }
-  .sf-attachment-name { flex: 1; color: var(--c-text); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .sf-attachment-name:hover { color: var(--jmt-blue); text-decoration: underline; }
-  .sf-attachment-size { color: var(--c-text-dim); font-size: 0.72rem; flex-shrink: 0; }
-  .sf-attachment-remove { background: none; border: none; color: var(--c-text-faint); cursor: pointer; font-size: 0.95rem; line-height: 1; padding: 0 4px; flex-shrink: 0; }
-  .sf-attachment-remove:hover { color: #e05555; }
-  .sf-attachments-empty { font-size: 0.74rem; color: var(--c-text-muted); font-style: italic; padding: 6px 4px; }
   /* Loading-state pulse — gentle opacity breathing communicates "work in
      progress" without being noisy. Slow 1.6s cycle so it reads as steady
      activity rather than urgency. Reused for any "Loading…" copy and on
@@ -4639,6 +4663,20 @@
           <span class="sf-meta-label">Included Files</span>
           <div class="sf-meta-val sf-doc-chips" id="sf-source-docs-chips" data-doc-scope="source"></div>
         </div>
+        <!-- ── Proof of Purchase ── receipts / order confirmations the user
+             attaches. Rendered as clickable chips exactly like Included Files;
+             stored in the central content-addressed store and linked to this
+             source by id (soundFontAttachments.js), never inside the zip. -->
+        <div class="sf-meta-row" id="sf-source-pop-row">
+          <span class="sf-meta-label">Proof of Purchase</span>
+          <div class="sf-meta-val sf-pop-val">
+            <span class="sf-doc-chips sf-pop-chips" id="sf-source-pop-chips" data-doc-scope="pop"></span>
+            <span class="sf-pop-actions">
+              <button class="sf-pop-action" id="btn-sf-source-add-pop" type="button" title="Add a receipt or proof-of-purchase file from your computer">+ Add</button>
+              <button class="sf-pop-action" id="btn-sf-source-link-pop" type="button" title="Link a proof-of-purchase file you already added to another source">Link existing&hellip;</button>
+            </span>
+          </div>
+        </div>
         <div class="sf-meta-row">
           <span class="sf-meta-label">Notes</span>
           <div class="sf-meta-val">
@@ -4672,18 +4710,6 @@
         <div class="sf-entry-files-browser" id="sf-source-files-browser">
           <div class="sf-entry-files-list" id="sf-source-files-list"></div>
         </div>
-      </div>
-      <!-- ── Attachments ── receipts / proof-of-purchase / reference files.
-           Stored in a central content-addressed store and LINKED to this
-           source by id (soundFontAttachments.js) — kept next to the source,
-           never inside the zip, so they can't affect the source content hash,
-           dedup, or the SD export. -->
-      <div class="sf-entry-detail-section">
-        <h3 class="sf-entry-files-head">
-          <span>Attachments:</span>
-          <button class="sf-source-add-more-btn" id="btn-sf-source-add-attachment" title="Attach receipts, proof of purchase, or reference files. Kept with the app next to the source, not inside the font zip.">+ Add file(s)</button>
-        </h3>
-        <div class="sf-attachments-list" id="sf-source-attachments-list"></div>
       </div>
     </div>
     <div class="modal-btns" style="margin-top: 12px;">
@@ -4725,6 +4751,56 @@
       <span class="sf-doc-viewer-size" id="sf-doc-viewer-size"></span>
     </div>
     <div class="sf-doc-viewer-body" id="sf-doc-viewer-body"></div>
+    <div class="sf-doc-viewer-actions" id="sf-doc-viewer-actions" style="display:none">
+      <button class="modal-btn-cancel" id="sf-doc-viewer-open-ext" type="button" title="Open in your computer's default app">Open externally</button>
+      <button class="modal-btn-cancel sf-source-delete-btn" id="sf-doc-viewer-remove" type="button" title="Remove this file from this source">Remove from source</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Link existing proof of purchase ── multi-select from files already
+     added to other sources; links them to the current source (no second copy
+     on disk, thanks to content-addressing). -->
+<div class="modal-overlay" id="modal-sf-pop-link">
+  <div class="modal">
+    <button class="modal-btn-close" id="sf-pop-link-close" title="Close">&#10005;</button>
+    <h2>Link existing proof of purchase</h2>
+    <p class="sf-pop-link-sub">Pick files you've already added to other sources. They'll be linked here without a second copy on disk.</p>
+    <div class="sf-pop-link-list" id="sf-pop-link-list"></div>
+    <div class="modal-btns" style="margin-top: 12px;">
+      <button class="modal-btn-cancel" id="sf-pop-link-cancel">Cancel</button>
+      <button class="modal-btn-primary" id="sf-pop-link-confirm" disabled>Link selected</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Add proof of purchase (import-style) ── browse a receipt, optionally
+     name it, and tick which sources it covers (the current one auto-checked).
+     One action stores the file once and links it to every chosen source. -->
+<div class="modal-overlay" id="modal-sf-pop-add">
+  <div class="modal">
+    <button class="modal-btn-close" id="sf-pop-add-close" title="Close">&#10005;</button>
+    <h2>Add proof of purchase</h2>
+    <div class="sf-pop-add-field">
+      <label class="sf-pop-add-label">File</label>
+      <div class="sf-pop-add-file-row">
+        <input type="text" id="sf-pop-add-file" class="sf-edit-input" placeholder="Choose a receipt or order file&hellip;" readonly>
+        <button class="modal-btn-cancel" id="sf-pop-add-browse" type="button">Browse&hellip;</button>
+      </div>
+    </div>
+    <div class="sf-pop-add-field">
+      <label class="sf-pop-add-label">Display name <span class="sf-pop-add-opt">(optional)</span></label>
+      <input type="text" id="sf-pop-add-name" class="sf-edit-input" placeholder="How it shows in the list &mdash; defaults to the file name" maxlength="80">
+    </div>
+    <div class="sf-pop-add-field">
+      <label class="sf-pop-add-label">Attach to sources</label>
+      <input type="text" id="sf-pop-add-search" class="sf-edit-input" placeholder="Search sources&hellip;" autocomplete="off" style="margin-bottom:6px;">
+      <div class="sf-pop-link-list sf-pop-add-list" id="sf-pop-add-list"></div>
+    </div>
+    <div class="modal-btns" style="margin-top: 12px;">
+      <button class="modal-btn-cancel" id="sf-pop-add-cancel">Cancel</button>
+      <button class="modal-btn-primary" id="sf-pop-add-confirm" disabled>Add</button>
+    </div>
   </div>
 </div>
 
@@ -18558,55 +18634,183 @@ require(['vs/editor/editor.main'], function () {
         addMoreBtn:      document.getElementById('btn-sf-source-add-more'),
         deleteBtn:       document.getElementById('btn-sf-source-delete'),
         exportBtn:       document.getElementById('btn-sf-source-export'),
-        addAttachmentBtn: document.getElementById('btn-sf-source-add-attachment'),
-        attachmentsList: document.getElementById('sf-source-attachments-list'),
+        popChips:        document.getElementById('sf-source-pop-chips'),
+        addPopBtn:       document.getElementById('btn-sf-source-add-pop'),
+        linkPopBtn:      document.getElementById('btn-sf-source-link-pop'),
         discardBtn:      document.getElementById('sf-source-detail-discard'),
         saveBtn:         document.getElementById('sf-source-detail-save'),
       };
 
-      // ── Source attachments (receipts / proof-of-purchase) ──────────
-      // Reads the open source's linked attachments and renders them. Add
-      // stores files in the central content-addressed store and links their
-      // ids to this source; remove unlinks (and GCs the file if orphaned).
-      const _sfRenderSourceAttachments = async () => {
-        const list = _sfSourceDetailEls.attachmentsList;
-        if (!list) return;
+      // ── Proof of Purchase (receipts / order confirmations) ─────────
+      // Rendered as clickable chips, exactly like Included Files. Each chip
+      // carries its attachment id + name; the global .sf-doc-chip handler
+      // routes a click to the in-app viewer (data-doc-scope="pop"). Add pulls
+      // files from disk into the central store; Link existing attaches a file
+      // already added to another source (one receipt, many sources).
+      const _sfRenderSourcePop = async () => {
+        const chips = _sfSourceDetailEls.popChips;
+        if (!chips) return;
         const uuid = _sfSourceOriginalUuid;
-        if (!uuid) { list.innerHTML = ''; return; }
+        chips.setAttribute('data-doc-key', uuid || '');
+        if (!uuid) { chips.innerHTML = ''; return; }
         let items = [];
         try { const r = await window.electronAPI.listAttachments({ uuid }); if (r && r.ok) items = r.attachments || []; } catch {}
         if (_sfSourceOriginalUuid !== uuid) return; // source changed while loading
-        if (!items.length) { list.innerHTML = '<div class="sf-attachments-empty">No attachments yet. Add a receipt or proof of purchase.</div>'; return; }
-        list.innerHTML = items.map(a =>
-          `<div class="sf-attachment-row" data-att-id="${_sfEscape(a.id)}">`
-          + `<span class="sf-attachment-name" title="Open">${_sfEscape(a.name)}</span>`
-          + `<span class="sf-attachment-size">${_sfFmtSize(a.size)}</span>`
-          + `<button class="sf-attachment-remove" data-att-remove="1" title="Remove from this source">&#10005;</button>`
-          + `</div>`
-        ).join('');
+        if (!items.length) { chips.innerHTML = ''; return; }
+        chips.innerHTML = items.map(a => {
+          const disp = a.label || a.name;
+          const sizeHint = a.size ? ` (${_sfFmtSize(a.size)})` : '';
+          const sizeAttr = a.size ? ` data-doc-size="${a.size}"` : '';
+          const labelAttr = a.label ? ` data-att-label="${_sfEscape(a.label)}"` : '';
+          return `<button class="sf-doc-chip" data-att-id="${_sfEscape(a.id)}" data-doc-path="${_sfEscape(a.name)}"${labelAttr}${sizeAttr} title="Open ${_sfEscape(disp)}${_sfEscape(sizeHint)}">${_sfEscape(disp)}</button>`;
+        }).join('<span class="sf-doc-sep">, </span>');
       };
-      _sfSourceDetailEls.addAttachmentBtn?.addEventListener('click', async () => {
+      _sfSourceDetailEls.addPopBtn?.addEventListener('click', () => _sfOpenPopAdd());
+      _sfSourceDetailEls.linkPopBtn?.addEventListener('click', () => _sfOpenPopLink());
+
+      // ── Link existing proof of purchase (multi-select picker) ──────
+      // Lists every attachment already in the store (minus those already on
+      // this source) as checkboxes; linking attaches the chosen ids to this
+      // source with no second copy on disk. Stashes the source-detail modal
+      // while open so panels never stack.
+      const _sfPopLinkEls = {
+        modal:   document.getElementById('modal-sf-pop-link'),
+        list:    document.getElementById('sf-pop-link-list'),
+        close:   document.getElementById('sf-pop-link-close'),
+        cancel:  document.getElementById('sf-pop-link-cancel'),
+        confirm: document.getElementById('sf-pop-link-confirm'),
+      };
+      let _sfPopLinkStashed = [];
+      const _sfClosePopLink = () => {
+        _sfPopLinkEls.modal?.classList.remove('active');
+        for (const id of _sfPopLinkStashed) document.getElementById(id)?.classList.add('active');
+        _sfPopLinkStashed = [];
+      };
+      const _sfOpenPopLink = async () => {
         const uuid = _sfSourceOriginalUuid;
-        if (!uuid) return;
-        const r = await window.electronAPI.addAttachments({ uuid });
-        if (r && r.ok) _sfRenderSourceAttachments();
-        else if (r && !r.canceled && r.error) promptError('Attach failed', r.error);
-      });
-      _sfSourceDetailEls.attachmentsList?.addEventListener('click', async (e) => {
-        const row = e.target.closest('[data-att-id]');
-        if (!row) return;
-        const id = row.getAttribute('data-att-id');
-        const uuid = _sfSourceOriginalUuid;
-        if (e.target.closest('[data-att-remove]')) {
-          const ok = await promptConfirm({ title: 'Remove attachment', message: 'Remove this file from this source? If no other source uses it, the file is deleted from the app.', confirmText: 'Remove', confirmKind: 'danger' });
-          if (!ok) return;
-          const r = await window.electronAPI.unlinkAttachment({ uuid, id });
-          if (r && r.ok) _sfRenderSourceAttachments();
-          else if (r && r.error) promptError('Remove failed', r.error);
+        if (!uuid || !_sfPopLinkEls.modal) return;
+        let all = [];
+        try { const r = await window.electronAPI.listAllAttachments(); if (r && r.ok) all = r.attachments || []; } catch {}
+        let linked = [];
+        try { const r = await window.electronAPI.listAttachments({ uuid }); if (r && r.ok) linked = (r.attachments || []).map(a => a.id); } catch {}
+        const avail = all.filter(a => !linked.includes(a.id));
+        if (!avail.length) {
+          promptError('Nothing to link', 'No proof-of-purchase files have been added to other sources yet. Use “+ Add” to attach one from your computer.');
           return;
         }
-        await window.electronAPI.openAttachment({ id });
+        _sfPopLinkEls.list.innerHTML = avail.map(a =>
+          `<label class="sf-pop-link-row"><input type="checkbox" value="${_sfEscape(a.id)}">`
+          + `<span class="sf-pop-link-name">${_sfEscape(a.name)}</span>`
+          + `<span class="sf-pop-link-meta">${_sfFmtSize(a.size)} · used by ${a.usedBy || 0}</span></label>`
+        ).join('');
+        if (_sfPopLinkEls.confirm) _sfPopLinkEls.confirm.disabled = true;
+        _sfPopLinkStashed = [];
+        const sd = document.getElementById('modal-sf-source-detail');
+        if (sd && sd.classList.contains('active')) { sd.classList.remove('active'); _sfPopLinkStashed.push('modal-sf-source-detail'); }
+        _sfPopLinkEls.modal.classList.add('active');
+      };
+      _sfPopLinkEls.list?.addEventListener('change', () => {
+        if (_sfPopLinkEls.confirm) _sfPopLinkEls.confirm.disabled = !_sfPopLinkEls.list.querySelector('input:checked');
       });
+      _sfPopLinkEls.confirm?.addEventListener('click', async () => {
+        const uuid = _sfSourceOriginalUuid;
+        if (!uuid) return;
+        const ids = Array.from(_sfPopLinkEls.list.querySelectorAll('input:checked')).map(i => i.value);
+        if (!ids.length) return;
+        const r = await window.electronAPI.linkAttachments({ uuid, ids });
+        if (r && r.ok) { _sfClosePopLink(); _sfRenderSourcePop(); }
+        else if (r && r.error) promptError('Link failed', r.error);
+      });
+      _sfPopLinkEls.close?.addEventListener('click', _sfClosePopLink);
+      _sfPopLinkEls.cancel?.addEventListener('click', _sfClosePopLink);
+      _sfPopLinkEls.modal?.addEventListener('click', (e) => { if (e.target === _sfPopLinkEls.modal) _sfClosePopLink(); });
+
+      // ── Add proof of purchase (import-style) ───────────────────────
+      // Browse a file, optionally name it, tick which sources it covers (the
+      // current source auto-checked and locked). One action stores the file
+      // once and links it to every chosen source. The chosen set is held in a
+      // Set so it survives search filtering of the source list.
+      const _sfPopAddEls = {
+        modal:     document.getElementById('modal-sf-pop-add'),
+        close:     document.getElementById('sf-pop-add-close'),
+        cancel:    document.getElementById('sf-pop-add-cancel'),
+        confirm:   document.getElementById('sf-pop-add-confirm'),
+        fileField: document.getElementById('sf-pop-add-file'),
+        browseBtn: document.getElementById('sf-pop-add-browse'),
+        nameInput: document.getElementById('sf-pop-add-name'),
+        search:    document.getElementById('sf-pop-add-search'),
+        list:      document.getElementById('sf-pop-add-list'),
+      };
+      let _sfPopAddStashed = [];
+      let _sfPopAddFile = null;            // { filePath, fileName }
+      let _sfPopAddSources = [];           // [{uuid, name}]
+      let _sfPopAddSelected = new Set();   // chosen uuids
+      let _sfPopAddCurrentUuid = null;     // auto-checked + locked
+      const _sfClosePopAdd = () => {
+        _sfPopAddEls.modal?.classList.remove('active');
+        for (const id of _sfPopAddStashed) document.getElementById(id)?.classList.add('active');
+        _sfPopAddStashed = [];
+      };
+      const _sfUpdatePopAddConfirm = () => {
+        if (_sfPopAddEls.confirm) _sfPopAddEls.confirm.disabled = !(_sfPopAddFile && _sfPopAddSelected.size);
+      };
+      const _sfRenderPopAddList = (filter) => {
+        if (!_sfPopAddEls.list) return;
+        const q = (filter || '').trim().toLowerCase();
+        const rows = _sfPopAddSources
+          .filter(s => !q || s.name.toLowerCase().includes(q))
+          .map(s => {
+            const isCurrent = s.uuid === _sfPopAddCurrentUuid;
+            const checked = isCurrent || _sfPopAddSelected.has(s.uuid);
+            const meta = isCurrent ? '<span class="sf-pop-link-meta">this source</span>' : '';
+            return `<label class="sf-pop-link-row"><input type="checkbox" value="${_sfEscape(s.uuid)}"${checked ? ' checked' : ''}${isCurrent ? ' disabled' : ''}><span class="sf-pop-link-name">${_sfEscape(s.name)}</span>${meta}</label>`;
+          }).join('');
+        _sfPopAddEls.list.innerHTML = rows || '<div class="sf-pop-link-empty">No sources match.</div>';
+      };
+      const _sfOpenPopAdd = () => {
+        const uuid = _sfSourceOriginalUuid;
+        if (!uuid || !_sfPopAddEls.modal) return;
+        _sfPopAddCurrentUuid = uuid;
+        _sfPopAddFile = null;
+        _sfPopAddSelected = new Set([uuid]); // current source always included
+        if (_sfPopAddEls.fileField) _sfPopAddEls.fileField.value = '';
+        if (_sfPopAddEls.nameInput) _sfPopAddEls.nameInput.value = '';
+        if (_sfPopAddEls.search) _sfPopAddEls.search.value = '';
+        _sfPopAddSources = Object.values(_sfAllSourcesByUuid)
+          .map(s => ({ uuid: s.uuid, name: (s.meta && (s.meta.bundleName || s.meta.originalName)) || s.uuid }))
+          .sort((a, b) => a.name.localeCompare(b.name));
+        _sfRenderPopAddList('');
+        _sfUpdatePopAddConfirm();
+        _sfPopAddStashed = [];
+        const sd = document.getElementById('modal-sf-source-detail');
+        if (sd && sd.classList.contains('active')) { sd.classList.remove('active'); _sfPopAddStashed.push('modal-sf-source-detail'); }
+        _sfPopAddEls.modal.classList.add('active');
+      };
+      _sfPopAddEls.browseBtn?.addEventListener('click', async () => {
+        let r; try { r = await window.electronAPI.pickAttachmentFile(); } catch { return; }
+        if (!r || !r.ok) return;
+        _sfPopAddFile = { filePath: r.filePath, fileName: r.fileName };
+        if (_sfPopAddEls.fileField) _sfPopAddEls.fileField.value = r.fileName;
+        _sfUpdatePopAddConfirm();
+      });
+      _sfPopAddEls.search?.addEventListener('input', () => _sfRenderPopAddList(_sfPopAddEls.search.value));
+      _sfPopAddEls.list?.addEventListener('change', (e) => {
+        const cb = e.target;
+        if (!cb || cb.disabled || cb.type !== 'checkbox') return;
+        if (cb.checked) _sfPopAddSelected.add(cb.value); else _sfPopAddSelected.delete(cb.value);
+        _sfUpdatePopAddConfirm();
+      });
+      _sfPopAddEls.confirm?.addEventListener('click', async () => {
+        if (!_sfPopAddFile || !_sfPopAddSelected.size) return;
+        const label = (_sfPopAddEls.nameInput && _sfPopAddEls.nameInput.value || '').trim();
+        const uuids = Array.from(_sfPopAddSelected);
+        const r = await window.electronAPI.addAttachmentToSources({ filePath: _sfPopAddFile.filePath, label, uuids });
+        if (r && r.ok) { _sfClosePopAdd(); _sfRenderSourcePop(); }
+        else if (r && r.error) promptError('Add failed', r.error);
+      });
+      _sfPopAddEls.close?.addEventListener('click', _sfClosePopAdd);
+      _sfPopAddEls.cancel?.addEventListener('click', _sfClosePopAdd);
+      _sfPopAddEls.modal?.addEventListener('click', (e) => { if (e.target === _sfPopAddEls.modal) _sfClosePopAdd(); });
       let _sfSourceOriginalUuid = null;
       let _sfSourceEdit = null;
       let _sfSourceDirty = false;
@@ -18943,7 +19147,7 @@ require(['vs/editor/editor.main'], function () {
         }
         const sm = src.meta || {};
         _sfSourceOriginalUuid = uuid;
-        _sfRenderSourceAttachments(); // fire-and-forget; fills when its IPC lands
+        _sfRenderSourcePop(); // fire-and-forget; fills when its IPC lands
         const opToken = ++_sfSourceDetailOpToken;
         // Stub edit-state with empty entries/tags. The async entries load
         // below fills both in once they're known. Save() is disabled and the
@@ -23944,12 +24148,24 @@ require(['vs/editor/editor.main'], function () {
         name:     document.getElementById('sf-doc-viewer-name'),
         size:     document.getElementById('sf-doc-viewer-size'),
         body:     document.getElementById('sf-doc-viewer-body'),
+        actions:  document.getElementById('sf-doc-viewer-actions'),
+        openExt:  document.getElementById('sf-doc-viewer-open-ext'),
+        remove:   document.getElementById('sf-doc-viewer-remove'),
       };
+      // Blob URL of the currently-previewed media (image/PDF), revoked on close.
+      let _sfDocViewerBlobUrl = null;
+      // Proof-of-purchase context {id, uuid} when the viewer shows an attachment;
+      // null for plain vendor docs (which have no Open-externally / Remove actions).
+      let _sfDocViewerPop = null;
       // Modals to stash while the doc viewer is on top, so the user doesn't
       // see two layered modal panels at once. State stays intact (dirty edits,
       // input focus history, etc.) — only the visible .active class is toggled.
       let _sfDocViewerStashedModalIds = [];
-      const _sfShowDocViewer = (fileName, size, content) => {
+      // content is the decoded text for kind 'text'; opts carries { kind, blobUrl,
+      // pop } for richer previews. kind: 'text' (default) | 'image' | 'pdf' |
+      // 'none' (unpreviewable — show a note + rely on Open externally). When
+      // opts.pop = {id, uuid} is set, the Open-externally / Remove actions show.
+      const _sfShowDocViewer = (fileName, size, content, opts = {}) => {
         if (!_sfDocViewerEls.modal) return;
         const fmtSize = (n) => {
           if (!n) return '';
@@ -23959,7 +24175,29 @@ require(['vs/editor/editor.main'], function () {
         };
         if (_sfDocViewerEls.name) _sfDocViewerEls.name.textContent = fileName;
         if (_sfDocViewerEls.size) _sfDocViewerEls.size.textContent = size ? fmtSize(size) : '';
-        if (_sfDocViewerEls.body) _sfDocViewerEls.body.textContent = content;
+        // Release any prior media blob before swapping in new body content.
+        if (_sfDocViewerBlobUrl) { URL.revokeObjectURL(_sfDocViewerBlobUrl); _sfDocViewerBlobUrl = null; }
+        const kind = opts.kind || 'text';
+        const body = _sfDocViewerEls.body;
+        if (body) {
+          body.classList.toggle('sf-doc-viewer-media', kind === 'image' || kind === 'pdf');
+          if (kind === 'image') {
+            _sfDocViewerBlobUrl = opts.blobUrl || null;
+            body.innerHTML = '<img class="sf-doc-viewer-img" alt="">';
+            const img = body.querySelector('img'); if (img && opts.blobUrl) img.src = opts.blobUrl;
+          } else if (kind === 'pdf') {
+            _sfDocViewerBlobUrl = opts.blobUrl || null;
+            body.innerHTML = '<iframe class="sf-doc-viewer-frame" title="preview"></iframe>';
+            const fr = body.querySelector('iframe'); if (fr && opts.blobUrl) fr.src = opts.blobUrl;
+          } else if (kind === 'none') {
+            body.innerHTML = '<div class="sf-doc-viewer-nopreview">This file can\'t be previewed in the app. Use “Open externally” to view it in your default app.</div>';
+          } else {
+            body.textContent = content;
+          }
+        }
+        // Proof-of-purchase actions (Open externally / Remove) only for attachments.
+        _sfDocViewerPop = opts.pop || null;
+        if (_sfDocViewerEls.actions) _sfDocViewerEls.actions.style.display = _sfDocViewerPop ? '' : 'none';
         // Hide any SF modals currently open so the viewer is the only thing
         // on screen. They get restored on close.
         _sfDocViewerStashedModalIds = [];
@@ -23975,7 +24213,10 @@ require(['vs/editor/editor.main'], function () {
       };
       const _sfHideDocViewer = () => {
         _sfDocViewerEls.modal?.classList.remove('active');
-        if (_sfDocViewerEls.body) _sfDocViewerEls.body.textContent = '';
+        if (_sfDocViewerBlobUrl) { URL.revokeObjectURL(_sfDocViewerBlobUrl); _sfDocViewerBlobUrl = null; }
+        if (_sfDocViewerEls.body) { _sfDocViewerEls.body.innerHTML = ''; _sfDocViewerEls.body.classList.remove('sf-doc-viewer-media'); }
+        if (_sfDocViewerEls.actions) _sfDocViewerEls.actions.style.display = 'none';
+        _sfDocViewerPop = null;
         // Restore whatever modals we hid when the viewer opened, preserving
         // their existing state (dirty flags, in-progress edits, etc.).
         for (const id of _sfDocViewerStashedModalIds) {
@@ -23984,6 +24225,39 @@ require(['vs/editor/editor.main'], function () {
         _sfDocViewerStashedModalIds = [];
       };
       _sfDocViewerEls.closeBtn?.addEventListener('click', _sfHideDocViewer);
+      _sfDocViewerEls.openExt?.addEventListener('click', () => {
+        if (_sfDocViewerPop && _sfDocViewerPop.id) window.electronAPI.openAttachment({ id: _sfDocViewerPop.id });
+      });
+      _sfDocViewerEls.remove?.addEventListener('click', async () => {
+        if (!_sfDocViewerPop) return;
+        const { id, uuid } = _sfDocViewerPop;
+        // Situational: we know exactly how many sources use this file, so offer
+        // "remove from all" only when it actually applies, and state the outcome
+        // plainly rather than hedging with "if no other source uses it…".
+        let usedBy = 1;
+        try { const r = await window.electronAPI.sourcesForAttachment({ id }); if (r && r.ok) usedBy = (r.uuids || []).length || 1; } catch {}
+        let action; // 'this' | 'all' | null
+        if (usedBy > 1) {
+          const choice = await promptConfirm({
+            title: 'Remove proof of purchase',
+            message: `This file is attached to ${usedBy} sources. Remove it from just this source, or from all ${usedBy}?`,
+            middleText: 'This source only',
+            confirmText: 'Remove from all',
+            confirmKind: 'danger',
+            cancelText: 'Cancel',
+          });
+          action = choice === 'confirm' ? 'all' : choice === 'middle' ? 'this' : null;
+        } else {
+          const ok = await promptConfirm({ title: 'Remove proof of purchase', message: 'Remove this file and delete it from the app?', confirmText: 'Remove', confirmKind: 'danger' });
+          action = ok ? 'this' : null; // last/only reference — unlink deletes it
+        }
+        if (!action) return;
+        const r = action === 'all'
+          ? await window.electronAPI.removeAttachmentEverywhere({ id })
+          : await window.electronAPI.unlinkAttachment({ uuid, id });
+        if (r && r.ok) { _sfHideDocViewer(); _sfRenderSourcePop(); }
+        else if (r && r.error) promptError('Remove failed', r.error);
+      });
       _sfDocViewerEls.modal?.addEventListener('click', (e) => {
         if (e.target === _sfDocViewerEls.modal) _sfHideDocViewer();
       });
@@ -23992,13 +24266,55 @@ require(['vs/editor/editor.main'], function () {
           _sfHideDocViewer();
         }
       });
+      // Image/PDF extensions we can preview inline (blob URL). Everything else
+      // falls through to text (if readable) or "open externally".
+      const _sfImageExt = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
+      const _sfMimeFor = (name) => {
+        const ext = (String(name).match(/\.([a-z0-9]+)$/i) || [,''])[1].toLowerCase();
+        return ({ png:'image/png', jpg:'image/jpeg', jpeg:'image/jpeg', gif:'image/gif',
+          webp:'image/webp', bmp:'image/bmp', svg:'image/svg+xml', pdf:'application/pdf' })[ext] || 'application/octet-stream';
+      };
+      const _sfPopKind = (name) => {
+        if (_sfImageExt.test(name)) return 'image';
+        if (/\.pdf$/i.test(name)) return 'pdf';
+        if (_sfIsTextReadable(name)) return 'text';
+        return 'none';
+      };
+      // Proof-of-purchase chip click: preview the attachment in-app (image / PDF /
+      // text), or open the viewer in "no preview" mode with an Open-externally
+      // fallback for other types. key on the container is the source uuid.
+      const _sfHandlePopChipClick = async (chip, container) => {
+        const id = chip.getAttribute('data-att-id');
+        const fileName = chip.getAttribute('data-doc-path') || '';   // real name → drives type detection
+        const title = chip.getAttribute('data-att-label') || fileName; // display name in the viewer header
+        const uuid = container?.getAttribute('data-doc-key') || _sfSourceOriginalUuid || '';
+        if (!id) return;
+        const size = parseInt(chip.getAttribute('data-doc-size') || '0', 10) || 0;
+        const kind = _sfPopKind(fileName);
+        const pop = { id, uuid };
+        if (kind === 'none') { _sfShowDocViewer(title, size, '', { kind: 'none', pop }); return; }
+        let res;
+        try { res = await window.electronAPI.readAttachment({ id }); }
+        catch (err) { promptError('Could not read file', err && err.message || err); return; }
+        if (!res || !res.ok) { promptError('Could not read file', (res && res.error) || 'unknown error'); return; }
+        const u8 = new Uint8Array(res.bytes);
+        if (kind === 'text') {
+          const raw = _sfDecodeBytes(u8);
+          const displayText = /\.rtf$/i.test(fileName) ? _sfStripRtf(raw) : raw;
+          _sfShowDocViewer(title, size || u8.length, displayText, { kind: 'text', pop });
+        } else {
+          const blobUrl = URL.createObjectURL(new Blob([u8], { type: _sfMimeFor(fileName) }));
+          _sfShowDocViewer(title, size || u8.length, '', { kind, blobUrl, pop });
+        }
+      };
       // Click dispatch for any .sf-doc-chip: routes by the parent container's
-      // data-doc-scope (source vs entry) and data-doc-key (uuid or name).
+      // data-doc-scope (source vs entry vs pop) and data-doc-key (uuid or name).
       const _sfHandleDocClick = async (chip) => {
         const fileName = chip.getAttribute('data-doc-path');
         if (!fileName) return;
         const container = chip.closest('.sf-doc-chips');
         const scope = container?.getAttribute('data-doc-scope') || 'source';
+        if (scope === 'pop') { return _sfHandlePopChipClick(chip, container); }
         const key = container?.getAttribute('data-doc-key') || '';
         if (!key) return;
         const size = parseInt(chip.getAttribute('data-doc-size') || '0', 10) || 0;

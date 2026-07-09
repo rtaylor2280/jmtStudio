@@ -1181,6 +1181,42 @@ ipcMain.handle('attachments:unlink', (_, { uuid, id } = {}) => {
   try { return soundFontAttachments.unlinkAttachment(app.getPath('userData'), uuid, id); }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
+ipcMain.handle('attachments:listAll', () => {
+  try { return { ok: true, attachments: soundFontAttachments.listAllAttachments(app.getPath('userData')) }; }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+ipcMain.handle('attachments:link', (_, { uuid, ids } = {}) => {
+  try { return soundFontAttachments.linkAttachments(app.getPath('userData'), uuid, ids || []); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+ipcMain.handle('attachments:read', (_, { id } = {}) => {
+  try { return soundFontAttachments.readAttachment(app.getPath('userData'), id); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+ipcMain.handle('attachments:sourcesFor', (_, { id } = {}) => {
+  try { return { ok: true, uuids: soundFontAttachments.sourcesForAttachment(app.getPath('userData'), id) }; }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+ipcMain.handle('attachments:linkToSources', (_, { id, uuids } = {}) => {
+  try { return soundFontAttachments.linkAttachmentToSources(app.getPath('userData'), id, uuids || []); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+ipcMain.handle('attachments:pickFile', async () => {
+  const res = await dialog.showOpenDialog(win, {
+    title: 'Choose a proof-of-purchase file',
+    properties: ['openFile'],
+  });
+  if (res.canceled || !res.filePaths.length) return { ok: false, canceled: true };
+  return { ok: true, filePath: res.filePaths[0], fileName: path.basename(res.filePaths[0]) };
+});
+ipcMain.handle('attachments:addToSources', (_, { filePath, label, uuids } = {}) => {
+  try { return soundFontAttachments.addAttachmentToSources(app.getPath('userData'), { filePath, label, uuids: uuids || [] }); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+ipcMain.handle('attachments:removeEverywhere', (_, { id } = {}) => {
+  try { return soundFontAttachments.removeAttachmentEverywhere(app.getPath('userData'), id); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
 
 ipcMain.handle('entries:listFiles', (_, { name } = {}) => {
   try {
