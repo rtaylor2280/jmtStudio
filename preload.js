@@ -208,6 +208,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('sources:importProgress', handler);
     return () => ipcRenderer.removeListener('sources:importProgress', handler);
   },
+  linkImportStart:       (params)     => ipcRenderer.invoke('linkImport:start', params),
+  linkImportBrowser:     (params)     => ipcRenderer.invoke('linkImport:browser', params),
+  linkImportCleanup:     (params)     => ipcRenderer.invoke('linkImport:cleanup', params),
+  onLinkImportProgress: (cb) => {
+    const handler = (_, data) => cb(data);
+    ipcRenderer.on('linkImport:progress', handler);
+    return () => ipcRenderer.removeListener('linkImport:progress', handler);
+  },
 
   // Format-dispatch reads (slice 2)
   browseSource:          (params)     => ipcRenderer.invoke('sources:browse', params),

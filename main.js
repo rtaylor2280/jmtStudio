@@ -18,6 +18,7 @@ const soundFontReorganize = require('./soundFontReorganize');
 const soundFontVoicepack = require('./soundFontVoicepack');
 const soundFontSharedTracks = require('./soundFontSharedTracks');
 const soundFontAttachments = require('./soundFontAttachments');
+const soundFontLinkImport = require('./soundFontLinkImport');
 
 // ── Separate userData for dev vs prod ──────────────────
 if (!app.isPackaged) {
@@ -2226,6 +2227,154 @@ ipcMain.handle('sources:exportToPicked', async (_, { uuid } = {}) => {
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };
   }
+});
+
+// Import-from-link: peel a purchase/receipt URL down to a font archive and
+// download it to a temp file, streaming honest byte progress to the renderer.
+// On success the renderer hands the temp path to sources:import like any zip.
+ipcMain.handle('linkImport:start', async (event, { url } = {}) => {
+  const os = require('os');
+  const fsL = require('fs');
+  const pathL = require('path');
+  const send = (payload) => { try { event.sender.send('linkImport:progress', payload); } catch {} };
+  let last = 0;
+  const onProgress = (received, total) => {
+    const now = Date.now();
+    if (now - last >= 150 || (total && received >= total)) { last = now; send({ received, total }); }
+  };
+  try {
+    // No destDir here on purpose: resolve() creates the temp dir lazily, only
+    // when it actually has an archive to download. A failed fetch (gated, error)
+    // leaves nothing behind.
+    return await soundFontLinkImport.resolve(url, { onProgress });
+  } catch (e) {
+    return { ok: false, reason: 'error', message: String(e && e.message || e) };
+  }
+});
+
+// Tier 2: open the link in a real in-app browser window (Chromium, with a
+// persistent session so vendor logins carry over). The user clicks the vendor's
+// own Download button; we intercept the session's will-download, stream honest
+// byte progress, save to a temp file, and resolve with its path. Closing the
+// window without downloading cancels. This covers OneDrive / KSith / login-gated
+// vendors the headless peeler can't reach.
+ipcMain.handle('linkImport:browser', async (event, { url, autoHidden } = {}) => {
+  const os = require('os');
+  const fsL = require('fs');
+  const pathL = require('path');
+  const { BrowserWindow, session } = require('electron');
+  if (!url || !/^https?:\/\//i.test(url)) return { ok: false, message: 'Bad link.' };
+  // Created lazily when a download actually starts, so a canceled window (no
+  // download) leaves no empty temp dir behind.
+  let destDir = null;
+  const send = (payload) => { try { event.sender.send('linkImport:progress', payload); } catch {} };
+  const ses = session.fromPartition('persist:jmt-linkimport');
+  return await new Promise((resolve) => {
+    let settled = false;
+    let gotDownload = false;
+    let bw = null;
+    const onWillDownload = (_e, item) => {
+      gotDownload = true;
+      if (!destDir) {
+        try { destDir = fsL.mkdtempSync(pathL.join(os.tmpdir(), 'jmt-linkimport-')); }
+        catch (e) { finish({ ok: false, message: String(e && e.message || e) }); return; }
+      }
+      const name = (item.getFilename() || 'sound-font.zip').replace(/[<>:"|?*\x00-\x1f]/g, '_');
+      const destPath = pathL.join(destDir, name);
+      item.setSavePath(destPath);
+      // The download is captured and continues in the background — hide the
+      // window now (don't close: that could abort the download) so the user
+      // sees the import progress modal instead of a window covering it.
+      try { if (bw && !bw.isDestroyed()) bw.hide(); } catch {}
+      let last = 0;
+      item.on('updated', (__e, state) => {
+        if (state !== 'progressing') return;
+        const now = Date.now();
+        const received = item.getReceivedBytes();
+        const total = item.getTotalBytes();
+        if (now - last >= 150 || (total && received >= total)) { last = now; send({ received, total }); }
+      });
+      item.once('done', async (__e, state) => {
+        // We have the raw file (or a failure). Close the browser window now so a
+        // follow-on download (peeling a captured .txt/.rtf pointer) runs clean.
+        try { if (bw && !bw.isDestroyed()) bw.close(); } catch {}
+        if (state !== 'completed') { finish({ ok: false, message: `The download ${state}.` }); return; }
+        try {
+          // A gated download may hand back a .txt/.rtf pointer, not the archive —
+          // peel it the same way the headless resolver does.
+          const r = await soundFontLinkImport.resolveLocalFile(destPath, {
+            destDir,
+            onProgress: (received, total) => { const now = Date.now(); if (now - last >= 150 || (total && received >= total)) { last = now; send({ received, total }); } },
+          });
+          finish(r && r.ok ? { ok: true, filePath: r.filePath, fileName: r.fileName } : { ok: false, message: (r && r.message) || 'That download could not be imported.' });
+        } catch (e) { finish({ ok: false, message: String(e && e.message || e) }); }
+      });
+    };
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      try { ses.removeListener('will-download', onWillDownload); } catch {}
+      try { if (bw && !bw.isDestroyed()) bw.destroy(); } catch {}
+      resolve(result);
+    };
+    ses.on('will-download', onWillDownload);
+    bw = new BrowserWindow({
+      parent: win,
+      width: 1040, height: 780,
+      show: !autoHidden,
+      title: 'Download your font from the vendor',
+      autoHideMenuBar: true,
+      webPreferences: { partition: 'persist:jmt-linkimport', sandbox: true },
+    });
+    // Auto-hidden mode: we already have the vendor's session cookies, so try to
+    // let the download fire with no window at all. If instead a PAGE finishes
+    // loading (a login screen, or a page that needs a click) and no download has
+    // started, reveal the window so the user can finish — and tell the renderer.
+    if (autoHidden) {
+      bw.webContents.on('did-finish-load', () => {
+        setTimeout(() => {
+          if (!settled && !gotDownload && bw && !bw.isDestroyed() && !bw.isVisible()) {
+            try { bw.show(); } catch {}
+            send({ browserShown: true });
+          }
+        }, 2500);
+      });
+    }
+    // If the page itself comes back as an HTTP error (e.g. Cloudflare 522 when
+    // the vendor's origin is down), don't strand the user on the error page —
+    // fail with a plain, retryable message.
+    bw.webContents.on('did-navigate', (_e, _navUrl, httpResponseCode) => {
+      if (!gotDownload && httpResponseCode && httpResponseCode >= 400) {
+        finish({ ok: false, message: `The vendor site returned an error (HTTP ${httpResponseCode}). It may be temporarily down; try again in a few minutes.` });
+      }
+    });
+    // A download link that opens via target=_blank / window.open: load it in the
+    // same window so its download still fires on our session.
+    bw.webContents.setWindowOpenHandler(({ url: popupUrl }) => {
+      try { if (popupUrl) bw.loadURL(popupUrl); } catch {}
+      return { action: 'deny' };
+    });
+    bw.on('closed', () => { if (!gotDownload) finish({ ok: false, canceled: true }); });
+    bw.loadURL(url).catch(() => {});
+  });
+});
+
+// Delete a link-import temp dir once the source has been copied into the library
+// store, so a downloaded zip (and any .txt/.rtf pointer) never lingers as a
+// duplicate. Guarded to only ever remove our own jmt-linkimport-* temp dirs.
+ipcMain.handle('linkImport:cleanup', (_, { filePath } = {}) => {
+  const os = require('os');
+  const fsL = require('fs');
+  const pathL = require('path');
+  try {
+    if (!filePath) return { ok: false };
+    const dir = pathL.dirname(filePath);
+    if (pathL.basename(dir).startsWith('jmt-linkimport-') && dir.startsWith(os.tmpdir())) {
+      fsL.rmSync(dir, { recursive: true, force: true });
+      return { ok: true };
+    }
+    return { ok: false };
+  } catch (e) { return { ok: false, error: String(e && e.message || e) }; }
 });
 
 ipcMain.handle('sources:import', async (event, { sourcePath, originalName, metadata, forceNewSource } = {}) => {

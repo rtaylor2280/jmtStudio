@@ -2288,6 +2288,20 @@
   .sf-import-hint { font-size: 0.78rem; color: var(--c-text-sub); margin: 0 0 12px 0; line-height: 1.45; }
   .sf-import-pick-row { display: flex; gap: 10px; justify-content: center; margin-top: 16px; flex-wrap: wrap; }
   .sf-import-pick-row button { padding: 10px 20px; font-size: 0.9rem; }
+  /* Import from link: a third, co-equal choice alongside zip/folder. The three
+     buttons share the row equally; picking "Paste a link" reveals the field. */
+  #modal-sf-import .sf-import-pick-row { flex-wrap: nowrap; }
+  #modal-sf-import .sf-import-pick-row button { flex: 1 1 0; padding: 10px 12px; white-space: nowrap; }
+  .sf-import-link-block { margin-top: 6px; }
+  .sf-import-link-back { background: none; border: none; color: var(--jmt-blue); cursor: pointer; font-size: 0.82rem; padding: 0; margin-bottom: 10px; }
+  .sf-import-link-back:hover { opacity: 0.8; }
+  .sf-import-link-title { margin: 0 0 12px; font-size: 1.05rem; color: var(--c-text); font-weight: 600; }
+  .sf-import-link-row { display: flex; gap: 8px; align-items: center; }
+  .sf-import-link-row .sf-edit-input { flex: 1; min-width: 0; }
+  .sf-import-link-row button { flex-shrink: 0; padding: 8px 16px; font-size: 0.85rem; }
+  .sf-import-link-hint { margin: 8px 0 0; font-size: 0.76rem; color: var(--c-text-sub); line-height: 1.45; }
+  .sf-import-link-error { margin: 8px 0 0; font-size: 0.8rem; color: #e05555; line-height: 1.4; }
+  .sf-import-link-browser-btn { margin-top: 10px; padding: 8px 16px; font-size: 0.85rem; }
   /* Common-folder import chooser layout. zip and folder are the same
      category (local file source) so they sit side-by-side equally
      sized; voicepack is a different category (online source) so it
@@ -4345,12 +4359,33 @@
     <h2 id="sf-import-title">Import Sound Font</h2>
 
     <div class="sf-import-phase" id="sf-import-phase-pick">
-      <p class="sf-import-hint">Pick a sound font as it came from the vendor with preference for the original .zip download. JMT Studio keeps the archive intact and lets you choose which fonts inside to add to your library.</p>
-      <div class="sf-import-pick-row">
-        <button class="modal-btn-primary" id="sf-import-pick-zip">Pick .zip file…</button>
-        <button class="modal-btn-primary" id="sf-import-pick-folder">Pick folder…</button>
+      <!-- Chooser view: the three co-equal methods. Hidden once a method that
+           has its own sub-view (Paste a link) is chosen. -->
+      <div class="sf-import-chooser" id="sf-import-chooser">
+        <p class="sf-import-hint">Pick a sound font as it came from the vendor with preference for the original .zip download. JMT Studio keeps the archive intact and lets you choose which fonts inside to add to your library.</p>
+        <div class="sf-import-pick-row">
+          <button class="modal-btn-primary" id="sf-import-pick-zip">Pick .zip file…</button>
+          <button class="modal-btn-primary" id="sf-import-pick-folder">Pick folder…</button>
+          <button class="modal-btn-primary" id="sf-import-pick-link">Paste a link</button>
+        </div>
+        <p style="margin-top:14px;font-size:0.78rem;color:var(--c-text-sub);text-align:center">Already have many fonts to add? <a href="#" id="btn-sf-import-bulk-from-picker" style="color:var(--jmt-blue);text-decoration:underline;cursor:pointer">Bulk import from a folder</a></p>
       </div>
-      <p style="margin-top:14px;font-size:0.78rem;color:var(--c-text-sub);text-align:center">Already have many fonts to add? <a href="#" id="btn-sf-import-bulk-from-picker" style="color:var(--jmt-blue);text-decoration:underline;cursor:pointer">Bulk import from a folder</a></p>
+      <!-- Link view: focused sub-flow shown only after "Paste a link". -->
+      <div class="sf-import-link-block" id="sf-import-link-block" style="display:none">
+        <button type="button" class="sf-import-link-back" id="sf-import-link-back">&#8249; Import options</button>
+        <h3 class="sf-import-link-title">Import from a link</h3>
+        <div class="sf-import-link-row">
+          <div class="sf-url-input-wrap">
+            <input type="text" id="sf-import-link-url" class="sf-edit-input" placeholder="Download link from your receipt (Dropbox, vendor page…)" autocomplete="off" spellcheck="false">
+            <button type="button" class="sf-url-input-paste" id="btn-sf-import-link-paste" title="Paste link from clipboard and import"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="4" width="8" height="4" rx="1"/><path d="M16 6h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2"/></svg></button>
+            <button type="button" class="sf-url-input-clear" id="btn-sf-import-link-clear" title="Clear">&#10005;</button>
+          </div>
+          <button class="modal-btn-primary" id="sf-import-link-go">Import</button>
+        </div>
+        <p class="sf-import-link-hint" id="sf-import-link-hint">Paste the download link the vendor gave you. We'll fetch it and import it. If it needs a login or a click, we'll open it in an in-app browser for you.</p>
+        <p class="sf-import-link-error" id="sf-import-link-error" style="display:none"></p>
+        <button class="modal-btn-primary sf-import-link-browser-btn" id="sf-import-link-browser" style="display:none">Open in an in-app browser to download</button>
+      </div>
     </div>
 
     <div class="sf-import-phase" id="sf-import-phase-progress" style="display:none">
@@ -16107,6 +16142,17 @@ require(['vs/editor/editor.main'], function () {
         phaseCreate: document.getElementById('sf-import-phase-creating'),
         pickZipBtn:    document.getElementById('sf-import-pick-zip'),
         pickFolderBtn: document.getElementById('sf-import-pick-folder'),
+        chooser:       document.getElementById('sf-import-chooser'),
+        pickLinkBtn:   document.getElementById('sf-import-pick-link'),
+        linkBlock:     document.getElementById('sf-import-link-block'),
+        linkBackBtn:   document.getElementById('sf-import-link-back'),
+        linkHint:      document.getElementById('sf-import-link-hint'),
+        linkUrl:       document.getElementById('sf-import-link-url'),
+        linkPaste:     document.getElementById('btn-sf-import-link-paste'),
+        linkClear:     document.getElementById('btn-sf-import-link-clear'),
+        linkGoBtn:     document.getElementById('sf-import-link-go'),
+        linkError:     document.getElementById('sf-import-link-error'),
+        linkBrowserBtn: document.getElementById('sf-import-link-browser'),
         progLabel:   document.getElementById('sf-import-progress-label'),
         progBar:     document.getElementById('sf-import-progress-bar'),
         progDetail:  document.getElementById('sf-import-progress-detail'),
@@ -16214,6 +16260,12 @@ require(['vs/editor/editor.main'], function () {
       const _sfOpenImport = () => {
         _sfImport = null;
         if (_sfImportEls.title) _sfImportEls.title.textContent = 'Import Sound Font';
+        if (_sfImportEls.linkUrl) _sfImportEls.linkUrl.value = '';
+        if (_sfImportEls.linkError) { _sfImportEls.linkError.style.display = 'none'; _sfImportEls.linkError.textContent = ''; }
+        if (_sfImportEls.linkBrowserBtn) _sfImportEls.linkBrowserBtn.style.display = 'none';
+        if (_sfImportEls.linkHint) _sfImportEls.linkHint.style.display = '';
+        if (_sfImportEls.linkBlock) _sfImportEls.linkBlock.style.display = 'none';
+        if (_sfImportEls.chooser) _sfImportEls.chooser.style.display = '';
         _sfShowPhase('pick');
         if (_sfImportEls.modal) _sfImportEls.modal.classList.add('active');
       };
@@ -16605,11 +16657,15 @@ require(['vs/editor/editor.main'], function () {
       // pasted URL string for any post-paste bookkeeping.
       const _sfTryPasteUrlInto = async (inputEl, onSuccess) => {
         if (!inputEl) return false;
+        // Read via the main process (Electron clipboard) — the renderer's
+        // navigator.clipboard.readText() is permission-gated and silently
+        // rejects here, which broke every paste-icon button. Fall back to the
+        // web API only if the bridge is somehow unavailable.
         let clip = '';
-        try {
-          if (!navigator.clipboard || !navigator.clipboard.readText) return false;
-          clip = await navigator.clipboard.readText();
-        } catch { return false; }
+        try { clip = await window.electronAPI.readClipboard(); }
+        catch {
+          try { clip = await navigator.clipboard.readText(); } catch { return false; }
+        }
         const trimmed = (clip || '').trim();
         if (!_sfIsHttpUrl(trimmed)) {
           // Invalid → flash red briefly. The animation lives on the
@@ -17427,6 +17483,120 @@ require(['vs/editor/editor.main'], function () {
         _sfShowPhase('progress');
         if (wasActive) modal.classList.add('active');
         await _sfRunImport(sourcePath);
+      };
+
+      // Import from a pasted purchase/receipt link. The main-side peeler
+      // resolves the link to a font archive and downloads it to a temp file
+      // (honest byte progress, no ETA); on success we hand that path to the
+      // normal import flow. Any failure returns to the pick phase with the
+      // resolver's plain message — never a fake success.
+      const _sfLinkImport = async () => {
+        const url = (_sfImportEls.linkUrl && _sfImportEls.linkUrl.value || '').trim();
+        if (!url) return;
+        if (_sfImportEls.linkError) { _sfImportEls.linkError.style.display = 'none'; _sfImportEls.linkError.textContent = ''; }
+        if (_sfImportEls.linkBrowserBtn) _sfImportEls.linkBrowserBtn.style.display = 'none';
+        _sfShowPhase('progress');
+        if (_sfImportEls.progLabel) _sfImportEls.progLabel.textContent = 'Downloading font…';
+        if (_sfImportEls.progBar) _sfImportEls.progBar.style.width = '0%';
+        if (_sfImportEls.progDetail) _sfImportEls.progDetail.textContent = 'Following the link…';
+        const startMs = Date.now();
+        const fmtDur = (sec) => (window._sfFormatDuration ? window._sfFormatDuration(sec) : `${Math.round(sec)}s`);
+        if (_sfImportEls.progElapsed) _sfImportEls.progElapsed.textContent = `${fmtDur(0)} elapsed`;
+        const ticker = setInterval(() => {
+          if (_sfImportEls.progElapsed) _sfImportEls.progElapsed.textContent = `${fmtDur((Date.now() - startMs) / 1000)} elapsed`;
+        }, 1000);
+        const unsub = window.electronAPI.onLinkImportProgress((d) => {
+          if (!d || !_sfImportEls.progDetail) return;
+          if (d.total) {
+            const pct = Math.min(100, Math.max(0, (d.received / d.total) * 100));
+            if (_sfImportEls.progBar) _sfImportEls.progBar.style.width = `${pct}%`;
+            _sfImportEls.progDetail.textContent = `${_sfFormatBytes(d.received)} / ${_sfFormatBytes(d.total)} (${Math.floor(pct)}%)`;
+          } else {
+            _sfImportEls.progDetail.textContent = `${_sfFormatBytes(d.received)} downloaded`;
+          }
+        });
+        let r;
+        try { r = await window.electronAPI.linkImportStart({ url }); }
+        catch (e) { r = { ok: false, message: String(e && e.message || e) }; }
+        clearInterval(ticker);
+        try { if (unsub) unsub(); } catch {}
+        if (r && r.ok && r.filePath) {
+          await _sfRunImport(r.filePath);
+          try { await window.electronAPI.linkImportCleanup({ filePath: r.filePath }); } catch {}
+        } else if (r && r.browserRecoverable) {
+          // We may already have this vendor's login saved from a prior import.
+          // Try to continue headlessly with it first; the browser window only
+          // appears if a login or a click is actually needed.
+          _sfLinkPendingUrl = url;
+          await _sfBrowserImport(url, { auto: true });
+        } else {
+          _sfShowPhase('pick');
+          if (_sfImportEls.linkHint) _sfImportEls.linkHint.style.display = 'none';
+          if (_sfImportEls.linkError) {
+            _sfImportEls.linkError.textContent = (r && r.message) || 'Could not import from that link.';
+            _sfImportEls.linkError.style.display = '';
+          }
+          if (_sfImportEls.linkBrowserBtn) _sfImportEls.linkBrowserBtn.style.display = 'none';
+        }
+      };
+
+      // Tier 2: open the link in an in-app browser window; the user clicks the
+      // vendor's own Download and the main process captures the file. We just
+      // show a waiting/progress state and hand the captured zip to the importer.
+      let _sfLinkPendingUrl = null;
+      const _sfBrowserImport = async (url, opts = {}) => {
+        const auto = !!opts.auto;
+        if (!url) return;
+        if (_sfImportEls.linkError) { _sfImportEls.linkError.style.display = 'none'; _sfImportEls.linkError.textContent = ''; }
+        if (_sfImportEls.linkBrowserBtn) _sfImportEls.linkBrowserBtn.style.display = 'none';
+        _sfShowPhase('progress');
+        if (_sfImportEls.progLabel) _sfImportEls.progLabel.textContent = auto ? 'Trying with your saved login…' : 'Waiting for your download in the browser window…';
+        if (_sfImportEls.progBar) _sfImportEls.progBar.style.width = '0%';
+        if (_sfImportEls.progDetail) _sfImportEls.progDetail.textContent = auto ? 'Using the login you already have with this vendor.' : 'Click the vendor Download button. We will grab it and import it automatically.';
+        const startMs = Date.now();
+        const fmtDur = (sec) => (window._sfFormatDuration ? window._sfFormatDuration(sec) : `${Math.round(sec)}s`);
+        if (_sfImportEls.progElapsed) _sfImportEls.progElapsed.textContent = `${fmtDur(0)} elapsed`;
+        const ticker = setInterval(() => {
+          if (_sfImportEls.progElapsed) _sfImportEls.progElapsed.textContent = `${fmtDur((Date.now() - startMs) / 1000)} elapsed`;
+        }, 1000);
+        const unsub = window.electronAPI.onLinkImportProgress((d) => {
+          if (!d) return;
+          if (d.browserShown) {
+            // Headless attempt needed a login/click, so the window was revealed.
+            if (_sfImportEls.progLabel) _sfImportEls.progLabel.textContent = 'Sign in if asked, then click the vendor Download button…';
+            if (_sfImportEls.progDetail) _sfImportEls.progDetail.textContent = 'A browser window opened so you can finish the download.';
+            return;
+          }
+          if (!_sfImportEls.progDetail) return;
+          if (_sfImportEls.progLabel) _sfImportEls.progLabel.textContent = 'Downloading font…';
+          if (d.total) {
+            const pct = Math.min(100, Math.max(0, (d.received / d.total) * 100));
+            if (_sfImportEls.progBar) _sfImportEls.progBar.style.width = `${pct}%`;
+            _sfImportEls.progDetail.textContent = `${_sfFormatBytes(d.received)} / ${_sfFormatBytes(d.total)} (${Math.floor(pct)}%)`;
+          } else {
+            _sfImportEls.progDetail.textContent = `${_sfFormatBytes(d.received)} downloaded`;
+          }
+        });
+        let r;
+        try { r = await window.electronAPI.linkImportBrowser({ url, autoHidden: auto }); }
+        catch (e) { r = { ok: false, message: String(e && e.message || e) }; }
+        clearInterval(ticker);
+        try { if (unsub) unsub(); } catch {}
+        if (r && r.ok && r.filePath) {
+          await _sfRunImport(r.filePath);
+          try { await window.electronAPI.linkImportCleanup({ filePath: r.filePath }); } catch {}
+        } else {
+          _sfShowPhase('pick');
+          if (!r || !r.canceled) {
+            if (_sfImportEls.linkHint) _sfImportEls.linkHint.style.display = 'none';
+            if (_sfImportEls.linkError) {
+              _sfImportEls.linkError.textContent = (r && r.message) || 'The in-app download did not complete.';
+              _sfImportEls.linkError.style.display = '';
+            }
+          }
+          // Leave the browser button up so they can retry.
+          if (_sfImportEls.linkBrowserBtn) _sfImportEls.linkBrowserBtn.style.display = '';
+        }
       };
 
       // ── Entry detail view (Phase 3, slice 8 editable) ──
@@ -27286,6 +27456,32 @@ require(['vs/editor/editor.main'], function () {
       });
       _sfImportEls.pickZipBtn?.addEventListener('click', () => _sfPickAndImport('zip'));
       _sfImportEls.pickFolderBtn?.addEventListener('click', () => _sfPickAndImport('folder'));
+      // Enter the focused link view: hide the chooser (zip/folder/link + bulk),
+      // show just the link sub-flow. Back returns to the chooser.
+      const _sfEnterLinkMode = () => {
+        if (_sfImportEls.chooser) _sfImportEls.chooser.style.display = 'none';
+        if (_sfImportEls.linkBlock) _sfImportEls.linkBlock.style.display = '';
+        if (_sfImportEls.linkHint) _sfImportEls.linkHint.style.display = '';
+        if (_sfImportEls.linkError) { _sfImportEls.linkError.style.display = 'none'; _sfImportEls.linkError.textContent = ''; }
+        if (_sfImportEls.linkBrowserBtn) _sfImportEls.linkBrowserBtn.style.display = 'none';
+        if (_sfImportEls.linkUrl) _sfImportEls.linkUrl.focus();
+      };
+      const _sfExitLinkMode = () => {
+        if (_sfImportEls.linkBlock) _sfImportEls.linkBlock.style.display = 'none';
+        if (_sfImportEls.linkUrl) _sfImportEls.linkUrl.value = '';
+        if (_sfImportEls.linkError) { _sfImportEls.linkError.style.display = 'none'; _sfImportEls.linkError.textContent = ''; }
+        if (_sfImportEls.linkBrowserBtn) _sfImportEls.linkBrowserBtn.style.display = 'none';
+        if (_sfImportEls.linkHint) _sfImportEls.linkHint.style.display = '';
+        if (_sfImportEls.chooser) _sfImportEls.chooser.style.display = '';
+      };
+      _sfImportEls.pickLinkBtn?.addEventListener('click', _sfEnterLinkMode);
+      _sfImportEls.linkBackBtn?.addEventListener('click', _sfExitLinkMode);
+      _sfImportEls.linkGoBtn?.addEventListener('click', () => _sfLinkImport());
+      // Clipboard paste icon: fill the field and fire Import in one click.
+      _sfImportEls.linkPaste?.addEventListener('click', () => _sfTryPasteUrlInto(_sfImportEls.linkUrl, () => _sfLinkImport()));
+      _sfImportEls.linkClear?.addEventListener('click', () => { if (_sfImportEls.linkUrl) { _sfImportEls.linkUrl.value = ''; _sfImportEls.linkUrl.focus(); } });
+      _sfImportEls.linkUrl?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); _sfLinkImport(); } });
+      _sfImportEls.linkBrowserBtn?.addEventListener('click', () => _sfBrowserImport(_sfLinkPendingUrl));
       _sfImportEls.cancelBtn?.addEventListener('click', _sfCloseImportAndReturn);
       _sfImportEls.confirmBtn?.addEventListener('click', _sfConfirmImport);
       // Paste + clear icons on the Website and Link URL fields. Inside-
