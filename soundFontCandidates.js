@@ -359,6 +359,23 @@ function detectBundleOfZips(childFiles) {
   return candidateZips;
 }
 
+// Auxiliary-content folder names that must NEVER be promoted to a font, even
+// when their alternate-take sounds (extra lockups / melts / preons) clear the
+// MIN_EFFECT_TYPES gate. This is the font-promotion counterpart to
+// EFFECT_DIR_EXCLUSIONS, but deliberately WITHOUT the board-format names
+// (proffie/asteria/cfx/verso/...), because a board folder can legitimately be
+// a real subfolder-layout font. A vendor "extra" folder (Kyber Prime shipped
+// Golden Harvest/extra with 7 lockup/melt/preon variants) is not.
+const NON_FONT_FOLDER_NAMES = new Set([
+  'tracks', 'track', 'quote', 'quotes', 'common', '__macosx',
+  '_extras', 'extras', 'extra', 'bonus',
+]);
+function isNonFontFolderName(name) {
+  if (!name) return false;
+  return NON_FONT_FOLDER_NAMES.has(String(name).toLowerCase()) || NON_FONT_BUNDLE_NAME.test(String(name));
+}
+function _leafName(dir) { return dir ? dir.split('/').filter(Boolean).pop() || '' : ''; }
+
 // Walk down from startDir looking for Proffie-font roots. Returns an
 // array of paths — empty when nothing matches, one entry when there's a
 // single unambiguous root (e.g. JayDaloRian's wrapper `Proffie/<Font>/`),
@@ -374,7 +391,9 @@ function findAllProffieRoots(byParent, startDir) {
   const folders = children.filter(c => c.isDir);
   const files = children.filter(c => !c.isDir);
 
-  if (looksLikeProffieFont(folders, files, byParent)) return [startDir];
+  // Don't promote an auxiliary-content folder (extra/extras/bonus/...) to a
+  // font even if its alternate-take sounds clear the effect-type gate.
+  if (!isNonFontFolderName(_leafName(startDir)) && looksLikeProffieFont(folders, files, byParent)) return [startDir];
   if (folders.length === 0) return [];
 
   const matches = [];
@@ -402,8 +421,9 @@ function walkForCandidates(byParent, currentDir, candidates, fallbackName) {
   const childFolders = children.filter(c => c.isDir);
   const childFiles = children.filter(c => !c.isDir);
 
-  // CASE A: this dir IS a Proffie font.
-  if (looksLikeProffieFont(childFolders, childFiles, byParent)) {
+  // CASE A: this dir IS a Proffie font. (Aux-content folders like extra/bonus
+  // never promote, even when their alt-take sounds clear the effect-type gate.)
+  if (!isNonFontFolderName(_leafName(currentDir)) && looksLikeProffieFont(childFolders, childFiles, byParent)) {
     // Walk up the path from the leaf, skipping board names (Proffie,
     // CFX, Verso, etc.), to find a meaningful candidate name. The leaf
     // itself is preferred when it's not a board. When all segments are
