@@ -406,6 +406,21 @@ ipcMain.handle('toolchain:compile', async (_, { configContent, fqbn, buildOption
   return result;
 });
 
+// Dynamic-speed research bench: compile the given config across a list of
+// optimization levels, cache-bypassed, returning a timing/fit record per level.
+// Dev/test instrumentation — driven from the DevTools console via jmtBench().
+ipcMain.handle('toolchain:benchCompile', async (_, { configContent, fqbn, buildOptions, optList }) => {
+  const log = makeLogger();
+  if (win && !win.isDestroyed()) {
+    win.webContents.send('build:status', { type: 'compile', ok: null, message: 'Benchmarking compile...' });
+  }
+  const result = await toolchain.benchCompile(configContent, fqbn, buildOptions, optList, log);
+  if (win && !win.isDestroyed()) {
+    win.webContents.send('build:status', { type: 'compile', ok: true, message: 'Bench complete' });
+  }
+  return result;
+});
+
 ipcMain.handle('toolchain:flash', async (_, { port, fqbn }) => {
   const log = makeLogger();
 
@@ -2986,23 +3001,60 @@ ipcMain.handle('versions:downloadRelease', async (event, { downloadUrl, versionN
 // hidden devmode toggle in the versions panel. Session-only: every app launch resets
 // to `main` so a user can never accidentally end up on dev.
 let _addonBranch = 'main';
-const _JMT_REPO_BASE     = 'https://raw.githubusercontent.com/rtaylor2280/jmt-proffie-addons/';
-const _jmtManifestUrl = () => `${_JMT_REPO_BASE}${_addonBranch}/manifest.json`;
-const _jmtRawBase     = () => `${_JMT_REPO_BASE}${_addonBranch}/`;
-let _jmtManifestCache    = null;
-let _jmtManifestCachedAt = 0;
+const _JMT_REPO_BASE  = 'https://raw.githubusercontent.com/rtaylor2280/jmt-proffie-addons/';
+const _JMT_API_COMMIT = (branch) => `https://api.github.com/repos/rtaylor2280/jmt-proffie-addons/commits/${branch}`;
+const _jmtRawBranch   = () => `${_JMT_REPO_BASE}${_addonBranch}/`;   // branch-tip base (edge-cache lagged)
+const _jmtRawAt       = (sha) => `${_JMT_REPO_BASE}${sha}/`;         // SHA-pinned base (always fresh)
+let _jmtManifestCache = null;
+let _jmtCachedSha     = null;   // commit the cached manifest was fetched at
+let _jmtShaLast       = null;   // last resolved branch-tip SHA (throttled)
+let _jmtShaResolvedAt = 0;
 
-async function _getJmtManifest() {
+// Resolve the current branch-tip commit SHA via the GitHub API. Branch-NAME raw
+// URLs sit behind raw.githubusercontent's ~5-minute edge cache, so a fresh push
+// isn't visible for minutes (the pain when iterating on the addons). A raw URL
+// pinned to the full commit SHA is content-addressed and served immediately.
+// We pay ONE lightweight API call (Accept: sha returns just the 40-char hash),
+// then fetch manifest + every file from raw AT that SHA — no per-file API
+// rate-limit exposure, no CDN lag. Throttled ~8s to collapse bursty UI calls.
+async function _getJmtBranchSha() {
   const now = Date.now();
-  if (_jmtManifestCache && (now - _jmtManifestCachedAt < RELEASES_CACHE_TTL)) {
-    return { ok: true, manifest: _jmtManifestCache };
+  if (_jmtShaLast && (now - _jmtShaResolvedAt < 8000)) return _jmtShaLast;
+  const sha = (await _httpsGet(_JMT_API_COMMIT(_addonBranch), {
+    'User-Agent': 'JMT-Studio', 'Accept': 'application/vnd.github.sha',
+  })).trim();
+  if (!/^[0-9a-f]{40}$/i.test(sha)) throw new Error(`unexpected SHA from GitHub API: ${sha.slice(0, 60)}`);
+  _jmtShaLast = sha;
+  _jmtShaResolvedAt = now;
+  return sha;
+}
+
+// Returns { ok, manifest, sha }. The manifest at a given commit is immutable, so
+// the cache is keyed by SHA: a matching SHA serves the cache (no staleness), a
+// new SHA (a push) always re-fetches. Falls back to the branch-tip raw URL if
+// the API is unreachable/rate-limited (may be edge-stale, but never fails hard).
+async function _getJmtManifest() {
+  let sha = null;
+  try {
+    sha = await _getJmtBranchSha();
+  } catch {
+    try {
+      const body = await _httpsGet(`${_jmtRawBranch()}manifest.json?_=${Date.now()}`,
+        { 'User-Agent': 'JMT-Studio', 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' });
+      return { ok: true, manifest: JSON.parse(body), sha: null };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  }
+  if (_jmtManifestCache && _jmtCachedSha === sha) {
+    return { ok: true, manifest: _jmtManifestCache, sha };
   }
   try {
-    const body = await _httpsGet(_jmtManifestUrl() + '?_=' + Date.now(), { 'User-Agent': 'JMT-Studio', 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' });
+    const body = await _httpsGet(`${_jmtRawAt(sha)}manifest.json`, { 'User-Agent': 'JMT-Studio' });
     const manifest = JSON.parse(body);
-    _jmtManifestCache    = manifest;
-    _jmtManifestCachedAt = Date.now();
-    return { ok: true, manifest };
+    _jmtManifestCache = manifest;
+    _jmtCachedSha     = sha;
+    return { ok: true, manifest, sha };
   } catch (e) {
     return { ok: false, error: e.message };
   }
@@ -3013,10 +3065,12 @@ ipcMain.handle('versions:fetchJmtManifest', () => _getJmtManifest());
 ipcMain.handle('versions:getAddonBranch', () => _addonBranch);
 ipcMain.handle('versions:setAddonBranch', (_, branch) => {
   _addonBranch = branch === 'dev' ? 'dev' : 'main';
-  // Manifest cache is keyed by URL implicitly — flush it so the next fetch hits
-  // the new branch instead of returning the previous branch's cached manifest.
-  _jmtManifestCache    = null;
-  _jmtManifestCachedAt = 0;
+  // Flush everything branch-scoped so the next fetch resolves the new branch's
+  // tip SHA and manifest rather than reusing the previous branch's.
+  _jmtManifestCache = null;
+  _jmtCachedSha     = null;
+  _jmtShaLast       = null;
+  _jmtShaResolvedAt = 0;
   return { ok: true, branch: _addonBranch };
 });
 
@@ -3045,7 +3099,11 @@ ipcMain.handle('versions:checkJmtIntegrity', (_, { versionName, files }) => {
 ipcMain.handle('versions:applyJmtFeatures', async (event, versionName) => {
   const manifestResult = await _getJmtManifest();
   if (!manifestResult.ok) return manifestResult;
-  const { manifest } = manifestResult;
+  const { manifest, sha } = manifestResult;
+  // Pull files from the SAME commit the manifest came from (SHA-pinned = fresh,
+  // and guarantees files match the manifest even if a push lands mid-install).
+  // Fall back to the branch tip only if the SHA couldn't be resolved.
+  const _fileBase = sha ? _jmtRawAt(sha) : _jmtRawBranch();
 
   const proffieRoot = path.join(proffie.getUserVersionsPath(), versionName, 'ProffieOS');
   if (!fs.existsSync(proffieRoot)) return { ok: false, error: 'ProffieOS folder not found.' };
@@ -3071,7 +3129,7 @@ ipcMain.handle('versions:applyJmtFeatures', async (event, versionName) => {
     }
     for (const file of manifest.files) {
       win.webContents.send('versions:jmtProgress', { file: file.path, done, total });
-      const content = await _httpsGet(_jmtRawBase() + file.path, { 'User-Agent': 'JMT-Studio' });
+      const content = await _httpsGet(_fileBase + file.path, { 'User-Agent': 'JMT-Studio' });
       const dest = path.join(proffieRoot, file.path);
       fs.mkdirSync(path.dirname(dest), { recursive: true });
       fs.writeFileSync(dest, content, 'utf8');
@@ -3089,7 +3147,7 @@ ipcMain.handle('versions:applyJmtFeatures', async (event, versionName) => {
     // styles/edit_mode.h (unlikely today, defensive for the future).
     proffie.invalidateVersionHash(versionName);
     proffie.invalidateArgumentNames(versionName);
-    _jmtManifestCache = null;  // force fresh fetch on next check
+    _jmtManifestCache = null; _jmtCachedSha = null;  // force fresh fetch on next check
     return { ok: true, jmtVersion: manifest.version, removed: toDelete.length };
   } catch (e) {
     return { ok: false, error: e.message };

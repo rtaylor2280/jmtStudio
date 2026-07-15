@@ -37,8 +37,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // ── Toolchain ────────────────────────────────────────
   initToolchain: ()              => ipcRenderer.invoke('toolchain:initialize'),
-  compile: (configContent, fqbn, buildOptions) => 
+  compile: (configContent, fqbn, buildOptions) =>
     ipcRenderer.invoke('toolchain:compile', { configContent, fqbn, buildOptions }),
+  benchCompile: (configContent, fqbn, buildOptions, optList) =>
+    ipcRenderer.invoke('toolchain:benchCompile', { configContent, fqbn, buildOptions, optList }),
   flash:   (port, fqbn)          => ipcRenderer.invoke('toolchain:flash', { port, fqbn }),
   getToolStatus:  ()             => ipcRenderer.invoke('toolchain:getStatus'),
   abortCompile:   ()             => ipcRenderer.invoke('toolchain:abort'),

@@ -238,6 +238,10 @@ async function initBuildPanel() {
   el('bp-usb-select').addEventListener('change', e => {
     selectedUsb = e.target.value;
     updateUsbChangedIndicator();
+    // USB mode is persisted per-config via the @jmt:usb marker, so a change is a
+    // saveable config edit — mark dirty like the other meta fields do.
+    window.markConfigDirty?.();
+    window._resetMassStorageAck?.(); // a fresh mode choice re-arms the SD warning
     if (compileSuccess) {
       compileSuccess = false;
       setFlashEnabled(false);
@@ -441,6 +445,11 @@ async function doFlash() {
     appendLog('Compile first before flashing.', true);
     return;
   }
+
+  // SD-corruption guard: a Mass Storage USB mode with no MOUNT_SD_SETTING can
+  // corrupt an inserted card the instant the board enumerates. Scan regardless
+  // of how the mode got selected. Cancelling drops the user into the fix.
+  if (window.checkMassStorageBeforeFlash && !(await window.checkMassStorageBeforeFlash(selectedUsb))) return;
 
   // Pre-flash port check — verify board is still present
   if (!selectedPort || !selectedPortIsProffieboard) {
@@ -740,9 +749,22 @@ function onInputBoardChange() {
 }
 
 // ── IPC event handlers ─────────────────────────────────
+// A single expanded-template compile error can be tens of thousands of chars
+// wide (SingleValueAdapter<IntSVF<...>> chains plus an equally long caret
+// underline). Rendering raw lines that big chokes the DOM and buries the real
+// "file:line: error:" message. Cap what we render — the head always carries the
+// location and the actual error text. The full output still reaches the error
+// parser in the main process, so nothing diagnostic is lost.
+const MAX_LOG_LINE = 1000;
+function _truncateLogLine(line) {
+  if (typeof line !== 'string' || line.length <= MAX_LOG_LINE) return line;
+  return line.slice(0, MAX_LOG_LINE) + ` … [${line.length - MAX_LOG_LINE} more chars]`;
+}
+
 function onBuildLog({ line, isError }) {
-  appendLog(line, isError);
-  appendModalLog(line, isError);
+  const shown = _truncateLogLine(line);
+  appendLog(shown, isError);
+  appendModalLog(shown, isError);
 }
 
 function onBuildStatus({ type, ok, needsProffieOS, message }) {
@@ -2265,6 +2287,10 @@ async function doFlashDFU() {
     return;
   }
 
+  // Same SD-corruption guard as the serial flash path (the compiled binary
+  // carries the USB mode regardless of which flash route uploads it).
+  if (window.checkMassStorageBeforeFlash && !(await window.checkMassStorageBeforeFlash(selectedUsb))) return;
+
   if (!dfuDeviceReady) {
     // Device not yet detected — run the detection flow first, then flash
     await startDfuWaitModal();
@@ -2411,4 +2437,93 @@ window.setSelectedUsb      = (usb) => {
   const sel = el('bp-usb-select');
   if (sel) sel.value = usb;
   updateUsbChangedIndicator();
+  window._resetMassStorageAck?.(); // config load / mode set re-arms the SD warning
+};
+
+// ── Dynamic-speed compile bench (dev/test) ─────────────
+// Console helper for the "fast when you can, slower when you need it" research.
+// Measures real compile time + flash/RAM fit for the CURRENTLY OPEN config
+// across optimization levels, cache-bypassed. From the DevTools console:
+//   await jmtBench()                       // defaults to ['os','o2']
+//   await jmtBench(['os','o1','o2','o3'])  // full sweep
+// Each run also appends a line to local/compile-metrics.jsonl. Every level is a
+// full ProffieOS compile, so a multi-level sweep takes several minutes; the
+// Abort button stops it after the current level.
+window.jmtBench = async (optList = ['os', 'o2']) => {
+  if (!selectedFqbn) { console.warn('[jmtBench] No board selected — pick a board first.'); return; }
+  const content = window.getEditorContent();
+  console.log(`[jmtBench] Sweeping opt=[${optList.join(', ')}] on ${selectedFqbn}. ${optList.length} full compile(s) — this takes a while...`);
+  const res = await window.electronAPI.benchCompile(content, selectedFqbn, { usb: selectedUsb }, optList);
+  const rows = (res.runs || []).map(r => ({
+    opt: r.opt,
+    ok: r.ok,
+    seconds: r.durationMs != null ? +(r.durationMs / 1000).toFixed(1) : null,
+    flashKB: r.flashBytes != null ? Math.round(r.flashBytes / 1024) : null,
+    flashPct: r.flashPct != null ? r.flashPct : null,
+    ramKB: r.ramBytes != null ? Math.round(r.ramBytes / 1024) : null,
+    ramPct: r.ramPct != null ? r.ramPct : null,
+    fits: r.fits,
+    error: r.error || '',
+  }));
+  console.table(rows);
+  return res;
+};
+
+// ── LTO A/B (the lever for a fit-constrained config) ───
+// When you're already tight on flash, the opt-level knob can't move (dropping
+// -Os overflows). LTO can: it's a big slice of compile wall-clock, and turning
+// it off trades binary size (which you may have to spare) for speed. This runs
+// the CURRENTLY OPEN config twice — LTO on, then off — cache-bypassed, and
+// reports how much time LTO-off saves and whether the (larger) binary still
+// fits flash. Two full compiles, so it takes a while. From the DevTools console:
+//   await jmtBenchLto()
+window.jmtBenchLto = async () => {
+  if (!selectedFqbn) { console.warn('[jmtBenchLto] No board selected — pick a board first.'); return; }
+  const content = window.getEditorContent();
+  const runs = [];
+  for (const useLto of [true, false]) {
+    console.log(`[jmtBenchLto] compiling with LTO ${useLto ? 'ON' : 'OFF'} — full compile, hang tight...`);
+    const r = await window.electronAPI.compile(content, selectedFqbn, { usb: selectedUsb, bench: true, lto: useLto });
+    const flashMax = r.flashMax || 507904;
+    runs.push({
+      lto: useLto ? 'on' : 'off',
+      ok: !!r.ok,
+      minutes: r.durationMs != null ? +(r.durationMs / 60000).toFixed(1) : null,
+      flashKB: r.flashBytes != null ? Math.round(r.flashBytes / 1024) : null,
+      flashPct: r.flashPct != null ? r.flashPct : null,
+      flashFits: r.flashBytes != null ? r.flashBytes <= flashMax : null,
+      error: r.error || '',
+    });
+  }
+  console.table(runs);
+  const [on, off] = runs;
+  if (on.minutes && off.minutes) {
+    const saved = +(on.minutes - off.minutes).toFixed(1);
+    const pct = on.minutes ? Math.round(100 * saved / on.minutes) : 0;
+    console.log(`[jmtBenchLto] LTO off saved ${saved} min (${pct}%). Flash: on=${on.flashPct}% → off=${off.flashPct}%  ·  still fits flash? ${off.flashFits}`);
+  }
+  return runs;
+};
+
+// One-shot: a single LTO-OFF compile of the current config, cache-bypassed.
+// Faster than jmtBenchLto (one compile, not two) — compare its minutes/flash to
+// your known LTO baseline (the 17:49 run). Picks up any addon changes since it
+// recompiles against the current ProffieOS version. From the DevTools console:
+//   await jmtNoLto()
+window.jmtNoLto = async () => {
+  if (!selectedFqbn) { console.warn('[jmtNoLto] No board selected — pick a board first.'); return; }
+  console.log('[jmtNoLto] compiling with LTO OFF — full compile, hang tight...');
+  const r = await window.electronAPI.compile(window.getEditorContent(), selectedFqbn, { usb: selectedUsb, bench: true, lto: false });
+  const flashMax = r.flashMax || 507904;
+  const out = {
+    ok: !!r.ok,
+    minutes: r.durationMs != null ? +(r.durationMs / 60000).toFixed(1) : null,
+    flashKB: r.flashBytes != null ? Math.round(r.flashBytes / 1024) : null,
+    flashPct: r.flashPct != null ? r.flashPct : null,
+    flashFits: r.flashBytes != null ? r.flashBytes <= flashMax : null,
+    error: r.error || '',
+  };
+  console.table([out]);
+  console.log(`[jmtNoLto] ${out.minutes} min · flash ${out.flashPct}% · fits flash? ${out.flashFits}  (compare vs your ~17.8 min LTO baseline)`);
+  return out;
 };

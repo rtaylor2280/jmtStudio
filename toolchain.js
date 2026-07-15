@@ -22,11 +22,37 @@ function clearPartialBuild(buildPath) {
   });
 }
 
+// arduino-cli is only an orchestrator — the compile is done by a tree of child
+// processes it spawns (the proffieboard gcc toolchain, and cc1plus grinding
+// through the actual C++). Node's proc.kill() signals ONLY arduino-cli, so its
+// gcc children keep running to completion and keep streaming the whole error
+// dump into the pipe — which is why "Abort" appeared to hang and had to be
+// waited out. Kill the entire tree instead.
+function _killTree(proc) {
+  if (!proc) return;
+  const pid = proc.pid;
+  if (process.platform === 'win32') {
+    // /T = whole tree, /F = force. Fire-and-forget; if taskkill can't spawn,
+    // fall back to at least killing the parent.
+    try {
+      spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' });
+    } catch { try { proc.kill('SIGKILL'); } catch {} }
+  } else {
+    // Spawned detached on POSIX, so the child leads its own process group
+    // (pgid = pid). A negative pid signals the whole group, taking gcc/cc1plus
+    // down with it.
+    try { process.kill(-pid, 'SIGKILL'); }
+    catch { try { proc.kill('SIGKILL'); } catch {} }
+  }
+}
+
 function abort() {
   if (_currentProc) {
     _aborted = true;
-    _currentProc.kill();
-    _currentProc = null;
+    _killTree(_currentProc);
+    // Don't null _currentProc here — let the 'close' handler clear it once the
+    // tree is actually dead, so a second Abort click during a slow kill still
+    // finds the process instead of getting "No active process to abort".
     return { ok: true };
   }
   return { ok: false, error: 'No active process to abort' };
@@ -99,7 +125,14 @@ function runCli(args, onLog) {
 
     onLog(`> arduino-cli ${fullArgs.join(' ')}`, false);
 
-    const proc = spawn(v.cliPath, fullArgs, { cwd: dataPath });
+    // detached on POSIX makes the child a process-group leader so abort() can
+    // tree-kill the whole gcc/cc1plus group (see _killTree). No-op on Windows,
+    // where detached would spawn a separate console; taskkill /T handles the
+    // tree there instead.
+    const proc = spawn(v.cliPath, fullArgs, {
+      cwd: dataPath,
+      detached: process.platform !== 'win32',
+    });
     _currentProc = proc;
 
     let stdout = '', stderr = '';
@@ -341,10 +374,95 @@ async function initialize(onLog) {
  * onLog(line, isError) streams output back to renderer.
  * Returns { ok, error?, buildPath? }
  */
+// ── Compile metrics (dev/test instrumentation) ─────────
+// One JSONL record per compile, appended to local/compile-metrics.jsonl, for
+// the dynamic-speed research (the opt / toolchain-version time-vs-fit tradeoff:
+// backlog "Fast when you can, slower when you need it"). Dev-only by
+// construction: local/ is gitignored and absent from packaged builds, so the
+// sink silently no-ops in prod. Nothing here is allowed to throw into compile.
+const METRICS_PATH = path.join(__dirname, 'local', 'compile-metrics.jsonl');
+
+// Pull flash + RAM usage and ceilings out of arduino-cli's size summary. The
+// two sentences the toolchain prints look like:
+//   Sketch uses 245678 bytes (46%) of program storage space. Maximum is 524288 bytes.
+//   Global variables use 34567 bytes (26%) of dynamic memory, ... Maximum is 131072 bytes.
+function _parseSizeReport(output) {
+  const out = {};
+  const flash = output.match(/Sketch uses (\d+) bytes[\s\S]*?Maximum is (\d+) bytes/);
+  if (flash) { out.flashBytes = +flash[1]; out.flashMax = +flash[2]; }
+  const ram = output.match(/Global variables use (\d+) bytes[\s\S]*?Maximum is (\d+) bytes/);
+  if (ram) { out.ramBytes = +ram[1]; out.ramMax = +ram[2]; }
+  if (out.flashBytes != null && out.flashMax) out.flashPct = +(100 * out.flashBytes / out.flashMax).toFixed(1);
+  if (out.ramBytes != null && out.ramMax) out.ramPct = +(100 * out.ramBytes / out.ramMax).toFixed(1);
+  if (out.flashBytes != null && out.ramBytes != null) {
+    out.fits = out.flashBytes <= out.flashMax && out.ramBytes <= out.ramMax;
+  }
+  return out;
+}
+
+// Coarse failure bucket so the corpus can separate "didn't fit" from "toolchain
+// ran out of memory building it" from "the config has a real error" — these
+// mean very different things for the fast-vs-safe heuristic.
+function _classifyCompileError(output) {
+  if (/region `?FLASH'? overflowed/i.test(output)) return 'flash_overflow';
+  if (/region `?RAM'? overflowed/i.test(output)) return 'ram_overflow';
+  if (/out of memory|lto-wrapper.*(memory|failed)|\bKilled\b|std::bad_alloc/i.test(output)) return 'lto_oom';
+  if (/error:/i.test(output)) return 'compile_error';
+  return 'unknown';
+}
+
+// Measurable config inputs to correlate against fit/time when hunting a
+// threshold. Rough on purpose — Phase 1 is exploratory.
+function _configFeatures(configContent) {
+  const c = String(configContent || '');
+  const count = (re) => (c.match(re) || []).length;
+  return {
+    configBytes: c.length,
+    includeCount: count(/^\s*#include\b/gm),
+    defineCount: count(/^\s*#define\b/gm),
+    styleCount: count(/Style\w*Ptr\s*</g),
+    bladeConfigCount: count(/CONFIGARRAY\s*\(/g),
+  };
+}
+
+function _shortConfigHash(configContent) {
+  try {
+    return require('crypto').createHash('sha256')
+      .update(String(configContent || ''), 'utf8').digest('hex').slice(0, 12);
+  } catch { return null; }
+}
+
+function _logCompileMetrics(record) {
+  try {
+    // dirname is local/; present in dev, absent (inside asar) in packaged prod.
+    if (!fs.existsSync(path.dirname(METRICS_PATH))) return;
+    fs.appendFileSync(METRICS_PATH, JSON.stringify(record) + '\n');
+  } catch {}
+}
+
 async function compile(configContent, fqbn, buildOptions, onLog) {
   onLog('--- Compile started ---', false);
 
   const usb = (buildOptions && buildOptions.usb) || 'cdc_webusb';
+  // Optimization level (the dynamic-speed research knob). Board menu values are
+  // os|o1|o2|o3 (os = -Os + newlib-nano, the size-optimized default we ship).
+  // Overridable via buildOptions.opt or the JMT_COMPILE_OPT env var so A/B runs
+  // don't need a code edit.
+  const opt = (buildOptions && buildOptions.opt) || process.env.JMT_COMPILE_OPT || 'os';
+  // LTO knob — the second dynamic-speed lever, and the one that matters for a
+  // fit-constrained config where opt-level can't move. ProffieOS builds with
+  // whole-program `-flto`; the link-time LTRANS pass re-optimizes the ENTIRE
+  // program on every build and is a large slice of wall-clock. Turning it off
+  // (a `-fno-lto` appended after the platform's `-flto`, so it wins) skips that
+  // pass for a much faster DEV build, at the cost of a bigger binary (LTO's
+  // cross-unit dead-code elimination is lost, typically +10-20% size). Default
+  // ON so ship builds stay fully squeezed to fit; turn off per-build via
+  // buildOptions.lto === false or JMT_COMPILE_LTO=0.
+  const lto = (buildOptions && buildOptions.lto === false) ? false
+            : !/^(0|false|off)$/i.test(process.env.JMT_COMPILE_LTO || '');
+  // Bench runs bypass the persistent cache: a cache hit would report ~0ms
+  // (useless for timing) and bench builds shouldn't pollute the real cache.
+  const bench = !!(buildOptions && buildOptions.bench);
 
   const refCheck = proffie.ensureConfigFileRef(onLog);
   if (!refCheck.ok) { onLog(refCheck.error, true); return { ok: false, error: refCheck.error }; }
@@ -362,28 +480,77 @@ async function compile(configContent, fqbn, buildOptions, onLog) {
 
   const args = [
     'compile',
-    '--fqbn', `${fqbn}:usb=${usb},dosfs=${dosfs},speed=80,opt=os,pclk=2`,
+    '--fqbn', `${fqbn}:usb=${usb},dosfs=${dosfs},speed=80,opt=${opt},pclk=2`,
     '--build-path', buildPath,
     '--warnings', 'none',
     '--verbose',
-    sketchPath
   ];
+  // Extra compiler flags, composed per-language. `compiler.{c,cpp}.extra_flags`
+  // is the platform's designated user hook (empty by default) and the recipes
+  // place it AFTER the platform flags, so anything here wins.
+  const cppExtra = [];
+  const cExtra   = [];
+  // -fmax-errors caps the cascade at the source. A ProffieOS config error is
+  // almost always a single bad preset; once gcc's parser derails on it, every
+  // following line is garbage AND each expanded-template error is tens of
+  // thousands of chars wide. Without this, one typo dumps megabytes of output
+  // and the compile has to be waited out. 5 keeps the real error plus a little
+  // context, then gcc stops.
+  cppExtra.push('-fmax-errors=5');
+  cExtra.push('-fmax-errors=5');
+  if (!lto) {
+    // `-fno-lto` after the platform's `-flto` wins, so objects are built
+    // without LTO bytecode; the link's `-flto` then no-ops and the expensive
+    // LTRANS pass simply doesn't run.
+    cppExtra.push('-fno-lto');
+    cExtra.push('-fno-lto');
+  }
+  args.push('--build-property', `compiler.cpp.extra_flags=${cppExtra.join(' ')}`,
+            '--build-property', `compiler.c.extra_flags=${cExtra.join(' ')}`);
+  args.push(sketchPath);
 
+  const t0 = Date.now();
   const result = await runCli(args, onLog);
+  const durationMs = Date.now() - t0;
+  const wasAborted = _aborted;
+
+  const output = (result.stdout || '') + (result.stderr || '');
+  const sizeReport = result.ok ? _parseSizeReport(output) : {};
+
+  _logCompileMetrics({
+    ts: new Date().toISOString(),
+    durationMs,
+    ok: result.ok,
+    aborted: wasAborted,
+    errorClass: result.ok ? null : (wasAborted ? 'aborted' : _classifyCompileError(output)),
+    coreVersion: CORE_VERSION,
+    opt,
+    lto,
+    usb,
+    dosfs,
+    fqbn,
+    bench,
+    proffieOSVersion: (() => { try { return proffie.getSelectedVersion(); } catch { return null; } })(),
+    configHash: _shortConfigHash(configContent),
+    ...sizeReport,
+    ..._configFeatures(configContent),
+  });
 
   if (result.ok) {
-    onLog('--- Compile successful ---', false);
-    // Save to persistent cache
-    try {
-      const { app } = require('electron');
-      const proffieOSHash = proffie.hashVersion(proffie.getSelectedVersion());
-      const stylesContent = proffie.readStagedStyles();
-      cache.cacheCompileResult(buildPath, configContent, fqbn, usb, proffieOSHash,
-        new Date().toISOString(), app.getVersion(), stylesContent);
-    } catch {}
-    return { ok: true, buildPath };
+    onLog(`--- Compile successful (${(durationMs / 1000).toFixed(1)}s) ---`, false);
+    // Save to persistent cache (skipped for bench runs so timing harnesses
+    // never pollute the real cache).
+    if (!bench) {
+      try {
+        const { app } = require('electron');
+        const proffieOSHash = proffie.hashVersion(proffie.getSelectedVersion());
+        const stylesContent = proffie.readStagedStyles();
+        cache.cacheCompileResult(buildPath, configContent, fqbn, usb, proffieOSHash,
+          new Date().toISOString(), app.getVersion(), stylesContent);
+      } catch {}
+    }
+    return { ok: true, buildPath, durationMs, ...sizeReport };
   } else {
-    const wasAborted = _aborted;
     _aborted = false;
     if (wasAborted) {
       onLog('--- Compile aborted ---', true);
@@ -392,8 +559,32 @@ async function compile(configContent, fqbn, buildOptions, onLog) {
     }
     onLog('--- Compile failed ---', true);
     const cleanError = extractCompileError(result.stderr + result.stdout);
-    return { ok: false, error: cleanError };
+    return { ok: false, error: cleanError, durationMs, errorClass: _classifyCompileError(output) };
   }
+}
+
+// Bench harness for the dynamic-speed research: compile one config across a
+// list of optimization levels back-to-back, cache-bypassed, returning a timing
+// + fit record per level. Each underlying compile() also appends its own line
+// to local/compile-metrics.jsonl, so the persistent corpus grows either way.
+async function benchCompile(configContent, fqbn, buildOptions, optList, onLog) {
+  const opts = Array.isArray(optList) && optList.length ? optList : ['os', 'o2'];
+  const runs = [];
+  for (const opt of opts) {
+    onLog(`=== bench: opt=${opt} ===`, false);
+    const r = await compile(configContent, fqbn, { ...(buildOptions || {}), opt, bench: true }, onLog);
+    runs.push({
+      opt,
+      ok: !!r.ok,
+      durationMs: r.durationMs != null ? r.durationMs : null,
+      flashBytes: r.flashBytes, flashMax: r.flashMax, flashPct: r.flashPct,
+      ramBytes: r.ramBytes, ramMax: r.ramMax, ramPct: r.ramPct,
+      fits: r.fits,
+      error: r.ok ? null : (r.error || null),
+    });
+    if (r.aborted) break; // user killed the run mid-bench
+  }
+  return { ok: true, runs };
 }
 
 // ── Extract readable compile error ─────────────────────
@@ -1071,6 +1262,7 @@ function needsCoreInstall() {
 module.exports = {
   initialize,
   compile,
+  benchCompile,
   flash,
   flashDFU,
   detectDFU,

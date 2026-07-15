@@ -7,7 +7,7 @@
 //
 // Pipeline order:
 //   1. Leading vendor-version prefix     (1.1-, 2.0-, 1.2 )
-//   2. Known maker prefix                (KSith_, JUANSITH'S , RENvious_)
+//   2. Known maker prefix                (KSith_, JUANSITH'S )
 //   3. Accent transliteration            (acute, grave, diaeresis, etc.)
 //   4. Punctuation strip                 (apostrophes drop entirely)
 //   5. Trailing tail loop                (version stamp + platform tokens)
@@ -27,7 +27,6 @@ const VENDOR_PREFIXES = [
   "JUANSITH'S ",
   "JUANSITH´S ",
   'KSith_',
-  'RENvious_',
 ];
 
 // Trailing tokens that get peeled iteratively. Each loop iteration tries

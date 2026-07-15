@@ -1107,8 +1107,6 @@
   #bm-abort       { background: var(--c-danger-bg);  color: var(--c-danger-text);  border: 1px solid var(--c-danger-border); }
   #bm-close       { background: var(--c-success-bg); color: var(--c-success-text); border: 1px solid var(--c-success-border); }
   #bm-dfu-setup      { background: var(--jmt-blue); color: #fff; border: 1px solid #0a6abf; }
-  #bm-install-anyway { background: #3a2800; color: #fa0; border: 1px solid #6a4800; }
-  html.light-mode #bm-install-anyway { background: #fff3cd; color: #a06000; border: 1px solid #d4a800; }
   #bm-retry       { background: #1a2a3a; color: #4af;  border: 1px solid #2a4a6a; }
   html.light-mode #bm-board-flash,
   html.light-mode #bm-retry       { background: #e8f0fe; color: #1a4a9a; border-color: #b0c8f0; }
@@ -5868,6 +5866,119 @@ function setDirty(v) {
   updateWindowTitle();
 }
 
+// Meta-bar edits made from other modules (e.g. the USB-mode dropdown, wired in
+// buildPanel.js) route dirty through here so they honor the same fileIsOpen
+// guard as the in-scope meta handlers (description/board/version).
+window.markConfigDirty = () => { if (fileIsOpen) setDirty(true); };
+
+// ── SD-card corruption guard (USB Mass Storage) ─────────
+// USB Mass Storage hands the SD card to the host the instant the board
+// enumerates. Without MOUNT_SD_SETTING (an OS8+ define) it auto-mounts with no
+// safe-eject window, corrupting the card during flashing and every later
+// plug/unplug. Both usb=cdc_msc and the define are compile-time, so the check
+// scans the config before a flash regardless of how the USB mode was selected.
+// Remembers the USB mode the user already accepted the risk for, so auto-retry
+// flashes don't re-prompt mid-recovery. Re-armed whenever the USB mode changes
+// or a config loads (see _resetMassStorageAck).
+let _msgStorageAckMode = null;
+window._resetMassStorageAck = () => { _msgStorageAckMode = null; };
+function _configHasMountSdSetting(text) {
+  return /^[ \t]*#define[ \t]+MOUNT_SD_SETTING\b/m.test(text || '');
+}
+function _currentOsMajor() {
+  const v = document.getElementById('input-version')?.value || '';
+  const m = v.match(/(\d+)\s*\.\s*\d+/) || v.match(/(\d+)/);
+  return m ? parseInt(m[1], 10) : null;
+}
+// Inserts #define MOUNT_SD_SETTING into CONFIG_TOP as one undoable Monaco edit,
+// mirroring the board-include insertion. Editing the model fires
+// onEditorContentChanged, which invalidates the stale compile automatically.
+function _injectMountSdSetting() {
+  if (!editor) return false;
+  const text = editor.getValue();
+  if (_configHasMountSdSetting(text)) return false;
+  const lines = text.split('\n');
+  const ifdefIdx = lines.findIndex(l => /^[ \t]*#ifdef\s+CONFIG_TOP\b/.test(l));
+  const defineLine = '#define MOUNT_SD_SETTING                        // SD access stays off until "sd 1": prevents auto-mount SD corruption (added by JMT Studio)\n';
+  let insertLineNum;
+  if (ifdefIdx !== -1) {
+    insertLineNum = ifdefIdx + 2; // 1-based; line right after #ifdef CONFIG_TOP
+  } else {
+    insertLineNum = _findFirstNonCommentLineIdx(text) + 1;
+  }
+  _atomicEdit(editor, 'mount-sd-setting-insert', [{
+    range: new monaco.Range(insertLineNum, 1, insertLineNum, 1),
+    text:  defineLine,
+  }]);
+  if (fileIsOpen) setDirty(true);
+  flashEditorLine(insertLineNum);
+  return true;
+}
+// Flash preflight. Returns true to proceed with the flash, false to abort.
+// Safe cases (non-MSC mode, or the define present) pass silently.
+window.checkMassStorageBeforeFlash = async function (usbMode) {
+  if (!usbMode || !/msc/i.test(usbMode)) return true;      // not a Mass Storage mode
+  const text = editor ? editor.getValue() : '';
+  if (_configHasMountSdSetting(text)) return true;         // guarded — safe
+  if (_msgStorageAckMode === usbMode) return true;         // already accepted this mode
+
+  const osMajor = _currentOsMajor();
+  const isOS8plus = osMajor != null && osMajor >= 8;
+  const riskBody =
+    `Without a guard, the board exposes the SD card to your computer the instant ` +
+    `it's plugged in, with no safe-eject, so it can corrupt the card during flashing ` +
+    `and every later plug/unplug. Flashing with <strong>no card inserted is safe</strong>.`;
+
+  if (isOS8plus) {
+    const proceed = await promptConfirm({
+      title:       'SD Card Corruption Risk',
+      messageHtml: `This config flashes with <strong>USB Mass Storage</strong> but is missing ` +
+                   `<code>#define MOUNT_SD_SETTING</code>.<br><br>${riskBody}`,
+      confirmText: 'Flash anyway',
+      confirmKind: 'danger',
+      cancelText:  'Cancel',
+    });
+    if (proceed) { _msgStorageAckMode = usbMode; return true; }
+    // Cancelled — drop them straight into the fix rather than a dead end.
+    const add = await promptConfirm({
+      title:       'Add SD Card Protection?',
+      messageHtml: `Add <code>#define MOUNT_SD_SETTING</code> to this config now?<br><br>` +
+                   `SD access will stay off until you run <code>sd 1</code>, so the card can't ` +
+                   `auto-mount. You'll need to <strong>recompile</strong> for it to take effect.`,
+      confirmText: 'Add define',
+      confirmKind: 'save',
+      cancelText:  'Not now',
+    });
+    if (add && _injectMountSdSetting()) {
+      showToast('Added #define MOUNT_SD_SETTING. Recompile to apply, then flash.');
+    }
+    return false; // abort this flash either way (binary is still unguarded)
+  }
+
+  // Below OS8: MOUNT_SD_SETTING does not exist, so warn strongly + require ack.
+  const res = await promptConfirm({
+    title:       'SD Card Corruption Risk',
+    messageHtml: `This config flashes with <strong>USB Mass Storage</strong> on an OS version with ` +
+                 `no way to stop the SD card auto-mounting (pre-OS8).<br><br>${riskBody}<br><br>` +
+                 `To protect an inserted card, switch the USB mode to Serial + WebUSB, or move to OS8.`,
+    confirmText: 'Flash anyway',
+    confirmKind: 'danger',
+    cancelText:  'Cancel',
+    checkbox: {
+      label: 'I understand this can corrupt an inserted SD card',
+      hint:  'Only proceed if no card is inserted, or you accept the risk.',
+    },
+  });
+  // Clicking "Flash anyway" without ticking the box would otherwise abort with
+  // no feedback and read as a broken button, so tell them what's needed.
+  if (res && res.confirmed && !res.checked) {
+    showToast('Tick the box to confirm you accept the SD-card risk before flashing.', { kind: 'warn' });
+  }
+  const ok = !!(res && res.confirmed && res.checked);
+  if (ok) _msgStorageAckMode = usbMode;
+  return ok;
+};
+
 // ── Window title ───────────────────────────────────────
 function updateWindowTitle() {
   if (!isElectron) return;
@@ -6369,7 +6480,11 @@ function loadContent(rawContent, filePath) {
   if (!resolvedBoard) resolvedBoard = board;
   boardSel.value = resolvedBoard ? (Array.from(boardSel.options).find(o => o.value === resolvedBoard) ? resolvedBoard : '') : '';
   boardSel.dispatchEvent(new Event('change'));
-  if (usb && window.setSelectedUsb) window.setSelectedUsb(usb);
+  // Marker-less configs must NOT inherit the previously-open config's USB mode.
+  // That silent bleed is how USB Mass Storage (and the SD-card corruption it
+  // causes) slipped into configs that never asked for it. Fall back to the safe
+  // Serial + WebUSB; a deliberate Mass Storage choice re-saves its own marker.
+  if (window.setSelectedUsb) window.setSelectedUsb(usb || 'cdc_webusb');
   const versionSel  = document.getElementById('input-version');
   const exactMatch  = version
     ? Array.from(versionSel.options).find(o => o.value === version)
@@ -9502,9 +9617,13 @@ function _parseStyleEntries(content) {
     const gapStart  = realHEnd !== -1 ? realHEnd + 2 : usingIdx;
     const gapText   = realHEnd !== -1 ? content.slice(realHEnd + 2, usingIdx) : '';
 
-    // The using statement — everything from `using NAME =` to the closing `;`
+    // The using statement — everything from `using NAME =` to the closing `;`.
+    // Scan for the terminating ';' with comment-awareness: style expressions
+    // routinely embed ';' inside /* */ or // annotations (DEV placeholder
+    // blocks, inline notes), and a plain indexOf(';') truncates the style at
+    // the first commented semicolon — corrupting it on save/reopen.
     const usingBlock = content.slice(usingIdx, nextIdx);
-    const semiIdx    = usingBlock.indexOf(';');
+    const semiIdx    = _findUsingExprEnd(usingBlock, 0);
     const usingCode  = semiIdx !== -1 ? usingBlock.slice(0, semiIdx + 1).trim() : usingBlock.trim();
     const usingEnd   = usingIdx + (semiIdx !== -1 ? semiIdx + 1 : usingCode.length);
 
@@ -11800,6 +11919,25 @@ document.getElementById('modal-add-style').addEventListener('click', async e => 
     _addStyleConfirmCallback = null;
   }
 });
+// Find the index of the statement-terminating ';' for a `using X = ...;`,
+// scanning from `from` and SKIPPING semicolons that live inside /* */ or //
+// comments. Style annotations (DEV placeholder blocks, inline /* CHANGED */
+// notes) routinely contain semicolons; a naive first-';' match truncates the
+// expression at the first commented one. Returns -1 if no bare ';' is found.
+function _findUsingExprEnd(text, from) {
+  let i = from, inBlock = false, inLine = false;
+  while (i < text.length) {
+    const c = text[i], c2 = text[i + 1];
+    if (inLine) { if (c === '\n') inLine = false; i++; continue; }
+    if (inBlock) { if (c === '*' && c2 === '/') { inBlock = false; i += 2; continue; } i++; continue; }
+    if (c === '/' && c2 === '*') { inBlock = true; i += 2; continue; }
+    if (c === '/' && c2 === '/') { inLine = true; i += 2; continue; }
+    if (c === ';') return i;
+    i++;
+  }
+  return -1;
+}
+
 // Parse clipboard content into structured style fields
 function _parseClipboardStyle(text) {
   const raw = text.trim();
@@ -11816,7 +11954,12 @@ function _parseClipboardStyle(text) {
     const bodyLines = [firstLine, ...blockMatch[3].split('\n').map(l => l.trim())].filter(Boolean);
     const noteLines = [];
     for (const line of bodyLines) {
-      if (line.startsWith('copyright ')) {
+      if (/^source:/i.test(line)) {
+        // Labeled `source:` — the format JMT Studio itself writes on export.
+        if (!result.source) result.source = line.replace(/^source:/i, '').trim();
+      } else if (/^url:/i.test(line)) {
+        if (!result.url) result.url = line.replace(/^url:/i, '').trim();
+      } else if (line.startsWith('copyright ')) {
         result.source = line.replace(/^copyright\s+/, '').trim();
       } else if (/^https?:\/\//i.test(line)) {
         if (!result.url) result.url = line.trim();
@@ -11834,10 +11977,14 @@ function _parseClipboardStyle(text) {
   // name and `=`. Without this, `using NAME* = ...;` fails to match and falls
   // through to the StylePtr fallback, which then pulls the bogus `NAME*` token
   // out of the trailing "Add to preset as StylePtr<NAME*>()" comment.
-  const usingM = raw.match(/\busing\s+(\w+)[^\w\s=;]*\s*=\s*([\s\S]+?)\s*;/);
-  if (usingM) {
-    if (!result.name) result.name = usingM[1];
-    result.expr = usingM[2].replace(/\s+/g, ' ').trim();
+  const usingHead = raw.match(/\busing\s+(\w+)[^\w\s=;]*\s*=\s*/);
+  if (usingHead) {
+    if (!result.name) result.name = usingHead[1];
+    // Terminate at the real statement ';', not one buried in a comment.
+    const exprStart = usingHead.index + usingHead[0].length;
+    const semi = _findUsingExprEnd(raw, exprStart);
+    const exprRaw = semi >= 0 ? raw.slice(exprStart, semi) : raw.slice(exprStart);
+    result.expr = exprRaw.replace(/\s+/g, ' ').trim();
   } else if (/\b\w*StylePtr\s*</.test(raw)) {
     const inner = _extractStylePtrInner(raw);
     if (inner) result.expr = inner.replace(/\s+/g, ' ').trim();
@@ -13601,14 +13748,21 @@ require(['vs/editor/editor.main'], function () {
           if (!_sfInUseFilterOn) return true;
           return inUseFonts.has(f.name);
         };
-        // Selected cards bypass the current filter — they stay visible even
-        // when the search/tag/creator/effects filter would otherwise hide
-        // them. The mental model: selection is a "keep this" override on
-        // top of the filter. Clearing the selection lets the filter take
-        // over again.
+        // Text search is authoritative: a typed query gates EVERY card,
+        // selected or not. A search that matches nothing must show nothing
+        // (and fall through to the "No fonts match" empty state) rather than
+        // silently displaying a stale selection as if it were the result.
+        //
+        // Selection still overrides the TOGGLE filters (tags / creator /
+        // effects / needs-review / in-use): those are deliberate switches,
+        // and keeping selected cards visible while toggling them is the
+        // useful "keep this" behavior. Clearing the selection lets the
+        // toggle filters take over again. But selection does NOT override
+        // the search box — you type to narrow, so narrow it does.
         const matching = sorted.filter(f =>
-          _sfSelectedNames.has(f.name) ||
-          (matchesSearch(f) && matchesTagFilter(f) && matchesCreatorFilter(f) && matchesEffectsFilter(f) && matchesNeedsReviewFilter(f) && matchesInUseFilter(f))
+          matchesSearch(f) &&
+          (_sfSelectedNames.has(f.name) ||
+            (matchesTagFilter(f) && matchesCreatorFilter(f) && matchesEffectsFilter(f) && matchesNeedsReviewFilter(f) && matchesInUseFilter(f)))
         );
         const isFiltering = !!q || _sfActiveFilterTags.size > 0 || _sfActiveFilterCreators.size > 0 || _sfActiveFilterEffects.size > 0 || _sfActiveFilterEffectsMissing.size > 0 || _sfNeedsReviewFilterOn || _sfInUseFilterOn;
         // Needs Review filter button: visible only when at least one entry
@@ -23825,8 +23979,10 @@ require(['vs/editor/editor.main'], function () {
         const names = Array.from(_sfSelectedNames);
         if (names.length === 0) return false;
         // Common inclusion logic:
-        //   config refs ;common AND starred exists  → include silently (uses default)
-        //   config refs ;common AND no starred       → warn (only fonts ship)
+        //   config refs ;common AND config-selected common is in library → use THAT one
+        //   config refs ;common AND config named a common that's missing  → ask (default / fonts-only / cancel)
+        //   config refs ;common AND no config selection AND starred exists → include starred silently
+        //   config refs ;common AND no config selection AND no starred     → warn (only fonts ship)
         //   config DOESN'T ref ;common AND 1 common  → 3-button ask (default uuid)
         //   config DOESN'T ref ;common AND 2+ commons → dropdown forces an explicit pick
         //   config DOESN'T ref ;common AND no commons → don't include, no ask
@@ -23836,17 +23992,46 @@ require(['vs/editor/editor.main'], function () {
         // Tracks which common to include for this Save. Defaults to the
         // starred uuid; the multi-common dropdown can override it.
         let _sfBulkSaveCommonOverride = null;
-        if (wantsCommon && hasStarred) {
-          includeCommon = true;
-        } else if (wantsCommon && !hasStarred) {
-          const ok = await promptConfirm({
-            title: 'No common folder available',
-            message: 'The open config references a "common" folder, but no common folder is imported in your library.\nSave will only include the selected fonts. Continue?',
-            confirmText: 'Continue',
-            confirmKind: 'primary',
-            cancelText: 'Cancel',
-          });
-          if (!ok) return false;
+        if (wantsCommon) {
+          // Honor the common the OPEN CONFIG selected (@jmt:common, tracked
+          // as window._sfActiveCommonForConfig) before the global starred
+          // default. Shipping the starred common when the config asked for a
+          // different one puts the wrong sounds on the card.
+          const activeName = window._sfActiveCommonForConfig || '';
+          const configCommon = activeName
+            ? _sfCommons.find(c => (c.meta && c.meta.name) === activeName)
+            : null;
+          if (configCommon) {
+            includeCommon = true;
+            _sfBulkSaveCommonOverride = configCommon.uuid;
+          } else if (activeName && hasStarred) {
+            // Config named a specific common that isn't in the library. Don't
+            // silently substitute the (different) starred default — let the
+            // user ship it, ship fonts only, or cancel.
+            const choice = await promptConfirm({
+              title: 'Config common folder not found',
+              message: `The open config references the common folder "${activeName}", but it isn't in your library.\nInclude your default common folder instead, or save only the selected fonts?`,
+              confirmText: 'Use default',
+              confirmKind: 'primary',
+              middleText: 'Fonts only',
+              cancelText: 'Cancel',
+            });
+            if (choice === 'cancel') return false;
+            includeCommon = choice === 'confirm';
+          } else if (hasStarred) {
+            // Config references ;common but didn't name a specific one; the
+            // starred default is the right pick.
+            includeCommon = true;
+          } else {
+            const ok = await promptConfirm({
+              title: 'No common folder available',
+              message: 'The open config references a "common" folder, but no common folder is imported in your library.\nSave will only include the selected fonts. Continue?',
+              confirmText: 'Continue',
+              confirmKind: 'primary',
+              cancelText: 'Cancel',
+            });
+            if (!ok) return false;
+          }
         } else if (!wantsCommon && hasStarred) {
           // Config doesn't ask for it — but the user has one available.
           // Single-common case: simple 3-button (Cancel / Skip / Include).
@@ -34447,8 +34632,7 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
       <div id="bm-hint"></div>
       <div style="display:flex;gap:8px;">
         <button id="bm-abort"          class="bm-btn">⊘ Abort</button>
-        <button id="bm-dfu-setup"      class="bm-btn" style="display:none;">⬇ Download DFU Tool</button>
-        <button id="bm-install-anyway" class="bm-btn" style="display:none;">⚠ Install Anyway</button>
+        <button id="bm-dfu-setup"      class="bm-btn" style="display:none;">▶ Install DFU Driver</button>
         <button id="bm-retry"          class="bm-btn" style="display:none;">↺ Retry Flash</button>
         <button id="bm-close"          class="bm-btn" style="display:none;">Close</button>
       </div>
