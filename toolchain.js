@@ -528,33 +528,85 @@ function touchReset(port, onLog) {
   });
 }
 
-// ── Wait for DFU device ────────────────────────────────
-function waitForDfu(onLog, timeoutMs = 10000) {
+// Returns the Windows driver service currently bound to the STM32 bootloader
+// (e.g. 'WinUSB', 'STTub30'), or '' if none/unknown. Lets us tell a genuine
+// WinUSB bind-in-progress from a wrong driver that will never become openable.
+function _getDfuBoundService() {
+  if (process.platform !== 'win32') return Promise.resolve('');
+  const { execFile } = require('child_process');
+  const ps = "$d = Get-PnpDevice -PresentOnly | Where-Object { $_.InstanceId -match 'VID_0483&PID_DF11' } | Select-Object -First 1; if ($d) { (Get-PnpDeviceProperty -InstanceId $d.InstanceId -KeyName 'DEVPKEY_Device_Service' -ErrorAction SilentlyContinue).Data }";
+  return new Promise((resolve) => {
+    execFile('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], { timeout: 4000 }, (err, stdout) => {
+      resolve(err ? '' : String(stdout || '').trim());
+    });
+  });
+}
+
+// ── Wait for DFU device to become accessible ───────────
+// After a touch reset the board re-enumerates as the STM32 DFU bootloader, but
+// on Windows the WinUSB driver has to bind to that bootloader's unique serial
+// before dfu-util can open it. For a board this PC has flashed before the bind
+// is instant; for a serial Windows hasn't seen it can lag several seconds
+// behind enumeration. The old 10s gate treated that lag as a missing driver
+// and diverted every fresh board into the manual Bootloader-Mode flow (holding
+// BOOT, reinstalling the driver) even though the automatic path would have
+// completed on its own a moment later. We now wait patiently for the device to
+// become openable and report what we actually saw, so the caller can tell
+// "still binding" from "never showed up at all".
+//
+// Resolves { openable, everPresent, elapsedMs }
+//   openable    — dfu-util can open the device now; safe to flash
+//   everPresent — the DFU VID:PID appeared at least once (board did enter DFU)
+function waitForDfuAccessible(onLog, deadlineMs = 25000) {
   return new Promise((resolve) => {
     onLog('Waiting for DFU device...', false);
     const start    = Date.now();
     const dfuUtil  = getDfuUtilPath();
     const toolsDir = getToolsPath();
     ensureExecutable(dfuUtil);
+    let everPresent  = false;
+    let notedBinding = false;
 
     const check = () => {
       const { execFile } = require('child_process');
-      execFile(dfuUtil, ['-l'], { timeout: 3000, cwd: toolsDir, env: getDfuEnv(toolsDir) }, (err, stdout, stderr) => {
-        const output = (stdout || '') + (stderr || '');
-        const lines  = output.split(/\r?\n/);
-        const found  = lines.some(l =>
+      execFile(dfuUtil, ['-l'], { timeout: 3000, cwd: toolsDir, env: getDfuEnv(toolsDir) }, async (err, stdout, stderr) => {
+        const output  = (stdout || '') + (stderr || '');
+        const lines   = output.split(/\r?\n/);
+        const elapsed = Date.now() - start;
+
+        const openable = lines.some(l =>
           l.trim().startsWith('Found DFU:') &&
           (l.includes('0483:df11') || l.includes('1209:6668'))
         );
-        if (found) {
-          onLog('DFU device detected.', false);
-          return resolve(true);
+        if (openable) {
+          onLog(`DFU device ready after ${(elapsed / 1000).toFixed(1)}s.`, false);
+          return resolve({ openable: true, everPresent: true, elapsedMs: elapsed });
         }
-        if (Date.now() - start > timeoutMs) {
-          onLog('Timed out waiting for DFU device.', true);
-          return resolve(false);
+
+        // Present on the bus but not openable. On Windows, find out WHY before
+        // committing to the full wait: if WinUSB is mid-bind it will succeed on
+        // its own, but if a non-WinUSB driver (e.g. ST's STTub30) is bound it
+        // never will. In that case bail immediately with wrongDriver set so the
+        // caller can install our driver instead of burning the whole deadline.
+        const mentioned = output.includes('0483:df11') || output.includes('1209:6668');
+        if (mentioned) {
+          everPresent = true;
+          if (!notedBinding && elapsed > 2000) {
+            notedBinding = true;
+            const svc = await _getDfuBoundService();
+            if (svc && !/winusb/i.test(svc)) {
+              onLog(`Board is in bootloader mode, but WinUSB is not the active driver (currently: ${svc}).`, false);
+              return resolve({ openable: false, everPresent: true, wrongDriver: true, boundService: svc, elapsedMs: elapsed });
+            }
+            onLog('Board is in bootloader mode. Waiting for the USB driver to attach (this can take a few seconds on a board this PC hasn\'t flashed before)...', false);
+          }
         }
-        setTimeout(check, 500);
+
+        if (elapsed > deadlineMs) {
+          onLog(`Timed out after ${(elapsed / 1000).toFixed(1)}s waiting for the DFU device to become accessible.`, true);
+          return resolve({ openable: false, everPresent, elapsedMs: elapsed });
+        }
+        setTimeout(check, 750);
       });
     };
     check();
@@ -761,7 +813,7 @@ async function runDfuFlash(dfuPath, toolsDir, onLog) {
     const combined = (flashResult.stderr || '') + (flashResult.stdout || '');
     const error = extractFlashError(combined);
     // Linux without udev rules: dfu-util can enumerate the device via sysfs
-    // (so waitForDfu + detectDFU don't catch it as inaccessible) but the
+    // (so waitForDfuAccessible + detectDFU don't catch it as inaccessible) but the
     // actual transfer fails inside libusb with LIBUSB_ERROR_ACCESS. Surface
     // the existing "Fix DFU Driver" modal so the user gets udev guidance
     // instead of a cryptic generic error.
@@ -803,6 +855,82 @@ function detectDFU() {
   });
 }
 
+// ── Ensure the WinUSB DFU driver is installed + bound ──
+// Stages our one Trusted-Signing-signed WinUSB package (once) and force-binds
+// the present bootloader to it, so dfu-util can flash. Windows-only; mac/linux
+// reach the DFU device through libusb directly. Runs an elevated helper (one
+// UAC prompt; a first-ever install also shows a one-time publisher prompt).
+// Returns { ok, status, detail }.
+function ensureDfuDriver(onLog) {
+  if (process.platform !== 'win32') return Promise.resolve({ ok: true, status: 'not-needed' });
+  const os = require('os');
+  const { execFile } = require('child_process');
+  const resDir     = proffie.getResourcesPath();
+  const helper     = path.join(resDir, 'dfu-driver', 'ensure-winusb.ps1');
+  const infPath    = path.join(resDir, 'dfu-driver', 'jmt_proffie_winusb.inf');
+  const resultPath = path.join(os.tmpdir(), `jmt-dfu-driver-${Date.now()}.json`);
+
+  if (!fs.existsSync(helper) || !fs.existsSync(infPath)) {
+    return Promise.resolve({ ok: false, status: 'error', detail: 'Bundled DFU driver package is missing from this build.' });
+  }
+
+  onLog('Installing the WinUSB driver...', false);
+
+  // Self-elevate a PowerShell that runs the bundled helper. Single-quote every
+  // path (doubling embedded quotes) so spaces in "Program Files" survive.
+  // -WindowStyle Hidden on both the outer probe shell and the elevated helper
+  // keeps the raw PowerShell console off the user's screen. The UAC prompt and
+  // the "install this device software" dialog are separate system windows and
+  // still appear (that consent is intentional); only the console is suppressed.
+  // Do NOT rely on Start-Process -Wait/-PassThru to know when the elevated
+  // helper finished: neither reliably waits across the UAC elevation boundary
+  // (they can signal on the consent broker, not the real process), which made us
+  // read the result before it was written and mis-report success as failure.
+  // The helper writes its result JSON as its LAST action, so we poll for that
+  // file as the completion signal instead. If the user declines the UAC prompt,
+  // Start-Process throws and the launcher exits non-zero.
+  const q = (s) => "'" + String(s).replace(/'/g, "''") + "'";
+  const psCmd =
+    `$a=@('-NoProfile','-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-File',${q(helper)},` +
+    `'-InfPath',${q(infPath)},'-ResultPath',${q(resultPath)});` +
+    `try { Start-Process -FilePath 'powershell' -ArgumentList $a -Verb RunAs -WindowStyle Hidden | Out-Null; exit 0 } catch { exit 3 }`;
+
+  const dbg = (m) => { try { fs.appendFileSync(path.join(os.tmpdir(), 'jmt-dfu-app-debug.log'), `[${new Date().toISOString()}] ${m}\n`); } catch {} };
+
+  return new Promise((resolve) => {
+    execFile('powershell', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', psCmd],
+      { timeout: 120000, windowsHide: true }, async (error) => {
+        dbg(`launch done; err=${error ? (error.message || error.code) : 'none'}`);
+        if (error) {
+          // Non-zero exit from the launcher means the elevated launch failed,
+          // almost always the user declining the UAC prompt.
+          return resolve({ ok: false, status: 'cancelled', detail: 'Driver install was cancelled. Accept the Windows permission prompt to continue.' });
+        }
+        // Poll for the helper's result file (its final write) up to ~3 minutes,
+        // which also covers the user answering the device-software prompt.
+        const deadline = Date.now() + 180000;
+        let result = null;
+        while (Date.now() < deadline) {
+          let raw = null;
+          try { raw = fs.readFileSync(resultPath, 'utf8'); } catch {}
+          if (raw) { try { result = JSON.parse(raw); break; } catch {} }
+          await new Promise(r => setTimeout(r, 400));
+        }
+        dbg(`result=${JSON.stringify(result)}`);
+        try { fs.unlinkSync(resultPath); } catch {}
+
+        if (result && (result.status === 'ok' || result.status === 'staged-nodev')) {
+          onLog('WinUSB driver ready.', false);
+          return resolve({ ok: true, status: result.status, detail: result.detail });
+        }
+        if (!result) {
+          return resolve({ ok: false, status: 'timeout', detail: 'Driver setup did not complete. Try again, or use a manual option.' });
+        }
+        resolve({ ok: false, status: result.status, detail: result.detail || 'Driver install failed.' });
+      });
+  });
+}
+
 // ── Flash ──────────────────────────────────────────────
 /**
  * Uploads compiled firmware via 1200-bps touch reset → DFU → dfu-util.
@@ -839,28 +967,46 @@ async function flash(port, fqbn, onLog) {
   }
   await new Promise(r => setTimeout(r, 1000));
 
-  // Wait for DFU device
-  const dfuFound = await waitForDfu(onLog);
-  if (!dfuFound) {
-    // Touch reset succeeded — the board IS in DFU. dfu-util may not see it for two reasons:
-    //   1. Late enumeration race (now accessible) — proceed straight to flash.
-    //   2. Driver state on this USB instance (wrong driver bound, OR no driver bound at all
-    //      after a Device Manager uninstall, OR on Linux, missing udev rules). In all of
-    //      these we hand off to the renderer's bootloader-wait flow, which can offer
-    //      the driver/permission setup and keep polling.
-    const dfuState = await detectDFU();
+  // Wait for the bootloader to become accessible, then flash. The wait is
+  // patient (see waitForDfuAccessible) so a fresh board's WinUSB bind delay is
+  // no longer misread as a missing driver and diverted into manual DFU mode.
+  const acc = await waitForDfuAccessible(onLog);
 
-    if (dfuState.accessible) {
-      onLog('DFU device detected (late). Proceeding with flash.', false);
-      return await runDfuFlash(dfuPath, toolsDir, onLog);
-    }
-
-    const msg = 'DFU device not accessible. Switching to Bootloader Mode to recover.';
-    onLog(msg, false);
-    return { ok: false, error: msg, needsDfuDriver: true };
+  if (acc.openable) {
+    return await runDfuFlash(dfuPath, toolsDir, onLog);
   }
 
-  return await runDfuFlash(dfuPath, toolsDir, onLog);
+  if (acc.wrongDriver) {
+    // The board is in DFU but a non-WinUSB driver is bound, so it will never
+    // become openable on its own. We do NOT auto-install anything here: route to
+    // the driver-setup screen and let the user decide (our one-click install, or
+    // their own tool). Asking first is deliberate. The app stays transparent and
+    // the user keeps the choice; the setup is one-time, so a single click is a
+    // fair trade for that trust.
+    return { ok: false, error: `WinUSB is not attached to the bootloader (currently: ${acc.boundService}). Driver setup required.`, needsDfuDriver: true };
+  }
+
+  if (acc.everPresent) {
+    // The board entered DFU but never reported openable within the window. The
+    // `-l` probe can stay falsely negative while a device is mid-bind, so make
+    // one real flash attempt anyway — `dfu-util -D` is a stronger test than
+    // `-l` and usually succeeds here. Only a genuine failure means the driver
+    // is actually wrong/missing and we should offer the setup flow.
+    onLog('Attempting flash directly...', false);
+    const direct = await runDfuFlash(dfuPath, toolsDir, onLog);
+    if (direct.ok || direct.needsDfuDriver) return direct;
+    // Real access failure. runDfuFlash only flags needsDfuDriver on Linux
+    // (udev); on Windows set it here so we still route into the driver-setup
+    // flow for a genuinely broken driver state.
+    return { ok: false, error: direct.error, needsDfuDriver: true };
+  }
+
+  // The DFU device never appeared at all — the touch reset didn't carry the
+  // board into bootloader mode. Hand off to the manual Bootloader-Mode flow,
+  // which walks the user through entering DFU by hand.
+  const msg = 'DFU device not detected. Switching to Bootloader Mode to recover.';
+  onLog(msg, false);
+  return { ok: false, error: msg, needsDfuDriver: true };
 }
 
 // ── Flash DFU ──────────────────────────────────────────
@@ -928,6 +1074,7 @@ module.exports = {
   flash,
   flashDFU,
   detectDFU,
+  ensureDfuDriver,
   abort,
   getStatus,
   checkCacheAndRestore,
