@@ -118,15 +118,26 @@ function _collectRecords(itemRoot) {
 // sha256 hex digest of the canonical serialization, or null when the
 // path doesn't exist / can't be read at all (caller treats null as
 // "no comparison available" → safe to wipe-and-extract).
-function hashItemDir(itemRoot) {
+// Public: collect the canonical per-file record list for an item, sorted.
+// Returns [{ relPath, size, fileHash }] (empty-dir markers included as
+// { relPath, size: 0, fileHash: '<empty>' }), or null when the path can't be
+// read. This is the same walk hashItemDir folds into a digest — exposed so
+// the compare tool can build per-file hash sets without re-walking or
+// re-hashing. Same meta.json-at-root exclusion and big-file streaming.
+function collectFileRecords(itemRoot) {
   if (!itemRoot || !fs.existsSync(itemRoot)) return null;
   let stat;
   try { stat = fs.statSync(itemRoot); } catch { return null; }
   if (!stat.isDirectory()) return null;
   const records = _collectRecords(itemRoot);
-  // Stable order. Forward-slash paths sort consistently across
-  // platforms; no normalization needed beyond walking.
+  // Stable order. Forward-slash paths sort consistently across platforms.
   records.sort((a, b) => (a.relPath < b.relPath ? -1 : a.relPath > b.relPath ? 1 : 0));
+  return records;
+}
+
+// Fold a sorted record list into the canonical digest. Split out so the
+// digest and the record list share one definition of "canonical."
+function hashRecords(records) {
   const lineHash = crypto.createHash('sha256');
   for (const r of records) {
     // \0 separators inside, \n between records. \0 can't appear in a
@@ -139,6 +150,12 @@ function hashItemDir(itemRoot) {
     lineHash.update('\n');
   }
   return lineHash.digest('hex');
+}
+
+function hashItemDir(itemRoot) {
+  const records = collectFileRecords(itemRoot);
+  if (records === null) return null;
+  return hashRecords(records);
 }
 
 // Convenience: hash every top-level child directory inside `bucketRoot`
@@ -159,4 +176,4 @@ function hashBucketChildren(bucketRoot) {
   return out;
 }
 
-module.exports = { hashItemDir, hashBucketChildren };
+module.exports = { hashItemDir, hashBucketChildren, collectFileRecords, hashRecords, hashFile: _hashFile };
