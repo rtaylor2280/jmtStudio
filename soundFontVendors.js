@@ -245,6 +245,86 @@ const vendors = [
       },
     ],
   },
+  // ---------------------------------------------------------------------
+  // Default SD-card creators — the profezzorn/SoundFonts v2.0 release
+  // (https://github.com/profezzorn/SoundFonts/releases/tag/v2.0) is the
+  // official ProffieOS default SD-card set. Every builder ends up with
+  // these eight fonts, so we recognize their creators by name rather than
+  // leaving them to the generic extractor. CODA (Greyscale, below) and
+  // TthCrstl (Dayad Jocen, here) already resolved; these entries add the
+  // six that ship the attribution mid-line.
+  //
+  // IMPORTANT — anchor to the attribution idiom, never the bare name.
+  // Thexter (SmoothSwing algorithm author) and Fredrik Hubinette (the OS
+  // author) are credited in fonts they did NOT make: TthCrstl's readme
+  // says "algorithm developed by Thexter" and "operating system created
+  // by Fredrik Hubinette". A bare /by Thexter/ would mis-attribute those.
+  // So Thexter's pattern requires "font ... by Thexter", and Dayad Jocen
+  // sits BEFORE Thexter so TthCrstl resolves to its real author first.
+  {
+    id: 'dayadjocen',
+    displayName: 'Dayad Jocen',
+    website: 'http://therebelarmory.com/user/1738', // from TthCrstl readme
+    purchasedDefault: false, // default SD font (TthCrstl), free
+    patterns: [
+      {
+        type: 'readmeContent',
+        fileMatch: /(^|\/)(read[\s_-]?me)[^/]*\.(txt|rtf|md)$/i,
+        contentMatch: /\bby\s+Dayad\s+Jocen\b/i,
+      },
+    ],
+  },
+  {
+    id: 'thexter',
+    displayName: 'Thexter',
+    website: 'http://therebelarmory.com/user/2475', // from TthCrstl readme
+    purchasedDefault: false, // default SD fonts (RgueCmdr, SmthFuzz/Grey/Jedi), free
+    patterns: [
+      {
+        // "Smoothswing sound font for ProffieOS by Thexter." — anchored on
+        // "font [for OS] by Thexter" so the algorithm-credit phrasing
+        // ("algorithm developed by Thexter") never matches. The four
+        // Thexter default fonts also carry "Modifications by Brian Conner";
+        // that's a modifier, not the author, and this pattern ignores it.
+        type: 'readmeContent',
+        fileMatch: /(^|\/)(read[\s_-]?me)[^/]*\.(txt|rtf|md)$/i,
+        contentMatch: /\bfont\s+(?:for\s+[A-Za-z0-9]+\s+)?by\s+Thexter\b/i,
+      },
+    ],
+  },
+  {
+    id: 'lordblako',
+    displayName: 'Lord Blako',
+    website: 'https://www.krsabers.com', // TeensySF copyright names KRSABERS.COM
+    purchasedDefault: false, // default SD font (TeensySF), free
+    patterns: [
+      {
+        // "Teensy - a SmoothSwing V2 font by Lord Blako."
+        type: 'readmeContent',
+        fileMatch: /(^|\/)(read[\s_-]?me)[^/]*\.(txt|rtf|md)$/i,
+        contentMatch: /\bfont\s+by\s+Lord\s+Blako\b/i,
+      },
+    ],
+  },
+  {
+    id: 'lordnikahn',
+    displayName: 'Lord Nikahn',
+    // Credited at BlueForce Company but no standalone maker site is known,
+    // so fall back to the canonical profezzorn default-set release page.
+    website: 'https://github.com/profezzorn/SoundFonts/releases/tag/v2.0',
+    purchasedDefault: false, // default SD font (LiquidStatic), free
+    patterns: [
+      {
+        // '"Liquid Static" by Lord Nikahn at BlueForce Company' — "Lord
+        // Nikahn" is distinctive enough that the bare "by" idiom is safe,
+        // and the curated displayName drops the "at BlueForce Company"
+        // studio tail automatically.
+        type: 'readmeContent',
+        fileMatch: /(^|\/)(read[\s_-]?me)[^/]*\.(txt|rtf|md)$/i,
+        contentMatch: /\bby\s+Lord\s+Nikahn\b/i,
+      },
+    ],
+  },
   // Greyscale sits LAST in the vendor list because its phrase-content
   // pattern reads every .txt file in the archive. Putting it last means
   // we only pay that cost on sources that have already failed every
