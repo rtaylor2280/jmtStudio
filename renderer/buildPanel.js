@@ -50,6 +50,9 @@ let compileTimerInterval  = null;
 let flashTimerInterval    = null;
 let contentDebounceTimer  = null;
 let _compileStartTime     = 0;
+// One-shot lead message typed into the flash hint line when an SD fix at the
+// flash gate resolved to a cached build (no recompile). Set by _flashAfterSdFix.
+let _sdFlashLeadMsg       = null;
 
 // ── Compile hint typewriter ────────────────────────────
 let _hintActive          = false;
@@ -59,6 +62,7 @@ let _hintTypingTimer     = null;   // setInterval for character typing
 let _hintFadeTimeout     = null;   // hold-then-fade timer
 let _hintNextTimeout     = null;   // gap between messages
 let _hintDurationTimeout = null;   // clears last-compile duration before first hint
+let _leadHint            = null;   // one-off message shown first (e.g. SD-guard Easter egg)
 
 function _formatCompileDuration(seconds) {
   if (seconds < 60) return `${seconds} second${seconds !== 1 ? 's' : ''}`;
@@ -67,26 +71,16 @@ function _formatCompileDuration(seconds) {
   return s === 0 ? `${m} minute${m !== 1 ? 's' : ''}` : `${m}m ${s}s`;
 }
 
-function startCompileHints() {
+function startCompileHints(leadMessage) {
   stopCompileHints();
   _hintActive = true;
   _hintIndex  = 0;
+  _leadHint   = leadMessage || null;
 
-  const lastDuration = window.getLastCompileDuration?.();
-  if (lastDuration) {
-    const el = document.getElementById('bm-hint');
-    if (el) {
-      el.style.transition = 'none';
-      el.style.opacity = '1';
-      el.textContent = `Last compiled version of this config took about ${_formatCompileDuration(lastDuration)}.`;
-    }
-    // Clear 15s before the first hint appears
-    _hintDurationTimeout = setTimeout(() => {
-      const el = document.getElementById('bm-hint');
-      if (el && _hintActive) { el.style.opacity = '0'; setTimeout(() => { if (el) el.textContent = ''; }, 400); }
-    }, 45000);
-  }
-
+  // A lead (compile opener / Easter egg / fix message) types in immediately and
+  // holds; the authored hint cycle still begins at the 60s mark and replaces it,
+  // so the timed hints stay exactly as written.
+  if (_leadHint) _showNextHint();
   _hintTimeout = setTimeout(_showNextHint, 60000);
 }
 
@@ -98,16 +92,23 @@ function stopCompileHints() {
   clearTimeout(_hintDurationTimeout);
   clearInterval(_hintTypingTimer);
   _hintTimeout = _hintFadeTimeout = _hintNextTimeout = _hintTypingTimer = _hintDurationTimeout = null;
+  _leadHint = null;
   const el = document.getElementById('bm-hint');
   if (el) { el.style.transition = 'none'; el.style.opacity = '0'; el.textContent = ''; }
 }
 
 function _showNextHint() {
   if (!_hintActive) return;
-  const hints = (typeof COMPILE_HINTS !== 'undefined') ? COMPILE_HINTS : [];
-  if (_hintIndex >= hints.length) return; // list exhausted — stop quietly
-
-  const text = hints[_hintIndex++];
+  let text, isLead = false;
+  if (_leadHint) {
+    text = _leadHint;   // one-off lead (opener / Easter egg / fix) shows before the cycle
+    _leadHint = null;
+    isLead = true;
+  } else {
+    const hints = (typeof COMPILE_HINTS !== 'undefined') ? COMPILE_HINTS : [];
+    if (_hintIndex >= hints.length) return; // list exhausted — stop quietly
+    text = hints[_hintIndex++];
+  }
   const el = document.getElementById('bm-hint');
   if (!el) return;
 
@@ -124,6 +125,7 @@ function _showNextHint() {
     if (i >= text.length) {
       clearInterval(_hintTypingTimer);
       _hintTypingTimer = null;
+      if (isLead) return; // lead holds until the 60s timer starts the authored cycle
       // Hold fully-typed for 12s, then fade out
       _hintFadeTimeout = setTimeout(() => {
         if (!_hintActive) return;
@@ -139,6 +141,26 @@ function _showNextHint() {
       }, 12000);
     }
   }, 28); // ~28ms/char ≈ 35 chars/sec
+}
+
+// Types a one-off message into #bm-hint (the italicized, under-the-box hint line),
+// same treatment as the compile hints. Used for the SD-guard flash Easter egg,
+// where the hint cycle isn't running. Cancels any cycling hints; types once and
+// holds until the flash finishes (finishBuildModal -> stopCompileHints clears it).
+function typeHintMessage(text) {
+  stopCompileHints();
+  _hintActive = true;
+  const el = document.getElementById('bm-hint');
+  if (!el) return;
+  el.style.transition = 'none';
+  el.style.opacity    = '1';
+  el.textContent      = '';
+  let i = 0;
+  _hintTypingTimer = setInterval(() => {
+    if (!_hintActive) { clearInterval(_hintTypingTimer); _hintTypingTimer = null; return; }
+    el.textContent = text.slice(0, ++i);
+    if (i >= text.length) { clearInterval(_hintTypingTimer); _hintTypingTimer = null; }
+  }, 28);
 }
 let isDfuMode       = false;   // true when bootloader (DFU) mode is active
 let dfuDeviceReady  = false;   // true after DFU device detected in waiting modal
@@ -157,6 +179,19 @@ window.onEditorContentChanged = () => {
   // Debounced cache check: if user reverts content to a previously compiled state, restore
   clearTimeout(contentDebounceTimer);
   contentDebounceTimer = setTimeout(() => checkCacheForConfig(false), 600);
+};
+
+// Invalidate a successful compile from outside the editor-change path (e.g. the
+// SD guard switching the USB mode at flash time, which makes the built binary
+// stale). Mirrors the invalidation in onEditorContentChanged.
+window.invalidateCompile = (msg) => {
+  if (compileSuccess) {
+    compileSuccess = false;
+    setFlashEnabled(false);
+    cacheCheckPending = true;
+    updateCompileButton();
+  }
+  setStatus('compile', 'warn', msg || 'Recompile needed');
 };
 
 // ── DOM refs ───────────────────────────────────────────
@@ -236,12 +271,19 @@ async function initBuildPanel() {
   const _initBoardOpt = _initBoardSel ? _initBoardSel.options[_initBoardSel.selectedIndex] : null;
   selectedFqbn = (_initBoardOpt && _initBoardOpt.dataset.fqbn) ? _initBoardOpt.dataset.fqbn : null;
   el('bp-usb-select').addEventListener('change', e => {
+    const prevUsb = selectedUsb;
     selectedUsb = e.target.value;
     updateUsbChangedIndicator();
     // USB mode is persisted per-config via the @jmt:usb marker, so a change is a
     // saveable config edit — mark dirty like the other meta fields do.
     window.markConfigDirty?.();
-    window._resetMassStorageAck?.(); // a fresh mode choice re-arms the SD warning
+    // Touchpoint 1: changing INTO a Mass Storage mode is the first chance to
+    // offer the SD-card guard. Programmatic setSelectedUsb (config load) does not
+    // fire this handler, so loads never trigger it; they warn at compile instead.
+    if (/msc/i.test(selectedUsb) && !/msc/i.test(prevUsb || '')) {
+      window._notePreMassStorageMode?.(prevUsb); // remember what to revert to
+      window.offerMountSdSettingOnSelect?.(selectedUsb);
+    }
     if (compileSuccess) {
       compileSuccess = false;
       setFlashEnabled(false);
@@ -387,6 +429,17 @@ async function doCompile() {
     return;
   }
 
+  // SD-corruption guard (primary gate): a Mass Storage USB mode with no
+  // MOUNT_SD_SETTING auto-mounts and can corrupt an inserted card. Warn here,
+  // before building the risky binary; "Add define & compile" injects it and the
+  // build below compiles it in. Runs before the dirty check so an added define
+  // is offered for saving too. The flash path keeps its own check as a net for
+  // cache-restored builds that never pass through here.
+  const _sdCompile = window.checkMassStorageSafety
+    ? await window.checkMassStorageSafety(selectedUsb, 'compile')
+    : true;
+  if (!_sdCompile) return; // Cancel from the SD guard
+
   // Dirty checks — prompt the user instead of auto-saving. Config first (Save As is
   // offered since the user may want to compile a copy at a new path), then Style
   // Library if applicable (fixed path, no Save As). Cancel from either bails out.
@@ -420,7 +473,10 @@ async function doCompile() {
   const content = window.getEditorContent();
 
   showBuildModal('⚙ Compiling...');
-  startCompileHints();
+  const _recompileReason = window.consumeSdRecompileReason?.();
+  startCompileHints(_recompileReason || (_sdCompile === 'compile-anyway'
+    ? 'Compiling without SD card protection. I have a bad feeling about this…'
+    : 'Compiling ProffieOS with your config into firmware for the board…'));
   setBusy(true);
   clearLog();
   compileSuccess = false;
@@ -436,6 +492,23 @@ async function doCompile() {
   }
 }
 
+// After an SD fix at the flash gate, the config/USB changed. Prefer a cached
+// build for the corrected inputs (instant) over a full recompile; only rebuild
+// on a cache miss. Either way we end at a flash.
+async function _flashAfterSdFix() {
+  await window.checkCacheForConfig?.();   // restores build + sets compileSuccess on a HIT
+  if (compileSuccess) {
+    // Cache hit: the corrected build is already restored. Turn the "recompiling…"
+    // lead into a "using cached build…" message for the flash hint line, then
+    // flash without rebuilding.
+    const reason = window.consumeSdRecompileReason?.();
+    _sdFlashLeadMsg = reason ? reason.replace('recompiling…', 'using cached build…') : null;
+    doFlash();                            // routes to DFU internally; re-checks guard (now safe) + flashes
+  } else {
+    doCompile();                          // MISS: real build (consumes the reason for its hint), auto-flashes
+  }
+}
+
 // ── Flash ──────────────────────────────────────────────
 async function doFlash() {
   if (isDfuMode) { await doFlashDFU(); return; }
@@ -446,10 +519,22 @@ async function doFlash() {
     return;
   }
 
-  // SD-corruption guard: a Mass Storage USB mode with no MOUNT_SD_SETTING can
-  // corrupt an inserted card the instant the board enumerates. Scan regardless
-  // of how the mode got selected. Cancelling drops the user into the fix.
-  if (window.checkMassStorageBeforeFlash && !(await window.checkMassStorageBeforeFlash(selectedUsb))) return;
+  // SD-corruption guard. Returns: 'recompile' (a fix was applied at the gate,
+  // so recompile it and let the compile auto-flash), false (cancel), or
+  // true/'flash-anyway' (proceed; 'flash-anyway' logs the Easter egg below).
+  const _sdFlash = window.checkMassStorageSafety
+    ? await window.checkMassStorageSafety(selectedUsb, 'flash')
+    : true;
+  if (_sdFlash === 'recompile') { _flashAfterSdFix(); return; }
+  if (!_sdFlash) {
+    // Cancelled — the auto-flash-after-compile path pre-sets "flashing..." and
+    // hides Close, so restore a usable, closable state instead of stranding it.
+    if (el('bm-status')) el('bm-status').textContent = 'Flash cancelled. Click Flash to try again.';
+    if (el('bm-close'))  el('bm-close').style.display = 'inline-block';
+    if (el('bm-abort'))  el('bm-abort').style.display = 'none';
+    setFlashEnabled(true);
+    return;
+  }
 
   // Pre-flash port check — verify board is still present
   if (!selectedPort || !selectedPortIsProffieboard) {
@@ -475,6 +560,12 @@ async function doFlash() {
   document.getElementById('bm-status').textContent = '';
   document.getElementById('bm-abort').style.display = 'none';
   document.getElementById('bm-close').style.display = 'none';
+  if (_sdFlash === 'flash-anyway') {
+    typeHintMessage('Flashing without SD card protection. I have a bad feeling about this…');
+  } else if (_sdFlashLeadMsg) {
+    typeHintMessage(_sdFlashLeadMsg);
+    _sdFlashLeadMsg = null;
+  }
   document.getElementById('bm-retry').style.display = 'none';
   document.getElementById('build-modal').style.display = 'flex';
   startFlashTimer();
@@ -1835,6 +1926,21 @@ function startCompileTimer() {
   _compileStartTime = Date.now();
   document.getElementById('bm-timer-compile').style.display = 'inline';
   document.getElementById('bm-timer-compile-val').textContent = '0:00';
+  // Persistent left-justified "last compile" for this config (its home now, so it
+  // isn't lost when the hint line shows something else).
+  const _lastDur = window.getLastCompileDuration?.();
+  const _lastEl  = document.getElementById('bm-timer-last');
+  if (_lastEl) {
+    // Keep the left slot PRESENT in compile mode even when empty: as a zero-width
+    // flex item it holds position 0, so the live Compile Time stays pinned to the
+    // RIGHT edge under space-between. (Collapsing it would leave a single child,
+    // which space-between pins LEFT.) Flash mode hides it instead, so there the
+    // two timers hug opposite edges.
+    _lastEl.textContent = _lastDur
+      ? `Last compile: ${Math.floor(_lastDur / 60)}:${(_lastDur % 60).toString().padStart(2, '0')}`
+      : '';
+    _lastEl.style.display = 'inline';
+  }
   const start = _compileStartTime;
   compileTimerInterval = setInterval(() => {
     const s = Math.floor((Date.now() - start) / 1000);
@@ -1851,6 +1957,10 @@ function stopCompileTimer() {
 function startFlashTimer() {
   document.getElementById('bm-timer-flash').style.display = 'inline';
   document.getElementById('bm-timer-flash-val').textContent = '0:00';
+  // Don't show last-compile during a flash (no last-flash time tracked yet).
+  // Collapse the slot entirely so Compile Time / Flash Time hug the row edges.
+  const _lastEl = document.getElementById('bm-timer-last');
+  if (_lastEl) { _lastEl.textContent = ''; _lastEl.style.display = 'none'; }
   const start = Date.now();
   flashTimerInterval = setInterval(() => {
     const s = Math.floor((Date.now() - start) / 1000);
@@ -2289,7 +2399,18 @@ async function doFlashDFU() {
 
   // Same SD-corruption guard as the serial flash path (the compiled binary
   // carries the USB mode regardless of which flash route uploads it).
-  if (window.checkMassStorageBeforeFlash && !(await window.checkMassStorageBeforeFlash(selectedUsb))) return;
+  const _sdFlash = window.checkMassStorageSafety
+    ? await window.checkMassStorageSafety(selectedUsb, 'flash')
+    : true;
+  if (_sdFlash === 'recompile') { _flashAfterSdFix(); return; }
+  if (!_sdFlash) {
+    // Cancelled — restore a usable, closable state instead of stranding it.
+    if (el('bm-status')) el('bm-status').textContent = 'Flash cancelled. Click Flash to try again.';
+    if (el('bm-close'))  el('bm-close').style.display = 'inline-block';
+    if (el('bm-abort'))  el('bm-abort').style.display = 'none';
+    setFlashEnabled(true);
+    return;
+  }
 
   if (!dfuDeviceReady) {
     // Device not yet detected — run the detection flow first, then flash
@@ -2322,6 +2443,12 @@ async function doFlashDFU() {
   await pauseSerialBeforeFlash();
   setBusy(true);
   setStatus('flash', 'pending', 'Flashing via DFU...');
+  if (_sdFlash === 'flash-anyway') {
+    typeHintMessage('Flashing without SD card protection. I have a bad feeling about this…');
+  } else if (_sdFlashLeadMsg) {
+    typeHintMessage(_sdFlashLeadMsg);
+    _sdFlashLeadMsg = null;
+  }
 
   await window.electronAPI.flashDFU();
   setBusy(false);
@@ -2437,7 +2564,7 @@ window.setSelectedUsb      = (usb) => {
   const sel = el('bp-usb-select');
   if (sel) sel.value = usb;
   updateUsbChangedIndicator();
-  window._resetMassStorageAck?.(); // config load / mode set re-arms the SD warning
+  window._resetMassStorageDecline?.(); // config load / mode set clears the SD decline state
 };
 
 // ── Dynamic-speed compile bench (dev/test) ─────────────

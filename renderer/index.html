@@ -1096,8 +1096,11 @@
     white-space: pre-wrap;
     padding-right: 8px;
   }
-  #bm-hint        { flex: 1; opacity: 0; font-style: italic; font-size: 0.78rem; color: var(--c-text-dim); padding: 0 12px; white-space: nowrap; overflow: hidden; }
-  #bm-timer-row   { display: flex; gap: 20px; justify-content: flex-end; margin-top: 10px; font-family: monospace; font-size: 0.72rem; color: var(--c-text-muted); }
+  /* When empty (during a compile/flash, no error), contribute zero width so the
+     hint lead-in aligns to the black log box's left edge, not 8px right of it. */
+  #bm-status:empty { padding: 0; }
+  #bm-hint        { flex: 1; opacity: 0; font-style: italic; font-size: 0.78rem; color: var(--c-text-dim); padding: 0 12px 0 0; white-space: nowrap; overflow: hidden; min-height: 1.4em; }
+  #bm-timer-row   { display: flex; gap: 20px; justify-content: space-between; margin-top: 10px; font-family: monospace; font-size: 0.72rem; color: var(--c-text-muted); }
   #bm-board-select-wrap { align-items: center; gap: 10px; margin-bottom: 14px; }
   #bm-board-select-wrap > span { font-size: 0.8rem; color: var(--c-text-sub); white-space: nowrap; }
   /* Build modal buttons — shared base */
@@ -1144,6 +1147,20 @@
      at 10020 so clicking outside the menu still closes it. */
   #modal-unsaved { z-index: 10015; }
   #modal-confirm { z-index: 10015; }
+  /* Confirm modal can carry longer explanatory copy and up to four action
+     buttons (the SD-card guard), so give it more room than the 380px default so
+     the text does not wrap into cramped lines. */
+  #modal-confirm .modal { max-width: 520px; }
+  /* Turn off the base .modal p's text-wrap: balance (it makes stubby even lines
+     and odd breaks). Plain wrapping + a tuned width gives clean, predictable
+     line breaks for this static copy. */
+  #modal-confirm .modal p { text-wrap: wrap; }
+  /* Keep code tokens (e.g. #define MOUNT_SD_SETTING) from splitting mid-token;
+     they wrap to the next line whole instead. */
+  #modal-confirm .modal p code { white-space: nowrap; }
+  /* Four-button modals (add / remove / proceed / cancel) get a little more room
+     so the button row fits horizontally, same layout as every other modal. */
+  #modal-confirm .modal.modal-confirm-wide { max-width: 600px; }
   #modal-sf-text-prompt { z-index: 10015; }
   /* Sits above the library picker (10010) so the rename decision is
      always on top of the modal that triggered it. Same tier as the
@@ -1312,7 +1329,7 @@
   }
   .modal h2 { font-size: 0.95rem; color: var(--c-text-bright); margin-bottom: 8px; }
   .modal p  { font-size: 0.82rem; color: var(--c-text-sub); margin-bottom: 20px; line-height: 1.5; text-wrap: balance; }
-  .modal-btns { display: flex; justify-content: flex-end; gap: 8px; }
+  .modal-btns { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
   .modal-btn-cancel  { background: var(--c-border); color: var(--c-text-sub); border: 1px solid var(--c-border-heavy); }
   .modal-btn-discard { background: var(--c-danger-bg);  color: var(--c-danger-text);  border: 1px solid var(--c-danger-border); }
   .modal-btn-save    { background: var(--c-success-bg); color: var(--c-success-text); border: 1px solid var(--c-success-border); }
@@ -4212,6 +4229,7 @@
     <div class="modal-btns">
       <button class="modal-btn-cancel" id="modal-confirm-cancel">Cancel</button>
       <button class="modal-btn-cancel" id="modal-confirm-middle" style="display:none"></button>
+      <button class="modal-btn-cancel" id="modal-confirm-alt" style="display:none"></button>
       <button class="modal-btn-discard" id="modal-confirm-ok">OK</button>
     </div>
   </div>
@@ -5745,7 +5763,10 @@ function promptConfirm(opts) {
       confirmText = 'OK',
       confirmKind = 'danger',
       cancelText  = 'Cancel',
+      cancelKind  = 'cancel',
       middleText  = null,
+      altText     = null,
+      altKind     = 'cancel',
       hideCancel  = false,
       checkbox    = null,
     } = opts || {};
@@ -5793,6 +5814,10 @@ function promptConfirm(opts) {
                     : 'modal-btn-discard';
     const cancelBtn = document.getElementById('modal-confirm-cancel');
     cancelBtn.textContent = cancelText;
+    cancelBtn.className = cancelKind === 'save'    ? 'modal-btn-save'
+                        : cancelKind === 'primary' ? 'modal-btn-primary'
+                        : cancelKind === 'danger'  ? 'modal-btn-discard'
+                        : 'modal-btn-cancel';
     cancelBtn.style.display = hideCancel ? 'none' : '';
     const middleBtn = document.getElementById('modal-confirm-middle');
     if (middleBtn) {
@@ -5804,13 +5829,31 @@ function promptConfirm(opts) {
         middleBtn.onclick = null;
       }
     }
+    const altBtn = document.getElementById('modal-confirm-alt');
+    if (altBtn) {
+      if (altText) {
+        altBtn.textContent = altText;
+        altBtn.className = altKind === 'primary' ? 'modal-btn-primary'
+                         : altKind === 'save'    ? 'modal-btn-save'
+                         : altKind === 'danger'  ? 'modal-btn-discard'
+                         : 'modal-btn-cancel';
+        altBtn.style.display = '';
+      } else {
+        altBtn.style.display = 'none';
+        altBtn.onclick = null;
+      }
+    }
+    // Four-button modals get a wider shell so their row fits horizontally.
+    const modalEl = document.querySelector('#modal-confirm .modal');
+    if (modalEl) modalEl.classList.toggle('modal-confirm-wide', !!(middleText && altText));
     const overlay = document.getElementById('modal-confirm');
     overlay.classList.add('active');
-    // Three-button mode resolves with strings so the caller can branch;
-    // two-button mode keeps the historical boolean shape for compat.
+    // Multi-button mode (any of middle/alt present) resolves with strings so the
+    // caller can branch; plain two-button mode keeps the historical boolean shape.
+    const multi = !!(middleText || altText);
     const cleanup = (result) => {
       overlay.classList.remove('active');
-      if (middleText) {
+      if (multi) {
         resolve(result);
       } else if (checkbox) {
         resolve({ confirmed: result === true, checked: !!(cbInput && cbInput.checked) });
@@ -5818,9 +5861,10 @@ function promptConfirm(opts) {
         resolve(result === true);
       }
     };
-    okBtn.onclick     = () => cleanup(middleText ? 'confirm' : true);
-    cancelBtn.onclick = () => cleanup(middleText ? 'cancel'  : false);
+    okBtn.onclick     = () => cleanup(multi ? 'confirm' : true);
+    cancelBtn.onclick = () => cleanup(multi ? 'cancel'  : false);
     if (middleBtn) middleBtn.onclick = () => cleanup('middle');
+    if (altBtn)    altBtn.onclick    = () => cleanup('alt');
   });
 }
 window.promptConfirm = promptConfirm;
@@ -5872,111 +5916,361 @@ function setDirty(v) {
 window.markConfigDirty = () => { if (fileIsOpen) setDirty(true); };
 
 // ── SD-card corruption guard (USB Mass Storage) ─────────
-// USB Mass Storage hands the SD card to the host the instant the board
-// enumerates. Without MOUNT_SD_SETTING (an OS8+ define) it auto-mounts with no
-// safe-eject window, corrupting the card during flashing and every later
-// plug/unplug. Both usb=cdc_msc and the define are compile-time, so the check
-// scans the config before a flash regardless of how the USB mode was selected.
-// Remembers the USB mode the user already accepted the risk for, so auto-retry
-// flashes don't re-prompt mid-recovery. Re-armed whenever the USB mode changes
-// or a config loads (see _resetMassStorageAck).
-let _msgStorageAckMode = null;
-window._resetMassStorageAck = () => { _msgStorageAckMode = null; };
+// USB Mass Storage exposes the SD card to the host, which can corrupt it during
+// the flash itself and on every later plug/unplug. MOUNT_SD_SETTING (an OS8
+// define) gates that behind an explicit `sd 1` command. ENABLE_SD is the actual
+// precondition: without it the OS compiles out the whole SD-mount path, so there
+// is no risk. Four touchpoints offer the fix as early as possible: OS upgrade to
+// OS8, USB-mode select, compile, and flash. The fix is add/uncomment the define
+// (OS8) or remove Mass Storage (revert the USB mode); a decline is remembered
+// only to frame the compile modal as a reminder.
+//
+// The mass-storage mode the user declined to fix this session (reminder framing
+// only; never suppresses a later gate).
+let _msgStorageDeclinedMode = null;
+// The non-Mass-Storage mode in effect just before the user switched INTO Mass
+// Storage, so "Remove Mass Storage" reverts to exactly what they had. Null when
+// unknown (e.g. the config loaded already in Mass Storage), which falls back to WebUSB.
+let _preMsgStorageUsb = null;
+window._notePreMassStorageMode = (prev) => { _preMsgStorageUsb = (prev && !/msc/i.test(prev)) ? prev : null; };
+// One-shot: set when the user chose "Compile anyway", so the IMMEDIATE auto-flash
+// right after that compile does not re-warn (they just acknowledged the risk).
+// Consumed by the next flash; a later deliberate re-flash warns again.
+let _sdCompileAcked = false;
+window._resetMassStorageDecline = () => { _msgStorageDeclinedMode = null; _preMsgStorageUsb = null; _sdCompileAcked = false; };
+// Set when a fix at the flash gate triggers a recompile; shown as the first
+// compile hint (e.g. "SD card protection added, recompiling…"). Consumed once.
+let _sdRecompileReason = null;
+window.consumeSdRecompileReason = () => { const r = _sdRecompileReason; _sdRecompileReason = null; return r; };
+
+const _SD_RISK_HTML =
+  `Without this guard, the board hands its SD card to any computer whenever it's ` +
+  `plugged in. That risks corrupting the card during the flash itself, and again on ` +
+  `every later connection, where it has to be safely ejected before unplugging ` +
+  `<strong>every single time</strong>.`;
+
+// An ACTIVE (uncommented) define. Commented-out copies are ignored, which is
+// exactly what the compiler does.
 function _configHasMountSdSetting(text) {
   return /^[ \t]*#define[ \t]+MOUNT_SD_SETTING\b/m.test(text || '');
+}
+// ENABLE_SD (active) gates the entire SD-mount mechanism in OS8's sd_card.h
+// (`#if defined(ENABLE_SD) ...`; without it AvoidIdleSDAccess() is compiled to
+// `return false`). No active ENABLE_SD means the board cannot hand the SD to a
+// host at all, so there is no corruption risk and nothing to warn about.
+function _configHasEnableSd(text) {
+  return /^[ \t]*#define[ \t]+ENABLE_SD\b/m.test(text || '');
+}
+// True when MOUNT_SD_SETTING exists but is commented out (present yet inert).
+function _mountSdIsCommented(text) {
+  return /^[ \t]*\/\/[ \t]*#define[ \t]+MOUNT_SD_SETTING\b/m.test(text || '');
 }
 function _currentOsMajor() {
   const v = document.getElementById('input-version')?.value || '';
   const m = v.match(/(\d+)\s*\.\s*\d+/) || v.match(/(\d+)/);
   return m ? parseInt(m[1], 10) : null;
 }
-// Inserts #define MOUNT_SD_SETTING into CONFIG_TOP as one undoable Monaco edit,
-// mirroring the board-include insertion. Editing the model fires
-// onEditorContentChanged, which invalidates the stale compile automatically.
-function _injectMountSdSetting() {
+// The config is at SD-corruption risk when Mass Storage is active AND ENABLE_SD
+// is active (SD-mount path compiled in) AND it is not protected. It is protected
+// ONLY by an active MOUNT_SD_SETTING on OS8+. That define does nothing before
+// OS8, so a pre-OS8 Mass Storage config is at risk REGARDLESS of the define
+// (a present-but-inert define must not be mistaken for safety).
+function _sdAtRisk(text, mode) {
+  if (!/msc/i.test(mode || ''))  return false;
+  if (!_configHasEnableSd(text)) return false;
+  if ((_currentOsMajor() ?? -1) >= 8 && _configHasMountSdSetting(text)) return false;
+  return true;
+}
+// Why a pre-OS8 Mass Storage config is unsafe, calling out an inert define when
+// one is present (false safety is worth naming explicitly).
+function _preOs8Why(text) {
+  return _configHasMountSdSetting(text)
+    ? `<code>MOUNT_SD_SETTING</code> has <strong>no effect before OS8</strong>, so the SD card is still exposed`
+    : `there is no setting to stop the SD card auto-mounting (that protection is OS8+)`;
+}
+// Comments out an active MOUNT_SD_SETTING (inverse of the uncomment path), one
+// undoable Monaco edit. Used when the define is inert (pre-OS8) and the user
+// keeps Mass Storage: it is dead code implying false safety, so reflect reality.
+function _commentOutMountSdSetting() {
   if (!editor) return false;
   const text = editor.getValue();
-  if (_configHasMountSdSetting(text)) return false;
-  const lines = text.split('\n');
-  const ifdefIdx = lines.findIndex(l => /^[ \t]*#ifdef\s+CONFIG_TOP\b/.test(l));
-  const defineLine = '#define MOUNT_SD_SETTING                        // SD access stays off until "sd 1": prevents auto-mount SD corruption (added by JMT Studio)\n';
-  let insertLineNum;
-  if (ifdefIdx !== -1) {
-    insertLineNum = ifdefIdx + 2; // 1-based; line right after #ifdef CONFIG_TOP
-  } else {
-    insertLineNum = _findFirstNonCommentLineIdx(text) + 1;
+  const idx = text.split('\n').findIndex(l => /^[ \t]*#define[ \t]+MOUNT_SD_SETTING\b/.test(l));
+  if (idx === -1) return false;
+  const ln = idx + 1;
+  const orig = text.split('\n')[idx];
+  const commented = orig.replace(/^([ \t]*)(#define[ \t]+MOUNT_SD_SETTING\b.*)$/, '$1// $2');
+  _atomicEdit(editor, 'mount-sd-setting-comment', [{
+    range: new monaco.Range(ln, 1, ln, orig.length + 1),
+    text:  commented,
+  }]);
+  if (fileIsOpen) setDirty(true);
+  flashEditorLine(ln);
+  return true;
+}
+// On a pre-OS8 "Keep Mass Storage", an active define is inert dead code, so
+// comment it out and say why (the risk itself stays, by their choice).
+function _commentInertDefineOnKeep() {
+  if (_configHasMountSdSetting(editor ? editor.getValue() : '') && _commentOutMountSdSetting()) {
+    showToast('MOUNT_SD_SETTING has no effect before OS8, so it was commented out.');
   }
+}
+// Enables MOUNT_SD_SETTING as one undoable Monaco edit: uncomments an existing
+// commented-out copy in place if there is one; otherwise inserts a fresh define.
+// Fresh-insert placement, best to worst: directly under an active #define
+// ENABLE_SD (they are coupled), else after the last of the board include /
+// NUM_BLADES / NUM_BUTTONS (the minimum valid spot), else just inside
+// CONFIG_TOP. Editing the model invalidates the stale compile automatically.
+function _fixMountSdSetting() {
+  if (!editor) return false;
+  const text = editor.getValue();
+  if (_configHasMountSdSetting(text)) return false; // already active
+  const lines = text.split('\n');
+
+  // 1) Present but commented out: uncomment it in place.
+  const commentedIdx = lines.findIndex(l => /^[ \t]*\/\/[ \t]*#define[ \t]+MOUNT_SD_SETTING\b/.test(l));
+  if (commentedIdx !== -1) {
+    const ln = commentedIdx + 1; // 1-based
+    const uncommented = lines[commentedIdx].replace(/^([ \t]*)\/\/[ \t]*(#define[ \t]+MOUNT_SD_SETTING\b.*)$/, '$1$2');
+    _atomicEdit(editor, 'mount-sd-setting-uncomment', [{
+      range: new monaco.Range(ln, 1, ln, lines[commentedIdx].length + 1),
+      text:  uncommented,
+    }]);
+    if (fileIsOpen) setDirty(true);
+    _msgStorageDeclinedMode = null;
+    flashEditorLine(ln);
+    return true;
+  }
+
+  // 2) Absent: insert at the best available anchor.
+  const findIdx = (re) => lines.findIndex(l => re.test(l));
+  const idxEnableSd = findIdx(/^[ \t]*#define[ \t]+ENABLE_SD\b/);
+  const idxInclude  = findIdx(/^[ \t]*#include\s+"proffieboard_v\d+_config\.h"/);
+  const idxBlades   = findIdx(/^[ \t]*#define[ \t]+NUM_BLADES\b/);
+  const idxButtons  = findIdx(/^[ \t]*#define[ \t]+NUM_BUTTONS\b/);
+  const minReq = Math.max(idxInclude, idxBlades, idxButtons); // last of the three (-1 if none)
+  let insertLineNum;
+  if (idxEnableSd !== -1 && idxEnableSd >= minReq) {
+    insertLineNum = idxEnableSd + 2;   // directly under ENABLE_SD (desired)
+  } else if (minReq !== -1) {
+    insertLineNum = minReq + 2;        // after the last hardware-setup line (minimum)
+  } else {
+    const ifdefIdx = findIdx(/^[ \t]*#ifdef\s+CONFIG_TOP\b/);
+    insertLineNum = ifdefIdx !== -1 ? ifdefIdx + 2 : _findFirstNonCommentLineIdx(text) + 1;
+  }
+  const defineLine = '#define MOUNT_SD_SETTING                        // Enables serial commands sd 1 - enable, sd 0 - disable sd card access from computer\n';
   _atomicEdit(editor, 'mount-sd-setting-insert', [{
     range: new monaco.Range(insertLineNum, 1, insertLineNum, 1),
     text:  defineLine,
   }]);
   if (fileIsOpen) setDirty(true);
+  _msgStorageDeclinedMode = null; // fixed, no longer a pending risk
   flashEditorLine(insertLineNum);
   return true;
 }
-// Flash preflight. Returns true to proceed with the flash, false to abort.
-// Safe cases (non-MSC mode, or the define present) pass silently.
-window.checkMassStorageBeforeFlash = async function (usbMode) {
-  if (!usbMode || !/msc/i.test(usbMode)) return true;      // not a Mass Storage mode
+function _currentUsbMode() { return document.getElementById('bp-usb-select')?.value || ''; }
+// Reverts off Mass Storage to whatever the user had before (if known and safe),
+// else to Serial + WebUSB. Marks dirty and invalidates any built binary (the USB
+// mode is compiled in). Returns the target mode.
+function _removeMassStorage() {
+  const target = _preMsgStorageUsb || 'cdc_webusb'; // read before setSelectedUsb clears it
+  if (window.setSelectedUsb) window.setSelectedUsb(target);
+  window.markConfigDirty?.();
+  window.invalidateCompile?.('USB mode changed, recompile needed');
+  _msgStorageDeclinedMode = null;
+  _preMsgStorageUsb = null;
+  return target;
+}
+// Shared OS8 offer used by the select (touchpoint 1) and OS-upgrade (touchpoint 0)
+// helpers: [Add define/Uncomment] [Remove Mass Storage] [Not now]. Framing via
+// title + intro; performs the chosen action.
+async function _offerProtectSd({ title, intro }) {
+  const commented = _mountSdIsCommented(editor ? editor.getValue() : '');
+  const res = await promptConfirm({
+    title,
+    messageHtml: `${intro}<br><br>${_SD_RISK_HTML}`,
+    confirmText: commented ? 'Enable define' : 'Add define',
+    confirmKind: 'save',
+    altText:     'Remove Mass Storage',
+    cancelText:  'Not now',
+  });
+  if (res === 'confirm')  _fixMountSdSetting();
+  else if (res === 'alt') _removeMassStorage();
+  else                    _msgStorageDeclinedMode = _currentUsbMode();
+}
+
+// Touchpoint 1: fired the moment a Mass Storage mode is picked in the dropdown
+// (the first, best chance to fix it). OS8 offers add-or-remove; below OS8 the
+// only fix is removing Mass Storage. Buttons only, never a checkbox.
+window.offerMountSdSettingOnSelect = async function (usbMode) {
+  if (!usbMode || !/msc/i.test(usbMode)) return;
   const text = editor ? editor.getValue() : '';
-  if (_configHasMountSdSetting(text)) return true;         // guarded — safe
-  if (_msgStorageAckMode === usbMode) return true;         // already accepted this mode
-
-  const osMajor = _currentOsMajor();
-  const isOS8plus = osMajor != null && osMajor >= 8;
-  const riskBody =
-    `Without a guard, the board exposes the SD card to your computer the instant ` +
-    `it's plugged in, with no safe-eject, so it can corrupt the card during flashing ` +
-    `and every later plug/unplug. Flashing with <strong>no card inserted is safe</strong>.`;
-
-  if (isOS8plus) {
-    const proceed = await promptConfirm({
-      title:       'SD Card Corruption Risk',
-      messageHtml: `This config flashes with <strong>USB Mass Storage</strong> but is missing ` +
-                   `<code>#define MOUNT_SD_SETTING</code>.<br><br>${riskBody}`,
-      confirmText: 'Flash anyway',
-      confirmKind: 'danger',
-      cancelText:  'Cancel',
+  if (!_sdAtRisk(text, usbMode)) return;      // protected (OS8 + active define) or no SD subsystem
+  if ((_currentOsMajor() ?? -1) >= 8) {
+    const commented = _mountSdIsCommented(text);
+    await _offerProtectSd({
+      title: 'Protect the SD Card?',
+      intro: `You selected <strong>USB Mass Storage</strong>, but this config ` +
+             (commented ? `has <code>#define MOUNT_SD_SETTING</code> <strong>commented out</strong>.`
+                        : `is missing: <code>#define MOUNT_SD_SETTING</code>`),
     });
-    if (proceed) { _msgStorageAckMode = usbMode; return true; }
-    // Cancelled — drop them straight into the fix rather than a dead end.
-    const add = await promptConfirm({
-      title:       'Add SD Card Protection?',
-      messageHtml: `Add <code>#define MOUNT_SD_SETTING</code> to this config now?<br><br>` +
-                   `SD access will stay off until you run <code>sd 1</code>, so the card can't ` +
-                   `auto-mount. You'll need to <strong>recompile</strong> for it to take effect.`,
-      confirmText: 'Add define',
-      confirmKind: 'save',
-      cancelText:  'Not now',
-    });
-    if (add && _injectMountSdSetting()) {
-      showToast('Added #define MOUNT_SD_SETTING. Recompile to apply, then flash.');
-    }
-    return false; // abort this flash either way (binary is still unguarded)
+    return;
   }
-
-  // Below OS8: MOUNT_SD_SETTING does not exist, so warn strongly + require ack.
+  // Below OS8: MOUNT_SD_SETTING has no effect, so the only fix is dropping Mass Storage.
   const res = await promptConfirm({
     title:       'SD Card Corruption Risk',
-    messageHtml: `This config flashes with <strong>USB Mass Storage</strong> on an OS version with ` +
-                 `no way to stop the SD card auto-mounting (pre-OS8).<br><br>${riskBody}<br><br>` +
-                 `To protect an inserted card, switch the USB mode to Serial + WebUSB, or move to OS8.`,
-    confirmText: 'Flash anyway',
-    confirmKind: 'danger',
-    cancelText:  'Cancel',
-    checkbox: {
-      label: 'I understand this can corrupt an inserted SD card',
-      hint:  'Only proceed if no card is inserted, or you accept the risk.',
-    },
+    messageHtml: `You selected <strong>USB Mass Storage</strong> on a pre-OS8 version, where ${_preOs8Why(text)}.<br><br>${_SD_RISK_HTML}`,
+    confirmText: 'Remove Mass Storage',
+    confirmKind: 'save',
+    cancelText:  'Keep Mass Storage',
   });
-  // Clicking "Flash anyway" without ticking the box would otherwise abort with
-  // no feedback and read as a broken button, so tell them what's needed.
-  if (res && res.confirmed && !res.checked) {
-    showToast('Tick the box to confirm you accept the SD-card risk before flashing.', { kind: 'warn' });
+  if (res) _removeMassStorage();
+  else { _msgStorageDeclinedMode = usbMode; _commentInertDefineOnKeep(); }
+};
+
+// Touchpoint 0: fired after the OS version changes. Upgrading an existing Mass
+// Storage config to OS8 unlocks MOUNT_SD_SETTING, so this reads as a helper, not
+// a warning. Downgrading to pre-OS8 makes any existing define inert, so it warns
+// and offers to remove Mass Storage instead.
+window.offerMountSdSettingOnOsChange = async function () {
+  const text = editor ? editor.getValue() : '';
+  const mode = _currentUsbMode();
+  if (!_sdAtRisk(text, mode)) return;
+  if ((_currentOsMajor() ?? -1) >= 8) {
+    // Upgrade: OS8 unlocks the protection, so offer to enable it (a helper).
+    const commented = _mountSdIsCommented(text);
+    await _offerProtectSd({
+      title: 'Protect the SD Card?',
+      intro: `You're now on <strong>OS8</strong>, which can protect the SD card. This config uses ` +
+             `<strong>USB Mass Storage</strong> and ` +
+             (commented ? `has <code>#define MOUNT_SD_SETTING</code> <strong>commented out</strong>.`
+                        : `is missing: <code>#define MOUNT_SD_SETTING</code>`),
+    });
+    return;
   }
-  const ok = !!(res && res.confirmed && res.checked);
-  if (ok) _msgStorageAckMode = usbMode;
-  return ok;
+  // Downgrade to pre-OS8: any MOUNT_SD_SETTING is now inert, so the only fix is
+  // dropping Mass Storage.
+  const res = await promptConfirm({
+    title:       'SD Card Corruption Risk',
+    messageHtml: `This config now targets a <strong>pre-OS8</strong> version but uses ` +
+                 `<strong>USB Mass Storage</strong>, where ${_preOs8Why(text)}.<br><br>${_SD_RISK_HTML}`,
+    confirmText: 'Remove Mass Storage',
+    confirmKind: 'save',
+    cancelText:  'Keep Mass Storage',
+  });
+  if (res) _removeMassStorage();
+  else { _msgStorageDeclinedMode = mode; _commentInertDefineOnKeep(); }
+};
+
+// Applies an SD fix, then saves silently ONLY when the fix is the sole dirty
+// change (the user asked for it, so no save prompt). If the config already had
+// other unsaved edits, leave it dirty for the normal compile-time save prompt.
+async function _applySdFixAndMaybeSave(fixFn) {
+  const wasDirty = !!window.getIsDirty?.();
+  fixFn();
+  if (!wasDirty) await window.doSave?.();
+}
+// Touchpoints 2 & 3: compile and flash gates. stage: 'compile' | 'flash'.
+// Returns: true (proceed/safe), false (cancel), 'compile-anyway' or
+// 'flash-anyway' (user ignored the warning; caller logs the Easter egg), or
+// 'recompile' (a fix was applied at the flash gate; caller recompiles + flashes).
+window.checkMassStorageSafety = async function (usbMode, stage) {
+  if (!usbMode || !/msc/i.test(usbMode)) return true;      // not a Mass Storage mode
+  const text = editor ? editor.getValue() : '';
+  if (!_sdAtRisk(text, usbMode)) return true;              // protected (OS8 + active define) or no SD subsystem
+  // Auto-retry flashes within one in-flight flash the user already approved
+  // shouldn't re-prompt.
+  if (stage === 'flash' && window._isFlashing) return true;
+  // Just chose "Compile anyway" (which already typed the compile Easter egg), so
+  // the immediate auto-flash should proceed silently: no re-warn modal, and no
+  // second egg (once per "I chose to proceed" is enough). One-shot, so a later
+  // deliberate re-flash still warns in full and shows its own egg.
+  if (stage === 'flash' && _sdCompileAcked) { _sdCompileAcked = false; return true; }
+
+  const atCompile = stage === 'compile';
+  const isOS8plus = (_currentOsMajor() ?? -1) >= 8;
+  const commented = _mountSdIsCommented(text);
+  const stateHtml = commented
+    ? `has <code>#define MOUNT_SD_SETTING</code> <strong>commented out</strong>`
+    : `is missing <code>#define MOUNT_SD_SETTING</code>`;
+  const addLabel  = commented ? 'Enable define' : 'Add define';
+
+  if (isOS8plus) {
+    if (atCompile) {
+      // Compile: a fix applies in place and the build below includes it (no
+      // recompile chain needed, we're about to compile anyway).
+      const reminder = _msgStorageDeclinedMode === usbMode;
+      const res = await promptConfirm({
+        title:       reminder ? 'SD Protection Still Off' : 'Protect the SD Card?',
+        messageHtml: (reminder
+          ? `Heads up: this config ${stateHtml} and compiles with <strong>USB Mass Storage</strong>.<br><br>`
+          : `This config compiles with <strong>USB Mass Storage</strong> but ${stateHtml}.<br><br>`)
+          + _SD_RISK_HTML,
+        confirmText: addLabel,
+        confirmKind: 'save',
+        altText:     'Remove Mass Storage',
+        middleText:  'Compile anyway',
+        cancelText:  'Cancel',
+      });
+      if (res === 'confirm') { await _applySdFixAndMaybeSave(_fixMountSdSetting); return true; }
+      if (res === 'alt')     { await _applySdFixAndMaybeSave(_removeMassStorage); return true; } // compile reads the new mode
+      if (res === 'cancel')  return false;
+      _msgStorageDeclinedMode = usbMode; _sdCompileAcked = true; // 'middle'
+      return 'compile-anyway';
+    }
+    // Flash: the binary is already built, so a fix must recompile. The two fix
+    // buttons run the whole chain (fix -> silent save when it's the only change
+    // -> recompile -> flash) via 'recompile'. "Flash anyway" flashes the risky
+    // binary now; the caller logs the Easter egg.
+    const res = await promptConfirm({
+      title:       'SD Card Corruption Risk',
+      messageHtml: `This config flashes with <strong>USB Mass Storage</strong> but ${stateHtml}.<br><br>${_SD_RISK_HTML}<br><br>` +
+                   `<strong>Fix it and recompile?</strong> Either <strong>${addLabel}</strong> or <strong>Remove Mass Storage</strong> will recompile with the fix, then flash.`,
+      confirmText: addLabel,
+      confirmKind: 'save',
+      altText:     'Remove Mass Storage',
+      middleText:  'Flash anyway',
+      cancelText:  'Cancel',
+    });
+    if (res === 'confirm') { await _applySdFixAndMaybeSave(_fixMountSdSetting); _sdRecompileReason = commented ? 'SD card protection enabled, recompiling…' : 'SD card protection added, recompiling…'; return 'recompile'; }
+    if (res === 'alt')     { await _applySdFixAndMaybeSave(_removeMassStorage); _sdRecompileReason = 'USB Mass Storage removed, recompiling…'; return 'recompile'; }
+    if (res === 'middle')  return 'flash-anyway';
+    return false;                          // cancel
+  }
+
+  // Below OS8: no define exists; the only fix is dropping Mass Storage.
+  if (atCompile) {
+    // Already chose "Compile anyway" for this mode: soften to a reminder rather
+    // than re-alarm, mirroring the OS8 path.
+    const reminder = _msgStorageDeclinedMode === usbMode;
+    const res = await promptConfirm({
+      title:       reminder ? 'SD Card Still At Risk' : 'SD Card Corruption Risk',
+      messageHtml: (reminder
+        ? `Heads up: this config still compiles with <strong>USB Mass Storage</strong> on a pre-OS8 version, `
+        : `This config compiles with <strong>USB Mass Storage</strong> on a pre-OS8 version, `)
+        + `where ${_preOs8Why(text)}.<br><br>${_SD_RISK_HTML}`,
+      confirmText: 'Remove Mass Storage',
+      confirmKind: 'save',
+      middleText:  'Compile anyway',
+      cancelText:  'Cancel',
+    });
+    if (res === 'confirm') { await _applySdFixAndMaybeSave(_removeMassStorage); return true; } // compile reads the new mode
+    if (res === 'cancel')  return false;
+    _msgStorageDeclinedMode = usbMode; _sdCompileAcked = true; // 'middle'
+    return 'compile-anyway';
+  }
+  const res = await promptConfirm({
+    title:       'SD Card Corruption Risk',
+    messageHtml: `This config flashes with <strong>USB Mass Storage</strong> on a pre-OS8 version, ` +
+                 `where ${_preOs8Why(text)}.<br><br>${_SD_RISK_HTML}<br><br>` +
+                 `<strong>Fix it and recompile?</strong> <strong>Remove Mass Storage</strong> will recompile without it, then flash.`,
+    confirmText: 'Remove Mass Storage',
+    confirmKind: 'save',
+    middleText:  'Flash anyway',
+    cancelText:  'Cancel',
+  });
+  if (res === 'confirm') { await _applySdFixAndMaybeSave(_removeMassStorage); _sdRecompileReason = 'USB Mass Storage removed, recompiling…'; return 'recompile'; }
+  if (res === 'middle')  return 'flash-anyway';
+  return false;
 };
 
 // ── Window title ───────────────────────────────────────
@@ -6176,6 +6470,9 @@ document.getElementById('input-version').addEventListener('change', () => {
     window.electronAPI.initToolchain();
   }
   _refreshSelectedVersionJmtState();
+  // Touchpoint 0: upgrading an existing Mass Storage config to OS8 unlocks the
+  // MOUNT_SD_SETTING protection, so offer it as a helper (not a warning).
+  window.offerMountSdSettingOnOsChange?.();
 });
 
 // ── Metadata ───────────────────────────────────────────
@@ -34652,6 +34949,7 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
 
     <!-- Elapsed time -->
     <div id="bm-timer-row">
+      <span id="bm-timer-last"></span>
       <span id="bm-timer-compile" style="display:none;">Compile Time: <span id="bm-timer-compile-val">0:00</span></span>
       <span id="bm-timer-flash"   style="display:none;">Flash Time: <span id="bm-timer-flash-val">0:00</span></span>
     </div>
