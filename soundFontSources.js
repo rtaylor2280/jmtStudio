@@ -132,17 +132,40 @@ async function copyFileStreamed(srcPath, destPath, onProgress) {
 // hash was an aggregate of per-file hashes, the new one is a hash of
 // the zip stream — different shape). Acceptable edge case for the
 // one-time format transition.
-async function zipFolderToFile(srcDir, destZipPath, onProgress) {
+async function zipFolderToFile(srcDir, destZipPath, onProgress, stripCorruptWavs) {
   const archiver = require('archiver');
   const { Transform } = require('stream');
 
-  const files = walkFolderSorted(srcDir).filter(f => !_isNoisePath(f.relPath));
+  let files = walkFolderSorted(srcDir).filter(f => !_isNoisePath(f.relPath));
+  // When the user chose to import a font flagged as corrupt, drop the damaged
+  // wavs BEFORE they reach the archive. This salvages the good files (which is
+  // what "import it anyway" is expected to mean) AND, because the scrambled
+  // file is never read/zipped, removes the very read that can stall the pass.
+  // Header-only check — the SAME one that flagged the font — so a flagged file
+  // is readable here and won't hang. Opt-in (corrupt fonts only) so clean
+  // imports pay nothing and no bad-sector header read is done unprompted.
+  const strippedFiles = [];
+  if (stripCorruptWavs) {
+    const { checkWavHealth } = require('./sdCardDetect');
+    files = files.filter(f => {
+      if (!/\.wav$/i.test(f.relPath)) return true;
+      const h = checkWavHealth(f.absPath, f.size);
+      if (h && h.corrupt) { strippedFiles.push({ relPath: f.relPath, reason: h.reason }); return false; }
+      return true;
+    });
+  }
   const totalBytes = files.reduce((s, f) => s + f.size, 0);
   const fileCount = files.length;
 
   const archive = archiver('zip', {
     zlib: { level: 1 },
     forceZip64: true,
+    // statConcurrency: 1 is REQUIRED for a deterministic archive. The default (4)
+    // stats files concurrently and appends them in I/O-completion order, not the
+    // sorted submission order — so the same folder produced different zip bytes
+    // (and thus a different content hash) on each import, silently breaking
+    // dedup. Serializing the stat restores stable, order-deterministic output.
+    statConcurrency: 1,
   });
 
   const hasher = crypto.createHash('sha256');
@@ -162,8 +185,10 @@ async function zipFolderToFile(srcDir, destZipPath, onProgress) {
   let bytesProcessed = 0;
   let filesProcessed = 0;
   let lastEmit = Date.now();
+  let lastProgressMs = Date.now(); // watchdog: last time an entry actually completed
   archive.on('entry', (entry) => {
     filesProcessed++;
+    lastProgressMs = Date.now();
     if (entry.stats && entry.stats.size) bytesProcessed += entry.stats.size;
     if (!onProgress) return;
     const now = Date.now();
@@ -173,26 +198,40 @@ async function zipFolderToFile(srcDir, destZipPath, onProgress) {
     }
   });
 
-  // Add files in pre-sorted order. archiver's internal queue is FIFO so
-  // submission order = on-disk order = deterministic zip bytes.
+  // Add files in pre-sorted order. With statConcurrency:1 above, archiver stats
+  // and appends them one at a time IN this submission order, so the zip bytes are
+  // deterministic (concurrent stat was reordering them and breaking dedup).
   for (const f of files) {
     archive.file(f.absPath, { name: f.relPath, date: EPOCH, mode: MODE });
   }
 
   await new Promise((resolve, reject) => {
-    fileStream.on('close', resolve);
-    fileStream.on('error', reject);
-    archive.on('error', reject);
+    // Watchdog: if no entry completes for a long stretch, a file is unreadable
+    // (a damaged wav on a bad sector can make the OS read hang indefinitely).
+    // Abort rather than hang the whole import forever — the caller cleans up the
+    // partial uuid dir and surfaces a real error instead of a frozen modal.
+    const STALL_MS = 90000;
+    const watchdog = setInterval(() => {
+      if (Date.now() - lastProgressMs > STALL_MS) {
+        clearInterval(watchdog);
+        try { archive.abort(); } catch {}
+        reject(new Error('Stalled reading a file — the source has a damaged or unreadable file. Nothing was imported.'));
+      }
+    }, 5000);
+    const finish = (fn, arg) => { clearInterval(watchdog); fn(arg); };
+    fileStream.on('close', () => finish(resolve));
+    fileStream.on('error', (e) => finish(reject, e));
+    archive.on('error', (e) => finish(reject, e));
     archive.on('warning', (err) => {
       // ENOENT during walk just means a file vanished between readdir
       // and read — rare but not fatal; surface anything else.
       if (err.code === 'ENOENT') return;
-      reject(err);
+      finish(reject, err);
     });
     archive.finalize();
   });
 
-  return { hash: hasher.digest('hex'), totalBytes, fileCount };
+  return { hash: hasher.digest('hex'), totalBytes, fileCount, strippedFiles };
 }
 
 // Walk a folder tree, return an array of {relPath, absPath, size} sorted
@@ -308,6 +347,16 @@ function cleanupOrphanSources(userData) {
     if (!entry.isDirectory()) continue;
     const uuid = entry.name;
     const uuidDir = path.join(root, uuid);
+    // In-flight PREPARED source (prepareOnly staged the zip; meta comes at
+    // finalize). Marked with .preparing so a sibling prepare/import in the same
+    // bulk run doesn't sweep it as an "archive without meta" orphan. Skip recent
+    // ones; only reclaim a marker older than 6h (a crashed session's straggler).
+    const prepMarker = path.join(uuidDir, '.preparing');
+    if (fs.existsSync(prepMarker)) {
+      try {
+        if (Date.now() - fs.statSync(prepMarker).mtimeMs < 6 * 3600 * 1000) continue;
+      } catch { continue; }
+    }
     const metaPath = path.join(uuidDir, 'meta.json');
     const hasMeta = fs.existsSync(metaPath);
     const hasZip = fs.existsSync(path.join(uuidDir, 'source.zip'));
@@ -427,7 +476,7 @@ function cleanupPartialSource(uuidDir) {
 //   { ok: false, error: <string> }
 //
 // Progress events fire in three stages: hashing, copying, done.
-async function importSource({ userData, sourcePath, originalName, metadata, onProgress, forceNewSource }) {
+async function importSource({ userData, sourcePath, originalName, metadata, onProgress, forceNewSource, prepareOnly, stripCorrupt }) {
   if (!userData) return { ok: false, error: 'Missing userData' };
   if (!sourcePath) return { ok: false, error: 'Missing sourcePath' };
   // Sweep corrupt source dirs (meta without archive, archive without
@@ -468,6 +517,7 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
   let fileSize = 0;
   let totalBytes = 0;
   let fileCount = 0;
+  let strippedFiles = []; // damaged wavs dropped when stripCorrupt is set (folder imports)
 
   // Zip-format input: hash THEN dedup THEN copy, like before. Dedup
   // can short-circuit cleanly before we write anything because the
@@ -530,10 +580,11 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
           totalBytes: tb,
           currentFile,
         });
-      });
+      }, stripCorrupt);
       hash = result.hash;
       totalBytes = result.totalBytes;
       fileCount = result.fileCount;
+      strippedFiles = result.strippedFiles || [];
       fileSize = fs.statSync(destZip).size;
       if (!forceNewSource) {
         const existing = findByHash(userData, hash);
@@ -546,18 +597,9 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
     }
 
     // Capture the original archive's modification date as the default
-    // acquisitionDate. We use mtime, NOT birthtime: on Windows + Google
-    // Drive (and most sync clients) birthtime gets rewritten to the local
-    // sync moment, which masks the real date a file has been in the
-    // user's collection. mtime survives sync because preserving it is
-    // exactly what "modified time" means. This is also what Explorer
-    // shows in its "Date modified" column, so the modal default matches
-    // what the user sees in the OS file picker. Formatted YYYY-MM-DD UTC.
-    //
-    // Both the date string (for the UI default) and the precise
-    // milliseconds (for export-time mtime preservation, so a re-exported
-    // source carries the original date out to the user's Downloads) are
-    // stored on the source meta.
+    // acquisitionDate (mtime, not birthtime — birthtime gets rewritten by sync
+    // clients). Captured HERE so it's identical whether we finalize now or later
+    // via a prepareOnly split.
     let sourceFileDate = null;
     let sourceFileMtimeMs = null;
     try {
@@ -567,47 +609,86 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
       }
     } catch {}
 
-    const meta = {
-      schemaVersion: 1,
-      uuid,
-      format,
-      originalName: name,
-      hash,
-      vendor: (metadata && metadata.vendor) || null,
-      vendorWebsite: (metadata && metadata.vendorWebsite) || null,
-      vendorAutoDetected: !!(metadata && metadata.vendorAutoDetected),
-      // Default to the archive's mtime when no caller-supplied value lands.
-      // Single-source review pre-fills the date input with sourceFileDate and
-      // sends it back through metadata.purchaseDate, so this fallback only
-      // bites the bulk-import path that calls importSource with metadata:{}.
-      // Without this, bulk-imported sources stayed null and the source detail
-      // modal's Acquired field rendered empty — Ryan caught this on
-      // Power_Of_Many_Bundle 2026-06-26.
-      purchaseDate: (metadata && metadata.purchaseDate) || sourceFileDate || null,
-      sourceFileDate,
-      sourceFileMtimeMs,
-      importedAt: new Date().toISOString(),
-      userNotes: (metadata && metadata.userNotes) || '',
-      fileSize,
-      readmePaths: [],
-    };
+    // prepareOnly (the "analyze" half of bulk import): the zip is written, hashed,
+    // and dedup-checked — but we DON'T write meta or create the entry yet. The
+    // caller shows real stats, lets the user prune/edit, then calls
+    // finalizePreparedSource to commit (no re-hash — the zip is already here).
+    if (prepareOnly) {
+      // Mark as in-flight so a sibling prepare/import doesn't sweep this staged
+      // zip as an orphan before we finalize it.
+      try { fs.writeFileSync(path.join(uuidDir, '.preparing'), ''); } catch {}
+      emit('done', { isDuplicate: false, prepared: true });
+      return { ok: true, isDuplicate: false, prepared: true, uuid, uuidDir, hash, format, name, fileSize, sourceFileDate, sourceFileMtimeMs, totalBytes, fileCount, strippedFiles };
+    }
 
-    fs.writeFileSync(path.join(uuidDir, 'meta.json'), JSON.stringify(meta, null, 2));
-
-    // Warm the candidate cache at import time. The user is almost certainly
-    // about to look at this source (single-source import lands them in the
-    // review modal; bulk import goes straight to creating entries) so we'd
-    // pay this cost anyway — paying it here means subsequent opens are
-    // free and the result rides into backup payloads via meta. Best-effort:
-    // a stamp failure doesn't fail the import, just leaves the cache cold.
-    try { await recomputeAndStampCandidates(userData, uuid); } catch {}
-
+    const res = await _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format, name, hash, fileSize, sourceFileDate, sourceFileMtimeMs, metadata, strippedFiles });
     emit('done', { isDuplicate: false });
-    return { ok: true, isDuplicate: false, uuid, hash, format, sourceFileDate };
+    return { ...res, strippedFiles };
   } catch (err) {
     cleanupPartialSource(uuidDir);
     return { ok: false, error: `Import failed: ${err.message}` };
   }
+}
+
+// Shared meta writer + candidate-cache warm. Used by importSource's finalize
+// path AND finalizePreparedSource (the deferred commit of a prepareOnly source),
+// so the written meta is identical whichever way a source is committed.
+async function _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format, name, hash, fileSize, sourceFileDate, sourceFileMtimeMs, metadata, strippedFiles }) {
+  const meta = {
+    schemaVersion: 1,
+    uuid,
+    format,
+    originalName: name,
+    hash,
+    vendor: (metadata && metadata.vendor) || null,
+    vendorWebsite: (metadata && metadata.vendorWebsite) || null,
+    vendorAutoDetected: !!(metadata && metadata.vendorAutoDetected),
+    purchaseDate: (metadata && metadata.purchaseDate) || sourceFileDate || null,
+    sourceFileDate,
+    sourceFileMtimeMs,
+    importedAt: new Date().toISOString(),
+    userNotes: (metadata && metadata.userNotes) || '',
+    fileSize,
+    readmePaths: [],
+    // Provenance: damaged wavs that were removed on import (empty/absent when none).
+    ...(strippedFiles && strippedFiles.length ? { strippedFiles } : {}),
+  };
+  fs.writeFileSync(path.join(uuidDir, 'meta.json'), JSON.stringify(meta, null, 2));
+  // Warm the candidate cache (best-effort; a stamp failure just leaves it cold).
+  try { await recomputeAndStampCandidates(userData, uuid); } catch {}
+  return { ok: true, isDuplicate: false, uuid, hash, format, sourceFileDate };
+}
+
+// Commit a source previously staged by importSource({ prepareOnly: true }). Its
+// uuid/source.zip is already on disk, hashed and dedup-cleared — this only writes
+// the meta and warms the cache. NO re-hash. The prepared fields come back from
+// the prepare result and pass straight through.
+async function finalizePreparedSource({ userData, uuid, format, name, hash, fileSize, sourceFileDate, sourceFileMtimeMs, metadata }) {
+  if (!userData || !uuid) return { ok: false, error: 'Missing userData/uuid' };
+  const uuidDir = path.join(sourcesRoot(userData), uuid);
+  if (!fs.existsSync(path.join(uuidDir, 'source.zip'))) return { ok: false, error: 'Prepared source is missing its archive' };
+  // No longer in-flight — clear the marker BEFORE stamping so it isn't hashed
+  // into the source's content signature.
+  try { fs.unlinkSync(path.join(uuidDir, '.preparing')); } catch {}
+  try {
+    return await _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format: format || 'zip', name, hash, fileSize, sourceFileDate, sourceFileMtimeMs, metadata });
+  } catch (err) {
+    return { ok: false, error: `Finalize failed: ${err.message}` };
+  }
+}
+
+// Discard a prepareOnly source the user chose not to keep: delete its staged
+// uuid dir. SAFETY: only removes a source that was prepared but NEVER finalized
+// (has source.zip but no meta.json). A finalized source (meta present) is a real
+// library entry and is left alone — so the caller can safely discard every
+// prepared uuid on modal close without risking committed ones. Idempotent.
+function discardPreparedSource(userData, uuid) {
+  if (!userData || !uuid) return;
+  const uuidDir = path.join(sourcesRoot(userData), uuid);
+  try {
+    if (fs.existsSync(path.join(uuidDir, 'meta.json'))) return; // finalized — keep
+    cleanupPartialSource(uuidDir);
+  } catch {}
 }
 
 // ── Format dispatch (Phase 1, slice 2) ──────────────────
@@ -1363,15 +1444,127 @@ function getSourceContentHash(userData, uuid) {
   return recomputeSourceContentHash(userData, uuid);
 }
 
+// Open a Source-like reader over an arbitrary folder or .zip path that has
+// NOT been imported into the library. Returns the same read interface the
+// vendor/candidate detectors expect ({ meta, format, listAll, readFile,
+// browse }) so guided-import enrichment can detect vendor and peek at files
+// in place, before the user commits to importing anything. No hashing, no
+// copy, no userData. Read-only.
+function openSourceAtPath(absPath) {
+  if (!absPath || !fs.existsSync(absPath)) return null;
+  let stat;
+  try { stat = fs.statSync(absPath); } catch { return null; }
+  const originalName = path.basename(absPath);
+  const meta = { originalName };
+
+  if (stat.isFile() && /\.zip$/i.test(absPath)) {
+    async function _readFlat(filePath) {
+      const norm = _normalizeSubPath(filePath);
+      if (!norm) throw new Error('readFile requires a path');
+      const zip = _openZip(absPath);
+      try {
+        const entries = await _readAllZipEntries(zip);
+        const match = entries.find(e => e.fileName === norm);
+        if (!match) throw new Error(`Not found in source: ${norm}`);
+        return await _readZipEntryToBuffer(zip, match);
+      } finally {
+        await zip.close();
+      }
+    }
+    return {
+      meta,
+      format: 'zip',
+      async listAll() {
+        const zip = _openZip(absPath);
+        try { return await _readAllZipEntries(zip); }
+        finally { await zip.close(); }
+      },
+      async browse(subPath) {
+        const zip = _openZip(absPath);
+        try {
+          const entries = await _readAllZipEntries(zip);
+          return _listAtPath(entries, _normalizeSubPath(subPath));
+        } finally { await zip.close(); }
+      },
+      async readFile(filePath) {
+        return await _resolveCompositeReadBytes({ readFile: _readFlat }, filePath);
+      },
+    };
+  }
+
+  if (stat.isDirectory()) {
+    const folderRoot = absPath;
+    async function _readFlat(filePath) {
+      const norm = _normalizeSubPath(filePath);
+      if (!norm) throw new Error('readFile requires a path');
+      const abs = path.join(folderRoot, norm);
+      if (!fs.existsSync(abs)) throw new Error(`Not found in source: ${norm}`);
+      return await fs.promises.readFile(abs);
+    }
+    return {
+      meta,
+      format: 'folder',
+      async listAll() {
+        const out = [];
+        const walk = (dir, relBase) => {
+          let entries;
+          try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
+          catch { return; }
+          for (const e of entries) {
+            const abs = path.join(dir, e.name);
+            const rel = relBase ? `${relBase}/${e.name}` : e.name;
+            if (e.isDirectory()) { out.push({ fileName: `${rel}/`, size: 0, isDir: true }); walk(abs, rel); }
+            else if (e.isFile()) {
+              let size = 0;
+              try { size = fs.statSync(abs).size; } catch {}
+              out.push({ fileName: rel, size, isDir: false });
+            }
+          }
+        };
+        walk(folderRoot, '');
+        return out;
+      },
+      async browse(subPath) {
+        const norm = _normalizeSubPath(subPath);
+        const target = norm ? path.join(folderRoot, norm) : folderRoot;
+        if (!fs.existsSync(target)) return [];
+        const entries = fs.readdirSync(target, { withFileTypes: true });
+        const items = entries.map(e => {
+          const abs = path.join(target, e.name);
+          const isDir = e.isDirectory();
+          const rel = norm ? `${norm}/${e.name}` : e.name;
+          let size;
+          if (e.isFile()) { try { size = fs.statSync(abs).size; } catch {} }
+          return { name: e.name, isDirectory: isDir, size, path: rel };
+        });
+        items.sort((a, b) => {
+          if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+          return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+        });
+        return items;
+      },
+      async readFile(filePath) {
+        return await _resolveCompositeReadBytes({ readFile: _readFlat }, filePath);
+      },
+    };
+  }
+
+  return null;
+}
+
 module.exports = {
   sourcesRoot,
   ensureSourcesRoot,
+  isNoisePath: _isNoisePath,
+  openSourceAtPath,
   hashZipFile,
   hashFolder,
   listSources,
   cleanupOrphanSources,
   findByHash,
   importSource,
+  finalizePreparedSource,
+  discardPreparedSource,
   openSource,
   deleteSource,
   updateSourceMeta,

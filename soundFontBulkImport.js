@@ -42,8 +42,34 @@ const soundFontEntries = require('./soundFontEntries');
 const soundFontVendors = require('./soundFontVendors');
 const soundFontCommon = require('./soundFontCommon');
 const soundFontSharedTracks = require('./soundFontSharedTracks');
+const soundFontFileHash = require('./soundFontFileHash');
+const { checkWavBuffer } = require('./sdCardDetect');
 
 const MAX_SCAN_DEPTH_BEFORE_HALT = 6;
+
+// One read pass over a font folder that yields, together, everything the import
+// would otherwise compute later ("quick import, ahead of time"):
+//   - fileHashes: the per-file hash set { relPath: sha256 } over the REAL font
+//     content (noise like ._*, .DS_Store, __MACOSX excluded — the same files the
+//     import strips when it zips). Per-file is what enables percent-match, not
+//     just exact-match.
+//   - contentHash: those records folded into one digest for cheap exact-dedup.
+//   - corruptFiles: [{ relPath, reason }] — wavs are header-checked off the SAME
+//     buffer the hash reads, so nothing is read twice.
+// Returns null when the folder can't be read.
+function hashAndCheckFont(absDir) {
+  const corruptFiles = [];
+  const notNoise = (rel) => !soundFontSources.isNoisePath(rel);
+  const records = soundFontFileHash.collectFileRecords(absDir, (relPath, buf, size) => {
+    if (!/\.wav$/i.test(relPath) || !buf) return;
+    const h = checkWavBuffer(buf, size);
+    if (h && h.corrupt) corruptFiles.push({ relPath, reason: h.reason });
+  }, notNoise);
+  if (records === null) return null;
+  const fileHashes = {};
+  for (const r of records) fileHashes[r.relPath] = r.fileHash;
+  return { contentHash: soundFontFileHash.hashRecords(records), fileHashes, corruptFiles };
+}
 
 // Noise file/dir segments we never want to descend into or count as
 // content. Mirrors soundFontCandidates.isNoiseSegment but local so the
@@ -342,7 +368,7 @@ async function runBulkImport({ plan, userData }, callbacks = {}) {
     const src = plan.sources[i];
     onProgress({ stage: 'source-start', sourceIdx: i, total, label: src.cleanedName || src.rawName });
     try {
-      const result = await importPlannedSource({ userData, src }, (subProgress) => {
+      const result = await importPlannedSource({ userData, src, fromSdCard: !!plan.fromSdCard }, (subProgress) => {
         onProgress({ stage: 'source-progress', sourceIdx: i, total, label: src.cleanedName || src.rawName, sub: subProgress });
       });
       if (result.dedup) {
@@ -356,6 +382,7 @@ async function runBulkImport({ plan, userData }, callbacks = {}) {
           multiCandidate: !!result.multiCandidate,
           versionsSkipped: result.versionsSkipped || 0,
           variantsEmitted: result.variantsEmitted || 0,
+          strippedFiles: result.strippedFiles || [],
         });
       } else {
         summary.failed.push({ src: src.relPath || src.absPath, reason: result.error });
@@ -430,35 +457,121 @@ async function runBulkImport({ plan, userData }, callbacks = {}) {
   return { ok: true, summary };
 }
 
+// ANALYZE phase ("prepare"): stage every planned source via importSource
+// prepareOnly — zip + hash + dedup, no meta/entry yet — and fold in the
+// already-computed corruption map (by top-level folder name). Returns per-source
+// results the caller stamps back onto the plan (src._prepared / dup / corrupt)
+// plus aggregate stats for the real-stats screen. This is exactly the hashing
+// quick import does, just run BEFORE the keep/prune decision — the prepared zips
+// are reused at commit (no re-hash). Emits byte progress for the existing bar.
+async function analyzeBulkImport({ plan, userData, corruptFonts }, callbacks = {}) {
+  const onProgress = typeof callbacks.onProgress === 'function' ? callbacks.onProgress : () => {};
+  const shouldCancel = typeof callbacks.shouldCancel === 'function' ? callbacks.shouldCancel : () => false;
+  if (!plan || !Array.isArray(plan.sources)) return { ok: false, error: 'Invalid plan' };
+  const sources = plan.sources;
+  const total = sources.length;
+  const cf = corruptFonts || {};
+  const results = [];
+  let newCount = 0, dupCount = 0, corruptCount = 0;
+  for (let i = 0; i < total; i++) {
+    if (shouldCancel()) return { ok: true, cancelled: true, results };
+    const src = sources[i];
+    const label = src.cleanedName || src.rawName;
+    onProgress({ stage: 'source-start', sourceIdx: i, total, label });
+    const corrupt = cf[src.rawName] || null;
+    // Corrupt fonts are prepared the SAME way as clean ones, with stripCorrupt:
+    // remove the damaged wavs FIRST, then hash the salvaged content. That clean,
+    // stable hash means a corrupt font you ALREADY have dedups up front (shows as
+    // "already in library" on the stats screen) instead of the user checking it
+    // and only discovering the duplicate after it re-processes at commit. A
+    // corrupt font that's genuinely NEW gets a prepared (stripped) zip, still
+    // flagged corrupt so review keeps it unchecked-by-default — but committing it
+    // now reuses the prepared zip (no re-strip/re-hash).
+    let res;
+    try {
+      res = await soundFontSources.importSource({
+        userData, sourcePath: src.absPath, originalName: path.basename(src.absPath),
+        metadata: {}, prepareOnly: true, stripCorrupt: !!corrupt,
+        onProgress: (p) => onProgress({ stage: 'source-progress', sourceIdx: i, total, label, sub: p }),
+      });
+    } catch (e) { res = { ok: false, error: String(e && e.message || e) }; }
+    if (res && res.ok && res.isDuplicate) {
+      dupCount++;
+      results.push({ idx: i, isDuplicate: true, existingUuid: res.uuid, corrupt });
+    } else if (res && res.ok && res.prepared) {
+      if (corrupt) corruptCount++; else newCount++;
+      results.push({ idx: i, prepared: {
+        uuid: res.uuid, hash: res.hash, format: res.format, name: res.name,
+        fileSize: res.fileSize, sourceFileDate: res.sourceFileDate, sourceFileMtimeMs: res.sourceFileMtimeMs,
+        strippedFiles: res.strippedFiles || [],
+      }, corrupt });
+    } else {
+      results.push({ idx: i, error: (res && res.error) || 'prepare failed', corrupt });
+    }
+  }
+  onProgress({ stage: 'done', total });
+  return { ok: true, results, stats: { total, new: newCount, duplicate: dupCount, corrupt: corruptCount } };
+}
+
+// Discard prepared-but-not-committed sources (user pruned them or cancelled).
+function discardPreparedSources(userData, uuids) {
+  if (!Array.isArray(uuids)) return;
+  for (const u of uuids) { try { soundFontSources.discardPreparedSource(userData, u); } catch {} }
+}
+
 // Import one planned source end-to-end: hash + copy via importSource,
 // detect candidates, create entries with needsReview when applicable.
-async function importPlannedSource({ userData, src }, onSubProgress) {
+async function importPlannedSource({ userData, src, fromSdCard }, onSubProgress) {
   const sourcePath = src.absPath;
-  const originalName = path.basename(sourcePath) + (src.kind === 'zip' ? '' : '');
+  const originalName = path.basename(sourcePath);
   // importSource handles dedup-by-hash automatically. We don't pre-fill
   // metadata.vendor — vendor detection runs AFTER the source is on disk
   // because the existing detector wants a Source object with listAll.
-  const importRes = await soundFontSources.importSource({
-    userData,
-    sourcePath,
-    originalName: src.kind === 'zip' ? path.basename(sourcePath) : path.basename(sourcePath),
-    metadata: {},
-    onProgress: (p) => onSubProgress && onSubProgress({ phase: 'import', ...p }),
-  });
-  if (!importRes || !importRes.ok) {
-    return { ok: false, error: (importRes && importRes.error) || 'Import failed' };
-  }
-  if (importRes.isDuplicate) {
-    // Emit the 'skipped' tick then HOLD for ~1.5s before returning.
-    // Without the delay the next source's source-start event fires
-    // immediately and overwrites the "Skipped" label before the user
-    // sees it. The hold is per-skip; for a run with many duplicates
-    // it sums up but every skip becomes visible.
-    if (onSubProgress) {
-      try { onSubProgress({ phase: 'import', stage: 'skipped', percent: 100 }); } catch {}
+  let importRes;
+  if (src._prepared && src._prepared.uuid) {
+    // COMMIT path: this source was already staged by the analyze phase
+    // (importSource prepareOnly) — its zip is on disk, hashed and dedup-cleared.
+    // Finalize just writes meta; NO re-hash (this is what makes quick import fast).
+    importRes = await soundFontSources.finalizePreparedSource({
+      userData,
+      uuid: src._prepared.uuid,
+      format: src._prepared.format,
+      name: src._prepared.name || originalName,
+      hash: src._prepared.hash,
+      fileSize: src._prepared.fileSize,
+      sourceFileDate: src._prepared.sourceFileDate,
+      sourceFileMtimeMs: src._prepared.sourceFileMtimeMs,
+      metadata: {},
+    });
+    if (!importRes || !importRes.ok) {
+      return { ok: false, error: (importRes && importRes.error) || 'Finalize failed' };
     }
-    await new Promise(r => setTimeout(r, 1500));
-    return { ok: true, dedup: true, existingUuid: importRes.uuid };
+  } else {
+    // Legacy one-shot path (no analyze phase ran): hash + copy + dedup + finalize.
+    // A font the user flagged corrupt but chose to import lands here (analyze
+    // skips corrupt fonts, so they never get a _prepared zip). stripCorrupt
+    // drops the damaged wavs at zip time — salvage the good files, and the bad
+    // read never happens.
+    importRes = await soundFontSources.importSource({
+      userData,
+      sourcePath,
+      originalName,
+      metadata: {},
+      stripCorrupt: !!src._corrupt,
+      onProgress: (p) => onSubProgress && onSubProgress({ phase: 'import', ...p }),
+    });
+    if (!importRes || !importRes.ok) {
+      return { ok: false, error: (importRes && importRes.error) || 'Import failed' };
+    }
+    if (importRes.isDuplicate) {
+      // Emit the 'skipped' tick then HOLD ~1.5s so the label is visible before
+      // the next source-start event overwrites it.
+      if (onSubProgress) {
+        try { onSubProgress({ phase: 'import', stage: 'skipped', percent: 100 }); } catch {}
+      }
+      await new Promise(r => setTimeout(r, 1500));
+      return { ok: true, dedup: true, existingUuid: importRes.uuid };
+    }
   }
   const sourceUuid = importRes.uuid;
   // Vendor detection on the just-imported source. detectVendor handles
@@ -473,33 +586,67 @@ async function importPlannedSource({ userData, src }, onSubProgress) {
   const detectedVendor = vendorRes && vendorRes.vendor ? vendorRes.vendor : null;
   const detectedConfidence = vendorRes && vendorRes.confidence ? vendorRes.confidence : null;
   const detectedWebsite = vendorRes && vendorRes.vendorWebsite ? vendorRes.vendorWebsite : null;
+  // Guided-import override: a vendor the user typed/confirmed in the guided
+  // review replaces the auto-detected one everywhere (source meta, entry
+  // author, and the creator_empty review reason), and clears the
+  // auto-detected flag since it's now user-chosen. The known-vendor website
+  // is only carried over when the user's vendor still matches what we
+  // detected; a different typed vendor gets no website guess.
+  const _guidedVendor  = src.guidedVendor  && String(src.guidedVendor).trim();
+  const _guidedWebsite = src.guidedWebsite && String(src.guidedWebsite).trim();
+  const _guidedLink    = src.guidedLink    && String(src.guidedLink).trim();
+  const _guidedNotes   = src.guidedNotes   && String(src.guidedNotes).trim();
+  const _guidedDate    = src.guidedAcquisitionDate && String(src.guidedAcquisitionDate).trim();
+  const vendorFromUser = !!_guidedVendor;
+  let effectiveVendor = vendorFromUser ? _guidedVendor : detectedVendor;
+  // SD-card path: an undetected vendor defaults to "Unknown" — an acceptable
+  // creator for a font that came off someone's card — so it imports cleanly with
+  // NO Needs-review flag, even on Quick import. The regular bulk path leaves it
+  // empty so it hits creator_empty -> Needs review (let the user figure it out).
+  if (!effectiveVendor && fromSdCard) effectiveVendor = 'Unknown';
+  // Website precedence: an explicit guided website wins; otherwise the known-
+  // vendor site, but only when the (auto-detected or user-confirmed) vendor
+  // still matches what we detected — a different typed vendor gets no guess.
+  const detectedVendorWebsite = (!vendorFromUser || _guidedVendor === detectedVendor) ? detectedWebsite : null;
+  const effectiveWebsite = _guidedWebsite || detectedVendorWebsite;
   // purchased default order of precedence:
-  //   1. Vendor's purchasedDefault when the detector knows (e.g. some
-  //      vendors are paid-only, some are free-only)
-  //   2. "free" in the source filename overrides to false (good signal
-  //      across many vendors who name their freebies "Free Pack",
-  //      "Free Decimate", etc.)
+  //   1. Vendor's purchasedDefault when the detector knows (paid-only/free-only)
+  //   2. "free" in the source filename
   //   3. Default paid (true)
   let purchasedDefault;
-  if (vendorRes && vendorRes.purchasedDefault === false) {
-    purchasedDefault = false;
-  } else if (/\bfree\b/i.test(src.rawName || '')) {
-    purchasedDefault = false;
-  } else {
-    purchasedDefault = true;
-  }
-  // Persist vendor info onto the source meta (mirrors what the review
-  // modal would write at user-commit). For structural matches we still
-  // apply the value AND mark needsReview so the user can verify.
-  if (detectedVendor) {
+  if (vendorRes && vendorRes.purchasedDefault === false) purchasedDefault = false;
+  else if (/\bfree\b/i.test(src.rawName || '')) purchasedDefault = false;
+  else purchasedDefault = true;
+  // The guided Free-content checkbox (sent on every guided-path source)
+  // overrides the default; quick import sends none and keeps the default.
+  const purchased = (typeof src.guidedFree === 'boolean') ? !src.guidedFree : purchasedDefault;
+  // Persist vendor info onto the source meta (source of truth; projected onto
+  // entries at read time). For structural matches we still apply the value AND
+  // mark needsReview so the user can verify.
+  if (effectiveVendor) {
     try {
       soundFontSources.updateSourceMeta(userData, sourceUuid, {
-        vendor: detectedVendor,
-        vendorWebsite: detectedWebsite,
-        vendorAutoDetected: true,
-        purchased: purchasedDefault,
+        vendor: effectiveVendor,
+        vendorWebsite: effectiveWebsite,
+        vendorAutoDetected: !vendorFromUser,
+        purchased,
       });
     } catch {}
+  }
+  // Source-level extras for the no-vendor case (the with-vendor write above
+  // already handles website + purchased). Website + free/paid are source-of-
+  // truth fields. The date/link/notes are ENTRY-level and go through createEntry
+  // below (acquisitionDate -> hoisted to source.purchaseDate; link -> demoUrl;
+  // notes -> userNotes).
+  const _extraMeta = {};
+  if (!effectiveVendor && effectiveWebsite) _extraMeta.vendorWebsite = effectiveWebsite;
+  if (!effectiveVendor && typeof src.guidedFree === 'boolean') _extraMeta.purchased = purchased;
+  // Acquisition date -> source.purchaseDate (the projected source-of-truth
+  // field). Written here so it overrides the file-date default the source
+  // otherwise picks up, and so the read-time projection surfaces the user's value.
+  if (_guidedDate) _extraMeta.purchaseDate = _guidedDate;
+  if (Object.keys(_extraMeta).length) {
+    try { soundFontSources.updateSourceMeta(userData, sourceUuid, _extraMeta); } catch {}
   }
   // Candidate detection -> create each as a library entry. Bundle name
   // (if any) becomes the first tag on every entry from this source.
@@ -523,7 +670,10 @@ async function importPlannedSource({ userData, src }, onSubProgress) {
     try { soundFontSources.deleteSource(userData, sourceUuid); } catch {}
     return { ok: false, error: 'No fonts found in source' };
   }
-  const bundleName = candidatesRes.bundleName || null;
+  // A guided "Source name" override wins over the auto-detected bundle name;
+  // it becomes the source's friendly name and the tag on every font from it.
+  const _guidedSourceName = src.guidedSourceName && String(src.guidedSourceName).trim();
+  const bundleName = _guidedSourceName || candidatesRes.bundleName || null;
   // Persist bundleName + multiCandidate on source meta so the renderer
   // can show "this source produced N fonts" without re-running detection,
   // and the entry detail can surface the bundle link for variants.
@@ -554,6 +704,14 @@ async function importPlannedSource({ userData, src }, onSubProgress) {
   for (let cIdx = 0; cIdx < candidates.length; cIdx++) {
     const cand = candidates[cIdx];
     let proposedName = cand.name || `font_${cIdx + 1}`;
+    // Guided-import name override applies only to single-candidate sources
+    // (the folder-solo case the guided view is built around); a bundle that
+    // yields several fonts keeps its per-candidate auto names since one
+    // typed name can't stand in for many.
+    if (src.guidedName && candidates.length === 1) {
+      const gn = String(src.guidedName).trim();
+      if (gn) proposedName = gn;
+    }
     const reviewReasons = [];
     // Bundle prepend for ambiguous candidate names. Two triggers:
     //   1. Variants (cand.isVariant): the detector emitted multiple
@@ -599,6 +757,14 @@ async function importPlannedSource({ userData, src }, onSubProgress) {
     // becomes noise. The vendorAutoDetected flag on the source meta
     // still indicates the auto-application for users who want to audit.
     const tags = bundleName ? [bundleName] : [];
+    // Shared tags from the guided review's static tag bar — applied to every
+    // font in this batch (deduped against the source-name tag above).
+    if (Array.isArray(src.guidedSharedTags)) {
+      for (const t of src.guidedSharedTags) {
+        const tt = String(t || '').trim();
+        if (tt && !tags.includes(tt)) tags.push(tt);
+      }
+    }
     // Multi-version sibling info: when the candidate detector collapsed
     // a group of X_V1/X_V2/... siblings down to the highest version,
     // surface the version in the description so the user can tell at a
@@ -619,9 +785,15 @@ async function importPlannedSource({ userData, src }, onSubProgress) {
     }
     const meta = {
       tags,
-      author: detectedVendor || '',
-      purchased: purchasedDefault,
+      author: effectiveVendor || '',
+      purchased,
       description: initialDescription,
+      // Entry-level guided Details: link is the entry's demoUrl; notes are
+      // userNotes. Acquisition date is a source-of-truth field (source.
+      // purchaseDate), written directly to the source meta above so the
+      // read-time projection can't clobber it with the folder's file date.
+      demoUrl: _guidedLink || undefined,
+      userNotes: _guidedNotes || undefined,
       // Other fields default through createEntry's existing logic
       // (acquisitionDate falls back to sourceFileDate -> importedAt).
     };
@@ -631,7 +803,7 @@ async function importPlannedSource({ userData, src }, onSubProgress) {
     // null website is intentional, like Orlando Dove who distributes
     // via YouTube only) or absent entirely. So only creator_empty
     // matters as a review trigger here.
-    if (!detectedVendor) reviewReasons.push('creator_empty');
+    if (!effectiveVendor) reviewReasons.push('creator_empty');
     if (versionInfo) reviewReasons.push('multiple_versions_in_source');
     const entryRes = await soundFontEntries.createEntry({
       userData, sourceUuid, candidate: cand, name: finalName, metadata: meta,
@@ -666,12 +838,124 @@ async function importPlannedSource({ userData, src }, onSubProgress) {
     multiCandidate: candidates.length >= 2,
     versionsSkipped: versionsSkippedHere,
     variantsEmitted: variantsEmittedHere,
+    strippedFiles: (importRes && importRes.strippedFiles)
+      || (src._prepared && src._prepared.strippedFiles) || [],
   };
+}
+
+// ── Guided-import enrichment ────────────────────────────────────────────
+// The fast scan intentionally skips vendor detection and file peeking so it
+// can run instantly on an "open this folder" click. Guided import needs
+// more per candidate: the detected vendor (shown up front, editable), the
+// first font.wav / hum.wav for preview, and any readme/text docs to glance
+// at. That heavier work runs ONLY when the user chooses to look closely, so
+// quick import stays on the fast path. Read-only, no userData, no copy.
+
+// Locate the first `${base}*.wav` (base 'font' -> font.wav, font1.wav, ...)
+// at any depth. Prefer the bare name; otherwise the lowest-numbered variant.
+function _pickFirstEffectWav(entries, base) {
+  const rx = new RegExp(`(^|/)${base}(\\d*)\\.wav$`, 'i');
+  let best = null, bestNum = Infinity;
+  for (const e of entries) {
+    if (e.isDir) continue;
+    const m = e.fileName.match(rx);
+    if (!m) continue;
+    const num = m[2] === '' ? -1 : parseInt(m[2], 10); // bare name sorts first
+    if (num < bestNum) { bestNum = num; best = e.fileName; }
+  }
+  return best;
+}
+
+// Enrich one planned source in place. Returns vendor guess + preview refs +
+// text docs. fontWav/humWav/textFiles carry an absPath for folder sources
+// (renderer plays/reads them by disk path directly); zip sources get
+// fileName only for now (preview needs extraction — a later slice).
+async function enrichSourceForGuided(src) {
+  const out = {
+    vendor: null, vendorConfidence: null, vendorWebsite: null,
+    purchasedDefault: true, fontWav: null, humWav: null, textFiles: [],
+    wavCount: 0,
+    error: null,
+  };
+  try {
+    const source = soundFontSources.openSourceAtPath(src.absPath);
+    if (!source) { out.error = 'unreadable'; return out; }
+    let vendorRes = null;
+    try { vendorRes = await soundFontVendors.detectVendor(source); } catch {}
+    if (vendorRes) {
+      out.vendor = vendorRes.vendor || null;
+      out.vendorConfidence = vendorRes.confidence || null;
+      out.vendorWebsite = vendorRes.vendorWebsite || null;
+      if (vendorRes.purchasedDefault === false) out.purchasedDefault = false;
+    }
+    if (out.purchasedDefault && /\bfree\b/i.test(src.rawName || '')) out.purchasedDefault = false;
+    const entries = await source.listAll();
+    const isFolder = source.format === 'folder';
+    const toRef = (fileName) => fileName == null ? null : {
+      fileName,
+      absPath: isFolder ? path.join(src.absPath, fileName) : null,
+    };
+    out.fontWav = toRef(_pickFirstEffectWav(entries, 'font'));
+    out.humWav = toRef(_pickFirstEffectWav(entries, 'hum'));
+    out.wavCount = entries.reduce((n, e) => n + (!e.isDir && /\.wav$/i.test(e.fileName) ? 1 : 0), 0);
+    for (const e of entries) {
+      if (e.isDir) continue;
+      if (/\.(txt|md|nfo|rtf)$/i.test(e.fileName) || /(^|\/)read\s?me/i.test(e.fileName)) {
+        out.textFiles.push({
+          fileName: e.fileName,
+          size: e.size || 0,
+          absPath: isFolder ? path.join(src.absPath, e.fileName) : null,
+        });
+      }
+    }
+    // Lead with the real readme: readme-shaped names first, then the
+    // shallowest path (root docs before nested config .txt like leds.txt /
+    // font_config.txt), then alphabetical. Keeps the peek's default on top.
+    const _isReadme = (n) => /read\s?me/i.test(n.split('/').pop());
+    const _depth = (n) => (n.match(/\//g) || []).length;
+    out.textFiles.sort((a, b) => {
+      const ar = _isReadme(a.fileName), br = _isReadme(b.fileName);
+      if (ar !== br) return ar ? -1 : 1;
+      const ad = _depth(a.fileName), bd = _depth(b.fileName);
+      if (ad !== bd) return ad - bd;
+      return a.fileName.localeCompare(b.fileName, undefined, { numeric: true, sensitivity: 'base' });
+    });
+  } catch (e) {
+    out.error = String(e && e.message || e);
+  }
+  return out;
+}
+
+// Enrich every source in a scan plan for the guided review. Sequential so a
+// large library doesn't open hundreds of archives at once; emits per-source
+// progress and honors cancellation. Result `enriched` aligns index-for-index
+// with plan.sources.
+async function enrichPlanForGuided({ plan }, callbacks = {}) {
+  const onProgress = typeof callbacks.onProgress === 'function' ? callbacks.onProgress : () => {};
+  const shouldCancel = typeof callbacks.shouldCancel === 'function' ? callbacks.shouldCancel : () => false;
+  if (!plan || !Array.isArray(plan.sources)) return { ok: false, error: 'Invalid plan' };
+  const total = plan.sources.length;
+  const enriched = [];
+  for (let i = 0; i < total; i++) {
+    if (shouldCancel()) return { ok: true, cancelled: true, enriched };
+    const src = plan.sources[i];
+    const result = await enrichSourceForGuided(src);
+    enriched.push(result);
+    // Emit the finished result per candidate so the renderer can fill that
+    // row in place and let the user work with it immediately, while the
+    // remaining candidates keep loading below.
+    onProgress({ idx: i, total, label: src.cleanedName || src.rawName, done: true, result });
+  }
+  return { ok: true, enriched };
 }
 
 module.exports = {
   scanForBulkImport,
   runBulkImport,
+  analyzeBulkImport,
+  discardPreparedSources,
+  enrichSourceForGuided,
+  enrichPlanForGuided,
   // exported for testing
   looksLikeProffieDir,
   looksLikeCommonDir,

@@ -263,7 +263,7 @@ async function initBuildPanel() {
     });
   });
   el('bp-log-toggle').addEventListener('click', toggleLog);
-  el('bp-log-clear').addEventListener('click', clearLog);
+  el('bp-log-clear').addEventListener('click', () => { clearLog(); closeLog(); });
   wireSerialMonitor();
   document.getElementById('input-board').addEventListener('change', onInputBoardChange);
   // Seed selectedFqbn from dropdown without triggering a cache check (no file open yet)
@@ -1241,6 +1241,12 @@ function openLog() {
   el('bp-log-body').classList.add('open');
   _setLogChevron(true);
   _syncSerialPauseToCollapse(true);
+}
+
+function closeLog() {
+  el('bp-log-body').classList.remove('open');
+  _setLogChevron(false);
+  _syncSerialPauseToCollapse(false);
 }
 
 function toggleLog() {

@@ -16,6 +16,7 @@ const soundFontBulkImport = require('./soundFontBulkImport');
 const soundFontFileOps = require('./soundFontFileOps');
 const soundFontReorganize = require('./soundFontReorganize');
 const soundFontVoicepack = require('./soundFontVoicepack');
+const sdCardDetect = require('./sdCardDetect');
 const soundFontSharedTracks = require('./soundFontSharedTracks');
 const soundFontAttachments = require('./soundFontAttachments');
 const soundFontLinkImport = require('./soundFontLinkImport');
@@ -220,8 +221,8 @@ ipcMain.handle('dialog:open', async () => {
     title: 'Open Config File',
     defaultPath: lastDir || app.getPath('documents'),
     filters: [
-      { name: 'Header Files', extensions: ['h'] },
-      { name: 'Text Files',   extensions: ['txt'] }
+      { name: 'Proffie Config', extensions: ['h', 'hpp', 'txt'] },
+      { name: 'All Files',      extensions: ['*'] }
     ],
     properties: ['openFile']
   });
@@ -926,6 +927,80 @@ ipcMain.handle('bulkImport:run', async (e, { plan } = {}) => {
 ipcMain.handle('bulkImport:cancel', () => {
   if (_bulkImportCancelToken) _bulkImportCancelToken.cancelled = true;
   return { ok: true };
+});
+
+// ANALYZE phase: stage every planned source (zip + hash + dedup, no meta yet)
+// and return real stats + per-source prepared/dup/corrupt results. Reuses the
+// same progress event + cancel token as run.
+ipcMain.handle('bulkImport:analyze', async (e, { plan, corruptFonts } = {}) => {
+  try {
+    _bulkImportCancelToken = { cancelled: false };
+    const myToken = _bulkImportCancelToken;
+    const result = await soundFontBulkImport.analyzeBulkImport(
+      { plan, userData: app.getPath('userData'), corruptFonts },
+      {
+        onProgress: (payload) => { try { e.sender.send('bulkImport:progress', payload); } catch {} },
+        shouldCancel: () => myToken.cancelled,
+      },
+    );
+    return result;
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  } finally {
+    _bulkImportCancelToken = null;
+  }
+});
+
+// Delete prepared-but-not-committed sources (user pruned them or closed the modal).
+ipcMain.handle('bulkImport:discardPrepared', async (_, { uuids } = {}) => {
+  try { soundFontBulkImport.discardPreparedSources(app.getPath('userData'), uuids || []); return { ok: true }; }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+// Guided import — enrich a scan plan: per-candidate vendor detection (in
+// place), first font.wav/hum.wav for preview, and readme/text docs. Runs
+// only when the user opens the guided review, so quick import stays fast.
+// Read-only: no hashing, no copy, no library writes. Streams progress via
+// the bulkImport:enrichProgress event.
+let _bulkEnrichCancelToken = null;
+ipcMain.handle('bulkImport:enrichGuided', async (e, { plan } = {}) => {
+  try {
+    _bulkEnrichCancelToken = { cancelled: false };
+    const myToken = _bulkEnrichCancelToken;
+    return await soundFontBulkImport.enrichPlanForGuided(
+      { plan },
+      {
+        onProgress: (payload) => {
+          try { e.sender.send('bulkImport:enrichProgress', payload); } catch {}
+        },
+        shouldCancel: () => myToken.cancelled,
+      },
+    );
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  } finally {
+    _bulkEnrichCancelToken = null;
+  }
+});
+
+ipcMain.handle('bulkImport:enrichCancel', () => {
+  if (_bulkEnrichCancelToken) _bulkEnrichCancelToken.cancelled = true;
+  return { ok: true };
+});
+
+// Read one file out of an in-place (not-yet-imported) source — folder OR
+// zip — for the guided review's font/hum previews and text peek. Works for
+// both because openSourceAtPath abstracts the format. Read-only. Returns
+// the raw bytes; the renderer decodes audio or text as needed.
+ipcMain.handle('bulkImport:readCandidateFile', async (_, { absPath, innerPath } = {}) => {
+  try {
+    const source = soundFontSources.openSourceAtPath(absPath);
+    if (!source) return { ok: false, error: 'unreadable source' };
+    const buf = await source.readFile(innerPath);
+    return { ok: true, bytes: buf };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
 });
 
 ipcMain.handle('sources:cleanupOrphans', () => {
@@ -3157,6 +3232,45 @@ ipcMain.handle('versions:applyJmtFeatures', async (event, versionName) => {
 // ── IPC: DFU ───────────────────────────────────────────
 ipcMain.handle('shell:openExternal', (_, url) => {
   shell.openExternal(url);
+});
+
+// Read-only scan of removable volumes for the "Read my Proffie SD card" flow.
+ipcMain.handle('sdcard:scan', () => sdCardDetect.scan());
+
+// Fallback when no card is auto-detected: let the user point at a drive or a folder
+// (e.g. a copy of an SD card) and assess it the same way. Read-only.
+ipcMain.handle('sdcard:pickFolder', async () => {
+  const res = await dialog.showOpenDialog(win, {
+    title: 'Choose a drive or SD-card folder',
+    properties: ['openDirectory'],
+  });
+  return (res.canceled || !res.filePaths.length) ? null : res.filePaths[0];
+});
+ipcMain.handle('sdcard:scanPath', (_, p) => sdCardDetect.assessPicked(p));
+ipcMain.handle('sdcard:listDir', (_, p) => sdCardDetect.listDir(p));
+ipcMain.handle('sdcard:folderHealth', (_, p) => { try { return sdCardDetect.scanFolderHealth(p); } catch { return { files: {}, dirs: {} }; } });
+ipcMain.handle('sdcard:readText', (_, p) => {
+  try { return fs.readFileSync(p, 'utf8').slice(0, 200000); } catch { return null; }
+});
+ipcMain.handle('sdcard:readBytes', (_, p) => {
+  try { const b = fs.readFileSync(p); return b.length > 20 * 1024 * 1024 ? null : b.toString('base64'); } catch { return null; }
+});
+ipcMain.handle('sdcard:findConfigs', (_, p) => { try { return sdCardDetect.findConfigs(p); } catch { return []; } });
+ipcMain.handle('sdcard:analyzeFonts', (_, p) => { try { return sdCardDetect.analyzeFonts(p); } catch (e) { return { path: p, error: String(e && e.message || e), fonts: [] }; } });
+// Copy a file or folder OFF a card to a user-chosen location. Read-only on the card side;
+// only ever writes to destDir. Collision-safe (" (N)" suffix).
+ipcMain.handle('sdcard:copyOut', (_, { srcPath, destDir }) => {
+  try {
+    if (!srcPath || !destDir) return { ok: false, error: 'Missing path' };
+    const base = path.basename(srcPath);
+    const ext = path.extname(base), stem = base.slice(0, base.length - ext.length);
+    let dest = path.join(destDir, base), n = 1;
+    while (fs.existsSync(dest)) { dest = path.join(destDir, `${stem} (${n})${ext}`); n++; }
+    const st = fs.statSync(srcPath);
+    if (st.isDirectory()) fs.cpSync(srcPath, dest, { recursive: true });
+    else fs.copyFileSync(srcPath, dest);
+    return { ok: true, dest };
+  } catch (e) { return { ok: false, error: e.message }; }
 });
 
 ipcMain.handle('dfu:detect', async () => {

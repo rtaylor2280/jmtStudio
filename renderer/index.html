@@ -249,6 +249,20 @@
   .meta-field select:focus { border-color: #4d9; }
   .field-changed { color: #e55 !important; }
   .field-changed option { color: var(--c-text); }
+  #modal-confirm-dropdown {
+    width: 100%;
+    background: var(--c-bg-raised);
+    border: 1px solid var(--c-border-input);
+    border-radius: 3px;
+    color: var(--c-text);
+    font-size: 0.9rem;
+    padding: 6px 8px;
+    font-family: inherit;
+    outline: none;
+    cursor: pointer;
+    transition: border-color 0.15s;
+  }
+  #modal-confirm-dropdown:focus { border-color: var(--jmt-blue); }
 
   .filename-wrap {
     position: relative;
@@ -652,6 +666,43 @@
   #empty-state svg { color: var(--c-text-faint); }
   #empty-state p { font-size: 0.9rem; }
   .empty-state-actions { display: grid; gap: 12px; }
+  .empty-btn-wrap { display: flex; flex-direction: column; gap: 4px; }
+  /* First-run helper (O1) — hidden unless #empty-state has .first-run */
+  #fr-welcome, .empty-btn-sub { display: none; }
+  #empty-state.first-run .es-default-heading { display: none; }
+  #empty-state.first-run #fr-welcome { display: block; font-size: 0.95rem; margin: 2px auto 4px; text-align: center; }
+  #empty-state.first-run .empty-btn-sub { display: block; font-size: 0.72rem; color: var(--c-text-sub); max-width: 30ch; margin: 0 auto; line-height: 1.35; text-align: center; }
+  #fr-fett { display: none; }
+  #empty-state.show-fett #fr-fett { display: block; font-size: 0.75rem; color: var(--c-text-sub); text-align: center; max-width: 42ch; margin: 10px auto 0; line-height: 1.4; }
+  #fr-fett a { color: var(--jmt-blue); text-decoration: underline; cursor: pointer; }
+  #link-sdcard-empty { display: block; margin: 16px auto 0; font-size: 0.82rem; color: var(--jmt-blue); text-decoration: underline; cursor: pointer; }
+  #link-sdcard-empty:hover { color: var(--c-text); }
+  /* SD report / file-browser overlay */
+  /* SD card report / browser. FIXED size so it never resizes with content —
+     short folders just leave empty space, like the Sound Font Library file
+     view. Flex column: fixed summary + breadcrumb on top, the file browser
+     is the only scroll surface. File list reuses the SFL .sf-entry-files-*
+     language (breadcrumb pills, 140px rows, yellow folder icons). */
+  .modal.sd-report-modal { width: 880px; max-width: 94vw; height: min(84vh, 640px); display: flex; flex-direction: column; }
+  .sd-rpt-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; flex-shrink: 0; }
+  .sd-rpt-back { background: none; border: none; color: var(--jmt-blue); cursor: pointer; font-size: 0.82rem; padding: 2px; }
+  .sd-rpt-title { font-weight: 600; font-size: 1.05rem; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sd-rpt-body { flex: 1; min-height: 0; display: flex; flex-direction: column; margin: 4px 0 12px; text-align: left; }
+  .sd-rpt-summary { flex-shrink: 0; border-bottom: 1px solid var(--c-border); padding-bottom: 10px; margin-bottom: 10px; }
+  .sd-rpt-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; flex-shrink: 0; }
+  .sd-act-btn { font-size: 0.8rem; padding: 6px 14px; }
+  .sd-rpt-sub { font-size: 0.79rem; color: var(--c-text-sub); }
+  .sd-rpt-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+  .sd-rpt-card { text-align: left; padding: 11px 8px; border-top: 1px solid var(--c-border); cursor: pointer; border-radius: 4px; }
+  .sd-rpt-card:hover { background: var(--c-bg-raised); }
+  .sd-rpt-text { flex: 1; min-height: 0; overflow-y: auto; white-space: pre-wrap; word-break: break-word; font-family: "Cascadia Code", Consolas, monospace; font-size: 0.76rem; background: var(--c-bg-inset); border: 1px solid var(--c-border); border-radius: 4px; padding: 10px; }
+  .sf-entry-files-row.sd-clickable { cursor: pointer; }
+  /* Corruption marks in the SD browser: red accent (not a lighter/disabled
+     look) + a warning glyph, with the specific reason in the tooltip. */
+  .sf-entry-files-row.sd-corrupt .sf-entry-files-row-name { color: #e5534b; }
+  .sf-entry-files-row .sd-corrupt-mark { color: #e5534b; font-size: 0.82rem; line-height: 1; flex-shrink: 0; margin-left: 3px; cursor: help; }
+  /* SD/guided doc viewer — reuses the SFL .sf-doc-viewer-* body styling. */
+  .modal.sd-doc-modal { width: 720px; max-width: 96vw; height: min(80vh, 600px); display: flex; flex-direction: column; position: relative; padding-bottom: 16px; }
   #btn-open-empty, #btn-new-empty {
     padding: 10px 28px;
     border-radius: 5px;
@@ -2291,7 +2342,19 @@
   #modal-sf-import .sf-import-checkbox-row { display: flex; align-items: center; gap: 8px; }
   #modal-sf-import .sf-import-checkbox-row label { display: inline; margin: 0; cursor: pointer; }
   #modal-sf-import .sf-import-checkbox-row input[type="checkbox"] { margin: 0; flex-shrink: 0; }
-  #modal-sf-import input[type="text"], #modal-sf-import input[type="date"], #modal-sf-import textarea { width: 100%; background: var(--c-bg-inset); border: 1px solid var(--c-border-input); border-radius: 3px; color: var(--c-text); padding: 5px 8px; font-size: 0.82rem; outline: none; box-sizing: border-box; font-family: inherit; }
+  #modal-sf-import input[type="text"], #modal-sf-import input[type="date"], #modal-sf-import input[type="url"], #modal-sf-import textarea { width: 100%; background: var(--c-bg-inset); border: 1px solid var(--c-border-input); border-radius: 3px; color: var(--c-text); padding: 5px 8px; font-size: 0.82rem; outline: none; box-sizing: border-box; font-family: inherit; }
+  /* Empty date fields render the mm/dd/yyyy placeholder segments in the same
+     dim tone as text-input placeholders (unfilled subfields have no aria-valuenow). */
+  /* Date fields render their native picker (calendar icon + dropdown) in dark
+     mode in BOTH the single-source modal and the bulk/guided modal, so the date
+     picker looks identical wherever it appears. */
+  #modal-sf-import input[type="date"], #modal-sf-bulk-import input[type="date"] { color-scheme: dark; }
+  #modal-sf-import input[type="date"]::-webkit-datetime-edit-year-field:not([aria-valuenow]),
+  #modal-sf-import input[type="date"]::-webkit-datetime-edit-month-field:not([aria-valuenow]),
+  #modal-sf-import input[type="date"]::-webkit-datetime-edit-day-field:not([aria-valuenow]),
+  #modal-sf-bulk-import input[type="date"]::-webkit-datetime-edit-year-field:not([aria-valuenow]),
+  #modal-sf-bulk-import input[type="date"]::-webkit-datetime-edit-month-field:not([aria-valuenow]),
+  #modal-sf-bulk-import input[type="date"]::-webkit-datetime-edit-day-field:not([aria-valuenow]) { color: var(--c-text-dim); }
   #modal-sf-import input:focus, #modal-sf-import textarea:focus { border-color: var(--jmt-blue); }
   #modal-sf-import input.invalid { border-color: #e44; }
   #modal-sf-import textarea { resize: vertical; min-height: 60px; }
@@ -2301,6 +2364,10 @@
   .sf-import-phase::-webkit-scrollbar-track { background: transparent; }
   .sf-import-phase::-webkit-scrollbar-thumb { background: var(--c-border-strong); border-radius: 3px; }
   .sf-import-hint { font-size: 0.78rem; color: var(--c-text-sub); margin: 0 0 12px 0; line-height: 1.45; }
+  /* Override the global `.modal p { text-wrap: balance }` for import hints —
+     balance evens out line lengths (good for short prompts) but on this longer
+     body copy it wraps early and leaves ragged right whitespace. Fill normally. */
+  .modal .sf-import-hint { text-wrap: wrap; }
   .sf-import-pick-row { display: flex; gap: 10px; justify-content: center; margin-top: 16px; flex-wrap: wrap; }
   .sf-import-pick-row button { padding: 10px 20px; font-size: 0.9rem; }
   /* Import from link: a third, co-equal choice alongside zip/folder. The three
@@ -2529,14 +2596,19 @@
   .sf-review-candidate-list { display: flex; flex-direction: column; gap: 6px; }
   .sf-review-candidate-row { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; background: var(--c-bg-inset); border: 1px solid var(--c-border-faint); border-radius: 4px; }
   .sf-review-candidate-row .cand-row-main { display: grid; grid-template-columns: 22px 1fr auto auto; gap: 8px; align-items: start; }
-  .sf-review-candidate-row .cand-link-toggle { background: transparent; border: 1px solid var(--c-border-faint); color: var(--c-text-sub); border-radius: 3px; width: 26px; height: 26px; cursor: pointer; font-size: 0.85rem; line-height: 1; padding: 0; display: flex; align-items: center; justify-content: center; flex-shrink: 0; align-self: center; }
-  .sf-review-candidate-row .cand-link-toggle:hover { color: var(--c-text); border-color: var(--c-border-strong); }
-  .sf-review-candidate-row .cand-link-toggle.has-url { color: var(--jmt-blue); border-color: var(--jmt-blue); }
-  .sf-review-candidate-row .cand-demo-row { display: flex; align-items: center; gap: 6px; padding-left: 30px; }
-  .sf-review-candidate-row .cand-demo-label { font-size: 0.78rem; color: var(--c-text-sub); width: 50px; flex-shrink: 0; }
-  .sf-review-candidate-row .cand-demo-input { flex: 1; }
-  .sf-review-candidate-row .cand-demo-clear { background: transparent; border: none; color: var(--c-text-sub); cursor: pointer; padding: 4px 6px; opacity: 0.45; font-size: 0.85rem; }
-  .sf-review-candidate-row .cand-demo-clear:hover { opacity: 1; color: var(--c-text); }
+  /* Per-candidate Demo link — shared by the single-source candidate rows AND
+     the guided bulk-import rows. They live in DIFFERENT modals (#modal-sf-import
+     vs #modal-sf-bulk-import), so scope by the ROW classes, not the modal id —
+     and self-style the input so it doesn't depend on either modal's base rules. */
+  .sf-review-candidate-row .cand-link-toggle, .sf-guided-row .cand-link-toggle { background: transparent; border: 1px solid var(--c-border-faint); color: var(--c-text-sub); border-radius: 3px; width: 26px; height: 26px; cursor: pointer; font-size: 0.85rem; line-height: 1; padding: 0; display: flex; align-items: center; justify-content: center; flex-shrink: 0; align-self: center; }
+  .sf-review-candidate-row .cand-link-toggle:hover, .sf-guided-row .cand-link-toggle:hover { color: var(--c-text); border-color: var(--c-border-strong); }
+  .sf-review-candidate-row .cand-link-toggle.has-url, .sf-guided-row .cand-link-toggle.has-url { color: var(--jmt-blue); border-color: var(--jmt-blue); }
+  .sf-review-candidate-row .cand-demo-row, .sf-guided-row .cand-demo-row { display: flex; align-items: center; gap: 6px; padding-left: 30px; margin-top: 7px; }
+  .sf-review-candidate-row .cand-demo-label, .sf-guided-row .cand-demo-label { font-size: 0.78rem; color: var(--c-text-sub); width: 50px; flex-shrink: 0; }
+  .sf-review-candidate-row .cand-demo-input, .sf-guided-row .cand-demo-input { flex: 1; background: var(--c-bg-raised); border: 1px solid var(--c-border-input); border-radius: 3px; color: var(--c-text); padding: 4px 7px; font-size: 0.82rem; outline: none; box-sizing: border-box; font-family: inherit; }
+  .sf-review-candidate-row .cand-demo-input:focus, .sf-guided-row .cand-demo-input:focus { border-color: var(--jmt-blue); }
+  .sf-review-candidate-row .cand-demo-clear, .sf-guided-row .cand-demo-clear { background: transparent; border: none; color: var(--c-text-sub); cursor: pointer; padding: 4px 6px; opacity: 0.45; font-size: 0.85rem; }
+  .sf-review-candidate-row .cand-demo-clear:hover, .sf-guided-row .cand-demo-clear:hover { opacity: 1; color: var(--c-text); }
   .sf-review-candidate-row.disabled { opacity: 0.55; }
   .sf-review-candidate-row.already-imported { opacity: 0.6; }
   .sf-review-candidate-row.already-imported .cand-status { color: var(--jmt-blue); font-style: italic; }
@@ -2556,6 +2628,111 @@
   .sf-review-candidate-row .cand-badge.multi-board { color: var(--jmt-blue); border-color: rgba(0,130,255,0.35); background: rgba(0,130,255,0.08); }
   .sf-review-candidate-row .cand-badge.nested { color: #cb6; border-color: rgba(204,180,100,0.35); background: rgba(204,180,100,0.08); }
   .sf-review-candidate-row .cand-badge.alt-version { color: var(--c-text-sub); border-color: var(--c-border-faint); background: var(--c-bg-inset); font-style: italic; }
+
+  /* ── SD browser folder multi-select (Ctrl/Cmd or Shift+click) ── */
+  .sf-entry-files-row.sd-selected { background: rgba(0, 130, 255, 0.16); box-shadow: inset 0 0 0 1px rgba(0, 130, 255, 0.45); border-radius: 3px; }
+  .sd-sel-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 10px; margin: 8px 0; background: var(--c-bg-raised); border: 1px solid var(--jmt-blue); border-radius: 5px; }
+  .sd-sel-count { font-size: 0.82rem; color: var(--c-text); font-weight: 500; }
+  .sd-sel-actions { display: flex; gap: 8px; flex-shrink: 0; }
+  .sd-sel-bar .modal-btn-primary, .sd-sel-bar .btn-neutral { padding: 5px 12px; font-size: 0.8rem; }
+
+  /* ── Guided bulk import: wider candidate view ─────────────────────── */
+  .modal-btn-secondary { background: transparent; color: var(--c-text); border: 1px solid var(--c-border-strong); border-radius: 4px; padding: 8px 14px; font-size: 0.85rem; cursor: pointer; }
+  .modal-btn-secondary:hover { border-color: var(--jmt-blue); color: var(--jmt-blue); }
+  /* The bulk modal grows only while the guided candidate view is up; the
+     counts/scan/progress phases keep the compact 600px width. */
+  .sf-import-modal.wide { max-width: min(920px, 94vw); }
+  /* Guided phase is a flex column so the summary line stays pinned and only the
+     font list scrolls beneath it. */
+  #sf-bulk-import-phase-guided { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+  #sf-bulk-guided-summary { flex-shrink: 0; margin: 0 0 2px; }
+  /* Static tag bar pinned at the bottom of the guided view (does not scroll with the list). */
+  .sf-guided-tagbar { flex-shrink: 0; display: flex; align-items: center; gap: 10px; padding: 9px 2px 2px; border-top: 1px solid var(--c-border-faint); margin-top: 8px; }
+  .sf-guided-tagbar label { font-size: 0.78rem; color: var(--c-text-sub); flex-shrink: 0; margin: 0; }
+  .sf-guided-tagbar .sf-tags-edit { flex: 1; min-width: 0; }
+  .sf-guided-list { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; overflow-y: auto; flex: 1; min-height: 0; padding-right: 4px; }
+  .sf-guided-list::-webkit-scrollbar { width: 6px; }
+  .sf-guided-list::-webkit-scrollbar-thumb { background: var(--c-border-strong); border-radius: 3px; }
+  .sf-guided-row { background: var(--c-bg-inset); border: 1px solid var(--c-border-faint); border-radius: 4px; padding: 8px 10px; }
+  .sf-guided-row.excluded { opacity: 0.5; }
+  /* Corrupted font: amber edge + note. The note stays full-opacity even when the
+     row is excluded, so the reason is always readable. */
+  .sf-guided-row.g-corrupt { border-left: 2px solid #e5534b; }
+  .sf-guided-row.g-corrupt.excluded { opacity: 0.72; }
+  .sf-guided-row .g-corrupt-note { font-size: 0.72rem; color: #e5534b; margin-top: 3px; line-height: 1.35; }
+  /* Drag-to-vendor + change-vendor control */
+  .sf-guided-row .g-move-vendor { background: none; border: none; color: var(--jmt-blue); font-size: 0.72rem; cursor: pointer; padding: 2px 0; }
+  .sf-guided-row .g-move-vendor:hover { text-decoration: underline; }
+  .sf-guided-row.g-dragging { opacity: 0.45; }
+  /* While dragging, every group is collapsed to a compact header, and the whole
+     section is the drop target (so each vendor is reachable). */
+  .g-group.g-drop-over > .g-group-header { outline: 2px dashed var(--jmt-blue); outline-offset: 2px; border-radius: 4px; }
+  .sf-guided-row .g-main { display: grid; grid-template-columns: 16px 22px minmax(0,1fr) auto auto; gap: 10px; align-items: start; }
+  .sf-guided-row .g-grip { cursor: grab; color: var(--c-text-dim); font-size: 1.05rem; line-height: 1; align-self: center; user-select: none; text-align: center; }
+  .sf-guided-row .g-grip:hover { color: var(--c-text-sub); }
+  .sf-guided-row .g-grip:active { cursor: grabbing; }
+  /* ── Vendor groups: the header (vendor info) sits on the plain modal
+     background; its fonts are the dark boxes underneath. Matches the
+     single-source import (source header on bg, candidates in inset rows). ── */
+  .g-group { border: none; background: transparent; margin-bottom: 26px; flex-shrink: 0; }
+  .g-group-header { display: flex; align-items: center; gap: 8px; padding: 2px 2px 10px; background: transparent; flex-wrap: wrap; }
+  .g-group-toggle { background: none; border: none; color: var(--c-text); cursor: pointer; padding: 0 4px 0 0; font-size: 1rem; line-height: 1; flex-shrink: 0; opacity: 0.9; }
+  .g-group-toggle:hover { opacity: 1; }
+  .g-group-toggle::before { content: '\25BE'; display: inline-block; transition: transform 0.1s; }
+  .g-group.collapsed .g-group-toggle::before { transform: rotate(-90deg); }
+  .g-group.collapsed .g-group-body { display: none; }
+  .g-group-vendor { flex: 0 1 200px; background: var(--c-bg-inset); border: 1px solid var(--c-border-input); border-radius: 3px; color: var(--c-text); padding: 4px 8px; font-size: 0.86rem; font-weight: 600; outline: none; }
+  .g-group-vendor:focus { border-color: var(--jmt-blue); }
+  .g-group-count { font-size: 0.72rem; color: var(--c-text-dim); flex-shrink: 0; }
+  .g-group-website-wrap { flex: 1 1 160px; min-width: 120px; }
+  .g-group-website { background: var(--c-bg-inset); border: 1px solid var(--c-border-input); border-radius: 3px; color: var(--c-text); padding: 4px 8px; font-size: 0.78rem; outline: none; }
+  .g-group-website:focus { border-color: var(--jmt-blue); }
+  .g-group-free-lbl { display: inline-flex; align-items: center; gap: 5px; font-size: 0.78rem; color: var(--c-text-sub); cursor: pointer; flex-shrink: 0; }
+  /* Fonts are indented and share a faint left rail so they read clearly as
+     "belonging to" the vendor above and stay separate from the next group. */
+  .g-group-body { display: flex; flex-direction: column; gap: 8px; margin-left: 9px; padding-left: 14px; border-left: 2px solid var(--c-border-faint); }
+  .g-group-body .sf-guided-row { background: var(--c-bg-inset); }
+  /* A vendor left truly BLANK gets a subtle amber cue on its field (needs review). */
+  .g-group-review .g-group-vendor { border-color: var(--jmt-amber, #d49b3a); }
+  .sf-guided-row input[type="checkbox"] { margin: 0; }
+  .sf-guided-row .g-check { margin-top: 6px; }
+  .sf-guided-row .g-name-wrap { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .sf-guided-row input.g-name, .sf-guided-row input.g-vendor { width: 100%; background: var(--c-bg-raised); border: 1px solid var(--c-border-input); border-radius: 3px; color: var(--c-text); padding: 4px 7px; font-size: 0.82rem; outline: none; box-sizing: border-box; font-family: inherit; }
+  .sf-guided-row input.g-name:focus, .sf-guided-row input.g-vendor:focus { border-color: var(--jmt-blue); }
+  .sf-guided-row input.g-name.invalid { border-color: #e44; }
+  .sf-guided-row .g-path { font-size: 0.66rem; color: var(--c-text-dim); font-family: monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sf-guided-row .g-meta { display: flex; flex-direction: column; gap: 4px; align-items: flex-end; min-width: 0; }
+  .sf-guided-row .g-wavcount { font-size: 0.7rem; color: var(--c-text-dim); white-space: nowrap; }
+  .sf-guided-row .g-preview { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+  .sf-guided-row .g-nopreview { font-size: 0.68rem; color: var(--c-text-dim); font-style: italic; }
+  .sf-guided-row .g-vendor-wrap { display: flex; flex-direction: column; gap: 2px; min-width: 0; position: relative; }
+  .sf-guided-row .g-vendor-loading { font-size: 0.72rem; color: var(--c-text-dim); font-style: italic; padding: 4px 2px; }
+  .sf-guided-row .g-vendor-loading::after { content: ''; display: inline-block; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: var(--jmt-blue); opacity: 0.5; animation: sfGuidedPulse 1s ease-in-out infinite; vertical-align: middle; }
+  @keyframes sfGuidedPulse { 0%,100% { opacity: 0.25; } 50% { opacity: 0.9; } }
+  /* Amber left edge when a row has no vendor — it will import needing review. */
+  .sf-guided-row.g-will-review { border-left: 2px solid var(--jmt-amber, #d49b3a); }
+  /* Footer: Details expander + the source's text files (listed outright). */
+  .sf-guided-row .g-sub { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 7px; padding-left: 32px; }
+  .sf-guided-row .g-details-toggle { background: none; border: none; color: var(--jmt-blue); font-size: 0.72rem; cursor: pointer; padding: 2px 0; display: inline-flex; align-items: center; gap: 4px; }
+  .sf-guided-row .g-details-toggle::before { content: '\25B8'; display: inline-block; transition: transform 0.1s; font-size: 0.6rem; }
+  .sf-guided-row .g-details-toggle.open::before { transform: rotate(90deg); }
+  .sf-guided-row .g-details-toggle:hover { text-decoration: underline; }
+  .sf-guided-row .g-docs { display: flex; gap: 10px; flex-wrap: wrap; }
+  .sf-guided-row .g-doc { font-size: 0.72rem; color: var(--c-text-sub); cursor: pointer; font-family: monospace; }
+  .sf-guided-row .g-doc:hover { color: var(--jmt-blue); }
+  /* Condensed, collapsed-by-default source metadata. */
+  .sf-guided-row .g-details { display: none; margin-top: 8px; padding: 8px 10px 4px 32px; flex-direction: column; gap: 7px; border-top: 1px dashed var(--c-border-faint); }
+  .sf-guided-row .g-details.open { display: flex; }
+  .sf-guided-row .g-fld { display: flex; flex-direction: column; gap: 2px; }
+  .sf-guided-row .g-fld > span { font-size: 0.66rem; color: var(--c-text-sub); font-weight: 500; }
+  .sf-guided-row .g-fld input, .sf-guided-row .g-fld textarea { width: 100%; background: var(--c-bg-raised); border: 1px solid var(--c-border-input); border-radius: 3px; color: var(--c-text); padding: 4px 7px; font-size: 0.8rem; outline: none; box-sizing: border-box; font-family: inherit; }
+  .sf-guided-row .g-fld input:focus, .sf-guided-row .g-fld textarea:focus { border-color: var(--jmt-blue); }
+  .sf-guided-row .g-fld textarea { resize: vertical; min-height: 40px; }
+  .sf-guided-row .g-fld-inline { display: flex; gap: 20px; align-items: flex-end; flex-wrap: wrap; }
+  .sf-guided-row .g-fld-grow { flex: 0 0 auto; }
+  .sf-guided-row .g-fld-check { display: flex; align-items: center; gap: 6px; font-size: 0.8rem; color: var(--c-text); cursor: pointer; padding-bottom: 5px; }
+  .sf-guided-row.enriching .g-preview, .sf-guided-row.enriching .g-sub { visibility: hidden; }
+
   .sf-import-btn-row { display: flex; gap: 8px; justify-content: flex-end; flex-shrink: 0; }
   .sf-dup-btn-stack { display: flex; flex-direction: column; gap: 8px; margin-top: 18px; }
   .sf-dup-btn-stack button { width: 100%; padding: 8px 14px; font-size: 0.85rem; }
@@ -2583,6 +2760,8 @@
   .sf-entry-files-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 0 0 8px 0; font-size: 0.85rem; color: var(--c-text); font-weight: 600; }
   .sf-entry-files-head-actions { display: inline-flex; gap: 4px; margin-left: auto; }
   .sf-entry-files-head-btn { font-size: 0.7rem; padding: 2px 8px; font-weight: 500; }
+  .sf-entry-play-btn { color: var(--jmt-blue); }
+  .sf-entry-play-btn.playing { color: #fff; background: var(--jmt-blue); border-color: var(--jmt-blue); }
   .sf-entry-files-breadcrumb { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; font-weight: 400; font-size: 0.72rem; }
   /* Breadcrumb chips — small pill buttons so clickability is obvious. */
   .sf-entry-files-crumb { display: inline-flex; align-items: center; background: var(--c-bg-raised); border: 1px solid var(--c-border-faint); color: var(--c-text-sub); cursor: pointer; padding: 1px 8px; border-radius: 10px; transition: background 0.1s, color 0.1s, border-color 0.1s; }
@@ -4064,11 +4243,20 @@
     <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
       <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
     </svg>
-    <p>No config file open</p>
+    <p class="es-default-heading">No config file open</p>
+    <p id="fr-welcome">Welcome to JMT Studio. Everything starts with your Proffie config.</p>
     <div class="empty-state-actions">
-      <button id="btn-open-empty" class="btn-blue">&#8593; Open Config File</button>
-      <button id="btn-new-empty"  class="btn-neutral">&#43; Create New Config</button>
+      <div class="empty-btn-wrap">
+        <button id="btn-open-empty" class="btn-blue">&#8593; Open Config File</button>
+        <span class="empty-btn-sub">Already have one? Open it: .h or .txt, even off your saber&#39;s SD card.</span>
+      </div>
+      <div class="empty-btn-wrap">
+        <button id="btn-new-empty"  class="btn-neutral">&#43; Create New Config</button>
+        <span class="empty-btn-sub">Prefer to build your own? Start from a basic template.</span>
+      </div>
     </div>
+    <a href="#" id="link-sdcard-empty">Read my Proffie SD card</a>
+    <p id="fr-fett">Never built a config? Build one with <a href="#" id="fr-fett-link">Fett263&#39;s Config Helper</a>, then open it here.</p>
   </div>
   <div id="fav-cards"></div>
 </div>
@@ -4226,6 +4414,10 @@
       <span id="modal-confirm-checkbox-label"></span>
       <div id="modal-confirm-checkbox-hint" style="display:none; margin: 4px 0 0 22px; font-size: 0.75rem; color: var(--c-text-dim);"></div>
     </label>
+    <div id="modal-confirm-dropdown-row" style="display:none; margin: 12px 0 20px;">
+      <label id="modal-confirm-dropdown-label" for="modal-confirm-dropdown" style="display:block; font-size:0.72rem; color:var(--c-text-sub); margin-bottom:6px; text-transform:uppercase; letter-spacing:0.05em;"></label>
+      <select id="modal-confirm-dropdown"></select>
+    </div>
     <div class="modal-btns">
       <button class="modal-btn-cancel" id="modal-confirm-cancel">Cancel</button>
       <button class="modal-btn-cancel" id="modal-confirm-middle" style="display:none"></button>
@@ -4614,6 +4806,8 @@
           <span>Files:</span>
           <span class="sf-entry-files-breadcrumb" id="sf-entry-files-breadcrumb"></span>
           <span class="sf-entry-files-head-actions">
+            <button class="btn-neutral sf-entry-files-head-btn sf-entry-play-btn" id="btn-sf-entry-play-font" title="Play this font's font.wav" style="display:none">&#9654; font</button>
+            <button class="btn-neutral sf-entry-files-head-btn sf-entry-play-btn" id="btn-sf-entry-play-hum" title="Play this font's hum.wav" style="display:none">&#9654; hum</button>
             <button class="btn-neutral sf-entry-files-head-btn" id="btn-sf-entry-reorganize" title="Restructure, reorder, find &amp; replace">Reorganize</button>
             <button class="btn-neutral sf-entry-files-head-btn" id="btn-sf-entry-add-folder" title="Create a new subfolder">+ Folder</button>
             <span class="styles-tag-filter-wrap" style="position:relative">
@@ -5237,9 +5431,32 @@
     <div class="sf-import-phase" id="sf-bulk-import-phase-review" style="display:none">
       <p class="sf-import-hint" id="sf-bulk-import-review-summary"></p>
       <div id="sf-bulk-import-review-breakdown" class="sf-bulk-review-breakdown"></div>
-      <p class="sf-import-hint" id="sf-bulk-import-review-note" style="color: var(--c-text-muted); margin-top: 10px;">
-        Sources already in your library will be skipped automatically. Items missing required fields land with a <span style="color: var(--jmt-amber, #d49b3a)">Needs review</span> flag you can resolve later.
+      <p class="sf-import-hint" style="color: var(--c-text-muted); margin: 10px 0 5px;">
+        <strong>Quick import</strong> adds them all now with the names and vendors we detected. Anything we couldn't identify comes in with a <span style="color: var(--jmt-amber, #d49b3a)">Needs review</span> flag to fix later.
       </p>
+      <p class="sf-import-hint" style="color: var(--c-text-muted); margin: 0 0 8px;">
+        <strong>Review import</strong> lets you rename, set vendors, add a demo link, preview the sound, and pick exactly which fonts to add.
+      </p>
+      <p class="sf-import-hint" id="sf-bulk-import-review-note" style="color: var(--c-text-muted); margin: 0;">
+        Duplicates are skipped on import. A font that exactly matches one already in your library won't be added again, and an edited version comes in as its own new font.
+      </p>
+    </div>
+
+    <!-- Guided review: the wider candidate view. Each detected font is its own
+         row (its own future source) with a checkbox, editable name, and font/hum
+         previews, organized under its detected vendor. Enrichment (vendor +
+         previews) runs to completion behind the progress phase BEFORE this view
+         opens, so it renders complete in one shot — no per-row pop-in. -->
+    <div class="sf-import-phase" id="sf-bulk-import-phase-guided" style="display:none">
+      <p class="sf-import-hint" id="sf-bulk-guided-summary"></p>
+      <div class="sf-guided-list" id="sf-bulk-guided-list"></div>
+      <div class="sf-guided-tagbar" id="sf-bulk-guided-tagbar">
+        <label>Tag all fonts</label>
+        <div class="sf-tags-edit">
+          <div class="sf-tags-chips" id="sf-bulk-guided-tag-chips"></div>
+          <input type="text" id="sf-bulk-guided-tags" class="sf-tag-add-input" list="sf-all-tags-datalist" placeholder="Add tag&hellip;" maxlength="40" autocomplete="off">
+        </div>
+      </div>
     </div>
 
     <div class="sf-import-phase" id="sf-bulk-import-phase-progress" style="display:none">
@@ -5263,11 +5480,15 @@
       <p class="sf-import-hint" id="sf-bulk-import-summary-text"></p>
       <p class="sf-import-hint" id="sf-bulk-import-summary-elapsed" style="color:var(--c-text-sub);margin-top:6px"></p>
       <div id="sf-bulk-import-summary-failures" class="sf-bulk-review-breakdown" style="display:none"></div>
+      <div id="sf-bulk-import-summary-stripped" class="sf-bulk-review-breakdown" style="display:none"></div>
     </div>
 
     <div class="modal-btns sf-import-btn-row" style="margin-top: 18px;">
       <button class="modal-btn-cancel" id="sf-bulk-import-cancel-btn">Cancel</button>
-      <button class="modal-btn-primary" id="sf-bulk-import-start-btn" style="display:none">Start bulk import</button>
+      <button class="modal-btn-cancel" id="sf-bulk-guided-back-btn" style="display:none">&#8249; Back</button>
+      <button class="modal-btn-secondary" id="sf-bulk-import-start-btn" style="display:none">Quick import</button>
+      <button class="modal-btn-primary" id="sf-bulk-import-review-btn" style="display:none">Review Import</button>
+      <button class="modal-btn-primary" id="sf-bulk-guided-import-btn" style="display:none">Import</button>
       <button class="modal-btn-primary" id="sf-bulk-import-done-btn" style="display:none">Done</button>
     </div>
   </div>
@@ -5693,7 +5914,7 @@ function setFileOpen(open) {
     _compareFilePath = null;
     _resetCompareUI();
     document.getElementById('config-banner').classList.remove('visible');
-    if (isElectron) refreshEmptyStateFavs();
+    if (isElectron) { refreshEmptyStateFavs(); updateFirstRunHelp(); }
     _restoreFilenameReadonly();
   } else {
     updateBanner();
@@ -5769,6 +5990,7 @@ function promptConfirm(opts) {
       altKind     = 'cancel',
       hideCancel  = false,
       checkbox    = null,
+      dropdown    = null,
     } = opts || {};
     document.getElementById('modal-confirm-title').textContent = title;
     const msgEl = document.getElementById('modal-confirm-msg');
@@ -5806,6 +6028,22 @@ function promptConfirm(opts) {
       cbRow.style.display = 'block';
     } else if (cbRow) {
       cbRow.style.display = 'none';
+    }
+    const ddRow   = document.getElementById('modal-confirm-dropdown-row');
+    const ddSel   = document.getElementById('modal-confirm-dropdown');
+    const ddLabel = document.getElementById('modal-confirm-dropdown-label');
+    if (dropdown && ddRow && ddSel) {
+      if (ddLabel) { ddLabel.textContent = dropdown.label || ''; ddLabel.style.display = dropdown.label ? 'block' : 'none'; }
+      ddSel.innerHTML = '';
+      (dropdown.options || []).forEach(o => {
+        const opt = document.createElement('option');
+        opt.value = o.value; opt.textContent = o.label;
+        if (o.value === dropdown.value) opt.selected = true;
+        ddSel.appendChild(opt);
+      });
+      ddRow.style.display = 'block';
+    } else if (ddRow) {
+      ddRow.style.display = 'none';
     }
     const okBtn = document.getElementById('modal-confirm-ok');
     okBtn.textContent = confirmText;
@@ -5855,6 +6093,8 @@ function promptConfirm(opts) {
       overlay.classList.remove('active');
       if (multi) {
         resolve(result);
+      } else if (dropdown) {
+        resolve({ confirmed: result === true, value: ddSel ? ddSel.value : null });
       } else if (checkbox) {
         resolve({ confirmed: result === true, checked: !!(cbInput && cbInput.checked) });
       } else {
@@ -6371,6 +6611,64 @@ function _findFirstNonCommentLineIdx(text) {
   return lines.length;
 }
 
+// Insert the board include for `choice` into the editor. Placement: into an existing
+// #ifdef CONFIG_TOP if present, else a fresh block at the top (after leading comments).
+// Single undoable Monaco edit. Callers own the consent prompt (reactive dropdown pick,
+// or the proactive on-open board-help modal), so this just performs the edit.
+function _insertBoardIncludeInEditor(choice, targetFile) {
+  if (!editor || !targetFile) return;
+  const text  = editor.getValue();
+  const lines = text.split('\n');
+  const ifdefLineIdx = lines.findIndex(l => /^[ \t]*#ifdef\s+CONFIG_TOP\b/.test(l));
+  let insertLineNum, insertText, flashLine;
+  if (ifdefLineIdx !== -1) {
+    insertLineNum = ifdefLineIdx + 2;
+    insertText    = `#include "${targetFile}"\n`;
+    flashLine     = insertLineNum;
+  } else {
+    const startIdx = _findFirstNonCommentLineIdx(text);
+    insertLineNum  = startIdx + 1;
+    insertText = ['#ifdef CONFIG_TOP', `#include "${targetFile}"`, '#endif', '', ''].join('\n');
+    flashLine = insertLineNum + 1;
+  }
+  _atomicEdit(editor,'board-include-insert', [{
+    range: new monaco.Range(insertLineNum, 1, insertLineNum, 1),
+    text:  insertText,
+  }]);
+  showToast(`Board include added (${choice}).`);
+  flashEditorLine(flashLine);
+}
+
+// Proactive help: a config with no board can't compile, so on open we OFFER to set one
+// (the enhanced Insert Board Include? modal, here WITH a board picker since none is chosen
+// yet). The picker's options come straight from the main #input-board dropdown, so a future
+// board added there needs no change here. Decline leaves the board field's red cue as the
+// quiet standing reminder; a later meta-bar pick fires the same modal reactively (no picker).
+async function _offerBoardHelpIfMissing() {
+  const sel = document.getElementById('input-board');
+  if (!fileIsOpen || !sel || sel.value) return;
+  const options = Array.from(sel.options)
+    .filter(o => o.value)
+    .map(o => ({ value: o.value, label: o.textContent.trim() }));
+  if (!options.length) return;
+  const res = await promptConfirm({
+    title:       'Insert Board Include?',
+    message:     "This config doesn't have a board set yet, so it can't compile. Choose your Proffieboard and JMT Studio will add it to the config.",
+    dropdown:    { label: 'Board', value: options[0].value, options },
+    confirmText: 'Insert',
+    confirmKind: 'save',
+  });
+  if (!res || !res.confirmed) return; // declined → the red board field is the quiet reminder
+  const choice = res.value;
+  const targetFile = _BOARD_INCLUDE_FILE_BY_DROPDOWN[choice];
+  // Set the main board dropdown programmatically. A synthetic change event is
+  // isTrusted=false, so the reactive insert-prompt listener skips it (no double-ask),
+  // while the buildPanel handler still syncs selectedFqbn and the red cue clears.
+  sel.value = choice;
+  sel.dispatchEvent(new Event('change'));
+  _insertBoardIncludeInEditor(choice, targetFile);
+}
+
 document.getElementById('input-board').addEventListener('change', async (e) => {
   if (!e.isTrusted) return;
   if (!editor) return;
@@ -6413,34 +6711,7 @@ document.getElementById('input-board').addEventListener('change', async (e) => {
   });
   if (!ok) return;
 
-  const model = editor.getModel();
-  const lines = text.split('\n');
-  // Placement: into existing CONFIG_TOP if present, else fresh block at top of file
-  // (after leading comments). Single undoable Monaco edit either way.
-  const ifdefLineIdx = lines.findIndex(l => /^[ \t]*#ifdef\s+CONFIG_TOP\b/.test(l));
-  let insertLineNum, insertText, flashLine;
-  if (ifdefLineIdx !== -1) {
-    insertLineNum = ifdefLineIdx + 2; // 1-based; the line right after #ifdef CONFIG_TOP
-    insertText    = `#include "${targetFile}"\n`;
-    flashLine     = insertLineNum;
-  } else {
-    const startIdx = _findFirstNonCommentLineIdx(text);
-    insertLineNum  = startIdx + 1; // 1-based
-    insertText = [
-      '#ifdef CONFIG_TOP',
-      `#include "${targetFile}"`,
-      '#endif',
-      '',
-      '',
-    ].join('\n');
-    flashLine = insertLineNum + 1; // the include line within the new block
-  }
-  _atomicEdit(editor,'board-include-insert', [{
-    range: new monaco.Range(insertLineNum, 1, insertLineNum, 1),
-    text:  insertText,
-  }]);
-  showToast(`Board include added (${choice}).`);
-  flashEditorLine(flashLine);
+  _insertBoardIncludeInEditor(choice, targetFile);
 });
 
 document.getElementById('input-board').addEventListener('change', () => {
@@ -6495,13 +6766,20 @@ function updateChangedIndicators() {
   const boardSel  = document.getElementById('input-board');
   const versionEl = document.getElementById('input-version');
 
+  // Proactive: a config is open but no board is selected. A config that can't name
+  // its board can't compile, so flag it the moment it loads, not only after a
+  // compile sets a baseline. Reuses the existing field-changed visual. (Visual cue
+  // only; the "Insert Board Include?" prompt stays reactive to the user's pick.)
+  const noBoard = fileIsOpen && !boardSel.value;
   const boardChanged = baselineBoard !== null && boardSel.value !== baselineBoard;
-  boardSel.classList.toggle('field-changed', boardChanged);
-  boardSel.title = boardChanged
-    ? (boardSel.value
-        ? `Board changed since last compile (was: ${baselineBoard}) — recompile before flashing`
-        : 'No board selected — select a board before compiling')
-    : '';
+  boardSel.classList.toggle('field-changed', noBoard || boardChanged);
+  boardSel.title = noBoard
+    ? 'No board detected in this config. Select your Proffieboard to compile.'
+    : boardChanged
+      ? (boardSel.value
+          ? `Board changed since last compile (was: ${baselineBoard}) — recompile before flashing`
+          : 'No board selected — select a board before compiling')
+      : '';
 
   const versionChanged = baselineVersion !== null && versionEl.value !== baselineVersion;
   versionEl.classList.toggle('field-changed', versionChanged);
@@ -6810,6 +7088,8 @@ function loadContent(rawContent, filePath) {
   takeSnapshot(clean);
   setFilePath(filePath || null);
   setFileOpen(true);
+  updateChangedIndicators(); // re-evaluate the proactive no-board cue now that fileIsOpen is true
+  _offerBoardHelpIfMissing(); // proactively offer to set a board when the config has none
   // Refresh the preset-sidecar common-folder dropdown so it reads the new
   // file's JMT_COMMON marker (or falls back to the global star default).
   try { window._sfRenderPresetSidecarCommonRow?.(); } catch {}
@@ -7468,8 +7748,15 @@ document.getElementById('btn-saveas')  ?.addEventListener('click', doSaveAs);
 document.getElementById('btn-download')?.addEventListener('click', doDownload);
 
 // ── Guard unsaved ──────────────────────────────────────
+// "Something would be lost if we discarded now" = dirty edits OR content that
+// is loaded but has never been written to a file (a template or an SD-card
+// config, which open untitled). Mirrors the Save button's enable rule so the
+// close/new/open guards prompt in exactly the cases Save is offered.
+function hasUnsavedWork() {
+  return fileIsOpen && (isDirty || !currentFilePath);
+}
 async function guardUnsaved(msg) {
-  if (!isDirty) return true;
+  if (!hasUnsavedWork()) return true;
   const choice = await promptUnsaved(msg, { saveAs: true });
   if (choice === 'cancel')  return false;
   // Treat a cancelled Save / Save As (user dismissed the file picker, or write
@@ -7543,6 +7830,715 @@ document.getElementById('btn-new').addEventListener('click', doNew);
 document.getElementById('btn-new-empty').addEventListener('click', doNew);
 document.getElementById('btn-open').addEventListener('click', doOpen);
 document.getElementById('btn-open-empty').addEventListener('click', doOpen);
+document.getElementById('link-sdcard-empty')?.addEventListener('click', (e) => { e.preventDefault(); startSdCardImport(); });
+
+// Path-2 on-ramp: read a Proffie SD card, then (next increments) populate the Sound Font
+// Library from it and surface any configs to open. Entry point only for now — the card
+// detection + import + config-surfacing steps are built out next.
+// Self-contained busy overlay for the SD flow (the shared _sfDeleteProgress lives inside
+// the Sound Fonts scope and isn't reachable here). Reuses the global indeterminate-bar CSS.
+function _sdBusy(show, text) {
+  let el = document.getElementById('sd-busy-overlay');
+  if (!el && show) {
+    el = document.createElement('div');
+    el.id = 'sd-busy-overlay';
+    el.style.cssText = 'position:fixed; inset:0; z-index:11000; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.55);';
+    el.innerHTML = '<div style="background:var(--c-bg-raised); border:1px solid var(--c-border); border-radius:8px; padding:22px 28px; text-align:center; color:var(--c-text); min-width:250px;">'
+      + '<div class="sf-import-progress-track" style="margin-bottom:12px;"><div class="sf-import-progress-bar indeterminate"></div></div>'
+      + '<div id="sd-busy-text" style="font-size:0.9rem;"></div></div>';
+    document.body.appendChild(el);
+  }
+  if (!el) return;
+  if (show) {
+    const t = document.getElementById('sd-busy-text');
+    if (t) t.textContent = text || 'Working...';
+    el.style.display = 'flex';
+  } else {
+    el.style.display = 'none';
+  }
+}
+
+// Shared folder/drive picker: launches the OS picker, assesses the pick, and surfaces a
+// clear warning if it was rejected (e.g. the system drive). Returns a card, or null.
+async function _pickCardOrFolder() {
+  let picked = null;
+  try { picked = await window.electronAPI.pickFolder(); } catch {}
+  if (!picked) return null;
+  _sdBusy(true, 'Scanning...');
+  let result = null;
+  try { result = await window.electronAPI.scanPath(picked); } catch {}
+  _sdBusy(false);
+  if (result && result.rejected) {
+    await promptConfirm({
+      title: 'Not an SD card',
+      message: `${result.reason} Pick your SD card's drive, or a folder that's a copy of a card.`,
+      confirmText: 'OK', confirmKind: 'primary', hideCancel: true,
+    });
+    return null;
+  }
+  return result || null;
+}
+
+// ── SD report / file-browser overlay: drill into a card's folders and files ──
+const _sdReport = { cards: [], stack: [], card: null, textView: false, single: false, context: 'config', fontCtx: null, healthCache: {} };
+let _sdTextToken = 0; // monotonic guard so a slow text read can't overwrite a newer click
+function _sdEsc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c])); }
+function _sdFmtGB(b) { return b == null ? '?' : (b / (1024 ** 3)).toFixed(1) + ' GB'; }
+function _sdFmtBytes(b) { if (b == null) return ''; if (b < 1024) return b + ' B'; if (b < 1048576) return Math.round(b / 1024) + ' KB'; return (b / 1048576).toFixed(1) + ' MB'; }
+function _sdPlur(n, w) { return `${n} ${w}${n === 1 ? '' : 's'}`; }
+
+function _sdEnsureOverlay() {
+  let ov = document.getElementById('sd-report-overlay');
+  if (ov) return ov;
+  ov = document.createElement('div');
+  ov.id = 'sd-report-overlay';
+  ov.className = 'modal-overlay';
+  ov.innerHTML = '<div class="modal sd-report-modal">'
+    + '<div class="sd-rpt-head"><button id="sd-rpt-back" class="sd-rpt-back" hidden>&#8592; Back</button><div id="sd-rpt-title" class="sd-rpt-title"></div></div>'
+    + '<div id="sd-rpt-body" class="sd-rpt-body"></div>'
+    + '<div class="modal-btns"><button id="sd-rpt-others" class="modal-btn-cancel" style="display:none;">&#8592; Other SD cards</button><button id="sd-rpt-browse" class="modal-btn-cancel">Browse a folder or drive</button><button id="sd-rpt-close" class="modal-btn-primary">Close</button></div>'
+    + '</div>';
+  document.body.appendChild(ov);
+  ov.querySelector('#sd-rpt-close').onclick = () => ov.classList.remove('active');
+  ov.querySelector('#sd-rpt-back').onclick = _sdBack;
+  ov.querySelector('#sd-rpt-browse').onclick = async () => {
+    const p = await _pickCardOrFolder();
+    if (p) _sdOpenReport([p]);
+  };
+  ov.querySelector('#sd-rpt-others').onclick = () => {
+    _sdReport.stack = []; _sdReport.card = null; _sdReport.single = false; _sdReport.textView = false;
+    _sdRenderList();
+  };
+  // Up-one-level navigation, same pattern as the SFL file browser: Backspace
+  // and the mouse "back" button (button 3). If the doc viewer is open on top,
+  // back closes it first; otherwise it pops one folder up the tree. These are
+  // document-level and added once (this function early-returns if the overlay
+  // already exists).
+  const _sdBackNav = () => {
+    const docOv = document.getElementById('sd-doc-overlay');
+    if (docOv && docOv.classList.contains('active')) { docOv.classList.remove('active'); return true; }
+    if (_sdReport.stack && _sdReport.stack.length > 1) { _sdReport.stack.pop(); _sdReport.textView = false; _sdRenderBrowse(); return true; }
+    return false;
+  };
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Backspace') return;
+    if (!ov.classList.contains('active')) return;
+    const ae = document.activeElement;
+    if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
+    if (_sdBackNav()) e.preventDefault();
+  });
+  document.addEventListener('mouseup', (e) => {
+    if (e.button !== 3) return;
+    if (!ov.classList.contains('active')) return;
+    if (_sdBackNav()) e.preventDefault();
+  });
+  return ov;
+}
+function _sdOpenReport(cards) {
+  _sdReport.cards = cards; _sdReport.stack = []; _sdReport.card = null; _sdReport.textView = false;
+  _sdReport.single = cards.length === 1;
+  _sdReport.healthCache = {}; // fresh scan per card open (paths could collide across cards on the same drive letter)
+  _sdReport.fontCtx = null;
+  _sdEnsureOverlay(); // ensure the overlay EXISTS, but don't reveal it yet
+  if (_sdReport.single) {
+    // Single card is the primary case. Do NOT bring the report modal up here —
+    // _sdRenderBrowse reveals it itself, fully scanned and rendered, in one shot,
+    // so the user never sees the report appear and then scan inside it
+    // (Ryan: don't bring it up until it's literally done).
+    const c = cards[0];
+    _sdReport.card = c;
+    _sdReport.stack = [{ name: (c.isFolder ? 'Folder' : c.drive), path: c.mountPath || c.drive }];
+    _sdRenderBrowse();
+  } else {
+    document.getElementById('sd-report-overlay').classList.add('active'); // the list is instant, no scan
+    _sdRenderList();
+  }
+}
+function _sdSetView(titleText) {
+  const ov = document.getElementById('sd-report-overlay');
+  // Modal size is fixed now — no content-based resizing.
+  const head = ov.querySelector('.sd-rpt-head');
+  if (head) head.style.display = titleText ? '' : 'none';
+  ov.querySelector('#sd-rpt-title').textContent = titleText || '';
+  ov.querySelector('#sd-rpt-back').hidden = true; // navigation lives in the breadcrumb + footer now
+  return ov.querySelector('#sd-rpt-body');
+}
+// The "Other SD cards" footer button only earns its space when several cards are present;
+// normally you're inside the one card and there's nothing above to go back to.
+function _sdShowOthers(show) {
+  const b = document.getElementById('sd-rpt-others');
+  if (b) b.style.display = show ? '' : 'none';
+}
+// Breadcrumb navigation (SFL-style): click a parent segment to jump to that depth, which
+// also leaves the text view. The current segment (.cur) is inert.
+function _sdWireCrumb(body) {
+  body.querySelectorAll('.sf-entry-files-crumb').forEach(el => el.onclick = () => {
+    if (el.classList.contains('current')) return;
+    _sdReport.stack = _sdReport.stack.slice(0, (+el.dataset.depth) + 1);
+    _sdReport.textView = false;
+    _sdRenderBrowse();
+  });
+}
+// Descriptive drive/folder label, matching Windows Explorer's convention:
+// "<VolumeLabel> (J:)" when the card is named, a generic placeholder when it
+// isn't. Folders show their own name.
+function _sdDriveLabel(c) {
+  if (!c) return '';
+  if (c.isFolder) return (String(c.drive || '').split(/[\\/]/).filter(Boolean).pop()) || 'Folder';
+  const name = c.label && String(c.label).trim();
+  return name ? `${name} (${c.drive})` : `Removable Disk (${c.drive})`;
+}
+// SFL-style breadcrumb (Files: <root> › folder › subfolder). Root crumb is the
+// descriptive card label; deeper crumbs are folder names. data-depth drives
+// _sdWireCrumb navigation. An optional trailing leaf (a file name) renders as
+// the inert current segment for the text view.
+function _sdCrumbHtml(st, leaf, actionsHtml) {
+  const segs = st.map((s, i) => {
+    const label = (i === 0 && _sdReport.card) ? _sdDriveLabel(_sdReport.card) : s.name;
+    const isCurrent = !leaf && i === st.length - 1;
+    return `<span class="sf-entry-files-crumb${isCurrent ? ' current' : ''}" data-depth="${i}">${_sdEsc(label)}</span>`;
+  });
+  if (leaf) segs.push(`<span class="sf-entry-files-crumb current">${_sdEsc(leaf)}</span>`);
+  const inner = segs.join('<span class="sf-entry-files-crumb-sep">›</span>');
+  return `<div class="sf-entry-files-head" style="flex-shrink:0"><span>Files:</span><span class="sf-entry-files-breadcrumb">${inner}</span>${actionsHtml || ''}</div>`;
+}
+// Does this folder listing look like a complete Proffie FONT (its root) — vs a
+// lone effect component (font/ or hum/) or a collection of fonts (the card
+// root)? A font has a hum plus several other effect types, present either as
+// flat wavs (hum.wav, clsh01.wav) or per-effect subfolders (hum/, clsh/).
+function _sdLooksLikeFontRoot(entries) {
+  const names = (entries || []).map(e => e.name.toLowerCase());
+  const isEff = (base) => names.some(n => new RegExp(`^${base}\\d*\\.wav$`).test(n)) || names.includes(base);
+  if (!isEff('hum')) return false;
+  const others = ['font', 'blst', 'clsh', 'swng', 'swing', 'swingh', 'swingl', 'boot', 'out', 'in', 'lock', 'drag', 'preon', 'force', 'stab', 'melt'];
+  return others.filter(isEff).length >= 2;
+}
+function _sdCardSummaryHtml(c, wide) {
+  const v = c.verdict || {}, cls = c.classification || {}, ct = cls.counts || {};
+  const dot = v.level === 'good' ? '#3fb950' : v.level === 'bad' ? '#e5534b' : '#d29922';
+  const hasContent = cls.kind !== 'empty' && cls.kind !== 'unreadable';
+  const label = _sdEsc(_sdDriveLabel(c));
+  const countsTxt = hasContent ? `${_sdPlur(ct.fonts || 0, 'sound font')} &middot; ${_sdPlur(ct.configs || 0, 'config')} &middot; ${_sdPlur(ct.otherFiles || 0, 'other file')}` : '';
+  const metaTxt = c.isFolder ? 'Folder' : `${_sdEsc(c.fileSystem || '')} &middot; ${_sdFmtGB(c.freeBytes)} free of ${_sdFmtGB(c.sizeBytes)} &middot; health: ${_sdEsc(c.health || '?')}`;
+  const stats = [countsTxt, metaTxt].filter(Boolean).join(' &middot; ');
+  const dotSpan = `<span style="color:${dot};">&#9679;</span>`;
+  if (wide) {
+    // Browse header: horizontal room, so favor fewer lines — identity + verdict share a
+    // row, and counts + card meta collapse to one dim stats line.
+    return `<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;">`
+      + `<span style="font-weight:600;">${dotSpan} ${label}</span>`
+      + (v.headline ? `<span style="font-weight:600;">${_sdEsc(v.headline)}</span>` : '')
+      + `</div>`
+      // On a healthy card the detail just restates what the action buttons already offer;
+      // keep it only when it carries a real signal (a warning / an odd card).
+      + ((v.detail && v.level !== 'good') ? `<div class="sd-rpt-sub" style="margin-top:3px;">${_sdEsc(v.detail)}</div>` : '')
+      + (stats ? `<div class="sd-rpt-sub" style="color:var(--c-text-dim);margin-top:5px;">${stats}</div>` : '');
+  }
+  return `<div style="font-weight:600;">${dotSpan} ${label}</div>`
+    + (v.headline ? `<div style="margin-top:3px;">${_sdEsc(v.headline)}</div>` : '')
+    + (v.detail ? `<div class="sd-rpt-sub" style="margin-top:2px;">${_sdEsc(v.detail)}</div>` : '')
+    + (stats ? `<div class="sd-rpt-sub" style="color:var(--c-text-dim);margin-top:4px;">${stats}</div>` : '');
+}
+// Action buttons on the card summary, gated by what was found. Launch context sets the
+// hero: from Config Manager, "Open a config" leads; from the Sound Font Library, "Import
+// fonts" leads. Everything present sits as a quiet ghost button either way.
+function _sdActionRowHtml(c) {
+  const ct = (c.classification && c.classification.counts) || {};
+  const ctx = _sdReport.context || 'config';
+  const canConfig = (ct.configs || 0) > 0;
+  const canFonts = (ct.fonts || 0) > 0;
+  if (!canConfig && !canFonts) return '';
+  const btns = [];
+  if (canConfig) btns.push(`<button id="sd-act-config" class="${ctx === 'config' ? 'modal-btn-primary' : 'modal-btn-cancel'} sd-act-btn">Open a config</button>`);
+  if (canFonts) btns.push(`<button id="sd-act-import" class="${ctx === 'sfl' ? 'modal-btn-primary' : 'modal-btn-cancel'} sd-act-btn">Import fonts to library</button>`);
+  return `<div class="sd-rpt-actions">${btns.join('')}</div>`;
+}
+function _sdActiveRoot() {
+  return (_sdReport.stack[0] && _sdReport.stack[0].path) || (_sdReport.card && (_sdReport.card.mountPath || _sdReport.card.drive)) || '';
+}
+async function _sdOpenConfigFromCard() {
+  const root = _sdActiveRoot();
+  if (!root) return;
+  _sdBusy(true, 'Looking for a config...');
+  let configs = [];
+  try { configs = await window.electronAPI.findSdConfigs(root); } catch { configs = []; }
+  _sdBusy(false);
+  if (!configs || !configs.length) {
+    await promptConfirm({ title: 'No config found', message: "JMT Studio didn't find a Proffie config file at the top of this card. If the config lives inside a folder, open it from the file list.", confirmText: 'OK', confirmKind: 'primary', hideCancel: true });
+    return;
+  }
+  let pick = configs[0];
+  if (configs.length > 1) {
+    const res = await promptConfirm({
+      title: 'Open a config',
+      message: 'This card carries more than one config. Which one do you want to open?',
+      dropdown: { label: 'Config', value: '0', options: configs.map((cf, i) => ({ value: String(i), label: cf.name })) },
+      confirmText: 'Open',
+      confirmKind: 'primary',
+      cancelText: 'Cancel',
+    });
+    if (!res || !res.confirmed) return;
+    pick = configs[Number(res.value)] || configs[0];
+  }
+  await _sdOpenConfigCopy(pick.name, pick.path);
+}
+// The card is read-only to us by rule: never point the editor at the card path
+// (Save would write back to the card live). Instead we open the config as an
+// UNTITLED, unsaved document — exactly like opening from a template. With no
+// file path, Save delegates to Save As, so the user picks name + location the
+// first time they save (and the card is never a write target). Non-destructive,
+// same model as viewing a text file.
+async function _sdOpenConfigCopy(name, filePath) {
+  // Read the FULL file — readSdText is capped at 200KB for the on-screen preview
+  // and a real config can exceed that; a truncated open would be silently wrong.
+  const file = await window.electronAPI.readFile(filePath);
+  if (!file || file.content == null) { await promptConfirm({ title: "Couldn't open the config", message: 'That file could not be read.', confirmText: 'OK', confirmKind: 'primary', hideCancel: true }); return; }
+  // Same guard as the normal Open flow — offer to save the current file first.
+  if (!await guardUnsaved('Save current file before opening this config?')) return;
+  loadContent(file.content, null);
+  // Suggest the card's config name for the eventual Save As.
+  const base = String(name || 'config').replace(/\.[^.]+$/, '').trim();
+  if (base) { const fn = document.getElementById('input-filename'); if (fn) fn.value = base; }
+  document.getElementById('sd-report-overlay').classList.remove('active');
+}
+async function _sdImportFontsFromCard() {
+  const root = _sdActiveRoot();
+  if (!root) return;
+  if (!window._sfBulkImportFromPath) { await promptConfirm({ title: 'Importer unavailable', message: 'The font importer could not be reached.', confirmText: 'OK', confirmKind: 'primary', hideCancel: true }); return; }
+  // Step aside so the import modal (static HTML, lower in the DOM) isn't covered by this
+  // dynamically-appended overlay, then restore the SD browser when that modal closes (whether
+  // the import completed or was cancelled) so the user isn't dropped to a dead end.
+  const sdOv = document.getElementById('sd-report-overlay');
+  const impModal = document.getElementById('modal-sf-bulk-import');
+  sdOv.classList.remove('active');
+  if (impModal && window.MutationObserver) {
+    const obs = new MutationObserver(() => {
+      if (!impModal.classList.contains('active')) { obs.disconnect(); sdOv.classList.add('active'); }
+    });
+    obs.observe(impModal, { attributes: true, attributeFilter: ['class'] });
+  }
+  // Pass the friendly card label (e.g. "PROFFIESD (J:)") so the import summary
+  // shows it instead of the raw drive path.
+  const label = _sdReport.card ? _sdDriveLabel(_sdReport.card) : null;
+  // Reuse the corruption scan the browser ALREADY ran for this card (cached per
+  // path) so the guided review can flag corrupted fonts without re-scanning. The
+  // root's `dirs` map is keyed by top-level font-folder name -> {count, reason}.
+  let health = _sdReport.healthCache[root];
+  if (!health) { try { health = await window.electronAPI.sdFolderHealth(root); _sdReport.healthCache[root] = health; } catch { health = null; } }
+  const corruptFonts = (health && health.dirs) || {};
+  window._sfBulkImportFromPath(root, label, corruptFonts);
+}
+function _sdRenderList() {
+  _sdReport.textView = false;
+  const cards = _sdReport.cards, n = cards.length;
+  const isFolder = n === 1 && cards[0].isFolder;
+  const title = isFolder ? 'Folder contents' : (n === 1 ? 'SD card found' : `Multiple SD cards found (${n})`);
+  const body = _sdSetView(title);
+  _sdShowOthers(false);
+  body.innerHTML = `<div class="sd-rpt-scroll">` + cards.map((c, i) =>
+    `<div class="sd-rpt-card" data-idx="${i}">${_sdCardSummaryHtml(c)}<div class="sd-rpt-sub" style="color:var(--jmt-blue);margin-top:6px;">view files &rarr;</div></div>`
+  ).join('') + `</div>`;
+  body.querySelectorAll('.sd-rpt-card').forEach(el => el.onclick = () => {
+    const c = _sdReport.cards[+el.dataset.idx];
+    _sdReport.card = c;
+    _sdReport.stack = [{ name: (c.isFolder ? 'Folder' : c.drive), path: c.mountPath || c.drive }];
+    _sdRenderBrowse();
+  });
+}
+async function _sdRenderBrowse() {
+  _sdReport.textView = false;
+  const st = _sdReport.stack, cur = st[st.length - 1];
+  const body = _sdSetView('');
+  _sdShowOthers(_sdReport.cards.length > 1);
+  // Keep the SAME scanning overlay (_sdBusy) up the WHOLE time we prepare this
+  // view (directory listing + corruption scan) — don't blank the body to a
+  // separate loading state. _sdSetView doesn't clear the body, so the prior view
+  // stays under the overlay until we swap in the complete view in one shot
+  // (Ryan: don't stop showing the progress bar until you're ready for the full thing).
+  _sdBusy(true, _sdReport.stack.length <= 1 ? 'Found your card. Scanning it…' : 'Scanning…');
+  const res = await window.electronAPI.listSdDir(cur.path);
+  if (_sdReport.stack[_sdReport.stack.length - 1] !== cur) return; // navigated away while loading
+  // Fetch corruption health BEFORE rendering so the red marks appear in the
+  // SAME paint as the file list — never an unmarked list that then pops a red
+  // mark a moment later (Ryan: finish the scan, then render once). The "Loading"
+  // placeholder above covers this wait.
+  let _health = _sdReport.healthCache[cur.path];
+  if (!_health) {
+    try { _health = await window.electronAPI.sdFolderHealth(cur.path); } catch { _health = null; }
+    if (_sdReport.stack[_sdReport.stack.length - 1] !== cur) return; // navigated away during health scan
+    _sdReport.healthCache[cur.path] = _health || { files: {}, dirs: {} };
+  }
+  // Card summary + action buttons stay pinned at the top (they don't scroll);
+  // the file browser below is the only scroll surface. The actions are
+  // card-level ("open a config" / "import the card's fonts") and always target
+  // the card root, so they stay visible at every browse depth — you're just
+  // exploring, the card and what you can do with it don't change.
+  const summary = _sdReport.card ? `<div class="sd-rpt-summary">${_sdCardSummaryHtml(_sdReport.card, true)}${_sdActionRowHtml(_sdReport.card)}</div>` : '';
+  const crumb = _sdCrumbHtml(st);
+  const wireActions = () => {
+    const bCfg = document.getElementById('sd-act-config'); if (bCfg) bCfg.onclick = _sdOpenConfigFromCard;
+    const bImp = document.getElementById('sd-act-import'); if (bImp) bImp.onclick = _sdImportFontsFromCard;
+  };
+  if (res.error) {
+    body.innerHTML = summary + crumb + `<div class="sf-entry-files-browser"><div class="sf-entry-files-empty">Couldn't read this folder: ${_sdEsc(res.error)}</div></div>`;
+    wireActions(); _sdWireCrumb(body); document.getElementById('sd-report-overlay')?.classList.add('active'); _sdBusy(false); return;
+  }
+  const isAud = (nm) => /\.(wav|mp3|ogg|flac)$/i.test(nm);
+  const isImg = (nm) => /\.(jpe?g|png|gif|webp|bmp|svg)$/i.test(nm);
+  const rows = res.entries.map((e, i) => {
+    const audio = isAud(e.name);
+    const image = isImg(e.name);
+    const ext = (e.name.match(/\.[^.]+$/) || [''])[0].toLowerCase();
+    const icon = e.isDir ? '&#128193;' : (ext === '.wav' ? '&#127925;' : image ? '&#128444;' : '&#128196;'); // folder / wav / image / doc
+    const clickable = e.isDir || e.isText || audio || image;
+    const cls = ['sf-entry-files-row'];
+    if (e.isDir) cls.push('is-dir');
+    if (clickable && !e.isDir) cls.push('sd-clickable');
+    const sizeTitle = (!e.isDir && e.size != null) ? ` — ${_sdFmtBytes(e.size)}` : '';
+    return `<div class="${cls.join(' ')}" data-idx="${i}" title="${_sdEsc(e.name + sizeTitle)}"><span class="sf-entry-files-row-icon">${icon}</span><span class="sf-entry-files-row-name">${_sdEsc(e.name)}</span></div>`;
+  }).join('');
+  // Font context: when you're inside a Proffie FONT — its root or any of its
+  // subfolders (font/, hum/, clsh/, ...) — surface font + hum quick-play in the
+  // header. Anchored at the font ROOT so BOTH persist as you drill in, even
+  // when the wavs live in nested font/ and hum/ folders.
+  const _sdNorm = (s) => String(s || '').replace(/[\\/]+$/, '');
+  const _sdWithin = (p, root) => { const r = _sdNorm(root), pn = _sdNorm(p); return pn === r || pn.startsWith(r + '\\') || pn.startsWith(r + '/'); };
+  if (!(_sdReport.fontCtx && _sdWithin(cur.path, _sdReport.fontCtx.rootPath))) {
+    _sdReport.fontCtx = null;
+    if (_sdLooksLikeFontRoot(res.entries)) {
+      // Build a 2-level tree of the font root and resolve font/hum the SAME way
+      // the library cards do — window._sfFindFirstEffectFileInTree — instead of
+      // reinventing the match rules (it handles nested font/, flat font.wav,
+      // font01.wav, font (1).wav, alt fallback, etc.).
+      const tree = [];
+      const pathMap = {}; // finder's relative path -> absolute SD path
+      for (const e of res.entries) {
+        const node = { name: e.name, isDir: e.isDir };
+        if (!e.isDir) { pathMap[e.name] = e.path; }
+        else if (e.name.toLowerCase() === 'font' || e.name.toLowerCase() === 'hum') {
+          const subRes = await window.electronAPI.listSdDir(e.path);
+          const kids = (subRes && !subRes.error ? subRes.entries : []).filter(c => !c.isDir);
+          node.children = kids.map(c => { pathMap[`${e.name}/${c.name}`] = c.path; return { name: c.name, isDir: false }; });
+        }
+        tree.push(node);
+      }
+      if (_sdReport.stack[_sdReport.stack.length - 1] !== cur) return; // navigated away during the sub-listing
+      const pick = (base) => {
+        const rel = window._sfFindFirstEffectFileInTree ? window._sfFindFirstEffectFileInTree(tree, base) : null;
+        return rel && pathMap[rel] ? { path: pathMap[rel], name: rel.split('/').pop() } : null;
+      };
+      const fontF = pick('font'), humF = pick('hum');
+      if (fontF || humF) _sdReport.fontCtx = { rootPath: cur.path, fontFile: fontF, humFile: humF };
+    }
+  }
+  const _fc = _sdReport.fontCtx;
+  const _sdHeadActions = (_fc && (_fc.fontFile || _fc.humFile))
+    ? `<span class="sf-entry-files-head-actions">`
+      + (_fc.fontFile ? `<button class="btn-neutral sf-entry-files-head-btn sf-entry-play-btn" data-sd-play="font" title="Play ${_sdEsc(_fc.fontFile.name)}">&#9654; font</button>` : '')
+      + (_fc.humFile ? `<button class="btn-neutral sf-entry-files-head-btn sf-entry-play-btn" data-sd-play="hum" title="Play ${_sdEsc(_fc.humFile.name)}">&#9654; hum</button>` : '')
+      + `</span>`
+    : '';
+  const crumbWithActions = _sdCrumbHtml(st, null, _sdHeadActions);
+  body.innerHTML = summary + crumbWithActions + `<div class="sf-entry-files-browser">${rows ? `<div class="sf-entry-files-list">${rows}</div>` : '<div class="sf-entry-files-empty">This folder is empty.</div>'}</div>`;
+  wireActions();
+  _sdWireCrumb(body);
+  const _pfBtn = body.querySelector('[data-sd-play="font"]');
+  if (_pfBtn && _fc && _fc.fontFile) _pfBtn.onclick = () => {
+    if (window._sfQuickAudioChip === _pfBtn) { try { window._sfQuickAudioStop?.(); } catch {} return; }
+    try { window._sfQuickPlay && window._sfQuickPlay({ kind: 'path', id: _fc.fontFile.path, subPath: _fc.fontFile.name, chipEl: _pfBtn }); } catch {}
+  };
+  const _phBtn = body.querySelector('[data-sd-play="hum"]');
+  if (_phBtn && _fc && _fc.humFile) _phBtn.onclick = () => {
+    if (window._sfQuickAudioChip === _phBtn) { try { window._sfQuickAudioStop?.(); } catch {} return; }
+    try { window._sfQuickPlay && window._sfQuickPlay({ kind: 'path', id: _fc.humFile.path, subPath: _fc.humFile.name, chipEl: _phBtn }); } catch {}
+  };
+  // Folder multi-select: normal click opens (as always); Ctrl/Cmd or Shift held
+  // BYPASSES the open and selects instead, so you can pick several font folders to
+  // import together. Selection lives at this directory level (a fresh render
+  // clears it). Files already multi-select in the library; this brings folders in line.
+  _sdReport.sel = new Set();
+  _sdReport.selAnchor = null;
+  const _sdUpdateSelUI = () => {
+    body.querySelectorAll('.sf-entry-files-row[data-idx]').forEach(el2 => {
+      const e2 = res.entries[+el2.dataset.idx];
+      el2.classList.toggle('sd-selected', !!(e2 && e2.isDir && _sdReport.sel.has(e2.path)));
+    });
+    const n = _sdReport.sel.size;
+    let bar = body.querySelector('.sd-sel-bar');
+    if (n === 0) { if (bar) bar.remove(); return; }
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.className = 'sd-sel-bar';
+      bar.innerHTML = '<span class="sd-sel-count"></span><span class="sd-sel-actions">'
+        + '<button type="button" class="btn-neutral sd-sel-clear">Clear</button>'
+        + '<button type="button" class="modal-btn-primary sd-sel-import">Import selected</button></span>';
+      body.appendChild(bar); // static bar at the BOTTOM, below the scrolling list
+      bar.querySelector('.sd-sel-clear').onclick = () => { _sdReport.sel.clear(); _sdReport.selAnchor = null; _sdUpdateSelUI(); };
+      bar.querySelector('.sd-sel-import').onclick = () => _sdImportSelected();
+    }
+    bar.querySelector('.sd-sel-count').textContent = `${n} folder${n === 1 ? '' : 's'} selected`;
+  };
+  body.querySelectorAll('.sf-entry-files-row[data-idx]').forEach(el => {
+    const e = res.entries[+el.dataset.idx];
+    // Right-click a folder to import just that one to the library (scoped
+    // version of "Import fonts to library"). The scan treats a lone font
+    // folder as a single source, so it lands in the same import flow.
+    if (e.isDir) {
+      el.addEventListener('contextmenu', (ev) => {
+        ev.preventDefault();
+        const menu = document.getElementById('preset-ctx-menu');
+        if (!menu) return;
+        menu.innerHTML = '';
+        menu.style.minWidth = '0';
+        const item = document.createElement('div');
+        item.className = 'preset-ctx-item';
+        const corrupt = _health && _health.dirs && _health.dirs[e.name];
+        if (corrupt) {
+          // A single corrupted font can't be imported on its own: there's no
+          // review step to drop the damaged file, and reading it can stall the
+          // zip. (Corrupt fonts import fine ALONGSIDE others — unchecked in the
+          // guided review.) Offer nothing actionable here, just explain why.
+          item.textContent = 'Corrupted font: fix the damaged file(s) first';
+          item.style.opacity = '0.55';
+          item.style.cursor = 'default';
+        } else {
+          item.textContent = 'Import to Sound Font Library';
+          item.addEventListener('mousedown', (mev) => { mev.stopPropagation(); menu.style.display = 'none'; menu.style.minWidth = ''; _sdImportFolderToLibrary(e); });
+        }
+        menu.appendChild(item);
+        const mw = menu.offsetWidth || 220;
+        menu.style.left = Math.min(ev.clientX, window.innerWidth - mw - 8) + 'px';
+        menu.style.top = Math.min(ev.clientY, window.innerHeight - 60) + 'px';
+        menu.style.display = 'block';
+      });
+    }
+    if (!(e.isDir || e.isText || isAud(e.name) || isImg(e.name))) return;
+    el.onclick = async (ev) => {
+      // Ctrl/Cmd or Shift on a FOLDER selects instead of opening.
+      if (e.isDir && (ev.ctrlKey || ev.metaKey || ev.shiftKey)) {
+        ev.preventDefault();
+        const idx = +el.dataset.idx;
+        if (ev.shiftKey && _sdReport.selAnchor != null) {
+          const folderIdxs = res.entries.map((en, i) => en.isDir ? i : -1).filter(i => i >= 0);
+          const a = folderIdxs.indexOf(_sdReport.selAnchor), b = folderIdxs.indexOf(idx);
+          if (a >= 0 && b >= 0) { const lo = Math.min(a, b), hi = Math.max(a, b); for (let k = lo; k <= hi; k++) _sdReport.sel.add(res.entries[folderIdxs[k]].path); }
+        } else {
+          if (_sdReport.sel.has(e.path)) _sdReport.sel.delete(e.path); else _sdReport.sel.add(e.path);
+          _sdReport.selAnchor = idx;
+        }
+        _sdUpdateSelUI();
+        return;
+      }
+      // Normal click clears any selection, then acts as before.
+      if (_sdReport.sel && _sdReport.sel.size) { _sdReport.sel.clear(); _sdReport.selAnchor = null; _sdUpdateSelUI(); }
+      if (e.isDir) { _sdReport.stack.push({ name: e.name, path: e.path }); _sdRenderBrowse(); }
+      else if (e.isText) { _sdOpenDoc(e.path, e.name, { size: e.size }); }
+      else if (isAud(e.name) && window._sfOpenAudioPlayer) { window._sfOpenAudioPlayer({ kind: 'path', id: e.path, label: e.name }); }
+      else if (isImg(e.name)) { _sdOpenDoc(e.path, e.name, { size: e.size }); }
+    };
+  });
+  // Corruption marks — health was fetched BEFORE this render (above), so apply
+  // it synchronously now: the marks paint together with the list, in one shot.
+  const _applyHealth = (health) => {
+    if (!health) return;
+    body.querySelectorAll('.sf-entry-files-row[data-idx]').forEach(el => {
+      const e = res.entries[+el.dataset.idx];
+      const issue = e.isDir ? (health.dirs && health.dirs[e.name]) : (health.files && health.files[e.name]);
+      if (!issue) return;
+      const tip = e.isDir
+        ? `Contains ${issue.count} corrupted file${issue.count === 1 ? '' : 's'}.`
+        : issue.reason;
+      el.classList.add('sd-corrupt');
+      el.title = tip;
+      const ic = el.querySelector('.sf-entry-files-row-icon');
+      if (ic && !el.querySelector('.sd-corrupt-mark')) ic.insertAdjacentHTML('afterend', `<span class="sd-corrupt-mark" title="${_sdEsc(tip)}">&#9888;</span>`);
+    });
+  };
+  _applyHealth(_health);
+  // Complete view is now in the DOM with its corruption marks — NOW reveal the
+  // report modal (a no-op if it's already up, e.g. navigating) and drop the
+  // scanning overlay, together. This is the only place the report is brought up.
+  document.getElementById('sd-report-overlay')?.classList.add('active');
+  _sdBusy(false);
+}
+// Scoped import: scan just the picked folder (a lone font folder = one source)
+// and run it through the same import flow. Mirrors _sdImportFontsFromCard's
+// step-aside-and-restore dance so the SD browser comes back on close.
+function _sdImportFolderToLibrary(entry) {
+  if (!entry || !entry.path) return;
+  // A single folder is NOT a bulk import — route it through the normal
+  // single-source import (folder review), not the bulk modal.
+  if (!window._sfImportSourceFromPath) { promptConfirm({ title: 'Importer unavailable', message: 'The font importer could not be reached.', confirmText: 'OK', confirmKind: 'primary', hideCancel: true }); return; }
+  const sdOv = document.getElementById('sd-report-overlay');
+  sdOv.classList.remove('active');
+  // Ask the single-import flow to bring the card browser back when it FULLY
+  // closes (Cancel or a completed import). A plain MutationObserver on the
+  // import modal's class was wrong: the duplicate prompt momentarily hides the
+  // import modal to show itself, which tripped the observer and slammed the SD
+  // browser back UNDER the dup dialog. This flag is only consumed at the real
+  // close point (_sfCloseImport), and the dup "Open existing" path clears it so
+  // we don't cover the source-detail view it navigates to.
+  window._sfReturnToSdBrowser = true;
+  window._sfImportSourceFromPath(entry.path);
+}
+// Import the multi-selected folders. One folder is just the single-folder path;
+// two or more fan out through the merge entry point. Carries the card's cached
+// corruption map so corrupted fonts land pre-flagged in the review.
+function _sdImportSelected() {
+  const paths = _sdReport.sel ? [..._sdReport.sel] : [];
+  if (!paths.length) return;
+  // Clear the selection (state + highlights + bar) now — once the import is
+  // launched the browser is stepped aside, and we don't want it restored with a
+  // stale selection still showing.
+  _sdReport.sel = new Set();
+  _sdReport.selAnchor = null;
+  document.querySelectorAll('.sf-entry-files-row.sd-selected').forEach(el => el.classList.remove('sd-selected'));
+  const _selBar = document.querySelector('.sd-sel-bar');
+  if (_selBar) _selBar.remove();
+  if (paths.length === 1) { const p = paths[0]; _sdImportFolderToLibrary({ path: p, name: p.split(/[\\/]/).pop() }); return; }
+  if (!window._sfBulkImportFromPaths) { promptConfirm({ title: 'Importer unavailable', message: 'The font importer could not be reached.', confirmText: 'OK', confirmKind: 'primary', hideCancel: true }); return; }
+  const sdOv = document.getElementById('sd-report-overlay');
+  const impModal = document.getElementById('modal-sf-bulk-import');
+  sdOv.classList.remove('active');
+  if (impModal && window.MutationObserver) {
+    const obs = new MutationObserver(() => { if (!impModal.classList.contains('active')) { obs.disconnect(); sdOv.classList.add('active'); } });
+    obs.observe(impModal, { attributes: true, attributeFilter: ['class'] });
+  }
+  const label = _sdReport.card ? _sdDriveLabel(_sdReport.card) : null;
+  const health = _sdReport.healthCache[_sdActiveRoot()];
+  const corruptFonts = (health && health.dirs) || null;
+  window._sfBulkImportFromPaths(paths, label ? `${paths.length} folders from ${label}` : `${paths.length} folders`, corruptFonts);
+}
+// Document viewer — text AND images in a popup modal that reuses the Sound
+// Font Library's .sf-doc-viewer-* look so it matches the rest of the app.
+// Standalone overlay (doesn't tangle with the SFL viewer's stash/close
+// wiring). Shared by the SD card browser and the guided-import text peek.
+function _sdEnsureDocModal() {
+  let ov = document.getElementById('sd-doc-overlay');
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.id = 'sd-doc-overlay';
+    ov.className = 'modal-overlay';
+    ov.innerHTML = '<div class="modal sd-doc-modal">'
+      + '<button class="modal-btn-close" id="sd-doc-close" title="Close">&#10005;</button>'
+      + '<div class="sf-doc-viewer-header"><span class="sf-doc-viewer-name" id="sd-doc-name"></span><span class="sf-doc-viewer-size" id="sd-doc-size"></span></div>'
+      + '<div class="sf-doc-viewer-body" id="sd-doc-body"></div>'
+      + '<div class="sf-doc-viewer-actions" id="sd-doc-actions" style="display:none"><button class="modal-btn-primary" id="sd-doc-open-editor"></button></div>'
+      + '</div>';
+    document.body.appendChild(ov);
+    const close = () => ov.classList.remove('active');
+    ov.querySelector('#sd-doc-close').onclick = close;
+    ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
+  }
+  return ov;
+}
+// Show already-fetched content. Pass { text } for text, { imageSrc } for an
+// image data URL, and an optional { action: { label, onClick } } footer button.
+function _sdShowDoc(name, { size, text, imageSrc, action } = {}) {
+  const ov = _sdEnsureDocModal();
+  ov.querySelector('#sd-doc-name').textContent = name;
+  ov.querySelector('#sd-doc-size').textContent = size != null ? _sdFmtBytes(size) : '';
+  const body = ov.querySelector('#sd-doc-body');
+  const actions = ov.querySelector('#sd-doc-actions');
+  const openBtn = ov.querySelector('#sd-doc-open-editor');
+  if (imageSrc != null) {
+    body.classList.add('sf-doc-viewer-media');
+    body.innerHTML = '<img class="sf-doc-viewer-img" alt="">';
+    body.querySelector('img').src = imageSrc;
+  } else {
+    body.classList.remove('sf-doc-viewer-media');
+    body.textContent = text != null ? text : '';
+  }
+  if (action) {
+    actions.style.display = '';
+    openBtn.textContent = action.label || 'Open';
+    openBtn.onclick = () => { ov.classList.remove('active'); action.onClick(); };
+  } else {
+    actions.style.display = 'none';
+  }
+  ov.classList.add('active');
+}
+window._sdShowDoc = _sdShowDoc;
+// SD card convenience: fetch text/image from a card path and show it. For
+// Proffie configs it offers "Open in editor" (always via a saved copy — never
+// the live card).
+async function _sdOpenDoc(filePath, name, opts = {}) {
+  const token = (window._sdDocToken = (window._sdDocToken || 0) + 1);
+  const isImg = /\.(jpe?g|png|gif|webp|bmp|svg)$/i.test(name);
+  _sdShowDoc(name, { size: opts.size, text: 'Loading…' });
+  if (isImg) {
+    try {
+      const b64 = await window.electronAPI.readSdBytes(filePath);
+      if (token !== window._sdDocToken) return;
+      if (b64 == null) throw new Error('read failed');
+      const ext = (name.match(/\.([^.]+)$/) || ['', ''])[1].toLowerCase();
+      const mime = ext === 'jpg' ? 'jpeg' : ext === 'svg' ? 'svg+xml' : ext;
+      _sdShowDoc(name, { size: opts.size, imageSrc: `data:image/${mime};base64,${b64}` });
+    } catch { if (token === window._sdDocToken) _sdShowDoc(name, { size: opts.size, text: 'Could not open this image.' }); }
+    return;
+  }
+  let txt = null;
+  try { txt = await window.electronAPI.readSdText(filePath); } catch {}
+  if (token !== window._sdDocToken) return;
+  if (txt == null) { _sdShowDoc(name, { size: opts.size, text: "Couldn't read this file." }); return; }
+  // Same standard as the "Open a config" chooser (sdCardDetect.isProffieConfigFile):
+  // CONFIG_TOP + the board include anchor it; bare BladeConfig is NOT enough
+  // (it shows up in readmes/snippets), so "Open in editor" only appears on a
+  // genuine config.
+  const looksConfig = /\.(txt|h|hpp|ino)$/i.test(name)
+    && /(CONFIG_TOP|proffieboard_v\d|#include\s+"proffieboard)/i.test(txt);
+  _sdShowDoc(name, {
+    size: opts.size,
+    text: txt,
+    action: looksConfig ? { label: 'Open in editor', onClick: () => _sdOpenConfigCopy(name, filePath) } : null,
+  });
+}
+function _sdRenderText(name, content, filePath) {
+  const body = _sdSetView('');
+  _sdShowOthers(_sdReport.cards.length > 1);
+  _sdReport.textView = true;
+  const crumb = _sdCrumbHtml(_sdReport.stack, name);
+  if (content == null) { body.innerHTML = crumb + '<div class="sf-entry-files-browser"><div class="sf-entry-files-empty">Couldn\'t read this file.</div></div>'; _sdWireCrumb(body); return; }
+  // Offer to load it into the editor when the file reads like a Proffie config. Loading
+  // always goes through a saved copy (_sdOpenConfigCopy re-reads the full file) — never the card.
+  const looksConfig = !!filePath && /\.(h|hpp|txt|ino|cfg)$/i.test(name) && /(CONFIG_TOP|#include\s+"proffieboard|BladeConfig|struct Preset|Preset\s+\w+\[\])/i.test(content);
+  const openBtn = looksConfig ? `<div class="sd-rpt-actions" style="margin-top:0;margin-bottom:8px"><button id="sd-txt-open" class="modal-btn-primary sd-act-btn">Open in editor</button></div>` : '';
+  body.innerHTML = crumb + openBtn + `<div class="sd-rpt-text">${_sdEsc(content)}</div>`;
+  _sdWireCrumb(body);
+  if (looksConfig) {
+    const b = document.getElementById('sd-txt-open');
+    if (b) b.onclick = () => _sdOpenConfigCopy(name, filePath);
+  }
+}
+function _sdBack() {
+  if (_sdReport.textView) { _sdRenderBrowse(); return; }
+  if (_sdReport.stack.length > 1) { _sdReport.stack.pop(); _sdRenderBrowse(); return; }
+  if (_sdReport.single) { document.getElementById('sd-report-overlay').classList.remove('active'); return; }
+  _sdReport.stack = []; _sdReport.card = null; _sdRenderList();
+}
+
+async function startSdCardImport() {
+  let cards = [];
+  _sdReport.context = 'config'; // Config Manager entry point — a future SFL launcher sets 'sfl'
+  _sdBusy(true, 'Looking for your SD card...');
+  try { cards = await window.electronAPI.scanSdCards(); } catch { cards = []; }
+  _sdBusy(false);
+  if (!cards || !cards.length) {
+    const choose = await promptConfirm({
+      title: 'No SD card found',
+      message: "No removable SD card was detected. It might be in a reader that isn't visible here, or you can point JMT Studio at a folder that's a copy of a card. Choose a drive or folder to look at?",
+      confirmText: 'Choose a folder or drive',
+      confirmKind: 'primary',
+      cancelText: 'Cancel',
+    });
+    if (!choose) return;
+    const picked = await _pickCardOrFolder();
+    if (!picked) return;
+    cards = [picked];
+  }
+  _sdOpenReport(cards);
+}
+
 document.getElementById('file-input').addEventListener('change', function () {
   const file = this.files[0];
   if (!file) return;
@@ -8125,23 +9121,47 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     summaryText:  document.getElementById('sf-bulk-import-summary-text'),
     summaryElapsed: document.getElementById('sf-bulk-import-summary-elapsed'),
     summaryFailures: document.getElementById('sf-bulk-import-summary-failures'),
+    summaryStripped: document.getElementById('sf-bulk-import-summary-stripped'),
     cancelBtn:    document.getElementById('sf-bulk-import-cancel-btn'),
     startBtn:     document.getElementById('sf-bulk-import-start-btn'),
     doneBtn:      document.getElementById('sf-bulk-import-done-btn'),
+    phaseGuided:  document.getElementById('sf-bulk-import-phase-guided'),
+    guidedSummary: document.getElementById('sf-bulk-guided-summary'),
+    guidedList:   document.getElementById('sf-bulk-guided-list'),
+    reviewBtn:    document.getElementById('sf-bulk-import-review-btn'),
+    guidedBackBtn: document.getElementById('sf-bulk-guided-back-btn'),
+    guidedImportBtn: document.getElementById('sf-bulk-guided-import-btn'),
   };
   let currentPlan = null;
   let progressUnsub = null;
   let runInFlight = false;
+  let guidedRows = [];       // flat list of all rows { src, idx, enriched, el, nameInput, checkbox, group }
+  let _guidedGroups = [];    // vendor groups built after enrichment { key, vendor, rows, vendorInput, websiteInput, freeCheckbox, el }
+  let enrichUnsub = null;
 
   const showPhase = (phase) => {
     if (els.phaseScan)    els.phaseScan.style.display    = phase === 'scan'    ? '' : 'none';
     if (els.phaseReview)  els.phaseReview.style.display  = phase === 'review'  ? '' : 'none';
+    if (els.phaseGuided)  els.phaseGuided.style.display  = phase === 'guided'  ? '' : 'none';
     if (els.phaseProg)    els.phaseProg.style.display    = phase === 'progress' ? '' : 'none';
     if (els.phaseSummary) els.phaseSummary.style.display = phase === 'summary' ? '' : 'none';
+    // The modal only widens for the guided candidate view; every other
+    // phase keeps the compact width.
+    if (els.modal) {
+      const inner = els.modal.querySelector('.sf-import-modal');
+      if (inner) inner.classList.toggle('wide', phase === 'guided');
+    }
     // Button visibility
-    if (els.startBtn) els.startBtn.style.display = phase === 'review' ? '' : 'none';
-    if (els.doneBtn)  els.doneBtn.style.display  = phase === 'summary' ? '' : 'none';
-    // Cancel label changes meaning by phase
+    if (els.startBtn)  els.startBtn.style.display  = phase === 'review' ? '' : 'none';
+    if (els.reviewBtn) els.reviewBtn.style.display = phase === 'review' ? '' : 'none';
+    // No Back on the guided view: you've already passed the stats/fork and the
+    // analyze has run — from here it's Import or Cancel (out to the card browser).
+    if (els.guidedBackBtn)   els.guidedBackBtn.style.display   = 'none';
+    if (els.guidedImportBtn) els.guidedImportBtn.style.display = phase === 'guided' ? '' : 'none';
+    if (els.doneBtn)   els.doneBtn.style.display   = phase === 'summary' ? '' : 'none';
+    // Cancel is the escape on every working phase (incl. guided, alongside Back);
+    // only the summary hides it (Done takes over). On guided, Back steps to the
+    // stats screen while Cancel abandons the whole operation.
     if (els.cancelBtn) {
       els.cancelBtn.style.display = phase === 'summary' ? 'none' : '';
       els.cancelBtn.textContent = phase === 'progress' ? 'Cancel import' : 'Cancel';
@@ -8162,40 +9182,527 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
 
   const closeModal = () => {
     if (progressUnsub) { try { progressUnsub(); } catch {} progressUnsub = null; }
+    if (enrichUnsub) { try { enrichUnsub(); } catch {} enrichUnsub = null; }
+    try { window.electronAPI.bulkImportEnrichCancel?.(); } catch {}
+    // Discard any analyzed-but-not-imported prepared sources. Safe: the backend
+    // only deletes ones that were never finalized (committed sources have meta
+    // and are left alone), so we can hand it every prepared uuid.
+    try {
+      if (currentPlan && Array.isArray(currentPlan.sources)) {
+        const uuids = currentPlan.sources.filter(s => s._prepared && s._prepared.uuid).map(s => s._prepared.uuid);
+        if (uuids.length) window.electronAPI.bulkImportDiscardPrepared?.({ uuids });
+      }
+    } catch {}
     els.modal?.classList.remove('active');
+    const inner = els.modal?.querySelector('.sf-import-modal');
+    if (inner) inner.classList.remove('wide');
     currentPlan = null;
+    guidedRows = [];
+    _guidedGroups = [];
     runInFlight = false;
   };
 
-  const showReview = (plan) => {
-    currentPlan = plan;
-    const byKind = {};
-    for (const s of plan.sources) byKind[s.kind] = (byKind[s.kind] || 0) + 1;
+  // ── Guided candidate view ──────────────────────────────────────────
+  // Names Proffie can read: letters, numbers, underscore, hyphen only.
+  const _guidedNameOk = (s) => /^[A-Za-z0-9_-]+$/.test(String(s || '').trim());
+
+  const _updateGuidedCount = () => {
+    const n = guidedRows.filter(r => r.checkbox && r.checkbox.checked && !r.nameInput.classList.contains('invalid')).length;
+    if (els.guidedImportBtn) {
+      els.guidedImportBtn.textContent = n ? `Import (${n})` : 'Import';
+      els.guidedImportBtn.disabled = n === 0;
+    }
+  };
+
+  // Amber "will need review" cue on a vendor GROUP that has no vendor — those
+  // fonts import with a Needs-review flag until a vendor is assigned.
+  const _updateGuidedGroupReview = (g) => {
+    if (!g || !g.el) return;
+    const blank = !(g.vendorInput && g.vendorInput.value.trim());
+    g.el.classList.toggle('g-group-review', blank);
+  };
+
+  // Build a play chip for one effect, matching the library-card visual
+  // language (.sf-effect-chip, solid-blue while playing) and using the same
+  // inline _sfQuickPlay engine — no modal. Folder candidates play by disk
+  // path; zip candidates read the entry out of the archive in place.
+  const _guidedEffectChip = (row, ref, label) => {
+    if (!ref || !ref.fileName) return null;
+    const kind = ref.absPath ? 'path' : 'inplace';
+    const id = ref.absPath || (row.src && row.src.absPath);
+    if (!id) return null;
+    const chip = document.createElement('span');
+    chip.className = 'sf-effect-chip g-play-chip';
+    // Lead with a play glyph so it reads as a button, not just a label.
+    chip.textContent = '▶ ' + label;
+    chip.title = `Play ${ref.fileName.split('/').pop()}`;
+    chip.addEventListener('click', () => {
+      // Toggle: a second click while this chip is playing stops it (same as the
+      // library cards), instead of restarting.
+      if (window._sfQuickAudioChip === chip) { try { window._sfQuickAudioStop?.(); } catch {} return; }
+      try { window._sfQuickPlay && window._sfQuickPlay({ kind, id, subPath: ref.fileName, chipEl: chip }); } catch {}
+    });
+    return chip;
+  };
+
+  // Fill one row with its enrichment result once it streams in. Vendor /
+  // website / free are NOT set here — they're read off row.enriched when the
+  // rows are grouped by vendor after enrichment completes.
+  const _fillGuidedRow = (row, e) => {
+    row.enriched = e;
+    row.el.classList.remove('enriching');
+    // Wav count in the meta column (same info the single-source rows show).
+    const wc = row.el.querySelector('.g-wavcount');
+    if (wc) wc.textContent = (e && e.wavCount) ? `${e.wavCount} .wav` : '';
+    // Preview chips: one per effect we actually found, in the library-card
+    // chip language. No chip when the effect is absent.
+    const prev = row.el.querySelector('.g-preview');
+    if (prev) {
+      prev.innerHTML = '';
+      const fc = _guidedEffectChip(row, e && e.fontWav, 'font');
+      const hc = _guidedEffectChip(row, e && e.humWav, 'hum');
+      if (fc) prev.appendChild(fc);
+      if (hc) prev.appendChild(hc);
+      if (!fc && !hc) {
+        const none = document.createElement('span');
+        none.className = 'g-nopreview';
+        none.textContent = 'no preview';
+        prev.appendChild(none);
+      }
+    }
+    // Text files: listed outright in the footer (no show/hide toggle — there's
+    // room), each a clickable chip that opens in the shared doc-viewer modal.
+    const docsWrap = row.el.querySelector('.g-docs');
+    if (docsWrap) {
+      docsWrap.innerHTML = '';
+      const docs = (e && e.textFiles) || [];
+      docs.forEach(d => {
+        const base = d.fileName.split('/').pop();
+        const chip = document.createElement('span');
+        chip.className = 'g-doc';
+        chip.textContent = '\u{1F4C4} ' + base;
+        chip.title = `View ${base}`;
+        chip.addEventListener('click', async () => {
+          let txt = null;
+          try {
+            if (d.absPath) {
+              txt = await window.electronAPI.readSdText(d.absPath);
+            } else if (row.src && row.src.absPath) {
+              const r = await window.electronAPI.bulkImportReadCandidateFile({ absPath: row.src.absPath, innerPath: d.fileName });
+              txt = (r && r.ok) ? new TextDecoder().decode(r.bytes instanceof Uint8Array ? r.bytes : new Uint8Array(r.bytes)) : null;
+            }
+          } catch {}
+          if (window._sdShowDoc) window._sdShowDoc(base, { size: d.size, text: txt == null ? "Couldn't read this file." : txt });
+        });
+        docsWrap.appendChild(chip);
+      });
+    }
+    _updateGuidedCount();
+  };
+
+  // Last demo URL committed this guided session — powers the smart-paste dedup
+  // across sibling rows (same role as _sfImport._lastDemoUrl in single import).
+  let _guidedLastDemoUrl = '';
+  const _buildGuidedRow = (src, idx) => {
+    const row = document.createElement('div');
+    row.className = 'sf-guided-row enriching';
+    const srcName = escapeHtml(src.cleanedName || src.rawName || '');
+    row.innerHTML =
+      `<div class="g-main">`
+      + `<span class="g-grip" title="Drag to another vendor" draggable="true">&#10303;</span>`
+      + `<input type="checkbox" class="g-check" checked>`
+      + `<div class="g-name-wrap">`
+      +   `<input type="text" class="g-name" maxlength="80" value="${srcName}">`
+      +   `<div class="g-path" title="${escapeHtml(src.relPath || src.absPath || '')}">${escapeHtml(src.relPath || src.rawName || '')}</div>`
+      + `</div>`
+      // Right-aligned meta column (mirrors the single-source row): the font/hum
+      // play chips sit where the "Proffie variant" badge is on that row (top),
+      // with the .wav count beneath them.
+      + `<div class="g-meta"><div class="g-preview"></div><div class="g-wavcount"></div></div>`
+      // Per-font Demo link, same chain-icon pattern as the single-source import.
+      + `<button type="button" class="cand-link-toggle" title="Add demo link">&#128279;</button>`
+      + `</div>`
+      + `<div class="cand-demo-row" style="display:none">`
+      +   `<span class="cand-demo-label">Demo</span>`
+      +   `<input type="url" class="cand-demo-input" placeholder="Link to a demo of this font">`
+      +   `<button type="button" class="cand-demo-clear" title="Clear demo link">&#10005;</button>`
+      + `</div>`
+      // Footer: expand toggle for the per-font metadata + the source's text
+      // files (listed outright, each opens in the doc viewer). Vendor, website
+      // and free/paid live at the GROUP level, not per row. The "where to get
+      // it" link is source-tied and deferred; the per-font Demo link above is
+      // the one per-font link we surface.
+      + `<div class="g-sub"><button type="button" class="g-details-toggle">Details</button><button type="button" class="g-move-vendor" title="Move this font to another vendor">Change vendor</button><span class="g-docs"></span></div>`
+      + `<div class="g-details">`
+      +   `<label class="g-fld"><span>Source name</span><input type="text" class="g-srcname" maxlength="64" value="${srcName}" autocomplete="off"></label>`
+      +   `<label class="g-fld g-fld-grow"><span>Acquired</span><input type="date" class="g-date"></label>`
+      +   `<label class="g-fld"><span>Notes</span><textarea class="g-notes" rows="2" maxlength="500" placeholder="Anything to remember about this font (optional)"></textarea></label>`
+      + `</div>`;
+    const checkbox = row.querySelector('.g-check');
+    const nameInput = row.querySelector('.g-name');
+    checkbox.addEventListener('change', () => { row.classList.toggle('excluded', !checkbox.checked); _updateGuidedCount(); });
+    nameInput.addEventListener('input', () => {
+      const ok = _guidedNameOk(nameInput.value);
+      nameInput.classList.toggle('invalid', !ok);
+      _updateGuidedCount();
+    });
+    const detailsToggle = row.querySelector('.g-details-toggle');
+    const details = row.querySelector('.g-details');
+    detailsToggle.addEventListener('click', () => {
+      const open = details.classList.toggle('open');
+      detailsToggle.classList.toggle('open', open);
+    });
+    // Default Acquired to today: SD-card folder dates are the copy date, not a
+    // real acquisition date, so today (import day) is the sensible library date.
+    // Pre-filling also means the field isn't a bare mm/dd/yyyy placeholder.
+    const dateInput = row.querySelector('.g-date');
+    dateInput.value = new Date().toISOString().slice(0, 10);
+    // Corrupted fonts (from the card's already-run health scan — reused, not
+    // recomputed) start UNCHECKED with a persistent note. The user can knowingly
+    // re-check to import anyway; the note stays either way.
+    const _corrupt = currentPlan && currentPlan.corruptFonts && currentPlan.corruptFonts[src.rawName];
+    if (_corrupt) {
+      checkbox.checked = false;
+      row.classList.add('excluded', 'g-corrupt');
+      const n = _corrupt.count || 0;
+      const note = document.createElement('div');
+      note.className = 'g-corrupt-note';
+      note.innerHTML = `&#9888; Corrupted sound font. ${n} damaged file${n === 1 ? '' : 's'} won't play. Check the box to import this font without ${n === 1 ? 'it' : 'them'}.`;
+      const nw = row.querySelector('.g-name-wrap');
+      if (nw) nw.appendChild(note);
+    }
+    const rowObj = {
+      src, idx, enriched: null, el: row, checkbox, nameInput, group: null,
+      demoInput: row.querySelector('.cand-demo-input'),
+      dateInput,
+      srcNameInput: row.querySelector('.g-srcname'),
+      notesInput: row.querySelector('.g-notes'),
+    };
+    // Per-font Demo link — identical behavior to the single-source import via
+    // the shared _sfWireDemoLink. Dedup the font's GROUP website so it never
+    // auto-pastes into a demo slot (group is assigned later, at regroup time,
+    // so read it lazily inside the closure).
+    if (window._sfWireDemoLink) window._sfWireDemoLink(row, {
+      dedupUrls: () => [rowObj.group && rowObj.group.websiteInput && rowObj.group.websiteInput.value],
+      getLast: () => _guidedLastDemoUrl,
+      setLast: (u) => { _guidedLastDemoUrl = u; },
+    });
+    return rowObj;
+  };
+
+  // Drag-to-vendor + "Change vendor" control. Moving a font to another group IS
+  // reassigning its vendor (the group's vendor is what imports onto the font).
+  let _guidedDragRow = null;
+  // On grab, collapse EVERY vendor to a compact header so all drop targets are
+  // reachable; on release, restore each group to whatever state it was in before.
+  let _guidedPrevCollapse = null;
+  const _guidedCollapseAllForDrag = (exceptG) => {
+    _guidedPrevCollapse = new Map();
+    for (const g of _guidedGroups) {
+      if (!g.el) continue;
+      _guidedPrevCollapse.set(g, g.el.classList.contains('collapsed'));
+      // Keep the SOURCE group open — collapsing it would hide the row being
+      // dragged and the browser aborts the drag.
+      if (g !== exceptG) g.el.classList.add('collapsed');
+    }
+  };
+  const _guidedRestoreAfterDrag = () => {
+    if (!_guidedPrevCollapse) return;
+    for (const g of _guidedGroups) { if (g.el) g.el.classList.toggle('collapsed', !!_guidedPrevCollapse.get(g)); }
+    _guidedPrevCollapse = null;
+  };
+  const _guidedUpdateGroupCount = (g) => {
+    if (!g || !g.el) return;
+    const c = g.el.querySelector('.g-group-count');
+    if (c) { const n = g.rows.length; c.textContent = `${n} font${n === 1 ? '' : 's'}`; }
+    g.el.style.display = g.rows.length === 0 ? 'none' : ''; // hide a group emptied by moves
+  };
+  const _guidedMoveRow = (rowObj, targetG) => {
+    if (!rowObj || !targetG || rowObj.group === targetG) return;
+    const fromG = rowObj.group;
+    if (fromG && fromG.rows) { const i = fromG.rows.indexOf(rowObj); if (i >= 0) fromG.rows.splice(i, 1); }
+    targetG.rows.push(rowObj);
+    rowObj.group = targetG;
+    const tbody = targetG.el && targetG.el.querySelector('.g-group-body');
+    if (tbody) tbody.appendChild(rowObj.el);
+    _guidedUpdateGroupCount(fromG);
+    _guidedUpdateGroupCount(targetG);
+    _updateGuidedCount();
+  };
+  const _guidedShowVendorMenu = (rowObj, anchorEl) => {
+    const menu = document.getElementById('preset-ctx-menu');
+    if (!menu) return;
+    menu.innerHTML = '';
+    menu.style.minWidth = '0';
+    for (const g of _guidedGroups) {
+      if (g === rowObj.group || g.rows.length === 0) continue;
+      const item = document.createElement('div');
+      item.className = 'preset-ctx-item';
+      item.textContent = g.vendor || 'Unknown';
+      item.addEventListener('mousedown', (ev) => { ev.stopPropagation(); menu.style.display = 'none'; menu.style.minWidth = ''; _guidedMoveRow(rowObj, g); });
+      menu.appendChild(item);
+    }
+    if (!menu.children.length) { const it = document.createElement('div'); it.className = 'preset-ctx-item'; it.style.opacity = '0.6'; it.textContent = 'No other vendor groups'; menu.appendChild(it); }
+    const r = anchorEl.getBoundingClientRect();
+    const mw = menu.offsetWidth || 200;
+    menu.style.left = Math.min(r.left, window.innerWidth - mw - 8) + 'px';
+    menu.style.top = Math.min(r.bottom + 2, window.innerHeight - 60) + 'px';
+    menu.style.display = 'block';
+  };
+
+  // After enrichment completes, reorganize the flat rows into collapsible vendor
+  // GROUPS. Each group's header carries the shared vendor + website + free/paid
+  // (set once for all its fonts); rows keep only per-font fields. Blank-vendor
+  // fonts collect in a "Needs a vendor" group (the review one).
+  const _regroupByVendor = () => {
+    if (!guidedRows.length) return;
+    const groups = new Map();
+    for (const row of guidedRows) {
+      const v = String((row.enriched && row.enriched.vendor) || '').trim();
+      const key = v ? v.toLowerCase() : '__none__';
+      if (!groups.has(key)) {
+        const e0 = row.enriched || {};
+        // Undetected vendor -> the creator is "Unknown", which is an acceptable
+        // import (not a needs-review blocker). User can change it or leave it.
+        groups.set(key, { key, vendor: key === '__none__' ? 'Unknown' : v, website: (key !== '__none__' && e0.vendorWebsite) || '', free: e0.purchasedDefault === false, rows: [] });
+      }
+      const g = groups.get(key);
+      g.rows.push(row);
+      if (!g.website && key !== '__none__' && row.enriched && row.enriched.vendorWebsite) g.website = row.enriched.vendorWebsite;
+    }
+    _guidedGroups = [...groups.values()].sort((a, b) => {
+      if (a.key === '__none__') return 1;
+      if (b.key === '__none__') return -1;
+      return a.vendor.localeCompare(b.vendor);
+    });
+    els.guidedList.innerHTML = '';
+    for (const g of _guidedGroups) {
+      const isNone = g.key === '__none__';
+      const count = g.rows.length;
+      const sec = document.createElement('div');
+      sec.className = 'g-group' + (isNone ? ' g-group-none' : '');
+      sec.innerHTML =
+        `<div class="g-group-header">`
+        + `<button type="button" class="g-group-toggle" title="Collapse or expand"></button>`
+        + `<input type="text" class="g-group-vendor" value="${escapeHtml(g.vendor)}" list="sf-review-vendor-list" placeholder="Vendor">`
+        + `<span class="g-group-count">${count} font${count === 1 ? '' : 's'}</span>`
+        + `<span class="sf-url-input-wrap g-group-website-wrap">`
+        +   `<input type="text" class="g-group-website" placeholder="Website" value="${escapeHtml(g.website)}" autocomplete="off">`
+        +   `<button type="button" class="sf-url-input-paste" title="Paste clipboard URL"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="4" width="8" height="4" rx="1"/><path d="M16 6h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2"/></svg></button>`
+        +   `<button type="button" class="sf-url-input-clear" title="Clear">&#10005;</button>`
+        + `</span>`
+        + `<label class="g-group-free-lbl"><input type="checkbox" class="g-group-free"${g.free ? ' checked' : ''}> Free</label>`
+        + `</div>`
+        + `<div class="g-group-body"></div>`;
+      const body = sec.querySelector('.g-group-body');
+      // Drop target = the whole group SECTION. Its header stays visible even when
+      // collapsed during a drag, so every vendor is reachable as a drop target.
+      sec.addEventListener('dragover', (ev) => { if (_guidedDragRow) { ev.preventDefault(); sec.classList.add('g-drop-over'); } });
+      sec.addEventListener('dragleave', (ev) => { if (!sec.contains(ev.relatedTarget)) sec.classList.remove('g-drop-over'); });
+      sec.addEventListener('drop', (ev) => { ev.preventDefault(); sec.classList.remove('g-drop-over'); if (_guidedDragRow) _guidedMoveRow(_guidedDragRow, g); });
+      for (const row of g.rows) {
+        row.group = g;
+        body.appendChild(row.el);
+        // Drag via the GRIP only (keeps the row's inputs interactive). Grabbing
+        // it collapses every vendor to a compact header; releasing restores.
+        const grip = row.el.querySelector('.g-grip');
+        grip?.addEventListener('dragstart', (ev) => {
+          _guidedDragRow = row; row.el.classList.add('g-dragging');
+          try { ev.dataTransfer.effectAllowed = 'move'; ev.dataTransfer.setData('text/plain', row.src.rawName || ''); } catch {}
+          // Defer the collapse until AFTER the drag image is captured and the
+          // drag is live — mutating the DOM synchronously inside dragstart
+          // cancels the drag in Chromium.
+          setTimeout(() => { if (_guidedDragRow === row) _guidedCollapseAllForDrag(row.group); }, 0);
+        });
+        grip?.addEventListener('dragend', () => { row.el.classList.remove('g-dragging'); _guidedDragRow = null; _guidedRestoreAfterDrag(); document.querySelectorAll('.g-drop-over').forEach(b => b.classList.remove('g-drop-over')); });
+        const moveBtn = row.el.querySelector('.g-move-vendor');
+        moveBtn?.addEventListener('click', () => _guidedShowVendorMenu(row, moveBtn));
+      }
+      g.el = sec;
+      g.vendorInput = sec.querySelector('.g-group-vendor');
+      g.websiteInput = sec.querySelector('.g-group-website');
+      g.freeCheckbox = sec.querySelector('.g-group-free');
+      // Website paste + clear (same shell as the single-source import).
+      const gwPaste = sec.querySelector('.g-group-website-wrap .sf-url-input-paste');
+      const gwClear = sec.querySelector('.g-group-website-wrap .sf-url-input-clear');
+      gwPaste?.addEventListener('click', async () => {
+        let clip = '';
+        try { clip = await window.electronAPI.readClipboard(); }
+        catch { try { clip = await navigator.clipboard.readText(); } catch {} }
+        const t = (clip || '').trim();
+        if (/^https?:\/\/\S+$/i.test(t)) { g.websiteInput.value = t; g.websiteInput.focus(); }
+      });
+      gwClear?.addEventListener('click', () => { g.websiteInput.value = ''; g.websiteInput.focus(); });
+      sec.querySelector('.g-group-toggle').addEventListener('click', () => sec.classList.toggle('collapsed'));
+      g.vendorInput.addEventListener('input', () => { g.vendor = g.vendorInput.value.trim(); _updateGuidedGroupReview(g); });
+      _updateGuidedGroupReview(g);
+      els.guidedList.appendChild(sec);
+    }
+    _updateGuidedCount();
+  };
+
+  // Shared "tag all fonts" bar — uses the app's tag-chip component (chips +
+  // datalist-backed Add-tag input, add-on-Enter), matching how tags are added
+  // everywhere else, not a plain comma field.
+  let _guidedSharedTagList = [];
+  let _guidedTagWired = false;
+  const _guidedRenderTagChips = () => {
+    const wrap = document.getElementById('sf-bulk-guided-tag-chips');
+    if (!wrap) return;
+    wrap.innerHTML = _guidedSharedTagList.map((t, i) => `<span class="sf-tag-chip">${escapeHtml(t)}<button type="button" class="sf-tag-chip-remove" data-gtag-i="${i}" title="Remove">&times;</button></span>`).join('');
+  };
+  const _guidedAddTag = (raw) => {
+    const t = String(raw || '').trim();
+    if (!t || _guidedSharedTagList.some(x => x.toLowerCase() === t.toLowerCase())) return;
+    _guidedSharedTagList.push(t);
+    _guidedRenderTagChips();
+  };
+  const _guidedWireTagBar = () => {
+    if (_guidedTagWired) return;
+    _guidedTagWired = true;
+    const input = document.getElementById('sf-bulk-guided-tags');
+    input?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); _guidedAddTag(input.value); input.value = ''; } });
+    const chips = document.getElementById('sf-bulk-guided-tag-chips');
+    chips?.addEventListener('click', (e) => { const b = e.target.closest('.sf-tag-chip-remove'); if (!b) return; _guidedSharedTagList.splice(+b.dataset.gtagI, 1); _guidedRenderTagChips(); });
+  };
+
+  const openGuided = () => {
+    if (!currentPlan || !currentPlan.sources || !currentPlan.sources.length) return;
+    const total = currentPlan.sources.length;
+    _guidedSharedTagList = [];
+    _guidedWireTagBar();
+    _guidedRenderTagChips();
+    // Fill the shared vendor datalist with the merged seed + already-in-
+    // library vendors, so the per-row vendor field autocompletes the user's
+    // own vendors — not just our seed — even when guided import is opened
+    // without the single-source import flow having populated it.
+    try {
+      const dl = document.getElementById('sf-review-vendor-list');
+      if (dl && window._sfGetKnownVendors) {
+        dl.innerHTML = window._sfGetKnownVendors()
+          .map(v => `<option value="${String(v.name || '').replace(/"/g, '&quot;')}"></option>`).join('');
+      }
+    } catch {}
+    // Build the rows now but keep them OFF-SCREEN. We do NOT open the review
+    // until every row is enriched AND grouped, so it renders complete in one
+    // shot (Ryan: don't open till we're ready — no per-row vendor/preview
+    // pop-in). While enriching, show the working state with a live count.
+    // Duplicates (already in the library) are excluded from the review — no point
+    // making you look at fonts that won't import. Rows AND enrichment run on the
+    // SAME filtered set so streamed indices stay aligned.
+    const _guidedSources = currentPlan.sources.filter(src => !src._duplicate);
+    const _gTotal = _guidedSources.length;
+    guidedRows = _guidedSources.map((src, idx) => _buildGuidedRow(src, idx));
+    showPhase('scan');
+    const _scanLabel = els.phaseScan && els.phaseScan.querySelector('.sf-import-progress-label');
+    if (_scanLabel) _scanLabel.textContent = 'Analyzing fonts…';
+    let _enrDone = 0;
+    const _setProg = () => { if (els.scanDetail) els.scanDetail.textContent = `${_enrDone} / ${_gTotal} ready`; };
+    _setProg();
+    if (enrichUnsub) { try { enrichUnsub(); } catch {} enrichUnsub = null; }
+    enrichUnsub = window.electronAPI.onBulkImportEnrichProgress((data) => {
+      if (!data || !data.done || data.idx == null) return;
+      const row = guidedRows[data.idx];
+      if (row) _fillGuidedRow(row, data.result);   // fills the off-screen row
+      _enrDone++; _setProg();
+    });
+    window.electronAPI.bulkImportEnrichGuided({ plan: { ...currentPlan, sources: _guidedSources } }).then((res) => {
+      if (enrichUnsub) { try { enrichUnsub(); } catch {} enrichUnsub = null; }
+      // Backstop: fill any rows that never got their streamed event.
+      if (res && res.ok && Array.isArray(res.enriched)) {
+        res.enriched.forEach((e, i) => { const row = guidedRows[i]; if (row && !row.enriched) _fillGuidedRow(row, e); });
+      }
+      // Everything is ready — render the complete grouped view in ONE shot.
+      els.guidedSummary.innerHTML =
+        `Reviewing <strong>${_gTotal}</strong> font${_gTotal === 1 ? '' : 's'}. Uncheck any you don't want, fix names or vendors, `
+        + `preview the sound, then <strong>Import</strong>. Each becomes its own source.`;
+      _regroupByVendor();   // clears + populates guidedList with the grouped rows
+      showPhase('guided');
+      if (_scanLabel) _scanLabel.textContent = 'Scanning folder…'; // restore for the next real scan
+      _updateGuidedCount();
+    }).catch(() => {});
+  };
+
+  // ANALYZE ("prepare") pass — hash + dedup + corruption-mark up front so the
+  // review stats are REAL (what's actually new vs already-owned). Same hashing
+  // quick import does, run before the keep/prune decision; corrupt fonts skip it.
+  // Stamps _prepared / _duplicate / _corrupt onto the plan's sources. Drives the
+  // existing progress bar. Returns false on failure/cancel (modal handled).
+  const _runAnalyze = async (plan) => {
+    showPhase('progress');
+    if (els.progLabel) els.progLabel.textContent = 'Analyzing fonts…';
+    if (els.progBar) els.progBar.style.width = '0%';
     const total = plan.sources.length;
+    const unsub = window.electronAPI.onBulkImportProgress((data) => {
+      if (!data) return;
+      if (data.stage === 'source-start' && data.sourceIdx != null) {
+        if (els.progBar) els.progBar.style.width = `${total ? Math.round((data.sourceIdx / total) * 100) : 0}%`;
+        if (els.progLabel) els.progLabel.textContent = `Analyzing ${data.sourceIdx + 1} of ${total}: ${data.label || ''}`;
+      } else if (data.stage === 'done' && els.progBar) {
+        els.progBar.style.width = '100%';
+      }
+    });
+    let res;
+    try { res = await window.electronAPI.bulkImportAnalyze({ plan, corruptFonts: plan.corruptFonts || null }); }
+    catch (e) { res = { ok: false, error: String(e && e.message || e) }; }
+    if (unsub) { try { unsub(); } catch {} }
+    if (!res || !res.ok) { promptError('Analyze failed', (res && res.error) || 'unknown error'); closeModal(); return false; }
+    if (res.cancelled) { closeModal(); return false; }
+    for (const r of (res.results || [])) {
+      const s = plan.sources[r.idx];
+      if (!s) continue;
+      if (r.isDuplicate) { s._duplicate = true; s._existingUuid = r.existingUuid; delete s._prepared; }
+      else if (r.prepared) { s._prepared = r.prepared; }
+      if (r.corrupt) s._corrupt = r.corrupt;
+    }
+    plan._analyzeStats = res.stats || null;
+    plan._analyzed = true;
+    return true;
+  };
+
+  const showReview = async (plan) => {
+    currentPlan = plan;
+    const total = plan.sources.length;
+    if (total > 0) {
+      const ok = await _runAnalyze(plan);
+      if (!ok) return; // failed/cancelled — closeModal already ran
+    }
+    const st = plan._analyzeStats;
     if (total === 0) {
       els.reviewSummary.textContent = 'No sound fonts found in that folder.';
       els.reviewBreakdown.innerHTML = '';
       els.startBtn.disabled = true;
     } else {
+      const newCount = st ? st.new : total;
       els.reviewSummary.innerHTML =
-        `Found <strong>${total}</strong> source${total === 1 ? '' : 's'} ` +
-        `(${fmtBytes(plan.totalSizeBytes)} total) ready to import from ` +
-        `<code>${escapeHtml(plan.rootDir)}</code>.`;
+        `<strong>${newCount}</strong> new sound font${newCount === 1 ? '' : 's'} ready to import from ` +
+        `<code>${escapeHtml(plan._displayRoot || plan.rootDir)}</code>.`;
       const rows = [];
-      if (byKind['zip'])         rows.push(['Zip archives',          byKind['zip']]);
-      if (byKind['folder-solo']) rows.push(['Folder fonts',          byKind['folder-solo']]);
+      if (st) {
+        rows.push(['New sound fonts', st.new]);
+        if (st.duplicate) rows.push(['Already in your library (skipped)', st.duplicate]);
+        if (st.corrupt)   rows.push(['Corrupted (unchecked)', st.corrupt]);
+      } else {
+        const byKind = {};
+        for (const s of plan.sources) byKind[s.kind] = (byKind[s.kind] || 0) + 1;
+        if (byKind['zip'])         rows.push(['Zip archives', byKind['zip']]);
+        if (byKind['folder-solo']) rows.push(['Sound fonts', byKind['folder-solo']]);
+      }
       if (plan.commonFolders.length) rows.push(['Common folders (will be imported)', plan.commonFolders.length]);
       if (plan.tracksFolders && plan.tracksFolders.length) rows.push(['Shared tracks folder (will be imported)', plan.tracksFolders.length]);
       if (plan.skipped.length)   rows.push(['Skipped (no Proffie content)', plan.skipped.length]);
       let html = rows.map(([l, v]) =>
         `<div class="br-row"><span class="br-label">${escapeHtml(l)}</span><span class="br-val">${v}</span></div>`).join('');
       if (plan.depthHalted) {
-        html += `<div class="br-row" style="margin-top:8px"><span class="br-label" style="color: var(--jmt-amber)">Scan halted at depth ${6} — nothing found yet. Pick a closer folder if you have more nested fonts.</span></div>`;
+        html += `<div class="br-row" style="margin-top:8px"><span class="br-label" style="color: var(--jmt-amber)">Scan halted at depth ${6}. Pick a closer folder if you have more nested fonts.</span></div>`;
       }
       els.reviewBreakdown.innerHTML = html;
-      els.startBtn.disabled = false;
+      // Quick import only has something to do when there are new fonts.
+      els.startBtn.disabled = !!st && st.new === 0;
     }
     showPhase('review');
+    // No new fonts to review -> hide the guided entry (dups/corrupt aren't "reviewable" here).
+    if (els.reviewBtn) els.reviewBtn.style.display = (total === 0 || (st && st.new === 0 && st.corrupt === 0)) ? 'none' : '';
   };
 
   const startScan = async () => {
@@ -8219,8 +9726,80 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     showReview(scanRes.plan);
   };
 
-  const runImport = async () => {
-    if (!currentPlan) return;
+  // Same as startScan but with a caller-supplied root (an SD card / folder), skipping the
+  // OS folder-picker. Lets the SD-card browser reuse this whole proven modal — review
+  // breakdown, dedup, progress, elapsed clock, cancel, summary — instead of a parallel flow.
+  const startScanWithRoot = async (rootDir, displayName, corruptFonts) => {
+    showPhase('scan');
+    els.modal?.classList.add('active');
+    els.scanDetail.textContent = displayName || rootDir || '';
+    const scanRes = await window.electronAPI.bulkImportScan({ rootDir });
+    if (!scanRes || !scanRes.ok) {
+      promptError('Scan failed', (scanRes && scanRes.error) || 'unknown error');
+      closeModal();
+      return;
+    }
+    // Prefer a friendly source label (e.g. the SD card's "PROFFIESD (J:)")
+    // over the raw path when the caller supplies one.
+    if (scanRes.plan) {
+      scanRes.plan._displayRoot = displayName || null;
+      // Corruption map from the card's already-run health scan (top-level
+      // font-folder name -> {count, reason}); the guided review flags these.
+      scanRes.plan.corruptFonts = corruptFonts || null;
+      // SD-card path: an undetected vendor becomes "Unknown" (an acceptable
+      // creator from a card) instead of a Needs-review flag, even on Quick
+      // import. The regular bulk path (startScan) leaves it to Needs review.
+      scanRes.plan.fromSdCard = true;
+    }
+    showReview(scanRes.plan);
+  };
+  window._sfBulkImportFromPath = startScanWithRoot;
+
+  // Multi-folder entry point: scan each selected folder and MERGE their sources
+  // into one review plan. Used by the SD browser's folder multi-select — the
+  // backend scans a single root at a time, so we fan out and concatenate. A
+  // single selected folder is better served by the single-folder path; this is
+  // for 2+.
+  const startScanWithPaths = async (paths, displayName, corruptFonts) => {
+    if (!paths || !paths.length) return;
+    showPhase('scan');
+    els.modal?.classList.add('active');
+    els.scanDetail.textContent = displayName || `${paths.length} folders`;
+    const merged = { rootDir: null, sources: [], commonFolders: [], tracksFolders: [], skipped: [], depthHalted: false, totalSizeBytes: 0, fromSdCard: true, corruptFonts: corruptFonts || null };
+    for (const p of paths) {
+      let r;
+      try { r = await window.electronAPI.bulkImportScan({ rootDir: p }); } catch { r = null; }
+      if (r && r.ok && r.plan) {
+        merged.sources.push(...(r.plan.sources || []));
+        merged.totalSizeBytes += r.plan.totalSizeBytes || 0;
+        if (r.plan.depthHalted) merged.depthHalted = true;
+      }
+    }
+    if (!merged.sources.length) {
+      promptError('Nothing to import', 'No importable sound fonts were found in the selected folders.');
+      closeModal();
+      return;
+    }
+    merged._displayRoot = displayName || null;
+    showReview(merged);
+  };
+  window._sfBulkImportFromPaths = startScanWithPaths;
+
+  const runImport = async (planOverride) => {
+    let runPlan = planOverride || currentPlan;
+    if (!runPlan) return;
+    // Quick import (no override): commit only the analyzed-NEW fonts (those with
+    // a prepared zip). Duplicates and corrupted are excluded. Guided import
+    // passes its own chosen subset, so leave that untouched.
+    if (!planOverride && runPlan._analyzed) {
+      // Quick import commits only NEW, non-corrupt fonts. Corrupt fonts now get
+      // a prepared (stripped) zip too — so they'd match _prepared — but they must
+      // stay opt-in via Review, never swept in by Quick. Exclude them here; their
+      // staged zips are discarded on close if never committed.
+      const fresh = runPlan.sources.filter(s => s._prepared && !s._corrupt);
+      if (!fresh.length) { closeModal(); return; }
+      runPlan = { ...runPlan, sources: fresh };
+    }
     runInFlight = true;
     showPhase('progress');
     els.progLabel.textContent = 'Starting…';
@@ -8231,7 +9810,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     // back up" rule as the backup export path — elapsed only.
     const bulkStartMs = Date.now();
     const _fmtDur = (sec) => (window._sfFormatDuration ? window._sfFormatDuration(sec) : `${Math.round(sec)}s`);
-    const total = currentPlan.sources.length;
+    const total = runPlan.sources.length;
     // Overall progress lives BELOW the bar now (the line labels what the
     // bar visualizes). Latest count+percent get cached so the elapsed
     // ticker can re-render the combined "X of Y (Z% overall) · elapsed"
@@ -8336,7 +9915,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         renderOverallLine();
       }
     });
-    const runRes = await window.electronAPI.bulkImportRun({ plan: currentPlan });
+    const runRes = await window.electronAPI.bulkImportRun({ plan: runPlan });
     if (progressUnsub) { try { progressUnsub(); } catch {} progressUnsub = null; }
     // Stop the elapsed-clock interval and capture the final wall-clock
     // duration for the summary stamp. Cleared regardless of outcome
@@ -8442,6 +10021,32 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       els.summaryFailures.innerHTML = '';
       els.summaryFailures.style.display = 'none';
     }
+    // Removed damaged files: when the user chose to import a font flagged
+    // corrupt, its damaged wavs were stripped at zip time. Confirm it happened
+    // and name each removed file (source on the left, file on the right; the
+    // corruption reason is the row tooltip). One row per file so a source that
+    // shed several is fully itemized.
+    const strippedGroups = sum.imported
+      .map(imp => ({
+        name: (String(imp.src || '').split(/[\\/]/).pop() || String(imp.src || '')),
+        files: imp.strippedFiles || [],
+      }))
+      .filter(g => g.files.length);
+    const strippedTotal = strippedGroups.reduce((n, g) => n + g.files.length, 0);
+    if (strippedTotal > 0) {
+      const rows = strippedGroups.flatMap(g => g.files.map(f =>
+        `<div class="sf-bulk-failure-row" title="${escapeHtml(f.reason || '')}">`
+          + `<span class="sf-bulk-failure-name">${escapeHtml(g.name)}</span>`
+          + `<span class="sf-bulk-failure-reason">${escapeHtml(f.relPath)}</span>`
+          + `</div>`)).join('');
+      els.summaryStripped.innerHTML =
+        `<div class="sf-bulk-failure-head">&#9888; Removed ${strippedTotal} damaged file${strippedTotal === 1 ? '' : 's'} so the rest could import</div>`
+        + `<div class="sf-bulk-failure-list">${rows}</div>`;
+      els.summaryStripped.style.display = 'block';
+    } else {
+      els.summaryStripped.innerHTML = '';
+      els.summaryStripped.style.display = 'none';
+    }
     showPhase('summary');
     try { await window.refreshSoundFontsView?.(); } catch {}
   };
@@ -8452,10 +10057,52 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       els.progLabel.textContent = 'Cancelling… (finishing current source)';
       return;
     }
+    // Cancel abandons the import and returns to the card browser (the step-aside
+    // observer restores it) — consistent with Cancel on the stats screen. Only
+    // the browser's own Close exits the whole operation.
     closeModal();
   });
-  els.startBtn?.addEventListener('click', runImport);
+  els.startBtn?.addEventListener('click', () => runImport());
   els.doneBtn?.addEventListener('click', closeModal);
+  // Guided flow: counts screen → wider candidate view → curated import.
+  els.reviewBtn?.addEventListener('click', openGuided);
+  els.guidedBackBtn?.addEventListener('click', () => {
+    if (enrichUnsub) { try { enrichUnsub(); } catch {} enrichUnsub = null; }
+    try { window.electronAPI.bulkImportEnrichCancel?.(); } catch {}
+    showPhase('review');
+  });
+  els.guidedImportBtn?.addEventListener('click', () => {
+    if (!currentPlan) return;
+    const chosen = guidedRows.filter(r => r.checkbox.checked && !r.nameInput.classList.contains('invalid'));
+    if (!chosen.length) return;
+    // Shared tags (chip list) from the static bottom tag bar — applied to every
+    // font in this batch. Include a tag still typed but not yet committed to a chip.
+    const _pendingTag = (document.getElementById('sf-bulk-guided-tags')?.value || '').trim();
+    const _sharedTags = _pendingTag && !_guidedSharedTagList.some(x => x.toLowerCase() === _pendingTag.toLowerCase())
+      ? [..._guidedSharedTagList, _pendingTag] : _guidedSharedTagList.slice();
+    // Only the checked candidates import. Each carries the user's edits from
+    // the row + the (collapsed) Details panel; the backend applies them to the
+    // source/entry meta, falling back to auto-detect for anything left blank.
+    const sources = chosen.map(r => ({
+      ...r.src,
+      guidedSharedTags: _sharedTags.length ? _sharedTags : undefined,
+      guidedName: (r.nameInput.value || '').trim() || undefined,
+      // Vendor / website / free come from the row's VENDOR GROUP (shared).
+      guidedVendor: (r.group && r.group.vendorInput && r.group.vendorInput.value.trim()) || undefined,
+      guidedWebsite: (r.group && r.group.websiteInput && r.group.websiteInput.value.trim()) || undefined,
+      guidedFree: !!(r.group && r.group.freeCheckbox && r.group.freeCheckbox.checked),
+      // Per-font fields stay on the row. The Demo link (chain icon) is the
+      // per-font link; it maps to the entry's demoUrl. Prefer the live input
+      // value, fall back to the tracked dataset value.
+      guidedLink: ((r.demoInput && r.demoInput.value.trim()) || (r.el && r.el.dataset.demourl) || '') || undefined,
+      guidedAcquisitionDate: (r.dateInput && r.dateInput.value) || undefined,
+      guidedSourceName: (r.srcNameInput && r.srcNameInput.value.trim()) || undefined,
+      guidedNotes: (r.notesInput && r.notesInput.value.trim()) || undefined,
+    }));
+    if (enrichUnsub) { try { enrichUnsub(); } catch {} enrichUnsub = null; }
+    try { window.electronAPI.bulkImportEnrichCancel?.(); } catch {}
+    runImport({ ...currentPlan, sources });
+  });
   // Backdrop click + Esc are silently blocked while an import is in
   // flight so the user can't accidentally dismiss the modal mid-run
   // and lose progress visibility (the import keeps running in main
@@ -13276,6 +14923,29 @@ async function openFavorite(filePath) {
   else await refreshEmptyStateFavs();
 }
 
+// First-run helper (O1): show the welcome + per-button sub-labels only until the
+// user opens or creates their first config (or dismisses). Gated on a persisted
+// setting so it is "not huge, not forever."
+// Dynamic, no flags: the first-run helper is driven purely by how many configs
+// the user has touched. Existing users already have recents/favorites, so they
+// never see it; a brand-new user has none. Two tiers:
+//   .first-run — welcome + sub-labels (+ the in-place heading swap): brand new only (0 recents, 0 favs)
+//   .show-fett — the "build one with Fett263" pointer: kept until 2+ recents or 2+ favorites
+async function updateFirstRunHelp() {
+  const es = document.getElementById('empty-state');
+  if (!es || !isElectron) return;
+  let recents = [], favs = [];
+  try { recents = (await window.electronAPI.getRecentFiles()) || []; } catch {}
+  try { favs    = (await window.electronAPI.getFavorites())    || []; } catch {}
+  const r = recents.length, f = favs.length;
+  es.classList.toggle('first-run', r < 1 && f < 1);
+  es.classList.toggle('show-fett', r < 2 && f < 2);
+}
+document.getElementById('fr-fett-link')?.addEventListener('click', (e) => {
+  e.preventDefault();
+  window.electronAPI?.openExternal?.('https://fett263.com/fett263-os7-config-helper.html');
+});
+
 async function refreshEmptyStateFavs() {
   const container = document.getElementById('fav-cards');
   if (!container) return;
@@ -16678,6 +18348,84 @@ require(['vs/editor/editor.main'], function () {
         } catch {}
         return Array.from(byName.values()).sort((a, b) => a.name.localeCompare(b.name));
       };
+      // Exposed so the bulk/guided import flow (a separate IIFE) can fill its
+      // own vendor datalist with the same merged seed + library vendors.
+      window._sfGetKnownVendors = _sfGetKnownVendors;
+      // Shared wiring for a per-candidate "Demo" link (chain icon toggles an
+      // inline edit row below; smart-paste on open; X clears; Enter/Escape).
+      // Used by BOTH the single-source import candidate rows AND the guided
+      // bulk-import rows so the behavior is byte-identical in both places.
+      // The row must contain .cand-link-toggle / .cand-demo-row /
+      // .cand-demo-input / .cand-demo-clear; the value is tracked on
+      // row.dataset.demourl. opts:
+      //   dedupUrls() -> string[]  URLs that must NOT auto-paste (source
+      //                            website / product link — deliberate reuse
+      //                            only, by hand).
+      //   getLast()   -> string    last demo URL committed this session.
+      //   setLast(u)               record the last committed demo URL.
+      function _sfWireDemoLink(row, opts) {
+        opts = opts || {};
+        const _isHttpUrl = (s) => /^https?:\/\/\S+$/i.test(String(s || '').trim());
+        const _trySmartPaste = async () => {
+          if (!navigator.clipboard || !navigator.clipboard.readText) return null;
+          let clip = '';
+          try { clip = await navigator.clipboard.readText(); } catch { return null; }
+          const trimmed = (clip || '').trim();
+          if (!trimmed || !_isHttpUrl(trimmed)) return null;
+          const last = (opts.getLast && opts.getLast()) || '';
+          if (last && trimmed === last) return null;
+          const dedup = (opts.dedupUrls && opts.dedupUrls()) || [];
+          for (const u of dedup) { if (u && trimmed === String(u).trim()) return null; }
+          return trimmed;
+        };
+        const _sync = (url) => {
+          const trimmed = (url || '').trim();
+          row.dataset.demourl = trimmed;
+          const tb = row.querySelector('.cand-link-toggle');
+          if (tb) {
+            tb.title = trimmed ? 'Demo link set — toggle to show/hide' : 'Add demo link';
+            tb.classList.toggle('has-url', !!trimmed);
+          }
+          if (trimmed && opts.setLast) opts.setLast(trimmed);
+        };
+        const toggleBtn = row.querySelector('.cand-link-toggle');
+        const demoRow = row.querySelector('.cand-demo-row');
+        const demoInput = row.querySelector('.cand-demo-input');
+        const demoClear = row.querySelector('.cand-demo-clear');
+        toggleBtn?.addEventListener('click', async () => {
+          if (!demoRow || !demoInput) return;
+          const opening = demoRow.style.display === 'none';
+          if (opening) {
+            const existing = row.dataset.demourl || '';
+            demoInput.value = existing;
+            demoRow.style.display = '';
+            if (!existing) {
+              const pasted = await _trySmartPaste();
+              if (pasted) { demoInput.value = pasted; _sync(pasted); return; }
+            }
+            setTimeout(() => { demoInput.focus(); demoInput.select?.(); }, 0);
+          } else {
+            const currentValue = (demoInput.value || '').trim();
+            if (!currentValue) {
+              const pasted = await _trySmartPaste();
+              if (pasted) {
+                demoInput.value = pasted; _sync(pasted);
+                setTimeout(() => { demoInput.focus(); demoInput.select?.(); }, 0);
+                return;
+              }
+            }
+            _sync(demoInput.value);
+            demoRow.style.display = 'none';
+          }
+        });
+        demoInput?.addEventListener('change', () => { _sync(demoInput.value); });
+        demoInput?.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') { e.preventDefault(); _sync(demoInput.value); demoInput.blur(); }
+          else if (e.key === 'Escape') { e.preventDefault(); demoInput.value = row.dataset.demourl || ''; demoRow.style.display = 'none'; }
+        });
+        demoClear?.addEventListener('click', () => { demoInput.value = ''; _sync(''); demoInput.focus(); });
+      }
+      window._sfWireDemoLink = _sfWireDemoLink;
       let _sfImport = null; // { sourcePath, uuid, vendor, candidates }
       let _sfImportProgressUnsub = null;
       let _sfCreateProgressUnsub = null;
@@ -17071,6 +18819,15 @@ require(['vs/editor/editor.main'], function () {
         if (uuidToClean) {
           window.electronAPI.deleteSource({ uuid: uuidToClean }).catch(() => {});
         }
+        // Launched from the SD card browser? Bring it back now that the import
+        // modal is truly closed (Cancel or completed import). The dup "Open
+        // existing" path clears this first so it lands on the source detail
+        // instead of the card browser.
+        if (window._sfReturnToSdBrowser) {
+          window._sfReturnToSdBrowser = false;
+          const sdOv = document.getElementById('sd-report-overlay');
+          if (sdOv) sdOv.classList.add('active');
+        }
       };
       // Close the import modal AND, when the user reached it via
       // "Add more fonts from this source", reopen the source detail view
@@ -17284,6 +19041,10 @@ require(['vs/editor/editor.main'], function () {
           // Re-import as new forces a parallel copy even though the
           // content matches (rare, for restoring a clean working copy).
           const onKeep = async () => {
+            // Navigating to the matched source's detail view — NOT back to the
+            // card browser. Clear the SD-return flag so _sfCloseImport doesn't
+            // slam the card browser over the detail we're about to open.
+            window._sfReturnToSdBrowser = false;
             cleanup();
             _sfCloseImport();
             await window.refreshSoundFontsView();
@@ -17564,51 +19325,6 @@ require(['vs/editor/editor.main'], function () {
             }).join('');
           }
         }
-        // Smart paste helper for the candidate-row demo link toggle.
-        // Reads clipboard, validates as URL, then suppresses auto-paste
-        // when the clipboard matches any of three values:
-        //   1. The last demoUrl committed earlier in this import session
-        //      (stale clipboard from font 1 → don't repeat on font 2).
-        //   2. The source-level Website value (creator's homepage).
-        //   3. The source-level Link value (bundle's product page).
-        // Cases 2 and 3 aren't "the demo can't possibly be the same URL"
-        // — sometimes a product page does embed the demo video, so they
-        // legitimately can match. The suppression is about deliberateness:
-        // when the same URL is going into multiple distinct slots, the
-        // user should make that decision by hand (focus the input and
-        // Ctrl+V), not have it auto-applied silently.
-        // Returns the URL to paste, or null when no auto-paste should fire.
-        const _isHttpUrl = (s) => /^https?:\/\/\S+$/i.test(String(s || '').trim());
-        const _trySmartPaste = async () => {
-          if (!navigator.clipboard || !navigator.clipboard.readText) return null;
-          let clip = '';
-          try { clip = await navigator.clipboard.readText(); } catch { return null; }
-          const trimmed = (clip || '').trim();
-          if (!trimmed || !_isHttpUrl(trimmed)) return null;
-          const last = (_sfImport && _sfImport._lastDemoUrl) || '';
-          if (last && trimmed === last) return null;
-          const websiteVal = (_sfImportEls.website?.value || '').trim();
-          const linkVal    = (_sfImportEls.link?.value    || '').trim();
-          if (websiteVal && trimmed === websiteVal) return null;
-          if (linkVal    && trimmed === linkVal)    return null;
-          return trimmed;
-        };
-        // Sync the row's tracking state from the current input value.
-        // Used after smart paste (which fills the input) and on input
-        // change (fires on blur / Enter). Does NOT close the row — the
-        // chain icon is a pure toggle in this context; users can leave
-        // the input visible across siblings so the value is its own
-        // confirmation.
-        const _syncCandDemoState = (row, url) => {
-          const trimmed = (url || '').trim();
-          row.dataset.demourl = trimmed;
-          const toggleBtn = row.querySelector('.cand-link-toggle');
-          if (toggleBtn) {
-            toggleBtn.title = trimmed ? 'Demo link set — toggle to show/hide' : 'Add demo link';
-            toggleBtn.classList.toggle('has-url', !!trimmed);
-          }
-          if (trimmed && _sfImport) _sfImport._lastDemoUrl = trimmed;
-        };
         _sfImportEls.candList?.querySelectorAll('.sf-review-candidate-row').forEach(row => {
           if (row.dataset.already === '1') return; // already-imported rows are locked
           const check = row.querySelector('.cand-check');
@@ -17624,87 +19340,13 @@ require(['vs/editor/editor.main'], function () {
             if (name.value !== row.dataset.suggested) row.dataset.edited = 'true';
             validate();
           });
-          // Demo link toggle: chain icon → expand row → swap to checkmark.
-          // Smart paste fires when opening an empty field if the clipboard
-          // holds a fresh URL.
-          const toggleBtn = row.querySelector('.cand-link-toggle');
-          const demoRow = row.querySelector('.cand-demo-row');
-          const demoInput = row.querySelector('.cand-demo-input');
-          const demoClear = row.querySelector('.cand-demo-clear');
-          // Chain link is a pure open/close toggle here — no icon swap,
-          // no commit-by-icon. The input value itself is the confirmation
-          // ("here's the URL I just captured"), so closing the row after
-          // smart paste would actually hide the feedback the user came
-          // here for. Normal workflow: open → see/paste the URL → leave
-          // it open across siblings. Close is optional.
-          toggleBtn?.addEventListener('click', async () => {
-            if (!demoRow || !demoInput) return;
-            const opening = demoRow.style.display === 'none';
-            if (opening) {
-              const existing = row.dataset.demourl || '';
-              demoInput.value = existing;
-              demoRow.style.display = '';
-              // Smart paste only fires on an empty field — don't overwrite
-              // a value the user already chose. Auto-fills the input but
-              // leaves the row open so the URL is visible.
-              if (!existing) {
-                const pasted = await _trySmartPaste();
-                if (pasted) {
-                  demoInput.value = pasted;
-                  _syncCandDemoState(row, pasted);
-                  return;
-                }
-              }
-              setTimeout(() => { demoInput.focus(); demoInput.select?.(); }, 0);
-            } else {
-              // Open + empty + fresh clipboard URL → smart-paste into
-              // the visible input rather than closing. Clicking the
-              // chain on an empty open row reads as "fill this" intent;
-              // a no-value close wastes a click and forces a re-open to
-              // trigger the same paste.
-              const currentValue = (demoInput.value || '').trim();
-              if (!currentValue) {
-                const pasted = await _trySmartPaste();
-                if (pasted) {
-                  demoInput.value = pasted;
-                  _syncCandDemoState(row, pasted);
-                  setTimeout(() => { demoInput.focus(); demoInput.select?.(); }, 0);
-                  return;
-                }
-              }
-              // No smart paste available, or input already has a value
-              // → close. Capture the current input as the tracked value
-              // before hiding.
-              _syncCandDemoState(row, demoInput.value);
-              demoRow.style.display = 'none';
-            }
-          });
-          // Sync tracking state whenever the user finishes editing the
-          // input (fires on blur or Enter). Updates _lastDemoUrl so smart
-          // paste dedup works across siblings even though there's no
-          // explicit commit gesture.
-          demoInput?.addEventListener('change', () => {
-            _syncCandDemoState(row, demoInput.value);
-          });
-          demoInput?.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              _syncCandDemoState(row, demoInput.value);
-              demoInput.blur();
-            } else if (e.key === 'Escape') {
-              e.preventDefault();
-              // Revert input to last tracked value, then close.
-              demoInput.value = row.dataset.demourl || '';
-              demoRow.style.display = 'none';
-            }
-          });
-          demoClear?.addEventListener('click', () => {
-            demoInput.value = '';
-            _syncCandDemoState(row, '');
-            // Keep the row open so the user can paste a new URL right
-            // away. Closing it would feel like a confirmation when they
-            // just cleared.
-            demoInput.focus();
+          // Per-font Demo link (chain icon → inline edit row). Shared wiring
+          // with the guided bulk-import rows via _sfWireDemoLink. Dedup the
+          // source Website / product Link so neither auto-pastes into a demo slot.
+          _sfWireDemoLink(row, {
+            dedupUrls: () => [_sfImportEls.website?.value, _sfImportEls.link?.value],
+            getLast: () => (_sfImport && _sfImport._lastDemoUrl) || '',
+            setLast: (u) => { if (_sfImport) _sfImport._lastDemoUrl = u; },
           });
         });
         // Recompute the suggested names for every row that hasn't been
@@ -17933,6 +19575,20 @@ require(['vs/editor/editor.main'], function () {
         // picker closing and _sfRunImport's own _sfShowPhase call.
         _sfShowPhase('progress');
         if (wasActive) modal.classList.add('active');
+        await _sfRunImport(sourcePath);
+      };
+
+      // Import a KNOWN folder/zip path through the single-source flow (skips the
+      // native picker). Exposed for the SD browser: importing ONE folder isn't
+      // "bulk", so it goes through the normal single-source review instead of the
+      // bulk modal.
+      window._sfImportSourceFromPath = async (sourcePath) => {
+        if (!sourcePath) return;
+        _sfImport = null;
+        if (_sfImportEls.title) _sfImportEls.title.textContent = 'Import Sound Font';
+        if (_sfImportEls.linkError) { _sfImportEls.linkError.style.display = 'none'; _sfImportEls.linkError.textContent = ''; }
+        _sfShowPhase('progress');
+        if (_sfImportEls.modal) _sfImportEls.modal.classList.add('active');
         await _sfRunImport(sourcePath);
       };
 
@@ -18515,6 +20171,23 @@ require(['vs/editor/editor.main'], function () {
           _sfEntryFilesTree = (fr && fr.ok && fr.files) || [];
         } catch { _sfEntryFilesTree = []; }
         _sfRenderEntryFiles();
+        // Font / hum quick-play buttons in the files header — clearer than a
+        // bare chip that these actually play the sound. Shown only when the
+        // effect exists; plays the first matching file via the shared engine.
+        const _wireEntryPlay = (btnId, effect) => {
+          const btn = document.getElementById(btnId);
+          if (!btn) return;
+          const files = _sfFindAllEffectFilesInTree(_sfEntryFilesTree, effect);
+          if (!files.length) { btn.style.display = 'none'; btn.onclick = null; return; }
+          btn.style.display = '';
+          btn.classList.remove('playing', 'sf-loading-pulse');
+          btn.onclick = () => {
+            if (window._sfQuickAudioChip === btn) { try { window._sfQuickAudioStop?.(); } catch {} return; }
+            try { window._sfQuickPlay && window._sfQuickPlay({ kind: 'entry', id: entry.name, subPath: files[0], chipEl: btn }); } catch {}
+          };
+        };
+        _wireEntryPlay('btn-sf-entry-play-font', 'font');
+        _wireEntryPlay('btn-sf-entry-play-hum', 'hum');
 
         // Creator datalist: distinct authors already in the library plus the
         // seeded vendor list. Soft normalization — the user can still type
@@ -18884,6 +20557,10 @@ require(['vs/editor/editor.main'], function () {
         const all = _sfFindAllEffectFilesInTree(tree, effectName);
         return all.length > 0 ? all[0] : null;
       };
+      // Reachable from the SD-card browser so it resolves font/hum the same way
+      // the library cards do (nested effect folders, flat files, alt fallback).
+      window._sfFindAllEffectFilesInTree = _sfFindAllEffectFilesInTree;
+      window._sfFindFirstEffectFileInTree = _sfFindFirstEffectFileInTree;
       // Find every wav file in the entry tree that belongs to this
       // effect. Returns array of relative paths (sorted). Covers folder
       // layout (effect/foo.wav), flat layout (effect.wav, effect01.wav),
@@ -22186,6 +23863,19 @@ require(['vs/editor/editor.main'], function () {
         });
       } catch {}
       const _sfAudioReadBytes = async ({ kind, id, subPath }) => {
+        if (kind === 'path') {
+          const b64 = await window.electronAPI.readSdBytes(id);
+          if (b64 == null) throw new Error('Read failed');
+          return Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+        }
+        if (kind === 'inplace') {
+          // In-place (not-yet-imported) source: id is the folder/zip path,
+          // subPath is the inner file. Used by the guided-import preview so
+          // zip candidates play without extraction.
+          const r = await window.electronAPI.bulkImportReadCandidateFile({ absPath: id, innerPath: subPath });
+          if (!r || !r.ok) throw new Error((r && r.error) || 'Read failed');
+          return r.bytes instanceof Uint8Array ? r.bytes : new Uint8Array(r.bytes);
+        }
         if (kind === 'entry') {
           const r = await window.electronAPI.readEntryDocBytes({ name: id, path: subPath });
           if (!r || !r.ok) throw new Error((r && r.error) || 'Read failed');
@@ -22430,6 +24120,7 @@ require(['vs/editor/editor.main'], function () {
           }
         }
       };
+      window._sfOpenAudioPlayer = _sfOpenAudioPlayer; // reachable from the SD browser (kind:'path')
       document.getElementById('sf-audio-close')?.addEventListener('click', _sfCloseAudioPlayer);
       // Backdrop click closes — no dirty state to protect.
       document.getElementById('modal-sf-audio')?.addEventListener('click', (e) => {
@@ -28033,7 +29724,7 @@ require(['vs/editor/editor.main'], function () {
       await promptError(`Cannot ${action}`, `Cannot ${action} while a Sound Font backup is in progress. Click Cancel on the progress dialog first. It will clean up the partial file.`);
       return false;
     }
-    if (isDirty) {
+    if (hasUnsavedWork()) {
       const fileName = currentFilePath ? currentFilePath.split(/[\\/]/).pop() : 'config file';
       const choice = await promptUnsaved(`Unsaved changes in "${fileName}" — save before ${verb}?`, { saveAs: true });
       if (choice === 'cancel') return false;

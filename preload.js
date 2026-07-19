@@ -144,6 +144,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('dfu:setupStatus', handler);
   },
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
+  scanSdCards: () => ipcRenderer.invoke('sdcard:scan'),
+  pickFolder: () => ipcRenderer.invoke('sdcard:pickFolder'),
+  scanPath: (p) => ipcRenderer.invoke('sdcard:scanPath', p),
+  listSdDir: (p) => ipcRenderer.invoke('sdcard:listDir', p),
+  sdFolderHealth: (p) => ipcRenderer.invoke('sdcard:folderHealth', p),
+  readSdText: (p) => ipcRenderer.invoke('sdcard:readText', p),
+  readSdBytes: (p) => ipcRenderer.invoke('sdcard:readBytes', p),
+  findSdConfigs: (p) => ipcRenderer.invoke('sdcard:findConfigs', p),
+  analyzeSdFonts: (p) => ipcRenderer.invoke('sdcard:analyzeFonts', p),
+  copyOutSd: (srcPath, destDir) => ipcRenderer.invoke('sdcard:copyOut', { srcPath, destDir }),
 
   checkForUpdate:  (force) => ipcRenderer.invoke('app:checkForUpdate', { force: !!force }),
   downloadUpdate:  (downloadUrl, assetName) => ipcRenderer.invoke('app:downloadUpdate', { downloadUrl, assetName }),
@@ -193,11 +203,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
   bulkImportPickRoot:    ()           => ipcRenderer.invoke('bulkImport:pickRoot'),
   bulkImportScan:        (params)     => ipcRenderer.invoke('bulkImport:scan', params),
   bulkImportRun:         (params)     => ipcRenderer.invoke('bulkImport:run', params),
+  bulkImportAnalyze:     (params)     => ipcRenderer.invoke('bulkImport:analyze', params),
+  bulkImportDiscardPrepared: (params) => ipcRenderer.invoke('bulkImport:discardPrepared', params),
   bulkImportCancel:      ()           => ipcRenderer.invoke('bulkImport:cancel'),
   onBulkImportProgress:  (cb) => {
     const handler = (_, data) => cb(data);
     ipcRenderer.on('bulkImport:progress', handler);
     return () => ipcRenderer.removeListener('bulkImport:progress', handler);
+  },
+  bulkImportEnrichGuided: (params)    => ipcRenderer.invoke('bulkImport:enrichGuided', params),
+  bulkImportEnrichCancel: ()          => ipcRenderer.invoke('bulkImport:enrichCancel'),
+  bulkImportReadCandidateFile: (params) => ipcRenderer.invoke('bulkImport:readCandidateFile', params),
+  onBulkImportEnrichProgress: (cb) => {
+    const handler = (_, data) => cb(data);
+    ipcRenderer.on('bulkImport:enrichProgress', handler);
+    return () => ipcRenderer.removeListener('bulkImport:enrichProgress', handler);
   },
   sourceExistsByHash:    (hash)       => ipcRenderer.invoke('sources:existsByHash', hash),
   importSource:          (params)     => ipcRenderer.invoke('sources:import', params),

@@ -47,8 +47,10 @@ const vendors = [
     purchasedDefault: true,
     patterns: [
       {
+        // Read any .txt (BKSaberSounds sometimes name the doc after the font,
+        // not "readme.txt"); the specific "by BKSaberSounds" anchor keeps it safe.
         type: 'readmeContent',
-        fileMatch: /(^|\/)readme\.txt$/i,
+        fileMatch: /(^|\/)[^/]*\.txt$/i,
         contentMatch: /by\s+BKSaberSounds/i,
       },
     ],
@@ -60,8 +62,13 @@ const vendors = [
     purchasedDefault: undefined,
     patterns: [
       {
+        // KSith names the attribution doc after the FONT, not "readme.txt"
+        // (e.g. TheBoldOne.txt, "Read me.txt"), so a readme.txt-only fileMatch
+        // misses it and the font drops to Unknown. Read any root-level .txt;
+        // the specific "by KSith" contentMatch keeps it from ever mis-hitting
+        // (mirrors the Greyscale broad-.txt pattern below).
         type: 'readmeContent',
-        fileMatch: /(^|\/)readme\.txt$/i,
+        fileMatch: /(^|\/)[^/]*\.txt$/i,
         contentMatch: /by\s+KSith/i,
       },
       // KSith ships every font with the prefix "KSith_" in the zip
@@ -157,8 +164,12 @@ const vendors = [
     purchasedDefault: undefined,
     patterns: [
       {
+        // Juansith name the doc inconsistently: "Read me.txt", "readme.txt",
+        // even "font changelog <date>.txt" (OB3TV). All open with the brand
+        // header "JUANSITH'S <font>...", so read any .txt and anchor on the
+        // coined brand JUANSITH (unique enough to never mis-hit).
         type: 'readmeContent',
-        fileMatch: /(^|\/)Read me\.txt$/i,
+        fileMatch: /(^|\/)[^/]*\.txt$/i,
         contentMatch: /JUANSITH/i,
       },
       // Juansith always names their zips "JUANSITH'S <FontName>.zip"
@@ -179,10 +190,10 @@ const vendors = [
     purchasedDefault: undefined,
     patterns: [
       {
+        // Any .txt (not just readme.txt); both signals still required so we
+        // don't false-match Juansith fonts that also reference saberfont.com.
         type: 'readmeContent',
-        fileMatch: /(^|\/)readme\.txt$/i,
-        // Require both signals so we don't false-match Juansith fonts that
-        // also reference saberfont.com.
+        fileMatch: /(^|\/)[^/]*\.txt$/i,
         contentMatch: /Rob Petkau/i,
         contentMatchAll: [/Rob Petkau/i, /saberfont\.com/i],
       },
@@ -195,10 +206,10 @@ const vendors = [
     purchasedDefault: undefined,
     patterns: [
       {
+        // Any .txt (not just readme.txt); both signals required so we don't
+        // false-match Rob Petkau or Juansith readmes that also mention saberfont.com.
         type: 'readmeContent',
-        fileMatch: /(^|\/)readme\.txt$/i,
-        // Both signals required so we don't false-match Rob Petkau or
-        // Juansith readmes that also mention saberfont.com.
+        fileMatch: /(^|\/)[^/]*\.txt$/i,
         contentMatchAll: [/by\s+Project\s+Fonts/i, /saberfont\.com/i],
       },
     ],

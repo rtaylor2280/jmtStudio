@@ -69,7 +69,16 @@ function _hashFile(absPath) {
 //   { relPath, size: 0, fileHash: '<empty>' }   for empty dirs
 // Caller sorts and serializes. Sealed inside one helper so the
 // canonical form is described in exactly one place.
-function _collectRecords(itemRoot) {
+// onFile (optional): called once per hashed regular file as
+// onFile(relPath, buf, size) — buf is the file's bytes when it went through the
+// buffered path (the common case; every wav), or null for a streamed big file.
+// Lets a caller piggyback other per-file work (e.g. a wav corruption check off
+// the header) on the SAME read the content hash already does — no second pass.
+// filter (optional): filter(relPath) => truthy to INCLUDE a file/dir, falsy to
+// skip it (and, for a dir, not descend). Used to drop non-content noise
+// (AppleDouble ._*, .DS_Store, __MACOSX, Thumbs.db) so the per-file hash set
+// represents only the real font content — matching what the import zips.
+function _collectRecords(itemRoot, onFile, filter) {
   const records = [];
   // Walk relative to itemRoot so the captured paths are stable across
   // different on-disk locations (backup snapshot vs live tree etc.).
@@ -87,6 +96,7 @@ function _collectRecords(itemRoot) {
     for (const e of entries) {
       const absChild = path.join(absDir, e.name);
       const relChild = relDir ? `${relDir}/${e.name}` : e.name;
+      if (filter && !filter(relChild)) continue; // excluded (noise) — not content
       if (e.isDirectory()) {
         sawAnything = true;
         walk(absChild, relChild);
@@ -100,7 +110,17 @@ function _collectRecords(itemRoot) {
       sawAnything = true;
       let size = 0;
       try { size = fs.statSync(absChild).size; } catch {}
-      const fileHash = _hashFile(absChild);
+      // Buffered path (the common case) reads the bytes once, hashes them, and
+      // hands the same buffer to onFile. Big files stream-hash (no buffer).
+      let fileHash;
+      let buf = null;
+      if (size < _STREAM_HASH_THRESHOLD) {
+        try { buf = fs.readFileSync(absChild); } catch { buf = null; }
+        fileHash = buf ? crypto.createHash('sha256').update(buf).digest('hex') : _hashFile(absChild);
+      } else {
+        fileHash = _hashFile(absChild);
+      }
+      if (typeof onFile === 'function') { try { onFile(relChild, buf, size); } catch {} }
       records.push({ relPath: relChild, size, fileHash });
     }
     // Edge case: a directory whose only children are the excluded
@@ -124,12 +144,12 @@ function _collectRecords(itemRoot) {
 // read. This is the same walk hashItemDir folds into a digest — exposed so
 // the compare tool can build per-file hash sets without re-walking or
 // re-hashing. Same meta.json-at-root exclusion and big-file streaming.
-function collectFileRecords(itemRoot) {
+function collectFileRecords(itemRoot, onFile, filter) {
   if (!itemRoot || !fs.existsSync(itemRoot)) return null;
   let stat;
   try { stat = fs.statSync(itemRoot); } catch { return null; }
   if (!stat.isDirectory()) return null;
-  const records = _collectRecords(itemRoot);
+  const records = _collectRecords(itemRoot, onFile, filter);
   // Stable order. Forward-slash paths sort consistently across platforms.
   records.sort((a, b) => (a.relPath < b.relPath ? -1 : a.relPath > b.relPath ? 1 : 0));
   return records;
