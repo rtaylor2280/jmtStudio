@@ -1556,6 +1556,8 @@ module.exports = {
   sourcesRoot,
   ensureSourcesRoot,
   isNoisePath: _isNoisePath,
+  zipFolderToFile,
+  walkFolderSorted,
   openSourceAtPath,
   hashZipFile,
   hashFolder,
