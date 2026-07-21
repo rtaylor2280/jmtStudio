@@ -3249,8 +3249,13 @@ ipcMain.handle('sdcard:pickFolder', async () => {
 ipcMain.handle('sdcard:scanPath', (_, p) => sdCardDetect.assessPicked(p));
 ipcMain.handle('sdcard:listDir', (_, p) => sdCardDetect.listDir(p));
 ipcMain.handle('sdcard:folderHealth', (_, p) => { try { return sdCardDetect.scanFolderHealth(p); } catch { return { files: {}, dirs: {} }; } });
-ipcMain.handle('sdcard:readText', (_, p) => {
-  try { return fs.readFileSync(p, 'utf8').slice(0, 200000); } catch { return null; }
+// The viewer is a translator, not a converter: a .docx is shown as plain text pulled
+// from its zip in memory (sdCardDetect.docxToText), never written back to disk.
+ipcMain.handle('sdcard:readText', async (_, p) => {
+  try {
+    if (/\.docx$/i.test(p)) return await sdCardDetect.docxToText(p);
+    return fs.readFileSync(p, 'utf8').slice(0, 200000);
+  } catch { return null; }
 });
 ipcMain.handle('sdcard:readBytes', (_, p) => {
   try { const b = fs.readFileSync(p); return b.length > 20 * 1024 * 1024 ? null : b.toString('base64'); } catch { return null; }

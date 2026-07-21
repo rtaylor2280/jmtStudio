@@ -2660,6 +2660,10 @@
   .sf-guided-row.g-corrupt { border-left: 2px solid #e5534b; }
   .sf-guided-row.g-corrupt.excluded { opacity: 0.72; }
   .sf-guided-row .g-corrupt-note { font-size: 0.72rem; color: #e5534b; margin-top: 3px; line-height: 1.35; }
+  .sf-guided-row .g-name-hint { font-size: 0.72rem; color: #d0913a; margin-top: 3px; line-height: 1.35; }
+  .sf-guided-row.g-lowconf .g-name { border-color: #d0913a; }
+  /* Name field reuses the URL shell's clear-x, but with no paste icon it only needs single-icon padding. */
+  .sf-guided-row .g-name-shell > input { padding-right: 24px !important; }
   /* Drag-to-vendor + change-vendor control */
   .sf-guided-row .g-move-vendor { background: none; border: none; color: var(--jmt-blue); font-size: 0.72rem; cursor: pointer; padding: 2px 0; }
   .sf-guided-row .g-move-vendor:hover { text-decoration: underline; }
@@ -7864,7 +7868,7 @@ async function _pickCardOrFolder() {
   let picked = null;
   try { picked = await window.electronAPI.pickFolder(); } catch {}
   if (!picked) return null;
-  _sdBusy(true, 'Scanning...');
+  _sdBusy(true, 'Scanning files…');
   let result = null;
   try { result = await window.electronAPI.scanPath(picked); } catch {}
   _sdBusy(false);
@@ -8155,7 +8159,7 @@ async function _sdRenderBrowse() {
   // separate loading state. _sdSetView doesn't clear the body, so the prior view
   // stays under the overlay until we swap in the complete view in one shot
   // (Ryan: don't stop showing the progress bar until you're ready for the full thing).
-  _sdBusy(true, _sdReport.stack.length <= 1 ? 'Found your card. Scanning it…' : 'Scanning…');
+  _sdBusy(true, 'Scanning files…');
   const res = await window.electronAPI.listSdDir(cur.path);
   if (_sdReport.stack[_sdReport.stack.length - 1] !== cur) return; // navigated away while loading
   // Fetch corruption health BEFORE rendering so the red marks appear in the
@@ -9204,7 +9208,10 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
 
   // ── Guided candidate view ──────────────────────────────────────────
   // Names Proffie can read: letters, numbers, underscore, hyphen only.
-  const _guidedNameOk = (s) => /^[A-Za-z0-9_-]+$/.test(String(s || '').trim());
+  // Only flag genuinely invalid names: empty, or containing a filesystem-illegal
+  // character. Spaces auto-convert to underscores on input, so they never error;
+  // everything else the user types (parens, hyphens, etc.) is allowed through.
+  const _guidedNameOk = (s) => { const t = String(s || '').trim(); return t.length > 0 && !/[<>:"/\\|?*\x00-\x1f]/.test(t); };
 
   const _updateGuidedCount = () => {
     const n = guidedRows.filter(r => r.checkbox && r.checkbox.checked && !r.nameInput.classList.contains('invalid')).length;
@@ -9251,6 +9258,20 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
   const _fillGuidedRow = (row, e) => {
     row.enriched = e;
     row.el.classList.remove('enriching');
+    // Late docx naming: the async pass cracked a Word readme the sync scan couldn't,
+    // and recovered a real name for what fell back to a generic folder name. Apply it
+    // (only if the field still holds the original fallback, so a manual edit wins) and
+    // drop the low-confidence flag, since we now have a real name.
+    if (e && e.suggestedName) {
+      const nameEl = row.el.querySelector('.g-name');
+      if (nameEl && nameEl.value === (row.src && row.src.cleanedName)) {
+        nameEl.value = e.suggestedName;
+        nameEl.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      row.el.classList.remove('g-lowconf');
+      const hint = row.el.querySelector('.g-name-hint');
+      if (hint) hint.remove();
+    }
     // Wav count in the meta column (same info the single-source rows show).
     const wc = row.el.querySelector('.g-wavcount');
     if (wc) wc.textContent = (e && e.wavCount) ? `${e.wavCount} .wav` : '';
@@ -9312,7 +9333,10 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       + `<span class="g-grip" title="Drag to another vendor" draggable="true">&#10303;</span>`
       + `<input type="checkbox" class="g-check" checked>`
       + `<div class="g-name-wrap">`
-      +   `<input type="text" class="g-name" maxlength="80" value="${srcName}">`
+      +   `<div class="sf-url-input-wrap g-name-shell">`
+      +     `<input type="text" class="g-name" maxlength="80" value="${srcName}">`
+      +     `<button type="button" class="sf-url-input-clear g-name-clear" title="Clear name" tabindex="-1">&#10005;</button>`
+      +   `</div>`
       +   `<div class="g-path" title="${escapeHtml(src.relPath || src.absPath || '')}">${escapeHtml(src.relPath || src.rawName || '')}</div>`
       + `</div>`
       // Right-aligned meta column (mirrors the single-source row): the font/hum
@@ -9346,6 +9370,15 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       nameInput.classList.toggle('invalid', !ok);
       _updateGuidedCount();
     });
+    _wireStyleNameSanitize(nameInput, { hyphen: false }); // space -> _ live, keep hyphens
+    const srcNameEl = row.querySelector('.g-srcname');
+    if (srcNameEl) _wireStyleNameSanitize(srcNameEl, { hyphen: false });
+    const nameClear = row.querySelector('.g-name-clear');
+    if (nameClear) nameClear.addEventListener('click', () => {
+      nameInput.value = '';
+      nameInput.dispatchEvent(new Event('input', { bubbles: true }));
+      nameInput.focus();
+    });
     const detailsToggle = row.querySelector('.g-details-toggle');
     const details = row.querySelector('.g-details');
     detailsToggle.addEventListener('click', () => {
@@ -9370,6 +9403,17 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       note.innerHTML = `&#9888; Corrupted sound font. ${n} damaged file${n === 1 ? '' : 's'} won't play. Check the box to import this font without ${n === 1 ? 'it' : 'them'}.`;
       const nw = row.querySelector('.g-name-wrap');
       if (nw) nw.appendChild(note);
+    }
+    // Low-confidence name: the folder is a generic slot name (BankNN or a numbered
+    // sibling series) and no readme or name-tag gave us anything better, so the box
+    // just holds the bare folder name. Flag it so the user knows to type the real one.
+    if (src.nameSource === 'folder-fallback') {
+      row.classList.add('g-lowconf');
+      const hint = document.createElement('div');
+      hint.className = 'g-name-hint';
+      hint.innerHTML = '&#9432; Generic folder name: likely not the real font name. Rename if you know it.';
+      const nw = row.querySelector('.g-name-wrap');
+      if (nw) nw.appendChild(hint);
     }
     const rowObj = {
       src, idx, enriched: null, el: row, checkbox, nameInput, group: null,
@@ -13976,9 +14020,14 @@ function _updateAddStyleConfirmBtn() {
 // Preset" click scaffolded a duplicate `Preset presets[]` underneath. The "permissive,
 // compile-will-error" stance for hyphens (original TC-688) didn't account for the
 // visual view breakage. Auto-converting at input time is more honest.
-function _wireStyleNameSanitize(el) {
+// opts.hyphen (default true): also convert '-' -> '_'. Style identifiers can't
+// contain hyphens so they need it; font folder names CAN (and cleanSuggestedName
+// preserves them), so those callers pass { hyphen: false } and only spaces convert.
+function _wireStyleNameSanitize(el, opts) {
+  const hyphen = !opts || opts.hyphen !== false;
+  const pasteRx = hyphen ? /[\s-]+/g : /\s+/g;
   el.addEventListener('keydown', e => {
-    if (e.key === ' ' || e.key === '-') {
+    if (e.key === ' ' || (hyphen && e.key === '-')) {
       e.preventDefault();
       const s = el.selectionStart, end = el.selectionEnd;
       el.value = el.value.slice(0, s) + '_' + el.value.slice(end);
@@ -13988,8 +14037,8 @@ function _wireStyleNameSanitize(el) {
   });
   el.addEventListener('paste', e => {
     e.preventDefault();
-    // Collapse runs of whitespace and/or hyphens to a single underscore.
-    const text = (e.clipboardData || window.clipboardData).getData('text').replace(/[\s-]+/g, '_');
+    // Collapse runs of whitespace (and hyphens, for style ids) to a single underscore.
+    const text = (e.clipboardData || window.clipboardData).getData('text').replace(pasteRx, '_');
     const s = el.selectionStart, end = el.selectionEnd;
     el.value = el.value.slice(0, s) + text + el.value.slice(end);
     el.setSelectionRange(s + text.length, s + text.length);

@@ -43,7 +43,7 @@ const soundFontVendors = require('./soundFontVendors');
 const soundFontCommon = require('./soundFontCommon');
 const soundFontSharedTracks = require('./soundFontSharedTracks');
 const soundFontFileHash = require('./soundFontFileHash');
-const { checkWavBuffer } = require('./sdCardDetect');
+const { checkWavBuffer, deriveFontName, docxToText, nameFromReadmeText } = require('./sdCardDetect');
 
 const MAX_SCAN_DEPTH_BEFORE_HALT = 6;
 
@@ -230,25 +230,30 @@ function walkForSources(absDir, relPath, depth, ctx) {
   const parentName = path.basename(absDir);
   const parentIsBoardNamed = !!soundFontCandidates.identifyBoard(parentName);
   if (allBoardNamed && !parentIsBoardNamed) {
+    const _nm = folderSourceName(absDir, parentName, false);
     ctx.results.sources.push({
       kind: 'folder-solo',
       absPath: absDir,
       relPath,
       rawName: parentName,
-      cleanedName: cleanSuggestedName(parentName),
+      cleanedName: _nm.name,
+      nameSource: _nm.source,
       sizeBytes: safeDirSize(absDir),
     });
     return;
   }
   // Otherwise: every Proffie-shape direct child is its own solo source.
   // No auto-bundling — see header comment for the rationale.
+  const _series = numberedSeriesMembers(proffieChildren.map(p => p.name));
   for (const p of proffieChildren) {
+    const _nm = folderSourceName(p.absPath, p.name, _series.has(p.name));
     ctx.results.sources.push({
       kind: 'folder-solo',
       absPath: p.absPath,
       relPath: path.join(relPath, p.name),
       rawName: p.name,
-      cleanedName: cleanSuggestedName(p.name),
+      cleanedName: _nm.name,
+      nameSource: _nm.source,
       sizeBytes: safeDirSize(p.absPath),
     });
   }
@@ -297,6 +302,49 @@ function safeDirSize(dir) {
   return total;
 }
 
+// Names that are just a shared prefix plus a trailing number — Bank01/Bank02,
+// Preset1/Preset2, or any prefix a given card happens to use — are slot names, not
+// real font names (nobody names actual fonts Something01..SomethingNN). Detect the
+// series across the sibling set and return the members, so their folder name gets
+// distrusted and the readme/name-tag lookup drives the suggested name instead.
+function numberedSeriesMembers(names) {
+  const groups = new Map();
+  for (const n of names) {
+    const m = /^(.*?)(\d+)$/.exec(n);
+    if (!m) continue;
+    const prefix = m[1].toLowerCase().replace(/[\s_-]+$/, '');
+    if (!groups.has(prefix)) groups.set(prefix, []);
+    groups.get(prefix).push(n);
+  }
+  const members = new Set();
+  for (const arr of groups.values()) {
+    if (arr.length >= 3) arr.forEach(n => members.add(n));
+  }
+  return members;
+}
+
+// Suggested name for a folder-solo source. For a generic slot folder (its own name
+// matches a known slot pattern, or `forceGeneric` from the sibling series) we let
+// deriveFontName walk the confidence ladder (readme content -> name-tag -> folder).
+// For a folder that already carries a real name we keep the import's own cleaner so
+// existing naming is unchanged. Returns { name, source } — source feeds the review
+// screen's low-confidence flag ('folder-fallback' = a generic name we couldn't better).
+function folderSourceName(absDir, folderName, forceGeneric) {
+  try {
+    const d = deriveFontName(absDir, folderName, { forceGeneric });
+    // Route discovered names through the app's default cleaner too, so a name-tag
+    // "ben solo" or readme "DarkWolf" lands in the same underscore / Title-Case /
+    // disk-safe convention as every other suggested name (deriveFontName finds the
+    // name; cleanSuggestedName formats it). Fall back to the raw name if the cleaner
+    // reduces it to nothing (a name made entirely of stripped tokens).
+    if (d && (d.source === 'readme' || d.source === 'name-tag')) {
+      return { name: cleanSuggestedName(d.name) || d.name, source: d.source };
+    }
+    if (d && d.source === 'folder-fallback') return { name: cleanSuggestedName(folderName), source: 'folder-fallback' };
+  } catch { /* fall through to the plain cleaner */ }
+  return { name: cleanSuggestedName(folderName), source: 'folder' };
+}
+
 // scanForBulkImport({ rootDir }) -> { ok, plan }
 //   plan: {
 //     rootDir,
@@ -330,12 +378,14 @@ function scanForBulkImport({ rootDir }) {
   // If the picked root itself IS a Proffie shape, emit as solo and skip
   // descent. Common single-font-folder case from "Import folder" workflow.
   if (looksLikeProffieDir(rootDir)) {
+    const _nm = folderSourceName(rootDir, path.basename(rootDir), false);
     ctx.results.sources.push({
       kind: 'folder-solo',
       absPath: rootDir,
       relPath: '',
       rawName: path.basename(rootDir),
-      cleanedName: cleanSuggestedName(path.basename(rootDir)),
+      cleanedName: _nm.name,
+      nameSource: _nm.source,
       sizeBytes: safeDirSize(rootDir),
     });
   } else {
@@ -875,6 +925,7 @@ async function enrichSourceForGuided(src) {
     vendor: null, vendorConfidence: null, vendorWebsite: null,
     purchasedDefault: true, fontWav: null, humWav: null, textFiles: [],
     wavCount: 0,
+    suggestedName: null, nameSource: null, // set only when late docx naming upgrades a fallback
     error: null,
   };
   try {
@@ -920,6 +971,19 @@ async function enrichSourceForGuided(src) {
       if (ad !== bd) return ad - bd;
       return a.fileName.localeCompare(b.fileName, undefined, { numeric: true, sensitivity: 'base' });
     });
+    // Late naming from a Word .docx readme. The sync scan can't crack a .docx (it's a
+    // zip), so a font whose name fell back to the generic folder name gets one more
+    // shot here in the async pass: read the docx text and run the same readme name
+    // extraction. Read-only; on any failure the fallback name simply stands.
+    if (src.nameSource === 'folder-fallback') {
+      const docx = out.textFiles.find(t => t.absPath && /\.docx$/i.test(t.fileName));
+      if (docx) {
+        try {
+          const nm = nameFromReadmeText(await docxToText(docx.absPath));
+          if (nm) { out.suggestedName = cleanSuggestedName(nm) || nm; out.nameSource = 'readme'; }
+        } catch { /* leave the fallback name */ }
+      }
+    }
   } catch (e) {
     out.error = String(e && e.message || e);
   }

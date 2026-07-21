@@ -323,7 +323,7 @@ function listDir(dirPath) {
     const full = path.join(dirPath, e.name);
     let size = null;
     if (e.isFile()) { try { size = fs.statSync(full).size; } catch { /* ignore */ } }
-    return { name: e.name, path: full, isDir: e.isDirectory(), size, isText: /\.(txt|h|hpp|ini|cfg|md|log|csv)$/i.test(e.name) };
+    return { name: e.name, path: full, isDir: e.isDirectory(), size, isText: /\.(txt|h|hpp|ini|cfg|md|log|csv|docx)$/i.test(e.name) };
   });
   entries.sort((a, b) => (a.isDir === b.isDir ? a.name.localeCompare(b.name, undefined, { numeric: true }) : (a.isDir ? -1 : 1)));
   return { path: dirPath, entries };
@@ -470,32 +470,156 @@ function _looksLikeName(s) {
   const letters = (s.match(/[A-Za-z]/g) || []).length;
   return letters >= Math.ceil(s.length * 0.5);
 }
-// Pull a font name from a readme/txt inside the folder, but only if a line actually looks
-// like a name. Returns null (→ folder-name fallback) otherwise.
+// Is this file a readme/prose file we should read CONTENT from (vs a bare name-tag
+// txt whose value is its FILENAME)? Keeping the two apart stops us pulling a noisy
+// description line out of a name-tag file and ranking it above the name itself. The
+// extension guard also keeps us from reading a binary doc (.docx/.pdf/.rtf) as text.
+function _isReadmeShaped(name) {
+  if (!/\.(txt|text|md|nfo)$/i.test(name)) return false;
+  if (/\.(md|nfo)$/i.test(name)) return true;
+  const stem = name.toLowerCase().replace(/\.[^.]*$/, '').replace(/[\s._-]+/g, ' ').trim();
+  return /^(read ?me|info|about|description|desc|notes?|credits?|changelog|change log|instructions?)\b/.test(stem);
+}
+// A ProffieOS preset literal in a readme names the font directly: the FIRST quoted
+// string in `{ "fontdir", "track/path.wav", Style..., "display" }` is the font's
+// folder name. The most reliable name a readme carries ("copy this into your config").
+function _presetFontName(head) {
+  const m = head.match(/\{\s*"([A-Za-z0-9][^"]{1,47})"\s*,\s*"/);
+  if (!m) return null;
+  const dir = m[1].trim().replace(/[.\s]+$/, '');
+  return _looksLikeTagName(dir) ? dir : null;
+}
+// A font name quoted at the START of an early line — the common readme title form
+// (`"DarkWolf" an exclusive sound font...`). Requiring the line to open with the
+// quote avoids grabbing an incidental quoted word mid-sentence.
+function _quotedTitle(head) {
+  for (const raw of head.split(/\r?\n/).slice(0, 8)) {
+    // Accept straight OR curly quotes ("Name" and “Name”) — .docx readmes smart-quote.
+    const m = raw.trim().match(/^["“]([A-Za-z0-9][^"“”]{1,47})["”]/);
+    if (m) {
+      const s = m[1].trim().replace(/[.\s]+$/, '');
+      if (_looksLikeTagName(s)) return s;
+    }
+  }
+  return null;
+}
+// Extract a font name from readme TEXT. Order: a preset literal (author says "paste
+// this") beats a clean name line beats a quoted title. Returns null when nothing
+// qualifies. Shared so the async docx path can reuse the exact same extraction.
+function nameFromReadmeText(text) {
+  const head = String(text || '').slice(0, 4000);
+  const preset = _presetFontName(head);   // author says "paste this into your config"
+  if (preset) return preset;
+  const quoted = _quotedTitle(head);      // a line that OPENS with the quoted name (title form)
+  if (quoted) return quoted;
+  const line = head.split(/\r?\n/).map(s => s.replace(/^["'\s#*=-]+|["'\s#*=-]+$/g, '').trim())
+    .find(_looksLikeName);                // last resort: any line that reads like a bare name
+  if (line) return line;
+  return null;
+}
+// Pull a font name from a readme/prose file inside the folder. Returns null (→
+// name-tag / folder fallback) when nothing qualifies.
 function _readmeTitle(dirPath) {
   const ents = safeReaddir(dirPath);
   if (ents.__error) return null;
-  const txts = ents.filter(e => e.isFile() && /\.(txt|md|nfo)$/i.test(e.name))
+  const txts = ents.filter(e => e.isFile() && _isReadmeShaped(e.name))
     .sort((a, b) => _readmeRank(b.name) - _readmeRank(a.name));
   for (const t of txts) {
     try {
-      const head = fs.readFileSync(path.join(dirPath, t.name), 'utf8').slice(0, 2000);
-      const line = head.split(/\r?\n/).map(s => s.replace(/^["'\s#*=-]+|["'\s#*=-]+$/g, '').trim())
-        .find(_looksLikeName);
-      if (line) return line;
+      const name = nameFromReadmeText(fs.readFileSync(path.join(dirPath, t.name), 'utf8'));
+      if (name) return name;
     } catch { /* skip unreadable */ }
   }
   return null;
 }
-// Best-guess display name for a font folder. Numbered / BankNN folders carry no real name,
-// so for those we try a readme title first; otherwise a lightly-cleaned folder name.
-// `source` tells the UI where the name came from so it can flag low-confidence suggestions.
-function deriveFontName(dirPath, folderName) {
+// Read a Word .docx as plain text WITHOUT converting it on disk — a .docx is a zip;
+// its text lives in word/document.xml as <w:t> runs. Pull that one entry, turn
+// paragraphs/tabs/breaks into whitespace, strip the tags, decode entities. Async
+// (zip read); read-only. Shared by the doc viewer and the guided-import late naming.
+async function docxToText(absPath) {
+  const StreamZip = require('node-stream-zip');
+  const zip = new StreamZip.async({ file: absPath });
+  try {
+    const buf = await zip.entryData('word/document.xml');
+    let x = buf.toString('utf8')
+      .replace(/<w:tab\b[^>]*\/?>/g, '\t')
+      .replace(/<w:br\b[^>]*\/?>/g, '\n')
+      .replace(/<\/w:p>/g, '\n')
+      .replace(/<[^>]+>/g, '');
+    x = x.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'").replace(/&#(\d+);/g, (_m, d) => String.fromCodePoint(+d))
+      .replace(/&amp;/g, '&');
+    return x.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  } finally {
+    await zip.close();
+  }
+}
+// Standard txt/doc filenames whose NAME is never the font's name — readmes,
+// licenses, settings dumps, index/function listings. (Their CONTENT may name the
+// font; that's _readmeTitle's job.) Matched on the basename with extension gone
+// and spaces/punctuation squeezed to single spaces.
+const _STD_TXT_NAMES = new Set([
+  'readme', 'read me', 'license', 'licence', 'copyright', 'credits',
+  'settings', 'config', 'configuration', 'changelog', 'change log',
+  'notes', 'info', 'information', 'instructions', 'font list', 'fontlist',
+  'sd config', 'sdconfig',
+]);
+function _isStdTxtName(fileName) {
+  const k = fileName.toLowerCase().replace(/\.[^.]*$/, '').replace(/[\s._-]+/g, ' ').trim();
+  if (_STD_TXT_NAMES.has(k) || _STD_TXT_NAMES.has(k.replace(/\s+/g, ''))) return true;
+  if (/functions?$/.test(k)) return true;   // "proffie os6.5 functions"
+  if (/proffie\s*os/.test(k)) return true;
+  return false;
+}
+// Lighter name check for a FILENAME tag than the content-line check: filenames
+// legitimately carry parens/case a settings line never would ("FinalStep(YellowRey)",
+// "Ascension(green)"), so we only reject urls/marketing/obvious non-names here.
+function _looksLikeTagName(s) {
+  if (!s || s.length < 2 || s.length > 48) return false;
+  if (/https?:|www\.|patreon|youtube|discord|\.wav$|\.ini$/i.test(s)) return false;
+  if (s.split(/\s+/).length > 6) return false;
+  return (s.match(/[A-Za-z]/g) || []).length >= 2;
+}
+// The "name tag" convention (Golden Harvest / profezzorn default sets and others):
+// the font's real name rides along as a .txt file whose FILENAME is the name —
+// usually a 0-byte file — next to a generic BankNN folder. A signal, not gospel:
+// ranked below readme CONTENT and surfaced to the review screen for confirmation.
+function _nameTagTitle(dirPath) {
+  const ents = safeReaddir(dirPath);
+  if (ents.__error) return null;
+  const cands = [];
+  for (const e of ents) {
+    if (!e.isFile() || !/\.txt$/i.test(e.name)) continue;
+    if (_isStdTxtName(e.name)) continue;
+    // Drop the extension, then any trailing dots/spaces ("Name..txt" -> "Name").
+    const stem = e.name.replace(/\.txt$/i, '').replace(/[.\s]+$/, '').trim();
+    if (!_looksLikeTagName(stem)) continue;
+    let size = 1;
+    try { size = fs.statSync(path.join(dirPath, e.name)).size; } catch { /* keep 1 */ }
+    cands.push({ stem, size });
+  }
+  if (!cands.length) return null;
+  const empty = cands.filter(c => c.size === 0);
+  if (empty.length === 1) return empty[0].stem;   // the deliberate 0-byte tag
+  if (empty.length > 1) return null;              // ambiguous — don't guess
+  return cands.length === 1 ? cands[0].stem : null; // a lone non-empty candidate
+}
+// Best-guess display name for a font folder. Slot-named folders (BankNN and any
+// prefix+number series — see the scan's numbered-series detection) carry no real
+// name, so for those we walk the confidence ladder: readme CONTENT (highest) ->
+// name-tag filename -> lightly-cleaned folder name (lowest). `source` tells the UI
+// where the name came from so it can flag the low-confidence folder fallback.
+// `opts.forceGeneric` lets the caller mark a folder generic from sibling context
+// even when its own name doesn't match a known slot pattern.
+function deriveFontName(dirPath, folderName, opts) {
   const base = folderName || path.basename(dirPath);
-  const generic = /^bank\d+$/i.test(base) || /^\d+$/.test(base) || /^\d+-/.test(base) || /^font\d+$/i.test(base) || /^\d+-\S/.test(base);
+  const generic = (opts && opts.forceGeneric)
+    || /^(bank|preset|font|slot)\s*\d+$/i.test(base) || /^\d+$/.test(base) || /^\d+[-_ ]/.test(base);
   if (generic) {
-    const title = _readmeTitle(dirPath);
+    const title = _readmeTitle(dirPath);          // 1 & 2: readme / readme-shaped content
     if (title) return { name: title, source: 'readme' };
+    const tag = _nameTagTitle(dirPath);           // 3: name-tag filename
+    if (tag) return { name: tag, source: 'name-tag' };
   }
   const cleaned = base.replace(/[_]+/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/\s+/g, ' ').trim();
   return { name: cleaned || base, source: generic ? 'folder-fallback' : 'folder' };
@@ -534,4 +658,4 @@ function analyzeFonts(dirPath) {
   return { path: dirPath, fonts };
 }
 
-module.exports = { scan, assessCard, assessPath, assessPicked, classifyCard, listDir, findConfigs, deriveFontName, analyzeFonts, resolveIdentity, isDegenerateVsn, formatVsn, enumerateAllVolumes, enumerateRemovableVolumes, scanFolderHealth, checkWavHealth, checkWavBuffer };
+module.exports = { scan, assessCard, assessPath, assessPicked, classifyCard, listDir, findConfigs, deriveFontName, nameFromReadmeText, docxToText, analyzeFonts, resolveIdentity, isDegenerateVsn, formatVsn, enumerateAllVolumes, enumerateRemovableVolumes, scanFolderHealth, checkWavHealth, checkWavBuffer };
