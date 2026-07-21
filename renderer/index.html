@@ -592,7 +592,7 @@
     font-size: 0.78rem;
     padding: 4px 6px;
     outline: none;
-    min-width: 160px;
+    min-width: 100px;   /* shrink the mostly-empty dropdown first, before truncating status text */
     cursor: pointer;
   }
   #bp-port-select:focus { border-color: #4d9; }
@@ -619,13 +619,15 @@
     align-items: center;
     gap: 14px;
     margin-left: auto;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    min-width: 0;
   }
   .bp-status-item {
     display: flex;
     align-items: center;
     gap: 5px;
     font-size: 0.72rem;
+    min-width: 0;
   }
   .bp-status-dot {
     width: 7px;
@@ -639,7 +641,11 @@
   .bp-status-pending { background: #66f; box-shadow: 0 0 4px #66fa; animation: pulse-dot 1.2s ease-in-out infinite; }
   @keyframes pulse-dot { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
 
-  .bp-status-text { color: var(--c-text-soft); white-space: nowrap; }
+  /* Status labels truncate with ellipsis (full text on hover — title set in
+     setStatus) so a long one, port OR toolchain, never wraps the toolbar to a
+     second row; they SHARE the space. The port dropdown also shrinks (below)
+     before it comes to truncation. */
+  .bp-status-text { color: var(--c-text-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 
   /* ── Empty state ── */
   #empty-state {
@@ -677,6 +683,47 @@
   #fr-fett a { color: var(--jmt-blue); text-decoration: underline; cursor: pointer; }
   #link-sdcard-empty { display: block; margin: 16px auto 0; font-size: 0.82rem; color: var(--jmt-blue); text-decoration: underline; cursor: pointer; }
   #link-sdcard-empty:hover { color: var(--c-text); }
+  /* Responsive empty-state degradation (mode classes set in refreshEmptyStateFavs).
+     es-compact: short screen, drop the decorative stack icon to protect the buttons.
+     es-split: height gone / width available — favorites become a scrolling column
+     on the LEFT, actions on the RIGHT (row-reverse, since DOM order is center→favs). */
+  #empty-state.es-split {
+    flex-direction: row-reverse;
+    justify-content: center;
+    align-items: center;
+    gap: 32px;
+    padding: 0 24px;
+  }
+  #empty-state.es-split #empty-state-center { flex: 0 1 auto; }
+  /* Favorites: the exact config that WORKED. Do NOT add min-width:0 here — it lets
+     the grid shrink to 0 width (verified: favBox=0x…). The explicit max-width set
+     in JS drives the column count (1 col before, 2 now). */
+  #empty-state.es-split #fav-cards {
+    flex: 0 1 auto;
+    justify-content: flex-start;     /* left-align cards so a lone last card sits under col 1, not centered */
+    align-content: flex-start;
+    max-height: calc(100% - 16px);
+    padding-bottom: 0;
+  }
+  /* Empty state (no config open): hide the config-EDITING chrome, keep the ways
+     INTO a config (New / Open / recent-files) plus live board/toolchain info.
+     body starts WITH .no-config (default hidden), and setFileOpen REMOVES it when a
+     config opens — so the chrome never flashes visible during load. !important beats
+     switchTab's inline display on tab-scoped elements like #config-banner. */
+  body.no-config .js-config-only { display: none !important; }
+  /* On the empty state the toolbar has few items, so let it SHRINK rather than
+     wrap — the status text keeps its full text when there's room and only
+     ellipsizes when genuinely tight. (Config-open keeps flex-wrap.) */
+  body.no-config #build-toolbar { flex-wrap: nowrap; }
+  /* Startup dim — solid app-background over everything until the splash dismisses. */
+  #load-dim {
+    position: fixed;
+    inset: 0;
+    z-index: 100000;
+    background: #111111;
+    transition: opacity 0.45s ease;
+  }
+  #load-dim.hidden { opacity: 0; pointer-events: none; }
   /* SD report / file-browser overlay */
   /* SD card report / browser. FIXED size so it never resizes with content —
      short folders just leave empty space, like the Sound Font Library file
@@ -3741,7 +3788,10 @@
   }
 </style>
 </head>
-<body>
+<body class="no-config">
+<!-- Startup dim: covers the app while it renders behind the splash so the
+     half-painted chrome isn't distracting; fades out on app:splash-dismissed. -->
+<div id="load-dim"></div>
 
 <div id="dev-bar">Dev Build</div>
 
@@ -3780,10 +3830,10 @@
     </div>
     <div style="display:flex;align-items:center;gap:8px;">
       <div class="tab-btns" id="tab-btns-config">
-        <button id="btn-undo" class="btn-neutral" title="Undo (Ctrl+Z)">&#8634;</button>
-        <button id="btn-redo" class="btn-neutral" title="Redo (Ctrl+Y)">&#8635;</button>
-        <button class="diff-toggle" id="diff-toggle-label">&#916; Show Changes</button>
-        <button class="diff-toggle" id="btn-compare" disabled>&#8644; Compare File</button>
+        <button id="btn-undo" class="btn-neutral js-config-only" title="Undo (Ctrl+Z)">&#8634;</button>
+        <button id="btn-redo" class="btn-neutral js-config-only" title="Redo (Ctrl+Y)">&#8635;</button>
+        <button class="diff-toggle js-config-only" id="diff-toggle-label">&#916; Show Changes</button>
+        <button class="diff-toggle js-config-only" id="btn-compare" disabled>&#8644; Compare File</button>
         <div class="toolbar-divider"></div>
         <div class="fav-wrap">
           <button id="btn-fav">Favorites &#9662;</button>
@@ -3793,9 +3843,9 @@
         </div>
         <button id="btn-new"      class="btn-neutral">&#43; New</button>
         <button id="btn-open"     class="btn-blue">&#8593; Open</button>
-        <button id="btn-close"    class="btn-red">&#10005; Close</button>
-        <button id="btn-save"     class="btn-green" style="display:none">&#8595; Save</button>
-        <button id="btn-saveas"   class="btn-green" style="display:none">&#8595; Save As</button>
+        <button id="btn-close"    class="btn-red js-config-only">&#10005; Close</button>
+        <button id="btn-save"     class="btn-green js-config-only" style="display:none">&#8595; Save</button>
+        <button id="btn-saveas"   class="btn-green js-config-only" style="display:none">&#8595; Save As</button>
         <button id="btn-download" class="btn-green" style="display:none">&#8595; Download</button>
         <div class="toolbar-divider" id="divider-styles-ctrl" style="display:none"></div>
         <button id="btn-styles-create" class="btn-blue"  style="display:none" title="Create or import a Style Library">&#43; Create Style Library</button>
@@ -3868,7 +3918,7 @@
         </div>
       </div>
     </div>
-    <div class="meta-field">
+    <div class="meta-field js-config-only">
       <div style="display:flex;justify-content:space-between;align-items:baseline;">
         <label>Description</label>
         <span id="desc-dupe-warning" style="display:none;color:#c8a020;font-size:0.67rem;cursor:default;letter-spacing:0.04em;"
@@ -3878,7 +3928,7 @@
       </div>
       <input type="text" id="input-desc" placeholder="e.g. Graflex v2.2" spellcheck="false" />
     </div>
-    <div class="meta-field">
+    <div class="meta-field js-config-only">
       <div style="display:flex;justify-content:space-between;align-items:baseline;">
         <label>Board</label>
         <span id="v1-warning" style="display:none;color:#c8a020;font-size:0.67rem;cursor:default;letter-spacing:0.04em;"
@@ -3893,7 +3943,7 @@
         <option value="Proffieboard"    data-fqbn="proffieboard:stm32l4:Proffieboard-L433CC">Proffieboard</option>
       </select>
     </div>
-    <div class="meta-field">
+    <div class="meta-field js-config-only">
       <label>OS Version</label>
       <select id="input-version"></select>
     </div>
@@ -3902,7 +3952,7 @@
          JMT_COMMON marker) OR the library has commons available. One
          element flips between three states: missing-needed (red text),
          single-name display, and a dropdown when 2+ commons exist. -->
-    <div class="meta-field" id="config-common-field" style="display:none">
+    <div class="meta-field js-config-only" id="config-common-field" style="display:none">
       <label>Common Folder</label>
       <div id="config-common-content"></div>
     </div>
@@ -4168,7 +4218,7 @@
 </div>
 
 <!-- ── Config banner ── -->
-<div id="config-banner">
+<div id="config-banner" class="js-config-only">
   <div id="banner-compare-half">
     <div id="compare-banner-desc"></div>
     <button id="compare-banner-clear" title="Clear compare file">&#10005;</button>
@@ -4188,10 +4238,10 @@
 
 <!-- ── Build toolbar ── -->
 <div id="build-toolbar">
-  <button class="build-btn-compile" id="bp-btn-compile" disabled>⚙ Compile</button>
-  <button class="build-btn-flash"   id="bp-btn-flash"   disabled>⚡ Flash</button>
+  <button class="build-btn-compile js-config-only" id="bp-btn-compile" disabled>⚙ Compile</button>
+  <button class="build-btn-flash js-config-only"   id="bp-btn-flash"   disabled>⚡ Flash</button>
 
-  <div class="build-divider"></div>
+  <div class="build-divider js-config-only"></div>
 
   <div class="port-group">
     <label id="bp-label-port">Port</label>
@@ -4204,8 +4254,8 @@
       <span style="font-size:0.72rem;color:var(--c-text-dim);">· No port required</span>
       <button id="bp-btn-exit-dfu" style="padding:3px 10px;background:#1a2a1a;color:#6d6;border:1px solid #2a4a2a;border-radius:3px;font-size:0.72rem;cursor:pointer;">Exit</button>
     </div>
-    <label style="margin-left:8px">USB</label>
-    <select id="bp-usb-select" style="background:var(--c-bg-raised);border:1px solid var(--c-border-input);border-radius:3px;color:var(--c-text);font-size:0.78rem;padding:4px 6px;outline:none;cursor:pointer;">
+    <label class="js-config-only" style="margin-left:8px">USB</label>
+    <select id="bp-usb-select" class="js-config-only" style="background:var(--c-bg-raised);border:1px solid var(--c-border-input);border-radius:3px;color:var(--c-text);font-size:0.78rem;padding:4px 6px;outline:none;cursor:pointer;">
       <option value="cdc">Serial</option>
       <option value="cdc_msc">Serial + Mass Storage</option>
       <option value="cdc_hid">Serial + Keyboard + Mouse</option>
@@ -4230,11 +4280,11 @@
       <div class="bp-status-dot bp-status-pending" id="bp-status-port-dot"></div>
       <span class="bp-status-text" id="bp-status-port-text">Port</span>
     </div>
-    <div class="bp-status-item" id="bp-status-compile-item">
+    <div class="bp-status-item js-config-only" id="bp-status-compile-item">
       <div class="bp-status-dot" id="bp-status-compile-dot"></div>
       <span class="bp-status-text" id="bp-status-compile-text">Not compiled</span>
     </div>
-    <div class="bp-status-item" id="bp-status-flash-item">
+    <div class="bp-status-item js-config-only" id="bp-status-flash-item">
       <div class="bp-status-dot" id="bp-status-flash-dot"></div>
       <span class="bp-status-text" id="bp-status-flash-text">Not flashed</span>
     </div>
@@ -5897,6 +5947,10 @@ window.getEditorContent = () => {
 // ── Empty state ────────────────────────────────────────
 function setFileOpen(open) {
   fileIsOpen = open;
+  // Empty state: strip the config-editing chrome (meta fields, Compile/Flash,
+  // Save/Compare/Close, config banner) so only the ways into a config + live
+  // board/toolchain info remain. CSS does the hiding via .js-config-only.
+  document.body.classList.toggle('no-config', !open);
   document.getElementById('empty-state').classList.toggle('visible', !open);
   // Only show the config editor row when the user is actually on the
   // config tab. If they've switched away to Style Library / Sound Fonts
@@ -15001,15 +15055,57 @@ async function refreshEmptyStateFavs() {
   const items = await window.electronAPI.getFavorites();
   favoritePaths = new Set(items.map(i => i.filePath));
   container.innerHTML = '';
-  if (!items.length) { container.style.display = 'none'; return; }
-  container.style.display = 'flex';
+  // Responsive empty-state layout, driven by the ACTUAL height available to the
+  // empty-state region (es.clientHeight) rather than window height — so a wrapped
+  // toolbar that eats vertical space is accounted for. Rank contents by importance
+  // and shed from the bottom: favorites thin out (fewer rows) first, then the
+  // decorative icon drops, and only then would the primary buttons be at risk (they
+  // never are — the grid is hard-bounded so it can't overflow into them). When
+  // height is gone but width isn't, flip to a split — favorites scroll on the LEFT,
+  // actions on the RIGHT. Too small for a split too → favorites fall back to the
+  // toolbar's "Favorites" menu (nothing lost).
+  const es = document.getElementById('empty-state');
+  const w = window.innerWidth;
+  const availH = (es && es.clientHeight > 60) ? es.clientHeight : Math.max(window.innerHeight - 290, 120);
+  const hasFavs = items.length > 0;
   const cardW = 180, gap = 8;
-  const maxCols = Math.floor((window.innerWidth - 48) / (cardW + gap));
-  const idealCols = Math.min(
-    Math.max(Math.ceil(Math.sqrt(items.length)), Math.ceil(items.length / 3)),
-    Math.max(maxCols, 1)
-  );
-  container.style.maxWidth = (idealCols * cardW + (idealCols - 1) * gap) + 'px';
+
+  const maxCols = Math.max(1, Math.floor((w - 48) / (cardW + gap)));
+  // Comfort-biased row cap by available height (prefers breathing room).
+  const maxRows = availH >= 660 ? 4 : availH >= 520 ? 3 : availH >= 380 ? 2 : 1;
+  // Fill the width first (fewest rows). If even a full-width grid would STILL
+  // exceed the row cap — i.e. it would have to scroll — and there's horizontal
+  // room, flip to SPLIT: favorites move beside the actions and get the FULL region
+  // height, fitting more without a scrollbar. availH<340 forces split regardless.
+  const stackedRowsNeeded = Math.ceil(items.length / maxCols);
+  const splitMode   = hasFavs && w >= 620 && (stackedRowsNeeded > maxRows || availH < 340);
+  const actionsOnly = hasFavs && w < 620 && availH < 340;
+  es?.classList.toggle('es-split', splitMode);
+
+  if (!hasFavs || actionsOnly) {
+    container.style.display = 'none';
+    container.style.maxWidth = ''; container.style.maxHeight = '';
+    return;
+  }
+  container.style.display = 'flex';
+
+  let stackedRows = 0;
+  if (splitMode) {
+    // EXPLICIT width — grow-to-fill collapsed to 0 in this nested flex (verified via
+    // the debug readout: favBox=0x…). Compute columns from the space left of the
+    // narrow ~250px actions column; height comes from CSS (align-self:stretch).
+    const favW    = Math.max(cardW, w - 250);
+    const favCols = Math.max(1, Math.floor((favW + gap) / (cardW + gap)));
+    container.style.maxWidth = (favCols * cardW + (favCols - 1) * gap) + 'px';
+    container.style.maxHeight = '';
+  } else {
+    // Stacked: fill the width to minimize rows, cap visible rows by height, and
+    // scroll any overflow (measured maxHeight set after render so it can't bleed
+    // up into the actions block).
+    stackedRows = maxRows;
+    const cols = Math.min(items.length, maxCols);
+    container.style.maxWidth = (cols * cardW + (cols - 1) * gap) + 'px';
+  }
   const present = items.filter(i => i.exists);
   const sorted = [...present, ...items.filter(i => !i.exists)];
   sorted.forEach(({ filePath, name, desc, exists }) => {
@@ -15083,7 +15179,40 @@ async function refreshEmptyStateFavs() {
 
     container.appendChild(card);
   });
+
+  // Hard-bound the stacked grid to its row cap using a real card's measured height,
+  // so a width-limited grid (too few columns to hit the cap) scrolls at the cap
+  // instead of overflowing up into the actions block. Kept under availH - actions
+  // by the comfort ladder above, so the buttons always keep their room.
+  if (stackedRows > 0) {
+    const fc = container.querySelector('.fav-card');
+    const ch = fc ? fc.offsetHeight : 58;
+    container.style.maxHeight = (stackedRows * ch + (stackedRows - 1) * gap + 24 + 4) + 'px';
+  }
 }
+
+// Fade out the startup dim once the splash finishes, revealing the fully-rendered
+// app rather than the half-painted chrome. Safety timeout so the app is never left
+// dark if the signal is missed (or we're running outside Electron).
+(function initLoadDim() {
+  const dim = document.getElementById('load-dim');
+  if (!dim) return;
+  let done = false;
+  const hide = () => { if (done) return; done = true; dim.classList.add('hidden'); setTimeout(() => dim.remove(), 550); };
+  window.electronAPI?.onSplashDismissed?.(hide);
+  setTimeout(hide, 6000);
+})();
+
+// Reflow the favorites grid when the window resizes so the height-aware row cap
+// (see refreshEmptyStateFavs) re-applies live. Debounced; only re-lays-out when
+// the empty-state grid is actually on screen.
+let _favReflowTimer = null;
+window.addEventListener('resize', () => {
+  const es = document.getElementById('empty-state');
+  if (!es || !es.classList.contains('visible')) return;   // only while the empty state is on screen
+  clearTimeout(_favReflowTimer);
+  _favReflowTimer = setTimeout(() => { refreshEmptyStateFavs(); }, 120);
+});
 
 if (isElectron) {
   document.getElementById('input-filename').addEventListener('click', async (e) => {

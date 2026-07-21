@@ -2037,6 +2037,7 @@ function setStatus(type, state, message) {
 
   dot.className = `bp-status-dot bp-status-${state}`;
   text.textContent = message;
+  text.title = message;   // full text on hover when the label is ellipsis-truncated
 
   if (type === 'port') {
     if (state === 'warn' || state === 'error') {

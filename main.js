@@ -119,7 +119,7 @@ function createWindow() {
     height:   1,
     ...(bounds.x != null && bounds.y != null ? { x: bounds.x, y: bounds.y } : {}),
     minWidth: 800,
-    minHeight: 500,
+    minHeight: 692,
     backgroundColor: '#111111',
     titleBarStyle: 'default',
     ...(process.platform === 'win32'  ? { icon: path.join(__dirname, 'assets', 'icon.ico') }
