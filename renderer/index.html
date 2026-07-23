@@ -9775,9 +9775,12 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
           note.className = 'g-dup-note';
           row.el.querySelector('.g-name-wrap')?.appendChild(note);
         }
+        // Green + uncheck ONLY for fully-owned; a copy carrying sounds the
+        // library lacks stays checked in amber (skipping would lose them).
         note.textContent = res.label;
-        note.classList.toggle('have-it', res.verdict === 'have_it');
-        if (res.verdict === 'have_it' && row.checkbox && row.checkbox.checked
+        note.classList.toggle('have-it', !!res.fullyOwned);
+        if (res.tip && row.checkbox) row.checkbox.title = res.tip;
+        if (res.fullyOwned && row.checkbox && row.checkbox.checked
             && row.el.dataset.touched !== 'true' && !row.el.classList.contains('g-corrupt')) {
           row.checkbox.checked = false;
           row.el.classList.add('excluded');
@@ -9785,7 +9788,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       }
       // Summary hint (information, not force): explain the auto-uncheck, that
       // the boxes still work, and the Duplicate path for the customize case.
-      const haveIts = r.results.filter(x => x.verdict === 'have_it').length;
+      const haveIts = r.results.filter(x => x.fullyOwned).length;
       if (haveIts > 0 && els.guidedSummary) {
         let hint = document.getElementById('sf-guided-dup-hint');
         if (!hint) {
@@ -19756,12 +19759,16 @@ require(['vs/editor/editor.main'], function () {
                 note.className = 'cand-dup-note';
                 row.querySelector('.cand-main')?.appendChild(note);
               }
+              // Green + uncheck ONLY when the library truly holds every sound in
+              // this candidate. A near-match whose extra sounds the library
+              // LACKS stays checked in amber — skipping it would lose them.
               note.textContent = hit.label;
-              note.classList.toggle('have-it', hit.verdict === 'have_it');
-              note.classList.toggle('variant', hit.verdict !== 'have_it');
-              if (hit.verdict === 'have_it' && row.dataset.already !== '1'
+              note.classList.toggle('have-it', !!hit.fullyOwned);
+              note.classList.toggle('variant', !hit.fullyOwned);
+              const check = row.querySelector('.cand-check');
+              if (check && hit.tip) check.title = hit.tip;
+              if (hit.fullyOwned && row.dataset.already !== '1'
                   && row.dataset.touched !== 'true' && row.dataset.edited !== 'true') {
-                const check = row.querySelector('.cand-check');
                 if (check && check.checked) {
                   check.checked = false;
                   row.classList.add('disabled');
@@ -19772,7 +19779,7 @@ require(['vs/editor/editor.main'], function () {
             // Summary hint: the auto-uncheck needs its WHY and its exit (Ryan,
             // 2026-07-23: information, not force). Says what happened, that the
             // boxes still work, and points at Duplicate for the customize case.
-            const haveIts = r.results.filter(x => x.verdict === 'have_it').length;
+            const haveIts = r.results.filter(x => x.fullyOwned).length;
             const dupHint = document.getElementById('sf-review-dup-hint');
             if (dupHint && haveIts > 0) {
               const allOfThem = haveIts === _sfImport.candidates.length;

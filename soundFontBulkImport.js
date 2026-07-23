@@ -971,7 +971,9 @@ async function importPlannedSource({ userData, src, fromSdCard }, onSubProgress)
         for (const ent of created) {
           if (!others.length) break;
           const m = compare.matchCandidateAgainstLibrary(mf.records, ent.candidatePath, others);
-          if (!m || m.verdict !== 'have_it' || m.lowConfidence) continue;
+          // Only stamp when the library truly holds EVERY sound this entry has —
+          // a copy carrying extra sounds is not "already in your library".
+          if (!m || m.lowConfidence || !compare.isFullyOwned(m)) continue;
           try {
             const updates = {
               needsReview: true,

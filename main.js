@@ -2488,7 +2488,7 @@ ipcMain.handle('bulkImport:matchGuided', async (_event, { sources } = {}) => {
         ? null
         : compare.verdictLabel(m);
       if (!label) continue;
-      results.push({ idx: s.idx, verdict: m.verdict, label });
+      results.push({ idx: s.idx, verdict: m.verdict, label, tip: compare.verdictTip(m), fullyOwned: compare.isFullyOwned(m) });
     }
     return { ok: true, results };
   } catch (err) {
@@ -2549,7 +2549,7 @@ ipcMain.handle('sources:matchCandidates', async (_event, { uuid, candidates } = 
         ? null
         : compare.verdictLabel(m);
       if (!label) continue;
-      results.push({ name: c.name, path: c.path, verdict: m.verdict, exact: !!m.exact, label });
+      results.push({ name: c.name, path: c.path, verdict: m.verdict, exact: !!m.exact, label, tip: compare.verdictTip(m), fullyOwned: compare.isFullyOwned(m) });
     }
     return { ok: true, results };
   } catch (err) {

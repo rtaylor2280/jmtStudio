@@ -405,15 +405,25 @@ function matchCandidateAgainstLibrary(records, candidatePath, index, thresholds 
   return best;
 }
 
+// DIRECTION matters (Ryan, 2026-07-23): "already in your library" may only be
+// claimed when the library contains EVERY sound the candidate has. A have-it
+// score with sounds missing from the library copy means skipping the import
+// would LOSE those sounds — that case must stay checked and say so.
+function isFullyOwned(m) {
+  return !!m && m.verdict === 'have_it' && (m.exact || (m.coreInter || 0) >= (m.cardCoreCount || 0));
+}
+
 // Plain-language verdict line for the review UI. No engineering terms — a
 // verdict plus a sound-count sentence (per the standing no-jargon rule).
 // Returns null when there's nothing worth saying (new font / no match).
 function verdictLabel(m) {
   if (!m || !m.bestMatch || m.lowConfidence) return null;
+  const missing = Math.max(0, (m.cardCoreCount || 0) - (m.coreInter || 0));
   if (m.verdict === 'have_it') {
-    return (m.exact || m.coreContainment >= 0.999)
-      ? `Already in your library: matches ${m.bestMatch}`
-      : `Already in your library: matches ${m.bestMatch} (${m.coreInter} of ${m.cardCoreCount} sounds)`;
+    if (isFullyOwned(m)) {
+      return `Already in your library: matches ${m.bestMatch}`;
+    }
+    return `Nearly identical to ${m.bestMatch}, but this copy has ${missing} sound${missing === 1 ? '' : 's'} yours is missing`;
   }
   if (m.verdict === 'variant') {
     // Superset case: everything this font has, an owned font already contains
@@ -422,6 +432,23 @@ function verdictLabel(m) {
       return `All of its sounds are already in ${m.bestMatch} (which has more)`;
     }
     return `Close match to ${m.bestMatch}: shares ${Math.round(m.coreContainment * 100)}% of its sounds (possibly a different version)`;
+  }
+  return null;
+}
+
+// Checkbox tooltip — the teaching layer (Ryan, 2026-07-23): explains what
+// checking the box actually does GIVEN this match. Null when the label is null.
+function verdictTip(m) {
+  if (!m || !m.bestMatch || m.lowConfidence) return null;
+  const missing = Math.max(0, (m.cardCoreCount || 0) - (m.coreInter || 0));
+  if (m.verdict === 'have_it') {
+    if (isFullyOwned(m)) {
+      return `Your library already has every sound in this font (as ${m.bestMatch}). Check the box to import a second copy anyway. To customize ${m.bestMatch}, duplicating it in your library is the better path.`;
+    }
+    return `Importing keeps the ${missing} sound${missing === 1 ? '' : 's'} your ${m.bestMatch} copy doesn't have. Uncheck only if you don't want them.`;
+  }
+  if (m.verdict === 'variant') {
+    return `Probably a different version of ${m.bestMatch}. Import it if you want both versions in your library.`;
   }
   return null;
 }
@@ -447,6 +474,8 @@ module.exports = {
   segmentCandidateRecords,
   matchCandidateAgainstLibrary,
   verdictLabel,
+  verdictTip,
+  isFullyOwned,
   VARIANT_DISPLAY_MIN,
   BOARD_WRAPPER_DIRS,
   CUSTOMIZABLE_DIRS,
