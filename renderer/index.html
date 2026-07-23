@@ -19266,15 +19266,23 @@ require(['vs/editor/editor.main'], function () {
       window._sfDupSummaryText = (owned, flagged, total) => {
         const parts = [];
         if (owned > 0) {
+          // Singular frame when the whole review is ONE font — "one of these
+          // fonts" reads wrong with a single row on screen.
+          parts.push(total === 1
+            ? 'This font is already in your library, so it starts unchecked.'
+            : owned === 1
+              ? 'One of these fonts is already in your library, so it starts unchecked.'
+              : `${owned === total ? 'All' : owned} of these fonts are already in your library, so they start unchecked.`);
           parts.push(owned === 1
-            ? 'One of these fonts is already in your library, so it starts unchecked.'
-            : `${owned === total ? 'All' : owned} of these fonts are already in your library, so they start unchecked.`);
-          parts.push('You can still check any of them to import a second copy. To customize a font you already own, open it in your library and duplicate it there.');
+            ? 'You can still check it to import a second copy. To customize a font you already own, open it in your library and duplicate it there.'
+            : 'You can still check any of them to import a second copy. To customize a font you already own, open it in your library and duplicate it there.');
         }
         if (flagged > 0) {
-          parts.push(flagged === 1
-            ? 'One more is a close match to a font you own; see the note on its row before importing.'
-            : `${flagged} more are close matches to fonts you own; see the notes on their rows before importing.`);
+          parts.push(total === 1
+            ? 'This font is a close match to one you own; see the note on its row before importing.'
+            : flagged === 1
+              ? 'One more is a close match to a font you own; see the note on its row before importing.'
+              : `${flagged} more are close matches to fonts you own; see the notes on their rows before importing.`);
         }
         return parts.join(' ');
       };
