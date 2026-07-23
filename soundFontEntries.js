@@ -31,6 +31,14 @@ function ensureEntriesRoot(userData) {
   return root;
 }
 
+// Central per-file manifest store, kept OUTSIDE entry/source folders so it can never
+// export to an SD card. Keyed by uuid: entries/<entryUuid>.json (the live current state
+// of a library font), sources/<sourceUuid>.json (the static source version). See
+// local/sound-font-provenance-design.md §12.4.
+function fileHashManifestPath(userData, kind, uuid) {
+  return path.join(userData, 'soundFonts', '.filehashes', kind, `${uuid}.json`);
+}
+
 // entryUuid backfill: every library entry needs a per-folder identity so
 // the backup merge step can disambiguate duplicates (Sabine vs Sabine_KT
 // that both came from the same source candidate). Entries created before
@@ -733,8 +741,18 @@ function deleteEntry(userData, name) {
   if (!name) return { ok: false, error: 'Missing name' };
   const dir = path.join(entriesRoot(userData), name);
   if (!fs.existsSync(dir)) return { ok: true, deleted: false };
+  // Capture entryUuid BEFORE removing the folder so the central per-file manifest
+  // can be dropped too. The store is keyed by uuid and lives OUTSIDE this folder,
+  // so rmSync below doesn't touch it — we clean it explicitly. Best-effort: an
+  // orphaned manifest is harmless, but removing it keeps the store honest.
+  let entryUuid = null;
+  try { entryUuid = (JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8')) || {}).entryUuid || null; }
+  catch {}
   try {
     fs.rmSync(dir, { recursive: true, force: true });
+    if (entryUuid) {
+      try { fs.rmSync(fileHashManifestPath(userData, 'entries', entryUuid), { force: true }); } catch {}
+    }
     return { ok: true, deleted: true };
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };
@@ -974,17 +992,27 @@ function recomputeEntryContentHash(userData, entryName) {
   let meta;
   try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); }
   catch { return null; }
-  const { hashItemDir } = require('./soundFontFileHash');
-  const hash = hashItemDir(entryDir);
-  if (!hash) return null;
+  // One walk yields the per-file records; fold them for the aggregate AND persist them
+  // as the entry's LIVE manifest in the central store, so meta.contentHash and the
+  // manifest stay in step and no second read is added. (hashRecords over the unfiltered
+  // records is byte-for-byte what hashItemDir returned before.)
+  const { collectFileRecords, hashRecords, writeFileHashManifest } = require('./soundFontFileHash');
+  const records = collectFileRecords(entryDir);
+  if (records === null) return null;
+  const hash = hashRecords(records);
   const { fileCount, totalBytes } = _walkContentSignals(entryDir);
+  const hashedAt = new Date().toISOString();
+  if (!meta.entryUuid) meta.entryUuid = crypto.randomUUID();
   meta.contentHash = hash;
   meta.contentFileCount = fileCount;
   meta.contentTotalBytes = totalBytes;
-  meta.contentHashedAt = new Date().toISOString();
+  meta.contentHashedAt = hashedAt;
   meta.contentHashDirty = false;
   try { fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2)); }
   catch {}
+  // Best-effort LIVE entry manifest → central store (never in the entry folder, so it
+  // can't leak to a card). A rebuildable cache, so a miss never fails the recompute.
+  writeFileHashManifest(fileHashManifestPath(userData, 'entries', meta.entryUuid), records, hash, hashedAt);
   return hash;
 }
 

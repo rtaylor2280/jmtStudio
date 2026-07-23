@@ -2257,7 +2257,7 @@ ipcMain.handle('dialog:selectCommonSource', async (_, { mode = 'folder' } = {}) 
   return { ok: true, filePath: result.filePaths[0] };
 });
 
-ipcMain.handle('sources:exportToDownloads', async (_, { uuid, destDir } = {}) => {
+ipcMain.handle('sources:exportToDownloads', async (event, { uuid, destDir, format } = {}) => {
   try {
     const source = soundFontSources.openSource(app.getPath('userData'), uuid);
     if (!source) return { ok: false, error: `Source not found: ${uuid}` };
@@ -2265,7 +2265,21 @@ ipcMain.handle('sources:exportToDownloads', async (_, { uuid, destDir } = {}) =>
     // Windows (e.g. D:\Downloads) are respected; falls through to system
     // defaults on Mac/Linux.
     const target = destDir || app.getPath('downloads');
-    const result = await source.exportToDownloads(target);
+    // Forward the export's cumulative progress snapshots (phase, bytes, current
+    // file) to the renderer, throttled to ~80ms so a multi-GB reconstruction
+    // doesn't flood IPC. These are snapshots, not byte deltas — send the latest.
+    let lastSent = 0, pending = null;
+    const onProgress = (p) => {
+      pending = p;
+      const now = Date.now();
+      if (now - lastSent >= 80) {
+        lastSent = now;
+        try { event.sender.send('soundFonts:sourceExportProgress', pending); } catch {}
+        pending = null;
+      }
+    };
+    const result = await source.exportToDownloads(target, { format, onProgress });
+    if (pending) { try { event.sender.send('soundFonts:sourceExportProgress', pending); } catch {} }
     return { ok: true, ...result };
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };
@@ -2293,31 +2307,6 @@ ipcMain.handle('dialog:pickExportDir', async (_, { title } = {}) => {
   }
 });
 
-// Standalone "Export source…" — opens a folder picker so the user can
-// drop the source archive wherever they want (saber SD card, an external
-// backup drive, a project folder), instead of the silent always-Downloads
-// behavior of the delete-cascade checkbox. Remembers the last chosen dir
-// the same way other export flows do.
-ipcMain.handle('sources:exportToPicked', async (_, { uuid } = {}) => {
-  try {
-    const source = soundFontSources.openSource(app.getPath('userData'), uuid);
-    if (!source) return { ok: false, error: `Source not found: ${uuid}` };
-    const lastDir = Store.get('lastExportDir') || app.getPath('downloads');
-    const label = (source.meta && source.meta.originalName) || 'source';
-    const { canceled, filePaths } = await dialog.showOpenDialog(win, {
-      title: `Export "${label}" to…`,
-      defaultPath: lastDir,
-      properties: ['openDirectory', 'createDirectory'],
-    });
-    if (canceled || !filePaths?.length) return { ok: false, canceled: true };
-    const target = filePaths[0];
-    Store.set('lastExportDir', target);
-    const result = await source.exportToDownloads(target);
-    return { ok: true, ...result };
-  } catch (err) {
-    return { ok: false, error: String(err && err.message || err) };
-  }
-});
 
 // Import-from-link: peel a purchase/receipt URL down to a font archive and
 // download it to a temp file, streaming honest byte progress to the renderer.
@@ -2480,6 +2469,23 @@ ipcMain.handle('sources:import', async (event, { sourcePath, originalName, metad
       forceNewSource,
       onProgress: send,
     });
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
+// Optimize a source: build its per-file manifest then intra-source dedup it (§13).
+// SYNCHRONOUS — awaits completion so the caller knows it's done (no background lag, no
+// stale-cache indicator). The single-file import path calls this from the renderer after
+// commit; idempotent + verify-before-commit; single-format zips and folder sources are a
+// no-op. Returns the dedup result.
+ipcMain.handle('sources:optimize', async (_, { uuid } = {}) => {
+  if (!uuid) return { ok: false, error: 'Missing uuid' };
+  const ud = app.getPath('userData');
+  try {
+    await soundFontSources.ensureSourceManifest(ud, uuid);
+    const r = await soundFontSources.dedupeSource(ud, uuid);
+    return { ok: true, ...(r || {}) };
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };
   }
@@ -3234,6 +3240,26 @@ ipcMain.handle('shell:openExternal', (_, url) => {
   shell.openExternal(url);
 });
 
+// Reveal a file in the OS file manager with it selected (Explorer / Finder /
+// Linux file manager — selection is best-effort on Linux). Used by the export
+// completion summary so the user is taken straight to the artifact instead of
+// hunting for it in a date-sorted folder. Resolve + existence-check first,
+// because showItemInFolder silently does nothing on a bad/relative path; fall
+// back to opening the containing folder so the user always lands somewhere.
+ipcMain.handle('shell:showItemInFolder', async (_, p) => {
+  try {
+    if (!p) return { ok: false, error: 'no path' };
+    const full = path.resolve(String(p));
+    if (fs.existsSync(full)) { shell.showItemInFolder(full); return { ok: true }; }
+    const dir = path.dirname(full);
+    if (fs.existsSync(dir)) {
+      const err = await shell.openPath(dir);
+      return err ? { ok: false, error: err } : { ok: true, fallback: 'dir' };
+    }
+    return { ok: false, error: `Not found: ${full}` };
+  } catch (e) { return { ok: false, error: String(e && e.message || e) }; }
+});
+
 // Read-only scan of removable volumes for the "Read my Proffie SD card" flow.
 ipcMain.handle('sdcard:scan', () => sdCardDetect.scan());
 
@@ -3261,7 +3287,7 @@ ipcMain.handle('sdcard:readBytes', (_, p) => {
   try { const b = fs.readFileSync(p); return b.length > 20 * 1024 * 1024 ? null : b.toString('base64'); } catch { return null; }
 });
 ipcMain.handle('sdcard:findConfigs', (_, p) => { try { return sdCardDetect.findConfigs(p); } catch { return []; } });
-ipcMain.handle('sdcard:analyzeFonts', (_, p) => { try { return sdCardDetect.analyzeFonts(p); } catch (e) { return { path: p, error: String(e && e.message || e), fonts: [] }; } });
+ipcMain.handle('sdcard:analyzeFonts', async (_, p) => { try { return await sdCardDetect.analyzeFonts(p); } catch (e) { return { path: p, error: String(e && e.message || e), fonts: [] }; } });
 // Copy a file or folder OFF a card to a user-chosen location. Read-only on the card side;
 // only ever writes to destDir. Collision-safe (" (N)" suffix).
 ipcMain.handle('sdcard:copyOut', (_, { srcPath, destDir }) => {

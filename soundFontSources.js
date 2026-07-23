@@ -435,6 +435,7 @@ function deleteSource(userData, uuid) {
   if (!fs.existsSync(dir)) return { ok: true, deleted: false };
   try {
     fs.rmSync(dir, { recursive: true, force: true });
+    removeSourceManifest(userData, uuid); // drop the central per-file manifest too
     return { ok: true, deleted: true };
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };
@@ -800,6 +801,20 @@ function _uniqueDestPath(targetDir, filename) {
   }
 }
 
+// Top-level folders inside a set of file records (board-format dirs like
+// Proffie / cfx / Verso, plus any other subfolder). Root-level files (a bare
+// ReadMe.txt) are not folders. Used to describe an export in its completion
+// summary ("includes Asteria, cfx, GoldenHarvest, …").
+function _topFolders(records) {
+  const set = new Set();
+  for (const r of (records || [])) {
+    const rel = String(r.relPath || '');
+    const slash = rel.indexOf('/');
+    if (slash > 0) set.add(rel.slice(0, slash));
+  }
+  return [...set].sort((a, b) => a.localeCompare(b));
+}
+
 function _normalizeSubPath(p) {
   if (!p) return '';
   return String(p).replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
@@ -950,25 +965,33 @@ function _createZipSource({ uuid, uuidDir, meta }) {
       }
     },
 
-    async exportToDownloads(destDir) {
+    // Export the source. 'zip' (default) copies the on-disk archive exactly (it IS a zip
+    // already, so the copy is instant and bit-perfect); 'folder' extracts the tree. The
+    // freshly written file keeps its natural "now" timestamp so it's findable.
+    async exportToDownloads(destDir, { format = 'zip', onProgress } = {}) {
       if (!destDir) throw new Error('exportToDownloads requires destDir');
       if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
-      const destName = meta.originalName && /\.zip$/i.test(meta.originalName)
-        ? meta.originalName
-        : `${(meta.originalName || uuid).replace(/\.zip$/i, '')}.zip`;
+      const baseName = String(meta.originalName || uuid).replace(/\.zip$/i, '');
+      const files = (await this.listAll()).filter(e => !e.isDir);
+      const folders = _topFolders(files.map(e => ({ relPath: e.fileName })));
+      const totalBytes = files.reduce((s, e) => s + (e.size || 0), 0);
+      if (format === 'folder') {
+        const destPath = _uniqueDestPath(destDir, baseName);
+        const r = await this.extractTo('', destPath, (p) => onProgress && onProgress({
+          phase: 'reconstruct', fileCount: p.fileCount, totalFiles: files.length,
+          bytesDone: p.totalBytes, totalBytes, currentFile: p.currentFile,
+        }));
+        return { destPath, format: 'folder', fileCount: r.fileCount != null ? r.fileCount : files.length, totalBytes: r.totalBytes != null ? r.totalBytes : totalBytes, folders };
+      }
+      const destName = /\.zip$/i.test(String(meta.originalName || '')) ? meta.originalName : `${baseName}.zip`;
       const destPath = _uniqueDestPath(destDir, destName);
       await fs.promises.copyFile(zipPath, destPath);
-      // Stamp the exported file with the captured original mtime so a
-      // round-trip (export now, re-import later) keeps showing the date
-      // the user actually got the font. fs.utimes is cross-platform on
-      // Windows / Mac / Linux. Older sources imported before this field
-      // was captured have no mtime to apply; in that case the dest keeps
-      // its just-written time (no regression from current behavior).
-      if (meta.sourceFileMtimeMs && meta.sourceFileMtimeMs > 0) {
-        const t = new Date(meta.sourceFileMtimeMs);
-        try { await fs.promises.utimes(destPath, t, t); } catch {}
-      }
-      return { destPath };
+      // Windows copyFile inherits the SOURCE file's mtime, which would backdate
+      // this fresh export to its import date and bury it in a date-sorted view.
+      // Stamp "now" so it lands under Today like any download.
+      try { const now = new Date(); await fs.promises.utimes(destPath, now, now); } catch {}
+      if (onProgress) onProgress({ phase: 'compress', bytesDone: totalBytes, totalBytes, currentFile: destName });
+      return { destPath, format: 'zip', fileCount: files.length, totalBytes, folders };
     },
   };
 }
@@ -1070,36 +1093,29 @@ function _createFolderSource({ uuid, uuidDir, meta }) {
       return { fileCount, totalBytes };
     },
 
-    async exportToDownloads(destDir) {
+    // Export the source. 'zip' (default) archives the folder tree into one tidy artifact;
+    // 'folder' copies the tree as-is. Both stream real per-file progress. The freshly written
+    // output keeps its natural "now" timestamp so it's findable in a date-sorted view.
+    async exportToDownloads(destDir, { format = 'zip', onProgress } = {}) {
       if (!destDir) throw new Error('exportToDownloads requires destDir');
       if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
-      // Folder sources are archived into a single zip on export so the user
-      // gets one tidy artifact in Downloads instead of a loose tree of files,
-      // and so the round-trip (re-import the exported file) works the same
-      // way zip-format sources do.
       const baseName = String(meta.originalName || uuid).replace(/\.zip$/i, '');
-      const destPath = _uniqueDestPath(destDir, `${baseName}.zip`);
-      const archiver = require('archiver');
-      await new Promise((resolve, reject) => {
-        const ws = fs.createWriteStream(destPath);
-        // forceZip64 so individual sources past the 2 GiB classic-zip
-        // ceiling export cleanly. Same rationale as soundFontBackup.js.
-        const archive = archiver('zip', { zlib: { level: 6 }, forceZip64: true });
-        ws.on('close', resolve);
-        ws.on('error', reject);
-        archive.on('error', reject);
-        archive.pipe(ws);
-        archive.directory(folderRoot, false);
-        archive.finalize();
-      });
-      // Apply the captured original folder mtime to the freshly written
-      // zip so a round-trip preserves the user's collection date. Same
-      // rationale as the zip-source path above.
-      if (meta.sourceFileMtimeMs && meta.sourceFileMtimeMs > 0) {
-        const t = new Date(meta.sourceFileMtimeMs);
-        try { await fs.promises.utimes(destPath, t, t); } catch {}
+      const files = (await this.listAll()).filter(e => !e.isDir);
+      const folders = _topFolders(files.map(e => ({ relPath: e.fileName })));
+      const totalBytes = files.reduce((s, e) => s + (e.size || 0), 0);
+      if (format === 'folder') {
+        const destPath = _uniqueDestPath(destDir, baseName);
+        const r = await this.extractTo('', destPath, (p) => onProgress && onProgress({
+          phase: 'reconstruct', fileCount: p.fileCount, totalFiles: files.length,
+          bytesDone: p.totalBytes, totalBytes, currentFile: p.currentFile,
+        }));
+        return { destPath, format: 'folder', fileCount: r.fileCount != null ? r.fileCount : files.length, totalBytes: r.totalBytes != null ? r.totalBytes : totalBytes, folders };
       }
-      return { destPath };
+      const destPath = _uniqueDestPath(destDir, `${baseName}.zip`);
+      await zipFolderToFile(folderRoot, destPath, (p) => onProgress && onProgress({
+        phase: 'compress', bytesDone: p.bytesProcessed, totalBytes: p.totalBytes || totalBytes, currentFile: p.currentFile,
+      }));
+      return { destPath, format: 'zip', fileCount: files.length, totalBytes, folders };
     },
   };
 }
@@ -1279,9 +1295,19 @@ function openSource(userData, uuid) {
   const meta = readSourceMeta(uuidDir);
   if (!meta) return null;
   const ctx = { uuid, uuidDir, meta };
-  if (meta.format === 'zip') return _createZipSource(ctx);
-  if (meta.format === 'folder') return _createFolderSource(ctx);
-  throw new Error(`Unknown source format: ${meta.format}`);
+  let src;
+  if (meta.format === 'zip') src = _createZipSource(ctx);
+  else if (meta.format === 'folder') src = _createFolderSource(ctx);
+  else throw new Error(`Unknown source format: ${meta.format}`);
+  // A deduped source (§13) presents a VIRTUAL full tree over its trimmed archive: every
+  // consumer keeps seeing the complete multi-format bundle; only the bytes on disk are
+  // deduped. Flag off (no meta.deduped, the case for every source today) → the physical
+  // source is returned unchanged, so this is inert until dedup actually ships.
+  if (meta.deduped) {
+    const bc = _loadSourceBreadcrumb(userData, uuid, uuidDir);
+    if (bc && Array.isArray(bc.records)) return _virtualizeSource(src, bc.records);
+  }
+  return src;
 }
 
 // ── Persistent content hash (backup-side) ────────────────
@@ -1552,9 +1578,317 @@ function openSourceAtPath(absPath) {
   return null;
 }
 
+// ── Per-file source manifest (static provenance) ───────────────────────────
+// Central per-file manifest path (mirrors the entries helper in soundFontEntries;
+// kept here too so sources manage their own manifests without a cross-require).
+function fileHashManifestPath(userData, kind, uuid) {
+  return path.join(userData, 'soundFonts', '.filehashes', kind, `${uuid}.json`);
+}
+
+// Build (once) the STATIC comprehensive per-file manifest for a source: EVERY file in
+// the source — extras, tracks, all variants, non-Proffie content — keyed by its path
+// within the source. Frozen: the source is immutable, so if the manifest already exists
+// we skip and never recompute. Async + ONE-OPEN (the zip is opened a single time and
+// every entry is read from that handle, never re-opened per file) + yielding, so it can
+// run deferred after import without freezing the UI. Returns { records, contentHash } or
+// null. NOTE: an inner .zip nested inside the source is hashed as one blob — its contents
+// are not recursed into yet; a follow-on if any bundles nest zips with variants inside.
+async function ensureSourceManifest(userData, sourceUuid) {
+  if (!userData || !sourceUuid) return null;
+  const fh = require('./soundFontFileHash');
+  const crypto = require('crypto');
+  const outPath = fileHashManifestPath(userData, 'sources', sourceUuid);
+  const existing = fh.readFileHashManifest(outPath);
+  if (existing) return existing; // static — computed once, never recomputed
+
+  const uuidDir = path.join(sourcesRoot(userData), sourceUuid);
+  const meta = readSourceMeta(uuidDir);
+  if (!meta) return null;
+
+  const keep = (rel) => rel && rel !== 'meta.json' && !_isNoisePath(rel);
+  const records = [];
+  const pushHash = (rel, size, buf) => records.push({
+    relPath: rel, size: (size != null ? size : buf.length),
+    fileHash: crypto.createHash('sha256').update(buf).digest('hex'),
+  });
+
+  try {
+    if (meta.format === 'zip') {
+      // One open; read every entry from that single handle (no per-file re-open).
+      const zip = _openZip(path.join(uuidDir, 'source.zip'));
+      try {
+        const entries = await _readAllZipEntries(zip);
+        for (const e of entries) {
+          if (e.isDir || !keep(e.fileName)) continue;
+          let buf; try { buf = await _readZipEntryToBuffer(zip, e); } catch { continue; }
+          pushHash(e.fileName, e.size, buf);
+        }
+      } finally { await zip.close(); }
+    } else if (meta.format === 'folder') {
+      // Folder readFile is a cheap fs read (no re-open cost), so the abstraction is fine.
+      const source = openSource(userData, sourceUuid);
+      if (!source) return null;
+      const entries = await source.listAll();
+      for (const e of entries) {
+        if (e.isDir || !keep(e.fileName)) continue;
+        let buf; try { buf = await source.readFile(e.fileName); } catch { continue; }
+        pushHash(e.fileName, e.size, buf);
+      }
+    } else {
+      return null;
+    }
+  } catch { return null; }
+
+  records.sort((a, b) => (a.relPath < b.relPath ? -1 : a.relPath > b.relPath ? 1 : 0));
+  const aggregate = fh.hashRecords(records);
+  fh.writeFileHashManifest(outPath, records, aggregate);
+  return { records, contentHash: aggregate };
+}
+
+// Drop a source's manifest (called on source delete — the store is keyed by uuid and
+// lives outside the source folder, so removing the folder doesn't touch it).
+function removeSourceManifest(userData, sourceUuid) {
+  try { fs.rmSync(fileHashManifestPath(userData, 'sources', sourceUuid), { force: true }); } catch {}
+}
+
+// Load a deduped source's breadcrumb (its FULL original per-file tree). Prefers the durable
+// in-source copy that dedup writes (§13.1 — it travels with the source and is load-bearing),
+// falling back to the central manifest.
+function _loadSourceBreadcrumb(userData, uuid, uuidDir) {
+  const fh = require('./soundFontFileHash');
+  return fh.readFileHashManifest(path.join(uuidDir, '.jmt-source-manifest.json'))
+    || fh.readFileHashManifest(fileHashManifestPath(userData, 'sources', uuid));
+}
+
+// Transparent virtualization (§13.2). Wrap a physical, possibly-deduped source so it presents
+// the FULL original tree from the breadcrumb, resolving any trimmed path to its canonical
+// present twin by content hash. Inert-safe: if every breadcrumb path is still physically
+// present (source not yet deduped), it behaves identically to the physical source. Only
+// listAll / browse / readFile are virtualized — the programmatic readers every consumer uses;
+// extractTo stays physical (reconstruction gets its own path in a later step).
+function _virtualizeSource(physical, records) {
+  const recs = (records || []).filter(r => r && r.fileHash !== '<empty>');
+  const byPath = new Map();
+  const byHash = new Map();
+  for (const r of recs) {
+    byPath.set(r.relPath, r);
+    if (!byHash.has(r.fileHash)) byHash.set(r.fileHash, []);
+    byHash.get(r.fileHash).push(r.relPath);
+  }
+  const virtualEntries = recs.map(r => ({ fileName: r.relPath, size: r.size, isDir: false }));
+  const norm = (p) => String(p).replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+  let presentSet = null;
+  async function present() {
+    if (presentSet) return presentSet;
+    const phys = await physical.listAll();
+    presentSet = new Set(phys.filter(e => !e.isDir).map(e => e.fileName));
+    return presentSet;
+  }
+  return Object.assign({}, physical, {
+    virtualized: true,
+    async listAll() { return virtualEntries.map(e => ({ ...e })); },
+    async browse(subPath) { return _listAtPath(virtualEntries, norm(subPath)); },
+    async readFile(p) {
+      const key = norm(p);
+      const pres = await present();
+      if (pres.has(key)) return await physical.readFile(key);
+      // Trimmed path — resolve to any present twin sharing its content hash.
+      const rec = byPath.get(key);
+      if (rec) {
+        for (const twin of (byHash.get(rec.fileHash) || [])) {
+          if (pres.has(twin)) return await physical.readFile(twin);
+        }
+      }
+      return await physical.readFile(key); // not found → let the physical layer throw normally
+    },
+    // Reconstruct the FULL original subtree (trimmed board formats rebuilt from canonical
+    // copies) to destDir. This is the export/reconstruction path (§13.3) — every consumer that
+    // extracts a deduped source gets the complete bundle back, byte-identical per file.
+    async extractTo(subPath, destDir, onProgress) {
+      const base = norm(subPath);
+      const prefix = base ? base + '/' : '';
+      const destResolved = path.resolve(destDir);
+      if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+      let fileCount = 0, totalBytes = 0;
+      for (const r of recs) {
+        if (base && r.relPath !== base && !r.relPath.startsWith(prefix)) continue;
+        const rel = base ? r.relPath.slice(prefix.length) : r.relPath;
+        if (!rel) continue;
+        const destPath = path.join(destDir, rel.replace(/\//g, path.sep));
+        const resolved = path.resolve(destPath);
+        if (resolved !== destResolved && !resolved.startsWith(destResolved + path.sep)) {
+          throw new Error(`Refused to extract outside destination: ${rel}`);
+        }
+        const buf = await this.readFile(r.relPath);
+        fs.mkdirSync(path.dirname(destPath), { recursive: true });
+        fs.writeFileSync(destPath, buf);
+        fileCount++; totalBytes += buf.length;
+        if (onProgress) onProgress({ fileCount, totalBytes, currentFile: rel });
+      }
+      return { fileCount, totalBytes };
+    },
+    // Export the FULL original bundle (trimmed board formats rebuilt), not the slim on-disk
+    // archive. `format` is 'zip' (default — a single archive, for backup / re-import) or
+    // 'folder' (the extracted tree, ready to drop on a card). `onProgress` reports real work
+    // — every reconstructed file, with a running byte total — so the UI shows files flying by
+    // against an accurate bar instead of a blind spinner. The rebuilt output is content-per-file
+    // identical to the original (its zip-container bytes need not match). The freshly written
+    // file keeps its natural "now" timestamp so it's findable in a date-sorted view; the
+    // acquired date lives on the entry in-app, not on the exported file.
+    async exportToDownloads(destDir, { format = 'zip', onProgress } = {}) {
+      if (!destDir) throw new Error('exportToDownloads requires destDir');
+      if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+      const meta = physical.meta || {};
+      const baseName = (meta.originalName || 'source').replace(/\.zip$/i, '');
+      const grandTotal = recs.reduce((s, r) => s + (r.size || 0), 0);
+      const grandFiles = recs.length;
+      const folders = _topFolders(recs);
+      if (format === 'folder') {
+        const destPath = _uniqueDestPath(destDir, baseName);
+        await this.extractTo('', destPath, (p) => onProgress && onProgress({
+          phase: 'reconstruct', fileCount: p.fileCount, totalFiles: grandFiles,
+          bytesDone: p.totalBytes, totalBytes: grandTotal, currentFile: p.currentFile,
+        }));
+        return { destPath, format: 'folder', fileCount: grandFiles, totalBytes: grandTotal, folders, reconstructed: true };
+      }
+      // zip: reconstruct to a temp tree, then archive it. Two passes keep memory bounded on
+      // multi-GB voicepacks (no whole-bundle buffering) and reuse the proven zipFolderToFile
+      // output. Reconstruction reports real per-file progress; compression reports byte progress.
+      const destPath = _uniqueDestPath(destDir, `${baseName}.zip`);
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'jmt-srcexport-'));
+      try {
+        await this.extractTo('', tmp, (p) => onProgress && onProgress({
+          phase: 'reconstruct', fileCount: p.fileCount, totalFiles: grandFiles,
+          bytesDone: p.totalBytes, totalBytes: grandTotal, currentFile: p.currentFile,
+        }));
+        await zipFolderToFile(tmp, destPath, (p) => onProgress && onProgress({
+          phase: 'compress', bytesDone: p.bytesProcessed, totalBytes: p.totalBytes || grandTotal,
+          currentFile: p.currentFile,
+        }));
+      } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
+      return { destPath, format: 'zip', fileCount: grandFiles, totalBytes: grandTotal, folders, reconstructed: true };
+    },
+  });
+}
+
+// Alternate-board folder names to DEPRIORITIZE when choosing which copy of a duplicated file
+// to keep as canonical — the Proffie / plain copy wins, so the deduped archive stays
+// Proffie-shaped and the board formats are the ones reconstructed. Proffie is NOT in this set.
+const _ALT_BOARD_RX = /^(cfx|verso|xeno|nec|nova|cfx-?ghv?\d*|golden.?harvest|goldenharvest|ghv?\d*|crystal.?focus)$/i;
+function _canonScore(relPath) {
+  return relPath.split('/').filter(s => _ALT_BOARD_RX.test(s)).length; // 0 = Proffie/plain = preferred
+}
+function _pickCanonical(paths) {
+  return [...paths].sort((a, b) => {
+    const sa = _canonScore(a), sb = _canonScore(b);
+    if (sa !== sb) return sa - sb;                 // fewest alt-board segments wins (Proffie)
+    if (a.length !== b.length) return a.length - b.length; // then shorter path
+    return a < b ? -1 : 1;                         // then stable alphabetical
+  })[0];
+}
+
+// Trim intra-source duplicate files (§13): rewrite the archive keeping ONE canonical copy per
+// unique file (Proffie-folder preferred), leaving a durable breadcrumb so every trimmed path
+// reconstructs on demand. SAFETY: verify-before-commit — the slim archive is built to a temp
+// file and EVERY original path is proven to reconstruct to its recorded hash BEFORE the fat
+// archive is swapped out; on any failure the original is left untouched. Idempotent. ZIP only
+// (folder sources: a later step). Returns { deduped, originalFiles, uniqueFiles, savedBytes }
+// or { deduped:false, reason }.
+async function dedupeSource(userData, uuid) {
+  const uuidDir = path.join(sourcesRoot(userData), uuid);
+  const meta = readSourceMeta(uuidDir);
+  if (!meta) return { deduped: false, reason: 'no-meta' };
+  if (meta.deduped) return { deduped: false, reason: 'already' };
+  if (meta.format !== 'zip') return { deduped: false, reason: 'not-zip' };
+
+  const crypto = require('crypto');
+  const fh = require('./soundFontFileHash');
+  let bc = fh.readFileHashManifest(fileHashManifestPath(userData, 'sources', uuid));
+  if (!bc || !Array.isArray(bc.records)) bc = await ensureSourceManifest(userData, uuid);
+  if (!bc || !Array.isArray(bc.records)) return { deduped: false, reason: 'no-breadcrumb' };
+  const records = bc.records.filter(r => r.fileHash !== '<empty>');
+
+  const byHash = new Map();
+  for (const r of records) {
+    if (!byHash.has(r.fileHash)) byHash.set(r.fileHash, []);
+    byHash.get(r.fileHash).push(r.relPath);
+  }
+  const canonicalByHash = new Map();
+  for (const [h, paths] of byHash) canonicalByHash.set(h, _pickCanonical(paths));
+  if (canonicalByHash.size === records.length) return { deduped: false, reason: 'no-duplicates' };
+
+  const zipPath = path.join(uuidDir, 'source.zip');
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jmt-dedup-'));
+  const tmpZip = path.join(uuidDir, '.source.zip.dedup-tmp');
+  try {
+    // Extract ONLY the canonical files (one per unique hash) to a temp folder at their paths.
+    const zip = _openZip(zipPath);
+    try {
+      const entries = await _readAllZipEntries(zip);
+      const entryByName = new Map(entries.filter(e => !e.isDir).map(e => [e.fileName, e]));
+      for (const [h, canonPath] of canonicalByHash) {
+        const src = entryByName.has(canonPath) ? canonPath
+          : (byHash.get(h) || []).find(p => entryByName.has(p));
+        if (!src) throw new Error(`canonical missing in archive for hash ${h.slice(0, 8)}`);
+        const buf = await _readZipEntryToBuffer(zip, entryByName.get(src));
+        const dest = path.join(tmpDir, src.replace(/\//g, path.sep));
+        fs.mkdirSync(path.dirname(dest), { recursive: true });
+        fs.writeFileSync(dest, buf);
+      }
+    } finally { await zip.close(); }
+
+    // Build the slim archive (deterministic) to a temp file.
+    await zipFolderToFile(tmpDir, tmpZip);
+
+    // VERIFY-BEFORE-COMMIT: every ORIGINAL path must reconstruct to its recorded hash.
+    const vzip = _openZip(tmpZip);
+    try {
+      const vents = await _readAllZipEntries(vzip);
+      const vby = new Map(vents.filter(e => !e.isDir).map(e => [e.fileName, e]));
+      for (const r of records) {
+        const ent = vby.get(canonicalByHash.get(r.fileHash)) || vby.get(r.relPath);
+        if (!ent) throw new Error(`verify: ${r.relPath} unresolved in slim archive`);
+        const buf = await _readZipEntryToBuffer(vzip, ent);
+        if (crypto.createHash('sha256').update(buf).digest('hex') !== r.fileHash)
+          throw new Error(`verify: ${r.relPath} hash mismatch`);
+      }
+    } finally { await vzip.close(); }
+
+    // COMMIT: keep the fat archive until the slim one is safely in place.
+    const oldBytes = (() => { try { return fs.statSync(zipPath).size; } catch { return 0; } })();
+    const bak = zipPath + '.pre-dedup';
+    fs.renameSync(zipPath, bak);
+    try { fs.renameSync(tmpZip, zipPath); }
+    catch (e) { try { fs.renameSync(bak, zipPath); } catch {} throw e; }
+    fs.rmSync(bak, { force: true });
+    const newBytes = (() => { try { return fs.statSync(zipPath).size; } catch { return 0; } })();
+
+    // Durable breadcrumb travels WITH the source (load-bearing once trimmed, §13.1).
+    fh.writeFileHashManifest(path.join(uuidDir, '.jmt-source-manifest.json'), records, bc.contentHash, bc.hashedAt);
+    try {
+      updateSourceMeta(userData, uuid, { deduped: true, dedupStats: {
+        originalFiles: records.length, uniqueFiles: canonicalByHash.size,
+        originalArchiveBytes: oldBytes, dedupedArchiveBytes: newBytes,
+      } });
+    } catch {}
+
+    return { deduped: true, originalFiles: records.length, uniqueFiles: canonicalByHash.size,
+      savedBytes: Math.max(0, oldBytes - newBytes) };
+  } catch (e) {
+    return { deduped: false, reason: String(e && e.message || e) };
+  } finally {
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+    try { fs.rmSync(tmpZip, { force: true }); } catch {}
+  }
+}
+
 module.exports = {
   sourcesRoot,
   ensureSourcesRoot,
+  ensureSourceManifest,
+  removeSourceManifest,
+  dedupeSource,
+  _virtualizeSource,
   isNoisePath: _isNoisePath,
   zipFolderToFile,
   walkFolderSorted,

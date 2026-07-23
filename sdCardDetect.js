@@ -554,6 +554,26 @@ async function docxToText(absPath) {
     await zip.close();
   }
 }
+// Async docx name-recovery — the .docx-shaped sibling of _readmeTitle. The sync readme
+// ladder can't read a .docx (it's a zip that needs an async read, so _isReadmeShaped
+// excludes it), which is why a docx-only-named font falls back to a generic name on the
+// fast scan. This recovers it the same way a .txt readme is read: find every .docx in the
+// folder (readme-named ranked first, exactly like the text path), translate each with the
+// same docxToText the doc viewer uses, and run the identical nameFromReadmeText extraction.
+// Returns the raw extracted name (caller cleans, matching _readmeTitle) or null. Read-only.
+async function recoverNameFromDocx(dirPath) {
+  const ents = safeReaddir(dirPath);
+  if (ents.__error) return null;
+  const docxs = ents.filter(e => e.isFile() && /\.docx$/i.test(e.name))
+    .sort((a, b) => _readmeRank(b.name) - _readmeRank(a.name));
+  for (const d of docxs) {
+    try {
+      const name = nameFromReadmeText(await docxToText(path.join(dirPath, d.name)));
+      if (name) return name;
+    } catch { /* skip unreadable / corrupt docx */ }
+  }
+  return null;
+}
 // Standard txt/doc filenames whose NAME is never the font's name — readmes,
 // licenses, settings dumps, index/function listings. (Their CONTENT may name the
 // font; that's _readmeTitle's job.) Matched on the basename with extension gone
@@ -627,7 +647,7 @@ function deriveFontName(dirPath, folderName, opts) {
 // Enumerate the sound-font folders on a card/folder and gather what the import + naming
 // review UI needs per font: a suggested name (+ where it came from) and the two preview
 // sounds (font.wav / hum.wav). Read-only; no card writes.
-function analyzeFonts(dirPath) {
+async function analyzeFonts(dirPath) {
   const ents = safeReaddir(dirPath);
   if (ents.__error) return { path: dirPath, error: ents.__error, fonts: [] };
   const fonts = [];
@@ -642,6 +662,15 @@ function analyzeFonts(dirPath) {
     const fontFile = files.find(f => f.toLowerCase() === 'font.wav');
     const humFile = files.find(f => f.toLowerCase() === 'hum.wav') || files.find(f => /^hum\d+\.wav$/i.test(f));
     const derived = deriveFontName(full, e.name);
+    // Docx recovery: the sync ladder above can't read a .docx, so a font whose only
+    // real name lives in a Word readme lands as 'folder-fallback' here. Give it the
+    // same second shot the import flow gets — same helper, one place.
+    if (derived.source === 'folder-fallback') {
+      try {
+        const docxName = await recoverNameFromDocx(full);
+        if (docxName) { derived.name = docxName; derived.source = 'readme'; }
+      } catch { /* leave the fallback name */ }
+    }
     fonts.push({
       folder: e.name,
       path: full,
@@ -658,4 +687,4 @@ function analyzeFonts(dirPath) {
   return { path: dirPath, fonts };
 }
 
-module.exports = { scan, assessCard, assessPath, assessPicked, classifyCard, listDir, findConfigs, deriveFontName, nameFromReadmeText, docxToText, analyzeFonts, resolveIdentity, isDegenerateVsn, formatVsn, enumerateAllVolumes, enumerateRemovableVolumes, scanFolderHealth, checkWavHealth, checkWavBuffer };
+module.exports = { scan, assessCard, assessPath, assessPicked, classifyCard, listDir, findConfigs, deriveFontName, nameFromReadmeText, docxToText, recoverNameFromDocx, analyzeFonts, resolveIdentity, isDegenerateVsn, formatVsn, enumerateAllVolumes, enumerateRemovableVolumes, scanFolderHealth, checkWavHealth, checkWavBuffer };

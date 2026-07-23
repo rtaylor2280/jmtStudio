@@ -28,6 +28,15 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
+// Per-file hash manifest. The per-file records this module already computes for the
+// aggregate content hash, persisted so provenance / percent-match / card-matching can
+// read a saved set instead of re-walking on demand. Stored in a CENTRAL store keyed by
+// uuid (soundFonts/.filehashes/<kind>/<uuid>.json — caller owns the layout), deliberately
+// OUTSIDE any entry or source folder so it can never leak onto an SD card through an
+// export/write path. A rebuildable cache, never a source of truth — missing/stale is fine
+// (recompute rebuilds it).
+const FILE_HASH_MANIFEST_SCHEMA = 1;
+
 // Read a single file and return its sha256 hex. Small files (most wavs
 // are under 1 MB) go through the buffer-at-a-time fast path so we avoid
 // the bookkeeping of a streamed Hash for thousands of tiny entries.
@@ -178,6 +187,41 @@ function hashItemDir(itemRoot) {
   return hashRecords(records);
 }
 
+// Write a per-file manifest to an explicit path (the caller owns the central-store
+// layout, e.g. soundFonts/.filehashes/entries/<uuid>.json). `records` is the array
+// collectFileRecords returns; `aggregate` is the folded hashRecords() digest, stored
+// inside as a self-verify anchor (a reader can confirm freshness by re-folding records
+// or comparing to meta.contentHash). Creates the parent dir. Best-effort: a write
+// failure is swallowed because the manifest is a rebuildable cache — losing it only
+// means the next consumer walks live. Returns true on write.
+function writeFileHashManifest(filePath, records, aggregate, hashedAt) {
+  if (!filePath || !Array.isArray(records)) return false;
+  const payload = {
+    schemaVersion: FILE_HASH_MANIFEST_SCHEMA,
+    algo: 'sha256',
+    hashedAt: hashedAt || new Date().toISOString(),
+    contentHash: aggregate || hashRecords(records),
+    records,
+  };
+  try {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, JSON.stringify(payload));
+    return true;
+  } catch { return false; }
+}
+
+// Read a per-file manifest from an explicit path. Returns the parsed object, or null
+// when it is absent / unreadable. Callers verify freshness (re-fold `.records`, or
+// compare `.contentHash` to the item's meta.contentHash) and fall back to a live walk
+// on a miss — so a missing or stale manifest degrades gracefully, never breaks.
+function readFileHashManifest(filePath) {
+  if (!filePath) return null;
+  try {
+    if (!fs.existsSync(filePath)) return null;
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch { return null; }
+}
+
 // Convenience: hash every top-level child directory inside `bucketRoot`
 // and return a { name: hash } map. The export pass uses this once per
 // bucket (sources, library, common) so the renderer's progress UI can
@@ -196,4 +240,5 @@ function hashBucketChildren(bucketRoot) {
   return out;
 }
 
-module.exports = { hashItemDir, hashBucketChildren, collectFileRecords, hashRecords, hashFile: _hashFile };
+module.exports = { hashItemDir, hashBucketChildren, collectFileRecords, hashRecords, hashFile: _hashFile,
+  writeFileHashManifest, readFileHashManifest };

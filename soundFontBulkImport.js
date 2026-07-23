@@ -43,7 +43,7 @@ const soundFontVendors = require('./soundFontVendors');
 const soundFontCommon = require('./soundFontCommon');
 const soundFontSharedTracks = require('./soundFontSharedTracks');
 const soundFontFileHash = require('./soundFontFileHash');
-const { checkWavBuffer, deriveFontName, docxToText, nameFromReadmeText } = require('./sdCardDetect');
+const { checkWavBuffer, deriveFontName, recoverNameFromDocx } = require('./sdCardDetect');
 
 const MAX_SCAN_DEPTH_BEFORE_HALT = 6;
 
@@ -649,11 +649,13 @@ async function importPlannedSource({ userData, src, fromSdCard }, onSubProgress)
   const _guidedDate    = src.guidedAcquisitionDate && String(src.guidedAcquisitionDate).trim();
   const vendorFromUser = !!_guidedVendor;
   let effectiveVendor = vendorFromUser ? _guidedVendor : detectedVendor;
-  // SD-card path: an undetected vendor defaults to "Unknown" — an acceptable
-  // creator for a font that came off someone's card — so it imports cleanly with
-  // NO Needs-review flag, even on Quick import. The regular bulk path leaves it
-  // empty so it hits creator_empty -> Needs review (let the user figure it out).
-  if (!effectiveVendor && fromSdCard) effectiveVendor = 'Unknown';
+  // An UNDETECTED creator stays empty on every path, SD card included, so it hits
+  // creator_empty -> Needs review. "Undetected" (we couldn't find it) and "Unknown"
+  // (a real, deliberately-anonymous creator) are different answers: we never auto-stamp
+  // "Unknown" here because we can't tell the two apart programmatically. The user asserts
+  // "Unknown" themselves (a standardized creator value) when they know a font is a genuine
+  // orphan; that resolves the flag. Leaving it undetected imports fine and just stays
+  // flagged until resolved.
   // Website precedence: an explicit guided website wins; otherwise the known-
   // vendor site, but only when the (auto-detected or user-confirmed) vendor
   // still matches what we detected — a different typed vendor gets no guess.
@@ -762,6 +764,18 @@ async function importPlannedSource({ userData, src, fromSdCard }, onSubProgress)
       const gn = String(src.guidedName).trim();
       if (gn) proposedName = gn;
     }
+    // Docx name recovery for QUICK import. The guided path already recovers a docx
+    // name in enrichSourceForGuided (it arrives here as src.guidedName), but quick
+    // import skips enrichment, so without this a docx-only-named font lands under the
+    // generic folder name. Same helper the guided path and the SD surface use — read
+    // the Word readme exactly like a .txt and pull the name the same way.
+    let nameRecoveredFromDocx = false;
+    if (src.nameSource === 'folder-fallback' && !src.guidedName && src.absPath && candidates.length === 1) {
+      try {
+        const nm = await recoverNameFromDocx(src.absPath);
+        if (nm) { proposedName = cleanSuggestedName(nm) || nm; nameRecoveredFromDocx = true; }
+      } catch { /* leave the fallback name */ }
+    }
     const reviewReasons = [];
     // Bundle prepend for ambiguous candidate names. Two triggers:
     //   1. Variants (cand.isVariant): the detector emitted multiple
@@ -806,7 +820,11 @@ async function importPlannedSource({ userData, src, fromSdCard }, onSubProgress)
     // be distinctive), surfacing every one as Needs Review at scale
     // becomes noise. The vendorAutoDetected flag on the source meta
     // still indicates the auto-application for users who want to audit.
-    const tags = bundleName ? [bundleName] : [];
+    // Bundle-name tag ONLY for a real multi-font bundle (2+ fonts from one source),
+    // so importing a pack groups its fonts under one filterable tag. A SOLO import
+    // gets no auto-tag: the "bundle name" there is just the lone folder's own name
+    // (e.g. a generic slot like "Bank32"), which is noise as a tag.
+    const tags = (bundleName && candidates.length >= 2) ? [bundleName] : [];
     // Shared tags from the guided review's static tag bar — applied to every
     // font in this batch (deduped against the source-name tag above).
     if (Array.isArray(src.guidedSharedTags)) {
@@ -855,6 +873,18 @@ async function importPlannedSource({ userData, src, fromSdCard }, onSubProgress)
     // matters as a review trigger here.
     if (!effectiveVendor) reviewReasons.push('creator_empty');
     if (versionInfo) reviewReasons.push('multiple_versions_in_source');
+    // Low-confidence name flag for QUICK import. The scan fell back to a
+    // generic folder name (BankNN, a numbered sibling series) with no readme
+    // or name-tag to do better. The guided review surfaces this live as the
+    // amber g-lowconf hint, so a guided user has already seen it and made an
+    // active choice — no persisted flag needed (src.guidedName is always set
+    // on that path). Quick import skips the review screen entirely, so without
+    // this the font lands silently under the wrong name. Flag it so it carries
+    // the same Needs Review warning the guided screen shows.
+    if (src.nameSource === 'folder-fallback' && !src.guidedName && !nameRecoveredFromDocx) reviewReasons.push('name_uncertain');
+    // Note: name-tag names (font name rode along as a .txt filename next to a generic
+    // folder) are NOT flagged — Ryan's field experience is they're reliably correct, so
+    // a warning there is noise. nameSource === 'name-tag' is still tracked internally.
     const entryRes = await soundFontEntries.createEntry({
       userData, sourceUuid, candidate: cand, name: finalName, metadata: meta,
       onProgress: (p) => onSubProgress && onSubProgress({ phase: 'extract', candidate: cIdx + 1, totalCandidates: candidates.length, ...p }),
@@ -880,6 +910,15 @@ async function importPlannedSource({ userData, src, fromSdCard }, onSubProgress)
     }
     entries.push({ name: finalName, ok: true });
   }
+  // Optimize the source INLINE (synchronous, no deferral): build the STATIC per-file manifest
+  // (the breadcrumb), then dedup it (trim duplicate board-format copies, §13 — a no-op for
+  // single-format and folder sources). Idempotent + verify-before-commit, so a failure leaves
+  // the source untouched. Done before this source's import reports complete, so the deduped
+  // state is correct the moment the view refreshes — no background, no stale-cache lag.
+  try {
+    await soundFontSources.ensureSourceManifest(userData, sourceUuid);
+    await soundFontSources.dedupeSource(userData, sourceUuid);
+  } catch {}
   return {
     ok: true,
     sourceUuid,
@@ -973,16 +1012,14 @@ async function enrichSourceForGuided(src) {
     });
     // Late naming from a Word .docx readme. The sync scan can't crack a .docx (it's a
     // zip), so a font whose name fell back to the generic folder name gets one more
-    // shot here in the async pass: read the docx text and run the same readme name
-    // extraction. Read-only; on any failure the fallback name simply stands.
-    if (src.nameSource === 'folder-fallback') {
-      const docx = out.textFiles.find(t => t.absPath && /\.docx$/i.test(t.fileName));
-      if (docx) {
-        try {
-          const nm = nameFromReadmeText(await docxToText(docx.absPath));
-          if (nm) { out.suggestedName = cleanSuggestedName(nm) || nm; out.nameSource = 'readme'; }
-        } catch { /* leave the fallback name */ }
-      }
+    // shot here in the async pass. Shared helper (same one quick import and the SD
+    // surface use): finds any .docx in the folder, reads it like a .txt readme, and
+    // pulls the name the same way. Read-only; on any failure the fallback name stands.
+    if (src.nameSource === 'folder-fallback' && src.absPath) {
+      try {
+        const nm = await recoverNameFromDocx(src.absPath);
+        if (nm) { out.suggestedName = cleanSuggestedName(nm) || nm; out.nameSource = 'readme'; }
+      } catch { /* leave the fallback name */ }
     }
   } catch (e) {
     out.error = String(e && e.message || e);

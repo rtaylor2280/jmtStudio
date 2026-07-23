@@ -2542,6 +2542,15 @@
     100% { transform: translateX(250%); }
   }
   .sf-import-progress-detail { font-size: 0.72rem; color: var(--c-text-dim); margin: 4px 0 0 0; font-variant-numeric: tabular-nums; min-height: 1em; word-break: break-all; }
+  /* Export-source / bulk progress detail. The current file flies by on its own
+     top line (truncated — it never wraps or pushes the layout), with the size +
+     elapsed clock on a stable second line below. Fixed two-line height so the
+     modal holds steady as files change (Ryan, 2026-07-22). */
+  #sf-bulk-progress-detail { line-height: 1.25; min-height: 2.5em; max-height: 2.5em; overflow: hidden; }
+  #sf-bulk-progress-detail .sf-exp-file { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #sf-bulk-progress-detail .sf-exp-size { display: block; color: var(--c-text-sub); }
+  /* Slightly wider than the default modal so long font paths rarely truncate. */
+  #modal-sf-bulk-progress .modal { max-width: 460px; }
   .sf-bulk-review-breakdown { margin: 12px 0 0 0; padding: 10px 12px; background: var(--c-bg-inset); border-radius: 4px; font-size: 0.82rem; line-height: 1.55; max-height: 280px; overflow-y: auto; }
   .sf-bulk-review-breakdown .br-row { display: flex; justify-content: space-between; gap: 12px; }
   .sf-bulk-review-breakdown .br-row + .br-row { margin-top: 4px; }
@@ -4950,6 +4959,10 @@
         <div class="sf-meta-row">
           <span class="sf-meta-label">Archive size</span>
           <span id="sf-source-archive-size" class="sf-meta-val"></span>
+        </div>
+        <div class="sf-meta-row" id="sf-source-optimized-row" style="display:none">
+          <span class="sf-meta-label">Storage</span>
+          <span id="sf-source-optimized-val" class="sf-meta-val" style="color: var(--jmt-blue, #025192)"></span>
         </div>
         <div class="sf-meta-row">
           <span class="sf-meta-label">Tags</span>
@@ -9677,8 +9690,11 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     try {
       const dl = document.getElementById('sf-review-vendor-list');
       if (dl && window._sfGetKnownVendors) {
-        dl.innerHTML = window._sfGetKnownVendors()
-          .map(v => `<option value="${String(v.name || '').replace(/"/g, '&quot;')}"></option>`).join('');
+        // Standardized "Unknown" at top so guided import can assert an anonymous
+        // creator in one click (see the vendor-list seed rationale in the import flow).
+        dl.innerHTML = '<option value="Unknown"></option>'
+          + window._sfGetKnownVendors().filter(v => (v.name || '') !== 'Unknown')
+            .map(v => `<option value="${String(v.name || '').replace(/"/g, '&quot;')}"></option>`).join('');
       }
     } catch {}
     // Build the rows now but keep them OFF-SCREEN. We do NOT open the review
@@ -19263,7 +19279,14 @@ require(['vs/editor/editor.main'], function () {
         }
         if (_sfImportEls.sourcePath) _sfImportEls.sourcePath.textContent = sourcePath;
         if (_sfImportEls.vendorList) {
-          _sfImportEls.vendorList.innerHTML = _sfGetKnownVendors().map(v => `<option value="${_sfEscape(v.name)}"></option>`).join('');
+          // "Unknown" is a first-class, standardized creator value the user can pick
+          // deliberately for a genuinely-anonymous font (a community orphan nobody has
+          // claimed). Seeded at the top of every creator picker so the one token is
+          // reused everywhere (no "Unknown"/"unknown"/"Anonymous" fragmentation). It is
+          // NOT auto-applied — undetected fonts stay empty + Needs Review; picking
+          // "Unknown" is the user's own assertion, which resolves the flag.
+          _sfImportEls.vendorList.innerHTML = '<option value="Unknown"></option>'
+            + _sfGetKnownVendors().filter(v => v.name !== 'Unknown').map(v => `<option value="${_sfEscape(v.name)}"></option>`).join('');
         }
         // Source-level Link starts empty on every fresh source import —
         // there's no auto-detection signal for "this bundle's page" so the
@@ -19711,6 +19734,14 @@ require(['vs/editor/editor.main'], function () {
         if (failures.length) {
           await _sfShowPartialFailures('Some entries failed', failures);
         }
+        // Optimize storage SYNCHRONOUSLY so it's done — and the deduped state + indicator are
+        // correct — by the time the import closes and the view refreshes. No background, no
+        // stale-cache lag. Idempotent, verify-before-commit, no-op for single-format/folder.
+        if (_sfImport && _sfImport.uuid) {
+          if (_sfImportEls.createLabel) _sfImportEls.createLabel.textContent = 'Optimizing storage…';
+          if (_sfImportEls.createBar) _sfImportEls.createBar.style.width = '100%';
+          try { await window.electronAPI.optimizeSource({ uuid: _sfImport.uuid }); } catch {}
+        }
         // The source is now committed (referenced by at least one entry, or
         // attempted by the user). Clear the orphan-cleanup hook before close.
         if (_sfImport) _sfImport.uuid = null;
@@ -19999,6 +20030,7 @@ require(['vs/editor/editor.main'], function () {
           const verb = skipped.length === 1 ? 'is' : 'are';
           return `Source contained ${total} versions (${allVersions.join(', ')}). ${info.taken} was imported; ${skippedJoined} ${verb} still in the source if you want to add ${skipped.length === 1 ? 'it' : 'them'} separately.`;
         },
+        name_uncertain: 'Name is a generic folder name; the real font name couldn’t be detected. Rename if you know it.',
       };
       // Resolve a reason key into its display text, calling the formatter
       // function with the entry context when the entry needs to drive
@@ -20387,7 +20419,10 @@ require(['vs/editor/editor.main'], function () {
             }
           }
           opts.sort((a, b) => a.localeCompare(b));
-          _sfEntryDetailEls.bylineList.innerHTML = opts.map(n => `<option value="${_sfEscape(n)}"></option>`).join('');
+          // Standardized "Unknown" at top — a one-click assertion for an anonymous font
+          // on an already-imported entry (see the vendor-list seed for the rationale).
+          _sfEntryDetailEls.bylineList.innerHTML = '<option value="Unknown"></option>'
+            + opts.filter(n => n !== 'Unknown').map(n => `<option value="${_sfEscape(n)}"></option>`).join('');
         }
         // Notes: textarea reflects current value; toggle resets to closed.
         if (_sfEntryDetailEls.notesInput) _sfEntryDetailEls.notesInput.value = _sfDetailEdit.userNotes;
@@ -20590,6 +20625,16 @@ require(['vs/editor/editor.main'], function () {
         } else {
           activeReviewReasons = _rawReasons;
         }
+        const sanitizedName = _sfSanitizeName(_sfDetailEdit.name);
+        const isRename = sanitizedName !== _sfDetailOriginalName;
+        // Renaming the font IS the user asserting its real name, so it clears the
+        // "check this name" flags (name_uncertain / name_from_tag), mirroring the
+        // creator_empty auto-clear above. Guided import doesn't need this — submitting
+        // the review screen already resolves the name there.
+        if (isRename) {
+          activeReviewReasons = activeReviewReasons.filter(
+            r => r !== 'name_uncertain' && r !== 'name_from_tag');
+        }
         const activeNeedsReview = activeReviewReasons.length > 0;
         const updates = {
           author: _sfDetailEdit.author,
@@ -20606,8 +20651,6 @@ require(['vs/editor/editor.main'], function () {
           // field for back-compat with existing entry meta on disk.
           linkedStyleLibraryEntry: _sfDetailEdit.lastUsedStyleName || '',
         };
-        const sanitizedName = _sfSanitizeName(_sfDetailEdit.name);
-        const isRename = sanitizedName !== _sfDetailOriginalName;
         const res = await window.electronAPI.updateEntryMeta({
           currentName: _sfDetailOriginalName,
           newName: isRename ? sanitizedName : undefined,
@@ -21100,6 +21143,8 @@ require(['vs/editor/editor.main'], function () {
         acquiredConfirmBtn: document.getElementById('btn-sf-source-acquired-confirm'),
         originalFile:    document.getElementById('sf-source-original-file'),
         archiveSize:     document.getElementById('sf-source-archive-size'),
+        optimizedRow:    document.getElementById('sf-source-optimized-row'),
+        optimizedVal:    document.getElementById('sf-source-optimized-val'),
         tagsChips:       document.getElementById('sf-source-tags-chips'),
         tagsInput:       document.getElementById('sf-source-tags-input'),
         notesToggle:     document.getElementById('sf-source-notes-toggle'),
@@ -21665,6 +21710,21 @@ require(['vs/editor/editor.main'], function () {
         // Read-only fields.
         if (_sfSourceDetailEls.originalFile) _sfSourceDetailEls.originalFile.textContent = sm.originalName || '(unknown)';
         if (_sfSourceDetailEls.archiveSize) _sfSourceDetailEls.archiveSize.textContent = sm.fileSize ? _sfFormatBytes(sm.fileSize) : '(unknown)';
+        // Space-optimized indicator: a deduped source (§13) shows what trimming its duplicate
+        // board-format copies saved. Hidden for normal (non-deduped) sources. Nothing is lost —
+        // the full bundle rebuilds on export from the breadcrumb.
+        if (_sfSourceDetailEls.optimizedRow && _sfSourceDetailEls.optimizedVal) {
+          const ds = sm.deduped && sm.dedupStats;
+          if (ds) {
+            const saved = Math.max(0, (ds.originalArchiveBytes || 0) - (ds.dedupedArchiveBytes || 0));
+            const trimmed = Math.max(0, (ds.originalFiles || 0) - (ds.uniqueFiles || 0));
+            _sfSourceDetailEls.optimizedVal.textContent =
+              `Space-optimized: saved ${_sfFormatBytes(saved)} by trimming ${trimmed} duplicate files. Full bundle rebuilds on export.`;
+            _sfSourceDetailEls.optimizedRow.style.display = '';
+          } else {
+            _sfSourceDetailEls.optimizedRow.style.display = 'none';
+          }
+        }
         // Notes.
         if (_sfSourceDetailEls.notesInput) _sfSourceDetailEls.notesInput.value = _sfSourceEdit.userNotes;
         if (_sfSourceDetailEls.notesToggle) _sfSourceDetailEls.notesToggle.classList.toggle('open', !!_sfSourceEdit.userNotes);
@@ -21701,7 +21761,10 @@ require(['vs/editor/editor.main'], function () {
             }
           }
           optsList.sort((a, b) => a.localeCompare(b));
-          _sfSourceDetailEls.creatorList.innerHTML = optsList.map(n => `<option value="${_sfEscape(n)}"></option>`).join('');
+          // Standardized "Unknown" at top — same one-click assertion at the source level
+          // (see the vendor-list seed for the rationale).
+          _sfSourceDetailEls.creatorList.innerHTML = '<option value="Unknown"></option>'
+            + optsList.filter(n => n !== 'Unknown').map(n => `<option value="${_sfEscape(n)}"></option>`).join('');
         }
         // Skeleton placeholders for the three async-filled regions. The
         // entries / files skeletons reuse .sf-source-entries-empty which is
@@ -22543,25 +22606,113 @@ require(['vs/editor/editor.main'], function () {
       });
       // Export the source archive to a user-chosen folder. Standalone
       // back-up action; doesn't touch the library or remove anything.
-      // Picks via OS folder dialog so the user always knows where the
-      // file landed (toast confirms the full path on success).
+      // A deduped source reconstructs its FULL bundle here (real work, not
+      // an instant copy), so: hide the detail modal, pick the destination,
+      // then show the shared progress modal with a live elapsed clock while
+      // the archive is written, and confirm the exact path with a toast on
+      // success. The export is never silent, regardless of archive size.
       _sfSourceDetailEls.exportBtn?.addEventListener('click', async () => {
         if (!_sfSourceOriginalUuid) return;
         const uuid = _sfSourceOriginalUuid;
+        const src = _sfAllSourcesByUuid[uuid];
+        const label = (src && src.meta && (src.meta.bundleName || src.meta.originalName)) || 'source';
+        const fmtB = window._sfFormatBytes || ((n) => `${n} B`);
+        const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+        const restoreDetail = () => _sfSourceDetailEls.modal?.classList.add('active');
+        // In-app dialogs (format choice, progress, completion summary) DOM-stack
+        // behind the detail modal, so hide it for the whole flow and restore at
+        // the end — same reason as the delete flow below. The OS folder picker
+        // floats above regardless, so nothing is lost visually while it's up.
+        _sfSourceDetailEls.modal?.classList.remove('active');
+
+        // 1) Zip or folder? Zip is the backup / re-import artifact; folder is the
+        // extracted tree ready to drop on an SD card.
+        const choice = await promptConfirm({
+          title: 'Export source',
+          message: `Export "${label}" as:`,
+          dropdown: {
+            label: 'Format',
+            value: 'zip',
+            options: [
+              { value: 'zip', label: 'Zip archive — one file, for backup or re-import' },
+              { value: 'folder', label: 'Folder — extracted tree, ready for an SD card' },
+            ],
+          },
+          confirmText: 'Choose destination…',
+          confirmKind: 'primary',
+          cancelText: 'Cancel',
+        });
+        if (!choice || !choice.confirmed) { restoreDetail(); return; }
+        const format = choice.value || 'zip';
+
+        // 2) Where to?
+        const pick = await window.electronAPI.pickExportDir({ title: `Export "${label}" to…` });
+        if (!pick || !pick.ok) { restoreDetail(); return; }
+
+        // 3) Export with live per-file progress against an accurate bar. A deduped
+        // source reconstructs its full bundle (real work), so we show every file
+        // flying by. For a zip the bar spans reconstruct (0–50%) then compress
+        // (50–100%); a folder export is reconstruct only (0–100%).
+        let bytesDone = 0, totalBytes = 0, phase = '', currentFile = '';
+        const t0 = Date.now();
+        const render = () => {
+          const secs = Math.floor((Date.now() - t0) / 1000);
+          const clock = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+          const x = totalBytes ? Math.max(0, Math.min(1, bytesDone / totalBytes)) : 0;
+          const frac = format === 'folder' ? x : (phase === 'compress' ? 0.5 + 0.5 * x : 0.5 * x);
+          const sizeLine = totalBytes > 0
+            ? `${fmtB(bytesDone)} of ${fmtB(totalBytes)}  ·  ${clock}`
+            : clock;
+          _sfDeleteProgress.setProgressLines(frac, currentFile, sizeLine);
+        };
+        const offProg = window.electronAPI.onSourceExportProgress((p) => {
+          if (!p) return;
+          if (p.phase) phase = p.phase;
+          if (typeof p.bytesDone === 'number') bytesDone = p.bytesDone;
+          if (typeof p.totalBytes === 'number') totalBytes = p.totalBytes;
+          if (p.currentFile) currentFile = p.currentFile;
+          render();
+        });
+        _sfDeleteProgress.show('Exporting source', label, 0);
+        const tick = setInterval(render, 250);
+        let r;
         try {
-          const r = await window.electronAPI.exportSourceToPicked({ uuid });
-          if (r && r.canceled) return;
-          if (!r || !r.ok) {
-            promptError('Export failed', (r && r.error) || 'unknown error');
-            return;
-          }
-          // Success: silent. The user picked the destination via the OS
-          // dialog so they already know where the file landed; popping
-          // an "Exported to X" modal would just be a redundant
-          // interruption.
+          r = await window.electronAPI.exportSourceToDownloads({ uuid, destDir: pick.destDir, format });
         } catch (err) {
-          promptError('Export failed', err && err.message || err);
+          r = { ok: false, error: String(err && err.message || err) };
+        } finally {
+          clearInterval(tick);
+          if (offProg) offProg();
+          await _sfDeleteProgress.hide();
         }
+
+        // 4) Outcome. Errors keep the existing dialog. Success shows an in-modal
+        // summary (what it did + where it landed) with a Show-in-folder button —
+        // no corner toast — then returns to the detail modal.
+        if (!r || !r.ok) {
+          promptError('Export failed', (r && r.error) || 'unknown error');
+          restoreDetail();
+          return;
+        }
+        const kind = r.format === 'folder' ? 'a folder' : 'a Zip archive';
+        const lines = [`Exported <strong>${esc(label)}</strong> as ${kind}.`];
+        if (r.fileCount != null) lines.push(`<strong>${r.fileCount}</strong> files · <strong>${esc(fmtB(r.totalBytes || 0))}</strong>`);
+        if (r.folders && r.folders.length) lines.push(`Includes: ${esc(r.folders.join(', '))}`);
+        if (r.reconstructed) lines.push('Rebuilt in full from a space-optimized source.');
+        lines.push(`<span style="display:inline-block;margin-top:6px;opacity:.75;font-family:monospace;font-size:12px;word-break:break-all;">${esc(r.destPath)}</span>`);
+        const showIt = await promptConfirm({
+          title: 'Export complete',
+          messageHtml: lines.join('<br>'),
+          confirmText: 'Show in folder',
+          confirmKind: 'primary',
+          cancelText: 'Done',
+          cancelKind: 'cancel',
+        });
+        if (showIt === true) {
+          const rev = await window.electronAPI.showItemInFolder(r.destPath).catch((e) => ({ ok: false, error: String(e && e.message || e) }));
+          if (!rev || rev.ok === false) promptError('Could not open the folder', (rev && rev.error) || r.destPath);
+        }
+        restoreDetail();
       });
       // Delete source with cascade warning.
       _sfSourceDetailEls.deleteBtn?.addEventListener('click', async () => {
@@ -25833,6 +25984,20 @@ require(['vs/editor/editor.main'], function () {
           if (b) b.style.width = Math.max(0, Math.min(1, frac)) * 100 + '%';
           if (d && detail != null) d.textContent = detail;
         },
+        // Two-line detail variant shared by both export flows: a truncated top
+        // line (the item / current file, which flies by) over a stable bottom
+        // line (size + elapsed clock). Keeps the modal height fixed regardless of
+        // how long the top line gets. innerHTML with escaping since file paths
+        // can contain & < > and callers pass plain text.
+        setProgressLines(frac, topLine, bottomLine) {
+          const b = this.barEl(), d = this.detailEl();
+          if (b) b.style.width = Math.max(0, Math.min(1, frac)) * 100 + '%';
+          if (!d) return;
+          const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+          d.innerHTML =
+            `<span class="sf-exp-file">${topLine ? esc(topLine) : '&nbsp;'}</span>` +
+            `<span class="sf-exp-size">${esc(bottomLine)}</span>`;
+        },
         async hide(minMs = 200) {
           const elapsed = Date.now() - this.startTs;
           if (elapsed < minMs) {
@@ -26364,11 +26529,10 @@ require(['vs/editor/editor.main'], function () {
             : (totalSteps > 0 ? Math.max(0, stepIdx - 1) / totalSteps : 0);
           const secs = Math.floor((Date.now() - _sfExportT0) / 1000);
           const clock = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
-          const bits = [];
-          if (_sfExportLabel) bits.push(_sfExportLabel);
-          if (_sfExportTotalBytes > 0) bits.push(`${_sfFmtB(_sfExportBytesDone)} of ${_sfFmtB(_sfExportTotalBytes)}`);
-          bits.push(clock);
-          _sfDeleteProgress.setProgress(frac, bits.join('  ·  '));
+          const sizeLine = _sfExportTotalBytes > 0
+            ? `${_sfFmtB(_sfExportBytesDone)} of ${_sfFmtB(_sfExportTotalBytes)}  ·  ${clock}`
+            : clock;
+          _sfDeleteProgress.setProgressLines(frac, _sfExportLabel || '', sizeLine);
         };
         const _offExportProg = window.electronAPI.onSoundFontExportProgress(({ delta } = {}) => {
           _sfExportBytesDone += (delta || 0);

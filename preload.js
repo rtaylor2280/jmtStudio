@@ -197,6 +197,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('soundFonts:exportProgress', handler);
   },
 
+  // Per-file progress for a single source export (reconstruct + compress phases).
+  // Payload: { phase, fileCount, totalFiles, bytesDone, totalBytes, currentFile }.
+  onSourceExportProgress: (cb) => {
+    const handler = (_, data) => cb(data);
+    ipcRenderer.on('soundFonts:sourceExportProgress', handler);
+    return () => ipcRenderer.removeListener('soundFonts:sourceExportProgress', handler);
+  },
+
   // ── Sound Fonts — sources (Phase 1) ───────────────────
   listSources:           ()           => ipcRenderer.invoke('sources:list'),
   cleanupOrphanSources:  ()           => ipcRenderer.invoke('sources:cleanupOrphans'),
@@ -223,6 +231,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   importSource:          (params)     => ipcRenderer.invoke('sources:import', params),
   deleteSource:          (params)     => ipcRenderer.invoke('sources:delete', params),
   updateSourceMeta:      (params)     => ipcRenderer.invoke('sources:updateMeta', params),
+  optimizeSource:        (params)     => ipcRenderer.invoke('sources:optimize', params),
   onSourceImportProgress: (cb) => {
     const handler = (_, data) => cb(data);
     ipcRenderer.on('sources:importProgress', handler);
@@ -244,8 +253,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readSourceFile:        (params)     => ipcRenderer.invoke('sources:readFile', params),
   extractFromSource:     (params)     => ipcRenderer.invoke('sources:extractTo', params),
   exportSourceToDownloads: (params)   => ipcRenderer.invoke('sources:exportToDownloads', params),
-  exportSourceToPicked:    (params)   => ipcRenderer.invoke('sources:exportToPicked', params),
   pickExportDir:           (params)   => ipcRenderer.invoke('dialog:pickExportDir', params),
+  showItemInFolder:        (p)        => ipcRenderer.invoke('shell:showItemInFolder', p),
   detectSourceVendor:    (params)     => ipcRenderer.invoke('sources:detectVendor', params),
   detectSourceCandidates: (params)    => ipcRenderer.invoke('sources:detectCandidates', params),
 
