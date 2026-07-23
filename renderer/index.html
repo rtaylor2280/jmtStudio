@@ -35,6 +35,7 @@
     --c-text-faint:   #555555;
     --c-text-hint:    #444444;
     --c-overlay:      rgba(0,0,0,0.75);
+    --c-overlay-stacked: rgba(0,0,0,0.35);
     /* semantic action colors */
     --c-title-accent:   #4af;
     --c-warn-text:      #fa0;
@@ -75,6 +76,7 @@
     --c-text-faint:   #999999;
     --c-text-hint:    #aaaaaa;
     --c-overlay:      rgba(0,0,0,0.50);
+    --c-overlay-stacked: rgba(0,0,0,0.28);
     /* semantic action colors */
     --c-title-accent:   #1a5a9a;
     --c-warn-text:      #a06000;
@@ -1237,6 +1239,19 @@
        user would have to click the modal button a second time. */
     z-index: 10000;
   }
+  /* Stacked-over-a-modal backdrops dim LIGHTLY — remove distraction, don't
+     hide the context underneath (Ryan, 2026-07-23; export flow first, app-wide
+     message-modal sweep tracked in backlog). Covers an overlay stacking over an
+     earlier-in-DOM active overlay, plus the confirm modal (z-index-elevated,
+     earlier in DOM) when it rides over the source-detail modal. */
+  .modal-overlay.active ~ .modal-overlay.active { background: var(--c-overlay-stacked); }
+  body:has(#modal-sf-source-detail.active) #modal-confirm.active { background: var(--c-overlay-stacked); }
+  /* NO entrance animation on modal cards. A fade-in was tried 2026-07-23 to
+     soften the entry⇄source swap and made it WORSE: the card spends its first
+     frames invisible (backdrop-only — the app chrome shows through the dim),
+     which reads as "the window vanished for a moment". With both detail modals
+     sharing an identical fixed frame, the hard single-frame cut is the clean
+     option: the frame never moves, only content changes. */
   .modal-overlay.active { display: flex; }
   /* Confirm / prompt modals stack ABOVE base modals like the entry
      detail view, otherwise a Delete confirm or Rename prompt summoned
@@ -3039,7 +3054,11 @@
   .sf-save-conflict-choices label { display: inline-flex; align-items: center; gap: 4px; font-size: 0.76rem; color: var(--c-text-sub); cursor: pointer; user-select: none; }
   .sf-save-conflict-choices input[type="radio"] { margin: 0; }
   /* Slice 10: source detail modal */
-  #modal-sf-source-detail .modal { width: 820px; max-width: 96vw; height: auto; max-height: 90vh; display: flex; flex-direction: column; padding-bottom: 16px; }
+  /* Fixed height MATCHING the entry detail modal exactly — the two swap into
+     each other, so identical frames make the swap geometry-invariant, and the
+     async region fills (fonts list, file tree) can never resize the card
+     (the shrink-then-grow read, Ryan 2026-07-23). */
+  #modal-sf-source-detail .modal { width: 820px; max-width: 96vw; height: min(90vh, 800px); display: flex; flex-direction: column; padding-bottom: 16px; }
   /* Container is a 4-column grid so all display rows can share column widths
      via subgrid — name column auto-fits the widest name in view, description
      column flexes to take remaining space, meta column sits right-aligned. */
@@ -4731,6 +4750,7 @@
       <p class="sf-import-progress-label" id="sf-create-progress-label">Adding to library…</p>
       <div class="sf-import-progress-track"><div class="sf-import-progress-bar" id="sf-create-progress-bar"></div></div>
       <p class="sf-import-progress-detail" id="sf-create-progress-detail"></p>
+      <p class="sf-import-progress-detail" id="sf-create-progress-elapsed" style="color:var(--c-text-sub)"></p>
     </div>
 
     <div class="modal-btns sf-import-btn-row" style="margin-top:18px;">
@@ -5477,10 +5497,12 @@
 <div class="modal-overlay" id="modal-sf-bulk-progress">
   <div class="modal">
     <h2 id="sf-bulk-progress-title">Working&hellip;</h2>
-    <p id="sf-bulk-progress-detail" class="sf-import-progress-detail"></p>
+    <p id="sf-bulk-progress-label" class="sf-import-progress-label" style="display:none"></p>
     <div class="sf-import-progress-track">
       <div id="sf-bulk-progress-bar" class="sf-import-progress-bar"></div>
     </div>
+    <p id="sf-bulk-progress-detail" class="sf-import-progress-detail"></p>
+    <p id="sf-bulk-progress-elapsed" class="sf-import-progress-detail" style="color:var(--c-text-sub);display:none"></p>
   </div>
 </div>
 
@@ -9984,6 +10006,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
             hashing:    'Inspecting',
             copying:    'Copying',
             extracting: 'Importing',
+            optimizing: 'Optimizing',
             skipped:    'Skipped',
           };
           const verb = stageVerbs[data.sub.stage] || 'Importing';
@@ -9992,10 +10015,13 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
           // Hash/copy: percent + bytes/totalBytes both present.
           // Extract: only fileCount + totalBytes (running, no
           // pre-known totals) — show running file count + bytes.
+          // Optimizing: folded percent + the running duplicate-trim total.
           // Skipped: no metric at all.
           let metricStr = '';
           if (data.sub.stage === 'skipped') {
             metricStr = '';
+          } else if (data.sub.stage === 'optimizing') {
+            metricStr = `${Math.floor(data.sub.percent || 0)}%${data.sub.savedBytes ? ` · trimming ${_fmtBytes(data.sub.savedBytes)} of duplicates` : ''}`;
           } else if (data.sub.bytes != null && data.sub.totalBytes && data.sub.percent != null) {
             metricStr = `${_fmtBytes(data.sub.bytes)} / ${_fmtBytes(data.sub.totalBytes)} (${Math.floor(data.sub.percent)}%)`;
           } else if (data.sub.fileCount != null && data.sub.totalBytes != null) {
@@ -18478,6 +18504,7 @@ require(['vs/editor/editor.main'], function () {
         createLabel: document.getElementById('sf-create-progress-label'),
         createBar:   document.getElementById('sf-create-progress-bar'),
         createDetail:document.getElementById('sf-create-progress-detail'),
+        createElapsed: document.getElementById('sf-create-progress-elapsed'),
         sourcePath:  document.getElementById('sf-import-review-source-path'),
         vendor:      document.getElementById('sf-review-vendor'),
         vendorList:  document.getElementById('sf-review-vendor-list'),
@@ -19129,7 +19156,7 @@ require(['vs/editor/editor.main'], function () {
         return _sfSanitizeName(base) || `font_${idx + 1}`;
       };
 
-      const _sfRunImport = async (sourcePath, { forceNewSource } = {}) => {
+      const _sfRunImport = async (sourcePath, { forceNewSource, fromLink, knownHash } = {}) => {
         // Auto-opt-in: create the library sentinel on the user's first
         // import action. Idempotent on the main side.
         try { await window.electronAPI.createSoundFonts(); } catch {}
@@ -19137,8 +19164,10 @@ require(['vs/editor/editor.main'], function () {
         // (or starts another run) while importSource is still in flight on
         // the main process. If state has moved on by the time the await
         // resolves, we delete the orphan source we just wrote.
+        // fromLink marks a temp-downloaded link import, so the close-out
+        // screen doesn't suggest deleting an original the user never had.
         const myRun = Symbol('sfImportRun');
-        _sfImport = { sourcePath, uuid: null, vendor: null, candidates: [], runId: myRun };
+        _sfImport = { sourcePath, uuid: null, vendor: null, candidates: [], runId: myRun, fromLink: !!fromLink };
         _sfShowPhase('progress');
         if (_sfImportEls.progLabel) _sfImportEls.progLabel.textContent = 'Reading source…';
         if (_sfImportEls.progBar) _sfImportEls.progBar.style.width = '0%';
@@ -19172,7 +19201,7 @@ require(['vs/editor/editor.main'], function () {
             _sfImportEls.progDetail.textContent = detail;
           }
         });
-        const importRes = await window.electronAPI.importSource({ sourcePath, forceNewSource });
+        const importRes = await window.electronAPI.importSource({ sourcePath, forceNewSource, knownHash });
         if (_sfImportProgressUnsub) { try { _sfImportProgressUnsub(); } catch {} _sfImportProgressUnsub = null; }
         // Stop the elapsed clock regardless of outcome so the ticker
         // can't leak past the modal close or into the next phase.
@@ -19196,7 +19225,7 @@ require(['vs/editor/editor.main'], function () {
           // Clear our local uuid before handing off so the dup modal's close
           // doesn't try to delete the pre-existing source.
           _sfImport.uuid = null;
-          await _sfHandleDuplicate(importRes.uuid, sourcePath);
+          await _sfHandleDuplicate(importRes.uuid, sourcePath, importRes.hash);
           return;
         }
         _sfImport.uuid = importRes.uuid;
@@ -19211,7 +19240,7 @@ require(['vs/editor/editor.main'], function () {
         _sfShowPhase('review');
       };
 
-      const _sfHandleDuplicate = (existingUuid, sourcePath) => new Promise((resolve) => {
+      const _sfHandleDuplicate = (existingUuid, sourcePath, scannedHash) => new Promise((resolve) => {
         if (!_sfDupEls.modal) { resolve(); return; }
         (async () => {
           const r = await window.electronAPI.listSources();
@@ -19249,7 +19278,9 @@ require(['vs/editor/editor.main'], function () {
             resolve();
           };
           const onCancel = () => { cleanup(); _sfCloseImport(); resolve(); };
-          const onReimport = async () => { cleanup(); await _sfRunImport(sourcePath, { forceNewSource: true }); resolve(); };
+          // knownHash: the scan that raised this prompt already hashed the file —
+          // hand it to the re-run so it skips straight to the copy stage.
+          const onReimport = async () => { cleanup(); await _sfRunImport(sourcePath, { forceNewSource: true, fromLink: _sfImport?.fromLink, knownHash: scannedHash }); resolve(); };
           _sfDupEls.keepBtn?.addEventListener('click', onKeep);
           _sfDupEls.reimportBtn?.addEventListener('click', onReimport);
           _sfDupEls.cancelBtn?.addEventListener('click', onCancel);
@@ -19699,6 +19730,16 @@ require(['vs/editor/editor.main'], function () {
         }
         _sfShowPhase('creating');
         if (_sfImportEls.createBar) _sfImportEls.createBar.style.width = '0%';
+        // Elapsed clock for the whole post-review stretch (Adding + Optimizing),
+        // starting at Save so it measures machine work, not review think-time.
+        // Same independent 1s tick convention as the copy phase and bulk import.
+        const createStartMs = Date.now();
+        const _fmtDurCreate = (sec) => (window._sfFormatDuration ? window._sfFormatDuration(sec) : `${Math.round(sec)}s`);
+        if (_sfImportEls.createElapsed) _sfImportEls.createElapsed.textContent = `${_fmtDurCreate(0)} elapsed`;
+        const createElapsedTicker = setInterval(() => {
+          if (!_sfImportEls.createElapsed) return;
+          _sfImportEls.createElapsed.textContent = `${_fmtDurCreate((Date.now() - createStartMs) / 1000)} elapsed`;
+        }, 1000);
         if (_sfCreateProgressUnsub) { try { _sfCreateProgressUnsub(); } catch {} }
         _sfCreateProgressUnsub = window.electronAPI.onEntryCreateProgress((data) => {
           if (!data) return;
@@ -19740,23 +19781,68 @@ require(['vs/editor/editor.main'], function () {
         // Optimize storage SYNCHRONOUSLY so it's done — and the deduped state + indicator are
         // correct — by the time the import closes and the view refreshes. No background, no
         // stale-cache lag. Idempotent, verify-before-commit, no-op for single-format/folder.
+        // Every backend phase reports (catalog → reading → rebuild → compress → verify →
+        // commit): the bar restarts per phase, filenames fly by, and the label carries a
+        // running total of the duplicate bytes being trimmed.
+        let optRes = null;
         if (_sfImport && _sfImport.uuid) {
+          // Visible sections (Ryan's rule, 2026-07-23): one section = one metric =
+          // one bar fill. Sections restart the bar; the metric NEVER changes units
+          // mid-section. Inner-zip sources walk all seven; simpler sources skip the
+          // sections they don't have. The running savings total shows during
+          // Trimming only; the close-out screen repeats the final number.
+          const OPT_LABEL = {
+            catalog:       'Cataloging files',
+            reading:       'Trimming duplicates',
+            rebuild:       'Rebuilding',
+            innercompress: 'Compressing',
+            compress:      'Packaging',
+            verify:        'Verifying',
+            commit:        'Finalizing',
+          };
+          const fmtB = (n) => (window._sfFormatBytes ? window._sfFormatBytes(n) : `${n} B`);
+          let optPhase = '', optSaved = 0;
           if (_sfImportEls.createLabel) _sfImportEls.createLabel.textContent = 'Optimizing storage…';
           if (_sfImportEls.createBar) _sfImportEls.createBar.style.width = '0%';
           if (_sfImportEls.createDetail) _sfImportEls.createDetail.textContent = '';
-          // Track the dedup's real progress instead of freezing the bar full.
           const offOpt = window.electronAPI.onOptimizeProgress((p) => {
             if (!p) return;
-            if (_sfImportEls.createBar && p.totalFiles) {
-              _sfImportEls.createBar.style.width = `${Math.round(Math.min(1, (p.fileCount || 0) / p.totalFiles) * 100)}%`;
+            if (p.phase && p.phase !== optPhase) {
+              optPhase = p.phase;
+              if (_sfImportEls.createBar) _sfImportEls.createBar.style.width = '0%';
+            }
+            if (p.savedBytes != null) optSaved = p.savedBytes;
+            let frac = 0;
+            if (p.totalBytes) frac = Math.min(1, (p.bytesDone || 0) / p.totalBytes);
+            else if (p.totalFiles) frac = Math.min(1, (p.fileCount || 0) / p.totalFiles);
+            if (_sfImportEls.createBar) _sfImportEls.createBar.style.width = `${Math.round(frac * 100)}%`;
+            if (_sfImportEls.createLabel) {
+              // Same metric convention as the other import surfaces: n of m files
+              // when the phase counts files, bytes when it streams bytes.
+              let metric = null;
+              if (p.totalFiles) metric = `${(p.fileCount || 0).toLocaleString()} of ${p.totalFiles.toLocaleString()} files`;
+              else if (p.totalBytes) metric = `${fmtB(p.bytesDone || 0)} of ${fmtB(p.totalBytes)}`;
+              const bits = ['Optimizing storage', OPT_LABEL[optPhase] || null, metric,
+                (optPhase === 'reading' && optSaved) ? `~${fmtB(optSaved)} to reclaim` : null];
+              _sfImportEls.createLabel.textContent = bits.filter(Boolean).join(' · ');
             }
             if (_sfImportEls.createDetail) _sfImportEls.createDetail.textContent = p.currentFile || '';
           });
-          try { await window.electronAPI.optimizeSource({ uuid: _sfImport.uuid }); } catch {}
+          try { optRes = await window.electronAPI.optimizeSource({ uuid: _sfImport.uuid }); } catch {}
           if (offOpt) { try { offOpt(); } catch {} }
           if (_sfImportEls.createBar) _sfImportEls.createBar.style.width = '100%';
           if (_sfImportEls.createDetail) _sfImportEls.createDetail.textContent = '';
         }
+        // Stop the elapsed clock so the ticker can't leak past the modal close.
+        clearInterval(createElapsedTicker);
+        if (_sfImportEls.createElapsed) _sfImportEls.createElapsed.textContent = '';
+        // Close-out screen inputs, captured before import state is cleared. Fresh
+        // imports only — add-more/duplicate reviews return to the source detail.
+        const successCount = picks.length - failures.length;
+        const showCloseout = !!(_sfImport && !_sfImport.isExistingReview && successCount > 0);
+        const closeoutSrc = _sfImport
+          ? { fromLink: !!_sfImport.fromLink, sourcePath: _sfImport.sourcePath || '' }
+          : null;
         // The source is now committed (referenced by at least one entry, or
         // attempted by the user). Clear the orphan-cleanup hook before close.
         if (_sfImport) _sfImport.uuid = null;
@@ -19774,6 +19860,43 @@ require(['vs/editor/editor.main'], function () {
         } else {
           _sfCloseImport();
           await window.refreshSoundFontsView();
+          // Close-out education screen: what we did, and — when the user has an
+          // original file on disk — that it's now safe to delete. Wording adapts:
+          // link imports never had a local file, and non-deduped sources skip the
+          // duplicate-trim story.
+          if (showCloseout) {
+            const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            const fmtB = (n) => (window._sfFormatBytes ? window._sfFormatBytes(n) : `${n} B`);
+            const parts = [];
+            parts.push(successCount === 1
+              ? `<strong>${esc(picks[0].name)}</strong> was added to your library.`
+              : `<strong>${successCount} fonts</strong> were added to your library.`);
+            if (optRes && optRes.deduped && optRes.savedBytes > 0) {
+              const dupes = Math.max(0, (optRes.originalFiles || 0) - (optRes.uniqueFiles || 0));
+              parts.push(`JMT Studio found <strong>${dupes.toLocaleString()} duplicate files</strong> inside the source and kept one copy of each, saving <strong>${fmtB(optRes.savedBytes)}</strong> on your disk. Nothing is lost: exporting the source rebuilds every original file exactly.`);
+            }
+            if (closeoutSrc && !closeoutSrc.fromLink && closeoutSrc.sourcePath) {
+              const isFolder = !/\.zip$/i.test(closeoutSrc.sourcePath);
+              parts.push(`Your complete source now lives in the library, and you can export a full copy from the library whenever you need one. That means the original ${isFolder ? 'folder' : 'download'} on your computer is no longer needed, and it's safe to delete if you want the space back: <a href="#" id="sf-closeout-showpath" style="color:var(--jmt-blue);text-decoration:underline;cursor:pointer">${esc(closeoutSrc.sourcePath)}</a>`);
+            } else {
+              parts.push('The complete source is stored in your library. You can export a full copy whenever you need one.');
+            }
+            // Start the modal, then wire the path link while it's up — it opens the
+            // OS file manager with the original selected, one step from deleting it.
+            const closeoutDone = promptConfirm({
+              title: 'Added to your library',
+              messageHtml: parts.join('<br><br>'),
+              confirmText: 'Done',
+              confirmKind: 'primary',
+              hideCancel: true,
+            });
+            const pathLink = document.getElementById('sf-closeout-showpath');
+            if (pathLink) pathLink.addEventListener('click', (e) => {
+              e.preventDefault();
+              try { window.electronAPI.showItemInFolder(closeoutSrc.sourcePath); } catch {}
+            });
+            await closeoutDone;
+          }
         }
       };
 
@@ -19852,7 +19975,7 @@ require(['vs/editor/editor.main'], function () {
         clearInterval(ticker);
         try { if (unsub) unsub(); } catch {}
         if (r && r.ok && r.filePath) {
-          await _sfRunImport(r.filePath);
+          await _sfRunImport(r.filePath, { fromLink: true });
           try { await window.electronAPI.linkImportCleanup({ filePath: r.filePath }); } catch {}
         } else if (r && r.browserRecoverable) {
           // We may already have this vendor's login saved from a prior import.
@@ -19914,7 +20037,7 @@ require(['vs/editor/editor.main'], function () {
         clearInterval(ticker);
         try { if (unsub) unsub(); } catch {}
         if (r && r.ok && r.filePath) {
-          await _sfRunImport(r.filePath);
+          await _sfRunImport(r.filePath, { fromLink: true });
           try { await window.electronAPI.linkImportCleanup({ filePath: r.filePath }); } catch {}
         } else {
           _sfShowPhase('pick');
@@ -21918,7 +22041,10 @@ require(['vs/editor/editor.main'], function () {
         // by referencing them in a void return.
         void entriesPromise; void docsPromise; void filesPromise;
       };
-      const _sfCloseSourceDetail = async () => {
+      // dismissAll (Ryan, 2026-07-23): the X means "get rid of this window AND
+      // whatever was under it" — it skips the return-to-entry hop and lands on
+      // the grid. The bottom Close/Discard button keeps the step-back behavior.
+      const _sfCloseSourceDetail = async ({ dismissAll = false } = {}) => {
         // Bump the op token first so any async fills still in flight from the
         // open path veto themselves and don't write into a nulled _sfSourceEdit.
         // The opToken-compare-then-write pattern in _sfOpenSourceDetail's
@@ -21928,7 +22054,7 @@ require(['vs/editor/editor.main'], function () {
         // Snapshot the return target before any state changes, then defer the
         // visibility flip to the entry-detail open step so the transition is
         // atomic (no card grid flash mid-swap).
-        const returnEntry = _sfSourceDetailReturnToEntry;
+        const returnEntry = dismissAll ? null : _sfSourceDetailReturnToEntry;
         _sfSourceDetailReturnToEntry = null;
         // Always refresh so the card grid and any open detail view see the
         // latest source/entry meta (bulk-tag updates, vendor edits, etc.).
@@ -21946,7 +22072,7 @@ require(['vs/editor/editor.main'], function () {
         _sfSourceOriginalUuid = null;
         _sfSourceDirty = false;
       };
-      const _sfTryCloseSourceDetail = async () => {
+      const _sfTryCloseSourceDetail = async ({ dismissAll = false } = {}) => {
         if (_sfSourceDirty) {
           // Three-way prompt mirrors the entry detail close path:
           // Cancel (stay), Discard (close without saving), Save
@@ -21954,13 +22080,13 @@ require(['vs/editor/editor.main'], function () {
           const choice = await promptUnsaved('Unsaved changes to this source — save before closing?');
           if (choice === 'cancel') return;
           if (choice === 'save') {
-            const saved = await _sfSaveSourceDetail();
+            const saved = await _sfSaveSourceDetail({ dismissAll });
             if (!saved) return;
             return; // save already closed the modal via closeAfter default
           }
           // 'discard' falls through — close without saving.
         }
-        await _sfCloseSourceDetail();
+        await _sfCloseSourceDetail({ dismissAll });
       };
       // Same auto-commit convention as the entry detail save: any open
       // pencil-edit field is flushed before reading working state.
@@ -21988,7 +22114,7 @@ require(['vs/editor/editor.main'], function () {
       // has an active source modal to atomically deactivate. Returns
       // true on success, false on validation refusal or IPC fail so
       // callers can abort their follow-up action.
-      const _sfSaveSourceDetail = async ({ closeAfter = true } = {}) => {
+      const _sfSaveSourceDetail = async ({ closeAfter = true, dismissAll = false } = {}) => {
         if (!_sfSourceEdit || !_sfSourceOriginalUuid) return false;
         if (!_sfFlushSourceFieldEdits()) return false;
         const updates = {
@@ -22084,10 +22210,12 @@ require(['vs/editor/editor.main'], function () {
           await _sfShowPartialFailures('Source saved, but some entry edits failed', entryEditFailures);
         }
         _sfSourceDirty = false;
-        if (closeAfter) await _sfCloseSourceDetail();
+        if (closeAfter) await _sfCloseSourceDetail({ dismissAll });
         return true;
       };
-      _sfSourceDetailEls.closeX?.addEventListener('click', _sfTryCloseSourceDetail);
+      // X = dismiss the whole stack (no return-to-entry hop); the bottom
+      // Close/Discard button below keeps the step-back semantics.
+      _sfSourceDetailEls.closeX?.addEventListener('click', () => _sfTryCloseSourceDetail({ dismissAll: true }));
       // Bottom button reads "Discard" when dirty / "Close" when clean —
       // either click is an explicit dismissal, so skip the prompt.
       // Same convention as the entry detail modal.
@@ -22633,12 +22761,11 @@ require(['vs/editor/editor.main'], function () {
         const label = (src && src.meta && (src.meta.bundleName || src.meta.originalName)) || 'source';
         const fmtB = window._sfFormatBytes || ((n) => `${n} B`);
         const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-        const restoreDetail = () => _sfSourceDetailEls.modal?.classList.add('active');
-        // In-app dialogs (format choice, progress, completion summary) DOM-stack
-        // behind the detail modal, so hide it for the whole flow and restore at
-        // the end — same reason as the delete flow below. The OS folder picker
-        // floats above regardless, so nothing is lost visually while it's up.
-        _sfSourceDetailEls.modal?.classList.remove('active');
+        // The detail modal STAYS visible, dimmed under the flow's dialogs (Ryan,
+        // 2026-07-23): the confirm modal rides z-index 10015 and the progress
+        // overlay sits later in the DOM, so both stack above it and their
+        // backdrops provide the dim. No hide/restore — that produced a flash of
+        // the detail modal reappearing under "Show in folder".
 
         // 1) Zip or folder? Zip is the backup / re-import artifact; folder is the
         // extracted tree ready to drop on an SD card.
@@ -22657,32 +22784,32 @@ require(['vs/editor/editor.main'], function () {
           confirmKind: 'primary',
           cancelText: 'Cancel',
         });
-        if (!choice || !choice.confirmed) { restoreDetail(); return; }
+        if (!choice || !choice.confirmed) { return; }
         const format = choice.value || 'zip';
 
         // 2) Where to?
         const pick = await window.electronAPI.pickExportDir({ title: `Export "${label}" to…` });
-        if (!pick || !pick.ok) { restoreDetail(); return; }
+        if (!pick || !pick.ok) { return; }
 
-        // 3) Export with live progress, shown as named phases (each with its own
-        // fast-filling bar, like the import): Reading files → Rebuilding →
-        // Compressing. No phase is blind — the reconstruct's read step reports too.
+        // 3) Export with live progress in the import-convention layout: section +
+        // metric above the bar (one metric per section), current file below,
+        // elapsed clock last. Sections: Reading files → Rebuilding → Compressing.
         let bytesDone = 0, totalBytes = 0, fileCount = 0, totalFiles = 0, phase = '', currentFile = '';
         const t0 = Date.now();
         const PHASE_LABEL = { reading: 'Reading files', reconstruct: 'Rebuilding', compress: 'Compressing' };
+        const _fmtDur = (sec) => (window._sfFormatDuration ? window._sfFormatDuration(sec) : `${Math.round(sec)}s`);
         const render = () => {
           const secs = Math.floor((Date.now() - t0) / 1000);
-          const clock = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
           let frac, info;
           if (phase === 'compress') {
             frac = totalBytes ? Math.max(0, Math.min(1, bytesDone / totalBytes)) : 0;
             info = totalBytes ? `${fmtB(bytesDone)} of ${fmtB(totalBytes)}` : '';
           } else {
             frac = totalFiles ? Math.max(0, Math.min(1, fileCount / totalFiles)) : 0;
-            info = totalFiles ? `${fileCount} of ${totalFiles} files` : '';
+            info = totalFiles ? `${fileCount.toLocaleString()} of ${totalFiles.toLocaleString()} files` : '';
           }
-          const bottom = [PHASE_LABEL[phase] || 'Exporting', info, clock].filter(Boolean).join('  ·  ');
-          _sfDeleteProgress.setProgressLines(frac, currentFile, bottom);
+          const labelLine = [PHASE_LABEL[phase] || 'Exporting', info].filter(Boolean).join(' · ');
+          _sfDeleteProgress.setPhase(labelLine, frac, currentFile, `${_fmtDur(secs)} elapsed`);
         };
         const offProg = window.electronAPI.onSourceExportProgress((p) => {
           if (!p) return;
@@ -22712,18 +22839,26 @@ require(['vs/editor/editor.main'], function () {
         // no corner toast — then returns to the detail modal.
         if (!r || !r.ok) {
           promptError('Export failed', (r && r.error) || 'unknown error');
-          restoreDetail();
           return;
         }
         const kind = r.format === 'folder' ? 'a folder' : 'a Zip archive';
-        const lines = [`Exported <strong>${esc(label)}</strong> as ${kind}.`];
-        if (r.fileCount != null) lines.push(`<strong>${r.fileCount}</strong> files · <strong>${esc(fmtB(r.totalBytes || 0))}</strong>`);
-        if (r.folders && r.folders.length) lines.push(`Includes: ${esc(r.folders.join(', '))}`);
-        if (r.reconstructed) lines.push('Rebuilt in full from a space-optimized source.');
-        lines.push(`<span style="display:inline-block;margin-top:6px;opacity:.75;font-family:monospace;font-size:12px;word-break:break-all;">${esc(r.destPath)}</span>`);
+        // One summary sentence, then subdued supporting lines — same presentation
+        // standard as the import close-out (grouped paragraphs, counts formatted,
+        // detail de-emphasized so the verdict line leads).
+        const meta = [];
+        if (r.fileCount != null) meta.push(`<strong>${Number(r.fileCount).toLocaleString()} files</strong>`);
+        if (r.totalBytes) meta.push(`<strong>${esc(fmtB(r.totalBytes))}</strong>`);
+        const lines = [
+          `Exported <strong>${esc(label)}</strong> as ${kind}${meta.length ? `: ${meta.join(' · ')}` : ''}${r.reconstructed ? ', rebuilt in full from your space-optimized source' : ''}.`,
+        ];
+        if (r.folders && r.folders.length) {
+          const names = r.folders.map(f => String(f).replace(/\.zip$/i, ''));
+          lines.push(`<span style="color:var(--c-text-sub)">Includes ${esc(names.join(', '))}.</span>`);
+        }
+        lines.push(`<span style="opacity:.75;font-family:monospace;font-size:12px;word-break:break-all;">${esc(r.destPath)}</span>`);
         const showIt = await promptConfirm({
           title: 'Export complete',
-          messageHtml: lines.join('<br>'),
+          messageHtml: lines.join('<br><br>'),
           confirmText: 'Show in folder',
           confirmKind: 'primary',
           cancelText: 'Done',
@@ -22733,7 +22868,6 @@ require(['vs/editor/editor.main'], function () {
           const rev = await window.electronAPI.showItemInFolder(r.destPath).catch((e) => ({ ok: false, error: String(e && e.message || e) }));
           if (!rev || rev.ok === false) promptError('Could not open the folder', (rev && rev.error) || r.destPath);
         }
-        restoreDetail();
       });
       // Delete source with cascade warning.
       _sfSourceDetailEls.deleteBtn?.addEventListener('click', async () => {
@@ -25982,12 +26116,19 @@ require(['vs/editor/editor.main'], function () {
         startTs: 0,
         modal:    () => document.getElementById('modal-sf-bulk-progress'),
         titleEl:  () => document.getElementById('sf-bulk-progress-title'),
+        labelEl:  () => document.getElementById('sf-bulk-progress-label'),
         detailEl: () => document.getElementById('sf-bulk-progress-detail'),
+        elapsedEl:() => document.getElementById('sf-bulk-progress-elapsed'),
         barEl:    () => document.getElementById('sf-bulk-progress-bar'),
         show(title, detail, frac) {
           const t = this.titleEl(), d = this.detailEl(), b = this.barEl(), m = this.modal();
           if (t) t.textContent = title;
           if (d) d.textContent = detail || '';
+          // Section + elapsed lines are the setPhase() layout — reset them so
+          // the simpler flows (delete, common-folder ops) don't inherit them.
+          const l = this.labelEl(), e = this.elapsedEl();
+          if (l) { l.textContent = ''; l.style.display = 'none'; }
+          if (e) { e.textContent = ''; e.style.display = 'none'; }
           // Determinate when a fraction is passed (bulk export tracks real
           // bytes); otherwise the legacy 50% "busy" fill for quick single ops
           // that have no meaningful progress to show.
@@ -26005,19 +26146,15 @@ require(['vs/editor/editor.main'], function () {
           if (b) b.style.width = Math.max(0, Math.min(1, frac)) * 100 + '%';
           if (d && detail != null) d.textContent = detail;
         },
-        // Two-line detail variant shared by both export flows: a truncated top
-        // line (the item / current file, which flies by) over a stable bottom
-        // line (size + elapsed clock). Keeps the modal height fixed regardless of
-        // how long the top line gets. innerHTML with escaping since file paths
-        // can contain & < > and callers pass plain text.
-        setProgressLines(frac, topLine, bottomLine) {
-          const b = this.barEl(), d = this.detailEl();
-          if (b) b.style.width = Math.max(0, Math.min(1, frac)) * 100 + '%';
-          if (!d) return;
-          const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-          d.innerHTML =
-            `<span class="sf-exp-file">${topLine ? esc(topLine) : '&nbsp;'}</span>` +
-            `<span class="sf-exp-size">${esc(bottomLine)}</span>`;
+        // Import-convention phase display (Ryan, 2026-07-23): section + metric
+        // ABOVE the bar, the current file below it, subdued elapsed line last —
+        // the same reading order as the import modal's optimize phases.
+        setPhase(labelText, frac, file, elapsedText) {
+          const l = this.labelEl(), b = this.barEl(), d = this.detailEl(), e = this.elapsedEl();
+          if (l) { l.style.display = ''; l.textContent = labelText || ''; }
+          if (b) b.style.width = Math.max(0, Math.min(1, frac || 0)) * 100 + '%';
+          if (d) d.textContent = file || '';
+          if (e) { e.style.display = ''; e.textContent = elapsedText || ''; }
         },
         async hide(minMs = 200) {
           const elapsed = Date.now() - this.startTs;
@@ -26549,11 +26686,11 @@ require(['vs/editor/editor.main'], function () {
             ? _sfExportBytesDone / _sfExportTotalBytes
             : (totalSteps > 0 ? Math.max(0, stepIdx - 1) / totalSteps : 0);
           const secs = Math.floor((Date.now() - _sfExportT0) / 1000);
-          const clock = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
-          const sizeLine = _sfExportTotalBytes > 0
-            ? `${_sfFmtB(_sfExportBytesDone)} of ${_sfFmtB(_sfExportTotalBytes)}  ·  ${clock}`
-            : clock;
-          _sfDeleteProgress.setProgressLines(frac, _sfExportLabel || '', sizeLine);
+          const _fmtDur = (s) => (window._sfFormatDuration ? window._sfFormatDuration(s) : `${Math.round(s)}s`);
+          const labelLine = _sfExportTotalBytes > 0
+            ? `Copying · ${_sfFmtB(_sfExportBytesDone)} of ${_sfFmtB(_sfExportTotalBytes)}`
+            : 'Copying';
+          _sfDeleteProgress.setPhase(labelLine, frac, _sfExportLabel || '', `${_fmtDur(secs)} elapsed`);
         };
         const _offExportProg = window.electronAPI.onSoundFontExportProgress(({ delta } = {}) => {
           _sfExportBytesDone += (delta || 0);
