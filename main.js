@@ -2456,6 +2456,38 @@ ipcMain.handle('linkImport:cleanup', (_, { filePath } = {}) => {
   } catch (e) { return { ok: false, error: String(e && e.message || e) }; }
 });
 
+// Duplicate recognition for the import review (three scenarios, one matcher):
+// ensure the source's per-file manifest (which also pre-warms the optimize
+// step's cataloging pass), build the library index from the persisted entry
+// manifests, and match each candidate. Returns only candidates with something
+// worth saying — a have-it verdict, or a variant at/above the display bar —
+// with the plain-language label prebuilt.
+ipcMain.handle('sources:matchCandidates', async (_event, { uuid, candidates } = {}) => {
+  if (!uuid || !Array.isArray(candidates)) return { ok: false, error: 'Missing uuid/candidates' };
+  try {
+    const ud = app.getPath('userData');
+    const compare = require('./soundFontCompare');
+    const mf = await soundFontSources.ensureSourceManifest(ud, uuid);
+    if (!mf || !Array.isArray(mf.records)) return { ok: true, results: [] };
+    const { index } = compare.buildLibraryIndex(ud);
+    if (!index.length) return { ok: true, results: [] };
+    const results = [];
+    for (const c of candidates) {
+      if (!c || c.path == null) continue;
+      const m = compare.matchCandidateAgainstLibrary(mf.records, c.path, index);
+      if (!m || !m.bestMatch) continue;
+      const label = (m.verdict === 'variant' && m.coreContainment < compare.VARIANT_DISPLAY_MIN)
+        ? null
+        : compare.verdictLabel(m);
+      if (!label) continue;
+      results.push({ name: c.name, path: c.path, verdict: m.verdict, exact: !!m.exact, label });
+    }
+    return { ok: true, results };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
 // Finalize a source STAGED by the folder-duplicate path (see importSource's
 // folder branch): the zip is already built and hashed; this just writes meta.
 // Used by the duplicate prompt's "import again as a new source" so a folder

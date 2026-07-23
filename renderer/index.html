@@ -2702,6 +2702,11 @@
   .sf-review-candidate-row .cand-badge.multi-board { color: var(--jmt-blue); border-color: rgba(0,130,255,0.35); background: rgba(0,130,255,0.08); }
   .sf-review-candidate-row .cand-badge.nested { color: #cb6; border-color: rgba(204,180,100,0.35); background: rgba(204,180,100,0.08); }
   .sf-review-candidate-row .cand-badge.alt-version { color: var(--c-text-sub); border-color: var(--c-border-faint); background: var(--c-bg-inset); font-style: italic; }
+  /* Duplicate-recognition note (async): blue matches the already-imported
+     convention above; variants read as informational amber, not a warning. */
+  .sf-review-candidate-row .cand-dup-note { font-size: 0.68rem; font-style: italic; }
+  .sf-review-candidate-row .cand-dup-note.have-it { color: var(--jmt-blue); }
+  .sf-review-candidate-row .cand-dup-note.variant { color: var(--c-warn-text); }
 
   /* ── SD browser folder multi-select (Ctrl/Cmd or Shift+click) ── */
   .sf-entry-files-row.sd-selected { background: rgba(0, 130, 255, 0.16); box-shadow: inset 0 0 0 1px rgba(0, 130, 255, 0.45); border-radius: 3px; }
@@ -19592,6 +19597,9 @@ require(['vs/editor/editor.main'], function () {
           row.dataset.suggested = name?.value || '';
           const validate = () => _sfRevalidateCandidates();
           check?.addEventListener('change', () => {
+            // User took a stance on this row — async results (duplicate
+            // recognition) must not clobber it after the fact.
+            row.dataset.touched = 'true';
             row.classList.toggle('disabled', !check.checked);
             validate();
           });
@@ -19608,6 +19616,50 @@ require(['vs/editor/editor.main'], function () {
             setLast: (u) => { if (_sfImport) _sfImport._lastDemoUrl = u; },
           });
         });
+        // ── Duplicate recognition (async, fresh imports only) ──────────
+        // Match every candidate against the library while the user reviews;
+        // results land as per-row notes (own element — .cand-status belongs
+        // to the validator). Have-it rows also uncheck, unless the user
+        // already took a stance on that row. Add-more locks true dupes by
+        // candidatePath already, and duplicate mode EXPECTS copies, so both
+        // skip this. The manifest built here also pre-warms the optimize
+        // step's cataloging pass.
+        if (!isAddMore && !isDuplicate && _sfImport && _sfImport.uuid && cands.length) {
+          const matchRun = _sfImport.runId;
+          window.electronAPI.matchSourceCandidates({
+            uuid: _sfImport.uuid,
+            candidates: cands.map(c => ({ name: c.name, path: c.path || '' })),
+          }).then((r) => {
+            if (!r || !r.ok || !Array.isArray(r.results) || !r.results.length) return;
+            if (!_sfImport || _sfImport.runId !== matchRun) return; // user moved on
+            const byPath = new Map(r.results.map(x => [String(x.path || ''), x]));
+            let changedAny = false;
+            _sfImportEls.candList?.querySelectorAll('.sf-review-candidate-row').forEach(row => {
+              const c = _sfImport.candidates[parseInt(row.dataset.idx, 10)];
+              const hit = c ? byPath.get(String(c.path || '')) : null;
+              if (!hit) return;
+              let note = row.querySelector('.cand-dup-note');
+              if (!note) {
+                note = document.createElement('div');
+                note.className = 'cand-dup-note';
+                row.querySelector('.cand-main')?.appendChild(note);
+              }
+              note.textContent = hit.label;
+              note.classList.toggle('have-it', hit.verdict === 'have_it');
+              note.classList.toggle('variant', hit.verdict !== 'have_it');
+              if (hit.verdict === 'have_it' && row.dataset.already !== '1'
+                  && row.dataset.touched !== 'true' && row.dataset.edited !== 'true') {
+                const check = row.querySelector('.cand-check');
+                if (check && check.checked) {
+                  check.checked = false;
+                  row.classList.add('disabled');
+                  changedAny = true;
+                }
+              }
+            });
+            if (changedAny) _sfRevalidateCandidates();
+          }).catch(() => {});
+        }
         // Recompute the suggested names for every row that hasn't been
         // manually edited. Called when the user toggles the prepend
         // checkbox, edits the bundle prefix input, or edits the source
@@ -20198,6 +20250,12 @@ require(['vs/editor/editor.main'], function () {
           return `Source contained ${total} versions (${allVersions.join(', ')}). ${info.taken} was imported; ${skippedJoined} ${verb} still in the source if you want to add ${skipped.length === 1 ? 'it' : 'them'} separately.`;
         },
         name_uncertain: 'Name is a generic folder name; the real font name couldn’t be detected. Rename if you know it.',
+        already_in_library: (entry) => {
+          const who = entry && entry.duplicateOfName;
+          return who
+            ? `This font’s sounds match ${who}, which is already in your library. Keep both, or delete one.`
+            : 'This font’s sounds match a font already in your library. Keep both, or delete one.';
+        },
       };
       // Resolve a reason key into its display text, calling the formatter
       // function with the entry context when the entry needs to drive
@@ -20434,6 +20492,7 @@ require(['vs/editor/editor.main'], function () {
           linkUrl: m.linkUrl || '',
           needsReview: !!m.needsReview,
           reviewReasons: Array.isArray(m.reviewReasons) ? m.reviewReasons.slice() : [],
+          duplicateOfName: m.duplicateOfName || '',
           versionInfo: (m.versionInfo && typeof m.versionInfo === 'object') ? {
             taken: m.versionInfo.taken || '',
             skipped: Array.isArray(m.versionInfo.skipped) ? m.versionInfo.skipped.slice() : [],

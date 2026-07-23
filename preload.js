@@ -216,6 +216,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listSources:           ()           => ipcRenderer.invoke('sources:list'),
   cleanupOrphanSources:  ()           => ipcRenderer.invoke('sources:cleanupOrphans'),
   finalizeStagedSource:  (params)     => ipcRenderer.invoke('sources:finalizeStaged', params),
+  matchSourceCandidates: (params)     => ipcRenderer.invoke('sources:matchCandidates', params),
   bulkImportPickRoot:    ()           => ipcRenderer.invoke('bulkImport:pickRoot'),
   bulkImportScan:        (params)     => ipcRenderer.invoke('bulkImport:scan', params),
   bulkImportRun:         (params)     => ipcRenderer.invoke('bulkImport:run', params),

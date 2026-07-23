@@ -937,7 +937,7 @@ async function importPlannedSource({ userData, src, fromSdCard }, onSubProgress)
         });
       } catch {}
     }
-    entries.push({ name: finalName, ok: true });
+    entries.push({ name: finalName, ok: true, candidatePath: cand.path, reviewReasons: reviewReasons.slice(), versionInfo });
   }
   // Optimize the source INLINE (synchronous, no deferral): build the STATIC per-file manifest
   // (the breadcrumb), then dedup it (trim duplicate board-format copies, §13 — a no-op for
@@ -951,6 +951,39 @@ async function importPlannedSource({ userData, src, fromSdCard }, onSubProgress)
     const optForward = _optimizeProgressForwarder(onSubProgress);
     await soundFontSources.ensureSourceManifest(userData, sourceUuid, optForward);
     await soundFontSources.dedupeSource(userData, sourceUuid, optForward);
+  } catch {}
+  // Duplicate recognition for QUICK import (no review screen to label): match
+  // each created entry's candidate against the library EXCLUDING this source's
+  // own just-created entries (they must not match themselves or their
+  // siblings), and stamp an already_in_library review reason on have-it hits.
+  // Runs after the optimize so the source manifest is guaranteed present.
+  try {
+    const compare = require('./soundFontCompare');
+    const fhm = require('./soundFontFileHash');
+    const created = entries.filter(e => e.ok && e.candidatePath != null);
+    if (created.length) {
+      const mf = fhm.readFileHashManifest(
+        path.join(userData, 'soundFonts', '.filehashes', 'sources', `${sourceUuid}.json`));
+      if (mf && Array.isArray(mf.records)) {
+        const { index } = compare.buildLibraryIndex(userData);
+        const ownNames = new Set(created.map(e => e.name.toLowerCase()));
+        const others = index.filter(e => !ownNames.has(e.name.toLowerCase()));
+        for (const ent of created) {
+          if (!others.length) break;
+          const m = compare.matchCandidateAgainstLibrary(mf.records, ent.candidatePath, others);
+          if (!m || m.verdict !== 'have_it' || m.lowConfidence) continue;
+          try {
+            const updates = {
+              needsReview: true,
+              reviewReasons: [...(ent.reviewReasons || []), 'already_in_library'],
+              duplicateOfName: m.bestMatch,
+            };
+            if (ent.versionInfo) updates.versionInfo = ent.versionInfo;
+            soundFontEntries.updateEntryMeta({ userData, currentName: ent.name, updates });
+          } catch {}
+        }
+      }
+    }
   } catch {}
   return {
     ok: true,
