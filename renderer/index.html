@@ -2556,15 +2556,13 @@
     0%   { transform: translateX(-100%); }
     100% { transform: translateX(250%); }
   }
-  .sf-import-progress-detail { font-size: 0.72rem; color: var(--c-text-dim); margin: 4px 0 0 0; font-variant-numeric: tabular-nums; min-height: 1em; word-break: break-all; }
-  /* Export-source / bulk progress detail. The current file flies by on its own
-     top line (truncated — it never wraps or pushes the layout), with the size +
-     elapsed clock on a stable second line below. Fixed two-line height so the
-     modal holds steady as files change (Ryan, 2026-07-22). */
-  #sf-bulk-progress-detail { line-height: 1.25; min-height: 2.5em; max-height: 2.5em; overflow: hidden; }
-  /* Same fixed two-line height on the import "Adding…/Optimizing storage…" detail
-     so the import modal doesn't grow/shrink as file paths change length. */
-  #sf-create-progress-detail { line-height: 1.25; min-height: 2.5em; max-height: 2.5em; overflow: hidden; }
+  /* The detail line under every determinate progress bar is ONE line that
+     TRUNCATES with an ellipsis — it never wraps or grows the modal (Ryan,
+     2026-07-23; supersedes the 07-22 fixed two-line variant). */
+  .sf-import-progress-detail { font-size: 0.72rem; color: var(--c-text-dim); margin: 4px 0 0 0; font-variant-numeric: tabular-nums; min-height: 1em; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* Stable single-line height even while empty, so the modal never shifts. */
+  #sf-bulk-progress-detail { line-height: 1.25; min-height: 1.25em; max-height: 1.25em; overflow: hidden; }
+  #sf-create-progress-detail { line-height: 1.25; min-height: 1.25em; max-height: 1.25em; overflow: hidden; }
   #sf-bulk-progress-detail .sf-exp-file { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #sf-bulk-progress-detail .sf-exp-size { display: block; color: var(--c-text-sub); }
   /* Slightly wider than the default modal so long font paths rarely truncate. */
@@ -2702,11 +2700,13 @@
   .sf-review-candidate-row .cand-badge.multi-board { color: var(--jmt-blue); border-color: rgba(0,130,255,0.35); background: rgba(0,130,255,0.08); }
   .sf-review-candidate-row .cand-badge.nested { color: #cb6; border-color: rgba(204,180,100,0.35); background: rgba(204,180,100,0.08); }
   .sf-review-candidate-row .cand-badge.alt-version { color: var(--c-text-sub); border-color: var(--c-border-faint); background: var(--c-bg-inset); font-style: italic; }
-  /* Duplicate-recognition note (async): blue matches the already-imported
-     convention above; variants read as informational amber, not a warning. */
-  .sf-review-candidate-row .cand-dup-note { font-size: 0.68rem; font-style: italic; }
-  .sf-review-candidate-row .cand-dup-note.have-it { color: var(--jmt-blue); }
+  /* Duplicate-recognition note (async). GREEN = already owned (good news),
+     AMBER = close variant; rows carrying a note dim less when unchecked so
+     the reason stays readable. */
+  .sf-review-candidate-row .cand-dup-note { font-size: 0.72rem; }
+  .sf-review-candidate-row .cand-dup-note.have-it { color: var(--c-success-text); }
   .sf-review-candidate-row .cand-dup-note.variant { color: var(--c-warn-text); }
+  .sf-review-candidate-row.disabled:has(.cand-dup-note) { opacity: 0.72; }
 
   /* ── SD browser folder multi-select (Ctrl/Cmd or Shift+click) ── */
   .sf-entry-files-row.sd-selected { background: rgba(0, 130, 255, 0.16); box-shadow: inset 0 0 0 1px rgba(0, 130, 255, 0.45); border-radius: 3px; }
@@ -2741,10 +2741,13 @@
   .sf-guided-row .g-corrupt-note { font-size: 0.72rem; color: #e5534b; margin-top: 3px; line-height: 1.35; }
   .sf-guided-row .g-name-hint { font-size: 0.72rem; color: #d0913a; margin-top: 3px; line-height: 1.35; }
   .sf-guided-row.g-lowconf .g-name { border-color: #d0913a; }
-  /* Duplicate-recognition note on guided rows — same color language as the
-     single-import review: blue = already owned, amber = close variant. */
-  .sf-guided-row .g-dup-note { font-size: 0.7rem; font-style: italic; color: var(--c-warn-text); margin-top: 2px; }
-  .sf-guided-row .g-dup-note.have-it { color: var(--jmt-blue); }
+  /* Duplicate-recognition note on guided rows. Color language (Ryan,
+     2026-07-23): GREEN = you already own this (a good-news confirmation, not
+     an action), AMBER = close variant worth a look. Rows carrying a note dim
+     less when excluded so the reason stays readable (same trick as corrupt). */
+  .sf-guided-row .g-dup-note { font-size: 0.72rem; color: var(--c-warn-text); margin-top: 3px; line-height: 1.35; }
+  .sf-guided-row .g-dup-note.have-it { color: var(--c-success-text); }
+  .sf-guided-row.excluded:has(.g-dup-note) { opacity: 0.72; }
   /* Name field reuses the URL shell's clear-x, but with no paste icon it only needs single-icon padding. */
   .sf-guided-row .g-name-shell > input { padding-right: 24px !important; }
   /* Drag-to-vendor + change-vendor control */
@@ -4745,7 +4748,7 @@
       <div class="sf-import-review-section">
         <h3>Sound fonts found <span class="sf-review-cand-count" id="sf-review-cand-count"></span></h3>
         <p class="sf-import-hint" id="sf-review-cand-hint">Pick which fonts to add to your library. Names must use letters, numbers, underscores, or hyphens (Proffie can't read spaces).</p>
-        <p class="sf-import-hint" id="sf-review-dup-hint" style="display:none;color:var(--jmt-blue)"></p>
+        <p class="sf-import-hint" id="sf-review-dup-hint" style="display:none;color:var(--c-success-text)"></p>
         <p class="sf-import-hint sf-bundle-followup" id="sf-bundle-followup" style="display:none">This is a bundle with several fonts inside. You don't have to import them all now — the source stays in your library, so you can come back and add the rest later.</p>
         <div class="sf-import-checkbox-row" id="sf-bundle-prepend-row" style="display:none;margin-bottom:10px;flex-wrap:wrap;row-gap:6px">
           <input type="checkbox" id="sf-review-prepend-bundle" checked>
@@ -9789,7 +9792,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
           hint = document.createElement('div');
           hint.id = 'sf-guided-dup-hint';
           hint.className = 'sf-import-hint';
-          hint.style.color = 'var(--jmt-blue)';
+          hint.style.color = 'var(--c-success-text)';
           els.guidedSummary.parentNode?.insertBefore(hint, els.guidedSummary.nextSibling);
         }
         hint.textContent = `${haveIts === 1 ? 'One font here is' : `${haveIts} fonts here are`} already in your library, so ${haveIts === 1 ? 'it starts' : 'they start'} unchecked. Check any to import a copy anyway. To customize a font you already own, a better path is to open it in your library and duplicate it there.`;
