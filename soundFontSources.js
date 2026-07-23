@@ -734,6 +734,45 @@ async function _readZipEntryToBuffer(zip, entry) {
   return await zip.entryData(entry.fileName);
 }
 
+// Recurse a source zip to its LEAF files, descending into inner .zip entries so
+// their contents are visible to the per-file hash system. A font delivered
+// inside Proffie.zip is otherwise invisible to library dedup / compare / import
+// matching — we never hashed it, so we can't know we already own it. Inner-zip
+// leaves get a composite path "Inner.zip/inner/path" (forward-slash separators,
+// the same convention _resolveCompositeReadBytes reads back). The inner .zip
+// file itself is NOT recorded as a leaf: it's a container, rebuilt from its
+// leaves on reconstruction. Arbitrary nesting depth. onLeaf(relPath, size, buf).
+async function _collectZipLeaves(zip, prefix, keep, onLeaf) {
+  const entries = await _readAllZipEntries(zip);
+  const innerZips = [];
+  for (const e of entries) {
+    if (e.isDir) continue;
+    const full = prefix + e.fileName;
+    if (/\.zip$/i.test(e.fileName)) { innerZips.push({ e, full }); continue; }
+    if (keep && !keep(full)) continue;
+    let buf; try { buf = await _readZipEntryToBuffer(zip, e); } catch { continue; }
+    onLeaf(full, e.size, buf);
+  }
+  for (const iz of innerZips) {
+    let buf; try { buf = await _readZipEntryToBuffer(zip, iz.e); } catch { continue; }
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jmt-manifest-inner-'));
+    try {
+      const tmpZip = path.join(tmpDir, 'inner.zip');
+      fs.writeFileSync(tmpZip, buf);
+      const innerZip = _openZip(tmpZip);
+      try { await _collectZipLeaves(innerZip, iz.full + '/', keep, onLeaf); }
+      finally { await innerZip.close(); }
+    } catch {} finally { try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {} }
+  }
+}
+
+// A manifest record path that points INSIDE an inner zip (has a ".zip/" segment
+// that isn't the final path component). These are the leaves _collectZipLeaves
+// surfaces; trimming them needs the reconstruction promise honored everywhere.
+function _isCompositePath(relPath) {
+  return /\.zip\//i.test(String(relPath || ''));
+}
+
 async function _writeZipEntryToFile(zip, entry, destPath) {
   await new Promise((resolve, reject) => {
     zip.stream(entry.fileName)
@@ -1614,15 +1653,11 @@ async function ensureSourceManifest(userData, sourceUuid) {
 
   try {
     if (meta.format === 'zip') {
-      // One open; read every entry from that single handle (no per-file re-open).
+      // One open; recurse into inner zips so their leaves are hashed too (a font
+      // shipped inside Proffie.zip must be knowable to library dedup/compare).
       const zip = _openZip(path.join(uuidDir, 'source.zip'));
       try {
-        const entries = await _readAllZipEntries(zip);
-        for (const e of entries) {
-          if (e.isDir || !keep(e.fileName)) continue;
-          let buf; try { buf = await _readZipEntryToBuffer(zip, e); } catch { continue; }
-          pushHash(e.fileName, e.size, buf);
-        }
+        await _collectZipLeaves(zip, '', keep, (rel, size, buf) => pushHash(rel, size, buf));
       } finally { await zip.close(); }
     } else if (meta.format === 'folder') {
       // Folder readFile is a cheap fs read (no re-open cost), so the abstraction is fine.
@@ -1807,6 +1842,15 @@ async function dedupeSource(userData, uuid) {
   if (!bc || !Array.isArray(bc.records)) bc = await ensureSourceManifest(userData, uuid);
   if (!bc || !Array.isArray(bc.records)) return { deduped: false, reason: 'no-breadcrumb' };
   const records = bc.records.filter(r => r.fileHash !== '<empty>');
+
+  // TRIM GATE for inner-zip sources. The manifest now records leaves INSIDE
+  // inner zips (so the library knows those fonts), but physically trimming them
+  // means keeping one copy and rebuilding the inner zips on demand — a promise
+  // every consumer must honor, including the SD-card write path that doesn't
+  // exist yet. Until reconstruction is honored end-to-end, we record the hashes
+  // but never trim an inner-zip source. Hash coverage ships now; the reclaim
+  // rides on top once the write path is virtualization-safe.
+  if (records.some(r => _isCompositePath(r.relPath))) return { deduped: false, reason: 'inner-zip-deferred' };
 
   const byHash = new Map();
   for (const r of records) {
