@@ -437,7 +437,10 @@ function verdictLabel(m) {
   if (!m || !m.bestMatch || m.lowConfidence) return null;
   if (m.verdict === 'have_it') {
     if (isFullyOwned(m)) {
-      return `Already in your library: matches ${m.bestMatch}`;
+      // Short on purpose: the row shows the verdict, the checkbox tooltip
+      // carries the detail (who it matches, what checking does). Callers
+      // append "(as X)" only when the row's name differs from the match.
+      return 'Already in your library';
     }
     return `Nearly identical to ${m.bestMatch}, but this copy has ${_missingPhrase(m)} yours is missing`;
   }

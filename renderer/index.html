@@ -9777,7 +9777,12 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         }
         // Green + uncheck ONLY for fully-owned; a copy carrying sounds the
         // library lacks stays checked in amber (skipping would lose them).
-        note.textContent = res.label;
+        // Short green label; "(as X)" only when the row name differs.
+        const gRowName = (row.nameInput?.value || '').trim();
+        note.textContent = (res.fullyOwned && res.matchName
+            && gRowName.toLowerCase() !== String(res.matchName).toLowerCase())
+          ? `${res.label} (as ${res.matchName})`
+          : res.label;
         note.classList.toggle('have-it', !!res.fullyOwned);
         if (res.tip && row.checkbox) row.checkbox.title = res.tip;
         if (res.fullyOwned && row.checkbox && row.checkbox.checked
@@ -9787,9 +9792,11 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         }
       }
       // Summary hint (information, not force): explain the auto-uncheck, that
-      // the boxes still work, and the Duplicate path for the customize case.
+      // the boxes still work, the Duplicate path, and how many rows are
+      // flagged for a look.
       const haveIts = r.results.filter(x => x.fullyOwned).length;
-      if (haveIts > 0 && els.guidedSummary) {
+      const flagged = r.results.length - haveIts;
+      if ((haveIts > 0 || flagged > 0) && els.guidedSummary) {
         let hint = document.getElementById('sf-guided-dup-hint');
         if (!hint) {
           hint = document.createElement('div');
@@ -9798,7 +9805,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
           hint.style.color = 'var(--c-success-text)';
           els.guidedSummary.parentNode?.insertBefore(hint, els.guidedSummary.nextSibling);
         }
-        hint.textContent = `${haveIts === 1 ? 'One font here is' : `${haveIts} fonts here are`} already in your library, so ${haveIts === 1 ? 'it starts' : 'they start'} unchecked. Check any to import a copy anyway. To customize a font you already own, a better path is to open it in your library and duplicate it there.`;
+        hint.textContent = window._sfDupSummaryText(haveIts, flagged, _gTotal);
       }
       _updateGuidedCount();
     }).catch(() => {});
@@ -19252,6 +19259,25 @@ require(['vs/editor/editor.main'], function () {
         return _sfSanitizeName(base) || `font_${idx + 1}`;
       };
 
+      // ONE summary for recognition results, shared by the single-import
+      // review and the guided bulk review — no per-surface wording drift
+      // (Ryan, 2026-07-23). Two facets: fully-owned rows (auto-unchecked)
+      // and amber rows flagged for a look (variants / missing-sounds copies).
+      window._sfDupSummaryText = (owned, flagged, total) => {
+        const parts = [];
+        if (owned > 0) {
+          parts.push(owned === 1
+            ? 'One of these fonts is already in your library, so it starts unchecked.'
+            : `${owned === total ? 'All' : owned} of these fonts are already in your library, so they start unchecked.`);
+          parts.push('You can still check any of them to import a second copy. To customize a font you already own, open it in your library and duplicate it there.');
+        }
+        if (flagged > 0) {
+          parts.push(flagged === 1
+            ? 'One more is a close match to a font you own; see the note on its row before importing.'
+            : `${flagged} more are close matches to fonts you own; see the notes on their rows before importing.`);
+        }
+        return parts.join(' ');
+      };
       const _sfRunImport = async (sourcePath, { forceNewSource, fromLink, knownHash, finalizeStaged } = {}) => {
         // Auto-opt-in: create the library sentinel on the user's first
         // import action. Idempotent on the main side.
@@ -19762,7 +19788,13 @@ require(['vs/editor/editor.main'], function () {
               // Green + uncheck ONLY when the library truly holds every sound in
               // this candidate. A near-match whose extra sounds the library
               // LACKS stays checked in amber — skipping it would lose them.
-              note.textContent = hit.label;
+              // Fully-owned label stays short; "(as X)" only when the row name
+              // differs from the matched entry, so renames stay traceable.
+              const rowName = (row.querySelector('.cand-name')?.value || '').trim();
+              note.textContent = (hit.fullyOwned && hit.matchName
+                  && rowName.toLowerCase() !== String(hit.matchName).toLowerCase())
+                ? `${hit.label} (as ${hit.matchName})`
+                : hit.label;
               note.classList.toggle('have-it', !!hit.fullyOwned);
               note.classList.toggle('variant', !hit.fullyOwned);
               const check = row.querySelector('.cand-check');
@@ -19780,13 +19812,10 @@ require(['vs/editor/editor.main'], function () {
             // 2026-07-23: information, not force). Says what happened, that the
             // boxes still work, and points at Duplicate for the customize case.
             const haveIts = r.results.filter(x => x.fullyOwned).length;
+            const flagged = r.results.length - haveIts;
             const dupHint = document.getElementById('sf-review-dup-hint');
-            if (dupHint && haveIts > 0) {
-              const allOfThem = haveIts === _sfImport.candidates.length;
-              const lead = haveIts === 1
-                ? 'One of these fonts is already in your library, so it starts unchecked.'
-                : `${allOfThem ? 'All' : haveIts} of these fonts are already in your library, so they start unchecked.`;
-              dupHint.textContent = `${lead} You can still check any of them to import a second copy. To customize a font you already own, a better path is to open it in your library and duplicate it there.`;
+            if (dupHint && (haveIts > 0 || flagged > 0)) {
+              dupHint.textContent = window._sfDupSummaryText(haveIts, flagged, _sfImport.candidates.length);
               dupHint.style.display = '';
             }
             if (changedAny) _sfRevalidateCandidates();
