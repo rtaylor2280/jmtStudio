@@ -193,10 +193,17 @@ async function zipFolderToFile(srcDir, destZipPath, onProgress, stripCorruptWavs
     if (!onProgress) return;
     const now = Date.now();
     if (now - lastEmit > 100 || filesProcessed === fileCount) {
-      onProgress({ bytesProcessed, totalBytes, currentFile: entry.name });
+      // Name the file now STARTING (submission order == completion order with
+      // statConcurrency: 1), not the one just finished — during a long compress
+      // the display shows the file actually being worked while the bar honestly
+      // holds at completed bytes, instead of a stale name on a full-looking bar.
+      const next = files[filesProcessed];
+      onProgress({ bytesProcessed, totalBytes, currentFile: (next && next.relPath) || entry.name });
       lastEmit = now;
     }
   });
+  // First emission up front so a section never opens blind on a huge first file.
+  if (onProgress && files.length) onProgress({ bytesProcessed: 0, totalBytes, currentFile: files[0].relPath });
 
   // Add files in pre-sorted order. With statConcurrency:1 above, archiver stats
   // and appends them one at a time IN this submission order, so the zip bytes are
@@ -477,7 +484,7 @@ function cleanupPartialSource(uuidDir) {
 //   { ok: false, error: <string> }
 //
 // Progress events fire in three stages: hashing, copying, done.
-async function importSource({ userData, sourcePath, originalName, metadata, onProgress, forceNewSource, prepareOnly, stripCorrupt }) {
+async function importSource({ userData, sourcePath, originalName, metadata, onProgress, forceNewSource, prepareOnly, stripCorrupt, knownHash }) {
   if (!userData) return { ok: false, error: 'Missing userData' };
   if (!sourcePath) return { ok: false, error: 'Missing sourcePath' };
   // Sweep corrupt source dirs (meta without archive, archive without
@@ -524,6 +531,16 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
   // can short-circuit cleanly before we write anything because the
   // input is already a single file we can stream-hash in place.
   if (isZip) {
+    if (knownHash && forceNewSource) {
+      // Duplicate-prompt hand-off: the initial scan already hashed this exact
+      // file seconds ago and the user chose "import again as a new source" —
+      // reuse that hash instead of re-reading the whole archive. Only honored
+      // with forceNewSource (the dedup-check path must always hash fresh).
+      hash = knownHash;
+      fileSize = stat.size;
+      totalBytes = stat.size;
+      fileCount = 1;
+    } else {
     try {
       hash = await hashZipFile(sourcePath, ({ bytesHashed, totalBytes: tb }) => {
         emit('hashing', {
@@ -537,6 +554,7 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
       fileCount = 1;
     } catch (err) {
       return { ok: false, error: `Hash failed: ${err.message}` };
+    }
     }
     if (!forceNewSource) {
       const existing = findByHash(userData, hash);
@@ -742,7 +760,7 @@ async function _readZipEntryToBuffer(zip, entry) {
 // the same convention _resolveCompositeReadBytes reads back). The inner .zip
 // file itself is NOT recorded as a leaf: it's a container, rebuilt from its
 // leaves on reconstruction. Arbitrary nesting depth. onLeaf(relPath, size, buf).
-async function _collectZipLeaves(zip, prefix, keep, onLeaf) {
+async function _collectZipLeaves(zip, prefix, keep, onLeaf, onRead) {
   const entries = await _readAllZipEntries(zip);
   const innerZips = [];
   for (const e of entries) {
@@ -752,15 +770,19 @@ async function _collectZipLeaves(zip, prefix, keep, onLeaf) {
     if (keep && !keep(full)) continue;
     let buf; try { buf = await _readZipEntryToBuffer(zip, e); } catch { continue; }
     onLeaf(full, e.size, buf);
+    if (onRead) onRead(full, e.size);
   }
   for (const iz of innerZips) {
     let buf; try { buf = await _readZipEntryToBuffer(zip, iz.e); } catch { continue; }
+    // The blob read is the byte cost; inner leaves below tick names only (0 bytes)
+    // so a byte-driven caller total (outer entry table) still lands at 100%.
+    if (onRead) onRead(iz.full, iz.e.size);
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jmt-manifest-inner-'));
     try {
       const tmpZip = path.join(tmpDir, 'inner.zip');
       fs.writeFileSync(tmpZip, buf);
       const innerZip = _openZip(tmpZip);
-      try { await _collectZipLeaves(innerZip, iz.full + '/', keep, onLeaf); }
+      try { await _collectZipLeaves(innerZip, iz.full + '/', keep, onLeaf, onRead && ((rel) => onRead(rel, 0))); }
       finally { await innerZip.close(); }
     } catch {} finally { try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {} }
   }
@@ -1643,7 +1665,7 @@ function fileHashManifestPath(userData, kind, uuid) {
 // run deferred after import without freezing the UI. Returns { records, contentHash } or
 // null. NOTE: an inner .zip nested inside the source is hashed as one blob — its contents
 // are not recursed into yet; a follow-on if any bundles nest zips with variants inside.
-async function ensureSourceManifest(userData, sourceUuid) {
+async function ensureSourceManifest(userData, sourceUuid, onProgress) {
   if (!userData || !sourceUuid) return null;
   const fh = require('./soundFontFileHash');
   const crypto = require('crypto');
@@ -1668,17 +1690,36 @@ async function ensureSourceManifest(userData, sourceUuid) {
       // shipped inside Proffie.zip must be knowable to library dedup/compare).
       const zip = _openZip(path.join(uuidDir, 'source.zip'));
       try {
-        await _collectZipLeaves(zip, '', keep, (rel, size, buf) => pushHash(rel, size, buf));
+        // Byte-driven 'catalog' progress: total from the outer entry table (inner-zip
+        // leaves tick the name only — their bytes are counted once at the blob read).
+        let totalBytes = 0, bytesDone = 0, fileCount = 0;
+        if (onProgress) {
+          for (const e of await _readAllZipEntries(zip)) {
+            if (e.isDir) continue;
+            if (/\.zip$/i.test(e.fileName) || keep(e.fileName)) totalBytes += (e.size || 0);
+          }
+        }
+        const onRead = onProgress ? (rel, n) => {
+          bytesDone += n; fileCount++;
+          onProgress({ phase: 'catalog', bytesDone, totalBytes, fileCount, currentFile: rel });
+        } : undefined;
+        await _collectZipLeaves(zip, '', keep, (rel, size, buf) => pushHash(rel, size, buf), onRead);
       } finally { await zip.close(); }
     } else if (meta.format === 'folder') {
       // Folder readFile is a cheap fs read (no re-open cost), so the abstraction is fine.
       const source = openSource(userData, sourceUuid);
       if (!source) return null;
       const entries = await source.listAll();
+      let totalBytes = 0, bytesDone = 0, fileCount = 0;
+      if (onProgress) for (const e of entries) { if (!e.isDir && keep(e.fileName)) totalBytes += (e.size || 0); }
       for (const e of entries) {
         if (e.isDir || !keep(e.fileName)) continue;
         let buf; try { buf = await source.readFile(e.fileName); } catch { continue; }
         pushHash(e.fileName, e.size, buf);
+        if (onProgress) {
+          bytesDone += (e.size != null ? e.size : buf.length); fileCount++;
+          onProgress({ phase: 'catalog', bytesDone, totalBytes, fileCount, currentFile: e.fileName });
+        }
       }
     } else {
       return null;
@@ -1983,6 +2024,32 @@ async function _dedupeInnerZipSource(userData, uuid, uuidDir, meta, records, byH
   const physical = openSource(userData, uuid); // fat source, composite-aware reads
   if (!physical) return { deduped: false, reason: 'open-failed' };
 
+  // Running trim total: the moment the hash groups exist we know exactly which
+  // bytes are duplicates — (copies - 1) × size per unique file, attributed to its
+  // canonical. Accumulated as each canonical is read so the number tracks real work.
+  const sizeByHash = new Map();
+  for (const r of records) if (!sizeByHash.has(r.fileHash)) sizeByHash.set(r.fileHash, r.size || 0);
+  const dupBytesByCanon = new Map();
+  for (const [h, paths] of byHash) {
+    const canon = canonicalByHash.get(h);
+    if (canon) dupBytesByCanon.set(canon, (paths.length - 1) * (sizeByHash.get(h) || 0));
+  }
+  // The running total is denominated in DISK bytes, not raw content bytes: the
+  // duplicates live inside a compressed archive, so raw trimmed content overstates
+  // what the file will actually shrink by (the TurboTax effect, Ryan 2026-07-23).
+  // Scale by the archive's measured compression ratio; the close-out reports exact.
+  let trimmedSoFar = 0;
+  const contentBytes = records.reduce((s, r) => s + (r.size || 0), 0);
+  const archiveBytes = (() => { try { return fs.statSync(zipPath).size; } catch { return 0; } })();
+  const diskRatio = (contentBytes > 0 && archiveBytes > 0) ? Math.min(1, archiveBytes / contentBytes) : 1;
+  const prog = onProgress ? (p) => {
+    if (p && p.phase === 'reading' && p.currentFile && dupBytesByCanon.has(p.currentFile)) {
+      trimmedSoFar += dupBytesByCanon.get(p.currentFile);
+      dupBytesByCanon.delete(p.currentFile); // count each canonical once
+    }
+    onProgress({ ...p, savedBytes: Math.round(trimmedSoFar * diskRatio) });
+  } : null;
+
   const outerCanon = [];
   const innerGroups = new Map(); // innerZipPath -> [{ innerRel, canon }]
   for (const canon of canonicalByHash.values()) {
@@ -2000,29 +2067,63 @@ async function _dedupeInnerZipSource(userData, uuid, uuidDir, meta, records, byH
     // a single time, hash-verified), so building the slim is file copies — not a
     // per-file re-extraction of multi-hundred-MB inner zips.
     const { canonDisk: fatCanon, cleanup } = await _extractCanonicalsToDisk(physical, canonicalByHash,
-      { phase: 'optimize', onProgress });
+      { phase: 'reading', onProgress: prog });
     releaseFat = cleanup;
+    // Rebuild progress: one section per metric (Ryan's rule, 2026-07-23). Placement
+    // ticks are their own 'rebuild' section (file counts, fast fs copies); the
+    // per-inner-zip compressions are a separate 'innercompress' section carrying
+    // CUMULATIVE bytes across all inner zips so its bar fills once, monotonically.
+    const totalPlace = canonicalByHash.size;
+    let placed = 0;
+    const tickPlace = (cur) => { placed++; if (prog) prog({ phase: 'rebuild', fileCount: placed, totalFiles: totalPlace, currentFile: cur }); };
+    const canonSize = new Map();
+    for (const [h, canon] of canonicalByHash) canonSize.set(canon, sizeByHash.get(h) || 0);
+    let innerCompressTotal = 0;
+    for (const members of innerGroups.values())
+      for (const m of members) innerCompressTotal += (canonSize.get(m.canon) || 0);
+    let innerCompressedBase = 0;
     // Outer canonical files (not inside any inner zip) go in verbatim.
     for (const canon of outerCanon) {
       const dest = path.join(slimTree, canon.replace(/\//g, path.sep));
       fs.mkdirSync(path.dirname(dest), { recursive: true });
       fs.copyFileSync(fatCanon.get(canon), dest);
+      tickPlace(canon);
     }
     // Each inner zip rebuilt from ONLY its canonical members (the slim version).
-    for (const [iz, members] of innerGroups) {
-      const izTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'jmt-izdedup-inner-'));
-      try {
+    // Two passes, NOT interleaved: place every group's members first (one
+    // continuous Rebuilding section), then compress every rebuilt zip (one
+    // continuous Compressing section). Interleaving alternated the visible
+    // sections per zip and made the bar sawtooth (Ryan, 2026-07-23). Costs a
+    // little more temp disk (all group trees live until compressed) — fine.
+    const groupTmp = []; // [{ iz, izTmp, groupBytes }]
+    try {
+      for (const [iz, members] of innerGroups) {
+        const g = { iz, izTmp: fs.mkdtempSync(path.join(os.tmpdir(), 'jmt-izdedup-inner-')), groupBytes: 0 };
+        groupTmp.push(g);
         for (const m of members) {
-          const f = path.join(izTmp, m.innerRel.replace(/\//g, path.sep));
+          const f = path.join(g.izTmp, m.innerRel.replace(/\//g, path.sep));
           fs.mkdirSync(path.dirname(f), { recursive: true });
           fs.copyFileSync(fatCanon.get(m.canon), f);
+          g.groupBytes += (canonSize.get(m.canon) || 0);
+          tickPlace(m.canon);
         }
-        const dest = path.join(slimTree, iz.replace(/\//g, path.sep));
+      }
+      for (const g of groupTmp) {
+        const dest = path.join(slimTree, g.iz.replace(/\//g, path.sep));
         fs.mkdirSync(path.dirname(dest), { recursive: true });
-        await zipFolderToFile(izTmp, dest);
-      } finally { try { fs.rmSync(izTmp, { recursive: true, force: true }); } catch {} }
+        await zipFolderToFile(g.izTmp, dest, prog && ((p) => prog({
+          phase: 'innercompress',
+          bytesDone: innerCompressedBase + (p.bytesProcessed || 0),
+          totalBytes: innerCompressTotal,
+          currentFile: p.currentFile,
+        })));
+        innerCompressedBase += g.groupBytes;
+        try { fs.rmSync(g.izTmp, { recursive: true, force: true }); } catch {}
+      }
+    } finally {
+      for (const g of groupTmp) { try { fs.rmSync(g.izTmp, { recursive: true, force: true }); } catch {} }
     }
-    await zipFolderToFile(slimTree, slimZip);
+    await zipFolderToFile(slimTree, slimZip, prog && ((p) => prog({ phase: 'compress', bytesDone: p.bytesProcessed, totalBytes: p.totalBytes, currentFile: p.currentFile })));
 
     // VERIFY-BEFORE-COMMIT: extract every canonical from the slim archive once,
     // hash-checking each against the value it is the canonical for, and confirm
@@ -2031,7 +2132,8 @@ async function _dedupeInnerZipSource(userData, uuid, uuidDir, meta, records, byH
     // reconstructs to its recorded hash. Reads through the slim physical source
     // the virtualization also uses; opens each inner zip once.
     const slimPhysical = _createZipSource({ uuid, uuidDir: slimSrcDir, meta });
-    const { canonDisk, cleanup: releaseCanon } = await _extractCanonicalsToDisk(slimPhysical, canonicalByHash);
+    const { canonDisk, cleanup: releaseCanon } = await _extractCanonicalsToDisk(slimPhysical, canonicalByHash,
+      { phase: 'verify', onProgress: prog });
     try {
       for (const r of records) {
         if (!canonDisk.has(canonicalByHash.get(r.fileHash)))
@@ -2041,12 +2143,15 @@ async function _dedupeInnerZipSource(userData, uuid, uuidDir, meta, records, byH
 
     // COMMIT: keep the fat archive until the slim one is safely in place. slimZip
     // lives in the OS temp dir (possibly another volume), so copy then unlink
-    // rather than rename across devices.
+    // rather than rename across devices. Streamed so the multi-hundred-MB copy
+    // reports instead of freezing the bar on the last verify file.
     const oldBytes = (() => { try { return fs.statSync(zipPath).size; } catch { return 0; } })();
     const bak = zipPath + '.pre-dedup';
     fs.renameSync(zipPath, bak);
-    try { fs.copyFileSync(slimZip, zipPath); }
-    catch (e) { try { fs.renameSync(bak, zipPath); } catch {} throw e; }
+    try {
+      await copyFileStreamed(slimZip, zipPath, prog && ((p) => prog({ phase: 'commit', bytesDone: p.bytesCopied, totalBytes: p.totalBytes, currentFile: 'source.zip' })));
+    }
+    catch (e) { try { fs.rmSync(zipPath, { force: true }); } catch {} try { fs.renameSync(bak, zipPath); } catch {} throw e; }
     fs.rmSync(bak, { force: true });
     const newBytes = (() => { try { return fs.statSync(zipPath).size; } catch { return 0; } })();
 
@@ -2085,7 +2190,7 @@ async function dedupeSource(userData, uuid, onProgress) {
   const crypto = require('crypto');
   const fh = require('./soundFontFileHash');
   let bc = fh.readFileHashManifest(fileHashManifestPath(userData, 'sources', uuid));
-  if (!bc || !Array.isArray(bc.records)) bc = await ensureSourceManifest(userData, uuid);
+  if (!bc || !Array.isArray(bc.records)) bc = await ensureSourceManifest(userData, uuid, onProgress);
   if (!bc || !Array.isArray(bc.records)) return { deduped: false, reason: 'no-breadcrumb' };
   const records = bc.records.filter(r => r.fileHash !== '<empty>');
 
@@ -2110,11 +2215,21 @@ async function dedupeSource(userData, uuid, onProgress) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jmt-dedup-'));
   const tmpZip = path.join(uuidDir, '.source.zip.dedup-tmp');
   try {
+    // Running trim total, same shape as the inner-zip path: (copies - 1) × size
+    // per unique file, accumulated as each canonical is pulled, scaled to DISK
+    // bytes by the archive's measured compression ratio (see inner-zip note).
+    const sizeByHash = new Map();
+    for (const r of records) if (!sizeByHash.has(r.fileHash)) sizeByHash.set(r.fileHash, r.size || 0);
+    let trimmedSoFar = 0;
+    const gContentBytes = records.reduce((s, r) => s + (r.size || 0), 0);
+    const gArchiveBytes = (() => { try { return fs.statSync(zipPath).size; } catch { return 0; } })();
+    const gDiskRatio = (gContentBytes > 0 && gArchiveBytes > 0) ? Math.min(1, gArchiveBytes / gContentBytes) : 1;
     // Extract ONLY the canonical files (one per unique hash) to a temp folder at their paths.
     const zip = _openZip(zipPath);
     try {
       const entries = await _readAllZipEntries(zip);
       const entryByName = new Map(entries.filter(e => !e.isDir).map(e => [e.fileName, e]));
+      let done = 0;
       for (const [h, canonPath] of canonicalByHash) {
         const src = entryByName.has(canonPath) ? canonPath
           : (byHash.get(h) || []).find(p => entryByName.has(p));
@@ -2123,23 +2238,29 @@ async function dedupeSource(userData, uuid, onProgress) {
         const dest = path.join(tmpDir, src.replace(/\//g, path.sep));
         fs.mkdirSync(path.dirname(dest), { recursive: true });
         fs.writeFileSync(dest, buf);
+        done++;
+        trimmedSoFar += ((byHash.get(h) || []).length - 1) * (sizeByHash.get(h) || 0);
+        if (onProgress) onProgress({ phase: 'reading', fileCount: done, totalFiles: canonicalByHash.size, currentFile: src, savedBytes: Math.round(trimmedSoFar * gDiskRatio) });
       }
     } finally { await zip.close(); }
 
     // Build the slim archive (deterministic) to a temp file.
-    await zipFolderToFile(tmpDir, tmpZip);
+    await zipFolderToFile(tmpDir, tmpZip, onProgress && ((p) => onProgress({ phase: 'compress', bytesDone: p.bytesProcessed, totalBytes: p.totalBytes, currentFile: p.currentFile, savedBytes: Math.round(trimmedSoFar * gDiskRatio) })));
 
     // VERIFY-BEFORE-COMMIT: every ORIGINAL path must reconstruct to its recorded hash.
     const vzip = _openZip(tmpZip);
     try {
       const vents = await _readAllZipEntries(vzip);
       const vby = new Map(vents.filter(e => !e.isDir).map(e => [e.fileName, e]));
+      let vdone = 0;
       for (const r of records) {
         const ent = vby.get(canonicalByHash.get(r.fileHash)) || vby.get(r.relPath);
         if (!ent) throw new Error(`verify: ${r.relPath} unresolved in slim archive`);
         const buf = await _readZipEntryToBuffer(vzip, ent);
         if (crypto.createHash('sha256').update(buf).digest('hex') !== r.fileHash)
           throw new Error(`verify: ${r.relPath} hash mismatch`);
+        vdone++;
+        if (onProgress) onProgress({ phase: 'verify', fileCount: vdone, totalFiles: records.length, currentFile: r.relPath, savedBytes: Math.round(trimmedSoFar * gDiskRatio) });
       }
     } finally { await vzip.close(); }
 

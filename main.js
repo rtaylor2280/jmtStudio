@@ -2456,7 +2456,7 @@ ipcMain.handle('linkImport:cleanup', (_, { filePath } = {}) => {
   } catch (e) { return { ok: false, error: String(e && e.message || e) }; }
 });
 
-ipcMain.handle('sources:import', async (event, { sourcePath, originalName, metadata, forceNewSource } = {}) => {
+ipcMain.handle('sources:import', async (event, { sourcePath, originalName, metadata, forceNewSource, knownHash } = {}) => {
   const send = (payload) => {
     try { event.sender.send('sources:importProgress', payload); } catch {}
   };
@@ -2467,6 +2467,7 @@ ipcMain.handle('sources:import', async (event, { sourcePath, originalName, metad
       originalName,
       metadata,
       forceNewSource,
+      knownHash,
       onProgress: send,
     });
   } catch (err) {
@@ -2491,7 +2492,7 @@ ipcMain.handle('sources:optimize', async (event, { uuid } = {}) => {
     if (now - lastSent >= 80) { lastSent = now; try { event.sender.send('soundFonts:optimizeProgress', pending); } catch {} pending = null; }
   };
   try {
-    await soundFontSources.ensureSourceManifest(ud, uuid);
+    await soundFontSources.ensureSourceManifest(ud, uuid, onProgress);
     const r = await soundFontSources.dedupeSource(ud, uuid, onProgress);
     if (pending) { try { event.sender.send('soundFonts:optimizeProgress', pending); } catch {} }
     return { ok: true, ...(r || {}) };

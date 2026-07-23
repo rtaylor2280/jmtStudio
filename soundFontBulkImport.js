@@ -569,6 +569,35 @@ function discardPreparedSources(userData, uuids) {
   for (const u of uuids) { try { soundFontSources.discardPreparedSource(userData, u); } catch {} }
 }
 
+// Fold the optimize passes' phase events (catalog → reading → rebuild → compress →
+// verify → commit) onto one monotonic 0-100 percent for the bulk bar. Bands are
+// weighted by typical duration; within a band the phase's own counters drive it,
+// so the number always tracks real work. Throttled ~100ms.
+const _OPT_BANDS = {
+  catalog: [0, 35], reading: [35, 50], rebuild: [50, 58],
+  innercompress: [58, 72], compress: [72, 88], verify: [88, 98], commit: [98, 100],
+};
+function _optimizeProgressForwarder(onSubProgress) {
+  if (typeof onSubProgress !== 'function') return undefined;
+  let last = 0;
+  return (p) => {
+    if (!p) return;
+    const now = Date.now();
+    if (now - last < 100) return;
+    last = now;
+    const band = _OPT_BANDS[p.phase] || [0, 100];
+    let frac = 0;
+    if (p.totalBytes) frac = Math.max(0, Math.min(1, (p.bytesDone || 0) / p.totalBytes));
+    else if (p.totalFiles) frac = Math.max(0, Math.min(1, (p.fileCount || 0) / p.totalFiles));
+    onSubProgress({
+      stage: 'optimizing',
+      percent: band[0] + frac * (band[1] - band[0]),
+      savedBytes: p.savedBytes,
+      currentFile: p.currentFile,
+    });
+  };
+}
+
 // Import one planned source end-to-end: hash + copy via importSource,
 // detect candidates, create entries with needsReview when applicable.
 async function importPlannedSource({ userData, src, fromSdCard }, onSubProgress) {
@@ -915,9 +944,13 @@ async function importPlannedSource({ userData, src, fromSdCard }, onSubProgress)
   // single-format and folder sources). Idempotent + verify-before-commit, so a failure leaves
   // the source untouched. Done before this source's import reports complete, so the deduped
   // state is correct the moment the view refreshes — no background, no stale-cache lag.
+  // Progress: the optimize passes' phases are folded onto one monotonic percent
+  // (bands weighted by typical duration) so the bulk bar keeps moving instead of
+  // freezing at the end of the extract phase.
   try {
-    await soundFontSources.ensureSourceManifest(userData, sourceUuid);
-    await soundFontSources.dedupeSource(userData, sourceUuid);
+    const optForward = _optimizeProgressForwarder(onSubProgress);
+    await soundFontSources.ensureSourceManifest(userData, sourceUuid, optForward);
+    await soundFontSources.dedupeSource(userData, sourceUuid, optForward);
   } catch {}
   return {
     ok: true,
