@@ -406,11 +406,28 @@ function matchCandidateAgainstLibrary(records, candidatePath, index, thresholds 
 }
 
 // DIRECTION matters (Ryan, 2026-07-23): "already in your library" may only be
-// claimed when the library contains EVERY sound the candidate has. A have-it
-// score with sounds missing from the library copy means skipping the import
-// would LOSE those sounds — that case must stay checked and say so.
+// claimed when the library contains EVERYTHING the candidate has — character
+// sounds AND the customizable content (quotes/tracks/force). Identity runs on
+// core only (that's what makes recognition robust to personalization), but the
+// ownership claim must count it all: a core-identical copy carrying tracks or
+// quotes the library lacks is NOT fully owned — skipping it would lose them.
+// (m.exact only proves the CORE matched, so it can't shortcut this check.)
 function isFullyOwned(m) {
-  return !!m && m.verdict === 'have_it' && (m.exact || (m.coreInter || 0) >= (m.cardCoreCount || 0));
+  if (!m || m.verdict !== 'have_it') return false;
+  const coreMissing = Math.max(0, (m.cardCoreCount || 0) - (m.coreInter || 0));
+  const custMissing = Math.max(0, (m.cardCustCount || 0) - (m.custInter || 0));
+  return coreMissing === 0 && custMissing === 0;
+}
+
+// Compose the "what yours is missing" phrase across BOTH buckets: character
+// sounds and the customizable content (quotes/tracks/force). Plain words only.
+function _missingPhrase(m) {
+  const core = Math.max(0, (m.cardCoreCount || 0) - (m.coreInter || 0));
+  const cust = Math.max(0, (m.cardCustCount || 0) - (m.custInter || 0));
+  const parts = [];
+  if (core) parts.push(`${core} sound${core === 1 ? '' : 's'}`);
+  if (cust) parts.push(`${cust} quote or track file${cust === 1 ? '' : 's'}`);
+  return parts.join(' and ');
 }
 
 // Plain-language verdict line for the review UI. No engineering terms — a
@@ -418,12 +435,11 @@ function isFullyOwned(m) {
 // Returns null when there's nothing worth saying (new font / no match).
 function verdictLabel(m) {
   if (!m || !m.bestMatch || m.lowConfidence) return null;
-  const missing = Math.max(0, (m.cardCoreCount || 0) - (m.coreInter || 0));
   if (m.verdict === 'have_it') {
     if (isFullyOwned(m)) {
       return `Already in your library: matches ${m.bestMatch}`;
     }
-    return `Nearly identical to ${m.bestMatch}, but this copy has ${missing} sound${missing === 1 ? '' : 's'} yours is missing`;
+    return `Nearly identical to ${m.bestMatch}, but this copy has ${_missingPhrase(m)} yours is missing`;
   }
   if (m.verdict === 'variant') {
     // Superset case: everything this font has, an owned font already contains
@@ -440,12 +456,11 @@ function verdictLabel(m) {
 // checking the box actually does GIVEN this match. Null when the label is null.
 function verdictTip(m) {
   if (!m || !m.bestMatch || m.lowConfidence) return null;
-  const missing = Math.max(0, (m.cardCoreCount || 0) - (m.coreInter || 0));
   if (m.verdict === 'have_it') {
     if (isFullyOwned(m)) {
-      return `Your library already has every sound in this font (as ${m.bestMatch}). Check the box to import a second copy anyway. To customize ${m.bestMatch}, duplicating it in your library is the better path.`;
+      return `Your library already has everything in this font (as ${m.bestMatch}). Check the box to import a second copy anyway. To customize ${m.bestMatch}, duplicating it in your library is the better path.`;
     }
-    return `Importing keeps the ${missing} sound${missing === 1 ? '' : 's'} your ${m.bestMatch} copy doesn't have. Uncheck only if you don't want them.`;
+    return `Importing keeps the ${_missingPhrase(m)} your ${m.bestMatch} copy doesn't have. Uncheck only if you don't want them.`;
   }
   if (m.verdict === 'variant') {
     return `Probably a different version of ${m.bestMatch}. Import it if you want both versions in your library.`;
