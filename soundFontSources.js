@@ -773,6 +773,17 @@ function _isCompositePath(relPath) {
   return /\.zip\//i.test(String(relPath || ''));
 }
 
+// Split a composite path into [innerZipPath, innerRelPath]. The inner-zip path
+// is everything up to and including the FIRST ".zip"; the rest is the path
+// inside it. Non-composite paths return [null, path]. Library-wide scan proved
+// nesting is exactly one level deep, so the first ".zip" is the only boundary.
+//   "Grip/Proffie.zip/Proffie/boot.wav" -> ["Grip/Proffie.zip", "Proffie/boot.wav"]
+//   "Grip/ReadMe.txt"                   -> [null, "Grip/ReadMe.txt"]
+function _splitComposite(relPath) {
+  const m = String(relPath || '').match(/^(.*?\.zip)\/(.*)$/i);
+  return m ? [m[1], m[2]] : [null, String(relPath || '')];
+}
+
 async function _writeZipEntryToFile(zip, entry, destPath) {
   await new Promise((resolve, reject) => {
     zip.stream(entry.fileName)
@@ -1695,6 +1706,59 @@ function _loadSourceBreadcrumb(userData, uuid, uuidDir) {
     || fh.readFileHashManifest(fileHashManifestPath(userData, 'sources', uuid));
 }
 
+// Extract every canonical leaf of an inner-zip source to disk, opening each inner
+// zip exactly ONCE (not once per file), and verify each canonical's bytes hash to
+// the value it is the canonical for. Returns { canonDisk: Map(canonicalPath ->
+// diskPath), cleanup() }. Throws on a missing or hash-mismatched canonical. This
+// is both the fast bytes source for reconstructBundle and the safety check
+// dedupeSource verifies before it trims — a slim inner zip is small, so one read
+// per inner zip replaces thousands of per-file re-reads.
+async function _extractCanonicalsToDisk(physical, canonicalByHash) {
+  const crypto = require('crypto');
+  const hashByCanon = new Map();
+  for (const [h, p] of canonicalByHash) hashByCanon.set(p, h);
+  const outer = [];
+  const inner = new Map(); // innerZipPath -> [{ rel, canon }]
+  for (const canon of canonicalByHash.values()) {
+    const [iz, rel] = _splitComposite(canon);
+    if (iz === null) outer.push(canon);
+    else { if (!inner.has(iz)) inner.set(iz, []); inner.get(iz).push({ rel, canon }); }
+  }
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'jmt-canon-'));
+  const cleanup = () => { try { fs.rmSync(ws, { recursive: true, force: true }); } catch {} };
+  const canonDisk = new Map();
+  const verify = (canon, buf) => {
+    const want = hashByCanon.get(canon);
+    if (want && crypto.createHash('sha256').update(buf).digest('hex') !== want)
+      throw new Error(`canonical hash mismatch: ${canon}`);
+  };
+  try {
+    let i = 0;
+    for (const canon of outer) {
+      const buf = await physical.readFile(canon);
+      verify(canon, buf);
+      const dp = path.join(ws, 'o' + (i++)); fs.writeFileSync(dp, buf); canonDisk.set(canon, dp);
+    }
+    for (const [iz, members] of inner) {
+      const izBuf = await physical.readFile(iz);
+      const izDir = fs.mkdtempSync(path.join(ws, 'iz-'));
+      const izFile = path.join(izDir, 'i.zip'); fs.writeFileSync(izFile, izBuf);
+      const izZip = _openZip(izFile);
+      try {
+        const ents = new Map((await _readAllZipEntries(izZip)).filter(e => !e.isDir).map(e => [e.fileName, e]));
+        for (const m of members) {
+          const e = ents.get(m.rel);
+          if (!e) throw new Error(`canonical missing from inner zip: ${m.canon}`);
+          const buf = await _readZipEntryToBuffer(izZip, e);
+          verify(m.canon, buf);
+          const dp = path.join(izDir, 'c' + (i++)); fs.writeFileSync(dp, buf); canonDisk.set(m.canon, dp);
+        }
+      } finally { await izZip.close(); }
+    }
+    return { canonDisk, cleanup };
+  } catch (e) { cleanup(); throw e; }
+}
+
 // Transparent virtualization (§13.2). Wrap a physical, possibly-deduped source so it presents
 // the FULL original tree from the breadcrumb, resolving any trimmed path to its canonical
 // present twin by content hash. Inert-safe: if every breadcrumb path is still physically
@@ -1712,11 +1776,28 @@ function _virtualizeSource(physical, records) {
   }
   const virtualEntries = recs.map(r => ({ fileName: r.relPath, size: r.size, isDir: false }));
   const norm = (p) => String(p).replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+  // Inner-zip sources present differently. A trimmed leaf lives INSIDE an inner
+  // zip, so the outer physical.listAll() can't report leaf-level presence; and
+  // the deterministic canonical (one per hash, computed the same way dedupeSource
+  // trims) IS exactly what survives in the slim archive. So presence = the
+  // canonical set, and a trimmed leaf resolves to its canonical twin (present in
+  // its real inner zip) via the existing composite readFile. No slim-archive
+  // recursion needed — dedupeSource and this share _pickCanonical.
+  const hasInner = recs.some(r => _isCompositePath(r.relPath));
+  let canonicalByHash = null;
+  if (hasInner) {
+    canonicalByHash = new Map();
+    for (const [h, paths] of byHash) canonicalByHash.set(h, _pickCanonical(paths));
+  }
   let presentSet = null;
   async function present() {
     if (presentSet) return presentSet;
-    const phys = await physical.listAll();
-    presentSet = new Set(phys.filter(e => !e.isDir).map(e => e.fileName));
+    if (hasInner) {
+      presentSet = new Set([...canonicalByHash.values()]);
+    } else {
+      const phys = await physical.listAll();
+      presentSet = new Set(phys.filter(e => !e.isDir).map(e => e.fileName));
+    }
     return presentSet;
   }
   return Object.assign({}, physical, {
@@ -1762,6 +1843,56 @@ function _virtualizeSource(physical, records) {
       }
       return { fileCount, totalBytes };
     },
+    // Rebuild the FULL original bundle to destDir WITH inner zips intact — each
+    // inner zip rebuilt from its members' canonical copies. This is the faithful
+    // refill for a deduped inner-zip source: the exported bundle matches the
+    // original structure (Proffie.zip, Verso.zip, ... as real zips), not an
+    // exploded tree. Per-leaf byte-identical; inner-zip container bytes need not
+    // match. (extractTo above stays the "unwrapped tree" path for subtree/entry
+    // extraction; export routes here when the source has inner zips.)
+    async reconstructBundle(destDir, onProgress) {
+      if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+      // Pull every canonical to disk once (each inner zip opened a single time),
+      // then rebuild is pure file copies + one re-zip per inner zip.
+      const { canonDisk, cleanup } = await _extractCanonicalsToDisk(physical, canonicalByHash);
+      try {
+        const outer = [];
+        const groups = new Map(); // innerZipPath -> [{ innerRel, rec }]
+        for (const r of recs) {
+          const [iz, innerRel] = _splitComposite(r.relPath);
+          if (iz === null) outer.push(r);
+          else { if (!groups.has(iz)) groups.set(iz, []); groups.get(iz).push({ innerRel, rec: r }); }
+        }
+        let fileCount = 0, totalBytes = 0;
+        const emit = (rel, n) => { fileCount++; totalBytes += n; if (onProgress) onProgress({ fileCount, totalBytes, currentFile: rel }); };
+        const diskOf = (r) => {
+          const dp = canonDisk.get(canonicalByHash.get(r.fileHash));
+          if (!dp) throw new Error(`reconstruct: no canonical for ${r.relPath}`);
+          return dp;
+        };
+        for (const r of outer) {
+          const dest = path.join(destDir, r.relPath.replace(/\//g, path.sep));
+          fs.mkdirSync(path.dirname(dest), { recursive: true });
+          fs.copyFileSync(diskOf(r), dest);
+          emit(r.relPath, r.size || 0);
+        }
+        for (const [iz, members] of groups) {
+          const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'jmt-innerbuild-'));
+          try {
+            for (const m of members) {
+              const f = path.join(tmp, m.innerRel.replace(/\//g, path.sep));
+              fs.mkdirSync(path.dirname(f), { recursive: true });
+              fs.copyFileSync(diskOf(m.rec), f);
+              emit(m.rec.relPath, m.rec.size || 0);
+            }
+            const dest = path.join(destDir, iz.replace(/\//g, path.sep));
+            fs.mkdirSync(path.dirname(dest), { recursive: true });
+            await zipFolderToFile(tmp, dest);
+          } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
+        }
+        return { fileCount, totalBytes };
+      } finally { cleanup(); }
+    },
     // Export the FULL original bundle (trimmed board formats rebuilt), not the slim on-disk
     // archive. `format` is 'zip' (default — a single archive, for backup / re-import) or
     // 'folder' (the extracted tree, ready to drop on a card). `onProgress` reports real work
@@ -1778,9 +1909,12 @@ function _virtualizeSource(physical, records) {
       const grandTotal = recs.reduce((s, r) => s + (r.size || 0), 0);
       const grandFiles = recs.length;
       const folders = _topFolders(recs);
+      // Inner-zip sources rebuild their inner zips (faithful refill); folder-only
+      // sources write the flat tree. Same progress shape either way.
+      const reconstruct = (dest, onProg) => hasInner ? this.reconstructBundle(dest, onProg) : this.extractTo('', dest, onProg);
       if (format === 'folder') {
         const destPath = _uniqueDestPath(destDir, baseName);
-        await this.extractTo('', destPath, (p) => onProgress && onProgress({
+        await reconstruct(destPath, (p) => onProgress && onProgress({
           phase: 'reconstruct', fileCount: p.fileCount, totalFiles: grandFiles,
           bytesDone: p.totalBytes, totalBytes: grandTotal, currentFile: p.currentFile,
         }));
@@ -1792,7 +1926,7 @@ function _virtualizeSource(physical, records) {
       const destPath = _uniqueDestPath(destDir, `${baseName}.zip`);
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'jmt-srcexport-'));
       try {
-        await this.extractTo('', tmp, (p) => onProgress && onProgress({
+        await reconstruct(tmp, (p) => onProgress && onProgress({
           phase: 'reconstruct', fileCount: p.fileCount, totalFiles: grandFiles,
           bytesDone: p.totalBytes, totalBytes: grandTotal, currentFile: p.currentFile,
         }));
@@ -1822,6 +1956,104 @@ function _pickCanonical(paths) {
   })[0];
 }
 
+// Trim an inner-zip source: the duplicates live inside inner zips, so we rebuild
+// each inner zip keeping ONLY its canonical members (the copies it holds the
+// canonical for), write the slimmed inner zips + outer canonicals into a new
+// source.zip, then reconstruct EVERY original leaf through the virtualization and
+// confirm its hash BEFORE swapping the fat archive out. On any mismatch the
+// original is untouched. Canonicals stay in real inner zips, so the virtualization
+// reads trimmed leaves by resolving to their present canonical twin.
+async function _dedupeInnerZipSource(userData, uuid, uuidDir, meta, records, byHash, canonicalByHash, bc) {
+  const crypto = require('crypto');
+  const fh = require('./soundFontFileHash');
+  const zipPath = path.join(uuidDir, 'source.zip');
+  const physical = openSource(userData, uuid); // fat source, composite-aware reads
+  if (!physical) return { deduped: false, reason: 'open-failed' };
+
+  const outerCanon = [];
+  const innerGroups = new Map(); // innerZipPath -> [{ innerRel, canon }]
+  for (const canon of canonicalByHash.values()) {
+    const [iz, innerRel] = _splitComposite(canon);
+    if (iz === null) outerCanon.push(canon);
+    else { if (!innerGroups.has(iz)) innerGroups.set(iz, []); innerGroups.get(iz).push({ innerRel, canon }); }
+  }
+
+  const slimTree = fs.mkdtempSync(path.join(os.tmpdir(), 'jmt-izdedup-tree-'));
+  const slimSrcDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jmt-izdedup-src-'));
+  const slimZip = path.join(slimSrcDir, 'source.zip');
+  let releaseFat = null;
+  try {
+    // Pull every canonical out of the FAT source ONCE (each fat inner zip opened
+    // a single time, hash-verified), so building the slim is file copies — not a
+    // per-file re-extraction of multi-hundred-MB inner zips.
+    const { canonDisk: fatCanon, cleanup } = await _extractCanonicalsToDisk(physical, canonicalByHash);
+    releaseFat = cleanup;
+    // Outer canonical files (not inside any inner zip) go in verbatim.
+    for (const canon of outerCanon) {
+      const dest = path.join(slimTree, canon.replace(/\//g, path.sep));
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.copyFileSync(fatCanon.get(canon), dest);
+    }
+    // Each inner zip rebuilt from ONLY its canonical members (the slim version).
+    for (const [iz, members] of innerGroups) {
+      const izTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'jmt-izdedup-inner-'));
+      try {
+        for (const m of members) {
+          const f = path.join(izTmp, m.innerRel.replace(/\//g, path.sep));
+          fs.mkdirSync(path.dirname(f), { recursive: true });
+          fs.copyFileSync(fatCanon.get(m.canon), f);
+        }
+        const dest = path.join(slimTree, iz.replace(/\//g, path.sep));
+        fs.mkdirSync(path.dirname(dest), { recursive: true });
+        await zipFolderToFile(izTmp, dest);
+      } finally { try { fs.rmSync(izTmp, { recursive: true, force: true }); } catch {} }
+    }
+    await zipFolderToFile(slimTree, slimZip);
+
+    // VERIFY-BEFORE-COMMIT: extract every canonical from the slim archive once,
+    // hash-checking each against the value it is the canonical for, and confirm
+    // every original leaf maps to a present canonical. Reconstruction copies those
+    // exact canonical bytes into each leaf, so a passing check means every leaf
+    // reconstructs to its recorded hash. Reads through the slim physical source
+    // the virtualization also uses; opens each inner zip once.
+    const slimPhysical = _createZipSource({ uuid, uuidDir: slimSrcDir, meta });
+    const { canonDisk, cleanup: releaseCanon } = await _extractCanonicalsToDisk(slimPhysical, canonicalByHash);
+    try {
+      for (const r of records) {
+        if (!canonDisk.has(canonicalByHash.get(r.fileHash)))
+          throw new Error(`verify(inner-zip): no canonical present for ${r.relPath}`);
+      }
+    } finally { releaseCanon(); }
+
+    // COMMIT: keep the fat archive until the slim one is safely in place. slimZip
+    // lives in the OS temp dir (possibly another volume), so copy then unlink
+    // rather than rename across devices.
+    const oldBytes = (() => { try { return fs.statSync(zipPath).size; } catch { return 0; } })();
+    const bak = zipPath + '.pre-dedup';
+    fs.renameSync(zipPath, bak);
+    try { fs.copyFileSync(slimZip, zipPath); }
+    catch (e) { try { fs.renameSync(bak, zipPath); } catch {} throw e; }
+    fs.rmSync(bak, { force: true });
+    const newBytes = (() => { try { return fs.statSync(zipPath).size; } catch { return 0; } })();
+
+    fh.writeFileHashManifest(path.join(uuidDir, '.jmt-source-manifest.json'), records, bc.contentHash, bc.hashedAt);
+    try {
+      updateSourceMeta(userData, uuid, { deduped: true, innerZipDeduped: true, dedupStats: {
+        originalFiles: records.length, uniqueFiles: canonicalByHash.size,
+        originalArchiveBytes: oldBytes, dedupedArchiveBytes: newBytes,
+      } });
+    } catch {}
+    return { deduped: true, innerZip: true, originalFiles: records.length,
+      uniqueFiles: canonicalByHash.size, savedBytes: Math.max(0, oldBytes - newBytes) };
+  } catch (e) {
+    return { deduped: false, reason: String(e && e.message || e) };
+  } finally {
+    try { releaseFat(); } catch {}
+    try { fs.rmSync(slimTree, { recursive: true, force: true }); } catch {}
+    try { fs.rmSync(slimSrcDir, { recursive: true, force: true }); } catch {}
+  }
+}
+
 // Trim intra-source duplicate files (§13): rewrite the archive keeping ONE canonical copy per
 // unique file (Proffie-folder preferred), leaving a durable breadcrumb so every trimmed path
 // reconstructs on demand. SAFETY: verify-before-commit — the slim archive is built to a temp
@@ -1843,15 +2075,6 @@ async function dedupeSource(userData, uuid) {
   if (!bc || !Array.isArray(bc.records)) return { deduped: false, reason: 'no-breadcrumb' };
   const records = bc.records.filter(r => r.fileHash !== '<empty>');
 
-  // TRIM GATE for inner-zip sources. The manifest now records leaves INSIDE
-  // inner zips (so the library knows those fonts), but physically trimming them
-  // means keeping one copy and rebuilding the inner zips on demand — a promise
-  // every consumer must honor, including the SD-card write path that doesn't
-  // exist yet. Until reconstruction is honored end-to-end, we record the hashes
-  // but never trim an inner-zip source. Hash coverage ships now; the reclaim
-  // rides on top once the write path is virtualization-safe.
-  if (records.some(r => _isCompositePath(r.relPath))) return { deduped: false, reason: 'inner-zip-deferred' };
-
   const byHash = new Map();
   for (const r of records) {
     if (!byHash.has(r.fileHash)) byHash.set(r.fileHash, []);
@@ -1860,6 +2083,14 @@ async function dedupeSource(userData, uuid) {
   const canonicalByHash = new Map();
   for (const [h, paths] of byHash) canonicalByHash.set(h, _pickCanonical(paths));
   if (canonicalByHash.size === records.length) return { deduped: false, reason: 'no-duplicates' };
+
+  // Inner-zip sources trim a different shape: the duplicates live INSIDE inner
+  // zips, so we rebuild slimmed inner zips (canonical members only) and lean on
+  // the virtualization to reconstruct on read. Separate path, verified through
+  // that same virtualization before commit.
+  if (records.some(r => _isCompositePath(r.relPath))) {
+    return await _dedupeInnerZipSource(userData, uuid, uuidDir, meta, records, byHash, canonicalByHash, bc);
+  }
 
   const zipPath = path.join(uuidDir, 'source.zip');
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jmt-dedup-'));
