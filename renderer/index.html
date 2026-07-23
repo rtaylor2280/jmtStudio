@@ -5570,6 +5570,7 @@
            keep the modal compact. -->
       <p class="sf-import-progress-label" id="sf-bulk-import-prog-label">Importing&hellip;</p>
       <div class="sf-import-progress-track"><div class="sf-import-progress-bar" id="sf-bulk-import-prog-bar"></div></div>
+      <p class="sf-import-progress-detail" id="sf-bulk-import-prog-detail"></p>
       <p class="sf-import-progress-detail" id="sf-bulk-import-prog-elapsed" style="color:var(--c-text-sub);font-size:0.78rem;margin-top:4px"></p>
     </div>
 
@@ -9218,6 +9219,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     reviewBreakdown:  document.getElementById('sf-bulk-import-review-breakdown'),
     progLabel:    document.getElementById('sf-bulk-import-prog-label'),
     progBar:      document.getElementById('sf-bulk-import-prog-bar'),
+    progDetail:   document.getElementById('sf-bulk-import-prog-detail'),
     progElapsed:  document.getElementById('sf-bulk-import-prog-elapsed'),
     summaryText:  document.getElementById('sf-bulk-import-summary-text'),
     summaryElapsed: document.getElementById('sf-bulk-import-summary-elapsed'),
@@ -9773,15 +9775,38 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
   // Stamps _prepared / _duplicate / _corrupt onto the plan's sources. Drives the
   // existing progress bar. Returns false on failure/cancel (modal handled).
   const _runAnalyze = async (plan) => {
+    // Layout per the determinate-progress conventions (2026-07-23): section +
+    // metric above the bar, current item below it, elapsed clock last; the bar
+    // advances WITHIN each source via the analyze pass's sub-progress instead
+    // of stepping once per source.
     showPhase('progress');
-    if (els.progLabel) els.progLabel.textContent = 'Analyzing fonts…';
-    if (els.progBar) els.progBar.style.width = '0%';
     const total = plan.sources.length;
+    const _fmtDurA = (s) => (window._sfFormatDuration ? window._sfFormatDuration(s) : `${Math.round(s)}s`);
+    const _aT0 = Date.now();
+    if (els.progLabel) els.progLabel.textContent = `Analyzing fonts · 0 of ${total}`;
+    if (els.progBar) els.progBar.style.width = '0%';
+    if (els.progDetail) els.progDetail.textContent = '';
+    if (els.progElapsed) els.progElapsed.textContent = `${_fmtDurA(0)} elapsed`;
+    const _aTick = setInterval(() => {
+      if (els.progElapsed) els.progElapsed.textContent = `${_fmtDurA((Date.now() - _aT0) / 1000)} elapsed`;
+    }, 1000);
+    let _aIdx = 0, _aLabel = '';
     const unsub = window.electronAPI.onBulkImportProgress((data) => {
       if (!data) return;
       if (data.stage === 'source-start' && data.sourceIdx != null) {
-        if (els.progBar) els.progBar.style.width = `${total ? Math.round((data.sourceIdx / total) * 100) : 0}%`;
-        if (els.progLabel) els.progLabel.textContent = `Analyzing ${data.sourceIdx + 1} of ${total}: ${data.label || ''}`;
+        _aIdx = data.sourceIdx;
+        _aLabel = data.label || '';
+        if (els.progBar) els.progBar.style.width = `${total ? (((_aIdx) / total) * 100).toFixed(1) : 0}%`;
+        if (els.progLabel) els.progLabel.textContent = `Analyzing fonts · ${_aIdx + 1} of ${total}`;
+        if (els.progDetail) els.progDetail.textContent = _aLabel;
+      } else if (data.stage === 'source-progress' && data.sub) {
+        if (data.sub.percent != null && els.progBar) {
+          const within = Math.max(0, Math.min(100, data.sub.percent)) / 100;
+          els.progBar.style.width = `${total ? (((_aIdx + within) / total) * 100).toFixed(1) : 0}%`;
+        }
+        if (els.progDetail) {
+          els.progDetail.textContent = data.sub.currentFile ? `${_aLabel} · ${data.sub.currentFile}` : _aLabel;
+        }
       } else if (data.stage === 'done' && els.progBar) {
         els.progBar.style.width = '100%';
       }
@@ -9789,6 +9814,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     let res;
     try { res = await window.electronAPI.bulkImportAnalyze({ plan, corruptFonts: plan.corruptFonts || null }); }
     catch (e) { res = { ok: false, error: String(e && e.message || e) }; }
+    clearInterval(_aTick);
     if (unsub) { try { unsub(); } catch {} }
     if (!res || !res.ok) { promptError('Analyze failed', (res && res.error) || 'unknown error'); closeModal(); return false; }
     if (res.cancelled) { closeModal(); return false; }
@@ -9972,6 +9998,8 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       els.progElapsed.textContent = parts.join(' · ');
     };
     renderOverallLine();
+    // The analyze pass may have left its last item on the shared detail line.
+    if (els.progDetail) els.progDetail.textContent = '';
     const bulkElapsedTicker = setInterval(renderOverallLine, 1000);
     // Bar position is computed as: (completed sources + current source
     // sub-percent) / total. That way it advances smoothly during the
@@ -19193,9 +19221,11 @@ require(['vs/editor/editor.main'], function () {
         _sfImportProgressUnsub = window.electronAPI.onSourceImportProgress((data) => {
           if (!data || !_sfImportEls.progBar) return;
           // 'done' fires when the copy lands, but the flow immediately moves on
-          // to vendor + font-candidate detection before the review screen shows,
-          // so label that gap with the real work instead of a premature "Done".
-          const labels = { hashing: 'Reading source…', copying: 'Copying source…', done: 'Finding fonts…' };
+          // to the library check + candidate detection before the review screen
+          // shows, so label those gaps with the real work, never a premature
+          // "Done". 'checking' is the pre-review manifest build (catalog
+          // progress) that makes duplicate notes ready when the review opens.
+          const labels = { hashing: 'Reading source…', copying: 'Copying source…', checking: 'Checking your library…', done: 'Finding fonts…' };
           if (_sfImportEls.progLabel && labels[data.stage]) _sfImportEls.progLabel.textContent = labels[data.stage];
           const pct = typeof data.percent === 'number' ? data.percent : 0;
           _sfImportEls.progBar.style.width = `${Math.min(100, Math.max(0, pct))}%`;
@@ -19221,20 +19251,25 @@ require(['vs/editor/editor.main'], function () {
         } else {
           importRes = await window.electronAPI.importSource({ sourcePath, forceNewSource, knownHash });
         }
-        if (_sfImportProgressUnsub) { try { _sfImportProgressUnsub(); } catch {} _sfImportProgressUnsub = null; }
-        // Stop the elapsed clock regardless of outcome so the ticker
-        // can't leak past the modal close or into the next phase.
-        clearInterval(importElapsedTicker);
+        // Progress teardown is deferred on the success path — the pre-review
+        // "Checking your library…" stage below reuses the same subscription
+        // and elapsed clock. Every exit path calls this exactly once.
+        const endProgressPhase = () => {
+          if (_sfImportProgressUnsub) { try { _sfImportProgressUnsub(); } catch {} _sfImportProgressUnsub = null; }
+          clearInterval(importElapsedTicker);
+        };
         // If the user cancelled (or started another run) while the import
         // was in flight, _sfImport's runId no longer matches ours. Clean up
         // the orphan source if we did successfully write one.
         if (!_sfImport || _sfImport.runId !== myRun) {
+          endProgressPhase();
           if (importRes && importRes.ok && importRes.uuid && !importRes.isDuplicate) {
             window.electronAPI.deleteSource({ uuid: importRes.uuid }).catch(() => {});
           }
           return;
         }
         if (!importRes || !importRes.ok) {
+          endProgressPhase();
           promptError('Import failed', (importRes && importRes.error) || 'unknown error');
           _sfCloseImport();
           return;
@@ -19243,12 +19278,26 @@ require(['vs/editor/editor.main'], function () {
           // Duplicate path doesn't create a new source, so nothing to clean.
           // Clear our local uuid before handing off so the dup modal's close
           // doesn't try to delete the pre-existing source.
+          endProgressPhase();
           _sfImport.uuid = null;
           await _sfHandleDuplicate(importRes.uuid, sourcePath, importRes.hash, importRes.staged);
           return;
         }
         _sfImport.uuid = importRes.uuid;
         _sfImport.sourceFileDate = importRes.sourceFileDate || null;
+        // Pre-review library check: build (or twin-seed) the manifest NOW with
+        // an honest progress bar, so the review screen opens with duplicate
+        // notes ready instead of them arriving minutes late on big bundles.
+        // Byte-identical re-imports seed from their twin and pass instantly;
+        // the Optimize step's Cataloging section is pre-warmed either way.
+        if (_sfImportEls.progLabel) _sfImportEls.progLabel.textContent = 'Checking your library…';
+        if (_sfImportEls.progBar) _sfImportEls.progBar.style.width = '0%';
+        if (_sfImportEls.progDetail) _sfImportEls.progDetail.textContent = '';
+        try { await window.electronAPI.ensureSourceManifest({ uuid: importRes.uuid }); } catch {}
+        endProgressPhase();
+        if (!_sfImport || _sfImport.runId !== myRun) return; // cancelled during the check
+        if (_sfImportEls.progLabel) _sfImportEls.progLabel.textContent = 'Finding fonts…';
+        if (_sfImportEls.progBar) _sfImportEls.progBar.style.width = '100%';
         const [vendorRes, candidates] = await Promise.all([
           window.electronAPI.detectSourceVendor({ uuid: importRes.uuid }),
           _sfFetchSourceCandidatesCached(importRes.uuid),

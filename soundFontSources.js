@@ -1690,6 +1690,28 @@ async function ensureSourceManifest(userData, sourceUuid, onProgress) {
   const meta = readSourceMeta(uuidDir);
   if (!meta) return null;
 
+  // Twin seeding: a source whose archive hash matches another source that
+  // already has a manifest is byte-identical — same relPaths, same file hashes
+  // (dedup keeps the ORIGINAL fat hash on meta, and manifests always describe
+  // the full original tree). Copy the twin's records instead of re-reading the
+  // whole archive: "import again as a new source" re-imports catalog instantly.
+  if (meta.hash) {
+    try {
+      const rootDir = sourcesRoot(userData);
+      for (const d of fs.readdirSync(rootDir)) {
+        if (d === sourceUuid) continue;
+        let m2 = null;
+        try { m2 = JSON.parse(fs.readFileSync(path.join(rootDir, d, 'meta.json'), 'utf8')); } catch { continue; }
+        if (!m2 || m2.hash !== meta.hash) continue;
+        const twin = fh.readFileHashManifest(fileHashManifestPath(userData, 'sources', d));
+        if (twin && Array.isArray(twin.records) && twin.records.length) {
+          fh.writeFileHashManifest(outPath, twin.records, twin.contentHash, twin.hashedAt);
+          return { records: twin.records, contentHash: twin.contentHash };
+        }
+      }
+    } catch {}
+  }
+
   const keep = (rel) => rel && rel !== 'meta.json' && !_isNoisePath(rel);
   const records = [];
   const pushHash = (rel, size, buf) => records.push({

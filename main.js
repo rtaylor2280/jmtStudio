@@ -2456,6 +2456,35 @@ ipcMain.handle('linkImport:cleanup', (_, { filePath } = {}) => {
   } catch (e) { return { ok: false, error: String(e && e.message || e) }; }
 });
 
+// Build (or twin-seed) a source's per-file manifest with progress on the
+// import channel — the "Checking your library…" stage between copy and review.
+// Byte-identical re-imports seed from their twin and return instantly; fresh
+// sources pay the catalog HERE (with an honest bar) instead of silently after
+// the review screen, so duplicate-recognition notes are ready when it opens
+// and the later Optimize step skips its Cataloging section entirely.
+ipcMain.handle('sources:ensureManifest', async (event, { uuid } = {}) => {
+  if (!uuid) return { ok: false, error: 'Missing uuid' };
+  const send = (p) => { try { event.sender.send('sources:importProgress', p); } catch {} };
+  let last = 0;
+  try {
+    const r = await soundFontSources.ensureSourceManifest(app.getPath('userData'), uuid, (p) => {
+      const now = Date.now();
+      if (now - last < 100) return;
+      last = now;
+      send({
+        stage: 'checking',
+        percent: p.totalBytes ? Math.floor(((p.bytesDone || 0) / p.totalBytes) * 100) : 0,
+        bytes: p.bytesDone,
+        totalBytes: p.totalBytes,
+        currentFile: p.currentFile,
+      });
+    });
+    return { ok: !!r };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
 // Duplicate recognition for the import review (three scenarios, one matcher):
 // ensure the source's per-file manifest (which also pre-warms the optimize
 // step's cataloging pass), build the library index from the persisted entry
