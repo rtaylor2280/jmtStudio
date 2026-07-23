@@ -2456,6 +2456,46 @@ ipcMain.handle('linkImport:cleanup', (_, { filePath } = {}) => {
   } catch (e) { return { ok: false, error: String(e && e.message || e) }; }
 });
 
+// Guided bulk review duplicate recognition: a source that dodges the
+// whole-source dedup (edited or partial copy — files deleted on a card, a
+// tweaked quote) but whose CONTENT matches a library font must still surface.
+// Folder shapes match straight off the disk via the selective hasher (core
+// sounds only, skips tracks/large files); staged zips go through their
+// manifest. Returns only rows with something to say.
+ipcMain.handle('bulkImport:matchGuided', async (_event, { sources } = {}) => {
+  if (!Array.isArray(sources) || !sources.length) return { ok: true, results: [] };
+  try {
+    const ud = app.getPath('userData');
+    const compare = require('./soundFontCompare');
+    const { index } = compare.buildLibraryIndex(ud);
+    if (!index.length) return { ok: true, results: [] };
+    const fsg = require('fs');
+    const results = [];
+    for (const s of sources) {
+      if (!s) continue;
+      let m = null;
+      try {
+        if (s.absPath && fsg.existsSync(s.absPath) && fsg.statSync(s.absPath).isDirectory()) {
+          const sets = compare.buildFontSetsFromDir(s.absPath);
+          if (sets && sets.core.size) m = compare.matchAgainstLibrary(sets, index);
+        } else if (s.preparedUuid) {
+          const mf = await soundFontSources.ensureSourceManifest(ud, s.preparedUuid);
+          if (mf && Array.isArray(mf.records)) m = compare.matchCandidateAgainstLibrary(mf.records, '', index);
+        }
+      } catch {}
+      if (!m || !m.bestMatch) continue;
+      const label = (m.verdict === 'variant' && m.coreContainment < compare.VARIANT_DISPLAY_MIN)
+        ? null
+        : compare.verdictLabel(m);
+      if (!label) continue;
+      results.push({ idx: s.idx, verdict: m.verdict, label });
+    }
+    return { ok: true, results };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
 // Build (or twin-seed) a source's per-file manifest with progress on the
 // import channel — the "Checking your library…" stage between copy and review.
 // Byte-identical re-imports seed from their twin and return instantly; fresh

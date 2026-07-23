@@ -2741,6 +2741,10 @@
   .sf-guided-row .g-corrupt-note { font-size: 0.72rem; color: #e5534b; margin-top: 3px; line-height: 1.35; }
   .sf-guided-row .g-name-hint { font-size: 0.72rem; color: #d0913a; margin-top: 3px; line-height: 1.35; }
   .sf-guided-row.g-lowconf .g-name { border-color: #d0913a; }
+  /* Duplicate-recognition note on guided rows — same color language as the
+     single-import review: blue = already owned, amber = close variant. */
+  .sf-guided-row .g-dup-note { font-size: 0.7rem; font-style: italic; color: var(--c-warn-text); margin-top: 2px; }
+  .sf-guided-row .g-dup-note.have-it { color: var(--jmt-blue); }
   /* Name field reuses the URL shell's clear-x, but with no paste icon it only needs single-icon padding. */
   .sf-guided-row .g-name-shell > input { padding-right: 24px !important; }
   /* Drag-to-vendor + change-vendor control */
@@ -9463,7 +9467,13 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       + `</div>`;
     const checkbox = row.querySelector('.g-check');
     const nameInput = row.querySelector('.g-name');
-    checkbox.addEventListener('change', () => { row.classList.toggle('excluded', !checkbox.checked); _updateGuidedCount(); });
+    checkbox.addEventListener('change', () => {
+      // User took a stance — async duplicate-recognition results must not
+      // clobber it after the fact (same rule as the single-import review).
+      row.dataset.touched = 'true';
+      row.classList.toggle('excluded', !checkbox.checked);
+      _updateGuidedCount();
+    });
     nameInput.addEventListener('input', () => {
       const ok = _guidedNameOk(nameInput.value);
       nameInput.classList.toggle('invalid', !ok);
@@ -9739,6 +9749,37 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     const _guidedSources = currentPlan.sources.filter(src => !src._duplicate);
     const _gTotal = _guidedSources.length;
     guidedRows = _guidedSources.map((src, idx) => _buildGuidedRow(src, idx));
+    // Duplicate recognition for the guided rows (async): edited/partial copies
+    // dodge the whole-source dedup but their CONTENT still matches — label
+    // them, and uncheck have-it rows the user hasn't touched. A card copy
+    // with files deleted reads as fully contained ("already in your library").
+    window.electronAPI.bulkImportMatchGuided({
+      sources: _guidedSources.map((src, idx) => ({
+        idx,
+        absPath: src.absPath || null,
+        preparedUuid: (src._prepared && src._prepared.uuid) || null,
+      })),
+    }).then((r) => {
+      if (!r || !r.ok || !Array.isArray(r.results)) return;
+      for (const res of r.results) {
+        const row = guidedRows[res.idx];
+        if (!row || !row.el) continue;
+        let note = row.el.querySelector('.g-dup-note');
+        if (!note) {
+          note = document.createElement('div');
+          note.className = 'g-dup-note';
+          row.el.querySelector('.g-name-wrap')?.appendChild(note);
+        }
+        note.textContent = res.label;
+        note.classList.toggle('have-it', res.verdict === 'have_it');
+        if (res.verdict === 'have_it' && row.checkbox && row.checkbox.checked
+            && row.el.dataset.touched !== 'true' && !row.el.classList.contains('g-corrupt')) {
+          row.checkbox.checked = false;
+          row.el.classList.add('excluded');
+        }
+      }
+      _updateGuidedCount();
+    }).catch(() => {});
     showPhase('scan');
     const _scanLabel = els.phaseScan && els.phaseScan.querySelector('.sf-import-progress-label');
     if (_scanLabel) _scanLabel.textContent = 'Analyzing fonts…';

@@ -223,6 +223,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   bulkImportRun:         (params)     => ipcRenderer.invoke('bulkImport:run', params),
   bulkImportAnalyze:     (params)     => ipcRenderer.invoke('bulkImport:analyze', params),
   bulkImportDiscardPrepared: (params) => ipcRenderer.invoke('bulkImport:discardPrepared', params),
+  bulkImportMatchGuided: (params)     => ipcRenderer.invoke('bulkImport:matchGuided', params),
   bulkImportCancel:      ()           => ipcRenderer.invoke('bulkImport:cancel'),
   onBulkImportProgress:  (cb) => {
     const handler = (_, data) => cb(data);
