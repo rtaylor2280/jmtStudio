@@ -2476,7 +2476,11 @@ ipcMain.handle('bulkImport:matchGuided', async (_event, { sources } = {}) => {
       let m = null;
       try {
         if (s.absPath && fsg.existsSync(s.absPath) && fsg.statSync(s.absPath).isDirectory()) {
-          const sets = compare.buildFontSetsFromDir(s.absPath);
+          // 200MB cap, not the default 20MB: the ownership claim counts tracks,
+          // and the library holds ~48 track wavs in the 20-60MB band that the
+          // default would leave invisible. One card's worth of big tracks costs
+          // seconds; the tight default exists for whole-library scans, not this.
+          const sets = compare.buildFontSetsFromDir(s.absPath, { maxFileBytes: 200 * 1024 * 1024 });
           if (sets && sets.core.size) m = compare.matchAgainstLibrary(sets, index);
         } else if (s.preparedUuid) {
           const mf = await soundFontSources.ensureSourceManifest(ud, s.preparedUuid);
