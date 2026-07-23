@@ -298,6 +298,142 @@ function matchAgainstLibrary(cardSets, library, thresholds = DEFAULT_THRESHOLDS)
   return { bestMatch: best.name, exact: false, ...bestCmp, verdict, lowConfidence };
 }
 
+// ── Library-wide duplicate recognition (slice A, 2026-07-23) ────────────────
+// The one primitive all three import surfaces call: given ONE candidate font's
+// files (a slice of a source manifest), find its best match among library
+// entries. Single-folder imports, bundle review rows, and SD import are just
+// different call sites of matchCandidateAgainstLibrary.
+
+// Board-format wrapper dirs — the subset of the exclusion vocabulary that is
+// pure PACKAGING (a variant container), never content classification. These
+// are stripped during candidate re-rooting; tracks/quotes/extras are NOT here
+// because classifyRelPath scores those as content signals.
+const BOARD_WRAPPER_DIRS = new Set([
+  'proffie', 'proffieboard', 'asteria', 'cfx', 'cfx-ghv3', 'cfxghv3',
+  'ghv3', 'verso', 'xeno3', 'xenopixel', 'xeno', 'goldenharvest',
+]);
+
+// Build the "what do I own" index: one { name, sets } per library entry, read
+// from the persisted per-file manifests (.filehashes/entries/<entryUuid>.json).
+// ~200 small JSONs — cheap enough to build per import session. Entries without
+// a manifest (or with an empty core set) can't match and are counted, not
+// guessed at.
+function buildLibraryIndex(userData) {
+  const { readFileHashManifest } = require('./soundFontFileHash');
+  const libRoot = path.join(userData, 'soundFonts', 'library');
+  const index = [];
+  let unmatchable = 0;
+  let dirents = [];
+  try { dirents = fs.readdirSync(libRoot, { withFileTypes: true }); } catch {}
+  for (const d of dirents) {
+    if (!d.isDirectory()) continue;
+    let meta = null;
+    try { meta = JSON.parse(fs.readFileSync(path.join(libRoot, d.name, 'meta.json'), 'utf8')); } catch {}
+    const entryUuid = meta && meta.entryUuid;
+    const mf = entryUuid
+      ? readFileHashManifest(path.join(userData, 'soundFonts', '.filehashes', 'entries', `${entryUuid}.json`))
+      : null;
+    if (!mf || !Array.isArray(mf.records)) { unmatchable++; continue; }
+    const sets = setsFromRecords(mf.records);
+    if (sets.core.size === 0) { unmatchable++; continue; }
+    index.push({ name: d.name, sets });
+  }
+  return { index, unmatchable };
+}
+
+// Slice a SOURCE manifest down to one candidate's files, re-rooted the way
+// entry extraction re-roots them, GROUPED per wrapper variant. A multi-board
+// candidate must match on its best single variant — a library entry is one
+// variant, so unioning Proffie+CFX+Xeno hashes would dilute containment and
+// misread an owned font as merely a variant.
+//   records:       full source manifest records (composite paths supported)
+//   candidatePath: the candidate's root within the source ('' = whole source);
+//                  accepts the detector's inner-zip form ("X.zip!subtree")
+// Returns [{ wrapper, records }] with font-root-relative relPaths.
+function segmentCandidateRecords(records, candidatePath) {
+  const prefix = String(candidatePath || '')
+    .replace(/\\/g, '/')
+    .replace(/\.zip!/gi, '.zip/')   // detector's inner-zip separator → manifest form
+    .replace(/\/+$/, '');
+  const groups = new Map();
+  for (const r of records || []) {
+    if (!r || r.fileHash === '<empty>') continue;
+    let rel = String(r.relPath).replace(/\\/g, '/');
+    if (prefix) {
+      if (!(rel === prefix || rel.startsWith(prefix + '/'))) continue;
+      rel = rel === prefix ? '' : rel.slice(prefix.length + 1);
+      if (!rel) continue;
+    }
+    // Consume leading PACKAGING layers only: inner-zip segments and known
+    // board-format dirs. A font-name dir is left alone — classifyRelPath
+    // only reacts to known effect/customizable/wrapper names, so unknown
+    // leading dirs are harmless.
+    let wrapper = '';
+    for (let guard = 0; guard < 4; guard++) {
+      const slash = rel.indexOf('/');
+      if (slash < 0) break;
+      const seg = rel.slice(0, slash);
+      if (/\.zip$/i.test(seg) || BOARD_WRAPPER_DIRS.has(seg.toLowerCase())) {
+        wrapper = wrapper ? `${wrapper}/${seg}` : seg;
+        rel = rel.slice(slash + 1);
+        continue;
+      }
+      break;
+    }
+    if (!groups.has(wrapper)) groups.set(wrapper, []);
+    groups.get(wrapper).push({ relPath: rel, fileHash: r.fileHash, size: r.size });
+  }
+  return [...groups.entries()].map(([wrapper, recs]) => ({ wrapper, records: recs }));
+}
+
+// Match one candidate against the library: segment per variant, match each,
+// return the strongest result (highest containment, Jaccard tie-break).
+// Returns matchAgainstLibrary's shape plus { wrapper } for the winning variant,
+// or null when the candidate has no scorable character sounds at all.
+function matchCandidateAgainstLibrary(records, candidatePath, index, thresholds = DEFAULT_THRESHOLDS) {
+  let best = null;
+  for (const g of segmentCandidateRecords(records, candidatePath)) {
+    const sets = setsFromRecords(g.records);
+    if (sets.core.size === 0) continue;
+    const m = matchAgainstLibrary(sets, index, thresholds);
+    if (!best ||
+        m.coreContainment > best.coreContainment ||
+        (m.coreContainment === best.coreContainment && m.coreJaccard > best.coreJaccard)) {
+      best = { ...m, wrapper: g.wrapper };
+    }
+  }
+  return best;
+}
+
+// Plain-language verdict line for the review UI. No engineering terms — a
+// verdict plus a sound-count sentence (per the standing no-jargon rule).
+// Returns null when there's nothing worth saying (new font / no match).
+function verdictLabel(m) {
+  if (!m || !m.bestMatch || m.lowConfidence) return null;
+  if (m.verdict === 'have_it') {
+    return (m.exact || m.coreContainment >= 0.999)
+      ? `Already in your library: matches ${m.bestMatch}`
+      : `Already in your library: matches ${m.bestMatch} (${m.coreInter} of ${m.cardCoreCount} sounds)`;
+  }
+  if (m.verdict === 'variant') {
+    // Superset case: everything this font has, an owned font already contains
+    // (containment ~1 but Jaccard below the have-it bar = we own a superset).
+    if (m.coreContainment >= 0.98) {
+      return `All of its sounds are already in ${m.bestMatch} (which has more)`;
+    }
+    return `Close match to ${m.bestMatch}: shares ${Math.round(m.coreContainment * 100)}% of its sounds (possibly a different version)`;
+  }
+  return null;
+}
+
+// Display bar for the variant note on review screens: below this containment
+// the engine still reports, but the UI stays silent — real-world calibration
+// (2026-07-23 self-test on Ryan's 210-entry library) showed 50-70% catches
+// same-maker DIFFERENT fonts (Father_ESB vs Father_ROTJ at 55%), where a
+// "possibly a different version" note would be wrong. 80%+ is where true
+// variants (color/ignition/style splits, bundle re-releases) actually live.
+const VARIANT_DISPLAY_MIN = 0.75;
+
 module.exports = {
   classifyRelPath,
   setsFromRecords,
@@ -307,6 +443,12 @@ module.exports = {
   compareSets,
   classifyVerdict,
   matchAgainstLibrary,
+  buildLibraryIndex,
+  segmentCandidateRecords,
+  matchCandidateAgainstLibrary,
+  verdictLabel,
+  VARIANT_DISPLAY_MIN,
+  BOARD_WRAPPER_DIRS,
   CUSTOMIZABLE_DIRS,
   IGNORE_DIRS,
   DEFAULT_THRESHOLDS,

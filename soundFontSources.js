@@ -608,9 +608,22 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
       if (!forceNewSource) {
         const existing = findByHash(userData, hash);
         if (existing) {
-          cleanupPartialSource(uuidDir);
+          // Duplicate — but for folders the hash IS the zip-transform, so the
+          // finished archive already exists. KEEP it as a staged source (the
+          // folder analog of the zip path's knownHash hand-off): "import again
+          // as a new source" finalizes it directly with no re-zip; keep/cancel
+          // discard it. The orphan sweep reclaims a crashed straggler after 6h.
+          try { fs.writeFileSync(path.join(uuidDir, '.preparing'), ''); } catch {}
+          let sfd = null, sfm = null;
+          try {
+            if (stat.mtimeMs && stat.mtimeMs > 0) {
+              sfd = new Date(stat.mtimeMs).toISOString().slice(0, 10);
+              sfm = stat.mtimeMs;
+            }
+          } catch {}
           emit('done', { isDuplicate: true });
-          return { ok: true, isDuplicate: true, uuid: existing.uuid, hash, format };
+          return { ok: true, isDuplicate: true, uuid: existing.uuid, hash, format,
+            staged: { uuid, format, name, hash, fileSize, sourceFileDate: sfd, sourceFileMtimeMs: sfm } };
         }
       }
     }

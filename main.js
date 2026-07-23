@@ -2456,6 +2456,27 @@ ipcMain.handle('linkImport:cleanup', (_, { filePath } = {}) => {
   } catch (e) { return { ok: false, error: String(e && e.message || e) }; }
 });
 
+// Finalize a source STAGED by the folder-duplicate path (see importSource's
+// folder branch): the zip is already built and hashed; this just writes meta.
+// Used by the duplicate prompt's "import again as a new source" so a folder
+// re-import doesn't redo the whole zip-transform.
+ipcMain.handle('sources:finalizeStaged', async (_event, staged = {}) => {
+  try {
+    return await soundFontSources.finalizePreparedSource({
+      userData: app.getPath('userData'),
+      uuid: staged.uuid,
+      format: staged.format,
+      name: staged.name,
+      hash: staged.hash,
+      fileSize: staged.fileSize,
+      sourceFileDate: staged.sourceFileDate,
+      sourceFileMtimeMs: staged.sourceFileMtimeMs,
+    });
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
 ipcMain.handle('sources:import', async (event, { sourcePath, originalName, metadata, forceNewSource, knownHash } = {}) => {
   const send = (payload) => {
     try { event.sender.send('sources:importProgress', payload); } catch {}

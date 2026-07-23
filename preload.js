@@ -215,6 +215,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ── Sound Fonts — sources (Phase 1) ───────────────────
   listSources:           ()           => ipcRenderer.invoke('sources:list'),
   cleanupOrphanSources:  ()           => ipcRenderer.invoke('sources:cleanupOrphans'),
+  finalizeStagedSource:  (params)     => ipcRenderer.invoke('sources:finalizeStaged', params),
   bulkImportPickRoot:    ()           => ipcRenderer.invoke('bulkImport:pickRoot'),
   bulkImportScan:        (params)     => ipcRenderer.invoke('bulkImport:scan', params),
   bulkImportRun:         (params)     => ipcRenderer.invoke('bulkImport:run', params),

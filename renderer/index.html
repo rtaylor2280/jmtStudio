@@ -19156,7 +19156,7 @@ require(['vs/editor/editor.main'], function () {
         return _sfSanitizeName(base) || `font_${idx + 1}`;
       };
 
-      const _sfRunImport = async (sourcePath, { forceNewSource, fromLink, knownHash } = {}) => {
+      const _sfRunImport = async (sourcePath, { forceNewSource, fromLink, knownHash, finalizeStaged } = {}) => {
         // Auto-opt-in: create the library sentinel on the user's first
         // import action. Idempotent on the main side.
         try { await window.electronAPI.createSoundFonts(); } catch {}
@@ -19187,7 +19187,10 @@ require(['vs/editor/editor.main'], function () {
         if (_sfImportProgressUnsub) { try { _sfImportProgressUnsub(); } catch {} }
         _sfImportProgressUnsub = window.electronAPI.onSourceImportProgress((data) => {
           if (!data || !_sfImportEls.progBar) return;
-          const labels = { hashing: 'Reading source…', copying: 'Copying source…', done: 'Done' };
+          // 'done' fires when the copy lands, but the flow immediately moves on
+          // to vendor + font-candidate detection before the review screen shows,
+          // so label that gap with the real work instead of a premature "Done".
+          const labels = { hashing: 'Reading source…', copying: 'Copying source…', done: 'Finding fonts…' };
           if (_sfImportEls.progLabel && labels[data.stage]) _sfImportEls.progLabel.textContent = labels[data.stage];
           const pct = typeof data.percent === 'number' ? data.percent : 0;
           _sfImportEls.progBar.style.width = `${Math.min(100, Math.max(0, pct))}%`;
@@ -19201,7 +19204,18 @@ require(['vs/editor/editor.main'], function () {
             _sfImportEls.progDetail.textContent = detail;
           }
         });
-        const importRes = await window.electronAPI.importSource({ sourcePath, forceNewSource, knownHash });
+        // finalizeStaged: the folder-duplicate path already built and hashed the
+        // zip; finalizing just writes meta, so the whole zip-transform is skipped.
+        let importRes;
+        if (finalizeStaged) {
+          if (_sfImportEls.progLabel) _sfImportEls.progLabel.textContent = 'Finishing…';
+          const fr = await window.electronAPI.finalizeStagedSource(finalizeStaged);
+          importRes = (fr && fr.ok)
+            ? { ok: true, isDuplicate: false, uuid: finalizeStaged.uuid, sourceFileDate: finalizeStaged.sourceFileDate }
+            : fr;
+        } else {
+          importRes = await window.electronAPI.importSource({ sourcePath, forceNewSource, knownHash });
+        }
         if (_sfImportProgressUnsub) { try { _sfImportProgressUnsub(); } catch {} _sfImportProgressUnsub = null; }
         // Stop the elapsed clock regardless of outcome so the ticker
         // can't leak past the modal close or into the next phase.
@@ -19225,7 +19239,7 @@ require(['vs/editor/editor.main'], function () {
           // Clear our local uuid before handing off so the dup modal's close
           // doesn't try to delete the pre-existing source.
           _sfImport.uuid = null;
-          await _sfHandleDuplicate(importRes.uuid, sourcePath, importRes.hash);
+          await _sfHandleDuplicate(importRes.uuid, sourcePath, importRes.hash, importRes.staged);
           return;
         }
         _sfImport.uuid = importRes.uuid;
@@ -19240,7 +19254,10 @@ require(['vs/editor/editor.main'], function () {
         _sfShowPhase('review');
       };
 
-      const _sfHandleDuplicate = (existingUuid, sourcePath, scannedHash) => new Promise((resolve) => {
+      // staged: set on FOLDER duplicates — the finished zip is kept on disk so
+      // the re-import path finalizes it instead of re-zipping; keep/cancel must
+      // discard it so it doesn't linger until the orphan sweep.
+      const _sfHandleDuplicate = (existingUuid, sourcePath, scannedHash, staged) => new Promise((resolve) => {
         if (!_sfDupEls.modal) { resolve(); return; }
         (async () => {
           const r = await window.electronAPI.listSources();
@@ -19266,21 +19283,28 @@ require(['vs/editor/editor.main'], function () {
           // matched source. Cancel just abandons the in-flight pick.
           // Re-import as new forces a parallel copy even though the
           // content matches (rare, for restoring a clean working copy).
+          const discardStaged = () => {
+            if (staged && staged.uuid) {
+              try { window.electronAPI.bulkImportDiscardPrepared({ uuids: [staged.uuid] }); } catch {}
+            }
+          };
           const onKeep = async () => {
             // Navigating to the matched source's detail view — NOT back to the
             // card browser. Clear the SD-return flag so _sfCloseImport doesn't
             // slam the card browser over the detail we're about to open.
             window._sfReturnToSdBrowser = false;
+            discardStaged();
             cleanup();
             _sfCloseImport();
             await window.refreshSoundFontsView();
             await _sfOpenSourceDetail(existingUuid);
             resolve();
           };
-          const onCancel = () => { cleanup(); _sfCloseImport(); resolve(); };
+          const onCancel = () => { discardStaged(); cleanup(); _sfCloseImport(); resolve(); };
           // knownHash: the scan that raised this prompt already hashed the file —
-          // hand it to the re-run so it skips straight to the copy stage.
-          const onReimport = async () => { cleanup(); await _sfRunImport(sourcePath, { forceNewSource: true, fromLink: _sfImport?.fromLink, knownHash: scannedHash }); resolve(); };
+          // hand it to the re-run so it skips straight to the copy stage. For
+          // folders the staged zip goes further: finalize it, no re-zip at all.
+          const onReimport = async () => { cleanup(); await _sfRunImport(sourcePath, { forceNewSource: true, fromLink: _sfImport?.fromLink, knownHash: scannedHash, finalizeStaged: staged }); resolve(); };
           _sfDupEls.keepBtn?.addEventListener('click', onKeep);
           _sfDupEls.reimportBtn?.addEventListener('click', onReimport);
           _sfDupEls.cancelBtn?.addEventListener('click', onCancel);
@@ -19857,46 +19881,51 @@ require(['vs/editor/editor.main'], function () {
           _sfImport = null;
           await window.refreshSoundFontsView();
           await _sfOpenSourceDetail(returnUuid, { swapFromModalId: 'modal-sf-import' });
-        } else {
-          _sfCloseImport();
-          await window.refreshSoundFontsView();
+        } else if (showCloseout) {
           // Close-out education screen: what we did, and — when the user has an
           // original file on disk — that it's now safe to delete. Wording adapts:
           // link imports never had a local file, and non-deduped sources skip the
           // duplicate-trim story.
-          if (showCloseout) {
-            const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-            const fmtB = (n) => (window._sfFormatBytes ? window._sfFormatBytes(n) : `${n} B`);
-            const parts = [];
-            parts.push(successCount === 1
-              ? `<strong>${esc(picks[0].name)}</strong> was added to your library.`
-              : `<strong>${successCount} fonts</strong> were added to your library.`);
-            if (optRes && optRes.deduped && optRes.savedBytes > 0) {
-              const dupes = Math.max(0, (optRes.originalFiles || 0) - (optRes.uniqueFiles || 0));
-              parts.push(`JMT Studio found <strong>${dupes.toLocaleString()} duplicate files</strong> inside the source and kept one copy of each, saving <strong>${fmtB(optRes.savedBytes)}</strong> on your disk. Nothing is lost: exporting the source rebuilds every original file exactly.`);
-            }
-            if (closeoutSrc && !closeoutSrc.fromLink && closeoutSrc.sourcePath) {
-              const isFolder = !/\.zip$/i.test(closeoutSrc.sourcePath);
-              parts.push(`Your complete source now lives in the library, and you can export a full copy from the library whenever you need one. That means the original ${isFolder ? 'folder' : 'download'} on your computer is no longer needed, and it's safe to delete if you want the space back: <a href="#" id="sf-closeout-showpath" style="color:var(--jmt-blue);text-decoration:underline;cursor:pointer">${esc(closeoutSrc.sourcePath)}</a>`);
-            } else {
-              parts.push('The complete source is stored in your library. You can export a full copy whenever you need one.');
-            }
-            // Start the modal, then wire the path link while it's up — it opens the
-            // OS file manager with the original selected, one step from deleting it.
-            const closeoutDone = promptConfirm({
-              title: 'Added to your library',
-              messageHtml: parts.join('<br><br>'),
-              confirmText: 'Done',
-              confirmKind: 'primary',
-              hideCancel: true,
-            });
-            const pathLink = document.getElementById('sf-closeout-showpath');
-            if (pathLink) pathLink.addEventListener('click', (e) => {
-              e.preventDefault();
-              try { window.electronAPI.showItemInFolder(closeoutSrc.sourcePath); } catch {}
-            });
-            await closeoutDone;
+          // ORDER MATTERS: open the report FIRST (it stacks above the import
+          // modal), THEN tear down the import modal and refresh underneath while
+          // the user reads — the backdrop never drops, so there's no flash of
+          // the bare app between the progress modal and the report.
+          const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+          const fmtB = (n) => (window._sfFormatBytes ? window._sfFormatBytes(n) : `${n} B`);
+          const parts = [];
+          parts.push(successCount === 1
+            ? `<strong>${esc(picks[0].name)}</strong> was added to your library.`
+            : `<strong>${successCount} fonts</strong> were added to your library.`);
+          if (optRes && optRes.deduped && optRes.savedBytes > 0) {
+            const dupes = Math.max(0, (optRes.originalFiles || 0) - (optRes.uniqueFiles || 0));
+            parts.push(`JMT Studio found <strong>${dupes.toLocaleString()} duplicate files</strong> inside the source and kept one copy of each, saving <strong>${fmtB(optRes.savedBytes)}</strong> on your disk. Nothing is lost: exporting the source rebuilds every original file exactly.`);
           }
+          if (closeoutSrc && !closeoutSrc.fromLink && closeoutSrc.sourcePath) {
+            const isFolder = !/\.zip$/i.test(closeoutSrc.sourcePath);
+            parts.push(`Your complete source now lives in the library, and you can export a full copy from the library whenever you need one. That means the original ${isFolder ? 'folder' : 'download'} on your computer is no longer needed, and it's safe to delete if you want the space back: <a href="#" id="sf-closeout-showpath" style="color:var(--jmt-blue);text-decoration:underline;cursor:pointer">${esc(closeoutSrc.sourcePath)}</a>`);
+          } else {
+            parts.push('The complete source is stored in your library. You can export a full copy whenever you need one.');
+          }
+          // Start the modal, then wire the path link while it's up — it opens the
+          // OS file manager with the original selected, one step from deleting it.
+          const closeoutDone = promptConfirm({
+            title: 'Added to your library',
+            messageHtml: parts.join('<br><br>'),
+            confirmText: 'Done',
+            confirmKind: 'primary',
+            hideCancel: true,
+          });
+          const pathLink = document.getElementById('sf-closeout-showpath');
+          if (pathLink) pathLink.addEventListener('click', (e) => {
+            e.preventDefault();
+            try { window.electronAPI.showItemInFolder(closeoutSrc.sourcePath); } catch {}
+          });
+          _sfCloseImport();
+          await window.refreshSoundFontsView();
+          await closeoutDone;
+        } else {
+          _sfCloseImport();
+          await window.refreshSoundFontsView();
         }
       };
 
