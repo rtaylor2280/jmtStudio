@@ -197,12 +197,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('soundFonts:exportProgress', handler);
   },
 
-  // Per-file progress for a single source export (reconstruct + compress phases).
+  // Per-file progress for a single source export (reading + reconstruct + compress phases).
   // Payload: { phase, fileCount, totalFiles, bytesDone, totalBytes, currentFile }.
   onSourceExportProgress: (cb) => {
     const handler = (_, data) => cb(data);
     ipcRenderer.on('soundFonts:sourceExportProgress', handler);
     return () => ipcRenderer.removeListener('soundFonts:sourceExportProgress', handler);
+  },
+
+  // Progress for the import-time "Optimizing storage…" dedup (phase 'optimize').
+  onOptimizeProgress: (cb) => {
+    const handler = (_, data) => cb(data);
+    ipcRenderer.on('soundFonts:optimizeProgress', handler);
+    return () => ipcRenderer.removeListener('soundFonts:optimizeProgress', handler);
   },
 
   // ── Sound Fonts — sources (Phase 1) ───────────────────

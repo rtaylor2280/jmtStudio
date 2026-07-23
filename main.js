@@ -2479,12 +2479,21 @@ ipcMain.handle('sources:import', async (event, { sourcePath, originalName, metad
 // stale-cache indicator). The single-file import path calls this from the renderer after
 // commit; idempotent + verify-before-commit; single-format zips and folder sources are a
 // no-op. Returns the dedup result.
-ipcMain.handle('sources:optimize', async (_, { uuid } = {}) => {
+ipcMain.handle('sources:optimize', async (event, { uuid } = {}) => {
   if (!uuid) return { ok: false, error: 'Missing uuid' };
   const ud = app.getPath('userData');
+  // Forward the dedup's progress (throttled) so "Optimizing storage…" shows real
+  // work instead of a bar frozen full from the copy phase before it.
+  let lastSent = 0, pending = null;
+  const onProgress = (p) => {
+    pending = p;
+    const now = Date.now();
+    if (now - lastSent >= 80) { lastSent = now; try { event.sender.send('soundFonts:optimizeProgress', pending); } catch {} pending = null; }
+  };
   try {
     await soundFontSources.ensureSourceManifest(ud, uuid);
-    const r = await soundFontSources.dedupeSource(ud, uuid);
+    const r = await soundFontSources.dedupeSource(ud, uuid, onProgress);
+    if (pending) { try { event.sender.send('soundFonts:optimizeProgress', pending); } catch {} }
     return { ok: true, ...(r || {}) };
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };

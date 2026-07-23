@@ -1713,7 +1713,7 @@ function _loadSourceBreadcrumb(userData, uuid, uuidDir) {
 // is both the fast bytes source for reconstructBundle and the safety check
 // dedupeSource verifies before it trims — a slim inner zip is small, so one read
 // per inner zip replaces thousands of per-file re-reads.
-async function _extractCanonicalsToDisk(physical, canonicalByHash) {
+async function _extractCanonicalsToDisk(physical, canonicalByHash, opts = {}) {
   const crypto = require('crypto');
   const hashByCanon = new Map();
   for (const [h, p] of canonicalByHash) hashByCanon.set(p, h);
@@ -1732,12 +1732,21 @@ async function _extractCanonicalsToDisk(physical, canonicalByHash) {
     if (want && crypto.createHash('sha256').update(buf).digest('hex') !== want)
       throw new Error(`canonical hash mismatch: ${canon}`);
   };
+  const onProgress = opts.onProgress;
+  const phase = opts.phase || 'reading';
+  const totalFiles = canonicalByHash.size;
+  let done = 0, bytesDone = 0;
+  const tick = (currentFile, n) => {
+    done++; bytesDone += n;
+    if (onProgress) onProgress({ phase, fileCount: done, totalFiles, bytesDone, currentFile });
+  };
   try {
     let i = 0;
     for (const canon of outer) {
       const buf = await physical.readFile(canon);
       verify(canon, buf);
       const dp = path.join(ws, 'o' + (i++)); fs.writeFileSync(dp, buf); canonDisk.set(canon, dp);
+      tick(canon, buf.length);
     }
     for (const [iz, members] of inner) {
       const izBuf = await physical.readFile(iz);
@@ -1752,6 +1761,7 @@ async function _extractCanonicalsToDisk(physical, canonicalByHash) {
           const buf = await _readZipEntryToBuffer(izZip, e);
           verify(m.canon, buf);
           const dp = path.join(izDir, 'c' + (i++)); fs.writeFileSync(dp, buf); canonDisk.set(m.canon, dp);
+          tick(m.canon, buf.length);
         }
       } finally { await izZip.close(); }
     }
@@ -1853,8 +1863,10 @@ function _virtualizeSource(physical, records) {
     async reconstructBundle(destDir, onProgress) {
       if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
       // Pull every canonical to disk once (each inner zip opened a single time),
-      // then rebuild is pure file copies + one re-zip per inner zip.
-      const { canonDisk, cleanup } = await _extractCanonicalsToDisk(physical, canonicalByHash);
+      // reporting it as the 'reading' phase so the UI isn't blind while it runs;
+      // then rebuild ('reconstruct' phase) is pure file copies + one re-zip.
+      const { canonDisk, cleanup } = await _extractCanonicalsToDisk(physical, canonicalByHash,
+        { phase: 'reading', onProgress: onProgress && ((p) => onProgress({ phase: 'reading', fileCount: p.fileCount, totalFiles: p.totalFiles, currentFile: p.currentFile })) });
       try {
         const outer = [];
         const groups = new Map(); // innerZipPath -> [{ innerRel, rec }]
@@ -1864,7 +1876,8 @@ function _virtualizeSource(physical, records) {
           else { if (!groups.has(iz)) groups.set(iz, []); groups.get(iz).push({ innerRel, rec: r }); }
         }
         let fileCount = 0, totalBytes = 0;
-        const emit = (rel, n) => { fileCount++; totalBytes += n; if (onProgress) onProgress({ fileCount, totalBytes, currentFile: rel }); };
+        const totalFiles = recs.length;
+        const emit = (rel, n) => { fileCount++; totalBytes += n; if (onProgress) onProgress({ phase: 'reconstruct', fileCount, totalFiles, totalBytes, currentFile: rel }); };
         const diskOf = (r) => {
           const dp = canonDisk.get(canonicalByHash.get(r.fileHash));
           if (!dp) throw new Error(`reconstruct: no canonical for ${r.relPath}`);
@@ -1915,8 +1928,8 @@ function _virtualizeSource(physical, records) {
       if (format === 'folder') {
         const destPath = _uniqueDestPath(destDir, baseName);
         await reconstruct(destPath, (p) => onProgress && onProgress({
-          phase: 'reconstruct', fileCount: p.fileCount, totalFiles: grandFiles,
-          bytesDone: p.totalBytes, totalBytes: grandTotal, currentFile: p.currentFile,
+          phase: p.phase || 'reconstruct', fileCount: p.fileCount, totalFiles: p.totalFiles || grandFiles,
+          bytesDone: p.totalBytes || 0, totalBytes: grandTotal, currentFile: p.currentFile,
         }));
         return { destPath, format: 'folder', fileCount: grandFiles, totalBytes: grandTotal, folders, reconstructed: true };
       }
@@ -1927,8 +1940,8 @@ function _virtualizeSource(physical, records) {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'jmt-srcexport-'));
       try {
         await reconstruct(tmp, (p) => onProgress && onProgress({
-          phase: 'reconstruct', fileCount: p.fileCount, totalFiles: grandFiles,
-          bytesDone: p.totalBytes, totalBytes: grandTotal, currentFile: p.currentFile,
+          phase: p.phase || 'reconstruct', fileCount: p.fileCount, totalFiles: p.totalFiles || grandFiles,
+          bytesDone: p.totalBytes || 0, totalBytes: grandTotal, currentFile: p.currentFile,
         }));
         await zipFolderToFile(tmp, destPath, (p) => onProgress && onProgress({
           phase: 'compress', bytesDone: p.bytesProcessed, totalBytes: p.totalBytes || grandTotal,
@@ -1963,7 +1976,7 @@ function _pickCanonical(paths) {
 // confirm its hash BEFORE swapping the fat archive out. On any mismatch the
 // original is untouched. Canonicals stay in real inner zips, so the virtualization
 // reads trimmed leaves by resolving to their present canonical twin.
-async function _dedupeInnerZipSource(userData, uuid, uuidDir, meta, records, byHash, canonicalByHash, bc) {
+async function _dedupeInnerZipSource(userData, uuid, uuidDir, meta, records, byHash, canonicalByHash, bc, onProgress) {
   const crypto = require('crypto');
   const fh = require('./soundFontFileHash');
   const zipPath = path.join(uuidDir, 'source.zip');
@@ -1986,7 +1999,8 @@ async function _dedupeInnerZipSource(userData, uuid, uuidDir, meta, records, byH
     // Pull every canonical out of the FAT source ONCE (each fat inner zip opened
     // a single time, hash-verified), so building the slim is file copies — not a
     // per-file re-extraction of multi-hundred-MB inner zips.
-    const { canonDisk: fatCanon, cleanup } = await _extractCanonicalsToDisk(physical, canonicalByHash);
+    const { canonDisk: fatCanon, cleanup } = await _extractCanonicalsToDisk(physical, canonicalByHash,
+      { phase: 'optimize', onProgress });
     releaseFat = cleanup;
     // Outer canonical files (not inside any inner zip) go in verbatim.
     for (const canon of outerCanon) {
@@ -2061,7 +2075,7 @@ async function _dedupeInnerZipSource(userData, uuid, uuidDir, meta, records, byH
 // archive is swapped out; on any failure the original is left untouched. Idempotent. ZIP only
 // (folder sources: a later step). Returns { deduped, originalFiles, uniqueFiles, savedBytes }
 // or { deduped:false, reason }.
-async function dedupeSource(userData, uuid) {
+async function dedupeSource(userData, uuid, onProgress) {
   const uuidDir = path.join(sourcesRoot(userData), uuid);
   const meta = readSourceMeta(uuidDir);
   if (!meta) return { deduped: false, reason: 'no-meta' };
@@ -2089,7 +2103,7 @@ async function dedupeSource(userData, uuid) {
   // the virtualization to reconstruct on read. Separate path, verified through
   // that same virtualization before commit.
   if (records.some(r => _isCompositePath(r.relPath))) {
-    return await _dedupeInnerZipSource(userData, uuid, uuidDir, meta, records, byHash, canonicalByHash, bc);
+    return await _dedupeInnerZipSource(userData, uuid, uuidDir, meta, records, byHash, canonicalByHash, bc, onProgress);
   }
 
   const zipPath = path.join(uuidDir, 'source.zip');

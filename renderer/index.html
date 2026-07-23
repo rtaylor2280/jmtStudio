@@ -2547,6 +2547,9 @@
      elapsed clock on a stable second line below. Fixed two-line height so the
      modal holds steady as files change (Ryan, 2026-07-22). */
   #sf-bulk-progress-detail { line-height: 1.25; min-height: 2.5em; max-height: 2.5em; overflow: hidden; }
+  /* Same fixed two-line height on the import "Adding…/Optimizing storage…" detail
+     so the import modal doesn't grow/shrink as file paths change length. */
+  #sf-create-progress-detail { line-height: 1.25; min-height: 2.5em; max-height: 2.5em; overflow: hidden; }
   #sf-bulk-progress-detail .sf-exp-file { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #sf-bulk-progress-detail .sf-exp-size { display: block; color: var(--c-text-sub); }
   /* Slightly wider than the default modal so long font paths rarely truncate. */
@@ -19739,8 +19742,20 @@ require(['vs/editor/editor.main'], function () {
         // stale-cache lag. Idempotent, verify-before-commit, no-op for single-format/folder.
         if (_sfImport && _sfImport.uuid) {
           if (_sfImportEls.createLabel) _sfImportEls.createLabel.textContent = 'Optimizing storage…';
-          if (_sfImportEls.createBar) _sfImportEls.createBar.style.width = '100%';
+          if (_sfImportEls.createBar) _sfImportEls.createBar.style.width = '0%';
+          if (_sfImportEls.createDetail) _sfImportEls.createDetail.textContent = '';
+          // Track the dedup's real progress instead of freezing the bar full.
+          const offOpt = window.electronAPI.onOptimizeProgress((p) => {
+            if (!p) return;
+            if (_sfImportEls.createBar && p.totalFiles) {
+              _sfImportEls.createBar.style.width = `${Math.round(Math.min(1, (p.fileCount || 0) / p.totalFiles) * 100)}%`;
+            }
+            if (_sfImportEls.createDetail) _sfImportEls.createDetail.textContent = p.currentFile || '';
+          });
           try { await window.electronAPI.optimizeSource({ uuid: _sfImport.uuid }); } catch {}
+          if (offOpt) { try { offOpt(); } catch {} }
+          if (_sfImportEls.createBar) _sfImportEls.createBar.style.width = '100%';
+          if (_sfImportEls.createDetail) _sfImportEls.createDetail.textContent = '';
         }
         // The source is now committed (referenced by at least one entry, or
         // attempted by the user). Clear the orphan-cleanup hook before close.
@@ -22649,25 +22664,31 @@ require(['vs/editor/editor.main'], function () {
         const pick = await window.electronAPI.pickExportDir({ title: `Export "${label}" to…` });
         if (!pick || !pick.ok) { restoreDetail(); return; }
 
-        // 3) Export with live per-file progress against an accurate bar. A deduped
-        // source reconstructs its full bundle (real work), so we show every file
-        // flying by. For a zip the bar spans reconstruct (0–50%) then compress
-        // (50–100%); a folder export is reconstruct only (0–100%).
-        let bytesDone = 0, totalBytes = 0, phase = '', currentFile = '';
+        // 3) Export with live progress, shown as named phases (each with its own
+        // fast-filling bar, like the import): Reading files → Rebuilding →
+        // Compressing. No phase is blind — the reconstruct's read step reports too.
+        let bytesDone = 0, totalBytes = 0, fileCount = 0, totalFiles = 0, phase = '', currentFile = '';
         const t0 = Date.now();
+        const PHASE_LABEL = { reading: 'Reading files', reconstruct: 'Rebuilding', compress: 'Compressing' };
         const render = () => {
           const secs = Math.floor((Date.now() - t0) / 1000);
           const clock = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
-          const x = totalBytes ? Math.max(0, Math.min(1, bytesDone / totalBytes)) : 0;
-          const frac = format === 'folder' ? x : (phase === 'compress' ? 0.5 + 0.5 * x : 0.5 * x);
-          const sizeLine = totalBytes > 0
-            ? `${fmtB(bytesDone)} of ${fmtB(totalBytes)}  ·  ${clock}`
-            : clock;
-          _sfDeleteProgress.setProgressLines(frac, currentFile, sizeLine);
+          let frac, info;
+          if (phase === 'compress') {
+            frac = totalBytes ? Math.max(0, Math.min(1, bytesDone / totalBytes)) : 0;
+            info = totalBytes ? `${fmtB(bytesDone)} of ${fmtB(totalBytes)}` : '';
+          } else {
+            frac = totalFiles ? Math.max(0, Math.min(1, fileCount / totalFiles)) : 0;
+            info = totalFiles ? `${fileCount} of ${totalFiles} files` : '';
+          }
+          const bottom = [PHASE_LABEL[phase] || 'Exporting', info, clock].filter(Boolean).join('  ·  ');
+          _sfDeleteProgress.setProgressLines(frac, currentFile, bottom);
         };
         const offProg = window.electronAPI.onSourceExportProgress((p) => {
           if (!p) return;
           if (p.phase) phase = p.phase;
+          if (typeof p.fileCount === 'number') fileCount = p.fileCount;
+          if (typeof p.totalFiles === 'number') totalFiles = p.totalFiles;
           if (typeof p.bytesDone === 'number') bytesDone = p.bytesDone;
           if (typeof p.totalBytes === 'number') totalBytes = p.totalBytes;
           if (p.currentFile) currentFile = p.currentFile;
