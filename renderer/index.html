@@ -27799,8 +27799,17 @@ require(['vs/editor/editor.main'], function () {
         }
         // Common path: append to the existing array.
         const bladeCount = result.bladeCount || 1;
-        const lines = editor.getValue().split('\n');
-        const lastEndLine = arr.presets[arr.presets.length - 1].endLine;
+        const fullText = editor.getValue();
+        const lines = fullText.split('\n');
+        // JMT convention: when JMT_CHARGE_STYLE_PRESET is defined, the LAST preset is
+        // the charge style ("Enables last preset to be a charge style based on current
+        // blade config") and has to stay last, so a newly added font lands second to
+        // last instead. Line-anchored like the MOUNT_SD_SETTING probe above, so a
+        // commented-out define correctly does not count.
+        const hasChargePreset = /^[ \t]*#define[ \t]+JMT_CHARGE_STYLE_PRESET\b/m.test(fullText);
+        const beforeCharge = hasChargePreset && arr.presets.length >= 2;
+        const lastEndLine = arr.presets[beforeCharge ? arr.presets.length - 2
+                                                     : arr.presets.length - 1].endLine;
         // Detect whether there's already a blank line separating the
         // previous preset's `},` from whatever follows (typically the
         // array's `};`). When the previous preset sits flush against
@@ -27811,10 +27820,21 @@ require(['vs/editor/editor.main'], function () {
         // newText restores the gap. When a blank already exists, the
         // skip loop hops past it and the new preset lands cleanly
         // without doubling up the spacing.
+        // Charge preset present and it is the ONLY preset: there is nothing to append
+        // after, so the new font goes directly above it. No lead-in blank is needed
+        // because we are not following another preset's `},`.
+        const onlyCharge = hasChargePreset && arr.presets.length === 1;
         const lineAfterPrev = lines[lastEndLine] || '';
-        const prevHasTrailingBlank = lineAfterPrev.trim() === '';
-        let insertLine = lastEndLine + 1;
-        while (insertLine <= lines.length && lines[insertLine - 1].trim() === '') insertLine++;
+        const prevHasTrailingBlank = onlyCharge || lineAfterPrev.trim() === '';
+        let insertLine;
+        if (onlyCharge) {
+          insertLine = arr.presets[0].startLine;
+        } else {
+          insertLine = lastEndLine + 1;
+          // Skip existing blank lines. In the before-charge case this lands us exactly
+          // on the charge preset's opening `{`, so inserting there pushes it down.
+          while (insertLine <= lines.length && lines[insertLine - 1].trim() === '') insertLine++;
+        }
         const refLine = (insertLine <= lines.length ? lines[insertLine - 1] : '') || '';
         const indent = (refLine.match(/^(\s*)/) || ['', ''])[1];
         const inner = indent + '  ';
