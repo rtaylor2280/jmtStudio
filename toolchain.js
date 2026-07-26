@@ -1343,13 +1343,26 @@ function extractFlashError(raw) {
     // reassurance, and ONE next action. Everything else is escalation and belongs below
     // the fold, not in the panic moment. The raw dfu-util line still follows for anyone
     // who wants it, and the full log is in Build Output either way.
-    return 'The flash was interrupted before it finished' + (stoppedAt ? ' -' + stoppedAt.replace(' It stopped at', ' it stopped at').replace(/\.$/, '') : '') + '.\n'
-         + 'The board is fine. It holds partial firmware until a flash completes, and the bootloader cannot be erased.\n'
-         + 'Flash again. If the board is not in the port list, pick "Switch to Bootloader Mode (DFU)" from the port dropdown.\n'
-         + 'Still stuck? Hold BOOT and tap RESET on the board, then use Bootloader Mode.'
-         // stoppedShort can fire on its own (deepest cuts leave no named error), so
-         // only append the raw line when there actually is one.
-         + (dropLine ? '\n' + dropLine : '');
+    // Blank lines between the blocks, not just newlines. #bm-status is white-space:
+    // pre-wrap, so \n\n renders as real separation - and without it four short
+    // sentences still read as one paragraph, which was Ryan's second note after the
+    // length fix: "no spacing between these paragraphs... still looks hard to read."
+    // Each block answers one question: what happened, is my board OK, what do I do,
+    // what if that fails.
+    // THREE blocks: what happened, what to do, and the raw line for whoever wants it.
+    // The BOOT+RESET escalation was dropped deliberately - _checkDfuOnEntry already shows
+    // boot instructions when the board is not in DFU yet, so telling them here is telling
+    // them something they are about to be told. Ryan: "the still stuck part isn't needed
+    // because it will be told them when they switch to bootloader mode. wasted text here."
+    // No raw dfu-util line here. It is already in the log panel above, in red, and the
+    // two surfaces have different jobs: the panel is the raw truth, this is the human
+    // explanation. Repeating "Error during special command SET_ADDRESS get_status" under
+    // a plain-English translation just undoes the translation - the command name tells a
+    // user nothing they can act on, and which one appears is only a matter of which step
+    // was in flight when the connection died.
+    return 'The flash was interrupted before it finished' + (stoppedAt ? ' -' + stoppedAt.replace(' It stopped at', ' it stopped at').replace(/\.$/, '') : '') + '.\n\n'
+         + 'The board is fine. It holds partial firmware until a flash completes, and the bootloader cannot be erased. '
+         + 'Verify connection and flash again. If the board is not in the port list, pick "Switch to Bootloader Mode (DFU)" from the port dropdown.';
   }
   if (raw.includes('dfu-util: error')) {
     const errLine = lines.find(l => l.includes('dfu-util: error'));
