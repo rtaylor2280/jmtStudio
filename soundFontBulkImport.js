@@ -793,6 +793,17 @@ async function importPlannedSource({ userData, src, fromSdCard }, onSubProgress)
       const gn = String(src.guidedName).trim();
       if (gn) proposedName = gn;
     }
+    // Quick import: the scan already derived a confident name (readme content or a
+    // name-tag file) and the review screen shows it — the commit path must use it
+    // too. Without this the entry silently reverts to the candidate's folder name
+    // ("Bank01" while the review showed "KRossguard"), and name_uncertain stays
+    // quiet because nameSource looks confident. Guided imports arrive with
+    // guidedName carrying the same (possibly user-edited) value, so this branch
+    // only fires for the quick path. Single-candidate only, same rationale as above.
+    else if ((src.nameSource === 'readme' || src.nameSource === 'name-tag')
+        && src.cleanedName && candidates.length === 1) {
+      proposedName = src.cleanedName;
+    }
     // Docx name recovery for QUICK import. The guided path already recovers a docx
     // name in enrichSourceForGuided (it arrives here as src.guidedName), but quick
     // import skips enrichment, so without this a docx-only-named font lands under the
@@ -971,15 +982,26 @@ async function importPlannedSource({ userData, src, fromSdCard }, onSubProgress)
         for (const ent of created) {
           if (!others.length) break;
           const m = compare.matchCandidateAgainstLibrary(mf.records, ent.candidatePath, others);
-          // Only stamp when the library truly holds EVERY sound this entry has —
-          // a copy carrying extra sounds is not "already in your library".
-          if (!m || m.lowConfidence || !compare.isFullyOwned(m)) continue;
+          if (!m || m.lowConfidence || !m.bestMatch) continue;
+          // Two stamp tiers. 'already_in_library' keeps its strict claim: the
+          // library truly holds EVERY sound this entry has. Close matches above
+          // the same display bar the review screens use get their own reason —
+          // the review flow shows these on-row, so a quick import must surface
+          // them too, with the concrete gain for the keep-both/delete-one call.
+          const updates = {};
+          let reason = null;
+          if (compare.isFullyOwned(m)) {
+            reason = 'already_in_library';
+          } else if (m.coreContainment >= compare.VARIANT_DISPLAY_MIN) {
+            reason = 'close_match';
+            const gain = compare.missingPhrase(m);
+            if (gain) updates.closeMatchGain = gain;
+          }
+          if (!reason) continue;
           try {
-            const updates = {
-              needsReview: true,
-              reviewReasons: [...(ent.reviewReasons || []), 'already_in_library'],
-              duplicateOfName: m.bestMatch,
-            };
+            updates.needsReview = true;
+            updates.reviewReasons = [...(ent.reviewReasons || []), reason];
+            updates.duplicateOfName = m.bestMatch;
             if (ent.versionInfo) updates.versionInfo = ent.versionInfo;
             soundFontEntries.updateEntryMeta({ userData, currentName: ent.name, updates });
           } catch {}

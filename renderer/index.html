@@ -20425,6 +20425,13 @@ require(['vs/editor/editor.main'], function () {
             ? `This font’s sounds match ${who}, which is already in your library. Keep both, or delete one.`
             : 'This font’s sounds match a font already in your library. Keep both, or delete one.';
         },
+        close_match: (entry) => {
+          const who = (entry && entry.duplicateOfName) || 'a font already in your library';
+          const gain = entry && entry.closeMatchGain;
+          return gain
+            ? `Close match to ${who}: this copy has ${gain} yours doesn’t (possibly a different version). Keep both, or delete one.`
+            : `Close match to ${who} (possibly a different version). Keep both, or delete one.`;
+        },
       };
       // Resolve a reason key into its display text, calling the formatter
       // function with the entry context when the entry needs to drive
@@ -20662,6 +20669,7 @@ require(['vs/editor/editor.main'], function () {
           needsReview: !!m.needsReview,
           reviewReasons: Array.isArray(m.reviewReasons) ? m.reviewReasons.slice() : [],
           duplicateOfName: m.duplicateOfName || '',
+          closeMatchGain: m.closeMatchGain || '',
           versionInfo: (m.versionInfo && typeof m.versionInfo === 'object') ? {
             taken: m.versionInfo.taken || '',
             skipped: Array.isArray(m.versionInfo.skipped) ? m.versionInfo.skipped.slice() : [],

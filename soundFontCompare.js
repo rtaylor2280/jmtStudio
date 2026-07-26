@@ -450,6 +450,14 @@ function verdictLabel(m) {
     if (m.coreContainment >= 0.98) {
       return `All of its sounds are already in ${m.bestMatch} (which has more)`;
     }
+    // The verdict stays conservative ("possibly a different version"), but the
+    // note carries the concrete delta so the user sees what importing gains.
+    // Containment below 0.98 guarantees a non-empty core delta; the bare
+    // shares-% line remains only as a defensive fallback.
+    const gain = _missingPhrase(m);
+    if (gain) {
+      return `Close match to ${m.bestMatch}: this copy has ${gain} yours doesn't (possibly a different version)`;
+    }
     return `Close match to ${m.bestMatch}: shares ${Math.round(m.coreContainment * 100)}% of its sounds (possibly a different version)`;
   }
   return null;
@@ -466,7 +474,9 @@ function verdictTip(m) {
     return `Importing keeps the ${_missingPhrase(m)} your ${m.bestMatch} copy doesn't have. Uncheck only if you don't want them.`;
   }
   if (m.verdict === 'variant') {
-    return `Probably a different version of ${m.bestMatch}. Import it if you want both versions in your library.`;
+    const gain = _missingPhrase(m);
+    const base = `Probably a different version of ${m.bestMatch}. Import it if you want both versions in your library.`;
+    return gain ? `${base} Importing keeps the ${gain} your copy doesn't have.` : base;
   }
   return null;
 }
@@ -494,6 +504,7 @@ module.exports = {
   verdictLabel,
   verdictTip,
   isFullyOwned,
+  missingPhrase: _missingPhrase,
   VARIANT_DISPLAY_MIN,
   BOARD_WRAPPER_DIRS,
   CUSTOMIZABLE_DIRS,
