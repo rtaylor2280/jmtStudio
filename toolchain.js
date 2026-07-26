@@ -106,6 +106,16 @@ function validateCli() {
  * Calls onLog(line, isError) for each line of stdout/stderr.
  * Returns promise resolving to { ok, code, stdout, stderr }
  */
+// gcc/ld/lto-wrapper write warnings and notes to stderr alongside real errors, so
+// marking every stderr line as an error painted ordinary build noise red — the
+// harmless "memory region `SRAM2' not declared" and the LTRANS note show up on
+// EVERY build, which trains the eye to ignore red exactly when it matters. Default
+// stderr to error (an ld failure like "region `FLASH' overflowed" says neither
+// "error" nor "warning"), but never flag a warning or note.
+function _isCompileErrorLine(line) {
+  return !/\b(warning|note)\s*:/i.test(line);
+}
+
 function runCli(args, onLog) {
   return new Promise((resolve) => {
     const v = validateCli();
@@ -137,15 +147,27 @@ function runCli(args, onLog) {
 
     let stdout = '', stderr = '';
 
-    proc.stdout.on('data', d => {
-      const lines = d.toString().split(/\r?\n/).filter(Boolean);
-      lines.forEach(l => { stdout += l + '\n'; onLog(l, false); });
-    });
+    // Buffer the incomplete tail of each chunk. Splitting a raw chunk emits the
+    // partial last line immediately, which is why a long path could surface as a
+    // lone "C" followed by ":/Users/..." on the next line.
+    function makeLineReader(onLine) {
+      let buf = '';
+      return {
+        push(chunk) {
+          buf += chunk;
+          const parts = buf.split(/\r?\n/);
+          buf = parts.pop();
+          parts.filter(Boolean).forEach(onLine);
+        },
+        flush() { if (buf.trim()) onLine(buf); buf = ''; },
+      };
+    }
 
-    proc.stderr.on('data', d => {
-      const lines = d.toString().split(/\r?\n/).filter(Boolean);
-      lines.forEach(l => { stderr += l + '\n'; onLog(l, true); });
-    });
+    const outReader = makeLineReader(l => { stdout += l + '\n'; onLog(l, false); });
+    const errReader = makeLineReader(l => { stderr += l + '\n'; onLog(l, _isCompileErrorLine(l)); });
+
+    proc.stdout.on('data', d => outReader.push(d.toString()));
+    proc.stderr.on('data', d => errReader.push(d.toString()));
 
     proc.on('close', code => {
       _currentProc = null;
@@ -757,6 +779,7 @@ function waitForDfuAccessible(onLog, deadlineMs = 25000) {
     ensureExecutable(dfuUtil);
     let everPresent  = false;
     let notedBinding = false;
+    let probeError   = null;   // set once if dfu-util itself fails to run
 
     const check = () => {
       const { execFile } = require('child_process');
@@ -764,6 +787,12 @@ function waitForDfuAccessible(onLog, deadlineMs = 25000) {
         const output  = (stdout || '') + (stderr || '');
         const lines   = output.split(/\r?\n/);
         const elapsed = Date.now() - start;
+        // Same reasoning as detectDFU: a dfu-util that never ran looks exactly like a board
+        // that is not there. Say so once rather than silently reporting "not found".
+        if (err && !output.trim() && !probeError) {
+          probeError = err.code || err.message;
+          onLog(`Could not run the DFU check (${probeError}) - this is a tool problem, not necessarily a missing board.`, true);
+        }
 
         const openable = lines.some(l =>
           l.trim().startsWith('Found DFU:') &&
@@ -795,6 +824,16 @@ function waitForDfuAccessible(onLog, deadlineMs = 25000) {
 
         if (elapsed > deadlineMs) {
           onLog(`Timed out after ${(elapsed / 1000).toFixed(1)}s waiting for the DFU device to become accessible.`, true);
+          // Say WHAT dfu-util actually reported, not just that we gave up. On 2026-07-26 this
+          // timed out while the same binary listed the board in 66ms from a shell, and with no
+          // record of the tool's output there was no way to tell "device absent" from "device
+          // present but we could not open it" (libusb access on Windows is exclusive, so a
+          // concurrent dfu-util - including a diagnostic one - can lock us out). Cheap, and it
+          // only prints on the failure path.
+          const reported = lines.map(l => l.trim()).filter(Boolean).slice(-4);
+          onLog(reported.length
+            ? `dfu-util reported: ${reported.join(' | ')}`
+            : 'dfu-util returned no output at all.', false);
           return resolve({ openable: false, everPresent, elapsedMs: elapsed });
         }
         setTimeout(check, 750);
@@ -926,6 +965,19 @@ async function prepareFirmware(onLog) {
   return { ok: true, dfuPath, toolsDir };
 }
 
+// dfu-util writes BOTH progress and diagnostics to stderr, and its libusb
+// failures ("dfuse_download: libusb_control_transfer returned -1") never contain
+// the word "error" — so the old bare `includes('error')` test missed the one line
+// that mattered while progress lines carried the warning styling. Classify on the
+// real patterns instead, and never flag a progress line.
+function _isDfuProgressLine(line) {
+  return /^\s*(Download|Upload)\s*\[/.test(line) || /\[[=\s]*\]\s*\d+%/.test(line);
+}
+function _looksLikeFlashError(line) {
+  if (_isDfuProgressLine(line)) return false;
+  return /error|libusb_control_transfer returned|LIBUSB_ERROR|cannot open|access is denied|no dfu capable|timed out|failed/i.test(line);
+}
+
 // ── Run dfu-util flash (shared by flash and flashDFU) ─
 async function runDfuFlash(dfuPath, toolsDir, onLog) {
   onLog('Flashing firmware...', false);
@@ -982,7 +1034,7 @@ async function runDfuFlash(dfuPath, toolsDir, onLog) {
     const errEmu = makeTermEmu(line => {
       if (!line) return;
       stderr += line + '\n';
-      onLog(line, line.toLowerCase().includes('error'));
+      onLog(line, _looksLikeFlashError(line));
     });
 
     proc.stdout.on('data', d => outEmu.write(d.toString()));
@@ -1026,9 +1078,19 @@ function detectDFU() {
 
   ensureExecutable(getDfuUtilPath());
   return new Promise(resolve => {
-    execFile(dfuUtil, ['-l'], { timeout: 5000, cwd: toolsDir, env: getDfuEnv(toolsDir) }, (_err, stdout, stderr) => {
+    execFile(dfuUtil, ['-l'], { timeout: 5000, cwd: toolsDir, env: getDfuEnv(toolsDir) }, (err, stdout, stderr) => {
       const output = (stdout || '') + (stderr || '');
       const lines  = output.split(/\r?\n/);
+
+      // Discarding this error made a real failure undiagnosable on 2026-07-26: after several
+      // interrupted flashes the app could not see a DFU device that a shell dfu-util listed in
+      // 66ms, and only an app restart cleared it. With the error swallowed, "the tool failed to
+      // run" and "there is no board" produced the identical answer, so there was nothing to go
+      // on. Report it instead of guessing - callers can still treat probeFailed as not-found,
+      // but now the log says which one it was.
+      if (err && !output.trim()) {
+        return resolve({ found: false, probeFailed: true, error: err.code || err.message });
+      }
 
       // Proffieboard DFU accessible: appears in a "Found DFU:" line with matching VID:PID
       const accessible = lines.some(l =>
@@ -1146,9 +1208,26 @@ async function flash(port, fqbn, onLog) {
   // 1200-bps touch reset
   const resetResult = await touchReset(port, onLog);
   if (!resetResult.ok) {
+    // A failed touch reset does NOT mean we cannot flash. The board may already BE
+    // in the bootloader - after an interrupted flash it comes up in DFU, Windows can
+    // leave a stale COM node behind, and opening that node fails ("SetCommState:
+    // Unknown error code 31"). There is nothing to reset because the board is already
+    // where the reset was trying to put it. Bailing out here told the user to try a
+    // different cable while a ready-to-flash DFU device sat on the bus.
+    // Probe briefly before giving up - dfu-util -l answers immediately when the device
+    // is there, so this costs nothing in the genuine cable-fault case.
+    // (Found 2026-07-26: board in DFU, LED confirming it, app still on COM12.)
+    const already = await waitForDfuAccessible(onLog, 2500);
+    if (already.openable) {
+      onLog('Board is already in bootloader mode - flashing directly.', false);
+      return await runDfuFlash(dfuPath, toolsDir, onLog);
+    }
     let msg;
     if (resetResult.cause === 'port-locked') {
       msg = 'Flash stopped — free the port and click Retry Flash.';
+    } else if (already.everPresent) {
+      msg = 'The board is in bootloader mode but Windows will not let us open it yet. '
+          + 'Give it a moment and click Retry Flash; if it persists, check the DFU driver.';
     } else if (resetResult.cause === 'driver') {
       msg = 'Touch reset didn\'t complete. Sometimes a different USB cable or port is enough — worth trying before pressing reset on the board.';
     } else {
@@ -1223,11 +1302,67 @@ function extractFlashError(raw) {
   if (raw.includes('Access is denied'))  return 'Port access denied. Close any other programs using this port.';
   if (raw.includes('No DFU capable'))    return 'No DFU device found. Board may not be in bootloader mode.';
   if (raw.includes('timed out'))         return 'Upload timed out. Try reconnecting the board.';
+  // How far the transfer got before it died. The progress lines are the only place
+  // this exists, and they are exactly what the old fallback threw away - yet the
+  // stop point is the single most useful fact, because how deep the cut went decides
+  // which recovery the user needs (measured on a real board 2026-07-26: ~52% still
+  // enumerated on COM and a plain retry worked; ~62% and ~78% left it in bootloader
+  // with no COM port, the deepest needing manual bootloader entry).
+  const lastProgress = [...lines].reverse().find(l => _isDfuProgressLine(l));
+  const pm = lastProgress && lastProgress.match(/(\d+)%\s+(\d+)\s+bytes/);
+  const stoppedAt = pm ? ` It stopped at ${pm[1]}% (${Number(pm[2]).toLocaleString()} bytes).` : '';
+
+  // Mid-transfer interruption. dfu-util names this TWO different ways depending on
+  // how deep the transfer was, and neither contains the word "error" in the shape
+  // the checks above look for:
+  //   early - libusb reports the control transfer failing
+  //   later - the erase/get_status special command fails instead
+  // Matching only the first meant a late drop fell through to the tail below, and
+  // because every non-progress line in a dfu-util run sits at the START (the status
+  // handshake), "last 8 diagnostic lines" reliably returned the handshake - which
+  // tells the user nothing. Found by Ryan deliberately pulling USB at 52/62/78%.
+  // A completed flash always reaches 100%. So progress that exists and stops short IS
+  // an interruption, whether or not dfu-util named one - which covers the deepest cuts,
+  // where the only trace left in the tail is the status handshake from the top of the run.
+  const stoppedShort = !!pm && Number(pm[1]) < 100;
+  const dropLine = lines.find(l =>
+    /libusb_control_transfer returned|LIBUSB_ERROR/i.test(l) ||
+    /Error during special command|ERASE_PAGE|during download get_status/i.test(l));
+  if (dropLine || stoppedShort) {
+    // Wording checked against the ACTUAL controls: the port dropdown offers
+    // "Switch to Bootloader Mode (DFU)" (buildPanel.js:726) and the no-port tip offers
+    // "Try Bootloader Mode (DFU)" (buildPanel.js:1996). An earlier draft said "use Flash
+    // via DFU", which is not a control that exists anywhere in the app - naming a button
+    // that is not there is the same wrong-advice failure this whole pass is about.
+    // The two tiers below are what Ryan actually hit on 2026-07-26: a board that leaves
+    // the port list is simply waiting in the bootloader, but a board that KEEPS its port
+    // while refusing to flash is running incomplete firmware, and only BOOT+RESET moves it.
+    // KEEP THIS SHORT. The first draft ran five paragraphs and Ryan's verdict was fair:
+    // "this looks like a wall of text... not a good error if they have to read a book."
+    // Someone reading this has a saber that will not flash; they need the state, the
+    // reassurance, and ONE next action. Everything else is escalation and belongs below
+    // the fold, not in the panic moment. The raw dfu-util line still follows for anyone
+    // who wants it, and the full log is in Build Output either way.
+    return 'The flash was interrupted before it finished' + (stoppedAt ? ' -' + stoppedAt.replace(' It stopped at', ' it stopped at').replace(/\.$/, '') : '') + '.\n'
+         + 'The board is fine. It holds partial firmware until a flash completes, and the bootloader cannot be erased.\n'
+         + 'Flash again. If the board is not in the port list, pick "Switch to Bootloader Mode (DFU)" from the port dropdown.\n'
+         + 'Still stuck? Hold BOOT and tap RESET on the board, then use Bootloader Mode.'
+         // stoppedShort can fire on its own (deepest cuts leave no named error), so
+         // only append the raw line when there actually is one.
+         + (dropLine ? '\n' + dropLine : '');
+  }
   if (raw.includes('dfu-util: error')) {
     const errLine = lines.find(l => l.includes('dfu-util: error'));
     if (errLine) return errLine;
   }
-  return lines.slice(-8).join('\n');
+  // dfu-util emits hundreds of progress lines, so a raw tail is almost always spam.
+  // Prefer an actual error-looking line over position: the handshake sits at the top
+  // of the run, so taking the LAST non-progress lines surfaces the least useful part
+  // of the log. Fall back to the tail only when nothing looks like an error.
+  const diagnostic = lines.filter(l => !_isDfuProgressLine(l));
+  const errish = diagnostic.filter(_looksLikeFlashError);
+  if (errish.length) return (stoppedAt ? stoppedAt.trim() + '\n' : '') + errish.slice(-3).join('\n');
+  return (diagnostic.length ? diagnostic : lines).slice(-8).join('\n');
 }
 
 // ── Status check ───────────────────────────────────────
