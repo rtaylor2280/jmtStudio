@@ -1372,10 +1372,28 @@ function extractFlashError(raw) {
   // Prefer an actual error-looking line over position: the handshake sits at the top
   // of the run, so taking the LAST non-progress lines surfaces the least useful part
   // of the log. Fall back to the tail only when nothing looks like an error.
+  // Lines that LOOK like errors but appear in completely successful flashes. dfu-util
+  // clears a stale error state at the start of every run, so "dfuERROR, clearing status"
+  // and its surrounding status chatter match a naive /error/ test while meaning nothing.
+  // Observed verbatim in a successful flash on 2026-07-26; a synthetic-log test caught
+  // the fallback surfacing them, which no hardware run would have shown.
+  const _isBenignStatusLine = l =>
+    /Determining device status|dfuERROR, clearing status|dfuIDLE, continuing|^\s*dfuERROR\s*$/i.test(l);
+
   const diagnostic = lines.filter(l => !_isDfuProgressLine(l));
-  const errish = diagnostic.filter(_looksLikeFlashError);
+  const errish = diagnostic.filter(l => _looksLikeFlashError(l) && !_isBenignStatusLine(l));
   if (errish.length) return (stoppedAt ? stoppedAt.trim() + '\n' : '') + errish.slice(-3).join('\n');
-  return (diagnostic.length ? diagnostic : lines).slice(-8).join('\n');
+
+  // Last resort. If everything we have is the benign status chatter, dumping it would
+  // present lines that appear in SUCCESSFUL flashes as though they were the failure -
+  // the exact "wall of meaningless text" this pass set out to remove. Say the one true
+  // thing instead: it never got as far as transferring.
+  const meaningful = diagnostic.filter(l => !_isBenignStatusLine(l));
+  if (!meaningful.length) {
+    return 'The flash failed before it started transferring.\n\n'
+         + 'Check the cable and the board connection, then flash again.';
+  }
+  return meaningful.slice(-8).join('\n');
 }
 
 // ── Status check ───────────────────────────────────────
