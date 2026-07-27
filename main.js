@@ -422,14 +422,17 @@ ipcMain.handle('toolchain:benchCompile', async (_, { configContent, fqbn, buildO
   return result;
 });
 
-ipcMain.handle('toolchain:flash', async (_, { port, fqbn }) => {
+ipcMain.handle('toolchain:flash', async (_, { port, fqbn, expectedSN }) => {
   const log = makeLogger();
 
   if (win && !win.isDestroyed()) {
     win.webContents.send('build:status', { type: 'flash', ok: null, message: `Flashing on ${port}...` });
   }
 
-  const result = await toolchain.flash(port, fqbn, log);
+  // expectedSN pins the flash to the board the user picked. Without it dfu-util targets
+  // whichever board is in the bootloader, which is how a flash aimed at one board landed
+  // on another (2026-07-26).
+  const result = await toolchain.flash(port, fqbn, log, expectedSN);
 
   if (win && !win.isDestroyed()) {
     win.webContents.send('build:status', {

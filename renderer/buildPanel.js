@@ -544,10 +544,39 @@ async function doFlash() {
   }
   const rawPorts = await window.electronAPI.listPortsRaw();
   if (!rawPorts.find(p => p.path === selectedPort)) {
-    appendModalLog('Selected port disconnected — waiting for board...', true);
-    showWaitForBoardInModal();
-    startPortWatch('wait-flash');
-    return;
+    // The board that was selected is gone. Swapping boards is normal - unplug one, plug
+    // the next in, flash - and the app should not stall waiting for a board the user has
+    // already replaced. Before giving up, ask what IS connected:
+    //   exactly one Proffieboard -> unambiguous, adopt it and carry on
+    //   none, or several         -> genuinely needs the user, so wait as before
+    // Without this the flash never even reaches the toolchain, so the serial-matching
+    // there never gets a chance to help. (Ryan, 2026-07-26: unplugged one board, plugged
+    // the other in, clicked Flash, and came back to a "Connect Board" prompt with a board
+    // sitting right there.)
+    let adopted = null;
+    try {
+      const detected = await window.electronAPI.getRecommendedPort();
+      const boards = (detected && detected.ok && detected.proffieports) || [];
+      if (boards.length === 1) adopted = boards[0];
+    } catch {}
+
+    if (adopted) {
+      appendModalLog(`${selectedPort} is gone — using the connected board on ${adopted.path}.`, false);
+      selectedPort = adopted.path;
+      selectedPortSN = adopted.serialNumber || null;
+      selectedPortIsProffieboard = true;
+      _flashTargetPort = selectedPort;
+      _flashTargetSN   = selectedPortSN;
+      // Keep the dropdown honest - it should show the board being flashed.
+      try { if (portSelect) portSelect.value = adopted.path; } catch {}
+      if (typeof applyDetectedBoard === 'function') { try { applyDetectedBoard(adopted); } catch {} }
+      setStatus('port', 'ok', `Proffieboard on ${adopted.path}`);
+    } else {
+      appendModalLog('Selected port disconnected — waiting for board...', true);
+      showWaitForBoardInModal();
+      startPortWatch('wait-flash');
+      return;
+    }
   }
 
   // Reuse modal in flash mode — clear prior attempt's log so retries (watcher-triggered
@@ -584,7 +613,10 @@ async function doFlash() {
   _flashTargetPort = selectedPort;
   _flashTargetSN   = selectedPortSN;
 
-  await window.electronAPI.flash(selectedPort, selectedFqbn);
+  // Send the serial too, not just the port. The port only drives the touch reset; without
+  // the serial dfu-util matches on VID:PID alone and flashes whichever board is in the
+  // bootloader. This value was already being frozen here and then left unused.
+  await window.electronAPI.flash(selectedPort, selectedFqbn, _flashTargetSN);
   setBusy(false);
 }
 

@@ -794,13 +794,24 @@ function waitForDfuAccessible(onLog, deadlineMs = 25000) {
           onLog(`Could not run the DFU check (${probeError}) - this is a tool problem, not necessarily a missing board.`, true);
         }
 
-        const openable = lines.some(l =>
+        const foundLines = lines.filter(l =>
           l.trim().startsWith('Found DFU:') &&
           (l.includes('0483:df11') || l.includes('1209:6668'))
         );
+        // Collect the serial of every DFU device on the bus. The caller needs these to
+        // confirm the board it INTENDED to flash is the one actually sitting in the
+        // bootloader - dfu-util matches on VID:PID alone unless told otherwise, so
+        // without this check a flash aimed at one board lands on whichever board
+        // happens to be in DFU. The STM32 serial is identical in both modes
+        // (VID_1209:PID_6668 running, VID_0483:PID_DF11 in DFU), so it maps directly
+        // to the serial the port list reports.
+        const serials = [...new Set(
+          foundLines.map(l => (l.match(/serial="([^"]+)"/) || [])[1]).filter(Boolean)
+        )];
+        const openable = foundLines.length > 0;
         if (openable) {
           onLog(`DFU device ready after ${(elapsed / 1000).toFixed(1)}s.`, false);
-          return resolve({ openable: true, everPresent: true, elapsedMs: elapsed });
+          return resolve({ openable: true, everPresent: true, serials, elapsedMs: elapsed });
         }
 
         // Present on the bus but not openable. On Windows, find out WHY before
@@ -979,17 +990,25 @@ function _looksLikeFlashError(line) {
 }
 
 // ── Run dfu-util flash (shared by flash and flashDFU) ─
-async function runDfuFlash(dfuPath, toolsDir, onLog) {
-  onLog('Flashing firmware...', false);
+async function runDfuFlash(dfuPath, toolsDir, onLog, expectedSN) {
+  onLog(expectedSN ? `Flashing firmware to board ${expectedSN}...` : 'Flashing firmware...', false);
   ensureExecutable(getDfuUtilPath());
 
   const flashResult = await new Promise(resolve => {
-    const proc = spawn(getDfuUtilPath(), [
-      '-d', '1209:6668,0483:df11',
-      '-a', '0',
-      '-s', '0x08000000:leave',
-      '-D', dfuPath
-    ], { cwd: toolsDir, env: getDfuEnv(toolsDir) });
+    // -S pins the flash to ONE board by serial. Without it, `-d 1209:6668,0483:df11`
+    // matches ANY device with those IDs, so dfu-util flashes whichever board happens to
+    // be in the bootloader - not the one the user selected. The COM port only ever drove
+    // the touch reset; it never constrained the target.
+    // Found 2026-07-26 by Ryan: he unplugged the board on COM12, plugged a DIFFERENT board
+    // in, clicked Flash, and the log narrated COM12 while the firmware went to the board
+    // that was actually present. Since 0483:df11 is the GENERIC STM32 bootloader ID, the
+    // unconstrained form can also target a non-Proffieboard STM32 sitting in DFU.
+    // When the serial is unknown (manual Bootloader Mode with no port selected) we keep
+    // the old behaviour, because there is nothing better to go on.
+    const dfuArgs = ['-d', '1209:6668,0483:df11'];
+    if (expectedSN) dfuArgs.push('-S', expectedSN);
+    dfuArgs.push('-a', '0', '-s', '0x08000000:leave', '-D', dfuPath);
+    const proc = spawn(getDfuUtilPath(), dfuArgs, { cwd: toolsDir, env: getDfuEnv(toolsDir) });
 
     let stdout = '', stderr = '';
 
@@ -1191,14 +1210,55 @@ function ensureDfuDriver(onLog) {
  * onLog(line, isError) streams output back to renderer.
  * Returns { ok, error? }
  */
-async function flash(port, fqbn, onLog) {
+// A real STM32 serial is 12 hex characters (e.g. 204F32634630) and is the SAME in both
+// running and DFU modes, which is what makes it usable as identity across the transition.
+// serialport does NOT always give us that: for a stale or orphaned Windows entry it falls
+// back to the instance-path fragment (e.g. "6&1832F585&0&0000"), and handing THAT to
+// `dfu-util -S` would match nothing and fail a flash on a perfectly good board. So only a
+// value that looks like a board serial is allowed to pin anything; anything else is treated
+// as "unknown", which restores the previous behaviour rather than breaking the flash.
+const _isBoardSerial = (sn) => typeof sn === 'string' && /^[0-9A-Fa-f]{12}$/.test(sn.trim());
+
+// expectedSN is the serial of the board the USER selected. It pins the flash to that
+// board (see runDfuFlash) and lets us refuse when a different one is in the bootloader.
+async function flash(port, fqbn, onLog, expectedSN) {
   onLog('--- Flash started ---', false);
+  if (expectedSN && !_isBoardSerial(expectedSN)) expectedSN = null;
 
   if (!port) {
     const msg = 'No port selected.';
     onLog(msg, true);
     return { ok: false, error: msg };
   }
+
+  // Decide WHICH board this flash targets, then pin dfu-util to it.
+  //
+  // Swapping boards is normal - unplug one, plug the next in, flash. The user did nothing
+  // wrong, so the app must not turn its own stale selection into their error. Resolve it:
+  //   selected board is present        -> use it
+  //   it is not, but exactly ONE is    -> use that one and say so. No ambiguity exists.
+  //   it is not, and SEVERAL are       -> genuinely ambiguous; refuse rather than guess
+  // Only the last case is an error, and only because picking for the user there could
+  // flash a board they never intended to touch.
+  //
+  // A port can stay listed for a second or two after its board is unplugged, so "the port
+  // exists" was never evidence that the right board is on the end of it. Serial is the only
+  // identity that survives the DFU transition, so it is what we resolve on.
+  const _resolveTarget = (serials) => {
+    if (!serials || !serials.length) return { sn: expectedSN || null };   // nothing to go on
+    if (!expectedSN) return { sn: serials.length === 1 ? serials[0] : null };
+    const match = serials.find(s => s.toUpperCase() === String(expectedSN).toUpperCase());
+    if (match) return { sn: match };
+    if (serials.length === 1) {
+      onLog(`Board changed - flashing the connected board (${serials[0]}) instead of ${expectedSN}.`, false);
+      return { sn: serials[0], switched: true };
+    }
+    const msg = `More than one board is in bootloader mode (${serials.join(', ')}) and none of `
+              + `them is the one selected (${expectedSN}). Nothing was flashed.\n\n`
+              + `Disconnect the boards you do not want to flash, or pick the right one from the port list.`;
+    onLog(msg, true);
+    return { error: { ok: false, error: msg, wrongBoard: true, expectedSN, foundSN: serials } };
+  };
 
   const prep = await prepareFirmware(onLog);
   if (!prep.ok) return prep;
@@ -1219,8 +1279,10 @@ async function flash(port, fqbn, onLog) {
     // (Found 2026-07-26: board in DFU, LED confirming it, app still on COM12.)
     const already = await waitForDfuAccessible(onLog, 2500);
     if (already.openable) {
+      const target = _resolveTarget(already.serials);
+      if (target.error) return target.error;
       onLog('Board is already in bootloader mode - flashing directly.', false);
-      return await runDfuFlash(dfuPath, toolsDir, onLog);
+      return await runDfuFlash(dfuPath, toolsDir, onLog, target.sn);
     }
     let msg;
     if (resetResult.cause === 'port-locked') {
@@ -1243,7 +1305,9 @@ async function flash(port, fqbn, onLog) {
   const acc = await waitForDfuAccessible(onLog);
 
   if (acc.openable) {
-    return await runDfuFlash(dfuPath, toolsDir, onLog);
+    const target = _resolveTarget(acc.serials);
+    if (target.error) return target.error;
+    return await runDfuFlash(dfuPath, toolsDir, onLog, target.sn);
   }
 
   if (acc.wrongDriver) {
@@ -1263,7 +1327,7 @@ async function flash(port, fqbn, onLog) {
     // `-l` and usually succeeds here. Only a genuine failure means the driver
     // is actually wrong/missing and we should offer the setup flow.
     onLog('Attempting flash directly...', false);
-    const direct = await runDfuFlash(dfuPath, toolsDir, onLog);
+    const direct = await runDfuFlash(dfuPath, toolsDir, onLog, expectedSN);
     if (direct.ok || direct.needsDfuDriver) return direct;
     // Real access failure. runDfuFlash only flags needsDfuDriver on Linux
     // (udev); on Windows set it here so we still route into the driver-setup
