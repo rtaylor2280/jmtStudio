@@ -114,6 +114,9 @@ async function copyAcrossLocations({
   destNames, // optional: parallel to srcPaths; when supplied, use these
              // target basenames instead of the source's own. Proffie
              // variant naming still resolves collisions at the dest.
+  onFile,    // optional: onFile(name, done, total) as each file lands. Copying
+             // and (for sharedTracks) hashing are synchronous here, so a paste
+             // of thirty large tracks is a long silence without it.
 }) {
   // sharedTracks (src or dest) is the singleton flat folder — no id
   // required either side. Every other kind needs one.
@@ -234,6 +237,8 @@ async function copyAcrossLocations({
           await soundFontSources.extractSourceFileTo(userData, src.id, srcSubPath, destDir, finalName);
           const rel = path.relative(destRoot, path.join(destDir, finalName)).replace(/\\/g, '/');
           added.push(rel);
+        if (onFile) { try { onFile(rel, added.length, srcPaths.length); } catch {} }
+          if (onFile) { try { onFile(rel, added.length, srcPaths.length); } catch {} }
         } else {
           // Directory — extract the whole subtree under a folder-named
           // safe name. Each interior file lands at <destDir>/<finalDir>
@@ -254,6 +259,8 @@ async function copyAcrossLocations({
           }
           const rel = path.relative(destRoot, outRoot).replace(/\\/g, '/');
           added.push(rel);
+        if (onFile) { try { onFile(rel, added.length, srcPaths.length); } catch {} }
+          if (onFile) { try { onFile(rel, added.length, srcPaths.length); } catch {} }
         }
       } catch (err) {
         failed.push({ source: srcSubPath, error: String(err && err.message || err) });
@@ -294,6 +301,7 @@ async function copyAcrossLocations({
         walkCopy(srcAbs, outRoot);
         const rel = path.relative(destRoot, outRoot).replace(/\\/g, '/');
         added.push(rel);
+        if (onFile) { try { onFile(rel, added.length, srcPaths.length); } catch {} }
         continue;
       }
       if (!stat.isFile()) {

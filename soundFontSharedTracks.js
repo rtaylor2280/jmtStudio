@@ -205,7 +205,6 @@ function planExport(userData, destDir, onFile = null) {
   const srcDir = sharedTracksRoot(userData);
   if (!fs.existsSync(srcDir)) return { ok: false, error: 'Shared tracks folder not found' };
   const targetDir = path.join(destDir, 'tracks');
-  const { hashFile } = require('./soundFontFileHash');
   const toAdd = [], unchanged = [], differing = [];
   let names = [];
   try {
@@ -213,43 +212,55 @@ function planExport(userData, destDir, onFile = null) {
       .filter(e => e.isFile() && /\.wav$/i.test(e.name))
       .map(e => e.name);
   } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
-  // Per-file hashes we recorded when we last wrote this folder. A track whose
-  // size and mtime still match its entry keeps that hash and is never read; the
-  // rest are read. On a synced card that is the difference between stat calls
-  // and gigabytes of SD reading, and a single hand-edited track costs one hash.
+
+  // LIBRARY SIDE: hashes were computed when each track was imported and are
+  // trusted. The library is ours and every add, rename and delete goes through
+  // the index, so re-deriving them would be reading gigabytes to learn what we
+  // already wrote down.
+  let libHashes = new Map();
+  try { libHashes = hashIndex.resolveHashes(userData); } catch {}
+
+  // DESTINATION SIDE: the manifest holds a hash per file. mtime is there for one
+  // job only, to tell whether the user invalidated an entry. We look up ONLY the
+  // files the library is about to write; anything else at the destination, in
+  // the manifest or not, is none of this comparison's business.
+  //
+  // Self-healing: a file with no entry, or one whose entry is invalidated, gets
+  // hashed — just that file — and its entry is refreshed. So a missing or stale
+  // manifest costs exactly the reads it is missing, never a full pass.
+  const sync = require('./sfSyncManifest');
+  const { hashFile } = require('./soundFontFileHash');
   let cache = new Map();
-  try { cache = require('./sfSyncManifest').cacheFor(destDir, 'tracks'); } catch {}
-  const cachedHash = (abs, rel) => {
-    const c = cache.get(rel);
-    if (c) {
-      try {
-        const st = fs.statSync(abs);
-        if (c[0] === st.size && Math.abs((c[1] || 0) - Math.round(st.mtimeMs)) <= 2000) return c[2];
-      } catch {}
-    }
-    return hashFile(abs);
-  };
+  try { cache = sync.cacheFor(destDir, 'tracks'); } catch {}
+  const refreshed = new Map();
 
   let done = 0;
   for (const name of names) {
     if (onFile) { try { onFile(name, done, names.length); } catch {} }
-    const dst = path.join(targetDir, name);
     done++;
-    if (!fs.existsSync(dst)) { toAdd.push(name); continue; }
-    // Size first, and only as a NEGATIVE: different sizes prove a difference
-    // with two stat calls and no reading. Matching sizes prove nothing, so they
-    // fall through to the hash. Cuts the changed case to almost nothing; the
-    // fully-synced case still reads, because there is no way to know two files
-    // match without looking at them.
-    const src = path.join(srcDir, name);
-    let sameSize = true;
-    try { sameSize = fs.statSync(src).size === fs.statSync(dst).size; } catch { sameSize = false; }
-    if (!sameSize) { differing.push(name); continue; }
-    let same = false;
-    try { same = hashFile(src) === cachedHash(dst, name); } catch { same = false; }
-    (same ? unchanged : differing).push(name);
+    const dst = path.join(targetDir, name);
+    let st = null;
+    try { st = fs.statSync(dst); } catch { st = null; }
+    if (!st) { toAdd.push(name); continue; }
+
+    const mtime = Math.round(st.mtimeMs);
+    const entry = cache.get(name);
+    const valid = entry
+      && entry[0] === st.size
+      && Math.abs((entry[1] || 0) - mtime) <= sync.MTIME_TOLERANCE_MS;
+
+    let destHash = valid ? entry[2] : hashFile(dst);
+    refreshed.set(name, [st.size, mtime, destHash]);
+
+    const libHash = libHashes.get(name) || hashFile(path.join(srcDir, name));
+    (destHash && libHash && destHash === libHash ? unchanged : differing).push(name);
   }
   if (onFile) { try { onFile('', names.length, names.length); } catch {} }
+
+  // Persist what we learned, merged over what was already recorded, so entries
+  // for files we did not look at this time survive untouched.
+  try { sync.mergeItem(destDir, 'tracks', refreshed); } catch {}
+
   return { ok: true, toAdd, unchanged, differing };
 }
 
@@ -302,9 +313,22 @@ async function exportToFolderAdditive(userData, destDir, opts = {}) {
   // can reuse it. Recorded whatever the outcome: it describes the DESTINATION,
   // not our library, so a track the user chose to keep is simply recorded as it
   // is and will be compared against the library again next time.
+  // Refresh entries for the files we just wrote, and only those. Their content
+  // is the library's, so the hash is the library's — already known, nothing to
+  // re-read. Anything else recorded for this folder is left alone.
   try {
-    const { hashFile: hf, hashRecords } = require('./soundFontFileHash');
-    require('./sfSyncManifest').hashItemUsingManifest(destDir, 'tracks', hf, hashRecords, _wavOnly);
+    const sync = require('./sfSyncManifest');
+    const { hashFile } = require('./soundFontFileHash');
+    const libHashes = hashIndex.resolveHashes(userData);
+    const observed = new Map();
+    for (const name of [...added, ...replaced]) {
+      try {
+        const st = fs.statSync(path.join(targetDir, name));
+        const h = libHashes.get(name) || hashFile(path.join(srcDir, name));
+        if (h) observed.set(name, [st.size, Math.round(st.mtimeMs), h]);
+      } catch {}
+    }
+    sync.mergeItem(destDir, 'tracks', observed);
   } catch {}
   return { ok: true, destPath: targetDir, added, replaced, kept, unchanged: plan.unchanged };
 }

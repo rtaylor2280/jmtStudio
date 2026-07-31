@@ -104,6 +104,30 @@ function findByHash(index, hash) {
   return matches;
 }
 
+// Name -> hash for every track in the library, from the index rather than by
+// reading the files. ensureIndex already reconciles what appeared or vanished
+// and hashes only what lacks a record, so the steady state costs nothing.
+//
+// Added 2026-07-31 because export was calling hashFile on every library track
+// on every run — 500 tracks meant 500 local reads to discover nothing had
+// changed. The index had been sitting there unused.
+//
+// Deliberately NOT validated against size or mtime. The library is ours: adds,
+// renames and deletes all go through this index, and nothing else in the app
+// defends against a file being hand-edited inside userData either. The
+// destination manifest does check mtime, because a card is genuinely foreign
+// and people do edit them. Different situations, different answers.
+// (Ryan, 2026-07-31.)
+function resolveHashes(userData) {
+  const out = new Map();
+  const index = ensureIndex(userData);
+  for (const uuid of Object.keys(index.tracks || {})) {
+    const rec = index.tracks[uuid];
+    if (rec && rec.name && rec.hash) out.set(rec.name, rec.hash);
+  }
+  return out;
+}
+
 // Idempotent backfill: walk the .wav files in the folder and create
 // records for any that don't have one in the index. Also prunes
 // records whose file is no longer on disk. Called on every read path
@@ -232,6 +256,7 @@ function recordDelete(userData, name) {
 module.exports = {
   INDEX_VERSION,
   hashFile,
+  resolveHashes,
   readIndex,
   writeIndex,
   ensureIndex,

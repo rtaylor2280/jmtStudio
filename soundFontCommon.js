@@ -81,7 +81,11 @@ function listCommons(userData) {
     // for the relative path. Case-insensitive in case a maker shipped
     // MMain.wav or similar.
     const hasMmain = files.some(f => String(f.rel).toLowerCase() === 'mmain.wav');
-    out.push({ uuid: entry.name, meta, fileCount: files.length, totalBytes, hasMmain });
+    // The declared voice pack version, straight from this pack's own
+    // voicepack.ini. null when there is no ini, which ProffieOS treats as
+    // version 1 — so absence is a real answer, not missing data.
+    const voicepackVersion = _readVoicePackVersion(path.join(dir, 'files'));
+    out.push({ uuid: entry.name, meta, fileCount: files.length, totalBytes, hasMmain, voicepackVersion });
   }
   out.sort((a, b) => (a.meta.name || '').localeCompare(b.meta.name || ''));
   return out;
@@ -943,21 +947,36 @@ function commonMatchesAt(userData, uuid, destDir, targetName = 'common') {
     return { ok: true, exists: true, identical: false, reason: 'signals' };
   }
 
-  const { hashItemDir, hashFile, hashRecords } = require('./soundFontFileHash');
-  const hMine = hashItemDir(libDir, libFilter);
-  // Destination side goes through the manifest: files whose size and mtime still
-  // match what we recorded keep their hash and are never read, so one changed
-  // file costs one hash rather than the whole folder.
-  let hTheirs = null;
-  try {
-    const res = require('./sfSyncManifest')
-      .hashItemUsingManifest(destDir, targetName || 'common', hashFile, hashRecords, cardFilter);
-    if (res) hTheirs = res.hash;
-  } catch {}
-  if (hTheirs === null) hTheirs = hashItemDir(cardDir, cardFilter);
-  // A tree we could not read is not a tree we may claim is current.
-  if (!hMine || !hTheirs) return { ok: true, exists: true, identical: false, reason: 'unreadable' };
-  const identical = hMine === hTheirs;
+  // Per file, over the LIBRARY's files only. Anything else on the card, recorded
+  // or not, is none of this comparison's business. The destination manifest
+  // supplies a hash per file; mtime says only whether the user invalidated it,
+  // and an invalidated or missing entry costs one hash for that file alone.
+  const { collectFileRecords, hashFile } = require('./soundFontFileHash');
+  const libRecords = collectFileRecords(libDir, null, libFilter);
+  if (!libRecords) return { ok: true, exists: true, identical: false, reason: 'unreadable' };
+
+  const sync = require('./sfSyncManifest');
+  const item = targetName || 'common';
+  let cache = new Map();
+  try { cache = sync.cacheFor(destDir, item); } catch {}
+  const refreshed = new Map();
+  let identical = true;
+
+  for (const rec of libRecords) {
+    if (!rec || rec.fileHash === '<empty>') continue;
+    const abs = path.join(cardDir, rec.relPath);
+    let st = null;
+    try { st = fs.statSync(abs); } catch { st = null; }
+    if (!st) { identical = false; continue; }
+    const mtime = Math.round(st.mtimeMs);
+    const ent = cache.get(rec.relPath);
+    const valid = ent && ent[0] === st.size
+      && Math.abs((ent[1] || 0) - mtime) <= sync.MTIME_TOLERANCE_MS;
+    const destHash = valid ? ent[2] : hashFile(abs);
+    refreshed.set(rec.relPath, [st.size, mtime, destHash]);
+    if (destHash !== rec.fileHash) identical = false;
+  }
+  try { sync.mergeItem(destDir, item, refreshed); } catch {}
   return { ok: true, exists: true, identical, reason: identical ? null : 'hash' };
 }
 
@@ -1009,9 +1028,19 @@ async function exportCommonToFolder(userData, uuid, destDir, mode = 'rename', on
     // Recorded AFTER the marker is written, so the signature includes it and a
     // later scan does not see the marker as an unexplained change.
     try {
-      const { hashFile, hashRecords } = require('./soundFontFileHash');
-      require('./sfSyncManifest')
-        .hashItemUsingManifest(destDir, targetName, hashFile, hashRecords, _excludeOurMarkers(targetDir));
+      const { collectFileRecords } = require('./soundFontFileHash');
+      const recs = collectFileRecords(srcDir);
+      if (recs) {
+        const observed = new Map();
+        for (const r of recs) {
+          if (!r || r.fileHash === '<empty>') continue;
+          try {
+            const st = fs.statSync(path.join(targetDir, r.relPath));
+            observed.set(r.relPath, [st.size, Math.round(st.mtimeMs), r.fileHash]);
+          } catch {}
+        }
+        require('./sfSyncManifest').mergeItem(destDir, targetName, observed);
+      }
     } catch {}
     return { ok: true, destPath: targetDir };
   } catch (err) {

@@ -269,6 +269,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   pickExportDir:           (params)   => ipcRenderer.invoke('dialog:pickExportDir', params),
   showItemInFolder:        (p)        => ipcRenderer.invoke('shell:showItemInFolder', p),
   openFolder:              (p)        => ipcRenderer.invoke('shell:openFolder', p),
+  onFileOpsCopyProgress: (cb) => {
+    const handler = (_, data) => cb(data);
+    ipcRenderer.on('fileOps:copyProgress', handler);
+    return () => ipcRenderer.removeListener('fileOps:copyProgress', handler);
+  },
   detectSourceVendor:    (params)     => ipcRenderer.invoke('sources:detectVendor', params),
   detectSourceCandidates: (params)    => ipcRenderer.invoke('sources:detectCandidates', params),
 

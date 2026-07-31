@@ -4717,7 +4717,7 @@
 <div class="modal-overlay" id="modal-jmt-conflict">
   <div class="modal">
     <h2>Existing Prop Include Found</h2>
-    <p>Your config already includes a different prop. The JMT Add-ons wrapper is itself a prop — only one prop can compile at a time, so the existing line must be resolved before linking:</p>
+    <p>Your config already includes a different prop. The JMT Add-ons wrapper is itself a prop, and only one prop can compile at a time, so the existing line must be resolved before linking:</p>
     <pre id="modal-jmt-conflict-line" style="background:var(--c-bg-card);border:1px solid var(--c-border-strong);border-radius:4px;padding:8px 10px;font-size:0.78rem;overflow-x:auto;margin:10px 0;white-space:pre-wrap;word-break:break-all;"></pre>
     <div class="modal-btns">
       <button class="modal-btn-cancel"  id="modal-jmt-conflict-cancel">Cancel</button>
@@ -4834,7 +4834,7 @@
         <h3>Sound fonts found <span class="sf-review-cand-count" id="sf-review-cand-count"></span></h3>
         <p class="sf-import-hint" id="sf-review-cand-hint">Pick which fonts to add to your library. Names must use letters, numbers, underscores, or hyphens (Proffie can't read spaces).</p>
         <p class="sf-import-hint" id="sf-review-dup-hint" style="display:none;color:var(--c-success-text)"></p>
-        <p class="sf-import-hint sf-bundle-followup" id="sf-bundle-followup" style="display:none">This is a bundle with several fonts inside. You don't have to import them all now — the source stays in your library, so you can come back and add the rest later.</p>
+        <p class="sf-import-hint sf-bundle-followup" id="sf-bundle-followup" style="display:none">This is a bundle with several fonts inside. You don't have to import them all now. The source stays in your library, so you can come back and add the rest later.</p>
         <div class="sf-import-checkbox-row" id="sf-bundle-prepend-row" style="display:none;margin-bottom:10px;flex-wrap:wrap;row-gap:6px">
           <input type="checkbox" id="sf-review-prepend-bundle" checked>
           <label for="sf-review-prepend-bundle" style="margin:0;cursor:pointer">Prefix font names with:</label>
@@ -5541,11 +5541,40 @@
      already exist at the chosen destination. Per-row Skip/Replace choice
      so the user can keep some old, refresh others. Bulk-set quick links at
      the top set every row at once. ── -->
+<!-- Voice pack version gate. Shown at export when the prop requires the V2
+     voice pack and the common folder about to be written does not declare
+     version 2 in its voicepack.ini. Only a V2 requirement can fail: version 1
+     is satisfied by any pack, including one with no ini at all. -->
+<div class="modal-overlay" id="modal-sf-vp-version">
+  <div class="modal">
+    <h2>This voice pack is not version 2</h2>
+    <p class="sf-import-hint" id="sf-vp-version-msg"></p>
+    <!-- Markup mirrors the include-common picker exactly: same wrapper margins,
+         label sizing and select styling. Those are inline there rather than a
+         class, so a class name here rendered a native unstyled dropdown. -->
+    <div id="sf-vp-version-pick-wrap" style="margin: 14px 0 18px;">
+      <label for="sf-vp-version-select" style="display:block; margin-bottom: 6px; font-size: 0.78rem; color: var(--c-text-sub);">Use a different voice pack</label>
+      <select id="sf-vp-version-select" style="width: 100%; padding: 6px 8px; background: var(--c-bg-inset); color: var(--c-text); border: 1px solid var(--c-border-strong); border-radius: 3px; font-size: 0.82rem;"></select>
+    </div>
+    <p class="sf-import-hint" id="sf-vp-version-none" style="display:none;color:#d97706"></p>
+    <div class="modal-btns" style="margin-top: 16px">
+      <button class="modal-btn-cancel" id="sf-vp-version-cancel">Cancel</button>
+      <button class="modal-btn-secondary" id="sf-vp-version-ignore">Export anyway</button>
+      <!-- Offer the ACTION, not a description of it (same rule as Get ProffieOS
+           in S78). With no V2 pack in the library there is nothing to switch to,
+           so "pick another" is useless and the only real move is to go get one.
+           Becomes the primary in that case. -->
+      <button class="modal-btn-primary" id="sf-vp-version-get" style="display:none">&#8595; Get a voice pack</button>
+      <button class="modal-btn-primary" id="sf-vp-version-use">Use selected</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="modal-sf-save-conflict">
   <div class="modal">
     <h2 id="sf-save-conflict-title">Some fonts on the card are different</h2>
     <p class="sf-import-hint" id="sf-save-conflict-desc">These already exist on the card with different contents. For each one, choose whether to replace it with your library version or keep what is on the card. Fonts that already match your library are not listed and were left alone. Each font is treated as a unit, so old and new files are never mixed.</p>
-    <p class="sf-save-conflict-caution" id="sf-save-conflict-caution">Replace overwrites the whole folder on the card, including anything you added there yourself. If you have edited these on the card rather than in JMT Studio, back the card up first.</p>
+    <p class="sf-save-conflict-caution" id="sf-save-conflict-caution">Replace overwrites the whole folder at the destination, including anything you added there yourself. If you have edited these there rather than in JMT Studio, back it up first.</p>
     <div class="sf-save-conflict-bulk">
       <button class="sf-save-conflict-bulk-btn" data-conflict-all="skip">Set all to Skip</button>
       <button class="sf-save-conflict-bulk-btn" data-conflict-all="replace">Set all to Replace</button>
@@ -5896,7 +5925,7 @@
       <div class="cache-warning">
         <strong>Delete all cached compile results?</strong><br>
         Cached builds let the app skip recompiling unchanged configs. Clearing the cache means
-        your next compile for each config will run from scratch — up to 10–15 minutes for
+        your next compile for each config will run from scratch, up to 10 to 15 minutes for
         complex builds.<br><br>
         This does <strong>not</strong> affect your config files.
         <div class="cache-warning-actions">
@@ -6561,7 +6590,7 @@ window.offerMountSdSettingOnSelect = async function (usbMode) {
   if ((_currentOsMajor() ?? -1) >= 8) {
     const commented = _mountSdIsCommented(text);
     await _offerProtectSd({
-      title: 'Protect the SD Card?',
+      title: 'Protect the SD card?',
       intro: `You selected <strong>USB Mass Storage</strong>, but this config ` +
              (commented ? `has <code>#define MOUNT_SD_SETTING</code> <strong>commented out</strong>.`
                         : `is missing: <code>#define MOUNT_SD_SETTING</code>`),
@@ -6570,7 +6599,7 @@ window.offerMountSdSettingOnSelect = async function (usbMode) {
   }
   // Below OS8: MOUNT_SD_SETTING has no effect, so the only fix is dropping Mass Storage.
   const res = await promptConfirm({
-    title:       'SD Card Corruption Risk',
+    title:       'SD card corruption risk',
     messageHtml: `You selected <strong>USB Mass Storage</strong> on a pre-OS8 version, where ${_preOs8Why(text)}.<br><br>${_SD_RISK_HTML}`,
     confirmText: 'Remove Mass Storage',
     confirmKind: 'save',
@@ -6592,7 +6621,7 @@ window.offerMountSdSettingOnOsChange = async function () {
     // Upgrade: OS8 unlocks the protection, so offer to enable it (a helper).
     const commented = _mountSdIsCommented(text);
     await _offerProtectSd({
-      title: 'Protect the SD Card?',
+      title: 'Protect the SD card?',
       intro: `You're now on <strong>OS8</strong>, which can protect the SD card. This config uses ` +
              `<strong>USB Mass Storage</strong> and ` +
              (commented ? `has <code>#define MOUNT_SD_SETTING</code> <strong>commented out</strong>.`
@@ -6603,7 +6632,7 @@ window.offerMountSdSettingOnOsChange = async function () {
   // Downgrade to pre-OS8: any MOUNT_SD_SETTING is now inert, so the only fix is
   // dropping Mass Storage.
   const res = await promptConfirm({
-    title:       'SD Card Corruption Risk',
+    title:       'SD card corruption risk',
     messageHtml: `This config now targets a <strong>pre-OS8</strong> version but uses ` +
                  `<strong>USB Mass Storage</strong>, where ${_preOs8Why(text)}.<br><br>${_SD_RISK_HTML}`,
     confirmText: 'Remove Mass Storage',
@@ -6653,7 +6682,7 @@ window.checkMassStorageSafety = async function (usbMode, stage) {
       // recompile chain needed, we're about to compile anyway).
       const reminder = _msgStorageDeclinedMode === usbMode;
       const res = await promptConfirm({
-        title:       reminder ? 'SD Protection Still Off' : 'Protect the SD Card?',
+        title:       reminder ? 'SD Protection Still Off' : 'Protect the SD card?',
         messageHtml: (reminder
           ? `Heads up: this config ${stateHtml} and compiles with <strong>USB Mass Storage</strong>.<br><br>`
           : `This config compiles with <strong>USB Mass Storage</strong> but ${stateHtml}.<br><br>`)
@@ -6675,7 +6704,7 @@ window.checkMassStorageSafety = async function (usbMode, stage) {
     // -> recompile -> flash) via 'recompile'. "Flash anyway" flashes the risky
     // binary now; the caller logs the Easter egg.
     const res = await promptConfirm({
-      title:       'SD Card Corruption Risk',
+      title:       'SD card corruption risk',
       messageHtml: `This config flashes with <strong>USB Mass Storage</strong> but ${stateHtml}.<br><br>${_SD_RISK_HTML}<br><br>` +
                    `<strong>Fix it and recompile?</strong> Either <strong>${addLabel}</strong> or <strong>Remove Mass Storage</strong> will recompile with the fix, then flash.`,
       confirmText: addLabel,
@@ -6696,7 +6725,7 @@ window.checkMassStorageSafety = async function (usbMode, stage) {
     // than re-alarm, mirroring the OS8 path.
     const reminder = _msgStorageDeclinedMode === usbMode;
     const res = await promptConfirm({
-      title:       reminder ? 'SD Card Still At Risk' : 'SD Card Corruption Risk',
+      title:       reminder ? 'SD card still at risk' : 'SD card corruption risk',
       messageHtml: (reminder
         ? `Heads up: this config still compiles with <strong>USB Mass Storage</strong> on a pre-OS8 version, `
         : `This config compiles with <strong>USB Mass Storage</strong> on a pre-OS8 version, `)
@@ -6712,7 +6741,7 @@ window.checkMassStorageSafety = async function (usbMode, stage) {
     return 'compile-anyway';
   }
   const res = await promptConfirm({
-    title:       'SD Card Corruption Risk',
+    title:       'SD card corruption risk',
     messageHtml: `This config flashes with <strong>USB Mass Storage</strong> on a pre-OS8 version, ` +
                  `where ${_preOs8Why(text)}.<br><br>${_SD_RISK_HTML}<br><br>` +
                  `<strong>Fix it and recompile?</strong> <strong>Remove Mass Storage</strong> will recompile without it, then flash.`,
@@ -6845,7 +6874,7 @@ function _vpkPropIncludes(text) {
 // SaberFett263Buttons and chains Setup(), so a name list would miss his own config.
 // Known limit, accepted: a derived prop that overrides Setup() WITHOUT chaining
 // would escape this, and text alone cannot tell.
-async function _vpkPropRequiresVoicepack(text) {
+async function _vpkPropRequirement(text) {
   const versionName = document.getElementById('input-version')?.value?.trim() || '';
   if (!versionName) return null;
   // The select carries a placeholder when nothing is chosen; treat it as unknown
@@ -6863,7 +6892,23 @@ async function _vpkPropRequiresVoicepack(text) {
     try { res = await window.electronAPI?.readVersionFile?.(versionName, `ProffieOS/props/${file}`); } catch {}
     if (!res || !res.ok || !res.content) continue;
     const liveSrc = _vpkLiveText(res.content, defines);
-    if (_VPK_INIT_RE.test(liveSrc)) return true;
+    const hit = liveSrc.match(_VPK_INIT_RE);
+    if (hit) {
+      // WHICH spelling is live IS the version, straight from the source:
+      // sound_library_ is SoundLibrary (SoundLibraryVersion = 1) and
+      // sound_library_v2 is SoundLibraryV2 (= 2), while SoundLibrary::init()
+      // goes through a menu spec, and every spec in the tree typedefs
+      // SoundLibraryV2 (modes/default_spec.h:20, saber_BC_buttons.h:1419).
+      // The preprocessor above has already resolved MENU_SPEC_TEMPLATE and
+      // MOUNT_SD_SETTING, so the surviving call is the one that runs.
+      //
+      // Only the V2 requirement can ever FAIL: require_version(1) is satisfied
+      // by any pack, including one with no ini at all, since a missing ini reads
+      // as version 1. So this is binary, not a version number to compare.
+      // (Ryan, 2026-07-31: "there is NO V1 requirement ever".)
+      const isV1 = /sound_library_\s*\.\s*init/.test(hit[0]);
+      return { requires: true, v2: !isV1 };
+    }
     // Only chase further headers inside props/ — every init call site lives there,
     // and it keeps the walk bounded.
     for (const i of liveSrc.matchAll(/#\s*include\s+"([^"]+)"/g)) {
@@ -6871,7 +6916,7 @@ async function _vpkPropRequiresVoicepack(text) {
       if (!inc.includes('/') || /(^|\/)props\//.test(inc)) queue.push(inc.split('/').pop());
     }
   }
-  return false;
+  return { requires: false, v2: false };
 }
 
 // Exposed because the Sound Fonts view lives in a different IIFE and needs the
@@ -6880,7 +6925,17 @@ async function _vpkPropRequiresVoicepack(text) {
 // declaration is already a property of window, so `window.X = t => X(t)`
 // overwrites the declaration and the arrow then calls itself forever.
 // (Shipped that exact bug for four minutes on 2026-07-30.)
-window.__vpkRequiresVoicepack = (text) => _vpkPropRequiresVoicepack(text);
+// Two questions, one walk. Callers that only need "is a voicepack required"
+// keep the original boolean contract; the export path needs the sharper one,
+// because only a V2 requirement can fail.
+window.__vpkRequiresVoicepack = async (text) => {
+  const r = await _vpkPropRequirement(text);
+  return r === null ? null : r.requires;
+};
+window.__vpkRequiresV2 = async (text) => {
+  const r = await _vpkPropRequirement(text);
+  return r === null ? null : (r.requires && r.v2);
+};
 
 // A preset needs at least one path element beyond the font itself. Name-agnostic
 // and count-agnostic, so it holds for "MC", for a nested "balvenos/common", and
@@ -6931,7 +6986,8 @@ window.checkVoicepackDeclared = async function () {
   const { missing, sharedNames } = _vpkScanPresets(text);
   if (!missing.length) return true;
 
-  const requires = await _vpkPropRequiresVoicepack(text);
+  const req = await _vpkPropRequirement(text);
+  const requires = req === null ? null : req.requires;
   if (requires !== true) return true;                   // no requirement, or unknown
 
   // Repair uses a name the config already uses when that is unambiguous, so a
@@ -9612,12 +9668,12 @@ document.getElementById('btn-cache-confirm').addEventListener('click', async () 
       // Build output was also deleted — reset compile state so Flash is disabled
       if (window.resetCompileState) window.resetCompileState();
     } else {
-      confirmBtn.textContent = 'Error — try again';
+      confirmBtn.textContent = 'Error. Try again';
       confirmBtn.disabled = false;
       cancelBtn.disabled  = false;
     }
   } catch {
-    confirmBtn.textContent = 'Error — try again';
+    confirmBtn.textContent = 'Error. Try again';
     confirmBtn.disabled = false;
     cancelBtn.disabled  = false;
   }
@@ -11762,7 +11818,7 @@ function _openAddStyleModalWithExpr(exprText, defaultName, onConfirm) {
     _addStyleCurrentName = defaultName;
   }
   document.getElementById('add-style-code-section').style.display = 'flex';
-  document.getElementById('add-style-code-hint').textContent = defaultName ? 'editable — name field syncs live' : 'enter a name above to complete';
+  document.getElementById('add-style-code-hint').textContent = defaultName ? 'editable, name field syncs live' : 'enter a name above to complete';
   if (_addStyleEditor) {
     _addStyleEditor.setValue(defaultName ? `using ${defaultName} = ${editorContent};` : editorContent);
     _addStyleEditor.setScrollPosition({ scrollTop: 0 });
@@ -12739,7 +12795,7 @@ function _updateConflictBanner() {
     const msgs = [];
     if (_conflictStyleNames.size)    msgs.push(`duplicate names: ${[..._conflictStyleNames].map(n=>`"${n}"`).join(', ')}`);
     if (_conflictTemplateNames.size) msgs.push(`conflicting templates: ${[..._conflictTemplateNames].map(n=>`"${n}"`).join(', ')}`);
-    banner.textContent = `⚠ Resolve before saving — ${msgs.join(' · ')}`;
+    banner.textContent = `⚠ Resolve before saving: ${msgs.join(' · ')}`;
     banner.style.display = 'block';
     if (saveBtn) saveBtn.disabled = true;
   }
@@ -12772,7 +12828,7 @@ async function _deleteStyleEntry(entry, isHelper) {
     if (affected.length) affected.forEach(n => _brokenStyleNames.add(n));
   } else {
     if (!await promptConfirm({
-      title:       'Delete Style',
+      title:       'Delete style',
       message:     `Delete style "${entry.name}"?\n\nThis will remove it from your style library.`,
       confirmText: 'Delete',
     })) return;
@@ -13547,7 +13603,7 @@ function _updateDetailErrorMarkers(revealError = false) {
       const wm = before.match(/([A-Za-z_]\w*)$/);
       if (wm) hint = ` — closing \`>\` missing for \`${wm[1]}\`?`;
     }
-    banner.textContent = `✕ ${err.message} near “${ctx}”${hint} — fix before saving`;
+    banner.textContent = `✕ ${err.message} near “${ctx}”${hint}. Fix before saving`;
     banner.style.display = 'block';
     if (revealError) {
       _stylesDetailEditor.revealLineInCenter(pos.lineNumber);
@@ -13928,7 +13984,7 @@ async function _runDetailPasteCode() {
   const banner = document.getElementById('detail-error-banner');
   if (!parsed.expr) {
     if (banner) {
-      banner.textContent = 'No style code found in the clipboard — nothing pasted.';
+      banner.textContent = 'No style code found in the clipboard, so nothing was pasted.';
       banner.style.display = '';
       setTimeout(() => {
         if (banner.textContent.startsWith('No style code')) { banner.style.display = 'none'; banner.textContent = ''; }
@@ -14692,7 +14748,7 @@ document.getElementById('add-style-name').addEventListener('input', () => {
       // Raw expression pasted with no name yet — wrap it now
       const expr = content.replace(/;\s*$/, '').trim();
       _addStyleEditor.setValue(`using ${newName} = ${expr};`);
-      document.getElementById('add-style-code-hint').textContent = 'editable — name field syncs live';
+      document.getElementById('add-style-code-hint').textContent = 'editable, name field syncs live';
     } else if (hasUsing && _addStyleCurrentName && newName) {
       // Already has using — replace name everywhere
       const escaped = _addStyleCurrentName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -14722,7 +14778,7 @@ function _applyParsedStyleResult(parsed) {
 
   document.getElementById('add-style-code-section').style.display = 'flex';
   document.getElementById('add-style-code-hint').textContent =
-    parsed.name ? 'editable — name field syncs live' : 'enter a name above to complete';
+    parsed.name ? 'editable, name field syncs live' : 'enter a name above to complete';
 
   _addStyleCurrentName = (parsed.name || '').replace(/\s+/g, '_');
   document.getElementById('add-style-name').value   = _addStyleCurrentName;
@@ -14751,14 +14807,14 @@ async function _runPasteAndParse() {
   if (!parsed.expr) {
     // Allow but inform — show raw content so user can fix it manually
     document.getElementById('add-style-code-section').style.display = 'flex';
-    document.getElementById('add-style-code-hint').textContent = 'no style detected — edit to fix or Clear to start over';
+    document.getElementById('add-style-code-hint').textContent = 'no style detected. Edit to fix, or Clear to start over';
     if (_addStyleEditor) {
       _addStyleEditor.setValue(text.trim());
       _addStyleEditor.setScrollPosition({ scrollTop: 0 });
       _addStyleEditor.layout();
     }
     if (msg) {
-      msg.textContent = 'No style found in clipboard — edit to fix or Clear to start over.';
+      msg.textContent = 'No style found in clipboard. Edit to fix, or Clear to start over.';
       msg.style.color = '#e44';
       msg.style.display = '';
     }
@@ -15385,7 +15441,7 @@ window.initStylesPanel = function() {
           if (wm) hint = ` — closing \`>\` missing for \`${wm[1]}\`?`;
         }
         if (msg) {
-          msg.textContent = `✕ ${err.message} near "${ctx}"${hint} — fix before saving`;
+          msg.textContent = `✕ ${err.message} near "${ctx}"${hint}. Fix before saving`;
           msg.style.color = '#e44';
           msg.style.display = '';
         }
@@ -16313,6 +16369,29 @@ require(['vs/editor/editor.main'], function () {
       // Filter/search changes, opening entry details, tab switches, scroll,
       // and window focus loss all preserve selection.
       let _sfSelectedNames = new Set();
+      // Shift-range anchor for the card grid. Set by the two actions that
+      // actually select — ctrl/cmd-click and the corner checkbox — and never by
+      // a plain click, which in this grid opens the entry rather than selecting.
+      let _sfGridAnchor = null;
+
+      // Range-select from the anchor to `name`, ADDITIVELY. Ryan's convention
+      // across every multi-select surface here, and deliberately not Explorer's:
+      // adding rather than replacing lets a selection have gaps (take a range,
+      // ctrl-click elsewhere, shift-click to add a second range). The
+      // conventional behaviour is still reachable by clearing first, so this is
+      // a superset rather than a different choice.
+      const _sfShiftSelectGridTo = (name) => {
+        const cards = [...document.querySelectorAll('#sf-cards .sf-card[data-font]')];
+        const names = cards.map(c => c.getAttribute('data-font'));
+        const toIdx = names.indexOf(name);
+        if (toIdx < 0) return;
+        let fromIdx = _sfGridAnchor ? names.indexOf(_sfGridAnchor) : -1;
+        // A stale anchor (filtered away, renamed, deleted) collapses to the
+        // clicked card rather than selecting from the top of the grid.
+        if (fromIdx < 0) fromIdx = toIdx;
+        const [lo, hi] = fromIdx <= toIdx ? [fromIdx, toIdx] : [toIdx, fromIdx];
+        for (let i = lo; i <= hi; i++) if (names[i]) _sfSelectedNames.add(names[i]);
+      };
       // Escape key clears multi-select. Skipped when a modal is active (let
       // the modal handle its own Escape) or when focus is in an input/textarea
       // (let the input's own Escape behavior — like the source-detail inline
@@ -18265,7 +18344,7 @@ require(['vs/editor/editor.main'], function () {
       const _sfPasteCommonClipboard = async (destUuid, destSubPath = '') => {
         if (_sfFileClipboard && _sfFileClipboard.kind !== 'common' && _sfFileClipboard.paths.length > 0) {
           const n = _sfFileClipboard.paths.length;
-          _sfDeleteProgress.show('Pasting files', `${n} file${n === 1 ? '' : 's'}`);
+          const prog = _sfCopyProgress('Pasting', n);
           let res;
           try {
             res = await window.electronAPI.fileOpsCopy({
@@ -18274,7 +18353,7 @@ require(['vs/editor/editor.main'], function () {
               dest: { kind: 'common', id: destUuid, subPath: destSubPath },
             });
           } catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
-          await _sfDeleteProgress.hide();
+          await prog.close();
           if (!res || !res.ok) { promptError('Paste failed', (res && res.error) || 'unknown'); return; }
           if (res.failed?.length) {
             await _sfShowPartialFailures('Some files failed to paste', res.failed);
@@ -19459,13 +19538,18 @@ require(['vs/editor/editor.main'], function () {
         try { r = await window.electronAPI.sharedTracksExportToFolder({ destDir, mode: 'additive', replace }); }
         catch (err) { r = { ok: false, error: String(err && err.message || err) }; }
         _sfDeleteProgress.setProgress(1);
-        await _sfDeleteProgress.hide();
-        if (!r || !r.ok) { promptError('Export failed', (r && r.error) || 'unknown error'); return; }
+        if (!r || !r.ok) {
+          await _sfDeleteProgress.hide();
+          promptError('Export failed', (r && r.error) || 'unknown error');
+          return;
+        }
         await _sfShowExportSummary({
           destDir,
           names: [],
           modeByName: new Map(),
           elapsedSec: (Date.now() - _tracksT0) / 1000,
+          // Closed from inside the summary, once it is ready to show.
+          closeProgress: () => _sfDeleteProgress.hide(),
           commonOutcome: null,
           tracksOutcome: {
             reason: null,
@@ -19643,12 +19727,19 @@ require(['vs/editor/editor.main'], function () {
       // kinds all supported as src).
       const _sfPasteIntoSharedTracks = async () => {
         if (!_sfFileClipboard || _sfFileClipboard.paths.length === 0) return;
+        // Copying AND hashing happen synchronously in the main process, so a
+        // paste of several large tracks blocks with nothing on screen. No
+        // per-file granularity is available from fileOpsCopy, so this is the
+        // busy indicator rather than a bar that would have to lie.
+        const n = _sfFileClipboard.paths.length;
+        const prog = _sfCopyProgress('Pasting', n);
         try {
           const res = await window.electronAPI.fileOpsCopy({
             src: { kind: _sfFileClipboard.kind, id: _sfFileClipboard.id },
             srcPaths: _sfFileClipboard.paths,
             dest: { kind: 'sharedTracks' },
           });
+          await prog.close();
           if (!res || !res.ok) {
             promptError('Paste failed', res?.error || 'unknown error');
             return;
@@ -19664,6 +19755,8 @@ require(['vs/editor/editor.main'], function () {
           _sfSharedTracksAnchor = added.length ? added[0].split('/').pop() : null;
           await _sfRefreshSharedTracksModal();
         } catch (err) {
+          // A throw before the success path would otherwise leave the modal up.
+          await prog.close();
           promptError('Paste failed', String(err && err.message || err));
         }
       };
@@ -21912,7 +22005,7 @@ require(['vs/editor/editor.main'], function () {
         if (!_sfDetailEdit) return;
         const raw = (_sfEntryDetailEls.nameInput?.value || '').trim();
         const sanitized = _sfSanitizeName(raw);
-        if (!sanitized) { promptError('Name required', 'Name is required.'); return; }
+        if (!sanitized) { promptError('Name required', 'Enter a name for this font.'); return; }
         if (sanitized !== _sfDetailEdit.name) {
           _sfDetailEdit.name = sanitized;
           _sfMarkDetailDirty();
@@ -23625,8 +23718,8 @@ require(['vs/editor/editor.main'], function () {
             label: 'Format',
             value: 'zip',
             options: [
-              { value: 'zip', label: 'Zip archive — one file, for backup or re-import' },
-              { value: 'folder', label: 'Folder — extracted tree, ready for an SD card' },
+              { value: 'zip', label: 'Zip archive: one file, for backup or re-import' },
+              { value: 'folder', label: 'Folder: extracted tree, ready for an SD card' },
             ],
           },
           confirmText: 'Choose destination…',
@@ -23887,7 +23980,7 @@ require(['vs/editor/editor.main'], function () {
         const destNames = await _sfResolvePasteRenames(incomingNames, _sfEntryFilesPath);
         if (destNames === null) return; // user cancelled
         const n = _sfFileClipboard.paths.length;
-        _sfDeleteProgress.show('Pasting files', `${n} file${n === 1 ? '' : 's'}`);
+        const prog = _sfCopyProgress('Pasting', n);
         let res;
         try {
           res = await window.electronAPI.fileOpsCopy({
@@ -23897,7 +23990,7 @@ require(['vs/editor/editor.main'], function () {
             destNames: destNames.length ? destNames : undefined,
           });
         } catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
-        await _sfDeleteProgress.hide();
+        await prog.close();
         if (!res || !res.ok) { promptError('Paste failed', (res && res.error) || 'unknown'); return; }
         if (res.failed?.length) {
           await _sfShowPartialFailures('Some files failed to paste', res.failed);
@@ -24989,7 +25082,7 @@ require(['vs/editor/editor.main'], function () {
           g.names.push(destNames.length ? destNames[i] : null);
         }
         const total = _sfLibPickSelections.length;
-        _sfDeleteProgress.show('Adding files', `${total} file${total === 1 ? '' : 's'}`);
+        const prog = _sfCopyProgress('Adding', total);
         const allAdded = [];
         const allFailed = [];
         for (const { src, paths, names } of groups.values()) {
@@ -25008,8 +25101,10 @@ require(['vs/editor/editor.main'], function () {
           }
           for (const p of (res.added || [])) allAdded.push(p);
           for (const f of (res.failed || [])) allFailed.push(f);
+          // Next group's ticks count from zero again, so rebase.
+          prog.advance((res.added || []).length);
         }
-        await _sfDeleteProgress.hide();
+        await prog.close();
         if (allFailed.length) {
           await _sfShowPartialFailures('Some files failed to add', allFailed);
         }
@@ -25688,7 +25783,7 @@ require(['vs/editor/editor.main'], function () {
       document.getElementById('btn-sf-reorg-group')?.addEventListener('click', async () => {
         const ok = await promptConfirm({
           title: 'Group into subfolders',
-          message: 'Move every multi-file sound type into its own subfolder. Single files stay at the root.',
+          message: 'Move every sound that has several variations into its own subfolder. Single files stay at the root.',
           confirmText: 'Group',
         });
         if (!ok) return;
@@ -25776,7 +25871,7 @@ require(['vs/editor/editor.main'], function () {
         _sfReorgStaged = bucket.files.map(f => f.path);
         _sfReorgStagedOriginal = _sfReorgStaged.slice();
         _sfReorgSelectedRow = null;
-        document.getElementById('sf-reorg-reorder-title').textContent = `${bucket.label} — ${bucket.files.length} file${bucket.files.length === 1 ? '' : 's'}`;
+        document.getElementById('sf-reorg-reorder-title').textContent = `${bucket.label}: ${bucket.files.length} file${bucket.files.length === 1 ? '' : 's'}`;
         document.getElementById('sf-reorg-reorder-panel').style.display = '';
         _sfRenderReorgBuckets();
         _sfRenderReorgReorderList();
@@ -27129,7 +27224,7 @@ require(['vs/editor/editor.main'], function () {
         if (!modal || n === 0) return;
         if (title) title.textContent = `Tags for ${n} font${n === 1 ? '' : 's'}`;
         if (hint) {
-          hint.textContent = 'Chips show tags common to all selected fonts — remove to drop them from every selection. Type to add a tag to every selected font that doesn\'t already have it.';
+          hint.textContent = 'Chips show tags common to all selected fonts. Remove one to drop it from every selection. Type to add a tag to every selected font that doesn\'t already have it.';
         }
         _sfBulkTagInitial = _sfBulkTagComputeInitial();
         _sfBulkTagWorking = _sfBulkTagInitial.slice();
@@ -27295,6 +27390,125 @@ require(['vs/editor/editor.main'], function () {
       window._sfGetIncludeTracksPref = _sfGetIncludeTracksPref;
       window._sfSetIncludeTracksPref = _sfSetIncludeTracksPref;
 
+      // Shared progress shell for cross-location copies. copyAcrossLocations
+      // reports per file for EVERY kind, so paste and add-from-library show
+      // names going past wherever they happen, not only in the tracks folder.
+      // Copying is synchronous in the main process and, for shared tracks,
+      // hashes each file as it lands, so thirty files is a long silence
+      // otherwise.
+      //
+      // advance() exists for callers that make several copy calls in a row (the
+      // library picker groups by source): each call counts from zero, so the
+      // caller rebases between them to keep one honest running total.
+      const _sfCopyProgress = (title, total) => {
+        const t0 = Date.now();
+        const fmt = (sec) => (window._sfFormatDuration ? window._sfFormatDuration(sec) : `${Math.round(sec)}s`);
+        let base = 0;
+        const paint = (name, done) => _sfDeleteProgress.setPhase(
+          `${title} · ${Math.min(done, total)} of ${total}`,
+          total ? Math.min(done, total) / total : 0,
+          name || '',
+          `${fmt((Date.now() - t0) / 1000)} elapsed`,
+        );
+        _sfDeleteProgress.show(title, '', 0);
+        paint('', 0);
+        // The clock runs on its own so one large file does not read as a stall.
+        const clock = setInterval(() => {
+          const el = _sfDeleteProgress.elapsedEl && _sfDeleteProgress.elapsedEl();
+          if (!el) return;
+          el.style.display = '';
+          el.textContent = `${fmt((Date.now() - t0) / 1000)} elapsed`;
+        }, 1000);
+        const off = window.electronAPI.onFileOpsCopyProgress(({ name, done } = {}) => paint(name, base + (done || 0)));
+        return {
+          advance(n) { base += (n || 0); },
+          async close() {
+            clearInterval(clock);
+            try { off && off(); } catch {}
+            await _sfDeleteProgress.hide();
+          },
+        };
+      };
+      // The prop needs the V2 voice pack and the common about to be written does
+      // not declare version 2. Offer the three real answers: stop, ship it
+      // anyway, or pick one that does. The dropdown is filtered to packs whose
+      // own voicepack.ini says 2, patterned on the include-common picker.
+      //
+      // Only a V2 requirement can fail. require_version(1) is satisfied by any
+      // pack, including one with no ini at all, since a missing ini reads as
+      // version 1 — so there is never a V1 warning to give.
+      // Resolves { action: 'cancel' | 'ignore' | 'use', uuid? }.
+      const _sfPromptVoicepackVersion = (chosen, candidates) => {
+        const modal = document.getElementById('modal-sf-vp-version');
+        const msgEl = document.getElementById('sf-vp-version-msg');
+        const wrap = document.getElementById('sf-vp-version-pick-wrap');
+        const noneEl = document.getElementById('sf-vp-version-none');
+        const select = document.getElementById('sf-vp-version-select');
+        const cancelBtn = document.getElementById('sf-vp-version-cancel');
+        const ignoreBtn = document.getElementById('sf-vp-version-ignore');
+        const useBtn = document.getElementById('sf-vp-version-use');
+        const getBtn = document.getElementById('sf-vp-version-get');
+        if (!modal || !select) return Promise.resolve({ action: 'ignore' });
+
+        const name = (chosen && chosen.meta && chosen.meta.name) || 'The selected voice pack';
+        // THE CHAIN, and both halves have to be in the sentence (Ryan, 2026-07-31):
+        //   what we OBSERVED  -> no voicepack.ini declaring it a V2
+        //   what that INDICATES -> it is likely missing the required V2 sounds
+        //
+        // Stating the sounds flatly would claim more than we checked — Ryan's
+        // Crucible reply could say it outright because he had COUNTED the files,
+        // 188 against 214. All the app has read is the declaration. But dropping
+        // the ini entirely, which I tried first, throws away the evidence and
+        // leaves an assertion with nothing behind it.
+        //
+        // The ini appears as the INDICATOR, never as a fix. "Add an ini" would
+        // silence the error and leave the sounds missing, and profezzorn has
+        // warned people off exactly that twice.
+        // And say only what is known. We do NOT know this is a V1 pack — we know
+        // it is not identified as a V2 one. Calling it V1 fills in something we
+        // never checked. (Ryan, 2026-07-31.)
+        if (msgEl) {
+          msgEl.textContent = `Your prop needs voice pack version 2 on ProffieOS 8. `
+            + `"${name}" isn't identified as a V2 pack, which means it is likely missing the required V2 sounds. `
+            + `Exporting it will make the saber announce a voice pack error on every preset change.`;
+        }
+        select.innerHTML = candidates
+          .map(c => `<option value="${_sfEscape(c.uuid)}">${_sfEscape(c.meta.name || c.uuid)}</option>`)
+          .join('');
+        const haveAny = candidates.length > 0;
+        if (wrap) wrap.style.display = haveAny ? '' : 'none';
+        if (noneEl) {
+          noneEl.style.display = haveAny ? 'none' : '';
+          noneEl.textContent = 'No version 2 voice pack is in your library. Import one, or export anyway and fix it later.';
+        }
+        if (useBtn) useBtn.style.display = haveAny ? '' : 'none';
+        // Nothing to switch to: offer the way to fix it instead.
+        if (getBtn) getBtn.style.display = haveAny ? 'none' : '';
+
+        return new Promise(resolve => {
+          const done = (result) => {
+            modal.classList.remove('active');
+            cancelBtn?.removeEventListener('click', onCancel);
+            ignoreBtn?.removeEventListener('click', onIgnore);
+            useBtn?.removeEventListener('click', onUse);
+            getBtn?.removeEventListener('click', onGet);
+            document.removeEventListener('keydown', onKey);
+            resolve(result);
+          };
+          const onCancel = () => done({ action: 'cancel' });
+          const onIgnore = () => done({ action: 'ignore' });
+          const onUse = () => { if (select.value) done({ action: 'use', uuid: select.value }); };
+          const onGet = () => done({ action: 'get' });
+          // Escape is the safe answer here: it stops rather than proceeding.
+          const onKey = (e) => { if (e.key === 'Escape') onCancel(); };
+          cancelBtn?.addEventListener('click', onCancel);
+          ignoreBtn?.addEventListener('click', onIgnore);
+          useBtn?.addEventListener('click', onUse);
+          getBtn?.addEventListener('click', onGet);
+          document.addEventListener('keydown', onKey);
+          modal.classList.add('active');
+        });
+      };
       const _sfPromptSaveConflicts = (conflictNames, opts = {}) => {
         const modal = document.getElementById('modal-sf-save-conflict');
         const list = document.getElementById('sf-save-conflict-list');
@@ -27397,7 +27611,7 @@ require(['vs/editor/editor.main'], function () {
         const n = differing.length;
         const choices = await _sfPromptSaveConflicts(differing, {
           title: n === 1 ? 'One track differs from your library' : `${n} tracks differ from your library`,
-          description: 'These tracks exist at the destination with different contents. Replace them with your library version, or keep what is already on the card. Anything else on the card is left alone either way.',
+          description: 'These tracks exist at the destination with different contents. Replace them with your library version, or keep what is already there. Anything else there is left alone either way.',
           defaultMode: 'replace',
         });
         if (!choices) return null;
@@ -27444,7 +27658,7 @@ require(['vs/editor/editor.main'], function () {
       // The rule for the "why" notes: report what the APP decided, not what the
       // user chose. An inferred prop requirement earns a mention; their own
       // setting does not.
-      const _sfShowExportSummary = async ({ destDir, names, modeByName, commonOutcome, tracksOutcome, unchangedFonts, commonFolderName, elapsedSec }) => {
+      const _sfShowExportSummary = async ({ destDir, names, modeByName, commonOutcome, tracksOutcome, unchangedFonts, commonMissing, commonFolderName, elapsedSec, closeProgress, title }) => {
         const esc = _sfEscape;
         const n = (v) => `<strong>${v}</strong>`;
         const plural = (c, w) => `${w}${c === 1 ? '' : 's'}`;
@@ -27461,7 +27675,11 @@ require(['vs/editor/editor.main'], function () {
         if (written) bits.push(`${n(written)} written`);
         if (unchanged) bits.push(`${n(unchanged)} already identical`);
         if (keptByChoice) bits.push(`${n(keptByChoice)} kept as ${keptByChoice === 1 ? 'it was' : 'they were'}`);
-        lines.push(`${n(names.length)} ${plural(names.length, 'font')} selected. ${bits.join(', ')}.`);
+        // Guarded: the standalone tracks export calls this with no fonts at all,
+        // which otherwise produced "0 fonts selected. ." with a dangling stop.
+        if (names.length) {
+          lines.push(`${n(names.length)} ${plural(names.length, 'font')} selected.${bits.length ? ' ' + bits.join(', ') + '.' : ''}`);
+        }
 
         try {
           const dl = await window.electronAPI.listDestFolders({ destDir });
@@ -27469,7 +27687,7 @@ require(['vs/editor/editor.main'], function () {
             const reserved = new Set(['common', 'tracks', String(commonFolderName || 'common')]);
             const fontish = dl.folders.filter(f => !reserved.has(f));
             const extra = fontish.filter(f => !new Set(names).has(f)).length;
-            lines.push(`${n(fontish.length)} ${plural(fontish.length, 'font')} on the card${extra ? `, ${n(extra)} not part of this export` : ''}.`);
+            lines.push(`${n(fontish.length)} ${plural(fontish.length, 'font')} at the destination${extra ? `, ${n(extra)} not part of this export` : ''}.`);
           }
         } catch {}
 
@@ -27483,9 +27701,9 @@ require(['vs/editor/editor.main'], function () {
           if (commonOutcome.state === 'current') {
             // Silence would read as "it did not ship", the wrong impression to
             // leave from a good outcome.
-            lines.push(`Voice pack ${pack} was already on the card.`);
+            lines.push(`Voice pack ${pack} was already there.`);
           } else if (commonOutcome.state === 'kept') {
-            lines.push(`The card keeps ${esc(commonOutcome.cardName || 'the voice pack it had')}, at your choice. ${pack} was not written.`);
+            lines.push(`Kept ${esc(commonOutcome.cardName || 'the voice pack that was there')}, at your choice. ${pack} was not written.`);
           } else {
             lines.push(`Voice pack ${pack} written${why}.`);
           }
@@ -27504,13 +27722,13 @@ require(['vs/editor/editor.main'], function () {
                 : '';
             lines.push(`Shared tracks: ${tb.join(', ')}.${why}`);
           } else {
-            lines.push(`All ${n(total)} shared ${plural(total, 'track')} were already on the card.`);
+            lines.push(`All ${n(total)} shared ${plural(total, 'track')} were already there.`);
           }
           const kept = tracksOutcome.kept || [];
           if (kept.length) {
             const shown = esc(kept.slice(0, 6).join(', '));
             const more = kept.length > 6 ? `, and ${kept.length - 6} more` : '';
-            lines.push(`${n(kept.length)} ${plural(kept.length, 'track')} kept as ${kept.length === 1 ? 'it is' : 'they are'} on the card: ${shown}${more}.`);
+            lines.push(`${n(kept.length)} ${plural(kept.length, 'track')} kept as ${kept.length === 1 ? 'it is' : 'they are'}: ${shown}${more}.`);
           }
         }
 
@@ -27518,13 +27736,37 @@ require(['vs/editor/editor.main'], function () {
         // path is the useful thing, so it is the clickable thing, rather than a
         // button competing with Done for the primary slot.
         const destLink = `<a href="#" id="sf-export-summary-path" style="color:var(--jmt-blue);text-decoration:underline;cursor:pointer">${esc(destDir)}</a>`;
-        const tail = [`Saved to ${destLink}.`];
+        // "Saved to" is a lie when nothing was written, which is exactly the
+        // no-write case this summary now also serves.
+        const wroteSomething = written > 0
+          || (commonOutcome && commonOutcome.state === 'written')
+          || (tracksOutcome && ((tracksOutcome.added || 0) + (tracksOutcome.replaced || 0)) > 0);
+        // A verb on both sides, and "Checked" deliberately echoes the phase the
+        // user just watched ("Checking the destination…") so the summary closes
+        // the loop on the same word. "Saved to" would be a lie when nothing was
+        // written, and a bare "Destination:" says nothing about what happened.
+        // Wanted a common folder, library has none. Not asked about up front —
+        // there is nothing to choose from — but said once here, in the app's
+        // amber caution colour, because the destination will need one for the
+        // menu prompts to work. (Ryan, 2026-07-31.)
+        if (commonMissing) {
+          lines.push(`<span style="color:#d97706">No common folder was included, because your library does not have one. `
+            + `${commonMissing === 'prop'
+                ? 'Your prop needs a voicepack on ProffieOS 8'
+                : 'Your config references a common folder'}, so this destination will need one.</span>`);
+        }
+        const tail = [`${wroteSomething ? 'Saved to' : 'Checked'} ${destLink}.`];
         if (typeof elapsedSec === 'number') {
           const fmt = window._sfFormatDuration ? window._sfFormatDuration(elapsedSec) : `${Math.round(elapsedSec)}s`;
           tail.push(`Took ${fmt}.`);
         }
+        // Close whatever was on screen only now, with this dialog about to go up
+        // in the same task. The summary lists the destination first, so a caller
+        // that hid its progress before calling would leave the screen bare
+        // across that IPC round trip — which is the flash. (Ryan, 2026-07-31.)
+        if (typeof closeProgress === 'function') { try { await closeProgress(); } catch {} }
         const closed = promptConfirm({
-          title: 'Export complete',
+          title: title || 'Export complete',
           messageHtml: lines.join('<br>') + '<br><br>' + tail.join(' '),
           confirmText: 'Done',
           confirmKind: 'primary',
@@ -27576,6 +27818,10 @@ require(['vs/editor/editor.main'], function () {
         // Why the common folder is in play, carried through to the summary so a
         // folder that shipped without the user asking for it says why it did.
         const commonReason = wantsCommon ? 'config' : (propRequiresCommon ? 'prop' : null);
+        // Set when a common folder was WANTED but the library has none. Not a
+        // question — there is nothing to choose from — but worth saying once at
+        // the end, because the destination will need one.
+        let commonMissing = null;
         const hasStarred = !!_sfStarredCommonUuid;
         let includeCommon = false;
         // Tracks which common to include for this Save. Defaults to the
@@ -27612,18 +27858,18 @@ require(['vs/editor/editor.main'], function () {
             // starred default is the right pick.
             includeCommon = true;
           } else {
-            const ok = await promptConfirm({
-              title: 'No common folder available',
-              message: (wantsCommon
-                ? 'The open config references a "common" folder'
-                : 'Your prop requires a voicepack on ProffieOS 8')
-                + ', but no common folder is imported in your library.\nSave will only include the selected fonts. Continue?',
-              confirmText: 'Continue',
-              confirmKind: 'primary',
-              cancelText: 'Cancel',
-            });
-            if (!ok) return false;
+            // Wanted, but the library has none. Recorded for the summary.
+            commonMissing = wantsCommon ? 'config' : 'prop';
           }
+          // No ASK. The library has no common folder, so there is nothing to
+          // choose from and therefore no question to put — this used to block
+          // the export to announce it. Managing the common folder here is
+          // OPTIONAL: plenty of people keep one on the card by hand and never
+          // import it, and for them nothing is missing. (Ryan, 2026-07-31:
+          // "why would we ask if there's none to choose from?")
+          //
+          // Not the same concern as the compile preflight, which is about the
+          // CONFIG naming a shared folder and is unaffected by any of this.
         } else if (hasStarred) {
           // Config doesn't ask for it — but the user has one available.
           // Single-common case: simple 3-button (Cancel / Skip / Include).
@@ -27634,7 +27880,7 @@ require(['vs/editor/editor.main'], function () {
           if (_sfCommons.length === 1) {
             const choice = await promptConfirm({
               title: 'Include common folder?',
-              message: 'The open config does not reference a "common" folder, but you have a default common folder in your library. Include it in the saved output?',
+              message: 'The open config does not reference a "common" folder, but you have a default common folder in your library. Include it in the export?',
               confirmText: 'Include',
               confirmKind: 'primary',
               middleText: 'Skip',
@@ -27691,7 +27937,7 @@ require(['vs/editor/editor.main'], function () {
         } else if (wantsTracks && !hasTracksFolder) {
           const ok = await promptConfirm({
             title: 'No shared tracks folder',
-            message: 'The open config references the shared "tracks/" folder at the SD card root, but no shared tracks folder exists in your library.\nSave will only include the selected fonts. Continue?',
+            message: 'The open config references the shared "tracks/" folder at the SD card root, but no shared tracks folder exists in your library.\nThe export will only include the selected fonts. Continue?',
             confirmText: 'Continue',
             confirmKind: 'primary',
             cancelText: 'Cancel',
@@ -27720,8 +27966,8 @@ require(['vs/editor/editor.main'], function () {
             const m = await window.electronAPI.sharedTracksMatchesAt({ destDir });
             if (m && m.ok && m.exists && !m.identical) {
               const choice = await promptConfirm({
-                title: 'Update the tracks folder on this card?',
-                message: 'This location already has a "tracks/" folder and it does not match the shared tracks folder in your library.\n\nYou have "Include with export" turned off for tracks, so it would normally be left alone. Update it with anything new from your library?\n\nNothing on the card is deleted, and a file that differs is kept as it is.',
+                title: 'Update the tracks folder at this destination?',
+                message: 'This location already has a "tracks/" folder and it does not match the shared tracks folder in your library.\n\nYou have "Include with export" turned off for tracks, so it would normally be left alone. Update it with anything new from your library?\n\nNothing there is deleted, and a file that differs is kept as it is.',
                 confirmText: 'Update',
                 confirmKind: 'primary',
                 middleText: 'Leave it',
@@ -27732,6 +27978,48 @@ require(['vs/editor/editor.main'], function () {
             }
           } catch {}
         }
+        // VOICE PACK VERSION GATE. Runs BEFORE the destination scan starts, not
+        // inside it: it is a decision about WHICH common to export and needs
+        // nothing from the destination. Placed mid-scan it opened underneath the
+        // progress modal, which stacked two dialogs on screen.
+        //
+        // Only a V2 requirement can fail: require_version(1) is satisfied by any
+        // pack, including one with no ini, since a missing ini reads as version
+        // 1. So this fires only when the prop needs V2 and the chosen pack does
+        // not declare it. (Ryan, 2026-07-31.)
+        if (includeCommon) {
+          try {
+            let needsV2 = false;
+            if (typeof window.__vpkRequiresV2 === 'function'
+                && typeof editor !== 'undefined' && editor) {
+              needsV2 = (await window.__vpkRequiresV2(editor.getValue())) === true;
+            }
+            if (needsV2) {
+              const cu = _sfBulkSaveCommonOverride || _sfStarredCommonUuid;
+              const chosen = _sfCommons.find(x => x.uuid === cu);
+              // A MINIMUM, not an equality: sound_library.h:92 fails only when
+              // found_version < required_version_, so a version 3 pack would
+              // satisfy a version 2 requirement. A missing ini reads as 1.
+              const packVersion = (c) => Number((c && c.voicepackVersion) || 1);
+              if (chosen && packVersion(chosen) < 2) {
+                const candidates = _sfCommons.filter(c => packVersion(c) >= 2);
+                const ans = await _sfPromptVoicepackVersion(chosen, candidates);
+                if (ans.action === 'cancel') return false;
+                if (ans.action === 'get') {
+                  // Hand them to the voice pack picker and stop the export. What
+                  // they do there decides which pack exists next time, so
+                  // carrying on with the current one would be answering a
+                  // question they just declined to answer. The selection is kept
+                  // so the export is one click away afterwards.
+                  _sfOpenVoicepackPicker();
+                  return false;
+                }
+                if (ans.action === 'use' && ans.uuid) _sfBulkSaveCommonOverride = ans.uuid;
+              }
+            }
+          } catch {}
+        }
+
         // Pre-scan: which entries already exist at the destination? Also
         // check whether a "common" folder already exists if we plan to write
         // one — surfaced in the same conflict UI so the user picks per-item.
@@ -27865,7 +28153,11 @@ require(['vs/editor/editor.main'], function () {
         // Everything that had to be read has been read. Close the scan before
         // any decision opens, so the two never overlap on screen.
         clearInterval(_scanElapsedTicker);
-        await _sfDeleteProgress.hide();
+        // NOTE: the scan is deliberately NOT hidden here. Removing this overlay
+        // before the next one is up leaves a paint with no backdrop, which reads
+        // as a full-screen flash. Each transition below opens the next surface
+        // first and closes this one behind it. (Ryan spotted the flash
+        // 2026-07-31.)
         // Tracks deliberately do NOT enter the conflict list any more. That list
         // asks keep-or-replace, which is a destructive choice, and the tracks
         // export is now additive: nothing at the destination is deleted, and a
@@ -27901,23 +28193,25 @@ require(['vs/editor/editor.main'], function () {
               ? (_cFonts === 1 ? 'One font' : 'Some fonts')
               : 'The common folder';
           const _isPlural = _cFonts > 1 || (_cFonts >= 1 && _cCommon);
-          const _cTitle = `${_subject} on the card ${_isPlural ? 'are' : 'is'} different`;
+          const _cTitle = `${_subject} at the destination ${_isPlural ? 'are' : 'is'} different`;
           const _cBody = [
-            `${_isPlural ? 'These' : 'This'} already ${_isPlural ? 'exist' : 'exists'} on the card with different contents.`,
-            `Choose whether to replace ${_isPlural ? 'each' : 'it'} with your library version or keep what is on the card.`,
+            `${_isPlural ? 'These' : 'This'} already ${_isPlural ? 'exist' : 'exists'} there with different contents.`,
+            `Choose whether to replace ${_isPlural ? 'each' : 'it'} with your library version or keep what is there.`,
             // Only claim things were left alone when some actually were.
             (unchangedFonts.length
               ? `${unchangedFonts.length === 1 ? 'One font that already matches' : `${unchangedFonts.length} fonts that already match`} your library ${unchangedFonts.length === 1 ? 'is' : 'are'} not listed and ${unchangedFonts.length === 1 ? 'was' : 'were'} left alone.`
               : ''),
             `Each folder is treated as a unit, so old and new files are never mixed.`,
           ].filter(Boolean).join(' ');
-          const choices = await _sfPromptSaveConflicts(conflicts, {
+          // Started, not awaited: _sfPromptSaveConflicts adds .active
+          // synchronously, so the dialog is on screen before the scan closes.
+          const choicesPromise = _sfPromptSaveConflicts(conflicts, {
             defaultMode: 'replace',
             title: _cTitle,
             description: _cBody,
             labelFor: (n) => n,
             titleFor: (n) => (n === 'common'
-              ? `The card's common folder${commonMineName ? `, receiving ${commonMineName}` : ''}`
+              ? `The common folder at the destination${commonMineName ? `, receiving ${commonMineName}` : ''}`
               : n),
             // Row heading stays the DESTINATION folder name. A long pack name
             // as the title overflowed the row and still did not say what it
@@ -27932,6 +28226,8 @@ require(['vs/editor/editor.main'], function () {
               return out;
             },
           });
+          await _sfDeleteProgress.hide();
+          const choices = await choicesPromise;
           if (!choices) return false; // user cancelled
           modeByName = choices;
         }
@@ -27940,7 +28236,9 @@ require(['vs/editor/editor.main'], function () {
         // default (Replace) rather than folders treated as a unit.
         let tracksReplace = [];
         if (tracksDiffering.length) {
-          const chosen = await _sfResolveTrackConflicts(tracksDiffering);
+          const chosenPromise = _sfResolveTrackConflicts(tracksDiffering);
+          await _sfDeleteProgress.hide();   // no-op if already hidden
+          const chosen = await chosenPromise;
           if (chosen === null) return false; // user cancelled the save
           tracksReplace = chosen;
         }
@@ -27957,17 +28255,58 @@ require(['vs/editor/editor.main'], function () {
         const willWriteCommon = includeCommon && commonMode !== 'skip' ? 1 : 0;
         const willWriteTracks = includeTracks && (tracksToAdd.length || tracksReplace.length) ? 1 : 0;
         const totalSteps = willWriteFonts + willWriteCommon + willWriteTracks;
-        // Everything got skipped — honest bail rather than a "Exporting (0 of 0)"
-        // flash. Selection is preserved so the user can revisit their
-        // conflict choices and re-Save without re-selecting fonts.
+        // Nothing to write — an honest bail rather than an "Exporting (0 of 0)"
+        // flash. Selection is preserved either way, so a user who wants to
+        // revisit their choices does not have to re-select.
+        //
+        // WHICH nothing it is matters, and conflating them was wrong (Ryan,
+        // 2026-07-31). "Every item was set to Skip" attributed a decision to him
+        // he had not made: he skipped the common folder, while the fonts were
+        // simply already identical. And when the card is simply current, that is
+        // a GOOD outcome — framing it as "nothing to export" makes a success
+        // read as a null result.
         if (totalSteps === 0) {
-          await promptConfirm({
-            title: 'Nothing to export',
-            message: 'Every selected item was set to Skip, so no files were written. Your selection is kept so you can revisit your choices.',
-            confirmText: 'OK',
-            confirmKind: 'primary',
-            hideCancel: true,
+          // Nothing to write. Use the SUMMARY rather than a bespoke dialog: it
+          // already reports written / already-identical / kept-by-choice for
+          // fonts, plus the voice pack's and the tracks' state, omitting each
+          // clause when it does not apply. A no-write export is simply a summary
+          // whose written count is zero.
+          //
+          // This replaced three hand-written message variants that were slowly
+          // reinventing the summary in a second place, badly — and it shows the
+          // card's state, which is what the user actually wants to know.
+          // (Ryan, 2026-07-31.) The early return is kept so no "Exporting
+          // (0 of 0)" progress bar flashes on the way here.
+          const fontsSkipped = names.filter(n =>
+            modeByName.get(n) === 'skip' && !unchangedFonts.includes(n)).length;
+          const commonSkipped = !!(includeCommon && commonMode === 'skip');
+          const skippedByChoice = fontsSkipped + (commonSkipped ? 1 : 0);
+          const commonNames = { name: commonMineName, cardName: commonCardName, reason: commonReason };
+          await _sfShowExportSummary({
+            destDir, names, modeByName, unchangedFonts, commonMissing,
+            commonFolderName: 'common',
+            title: skippedByChoice === 0 ? 'Already up to date' : 'Card left as it was',
+            commonOutcome: commonAlreadyCurrent
+              ? { state: 'current', ...commonNames }
+              : (commonSkipped ? { state: 'kept', ...commonNames } : null),
+            tracksOutcome: includeTracks
+              ? {
+                  reason: tracksReason,
+                  added: 0, replaced: 0,
+                  unchanged: (window._sfSharedTracksFiles || []).length,
+                  kept: [],
+                }
+              : null,
           });
+          // An up-to-date card is a finished job, so it clears the selection the
+          // way a real export does — there is nothing to revisit, and leaving
+          // fonts ticked implies otherwise. A card left deliberately out of sync
+          // KEEPS the selection, because changing that decision is the one thing
+          // the user might want to do next.
+          if (skippedByChoice === 0) {
+            _sfSelectedNames.clear();
+            _sfRenderGrid();
+          }
           return false;
         }
         // The card already holds this exact pack, so there is nothing to copy —
@@ -28140,15 +28479,23 @@ require(['vs/editor/editor.main'], function () {
         // copied (e.g. an entry whose contentTotalBytes wasn't stamped yet).
         _sfExportBytesDone = _sfExportTotalBytes;
         _sfDeleteProgress.setProgress(1);
-        await _sfDeleteProgress.hide();
         if (failures.length) {
+          await _sfDeleteProgress.hide();
           await _sfShowPartialFailures('Some items failed to export', failures);
           // Keep selection on real failures so the user can see what's still
           // in scope and retry. (Skips don't count as failures — those were
           // deliberate user choices.)
           return true;
         }
-        await _sfShowExportSummary({ destDir, names, modeByName, commonOutcome, tracksOutcome, unchangedFonts, commonFolderName: 'common', elapsedSec: (Date.now() - _sfExportT0) / 1000 });
+        // Summary first, progress closed behind it. The summary does async work
+        // of its own (it lists the destination), so hiding first would leave the
+        // screen with no overlay across an IPC round trip.
+        await _sfShowExportSummary({
+          destDir, names, modeByName, commonOutcome, tracksOutcome, unchangedFonts, commonMissing,
+          commonFolderName: 'common',
+          elapsedSec: (Date.now() - _sfExportT0) / 1000,
+          closeProgress: () => _sfDeleteProgress.hide(),
+        });
         _sfSelectedNames.clear();
         _sfRenderGrid();
         return true;
@@ -28615,6 +28962,18 @@ require(['vs/editor/editor.main'], function () {
         // modifier converts every in-card click into a selection action and
         // suppresses the normal one. Standard convention from file managers
         // and most multi-select UIs.
+        // Shift adds the range from the anchor. Checked before ctrl so that
+        // ctrl+shift ranges too, matching the other browsers.
+        if (e.shiftKey) {
+          const card = e.target.closest('.sf-card[data-font]');
+          if (card) {
+            e.stopPropagation();
+            e.preventDefault();
+            const name = card.getAttribute('data-font');
+            if (name) { _sfShiftSelectGridTo(name); _sfRenderGrid(); }
+            return;
+          }
+        }
         if (e.ctrlKey || e.metaKey) {
           const card = e.target.closest('.sf-card');
           if (card) {
@@ -28624,6 +28983,7 @@ require(['vs/editor/editor.main'], function () {
             if (!name) return;
             if (_sfSelectedNames.has(name)) _sfSelectedNames.delete(name);
             else _sfSelectedNames.add(name);
+            _sfGridAnchor = name;
             _sfRenderGrid();
             return;
           }
@@ -28638,8 +28998,16 @@ require(['vs/editor/editor.main'], function () {
           e.stopPropagation();
           const name = selectBtn.getAttribute('data-card-select');
           if (!name) return;
-          if (_sfSelectedNames.has(name)) _sfSelectedNames.delete(name);
-          else _sfSelectedNames.add(name);
+          // The checkbox is a selecting action, so it maintains the anchor too.
+          if (e.shiftKey) {
+            _sfShiftSelectGridTo(name);
+          } else if (_sfSelectedNames.has(name)) {
+            _sfSelectedNames.delete(name);
+            _sfGridAnchor = name;
+          } else {
+            _sfSelectedNames.add(name);
+            _sfGridAnchor = name;
+          }
           _sfRenderGrid();
           return;
         }
@@ -30613,7 +30981,7 @@ require(['vs/editor/editor.main'], function () {
         if (totalAdds === 0 && totalConflicts === 0) {
           await promptConfirm({
             title: 'Library already up to date',
-            message: 'Everything in the backup is already in your library. No changes needed.',
+            message: 'Everything in this backup is already in your library. Nothing was merged.',
             confirmText: 'OK',
             confirmKind: 'primary',
             hideCancel: true,
@@ -31295,8 +31663,8 @@ require(['vs/editor/editor.main'], function () {
           // would just show "Library already up to date". Skip both and
           // tell the user directly.
           await promptConfirm({
-            title: 'Library matches backup',
-            message: 'Every item in this backup is already in your library and matches byte-for-byte. There is nothing to restore.',
+            title: 'Library already up to date',
+            message: 'Everything in this backup is already in your library. Nothing was restored.',
             confirmText: 'OK',
             confirmKind: 'primary',
             hideCancel: true,
@@ -33970,7 +34338,7 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
           // Not red — we can't verify either way; the user might be
           // referencing something on the SD card outside the library.
           comboInput.classList.remove('not-in-library');
-          comboInput.title = `Track exists at ${v} (unverified — not in library).`;
+          comboInput.title = `Track exists at ${v} (unverified, not in library).`;
           trackWarn.title = `"${fontName}" isn't a font folder in your library, "common", or "tracks". This still works as this preset's default track if the file is on the SD card. Track players only scan "tracks/" (plural) inside the font folder or inside common/.`;
           trackWarn.classList.add('visible'); // no .clickable — informational
           return;
@@ -34743,7 +35111,7 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
       else if (slot.styleClass === 'helper') tile.classList.add('slot-helper');
       else if (slot.styleClass === 'ref')    tile.classList.add('slot-ref');
       else                                   tile.classList.add('slot-inline');
-      if (isExcess)    tile.title = `Excess slot — NUM_BLADES is ${_parseResult.bladeCount}, this is blade ${slotIdx + 1}`;
+      if (isExcess)    tile.title = `Excess slot: NUM_BLADES is ${_parseResult.bladeCount}, this is blade ${slotIdx + 1}`;
       if (isUnlinked)  tile.title = `"${slot.expr?.match(/^\w+/)?.[0] || slot.expr}" looks like a library style but my_styles.h is not linked in this config. If defined externally it may still compile correctly, otherwise it will be undefined at compile time.`;
 
       // Badge: abbreviation (or default Bn) — click navigates; mousedown initiates drag for normal slots
@@ -36565,7 +36933,7 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
           _hcRow.appendChild(_hcLbl);
 
           if (_isLibHardcoded) {
-            _hcRow.title = 'Color is set in the Style Library and cannot be changed here — write a custom expression to override it';
+            _hcRow.title = 'Color is set in the Style Library and cannot be changed here. Write a custom expression to override it';
           } else {
             const _initRgb2  = _hcRgb16.slice();
             const _matchStr2 = _hcMatchStr;
@@ -36930,7 +37298,7 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
         trigSwatch.style.cssText = _dot(0,0,0) + 'visibility:hidden;';
         const trigLabel = document.createElement('span');
         trigLabel.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
-        trigLabel.textContent = '— Named color —';
+        trigLabel.textContent = 'Named color';
         const trigCaret = document.createElement('span');
         trigCaret.style.cssText = 'margin-left:4px;font-size:0.55rem;opacity:0.55;flex-shrink:0;';
         trigCaret.textContent = '▾';
@@ -36943,7 +37311,7 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
 
         const phRow = document.createElement('div');
         phRow.style.cssText = 'padding:3px 6px;font-size:0.68rem;color:var(--c-text-muted);cursor:pointer;white-space:nowrap;';
-        phRow.textContent = '— Named color —';
+        phRow.textContent = 'Named color';
         phRow.addEventListener('mouseenter', () => { phRow.style.background = 'var(--c-bg-hover)'; });
         phRow.addEventListener('mouseleave', () => { phRow.style.background = ''; });
         phRow.addEventListener('click', e => { e.stopPropagation(); list.style.display = 'none'; });
@@ -37007,7 +37375,7 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
             trigSwatch.style.cssText = _dot(r8, g8, b8);
             trigSwatch.style.visibility = 'visible';
           } else {
-            trigLabel.textContent = '— Named color —';
+            trigLabel.textContent = 'Named color';
             trigSwatch.style.visibility = 'hidden';
           }
         };
@@ -38466,7 +38834,7 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
         ? ` along with its ${count} preset${count === 1 ? '' : 's'}.`
         : '.';
       const ok = await promptConfirm({
-        title:       'Delete Preset Bank',
+        title:       'Delete preset bank',
         message:     `Delete preset bank "${arr.name}"? This will remove the bank${tail}`,
         confirmText: 'Delete',
       });
@@ -38524,7 +38892,7 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
         // OFF → ON: arm the toggle, don't auto-play retroactively.
         _presetAutoPlayOn = true;
         _presetAutoPlayBtn.classList.add('on');
-        _presetAutoPlayBtn.title = 'Auto-play armed — click a preset to play its font sound. Click again to stop / disable.';
+        _presetAutoPlayBtn.title = 'Auto-play armed. Click a preset to play its font sound. Click again to stop / disable.';
         return;
       }
       // ON → OFF: disarm and stop any audio still playing. The "playing"

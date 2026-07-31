@@ -987,7 +987,7 @@ function onBuildDone({ type, ok, error, aborted, retriable, needsDfuDriver, sour
         setBarMode('success');
         if (dfuDeviceReady) {
           document.getElementById('bm-close').style.display = 'none';
-          document.getElementById('bm-status').textContent = 'DFU device ready — flashing...';
+          document.getElementById('bm-status').textContent = 'DFU device ready. Flashing...';
           setFlashEnabled(true);
           setTimeout(() => doFlash(), 1200);
         } else {
@@ -1001,7 +1001,7 @@ function onBuildDone({ type, ok, error, aborted, retriable, needsDfuDriver, sour
         document.getElementById('bm-title').style.color = 'var(--c-success-text)';
         document.getElementById('bm-abort').style.display = 'none';
         document.getElementById('bm-close').style.display = 'none';
-        document.getElementById('bm-status').textContent = 'Board connected — flashing...';
+        document.getElementById('bm-status').textContent = 'Board connected. Flashing...';
         setBarMode('success');
         setFlashEnabled(true);
         setTimeout(() => doFlash(), 1200);
@@ -1208,7 +1208,7 @@ function _selectPortAndFlash(port, result) {
   updatePortChangedIndicator();
   applyDetectedBoard(port);
   document.getElementById('bm-board-select-wrap').style.display = 'none';
-  document.getElementById('bm-status').textContent = 'Board detected — flashing...';
+  document.getElementById('bm-status').textContent = 'Board detected. Flashing...';
   setTimeout(() => doFlash(), 1200);
 }
 
@@ -1242,7 +1242,7 @@ function showMultiBoardSelect(proffieports) {
   });
   if (currentVal) sel.value = currentVal; // preserve selection if already shown
 
-  document.getElementById('bm-status').textContent = 'Multiple Proffieboards detected — select one:';
+  document.getElementById('bm-status').textContent = 'Multiple Proffieboards detected. Select one:';
   document.getElementById('bm-board-select-wrap').style.display = 'flex';
 }
 
@@ -2618,7 +2618,7 @@ async function watchForSerialAfterDfu() {
   _portsBeforeDfu = [];
   exitDfuMode();
   document.getElementById('bm-status').textContent =
-    'Flash complete — board not yet detected. Try power cycling.';
+    'Flash complete, but the board has not been detected yet. Try power cycling.';
   appendModalLog('Board not detected after restart. Try power cycling or reconnecting.', true);
 }
 

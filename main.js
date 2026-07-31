@@ -1327,8 +1327,20 @@ ipcMain.handle('entries:listFiles', (_, { name } = {}) => {
 // Unified file ops (common ↔ entry, either direction, same kind same dir).
 // Used by both the common-folder sidecar and the entry detail file browser
 // so clipboard contents can survive switching between them.
-ipcMain.handle('fileOps:copy', async (_, { src, srcPaths, dest, destNames } = {}) => {
-  try { return await soundFontFileOps.copyAcrossLocations({ userData: app.getPath('userData'), src, srcPaths, dest, destNames }); }
+ipcMain.handle('fileOps:copy', async (event, { src, srcPaths, dest, destNames } = {}) => {
+  try {
+    // Throttled per-file ticks so the renderer can show names going past. The
+    // copy is synchronous here and, for shared tracks, hashes each file as it
+    // lands, so thirty large tracks is a long silence without this.
+    let last = 0;
+    const onFile = (name, done, total) => {
+      const now = Date.now();
+      if (now - last < 60 && done < total) return;
+      last = now;
+      try { event.sender.send('fileOps:copyProgress', { name, done, total }); } catch {}
+    };
+    return await soundFontFileOps.copyAcrossLocations({ userData: app.getPath('userData'), src, srcPaths, dest, destNames, onFile });
+  }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
@@ -3209,7 +3221,7 @@ ipcMain.handle('proffieOS:validateSource', (_, sourcePath) => {
     return { ok: false, error: 'Folder must be named "ProffieOS".' };
   }
   if (!fs.existsSync(path.join(sourcePath, 'ProffieOS.ino'))) {
-    return { ok: false, error: 'Folder does not contain ProffieOS.ino — not a valid ProffieOS source.' };
+    return { ok: false, error: 'Folder does not contain ProffieOS.ino, so it is not a valid ProffieOS source.' };
   }
   return { ok: true };
 });

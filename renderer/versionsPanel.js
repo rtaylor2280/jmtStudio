@@ -204,7 +204,7 @@ function _vpRenderDetail(v) {
 
     <div class="vp-section">
       <div class="vp-section-label">Notes</div>
-      <textarea id="vp-notes" class="vp-notes-editor" spellcheck="false" placeholder="Add notes about this version — changes, known issues, source, etc.">${notesVal}</textarea>
+      <textarea id="vp-notes" class="vp-notes-editor" spellcheck="false" placeholder="Add notes about this version: changes, known issues, source, etc.">${notesVal}</textarea>
       <div class="vp-notes-footer">
         <span id="vp-notes-status" class="vp-notes-status"></span>
         <button class="vp-action-btn primary" id="vp-btn-save-notes" disabled>Save Notes</button>
@@ -414,7 +414,7 @@ async function _vpSearch(versionName, query, container) {
   if (result.results.length >= 300) {
     const cap = document.createElement('div');
     cap.className = 'vp-tree-empty';
-    cap.textContent = 'Results capped at 300 — narrow your search.';
+    cap.textContent = 'Results capped at 300. Narrow your search.';
     container.appendChild(cap);
   }
 }
@@ -730,7 +730,7 @@ async function _vpDoApply(v, btn, panel, isFirstTime, onSuccess) {
   const statusEl = document.getElementById('vp-jmt-status');
 
   const unsub = window.electronAPI.onJmtProgress(({ file, done, total }) => {
-    if (statusEl) statusEl.textContent = `${done}/${total} — ${file}`;
+    if (statusEl) statusEl.textContent = `${done}/${total}: ${file}`;
   });
 
   const applyResult = await window.electronAPI.applyJmtFeatures(v.name);

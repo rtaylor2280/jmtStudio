@@ -873,25 +873,58 @@ function entryMatchesAt(userData, name, destDir) {
   try { destExists = fs.existsSync(destFont) && fs.statSync(destFont).isDirectory(); } catch {}
   if (!destExists) return { ok: true, exists: false, identical: false, reason: 'missing' };
   if (!fs.existsSync(srcDir)) return { ok: true, exists: true, identical: false, reason: 'unreadable' };
-  const { collectFileRecords, hashRecords } = require('./soundFontFileHash');
-  const mine = collectFileRecords(srcDir);
-  if (!mine) return { ok: true, exists: true, identical: false, reason: 'unreadable' };
-  const myHash = hashRecords(mine);
 
-  // Hash the destination PER FILE, reusing anything the manifest can still
-  // vouch for. A file whose size and mtime match what we recorded when we wrote
-  // it keeps its recorded hash and is never read; everything else is hashed. So
-  // adding or editing one file in a folder costs one hash, not the folder.
-  const { hashFile } = require('./soundFontFileHash');
+  // LIBRARY SIDE, trusted. Per-file hashes were computed when the entry was
+  // hashed and live in the central manifest, kept in step with meta.contentHash
+  // by the same walk. Re-deriving them would read the library to learn what we
+  // already wrote down. The dirty flag is the app's own signal that they need
+  // recomputing, and it is honoured here rather than second-guessed.
+  const { readFileHashManifest, hashFile } = require('./soundFontFileHash');
+  let meta = {};
+  try { meta = JSON.parse(fs.readFileSync(path.join(srcDir, 'meta.json'), 'utf8')); } catch {}
+  if (meta.contentHashDirty || !meta.entryUuid || !meta.contentHash) {
+    try { recomputeEntryContentHash(userData, name); } catch {}
+    try { meta = JSON.parse(fs.readFileSync(path.join(srcDir, 'meta.json'), 'utf8')); } catch {}
+  }
+  let libRecords = null;
+  if (meta.entryUuid) {
+    const mf = readFileHashManifest(fileHashManifestPath(userData, 'entries', meta.entryUuid));
+    if (mf && Array.isArray(mf.records) && mf.contentHash === meta.contentHash) libRecords = mf.records;
+  }
+  if (!libRecords) {
+    const { collectFileRecords } = require('./soundFontFileHash');
+    libRecords = collectFileRecords(srcDir);
+  }
+  if (!libRecords) return { ok: true, exists: true, identical: false, reason: 'unreadable' };
+
+  // DESTINATION SIDE. The manifest holds a hash per file; mtime exists only to
+  // say whether the user invalidated an entry. We consult ONLY the files the
+  // library is writing — anything else on the card, recorded or not, is none of
+  // this comparison's business. Self-healing: a file with no entry, or an
+  // invalidated one, is hashed, and only that file.
   const sync = require('./sfSyncManifest');
-  const res = sync.hashItemUsingManifest(destDir, name, hashFile, hashRecords);
-  if (!res) return { ok: true, exists: true, identical: false, reason: 'unreadable' };
-  const identical = res.hash === myHash;
-  return {
-    ok: true, exists: true, identical,
-    reason: identical ? null : 'hash',
-    reused: res.reused, hashed: res.hashed,
-  };
+  let cache = new Map();
+  try { cache = sync.cacheFor(destDir, name); } catch {}
+  const refreshed = new Map();
+  let identical = true, hashed = 0, reused = 0;
+
+  for (const rec of libRecords) {
+    if (!rec || rec.fileHash === '<empty>') continue;   // empty-dir marker
+    const abs = path.join(destFont, rec.relPath);
+    let st = null;
+    try { st = fs.statSync(abs); } catch { st = null; }
+    if (!st) { identical = false; continue; }           // library has it, card does not
+    const mtime = Math.round(st.mtimeMs);
+    const ent = cache.get(rec.relPath);
+    const valid = ent && ent[0] === st.size
+      && Math.abs((ent[1] || 0) - mtime) <= sync.MTIME_TOLERANCE_MS;
+    const destHash = valid ? (reused++, ent[2]) : (hashed++, hashFile(abs));
+    refreshed.set(rec.relPath, [st.size, mtime, destHash]);
+    if (destHash !== rec.fileHash) identical = false;
+  }
+  try { sync.mergeItem(destDir, name, refreshed); } catch {}
+
+  return { ok: true, exists: true, identical, reason: identical ? null : 'hash', reused, hashed };
 }
 
 async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onBytes = null) {
@@ -940,8 +973,19 @@ async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onB
     // of reading the folder back. Best effort: a manifest we cannot write only
     // costs a re-read next time.
     try {
-      const { hashFile, hashRecords } = require('./soundFontFileHash');
-      require('./sfSyncManifest').hashItemUsingManifest(destDir, targetName, hashFile, hashRecords);
+      const { collectFileRecords } = require('./soundFontFileHash');
+      const recs = collectFileRecords(srcDir);
+      if (recs) {
+        const observed = new Map();
+        for (const r of recs) {
+          if (!r || r.fileHash === '<empty>') continue;
+          try {
+            const st = fs.statSync(path.join(targetDir, r.relPath));
+            observed.set(r.relPath, [st.size, Math.round(st.mtimeMs), r.fileHash]);
+          } catch {}
+        }
+        require('./sfSyncManifest').mergeItem(destDir, targetName, observed);
+      }
     } catch {}
     return { ok: true, destPath: targetDir };
   } catch (err) {

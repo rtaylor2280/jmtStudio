@@ -1,40 +1,48 @@
-// Destination sync manifest — what we last wrote to an export location, so a
-// later export can tell "unchanged since we wrote it" from "needs reading".
+// Destination sync manifest — the hash of every file we wrote to an export
+// location, alongside the size and modified time it had there afterwards.
 //
-// THE PROBLEM IT SOLVES. Deciding whether a copy on a card matches the library
-// requires reading it, and the cost lands on the STEADY STATE: a card already in
-// sync has everything present, so everything gets hashed. A 2.4 GB shared tracks
-// folder is minutes of SD reading on every single export, to discover that
-// nothing needs doing.
+// THE SHAPE, and it is Ryan's (2026-07-31). Comparison is PER FILE, over only
+// the files the library is about to write:
 //
-// WHY THIS IS SOUND, when the common-folder marker was not. That marker asserted
-// CONTENT, and once a file changed nothing on disk contradicted it — so it could
-// declare a stale card current. This records size + mtime, which the filesystem
-// itself invalidates: edit a file and the OS moves its mtime. The claim stays
-// falsifiable by two stat calls, which is the same cheap-negative shape used
-// everywhere else here. The recorded hash is only ever trusted for a file whose
-// size and mtime still match what we observed when we wrote it.
+//   library hash (recorded at import, trusted)  vs  manifest hash (recorded here)
 //
-// THREE THINGS THAT WILL BITE, designed for:
+// Nothing else at the destination matters, including entries in this file for
+// things we are not writing. mtime has exactly one job: to say whether the user
+// invalidated an entry. It is not a content check and never stands in for one.
 //
-//  1. FAT32 (which is what SD cards are) stores mtime at 2-second granularity,
-//     in LOCAL time, with no timezone. So a comparison needs tolerance, and the
-//     mtime we record must be the one OBSERVED AT THE DESTINATION AFTER WRITING,
-//     never the source file's. A DST boundary shifts every timestamp on the card
-//     by an hour; that fails the comparison, everything gets re-read once, and
-//     the manifest is rewritten with fresh values. A once-a-year full verify is
-//     the right trade against special-casing timezone arithmetic.
+// SELF-HEALING, which is what makes it safe to be this simple. A file with no
+// entry, or one whose size or mtime no longer match, is hashed — just that file
+// — and its entry is refreshed. So a missing, partial, or stale manifest costs
+// exactly the reads it is missing and nothing more. Delete this file and the
+// next export rebuilds it as it goes.
 //
-//  2. Some copy tools preserve mtime (rsync -t and friends). A same-size,
-//     same-mtime, different-content replacement evades detection. Rare and
-//     deliberate. Deleting this file forces a full verify.
+// WHY IT IS PROPORTIONAL, which is the point: work inside JMT Studio and nothing
+// is ever re-read, because every hash was recorded when the file was written.
+// Work outside it and you pay for what you touched, not for the folder it lived
+// in. A 2.4 GB tracks folder with one hand-edited wav costs one hash.
 //
-//  3. A missing, unreadable, or version-mismatched manifest must fail toward
-//     READING, never toward "assume unchanged". Same rule as everywhere else: an
-//     unknown asks, it does not assume.
+// WHY THIS IS NOT THE MARKER SHORTCUT REJECTED THE SAME MORNING. That marker
+// asserted CONTENT, and once a file changed nothing on disk contradicted it, so
+// it could call a stale card current. Size and mtime are observations the
+// filesystem maintains: write a file and the clock moves. The claim stays
+// falsifiable by a stat, and every unknown resolves toward reading.
 //
-// The file is written at the destination root and is inert to ProffieOS (it
-// scans for .wav; IdentifyExtension returns UNKNOWN for anything else).
+// TWO THINGS THAT WILL BITE:
+//
+//  1. FAT32 (what SD cards are) keeps mtimes on 2-second boundaries, in local
+//     time, with no zone. Hence the tolerance, and hence recording the mtime
+//     OBSERVED AT THE DESTINATION AFTER WRITING rather than the source's. A
+//     daylight saving change shifts every stamp on the card, which costs one
+//     full re-read and a refreshed manifest — a better trade than doing timezone
+//     arithmetic against a filesystem.
+//
+//  2. A tool that preserves mtime while replacing a file of identical length
+//     (rsync -t and friends) goes unnoticed. Deliberate editing, Explorer
+//     copies, and app writes all move it. Deleting this file forces a full
+//     verify.
+//
+// Written at the destination root and inert to ProffieOS, which scans for .wav
+// and gets UNKNOWN from IdentifyExtension for anything else.
 
 const fs = require('fs');
 const path = require('path');
@@ -50,63 +58,6 @@ function manifestPath(destDir) {
   return path.join(destDir, MANIFEST_NAME);
 }
 
-// Canonical per-file records for `root`, in the exact shape soundFontFileHash
-// folds into a digest: { relPath, size, fileHash }, sorted by path, with empty
-// directories marked and the item-root meta.json excluded. `hashOne(abs)`
-// supplies a hash for any file we cannot take from the cache.
-//
-// `cache` is a Map of relPath -> [size, mtimeMs, fileHash] from a previous run.
-// A file whose size and mtime still match its cached entry reuses that hash and
-// is never read. Everything else is hashed. THIS is the granularity that
-// matters: adding or editing one file in a folder costs one hash, not the whole
-// folder. (Ryan, 2026-07-31 — the first cut was all-or-nothing per item.)
-//
-// Returns { records, reused, hashed, live } or null when the tree cannot be
-// walked, and null means the caller must not claim anything about it.
-function resolveRecords(root, hashOne, cache, filter) {
-  if (!root || !fs.existsSync(root)) return null;
-  const records = [];
-  const live = new Map();
-  let reused = 0, hashed = 0;
-  const walk = (absDir, relDir) => {
-    let entries;
-    try { entries = fs.readdirSync(absDir, { withFileTypes: true }); } catch { throw new Error('unreadable'); }
-    if (entries.length === 0 && relDir !== '') {
-      records.push({ relPath: relDir, size: 0, fileHash: '<empty>' });
-      return;
-    }
-    let saw = false;
-    for (const e of entries) {
-      const abs = path.join(absDir, e.name);
-      const rel = relDir ? `${relDir}/${e.name}` : e.name;
-      if (rel === MANIFEST_NAME && relDir === '') continue;
-      if (filter && !filter(rel)) continue;
-      if (e.isDirectory()) { saw = true; walk(abs, rel); continue; }
-      if (!e.isFile()) continue;
-      if (relDir === '' && e.name === 'meta.json') continue;
-      saw = true;
-      let st;
-      try { st = fs.statSync(abs); } catch { throw new Error('unreadable'); }
-      const mtime = Math.round(st.mtimeMs);
-      const cached = cache && cache.get(rel);
-      let fileHash;
-      if (cached && cached[0] === st.size && Math.abs((cached[1] || 0) - mtime) <= MTIME_TOLERANCE_MS) {
-        fileHash = cached[2];
-        reused++;
-      } else {
-        fileHash = hashOne(abs);
-        hashed++;
-      }
-      records.push({ relPath: rel, size: st.size, fileHash });
-      live.set(rel, [st.size, mtime, fileHash]);
-    }
-    if (relDir !== '' && !saw) records.push({ relPath: relDir, size: 0, fileHash: '<empty>' });
-  };
-  try { walk(root, ''); } catch { return null; }
-  records.sort((a, b) => (a.relPath < b.relPath ? -1 : a.relPath > b.relPath ? 1 : 0));
-  return { records, reused, hashed, live };
-}
-
 function read(destDir) {
   if (!destDir) return null;
   try {
@@ -117,12 +68,33 @@ function read(destDir) {
   } catch { return null; }
 }
 
+// Write to a temp file, then rename over the real one. writeFileSync truncates
+// first, so a plain write leaves a window where the manifest is empty or
+// partial — and because we write at EVERY item by design, so the card is always
+// left with a manifest matching what is on it, there are many such windows per
+// export. The realistic interrupter is someone pulling the card. A truncated
+// manifest defeats exactly the property the per-item write exists to provide.
+//
+// HONEST LIMIT: rename is atomic on journaled filesystems. FAT32, which is what
+// SD cards are, has no journal, so a power loss during the directory-entry
+// update can still corrupt. This narrows the window from the whole file write
+// to one metadata update. A large improvement, not a guarantee — and a corrupt
+// manifest still self-heals into a full re-read, so the worst case is slow
+// rather than wrong.
 function write(destDir, manifest) {
   if (!destDir || !manifest) return false;
+  const finalPath = manifestPath(destDir);
+  const tmpPath = finalPath + '.tmp';
   try {
-    fs.writeFileSync(manifestPath(destDir), JSON.stringify(manifest));
+    fs.writeFileSync(tmpPath, JSON.stringify(manifest));
+    fs.renameSync(tmpPath, finalPath);
     return true;
-  } catch { return false; }
+  } catch {
+    // A kill between the write and the rename leaves the temp behind. Clear it
+    // on the way out so it cannot accumulate on the card.
+    try { fs.unlinkSync(tmpPath); } catch {}
+    return false;
+  }
 }
 
 // The cached per-file table for an item, as a Map ready for resolveRecords.
@@ -140,15 +112,24 @@ function cacheFor(destDir, itemName) {
   return out;
 }
 
-// Store the table we just observed. `live` is resolveRecords' live Map, whose
-// mtimes are the DESTINATION's own — never the source's, or the first scan
-// after a copy would re-read everything.
-function recordItem(destDir, itemName, live) {
-  if (!destDir || !itemName || !live) return false;
-  const files = [];
-  for (const [rel, [size, mtime, hash]] of live) files.push([rel, size, mtime, hash]);
-  files.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+// Merge observed entries over what is already recorded. Entries for files we
+// did not look at this time survive untouched: a comparison only ever consults
+// the files the library is writing, so it has no business discarding knowledge
+// about anything else. `observed` is a Map of relPath -> [size, mtimeMs, hash].
+function mergeItem(destDir, itemName, observed) {
+  if (!destDir || !itemName || !observed || observed.size === 0) return false;
   const m = read(destDir) || { version: MANIFEST_VERSION, items: {} };
+  const existing = new Map();
+  const rec = m.items[itemName];
+  if (rec && Array.isArray(rec.files)) {
+    for (const f of rec.files) {
+      if (Array.isArray(f) && f.length >= 4) existing.set(f[0], [f[1], f[2], f[3]]);
+    }
+  }
+  for (const [rel, v] of observed) existing.set(rel, v);
+  const files = [];
+  for (const [rel, [size, mtime, hash]] of existing) files.push([rel, size, mtime, hash]);
+  files.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
   m.items[itemName] = { files };
   return write(destDir, m);
 }
@@ -160,27 +141,14 @@ function forgetItem(destDir, itemName) {
   return write(destDir, m);
 }
 
-// Convenience used by every caller: resolve an item at the destination, reusing
-// what the manifest can vouch for, then persist the refreshed table. Returns
-// { hash, reused, hashed } or null when the tree could not be read.
-function hashItemUsingManifest(destDir, itemName, hashOne, hashRecords, filter) {
-  const root = path.join(destDir, itemName);
-  const res = resolveRecords(root, hashOne, cacheFor(destDir, itemName), filter);
-  if (!res) return null;
-  try { recordItem(destDir, itemName, res.live); } catch {}
-  return { hash: hashRecords(res.records), reused: res.reused, hashed: res.hashed };
-}
-
 module.exports = {
   MANIFEST_NAME,
   MANIFEST_VERSION,
   MTIME_TOLERANCE_MS,
   manifestPath,
-  resolveRecords,
   cacheFor,
   read,
   write,
-  recordItem,
+  mergeItem,
   forgetItem,
-  hashItemUsingManifest,
 };
