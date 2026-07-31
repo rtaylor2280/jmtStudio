@@ -201,6 +201,12 @@ function el(id) {
   return els[id];
 }
 
+// NOTE: `isVersionSentinel` is a GLOBAL declared in index.html and used freely
+// here. Do NOT redeclare it — this file and index.html's inline script are both
+// classic scripts sharing one global lexical scope, so a `const`/`let` of that
+// name here is a SyntaxError that kills this whole file at parse time (and with
+// it every build-panel function). Cost that once, on 2026-07-29.
+
 // ── Init ───────────────────────────────────────────────
 async function initBuildPanel() {
   // Clean up any previous listeners
@@ -231,6 +237,10 @@ async function initBuildPanel() {
       _queuedOpenLogForSetup = false;
     }
   });
+
+  // Each installed tree's real ProffieOS version, so a connected board's report
+  // can be compared against it. Cheap (one small read per tree, cached in main).
+  loadOSVersionMap();
 
   // ArgumentName enum is loaded lazily — base color swatches don't need it
   // (those come from the styles file), and the legacy hardcoded table covers
@@ -439,6 +449,17 @@ async function doCompile() {
     ? await window.checkMassStorageSafety(selectedUsb, 'compile')
     : true;
   if (!_sdCompile) return; // Cancel from the SD guard
+
+  // Voicepack preflight: on OS8 the prop can require a voicepack with no user
+  // opt-in, and a preset that lists no shared folder announces "voice pack not
+  // found" on every switch to it. Config-only check; see the block above
+  // window.checkVoicepackDeclared in index.html for the traced mechanism.
+  // Sits here for the same reason the SD guard does — "Add ;common" edits the
+  // config, so it must run before the dirty check to be offered for saving.
+  const _vpkCompile = window.checkVoicepackDeclared
+    ? await window.checkVoicepackDeclared()
+    : true;
+  if (!_vpkCompile) return; // Cancel from the voicepack gate
 
   // Dirty checks — prompt the user instead of auto-saving. Config first (Save As is
   // offered since the user may want to compile a copy at a new path), then Style
@@ -807,6 +828,7 @@ function applyDetectedBoard(port) {
   window.updateSnIndicator?.();
   setStatus('port', 'ok', `Proffieboard on ${port.path}`);
   updateCompileButton();
+  probeBoardOSVersion(port);
   if (selectedFqbn) { cacheCheckPending = true; checkCacheForConfig(); }
 }
 
@@ -816,6 +838,7 @@ function clearDetectedBoard() {
   updateBoardDisplay('');
   window.updateSnIndicator?.();
   updateCompileButton();
+  forgetBoardOSVersion();
 }
 
 function onPortChange(e) {
@@ -923,6 +946,11 @@ function onBuildStatus({ type, ok, needsProffieOS, message }) {
       const item = document.getElementById(`bp-status-${t}-item`);
       if (item) item.style.display = showSecondary ? '' : 'none';
     });
+    // The status has already narrowed this to a single possible action, so offer
+    // it instead of describing it. The row is otherwise empty here for exactly
+    // that reason — the other three indicators just got hidden.
+    const getBtn = document.getElementById('bp-btn-get-proffieos');
+    if (getBtn) getBtn.style.display = (ok && needsProffieOS) ? '' : 'none';
   } else if (type === 'compile') {
     if (ok === null) {
       setStatus('compile', 'pending', message);
@@ -1003,6 +1031,9 @@ function onBuildDone({ type, ok, error, aborted, retriable, needsDfuDriver, sour
     window._isFlashing = false;
     stopFlashTimer();
     resumeSerialAfterFlash();
+    // Whatever we knew about the board's ProffieOS is now about the firmware we
+    // just replaced. Drop it so the re-enumerated board is asked again.
+    forgetBoardOSVersion();
     if (!ok) {
       // Auto-recovery: touch reset succeeded and the board IS in DFU, but the WinUSB
       // driver isn't bound on this USB instance. Switch to DFU mode and run the driver
@@ -1932,25 +1963,90 @@ function wireSerialMonitor() {
 }
 
 // ── UI helpers ─────────────────────────────────────────
+
+// Single source of truth for whether Compile can run, and — the part that was
+// missing — WHY it can't. Compile has six independent preconditions and only one
+// of them (no file open) is evident from looking at the screen, so a greyed-out
+// button with no explanation leaves the user guessing. That is especially true
+// for a first-timer, whose most likely blocker is an OS version they never
+// noticed they had to choose.
+//
+// Both callers route through here deliberately. The two disabled-state
+// assignments had already drifted: setBusy() omitted the OS-version check that
+// updateCompileButton() applied, so whether Compile was enabled with no version
+// selected depended on which ran last.
+//
+// Order matters: most fundamental first, so the tooltip names the thing they
+// should deal with rather than whichever check happens to be listed first.
+function compileBlockedReason() {
+  if (isBusy)                   return 'A build or flash is already running.';
+  if (!window._currentFilePath) return 'Open a config file to compile.';
+  if (!selectedFqbn)            return 'Select your board.';
+  const version = document.getElementById('input-version')?.value;
+  if (!version || isVersionSentinel(version)) {
+    return 'Select a ProffieOS version. If the list is empty, download or import one first.';
+  }
+  if (cacheCheckPending)        return 'Checking for a cached build…';
+  if (compileSuccess)           return 'Already compiled. Flash it, or edit the config to build again.';
+  return null;
+}
+
+function applyCompileButtonState() {
+  const btn = el('bp-btn-compile');
+  if (!btn) return;
+  const reason = compileBlockedReason();
+  btn.disabled = !!reason;
+  btn.title    = reason || '';
+}
+
 function setBusy(busy) {
   isBusy = busy;
-  el('bp-btn-compile').disabled = busy || !selectedFqbn || compileSuccess || !window._currentFilePath || cacheCheckPending;
+  applyCompileButtonState();
   if (isDfuMode) {
     el('bp-btn-flash').disabled = busy || !compileSuccess;
   } else {
     el('bp-btn-flash').disabled = busy || !compileSuccess || !selectedPort || !selectedPortIsProffieboard;
   }
+  applyFlashTitle();
   el('bp-btn-refresh-ports').disabled = busy;
   el('bp-port-select').disabled = busy;
 }
 
 function updateCompileButton() {
-  const version = document.getElementById('input-version')?.value;
-  const hasVersion = version && version !== '__add_version__';
-  if (!isBusy) el('bp-btn-compile').disabled = !selectedFqbn || !hasVersion || compileSuccess || !window._currentFilePath || cacheCheckPending;
+  applyCompileButtonState();
 }
 window.updateCompileButton = updateCompileButton;
 window.getLastFlashedSN    = () => lastFlashedSN;
+
+// Why Flash is unavailable, in plain terms. Deliberately does NOT restructure the
+// enable logic the way compileBlockedReason() does: setFlashEnabled() takes an
+// explicit `enabled` flag that ten call sites pass on purpose, and collapsing that
+// into state-derived conditions would discard information. So this only explains
+// the button; it never decides it.
+//
+// Because the reason is derived from state rather than from the caller's flag,
+// there may be paths where the button is disabled and none of these match. In
+// that case we say NOTHING rather than something vague: a tooltip that does not
+// help teaches people not to hover, and then the useful ones go unread too.
+// It also makes the gap a diagnostic — a disabled Flash button with no tooltip
+// means a blocking condition this function does not model, which is a bug to
+// fix here rather than paper over.
+function flashBlockedReason() {
+  if (isBusy)         return 'A build or flash is already running.';
+  if (!compileSuccess) return 'Compile first, then flash.';
+  if (!isDfuMode) {
+    if (!selectedPort)              return 'Connect your Proffieboard and select its port.';
+    if (!selectedPortIsProffieboard) return 'The selected port is not a Proffieboard.';
+  }
+  return null;
+}
+
+// Call AFTER the disabled state has been set, so the tooltip matches reality.
+function applyFlashTitle() {
+  const btn = el('bp-btn-flash');
+  if (!btn) return;
+  btn.title = btn.disabled ? (flashBlockedReason() || '') : '';
+}
 
 function setFlashEnabled(enabled) {
   if (isDfuMode) {
@@ -1958,6 +2054,7 @@ function setFlashEnabled(enabled) {
   } else {
     el('bp-btn-flash').disabled = !enabled || !selectedPort || !selectedPortIsProffieboard || isBusy;
   }
+  applyFlashTitle();
 }
 
 function startCompileTimer() {
@@ -2525,6 +2622,98 @@ async function watchForSerialAfterDfu() {
   appendModalLog('Board not detected after restart. Try power cycling or reconnecting.', true);
 }
 
+// ── OS version signal ──────────────────────────────────
+// Two quiet honesty fixes, no nagging and no blocking:
+//   1. When the open config carries no @jmt:os_version marker, the app picks
+//      one on the user's behalf. Say so in the field's tooltip instead of
+//      leaving it silent. Nearly every config that isn't ours lacks the marker
+//      (vendor files, web Configurator output, a friend's config).
+//   2. When a connected board reports a DIFFERENT ProffieOS than the selected
+//      tree, mark the field and say what was detected. Information, not a
+//      command — upgrading on purpose is a normal thing to do, so compile is
+//      never blocked and manual selection always wins.
+// Everything here degrades to showing nothing: no board, no probe, no map, no
+// signal. It is additive to a flow that already works.
+
+let _osVersionMap    = null;   // folderName → "v8.10", from each tree's own .ino
+let _boardOSVersion  = null;   // what the connected board reported, or null
+let _probedSN        = null;   // board we already asked; don't re-probe per poll
+
+// Whether the open config declared a version lives on window, not here: this
+// file is injected at the end of boot, so a config restored before that would
+// have had its answer dropped by a setter that did not exist yet.
+// index.html owns the value; we only read it.
+
+async function loadOSVersionMap() {
+  try {
+    const r = await window.electronAPI?.getOSVersionMap?.();
+    if (r?.ok) _osVersionMap = r.map;
+  } catch { _osVersionMap = null; }
+  applyOSVersionSignal();
+}
+
+// Asks the board what it is running. Fire-and-forget: a failure to answer is a
+// non-event, because this only ever adds information.
+async function probeBoardOSVersion(port) {
+  if (!port?.isProffieboard || !port.path) return;
+  const sn = port.serialNumber || port.path;
+  if (sn === _probedSN) return;        // same board, already asked
+  if (isBusy || isDfuMode) return;     // the port belongs to the build right now
+  _probedSN = sn;
+  try {
+    const r = await window.electronAPI?.probeBoardVersion?.(port.path);
+    _boardOSVersion = r?.ok ? r.version : null;
+    // "The port was busy" is not "the board won't answer." Clear the marker so
+    // the next detection tries again, once the monitor or the flash is done.
+    // A timeout or a failed open does mean the board is not talking, and that
+    // one is left alone rather than retried on every port event.
+    if (r?.reason === 'monitor-open' || r?.reason === 'aborted') _probedSN = null;
+  } catch { _boardOSVersion = null; }
+  applyOSVersionSignal();
+}
+
+function forgetBoardOSVersion() {
+  _boardOSVersion = null;
+  _probedSN       = null;
+  applyOSVersionSignal();
+}
+
+// The ProffieOS version the currently selected tree actually is, read from its
+// source rather than its folder name (which is whatever the user typed).
+function selectedTreeOSVersion() {
+  const name = el('input-version')?.value;
+  if (!name || isVersionSentinel(name)) return null;
+  return _osVersionMap?.[name] || null;
+}
+
+function applyOSVersionSignal() {
+  const sel = el('input-version');
+  if (!sel) return;
+  const name    = sel.value;
+  const tree    = selectedTreeOSVersion();
+  const mismatch = !!(_boardOSVersion && tree && _boardOSVersion !== tree);
+
+  sel.classList.toggle('field-error', mismatch);
+
+  // The field is 160px and folder names truncate, so the name stays the first
+  // line of the tooltip — that was its only job before this signal existed.
+  const notes = [];
+  if (name && !isVersionSentinel(name)) notes.push(name);
+  if (mismatch) {
+    notes.push(`JMT Studio detected ProffieOS ${_boardOSVersion} on the connected board. This will build against ${tree}.`);
+  } else if (_boardOSVersion && !tree) {
+    // Tree version unreadable, but knowing what the board runs is still worth saying.
+    notes.push(`JMT Studio detected ProffieOS ${_boardOSVersion} on the connected board.`);
+  }
+  if (!window._configOsVersionDeclared && name && !isVersionSentinel(name)) {
+    notes.push('This config does not specify a ProffieOS version, so JMT Studio is using the one selected here. Change it if this config was written for a different version.');
+  }
+  sel.title = notes.join('\n\n');
+}
+
+window.refreshOSVersionSignal = applyOSVersionSignal;
+window.reloadOSVersionMap     = loadOSVersionMap;
+
 // ── ProffieOS version ──────────────────────────────────
 function onOsVersionChange() {
   // IPC selectVersion is called by index.html's change handler.
@@ -2536,6 +2725,7 @@ function onOsVersionChange() {
   }
   cacheCheckPending = true;
   updateCompileButton();
+  applyOSVersionSignal();
   checkCacheForConfig('OS version changed — recompile needed');
   // Drop the previously-loaded ArgumentName slot map so the next lazy load
   // (when the user opens Advanced) pulls the new version's enum. Don't refetch
@@ -2587,11 +2777,13 @@ window.resetToolchainStatus     = () => {
   // accurate message, secondary indicators hidden (they can't be acted on
   // until a ProffieOS version is imported/downloaded, so they'd just be
   // visual noise).
-  setStatus('toolchain', 'error', 'No ProffieOS versions found. Please import or download a version first.');
+  setStatus('toolchain', 'error', 'No ProffieOS installed.');
   ['port', 'compile', 'flash'].forEach(t => {
     const item = document.getElementById(`bp-status-${t}-item`);
     if (item) item.style.display = 'none';
   });
+  const getBtn = document.getElementById('bp-btn-get-proffieos');
+  if (getBtn) getBtn.style.display = '';
   updateCompileButton();
 };
 window.checkCacheForConfig      = checkCacheForConfig;

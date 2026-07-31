@@ -21,6 +21,7 @@ const STYLES_FILENAME  = 'my_styles.h';
 // ── Version state ──────────────────────────────────────
 let _selectedVersion = null;
 const _hashCache = new Map(); // versionName → hash string
+const _osVersionCache = new Map(); // versionName → "v8.10" | null
 
 // ── Path helpers ───────────────────────────────────────
 
@@ -78,6 +79,36 @@ function listVersions() {
 function getVersionSourcePath(versionName) {
   const resolved = _resolveVersionFolder(versionName);
   return resolved ? path.join(resolved.folderPath, 'ProffieOS') : path.join(getUserVersionsPath(), versionName, 'ProffieOS');
+}
+
+// ── Reported OS version ────────────────────────────────
+
+/**
+ * The ProffieOS version a tree actually IS, read from its own source rather
+ * than inferred from the folder name. Folder names are whatever the user typed
+ * ("Test ProffieOS 8.10 (copy)"); this is the string the firmware reports over
+ * serial, so it is the only value that can be compared against a live board.
+ *
+ * Returns "v8.10" style, or null if the line is missing (a hand-edited or
+ * partial tree). Cached — an installed tree's version never changes.
+ */
+function getVersionOSVersion(versionName) {
+  if (_osVersionCache.has(versionName)) return _osVersionCache.get(versionName);
+  let found = null;
+  try {
+    const ino = path.join(getVersionSourcePath(versionName), 'ProffieOS.ino');
+    const m = fs.readFileSync(ino, 'utf8').match(/^const\s+char\s+version\s*\[\s*\]\s*=\s*"([^"]+)"/m);
+    if (m) found = m[1].trim();
+  } catch { /* unreadable tree → null, caller degrades */ }
+  _osVersionCache.set(versionName, found);
+  return found;
+}
+
+// { versionName → "v8.10" | null } for every installed tree.
+function getOSVersionMap() {
+  const map = {};
+  for (const name of listVersions()) map[name] = getVersionOSVersion(name);
+  return map;
 }
 
 // ── Version selection ──────────────────────────────────
@@ -746,6 +777,8 @@ function getResourcesPath() {
 
 module.exports = {
   listVersions,
+  getVersionOSVersion,
+  getOSVersionMap,
   getSelectedVersion,
   setSelectedVersion,
   hashVersion,

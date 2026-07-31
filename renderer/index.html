@@ -108,6 +108,8 @@
   html.light-mode .build-btn-compile:not(:disabled):hover { background: #d8e6ff; }
   html.light-mode .build-btn-flash                { background: #e8f5e8; color: #1a5a1a; border-color: #a0d0a0; }
   html.light-mode .build-btn-flash:not(:disabled):hover   { background: #d8f0d8; }
+  html.light-mode #bp-btn-get-proffieos           { background: #e8f0fe; color: #1a4a9a; border-color: #b0c8f0; }
+  html.light-mode #bp-btn-get-proffieos:hover     { background: #d8e6ff; }
 
   /* ── Config banner — light mode ── */
   html.light-mode #config-banner  { background: #f0f8f0; border-bottom-color: #c0d8c0; }
@@ -648,6 +650,25 @@
      second row; they SHARE the space. The port dropdown also shrinks (below)
      before it comes to truncation. */
   .bp-status-text { color: var(--c-text-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+
+  /* Blue: the .btn-blue palette, which is what this app actually uses for
+     acquiring something (Open, Import Version, Create Style Library, Link JMT
+     Add-ons) and what the dropdown's own Download/Import rows use. Green here
+     means save/write (Save, Save As), not fetch. Sized to the status row rather
+     than the toolbar so it sits with the message it answers. */
+  #bp-btn-get-proffieos {
+    padding: 3px 10px;
+    background: #1a2a3a;
+    color: #6af;
+    border: 1px solid #2a3a5a;
+    border-radius: 4px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  #bp-btn-get-proffieos:hover { background: #1e3348; }
 
   /* ── Empty state ── */
   #empty-state {
@@ -4319,6 +4340,10 @@
       <div class="bp-status-dot bp-status-pending" id="bp-status-toolchain-dot"></div>
       <span class="bp-status-text" id="bp-status-toolchain-text">Toolchain</span>
     </div>
+    <!-- Shown only when no ProffieOS is installed. The status beside it already
+         states that this is the sole remaining action, so the action belongs
+         here rather than as a sentence pointing at another tab. -->
+    <button id="bp-btn-get-proffieos" style="display:none" title="Download an official ProffieOS release from GitHub, or import a folder you already have.">&#8595; Get ProffieOS</button>
     <div class="bp-status-item" id="bp-status-port-item">
       <div class="bp-status-dot bp-status-pending" id="bp-status-port-dot"></div>
       <span class="bp-status-text" id="bp-status-port-text">Port</span>
@@ -5241,16 +5266,18 @@
   <div class="modal sf-voicepack-modal">
     <button class="modal-btn-close" id="sf-voicepack-close" title="Close">&#10005;</button>
     <h2>Download Voicepack</h2>
-    <p class="sf-voicepack-help">Voice prompts used by ProffieOS for menu narration and Edit Mode. Pick a language and variant, preview the voice, then install.</p>
+    <p class="sf-voicepack-help">Voice prompts used by ProffieOS for menu narration and Edit Mode. This is what goes in your <strong>common folder</strong>. Pick a language and variant, preview the voice, then install.</p>
 
     <div class="sf-voicepack-row">
       <label class="sf-voicepack-label">Version:</label>
       <div class="sf-voicepack-toggle">
-        <button class="sf-voicepack-toggle-btn" id="sf-voicepack-v1" data-version="v1" title="Original ProffieOS voicepack from hubbe.net. Covers basic saber operation. V2 adds menu narration for OS 8 features on top of everything V1 has, so V2 is the better default unless you have a specific reason to want the original recordings.">V1</button>
-        <button class="sf-voicepack-toggle-btn active" id="sf-voicepack-v2" data-version="v2" title="Updated voicepack with menu narration for OS 8 features (color adjustment menu, multi-preset reorder, style copy/paste). Available in the same languages as V1.">V2</button>
+        <button class="sf-voicepack-toggle-btn" id="sf-voicepack-v1" data-version="v1" title="The original ProffieOS voicepack from hubbe.net. ProffieOS 8 reads it as version 1, and most OS 8 props (including Fett263 and BC) require version 2 — so on OS 8 a V1 pack makes the saber announce &quot;error in voice pack&quot; every time you change preset. Choose V1 for ProffieOS 7, or if you specifically want the original recordings.">V1</button>
+        <button class="sf-voicepack-toggle-btn active" id="sf-voicepack-v2" data-version="v2" title="What ProffieOS 8 expects. Adds menu narration for OS 8 features (color adjustment menu, multi-preset reorder, style copy/paste) and is fully backward compatible with V1, so it also works on ProffieOS 7. Same languages as V1.">V2</button>
         <button class="sf-voicepack-toggle-btn" id="sf-voicepack-more" data-version="more" title="Community-made character voicepacks and other external sources.">More</button>
       </div>
     </div>
+
+    <p class="sf-voicepack-help" id="sf-voicepack-version-note" style="margin-top:2px">V2 is backwards compatible with V1, and some ProffieOS 8 props require it. On those, a V1 pack makes the saber announce &ldquo;error in voice pack&rdquo; on every preset change.</p>
 
     <div class="sf-voicepack-row" id="sf-voicepack-language-row">
       <label class="sf-voicepack-label" for="sf-voicepack-language">Language:</label>
@@ -5268,7 +5295,7 @@
       <div class="sf-voicepack-more-item">
         <div class="sf-voicepack-more-name">Additional Voicepacks &mdash; Brian Conner (NoSloppy)</div>
         <div class="sf-voicepack-more-desc">60+ character voicepacks (Vader, Yoda, GLaDOS, K.I.T.T., HK-47, many more) plus the V2 update of the official defaults. Free, donations welcome.</div>
-        <a class="sf-voicepack-more-link" href="#" data-href="https://crucible.hubbe.net/t/additional-voicepacks/4227/257">The Crucible &rarr; Additional Voicepacks</a>
+        <a class="sf-voicepack-more-link" href="#" data-href="https://crucible.hubbe.net/t/additional-voicepacks/4227">The Crucible &rarr; Additional Voicepacks</a>
       </div>
       <div class="sf-voicepack-more-item">
         <div class="sf-voicepack-more-name">Darkwolf Sabers &mdash; Sound Board Voice Packs</div>
@@ -5291,8 +5318,9 @@
     <p class="sf-voicepack-attribution">
       Voice prompts created by Brian Conner (NoSloppy). Released under
       <a href="#" id="sf-voicepack-cc-link" data-href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>.
-      Downloads come directly from the original source on
-      <a href="#" id="sf-voicepack-source-link" data-href="https://fredrik.hubbe.net/lightsaber/sound/">fredrik.hubbe.net</a>.
+      <span id="sf-voicepack-source-note">Downloads come directly from the original source on
+      <a href="#" data-href="https://fredrik.hubbe.net/lightsaber/sound/">fredrik.hubbe.net</a>.</span>
+      JMT Studio never hosts or re-publishes the files.
     </p>
   </div>
 </div>
@@ -5748,6 +5776,15 @@
         <label>Version Name</label>
         <input type="text" id="dl-version-name" placeholder="e.g. ProffieOS 8.10" maxlength="64" autocomplete="off" />
       </div>
+    </div>
+    <!-- Mirrors the Import modal's link to Download. Deliberately OUTSIDE
+         dl-releases-body so it survives a failed release fetch: offline, or
+         GitHub unreachable, is exactly when "use the folder you already have"
+         is the answer, and that is the moment the rest of this modal is
+         useless. It also keeps the import route visible to anyone who was
+         never after a download in the first place. -->
+    <div style="margin-top:8px;">
+      <button id="dl-switch-to-import" style="background:none;border:none;color:var(--jmt-blue);font-size:0.75rem;cursor:pointer;padding:0;">&#8593; Import a ProffieOS folder you already have</button>
     </div>
     <div id="dl-version-error" style="color:#e44;font-size:0.82rem;min-height:1.2em;margin-top:4px;"></div>
     <div id="dl-progress-wrap" style="display:none;margin-top:10px;">
@@ -6623,6 +6660,276 @@ window.checkMassStorageSafety = async function (usbMode, stage) {
   return false;
 };
 
+// ── Voicepack preflight (compile gate) ─────────────────
+// ProffieOS 8 added a voicepack VERSION REQUIREMENT that the user never opts
+// into. Traced against 7.15 and 8.10 source on 2026-07-30:
+//
+//   * The PROP registers it, not the OS core and not the config. Every call
+//     site lives in props/: prop_base.h (when MENU_SPEC_TEMPLATE IS defined),
+//     saber_fett263_buttons.h and saber_BC_buttons.h (when it is NOT), and
+//     blaster_BC_buttons.h (unconditionally). Both branches of that #ifndef
+//     lead to require_version, so on fett263 and BC there is no configuration
+//     that avoids it. 7.15 has none of this machinery at all, so moving a
+//     config from 7.15 to 8.10 gains the requirement with nothing in the
+//     config having changed.
+//   * CheckVersion() then re-runs on EVERY font directory change and searches
+//     ONLY that preset's font path. So the failure is PER PRESET: one whose
+//     path reaches a voicepack is quiet, one that does not announces "voice
+//     pack not found" every time you switch to it. The message means "this
+//     preset cannot see a voicepack", not "this saber has none".
+//
+// Scope, deliberately small (Ryan cut it twice on 2026-07-30, both correctly):
+//   * CONFIG ONLY. We never inspect the SD card or the sound font library. At
+//     compile time we cannot see the card, and an unverifiable warning is noise.
+//     The card reminder is a courtesy line INSIDE this dialog, never its own check.
+//   * No "remember my choice", no expiry, no Settings undo. There is exactly one
+//     legitimate reason to ignore (the voicepack lives inside the font folder),
+//     it is rare, and that person knows why they are clicking Ignore.
+//   * Never match the literal string "common". A shared folder can be named
+//     anything; 4 configs in a 245-config wild sample use "MC".
+
+// Comment stripper with a real state machine. A regex pass gets this wrong on
+// decorative banners like //*********, whose "/*" substring reads as a comment
+// open and blanks every real line up to the next "*/". That exact bug cost a
+// night of false positives in the lint harness.
+function _vpkStripComments(src) {
+  let out = '', i = 0; const n = src.length;
+  while (i < n) {
+    const c = src[i], d = src[i + 1];
+    if (c === '/' && d === '/') { while (i < n && src[i] !== '\n') i++; continue; }
+    if (c === '/' && d === '*') {
+      i += 2;
+      while (i < n && !(src[i] === '*' && src[i + 1] === '/')) { if (src[i] === '\n') out += '\n'; i++; }
+      i += 2; continue;
+    }
+    if (c === '"' || c === "'") {
+      const q = c; out += src[i++];
+      while (i < n && src[i] !== q) { if (src[i] === '\\' && i + 1 < n) out += src[i++]; out += src[i++]; }
+      if (i < n) out += src[i++];
+      continue;
+    }
+    out += src[i++];
+  }
+  return out;
+}
+
+// Keep only the lines a preprocessor would keep, evaluating ONLY the symbols we
+// can read from the config. Any other condition keeps BOTH branches live, so an
+// init behind an unknown #if still counts. Conservative on purpose: a missed
+// requirement is a saber that talks at you, a spurious one is a dismissible dialog.
+function _vpkLiveText(src, defines) {
+  const KNOWN = new Set(['MENU_SPEC_TEMPLATE', 'MOUNT_SD_SETTING']);
+  const stack = [];
+  const live = () => stack.every(f => f.live);
+  const out = [];
+  for (const raw of _vpkStripComments(src).split('\n')) {
+    const m = raw.match(/^\s*#\s*(ifdef|ifndef|if|else|elif|endif)\b\s*([A-Za-z_]\w*)?/);
+    if (m) {
+      const kw = m[1], sym = m[2];
+      if (kw === 'ifdef' || kw === 'ifndef' || kw === 'if') {
+        let known = false, val = true;
+        if ((kw === 'ifdef' || kw === 'ifndef') && sym && KNOWN.has(sym)) {
+          known = true;
+          val = (kw === 'ifdef') ? defines.has(sym) : !defines.has(sym);
+        }
+        stack.push({ live: val, known });
+      } else if (kw === 'else') {
+        const f = stack[stack.length - 1];
+        if (f) f.live = f.known ? !f.live : true;
+      } else if (kw === 'elif') {
+        const f = stack[stack.length - 1];
+        if (f) { f.live = true; f.known = false; }
+      } else if (kw === 'endif') {
+        stack.pop();
+      }
+      continue;
+    }
+    if (live()) out.push(raw);
+  }
+  return out.join('\n');
+}
+
+// The three spellings of "register a voicepack requirement". The macro form
+// (sound_library_v2.init) is the one a symbol search for SoundLibrary::init
+// misses — that miss cost a whole investigation on 2026-07-30.
+const _VPK_INIT_RE = /(?:sound_library_v2|sound_library_)\s*\.\s*init\s*\(\s*\)|SoundLibrary\s*::\s*init\s*\(\s*\)/;
+
+function _vpkConfigDefines(text) {
+  const set = new Set();
+  for (const m of _vpkStripComments(text).matchAll(/^[ \t]*#[ \t]*define[ \t]+([A-Za-z_]\w*)/gm)) set.add(m[1]);
+  return set;
+}
+
+// The prop headers named inside #ifdef CONFIG_PROP.
+function _vpkPropIncludes(text) {
+  const src = _vpkStripComments(text);
+  const out = [];
+  const blocks = /#\s*ifdef\s+CONFIG_PROP([\s\S]*?)#\s*endif/g;
+  let b;
+  while ((b = blocks.exec(src))) {
+    for (const i of b[1].matchAll(/#\s*include\s+"([^"]+)"/g)) out.push(i[1]);
+  }
+  return out;
+}
+
+// Does the prop this config selects register a voicepack requirement?
+// Returns true / false / null (could not tell — stay silent).
+// We follow the include chain rather than matching prop NAMES, because a user
+// can derive their own prop: Ryan's jmt_fett263_wrapper.h extends
+// SaberFett263Buttons and chains Setup(), so a name list would miss his own config.
+// Known limit, accepted: a derived prop that overrides Setup() WITHOUT chaining
+// would escape this, and text alone cannot tell.
+async function _vpkPropRequiresVoicepack(text) {
+  const versionName = document.getElementById('input-version')?.value?.trim() || '';
+  if (!versionName) return null;
+  // The select carries a placeholder when nothing is chosen; treat it as unknown
+  // rather than trying to read files out of a version that does not exist.
+  try { if (typeof isVersionSentinel === 'function' && isVersionSentinel(versionName)) return null; } catch {}
+  const queue = _vpkPropIncludes(text).map(p => p.split('/').pop()).filter(Boolean);
+  if (!queue.length) return null;                       // no prop declared
+  const defines = _vpkConfigDefines(text);
+  const seen = new Set();
+  while (queue.length && seen.size < 16) {
+    const file = queue.shift();
+    if (!file || seen.has(file)) continue;
+    seen.add(file);
+    let res = null;
+    try { res = await window.electronAPI?.readVersionFile?.(versionName, `ProffieOS/props/${file}`); } catch {}
+    if (!res || !res.ok || !res.content) continue;
+    const liveSrc = _vpkLiveText(res.content, defines);
+    if (_VPK_INIT_RE.test(liveSrc)) return true;
+    // Only chase further headers inside props/ — every init call site lives there,
+    // and it keeps the walk bounded.
+    for (const i of liveSrc.matchAll(/#\s*include\s+"([^"]+)"/g)) {
+      const inc = i[1];
+      if (!inc.includes('/') || /(^|\/)props\//.test(inc)) queue.push(inc.split('/').pop());
+    }
+  }
+  return false;
+}
+
+// Exposed because the Sound Fonts view lives in a different IIFE and needs the
+// same determination when deciding what a NEWLY added preset should carry.
+// The alias MUST NOT reuse the function's own name: a top-level function
+// declaration is already a property of window, so `window.X = t => X(t)`
+// overwrites the declaration and the arrow then calls itself forever.
+// (Shipped that exact bug for four minutes on 2026-07-30.)
+window.__vpkRequiresVoicepack = (text) => _vpkPropRequiresVoicepack(text);
+
+// A preset needs at least one path element beyond the font itself. Name-agnostic
+// and count-agnostic, so it holds for "MC", for a nested "balvenos/common", and
+// for a per-preset dark/light split.
+function _vpkScanPresets(text) {
+  const missing = [], sharedNames = new Set();
+  try {
+    const result = presetParser.parsePresets(text);
+    for (const arr of (result?.arrays || [])) {
+      for (const p of (arr.presets || [])) {
+        const font = String(p?.font ?? '').trim();
+        const raw  = font.split(';').map(s => s.trim());
+        // No font at all is a different (bigger) problem than a missing shared folder,
+        // and "add ;common" would not be a repair for it. This also covers a freshly
+        // added preset seeded as ";common" — it has the folder, it just has no font yet.
+        if (!raw[0]) continue;
+        const parts = raw.filter(Boolean);
+        parts.slice(1).forEach(n => sharedNames.add(n));
+        if (parts.length < 2) {
+          missing.push({
+            index: p.index,
+            font: parts[0] || font,
+            label: p.displayName || '',
+            range: p.fontRange,
+            line: p.startLine,
+          });
+        }
+      }
+    }
+  } catch {}
+  return { missing, sharedNames: [...sharedNames] };
+}
+
+const _vpkEsc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// Compile gate. Returns true (proceed) or false (cancel), matching the SD guard.
+// COMPILE ONLY, deliberately. The flash path is a second door (a cache-restored
+// build can reach doFlash without passing through doCompile), and the SD guard
+// covers both because its failure mode corrupts a card. This one's failure mode
+// is a saber that says "voice pack not found" — annoying, not damaging — and
+// repairing at flash time would mean a recompile chain for no proportionate gain.
+// If that trade ever changes, doFlash in buildPanel.js is where the second gate goes.
+window.checkVoicepackDeclared = async function () {
+  const text = editor ? editor.getValue() : '';
+  if (!text) return true;
+
+  // Cheap synchronous scan first; only touch the filesystem if something is missing.
+  const { missing, sharedNames } = _vpkScanPresets(text);
+  if (!missing.length) return true;
+
+  const requires = await _vpkPropRequiresVoicepack(text);
+  if (requires !== true) return true;                   // no requirement, or unknown
+
+  // Repair uses a name the config already uses when that is unambiguous, so a
+  // card organised around "MC" does not get a stray ";common" bolted on.
+  const repairName = sharedNames.length === 1 ? sharedNames[0] : 'common';
+
+  const shown = missing.slice(0, 8).map(p => {
+    const label = p.label ? ` &mdash; ${_vpkEsc(p.label)}` : '';
+    return `<li>Preset ${p.index}${label} &nbsp;<code>${_vpkEsc(p.font)}</code></li>`;
+  }).join('');
+  const more = missing.length > 8 ? `<li>&hellip;and ${missing.length - 8} more</li>` : '';
+
+  const one = missing.length === 1;
+
+  // The card reminder is a courtesy, not a check — we cannot see the card from
+  // here. Word it from the names the config already uses so it stays correct for
+  // a "MC" card or a per-preset dark/light split.
+  const cardLine = sharedNames.length
+    ? `Your other presets use ${sharedNames.map(n => `<code>${_vpkEsc(n)}</code>`).join(' and ')}. ` +
+      `${sharedNames.length > 1 ? 'Those folders' : 'That folder'} must exist at the root of your SD card.`
+    : `A <code>${_vpkEsc(repairName)}</code> folder must exist at the root of your SD card.`;
+
+  // The button names the action on the thing we control (the config). The exact
+  // string we will write is stated here instead, so nothing is hidden and no
+  // button implies we are creating something on the card.
+  const fixLine = `Fixing ${one ? 'it' : 'them'} adds <code>;${_vpkEsc(repairName)}</code> to ` +
+                  `${one ? 'that preset' : 'those presets'}.`;
+
+  const res = await promptConfirm({
+    title: 'Voicepack Folder Not Listed',
+    messageHtml:
+      `Your prop requires a voicepack on ProffieOS 8, and ${one ? 'this preset does' : `${missing.length} presets do`} ` +
+      `not list a shared folder:<br><ul style="margin:8px 0 8px 18px">${shown}${more}</ul>` +
+      `Unless ${one ? 'that font contains' : 'those fonts contain'} their own copy of the voicepack, the saber will ` +
+      `announce <strong>&ldquo;voice pack not found&rdquo;</strong> every time you switch to ${one ? 'it' : 'them'}.<br><br>` +
+      `${fixLine} ${cardLine}`,
+    confirmText: one ? 'Fix 1 preset' : `Fix ${missing.length} presets`,
+    confirmKind: 'save',
+    middleText:  'Ignore',
+    cancelText:  'Cancel',
+  });
+
+  if (res === 'cancel') return false;
+  if (res === 'middle') return true;                    // the font-carries-its-own case
+
+  // Repair as ONE batch rather than a loop of _commitFieldEdit calls. Monaco
+  // applies a multi-edit batch against the pre-edit coordinate space, so no
+  // range goes stale and no reverse-ordering is needed — and the whole repair
+  // is a single undo step, which matters when it rewrites 58 presets at once.
+  // Ranges are 1-based lines / 0-based columns from the parser, and cover the
+  // quotes, which is why the replacement text re-adds them.
+  const edits = missing.filter(p => p.range).map(p => ({
+    range: {
+      startLineNumber: p.range.startLine, startColumn: p.range.startCol + 1,
+      endLineNumber:   p.range.endLine,   endColumn:   p.range.endCol + 1,
+    },
+    text: `"${p.font};${repairName}"`,
+  }));
+  if (edits.length) {
+    try { window._atomicEdit(editor, 'voicepack-repair', edits); } catch {}
+  }
+  return true;
+};
+
 // ── Window title ───────────────────────────────────────
 function updateWindowTitle() {
   if (!isElectron) return;
@@ -6837,6 +7144,15 @@ document.getElementById('input-version').addEventListener('change', () => {
   if (verSel.value === '__add_version__') {
     verSel.value = verSel.dataset.lastValue || '';
     openImportVersionModal();
+    return;
+  }
+  // Download sits beside Import because "import" assumes a copy already on disk,
+  // and someone who has never installed ProffieOS has nothing to point at.
+  // Downloading in the app is the least-friction path, so it belongs here rather
+  // than only inside the Import modal or on another tab.
+  if (verSel.value === '__download_version__') {
+    verSel.value = verSel.dataset.lastValue || '';
+    openDownloadVersionModal();
     return;
   }
   verSel.dataset.lastValue = verSel.value;
@@ -7181,6 +7497,12 @@ function loadContent(rawContent, filePath) {
     versionSel.value = resolvedVersion;
     if (window.electronAPI) window.electronAPI.selectVersion(resolvedVersion);
   }
+  // No marker (or one naming a version they don't have) means the selection
+  // showing is one the app chose, not one the config asked for. Say so in the
+  // field's tooltip rather than leaving the choice silent. Written to window
+  // because buildPanel.js may not be loaded yet on a boot-restored config.
+  window._configOsVersionDeclared = !!resolvedVersion;
+  window.refreshOSVersionSignal?.();
   metaCreated  = created  || null;
   metaUpdated  = updated  || null;
   metaCompiled        = compiled || null;
@@ -7227,7 +7549,11 @@ function clearMeta() {
   document.getElementById('input-board').dispatchEvent(new Event('change'));
   metaCreated = metaUpdated = metaCompiled = metaCompileDuration = metaFlashed = metaBoardSN = metaPort = metaConfigId = null;
   baselineBoard = baselineVersion = baselineUsb = null;
-  // input-version stays at current selection (persistent compile setting)
+  // input-version stays at current selection (persistent compile setting) —
+  // which means a new config is, by definition, using a version it never asked
+  // for. Same tooltip as a marker-less imported config.
+  window._configOsVersionDeclared = false;
+  window.refreshOSVersionSignal?.();
   ['input-board','input-version'].forEach(id =>
     document.getElementById(id).classList.remove('field-changed'));
   document.getElementById('input-desc').classList.remove('field-warn');
@@ -8790,6 +9116,14 @@ function closeRecentDropdown() {
 
 // ── ProffieOS version dropdown helpers ─────────────────
 
+// The dropdown carries action rows alongside the real versions. Neither is a
+// version, so every reader of the selection discounts them through here — one
+// list, so adding another action row cannot half-land across the two files.
+function isVersionSentinel(v) {
+  return v === '__add_version__' || v === '__download_version__';
+}
+window.isVersionSentinel = isVersionSentinel;
+
 function populateVersionSelect(sel, versions, selectedName) {
   sel.innerHTML = '';
   if (!versions.length) {
@@ -8804,12 +9138,19 @@ function populateVersionSelect(sel, versions, selectedName) {
     opt.value = opt.textContent = name;
     sel.appendChild(opt);
   });
-  // Sentinel option
+  // Sentinel options. Download comes FIRST when nothing is installed, because
+  // that is the only one a person in that state can actually use — "import"
+  // presumes a ProffieOS folder already on their disk.
+  const dl = document.createElement('option');
+  dl.value = '__download_version__';
+  dl.textContent = '↓ Download version...';
+  dl.style.color = 'var(--jmt-blue)';
   const sep = document.createElement('option');
   sep.value = '__add_version__';
   sep.textContent = '＋ Import version...';
   sep.style.color = 'var(--jmt-blue)';
-  sel.appendChild(sep);
+  if (!versions.length) { sel.appendChild(dl); sel.appendChild(sep); }
+  else                  { sel.appendChild(sep); sel.appendChild(dl); }
 
   if (selectedName && versions.includes(selectedName)) {
     sel.value = selectedName;
@@ -8820,6 +9161,10 @@ function populateVersionSelect(sel, versions, selectedName) {
   }
   sel.dataset.lastValue = sel.value;
   sel.title = sel.value || '';
+  // The installed set just changed, so the folder→OS-version map is stale and
+  // the signal has to be recomputed against the new selection. Reloading also
+  // rewrites the title, which is why it comes after the line above.
+  if (sel.id === 'input-version') window.reloadOSVersionMap?.();
   // Any path that sets the dropdown value (boot, refresh, import success) should
   // also refresh the JMT-installed state for the now-selected version.
   window._refreshSelectedVersionJmtState?.();
@@ -8834,7 +9179,7 @@ async function _refreshVersionDropdown(preferName) {
   // If a real version is selected, reinit toolchain — dropdown value may not
   // have changed (no change event fires) even though the version was just installed
   const name = verSel.value;
-  if (name && name !== '__add_version__' && window.electronAPI) {
+  if (name && !isVersionSentinel(name) && window.electronAPI) {
     window.electronAPI.selectVersion(name);
     window.electronAPI.initToolchain();
   }
@@ -8956,6 +9301,11 @@ document.getElementById('import-cancel-btn').addEventListener('click', closeImpo
 document.getElementById('import-switch-to-download').addEventListener('click', () => {
   closeImportVersionModal();
   openDownloadVersionModal();
+});
+
+document.getElementById('dl-switch-to-import')?.addEventListener('click', () => {
+  document.getElementById('modal-download-version').classList.remove('active');
+  openImportVersionModal();
 });
 
 document.getElementById('import-confirm-btn').addEventListener('click', async () => {
@@ -10680,6 +11030,9 @@ async function openDownloadVersionModal() {
 }
 
 document.getElementById('btn-vp-download')?.addEventListener('click', openDownloadVersionModal);
+document.getElementById('bp-btn-get-proffieos')?.addEventListener('click', openDownloadVersionModal);
+// buildPanel.js is injected after this script, so it reaches the modal here.
+window.openDownloadVersionModal = openDownloadVersionModal;
 
 document.getElementById('dl-cancel-btn').addEventListener('click', () => {
   document.getElementById('modal-download-version').classList.remove('active');
@@ -10739,6 +11092,17 @@ document.getElementById('dl-confirm-btn').addEventListener('click', async () => 
   const verSel   = document.getElementById('input-version');
   const currentSel = verSel.value || verSel.dataset.lastValue || '';
   populateVersionSelect(verSel, versions, currentSel);
+  // Selecting the dropdown value in code fires no change event, so the toolchain
+  // is re-initialised here. It used to correct itself on the next tab switch,
+  // which was harmless when downloading only ever happened ON the OS Versions
+  // tab — but "Get ProffieOS" is offered from the config view now, where the
+  // user has no reason to leave, and the red no-ProffieOS bar would just sit there.
+  const nowSelected = verSel.value;
+  if (nowSelected && !isVersionSentinel(nowSelected) && window.electronAPI) {
+    window.electronAPI.selectVersion(nowSelected);
+    window.electronAPI.initToolchain();
+  }
+  window.updateCompileButton?.();
   if (window.vpRefresh) {
     await window.vpRefresh();
     if (result.versionName && window.vpSelectVersion) window.vpSelectVersion(result.versionName);
@@ -11059,7 +11423,7 @@ const _PROP_INCLUDE_RE         = /^\s*#include\s+"[^"]*\/props\/[^"]+\.h"/;
 async function _refreshSelectedVersionJmtState() {
   const verSel = document.getElementById('input-version');
   const name = verSel?.value;
-  if (!name || name === '__add_version__') {
+  if (!name || isVersionSentinel(name)) {
     _selectedVersionJmtVersion = null;
     _updateJmtLinkBtn();
     return;
@@ -15023,7 +15387,7 @@ async function switchTab(name) {
 
   if (name === 'config') {
     const v = document.getElementById('input-version')?.value;
-    if (!v || v === '__add_version__') {
+    if (!v || isVersionSentinel(v)) {
       window.resetToolchainStatus?.();
     } else if (!window.getToolchainReady?.()) {
       window.electronAPI?.initToolchain();
@@ -17230,7 +17594,7 @@ require(['vs/editor/editor.main'], function () {
       // shell.openExternal (wired in the picker's data-href handler).
       const _SF_VP_HUBBE_URL = 'https://fredrik.hubbe.net/lightsaber/sound/';
       const _SF_VP_DROPBOX_URL = 'https://www.dropbox.com/scl/fo/zojbb933bcysjll16dz6h/ADyeV3F3TxUAiCic9BGit9Q?rlkey=4z7pt3vmj6v2cuenniyfyz57i';
-      const _SF_VP_CRUCIBLE_URL = 'https://crucible.hubbe.net/t/additional-voicepacks/4227/257';
+      const _SF_VP_CRUCIBLE_URL = 'https://crucible.hubbe.net/t/additional-voicepacks/4227';
       const _sfVpShowFallback = (version) => {
         const el = document.getElementById('sf-voicepack-fallback');
         if (!el) return;
@@ -17433,6 +17797,10 @@ require(['vs/editor/editor.main'], function () {
         const modal = document.getElementById('modal-sf-voicepack-picker');
         if (!modal) return;
         modal.classList.add('active');
+        // The footer's source line is written per tab, and the modal opens on V2
+        // rather than the V1 wording baked into the markup. Set it on open, or the
+        // first thing anyone reads is the one case it does not describe.
+        _sfVpSourceNote(_sfVpSelectedVersion);
         _sfVpSetStatus('Loading catalog…');
         // Fetch the catalog once per session; the catalog is small and
         // doesn't change frequently. Cached for the rest of the session.
@@ -17463,7 +17831,10 @@ require(['vs/editor/editor.main'], function () {
       // sample, install) vs the "More" panel. The More tab shows only
       // external-source link cards; no catalog controls apply.
       const _sfVpToggleCatalogControls = (visible) => {
-        const ids = ['sf-voicepack-language-row'];
+        // The V1-vs-V2 note goes with the catalog controls: on the More tab the
+        // user is not choosing between versions, so it is answering a question
+        // nobody is asking.
+        const ids = ['sf-voicepack-language-row', 'sf-voicepack-version-note'];
         for (const id of ids) {
           const el = document.getElementById(id);
           if (el) el.style.display = visible ? '' : 'none';
@@ -17491,9 +17862,37 @@ require(['vs/editor/editor.main'], function () {
       // resets language/variant selection if the current language isn't
       // available in the new version. Stops any sample playback in
       // progress since the audio belongs to the previous version.
+      // The attribution footer used to claim every tab downloaded from
+      // fredrik.hubbe.net, which is only true of V1. V2 installs open Brian's
+      // Dropbox folder (we never host or redistribute), and the More tab's
+      // sources are the links in its own panel. Say what is actually happening
+      // per tab rather than one sentence that is wrong two thirds of the time.
+      const _sfVpSourceNote = (version) => {
+        const el = document.getElementById('sf-voicepack-source-note');
+        if (!el) return;
+        const link = (url, label) => `<a href="#" data-href="${url}">${label}</a>`;
+        if (version === 'v2') {
+          el.innerHTML = `Downloads come directly from the original source in ` +
+                         `${link(_SF_VP_DROPBOX_URL, "NoSloppy's Dropbox folder")}.`;
+        } else if (version === 'more') {
+          el.innerHTML = `Downloads come from the sources linked above, hosted by their authors.`;
+        } else {
+          el.innerHTML = `Downloads come directly from the original source on ` +
+                         `${link(_SF_VP_HUBBE_URL, 'fredrik.hubbe.net')}.`;
+        }
+        el.querySelectorAll('a[data-href]').forEach(a => {
+          a.onclick = (e) => {
+            e.preventDefault();
+            const url = a.getAttribute('data-href');
+            if (url) window.electronAPI?.openExternal?.(url);
+          };
+        });
+      };
+
       const _sfVpSetVersion = (version) => {
         if (version !== 'v1' && version !== 'v2' && version !== 'more') return;
         if (version === _sfVpSelectedVersion) return;
+        _sfVpSourceNote(version);
         _sfVpStopSample();
         _sfVpSelectedVersion = version;
         document.querySelectorAll('#modal-sf-voicepack-picker .sf-voicepack-toggle-btn').forEach(btn => {
@@ -26740,13 +27139,28 @@ require(['vs/editor/editor.main'], function () {
         //   config DOESN'T ref ;common AND 1 common  → 3-button ask (default uuid)
         //   config DOESN'T ref ;common AND 2+ commons → dropdown forces an explicit pick
         //   config DOESN'T ref ;common AND no commons → don't include, no ask
+        //   prop REQUIRES a voicepack (OS8 + fett263 / BC) → treated exactly like a
+        //     ";common" reference, because the folder is not optional there. Ryan,
+        //     2026-07-30: "auto included when required by prop in addition to what it
+        //     already does." Same determination the compile-time preflight makes.
         const wantsCommon = [..._sfLastInUseFonts].some(n => n.toLowerCase() === 'common');
+        // A config can need the folder without any preset naming it yet — that is the
+        // day-one shape, and asking "include it?" as a courtesy would be the wrong
+        // question when the answer is compulsory.
+        let propRequiresCommon = false;
+        try {
+          if (typeof window.__vpkRequiresVoicepack === 'function' &&
+              typeof editor !== 'undefined' && editor) {
+            propRequiresCommon = (await window.__vpkRequiresVoicepack(editor.getValue())) === true;
+          }
+        } catch {}
+        const needsCommon = wantsCommon || propRequiresCommon;
         const hasStarred = !!_sfStarredCommonUuid;
         let includeCommon = false;
         // Tracks which common to include for this Save. Defaults to the
         // starred uuid; the multi-common dropdown can override it.
         let _sfBulkSaveCommonOverride = null;
-        if (wantsCommon) {
+        if (needsCommon) {
           // Honor the common the OPEN CONFIG selected (@jmt:common, tracked
           // as window._sfActiveCommonForConfig) before the global starred
           // default. Shipping the starred common when the config asked for a
@@ -26779,14 +27193,17 @@ require(['vs/editor/editor.main'], function () {
           } else {
             const ok = await promptConfirm({
               title: 'No common folder available',
-              message: 'The open config references a "common" folder, but no common folder is imported in your library.\nSave will only include the selected fonts. Continue?',
+              message: (wantsCommon
+                ? 'The open config references a "common" folder'
+                : 'Your prop requires a voicepack on ProffieOS 8')
+                + ', but no common folder is imported in your library.\nSave will only include the selected fonts. Continue?',
               confirmText: 'Continue',
               confirmKind: 'primary',
               cancelText: 'Cancel',
             });
             if (!ok) return false;
           }
-        } else if (!wantsCommon && hasStarred) {
+        } else if (hasStarred) {
           // Config doesn't ask for it — but the user has one available.
           // Single-common case: simple 3-button (Cancel / Skip / Include).
           // Multi-common case: dropdown forces an explicit pick so we
@@ -26877,12 +27294,29 @@ require(['vs/editor/editor.main'], function () {
         // common, and the UI keys by string so a collision here is benign —
         // the user just sees one row labeled "common" representing the
         // common folder's overwrite choice.
+        // Set when the destination already holds the SAME pack. Not a conflict and
+        // not worth a prompt: re-copying 28 MB onto a slow card to change nothing
+        // is a cost with no benefit, and asking old-or-new about a folder whose
+        // only difference is the marker we wrote last time is a question with no
+        // meaning. (Ryan, 2026-07-30.)
+        let commonAlreadyCurrent = false;
         if (includeCommon) {
           try {
-            const r = await window.electronAPI.commonFolderExistsAt({ destDir });
-            if (r && r.ok && r.exists && !conflicts.includes('common')) conflicts.push('common');
+            const cu = _sfBulkSaveCommonOverride || _sfStarredCommonUuid;
+            const r = await window.electronAPI.commonMatchesAt({ uuid: cu, destDir });
+            if (r && r.ok && r.exists) {
+              // Decided on CONTENT, not on the marker. A marker states what we
+              // wrote last time; the folder can have been edited by hand since,
+              // and a card written by anything other than this app has no marker
+              // at all yet may hold exactly the same pack. Both cases were wrong
+              // before. Anything we cannot read comes back not-identical, so an
+              // unknown always asks rather than silently skipping.
+              commonAlreadyCurrent = !!r.identical;
+              if (!commonAlreadyCurrent && !conflicts.includes('common')) conflicts.push('common');
+            }
           } catch {}
         }
+        if (commonAlreadyCurrent) includeCommon = false;
         if (includeTracks) {
           try {
             const r = await window.electronAPI.sharedTracksFolderExistsAt({ destDir });
@@ -26917,6 +27351,17 @@ require(['vs/editor/editor.main'], function () {
             hideCancel: true,
           });
           return false;
+        }
+        // The card already holds this exact pack, so there is nothing to copy —
+        // but refresh the marker so the folder can still say what it is. It may
+        // have been deleted by hand, the pack may have been renamed, or the card
+        // may have been written by something that never wrote one. Additive,
+        // inert to ProffieOS, and it makes the next compare cheap.
+        // Deliberately placed AFTER every cancel and bail point: a pre-scan must
+        // never write to the user's card.
+        if (commonAlreadyCurrent) {
+          const cu = _sfBulkSaveCommonOverride || _sfStarredCommonUuid;
+          try { await window.electronAPI.writeCommonMarker({ uuid: cu, destDir }); } catch {}
         }
         const failures = [];
         const results = { copied: 0, skipped: 0, replaced: 0 };
@@ -27773,9 +28218,71 @@ require(['vs/editor/editor.main'], function () {
       // Falls back to the same _addFirstPreset / _insertFirstEntryIntoArray
       // helpers when the active array is empty or absent, with a
       // post-rebuild patch to inject the font name.
-      const _sfAddPresetWithFont = (fontName) => {
+      // Should a newly added font carry ";common"? Default is YES whenever there is any
+      // evidence a common folder is in play, because forgetting it is a silent runtime
+      // failure: shared sounds go missing, and on ProffieOS 8 the menu system announces
+      // "Voice pack not found" on EVERY preset change. Nothing in the build catches it -
+      // the config compiles perfectly - so the cost of omitting it lands on the user at
+      // boot, on the bench, after a flash. Ryan: "I got burned multiple times on common
+      // folder... we need it to be default on."
+      // TWO independent reasons a new preset needs one (Ryan's rule, 2026-07-30):
+      //   A. Some other preset in this config already names a shared folder. Then match
+      //      it, on ANY OS and ANY prop — a config where some presets have it and others
+      //      do not is the duality.h shape (41 of 46 declared, 5 did not), and the odd
+      //      ones out lose the shared sounds.
+      //   B. The prop requires a voicepack, even when no preset names one yet. Same
+      //      determination the compile-time preflight makes, reused rather than re-derived.
+      // DELIBERATELY NOT A FACTOR: whether a common folder is selected in the sound font
+      // library. That is a library concept, the library is optional, and what we write
+      // into someone's config must never depend on it. (Ryan, 2026-07-30: "defining a
+      // common folder is only about the SFL... preflight doesn't care if defined.")
+      // Returns the folder NAME to append, or null for none.
+      const _sfSharedFolderForNewPreset = async () => {
+        let text = '';
+        try { text = (typeof editor !== 'undefined' && editor) ? editor.getValue() : ''; } catch {}
+        if (!text) return null;
+
+        // A — match the config's own convention, whatever it happens to be called.
+        try {
+          if (typeof presetParser !== 'undefined' && presetParser) {
+            const r = presetParser.parsePresets(text);
+            const counts = new Map();
+            for (const arr of (r?.arrays || [])) {
+              for (const p of (arr.presets || [])) {
+                if (!p || !p.font) continue;
+                const parts = String(p.font).split(';').map(s => s.trim()).filter(Boolean);
+                for (const n of parts.slice(1)) counts.set(n, (counts.get(n) || 0) + 1);
+              }
+            }
+            // Most-used wins, so a single typo'd outlier (";comn" beside fifty ";common")
+            // cannot hijack the convention for every preset added afterwards.
+            if (counts.size) return [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+          }
+        } catch {}
+
+        // B — nothing to learn from, so ask whether the prop demands one.
+        try {
+          if (typeof window.__vpkRequiresVoicepack === 'function' &&
+              await window.__vpkRequiresVoicepack(text) === true) return 'common';
+        } catch {}
+        return null;
+      };
+
+      // Exposed for the Config Manager's own preset-creation paths (the + button and
+      // the two cold paths), so a preset born there follows the same rule as one born
+      // here. Distinct property name on purpose — see the note by __vpkRequiresVoicepack.
+      window.__vpkSharedFolderForNewPreset = () => _sfSharedFolderForNewPreset();
+
+      // Async only because the shared-folder decision may read the prop source. The
+      // parse below happens AFTER the await, so it always reads current editor state.
+      const _sfAddPresetWithFont = async (fontName) => {
         if (typeof editor === 'undefined' || !editor) return;
         if (typeof presetParser === 'undefined' || !presetParser) return;
+        // The font PATH gets the shared folder; the display NAME must not, or the preset
+        // ends up called "Grand_Sentinel;common" in Edit Mode.
+        const shared = await _sfSharedFolderForNewPreset();
+        const already = String(fontName).split(';').map(s => s.trim()).filter(Boolean).length > 1;
+        const fontPath = (shared && !already) ? `${fontName};${shared}` : fontName;
         const result = presetParser.parsePresets(editor.getValue());
         const activeIdx = (typeof _activeArrayIndex !== 'undefined' && result.arrays[_activeArrayIndex]) ? _activeArrayIndex : 0;
         const arr = result.arrays[activeIdx];
@@ -27843,7 +28350,7 @@ require(['vs/editor/editor.main'], function () {
         const leadIn = prevHasTrailingBlank ? [] : [''];
         const newText = [
           ...leadIn,
-          `${indent}{ "${fontName}", "",`,
+          `${indent}{ "${fontPath}", "",`,
           ...styleLines,
           '',
           `${inner}"${fontName}" },`,
@@ -27862,15 +28369,23 @@ require(['vs/editor/editor.main'], function () {
       // ship a generic placeholder name + empty font. After the rebuild
       // settles, find the newly-created preset and overwrite both fields
       // with the font name we wanted to seed.
-      const _sfPatchFreshPresetFont = (arrayIdx, presetIdx, fontName) => {
+      const _sfPatchFreshPresetFont = async (arrayIdx, presetIdx, fontName) => {
         try {
+          // Resolve the shared folder BEFORE parsing, so the ranges used below are read
+          // after the await rather than across it.
+          const shared = await _sfSharedFolderForNewPreset();
           const r = presetParser.parsePresets(editor.getValue());
           const arr = r.arrays[arrayIdx];
           if (!arr || !arr.presets[presetIdx]) return;
           const p = arr.presets[presetIdx];
+          // The shared folder belongs on the font path, never on the display name. This
+          // is the cold path (first preset in an empty config), so there is nothing to
+          // learn from and the decision falls entirely to whether the prop requires one.
+          const already = String(fontName).split(';').map(s => s.trim()).filter(Boolean).length > 1;
+          const fontPath = (shared && !already) ? `${fontName};${shared}` : fontName;
           // window._commitFieldEdit because this runs in the SF view's
           // IIFE and _commitFieldEdit is scoped to the Config Manager's.
-          if (p.fontRange && window._commitFieldEdit) window._commitFieldEdit(p.fontRange, fontName);
+          if (p.fontRange && window._commitFieldEdit) window._commitFieldEdit(p.fontRange, fontPath);
           if (p.displayNameRange && window._commitFieldEdit) window._commitFieldEdit(p.displayNameRange, fontName);
         } catch {}
       };
@@ -31061,7 +31576,8 @@ require(['vs/editor/editor.main'], function () {
 
     // Create a new `Preset presetsN[]` bank (next available name) pre-populated with one
     // `Preset 1` entry. Switch to it, open the sidecar (if collapsed), enter rename mode.
-    function _addPresetBank() {
+    async function _addPresetBank() {
+      const seed = await _newPresetFontSeed();
       if (!editor) return;
       const result  = presetParser.parsePresets(editor.getValue());
       const arrays  = result.arrays;
@@ -31075,7 +31591,7 @@ require(['vs/editor/editor.main'], function () {
       const styleLines = [];
       for (let i = 0; i < bladeCount; i++) styleLines.push(`${indent}StylePtr<Black>(),`);
       const entryText = [
-        `{ "", "",`,
+        `{ "${seed}", "",`,
         ...styleLines,
         '',
         `${indent}"Preset 1" },`,
@@ -32125,7 +32641,11 @@ require(['vs/editor/editor.main'], function () {
       // shape for the font + track fields; both want play-button state
       // re-evaluation on programmatic value changes.
       let commit = (newName) => {
-        const full = cb.checked ? (newName ? newName + ';common' : 'common') : (newName || '');
+        // An empty name with the box ticked writes ";common", not "common": the leading
+        // semicolon means 'no font yet, plus the shared folder'. Without it the preset
+        // reads as though COMMON were the font, and the compile check would flag it as
+        // having no shared folder at all. (Ryan, 2026-07-30.)
+        const full = cb.checked ? (newName ? newName + ';common' : ';common') : (newName || '');
         _commitFieldEdit(_getFreshFieldRange('font') || preset.fontRange, full);
         // "Last used style" auto-populate. When the user picks a font
         // that has a linkedStyleLibraryEntry pointing at a style still
@@ -32354,7 +32874,8 @@ require(['vs/editor/editor.main'], function () {
       }
       cb.addEventListener('change', () => {
         const path = comboInput.value.trim();
-        const full = cb.checked ? (path ? path + ';common' : 'common') : path;
+        // Same leading-semicolon rule as the font field above.
+        const full = cb.checked ? (path ? path + ';common' : ';common') : path;
         _commitFieldEdit(_getFreshFieldRange('font') || preset.fontRange, full);
         _scheduleRebuild();
       });
@@ -36361,19 +36882,37 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
     }
 
     // ── Add preset ─────────────────────────────────────────────────────────────
-    function _addPreset(arrayIndex, insertAtIndex) {
+    // A preset created here should carry the same shared folder one created from the
+    // Sound Fonts grid would. Returns ";<name>" to seed into the empty font slot, or "".
+    // Ryan, 2026-07-30: "if I add another preset using the visual options button, then it
+    // also adds it there. so we don't have to solve default always true but instead base
+    // it on this same logic."
+    async function _newPresetFontSeed() {
+      try {
+        if (typeof window.__vpkSharedFolderForNewPreset === 'function') {
+          const name = await window.__vpkSharedFolderForNewPreset();
+          if (name) return `;${name}`;
+        }
+      } catch {}
+      return '';
+    }
+
+    async function _addPreset(arrayIndex, insertAtIndex) {
       if (!editor) return;
+      // Resolved BEFORE the parse below, so every line number this function uses is
+      // read after the last await rather than across one.
+      const seed = await _newPresetFontSeed();
       const result = presetParser.parsePresets(editor.getValue());
       const arr = result.arrays[arrayIndex];
       if (!arr) {
         // No array at this index — create a fresh scaffold (handles "no banks at all")
-        _addFirstPreset(result.bladeCount || 1);
+        await _addFirstPreset(result.bladeCount || 1);
         return;
       }
       if (!arr.presets.length) {
         // Active array exists but is empty — insert the first entry into THIS specific array
         // (not into whatever Preset block appears first in source)
-        _insertFirstEntryIntoArray(arr, arrayIndex, result.bladeCount || 1);
+        await _insertFirstEntryIntoArray(arr, arrayIndex, result.bladeCount || 1);
         return;
       }
 
@@ -36398,7 +36937,7 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
       const styleLines = [];
       for (let i = 0; i < bladeCount; i++) styleLines.push(`${inner}StylePtr<Black>(),`);
       const newText = [
-        `${indent}{ "", "",`,
+        `${indent}{ "${seed}", "",`,
         ...styleLines,
         '',
         `${inner}"Preset ${presetNum}" },`,
@@ -36445,12 +36984,13 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
     // ── Insert the first entry into a specific (empty) Preset array ───────────
     // Used when the active bank exists but has no entries — picks THAT bank specifically
     // rather than falling back to a regex match (which would find the first Preset block).
-    function _insertFirstEntryIntoArray(arr, arrayIndex, bladeCount) {
+    async function _insertFirstEntryIntoArray(arr, arrayIndex, bladeCount) {
+      const seed = await _newPresetFontSeed();
       const indent = '  ';
       const styleLines = [];
       for (let i = 0; i < bladeCount; i++) styleLines.push(`${indent}StylePtr<Black>(),`);
       const entryText = [
-        `{ "", "",`,
+        `{ "${seed}", "",`,
         ...styleLines,
         '',
         `${indent}"Preset 1" },`,
@@ -36505,13 +37045,14 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
     }
 
     // ── Add first preset when no Preset[] block exists or it's empty ───────────
-    function _addFirstPreset(bladeCount) {
+    async function _addFirstPreset(bladeCount) {
+      const seed = await _newPresetFontSeed();
       if (!editor) return;
       const indent = '  ';
       const styleLines = [];
       for (let i = 0; i < bladeCount; i++) styleLines.push(`${indent}StylePtr<Black>(),`);
       const entryText = [
-        `{ "", "",`,
+        `{ "${seed}", "",`,
         ...styleLines,
         '',
         `${indent}"Preset 1" },`,

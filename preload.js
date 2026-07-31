@@ -69,6 +69,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   closeSerial: ()                      => ipcRenderer.invoke('serial:close'),
   writeSerial: (text)                  => ipcRenderer.invoke('serial:write',  { text }),
   isSerialOpen: ()                     => ipcRenderer.invoke('serial:isOpen'),
+  probeBoardVersion: (port)            => ipcRenderer.invoke('serial:probeVersion', { port }),
   onSerialData: (cb) => {
     const handler = (_, data) => cb(data);
     ipcRenderer.on('serial:data', handler);
@@ -100,6 +101,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ── ProffieOS versions ───────────────────────────────────
   listProffieVersions: ()                        => ipcRenderer.invoke('proffieOS:listVersions'),
   getSelectedVersion:  ()                        => ipcRenderer.invoke('proffieOS:getSelected'),
+  getOSVersionMap:     ()                        => ipcRenderer.invoke('proffieOS:osVersionMap'),
   getArgumentNames:    (versionName)             => ipcRenderer.invoke('proffieOS:getArgumentNames', versionName),
   selectVersion:       (name)                    => ipcRenderer.invoke('proffieOS:selectVersion', name),
   selectFolder:        ()                        => ipcRenderer.invoke('dialog:selectFolder'),
@@ -335,6 +337,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   moveCommonFiles:       (params)     => ipcRenderer.invoke('common:moveFiles', params),
   readCommonFileBytes:   (params)     => ipcRenderer.invoke('common:readFileBytes', params),
   commonFolderExistsAt:  (params)     => ipcRenderer.invoke('common:folderExistsAt', params),
+  commonMatchesAt:       (params)     => ipcRenderer.invoke('common:matchesAt', params),
+  writeCommonMarker:     (params)     => ipcRenderer.invoke('common:writeMarker', params),
   exportCommonToFolder:  (params)     => ipcRenderer.invoke('common:exportToFolder', params),
   resolveCommonContentDirty: (params) => ipcRenderer.invoke('common:resolveContentDirty', params),
   setCommonGroup:        (params)     => ipcRenderer.invoke('common:setGroup', params),

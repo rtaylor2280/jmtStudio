@@ -374,7 +374,9 @@ ipcMain.handle('toolchain:initialize', async () => {
     // slot rather than a misleading green "Toolchain ready" while compile is
     // still gated. The renderer reads needsProffieOS to pick the right state.
     const msg = !result.ok            ? result.error
-              : result.needsProffieOS ? 'No ProffieOS versions found. Please import or download a version first.'
+              // Kept short because the renderer puts a "Get ProffieOS" button
+              // beside it; repeating the instruction in words would be noise.
+              : result.needsProffieOS ? 'No ProffieOS installed.'
                                       : 'Toolchain ready';
     win.webContents.send('build:status', {
       type: 'toolchain',
@@ -424,6 +426,7 @@ ipcMain.handle('toolchain:benchCompile', async (_, { configContent, fqbn, buildO
 
 ipcMain.handle('toolchain:flash', async (_, { port, fqbn, expectedSN }) => {
   const log = makeLogger();
+  await _abortVersionProbe?.();  // never let a version probe hold the port a flash needs
 
   if (win && !win.isDestroyed()) {
     win.webContents.send('build:status', { type: 'flash', ok: null, message: `Flashing on ${port}...` });
@@ -1584,8 +1587,41 @@ ipcMain.handle('common:readFileBytes', (_, { uuid, subPath } = {}) => {
   } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
-ipcMain.handle('common:folderExistsAt', (_, { destDir } = {}) => {
-  try { return { ok: true, exists: soundFontCommon.commonFolderExistsAt(destDir) }; }
+ipcMain.handle('common:folderExistsAt', (_, { destDir, targetName } = {}) => {
+  try {
+    const exists = soundFontCommon.commonFolderExistsAt(destDir, targetName);
+    // Marker comes back with it so the renderer can NAME what is on the card.
+    // It is display only — never the basis for skipping a copy. See
+    // commonMatchesAt for why.
+    return { ok: true, exists, marker: exists ? soundFontCommon.readCommonMarkerAt(destDir, targetName) : null };
+  }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+// Byte-comparison of the destination's common folder against a library common.
+// Reads content; the marker is not consulted. Sync inside a handler because the
+// cheap file-count/byte pre-check short-circuits the expensive path in exactly
+// the case that would be slow (a genuinely different folder).
+ipcMain.handle('common:matchesAt', (_, { uuid, destDir, targetName } = {}) => {
+  try {
+    return soundFontCommon.commonMatchesAt(app.getPath('userData'), uuid, destDir, targetName);
+  }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+// Refresh the marker at a destination WITHOUT copying anything. Used when the
+// card already holds this exact pack: there is nothing to write but the folder
+// should still be able to say what it is (the marker may have been deleted, the
+// pack renamed, or the card written by something that never wrote one). The
+// renderer passes the destination root; the target subfolder is resolved here
+// so path construction stays on this side.
+ipcMain.handle('common:writeMarker', (_, { uuid, destDir, targetName } = {}) => {
+  try {
+    if (!uuid || !destDir) return { ok: false, error: 'Missing uuid or destDir' };
+    const target = path.join(destDir, targetName || 'common');
+    if (!fs.existsSync(target)) return { ok: false, error: 'Destination folder not found' };
+    return soundFontCommon.writeCommonReadme(app.getPath('userData'), uuid, target);
+  }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
@@ -2875,6 +2911,7 @@ function _closeSerialMonitor() {
 
 ipcMain.handle('serial:open', async (_, { port, baudRate }) => {
   if (!port) return { ok: false, error: 'No port specified' };
+  await _abortVersionProbe?.();  // the monitor owns the port; a probe must not block it
   _closeSerialMonitor();
   try {
     const { SerialPort } = require('serialport');
@@ -2927,6 +2964,107 @@ ipcMain.handle('serial:isOpen', () => {
   return { ok: true, isOpen: !!(_serialMonitorPort && _serialMonitorPort.isOpen) };
 });
 
+/**
+ * Asks a connected board what ProffieOS it is running, via the firmware's own
+ * `version` command. Read-only and short-lived: open, ask, close.
+ *
+ * Deliberate limits:
+ *  - 115200 only. Opening a Proffieboard's CDC port at 1200 baud is the
+ *    bootloader-entry touch; probing must never risk knocking a board into DFU.
+ *  - If the Serial Monitor already owns the port we decline rather than fight
+ *    for it. Windows CDC is exclusive, and stealing it would also dump our
+ *    query into the user's monitor window.
+ *  - Every exit path closes the port, including the timeout.
+ *
+ * Never throws. A board that is busy, asleep, or flooding output just yields
+ * ok:false, and the caller shows nothing.
+ */
+// Set while a version probe holds a port. A flash needs that same port, and the
+// probe is never important enough to make one wait, let alone fail.
+let _abortVersionProbe = null;
+
+// Pulls the OS version out of a board's serial output. Exported for tests.
+//
+// Two accepted shapes, both deliberately narrow. ProffieOS answers `version`
+// with the version alone on one line, immediately followed by CONFIG_FILE —
+// so requiring that trailing `.h` line is what keeps a bare number from the
+// board's ordinary chatter (a `3.85` battery reading, a preset index) from
+// being mistaken for a version. The boot banner is accepted too, since a board
+// that just enumerated may print it before our command lands.
+function parseBoardVersion(buf) {
+  const banner = buf.match(/Welcome to ProffieOS\s+v?(\d+\.\d+[\w.\-]*)/i);
+  if (banner) return 'v' + banner[1];
+  const reply = buf.match(/^[ \t]*v?(\d+\.\d+[\w.\-]*)[ \t]*\r?\n[ \t]*\S*\.h[ \t]*\r?$/m);
+  if (reply) return 'v' + reply[1];
+  return null;
+}
+
+ipcMain.handle('serial:probeVersion', async (_, { port } = {}) => {
+  if (!port) return { ok: false, reason: 'no-port' };
+  if (_serialMonitorPort && _serialMonitorPort.isOpen) {
+    return { ok: false, reason: 'monitor-open' };
+  }
+
+  const { SerialPort } = require('serialport');
+  let sp = null;
+  // Resolves only once the port is genuinely released. Closing is asynchronous,
+  // so an abort that did not wait for this would hand a still-open port to
+  // whatever asked us to get out of the way.
+  const shut = () => {
+    if (!sp) return Promise.resolve();
+    const p = sp;
+    sp = null;
+    try { p.removeAllListeners(); } catch {}
+    return new Promise(res => {
+      try { p.isOpen ? p.close(() => res()) : res(); } catch { res(); }
+    });
+  };
+
+  try {
+    sp = new SerialPort({ path: port, baudRate: 115200, autoOpen: false });
+    await new Promise((res, rej) => sp.open(e => e ? rej(e) : res()));
+  } catch (e) {
+    await shut();
+    return { ok: false, reason: 'open-failed', error: e.message };
+  }
+
+  return await new Promise(resolve => {
+    let buf    = '';
+    let done   = false;
+    let closed = null;
+    const finish = (result) => {
+      if (done) return closed;
+      done = true;
+      clearTimeout(timer);
+      closed = shut();
+      _abortVersionProbe = null;
+      closed.then(() => resolve(result));
+      return closed;
+    };
+    // Returns a promise the caller awaits, so "stop using the port" means the
+    // port is actually free when it resolves.
+    _abortVersionProbe = () => finish({ ok: false, reason: 'aborted' });
+
+    sp.on('data', chunk => {
+      buf += chunk.toString('utf8');
+      const v = parseBoardVersion(buf);
+      if (v) return finish({ ok: true, version: v });
+      // A flooding board (charge-detect chatter, a serial-print loop) would grow
+      // this without bound. Keep a tail large enough to hold a whole reply.
+      if (buf.length > 64 * 1024) buf = buf.slice(-8192);
+    });
+    sp.on('error', e => finish({ ok: false, reason: 'error', error: e.message }));
+    sp.on('close', () => finish({ ok: false, reason: 'closed' }));
+
+    const timer = setTimeout(() => finish({ ok: false, reason: 'timeout' }), 2500);
+
+    // Leading newline clears any partial command the board may have buffered.
+    try { sp.write('\nversion\n'); } catch (e) {
+      finish({ ok: false, reason: 'write-failed', error: e.message });
+    }
+  });
+});
+
 // ── IPC: Favorites ─────────────────────────────────────
 ipcMain.handle('favorites:get', () => {
   const favs = Store.get('favorites') || [];
@@ -2968,6 +3106,10 @@ ipcMain.handle('proffieOS:listVersions', () => proffie.listVersions());
 ipcMain.handle('proffieOS:getSelected', () => ({
   name: proffie.getSelectedVersion()
 }));
+
+// { folderName → "v8.10" } read from each tree's own ProffieOS.ino, so it can be
+// compared against what a connected board reports over serial.
+ipcMain.handle('proffieOS:osVersionMap', () => ({ ok: true, map: proffie.getOSVersionMap() }));
 
 // Returns [{ name, comment, slot }] for the ArgumentName enum in the given version's
 // styles/edit_mode.h. Falls back to [] when the version / file / enum can't be parsed.
@@ -3464,6 +3606,7 @@ ipcMain.handle('dfu:ensureDriver', async () => {
 
 ipcMain.handle('dfu:flash', async () => {
   const log = makeLogger();
+  await _abortVersionProbe?.();  // never let a version probe hold the port a flash needs
 
   if (win && !win.isDestroyed()) {
     win.webContents.send('build:status', { type: 'flash', ok: null, message: 'Flashing via DFU...' });

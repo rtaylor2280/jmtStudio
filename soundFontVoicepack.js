@@ -4,21 +4,24 @@
 //   V1 — in-app download from hubbe.net (per-variant stable URLs).
 //        Sample = small ~84KB sibling .wav on hubbe.net. Install =
 //        full ~15MB zip from hubbe.net.
-//   V2 — preview-only in-app; install via external link to Brian's
-//        Dropbox folder. The V2 mmain.wav is byte-identical to V1's
+//   V2 — in-app download from per-variant Dropbox URLs. (This comment
+//        used to say "preview-only, install via external link"; that was
+//        true before the per-variant tokens landed and is not any more.
+//        English F and G are the only externals left, since they have no
+//        token — see installType below.) The V2 mmain.wav is byte-identical to V1's
 //        for every variant that exists in both (19 of 20), so the
 //        V2 sample reuses V1's sibling sample URL — no bundle fetch
 //        needed. English G is the one V2-only variant; its sample
 //        ships as a bundled file in renderer/assets/voicepacks/.
 //
-// Why V2 install goes external: NoSloppy distributes V2 only as a
-// single ~435MB Dropbox folder (no per-file URLs without auth). The
-// per-file content is CC BY 4.0 so we could legally redistribute,
-// but that means we'd either host the files ourselves or force a
-// 435MB download for users who want one ~10MB variant. Both worse
-// than just opening Brian's folder in the browser, letting the user
-// download the variant they want, and importing via the existing
-// "Pick .zip file…" flow.
+// Why we FETCH from his Dropbox rather than host copies: NoSloppy
+// publishes V2 as a single ~435MB folder. The content is CC BY 4.0 so
+// redistributing would be legal, but hosting our own copies means a
+// mirror that goes stale the moment he updates a pack, and a 435MB
+// download for someone who wants one ~10MB variant. Per-variant Dropbox
+// links avoid both: the user pulls the one variant they want, from him,
+// always current. English F and G have no per-variant link yet and still
+// redirect to the folder for a manual download + "Pick .zip file…" import.
 //
 // Attribution: all voicepacks are by Brian Conner (NoSloppy), released
 // under CC BY 4.0. Surfaced in the picker modal footer.

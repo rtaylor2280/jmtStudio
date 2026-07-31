@@ -181,8 +181,13 @@ function hashRecords(records) {
   return lineHash.digest('hex');
 }
 
-function hashItemDir(itemRoot) {
-  const records = collectFileRecords(itemRoot);
+// `filter` is optional and has the same contract as collectFileRecords':
+// filter(relPath) => truthy to INCLUDE. Needed so a caller can hash two trees
+// under the SAME rules when one of them carries files the other never will
+// (the common-folder card compare subtracts JMT Studio's own marker txt from
+// both sides). Absent, behavior is unchanged.
+function hashItemDir(itemRoot, filter) {
+  const records = collectFileRecords(itemRoot, null, filter);
   if (records === null) return null;
   return hashRecords(records);
 }
