@@ -571,7 +571,7 @@ async function doFlash() {
     //   exactly one Proffieboard -> unambiguous, adopt it and carry on
     //   none, or several         -> genuinely needs the user, so wait as before
     // Without this the flash never even reaches the toolchain, so the serial-matching
-    // there never gets a chance to help. (Ryan, 2026-07-26: unplugged one board, plugged
+    // there never gets a chance to help. (2026-07-26: unplugged one board, plugged
     // the other in, clicked Flash, and came back to a "Connect Board" prompt with a board
     // sitting right there.)
     let adopted = null;

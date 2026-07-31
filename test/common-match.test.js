@@ -5,7 +5,7 @@
 // their card is current. Most of the cases below exist to prove we do not take
 // a shortcut that could produce one.
 //
-// The rule under test (Ryan, 2026-07-31): a cached claim about a filesystem we
+// The rule under test (2026-07-31): a cached claim about a filesystem we
 // do not control may RAISE a question, never suppress one. So the marker file
 // is never consulted for the decision, and the cheap file-count/byte signal is
 // only ever trusted as a NEGATIVE.
@@ -90,7 +90,7 @@ const PACK = {
 }
 
 {
-  // Ryan's case, 2026-07-31: he deleted the marker by hand and the app then
+  // The case that broke this, 2026-07-31: the marker was deleted by hand and the app then
   // demanded a keep-or-replace decision about a folder that had not changed.
   const { userData, dest, cardDir } = setup(PACK, PACK);
   writeCommonReadme(userData, UUID, cardDir);

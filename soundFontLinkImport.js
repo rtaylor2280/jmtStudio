@@ -1,6 +1,6 @@
 // Sound Fonts — import a font directly from a purchase/receipt link.
 //
-// Design (Ryan, 2026-07-09): the user pastes the ONE link a vendor gave them
+// Design (2026-07-09): the user pastes the ONE link a vendor gave them
 // and the app peels it down to a font archive and downloads it, skipping the
 // download-then-upload dance. See local/backlog.txt ("Import a sound font
 // directly from a purchase/receipt link") for the full spec + vendor research.

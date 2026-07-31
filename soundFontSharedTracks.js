@@ -264,7 +264,7 @@ function planExport(userData, destDir, onFile = null) {
   return { ok: true, toAdd, unchanged, differing };
 }
 
-// ADDITIVE export. Ryan's call 2026-07-31: "always additive not replacing. so
+// ADDITIVE export. Deliberate call 2026-07-31: "always additive not replacing. so
 // existing same hash files stay and anything new gets added."
 //
 // NOTHING AT THE DESTINATION IS EVER DELETED. That is the guarantee, and it

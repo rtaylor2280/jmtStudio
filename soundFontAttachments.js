@@ -1,6 +1,6 @@
 // Sound Fonts — source attachments (receipts / proof-of-purchase / notes).
 //
-// Design (Ryan, 2026-07-09): attachments live in ONE central, content-addressed
+// Design (2026-07-09): attachments live in ONE central, content-addressed
 // store at userData/soundFonts/attachments/<sha256>/, NOT inside any source
 // folder. Sources LINK to attachments by id in their meta (`attachments: []`).
 // Consequences:

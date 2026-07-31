@@ -5,7 +5,7 @@
 // a constructed log is the only way to exercise them:
 //   - the stopped-short backstop (progress exists, stops < 100%, NO named error)
 //   - the error-preferring fallback (no interruption signature at all)
-// Everything else here is a real log captured from Ryan's board on 2026-07-26.
+// Everything else here is a real log captured from a board on 2026-07-26.
 //
 // Function body is mirrored from toolchain.js; requiring it would pull in electron.
 'use strict';

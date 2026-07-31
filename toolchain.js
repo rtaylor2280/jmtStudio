@@ -999,7 +999,7 @@ async function runDfuFlash(dfuPath, toolsDir, onLog, expectedSN) {
     // matches ANY device with those IDs, so dfu-util flashes whichever board happens to
     // be in the bootloader - not the one the user selected. The COM port only ever drove
     // the touch reset; it never constrained the target.
-    // Found 2026-07-26 by Ryan: he unplugged the board on COM12, plugged a DIFFERENT board
+    // Found 2026-07-26 by Note: he unplugged the board on COM12, plugged a DIFFERENT board
     // in, clicked Flash, and the log narrated COM12 while the firmware went to the board
     // that was actually present. Since 0483:df11 is the GENERIC STM32 bootloader ID, the
     // unconstrained form can also target a non-Proffieboard STM32 sitting in DFU.
@@ -1384,7 +1384,7 @@ function extractFlashError(raw) {
   // Matching only the first meant a late drop fell through to the tail below, and
   // because every non-progress line in a dfu-util run sits at the START (the status
   // handshake), "last 8 diagnostic lines" reliably returned the handshake - which
-  // tells the user nothing. Found by Ryan deliberately pulling USB at 52/62/78%.
+  // tells the user nothing. Found by deliberately pulling USB at 52/62/78%.
   // A completed flash always reaches 100%. So progress that exists and stops short IS
   // an interruption, whether or not dfu-util named one - which covers the deepest cuts,
   // where the only trace left in the tail is the status handshake from the top of the run.
@@ -1398,10 +1398,10 @@ function extractFlashError(raw) {
     // "Try Bootloader Mode (DFU)" (buildPanel.js:1996). An earlier draft said "use Flash
     // via DFU", which is not a control that exists anywhere in the app - naming a button
     // that is not there is the same wrong-advice failure this whole pass is about.
-    // The two tiers below are what Ryan actually hit on 2026-07-26: a board that leaves
+    // The two tiers below are what actually happened on 2026-07-26: a board that leaves
     // the port list is simply waiting in the bootloader, but a board that KEEPS its port
     // while refusing to flash is running incomplete firmware, and only BOOT+RESET moves it.
-    // KEEP THIS SHORT. The first draft ran five paragraphs and Ryan's verdict was fair:
+    // KEEP THIS SHORT. The first draft ran five paragraphs and the verdict was fair:
     // "this looks like a wall of text... not a good error if they have to read a book."
     // Someone reading this has a saber that will not flash; they need the state, the
     // reassurance, and ONE next action. Everything else is escalation and belongs below
@@ -1409,14 +1409,14 @@ function extractFlashError(raw) {
     // who wants it, and the full log is in Build Output either way.
     // Blank lines between the blocks, not just newlines. #bm-status is white-space:
     // pre-wrap, so \n\n renders as real separation - and without it four short
-    // sentences still read as one paragraph, which was Ryan's second note after the
+    // sentences still read as one paragraph, which was the second note after the
     // length fix: "no spacing between these paragraphs... still looks hard to read."
     // Each block answers one question: what happened, is my board OK, what do I do,
     // what if that fails.
     // THREE blocks: what happened, what to do, and the raw line for whoever wants it.
     // The BOOT+RESET escalation was dropped deliberately - _checkDfuOnEntry already shows
     // boot instructions when the board is not in DFU yet, so telling them here is telling
-    // them something they are about to be told. Ryan: "the still stuck part isn't needed
+    // them something they are about to be told. Note: "the still stuck part isn't needed
     // because it will be told them when they switch to bootloader mode. wasted text here."
     // No raw dfu-util line here. It is already in the log panel above, in red, and the
     // two surfaces have different jobs: the panel is the raw truth, this is the human

@@ -405,7 +405,7 @@ function matchCandidateAgainstLibrary(records, candidatePath, index, thresholds 
   return best;
 }
 
-// DIRECTION matters (Ryan, 2026-07-23): "already in your library" may only be
+// DIRECTION matters (2026-07-23): "already in your library" may only be
 // claimed when the library contains EVERYTHING the candidate has — character
 // sounds AND the customizable content (quotes/tracks/force). Identity runs on
 // core only (that's what makes recognition robust to personalization), but the
@@ -463,7 +463,7 @@ function verdictLabel(m) {
   return null;
 }
 
-// Checkbox tooltip — the teaching layer (Ryan, 2026-07-23): explains what
+// Checkbox tooltip — the teaching layer (2026-07-23): explains what
 // checking the box actually does GIVEN this match. Null when the label is null.
 function verdictTip(m) {
   if (!m || !m.bestMatch || m.lowConfidence) return null;
@@ -483,7 +483,7 @@ function verdictTip(m) {
 
 // Display bar for the variant note on review screens: below this containment
 // the engine still reports, but the UI stays silent — real-world calibration
-// (2026-07-23 self-test on Ryan's 210-entry library) showed 50-70% catches
+// (2026-07-23 self-test on a 210-entry library) showed 50-70% catches
 // same-maker DIFFERENT fonts (Father_ESB vs Father_ROTJ at 55%), where a
 // "possibly a different version" note would be wrong. 80%+ is where true
 // variants (color/ignition/style splits, bundle re-releases) actually live.

@@ -171,7 +171,7 @@ function _hasAnyWav(dir) {
 // voicepack.ini can already sit in there safely. Named after the pack so a plain
 // directory listing answers the question without opening anything.
 //
-// Written at EXPORT, into the destination, never into the library copy. Ryan
+// Written at EXPORT, into the destination, never into the library copy. That was
 // caught that on 2026-07-30 and he was right: storing it in files/ would pollute
 // the content hash, go stale on every add/delete, and need a backfill. Generated
 // fresh at export it is always true, and the library copy stays a pristine copy
@@ -865,7 +865,7 @@ function readCommonMarkerAt(destDir, targetName = 'common') {
 // the user believes it is current. So the rule, and it generalises past this
 // function: a cached claim about a filesystem we do not control may RAISE a
 // question, never suppress one. Skipping requires reading the bytes.
-// (Ryan, 2026-07-31 — found by deleting the marker, then sharpened to the real
+// (2026-07-31 — found by deleting the marker, then sharpened to the real
 // case: the folder can change underneath a marker that still looks current.)
 //
 // The marker's remaining job is to tell a HUMAN which pack this is, and to

@@ -1,7 +1,7 @@
 // Destination sync manifest — the hash of every file we wrote to an export
 // location, alongside the size and modified time it had there afterwards.
 //
-// THE SHAPE, and it is Ryan's (2026-07-31). Comparison is PER FILE, over only
+// THE SHAPE, and it is settled (2026-07-31). Comparison is PER FILE, over only
 // the files the library is about to write:
 //
 //   library hash (recorded at import, trusted)  vs  manifest hash (recorded here)

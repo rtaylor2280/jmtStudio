@@ -117,7 +117,7 @@ function findByHash(index, hash) {
 // defends against a file being hand-edited inside userData either. The
 // destination manifest does check mtime, because a card is genuinely foreign
 // and people do edit them. Different situations, different answers.
-// (Ryan, 2026-07-31.)
+// (2026-07-31.)
 function resolveHashes(userData) {
   const out = new Map();
   const index = ensureIndex(userData);

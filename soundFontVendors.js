@@ -11,7 +11,7 @@
 // { vendorId: null, vendor: null, vendorAutoDetected: false } on no match.
 
 const vendors = [
-  // JMT Sabers — the house brand. Ryan's own fonts carry a readme.txt that
+  // JMT Sabers — the house brand. the house fonts carry a readme.txt that
   // names "JMT Sabers"; the content match is specific enough to sit first
   // without false-matching any third-party vendor.
   {
@@ -86,7 +86,7 @@ const vendors = [
   // The next three vendors share a filename convention that's
   // self-identifying: "ReadMe - <VendorName> (Font Creator).txt". The
   // filename alone is the declaration — structuralAll file-existence
-  // check is enough. Verified against Ryan's archive: each pattern
+  // check is enough. Verified against the reference archive: each pattern
   // catches the right vendor with no overlap (DoubleAgent.zip ->
   // Mountain Sabers, Shadow Lord.zip -> Orlando Dove, The_Water_Saber.zip
   // -> Synthetic Epiphany). If a vendor outside this trio ever adopts
@@ -248,7 +248,7 @@ const vendors = [
       // helper files: 1.1-BlasterMode.zip, 1.1-The New Year Saber,
       // 1.2-lightsaber of the bells, etc. Pattern is narrow enough
       // (leading digit.digit followed by a separator) that other
-      // vendors don't accidentally match — checked against Ryan's full
+      // vendors don't accidentally match — checked against the full reference
       // collection.
       {
         type: 'sourceFilename',
@@ -383,7 +383,7 @@ const vendors = [
       // Pattern 3 (cheap): Greyscale ships a distinctive style helper
       // file inside most of their fonts (paid and free, with or without
       // a readme): exact filename `proffie_blade_style.txt`, anywhere in
-      // the archive tree. Verified against Ryan's archive: 7/7 known
+      // the archive tree. Verified against the reference archive: 7/7 known
       // Greyscale fonts with the standard filename include it
       // (Stitched, Skotos, Null, EngineGrip, Apocalypse, Decay,
       // Volatile), 6/6 known non-Greyscale fonts don't (Cere, KSith_Ghost,
@@ -402,7 +402,7 @@ const vendors = [
       // magnetic_blade_style.txt etc.) so the file-existence pattern
       // above misses them. We fall through to scanning every .txt file
       // in the archive for an authorial disclaimer phrase that is
-      // distinctive to Greyscale. Verified against Ryan's archive: 21/24
+      // distinctive to Greyscale. Verified against the reference archive: 21/24
       // known Greyscale fonts contain this exact sentence somewhere in
       // a .txt file; 0/11 non-Greyscale fonts contain it anywhere. The
       // 3 still-uncovered fonts (Coda, Defect, Masterless) need manual

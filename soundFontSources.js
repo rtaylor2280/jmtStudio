@@ -2071,7 +2071,7 @@ async function _dedupeInnerZipSource(userData, uuid, uuidDir, meta, records, byH
   }
   // The running total is denominated in DISK bytes, not raw content bytes: the
   // duplicates live inside a compressed archive, so raw trimmed content overstates
-  // what the file will actually shrink by (the TurboTax effect, Ryan 2026-07-23).
+  // what the file will actually shrink by (the TurboTax effect, 2026-07-23).
   // Scale by the archive's measured compression ratio; the close-out reports exact.
   let trimmedSoFar = 0;
   const contentBytes = records.reduce((s, r) => s + (r.size || 0), 0);
@@ -2104,7 +2104,7 @@ async function _dedupeInnerZipSource(userData, uuid, uuidDir, meta, records, byH
     const { canonDisk: fatCanon, cleanup } = await _extractCanonicalsToDisk(physical, canonicalByHash,
       { phase: 'reading', onProgress: prog });
     releaseFat = cleanup;
-    // Rebuild progress: one section per metric (Ryan's rule, 2026-07-23). Placement
+    // Rebuild progress: one section per metric (House rule, 2026-07-23). Placement
     // ticks are their own 'rebuild' section (file counts, fast fs copies); the
     // per-inner-zip compressions are a separate 'innercompress' section carrying
     // CUMULATIVE bytes across all inner zips so its bar fills once, monotonically.
@@ -2128,7 +2128,7 @@ async function _dedupeInnerZipSource(userData, uuid, uuidDir, meta, records, byH
     // Two passes, NOT interleaved: place every group's members first (one
     // continuous Rebuilding section), then compress every rebuilt zip (one
     // continuous Compressing section). Interleaving alternated the visible
-    // sections per zip and made the bar sawtooth (Ryan, 2026-07-23). Costs a
+    // sections per zip and made the bar sawtooth (2026-07-23). Costs a
     // little more temp disk (all group trees live until compressed) — fine.
     const groupTmp = []; // [{ iz, izTmp, groupBytes }]
     try {

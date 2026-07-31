@@ -653,7 +653,7 @@ function _compareVersionParts(a, b) {
 //
 // Older design (2026-06-23, commit e2d301a) collapsed the losers INTO
 // the winner via a `skippedVersions[]` metadata field, hiding them from
-// every consumer including the picker. Ryan's correction (2026-06-24):
+// every consumer including the picker. Correction (2026-06-24):
 // "they are still fonts. just because we don't add them to the library
 // doesn't mean they aren't still available for the user." So we no
 // longer collapse — we annotate.
@@ -791,7 +791,7 @@ async function detectCandidates(source) {
   // inner zip might produce 0, 1, or many real candidates. Zero means
   // the inner zip isn't a Proffie font — the placeholder gets dropped
   // silently and the user never sees a phantom entry. This is the
-  // invariant Ryan called out: never serve something as a font unless
+  // invariant caught in review: never serve something as a font unless
   // it looks like one at the level we're pointing at.
   const expanded = [];
   const canReadInnerZips = typeof source.readFile === 'function';

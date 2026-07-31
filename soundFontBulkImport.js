@@ -19,7 +19,7 @@
 //                              there's no structural signal to tell
 //                              "this was a single vendor delivery" from
 //                              "user loosely organized N fonts together"
-//                              (Ryan's SD backup is N loose fonts; an
+//                              (a real SD backup is N loose fonts; an
 //                              extracted vendor bundle has identical
 //                              shape). If a user truly has a folder-form
 //                              bundle they want preserved, they pick its
@@ -840,7 +840,7 @@ async function importPlannedSource({ userData, src, fromSdCard }, onSubProgress)
         proposedName = `${bundleName}_${proposedName}`;
       }
     }
-    // Name collision: walk _N suffix until free. Per Ryan's spec
+    // Name collision: walk _N suffix until free. Per spec
     // ("review is essentially needing fields we didn't have") an
     // auto-resolved collision isn't a missing-field problem — vendor
     // is detected, name is functional, no user action required.
@@ -923,7 +923,7 @@ async function importPlannedSource({ userData, src, fromSdCard }, onSubProgress)
     // the same Needs Review warning the guided screen shows.
     if (src.nameSource === 'folder-fallback' && !src.guidedName && !nameRecoveredFromDocx) reviewReasons.push('name_uncertain');
     // Note: name-tag names (font name rode along as a .txt filename next to a generic
-    // folder) are NOT flagged — Ryan's field experience is they're reliably correct, so
+    // folder) are NOT flagged — field experience is they're reliably correct, so
     // a warning there is noise. nameSource === 'name-tag' is still tracked internally.
     const entryRes = await soundFontEntries.createEntry({
       userData, sourceUuid, candidate: cand, name: finalName, metadata: meta,

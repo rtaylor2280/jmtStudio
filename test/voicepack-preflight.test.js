@@ -200,7 +200,7 @@ function ok(name, cond, extra) {
 }
 
 // ── 6. what a NEWLY added preset should carry (the Sound Fonts write path) ──
-// Ryan's rule, 2026-07-30: A) match the config's own convention if any preset has
+// The rule, 2026-07-30: A) match the config's own convention if any preset has
 // one, on any OS and any prop; OR B) the prop requires a voicepack. The sound font
 // library's own "selected common" must NOT be a factor — the library is optional.
 function makeChooser({ requires }) {
@@ -246,7 +246,7 @@ const cfgOf = (...fonts) => 'Preset presets[] = {\n' +
 
   ok('empty config -> nothing', await needs('') === null);
 
-  // Regression guard for the thing Ryan explicitly had removed: the library's
+  // Regression guard for the thing explicitly removed: the library's
   // selected common folder must never influence what we write into a config.
   const sflOnly = makeChooser({ requires: false });
   ok('the sound font library selection is NOT consulted',

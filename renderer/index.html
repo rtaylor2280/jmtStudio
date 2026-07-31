@@ -1261,7 +1261,7 @@
     z-index: 10000;
   }
   /* Stacked-over-a-modal backdrops dim LIGHTLY — remove distraction, don't
-     hide the context underneath (Ryan, 2026-07-23; export flow first, app-wide
+     hide the context underneath (2026-07-23; export flow first, app-wide
      message-modal sweep tracked in backlog). Covers an overlay stacking over an
      earlier-in-DOM active overlay, plus the confirm modal (z-index-elevated,
      earlier in DOM) when it rides over the source-detail modal. */
@@ -2586,7 +2586,7 @@
      push width past the modal's max. Without this, an absolutely-
      positioned child or one with min-content could force a horizontal
      scroll or, worse, push the modal wider for a frame and back —
-     which is exactly the size-flicker Ryan called out. */
+     which is exactly the size-flicker caught in review. */
   #modal-sf-backup-progress .modal { overflow: hidden; }
   /* Backup progress modal sized to match bulk import's feel — narrower
      than the bulk-import modal (which has to hold review/summary)
@@ -2620,8 +2620,7 @@
     100% { transform: translateX(250%); }
   }
   /* The detail line under every determinate progress bar is ONE line that
-     TRUNCATES with an ellipsis — it never wraps or grows the modal (Ryan,
-     2026-07-23; supersedes the 07-22 fixed two-line variant). */
+     TRUNCATES with an ellipsis — it never wraps or grows the modal (2026-07-23; supersedes the 07-22 fixed two-line variant). */
   .sf-import-progress-detail { font-size: 0.72rem; color: var(--c-text-dim); margin: 4px 0 0 0; font-variant-numeric: tabular-nums; min-height: 1em; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   /* Stable single-line height even while empty, so the modal never shifts. */
   #sf-bulk-progress-detail { line-height: 1.25; min-height: 1.25em; max-height: 1.25em; overflow: hidden; }
@@ -2804,8 +2803,7 @@
   .sf-guided-row .g-corrupt-note { font-size: 0.72rem; color: #e5534b; margin-top: 3px; line-height: 1.35; }
   .sf-guided-row .g-name-hint { font-size: 0.72rem; color: #d0913a; margin-top: 3px; line-height: 1.35; }
   .sf-guided-row.g-lowconf .g-name { border-color: #d0913a; }
-  /* Duplicate-recognition note on guided rows. Color language (Ryan,
-     2026-07-23): GREEN = you already own this (a good-news confirmation, not
+  /* Duplicate-recognition note on guided rows. Color language (2026-07-23): GREEN = you already own this (a good-news confirmation, not
      an action), AMBER = close variant worth a look. Rows carrying a note dim
      less when excluded so the reason stays readable (same trick as corrupt). */
   .sf-guided-row .g-dup-note { font-size: 0.72rem; color: var(--c-warn-text); margin-top: 3px; line-height: 1.35; }
@@ -3150,7 +3148,7 @@
   /* Fixed height MATCHING the entry detail modal exactly — the two swap into
      each other, so identical frames make the swap geometry-invariant, and the
      async region fills (fonts list, file tree) can never resize the card
-     (the shrink-then-grow read, Ryan 2026-07-23). */
+     (the shrink-then-grow read, 2026-07-23). */
   #modal-sf-source-detail .modal { width: 820px; max-width: 96vw; height: min(90vh, 800px); display: flex; flex-direction: column; padding-bottom: 16px; }
   /* Container is a 4-column grid so all display rows can share column widths
      via subgrid — name column auto-fits the widest name in view, description
@@ -6773,7 +6771,7 @@ window.checkMassStorageSafety = async function (usbMode, stage) {
 //     pack not found" every time you switch to it. The message means "this
 //     preset cannot see a voicepack", not "this saber has none".
 //
-// Scope, deliberately small (Ryan cut it twice on 2026-07-30, both correctly):
+// Scope, deliberately small (cut twice on 2026-07-30, both correctly):
 //   * CONFIG ONLY. We never inspect the SD card or the sound font library. At
 //     compile time we cannot see the card, and an unverifiable warning is noise.
 //     The card reminder is a courtesy line INSIDE this dialog, never its own check.
@@ -6870,7 +6868,7 @@ function _vpkPropIncludes(text) {
 // Does the prop this config selects register a voicepack requirement?
 // Returns true / false / null (could not tell — stay silent).
 // We follow the include chain rather than matching prop NAMES, because a user
-// can derive their own prop: Ryan's jmt_fett263_wrapper.h extends
+// can derive their own prop: the JMT fett263 wrapper extends
 // SaberFett263Buttons and chains Setup(), so a name list would miss his own config.
 // Known limit, accepted: a derived prop that overrides Setup() WITHOUT chaining
 // would escape this, and text alone cannot tell.
@@ -6905,7 +6903,7 @@ async function _vpkPropRequirement(text) {
       // Only the V2 requirement can ever FAIL: require_version(1) is satisfied
       // by any pack, including one with no ini at all, since a missing ini reads
       // as version 1. So this is binary, not a version number to compare.
-      // (Ryan, 2026-07-31: "there is NO V1 requirement ever".)
+      // (2026-07-31: "there is NO V1 requirement ever".)
       const isV1 = /sound_library_\s*\.\s*init/.test(hit[0]);
       return { requires: true, v2: !isV1 };
     }
@@ -8502,7 +8500,7 @@ function _sdOpenReport(cards) {
     // Single card is the primary case. Do NOT bring the report modal up here —
     // _sdRenderBrowse reveals it itself, fully scanned and rendered, in one shot,
     // so the user never sees the report appear and then scan inside it
-    // (Ryan: don't bring it up until it's literally done).
+    // (Note: don't bring it up until it's literally done).
     const c = cards[0];
     _sdReport.card = c;
     _sdReport.stack = [{ name: (c.isFolder ? 'Folder' : c.drive), path: c.mountPath || c.drive }];
@@ -8712,13 +8710,13 @@ async function _sdRenderBrowse() {
   // view (directory listing + corruption scan) — don't blank the body to a
   // separate loading state. _sdSetView doesn't clear the body, so the prior view
   // stays under the overlay until we swap in the complete view in one shot
-  // (Ryan: don't stop showing the progress bar until you're ready for the full thing).
+  // (Note: don't stop showing the progress bar until you're ready for the full thing).
   _sdBusy(true, 'Scanning files…');
   const res = await window.electronAPI.listSdDir(cur.path);
   if (_sdReport.stack[_sdReport.stack.length - 1] !== cur) return; // navigated away while loading
   // Fetch corruption health BEFORE rendering so the red marks appear in the
   // SAME paint as the file list — never an unmarked list that then pops a red
-  // mark a moment later (Ryan: finish the scan, then render once). The "Loading"
+  // mark a moment later (Note: finish the scan, then render once). The "Loading"
   // placeholder above covers this wait.
   let _health = _sdReport.healthCache[cur.path];
   if (!_health) {
@@ -10217,7 +10215,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     } catch {}
     // Build the rows now but keep them OFF-SCREEN. We do NOT open the review
     // until every row is enriched AND grouped, so it renders complete in one
-    // shot (Ryan: don't open till we're ready — no per-row vendor/preview
+    // shot (Note: don't open till we're ready — no per-row vendor/preview
     // pop-in). While enriching, show the working state with a live count.
     // Duplicates (already in the library) are excluded from the review — no point
     // making you look at fonts that won't import. Rows AND enrichment run on the
@@ -16374,7 +16372,7 @@ require(['vs/editor/editor.main'], function () {
       // a plain click, which in this grid opens the entry rather than selecting.
       let _sfGridAnchor = null;
 
-      // Range-select from the anchor to `name`, ADDITIVELY. Ryan's convention
+      // Range-select from the anchor to `name`, ADDITIVELY. The house convention
       // across every multi-select surface here, and deliberately not Explorer's:
       // adding rather than replacing lets a selection have gaps (take a range,
       // ctrl-click elsewhere, shift-click to add a second range). The
@@ -18162,7 +18160,7 @@ require(['vs/editor/editor.main'], function () {
           const r = await window.electronAPI.commonFolderExistsAt({ destDir });
           // Same rule the bulk flow follows: if the destination already holds
           // exactly this pack, there is nothing to decide, so do not ask and do
-          // not re-copy. This path had the bug Ryan found in the font flow.
+          // not re-copy. This path had the same bug found in the font flow.
           let already = false;
           try {
             const m = await window.electronAPI.commonMatchesAt({ uuid, destDir });
@@ -19938,7 +19936,7 @@ require(['vs/editor/editor.main'], function () {
 
       // ONE summary for recognition results, shared by the single-import
       // review and the guided bulk review — no per-surface wording drift
-      // (Ryan, 2026-07-23). Two facets: fully-owned rows (auto-unchecked)
+      // (2026-07-23). Two facets: fully-owned rows (auto-unchecked)
       // and amber rows flagged for a look (variants / missing-sounds copies).
       window._sfDupSummaryText = (owned, flagged, total) => {
         const parts = [];
@@ -20493,7 +20491,7 @@ require(['vs/editor/editor.main'], function () {
                 }
               }
             });
-            // Summary hint: the auto-uncheck needs its WHY and its exit (Ryan,
+            // Summary hint: the auto-uncheck needs its WHY and its exit (
             // 2026-07-23: information, not force). Says what happened, that the
             // boxes still work, and points at Duplicate for the customize case.
             const haveIts = r.results.filter(x => x.fullyOwned).length;
@@ -20708,7 +20706,7 @@ require(['vs/editor/editor.main'], function () {
         // running total of the duplicate bytes being trimmed.
         let optRes = null;
         if (_sfImport && _sfImport.uuid) {
-          // Visible sections (Ryan's rule, 2026-07-23): one section = one metric =
+          // Visible sections (House rule, 2026-07-23): one section = one metric =
           // one bar fill. Sections restart the bar; the metric NEVER changes units
           // mid-section. Inner-zip sources walk all seven; simpler sources skip the
           // sections they don't have. The running savings total shows during
@@ -22983,7 +22981,7 @@ require(['vs/editor/editor.main'], function () {
         // by referencing them in a void return.
         void entriesPromise; void docsPromise; void filesPromise;
       };
-      // dismissAll (Ryan, 2026-07-23): the X means "get rid of this window AND
+      // dismissAll (2026-07-23): the X means "get rid of this window AND
       // whatever was under it" — it skips the return-to-entry hop and lands on
       // the grid. The bottom Close/Discard button keeps the step-back behavior.
       const _sfCloseSourceDetail = async ({ dismissAll = false } = {}) => {
@@ -23703,7 +23701,7 @@ require(['vs/editor/editor.main'], function () {
         const label = (src && src.meta && (src.meta.bundleName || src.meta.originalName)) || 'source';
         const fmtB = window._sfFormatBytes || ((n) => `${n} B`);
         const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-        // The detail modal STAYS visible, dimmed under the flow's dialogs (Ryan,
+        // The detail modal STAYS visible, dimmed under the flow's dialogs (
         // 2026-07-23): the confirm modal rides z-index 10015 and the progress
         // overlay sits later in the DOM, so both stack above it and their
         // backdrops provide the dim. No hide/restore — that produced a flash of
@@ -27090,7 +27088,7 @@ require(['vs/editor/editor.main'], function () {
           if (b) b.style.width = Math.max(0, Math.min(1, frac)) * 100 + '%';
           if (d && detail != null) d.textContent = detail;
         },
-        // Import-convention phase display (Ryan, 2026-07-23): section + metric
+        // Import-convention phase display (2026-07-23): section + metric
         // ABOVE the bar, the current file below it, subdued elapsed line last —
         // the same reading order as the import modal's optimize phases.
         setPhase(labelText, frac, file, elapsedText) {
@@ -27451,11 +27449,11 @@ require(['vs/editor/editor.main'], function () {
         if (!modal || !select) return Promise.resolve({ action: 'ignore' });
 
         const name = (chosen && chosen.meta && chosen.meta.name) || 'The selected voice pack';
-        // THE CHAIN, and both halves have to be in the sentence (Ryan, 2026-07-31):
+        // THE CHAIN, and both halves have to be in the sentence (2026-07-31):
         //   what we OBSERVED  -> no voicepack.ini declaring it a V2
         //   what that INDICATES -> it is likely missing the required V2 sounds
         //
-        // Stating the sounds flatly would claim more than we checked — Ryan's
+        // Stating the sounds flatly would claim more than we checked. The
         // Crucible reply could say it outright because he had COUNTED the files,
         // 188 against 214. All the app has read is the declaration. But dropping
         // the ini entirely, which I tried first, throws away the evidence and
@@ -27466,7 +27464,7 @@ require(['vs/editor/editor.main'], function () {
         // warned people off exactly that twice.
         // And say only what is known. We do NOT know this is a V1 pack — we know
         // it is not identified as a V2 one. Calling it V1 fills in something we
-        // never checked. (Ryan, 2026-07-31.)
+        // never checked. (2026-07-31.)
         if (msgEl) {
           msgEl.textContent = `Your prop needs voice pack version 2 on ProffieOS 8. `
             + `"${name}" isn't identified as a V2 pack, which means it is likely missing the required V2 sounds. `
@@ -27653,7 +27651,7 @@ require(['vs/editor/editor.main'], function () {
       // <strong>, an elapsed line last, and a "Show in folder" primary. It is
       // deliberately NOT the label/value breakdown block — that idiom belongs to
       // the bulk-import REVIEW screen, which is a pre-action comparison surface.
-      // Completion summaries here are prose. (Ryan caught the drift 2026-07-31.)
+      // Completion summaries here are prose. (Caught drifting 2026-07-31.)
       //
       // The rule for the "why" notes: report what the APP decided, not what the
       // user chose. An inferred prop requirement earns a mention; their own
@@ -27748,7 +27746,7 @@ require(['vs/editor/editor.main'], function () {
         // Wanted a common folder, library has none. Not asked about up front —
         // there is nothing to choose from — but said once here, in the app's
         // amber caution colour, because the destination will need one for the
-        // menu prompts to work. (Ryan, 2026-07-31.)
+        // menu prompts to work. (2026-07-31.)
         if (commonMissing) {
           lines.push(`<span style="color:#d97706">No common folder was included, because your library does not have one. `
             + `${commonMissing === 'prop'
@@ -27763,7 +27761,7 @@ require(['vs/editor/editor.main'], function () {
         // Close whatever was on screen only now, with this dialog about to go up
         // in the same task. The summary lists the destination first, so a caller
         // that hid its progress before calling would leave the screen bare
-        // across that IPC round trip — which is the flash. (Ryan, 2026-07-31.)
+        // across that IPC round trip — which is the flash. (2026-07-31.)
         if (typeof closeProgress === 'function') { try { await closeProgress(); } catch {} }
         const closed = promptConfirm({
           title: title || 'Export complete',
@@ -27800,7 +27798,7 @@ require(['vs/editor/editor.main'], function () {
         //   config DOESN'T ref ;common AND 2+ commons → dropdown forces an explicit pick
         //   config DOESN'T ref ;common AND no commons → don't include, no ask
         //   prop REQUIRES a voicepack (OS8 + fett263 / BC) → treated exactly like a
-        //     ";common" reference, because the folder is not optional there. Ryan,
+        //     ";common" reference, because the folder is not optional there.
         //     2026-07-30: "auto included when required by prop in addition to what it
         //     already does." Same determination the compile-time preflight makes.
         const wantsCommon = [..._sfLastInUseFonts].some(n => n.toLowerCase() === 'common');
@@ -27865,7 +27863,7 @@ require(['vs/editor/editor.main'], function () {
           // choose from and therefore no question to put — this used to block
           // the export to announce it. Managing the common folder here is
           // OPTIONAL: plenty of people keep one on the card by hand and never
-          // import it, and for them nothing is missing. (Ryan, 2026-07-31:
+          // import it, and for them nothing is missing. (2026-07-31:
           // "why would we ask if there's none to choose from?")
           //
           // Not the same concern as the compile preflight, which is about the
@@ -27917,7 +27915,7 @@ require(['vs/editor/editor.main'], function () {
           // the same truth this branch did.
           window._sfSharedTracksExists = hasTracksFolder;
         } catch { hasTracksFolder = !!window._sfSharedTracksExists; }
-        // THE PRECEDENCE LADDER (Ryan, 2026-07-31). It used to ask on every
+        // THE PRECEDENCE LADDER (2026-07-31). It used to ask on every
         // single export, which is a question with a stable answer asked over
         // and over — and repeated asks are what teach people to click through
         // the dialog that actually mattered.
@@ -27986,7 +27984,7 @@ require(['vs/editor/editor.main'], function () {
         // Only a V2 requirement can fail: require_version(1) is satisfied by any
         // pack, including one with no ini, since a missing ini reads as version
         // 1. So this fires only when the prop needs V2 and the chosen pack does
-        // not declare it. (Ryan, 2026-07-31.)
+        // not declare it. (2026-07-31.)
         if (includeCommon) {
           try {
             let needsV2 = false;
@@ -28029,7 +28027,7 @@ require(['vs/editor/editor.main'], function () {
         // both noise and untrue. They are also not re-copied, which is what
         // makes re-exporting the same selection to the same card fast and
         // quiet. The common folder already worked this way; fonts never did
-        // until now (Ryan spotted it 2026-07-31).
+        // until now (spotted 2026-07-31).
         //
         // THIS PHASE READS THE CARD. It used to be a bare existsSync per font;
         // adding the identity check turned it into a content hash per font,
@@ -28096,7 +28094,7 @@ require(['vs/editor/editor.main'], function () {
         // not worth a prompt: re-copying 28 MB onto a slow card to change nothing
         // is a cost with no benefit, and asking old-or-new about a folder whose
         // only difference is the marker we wrote last time is a question with no
-        // meaning. (Ryan, 2026-07-30.)
+        // meaning. (2026-07-30.)
         let commonAlreadyCurrent = false;
         // Names for the conflict row. "common" is where it goes, not what it is,
         // so the row has to say which pack is being written and which one the
@@ -28156,7 +28154,7 @@ require(['vs/editor/editor.main'], function () {
         // NOTE: the scan is deliberately NOT hidden here. Removing this overlay
         // before the next one is up leaves a paint with no backdrop, which reads
         // as a full-screen flash. Each transition below opens the next surface
-        // first and closes this one behind it. (Ryan spotted the flash
+        // first and closes this one behind it. (Spotted the flash
         // 2026-07-31.)
         // Tracks deliberately do NOT enter the conflict list any more. That list
         // asks keep-or-replace, which is a destructive choice, and the tracks
@@ -28167,7 +28165,7 @@ require(['vs/editor/editor.main'], function () {
         let modeByName = new Map(); // name -> 'skip' | 'replace'
         if (conflicts.length > 0) {
           // DEFAULT IS REPLACE, for fonts and for the common folder alike.
-          // Ryan, 2026-07-31, and it follows from what the app is for: people
+          // 2026-07-31, and it follows from what the app is for: people
           // are taught to modify their sound fonts HERE, in the library, and to
           // treat the card as output. Under that model the library is the source
           // of truth and a card folder that has drifted is stale, not precious.
@@ -28184,7 +28182,7 @@ require(['vs/editor/editor.main'], function () {
           // font folders, the common folder, or both, and it can hold exactly
           // one row — so a fixed plural "Some fonts..." was wrong in several
           // real cases, including a lone common-folder row that is not a font
-          // at all. (Ryan, 2026-07-31.)
+          // at all. (2026-07-31.)
           const _cFonts = conflicts.filter(n => n !== 'common').length;
           const _cCommon = conflicts.includes('common');
           const _subject = _cFonts && _cCommon
@@ -28259,7 +28257,7 @@ require(['vs/editor/editor.main'], function () {
         // flash. Selection is preserved either way, so a user who wants to
         // revisit their choices does not have to re-select.
         //
-        // WHICH nothing it is matters, and conflating them was wrong (Ryan,
+        // WHICH nothing it is matters, and conflating them was wrong (
         // 2026-07-31). "Every item was set to Skip" attributed a decision to him
         // he had not made: he skipped the common folder, while the fonts were
         // simply already identical. And when the card is simply current, that is
@@ -28275,7 +28273,7 @@ require(['vs/editor/editor.main'], function () {
           // This replaced three hand-written message variants that were slowly
           // reinventing the summary in a second place, badly — and it shows the
           // card's state, which is what the user actually wants to know.
-          // (Ryan, 2026-07-31.) The early return is kept so no "Exporting
+          // (2026-07-31.) The early return is kept so no "Exporting
           // (0 of 0)" progress bar flashes on the way here.
           const fontsSkipped = names.filter(n =>
             modeByName.get(n) === 'skip' && !unchangedFonts.includes(n)).length;
@@ -28355,7 +28353,7 @@ require(['vs/editor/editor.main'], function () {
           // tracks that are MISSING plus the ones the user chose to replace,
           // not the whole folder — counting all of it put gigabytes in the
           // denominator that were never going to be written, so the bar sat
-          // near empty and never moved. (Ryan spotted it 2026-07-31.)
+          // near empty and never moved. (Spotted 2026-07-31.)
           const willCopy = new Set([...tracksToAdd, ...tracksReplace]);
           _sfExportTotalBytes += (window._sfSharedTracksFiles || [])
             .reduce((sum, f) => sum + (willCopy.has(f.name) ? (f.size || 0) : 0), 0);
@@ -29235,7 +29233,7 @@ require(['vs/editor/editor.main'], function () {
       // Highlight a single SF card with the amber pulse — same animation
       // shape the Style Library uses. NO scroll: the user right-clicked
       // the card and is already looking at it, so movement would be
-      // jarring (Ryan's call). Bails silently when the card isn't in
+      // jarring (Deliberate call). Bails silently when the card isn't in
       // the DOM (filtered out of view, etc.) — the underlying .in-use
       // class still updates via the grid re-render.
       const _sfFlashCard = (fontName) => {
@@ -29295,9 +29293,9 @@ require(['vs/editor/editor.main'], function () {
       // failure: shared sounds go missing, and on ProffieOS 8 the menu system announces
       // "Voice pack not found" on EVERY preset change. Nothing in the build catches it -
       // the config compiles perfectly - so the cost of omitting it lands on the user at
-      // boot, on the bench, after a flash. Ryan: "I got burned multiple times on common
+      // boot, on the bench, after a flash. Note: "I got burned multiple times on common
       // folder... we need it to be default on."
-      // TWO independent reasons a new preset needs one (Ryan's rule, 2026-07-30):
+      // TWO independent reasons a new preset needs one (House rule, 2026-07-30):
       //   A. Some other preset in this config already names a shared folder. Then match
       //      it, on ANY OS and ANY prop — a config where some presets have it and others
       //      do not is the duality.h shape (41 of 46 declared, 5 did not), and the odd
@@ -29306,7 +29304,7 @@ require(['vs/editor/editor.main'], function () {
       //      determination the compile-time preflight makes, reused rather than re-derived.
       // DELIBERATELY NOT A FACTOR: whether a common folder is selected in the sound font
       // library. That is a library concept, the library is optional, and what we write
-      // into someone's config must never depend on it. (Ryan, 2026-07-30: "defining a
+      // into someone's config must never depend on it. (2026-07-30: "defining a
       // common folder is only about the SFL... preflight doesn't care if defined.")
       // Returns the folder NAME to append, or null for none.
       const _sfSharedFolderForNewPreset = async () => {
@@ -29596,7 +29594,7 @@ require(['vs/editor/editor.main'], function () {
           return d;
         };
         // Item 1: add this font as a new preset in the open config.
-        // Explicit "to config" framing per Ryan's call — being explicit
+        // Explicit "to config" framing per Deliberate call — being explicit
         // beats assuming the user knows what we're operating on.
         mkItem(`+ Add to config`, null, () => _sfAddPresetWithFont(fontName));
         // Item 2: swap this font into an existing preset (submenu of presets).
@@ -29606,7 +29604,7 @@ require(['vs/editor/editor.main'], function () {
           sub.innerHTML = '';
           sub.style.minWidth = '240px';
           // Cap the submenu at half the viewport height with internal
-          // scroll so long preset lists (Ryan's screenshot showed ~30+
+          // scroll so long preset lists (observed at ~30+
           // presets running off the bottom) stay reachable. The class
           // also styles the scrollbar to match the rest of the SF UI.
           sub.classList.add('preset-ctx-submenu-sized');
@@ -29637,7 +29635,7 @@ require(['vs/editor/editor.main'], function () {
               item.textContent = `${number}. ${name}`;
               // Data attributes so the click handler can re-read the
               // indices from the DOM. Earlier closure-capture version
-              // failed silently for Ryan in some cases — this shape
+              // failed silently in some cases — this shape
               // survives any potential scope quirk.
               item.dataset.sfArrayIdx = String(arrayIdx);
               item.dataset.sfPresetIdx = String(presetIdx);
@@ -32709,7 +32707,7 @@ require(['vs/editor/editor.main'], function () {
       // flips the field's missing/needed state immediately.
       try { window._sfRenderPresetSidecarCommonRow?.(); } catch {}
       // "Last used style" write-back debounce — selection-time semantics
-      // per Ryan's design (saving is a backstop, not the primary trigger).
+      // by design (saving is a backstop, not the primary trigger).
       // Schedules the write-back 500ms after the last edit so fast typing
       // doesn't fire IPC per keystroke. Independent timer from
       // _scheduleRebuild's 50ms paint debounce.
@@ -33716,7 +33714,7 @@ require(['vs/editor/editor.main'], function () {
         // An empty name with the box ticked writes ";common", not "common": the leading
         // semicolon means 'no font yet, plus the shared folder'. Without it the preset
         // reads as though COMMON were the font, and the compile check would flag it as
-        // having no shared folder at all. (Ryan, 2026-07-30.)
+        // having no shared folder at all. (2026-07-30.)
         const full = cb.checked ? (newName ? newName + ';common' : ';common') : (newName || '');
         _commitFieldEdit(_getFreshFieldRange('font') || preset.fontRange, full);
         // "Last used style" auto-populate. When the user picks a font
@@ -33879,7 +33877,7 @@ require(['vs/editor/editor.main'], function () {
       // library is empty (same gate as the dropdown arrow). Sits to the
       // LEFT of the input so it reads as the "play" action attached to
       // the field, mirroring the audio glyph on the left of a media
-      // bar — Ryan's call.
+      // bar — Deliberate call.
       const fontPlayBtn = _makePresetPlayButton('Play font sound');
       // Resolved subPath gets stashed here so the click handler doesn't
       // re-IPC. Updated in lockstep with the cache by _updateFontPlayBtn.
@@ -37956,7 +37954,7 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
     // ── Add preset ─────────────────────────────────────────────────────────────
     // A preset created here should carry the same shared folder one created from the
     // Sound Fonts grid would. Returns ";<name>" to seed into the empty font slot, or "".
-    // Ryan, 2026-07-30: "if I add another preset using the visual options button, then it
+    // 2026-07-30: "if I add another preset using the visual options button, then it
     // also adds it there. so we don't have to solve default always true but instead base
     // it on this same logic."
     async function _newPresetFontSeed() {
