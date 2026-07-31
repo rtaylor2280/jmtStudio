@@ -355,6 +355,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sharedTracksDeleteFile:(params)     => ipcRenderer.invoke('sharedTracks:deleteFile', params),
   sharedTracksDelete:    ()           => ipcRenderer.invoke('sharedTracks:delete'),
   sharedTracksFolderExistsAt:(params) => ipcRenderer.invoke('sharedTracks:folderExistsAt', params),
+  sharedTracksMatchesAt:     (params) => ipcRenderer.invoke('sharedTracks:matchesAt', params),
+  sharedTracksPlanExport:    (params) => ipcRenderer.invoke('sharedTracks:planExport', params),
+  onSharedTracksPlanProgress: (cb) => {
+    const handler = (_, data) => cb(data);
+    ipcRenderer.on('sharedTracks:planProgress', handler);
+    return () => ipcRenderer.removeListener('sharedTracks:planProgress', handler);
+  },
+  listDestFolders:       (params)     => ipcRenderer.invoke('soundFonts:listDestFolders', params),
+  entryMatchesAt:        (params)     => ipcRenderer.invoke('soundFonts:entryMatchesAt', params),
   sharedTracksExportToFolder:(params) => ipcRenderer.invoke('sharedTracks:exportToFolder', params),
   sharedTracksReadFileBytes:(params)  => ipcRenderer.invoke('sharedTracks:readFileBytes', params),
 

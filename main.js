@@ -1705,10 +1705,52 @@ ipcMain.handle('sharedTracks:folderExistsAt', (_, { destDir } = {}) => {
   try { return { ok: true, exists: soundFontSharedTracks.folderExistsAt(destDir) }; }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
-ipcMain.handle('sharedTracks:exportToFolder', async (event, { destDir, mode } = {}) => {
+ipcMain.handle('sharedTracks:matchesAt', (_, { destDir } = {}) => {
+  try { return soundFontSharedTracks.matchesAt(app.getPath('userData'), destDir); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+// Read-only: what would an export add, leave alone, or have to ask about.
+// Top-level folder names at an export destination. Used by the save summary to
+// answer "what else is on this card" without pulling in a full SD scan.
+ipcMain.handle('soundFonts:entryMatchesAt', (_, { name, destDir } = {}) => {
+  try { return soundFontEntries.entryMatchesAt(app.getPath('userData'), name, destDir); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+ipcMain.handle('soundFonts:listDestFolders', (_, { destDir } = {}) => {
+  try {
+    if (!destDir || !fs.existsSync(destDir)) return { ok: true, folders: [] };
+    const folders = fs.readdirSync(destDir, { withFileTypes: true })
+      .filter(e => e.isDirectory() && !e.name.startsWith('.'))
+      .map(e => e.name);
+    return { ok: true, folders };
+  } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+ipcMain.handle('sharedTracks:planExport', (event, { destDir } = {}) => {
+  try {
+    // Per-file ticks so the renderer can show names going past. Throttled: a
+    // hundred-plus IPC sends in a tight loop would cost more than the hashing.
+    let last = 0;
+    const onFile = (file, done, total) => {
+      const now = Date.now();
+      if (now - last < 60 && done < total) return;
+      last = now;
+      try { event.sender.send('sharedTracks:planProgress', { file, done, total }); } catch {}
+    };
+    return soundFontSharedTracks.planExport(app.getPath('userData'), destDir, onFile);
+  }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+ipcMain.handle('sharedTracks:exportToFolder', async (event, { destDir, mode, replace } = {}) => {
   try {
     const emit = _sfExportProgressEmitter(event);
-    const r = await soundFontSharedTracks.exportToFolder(app.getPath('userData'), destDir, mode, emit.onBytes);
+    // Additive is the default for the bulk flow: nothing at the destination is
+    // ever deleted, and a same-name file that differs is resolved per file by
+    // `replace` (the renderer collects that from the differences dialog). The
+    // older skip/replace/rename whole-folder modes stay reachable for callers
+    // that still ask for them explicitly.
+    const r = (!mode || mode === 'additive')
+      ? await soundFontSharedTracks.exportToFolderAdditive(app.getPath('userData'), destDir, { replace, onBytes: emit.onBytes })
+      : await soundFontSharedTracks.exportToFolder(app.getPath('userData'), destDir, mode, emit.onBytes);
     emit.flush();
     return r;
   } catch (err) { return { ok: false, error: String(err && err.message || err) }; }

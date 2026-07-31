@@ -2187,6 +2187,48 @@
   .sf-shared-tracks-icon { color: var(--jmt-blue); font-size: 1rem; line-height: 1; margin-right: 4px; }
   .sf-shared-tracks-count { font-size: 0.72rem; color: var(--c-text-muted); margin-top: 2px; }
   .sf-shared-tracks-empty { font-size: 0.7rem; color: var(--c-text-dim); font-style: italic; margin-top: 2px; }
+  /* "Include with export" — only rendered while an export selection is active.
+     Sits at the bottom of the tracks card, where other cards show their
+     selection tick, so the label is what distinguishes a saved setting from a
+     per-export choice. Auto top margin pins it to the bottom regardless of how
+     much the count line above it takes. */
+  /* The box deliberately mirrors .sf-card-select-btn, NOT the .sf-libpick-row
+     checkbox: its neighbours in this grid are the card selection ticks, and a
+     14px picker-style box sitting beside 16px card ticks reads as a different
+     kind of control. Same size, border weight, radius, and blue-fill-with-white-
+     tick as those. Right-aligned and row-reverse for the same reason — it lands
+     where every other card puts its tick. */
+  .sf-tracks-include {
+    position: absolute; bottom: 6px; right: 6px;
+    display: flex; align-items: center; gap: 6px;
+    flex-direction: row-reverse;
+    font-size: 0.72rem; color: var(--c-text-muted);
+    cursor: pointer; user-select: none;
+  }
+  .sf-tracks-include:hover { color: var(--c-text); }
+  .sf-tracks-include input[type="checkbox"] {
+    appearance: none; -webkit-appearance: none;
+    width: 16px; height: 16px; margin: 0; padding: 0;
+    border: 1.5px solid var(--c-border-strong); border-radius: 3px;
+    background: var(--c-bg-card); cursor: pointer; flex-shrink: 0;
+    display: inline-grid; place-content: center;
+    transition: background 0.1s, border-color 0.1s;
+  }
+  .sf-tracks-include input[type="checkbox"]:hover { border-color: var(--jmt-blue); }
+  .sf-tracks-include input[type="checkbox"]:checked { background: var(--jmt-blue); border-color: var(--jmt-blue); }
+  /* The same U+2713 glyph the card ticks draw, at their font size and weight —
+     not a CSS-drawn corner, which sits at a different angle and weight and is
+     what kept these looking subtly unlike their neighbours. */
+  .sf-tracks-include input[type="checkbox"]:checked::before {
+    content: '\2713';
+    font-size: 11px; font-weight: 700; line-height: 1; color: #fff;
+  }
+  /* Same control inside the tracks modal header, where it is the setting's
+     permanent home rather than a selection-time reveal. Sits inline with the
+     action buttons, so it drops the bottom-pinning the card version needs. */
+  /* In the modal header it is a normal inline control, so it opts back out of
+     the card's absolute bottom-right pinning. */
+  .sf-tracks-include-inline { position: static; bottom: auto; right: auto; margin-right: 10px; font-weight: 400; align-self: center; }
   /* Undersized track warning — files below ProffieOS's 200KB cutoff are
      visually flagged so the user knows they won't play. */
   .sf-entry-files-row-name.warn { color: #d97706; }
@@ -3073,10 +3115,28 @@
      full-height list (that was the old fan-out modal's sizing bug). */
   #modal-sf-pop-add .sf-pop-add-list { flex: none; max-height: 220px; }
   /* Bulk save conflict modal: list of rows, each with a per-entry choice. */
-  #modal-sf-save-conflict .modal { width: 560px; max-width: 96vw; max-height: min(80vh, 600px); display: flex; flex-direction: column; }
+  /* Wider than the default dialog: rows carry a name plus up to two detail
+     lines (the selected voice pack and the one being replaced), and pack names
+     are long. At 560px those wrapped mid-name. */
+  #modal-sf-save-conflict .modal { width: 680px; max-width: 96vw; max-height: min(80vh, 600px); display: flex; flex-direction: column; }
   .sf-save-conflict-bulk { display: flex; gap: 8px; margin: 6px 0 10px; }
   .sf-save-conflict-bulk-btn { font-size: 0.74rem; background: none; border: 1px solid var(--c-border-strong); border-radius: 3px; color: var(--c-text-sub); padding: 3px 9px; cursor: pointer; }
   .sf-save-conflict-bulk-btn:hover { color: var(--jmt-blue); border-color: var(--jmt-blue); }
+  /* Second line under a conflict row's name. Exists because "common" is the
+     DESTINATION folder name, not the thing being written: without this the row
+     asks you to keep or replace without naming either voice pack. */
+  /* Same amber caution idiom as .sf-shared-tracks-warn-footer. Always shown in
+     this dialog: it only opens when something would be overwritten, and Replace
+     is the default, so the warning is relevant essentially every time it is up. */
+  /* `.modal p` (specificity 0,1,1) sets colour, size and text-wrap: balance, so
+     a bare class here loses to it — the caution rendered in body-copy grey and
+     balance wrapped it early and ragged. Same fix the import hints already use,
+     with enough specificity to actually win. */
+  .modal .sf-save-conflict-caution {
+    margin: 0 0 12px; font-size: 0.78rem; line-height: 1.45;
+    color: #d97706; text-wrap: wrap;
+  }
+  .sf-save-conflict-sub { display: block; font-size: 0.72rem; color: var(--c-text-muted); font-weight: 400; margin-top: 2px; }
   .sf-save-conflict-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding-right: 4px; }
   .sf-save-conflict-list::-webkit-scrollbar { width: 6px; }
   .sf-save-conflict-list::-webkit-scrollbar-track { background: transparent; }
@@ -3941,7 +4001,7 @@
           </div>
         </div>
         <div class="toolbar-divider"></div>
-        <button id="btn-sf-create-shared-tracks" class="btn-blue" style="display:none" title="Create a shared tracks folder. Maps to /tracks/ at the SD card root — the universal track location ProffieOS scans for all presets.">&#43; Create Shared Tracks Folder</button>
+        <button id="btn-sf-create-shared-tracks" class="btn-blue" style="display:none" title="Create a shared tracks folder. Maps to /tracks/ at the SD card root, the universal track location ProffieOS scans for all presets.">&#43; Create Shared Tracks Folder</button>
         <button id="btn-sf-import-toolbar" class="btn-blue" style="display:none" title="Import a sound font into your library. Bulk-import many at once is offered inside.">&#43; Import Sound Font</button>
       </div>
       <div class="tab-btns" id="tab-btns-styles">
@@ -3956,8 +4016,8 @@
         <div class="toolbar-divider"></div>
         <button id="btn-styles-tab-link" class="btn-blue" disabled title="Open a config file to link the Style Library">&#128279; Link Style Library</button>
         <div class="toolbar-divider"></div>
-        <button id="btn-styles-collapse" class="btn-neutral" title="Condense — rewrites every style to a single line. Comments are preserved as /* */ blocks. File becomes smaller and easier to diff." style="display:none">&#8644; Condense</button>
-        <button id="btn-styles-expand"   class="btn-neutral" title="Expand — rewrites every style to indented multi-line for readability. Comments are preserved." style="display:none">&#8645; Expand</button>
+        <button id="btn-styles-collapse" class="btn-neutral" title="Condense: rewrites every style to a single line. Comments are preserved as /* */ blocks. File becomes smaller and easier to diff." style="display:none">&#8644; Condense</button>
+        <button id="btn-styles-expand"   class="btn-neutral" title="Expand: rewrites every style to indented multi-line for readability. Comments are preserved." style="display:none">&#8645; Expand</button>
         <div class="styles-view-toggle">
           <button class="styles-view-btn" id="btn-styles-view-code" title="Code view">&#x3C;/&#x3E; Code</button>
           <button class="styles-view-btn active" id="btn-styles-view-visual" title="Visual view">&#9776; Visual</button>
@@ -4508,7 +4568,7 @@
   <span id="stat-flashed"></span>
   <span id="stat-dirty">&#9679; unsaved</span>
   <span id="stat-diff-info">&#9776; diff view</span>
-  <span id="stat-update" title="Update available — click to open Settings"></span>
+  <span id="stat-update" title="Update available. Click to open Settings"></span>
   <span id="stat-filepath"></span>
 </div>
 
@@ -5213,6 +5273,11 @@
           <span>Tracks</span>
           <span id="sf-shared-tracks-contents" style="font-weight:400;color:var(--c-text-muted)"></span>
           <span class="sf-entry-files-head-actions">
+            <label class="sf-tracks-include sf-tracks-include-inline" data-tracks-include-wrap="1" title="Include the shared tracks folder every time you export fonts. A saved setting, not a one time choice. The same control appears on the tracks card once you have fonts selected, and changes it in the same way.&#10;&#10;Off by default: a tracks folder at the card root is read by the ProffieOS 8 Edit Track menu, but Fett263's Track Player looks in each font's own tracks folder instead.&#10;&#10;To put tracks on one card without changing this, use Export.">
+              <input type="checkbox" data-tracks-include="1">
+              <span>Always include with exports</span>
+            </label>
+            <button class="btn-neutral sf-entry-files-head-btn" id="btn-sf-shared-tracks-export" title="Copy these tracks to a folder or SD card. Nothing at the destination is deleted: new tracks are added, and a file that differs asks before it is replaced.">&#8599; Export</button>
             <span class="styles-tag-filter-wrap" style="position:relative">
               <button class="btn-neutral sf-entry-files-head-btn" id="btn-sf-shared-tracks-add" title="Add files to the Shared Tracks folder">+ Add</button>
               <div id="sf-shared-tracks-add-dropdown" class="styles-tag-dropdown" style="display:none;min-width:160px;right:0;left:auto">
@@ -5271,7 +5336,7 @@
     <div class="sf-voicepack-row">
       <label class="sf-voicepack-label">Version:</label>
       <div class="sf-voicepack-toggle">
-        <button class="sf-voicepack-toggle-btn" id="sf-voicepack-v1" data-version="v1" title="The original ProffieOS voicepack from hubbe.net. ProffieOS 8 reads it as version 1, and most OS 8 props (including Fett263 and BC) require version 2 — so on OS 8 a V1 pack makes the saber announce &quot;error in voice pack&quot; every time you change preset. Choose V1 for ProffieOS 7, or if you specifically want the original recordings.">V1</button>
+        <button class="sf-voicepack-toggle-btn" id="sf-voicepack-v1" data-version="v1" title="The original ProffieOS voicepack from hubbe.net. ProffieOS 8 reads it as version 1, and most OS 8 props (including Fett263 and BC) require version 2, so on OS 8 a V1 pack makes the saber announce &quot;error in voice pack&quot; every time you change preset. Choose V1 for ProffieOS 7, or if you specifically want the original recordings.">V1</button>
         <button class="sf-voicepack-toggle-btn active" id="sf-voicepack-v2" data-version="v2" title="What ProffieOS 8 expects. Adds menu narration for OS 8 features (color adjustment menu, multi-preset reorder, style copy/paste) and is fully backward compatible with V1, so it also works on ProffieOS 7. Same languages as V1.">V2</button>
         <button class="sf-voicepack-toggle-btn" id="sf-voicepack-more" data-version="more" title="Community-made character voicepacks and other external sources.">More</button>
       </div>
@@ -5478,8 +5543,9 @@
      the top set every row at once. ── -->
 <div class="modal-overlay" id="modal-sf-save-conflict">
   <div class="modal">
-    <h2 id="sf-save-conflict-title">Some fonts already exist at the destination</h2>
-    <p class="sf-import-hint" id="sf-save-conflict-desc">For each duplicate, choose whether to keep the existing folder or replace it with the version in your library. Treats each font as a unit — no mixing files between old and new.</p>
+    <h2 id="sf-save-conflict-title">Some fonts on the card are different</h2>
+    <p class="sf-import-hint" id="sf-save-conflict-desc">These already exist on the card with different contents. For each one, choose whether to replace it with your library version or keep what is on the card. Fonts that already match your library are not listed and were left alone. Each font is treated as a unit, so old and new files are never mixed.</p>
+    <p class="sf-save-conflict-caution" id="sf-save-conflict-caution">Replace overwrites the whole folder on the card, including anything you added there yourself. If you have edited these on the card rather than in JMT Studio, back the card up first.</p>
     <div class="sf-save-conflict-bulk">
       <button class="sf-save-conflict-bulk-btn" data-conflict-all="skip">Set all to Skip</button>
       <button class="sf-save-conflict-bulk-btn" data-conflict-all="replace">Set all to Replace</button>
@@ -16507,7 +16573,25 @@ require(['vs/editor/editor.main'], function () {
             : `<div class="sf-shared-tracks-count">${n} track${n === 1 ? '' : 's'}</div>`;
           const klasses = ['sf-card', 'sf-shared-tracks-card'];
           if (sharedTracksInUse) klasses.push('in-use');
-          return `<div class="${klasses.join(' ')}" data-shared-tracks="1" title="Shared tracks folder — maps to /tracks/ at the SD card root. Universal tracks available to every preset.">
+          // "Include with export" appears only while a selection is active, i.e.
+          // at the moment it is about to matter. It is NOT a per-export
+          // override: it edits the persisted setting from a convenient place, so
+          // whatever it is left at is what the next export does. The label has
+          // to be on the card, because every other card uses this same corner
+          // for "selected" and this one means something permanent.
+          //
+          // undefined = not read from the store yet; warm it and re-render once.
+          const prefKnown = typeof window._sfIncludeTracksPrefValue === 'boolean';
+          if (!prefKnown && typeof window._sfGetIncludeTracksPref === 'function') {
+            window._sfGetIncludeTracksPref().then(() => { try { _sfRenderGrid(); } catch {} });
+          }
+          const inclRow = _sfSelectedNames.size > 0
+            ? `<label class="sf-tracks-include" data-tracks-include-wrap="1" title="Include the shared tracks folder every time you export fonts, not just this once. Same setting as the one in the tracks folder itself.&#10;&#10;Off by default: a tracks folder at the card root is read by the ProffieOS 8 Edit Track menu, but Fett263's Track Player looks in each font's own tracks folder instead.&#10;&#10;To put tracks on one card without changing this, open the tracks folder and use Export.">
+                 <input type="checkbox" data-tracks-include="1"${window._sfIncludeTracksPrefValue ? ' checked' : ''}>
+                 <span>Always include with exports</span>
+               </label>`
+            : '';
+          return `<div class="${klasses.join(' ')}" data-shared-tracks="1" title="Shared tracks folder. Maps to /tracks/ at the SD card root. Universal tracks available to every preset.">
             <button class="card-delete-btn" data-shared-tracks-delete="1" title="Delete Shared Tracks folder">&#10005;</button>
             <div class="sf-card-name-row">
               <span class="sf-shared-tracks-icon">&#9835;</span>
@@ -16515,6 +16599,7 @@ require(['vs/editor/editor.main'], function () {
             </div>
             <div class="sf-card-author">Various Artists</div>
             ${countLine}
+            ${inclRow}
           </div>`;
         })() : '';
         list.innerHTML = sharedTracksCard + matching.map(f => {
@@ -17996,13 +18081,46 @@ require(['vs/editor/editor.main'], function () {
         let mode = 'rename';
         try {
           const r = await window.electronAPI.commonFolderExistsAt({ destDir });
+          // Same rule the bulk flow follows: if the destination already holds
+          // exactly this pack, there is nothing to decide, so do not ask and do
+          // not re-copy. This path had the bug Ryan found in the font flow.
+          let already = false;
+          try {
+            const m = await window.electronAPI.commonMatchesAt({ uuid, destDir });
+            already = !!(m && m.ok && m.identical);
+          } catch {}
+          if (already) {
+            await promptConfirm({
+              title: 'Already up to date',
+              message: `This location already has "${(c.meta && c.meta.name) || 'this voice pack'}". Nothing was copied.`,
+              confirmText: 'OK',
+              confirmKind: 'primary',
+              hideCancel: true,
+            });
+            return;
+          }
           if (r && r.ok && r.exists) {
+            // Same default as the bulk flow: Replace. The user picked this pack
+            // and chose to export it, so declining by default would undo the
+            // action they just took. Row names the pack, not the folder.
+            const marker = (r.marker && r.marker.name) || '';
             const choices = await _sfPromptSaveConflicts(['common'], {
               title: 'A common folder already exists at the destination',
-              description: 'Choose whether to keep the existing folder or replace it with the version in your library. Treats the common folder as a unit — no mixing files between old and new.',
+              description: 'Choose whether to replace it with the version in your library or keep what is already there. Treats the common folder as a unit, so files are never mixed between old and new.',
+              defaultMode: 'replace',
+              labelFor: () => 'common',
+              subLabelFor: () => {
+                const out = [];
+                const mine = (c.meta && c.meta.name) || '';
+                if (mine) out.push(`Selected voice pack: ${mine}`);
+                out.push(marker
+                  ? `Replaces current common: ${marker}`
+                  : `Replaces the current contents of this folder`);
+                return out;
+              },
             });
             if (!choices) return; // cancelled
-            mode = choices.get('common') || 'skip';
+            mode = choices.get('common') || 'replace';
           }
         } catch {}
         _sfDeleteProgress.show('Exporting common folder', c.meta.name);
@@ -19280,8 +19398,25 @@ require(['vs/editor/editor.main'], function () {
         const modal = document.getElementById('modal-sf-shared-tracks');
         if (!modal) return;
         await _sfRefreshSharedTracksModal();
+        // Reflect the stored setting before the modal is visible, so it never
+        // paints an unticked box for a second and then corrects itself.
+        try {
+          if (typeof window._sfGetIncludeTracksPref === 'function') await window._sfGetIncludeTracksPref();
+          window._sfSyncIncludeTracksBoxes?.();
+        } catch {}
         modal.classList.add('active');
       };
+      // The modal's own copy of the toggle. The grid has its own handler (which
+      // also has to stop the click reaching the card underneath); this one only
+      // has to write.
+      document.getElementById('modal-sf-shared-tracks')?.addEventListener('click', (e) => {
+        const wrap = e.target.closest('[data-tracks-include-wrap]');
+        if (!wrap) return;
+        const box = e.target.closest('[data-tracks-include]');
+        if (box && typeof window._sfSetIncludeTracksPref === 'function') {
+          window._sfSetIncludeTracksPref(!!box.checked);
+        }
+      });
       const _sfCloseSharedTracks = () => {
         const modal = document.getElementById('modal-sf-shared-tracks');
         if (modal) modal.classList.remove('active');
@@ -19296,6 +19431,56 @@ require(['vs/editor/editor.main'], function () {
       });
       // + Add dropdown — Browse (native file picker) or From library
       // (open the existing entry library picker scoped to .wav files).
+      // Standalone tracks export. Until now the shared tracks folder could only
+      // reach a card by riding along with a bulk font Save, so someone who just
+      // wanted to update their tracks had no route at all. Reached from the
+      // modal's Export button and from a right-click on the tracks card.
+      //
+      // Additive, like the bulk path: nothing at the destination is deleted, and
+      // a same-name file that differs is kept as it is and reported.
+      const _sfExportSharedTracks = async () => {
+        let pick;
+        try { pick = await window.electronAPI.selectSaveDestination(); }
+        catch (err) { promptError('Could not open folder picker', err && err.message || err); return; }
+        if (!pick || !pick.ok) return;
+        const destDir = pick.dirPath;
+        let replace = [];
+        try {
+          const plan = await window.electronAPI.sharedTracksPlanExport({ destDir });
+          if (plan && plan.ok && plan.differing && plan.differing.length) {
+            const chosen = await _sfResolveTrackConflicts(plan.differing);
+            if (chosen === null) return; // cancelled
+            replace = chosen;
+          }
+        } catch {}
+        const _tracksT0 = Date.now();
+        _sfDeleteProgress.show('Exporting tracks', '', 0);
+        let r;
+        try { r = await window.electronAPI.sharedTracksExportToFolder({ destDir, mode: 'additive', replace }); }
+        catch (err) { r = { ok: false, error: String(err && err.message || err) }; }
+        _sfDeleteProgress.setProgress(1);
+        await _sfDeleteProgress.hide();
+        if (!r || !r.ok) { promptError('Export failed', (r && r.error) || 'unknown error'); return; }
+        await _sfShowExportSummary({
+          destDir,
+          names: [],
+          modeByName: new Map(),
+          elapsedSec: (Date.now() - _tracksT0) / 1000,
+          commonOutcome: null,
+          tracksOutcome: {
+            reason: null,
+            added: (r.added || []).length,
+            replaced: (r.replaced || []).length,
+            unchanged: (r.unchanged || []).length,
+            kept: r.kept || [],
+          },
+        });
+      };
+      window._sfExportSharedTracks = _sfExportSharedTracks;
+      document.getElementById('btn-sf-shared-tracks-export')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        _sfExportSharedTracks();
+      });
       const _sfSharedAddBtn = document.getElementById('btn-sf-shared-tracks-add');
       const _sfSharedAddDropdown = document.getElementById('sf-shared-tracks-add-dropdown');
       const _sfCloseSharedAddDropdown = () => {
@@ -21136,7 +21321,7 @@ require(['vs/editor/editor.main'], function () {
               .map(name => `<span class="sf-effect-chip" data-effect="${_sfEscape(name)}">${_sfEscape(name)}</span>`)
               .join('');
             const unknownHtml = unknownEffects
-              .map(name => `<span class="sf-effect-chip-unknown" data-effect="${_sfEscape(name)}" title="Not in JMT Studio's known Proffie effect vocabulary. Looks effect-shaped (has .wav children) so it's surfaced as a safety net — the canonical list is updated periodically against ProffieOS releases.">${_sfEscape(name)}</span>`)
+              .map(name => `<span class="sf-effect-chip-unknown" data-effect="${_sfEscape(name)}" title="Not in JMT Studio's known Proffie effect vocabulary. Looks effect-shaped (has .wav children) so it's surfaced as a safety net. The canonical list is updated periodically against ProffieOS releases.">${_sfEscape(name)}</span>`)
               .join('');
             _sfDetailEffectsChips.innerHTML = knownHtml + unknownHtml;
             if (_sfDetailEffectsMissing && _sfDetailEffectsMissingBtn) {
@@ -25622,7 +25807,7 @@ require(['vs/editor/editor.main'], function () {
           const isLast = idx === _sfReorgStaged.length - 1;
           let posLabel = '';
           if (f.isMisnamed) {
-            posLabel = `<span class="sf-reorg-reorder-pos" title="Won't play — name doesn't match folder">⚠</span>`;
+            posLabel = `<span class="sf-reorg-reorder-pos" title="Won't play: name doesn't match folder">⚠</span>`;
           } else if (!firstHandled && firstIsBare) {
             // Bare stays bare at position 1; no rename, no work flag.
             firstHandled = true;
@@ -27013,9 +27198,11 @@ require(['vs/editor/editor.main'], function () {
       };
       // Promise-returning conflict-resolution modal. Receives the list of
       // duplicate entry names and returns a Map<name, 'skip'|'replace'>
-      // when the user clicks Continue, or null on Cancel. Default per row
-      // is 'skip' — safer; the user has to explicitly choose Replace, or
-      // hit the "Set all to Replace" quick action.
+      // when the user clicks Continue, or null on Cancel. Default per row is
+      // Replace (opts.defaultMode / opts.defaultModeFor): the library is the
+      // source of truth and the card is output, so a drifted card folder is
+      // stale rather than precious. Skip stays one click away on every row, and
+      // the caution line below only appears while something is set to Replace.
       // Multi-common include prompt — shown when the open config does NOT
       // reference ";common" and the user has more than one common available.
       // Default common is pre-selected so there's always a valid choice;
@@ -27066,6 +27253,48 @@ require(['vs/editor/editor.main'], function () {
           modal.classList.add('active');
         });
       };
+      // Persisted "include the shared tracks folder when exporting" preference.
+      // OFF by default, and that default is a real finding rather than caution:
+      // a tracks/ folder at the card ROOT is read by the ProffieOS 8 Edit Track
+      // menu (prop_base.h list_tracks -> ListTracks("tracks")), but Fett263's
+      // Track Player and Caiwyn's scan <fontdir>/tracks instead and never look
+      // at the root. So for most people tracks belong inside a font folder and a
+      // root copy is dead weight on the card. On ProffieOS 7 nothing on the
+      // saber calls list_tracks at all, so it is reachable only by a preset
+      // naming the path.
+      //
+      // Cached after the first read so the value is stable for the session and
+      // the card checkbox and the export path can never disagree.
+      const _SF_TRACKS_PREF_KEY = 'sfIncludeSharedTracksOnExport';
+      let _sfIncludeTracksPref = null;
+      // window mirror so the grid can render the checkbox synchronously —
+      // undefined means "not read yet", which is the render's cue to warm it.
+      async function _sfGetIncludeTracksPref() {
+        if (_sfIncludeTracksPref !== null) return _sfIncludeTracksPref;
+        try { _sfIncludeTracksPref = !!(await window.electronAPI.getSetting(_SF_TRACKS_PREF_KEY, false)); }
+        catch { _sfIncludeTracksPref = false; }
+        window._sfIncludeTracksPrefValue = _sfIncludeTracksPref;
+        return _sfIncludeTracksPref;
+      }
+      // The setting has two surfaces — the tracks modal header, where it lives
+      // permanently, and the tracks card while an export selection is active.
+      // They are the same stored value, so both are pushed to whenever it moves;
+      // otherwise a user who toggles it on the card and then opens the folder
+      // sees the old state staring back at them.
+      function _sfSyncIncludeTracksBoxes() {
+        const on = window._sfIncludeTracksPrefValue === true;
+        document.querySelectorAll('[data-tracks-include]').forEach(el => { el.checked = on; });
+      }
+      window._sfSyncIncludeTracksBoxes = _sfSyncIncludeTracksBoxes;
+      async function _sfSetIncludeTracksPref(on) {
+        _sfIncludeTracksPref = !!on;
+        window._sfIncludeTracksPrefValue = _sfIncludeTracksPref;
+        _sfSyncIncludeTracksBoxes();
+        try { await window.electronAPI.setSetting(_SF_TRACKS_PREF_KEY, !!on); } catch {}
+      }
+      window._sfGetIncludeTracksPref = _sfGetIncludeTracksPref;
+      window._sfSetIncludeTracksPref = _sfSetIncludeTracksPref;
+
       const _sfPromptSaveConflicts = (conflictNames, opts = {}) => {
         const modal = document.getElementById('modal-sf-save-conflict');
         const list = document.getElementById('sf-save-conflict-list');
@@ -27076,15 +27305,26 @@ require(['vs/editor/editor.main'], function () {
         if (!modal || !list) return Promise.resolve(null);
         // Default copy is the bulk-fonts case; common-only export passes
         // overrides so the modal language matches the action.
-        if (titleEl) titleEl.textContent = opts.title || 'Some fonts already exist at the destination';
-        if (descEl) descEl.textContent = opts.description || 'For each duplicate, choose whether to keep the existing folder or replace it with the version in your library. Treats each font as a unit — no mixing files between old and new.';
-        // Render one row per conflict; both options shown, "skip" pre-selected.
+        if (titleEl) titleEl.textContent = opts.title || 'Some fonts on the card are different';
+        if (descEl) descEl.textContent = opts.description || 'These already exist on the card with different contents. For each one, choose whether to replace it with your library version or keep what is on the card. Fonts that already match your library are not listed and were left alone. Each font is treated as a unit, so old and new files are never mixed.';
+        // Render one row per conflict; both options shown. Which one is
+        // pre-selected is the caller's call. Font folders default to Skip
+        // because the copy on the card may be something the user tuned there.
+        // Individual TRACK files default to Replace: the library is the curated
+        // source for them, so a difference almost always means the user updated
+        // their copy and expects that update to reach the card.
+        // Per ROW, not per dialog: the bulk save puts font folders and the
+        // common folder in one list and they do not want the same default.
+        const _dfltFor = (n) => {
+          const v = opts.defaultModeFor ? opts.defaultModeFor(n) : opts.defaultMode;
+          return v === 'replace' ? 'replace' : 'skip';
+        };
         list.innerHTML = conflictNames.map(n => `
           <div class="sf-save-conflict-row" data-conflict-row="${_sfEscape(n)}">
-            <span class="sf-save-conflict-name" title="${_sfEscape(n)}">${_sfEscape(n)}</span>
+            <span class="sf-save-conflict-name" title="${_sfEscape(opts.titleFor ? opts.titleFor(n) : n)}">${_sfEscape(opts.labelFor ? opts.labelFor(n) : n)}${(opts.subLabelFor ? [].concat(opts.subLabelFor(n) || []) : []).filter(Boolean).map(l => `<span class="sf-save-conflict-sub">${_sfEscape(l)}</span>`).join('')}</span>
             <span class="sf-save-conflict-choices">
-              <label><input type="radio" name="conflict-${_sfEscape(n)}" value="skip" checked>Skip</label>
-              <label><input type="radio" name="conflict-${_sfEscape(n)}" value="replace">Replace</label>
+              <label><input type="radio" name="conflict-${_sfEscape(n)}" value="skip"${_dfltFor(n) === 'skip' ? ' checked' : ''}>Skip</label>
+              <label><input type="radio" name="conflict-${_sfEscape(n)}" value="replace"${_dfltFor(n) === 'replace' ? ' checked' : ''}>Replace</label>
             </span>
           </div>
         `).join('');
@@ -27094,12 +27334,14 @@ require(['vs/editor/editor.main'], function () {
             if (!btn) return;
             const mode = btn.getAttribute('data-conflict-all');
             list.querySelectorAll(`input[type="radio"][value="${mode}"]`).forEach(r => { r.checked = true; });
+            // Setting radios in code fires no change event.
+            syncCaution();
           };
           const onApply = () => {
             const choices = new Map();
             for (const name of conflictNames) {
               const checked = list.querySelector(`input[name="conflict-${CSS.escape(name)}"]:checked`);
-              choices.set(name, checked?.value || 'skip');
+              choices.set(name, checked?.value || _dfltFor(name));
             }
             cleanup();
             resolve(choices);
@@ -27108,6 +27350,17 @@ require(['vs/editor/editor.main'], function () {
           const onBackdrop = (e) => { if (e.target === modal) onCancel(); };
           const onKey = (e) => { if (e.key === 'Escape') onCancel(); };
           const bulkRow = modal.querySelector('.sf-save-conflict-bulk');
+          // The caution only earns its place while something would actually be
+          // overwritten. With every row set to Skip it is noise, and noise here
+          // costs us the warning that matters later.
+          const cautionEl = document.getElementById('sf-save-conflict-caution');
+          const syncCaution = () => {
+            if (!cautionEl) return;
+            const anyReplace = !!list.querySelector('input[type="radio"][value="replace"]:checked');
+            cautionEl.style.display = anyReplace ? '' : 'none';
+          };
+          syncCaution();
+          list.addEventListener('change', syncCaution);
           const cleanup = () => {
             modal.classList.remove('active');
             applyBtn?.removeEventListener('click', onApply);
@@ -27115,6 +27368,7 @@ require(['vs/editor/editor.main'], function () {
             modal.removeEventListener('click', onBackdrop);
             document.removeEventListener('keydown', onKey);
             bulkRow?.removeEventListener('click', onBulk);
+            list.removeEventListener('change', syncCaution);
           };
           applyBtn?.addEventListener('click', onApply);
           cancelBtn?.addEventListener('click', onCancel);
@@ -27123,6 +27377,161 @@ require(['vs/editor/editor.main'], function () {
           bulkRow?.addEventListener('click', onBulk);
           modal.classList.add('active');
         });
+      };
+      // Which differing tracks should be overwritten. Returns an array of
+      // filenames to replace, or null if the user cancelled.
+      //
+      // This is the ONE ask the tracks export keeps, and it earns its place on
+      // terms the removed one never did: it fires only when files genuinely
+      // differ, it names them, and it defaults to the answer that is almost
+      // always right. Files that are merely missing are added without asking,
+      // and files that match are silent.
+      //
+      // Default is REPLACE, unlike font folders. The shared tracks folder is the
+      // app's own curated source for these files, so a difference nearly always
+      // means the user updated their copy and expects it on the card. Defaulting
+      // to Skip made the Update prompt contradict itself: it offered to update
+      // the card and then declined to update the one file that had changed.
+      const _sfResolveTrackConflicts = async (differing) => {
+        if (!differing || differing.length === 0) return [];
+        const n = differing.length;
+        const choices = await _sfPromptSaveConflicts(differing, {
+          title: n === 1 ? 'One track differs from your library' : `${n} tracks differ from your library`,
+          description: 'These tracks exist at the destination with different contents. Replace them with your library version, or keep what is already on the card. Anything else on the card is left alone either way.',
+          defaultMode: 'replace',
+        });
+        if (!choices) return null;
+        return differing.filter(name => (choices.get(name) || 'replace') === 'replace');
+      };
+      // Export completion summary — the honest counterpart to asking fewer
+      // questions. The app now decides several things on the user's behalf: the
+      // common folder auto-included when the prop requires a voicepack, tracks
+      // driven by a saved setting, an identical folder skipped with no prompt at
+      // all. Every one of those is a decision the user did not make, so there is
+      // one place afterwards that says what was decided. Reading a summary once
+      // at the end is cheap attention; a dialog before every export is expensive
+      // attention, and it is what teaches people to click through the dialog
+      // that actually mattered.
+      //
+      // Deliberately NOT a new modal shape: this reuses the app's existing
+      // notice pattern. The differences dialog happens BEFORE the work and stays
+      // a decision surface; this is the record, and the two should not blur.
+      // Export completion summary — the honest counterpart to asking fewer
+      // questions. The app now decides several things on the user's behalf: the
+      // common folder auto-included when the prop requires a voicepack, tracks
+      // driven by a saved setting, folders skipped without a prompt because
+      // they already matched. Every one of those is a decision the user did not
+      // make, so there is one place afterwards that says what was decided.
+      //
+      // Label/value rows rather than a paragraph (the bulk-import breakdown
+      // idiom): these are numbers, and numbers want to be scanned, not read.
+      // The differences dialog happens BEFORE the work and stays a decision
+      // surface; this is the record. The two should not blur.
+      // Export completion summary — the honest counterpart to asking fewer
+      // questions. The app now decides several things on the user's behalf: the
+      // common folder auto-included when the prop requires a voicepack, tracks
+      // driven by a saved setting, folders skipped without a prompt because they
+      // already matched. Every one of those is a decision the user did not make,
+      // so one place afterwards says what was decided.
+      //
+      // FORMAT follows the app's other completion summaries (bulk import, the
+      // single-source export): running prose, one line per subject, numbers in
+      // <strong>, an elapsed line last, and a "Show in folder" primary. It is
+      // deliberately NOT the label/value breakdown block — that idiom belongs to
+      // the bulk-import REVIEW screen, which is a pre-action comparison surface.
+      // Completion summaries here are prose. (Ryan caught the drift 2026-07-31.)
+      //
+      // The rule for the "why" notes: report what the APP decided, not what the
+      // user chose. An inferred prop requirement earns a mention; their own
+      // setting does not.
+      const _sfShowExportSummary = async ({ destDir, names, modeByName, commonOutcome, tracksOutcome, unchangedFonts, commonFolderName, elapsedSec }) => {
+        const esc = _sfEscape;
+        const n = (v) => `<strong>${v}</strong>`;
+        const plural = (c, w) => `${w}${c === 1 ? '' : 's'}`;
+        const lines = [];
+
+        const unchanged = (unchangedFonts || []).length;
+        const written = names.filter(x => (modeByName.get(x) || 'rename') !== 'skip').length;
+        const keptByChoice = Math.max(0, names.length - written - unchanged);
+
+        // Start from what was ASKED for, so the numbers reconcile against the
+        // user's own action. The two kinds of "not written" stay apart: one is
+        // the card already being correct, the other is a decision they made.
+        const bits = [];
+        if (written) bits.push(`${n(written)} written`);
+        if (unchanged) bits.push(`${n(unchanged)} already identical`);
+        if (keptByChoice) bits.push(`${n(keptByChoice)} kept as ${keptByChoice === 1 ? 'it was' : 'they were'}`);
+        lines.push(`${n(names.length)} ${plural(names.length, 'font')} selected. ${bits.join(', ')}.`);
+
+        try {
+          const dl = await window.electronAPI.listDestFolders({ destDir });
+          if (dl && dl.ok && Array.isArray(dl.folders)) {
+            const reserved = new Set(['common', 'tracks', String(commonFolderName || 'common')]);
+            const fontish = dl.folders.filter(f => !reserved.has(f));
+            const extra = fontish.filter(f => !new Set(names).has(f)).length;
+            lines.push(`${n(fontish.length)} ${plural(fontish.length, 'font')} on the card${extra ? `, ${n(extra)} not part of this export` : ''}.`);
+          }
+        } catch {}
+
+        if (commonOutcome) {
+          const pack = esc(commonOutcome.name || 'your common folder');
+          const why = commonOutcome.reason === 'prop'
+            ? ', required by your prop on ProffieOS 8'
+            : commonOutcome.reason === 'config'
+              ? ', because your config references it'
+              : '';
+          if (commonOutcome.state === 'current') {
+            // Silence would read as "it did not ship", the wrong impression to
+            // leave from a good outcome.
+            lines.push(`Voice pack ${pack} was already on the card.`);
+          } else if (commonOutcome.state === 'kept') {
+            lines.push(`The card keeps ${esc(commonOutcome.cardName || 'the voice pack it had')}, at your choice. ${pack} was not written.`);
+          } else {
+            lines.push(`Voice pack ${pack} written${why}.`);
+          }
+        }
+
+        if (tracksOutcome) {
+          const tb = [];
+          if (tracksOutcome.added) tb.push(`${n(tracksOutcome.added)} added`);
+          if (tracksOutcome.replaced) tb.push(`${n(tracksOutcome.replaced)} replaced`);
+          const total = (tracksOutcome.unchanged || 0) + (tracksOutcome.added || 0) + (tracksOutcome.replaced || 0);
+          if (tb.length) {
+            const why = tracksOutcome.reason === 'config'
+              ? ' Your config references the tracks folder.'
+              : tracksOutcome.reason === 'destination'
+                ? ' This card already had a tracks folder.'
+                : '';
+            lines.push(`Shared tracks: ${tb.join(', ')}.${why}`);
+          } else {
+            lines.push(`All ${n(total)} shared ${plural(total, 'track')} were already on the card.`);
+          }
+          const kept = tracksOutcome.kept || [];
+          if (kept.length) {
+            const shown = esc(kept.slice(0, 6).join(', '));
+            const more = kept.length > 6 ? `, and ${kept.length - 6} more` : '';
+            lines.push(`${n(kept.length)} ${plural(kept.length, 'track')} kept as ${kept.length === 1 ? 'it is' : 'they are'} on the card: ${shown}${more}.`);
+          }
+        }
+
+        const tail = [`Saved to ${esc(destDir)}.`];
+        if (typeof elapsedSec === 'number') {
+          const fmt = window._sfFormatDuration ? window._sfFormatDuration(elapsedSec) : `${Math.round(elapsedSec)}s`;
+          tail.push(`Took ${fmt}.`);
+        }
+        const showIt = await promptConfirm({
+          title: 'Export complete',
+          messageHtml: lines.join('<br>') + '<br><br>' + tail.join(' '),
+          confirmText: 'Show in folder',
+          confirmKind: 'primary',
+          cancelText: 'Done',
+          cancelKind: 'cancel',
+        });
+        if (showIt === true) {
+          const rev = await window.electronAPI.showItemInFolder(destDir)
+            .catch((e) => ({ ok: false, error: String(e && e.message || e) }));
+          if (!rev || rev.ok === false) promptError('Could not open the folder', (rev && rev.error) || destDir);
+        }
       };
       // Bulk save: copies each selected entry as a Proffie-shaped folder to
       // a destination the user picks (typically an SD card root). Pre-scans
@@ -27155,6 +27564,9 @@ require(['vs/editor/editor.main'], function () {
           }
         } catch {}
         const needsCommon = wantsCommon || propRequiresCommon;
+        // Why the common folder is in play, carried through to the summary so a
+        // folder that shipped without the user asking for it says why it did.
+        const commonReason = wantsCommon ? 'config' : (propRequiresCommon ? 'prop' : null);
         const hasStarred = !!_sfStarredCommonUuid;
         let includeCommon = false;
         // Tracks which common to include for this Save. Defaults to the
@@ -27250,9 +27662,23 @@ require(['vs/editor/editor.main'], function () {
           // the same truth this branch did.
           window._sfSharedTracksExists = hasTracksFolder;
         } catch { hasTracksFolder = !!window._sfSharedTracksExists; }
+        // THE PRECEDENCE LADDER (Ryan, 2026-07-31). It used to ask on every
+        // single export, which is a question with a stable answer asked over
+        // and over — and repeated asks are what teach people to click through
+        // the dialog that actually mattered.
+        //   0. The config references tracks/  -> include, silently, always.
+        //      The config is the authority on what the saber will go looking
+        //      for; a preference cannot overrule a file it asks for by name.
+        //   1. Otherwise the persisted setting decides, with no ask.
+        //   2. Except the destination-mismatch case, handled after the folder
+        //      picker below, which asks at most once.
+        // `tracksReason` is carried so the export summary can say WHY tracks
+        // shipped when the user did not tick the box themselves.
         let includeTracks = false;
+        let tracksReason = null;
         if (wantsTracks && hasTracksFolder) {
           includeTracks = true;
+          tracksReason = 'config';
         } else if (wantsTracks && !hasTracksFolder) {
           const ok = await promptConfirm({
             title: 'No shared tracks folder',
@@ -27262,32 +27688,107 @@ require(['vs/editor/editor.main'], function () {
             cancelText: 'Cancel',
           });
           if (!ok) return false;
-        } else if (!wantsTracks && hasTracksFolder) {
-          const choice = await promptConfirm({
-            title: 'Include shared tracks folder?',
-            message: 'The open config does not reference the shared "tracks/" folder, but you have one in your library. Include it in the saved output?',
-            confirmText: 'Include',
-            confirmKind: 'primary',
-            middleText: 'Skip',
-            cancelText: 'Cancel',
-          });
-          if (choice === 'cancel') return false;
-          includeTracks = choice === 'confirm';
+        } else if (hasTracksFolder) {
+          includeTracks = await _sfGetIncludeTracksPref();
+          if (includeTracks) tracksReason = 'setting';
         }
         let pick;
         try { pick = await window.electronAPI.selectSaveDestination(); }
         catch (err) { promptError('Could not open folder picker', err && err.message || err); return false; }
         if (!pick || !pick.ok) return false;
         const destDir = pick.dirPath;
+        // The one remaining ask, and only where there is real evidence to act
+        // on: this destination already has a tracks/ folder while the setting
+        // says don't include. That mismatch is evidence this person does use
+        // one, so ask once rather than silently leaving it stale. Byte-identical
+        // means there is nothing to say at all, so we do not say it.
+        //
+        // This also carries anyone who used to answer "Include" to the old
+        // per-export prompt: their card already has the folder, so they get
+        // asked once here instead of quietly losing it to the new default.
+        if (!includeTracks && hasTracksFolder) {
+          try {
+            const m = await window.electronAPI.sharedTracksMatchesAt({ destDir });
+            if (m && m.ok && m.exists && !m.identical) {
+              const choice = await promptConfirm({
+                title: 'Update the tracks folder on this card?',
+                message: 'This location already has a "tracks/" folder and it does not match the shared tracks folder in your library.\n\nYou have "Include with export" turned off for tracks, so it would normally be left alone. Update it with anything new from your library?\n\nNothing on the card is deleted, and a file that differs is kept as it is.',
+                confirmText: 'Update',
+                confirmKind: 'primary',
+                middleText: 'Leave it',
+                cancelText: 'Cancel',
+              });
+              if (choice === 'cancel') return false;
+              if (choice === 'confirm') { includeTracks = true; tracksReason = 'destination'; }
+            }
+          } catch {}
+        }
         // Pre-scan: which entries already exist at the destination? Also
         // check whether a "common" folder already exists if we plan to write
         // one — surfaced in the same conflict UI so the user picks per-item.
         const conflicts = [];
+        // Fonts whose copy on the card is already byte-identical are NOT
+        // conflicts: there is nothing to decide, so asking keep-or-replace is
+        // both noise and untrue. They are also not re-copied, which is what
+        // makes re-exporting the same selection to the same card fast and
+        // quiet. The common folder already worked this way; fonts never did
+        // until now (Ryan spotted it 2026-07-31).
+        //
+        // THIS PHASE READS THE CARD. It used to be a bare existsSync per font;
+        // adding the identity check turned it into a content hash per font,
+        // which on a full card is real time spent off slow storage. It gets a
+        // progress bar for the same reason every other long read in this app
+        // does: silence reads as a hang, and it is worst exactly when there is
+        // most to do.
+        const unchangedFonts = [];
+        const _scanT0 = Date.now();
+        // Only count steps we will actually perform, or the bar stops short of
+        // full and the "N of M" reads as though something was missed.
+        const _scanTotal = names.length + (includeCommon ? 1 : 0) + (includeTracks ? 1 : 0);
+        let _scanDone = 0;
+        // `sub` is progress WITHIN the current unit, 0..1. The tracks step is one
+        // unit but hashes a hundred-plus wavs inside it, so without this the bar
+        // parks on "shared tracks" through the longest part of the scan and
+        // reads as frozen. Names go past instead, which is what every other long
+        // read in this app does.
+        const _scanTick = (file, sub) => {
+          const secs = Math.floor((Date.now() - _scanT0) / 1000);
+          const dur = window._sfFormatDuration ? window._sfFormatDuration(secs) : `${secs}s`;
+          const pos = Math.min(_scanDone + (sub || 0), _scanTotal);
+          _sfDeleteProgress.setPhase(
+            `Comparing with your library · ${Math.min(Math.floor(pos) + 1, _scanTotal)} of ${_scanTotal}`,
+            _scanTotal ? pos / _scanTotal : 0,
+            file || '',
+            `${dur} elapsed`,
+          );
+        };
+        _sfDeleteProgress.show('Checking the destination…', '', 0);
+        _scanTick('');
+        // Independent clock, the app's established method (see the import flow).
+        // Not because this phase emits no ticks — tracks tick per file — but
+        // because FONTS tick per FOLDER: entryMatchesAt hashes a whole font
+        // folder behind one tick, so a large font is several seconds with
+        // nothing moving. More generally, a clock driven by work events shows a
+        // stale time exactly when work is slowest, which is when someone is
+        // reading it to decide whether the app has hung.
+        const _scanElapsedTicker = setInterval(() => {
+          const el = _sfDeleteProgress.elapsedEl && _sfDeleteProgress.elapsedEl();
+          if (!el) return;
+          const sec = (Date.now() - _scanT0) / 1000;
+          el.style.display = '';
+          el.textContent = `${window._sfFormatDuration ? window._sfFormatDuration(sec) : `${Math.round(sec)}s`} elapsed`;
+        }, 1000);
         for (const name of names) {
+          _scanTick(name);
           try {
-            const r = await window.electronAPI.entryFolderExistsAt({ name, destDir });
-            if (r && r.ok && r.exists) conflicts.push(name);
+            const m = await window.electronAPI.entryMatchesAt({ name, destDir });
+            if (m && m.ok && m.exists) {
+              if (m.identical) unchangedFonts.push(name);
+              else conflicts.push(name);
+            }
           } catch {}
+          _scanDone++;
+          _scanTick(name);
         }
         // The literal label "common" can collide with a font folder named
         // "common" in extreme edge cases; pre-scan order is fonts first then
@@ -27300,9 +27801,21 @@ require(['vs/editor/editor.main'], function () {
         // only difference is the marker we wrote last time is a question with no
         // meaning. (Ryan, 2026-07-30.)
         let commonAlreadyCurrent = false;
+        // Names for the conflict row. "common" is where it goes, not what it is,
+        // so the row has to say which pack is being written and which one the
+        // card is already carrying.
+        let commonMineName = '';
+        let commonCardName = '';
+        _scanTick('common folder');
         if (includeCommon) {
           try {
             const cu = _sfBulkSaveCommonOverride || _sfStarredCommonUuid;
+            const mineC = _sfCommons.find(x => x.uuid === cu);
+            commonMineName = (mineC && mineC.meta && mineC.meta.name) || '';
+            try {
+              const ex = await window.electronAPI.commonFolderExistsAt({ destDir });
+              commonCardName = (ex && ex.ok && ex.marker && ex.marker.name) || '';
+            } catch {}
             const r = await window.electronAPI.commonMatchesAt({ uuid: cu, destDir });
             if (r && r.ok && r.exists) {
               // Decided on CONTENT, not on the marker. A marker states what we
@@ -27316,35 +27829,131 @@ require(['vs/editor/editor.main'], function () {
             }
           } catch {}
         }
+        if (includeCommon) { _scanDone++; _scanTick('common folder'); }
         if (commonAlreadyCurrent) includeCommon = false;
+        // Tracks are PLANNED here, in the scan, even though their dialog opens
+        // further down with the other decisions. Reading is reading: doing it
+        // between two modals would put an unexplained pause in the middle of
+        // the user answering questions.
+        let tracksDiffering = [];
+        let tracksToAdd = [];
         if (includeTracks) {
+          _scanTick('shared tracks');
+          const offPlan = window.electronAPI.onSharedTracksPlanProgress(({ file, done, total } = {}) => {
+            _scanTick(file || 'shared tracks', total ? done / total : 0);
+          });
           try {
-            const r = await window.electronAPI.sharedTracksFolderExistsAt({ destDir });
-            if (r && r.ok && r.exists && !conflicts.includes('tracks')) conflicts.push('tracks');
+            const plan = await window.electronAPI.sharedTracksPlanExport({ destDir });
+            if (plan && plan.ok && Array.isArray(plan.differing)) {
+              tracksDiffering = plan.differing;
+              tracksToAdd = plan.toAdd || [];
+            }
           } catch {}
+          finally { try { offPlan && offPlan(); } catch {} }
+          _scanDone++;
         }
+        _scanTick('');
+        // Everything that had to be read has been read. Close the scan before
+        // any decision opens, so the two never overlap on screen.
+        clearInterval(_scanElapsedTicker);
+        await _sfDeleteProgress.hide();
+        // Tracks deliberately do NOT enter the conflict list any more. That list
+        // asks keep-or-replace, which is a destructive choice, and the tracks
+        // export is now additive: nothing at the destination is deleted, and a
+        // same-name file that differs is kept as it is. There is no destruction
+        // to authorise, so there is no question to ask. What DID happen is
+        // reported afterwards instead.
         let modeByName = new Map(); // name -> 'skip' | 'replace'
         if (conflicts.length > 0) {
-          const choices = await _sfPromptSaveConflicts(conflicts);
+          // DEFAULT IS REPLACE, for fonts and for the common folder alike.
+          // Ryan, 2026-07-31, and it follows from what the app is for: people
+          // are taught to modify their sound fonts HERE, in the library, and to
+          // treat the card as output. Under that model the library is the source
+          // of truth and a card folder that has drifted is stale, not precious.
+          // Defaulting to Skip also quietly declined a choice the user had just
+          // made, since they actively picked which common to ship (the config's
+          // @jmt:common marker, the starred default, or the multi-common
+          // dropdown). The prior Skip default had no recorded rationale.
+          //
+          // The consequence to know: replacing a font folder is a recursive
+          // wipe, so anything added on the card inside it goes, including a
+          // <font>/tracks/ subfolder. Consistent with the model above; it is
+          // still the reason Skip remains one click away on every row.
+          // Title and body describe WHAT IS ACTUALLY LISTED. The list can hold
+          // font folders, the common folder, or both, and it can hold exactly
+          // one row — so a fixed plural "Some fonts..." was wrong in several
+          // real cases, including a lone common-folder row that is not a font
+          // at all. (Ryan, 2026-07-31.)
+          const _cFonts = conflicts.filter(n => n !== 'common').length;
+          const _cCommon = conflicts.includes('common');
+          const _subject = _cFonts && _cCommon
+            ? (_cFonts === 1 ? 'One font and the common folder' : 'Some fonts and the common folder')
+            : _cFonts
+              ? (_cFonts === 1 ? 'One font' : 'Some fonts')
+              : 'The common folder';
+          const _isPlural = _cFonts > 1 || (_cFonts >= 1 && _cCommon);
+          const _cTitle = `${_subject} on the card ${_isPlural ? 'are' : 'is'} different`;
+          const _cBody = [
+            `${_isPlural ? 'These' : 'This'} already ${_isPlural ? 'exist' : 'exists'} on the card with different contents.`,
+            `Choose whether to replace ${_isPlural ? 'each' : 'it'} with your library version or keep what is on the card.`,
+            // Only claim things were left alone when some actually were.
+            (unchangedFonts.length
+              ? `${unchangedFonts.length === 1 ? 'One font that already matches' : `${unchangedFonts.length} fonts that already match`} your library ${unchangedFonts.length === 1 ? 'is' : 'are'} not listed and ${unchangedFonts.length === 1 ? 'was' : 'were'} left alone.`
+              : ''),
+            `Each folder is treated as a unit, so old and new files are never mixed.`,
+          ].filter(Boolean).join(' ');
+          const choices = await _sfPromptSaveConflicts(conflicts, {
+            defaultMode: 'replace',
+            title: _cTitle,
+            description: _cBody,
+            labelFor: (n) => n,
+            titleFor: (n) => (n === 'common'
+              ? `The card's common folder${commonMineName ? `, receiving ${commonMineName}` : ''}`
+              : n),
+            // Row heading stays the DESTINATION folder name. A long pack name
+            // as the title overflowed the row and still did not say what it
+            // was replacing, so both packs moved to the lines beneath it.
+            subLabelFor: (n) => {
+              if (n !== 'common') return [];
+              const out = [];
+              if (commonMineName) out.push(`Selected voice pack: ${commonMineName}`);
+              out.push(commonCardName
+                ? `Replaces current common: ${commonCardName}`
+                : `Replaces the current contents of this folder`);
+              return out;
+            },
+          });
           if (!choices) return false; // user cancelled
           modeByName = choices;
+        }
+        // Tracks resolve separately, and only for files that genuinely differ.
+        // Their own dialog, because they are individual files with a different
+        // default (Replace) rather than folders treated as a unit.
+        let tracksReplace = [];
+        if (tracksDiffering.length) {
+          const chosen = await _sfResolveTrackConflicts(tracksDiffering);
+          if (chosen === null) return false; // user cancelled the save
+          tracksReplace = chosen;
         }
         // Combined progress count — only items that will actually be written.
         // Items the user chose to skip in the conflict modal don't count
         // toward the total (and don't increment the running step), so the
         // progress reflects real work.
         const commonMode = includeCommon ? (modeByName.get('common') || 'rename') : null;
-        const tracksMode = includeTracks ? (modeByName.get('tracks') || 'rename') : null;
+        const tracksMode = includeTracks ? 'additive' : null;
+        // Byte-identical fonts ride the existing skip path: no IPC call, no
+        // progress tick, nothing written.
+        for (const n of unchangedFonts) modeByName.set(n, 'skip');
         const willWriteFonts = names.filter(n => (modeByName.get(n) || 'rename') !== 'skip').length;
         const willWriteCommon = includeCommon && commonMode !== 'skip' ? 1 : 0;
-        const willWriteTracks = includeTracks && tracksMode !== 'skip' ? 1 : 0;
+        const willWriteTracks = includeTracks && (tracksToAdd.length || tracksReplace.length) ? 1 : 0;
         const totalSteps = willWriteFonts + willWriteCommon + willWriteTracks;
-        // Everything got skipped — honest bail rather than a "Saving (0 of 0)"
+        // Everything got skipped — honest bail rather than a "Exporting (0 of 0)"
         // flash. Selection is preserved so the user can revisit their
         // conflict choices and re-Save without re-selecting fonts.
         if (totalSteps === 0) {
           await promptConfirm({
-            title: 'Nothing to save',
+            title: 'Nothing to export',
             message: 'Every selected item was set to Skip, so no files were written. Your selection is kept so you can revisit your choices.',
             confirmText: 'OK',
             confirmKind: 'primary',
@@ -27363,8 +27972,17 @@ require(['vs/editor/editor.main'], function () {
           const cu = _sfBulkSaveCommonOverride || _sfStarredCommonUuid;
           try { await window.electronAPI.writeCommonMarker({ uuid: cu, destDir }); } catch {}
         }
+        // Up FIRST, before any totals are summed or listeners wired. Pressing
+        // Continue must produce something on screen immediately; the gap before
+        // this grew with the size of the selection, which is exactly backwards.
+        _sfDeleteProgress.show('Preparing to export', '', 0);
         const failures = [];
         const results = { copied: 0, skipped: 0, replaced: 0 };
+        // What actually happened, for the export summary.
+        let tracksOutcome = null;
+        let commonOutcome = commonAlreadyCurrent
+          ? { state: 'current', reason: commonReason, name: commonMineName, cardName: commonCardName }
+          : null;
         let stepIdx = 0;
         // Byte-accurate progress. Sum the real byte totals of everything about
         // to be written, then advance the bar by bytes actually copied to the
@@ -27385,7 +28003,14 @@ require(['vs/editor/editor.main'], function () {
           _sfExportTotalBytes += (c && (c.totalBytes || (c.meta && c.meta.contentTotalBytes))) || 0;
         }
         if (willWriteTracks) {
-          _sfExportTotalBytes += (window._sfSharedTracksFiles || []).reduce((s, f) => s + (f.size || 0), 0);
+          // Only what will actually be copied. The additive export writes the
+          // tracks that are MISSING plus the ones the user chose to replace,
+          // not the whole folder — counting all of it put gigabytes in the
+          // denominator that were never going to be written, so the bar sat
+          // near empty and never moved. (Ryan spotted it 2026-07-31.)
+          const willCopy = new Set([...tracksToAdd, ...tracksReplace]);
+          _sfExportTotalBytes += (window._sfSharedTracksFiles || [])
+            .reduce((sum, f) => sum + (willCopy.has(f.name) ? (f.size || 0) : 0), 0);
         }
         let _sfExportBytesDone = 0;
         let _sfExportLabel = '';
@@ -27406,7 +28031,7 @@ require(['vs/editor/editor.main'], function () {
           _sfExportBytesDone += (delta || 0);
           _sfRenderExportProg();
         });
-        _sfDeleteProgress.show('Exporting fonts', '', 0);
+        _sfDeleteProgress.show('Exporting', '', 0);
         for (const name of names) {
           const mode = modeByName.get(name) || 'rename';
           if (mode === 'skip') {
@@ -27417,7 +28042,7 @@ require(['vs/editor/editor.main'], function () {
           }
           stepIdx++;
           _sfExportLabel = name;
-          _sfDeleteProgress.show(`Exporting fonts (${stepIdx} of ${totalSteps})`, '');
+          _sfDeleteProgress.show(`Exporting (${stepIdx} of ${totalSteps})`, '');
           _sfRenderExportProg();
           try {
             const r = await window.electronAPI.exportEntryToFolder({ name, destDir, mode });
@@ -27438,7 +28063,7 @@ require(['vs/editor/editor.main'], function () {
           const commonUuid = _sfBulkSaveCommonOverride || _sfStarredCommonUuid;
           stepIdx++;
           _sfExportLabel = 'common folder';
-          _sfDeleteProgress.show(`Exporting fonts (${stepIdx} of ${totalSteps})`, '');
+          _sfDeleteProgress.show(`Exporting (${stepIdx} of ${totalSteps})`, '');
           _sfRenderExportProg();
           try {
             const r = await window.electronAPI.exportCommonToFolder({
@@ -27447,9 +28072,13 @@ require(['vs/editor/editor.main'], function () {
               mode: commonMode,
             });
             if (!r || !r.ok) failures.push({ name: 'common', error: (r && r.error) || 'unknown error' });
-            else if (r.skipped) results.skipped++;
-            else if (commonMode === 'replace') results.replaced++;
-            else results.copied++;
+            else if (r.skipped) {
+              results.skipped++;
+              commonOutcome = { state: 'kept', reason: commonReason, name: commonMineName, cardName: commonCardName };
+            } else {
+              if (commonMode === 'replace') results.replaced++; else results.copied++;
+              commonOutcome = { state: 'written', reason: commonReason, name: commonMineName, cardName: commonCardName };
+            }
           } catch (err) {
             failures.push({ name: 'common', error: String(err && err.message || err) });
           }
@@ -27457,25 +28086,44 @@ require(['vs/editor/editor.main'], function () {
           // User chose to keep the existing common at destination.
           results.skipped++;
         }
-        if (includeTracks && tracksMode !== 'skip') {
+        if (includeTracks && willWriteTracks) {
           stepIdx++;
           _sfExportLabel = 'shared tracks folder';
-          _sfDeleteProgress.show(`Exporting fonts (${stepIdx} of ${totalSteps})`, '');
+          _sfDeleteProgress.show(`Exporting (${stepIdx} of ${totalSteps})`, '');
           _sfRenderExportProg();
           try {
             const r = await window.electronAPI.sharedTracksExportToFolder({
               destDir,
               mode: tracksMode,
+              replace: tracksReplace,
             });
-            if (!r || !r.ok) failures.push({ name: 'tracks', error: (r && r.error) || 'unknown error' });
-            else if (r.skipped) results.skipped++;
-            else if (tracksMode === 'replace') results.replaced++;
-            else results.copied++;
+            if (!r || !r.ok) {
+              failures.push({ name: 'tracks', error: (r && r.error) || 'unknown error' });
+            } else {
+              // Kept for the export summary: what shipped, what was replaced,
+              // what the user chose to keep, and WHY tracks were included when
+              // they did not tick the box themselves.
+              tracksOutcome = {
+                reason: tracksReason,
+                added: (r.added || []).length,
+                replaced: (r.replaced || []).length,
+                unchanged: (r.unchanged || []).length,
+                kept: r.kept || [],
+              };
+              if (tracksOutcome.added || tracksOutcome.replaced) results.copied++; else results.skipped++;
+            }
           } catch (err) {
             failures.push({ name: 'tracks', error: String(err && err.message || err) });
           }
-        } else if (includeTracks && tracksMode === 'skip') {
-          results.skipped++;
+        } else if (includeTracks) {
+          // Included, but the card already had every track. Worth saying: silence
+          // here reads as "tracks did not ship".
+          tracksOutcome = {
+            reason: tracksReason,
+            added: 0, replaced: 0,
+            unchanged: (window._sfSharedTracksFiles || []).length,
+            kept: [],
+          };
         }
         _offExportProg();
         // Snap to a full bar so the operation visibly completes, absorbing any
@@ -27485,12 +28133,13 @@ require(['vs/editor/editor.main'], function () {
         _sfDeleteProgress.setProgress(1);
         await _sfDeleteProgress.hide();
         if (failures.length) {
-          await _sfShowPartialFailures('Some items failed to save', failures);
+          await _sfShowPartialFailures('Some items failed to export', failures);
           // Keep selection on real failures so the user can see what's still
           // in scope and retry. (Skips don't count as failures — those were
           // deliberate user choices.)
           return true;
         }
+        await _sfShowExportSummary({ destDir, names, modeByName, commonOutcome, tracksOutcome, unchangedFonts, commonFolderName: 'common', elapsedSec: (Date.now() - _sfExportT0) / 1000 });
         _sfSelectedNames.clear();
         _sfRenderGrid();
         return true;
@@ -27985,6 +28634,24 @@ require(['vs/editor/editor.main'], function () {
           _sfRenderGrid();
           return;
         }
+        // "Include with export" on the tracks card. Writes the persisted
+        // setting immediately — there is no per-export copy of this value, so
+        // whatever it is left at is what the next export does. stopPropagation
+        // because the card itself opens the tracks modal on click.
+        const inclWrap = e.target.closest('[data-tracks-include-wrap]');
+        if (inclWrap) {
+          // Always swallow the click so the card underneath does not open the
+          // tracks modal. A click on the label text lands here with no input in
+          // the path; the browser then dispatches its own click on the checkbox,
+          // which re-enters this branch with the post-toggle state. That second
+          // pass is the one that writes.
+          e.stopPropagation();
+          const inclBox = e.target.closest('[data-tracks-include]');
+          if (inclBox && typeof window._sfSetIncludeTracksPref === 'function') {
+            window._sfSetIncludeTracksPref(!!inclBox.checked);
+          }
+          return;
+        }
         const sharedDel = e.target.closest('[data-shared-tracks-delete]');
         if (sharedDel) {
           e.stopPropagation();
@@ -28095,6 +28762,34 @@ require(['vs/editor/editor.main'], function () {
         }
         const name = card.getAttribute('data-font');
         if (name) _sfOpenEntryDetail(name);
+      });
+      // Right-click the Shared Tracks card → Export. Every other card kind in
+      // this grid already offers export from its context menu; tracks did not,
+      // so the folder could only ever reach a card by riding along with a bulk
+      // font Save.
+      document.getElementById('sf-cards')?.addEventListener('contextmenu', (e) => {
+        const card = e.target.closest('[data-shared-tracks]');
+        if (!card) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const menu = document.getElementById('preset-ctx-menu');
+        if (!menu) return;
+        menu.innerHTML = '';
+        menu.style.minWidth = '0';
+        const d = document.createElement('div');
+        d.className = 'preset-ctx-item';
+        d.textContent = 'Export…';
+        d.addEventListener('mousedown', (e2) => {
+          e2.stopPropagation();
+          menu.style.display = 'none';
+          if (typeof window._sfExportSharedTracks === 'function') window._sfExportSharedTracks();
+        });
+        menu.appendChild(d);
+        menu.style.display = 'block';
+        menu.style.left = `${e.pageX}px`;
+        menu.style.top = `${e.pageY}px`;
+        const close = () => { menu.style.display = 'none'; document.removeEventListener('mousedown', close); };
+        document.addEventListener('mousedown', close);
       });
       // Right-click on a card-level effect chip → context menu listing
       // every wav variant for that effect (mirrors the modal's behavior

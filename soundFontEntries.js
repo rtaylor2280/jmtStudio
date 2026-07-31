@@ -849,6 +849,41 @@ function entryFolderExistsAt(name, destDir) {
 //
 // Returns { ok, destPath } on copy success, { ok, skipped: true } when the
 // caller asked to skip an existing folder, or { ok: false, error } otherwise.
+// Is the copy at destDir/<name>/ byte-identical to this library entry?
+//
+// Exists so the conflict dialog stops asking keep-or-replace about folders that
+// do not differ. Before this, exporting the same selection to the same card
+// twice put every font in front of the user as a "conflict" when nothing had
+// changed, which is both noise and a lie: there was nothing to decide.
+//
+// Roots correspond directly here, unlike the common folder: the export copies
+// the entry dir's contents into destDir/<name>/, and collectFileRecords already
+// excludes the item-root meta.json, which is the only thing that does not ship.
+// So the two trees hash comparably with no special casing.
+//
+// Same discipline as commonMatchesAt: cheap signal first and only as a NEGATIVE
+// (differing counts prove difference; matching counts prove nothing), content
+// read before claiming sameness, and anything unreadable comes back
+// not-identical so the caller asks rather than assuming.
+function entryMatchesAt(userData, name, destDir) {
+  if (!name || !destDir) return { ok: false, error: 'Missing name or destDir' };
+  const srcDir  = path.join(entriesRoot(userData), name);
+  const destFont = path.join(destDir, name);
+  let destExists = false;
+  try { destExists = fs.existsSync(destFont) && fs.statSync(destFont).isDirectory(); } catch {}
+  if (!destExists) return { ok: true, exists: false, identical: false, reason: 'missing' };
+  if (!fs.existsSync(srcDir)) return { ok: true, exists: true, identical: false, reason: 'unreadable' };
+  const { collectFileRecords, hashRecords } = require('./soundFontFileHash');
+  const mine   = collectFileRecords(srcDir);
+  const theirs = collectFileRecords(destFont);
+  if (!mine || !theirs) return { ok: true, exists: true, identical: false, reason: 'unreadable' };
+  if (mine.length !== theirs.length) return { ok: true, exists: true, identical: false, reason: 'count' };
+  const bytes = (recs) => recs.reduce((t, r) => t + (r.size || 0), 0);
+  if (bytes(mine) !== bytes(theirs)) return { ok: true, exists: true, identical: false, reason: 'signals' };
+  const identical = hashRecords(mine) === hashRecords(theirs);
+  return { ok: true, exists: true, identical, reason: identical ? null : 'hash' };
+}
+
 async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onBytes = null) {
   if (!name) return { ok: false, error: 'Missing name' };
   if (!destDir) return { ok: false, error: 'Missing destDir' };
@@ -1206,6 +1241,7 @@ module.exports = {
   listEntryDocs,
   readEntryFileBytes,
   exportEntryFileTo,
+  entryMatchesAt,
   exportEntryToFolder,
   entryFolderExistsAt,
   listEntryFiles,
