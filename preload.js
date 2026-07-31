@@ -268,6 +268,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   exportSourceToDownloads: (params)   => ipcRenderer.invoke('sources:exportToDownloads', params),
   pickExportDir:           (params)   => ipcRenderer.invoke('dialog:pickExportDir', params),
   showItemInFolder:        (p)        => ipcRenderer.invoke('shell:showItemInFolder', p),
+  openFolder:              (p)        => ipcRenderer.invoke('shell:openFolder', p),
   detectSourceVendor:    (params)     => ipcRenderer.invoke('sources:detectVendor', params),
   detectSourceCandidates: (params)    => ipcRenderer.invoke('sources:detectCandidates', params),
 

@@ -943,9 +943,18 @@ function commonMatchesAt(userData, uuid, destDir, targetName = 'common') {
     return { ok: true, exists: true, identical: false, reason: 'signals' };
   }
 
-  const { hashItemDir } = require('./soundFontFileHash');
-  const hMine  = hashItemDir(libDir, libFilter);
-  const hTheirs = hashItemDir(cardDir, cardFilter);
+  const { hashItemDir, hashFile, hashRecords } = require('./soundFontFileHash');
+  const hMine = hashItemDir(libDir, libFilter);
+  // Destination side goes through the manifest: files whose size and mtime still
+  // match what we recorded keep their hash and are never read, so one changed
+  // file costs one hash rather than the whole folder.
+  let hTheirs = null;
+  try {
+    const res = require('./sfSyncManifest')
+      .hashItemUsingManifest(destDir, targetName || 'common', hashFile, hashRecords, cardFilter);
+    if (res) hTheirs = res.hash;
+  } catch {}
+  if (hTheirs === null) hTheirs = hashItemDir(cardDir, cardFilter);
   // A tree we could not read is not a tree we may claim is current.
   if (!hMine || !hTheirs) return { ok: true, exists: true, identical: false, reason: 'unreadable' };
   const identical = hMine === hTheirs;
@@ -997,6 +1006,13 @@ async function exportCommonToFolder(userData, uuid, destDir, mode = 'rename', on
     // Human-readable marker, written into the destination so the card can say
     // which voice pack it is carrying. Never written into the library copy.
     try { writeCommonReadme(userData, uuid, targetDir); } catch {}
+    // Recorded AFTER the marker is written, so the signature includes it and a
+    // later scan does not see the marker as an unexplained change.
+    try {
+      const { hashFile, hashRecords } = require('./soundFontFileHash');
+      require('./sfSyncManifest')
+        .hashItemUsingManifest(destDir, targetName, hashFile, hashRecords, _excludeOurMarkers(targetDir));
+    } catch {}
     return { ok: true, destPath: targetDir };
   } catch (err) {
     // Best-effort cleanup of a partial copy so the user doesn't end up with

@@ -213,6 +213,23 @@ function planExport(userData, destDir, onFile = null) {
       .filter(e => e.isFile() && /\.wav$/i.test(e.name))
       .map(e => e.name);
   } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+  // Per-file hashes we recorded when we last wrote this folder. A track whose
+  // size and mtime still match its entry keeps that hash and is never read; the
+  // rest are read. On a synced card that is the difference between stat calls
+  // and gigabytes of SD reading, and a single hand-edited track costs one hash.
+  let cache = new Map();
+  try { cache = require('./sfSyncManifest').cacheFor(destDir, 'tracks'); } catch {}
+  const cachedHash = (abs, rel) => {
+    const c = cache.get(rel);
+    if (c) {
+      try {
+        const st = fs.statSync(abs);
+        if (c[0] === st.size && Math.abs((c[1] || 0) - Math.round(st.mtimeMs)) <= 2000) return c[2];
+      } catch {}
+    }
+    return hashFile(abs);
+  };
+
   let done = 0;
   for (const name of names) {
     if (onFile) { try { onFile(name, done, names.length); } catch {} }
@@ -229,7 +246,7 @@ function planExport(userData, destDir, onFile = null) {
     try { sameSize = fs.statSync(src).size === fs.statSync(dst).size; } catch { sameSize = false; }
     if (!sameSize) { differing.push(name); continue; }
     let same = false;
-    try { same = hashFile(src) === hashFile(dst); } catch { same = false; }
+    try { same = hashFile(src) === cachedHash(dst, name); } catch { same = false; }
     (same ? unchanged : differing).push(name);
   }
   if (onFile) { try { onFile('', names.length, names.length); } catch {} }
@@ -278,6 +295,17 @@ async function exportToFolderAdditive(userData, destDir, opts = {}) {
     }
   } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 
+  // Only record when the destination now matches the library exactly. If the
+  // user kept a differing track, the folder is deliberately NOT our content, so
+  // recording a hash for it would let a later export skip a real difference.
+  // Refresh the recorded table from what is now on the card, so the next scan
+  // can reuse it. Recorded whatever the outcome: it describes the DESTINATION,
+  // not our library, so a track the user chose to keep is simply recorded as it
+  // is and will be compared against the library again next time.
+  try {
+    const { hashFile: hf, hashRecords } = require('./soundFontFileHash');
+    require('./sfSyncManifest').hashItemUsingManifest(destDir, 'tracks', hf, hashRecords, _wavOnly);
+  } catch {}
   return { ok: true, destPath: targetDir, added, replaced, kept, unchanged: plan.unchanged };
 }
 

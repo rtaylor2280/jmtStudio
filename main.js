@@ -3583,6 +3583,20 @@ ipcMain.handle('shell:showItemInFolder', async (_, p) => {
   } catch (e) { return { ok: false, error: String(e && e.message || e) }; }
 });
 
+// Open a FOLDER, as opposed to revealing an item inside its parent. The two are
+// genuinely different actions and the right one depends on what the path is: a
+// source file wants showItemInFolder (land next to it, selected), an export
+// destination wants this (land inside it, looking at what was written).
+ipcMain.handle('shell:openFolder', async (_, p) => {
+  try {
+    if (!p) return { ok: false, error: 'no path' };
+    const full = path.resolve(String(p));
+    if (!fs.existsSync(full)) return { ok: false, error: `Not found: ${full}` };
+    const err = await shell.openPath(full);
+    return err ? { ok: false, error: err } : { ok: true };
+  } catch (e) { return { ok: false, error: String(e && e.message || e) }; }
+});
+
 // Read-only scan of removable volumes for the "Read my Proffie SD card" flow.
 ipcMain.handle('sdcard:scan', () => sdCardDetect.scan());
 

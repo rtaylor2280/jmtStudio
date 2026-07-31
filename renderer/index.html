@@ -27514,24 +27514,33 @@ require(['vs/editor/editor.main'], function () {
           }
         }
 
-        const tail = [`Saved to ${esc(destDir)}.`];
+        // The destination is a link, matching the import close-out screen: the
+        // path is the useful thing, so it is the clickable thing, rather than a
+        // button competing with Done for the primary slot.
+        const destLink = `<a href="#" id="sf-export-summary-path" style="color:var(--jmt-blue);text-decoration:underline;cursor:pointer">${esc(destDir)}</a>`;
+        const tail = [`Saved to ${destLink}.`];
         if (typeof elapsedSec === 'number') {
           const fmt = window._sfFormatDuration ? window._sfFormatDuration(elapsedSec) : `${Math.round(elapsedSec)}s`;
           tail.push(`Took ${fmt}.`);
         }
-        const showIt = await promptConfirm({
+        const closed = promptConfirm({
           title: 'Export complete',
           messageHtml: lines.join('<br>') + '<br><br>' + tail.join(' '),
-          confirmText: 'Show in folder',
+          confirmText: 'Done',
           confirmKind: 'primary',
-          cancelText: 'Done',
-          cancelKind: 'cancel',
+          hideCancel: true,
         });
-        if (showIt === true) {
-          const rev = await window.electronAPI.showItemInFolder(destDir)
-            .catch((e) => ({ ok: false, error: String(e && e.message || e) }));
+        const pathLink = document.getElementById('sf-export-summary-path');
+        // openFolder, not showItemInFolder: the destination IS the folder, so the
+        // user wants to land inside it looking at what was just written, not in
+        // its parent with it highlighted.
+        if (pathLink) pathLink.addEventListener('click', async (e) => {
+          e.preventDefault();
+          const rev = await window.electronAPI.openFolder(destDir)
+            .catch((err) => ({ ok: false, error: String(err && err.message || err) }));
           if (!rev || rev.ok === false) promptError('Could not open the folder', (rev && rev.error) || destDir);
-        }
+        });
+        await closed;
       };
       // Bulk save: copies each selected entry as a Proffie-shaped folder to
       // a destination the user picks (typically an SD card root). Pre-scans

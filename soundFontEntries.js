@@ -874,14 +874,24 @@ function entryMatchesAt(userData, name, destDir) {
   if (!destExists) return { ok: true, exists: false, identical: false, reason: 'missing' };
   if (!fs.existsSync(srcDir)) return { ok: true, exists: true, identical: false, reason: 'unreadable' };
   const { collectFileRecords, hashRecords } = require('./soundFontFileHash');
-  const mine   = collectFileRecords(srcDir);
-  const theirs = collectFileRecords(destFont);
-  if (!mine || !theirs) return { ok: true, exists: true, identical: false, reason: 'unreadable' };
-  if (mine.length !== theirs.length) return { ok: true, exists: true, identical: false, reason: 'count' };
-  const bytes = (recs) => recs.reduce((t, r) => t + (r.size || 0), 0);
-  if (bytes(mine) !== bytes(theirs)) return { ok: true, exists: true, identical: false, reason: 'signals' };
-  const identical = hashRecords(mine) === hashRecords(theirs);
-  return { ok: true, exists: true, identical, reason: identical ? null : 'hash' };
+  const mine = collectFileRecords(srcDir);
+  if (!mine) return { ok: true, exists: true, identical: false, reason: 'unreadable' };
+  const myHash = hashRecords(mine);
+
+  // Hash the destination PER FILE, reusing anything the manifest can still
+  // vouch for. A file whose size and mtime match what we recorded when we wrote
+  // it keeps its recorded hash and is never read; everything else is hashed. So
+  // adding or editing one file in a folder costs one hash, not the folder.
+  const { hashFile } = require('./soundFontFileHash');
+  const sync = require('./sfSyncManifest');
+  const res = sync.hashItemUsingManifest(destDir, name, hashFile, hashRecords);
+  if (!res) return { ok: true, exists: true, identical: false, reason: 'unreadable' };
+  const identical = res.hash === myHash;
+  return {
+    ok: true, exists: true, identical,
+    reason: identical ? null : 'hash',
+    reused: res.reused, hashed: res.hashed,
+  };
 }
 
 async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onBytes = null) {
@@ -925,6 +935,14 @@ async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onB
     // meta.json files inside font subdirs are kept on the off chance a vendor
     // shipped one.
     await copyTreeWithProgress(srcDir, targetDir, { skipRootMeta: true, onBytes });
+    // Record what we just wrote, with the destination's own timestamps, so the
+    // next export can tell "unchanged since we wrote it" with stat calls instead
+    // of reading the folder back. Best effort: a manifest we cannot write only
+    // costs a re-read next time.
+    try {
+      const { hashFile, hashRecords } = require('./soundFontFileHash');
+      require('./sfSyncManifest').hashItemUsingManifest(destDir, targetName, hashFile, hashRecords);
+    } catch {}
     return { ok: true, destPath: targetDir };
   } catch (err) {
     // Best-effort cleanup of a partial copy on failure so the user doesn't
