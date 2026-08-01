@@ -1489,12 +1489,8 @@
   #import-version-error { font-size: 0.78rem; color: #e55; min-height: 18px; margin-top: 2px; }
   #import-progress-wrap { display: none; margin-top: 14px; }
   #import-progress-wrap span { font-size: 0.75rem; color: var(--c-text-muted); display: block; margin-bottom: 5px; }
-  #import-progress-track { height: 3px; background: var(--c-border); border-radius: 2px; overflow: hidden; }
-  #import-progress-bar { height: 100%; width: 40%; background: var(--jmt-blue); border-radius: 2px; animation: import-slide 1.2s ease-in-out infinite; }
-  @keyframes import-slide {
-    0%   { transform: translateX(-100%); }
-    100% { transform: translateX(350%); }
-  }
+  #import-progress-track { height: 3px; background: var(--c-border); border-radius: 2px; overflow: hidden; position: relative; }
+  #import-progress-bar { position: absolute; left: 0; height: 100%; width: 30%; background: var(--jmt-blue); border-radius: 2px; animation: knightrider 1.4s ease-in-out infinite; }
 
   /* ── Settings / About button ── */
   #btn-settings {
@@ -2603,22 +2599,13 @@
      the current sub-file being extracted within the active source so
      the user sees motion at the file level too. Truncates with
      ellipsis when paths are long. */
-  .sf-import-progress-track { height: 6px; background: var(--c-bg-inset); border-radius: 3px; overflow: hidden; margin: 6px 0; }
+  .sf-import-progress-track { height: 6px; background: var(--c-bg-inset); border-radius: 3px; overflow: hidden; margin: 6px 0; position: relative; }
   .sf-import-progress-bar { height: 100%; width: 0%; background: var(--jmt-blue); transition: width 0.15s; }
   /* Indeterminate cleanup state. Used during cancel while the backend
      is unlinking the partial file. Tells the user "work is happening"
      without claiming a percentage we don't know. The 40% inline width
      gives the sliding chip enough mass to read at a glance. */
-  .sf-import-progress-bar.indeterminate {
-    width: 40% !important;
-    background: linear-gradient(90deg, transparent 0%, var(--jmt-blue) 50%, transparent 100%);
-    transition: none;
-    animation: sf-progress-slide 1.2s linear infinite;
-  }
-  @keyframes sf-progress-slide {
-    0%   { transform: translateX(-100%); }
-    100% { transform: translateX(250%); }
-  }
+  .sf-import-progress-bar.indeterminate { position: absolute; left: 0; width: 30% !important; background: var(--jmt-blue); transition: none; animation: knightrider 1.4s ease-in-out infinite; }
   /* The detail line under every determinate progress bar is ONE line that
      TRUNCATES with an ellipsis — it never wraps or grows the modal (2026-07-23; supersedes the 07-22 fixed two-line variant). */
   .sf-import-progress-detail { font-size: 0.72rem; color: var(--c-text-dim); margin: 4px 0 0 0; font-variant-numeric: tabular-nums; min-height: 1em; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -3602,6 +3589,11 @@
   .preset-row-toggle:hover { opacity: 1 !important; color: var(--jmt-blue); background: rgba(10,30,60,0.7); }
   .preset-row.preset-disabled .preset-row-toggle:hover { color: #4c4; background: rgba(10,40,10,0.7); }
   .preset-row.preset-disabled { color: var(--c-text-hint); font-style: italic; }
+  /* A preset whose font folder or track path is flagged red in the detail
+     panel, raised to the list so a bad preset is findable without opening
+     every one. Same red as the fields. Hidden while selected: the detail is
+     open right there, and red on the selection fill does not read. */
+  .preset-row:not(.selected) .preset-row-name.not-in-library { color: #e44; }
   .preset-row.preset-disabled.selected { background: rgba(40,70,100,0.65); color: #c0d4e8; }
   /* When a disabled preset is the active item, suppress live-row selection highlight */
   #preset-list-top[data-disabled-active] .preset-row[data-live-idx].selected { background: transparent !important; color: var(--c-text-sub) !important; }
@@ -15520,6 +15512,10 @@ async function switchTab(name) {
     // font-folder combo depends on (dropdown contents + not-in-library
     // validation). Re-render the detail so both reflect the current library.
     try { window._renderPresetDetail?.(); } catch {}
+    // The preset LIST carries the same validity marks, and switching tabs
+    // does not rebuild it, so without this a font renamed in the Sound
+    // Fonts tab leaves every row showing what was true before the rename.
+    try { window._presetSidecar?.rebuild?.(); } catch {}
   }
 
   if (name === 'versions') {
@@ -32920,6 +32916,28 @@ require(['vs/editor/editor.main'], function () {
       return zone;
     }
 
+    // Raise the field-level red flags up to the row name. Reads the same
+    // _presetFontIsUnknown / _presetTrackState that the detail fields paint
+    // with, so the list can never disagree with the preset it summarizes.
+    // Async because the track answer may need a file listing; the row is
+    // already in the DOM by then, so this just repaints it.
+    async function _markPresetRowValidity(row, nameEl, preset) {
+      if (!nameEl) return;
+      let bad = _presetFontIsUnknown(preset.font);
+      if (!bad && preset.track) {
+        const fontFolder = String(preset.font || '')
+          .split(';').filter(x => x.trim() !== 'common').join(';').split('/')[0].trim();
+        try {
+          const st = await _presetTrackState(preset.track, fontFolder);
+          bad = !!(st && st.red);
+        } catch {}
+      }
+      nameEl.classList.toggle('not-in-library', bad);
+      nameEl.title = bad
+        ? 'This preset has a font folder or track that was not found in your library.'
+        : '';
+    }
+
     function _buildPresetRow(preset, idx) {
       const row = document.createElement('div');
       row.className = 'preset-row';
@@ -32950,6 +32968,7 @@ require(['vs/editor/editor.main'], function () {
       const name = document.createElement('span');
       name.className = 'preset-row-name';
       name.textContent = preset.displayName || '(unnamed)';
+      _markPresetRowValidity(row, name, preset);
       row.appendChild(name);
 
       const font = document.createElement('span');
@@ -33610,7 +33629,8 @@ require(['vs/editor/editor.main'], function () {
         const tree = (r && r.ok && r.files) || [];
         exists = _presetFileExistsInTree(tree, subPath);
       } catch {}
-      _presetPlayCheckCache.set(key, exists);
+      // Same rule as above: cache existence, never absence.
+      if (exists) _presetPlayCheckCache.set(key, exists);
       return exists;
     };
     // Find the first file matching an effect stem (font, hum, clash, etc.)
@@ -33634,7 +33654,10 @@ require(['vs/editor/editor.main'], function () {
           resolved = window._sfFindFirstEffectFileInTree(tree, effectName) || null;
         }
       } catch {}
-      _presetEffectFileCache.set(key, resolved);
+      // Only remember a hit. A miss must stay unremembered: renaming a
+      // font INTO a name that previously resolved to nothing would
+      // otherwise keep returning that stale nothing for the session.
+      if (resolved) _presetEffectFileCache.set(key, resolved);
       return resolved;
     };
     // Shared tracks: check the cached file list the SF view populates on
@@ -33990,6 +34013,191 @@ require(['vs/editor/editor.main'], function () {
       return wrap;
     }
 
+    // Font file listings, shared by the track field and by the preset
+    // list's validity marking. Lifted out of _buildTrackField so both
+    // callers read the same cache instead of each building its own.
+    // `fontTreeCache` stores the full file tree; `getFontTracks` derives
+    // the tracks/ shortcut on demand.
+    //
+    // Because these are now shared rather than rebuilt per field render,
+    // they outlive a single edit and must be tied to the library they
+    // describe. _sfEntriesCache is replaced wholesale on every library
+    // mutation, so its identity IS the stamp: a different array means a
+    // rename, delete or import happened and every cached answer is void.
+    // Without this, a font renamed away still resolves and the preset
+    // referencing it stays green.
+    const fontTreeCache = new Map();
+    let _fontListingStamp = null;
+    const _syncFontListingCaches = () => {
+      const stamp = window._sfEntriesCache || null;
+      if (stamp === _fontListingStamp) return;
+      _fontListingStamp = stamp;
+      fontTreeCache.clear();
+      fontTracksCache.clear();
+    };
+    const getFontTree = async (fontName) => {
+      if (!fontName) return null;
+      _syncFontListingCaches();
+      if (fontTreeCache.has(fontName)) return fontTreeCache.get(fontName);
+      let tree = null;
+      try {
+        const r = await window.electronAPI.listEntryFiles({ name: fontName });
+        if (r && r.ok && Array.isArray(r.files)) tree = r.files;
+      } catch {}
+      // Cache the listing only when the font actually resolved. Caching a
+      // null would make a font later renamed into this name look empty for
+      // the rest of the session.
+      if (tree) fontTreeCache.set(fontName, tree);
+      return tree;
+    };
+    // Walk to a sub-path inside an entry's tree. Empty path → root.
+    // Returns the children array at that location, or null if the path
+    // doesn't exist.
+    const walkTree = (tree, subPath) => {
+      if (!tree) return null;
+      if (!subPath) return tree;
+      const parts = subPath.split('/').filter(Boolean);
+      let cur = tree;
+      for (const p of parts) {
+        const next = cur.find(n => n.isDir && n.name === p);
+        if (!next) return null;
+        cur = next.children || [];
+      }
+      return cur;
+    };
+    const fontTracksCache = new Map();
+    const getFontTracks = async (fontName) => {
+      if (!fontName) return { tracks: [], subfolder: null, exists: false };
+      _syncFontListingCaches();
+      if (fontTracksCache.has(fontName)) return fontTracksCache.get(fontName);
+      let result = { tracks: [], subfolder: null, exists: false };
+      try {
+        const r = await window.electronAPI.listEntryFiles({ name: fontName });
+        if (r && r.ok && Array.isArray(r.files)) {
+          result.exists = true;
+          // ProffieOS prop_base.h ListTracks scans only "tracks/" (plural,
+          // lowercase). A singular "track/" folder is a common typo and
+          // wouldn't be found by the prop, so we deliberately don't fall
+          // back to it — surfacing it would imply playability we can't
+          // guarantee.
+          const tracksFolder = r.files.find(f => f.isDir && f.name === 'tracks');
+          if (tracksFolder) {
+            const wavFiles = (tracksFolder.children || [])
+              .filter(c => !c.isDir && /\.wav$/i.test(c.name));
+            result.tracks = wavFiles.map(f => ({
+              name: f.name,
+              path: `${fontName}/tracks/${f.name}`,
+            }));
+            result.subfolder = 'tracks';
+          }
+        }
+      } catch {}
+      // Same rule: only a font that actually resolved gets remembered.
+      if (result.exists) fontTracksCache.set(fontName, result);
+      return result;
+    };
+
+    // Is the font/track library empty? With nothing to validate against,
+    // flagging anything red would be a false alarm.
+    const _presetLibIsEmpty = () => {
+      const entries = window._sfEntriesCache || [];
+      const sharedAny = !!(window._sfSharedTracksExists && (window._sfSharedTracksFiles || []).length > 0);
+      return entries.length === 0 && !sharedAny;
+    };
+
+    // Font folder: red when the library has fonts and this is not one of
+    // them. Free-form names stay legal, the red is a heads-up.
+    const _presetFontIsUnknown = (fontValue) => {
+      const v = String(fontValue || '')
+        .split(';').filter(p => p.trim() !== 'common').join(';').trim();
+      if (!v) return false;
+      const names = (window._sfEntriesCache || [])
+        .map(e => e.name || (e.meta && e.meta.name) || '').filter(Boolean);
+      if (names.length === 0) return false;
+      return !new Set(names.map(n => n.toLowerCase())).has(v.toLowerCase());
+    };
+
+    // Track path: the whole case analysis, as DATA rather than as DOM
+    // writes. The track field paints it onto its input; the preset list
+    // reads only .red. One decision, two presentations, so the list can
+    // never disagree with the field it summarizes.
+    //
+    // Returns { red, title, warn } where warn is null or
+    // { title, clickable, context }.
+    const _presetTrackState = async (rawValue, currentFontFolder) => {
+      const v = String(rawValue || '').trim();
+      const none = { red: false, warn: null };
+      if (!v) return { ...none, title: 'Path to the audio file on the SD card.' };
+      if (_presetLibIsEmpty()) {
+        return { ...none, title: 'Path to the audio file on the SD card. No Sound Fonts library imported yet.' };
+      }
+      const parts = v.split('/');
+      // CASE C: not a track-path shape
+      if (parts.length < 2) {
+        return { red: true, warn: null,
+          title: `"${v}" doesn't look like a track path. Expected: tracks/<file>.wav or <font folder>/tracks/<file>.wav` };
+      }
+      // CASE D: tracks/<file>.wav - SD-root tracks reference
+      if (parts.length === 2 && parts[0].toLowerCase() === 'tracks') {
+        const fileName = parts[1];
+        const sharedFiles = window._sfSharedTracksFiles || [];
+        const hit = sharedFiles.find(f => f.name.toLowerCase() === fileName.toLowerCase());
+        if (hit) {
+          return { red: false, title: `Track exists in the Shared Tracks folder.`,
+            warn: { clickable: false, context: null, title: `This path uses SD-root "tracks/". Plays as this preset's default track. Track players only scan "tracks/" (plural) inside the font folder or inside common/, so the auto-cycle won't pick this up.` } };
+        }
+        if (!window._sfSharedTracksExists) {
+          return { red: true, warn: null, title: `No Shared Tracks folder in your library yet. Create one from the Sound Fonts tab. The config may still work if the file is on the SD card.` };
+        }
+        return { red: true, warn: null, title: `"${fileName}" isn't in your Shared Tracks folder. The config may still work if the file is on the SD card.` };
+      }
+      // CASE K/L/M: common/tracks/<file>.wav - common-folder tracks reference
+      if (parts.length >= 3 && parts[0].toLowerCase() === 'common' && parts[1].toLowerCase() === 'tracks') {
+        const commonUuid = window._sfActiveCommonForConfig || '';
+        if (!commonUuid) {
+          return { red: true, warn: null, title: `No common folder in your library yet. Import one from the Sound Fonts tab. The config may still work if the file is on the SD card.` };
+        }
+        let commonFiles = [];
+        try {
+          const r = await window.electronAPI.listCommonFiles({ uuid: commonUuid });
+          commonFiles = (r && r.ok && r.files) || [];
+        } catch {}
+        const wantRel = parts.slice(1).join('/').toLowerCase();
+        const hit = commonFiles.find(f => String(f.rel || f.name || '').toLowerCase() === wantRel);
+        if (hit) return { ...none, title: `Track exists at ${v}.` };
+        return { red: true, warn: null, title: `"${parts.slice(1).join('/')}" wasn't found in your common folder. The config may still work if the file is on the SD card.` };
+      }
+      // Font-specific or unrecognized-root: <something>/<rest>.
+      const fontName = parts[0];
+      const result = await getFontTracks(fontName);
+      if (!result.exists) {
+        // CASE N: cannot verify either way, so not red.
+        return { red: false, title: `Track exists at ${v} (unverified, not in library).`,
+          warn: { clickable: false, context: null, title: `"${fontName}" isn't a font folder in your library, "common", or "tracks". This still works as this preset's default track if the file is on the SD card. Track players only scan "tracks/" (plural) inside the font folder or inside common/.` } };
+      }
+      const hit = result.tracks.find(t => t.path.toLowerCase() === v.toLowerCase());
+      if (hit) return { ...none, title: `Track exists at ${hit.path}.` };
+      const subPath = parts.slice(1).join('/');
+      let literalExists = false;
+      try { literalExists = await _presetCheckEntryFileExists(fontName, subPath); } catch {}
+      if (!literalExists) {
+        return { red: true, warn: null, title: `"${v}" wasn't found in "${fontName}". The config may still work if the file is on the SD card.` };
+      }
+      // Exists at the typed path. Surface the singular track/ typo only
+      // when it sits directly under the font folder, where the prop would
+      // have looked. The warning is about THAT font, which can differ from
+      // the preset own font folder.
+      if (parts.length === 3 && parts[1].toLowerCase() === 'track') {
+        const oldFolderName = parts[1];
+        const isOwnFont = fontName === currentFontFolder;
+        return { red: false, title: `Track exists at ${v}.`,
+          warn: { clickable: true,
+            context: { fontName, oldFolder: oldFolderName, newFolder: 'tracks' },
+            title: isOwnFont ? `"${fontName}/${oldFolderName}/" is singular. This file still works as this preset's default track, but track players only scan "tracks/" (plural) inside the font folder or inside common/. Click to rename the folder + update every preset's track path that pointed into it.` : `This track points into "${fontName}"\u2014a different font from this preset. "${fontName}/${oldFolderName}/" is singular, so the file still works as this preset's default track, but won't be found by track players. Track players only scan "tracks/" (plural) inside the font folder or inside common/. Click to rename the folder + update every preset's track path that pointed into it.` } };
+      }
+      return { ...none, title: `Track exists at ${v}.` };
+    };
+
     function _buildTrackField(preset) {
       const wrap = document.createElement('div');
       wrap.className = 'preset-detail-field';
@@ -34177,229 +34385,26 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
       // applies on first render too.
       _applyTrackLibState();
 
-      // Per-font listing cache so repeated dropdown opens within a single
-      // edit session don't re-IPC for the same font. `fontTreeCache`
-      // stores the full file tree; `getFontTracks` derives the tracks/
-      // shortcut on demand.
-      const fontTreeCache = new Map();
-      const getFontTree = async (fontName) => {
-        if (!fontName) return null;
-        if (fontTreeCache.has(fontName)) return fontTreeCache.get(fontName);
-        let tree = null;
-        try {
-          const r = await window.electronAPI.listEntryFiles({ name: fontName });
-          if (r && r.ok && Array.isArray(r.files)) tree = r.files;
-        } catch {}
-        fontTreeCache.set(fontName, tree);
-        return tree;
-      };
-      // Walk to a sub-path inside an entry's tree. Empty path → root.
-      // Returns the children array at that location, or null if the path
-      // doesn't exist.
-      const walkTree = (tree, subPath) => {
-        if (!tree) return null;
-        if (!subPath) return tree;
-        const parts = subPath.split('/').filter(Boolean);
-        let cur = tree;
-        for (const p of parts) {
-          const next = cur.find(n => n.isDir && n.name === p);
-          if (!next) return null;
-          cur = next.children || [];
-        }
-        return cur;
-      };
-      const fontTracksCache = new Map();
-      const getFontTracks = async (fontName) => {
-        if (!fontName) return { tracks: [], subfolder: null, exists: false };
-        if (fontTracksCache.has(fontName)) return fontTracksCache.get(fontName);
-        let result = { tracks: [], subfolder: null, exists: false };
-        try {
-          const r = await window.electronAPI.listEntryFiles({ name: fontName });
-          if (r && r.ok && Array.isArray(r.files)) {
-            result.exists = true;
-            // ProffieOS prop_base.h ListTracks scans only "tracks/" (plural,
-            // lowercase). A singular "track/" folder is a common typo and
-            // wouldn't be found by the prop, so we deliberately don't fall
-            // back to it — surfacing it would imply playability we can't
-            // guarantee.
-            const tracksFolder = r.files.find(f => f.isDir && f.name === 'tracks');
-            if (tracksFolder) {
-              const wavFiles = (tracksFolder.children || [])
-                .filter(c => !c.isDir && /\.wav$/i.test(c.name));
-              result.tracks = wavFiles.map(f => ({
-                name: f.name,
-                path: `${fontName}/tracks/${f.name}`,
-              }));
-              result.subfolder = 'tracks';
-            }
-          }
-        } catch {}
-        fontTracksCache.set(fontName, result);
-        return result;
-      };
-
       // Validate the current value: red if the file isn't in the library.
       // Two valid shapes: "tracks/<file>" for shared-at-root, or
       // "<font>/tracks/<file>" for font-specific. Short-circuits when
       // the library is empty — without entries or shared tracks there's
       // nothing to validate against, so flagging would be a false alarm.
+      // Paint the shared decision onto this field. The decision itself
+      // lives in _presetTrackState so the preset list can mark rows from
+      // the same answer.
       const validateValue = async () => {
-        const v = comboInput.value.trim();
-        if (!v) {
-          comboInput.classList.remove('not-in-library');
-          comboInput.title = 'Path to the audio file on the SD card.';
-          return;
-        }
-        if (_trackLibEmpty) {
-          comboInput.classList.remove('not-in-library');
-          comboInput.title = 'Path to the audio file on the SD card. No Sound Fonts library imported yet.';
-          return;
-        }
-        const parts = v.split('/');
-        // CASE C: not a track-path shape
-        if (parts.length < 2) {
-          comboInput.classList.add('not-in-library');
-          comboInput.title = `"${v}" doesn't look like a track path. Expected: tracks/<file>.wav or <font folder>/tracks/<file>.wav`;
+        const st = await _presetTrackState(comboInput.value.trim(), currentFontFolder);
+        comboInput.classList.toggle('not-in-library', !!st.red);
+        comboInput.title = st.title;
+        if (st.warn) {
+          _trackWarnContext = st.warn.context;
+          trackWarn.title = st.warn.title;
+          trackWarn.classList.add('visible');
+          trackWarn.classList.toggle('clickable', !!st.warn.clickable);
+        } else {
           _trackWarnContext = null;
           trackWarn.classList.remove('visible', 'clickable');
-          return;
-        }
-        // Reset info glyph for this run — every branch decides on its own.
-        _trackWarnContext = null;
-        trackWarn.classList.remove('visible', 'clickable');
-        // CASE D: tracks/<file>.wav — SD-root tracks reference
-        if (parts.length === 2 && parts[0].toLowerCase() === 'tracks') {
-          const fileName = parts[1];
-          const sharedFiles = window._sfSharedTracksFiles || [];
-          const hit = sharedFiles.find(f => f.name.toLowerCase() === fileName.toLowerCase());
-          if (hit) {
-            // D-hit: file exists in SD-root tracks/. Mark green, then surface
-            // the info ⓘ — this path works as this preset's default track
-            // but track players won't auto-cycle through SD-root tracks/.
-            comboInput.classList.remove('not-in-library');
-            comboInput.title = `Track exists in the Shared Tracks folder.`;
-            trackWarn.title = `This path uses SD-root "tracks/". Plays as this preset's default track. Track players only scan "tracks/" (plural) inside the font folder or inside common/, so the auto-cycle won't pick this up.`;
-            trackWarn.classList.add('visible'); // no .clickable — informational
-          } else if (!window._sfSharedTracksExists) {
-            comboInput.classList.add('not-in-library');
-            comboInput.title = `No Shared Tracks folder in your library yet. Create one from the Sound Fonts tab. The config may still work if the file is on the SD card.`;
-          } else {
-            comboInput.classList.add('not-in-library');
-            comboInput.title = `"${fileName}" isn't in your Shared Tracks folder. The config may still work if the file is on the SD card.`;
-          }
-          return;
-        }
-        // CASE K/L/M: common/tracks/<file>.wav — common-folder tracks reference
-        if (parts.length >= 3 && parts[0].toLowerCase() === 'common' && parts[1].toLowerCase() === 'tracks') {
-          const commonUuid = window._sfActiveCommonForConfig || '';
-          // M: no common folder linked to the open config
-          if (!commonUuid) {
-            comboInput.classList.add('not-in-library');
-            comboInput.title = `No common folder in your library yet. Import one from the Sound Fonts tab. The config may still work if the file is on the SD card.`;
-            return;
-          }
-          // Existence check against the linked common folder's files.
-          let commonFiles = [];
-          try {
-            const r = await window.electronAPI.listCommonFiles({ uuid: commonUuid });
-            commonFiles = (r && r.ok && r.files) || [];
-          } catch {}
-          const wantRel = parts.slice(1).join('/').toLowerCase(); // tracks/<file...>
-          const hit = commonFiles.find(f => {
-            const rel = String(f.rel || f.name || '').toLowerCase();
-            return rel === wantRel;
-          });
-          if (hit) {
-            // K: canonical common/tracks/<file> reference — green, no glyph
-            comboInput.classList.remove('not-in-library');
-            comboInput.title = `Track exists at ${v}.`;
-          } else {
-            // L: file not in the linked common's tracks/
-            comboInput.classList.add('not-in-library');
-            comboInput.title = `"${parts.slice(1).join('/')}" wasn't found in your common folder. The config may still work if the file is on the SD card.`;
-          }
-          return;
-        }
-        // Font-specific or unrecognized-root: <something>/<rest>.
-        //   - When <something> is a font folder in the library: cases
-        //     F/G/H/I/J apply (canonical hit / track-singular variants /
-        //     non-tracks-folder / missing file).
-        //   - When <something> isn't a font folder AND wasn't matched
-        //     above as 'tracks' or 'common': CASE N — unrecognized root.
-        //     We can't verify; surface as info, not red. The path may
-        //     still play as this preset's default track if it resolves
-        //     on the SD card.
-        const fontName = parts[0];
-        const result = await getFontTracks(fontName);
-        if (!result.exists) {
-          // CASE N: first segment isn't a font, 'common', or 'tracks'.
-          // Not red — we can't verify either way; the user might be
-          // referencing something on the SD card outside the library.
-          comboInput.classList.remove('not-in-library');
-          comboInput.title = `Track exists at ${v} (unverified, not in library).`;
-          trackWarn.title = `"${fontName}" isn't a font folder in your library, "common", or "tracks". This still works as this preset's default track if the file is on the SD card. Track players only scan "tracks/" (plural) inside the font folder or inside common/.`;
-          trackWarn.classList.add('visible'); // no .clickable — informational
-          return;
-        }
-        const hit = result.tracks.find(t => t.path.toLowerCase() === v.toLowerCase());
-        if (hit) {
-          comboInput.classList.remove('not-in-library');
-          comboInput.title = `Track exists at ${hit.path}.`;
-          return;
-        }
-        // Fall back to checking the literal path within the font folder.
-        // Covers tracks organized under 'track/' singular, nested
-        // subfolders, etc. — anywhere the file exists at the typed
-        // path counts as a legit location. The 'track/' vs 'tracks/'
-        // distinction lives in the library-health audit (queued), not
-        // in this field's red-flag logic.
-        const subPath = parts.slice(1).join('/');
-        let literalExists = false;
-        try {
-          literalExists = await _presetCheckEntryFileExists(fontName, subPath);
-        } catch {}
-        if (literalExists) {
-          comboInput.classList.remove('not-in-library');
-          comboInput.title = `Track exists at ${v}.`;
-          // Surface the 'track/' singular typo as an inline warning
-          // ONLY when the path is exactly <font>/track/<file> — i.e.
-          // the typo'd folder sits directly under the font folder
-          // (where Proffie's track-player would have looked). The
-          // warning is specifically about THAT font's structure: the
-          // owning font referenced in the track path, NOT the preset's
-          // main font folder. The two can differ (a preset can have
-          // font A but pull tracks from font B's folder).
-          if (parts.length === 3 && parts[1].toLowerCase() === 'track') {
-            const oldFolderName = parts[1]; // preserves case ('track', 'Track', etc.)
-            _trackWarnContext = { fontName, oldFolder: oldFolderName, newFolder: 'tracks' };
-            // Two variants based on whether the track points at the
-            // preset's own font folder or pulls from a different font.
-            // The cross-font case is the one that catches users off-
-            // guard — they expect "my preset's track folder" but the
-            // path actually targets another font's structure.
-            //
-            // Terminology: "default track" = the single file the preset's
-            // track field points at (plays on direct trigger; can live
-            // anywhere on the SD card). "Track player" = ProffieOS's
-            // auto-cycle feature; finds tracks ONLY in a folder literally
-            // named "tracks/" — either inside the font folder OR inside
-            // common/.
-            const isOwnFont = fontName === currentFontFolder;
-            trackWarn.title = isOwnFont
-              ? `"${fontName}/${oldFolderName}/" is singular. This file still works as this preset's default track, but track players only scan "tracks/" (plural) inside the font folder or inside common/. Click to rename the folder + update every preset's track path that pointed into it.`
-              : `This track points into "${fontName}"—a different font from this preset. "${fontName}/${oldFolderName}/" is singular, so the file still works as this preset's default track, but won't be found by track players. Track players only scan "tracks/" (plural) inside the font folder or inside common/. Click to rename the folder + update every preset's track path that pointed into it.`;
-            // .clickable enables the cursor + hover state since this
-            // case has an actual one-click rename behind the glyph.
-            trackWarn.classList.add('visible', 'clickable');
-          } else {
-            _trackWarnContext = null;
-            trackWarn.classList.remove('visible', 'clickable');
-          }
-        } else {
-          comboInput.classList.add('not-in-library');
-          comboInput.title = `"${v}" wasn't found in "${fontName}". The config may still work if the file is on the SD card.`;
-          _trackWarnContext = null;
-          trackWarn.classList.remove('visible');
         }
       };
       validateValue();
