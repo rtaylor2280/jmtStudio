@@ -36,6 +36,19 @@ function abort() {
 const CORE_ID       = 'proffieboard:stm32l4';
 const CORE_VERSION  = '4.6.0';
 
+// Every build appends this FQBN option. A core that predates it rejects the
+// whole FQBN before compiling a single file, which surfaces to the user as
+// "Invalid FQBN: ... invalid option 'pclk'" and a build that fails in 0:00.
+// Probed as a CAPABILITY rather than matched as a version number: it tests the
+// thing that actually breaks, survives future core releases, and cannot be
+// fooled by a directory name.
+const REQUIRED_FQBN_OPTION = 'pclk';
+const PROBE_FQBN           = 'proffieboard:stm32l4:ProffieboardV3-L452RE';
+
+// null until probed. true means the core arduino-cli finds on its own cannot
+// build what we ask for, so every invocation gets pinned to our own directory.
+let _useIsolatedCore = null;
+
 // Additional URL needed for proffieboard core
 const BOARD_MANAGER_URL = 'https://profezzorn.github.io/arduino-proffieboard/package_proffieboard_index.json';
 
@@ -80,7 +93,10 @@ function validateCli() {
  * Calls onLog(line, isError) for each line of stdout/stderr.
  * Returns promise resolving to { ok, code, stdout, stderr }
  */
-function runCli(args, onLog) {
+// opts.raw runs arduino-cli with no config file and no environment override, so
+// it resolves exactly as it would for someone typing the command themselves.
+// That is the only way to find out which core a normal compile will really use.
+function runCli(args, onLog, opts = {}) {
   return new Promise((resolve) => {
     const v = validateCli();
     if (!v.ok) {
@@ -92,14 +108,27 @@ function runCli(args, onLog) {
     fs.mkdirSync(dataPath, { recursive: true });
 
     // Inject isolated data dir and board manager URL into every command
-    const fullArgs = [
+    const fullArgs = opts.raw ? [...args] : [
       ...args,
       `--config-file=${path.join(dataPath, 'arduino-cli.yaml')}`
     ];
 
     onLog(`> arduino-cli ${fullArgs.join(' ')}`, false);
 
-    const proc = spawn(v.cliPath, fullArgs, { cwd: dataPath });
+    // `--config-file` does NOT redirect platform discovery for `compile`.
+    // Measured 2026-08-04: the same flag that makes `board details` report
+    // "platform not installed" still lets `compile` resolve the core out of the
+    // system Arduino15 tree, which Arduino IDE and other Proffie tools own. So a
+    // core someone installed for a different program is what we were building
+    // against, and a core predating the `pclk` FQBN option rejected every build
+    // before it started. The environment variable DOES redirect it, so it is the
+    // only isolation actually available — applied only when the system core
+    // cannot build what we ask for, so machines that are already fine are left
+    // exactly as they are and nobody re-downloads a core that works.
+    const env = { ...process.env };
+    if (!opts.raw && _useIsolatedCore) env.ARDUINO_DIRECTORIES_DATA = dataPath;
+
+    const proc = spawn(v.cliPath, fullArgs, { cwd: dataPath, env });
     _currentProc = proc;
 
     let stdout = '', stderr = '';
@@ -245,28 +274,85 @@ function _ensureMacDfuSuffix(onLog) {
   }
 }
 
+// The board never got as far as being built for: arduino-cli rejected the FQBN
+// or could not find the platform at all. Distinct from a config error, and the
+// only failure worth retrying against a different core. Kept narrow on purpose -
+// anything broader would re-run real compile errors.
+function _looksLikeUnusableCore(result) {
+  const output = (result.stdout || '') + (result.stderr || '');
+  return /invalid option '[^']*'/i.test(output)
+      || /Invalid FQBN/i.test(output)
+      || /platform .* not (installed|found)/i.test(output);
+}
+
+// Is the core arduino-cli resolves on its own able to build what we ask for?
+// Asked the way a plain compile would resolve it, because that is the question
+// that matters: our config file does not control which platform `compile` picks.
+async function _systemCoreCanBuild() {
+  const probe = await runCli(['board', 'details', '-b', PROBE_FQBN], () => {}, { raw: true });
+  return probe.ok && probe.stdout.includes(REQUIRED_FQBN_OPTION);
+}
+
+// Does OUR directory hold a core that can actually build for this board?
+//
+// The old check accepted any version directory containing a boards.txt and then
+// wrote CORE_VERSION into the sentinel, so one wrong core made the app claim -
+// permanently, on every launch - that the right one was installed. A presence
+// check reporting itself as a version check is worse than no check.
+//
+// Matching the directory NAME does not work either: the same core installs as
+// `4.6` or `4.6.0` depending on whether the request said `@4.6` or `@4.6.0`,
+// and both are legitimate. So ask boards.txt what it can do, exactly as the
+// system-core probe does. Version-agnostic, and it stays true when 4.7 lands.
+function _ourCoreCanBuild(dataPath) {
+  const hardwarePath = path.join(dataPath, 'packages', 'proffieboard', 'hardware', 'stm32l4');
+  if (!fs.existsSync(hardwarePath)) return false;
+  return fs.readdirSync(hardwarePath).some(v => {
+    const boards = path.join(hardwarePath, v, 'boards.txt');
+    try { return fs.readFileSync(boards, 'utf8').includes(REQUIRED_FQBN_OPTION); }
+    catch { return false; }
+  });
+}
+
 async function ensureCore(onLog) {
   const dataPath     = getArduinoDataPath();
   const sentinelPath = path.join(dataPath, '.core-installed');
 
-  // Sentinel file written after any successful install (including "already installed" via Arduino IDE).
-  // Avoids re-running the index download on every startup for users who have the core installed
-  // via Arduino IDE rather than our own arduino-data directory.
-  if (fs.existsSync(sentinelPath) && fs.readFileSync(sentinelPath, 'utf8').trim() === CORE_VERSION) {
+  // Decide isolation before anything else: it determines whether "installed"
+  // means the system core or ours, and it is what every later spawn keys off.
+  if (_useIsolatedCore === null) {
+    _useIsolatedCore = !(await _systemCoreCanBuild());
+    if (_useIsolatedCore) {
+      onLog(`The Proffieboard core on this system cannot build for this board ` +
+            `(no '${REQUIRED_FQBN_OPTION}' option). Using JMT Studio's own copy instead; ` +
+            `your other Arduino tools are left untouched.`, false);
+    }
+  }
+
+  if (!_useIsolatedCore) {
+    // System core is fine. Leave the machine exactly as it is - no install, no
+    // download, no change from previous releases for the large majority.
+    onLog(`Core ${CORE_ID} on this system can build for this board.`, false);
+    _ensureLinuxDfuSuffix(onLog);
+    _ensureMacDfuSuffix(onLog);
+    return { ok: true };
+  }
+
+  // Isolated from here down: only our own directory counts. The sentinel is a
+  // speed-up, never evidence - verify the files are actually there before
+  // trusting it, or a stale sentinel silently skips the install it stands for.
+  if (fs.existsSync(sentinelPath) &&
+      fs.readFileSync(sentinelPath, 'utf8').trim() === CORE_VERSION &&
+      _ourCoreCanBuild(dataPath)) {
     onLog(`Core ${CORE_ID}@${CORE_VERSION} already installed.`, false);
     _ensureLinuxDfuSuffix(onLog);
     _ensureMacDfuSuffix(onLog);
     return { ok: true };
   }
 
-  // Also check our own arduino-data directory directly
-  const hardwarePath = path.join(dataPath, 'packages', 'proffieboard', 'hardware', 'stm32l4');
-  const isInstalled = fs.existsSync(hardwarePath) &&
-    fs.readdirSync(hardwarePath).some(v =>
-      fs.existsSync(path.join(hardwarePath, v, 'boards.txt'))
-    );
-
-  if (isInstalled) {
+  // Also check our own arduino-data directory directly, for a core that can
+  // actually build. Any-version-will-do is what let 3.6 masquerade as 4.6.0.
+  if (_ourCoreCanBuild(dataPath)) {
     onLog(`Core ${CORE_ID}@${CORE_VERSION} already installed.`, false);
     fs.writeFileSync(sentinelPath, CORE_VERSION, 'utf8');
     _ensureLinuxDfuSuffix(onLog);
@@ -344,6 +430,14 @@ async function initialize(onLog) {
 async function compile(configContent, fqbn, buildOptions, onLog) {
   onLog('--- Compile started ---', false);
 
+  // Normally decided during startup by ensureCore. Decide it here too rather
+  // than assume the ordering: getting this wrong means silently compiling
+  // against whichever core happens to be on the machine, which is the whole
+  // defect this guards against, and it costs one cheap probe once per session.
+  if (_useIsolatedCore === null) {
+    _useIsolatedCore = !(await _systemCoreCanBuild());
+  }
+
   const usb = (buildOptions && buildOptions.usb) || 'cdc_webusb';
 
   const refCheck = proffie.ensureConfigFileRef(onLog);
@@ -369,7 +463,23 @@ async function compile(configContent, fqbn, buildOptions, onLog) {
     sketchPath
   ];
 
-  const result = await runCli(args, onLog);
+  let result = await runCli(args, onLog);
+
+  // Self-heal inside a running session. The core arduino-cli resolves can change
+  // underneath us - somebody installs an older one for another Proffie tool
+  // while this app is open - and the failure is a hard FQBN rejection before a
+  // single file is built, so it costs nothing to catch. Re-probe, move to our
+  // own copy if the system one has gone bad, and try once. The user gets a
+  // slower compile instead of an error they have no way to act on. Guarded to
+  // one retry, and only for this signature, so a genuine config error is never
+  // compiled twice.
+  if (!result.ok && _looksLikeUnusableCore(result)) {
+    onLog('The Proffieboard core on this system cannot build for this board. ' +
+          'Switching to JMT Studio\'s own copy...', false);
+    _useIsolatedCore = null;
+    const core = await ensureCore(onLog);
+    if (core.ok && _useIsolatedCore) result = await runCli(args, onLog);
+  }
 
   if (result.ok) {
     onLog('--- Compile successful ---', false);
