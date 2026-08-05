@@ -7,6 +7,7 @@
 
 const { spawn }    = require('child_process');
 const proffie      = require('./proffieos');
+const toolchain    = require('./toolchain');
 const path         = require('path');
 
 const BOARD_MANAGER_URL = 'https://profezzorn.github.io/arduino-proffieboard/package_proffieboard_index.json';
@@ -49,9 +50,19 @@ function runBoardList() {
       try { require('fs').chmodSync(cli, 0o755); } catch {}
     }
 
+    // Follow the core to wherever it actually lives. When JMT Studio installed
+    // its own copy - because the system core was too old or absent - the
+    // platform is in OUR directory, and `board list` reading the system one
+    // finds no platform at all. `matching_boards` then comes back empty and a
+    // physically connected board reports as "No Proffieboard detected".
+    // Windows already pointed here via --config-file; Mac and Linux did not,
+    // so this is what makes all three agree with the compiler.
+    const env = { ...process.env };
+    if (toolchain.coreCanBuildAt(dataPath)) env.ARDUINO_DIRECTORIES_DATA = dataPath;
+
     let stdout = '';
     let stderr = '';
-    const proc = spawn(cli, args, { cwd: dataPath });
+    const proc = spawn(cli, args, { cwd: dataPath, env });
     const timer = setTimeout(() => { proc.kill(); resolve({ ok: false, error: 'board list timed out' }); }, 10000);
 
     proc.stdout.on('data', d => { stdout += d; });
