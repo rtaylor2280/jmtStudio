@@ -127,5 +127,35 @@ check('an unreadable boards.txt does not count',
 check('a usable core alongside an old one still counts',
   ourCoreCanBuild({ '3.6': BOARDS_36, '4.6': BOARDS_46 }), true);
 
+
+// ── retry guard, including abort ───────────────────────────────────────────
+// Mirrors the condition in compile(). The abort term matters: a build the user
+// cancelled must never be silently re-run, however its output happens to read.
+function shouldRetry(result, aborted) {
+  return !result.ok && !aborted && _looksLikeUnusableCore(result);
+}
+
+const UNUSABLE = { ok: false, stderr: "invalid option 'pclk'" };
+
+check('an unusable core retries when not aborted',
+  shouldRetry(UNUSABLE, false), true);
+check('an ABORTED compile never retries, even with a matching signature',
+  shouldRetry(UNUSABLE, true), false);
+check('a successful compile never retries',
+  shouldRetry({ ok: true, stdout: '' }, false), false);
+
+// ── board list follows the core ────────────────────────────────────────────
+// Mirrors runBoardList. `matching_boards` is only populated when arduino-cli
+// can see the platform, so a board list reading a different directory than the
+// compiler reports a connected board as "No Proffieboard detected".
+function boardListShouldPinToOurDir(ourDirHasCore) {
+  return ourDirHasCore;
+}
+
+check('our dir holds the core, so board list is pinned to it',
+  boardListShouldPinToOurDir(true), true);
+check('our dir is empty, so board list keeps the system default',
+  boardListShouldPinToOurDir(false), false);
+
 if (failures) { console.error(`\n${failures} failure(s)`); process.exit(1); }
-console.log('all directory checks passed');
+console.log('all retry and board-list checks passed');

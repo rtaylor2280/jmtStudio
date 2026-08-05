@@ -129,7 +129,11 @@ function runCli(args, onLog, opts = {}) {
     if (!opts.raw && _useIsolatedCore) env.ARDUINO_DIRECTORIES_DATA = dataPath;
 
     const proc = spawn(v.cliPath, fullArgs, { cwd: dataPath, env });
-    _currentProc = proc;
+    // A raw probe is not the user's build and must not become the abortable
+    // process. Registering it meant Abort pressed during the probe killed the
+    // probe instead, set the aborted flag, and then mislabelled whatever
+    // failed next as "aborted".
+    if (!opts.raw) _currentProc = proc;
 
     let stdout = '', stderr = '';
 
@@ -143,13 +147,16 @@ function runCli(args, onLog, opts = {}) {
       lines.forEach(l => { stderr += l + '\n'; onLog(l, true); });
     });
 
+    // Only clear the handle if it is still ours. Clearing unconditionally meant
+    // any process finishing could drop the handle for one still running, which
+    // would leave Abort with nothing to kill.
     proc.on('close', code => {
-      _currentProc = null;
+      if (_currentProc === proc) _currentProc = null;
       resolve({ ok: code === 0, code, stdout, stderr });
     });
 
     proc.on('error', e => {
-      _currentProc = null;
+      if (_currentProc === proc) _currentProc = null;
       const msg = `Failed to start arduino-cli: ${e.message}`;
       onLog(msg, true);
       resolve({ ok: false, code: -1, stdout: '', stderr: msg });
@@ -473,7 +480,7 @@ async function compile(configContent, fqbn, buildOptions, onLog) {
   // slower compile instead of an error they have no way to act on. Guarded to
   // one retry, and only for this signature, so a genuine config error is never
   // compiled twice.
-  if (!result.ok && _looksLikeUnusableCore(result)) {
+  if (!result.ok && !_aborted && _looksLikeUnusableCore(result)) {
     onLog('The Proffieboard core on this system cannot build for this board. ' +
           'Switching to JMT Studio\'s own copy...', false);
     _useIsolatedCore = null;
@@ -1044,5 +1051,10 @@ module.exports = {
   needsCoreInstall,
   validateCli,
   CORE_ID,
-  CORE_VERSION
+  CORE_VERSION,
+  // Exported so portDetector can look for the core in the same place the
+  // compiler does. Duplicating the rule is how the two drift apart, and a
+  // board list reading a different directory than the compile is exactly the
+  // class of bug this release exists to fix.
+  coreCanBuildAt: _ourCoreCanBuild
 };
