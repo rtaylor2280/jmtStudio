@@ -362,6 +362,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sharedTracksDelete:    ()           => ipcRenderer.invoke('sharedTracks:delete'),
   sharedTracksFolderExistsAt:(params) => ipcRenderer.invoke('sharedTracks:folderExistsAt', params),
   sharedTracksMatchesAt:     (params) => ipcRenderer.invoke('sharedTracks:matchesAt', params),
+  sharedTracksExistsAt:      (params) => ipcRenderer.invoke('sharedTracks:existsAt', params),
   sharedTracksPlanExport:    (params) => ipcRenderer.invoke('sharedTracks:planExport', params),
   onSharedTracksPlanProgress: (cb) => {
     const handler = (_, data) => cb(data);

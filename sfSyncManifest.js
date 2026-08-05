@@ -47,7 +47,12 @@
 const fs = require('fs');
 const path = require('path');
 
-const MANIFEST_NAME = '.jmt-sync.json';
+// Spelled out, not abbreviated, and no leading dot. A dot does not hide a
+// file on Windows - it only hid the extension in Explorer, which is exactly
+// how it went unrecognised. Someone who finds this on their card should be
+// able to read the name and then read the file. (Renamed 2026-08-01.)
+const MANIFEST_NAME = 'jmt-studio-manifest.json';
+const MANIFEST_NOTE = 'Written by JMT Studio. Records what was last exported to this destination so a repeat export can skip files that have not changed. Safe to delete: the next export simply re-reads everything.';
 const MANIFEST_VERSION = 1;
 
 // FAT32 timestamps land on 2-second boundaries, so a value can legitimately
@@ -58,14 +63,50 @@ function manifestPath(destDir) {
   return path.join(destDir, MANIFEST_NAME);
 }
 
-function read(destDir) {
-  if (!destDir) return null;
+// Reading has FOUR outcomes, and collapsing them into one null is what caused
+// the damage described below. Callers that only READ can keep using read();
+// anything that WRITES has to know the difference.
+//
+//   absent       — nothing is here. Starting fresh is correct.
+//   ok           — parsed and usable.
+//   incompatible — a format version this build cannot use. The records are
+//                  unusable by definition, so replacing them is right.
+//   unreadable   — a manifest IS here and we could not read or parse it.
+//
+// That last one is the dangerous case. A truncated read over a slow link, an
+// I/O error, a half-written file: the old code called every one of those
+// "absent", rebuilt from an empty object and wrote. Seen 2026-08-01 while
+// exporting through a board mounted as mass storage — a 507 KB manifest
+// covering 61 fonts became a 14 KB file covering 3, and every export after it
+// had to re-hash a card it had already recorded. The cache that makes an
+// export cheap was eaten by the export that needed it.
+//
+// Same distinction as everywhere else in this file: an unknown resolves toward
+// reading, never toward assuming. "I could not read it" is not "it is not
+// there", and only one of those two justifies a write.
+function readState(destDir) {
+  if (!destDir) return { manifest: null, state: 'absent' };
+  let raw;
   try {
-    const raw = fs.readFileSync(manifestPath(destDir), 'utf8');
-    const m = JSON.parse(raw);
-    if (!m || m.version !== MANIFEST_VERSION || !m.items) return null;
-    return m;
-  } catch { return null; }
+    raw = fs.readFileSync(manifestPath(destDir), 'utf8');
+  } catch (err) {
+    // ENOENT is a real answer: there is no manifest. Every other errno means
+    // one may well be sitting there that we simply could not get at.
+    return { manifest: null, state: (err && err.code === 'ENOENT') ? 'absent' : 'unreadable' };
+  }
+  let m = null;
+  try { m = JSON.parse(raw); } catch { return { manifest: null, state: 'unreadable' }; }
+  if (!m || typeof m !== 'object') return { manifest: null, state: 'unreadable' };
+  if (m.version !== MANIFEST_VERSION) return { manifest: null, state: 'incompatible' };
+  // Right version, no items: malformed rather than obsolete. Refuse to write
+  // over it. The escape hatch is the one already documented at the top — delete
+  // the file and the next export rebuilds it as it goes.
+  if (!m.items) return { manifest: null, state: 'unreadable' };
+  return { manifest: m, state: 'ok' };
+}
+
+function read(destDir) {
+  return readState(destDir).manifest;
 }
 
 // Write to a temp file, then rename over the real one. writeFileSync truncates
@@ -86,7 +127,11 @@ function write(destDir, manifest) {
   const finalPath = manifestPath(destDir);
   const tmpPath = finalPath + '.tmp';
   try {
-    fs.writeFileSync(tmpPath, JSON.stringify(manifest));
+    // JSON cannot carry a comment, so the explanation is the first key. Same
+    // idea as the card marker: whoever finds this should learn what wrote it
+    // and that removing it costs them nothing, without having to ask.
+    const withNote = Object.assign({ _note: MANIFEST_NOTE }, manifest);
+    fs.writeFileSync(tmpPath, JSON.stringify(withNote));
     fs.renameSync(tmpPath, finalPath);
     return true;
   } catch {
@@ -118,7 +163,12 @@ function cacheFor(destDir, itemName) {
 // about anything else. `observed` is a Map of relPath -> [size, mtimeMs, hash].
 function mergeItem(destDir, itemName, observed) {
   if (!destDir || !itemName || !observed || observed.size === 0) return false;
-  const m = read(destDir) || { version: MANIFEST_VERSION, items: {} };
+  const { manifest, state } = readState(destDir);
+  // Refuse rather than clobber. Not writing costs one item's worth of re-reads
+  // next time; writing over a manifest we failed to read costs every OTHER
+  // item's records, silently, and there is nothing left to notice it from.
+  if (state === 'unreadable') return false;
+  const m = manifest || { version: MANIFEST_VERSION, items: {} };
   const existing = new Map();
   const rec = m.items[itemName];
   if (rec && Array.isArray(rec.files)) {
@@ -148,6 +198,7 @@ module.exports = {
   manifestPath,
   cacheFor,
   read,
+  readState,
   write,
   mergeItem,
   forgetItem,

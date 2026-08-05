@@ -27957,11 +27957,38 @@ require(['vs/editor/editor.main'], function () {
         // asked once here instead of quietly losing it to the new default.
         if (!includeTracks && hasTracksFolder) {
           try {
-            const m = await window.electronAPI.sharedTracksMatchesAt({ destDir });
-            if (m && m.ok && m.exists && !m.identical) {
+            // ASK FIRST, COMPARE ONLY IF THEY SAY YES. This used to hash every
+            // wav in the library tracks folder AND every wav at the destination
+            // purely to decide whether this dialog was worth showing - seconds of
+            // silence on every export, forever, to avoid one dismissable prompt.
+            // Backwards, because the answer can make the work unnecessary: say
+            // "leave it" and the folder is skipped entirely, nothing read.
+            // Say "update" and it takes the same path as if the setting had been
+            // on all along, where planExport does the real per-file comparison
+            // inside the progress phase off the sync manifest.
+            // (Ryan's design, 2026-08-01, after hitting the wait on a real card.)
+            //
+            // The check itself is one stat, but it still gets a bar: a destination
+            // on slow or sleeping storage can stall even on existsSync, and a
+            // silent pause right after the folder picker is the one we just fixed.
+            const _tBar = _sfDeleteProgress.barEl();
+            _sfDeleteProgress.show('Checking the destination\u2026', 'Looking for a tracks folder\u2026');
+            if (_tBar) _tBar.classList.add('indeterminate');
+            let m = null;
+            try {
+              m = await window.electronAPI.sharedTracksExistsAt({ destDir });
+            } finally {
+              if (_tBar) _tBar.classList.remove('indeterminate');
+            }
+            // Deliberately NOT hidden here. The font scan below re-titles this
+            // same modal, so leaving it up makes the whole destination check one
+            // continuous progress rather than two identical-looking modals
+            // flashing in sequence. It only comes down if we have to ask.
+            if (m && m.ok && m.exists) {
+              await _sfDeleteProgress.hide();
               const choice = await promptConfirm({
                 title: 'Update the tracks folder at this destination?',
-                message: 'This location already has a "tracks/" folder and it does not match the shared tracks folder in your library.\n\nYou have "Include with export" turned off for tracks, so it would normally be left alone. Update it with anything new from your library?\n\nNothing there is deleted, and a file that differs is kept as it is.',
+                message: 'Tracks are not included in your exports, so this folder would normally be left alone.\n\nUpdating adds anything new from your library. Nothing is deleted, and a file that differs is kept as it is.',
                 confirmText: 'Update',
                 confirmKind: 'primary',
                 middleText: 'Leave it',

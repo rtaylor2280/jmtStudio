@@ -1717,6 +1717,10 @@ ipcMain.handle('sharedTracks:folderExistsAt', (_, { destDir } = {}) => {
   try { return { ok: true, exists: soundFontSharedTracks.folderExistsAt(destDir) }; }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
+ipcMain.handle('sharedTracks:existsAt', (_, { destDir } = {}) => {
+  try { return soundFontSharedTracks.existsAt(destDir); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
 ipcMain.handle('sharedTracks:matchesAt', (_, { destDir } = {}) => {
   try { return soundFontSharedTracks.matchesAt(app.getPath('userData'), destDir); }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }

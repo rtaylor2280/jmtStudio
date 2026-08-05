@@ -105,6 +105,47 @@ function record(dest, item, entries) {
     sync.cacheFor(dest, 'tracks').size, 0);
 }
 
+// ── refusing to clobber what we could not read ─────────────────────────────
+//
+// Failing toward reading is only half of it. The other half is that a failed
+// READ must never authorise a WRITE. Collapsing "unreadable" into "absent" let
+// mergeItem rebuild from an empty object, so one bad read of a manifest holding
+// sixty items left a manifest holding one — and every export afterwards paid to
+// re-hash a destination that had already been recorded. (2026-08-01: observed on
+// a card mounted through a board as mass storage; 61 items became 3.)
+{
+  const dest = mkDest();
+  record(dest, 'many', [['a.wav', [1, 1000, 'A']]]);
+  record(dest, 'others', [['b.wav', [2, 2000, 'B']]]);
+  const corrupt = '{"version":1,"items":{ truncated';
+  fs.writeFileSync(sync.manifestPath(dest), corrupt);
+
+  check('merging into an unreadable manifest is refused',
+    record(dest, 'third', [['c.wav', [3, 3000, 'C']]]), false);
+  check('and the file on disk is left exactly as it was',
+    fs.readFileSync(sync.manifestPath(dest), 'utf8'), corrupt);
+}
+
+{
+  // An I/O failure that is not ENOENT must be treated the same way. A directory
+  // where the manifest should be is the portable way to make the read throw.
+  const dest = mkDest();
+  fs.mkdirSync(sync.manifestPath(dest));
+  check('a manifest that cannot be opened at all reads as unreadable',
+    sync.readState(dest).state, 'unreadable');
+  check('and merging into it is refused',
+    record(dest, 'tracks', [['mars.wav', [10, 1000, 'H']]]), false);
+}
+
+{
+  // The distinction that makes the refusal safe rather than paralysing: a
+  // destination with no manifest is still a normal first export.
+  const dest = mkDest();
+  check('an absent manifest is absent, not unreadable', sync.readState(dest).state, 'absent');
+  check('so the first write still lands',
+    record(dest, 'tracks', [['mars.wav', [10, 1000, 'H']]]), true);
+}
+
 {
   const dest = mkDest();
   record(dest, 'tracks', [['mars.wav', [10, 1000, 'H']]]);

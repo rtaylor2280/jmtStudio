@@ -173,6 +173,20 @@ function _wavOnly(relPath) {
 // remembered value, and anything unreadable comes back not-identical so the
 // caller asks rather than assuming. Used to stay silent when a destination is
 // already up to date, which is the one case where saying nothing is honest.
+// Does this destination already have a tracks/ folder? One stat, no reads.
+// Deliberately separate from matchesAt: the export flow asks the user BEFORE
+// comparing anything, because if they say leave it alone there is nothing to
+// compare and the whole folder is skipped. Hashing to decide whether a
+// question is worth asking is backwards when the answer can make the work
+// unnecessary.
+function existsAt(destDir) {
+  if (!destDir) return { ok: false, error: 'Missing destDir' };
+  const destTracks = path.join(destDir, 'tracks');
+  let exists = false;
+  try { exists = fs.existsSync(destTracks) && fs.statSync(destTracks).isDirectory(); } catch {}
+  return { ok: true, exists };
+}
+
 function matchesAt(userData, destDir) {
   if (!destDir) return { ok: false, error: 'Missing destDir' };
   const srcDir  = sharedTracksRoot(userData);
@@ -409,6 +423,7 @@ module.exports = {
   deleteAll,
   folderExistsAt,
   matchesAt,
+  existsAt,
   planExport,
   exportToFolder,
   exportToFolderAdditive,
