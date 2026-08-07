@@ -21,6 +21,16 @@ function enumerateVolumesWindows(removableOnly) {
   // DriveType=2 = removable media (SD readers, USB sticks). Merge HealthStatus from
   // Get-Volume, which Win32_LogicalDisk does not carry. removableOnly=false is used when
   // the user explicitly points at a drive, so its metadata can still be reported.
+  //
+  // hasMedia distinguishes "no card in this slot" from "card present but unreadable".
+  // A multi-slot reader publishes a drive letter for EVERY slot, occupied or not, so an
+  // empty slot arrives here looking like a volume. Win32_LogicalDisk reports Size as null
+  // for it (verified 2026-08-06 against a two-slot reader: the loaded slot reported a size,
+  // the empty one reported null), and the storage layer agrees — Win32_DiskDrive gives that
+  // slot a blank MediaType and a null Size. Note this must be tested BEFORE the [int64] cast
+  // below, which turns null into 0 and destroys the distinction. Empty slots cannot be
+  // reached through partition associations, since a slot with no media has no partitions,
+  // which is why the answer is taken here rather than derived downstream.
   const filter = removableOnly ? ' -Filter "DriveType=2"' : '';
   const ps = [
     '$vols = Get-CimInstance Win32_LogicalDisk' + filter,
@@ -34,6 +44,7 @@ function enumerateVolumesWindows(removableOnly) {
     '    fileSystem   = $v.FileSystem',
     '    label        = $v.VolumeName',
     '    volumeSerial = $v.VolumeSerialNumber',
+    '    hasMedia     = ($null -ne $v.Size)',
     '    sizeBytes    = [int64]$v.Size',
     '    freeBytes    = [int64]$v.FreeSpace',
     '    health       = $h',
@@ -58,6 +69,14 @@ function enumerateVolumesWindows(removableOnly) {
 async function enumerateRemovableVolumes() {
   if (os.platform() === 'win32') return enumerateVolumesWindows(true);
   // TODO: macOS (diskutil list -plist external physical) / Linux (lsblk -J + udisks2).
+  //
+  // CONTRACT for whoever implements these: set hasMedia to false for a reader slot with no
+  // card in it, and true otherwise. scan() drops anything with hasMedia === false, because
+  // an empty slot is not a card and must never be reported as a damaged one. Answer it from
+  // whatever the platform states directly rather than re-deriving Windows-shaped nulls:
+  // udisks2 exposes a HasMedia property, and lsblk reports size 0 for an empty slot. macOS
+  // may never present the case at all, since it does not usually mount an empty slot; if so,
+  // returning true unconditionally is correct there. Neither has been tested.
   return [];
 }
 
@@ -293,7 +312,14 @@ async function assessPicked(pickedPath) {
 // Scan all removable volumes and assess each. Read-only.
 async function scan() {
   const vols = await enumerateRemovableVolumes();
-  return vols.map(assessCard);
+  // Drop empty reader slots. They are not cards, and reporting one as "this card couldn't be
+  // read, it may be damaged" is both false and alarming — a two-slot reader holding one card
+  // would otherwise list a phantom damaged card beside the real one, and a reader with nothing
+  // in it would list only phantoms instead of falling through to "No SD card found".
+  // Only a slot with no media is dropped; a card that IS present but unreadable still surfaces,
+  // because that one may genuinely be damaged and the user needs to know. A user who explicitly
+  // points at an empty slot still gets it assessed, since assessPicked does not come through here.
+  return vols.filter(v => v.hasMedia !== false).map(assessCard);
 }
 
 // Read-only directory listing for drilling into a card/folder in the report UI.
