@@ -200,7 +200,56 @@ app.whenReady().then(() => {
 
   createWindow();
   startPortPolling();
+  scheduleOrphanCacheSweep();
 });
+
+// Drop buildPkg directories whose ProffieOS hash no longer belongs to any installed version.
+// Deliberately NOT in the pre-window block above: it has to hash every installed OS tree, measured
+// at ~4.5s cold for eight versions on a dev profile, and that is not a cost to put in front of the
+// window appearing. Deferred until after first paint, and the hashing is not wasted — it warms the
+// same per-version cache that every later compile-cache check reads.
+//
+// Self-healing by design: it runs every launch, so a version deleted today is reclaimed tomorrow
+// with no user action and nothing to remember.
+function scheduleOrphanCacheSweep() {
+  setTimeout(() => {
+    try {
+      const validOsHashes = new Set();
+      let failed = false;
+      for (const v of proffie.listVersions()) {
+        try { validOsHashes.add(proffie.hashVersion(v)); }
+        catch { failed = true; }   // could not hash one -> its entries would look orphaned
+      }
+      // Abort on ANY failure rather than sweeping against a partial set. A version we failed to
+      // hash is a version whose live cache entries we would delete. Better to keep dead bytes for
+      // one launch than to throw away a 38-minute build.
+      if (failed) {
+        // Say so. Without this line an aborted sweep and a sweep with nothing to do look identical
+        // in the log, and a sweep that aborts every launch would silently never reclaim anything.
+        console.log('[cache] orphan sweep skipped: an installed OS version could not be hashed');
+        return;
+      }
+
+      // Two independent kinds of dead weight. Orphaned PACKAGES are whole directories whose OS
+      // version is gone. Stale ENTRIES sit inside perfectly live packages and went dead when the
+      // config hash algorithm changed — the sweep above cannot see those, and nothing else
+      // reclaims them.
+      const pkgs    = cacheManager.evictOrphanedBuildPkgs(validOsHashes);
+      const entries = cacheManager.evictStaleHashEntries();
+      const mb = b => (b / 1048576).toFixed(0);
+      if (pkgs.removed.length) {
+        console.log(`[cache] removed ${pkgs.removed.length} orphaned build package(s), ${mb(pkgs.bytes)} MB`);
+      }
+      if (pkgs.skipped) console.log(`[cache] orphan sweep skipped: ${pkgs.skipped}`);
+      if (!pkgs.removed.length && !pkgs.skipped && !entries.removed) {
+        console.log('[cache] sweep found nothing to reclaim');
+      }
+      if (entries.removed) {
+        console.log(`[cache] removed ${entries.removed} entr(ies) keyed by a superseded config hash, ${mb(entries.bytes)} MB`);
+      }
+    } catch {}
+  }, 5000);
+}
 app.on('window-all-closed', () => app.quit());
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 
@@ -596,20 +645,40 @@ ipcMain.handle('cache:getSize', () => {
   return dirSize(cacheRoot);
 });
 
-ipcMain.handle('cache:clear', async () => {
-  const userData    = app.getPath('userData');
-  const cacheRoot   = path.join(userData, 'build-cache');
-  const buildOutput = path.join(userData, 'build-output');
-  function dirSize(p) {
-    if (!fs.existsSync(p)) return 0;
-    return fs.readdirSync(p, { withFileTypes: true }).reduce((sum, e) => {
-      const full = path.join(p, e.name);
-      return sum + (e.isDirectory() ? dirSize(full) : fs.statSync(full).size);
-    }, 0);
-  }
-  const bytes = dirSize(cacheRoot) + dirSize(buildOutput);
+// Two separate destructive actions, because they destroy different things and only one of them
+// costs the user real work.
+//
+//   build-cache  — finished builds, one per config. Deleting forces a full recompile of each.
+//   build-output — arduino-cli's --build-path: core.a plus library objects, AND whatever build is
+//                  currently staged for Flash. Deleting loses no saved work; the next compile
+//                  rebuilds the core and the next cache hit repopulates the staged build.
+//
+// They used to be one button called "Clear Compile Cache", which meant anyone reclaiming disk also
+// threw away the compiler's intermediates, and the label reported a leftover build tree as though
+// it were cached work — it once read 48.0 MB when the number of cached builds was zero.
+function _dirSize(p) {
+  if (!fs.existsSync(p)) return 0;
+  return fs.readdirSync(p, { withFileTypes: true }).reduce((sum, e) => {
+    const full = path.join(p, e.name);
+    return sum + (e.isDirectory() ? _dirSize(full) : fs.statSync(full).size);
+  }, 0);
+}
+
+ipcMain.handle('cache:clearBuilds', async () => {
+  const cacheRoot = path.join(app.getPath('userData'), 'build-cache');
+  const bytes = _dirSize(cacheRoot);
   try {
-    if (fs.existsSync(cacheRoot))   await fs.promises.rm(cacheRoot,   { recursive: true, force: true });
+    if (fs.existsSync(cacheRoot)) await fs.promises.rm(cacheRoot, { recursive: true, force: true });
+    return { ok: true, bytesCleared: bytes };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('cache:resetWorkspace', async () => {
+  const buildOutput = path.join(app.getPath('userData'), 'build-output');
+  const bytes = _dirSize(buildOutput);
+  try {
     if (fs.existsSync(buildOutput)) await fs.promises.rm(buildOutput, { recursive: true, force: true });
     return { ok: true, bytesCleared: bytes };
   } catch (err) {
@@ -631,9 +700,45 @@ ipcMain.handle('cache:getDataSize', () => {
   // Previously this only summed build-cache, so users saw "10.3 MB" before
   // clicking Clear and "38.2 MB freed" afterward, a 3-4× discrepancy that
   // erodes trust in the displayed numbers.
+  // Break the total into its two halves. They are NOT the same kind of thing and lumping them
+  // together misleads: right after a cache sweep the label read "48.0 MB" while cached builds were
+  // literally zero — every byte was build-output, the build currently staged for flashing. A user
+  // reads that as "48 MB of saved builds to reclaim" and is wrong about the only part that costs
+  // them anything.
+  const cacheRoot   = path.join(userData, 'build-cache');
+  const outputRoot  = path.join(userData, 'build-output');
+
+  // Count real cached builds and find the most expensive one, so the confirm dialog can state what
+  // clearing actually costs instead of quoting an invented duration.
+  let cachedBuilds = 0, longestCompileMs = null;
+  (function scan(dir) {
+    if (!fs.existsSync(dir)) return;
+    for (const pkg of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (!pkg.isDirectory()) continue;
+      for (const e of fs.readdirSync(path.join(dir, pkg.name), { withFileTypes: true })) {
+        if (!e.isDirectory()) continue;
+        const mp = path.join(dir, pkg.name, e.name, 'metadata.json');
+        if (!fs.existsSync(mp)) continue;
+        cachedBuilds++;
+        try {
+          const d = JSON.parse(fs.readFileSync(mp, 'utf8')).compileDurationMs;
+          if (typeof d === 'number' && (longestCompileMs === null || d > longestCompileMs)) longestCompileMs = d;
+        } catch {}
+      }
+    }
+  })(cacheRoot);
+
+  const cachedBytes = dirSize(cacheRoot);
+  const outputBytes = dirSize(outputRoot);
+
   return {
-    cache:       dirSize(path.join(userData, 'build-cache')) +
-                 dirSize(path.join(userData, 'build-output')),
+    // Unchanged: must still equal what cache:clear deletes, or the old bug returns where the label
+    // says 10.3 MB and 38.2 MB disappears.
+    cache:       cachedBytes + outputBytes,
+    cachedBytes,
+    outputBytes,
+    cachedBuilds,
+    longestCompileMs,
     arduinoData: dirSize(path.join(userData, 'arduino-data')),
     versions:    dirSize(path.join(userData, 'ProffieOS-versions')),
   };

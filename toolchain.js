@@ -530,10 +530,18 @@ function _looksLikeUnusableCore(result) {
 // Measurable config inputs to correlate against fit/time when hunting a
 // threshold. Rough on purpose — Phase 1 is exploratory.
 function _configFeatures(configContent) {
-  const c = String(configContent || '');
+  const raw = String(configContent || '');
+  // Count ACTIVE code only. These counts previously included commented-out lines, which inflated
+  // every figure for anyone who keeps alternatives commented in their config — and comparing a
+  // config's "size" against fit/time is meaningless if half the count never reaches the compiler.
+  // Same stripper the cache hash uses, so the two can't drift. (backlog.txt:711, found 2026-07-25)
+  const c = cache.stripCommentsForHash(raw);
   const count = (re) => (c.match(re) || []).length;
   return {
-    configBytes: c.length,
+    // configBytes stays RAW on purpose: existing records were logged raw, and silently changing
+    // its meaning would make old and new rows incomparable without anyone noticing.
+    configBytes: raw.length,
+    activeBytes: c.replace(/\s+/g, ' ').trim().length,
     includeCount: count(/^\s*#include\b/gm),
     defineCount: count(/^\s*#define\b/gm),
     styleCount: count(/Style\w*Ptr\s*</g),
@@ -687,7 +695,7 @@ async function compile(configContent, fqbn, buildOptions, onLog) {
         const proffieOSHash = proffie.hashVersion(proffie.getSelectedVersion());
         const stylesContent = proffie.readStagedStyles();
         cache.cacheCompileResult(buildPath, configContent, fqbn, usb, proffieOSHash,
-          new Date().toISOString(), app.getVersion(), stylesContent);
+          new Date().toISOString(), app.getVersion(), stylesContent, durationMs);
       } catch {}
     }
     return { ok: true, buildPath, durationMs, ...sizeReport };

@@ -1506,7 +1506,7 @@
   #btn-settings:hover { color: var(--c-text-sub); border-color: var(--c-border-heavy); }
 
   /* ── About modal ── */
-  #modal-about .modal { width: 560px; max-width: 95vw; max-height: 95vh; overflow-y: auto; padding-top: 0; }
+  #modal-about .modal { width: 640px; max-width: 95vw; max-height: 95vh; overflow-y: auto; padding-top: 0; }
   #modal-about .modal::-webkit-scrollbar { width: 6px; }
   #modal-about .modal::-webkit-scrollbar-thumb { background: var(--c-border-strong); border-radius: 3px; }
   #modal-about .about-header { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; padding: 24px 0 4px; position: sticky; top: 0; background: var(--c-bg-card); z-index: 1; }
@@ -5907,22 +5907,31 @@
       </div>
     </div>
 
-    <div class="settings-item" id="settings-cache-item">
-      <span class="settings-item-label">Clear Compile Cache <span id="cache-size-label" style="font-size:0.72rem;color:var(--c-text-dim);"></span></span>
+    <!-- Two rows, not one. Cached builds are saved work and cost a recompile to lose; the build
+         workspace is the compiler's intermediates plus the staged build, and costs nothing but a
+         slower next compile. One combined button made every disk cleanup throw away the core
+         objects too, and reported a leftover build tree as if it were cached work. -->
+    <div class="settings-item" id="settings-cache-item"
+         title="Finished builds kept for each config, so a config you have not changed does not have to compile again. The app keeps the 5 most recent builds of each config and removes anything it can no longer use, so clearing is only needed if you want the space back now. The next build of each config would then compile from scratch.">
+      <span class="settings-item-label">Clear Cached Builds <span id="cache-size-label" style="font-size:0.72rem;color:var(--c-text-dim);"></span></span>
       <button class="settings-item-btn enabled" id="btn-clear-cache">Clear</button>
     </div>
     <div id="cache-confirm-panel" style="display:none;">
       <div class="cache-warning">
-        <strong>Delete all cached compile results?</strong><br>
-        Cached builds let the app skip recompiling unchanged configs. Clearing the cache means
-        your next compile for each config will run from scratch, up to 10 to 15 minutes for
-        complex builds.<br><br>
+        <strong>Delete all cached builds?</strong><br>
+        <span id="cache-warning-detail"></span><br><br>
         This does <strong>not</strong> affect your config files.
         <div class="cache-warning-actions">
           <button class="settings-item-btn enabled" id="btn-cache-cancel">Cancel</button>
-          <button class="settings-item-btn danger" id="btn-cache-confirm">Yes, Delete Cache</button>
+          <button class="settings-item-btn danger" id="btn-cache-confirm">Yes, Delete Builds</button>
         </div>
       </div>
+    </div>
+
+    <div class="settings-item" id="settings-workspace-item"
+         title="Temporary files from the last compile. Nothing you have saved is affected; a full compile afterwards takes longer than usual.">
+      <span class="settings-item-label">Reset Build Workspace <span id="workspace-size-label" style="font-size:0.72rem;color:var(--c-text-dim);"></span></span>
+      <button class="settings-item-btn enabled" id="btn-reset-workspace">Reset</button>
     </div>
 
     <div class="settings-item">
@@ -9494,10 +9503,20 @@ Generated configurations remain fully accessible and editable by the user.
 
 Copyright © 2026 JMT. All rights reserved.`;
 
+// Human duration for compile times. Seconds under a minute, whole minutes above — nobody needs
+// "32.4 minutes" and a false precision reads as a promise.
+function fmtDuration(ms) {
+  const sec = Math.round(ms / 1000);
+  if (sec < 60) return `${sec} second${sec === 1 ? '' : 's'}`;
+  const min = Math.round(sec / 60);
+  return `${min} minute${min === 1 ? '' : 's'}`;
+}
+
 function fmtBytes(b) {
   if (b < 1024) return `${b} B`;
   if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
-  return `${(b / (1024 * 1024)).toFixed(1)} MB`;
+  if (b < 1024 * 1024 * 1024) return `${(b / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(b / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
 async function openAboutModal() {
@@ -9517,10 +9536,52 @@ async function openAboutModal() {
     try {
       const sizes = await window.electronAPI.getDataSize();
       const cacheBytes = sizes.cache || 0;
-      document.getElementById('cache-size-label').textContent = cacheBytes > 0 ? `(${fmtBytes(cacheBytes)})` : '(empty)';
+      // Two different things live under this one button. `cachedBytes` is saved builds — losing
+      // them costs real recompiles. `outputBytes` is the build currently staged for flashing, which
+      // the next compile rewrites anyway. Showing only the total made the label claim 48 MB of
+      // cached builds at a moment when there were none at all.
+      const cachedBytes = sizes.cachedBytes ?? cacheBytes;
+      const outputBytes = sizes.outputBytes ?? 0;
+      const nBuilds     = sizes.cachedBuilds || 0;
+
+      document.getElementById('cache-size-label').textContent =
+        nBuilds > 0 ? `(${nBuilds} build${nBuilds === 1 ? '' : 's'} · ${fmtBytes(cachedBytes)})` : '(none)';
       const clearBtn = document.getElementById('btn-clear-cache');
-      clearBtn.disabled = cacheBytes === 0;
-      clearBtn.classList.toggle('enabled', cacheBytes > 0);
+      clearBtn.disabled = nBuilds === 0;
+      clearBtn.classList.toggle('enabled', nBuilds > 0);
+
+      const wsLabel = document.getElementById('workspace-size-label');
+      const wsBtn   = document.getElementById('btn-reset-workspace');
+      if (wsLabel) wsLabel.textContent = outputBytes > 0 ? `(${fmtBytes(outputBytes)})` : '(empty)';
+      if (wsBtn) {
+        wsBtn.disabled = outputBytes === 0;
+        wsBtn.classList.toggle('enabled', outputBytes > 0);
+      }
+
+      // State the real cost. No invented range: a light config builds in about 70 seconds and a
+      // heavy one in over half an hour, so any single number quoted for "a complex build" is wrong
+      // for most people. Say what THIS user's builds actually took, or say nothing.
+      const detail = document.getElementById('cache-warning-detail');
+      if (detail) {
+        const n = sizes.cachedBuilds || 0;
+        const longest = sizes.longestCompileMs;
+        const hasTime = typeof longest === 'number' && longest > 0;
+        // Build each number's sentence whole rather than splicing plural fragments into one
+        // template. Patching an 's' onto a fixed phrase is how "each of those configs ... build it"
+        // happens, and a dialog that cannot count erodes confidence in the part the user cannot see.
+        if (n === 0) {
+          detail.textContent = 'There are no cached builds.';
+        } else if (n === 1) {
+          detail.textContent =
+            'You have 1 cached build. Clearing forces a full recompile the next time you build that config.'
+            + (hasTime ? ` It took ${fmtDuration(longest)} to compile.` : '');
+        } else {
+          detail.textContent =
+            `You have ${n} cached builds. Clearing forces a full recompile for each of those configs `
+            + 'the next time you build them.'
+            + (hasTime ? ` The longest took ${fmtDuration(longest)} to compile.` : '');
+        }
+      }
     } catch {}
   }
   // Sync theme selector active state
@@ -9642,21 +9703,22 @@ document.getElementById('btn-cache-confirm').addEventListener('click', async () 
   try {
     const timeout = new Promise((_, reject) =>
       setTimeout(() => reject(new Error('timeout')), 15000));
-    const result = await Promise.race([window.electronAPI.clearCache(), timeout]);
+    const result = await Promise.race([window.electronAPI.clearBuilds(), timeout]);
     if (result.ok) {
       document.getElementById('cache-confirm-panel').style.display = 'none';
       const _clearBtn = document.getElementById('btn-clear-cache');
       _clearBtn.disabled = true;
       _clearBtn.classList.remove('enabled');
       _clearBtn.textContent = 'Clear';
-      confirmBtn.textContent = 'Yes, Delete Cache';
+      confirmBtn.textContent = 'Yes, Delete Builds';
       confirmBtn.disabled = false;
       cancelBtn.disabled  = false;
       const freed = fmtBytes(result.bytesCleared);
       document.getElementById('cache-size-label').textContent =
         result.bytesCleared > 0 ? `✓ Cleared (${freed} freed)` : '✓ Cleared';
-      // Build output was also deleted — reset compile state so Flash is disabled
-      if (window.resetCompileState) window.resetCompileState();
+      // build-output is untouched by this action, so whatever is staged stays flashable. Only the
+      // saved builds are gone, which shows up as a cache MISS the next time a config is checked.
+      if (window.checkCacheForConfig) window.checkCacheForConfig('Cached builds cleared — recompile needed');
     } else {
       confirmBtn.textContent = 'Error. Try again';
       confirmBtn.disabled = false;
@@ -9666,6 +9728,34 @@ document.getElementById('btn-cache-confirm').addEventListener('click', async () 
     confirmBtn.textContent = 'Error. Try again';
     confirmBtn.disabled = false;
     cancelBtn.disabled  = false;
+  }
+});
+
+// Reset Build Workspace: no confirmation. Nothing saved is lost — the next compile rebuilds the
+// core and the next cache hit repopulates the staged build. A modal that warns about a cost the
+// user is not paying teaches people to click through the modal that matters.
+document.getElementById('btn-reset-workspace')?.addEventListener('click', async () => {
+  const btn   = document.getElementById('btn-reset-workspace');
+  const label = document.getElementById('workspace-size-label');
+  btn.disabled = true;
+  btn.textContent = 'Resetting…';
+  try {
+    const result = await window.electronAPI.resetWorkspace();
+    btn.textContent = 'Reset';
+    if (result.ok) {
+      btn.classList.remove('enabled');
+      label.textContent = `✓ Reset (${fmtBytes(result.bytesCleared)} freed)`;
+      // The staged build is gone, so there is nothing to flash until a build exists again. A cache
+      // hit will restore one; checkCacheForConfig decides which.
+      if (window.checkCacheForConfig) window.checkCacheForConfig('Build workspace reset — recompile needed');
+    } else {
+      btn.disabled = false;
+      label.textContent = '✗ Could not reset';
+    }
+  } catch {
+    btn.textContent = 'Reset';
+    btn.disabled = false;
+    label.textContent = '✗ Could not reset';
   }
 });
 
