@@ -12840,6 +12840,9 @@ document.getElementById('modal-prop-missing-close')?.addEventListener('click', (
 let _stylesEditorInstance  = null;
 let _stylesDetailEditor    = null;
 let _stylesHelperEditor    = null;
+// my_styles.h read straight from disk, used when the Style Library editor is
+// not open. Written by presetSidecarModule, read by _getHelperTemplateParams.
+let _silentStylesText      = null;
 let _helperEditorOrigCode    = '';
 let _helperEditorOrigDisplay = '';
 let _helperEditorOrigNotes   = '';
@@ -13373,6 +13376,126 @@ function _formatStyleCode(usingCode) {
 function _splitTemplatePrefix(code) {
   const m = code.match(/^(template\s*<[\s\S]*?>\s*)(\nusing[\s\S]*)$/);
   return m ? { prefix: m[1].trimEnd(), code: m[2].replace(/^\n/, '') } : { prefix: '', code };
+}
+
+// Stand-in inner style for a wrapper's unfilled type parameter. A visible blade
+// with an ignition and a retraction, so the wrapper can be PREVIEWED in a style
+// editor before the real inner style is chosen.
+const _COPY_STYLE_INNER_PLACEHOLDER = 'InOutHelper<Blue,300,800>';
+
+// What Copy Style puts on the clipboard for one library entry.
+//
+// Copy Style EXPORTS A STYLE. Its destination is a lightsaber style editor, not
+// a preset slot, so the output must be self-contained: the body, not a reference
+// to the library entry. Copy Function is the button that gives the `using`
+// definition. (Established 2026-08-16.)
+//
+// A templated entry's body is therefore a problem, because its parameters are
+// declared on the line above the `using` and cannot travel with the body. The
+// export must resolve them INTO the body:
+//
+//   template<int dir = 0> using HexSpiralStyle = Layers<...Int<dir>...>;
+//   ->  StylePtr<Layers<...Int</*dir DEFAULT*/0/*dir DEFAULT*/>...>>()
+//
+// Every substituted value is wrapped in matching comments naming its parameter,
+// so the export is self-documenting: the recipient can see what was filled in
+// and where to change it. Verified 2026-08-16 that a lightsaber style editor
+// accepts comments inside a style body (tested with LEDSwitch, 10 of them).
+//
+// Three outcomes:
+//   { expr }                    - ready to copy
+//   { expr, placeholders: [..] } - copyable, but a type parameter was filled
+//                                 with a stand-in the user must replace
+//   { blocked: [names] }        - a value parameter has no default; inventing a
+//                                 number would be arbitrary, so refuse
+function _composeCopyStyleExpr(name, usingCode) {
+  const body = String(usingCode || '')
+    .replace(/^using\s+\w+\s*=\s*/, '')
+    .replace(/;\s*$/, '')
+    .trim();
+
+  const tParams = _getHelperTemplateParams(name) || [];
+  if (!tParams.length) return { expr: body };
+
+  // A value parameter with no default cannot be guessed. A TYPE parameter can
+  // take a stand-in, because any visible style demonstrates the wrapper.
+  const blocked = tParams.filter(p => !p.defaultExpr && p.type !== 'class')
+                         .map(p => p.name);
+  if (blocked.length) return { blocked };
+
+  const placeholders = [];
+  let expr = body;
+  for (const p of tParams) {
+    const isPlaceholder = !p.defaultExpr;
+    const value = p.defaultExpr || _COPY_STYLE_INNER_PLACEHOLDER;
+    const tag   = isPlaceholder ? `${p.name} PLACEHOLDER` : `${p.name} DEFAULT`;
+    if (isPlaceholder) placeholders.push(p.name);
+    // Word-boundary only: a parameter named `dir` must not match `direction`.
+    expr = expr.replace(new RegExp(`\\b${p.name}\\b`, 'g'),
+                        `/*${tag}*/${value}/*${tag}*/`);
+  }
+  return placeholders.length ? { expr, placeholders } : { expr };
+}
+
+// Parse a library helper's template<...> parameters out of my_styles.h.
+// Top level (moved out of presetSidecarModule 2026-08-16) because Copy Style
+// needs it too - the module-private copy was why Copy Style emitted a style
+// body with a free template parameter instead of the instantiation.
+function _getHelperTemplateParams(helperName) {
+  const text = _stylesEditorInstance ? _stylesEditorInstance.getValue() : (_silentStylesText || '');
+  if (!text || !helperName) return [];
+
+  const usingRe = new RegExp(`\\busing\\s+${helperName}\\s*=`);
+  const usingIdx = text.search(usingRe);
+  if (usingIdx < 0) return [];
+
+  // Look back up to 500 chars for `template<`
+  const lookbackStart = Math.max(0, usingIdx - 500);
+  const lookback = text.slice(lookbackStart, usingIdx);
+  const templateIdx = lookback.lastIndexOf('template');
+  if (templateIdx < 0) return [];
+
+  // Ensure no other `using` between template<> and ours
+  if (/\busing\b/.test(lookback.slice(templateIdx + 'template'.length))) return [];
+
+  const afterTemplate = text.slice(lookbackStart + templateIdx + 'template'.length).trimStart();
+  if (!afterTemplate.startsWith('<')) return [];
+
+  // Read balanced angle-bracket block
+  let depth = 0, i = 0, inner = '';
+  while (i < afterTemplate.length) {
+    const ch = afterTemplate[i];
+    if (ch === '<') { depth++; if (depth === 1) { i++; continue; } }
+    else if (ch === '>') { depth--; if (depth === 0) break; }
+    if (depth > 0) inner += ch;
+    i++;
+  }
+
+  // Split on top-level commas
+  const params = [];
+  let d = 0, cur = '';
+  for (const ch of inner) {
+    if (ch === '<') d++;
+    else if (ch === '>') d--;
+    if (ch === ',' && d === 0) { params.push(cur.trim()); cur = ''; }
+    else cur += ch;
+  }
+  if (cur.trim()) params.push(cur.trim());
+
+  return params.map(p => {
+    const s = p.trim();
+    const classM = /^(?:class|typename)\s+(\w+)(?:\s*=\s*([\s\S]*))?$/.exec(s);
+    if (classM) {
+      const defExpr = (classM[2] || '').trim() || null;
+      return { type: 'class', name: classM[1], defaultExpr: defExpr, required: !defExpr };
+    }
+    const intM = /^int\s+(\w+)(?:\s*=\s*(-?\d+))?$/.exec(s);
+    if (intM) {
+      const defExpr = (intM[2] || '').trim() || null;
+      return { type: 'int', name: intM[1], defaultExpr: defExpr, required: !defExpr };
+    }
+    return null;
+  }).filter(Boolean);
 }
 
 // Compact a formatted multi-line `using NAME = ...;` back to single-line
@@ -14826,11 +14949,31 @@ function _renderDetailTags() {
   });
 }
 
+// Copy Style is unavailable when the entry needs a value nobody can infer. The
+// button is DISABLED rather than clickable-then-complaining: a toast fires after
+// the user already believes they copied something. The reason sits on the button
+// itself, because a dead control with no explanation is its own dead end.
+function _syncCopyStyleAvailability(name, usingCode) {
+  const btn = document.getElementById('btn-style-detail-copy-style');
+  if (!btn) return;
+  const built = _composeCopyStyleExpr(name, usingCode);
+  if (built.blocked) {
+    btn.disabled = true;
+    btn.title = `${name} needs ${built.blocked.join(' and ')} before it can be a style on `
+              + `its own, and there is no default to use. Copy Function instead.`;
+  } else {
+    btn.disabled = false;
+    btn.title = 'Copy as StylePtr for use in a preset';
+  }
+}
+
 function _openStyleDetail(entry) {
   const { name, usingCode, meta } = entry;
   _detailEntry        = entry;
   _detailName         = name;
   _detailOriginalCode = usingCode;
+
+  _syncCopyStyleAvailability(name, usingCode);
 
   // Source: userSource takes priority, falls back to fett263 source
   _detailSource = meta.userSource || meta.source || '';
@@ -16224,19 +16367,30 @@ document.getElementById('btn-style-detail-copy-style').addEventListener('click',
     comment = rawComment;
   }
 
-  // Extract bare expression from `using NAME = EXPR;`
-  const expr = _detailEntry.usingCode
-    .replace(/^using\s+\w+\s*=\s*/, '')
-    .replace(/;\s*$/, '')
-    .trim();
+  const built = _composeCopyStyleExpr(_detailEntry.name, _detailEntry.usingCode);
+  // The button is disabled for this case, so reaching it means the disabled
+  // state and the composer disagree. Copy nothing rather than something broken.
+  if (built.blocked) return;
 
   const parts = [];
   if (comment) parts.push(comment);
-  parts.push(`StylePtr<${expr}>(),`);
+  // No trailing comma. This output is an EXPORTED STYLE, and its destination is a
+  // lightsaber style editor, which the comma breaks. A preset slot tolerates it;
+  // the style editor does not, and that is the case this button is for. (2026-08-16)
+  parts.push(`StylePtr<${built.expr}>()`);
   navigator.clipboard.writeText(parts.join('\n')).then(() => {
     const btn = document.getElementById('btn-style-detail-copy-style');
     btn.textContent = '✓ Copied';
     setTimeout(() => { btn.textContent = 'Copy Style'; }, 1500);
+    // Say what was substituted. The copy succeeded, so this is a notice about
+    // what the user now has, not a refusal.
+    if (built.placeholders) {
+      showToast(
+        `Copied with a stand-in for ${built.placeholders.join(', ')}. ` +
+        `Replace the /*${built.placeholders[0]} PLACEHOLDER*/ markers with your own style.`,
+        { kind: 'warn', durationMs: 7000 }
+      );
+    }
   });
 });
 // Discard: explicit intent, close without prompting
@@ -33405,7 +33559,10 @@ require(['vs/editor/editor.main'], function () {
     let _presetDecorations = [];
     let _activeLibComboDropdown = null;
     let _restoreSlotBody        = null;
-    let _silentStylesText       = null;
+    // _silentStylesText is declared at top level beside _stylesEditorInstance
+    // (moved 2026-08-16): _getHelperTemplateParams reads it as its fallback when
+    // the Style Library editor is not open, and that function now lives at top
+    // level so Copy Style can reach it. Assignments below are unchanged.
     let _reopenAfterRebuild     = null; // { presetIdx, slotIdx }
     // The custom-expression textarea is the ONLY control in the slot editor that
     // holds uncommitted state; every other one writes to the document the moment
@@ -37006,63 +37163,6 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
       if (/^Rgb\s*</.test(s)) return true;
       if (/^Rgb16\s*</.test(s)) return true;
       return false;
-    }
-
-    function _getHelperTemplateParams(helperName) {
-      const text = _stylesEditorInstance ? _stylesEditorInstance.getValue() : (_silentStylesText || '');
-      if (!text || !helperName) return [];
-
-      const usingRe = new RegExp(`\\busing\\s+${helperName}\\s*=`);
-      const usingIdx = text.search(usingRe);
-      if (usingIdx < 0) return [];
-
-      // Look back up to 500 chars for `template<`
-      const lookbackStart = Math.max(0, usingIdx - 500);
-      const lookback = text.slice(lookbackStart, usingIdx);
-      const templateIdx = lookback.lastIndexOf('template');
-      if (templateIdx < 0) return [];
-
-      // Ensure no other `using` between template<> and ours
-      if (/\busing\b/.test(lookback.slice(templateIdx + 'template'.length))) return [];
-
-      const afterTemplate = text.slice(lookbackStart + templateIdx + 'template'.length).trimStart();
-      if (!afterTemplate.startsWith('<')) return [];
-
-      // Read balanced angle-bracket block
-      let depth = 0, i = 0, inner = '';
-      while (i < afterTemplate.length) {
-        const ch = afterTemplate[i];
-        if (ch === '<') { depth++; if (depth === 1) { i++; continue; } }
-        else if (ch === '>') { depth--; if (depth === 0) break; }
-        if (depth > 0) inner += ch;
-        i++;
-      }
-
-      // Split on top-level commas
-      const params = [];
-      let d = 0, cur = '';
-      for (const ch of inner) {
-        if (ch === '<') d++;
-        else if (ch === '>') d--;
-        if (ch === ',' && d === 0) { params.push(cur.trim()); cur = ''; }
-        else cur += ch;
-      }
-      if (cur.trim()) params.push(cur.trim());
-
-      return params.map(p => {
-        const s = p.trim();
-        const classM = /^(?:class|typename)\s+(\w+)(?:\s*=\s*([\s\S]*))?$/.exec(s);
-        if (classM) {
-          const defExpr = (classM[2] || '').trim() || null;
-          return { type: 'class', name: classM[1], defaultExpr: defExpr, required: !defExpr };
-        }
-        const intM = /^int\s+(\w+)(?:\s*=\s*(-?\d+))?$/.exec(s);
-        if (intM) {
-          const defExpr = (intM[2] || '').trim() || null;
-          return { type: 'int', name: intM[1], defaultExpr: defExpr, required: !defExpr };
-        }
-        return null;
-      }).filter(Boolean);
     }
 
     function _helperHasClassInner(helperName) {
