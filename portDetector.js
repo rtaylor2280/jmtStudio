@@ -239,9 +239,16 @@ async function getRecommendedPort() {
       proffieports: [],
       linuxSerialPermissionIssue,
       linuxUdevRulesMissing,
+      // A status says what is true, and stops. The count used to ride along here - "3 other
+      // port(s) available" - which advertised a number nobody can act on and stood in for an
+      // explanation that does not fit in a status line. The zero-port branch below already carries
+      // the only distinction that changes what someone does. (2026-08-14)
+      // No TERMINAL period: the status row is a line of fragments, not sentences - "Toolchain
+      // ready", "Compile restored from cache", "Not flashed". An internal period is fine where a
+      // second clause earns its place. (2026-08-14)
       message: ports.length === 0
-        ? 'No serial ports detected. Connect your Proffieboard.'
-        : `No Proffieboard detected. ${ports.length} other port(s) available.`
+        ? 'No serial ports detected. Connect your Proffieboard'
+        : 'No Proffieboard detected'
     };
   }
 
@@ -254,7 +261,7 @@ async function getRecommendedPort() {
       proffieports,
       linuxSerialPermissionIssue,
       linuxUdevRulesMissing,
-      message: `Proffieboard detected on ${proffieports[0].path}.`
+      message: `Proffieboard detected on ${proffieports[0].path}`
     };
   }
 
@@ -265,7 +272,7 @@ async function getRecommendedPort() {
     ports,
     proffieports,
     linuxSerialPermissionIssue,
-    message: `${proffieports.length} Proffieboards detected. Select a port.`
+    message: `${proffieports.length} Proffieboards detected. Select a port`
   };
 }
 

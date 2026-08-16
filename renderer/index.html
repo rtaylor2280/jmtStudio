@@ -473,6 +473,16 @@
     background: var(--c-danger-bg) !important;
   }
   .field-error:focus { border-color: var(--c-danger-text) !important; }
+  /* The state belongs to the CONTROL, not to its contents. On a <select> the
+     danger background is inherited by every option, so opening the dropdown
+     showed the whole list on red - which reads as "all of these are wrong"
+     rather than "this field disagrees with the board".
+     `.field-changed` already resets `option` colour for exactly this reason
+     (see above); .field-error simply never got the equivalent. (2026-08-15) */
+  .field-error option {
+    background: var(--c-bg-raised);
+    color: var(--c-text);
+  }
   .field-warn { color: var(--c-danger-text) !important; }
 
   /* ── Config banner ── */
@@ -743,7 +753,10 @@
     position: fixed;
     inset: 0;
     z-index: 100000;
-    background: #111111;
+    /* The token, not the literal. This was hardcoded to dark's `#111111`, so a light-theme user
+       got a DARK full-screen dim at startup that then faded to a light app. Identical in dark
+       mode - `--c-bg` is that exact value there. (2026-08-14) */
+    background: var(--c-bg);
     transition: opacity 0.45s ease;
   }
   #load-dim.hidden { opacity: 0; pointer-events: none; }
@@ -1106,6 +1119,14 @@
     font-size: 0.72rem;
     line-height: 1.5;
   }
+  /* This is the first sentence a new user ever reads, and it had no light-mode value at all - a
+     light-theme user met JMT Studio with a dark navy strip and low-contrast blue text across the
+     top of the app. Worst possible place for a theme hole. (2026-08-14) */
+  html.light-mode #bp-setup-notice {
+    background: #e8f0fe;
+    border-bottom-color: #b0c8f0;
+    color: #1a4a9a;
+  }
   #bp-log-content {
     font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;
     font-size: 0.72rem;
@@ -1136,6 +1157,15 @@
     align-items: center;
   }
   .status-bar .hl { color: #4d9; }
+  /* An empty span is still a flex item, so `gap: 20px` lands on both sides of it
+     and leaves a double gap where nothing is shown. The neighbours all blank
+     themselves by clearing textContent and wear that; this one collapses
+     instead, because it is blank in the ordinary case of an unstamped version
+     rather than only when no config is open. (2026-08-15) */
+  #stat-plugin:empty { display: none; }
+  /* Same red the config header uses for `.field-changed`, so "this input moved
+     since the last build" reads identically wherever it appears. */
+  #stat-plugin.stat-stale { color: #e55; cursor: help; }
   #stat-dirty { color: #cb6; display: none; }
   #stat-dirty.visible { display: inline; }
   #stat-diff-info { color: #88f; display: none; }
@@ -1158,7 +1188,9 @@
   .settings-update-dot.visible { display: block; }
   .update-notes-body {
     white-space: pre-wrap; max-height: 180px; overflow-y: auto;
-    padding: 6px 8px; background: var(--c-bg-input);
+    /* Was `var(--c-bg-input)`, a token that has never existed. With no fallback the whole
+       declaration is invalid, so the release notes rendered with no background at all. (2026-08-14) */
+    padding: 6px 8px; background: var(--c-bg-inset);
     border: 1px solid var(--c-border); border-radius: 4px;
     font-family: monospace; font-size: 0.74rem; line-height: 1.5;
     color: var(--c-text-muted); margin-bottom: 8px;
@@ -1175,6 +1207,19 @@
     background: var(--jmt-blue) !important;
     box-shadow: 0 0 12px rgba(2,81,146,0.8), 0 0 24px rgba(2,81,146,0.4);
   }
+  /* Track for the same animation outside the build modal. A core download has no
+     percentage to report - arduino-cli streams its own progress to a log nobody
+     is looking at here - so this says "still working" and nothing it cannot back
+     up, matching the rule the build bar already follows. */
+  .vp-wait-track {
+    position: relative; overflow: hidden;
+    height: 3px; width: 160px; flex-shrink: 0;
+    background: var(--c-border); border-radius: 2px;
+  }
+  .vp-wait-track > div {
+    position: absolute; top: 0; height: 100%; border-radius: 2px;
+  }
+
 .bm-bar-success { background: var(--jmt-blue) !important; box-shadow: 0 0 8px rgba(2,81,146,0.6) !important; animation: none !important; width: 100% !important; }
   .bm-bar-error   { background: #e44 !important; box-shadow: 0 0 8px rgba(220,60,60,0.5) !important; animation: none !important; width: 100% !important; }
 
@@ -1220,6 +1265,27 @@
   /* When empty (during a compile/flash, no error), contribute zero width so the
      hint lead-in aligns to the black log box's left edge, not 8px right of it. */
   #bm-status:empty { padding: 0; }
+  /* A failure summary's FIRST line is what happened; the rest is what to do.
+     Splitting the emphasis is a general rule, not per-message styling - it needs
+     no knowledge of the text, so it improves every failure equally.
+     Deliberately NO colour here: this modal already carries the error state twice
+     (red title, red bar), and a third red inside the sentence competes with them
+     and makes the block harder to scan rather than easier. Colour is doing its
+     job as state; the body's job is content. tabular-nums because the numbers -
+     byte counts - are the point of the message. (2026-08-15) */
+  #bm-status .bm-status-lead {
+    color: var(--c-text); font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  #bm-status .bm-status-detail {
+    display: block; margin-top: 3px;
+    color: var(--c-text-soft);
+    font-variant-numeric: tabular-nums;
+  }
+  /* Set where the message put a blank line - separating the diagnosis from the
+     instruction. A margin rather than an empty row: same separation for about a
+     third of the vertical space, and tunable. (2026-08-15) */
+  #bm-status .bm-status-gap { margin-top: 10px; }
   #bm-hint        { flex: 1; opacity: 0; font-style: italic; font-size: 0.78rem; color: var(--c-text-dim); padding: 0 12px 0 0; white-space: nowrap; overflow: hidden; min-height: 1.4em; }
   #bm-timer-row   { display: flex; gap: 20px; justify-content: space-between; margin-top: 10px; font-family: monospace; font-size: 0.72rem; color: var(--c-text-muted); }
   #bm-board-select-wrap { align-items: center; gap: 10px; margin-bottom: 14px; }
@@ -1295,6 +1361,47 @@
   /* Four-button modals (add / remove / proceed / cancel) get a little more room
      so the button row fits horizontally, same layout as every other modal. */
   #modal-confirm .modal.modal-confirm-wide { max-width: 600px; }
+  /* Prop-link modals: three buttons plus a quoted include line and, on a swap
+     away from the wrapper, a warning paragraph. At the 380px default the button
+     row wraps and the prose goes ragged. */
+  #modal-jmt-conflict .modal,
+  #modal-styles-conflict .modal,
+  #modal-prop-pick .modal,
+  #modal-prop-missing .modal { max-width: 520px; }
+  #modal-prop-pick-list {
+    max-height: 46vh;
+    overflow-y: auto;
+    border: 1px solid var(--c-border);
+    border-radius: 4px;
+    margin-bottom: 18px;
+  }
+  .prop-pick-row {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 8px 12px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--c-border);
+    font-size: 0.82rem;
+  }
+  .prop-pick-row:last-child { border-bottom: none; }
+  .prop-pick-row:hover { background: var(--c-bg-hover); }
+  .prop-pick-name { font-family: monospace; color: var(--c-text); }
+  .prop-pick-tag {
+    margin-left: auto;
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--jmt-blue-text, #6af);
+    white-space: nowrap;
+  }
+  .prop-pick-empty { padding: 14px 12px; font-size: 0.82rem; color: var(--c-text-muted); }
+  /* `text-wrap: balance` evens line lengths, which reads well on the 380px
+     default but leaves these wider paragraphs short of the measure. `pretty`
+     still avoids a one-word last line without shrinking every line above it. */
+  #modal-jmt-conflict .modal p,
+  #modal-styles-conflict .modal p,
+  #modal-prop-missing .modal p { text-wrap: pretty; }
   #modal-sf-text-prompt { z-index: 10015; }
   /* Sits above the library picker (10010) so the rename decision is
      always on top of the modal that triggered it. Same tier as the
@@ -1530,6 +1637,14 @@
   #modal-about .settings-item-btn.enabled:hover { background: var(--c-border-strong); }
   #modal-about .settings-item-btn.danger { background: var(--c-danger-bg); color: var(--c-danger-text); border-color: var(--c-danger-border); cursor: pointer; opacity: 1; }
   #modal-about .settings-item-btn.danger:hover { filter: brightness(0.9); }
+  /* `.danger` set cursor:pointer and a hover unconditionally, so a confirm button
+     mid-action - disabled, reading "Resetting" - still offered a pointer and lit
+     up on hover. Harmless in effect, since disabled blocks the click, but a
+     control that looks live during the one moment it must not be pressed invites
+     the press and then swallows it, which reads as the app having hung. The
+     busy-dots exist to say "working"; the cursor has to agree. (2026-08-15) */
+  #modal-about .settings-item-btn.danger:disabled { cursor: not-allowed; opacity: 0.5; }
+  #modal-about .settings-item-btn.danger:disabled:hover { filter: none; }
   #modal-about .cache-warning { font-size: 0.78rem; color: var(--c-text-muted); background: var(--c-bg-inset); border: 1px solid var(--c-border); border-radius: 4px; padding: 10px 12px; margin-top: 6px; line-height: 1.5; }
   #modal-about .cache-warning strong { color: var(--c-text); }
   #modal-about .cache-warning-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; }
@@ -1550,9 +1665,24 @@
   .theme-btn:hover { background: var(--c-bg-hover); color: var(--c-text-sub); opacity: 1; }
   .theme-btn.active { background: var(--c-bg-card); color: var(--c-text-bright); font-weight: 600; }
   #modal-about .about-footer { font-size: 0.75rem; color: var(--c-text-hint); line-height: 1.6; border-top: 1px solid var(--c-border); padding-top: 14px; margin-top: 20px; }
-  #modal-about .about-license-toggle { background: none; border: none; color: #4a9edd; font-size: 0.75rem; cursor: pointer; padding: 0; margin-top: 8px; display: block; }
+  /* scroll-margin-top clears the sticky about-header, so scrolling the toggle to the top of the
+     modal does not park it underneath the logo bar. */
+  #modal-about .about-license-toggle { background: none; border: none; color: #4a9edd; font-size: 0.75rem; cursor: pointer; padding: 0; margin-top: 8px; display: block; scroll-margin-top: 92px; }
   #modal-about .about-license-toggle:hover { text-decoration: underline; }
-  #modal-about .about-license-body { display: none; font-size: 0.73rem; color: var(--c-text-soft); line-height: 1.6; margin-top: 8px; white-space: pre-wrap; background: var(--c-bg-code); border: 1px solid var(--c-border-mid); border-radius: 4px; padding: 12px 14px; max-height: 180px; overflow-y: auto; }
+  /* The licence is prose meant to be read, not a status line. It was 0.73rem in a 180px box inside
+     a modal that scrolls too - a tiny window onto long text, with two scroll contexts fighting.
+     Take every pixel that is going spare: a scrollbar is a last resort, not a layout.
+     The ceiling is derived, not picked. Once the toggle is scrolled to the top of the modal, what
+     remains below it is the modal viewport (95vh) less the sticky header (80px + 10px margin), the
+     toggle itself (~18px) and this box's own margin (8px) - so calc(95vh - 120px) is exactly the
+     space available, and the licence uses all of it. On a tall window that is the whole text with
+     no scrollbar at all; on a short one it still cannot exceed one page of the modal, which is what
+     keeps scrolling from going choppy.
+     `Hide License` is the thing that must stay on screen and this arithmetic protects it. `Close`
+     may fall below the fold - it is a duplicate exit, not the only one.
+     `overscroll-behavior: contain` kills the chop that height alone cannot: without it, reaching
+     the bottom of the licence hands the wheel to the modal and the page lurches. (2026-08-14) */
+  #modal-about .about-license-body { display: none; font-size: 0.8rem; color: var(--c-text-soft); line-height: 1.6; margin-top: 8px; white-space: pre-wrap; background: var(--c-bg-code); border: 1px solid var(--c-border-mid); border-radius: 4px; padding: 14px 16px; max-height: calc(95vh - 120px); overflow-y: auto; overscroll-behavior: contain; }
   #modal-about .about-license-body.open { display: block; }
   #modal-about .about-license-body::-webkit-scrollbar { width: 6px; }
   #modal-about .about-license-body::-webkit-scrollbar-thumb { background: var(--c-border-strong); border-radius: 3px; }
@@ -2117,6 +2247,21 @@
     opacity: 0.85;
   }
   #vp-file-modal-search-btn:hover { background: var(--c-bg-hover); color: var(--c-text); opacity: 1; border-color: var(--c-border-strong); }
+  /* Same geometry as the Search button beside it, but carries .btn-blue's colours
+     because it mutates the open config rather than just driving the viewer. */
+  #vp-file-modal-link-prop-btn {
+    background: #1a2a3a;
+    border: 1px solid #2a3a5a;
+    color: #6af;
+    font-size: 0.78rem;
+    padding: 3px 9px;
+    border-radius: 3px;
+    cursor: pointer;
+    flex-shrink: 0;
+    margin-right: 6px;
+  }
+  #vp-file-modal-link-prop-btn:hover { filter: brightness(1.25); }
+  html.light-mode #vp-file-modal-link-prop-btn { background: #e8f0fe; color: #1a4a9a; border-color: #b0c8f0; }
   .vp-file-modal-close {
     background: none;
     border: none;
@@ -2254,7 +2399,7 @@
   .sf-card-effect-chip { font-size: 0.63rem; color: var(--jmt-blue); background: rgba(60, 120, 200, 0.10); border: 1px solid rgba(60, 120, 200, 0.30); border-radius: 3px; padding: 1px 5px; white-space: nowrap; cursor: pointer; font-family: inherit; transition: background 0.25s, color 0.25s, border-color 0.25s; }
   .sf-card-effect-chip:hover { background: rgba(60, 120, 200, 0.22); border-color: var(--jmt-blue); }
   .sf-card-effect-chip.unknown { color: var(--c-text-sub); background: var(--c-bg-raised); border-color: var(--c-border); }
-  .sf-card-effect-chip.unknown:hover { background: var(--c-bg-elev); border-color: var(--c-border-strong); }
+  .sf-card-effect-chip.unknown:hover { background: var(--c-bg-elevated); border-color: var(--c-border-strong); }
   .sf-card-effect-chip.playing { color: #fff; background: var(--jmt-blue); border-color: var(--jmt-blue); }
   .sf-card-effect-chip.unknown.playing { color: var(--c-text); background: var(--c-border-strong); border-color: var(--c-border-strong); }
   /* Multi-select checkbox in the bottom-right corner. Hover-revealed (matches
@@ -3020,7 +3165,7 @@
      caught up with yet. Tooltip hints at the meaning. Same flex order
      as the known chips so they intermix naturally. */
   .sf-effect-chip-unknown { display: inline-flex; align-items: center; font-size: 0.68rem; color: var(--c-text-sub); background: var(--c-bg-raised); border: 1px solid var(--c-border); border-radius: 3px; padding: 1px 6px; font-family: inherit; order: 1; cursor: pointer; transition: background 0.25s, color 0.25s, border-color 0.25s; }
-  .sf-effect-chip-unknown:hover { background: var(--c-bg-elev); border-color: var(--c-border-strong); }
+  .sf-effect-chip-unknown:hover { background: var(--c-bg-elevated); border-color: var(--c-border-strong); }
   .sf-effect-chip-unknown.playing { color: var(--c-text); background: var(--c-border-strong); border-color: var(--c-border-strong); }
   .sf-effects-empty { font-size: 0.72rem; color: var(--c-text-dim); font-style: italic; }
   /* Effects row uses top-aligned label so when chips wrap to multiple
@@ -3174,6 +3319,31 @@
   }
   .sf-loading-pulse { animation: sf-loading-pulse 1.6s ease-in-out infinite; }
   input.sf-loading-pulse::placeholder { animation: sf-loading-pulse 1.6s ease-in-out infinite; }
+
+  /* Busy dots — for a button that has swapped its label to a working state ("Resetting", "Deleting",
+     "Importing"). A STATIC "Resetting…" is indistinguishable from a hang: no animation implies
+     frozen, which is the dead-click problem arriving later in the same sequence.
+     Set the label WITHOUT its ellipsis and add `.busy-dots`; this supplies the dots and animates
+     them 1 → 2 → 3.
+     Width is reserved at the full three dots and revealed by clip-path, never by growing the
+     element - dots that change the button's width shift every button beside it in a flex-end row,
+     which is its own kind of jitter. Frames are explicit rather than steps() so each reveal lands
+     exactly on a dot boundary. 1.2s matches the unhurried house pace (knightrider 1.4s, loading
+     pulse 1.6s). (2026-08-14) */
+  @keyframes busy-dots {
+    0%,     24.9% { clip-path: inset(0 100%  0 0); }
+    25%,    49.9% { clip-path: inset(0 66.6% 0 0); }
+    50%,    74.9% { clip-path: inset(0 33.3% 0 0); }
+    75%,    100%  { clip-path: inset(0 0     0 0); }
+  }
+  .busy-dots::after {
+    content: '...';
+    display: inline-block;
+    width: 1.1em;
+    text-align: left;
+    white-space: nowrap;
+    animation: busy-dots 1.2s infinite;
+  }
   .sf-source-add-more-btn { font-size: 0.82rem; padding: 6px 14px; }
   .sf-source-delete-btn { margin-right: auto; color: #e44; }
   .sf-source-delete-btn:hover { background: rgba(228,68,68,0.12); color: #f66; }
@@ -3964,6 +4134,9 @@
         <div class="toolbar-divider" id="divider-styles-ctrl" style="display:none"></div>
         <button id="btn-styles-create" class="btn-blue"  style="display:none" title="Create or import a Style Library">&#43; Create Style Library</button>
         <button id="btn-styles-link"   class="btn-blue"  style="display:none" title='Adds #include "my_styles.h" to your config so ProffieOS can use your saved styles'>&#128279; Link Style Library</button>
+        <!-- Label and title are set at runtime by _updateJmtLinkBtn: this slot is
+             "Link JMT Add-ons" when the selected version has them, and "Link Prop"
+             when the config names no prop at all. Do not rely on the markup below. -->
         <button id="btn-jmt-link"      class="btn-blue"  style="display:none" title='Adds the JMT Prop Addons include to your config so the wrapper features can be opted in via #defines'>&#128279; Link JMT Add-ons</button>
       </div>
       <div class="tab-btns" id="tab-btns-versions">
@@ -4530,7 +4703,9 @@
   <div id="bp-log-body">
     <!-- Build Output pane -->
     <div class="bp-log-pane active" id="bp-pane-build">
-      <div id="bp-setup-notice" style="display:none">First-time setup: downloading and installing required build tools. This only happens once and may take several minutes on slower connections. Compile and flash will be available when setup is complete.</div>
+      <!-- Replaced at runtime by onBuildStatus, which names the plugin version
+           being fetched. This static text is only the pre-signal fallback. -->
+      <div id="bp-setup-notice" style="display:none">Downloading and installing the Proffieboard Plugin. This can take several minutes on a slower connection. Compile and flash will be available when it finishes.</div>
       <div id="bp-log-content"></div>
     </div>
     <!-- Serial Monitor pane -->
@@ -4554,6 +4729,11 @@
   <span class="hl">C++</span>
   <span id="stat-board"></span>
   <span id="stat-version"></span>
+  <!-- Sits with Board and ProffieOS because those are what is SET for the next
+       build, while the two timestamps after it are what HAPPENED. Read-only by
+       design: the plugin belongs to the ProffieOS version, not to this config,
+       so changing it here would move every config on that version. -->
+  <span id="stat-plugin"></span>
   <span id="stat-compiled"></span>
   <span id="stat-flashed"></span>
   <span id="stat-dirty">&#9679; unsaved</span>
@@ -4703,16 +4883,52 @@
 </div>
 
 <!-- ── Styles conflict modal ── -->
-<!-- ── JMT prop wrapper conflict modal ── -->
+<!-- ── Prop include conflict modal ── -->
+<!-- Shared by "Link JMT Add-ons" and "Link Prop": both write a single #include
+     into CONFIG_PROP, and a config can only compile one prop. The intro line and
+     the warning note are set per call so the same modal can speak for either. -->
 <div class="modal-overlay" id="modal-jmt-conflict">
   <div class="modal">
     <h2>Existing Prop Include Found</h2>
-    <p>Your config already includes a different prop. The JMT Add-ons wrapper is itself a prop, and only one prop can compile at a time, so the existing line must be resolved before linking:</p>
+    <p id="modal-jmt-conflict-intro">Your config already includes a different prop. Only one prop can compile at a time, so the existing line must be resolved before linking:</p>
     <pre id="modal-jmt-conflict-line" style="background:var(--c-bg-card);border:1px solid var(--c-border-strong);border-radius:4px;padding:8px 10px;font-size:0.78rem;overflow-x:auto;margin:10px 0;white-space:pre-wrap;word-break:break-all;"></pre>
+    <p id="modal-jmt-conflict-note" style="display:none;color:var(--c-warn-text);font-size:0.82rem;line-height:1.5;margin:0 0 12px;"></p>
     <div class="modal-btns">
       <button class="modal-btn-cancel"  id="modal-jmt-conflict-cancel">Cancel</button>
       <button class="modal-btn-discard" id="modal-jmt-conflict-remove">Remove It</button>
       <button class="modal-btn-save"    id="modal-jmt-conflict-comment">Comment Out &amp; Link</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Prop picker ── -->
+<!-- Shown from the toolbar when a config names no prop at all. Lists the props
+     in the SELECTED version, so whatever is picked is guaranteed to be there at
+     build time. When JMT add-ons are installed the wrapper is simply one of the
+     files in that folder — no special-casing needed. -->
+<div class="modal-overlay" id="modal-prop-pick">
+  <div class="modal">
+    <h2>Link a Prop</h2>
+    <p id="modal-prop-pick-sub"></p>
+    <div id="modal-prop-pick-list"></div>
+    <div class="modal-btns">
+      <button class="modal-btn-cancel" id="modal-prop-pick-cancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Prop absent from the selected OS version ── -->
+<!-- The file tree can browse any installed version, but a config is staged into
+     the SELECTED version at build time, so that tree is the one that has to hold
+     the prop. Refusing here turns a cryptic "no such file" at compile time into
+     a sentence. -->
+<div class="modal-overlay" id="modal-prop-missing">
+  <div class="modal">
+    <h2>That Prop Isn&rsquo;t In Your Config&rsquo;s Version</h2>
+    <p id="modal-prop-missing-body"></p>
+    <p id="modal-prop-missing-hint" style="color:var(--c-text-muted);font-size:0.82rem;line-height:1.5;margin-top:10px;"></p>
+    <div class="modal-btns">
+      <button class="modal-btn-cancel" id="modal-prop-missing-close">Close</button>
     </div>
   </div>
 </div>
@@ -5911,10 +6127,16 @@
          workspace is the compiler's intermediates plus the staged build, and costs nothing but a
          slower next compile. One combined button made every disk cleanup throw away the core
          objects too, and reported a leftover build tree as if it were cached work. -->
-    <div class="settings-item" id="settings-cache-item"
-         title="Finished builds kept for each config, so a config you have not changed does not have to compile again. The app keeps the 5 most recent builds of each config and removes anything it can no longer use, so clearing is only needed if you want the space back now. The next build of each config would then compile from scratch.">
-      <span class="settings-item-label">Clear Cached Builds <span id="cache-size-label" style="font-size:0.72rem;color:var(--c-text-dim);"></span></span>
-      <button class="settings-item-btn enabled" id="btn-clear-cache">Clear</button>
+    <!-- Two tooltips, not one. The row used to carry a single `title`, so hovering the label and
+         hovering the button both explained the ACTION and nothing ever explained what the number
+         was made of - which is the question a size in a label actually raises. Label answers
+         "what is this and what is in it"; button answers "what happens if I press this".
+         (2026-08-14) -->
+    <div class="settings-item" id="settings-cache-item">
+      <span class="settings-item-label" id="cache-item-label"
+            title="Finished builds kept so an unchanged config does not require a full compile. Newest 5 per config.">Cached Builds <span id="cache-size-label" style="font-size:0.72rem;color:var(--c-text-dim);"></span></span>
+      <button class="settings-item-btn enabled" id="btn-clear-cache"
+              title="Deletes all saved builds.">Clear</button>
     </div>
     <div id="cache-confirm-panel" style="display:none;">
       <div class="cache-warning">
@@ -5928,10 +6150,25 @@
       </div>
     </div>
 
-    <div class="settings-item" id="settings-workspace-item"
-         title="Temporary files from the last compile. Nothing you have saved is affected; a full compile afterwards takes longer than usual.">
-      <span class="settings-item-label">Reset Build Workspace <span id="workspace-size-label" style="font-size:0.72rem;color:var(--c-text-dim);"></span></span>
-      <button class="settings-item-btn enabled" id="btn-reset-workspace">Reset</button>
+    <div class="settings-item" id="settings-workspace-item">
+      <span class="settings-item-label" id="workspace-item-label"
+            title="Temporary files from compiling, plus JMT Studio installed Proffieboard Plugins.">Build Space <span id="workspace-size-label" style="font-size:0.72rem;color:var(--c-text-dim);"></span></span>
+      <button class="settings-item-btn enabled" id="btn-reset-workspace"
+              title="Deletes temporary compile files and unused Proffieboard Plugins within JMT Studio.">Reset</button>
+    </div>
+    <!-- Inline, like the two rows either side of it, rather than a promptConfirm stacked over the
+         Settings modal. This was the only destructive action in here that opened a second modal,
+         and the row is the context the confirm needs: the size it is about stays on screen and
+         nothing is covered. Converted 2026-08-14. -->
+    <div id="workspace-confirm-panel" style="display:none;">
+      <div class="cache-warning">
+        <strong>Reset build space?</strong><br>
+        <span id="workspace-warning-detail"></span>
+        <div class="cache-warning-actions">
+          <button class="settings-item-btn enabled" id="btn-workspace-cancel">Cancel</button>
+          <button class="settings-item-btn danger" id="btn-workspace-confirm">Yes, Reset</button>
+        </div>
+      </div>
     </div>
 
     <div class="settings-item">
@@ -5943,10 +6180,13 @@
     </div>
 
     <div class="settings-item">
-      <span class="settings-item-label">Default Config Template</span>
+      <span class="settings-item-label" id="template-item-label"
+            title="The config every new config starts from.">Default Config Template</span>
       <div style="display:flex;gap:6px">
-        <button class="settings-item-btn enabled" id="btn-import-template">Import</button>
-        <button class="settings-item-btn enabled" id="btn-reset-template">Reset to Default</button>
+        <button class="settings-item-btn enabled" id="btn-import-template"
+                title="Replaces the template with a config file you choose.">Import</button>
+        <button class="settings-item-btn enabled" id="btn-reset-template"
+                title="Restores the template JMT Studio ships with.">Reset to Default</button>
       </div>
     </div>
     <div id="template-confirm-panel" style="display:none;">
@@ -6050,6 +6290,7 @@
   <div class="vp-file-modal-inner">
     <div class="vp-file-modal-header">
       <div id="vp-file-modal-title"></div>
+      <button id="vp-file-modal-link-prop-btn" style="display:none" title="Make this the prop for the config you have open">&#128279; Link Prop</button>
       <button id="vp-file-modal-search-btn" title="Search (Ctrl+F)">&#128269; Search</button>
       <button class="vp-file-modal-close" id="vp-file-modal-close-btn" title="Close">&#10005;</button>
     </div>
@@ -6115,6 +6356,9 @@ let isDirty         = false;
 let diffVisible     = false;
 let currentFilePath = null;
 let fileIsOpen      = false;
+// `let` at script scope is not a window property, so panels loaded as separate
+// scripts (versionsPanel.js) need an accessor rather than reading it directly.
+window.isConfigOpen = () => fileIsOpen;
 let favoritePaths   = new Set();
 let dragSrcPath     = null;
 let _compareMode    = false;
@@ -7089,11 +7333,133 @@ function fmtTimestamp(iso) {
     d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 }
 
+// The Proffieboard Plugin the selected ProffieOS version is pinned to.
+//
+// Cached rather than read here because resolving it is an IPC round trip and
+// updateStatusMeta is synchronous and called from a dozen places. Filled in by
+// _refreshSelectedVersionJmtState, which already fetches the version details
+// this comes from, so the label costs no extra call.
+let _statPluginVersion = null;
+
+// Normalised compare of two plugin versions. `3.6` and `3.6.0` are the same
+// plugin, and the two values reach us from different writers - @jmt:core from
+// the compile, the pin from .jmt_meta.json - so a raw string compare reports a
+// change where none happened. normalizeVersion lives in the main process; this
+// is its renderer twin, kept to the one rule it needs.
+const _normPlugin = v => String(v || '').trim().split('.').slice(0, 3)
+                           .concat(['0', '0', '0']).slice(0, 3).join('.');
+
+/**
+ * Is the last build's plugin different from the one this config would use now?
+ *
+ * Shared by the status bar and the OS Version field, which is the whole point:
+ * a ProffieOS version and a plugin are one build target, not two, so the two
+ * surfaces have to agree about when it moved. Computing it twice is how they
+ * drift. Returns nulls when either side is unknown, and the callers must then
+ * say nothing rather than guess - an unstamped config is not a changed one.
+ * (2026-08-15)
+ */
+/**
+ * Does the build target differ from what produced the last build?
+ *
+ * Answered from build records ONLY — @jmt:compiled_os and @jmt:core — never
+ * from baselineVersion, which resets on save and therefore means "matches the
+ * file on disk". A config saved as 8.10 but last compiled on 7.15 has a
+ * baseline of 8.10 and looks settled, while its binary came from a different
+ * ProffieOS. Same for a plugin that moved.
+ *
+ * Shared by the field's red and by the tooltip so the two cannot disagree; the
+ * tooltip being truthful under a field that looks fine is the exact state this
+ * was written to remove. (2026-08-15)
+ */
+// The FQBN the board dropdown currently resolves to. Read off the option's own
+// dataset, which buildPanel populates from its board table, so there is no
+// second copy of the name-to-FQBN mapping to drift.
+function _selectedBoardFqbn() {
+  const opt = document.getElementById('input-board')?.selectedOptions?.[0];
+  return (opt && opt.dataset && opt.dataset.fqbn) || null;
+}
+
+// Reverse lookup for display: a build record stores the FQBN, and a tooltip
+// should say "Proffieboard V2" rather than the triplet. Falls back to the raw
+// FQBN when no option matches, which is what a config built for a board this
+// version of the app no longer lists would hit.
+function _boardNameForFqbn(fqbn) {
+  if (!fqbn) return null;
+  const opts = document.getElementById('input-board')?.options || [];
+  for (const o of opts) if (o.dataset && o.dataset.fqbn === fqbn) return o.value;
+  return null;
+}
+
+// Was the last build made for a different board? Compared by FQBN, never by the
+// dropdown label, because the FQBN is what arduino-cli was handed.
+function _boardBuildMoved() {
+  const fqbn = _selectedBoardFqbn();
+  return !!(metaCompiledFqbn && fqbn && metaCompiledFqbn !== fqbn);
+}
+
+// Was the last build made with a different USB mode? Exposed for buildPanel,
+// which owns the USB control and its indicator.
+window.getCompiledUsb = () => metaCompiledUsb;
+
+function _buildTargetMoved() {
+  const name = document.getElementById('input-version')?.value;
+  const osMoved = !!(metaCompiledOs && name && metaCompiledOs !== name);
+  return osMoved || _pluginState().stale;
+}
+
+function _pluginState() {
+  const pinned   = _statPluginVersion || null;
+  const compiled = metaCore || null;
+  return {
+    pinned,
+    compiled,
+    stale: !!(pinned && compiled && _normPlugin(pinned) !== _normPlugin(compiled)),
+  };
+}
+
 function updateStatusMeta() {
   const board   = document.getElementById('input-board').value.trim();
   const version = document.getElementById('input-version').value.trim();
   document.getElementById('stat-board').textContent    = board || '';
   document.getElementById('stat-version').textContent  = version || '';
+
+  // "Plugin 4.6.0", not "Proffieboard Plugin 4.6.0". Almost nobody changes this
+  // — a config only needs it when it is tight on a 256 KB board — so the short
+  // form is right for a fact most eyes should slide past, and the tooltip
+  // carries the full name for the person who stopped to read it.
+  //
+  // Shown only when the version is actually stamped. A blank means nothing has
+  // resolved a pin for this version yet, and printing the default would be a
+  // guess about the one thing this label exists to state.
+  const pluginEl = document.getElementById('stat-plugin');
+  pluginEl.textContent = _statPluginVersion ? `Plugin ${_statPluginVersion}` : '';
+
+  // Red when the binary this config last produced came from a DIFFERENT plugin
+  // than the one it would build with now.
+  //
+  // The compile indicator at top right already warns when the pin changes, but
+  // that is session state: it says nothing after a restart, and nothing at all
+  // for a config compiled on someone else's machine. @jmt:core is persistent, so
+  // this is the only surface that can tell "never compiled" apart from "compiled,
+  // and the plugin moved underneath it". The cache is keyed by plugin, so that
+  // second case is a guaranteed miss and a full rebuild — worth saying out loud
+  // rather than leaving as an unexplained "Not compiled".
+  //
+  // Compared NORMALISED. `3.6` and `3.6.0` are the same plugin, and the two
+  // values reach here from different writers — @jmt:core from the compile,
+  // the pin from .jmt_meta.json — so a raw string compare would go red on a
+  // match. normalizeVersion lives in the main process, so this is its renderer
+  // twin, deliberately kept to the one rule it needs. (2026-08-15)
+  const _stale = _pluginState().stale;
+  pluginEl.classList.toggle('stat-stale', _stale);
+  pluginEl.title = !_statPluginVersion ? ''
+    : _stale
+      ? `Last compiled with Proffieboard Plugin ${metaCore}, but this config is now set to `
+        + `${_statPluginVersion}. That build cannot be reused, so the next compile runs from `
+        + `scratch. Change the plugin in the OS Versions tab.`
+      : `Proffieboard Plugin ${_statPluginVersion}. Set by ${version || 'the selected ProffieOS version'}. `
+        + `Change it in the OS Versions tab.`;
 
   const compiledEl = document.getElementById('stat-compiled');
   const flashedEl  = document.getElementById('stat-flashed');
@@ -7298,6 +7664,32 @@ let metaCreated  = null;
 let metaUpdated  = null;
 let metaCompiled        = null;
 let metaCompileDuration = null;  // seconds, persisted in @jmt:compile_duration
+// Which Proffieboard core produced the last compile, persisted in @jmt:core.
+// Recorded for the same reason os_version is: a config's binary size, and
+// whether it fits at all, depends on the core as much as on ProffieOS. Without
+// it a config that used to build and now overflows gives no clue what moved.
+let metaCore            = null;
+// The ProffieOS version that produced the last build, persisted in
+// @jmt:compiled_os.
+//
+// NOT the same thing as @jmt:os_version, and that distinction is the whole
+// reason this exists. @jmt:os_version is a SETTING: injectMetadata reads the
+// dropdown and writes it on every save, so it moves the moment the user changes
+// the selection, with or without a compile. `baselineVersion` is worse still -
+// it resets on save, by design, so it means "matches the file on disk".
+//
+// A "last built on X" claim can only be sourced from something a COMPLETED
+// compile wrote. Anything a save can move will eventually state a build that
+// never happened - change the version, press Ctrl+S, and the old scheme claimed
+// the binary came from a version it had never seen. (2026-08-15)
+let metaCompiledOs      = null;
+// The board (as an FQBN) and USB mode that produced the last build. Same rule
+// and same reason as metaCompiledOs: @jmt:board and @jmt:usb are settings that
+// follow the dropdowns to disk on every save, so neither can answer "what is
+// actually on this saber". That question gets asked whenever a config is pasted
+// into a support thread. (2026-08-15)
+let metaCompiledFqbn    = null;
+let metaCompiledUsb     = null;
 let metaFlashed         = null;
 let metaBoardSN  = null;
 let metaPort     = null;
@@ -7319,22 +7711,106 @@ function updateChangedIndicators() {
   // only; the "Insert Board Include?" prompt stays reactive to the user's pick.)
   const noBoard = fileIsOpen && !boardSel.value;
   const boardChanged = baselineBoard !== null && boardSel.value !== baselineBoard;
-  boardSel.classList.toggle('field-changed', noBoard || boardChanged);
+  // Same rule as the OS Version field, and the same defect before it: baselineBoard
+  // resets on save, so a config stored as a V3 whose binary was built for a V2
+  // looked settled. Compared by FQBN because that is what the build actually used
+  // and what @jmt:compiled_board records - the dropdown label is a display name.
+  // (2026-08-15)
+  const boardBuildMoved = _boardBuildMoved();
+  boardSel.classList.toggle('field-changed', noBoard || boardChanged || boardBuildMoved);
   boardSel.title = noBoard
     ? 'No board detected in this config. Select your Proffieboard to compile.'
+    : !boardSel.value
+      ? 'No board selected — select a board before compiling'
+    : boardBuildMoved
+        // Names the board that actually produced the binary, from the build
+        // record, so this survives a save and travels with a shared config.
+        ? `Last built for ${_boardNameForFqbn(metaCompiledFqbn) || metaCompiledFqbn} — recompile before flashing`
     : boardChanged
-      ? (boardSel.value
-          ? `Board changed since last compile (was: ${baselineBoard}) — recompile before flashing`
-          : 'No board selected — select a board before compiling')
+        ? `Board changed since last compile (was: ${baselineBoard}) — recompile before flashing`
       : '';
 
+  // A ProffieOS version and a Proffieboard Plugin are ONE build target, not two.
+  // The plugin is pinned per ProffieOS version, so "ProffieOS 8.10 +JMT" is an
+  // incomplete name for what a config builds against: on plugin 3.6.0 it is a
+  // different binary than on 4.6.0, from a different compiler. This field is the
+  // only place a config-side user ever sees the target, so it has to carry both.
+  //
+  // Which means either half moving is a reason to recompile, and both turn this
+  // field red. The tooltip then has to say WHICH moved - a red that can mean two
+  // things and does not distinguish them is worse than no red, because the user
+  // goes looking for the wrong change.
+  //
+  // The unchanged case stops being empty. It used to be '', so the one field
+  // naming the build target could never state it; now it reads
+  // "ProffieOS 8.10 +JMT on Proffieboard Plugin 4.6.0", which is the whole
+  // answer. (2026-08-15)
+  // Two independent reasons, deliberately OR'd rather than one replacing the
+  // other. `versionChanged` is the pre-existing unsaved-edit signal and keeps
+  // its behaviour exactly. `_buildTargetMoved()` is the new one, and it is what
+  // survives a save: a config stored as 8.10 whose binary came from 7.15 has a
+  // baseline of 8.10 and looked settled, because the only test was against the
+  // file on disk. (2026-08-15)
   const versionChanged = baselineVersion !== null && versionEl.value !== baselineVersion;
-  versionEl.classList.toggle('field-changed', versionChanged);
-  versionEl.title = versionChanged
-    ? `OS version changed since last compile (was: ${baselineVersion}) — recompile before flashing`
-    : '';
-
+  versionEl.classList.toggle('field-changed', versionChanged || _buildTargetMoved());
+  // NOTE: this function does NOT write versionEl.title. applyOSVersionSignal in
+  // buildPanel.js owns that property and composes it from several sources; two
+  // writers meant whichever ran last won, and since that one runs after an await
+  // it usually did. The "OS version changed since last compile" tooltip has been
+  // losing that race all along. Contribute through getVersionTargetLine below
+  // instead, and ask the owner to repaint. (2026-08-15)
+  window.applyOSVersionSignal?.();
 }
+
+/**
+ * This field's notes for the tooltip that applyOSVersionSignal composes.
+ *
+ * Lives here because it needs baselineVersion and the config's @jmt:core, both
+ * of which are this file's state. Returned as lines rather than written, so the
+ * single owner decides the order and the joining.
+ *
+ * A ProffieOS version and a Proffieboard Plugin are ONE build target: on plugin
+ * 3.6.0 a config is a different binary, from a different compiler, than on
+ * 4.6.0. So either half moving is a reason to recompile, both turn the field
+ * red, and the note has to say WHICH moved - a red that can mean two things and
+ * does not distinguish them sends the user looking for the wrong change.
+ * (2026-08-15)
+ */
+window.getVersionTargetLine = function () {
+  const versionEl = document.getElementById('input-version');
+  const name      = versionEl?.value;
+  if (!name || (window.isVersionSentinel && isVersionSentinel(name))) return null;
+
+  const plugin = _pluginState();
+  // Every ProffieOS version has a plugin - the main process resolves it rather
+  // than handing back a raw unstamped null - so this is the IPC-failure path,
+  // not a normal state. Fall back to the bare name the field showed before any
+  // of this existed. (2026-08-15)
+  if (!plugin.pinned) return null;
+
+  const now = `${name} on Plugin ${plugin.pinned}`;
+
+  // Sourced from the build record, NOT from baselineVersion. baselineVersion
+  // resets on save, so it answers "does this match the file on disk" - use it
+  // here and changing the version then pressing Ctrl+S produces a sentence
+  // claiming the binary came from a version that was never compiled.
+  // The same test the red uses, so the sentence and the colour can never
+  // disagree about whether anything moved.
+  if (!_buildTargetMoved()) return now;
+
+  // The comparison IS the reason, so no "recompile before flashing" is appended:
+  // two targets side by side say it, and the red says how much it matters. An
+  // earlier version listed each change as its own paragraph, which read as a
+  // stack of notifications rather than as one thing that moved.
+  //
+  // BOTH halves come from build records, so the sentence describes one real
+  // past build rather than mixing a saved setting with a compiled fact. Either
+  // half may be missing on a config that predates its marker, and each drops
+  // independently rather than being guessed at.
+  const wasVersion = metaCompiledOs || name;
+  const was = plugin.compiled ? `${wasVersion} on Plugin ${plugin.compiled}` : wasVersion;
+  return `${now} but last built on ${was}.`;
+};
 window.getBaselineUsb = () => baselineUsb;
 window.updateChangedIndicators = updateChangedIndicators;
 
@@ -7393,6 +7869,13 @@ function injectMetadata(content) {
   lines.push(`// @jmt:updated     ${now}`);
   if (metaCompiled)         lines.push(`// @jmt:compiled        ${metaCompiled}`);
   if (metaCompileDuration) lines.push(`// @jmt:compile_duration ${metaCompileDuration}`);
+  if (metaCore)            lines.push(`// @jmt:core            ${metaCore}`);
+  // Sits with the build records, never with @jmt:os_version above. Both name a
+  // ProffieOS version and they mean different things: that one is the setting,
+  // this one is what the last successful compile actually used.
+  if (metaCompiledOs)      lines.push(`// @jmt:compiled_os     ${metaCompiledOs}`);
+  if (metaCompiledFqbn)    lines.push(`// @jmt:compiled_board  ${metaCompiledFqbn}`);
+  if (metaCompiledUsb)     lines.push(`// @jmt:compiled_usb    ${metaCompiledUsb}`);
   if (metaFlashed)  lines.push(`// @jmt:flashed     ${metaFlashed}`);
   if (metaBoardSN)  lines.push(`// @jmt:board_sn    ${metaBoardSN}`);
   if (metaPort)     lines.push(`// @jmt:last_port   ${metaPort}`);
@@ -7574,6 +8057,12 @@ function extractMetadata(content) {
     updated:  m(/^\/\/ @jmt:updated\s+(.+)$/m),
     compiled:        m(/^\/\/ @jmt:compiled\s+(.+)$/m),
     compileDuration: m(/^\/\/ @jmt:compile_duration\s+(\d+)$/m),
+    core:            m(/^\/\/ @jmt:core\s+(\S+)$/m),
+    // (.+) not (\S+): a version name is user-chosen and contains spaces
+    // ("ProffieOS 7.15 +JMT").
+    compiledOs:      m(/^\/\/ @jmt:compiled_os\s+(.+)$/m),
+    compiledBoard:   m(/^\/\/ @jmt:compiled_board\s+(\S+)$/m),
+    compiledUsb:     m(/^\/\/ @jmt:compiled_usb\s+(\S+)$/m),
     flashed:  m(/^\/\/ @jmt:flashed\s+(.+)$/m),
     boardSn:  m(/^\/\/ @jmt:board_sn\s+(.+)$/m),
     usb:      m(/^\/\/ @jmt:usb\s+(.+)$/m),
@@ -7586,7 +8075,7 @@ function extractMetadata(content) {
 
 // ── Load content ───────────────────────────────────────
 function loadContent(rawContent, filePath) {
-  const { desc, board, version, created, updated, compiled, compileDuration, flashed, boardSn, usb, port, configId, common, clean } = extractMetadata(rawContent);
+  const { desc, board, version, created, updated, compiled, compileDuration, core, compiledOs, compiledBoard, compiledUsb, flashed, boardSn, usb, port, configId, common, clean } = extractMetadata(rawContent);
   // Common-folder selection lives in window state during the session
   // (file-state is generated at save time via injectMetadata). Seed it
   // from the loaded file's @jmt:common, or clear if absent.
@@ -7618,16 +8107,31 @@ function loadContent(rawContent, filePath) {
     versionSel.value = resolvedVersion;
     if (window.electronAPI) window.electronAPI.selectVersion(resolvedVersion);
   }
-  // No marker (or one naming a version they don't have) means the selection
-  // showing is one the app chose, not one the config asked for. Say so in the
-  // field's tooltip rather than leaving the choice silent. Written to window
-  // because buildPanel.js may not be loaded yet on a boot-restored config.
-  window._configOsVersionDeclared = !!resolvedVersion;
+  // The config ASKED for a version we do not have, so the dropdown quietly fell
+  // back to something else and will build against that. Recorded by name so the
+  // tooltip can say which.
+  //
+  // This used to be a boolean covering two cases, and the message it drove -
+  // "This config does not specify a ProffieOS version" - was FALSE for this one:
+  // the config specified one, we could not honour it. That is the case worth
+  // reporting, and the wrong half of the message was on it.
+  //
+  // The other case, a config with no marker at all, is gone: injectMetadata
+  // writes @jmt:os_version on every save, so it self-heals at the next Ctrl+S,
+  // and the field's own tooltip already states the version being used. A
+  // permanent paragraph for a condition that ends at the next save was not
+  // earning its place. Written to window because buildPanel.js may not be loaded
+  // yet on a boot-restored config. (2026-08-15)
+  window._configOsVersionMissing = (version && !resolvedVersion) ? version : null;
   window.refreshOSVersionSignal?.();
   metaCreated  = created  || null;
   metaUpdated  = updated  || null;
   metaCompiled        = compiled || null;
   metaCompileDuration = compileDuration ? parseInt(compileDuration, 10) : null;
+  metaCore            = core || null;
+  metaCompiledOs      = compiledOs    || null;
+  metaCompiledFqbn    = compiledBoard || null;
+  metaCompiledUsb     = compiledUsb   || null;
   metaFlashed  = flashed  || null;
   metaBoardSN  = boardSn  || null;
   metaPort     = port     || null;
@@ -7643,6 +8147,19 @@ function loadContent(rawContent, filePath) {
   setFileOpen(true);
   updateChangedIndicators(); // re-evaluate the proactive no-board cue now that fileIsOpen is true
   _offerBoardHelpIfMissing(); // proactively offer to set a board when the config has none
+  // The preset sidecar is showing the PREVIOUS config until something rebuilds it, and the 50ms
+  // rebuild refuses to run while a slot is being edited:
+  //   `if (_editingSlot) { _refreshBladeSectionLabel(); return; }`
+  // That guard is right for typing - a rebuild would tear out the editor DOM under the cursor - but
+  // it cannot tell a keystroke from the whole file being replaced. So opening another config while
+  // a preset was open left the sidecar rendering the old config's presets until the panel was
+  // closed and reopened by hand.
+  //
+  // Loading a config is not an edit. Close the slot editor first, THEN rebuild: the guard stays
+  // exactly as strict for the case it was written for, and the stale-sidecar path disappears
+  // because the condition it depended on is no longer true. (2026-08-14)
+  try { window._presetSidecar?.closeSlotEdit?.(); } catch {}
+  try { window._presetSidecar?.rebuild?.(); } catch {}
   // Refresh the preset-sidecar common-folder dropdown so it reads the new
   // file's JMT_COMMON marker (or falls back to the global star default).
   try { window._sfRenderPresetSidecarCommonRow?.(); } catch {}
@@ -7668,12 +8185,12 @@ function clearMeta() {
     .forEach(id => document.getElementById(id).value = '');
   document.getElementById('input-board').value = '';
   document.getElementById('input-board').dispatchEvent(new Event('change'));
-  metaCreated = metaUpdated = metaCompiled = metaCompileDuration = metaFlashed = metaBoardSN = metaPort = metaConfigId = null;
+  metaCreated = metaUpdated = metaCompiled = metaCompileDuration = metaCore = metaCompiledOs = metaCompiledFqbn = metaCompiledUsb = metaFlashed = metaBoardSN = metaPort = metaConfigId = null;
   baselineBoard = baselineVersion = baselineUsb = null;
-  // input-version stays at current selection (persistent compile setting) —
-  // which means a new config is, by definition, using a version it never asked
-  // for. Same tooltip as a marker-less imported config.
-  window._configOsVersionDeclared = false;
+  // input-version stays at current selection (persistent compile setting). A new
+  // config has asked for nothing, so there is nothing it asked for that we lack -
+  // the note this drives is only for a config naming a version that is missing.
+  window._configOsVersionMissing = null;
   window.refreshOSVersionSignal?.();
   ['input-board','input-version'].forEach(id =>
     document.getElementById(id).classList.remove('field-changed'));
@@ -9139,10 +9656,27 @@ document.getElementById('btn-download').style.display = isElectron ? 'none' : ''
 
 // ── Compile/flash timestamp setters (called from buildPanel) ──
 // isoString: pass cached timestamp on restore; omit for a fresh compile (saves file)
-window.setCompiledTimestamp = async (isoString, durationSec) => {
+window.setCompiledTimestamp = async (isoString, durationSec, coreVersion, osVersion, compiledFqbn, compiledUsb) => {
   metaCompiled = isoString || nowIso();
   if (durationSec) metaCompileDuration = durationSec;
+  // Only a completed compile reaches this function, which is exactly why the
+  // build records are written here and nowhere else. An aborted build never
+  // arrives, so it can never leave a claim about a binary that was not produced.
+  if (osVersion)    metaCompiledOs   = osVersion;
+  if (compiledFqbn) metaCompiledFqbn = compiledFqbn;
+  if (compiledUsb)  metaCompiledUsb  = compiledUsb;
+  // Recorded on restores as well as fresh builds: a cache hit is still a build
+  // that was produced by a specific core, and leaving the marker stale would
+  // make the config claim it was built by whichever core ran last.
+  if (coreVersion) metaCore = coreVersion;
   updateStatusMeta();
+  // Every indicator that now reads a build record has to repaint here, not only
+  // inside doSave. A fresh compile saves and doSave repaints, but a CACHE HIT
+  // takes the branch below and never saves - so without this, restoring a build
+  // for a different board or USB mode left all three fields red over a build
+  // that had just become current again. (2026-08-15)
+  updateChangedIndicators();
+  if (window.updateUsbChangedIndicator) window.updateUsbChangedIndicator();
   if (!isoString && currentFilePath) await doSave();
 };
 window.getLastCompileDuration = () => metaCompileDuration;
@@ -9519,22 +10053,76 @@ function fmtBytes(b) {
   return `${(b / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
+// Swap a button into a working state and back. The label is set WITHOUT its ellipsis; `.busy-dots`
+// supplies animated ones, because a static "Resetting…" is indistinguishable from a frozen app.
+function _btnBusy(btn, label) { if (!btn) return; btn.textContent = label; btn.classList.add('busy-dots'); }
+function _btnIdle(btn, label) { if (!btn) return; btn.classList.remove('busy-dots'); btn.textContent = label; }
+
+// The most recent build-space survey, so the Reset confirm can render on the click instead of
+// walking the core trees again first. Cleared after a reset, since it describes a disk that no
+// longer exists.
+let _lastSpaceSurvey = null;
+
+// Put both size rows into their pending state. Called before the modal paints, so the row is
+// never blank and never shows a stale number from the last time it was open.
+function _setSizeRowsPending() {
+  for (const [labelId, btnId] of [['cache-size-label', 'btn-clear-cache'],
+                                  ['workspace-size-label', 'btn-reset-workspace']]) {
+    const label = document.getElementById(labelId);
+    if (label) {
+      label.textContent = '(calculating…)';
+      label.classList.add('sf-loading-pulse');
+    }
+    const btn = document.getElementById(btnId);
+    // Disabled until the survey says there is something to act on. An enabled button over an
+    // unknown number can be clicked into a confirm dialog that then itemises nothing.
+    if (btn) { btn.disabled = true; btn.classList.remove('enabled'); }
+  }
+}
+
 async function openAboutModal() {
   document.getElementById('about-license-body').textContent = LICENSE_TEXT;
   document.getElementById('about-license-body').classList.remove('open');
   document.getElementById('about-license-toggle').textContent = 'View License';
-  // Reset cache panel state
+  // Reset both confirm panels. A panel left open from last time would reappear above a row whose
+  // numbers are about to be re-measured.
   document.getElementById('cache-confirm-panel').style.display = 'none';
+  document.getElementById('workspace-confirm-panel').style.display = 'none';
   document.getElementById('btn-clear-cache').textContent = 'Clear';
-  document.getElementById('btn-clear-cache').disabled = false;
-  document.getElementById('cache-size-label').textContent = '';
-  let ver = '—';
-  try { ver = await window.electronAPI.getAppVersion(); } catch {}
-  document.getElementById('about-version-str').textContent = `v${ver}`;
-  // Load cache size
+
+  // ── The modal opens HERE, before any disk work. ──────────────────────────
+  // A click must always act instantly or it reads as a click that did not register. This
+  // function used to await the app version, a full walk of the cache and versions trees, and a
+  // survey of every core tree - over a second on a machine holding three cores - and only then
+  // add `.active`. The numbers arrive when they arrive; the modal does not wait for them.
+  // (2026-08-14)
+  _setSizeRowsPending();
+  document.getElementById('about-version-str').textContent = '—';
+  // Sync theme selector active state
+  const _theme = localStorage.getItem('jmt-theme') || 'dark';
+  document.querySelectorAll('.theme-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.theme === _theme);
+  });
+  document.getElementById('modal-about').classList.add('active');
+
+  // Everything past this point fills the open modal in.
+  _refreshUpdateSection();
+  _refreshTemplateResetState();
+  window.electronAPI.getAppVersion()
+    .then(v => { document.getElementById('about-version-str').textContent = `v${v}`; })
+    .catch(() => {});
+  _refreshSpaceRows();
+}
+
+// Fill both size rows. getDataSize walks the build cache and surveyBuildSpace walks the core
+// trees; neither needs the other's answer, so they run together instead of one behind the other.
+async function _refreshSpaceRows() {
   if (window.electronAPI?.getDataSize) {
     try {
-      const sizes = await window.electronAPI.getDataSize();
+      const [sizes, wsSurvey] = await Promise.all([
+        window.electronAPI.getDataSize(),
+        window.electronAPI.surveyBuildSpace().catch(() => null),
+      ]);
       const cacheBytes = sizes.cache || 0;
       // Two different things live under this one button. `cachedBytes` is saved builds — losing
       // them costs real recompiles. `outputBytes` is the build currently staged for flashing, which
@@ -9544,18 +10132,40 @@ async function openAboutModal() {
       const outputBytes = sizes.outputBytes ?? 0;
       const nBuilds     = sizes.cachedBuilds || 0;
 
-      document.getElementById('cache-size-label').textContent =
+      const cacheLabel = document.getElementById('cache-size-label');
+      cacheLabel.classList.remove('sf-loading-pulse');
+      cacheLabel.textContent =
         nBuilds > 0 ? `(${nBuilds} build${nBuilds === 1 ? '' : 's'} · ${fmtBytes(cachedBytes)})` : '(none)';
       const clearBtn = document.getElementById('btn-clear-cache');
       clearBtn.disabled = nBuilds === 0;
       clearBtn.classList.toggle('enabled', nBuilds > 0);
 
+      // Same number the confirm dialog is going to show, from the same survey.
+      // This used to read outputBytes alone, so the row advertised 88.3 MB while
+      // the dialog itemised 352.8 MB - unpacked installers and reclaimable build
+      // tools were never counted, and a core sitting in our tree unused looked
+      // like it was worth nothing. (2026-08-12)
       const wsLabel = document.getElementById('workspace-size-label');
       const wsBtn   = document.getElementById('btn-reset-workspace');
-      if (wsLabel) wsLabel.textContent = outputBytes > 0 ? `(${fmtBytes(outputBytes)})` : '(empty)';
+      _lastSpaceSurvey = (wsSurvey && wsSurvey.ok) ? wsSurvey : null;
+      // The row shows the FOOTPRINT - what Build Space is - and the button keys off what is
+      // actually RECLAIMABLE. They are independent: the machine can be holding a gigabyte with
+      // none of it removable, and the old single number made the row lurch by ~710 MB when a
+      // plugin merely stopped being referenced. A size beside a noun describes the noun.
+      // (2026-08-14)
+      const wsBytes      = (wsSurvey && wsSurvey.ok) ? (wsSurvey.footprintBytes ?? wsSurvey.total) : outputBytes;
+      const wsReclaimable = (wsSurvey && wsSurvey.ok) ? wsSurvey.total : outputBytes;
+      if (wsLabel) {
+        wsLabel.classList.remove('sf-loading-pulse');
+        wsLabel.textContent = wsBytes > 0 ? `(${fmtBytes(wsBytes)})` : '(empty)';
+      }
       if (wsBtn) {
-        wsBtn.disabled = outputBytes === 0;
-        wsBtn.classList.toggle('enabled', outputBytes > 0);
+        wsBtn.disabled = wsReclaimable === 0;
+        wsBtn.classList.toggle('enabled', wsReclaimable > 0);
+        // A disabled button over a non-zero size needs to say why, or it reads as broken.
+        wsBtn.title = wsReclaimable === 0 && wsBytes > 0
+          ? 'Everything here is in use. Nothing can be deleted right now.'
+          : 'Deletes temporary compile files and unused Proffieboard Plugins within JMT Studio.';
       }
 
       // State the real cost. No invented range: a light config builds in about 70 seconds and a
@@ -9582,17 +10192,19 @@ async function openAboutModal() {
             + (hasTime ? ` The longest took ${fmtDuration(longest)} to compile.` : '');
         }
       }
-    } catch {}
+    } catch {
+      // A row that fails silently keeps pulsing forever, which promises a number that is never
+      // coming. Say it could not be read and leave the buttons disabled - acting on a size we
+      // failed to measure is the one thing worse than not showing it.
+      for (const id of ['cache-size-label', 'workspace-size-label']) {
+        const el = document.getElementById(id);
+        if (el && el.classList.contains('sf-loading-pulse')) {
+          el.classList.remove('sf-loading-pulse');
+          el.textContent = '(unavailable)';
+        }
+      }
+    }
   }
-  // Sync theme selector active state
-  const current = localStorage.getItem('jmt-theme') || 'dark';
-  document.querySelectorAll('.theme-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.theme === current);
-  });
-  document.getElementById('modal-about').classList.add('active');
-  // Reset update section to match current known state
-  _refreshUpdateSection();
-  _refreshTemplateResetState();
 }
 
 // Pull current template status and toggle the Reset button's enabled state based on
@@ -9635,19 +10247,19 @@ document.getElementById('btn-template-confirm').addEventListener('click', async 
   const cancelBtn  = document.getElementById('btn-template-cancel');
   confirmBtn.disabled    = true;
   cancelBtn.disabled     = true;
-  confirmBtn.textContent = 'Resetting…';
+  _btnBusy(confirmBtn, 'Resetting');
   try {
     const result = await window.electronAPI.resetDefaultTemplate();
     if (result.ok) {
       document.getElementById('template-confirm-panel').style.display = 'none';
-      confirmBtn.textContent = 'Yes, Reset';
+      _btnIdle(confirmBtn, 'Yes, Reset');
       confirmBtn.disabled    = false;
       cancelBtn.disabled     = false;
       _refreshTemplateResetState();
     } else {
       confirmBtn.textContent = '✗ Failed';
       setTimeout(() => {
-        confirmBtn.textContent = 'Yes, Reset';
+        _btnIdle(confirmBtn, 'Yes, Reset');
         confirmBtn.disabled    = false;
         cancelBtn.disabled     = false;
       }, 2200);
@@ -9656,7 +10268,7 @@ document.getElementById('btn-template-confirm').addEventListener('click', async 
   } catch (e) {
     confirmBtn.textContent = '✗ Failed';
     setTimeout(() => {
-      confirmBtn.textContent = 'Yes, Reset';
+      _btnIdle(confirmBtn, 'Yes, Reset');
       confirmBtn.disabled    = false;
       cancelBtn.disabled     = false;
     }, 2200);
@@ -9667,23 +10279,23 @@ document.getElementById('btn-template-confirm').addEventListener('click', async 
 document.getElementById('btn-import-template').addEventListener('click', async () => {
   const btn = document.getElementById('btn-import-template');
   btn.disabled    = true;
-  btn.textContent = 'Importing…';
+  _btnBusy(btn, 'Importing');
   try {
     const result = await window.electronAPI.importTemplate();
     if (result?.ok) {
-      btn.textContent = '✓ Imported';
+      _btnIdle(btn, '✓ Imported');
       setTimeout(() => { btn.textContent = 'Import'; btn.disabled = false; _refreshTemplateResetState(); }, 1800);
     } else if (result?.cancelled) {
       // User cancelled the file picker — silent reset, no feedback
-      btn.textContent = 'Import';
+      _btnIdle(btn, 'Import');
       btn.disabled = false;
     } else {
-      btn.textContent = '✗ Failed';
+      _btnIdle(btn, '✗ Failed');
       setTimeout(() => { btn.textContent = 'Import'; btn.disabled = false; }, 2200);
       console.error('Template import failed:', result?.error);
     }
   } catch (e) {
-    btn.textContent = '✗ Failed';
+    _btnIdle(btn, '✗ Failed');
     setTimeout(() => { btn.textContent = 'Import'; btn.disabled = false; }, 2200);
     console.error('Template import failed:', e);
   }
@@ -9699,7 +10311,7 @@ document.getElementById('btn-cache-confirm').addEventListener('click', async () 
   const cancelBtn  = document.getElementById('btn-cache-cancel');
   confirmBtn.disabled = true;
   cancelBtn.disabled  = true;
-  confirmBtn.textContent = 'Deleting…';
+  _btnBusy(confirmBtn, 'Deleting');
   try {
     const timeout = new Promise((_, reject) =>
       setTimeout(() => reject(new Error('timeout')), 15000));
@@ -9710,12 +10322,12 @@ document.getElementById('btn-cache-confirm').addEventListener('click', async () 
       _clearBtn.disabled = true;
       _clearBtn.classList.remove('enabled');
       _clearBtn.textContent = 'Clear';
-      confirmBtn.textContent = 'Yes, Delete Builds';
+      _btnIdle(confirmBtn, 'Yes, Delete Builds');
       confirmBtn.disabled = false;
       cancelBtn.disabled  = false;
       const freed = fmtBytes(result.bytesCleared);
       document.getElementById('cache-size-label').textContent =
-        result.bytesCleared > 0 ? `✓ Cleared (${freed} freed)` : '✓ Cleared';
+        result.bytesCleared > 0 ? `✓ Cleared (${freed} deleted)` : '✓ Cleared';
       // build-output is untouched by this action, so whatever is staged stays flashable. Only the
       // saved builds are gone, which shows up as a cache MISS the next time a config is checked.
       if (window.checkCacheForConfig) window.checkCacheForConfig('Cached builds cleared — recompile needed');
@@ -9731,30 +10343,206 @@ document.getElementById('btn-cache-confirm').addEventListener('click', async () 
   }
 });
 
-// Reset Build Workspace: no confirmation. Nothing saved is lost — the next compile rebuilds the
-// core and the next cache hit repopulates the staged build. A modal that warns about a cost the
-// user is not paying teaches people to click through the modal that matters.
-document.getElementById('btn-reset-workspace')?.addEventListener('click', async () => {
-  const btn   = document.getElementById('btn-reset-workspace');
-  const label = document.getElementById('workspace-size-label');
+// Reset Build Space: always confirms, and the confirm is composed from what is actually
+// reclaimable at that moment.
+//
+// The old comment here claimed this cost the user nothing. That was wrong, and the test that
+// disproves it is simple: if it cost nothing we would sweep it on launch and never show a button.
+// The button exists because the state has value. What it costs varies — sometimes it is only
+// working files and a slightly slower next compile, sometimes there are build tools nobody is
+// using and reclaiming those means downloading them again later.
+//
+// So the confirm is not a warning bolted onto a safe action. It is where a multi-part cost gets
+// itemised, and it says only what is true this time.
+//
+// This is a RESET, not a delete. It reduces as far as it safely can and never goes below what is
+// in use, so it can never leave the app unable to build.
+
+// Build the itemised cost as HTML. Split out of the click handler so the panel can be rendered
+// immediately from the survey we already have and then re-rendered from a fresher one.
+function _workspaceConfirmHtml(survey) {
+  const parts = [];
+  if (survey.workspaceBytes > 0) {
+    parts.push(`<li><strong>${fmtBytes(survey.workspaceBytes)}</strong> of working files from the last compile. ` +
+               `Your next compile will take longer than usual.</li>`);
+  }
+  if (survey.stagingBytes > 0) {
+    // No "Nothing is lost." here or on the folders bullet. It is a TAUTOLOGY: attached to an item
+    // the list has just said is being deleted, it either contradicts itself or says nothing, and
+    // either way it cannot be false. Secondary problems on top - an agentless passive (lost by
+    // whom, losing what), and reassurance inside a list whose job is COST, on two bullets of four,
+    // which invited the question of what the other two lose. "Already unpacked" and "empty" carry
+    // it. (2026-08-14)
+    parts.push(`<li><strong>${fmtBytes(survey.stagingBytes)}</strong> of installers that were already unpacked.</li>`);
+  }
+  // Leftover compilers in trees whose plugin is being kept. Previously swept by the reset and
+  // never itemised, which is how a reset promising 1.88 GB removed ~2.08 GB.
+  if (survey.strayToolBytes > 0) {
+    parts.push(`<li><strong>${fmtBytes(survey.strayToolBytes)}</strong> of build tools left over ` +
+               `from earlier plugin versions, which nothing installed needs.</li>`);
+  }
+  // Emptied plugin folders from an earlier reset. They are in the total, so they must be in the
+  // list: the bullets have to sum to the headline or the dialog cannot be checked.
+  if (survey.orphanTrees && survey.orphanTrees.bytes > 0) {
+    const n = survey.orphanTrees.paths.length;
+    parts.push(`<li><strong>${fmtBytes(survey.orphanTrees.bytes)}</strong> in ${n} empty plugin ` +
+               `folder${n === 1 ? '' : 's'} left behind by an earlier reset.</li>`);
+  }
+  if (survey.tools.versions.length > 0) {
+    const list = survey.tools.versions.join(', ');
+    // "Proffieboard Plugin", never "build tools" - the app's word for this everywhere else, and
+    // the one profezzorn and pod.hubbe.net use. See versionsPanel.js. The 1.8 rename pass missed
+    // this dialog and the tooltips above it. (2026-08-14)
+    const plural = survey.tools.versions.length === 1 ? '' : 's';
+    let line = `<li><strong>${fmtBytes(survey.tools.bytes)}</strong> of Proffieboard Plugin${plural} ${list}, ` +
+               `which no ProffieOS version is set to use.`;
+    if (survey.tools.strandedBuilds > 0) {
+      // A CONSEQUENCE, not a component. The reset no longer deletes these - cached builds belong to
+      // the row above, and the launch sweep clears a build whose plugin is gone. So it is stated as
+      // what becomes true, with no byte figure: quoting a size here invites adding it to the total,
+      // and it is not part of what this action frees. ("builds", never "stored compiles" - the
+      // app's own noun, used by the row above.) (2026-08-14)
+      line += ` ${survey.tools.strandedBuilds} saved build` +
+              `${survey.tools.strandedBuilds === 1 ? '' : 's'} will stop being usable.`;
+    }
+    // No download size here. It sat beside the reclaimed size and the two are not the same
+    // measurement: 709.9 MB is the UNPACKED footprint on disk, 198.0 MB is the COMPRESSED archive.
+    // Printed together they read as a contradiction, and explaining the difference is more than a
+    // confirm bullet can carry. The consequence - you would have to download it again - is the part
+    // that changes the decision, and it survives on its own. (2026-08-14)
+    line += ` <strong>Setting a version back to ${list} later downloads ` +
+            `${survey.tools.versions.length === 1 ? 'it' : 'them'} again.</strong></li>`;
+    parts.push(line);
+  }
+  // "Deletes", not "Frees" - the destructive verb, same rule as the tooltips, and the dialog must
+  // never be gentler than the button that opened it.
+  //
+  // The closing line answers the ONE fear this list raises, and only when the list raises it.
+  // Two earlier versions failed differently: "Anything still in use is left alone" was an agentless
+  // passive that never said in use by WHAT, and "Nothing else is deleted" was a tautology - the list
+  // above it already says what goes, so it answered nothing.
+  // The real question a user has when they read "deleting Proffieboard Plugins" is whether the one
+  // their ProffieOS version needs is about to go with them. So say that, and say it only when
+  // plugins are actually in the list. A reset that is removing temp files raises no such fear and
+  // gets no reassurance at all. (2026-08-14)
+  const keepsPlugins = (survey.tools?.versions?.length || 0) > 0
+    // Three passes on one sentence, and each fixed a different defect.
+    //   "Plugins your ProffieOS versions use are kept" - a bare relative clause, so it garden-paths:
+    //     one noun pile until "are kept" arrives. Same defect the attributive rule was written for.
+    //   "...used by YOUR ProffieOS versions..." - direct address reads conversational, and none of
+    //     the tooltips on these rows speak to the user that way.
+    //   "in use by", not "in use for" - the natural collocation; a plugin is in use BY a version.
+    // Named specifically rather than "anything still in use", which never said in use by what.
+    // (2026-08-14)
+    ? `<p style="margin:10px 0 0;color:var(--c-text-dim);">Plugins in use by ProffieOS versions are kept.</p>`
+    : '';
+  // "Frees X by deleting:" - the gain leads, the destructive verb is right there with it, and the
+  // colon makes the bullets the OBJECT of the deleting. That last part is what fixes the grammar:
+  // "Deletes 1.06 GB" made a size the thing being deleted, when you delete files and the size is
+  // the result. Leading with "Frees" alone would have been the euphemism this dialog already had
+  // once, since no bullet carries a destructive verb of its own. (2026-08-14)
+  return `Frees <strong>${fmtBytes(survey.total)}</strong> by deleting:` +
+         `<ul style="margin:8px 0 0 18px;padding:0;">${parts.join('')}</ul>` +
+         keepsPlugins;
+}
+
+document.getElementById('btn-workspace-cancel')?.addEventListener('click', () => {
+  document.getElementById('workspace-confirm-panel').style.display = 'none';
+  const btn = document.getElementById('btn-reset-workspace');
+  btn.disabled = false;
+  btn.classList.add('enabled');
+});
+
+document.getElementById('btn-reset-workspace')?.addEventListener('click', () => {
+  const btn    = document.getElementById('btn-reset-workspace');
+  const label  = document.getElementById('workspace-size-label');
+  const panel  = document.getElementById('workspace-confirm-panel');
+  const detail = document.getElementById('workspace-warning-detail');
+
+  // Opens on the click, from the survey the modal already ran. Re-surveying here first meant a
+  // full walk of every core tree - over a second - between the click and anything appearing, which
+  // is the same dead-click this modal was just fixed for one layer up. The numbers being seconds
+  // old is harmless: `space:reset` surveys again server-side before it removes anything, so what
+  // is displayed can never be what decides. (2026-08-14)
+  if (_lastSpaceSurvey && _lastSpaceSurvey.ok && !_lastSpaceSurvey.empty) {
+    detail.innerHTML = _workspaceConfirmHtml(_lastSpaceSurvey);
+  } else {
+    detail.textContent = 'Checking what can be deleted…';
+    detail.classList.add('sf-loading-pulse');
+  }
+  panel.style.display = 'block';
   btn.disabled = true;
-  btn.textContent = 'Resetting…';
-  try {
-    const result = await window.electronAPI.resetWorkspace();
-    btn.textContent = 'Reset';
-    if (result.ok) {
+  btn.classList.remove('enabled');
+
+  // Then refresh behind the open panel, so a stale figure cannot survive on screen.
+  window.electronAPI.surveyBuildSpace().then(survey => {
+    if (panel.style.display === 'none') return;   // cancelled while we were reading the disk
+    detail.classList.remove('sf-loading-pulse');
+    if (!survey || !survey.ok) { detail.textContent = 'Could not check what can be deleted.'; return; }
+    _lastSpaceSurvey = survey;
+    if (survey.empty) {
+      // Nothing reclaimable, but the row's number is the FOOTPRINT and is still true - do not
+      // overwrite it. Close the panel and let the disabled button carry the "nothing to do", which
+      // is the split this row now runs on. A reset reduces to a floor; it does not reach zero, so
+      // "nothing to delete" is a statement about the ACTION, never about the size. (2026-08-14)
+      panel.style.display = 'none';
+      btn.disabled = true;
       btn.classList.remove('enabled');
-      label.textContent = `✓ Reset (${fmtBytes(result.bytesCleared)} freed)`;
+      btn.title = 'Everything here is in use. Nothing can be deleted right now.';
+      return;
+    }
+    detail.innerHTML = _workspaceConfirmHtml(survey);
+  }).catch(() => {
+    detail.classList.remove('sf-loading-pulse');
+    detail.textContent = 'Could not check what can be deleted.';
+  });
+});
+
+document.getElementById('btn-workspace-confirm')?.addEventListener('click', async () => {
+  const btn        = document.getElementById('btn-reset-workspace');
+  const label      = document.getElementById('workspace-size-label');
+  const panel      = document.getElementById('workspace-confirm-panel');
+  const confirmBtn = document.getElementById('btn-workspace-confirm');
+  const cancelBtn  = document.getElementById('btn-workspace-cancel');
+
+  confirmBtn.disabled = true;
+  cancelBtn.disabled  = true;
+  _btnBusy(confirmBtn, 'Resetting');
+  try {
+    const result = await window.electronAPI.resetBuildSpace();
+    _btnIdle(confirmBtn, 'Yes, Reset');
+    confirmBtn.disabled = false;
+    cancelBtn.disabled  = false;
+    if (result.ok) {
+      panel.style.display = 'none';
+      _lastSpaceSurvey = null;
+      btn.classList.remove('enabled');
+      label.textContent = `✓ Reset (${fmtBytes(result.freed)} deleted)`;
+      // The OS Versions panel is showing build-tool state this just changed. It
+      // lives behind the settings modal and had no idea, so a core removed here
+      // went on reading "installed" in the Build Tools picker until something
+      // else happened to re-render it. (2026-08-12)
+      try { await window.vpRefresh?.(); } catch {}
       // The staged build is gone, so there is nothing to flash until a build exists again. A cache
       // hit will restore one; checkCacheForConfig decides which.
-      if (window.checkCacheForConfig) window.checkCacheForConfig('Build workspace reset — recompile needed');
+      if (window.checkCacheForConfig) window.checkCacheForConfig('Build space reset — recompile needed');
     } else {
+      panel.style.display = 'none';
       btn.disabled = false;
-      label.textContent = '✗ Could not reset';
+      btn.classList.add('enabled');
+      // Say WHICH part failed. The old label was the same three words whether
+      // the whole thing died or one core would not come off, and the failures
+      // were sitting in result.errors unread the entire time.
+      const why = (result.errors && result.errors.length) ? result.errors[0] : null;
+      label.textContent = why ? `✗ ${why}` : '✗ Could not reset';
     }
   } catch {
-    btn.textContent = 'Reset';
+    _btnIdle(confirmBtn, 'Yes, Reset');
+    confirmBtn.disabled = false;
+    cancelBtn.disabled  = false;
+    panel.style.display = 'none';
     btn.disabled = false;
+    btn.classList.add('enabled');
     label.textContent = '✗ Could not reset';
   }
 });
@@ -10952,6 +11740,11 @@ document.getElementById('about-license-toggle').addEventListener('click', () => 
   const btn  = document.getElementById('about-license-toggle');
   const open = body.classList.toggle('open');
   btn.textContent = open ? 'Hide License' : 'View License';
+  // Bring it into view on open. The licence sits near the bottom of a long modal, so expanding it
+  // used to reveal a panel mostly below the fold - the user clicked and saw a sliver. Scroll the
+  // TOGGLE rather than the body, so "Hide License" stays visible above its own panel and the way
+  // out is never the thing that scrolled away. Not on close: nothing moved into view to look at.
+  if (open) btn.scrollIntoView({ block: 'start', behavior: 'smooth' });
 });
 document.getElementById('about-website-link').addEventListener('click', (e) => {
   e.preventDefault();
@@ -11037,7 +11830,7 @@ document.getElementById('btn-check-updates').addEventListener('click', async () 
   const msg   = document.getElementById('update-status-msg');
   const panel = document.getElementById('update-available-panel');
   btn.disabled = true;
-  btn.textContent = 'Checking…';
+  _btnBusy(btn, 'Checking');
   msg.style.display   = 'none';
   panel.style.display = 'none';
   try {
@@ -11064,7 +11857,7 @@ document.getElementById('btn-check-updates').addEventListener('click', async () 
     msg.style.display = 'inline';
   } finally {
     btn.disabled = false;
-    btn.textContent = 'Check for Updates';
+    _btnIdle(btn, 'Check for Updates');
   }
 });
 
@@ -11321,6 +12114,10 @@ window.openImportVersionModalForDuplicate = (sourceName) => {
 document.getElementById('vp-file-modal-search-btn')?.addEventListener('click', () => {
   if (window.vpOpenFind) window.vpOpenFind();
 });
+document.getElementById('vp-file-modal-link-prop-btn')?.addEventListener('click', () => {
+  const p = window.vpViewerProp && window.vpViewerProp();
+  if (p) _linkPropFromVersion(p.filePath, p.versionName);
+});
 document.getElementById('vp-file-modal-close-btn')?.addEventListener('click', () => {
   if (window.vpCloseFileModal) window.vpCloseFileModal();
 });
@@ -11553,6 +12350,12 @@ function _doInsertStylesInclude(lines, conflictIdx, action) {
   ed.revealLineInCenter(insertedLine);
   ed.setPosition({ lineNumber: insertedLine, column: 1 });
   ed.focus();
+  // Same brief flash the board-include insert uses. Scrolling to a line only
+  // says WHERE to look; on a config where every line looks alike, it does not
+  // say WHICH line was just written. flashEditorLine is the house convention
+  // for exactly this - insert, reveal, flash - and the prop paths had the
+  // first two and not the third. (2026-08-15)
+  flashEditorLine(insertedLine);
   _updateStylesLinkBtn();
 }
 
@@ -11618,45 +12421,118 @@ document.getElementById('btn-styles-tab-link').addEventListener('click', () => {
 // resolved by the user via Cancel / Comment Out / Remove It modal.
 
 let _selectedVersionJmtVersion = null;       // installed JMT version on the SELECTED OS version, or null
-const _JMT_PROP_INCLUDE_PATH   = '../props/jmt_fett263_wrapper.h';
+const _JMT_PROP_FILE           = 'jmt_fett263_wrapper.h';
+const _JMT_PROP_INCLUDE_PATH   = `../props/${_JMT_PROP_FILE}`;
 const _JMT_PROP_INCLUDE_RE     = /^\s*#include\s+"[^"]*jmt_fett263_wrapper\.h"/m;
 const _PROP_INCLUDE_RE         = /^\s*#include\s+"[^"]*\/props\/[^"]+\.h"/;
+// Same pattern, multiline, for testing whole-document text. Used on the editor's
+// change handler, so it must not allocate a line array per keystroke.
+const _PROP_INCLUDE_RE_M       = /^\s*#include\s+"[^"]*\/props\/[^"]+\.h"/m;
+
+// Config-relative include for a prop sitting in the OS tree's props/ folder.
+const _propIncludePathFor = file => `../props/${file}`;
+const _propFileFromPath   = p => p.split('/').pop();
+
 
 async function _refreshSelectedVersionJmtState() {
   const verSel = document.getElementById('input-version');
   const name = verSel?.value;
   if (!name || isVersionSentinel(name)) {
     _selectedVersionJmtVersion = null;
+    _statPluginVersion         = null;
     _updateJmtLinkBtn();
+    updateStatusMeta();
     return;
   }
   try {
     const details = await window.electronAPI.listVersionsDetails();
     const v = (details || []).find(d => d.name === name);
     _selectedVersionJmtVersion = v?.jmtVersion || null;
+    // Same payload already carries the pinned plugin, so the status bar rides
+    // along on this call instead of adding one of its own. Deliberately NOT
+    // core:getForVersion, which resolves a default and can reach the network to
+    // work out whether a newer plugin exists — far too much machinery behind a
+    // label in the status bar.
+    _statPluginVersion         = v?.coreVersion || null;
   } catch {
     _selectedVersionJmtVersion = null;
+    _statPluginVersion         = null;
   }
   _updateJmtLinkBtn();
+  updateStatusMeta();
+  // The OS Version field reads the plugin too, so it repaints on the same beat.
+  // Leaving it out meant the status bar went red while the field above it, which
+  // is the one most people are actually looking at, stayed clean. (2026-08-15)
+  updateChangedIndicators();
 }
 window._refreshSelectedVersionJmtState = _refreshSelectedVersionJmtState;
 
+// Which action the shared toolbar slot is currently offering: 'addons', 'pick',
+// or null when hidden. Read by the click handler.
+let _jmtLinkBtnMode = null;
+
+// One slot, three states. Ryan's rule (2026-08-11): keep the add-ons pitch
+// wherever it applies, and offer the neutral prop picker only when nothing else
+// would be offered — otherwise a config with no prop on a plain ProffieOS
+// version gets no affordance at all, and that is exactly the user who does not
+// know props exist.
 function _updateJmtLinkBtn() {
   const btn = document.getElementById('btn-jmt-link');
   if (!btn) return;
-  if (!_selectedVersionJmtVersion || !fileIsOpen) {
+
+  if (!fileIsOpen) {
+    _jmtLinkBtnMode = null;
     btn.style.display = 'none';
     return;
   }
+
   const content = window._getEditorContent ? window._getEditorContent() : '';
-  const linked  = _JMT_PROP_INCLUDE_RE.test(content);
-  btn.style.display = linked ? 'none' : '';
+
+  // Already running our wrapper — nothing to offer.
+  if (_JMT_PROP_INCLUDE_RE.test(content)) {
+    _jmtLinkBtnMode = null;
+    btn.style.display = 'none';
+    return;
+  }
+
+  if (_selectedVersionJmtVersion) {
+    _jmtLinkBtnMode = 'addons';
+    btn.textContent = '\u{1F517} Link JMT Add-ons';
+    btn.title = 'Adds the JMT Prop Addons include to your config so the wrapper features can be opted in via #defines';
+    btn.style.display = '';
+    return;
+  }
+
+  // No add-ons on this version. Only worth a button when the config names no
+  // prop at all; if they already picked one, silence is right.
+  if (!_PROP_INCLUDE_RE_M.test(content)) {
+    _jmtLinkBtnMode = 'pick';
+    btn.textContent = '\u{1F517} Link Prop';
+    btn.title = 'This config names no prop, so it would build with ProffieOS’s default. Pick one from the selected version.';
+    btn.style.display = '';
+    return;
+  }
+
+  _jmtLinkBtnMode = null;
+  btn.style.display = 'none';
 }
 window._updateJmtLinkBtn = _updateJmtLinkBtn;
 
-function _promptJmtConflict(lines, conflictIdx) {
+// opts.intro replaces the explanatory line; opts.note adds a warning under the
+// offending include (used to say that swapping props turns the add-ons off).
+function _promptJmtConflict(lines, conflictIdx, opts = {}) {
   return new Promise(resolve => {
     document.getElementById('modal-jmt-conflict-line').textContent = lines[conflictIdx].trim();
+    const introEl = document.getElementById('modal-jmt-conflict-intro');
+    if (introEl) {
+      introEl.textContent = opts.intro
+        || 'Your config already includes a different prop. Only one prop can compile at a time, so the existing line must be resolved before linking:';
+    }
+    const noteEl = document.getElementById('modal-jmt-conflict-note');
+    if (noteEl) {
+      noteEl.textContent   = opts.note || '';
+      noteEl.style.display = opts.note ? '' : 'none';
+    }
     const overlay = document.getElementById('modal-jmt-conflict');
     overlay.classList.add('active');
     const cleanup = r => { overlay.classList.remove('active'); resolve(r); };
@@ -11666,9 +12542,11 @@ function _promptJmtConflict(lines, conflictIdx) {
   });
 }
 
-function _doInsertJmtPropInclude(lines, conflictIdx, action) {
+function _doInsertJmtPropInclude(lines, conflictIdx, action, includePath = _JMT_PROP_INCLUDE_PATH) {
   if (action === 'comment')     lines[conflictIdx] = '//' + lines[conflictIdx];
   else if (action === 'remove') lines.splice(conflictIdx, 1);
+
+  const includeLine = `#include "${includePath}"`;
 
   let insertedLine; // 1-based
   const propIdx = lines.findIndex(l => /^\s*#ifdef\s+CONFIG_PROP/.test(l));
@@ -11679,7 +12557,7 @@ function _doInsertJmtPropInclude(lines, conflictIdx, action) {
       if (/^\s*#endif/.test(lines[i])) { endifIdx = i; break; }
     }
     if (endifIdx === -1) return;
-    lines.splice(endifIdx, 0, `#include "${_JMT_PROP_INCLUDE_PATH}"`);
+    lines.splice(endifIdx, 0, includeLine);
     insertedLine = endifIdx + 1;
   } else {
     // No CONFIG_PROP — insert a fresh scaffold. Conventional ProffieOS ordering is
@@ -11687,16 +12565,16 @@ function _doInsertJmtPropInclude(lines, conflictIdx, action) {
     // CONFIG_PRESETS block exists, the new CONFIG_PROP must land BEFORE it.
     const presetsIdx = lines.findIndex(l => /^\s*#ifdef\s+CONFIG_PRESETS/.test(l));
     if (presetsIdx !== -1) {
-      const block = ['#ifdef CONFIG_PROP', `#include "${_JMT_PROP_INCLUDE_PATH}"`, '#endif', ''];
+      const block = ['#ifdef CONFIG_PROP', includeLine, '#endif', ''];
       const needLeadingBlank = presetsIdx > 0 && lines[presetsIdx - 1].trim() !== '';
       if (needLeadingBlank) block.unshift('');
-      const includeIdxInBlock = block.indexOf(`#include "${_JMT_PROP_INCLUDE_PATH}"`);
+      const includeIdxInBlock = block.indexOf(includeLine);
       lines.splice(presetsIdx, 0, ...block);
       insertedLine = presetsIdx + includeIdxInBlock + 1; // 1-based
     } else {
       // No CONFIG_PRESETS either — safe to append at end of file
       if (lines.length && lines[lines.length - 1].trim() !== '') lines.push('');
-      lines.push('#ifdef CONFIG_PROP', `#include "${_JMT_PROP_INCLUDE_PATH}"`, '#endif');
+      lines.push('#ifdef CONFIG_PROP', includeLine, '#endif');
       insertedLine = lines.length - 1; // line of the #include
     }
   }
@@ -11710,27 +12588,90 @@ function _doInsertJmtPropInclude(lines, conflictIdx, action) {
   ed.revealLineInCenter(insertedLine);
   ed.setPosition({ lineNumber: insertedLine, column: 1 });
   ed.focus();
+  flashEditorLine(insertedLine);
   _updateJmtLinkBtn();
 }
 
-async function _insertJmtPropInclude() {
+async function _insertJmtPropInclude(includePath = _JMT_PROP_INCLUDE_PATH, opts = {}) {
   if (!fileIsOpen) return;
   const editor = window._monacoEditor;
   if (!editor) return;
-  const lines = editor.getValue().split('\n');
+  const lines    = editor.getValue().split('\n');
+  const propFile = _propFileFromPath(includePath);
 
-  // If the wrapper is present but commented out, just uncomment it
-  const commentedIdx = lines.findIndex(l =>
-    /^\s*\/\/+\s*#include/.test(l) && l.includes('jmt_fett263_wrapper.h')
+  const findOursCommented = ls => ls.findIndex(l =>
+    /^\s*\/\/+\s*#include/.test(l) && l.includes(propFile)
   );
-  if (commentedIdx !== -1) {
-    const targetLine  = commentedIdx + 1; // 1-based
-    const original    = lines[commentedIdx];
-    const uncommented = original.replace(/^(\s*)\/\/+\s*/, '$1');
-    // Targeted single-line edit — replacing the full model range was causing Monaco
-    // to scroll the viewport back to line 1 after the edit (the post-edit layout
-    // update overrode our revealLineInCenter). Editing just the affected line keeps
-    // the viewport stable and lets the reveal call land at the right spot.
+  // Another prop that is ACTIVE and isn't the one being linked.
+  const findConflict = ls => ls.findIndex(l =>
+    _PROP_INCLUDE_RE.test(l) && !l.includes(propFile)
+  );
+
+  // Already linked and active — nothing to do but say so.
+  if (lines.some(l => _PROP_INCLUDE_RE.test(l) && l.includes(propFile))) {
+    showToast(`${propFile} is already this config's prop.`);
+    return;
+  }
+
+  // Resolve a conflict FIRST, before any other branch. The uncomment path below
+  // used to return early, so re-linking a prop that had been commented out by
+  // "Comment Out & Link" would un-comment it while a different prop was active
+  // and leave TWO live prop includes in CONFIG_PROP. (Found 2026-08-11.)
+  let conflictIdx = findConflict(lines);
+  let action = null;
+  if (conflictIdx !== -1) {
+    // Swapping away from our wrapper silently turns the add-ons off, so say it.
+    const losingAddons = lines[conflictIdx].includes(_JMT_PROP_FILE);
+    action = await _promptJmtConflict(lines, conflictIdx, {
+      intro: opts.intro,
+      // Naming specific features would presume which ones they enabled — the
+      // wrapper being included says nothing about that. State the mechanism
+      // instead, and that their #defines survive the swap.
+      note:  losingAddons
+        ? 'This config uses the JMT Add-ons wrapper. Linking a different prop replaces it, so any JMT add-on features this config uses will stop working. Your #defines stay in the config and take effect again if you re-link the wrapper.'
+        : opts.note,
+    });
+    if (!action) return;
+  }
+
+  // Our prop is present but commented out: revive that line instead of adding a
+  // second one. Apply the conflict resolution first, then re-find the commented
+  // line, because a 'remove' shifts every index below it.
+  if (findOursCommented(lines) !== -1) {
+    if (action) {
+      // A conflict edit touches other lines, so the whole model has to be
+      // rewritten. Re-find the commented line AFTER the mutation, because a
+      // 'remove' shifts every index below it.
+      if (action === 'comment')     lines[conflictIdx] = '//' + lines[conflictIdx];
+      else if (action === 'remove') lines.splice(conflictIdx, 1);
+
+      const cIdx = findOursCommented(lines);
+      lines[cIdx] = lines[cIdx].replace(/^(\s*)\/\/+\s*/, '$1');
+      const targetLine = cIdx + 1; // 1-based
+
+      const model = editor.getModel();
+      _atomicEdit(editor, 'jmt-link-uncomment', [{
+        range: model.getFullModelRange(),
+        text:  lines.join('\n'),
+      }]);
+      editor.revealLineInCenter(targetLine);
+      editor.setPosition({ lineNumber: targetLine, column: 1 });
+      editor.focus();
+      flashEditorLine(targetLine);
+      _updateJmtLinkBtn();
+      if (opts.toast) showToast(opts.toast);
+      return;
+    }
+
+    // No conflict, so exactly one line changes. Targeted single-line edit —
+    // replacing the full model range was causing Monaco to scroll the viewport
+    // back to line 1 after the edit (the post-edit layout update overrode our
+    // revealLineInCenter). Editing just the affected line keeps the viewport
+    // stable and lets the reveal call land at the right spot.
+    const commentedIdx = findOursCommented(lines);
+    const targetLine   = commentedIdx + 1; // 1-based
+    const original     = lines[commentedIdx];
+    const uncommented  = original.replace(/^(\s*)\/\/+\s*/, '$1');
     _atomicEdit(editor, 'jmt-link-uncomment', [{
       range: {
         startLineNumber: targetLine, startColumn: 1,
@@ -11746,25 +12687,152 @@ async function _insertJmtPropInclude() {
     // explicit `setScrollTop` we attempt here — including deferred-via-setTimeout
     // calls. Cursor position is correct (visible on the minimap), but the user has
     // to scroll manually to see the now-uncommented line.
+    //
+    // Which makes the flash worth MORE here than anywhere else, not less: this is
+    // the one path where the viewport does not follow, so the user is scrolling to
+    // find a line they were never shown. It holds for a second and fades over
+    // three, long enough to survive the scroll. (2026-08-15)
+    flashEditorLine(targetLine);
     _updateJmtLinkBtn();
+    if (opts.toast) showToast(opts.toast);
     return;
   }
 
-  // Conflict: any other `#include "../props/*.h"` that isn't our wrapper
-  const conflictIdx = lines.findIndex(l =>
-    _PROP_INCLUDE_RE.test(l) && !l.includes('jmt_fett263_wrapper.h')
-  );
-  if (conflictIdx !== -1) {
-    const action = await _promptJmtConflict(lines, conflictIdx);
-    if (!action) return;
-    _doInsertJmtPropInclude(lines, conflictIdx, action);
-  } else {
-    _doInsertJmtPropInclude(lines, -1, null);
-  }
+  _doInsertJmtPropInclude(lines, conflictIdx, action, includePath);
+  if (opts.toast) showToast(opts.toast);
 }
 
 document.getElementById('btn-jmt-link').addEventListener('click', () => {
-  _insertJmtPropInclude();
+  if (_jmtLinkBtnMode === 'pick') _openPropPicker();
+  else _insertJmtPropInclude();
+});
+
+// ── Prop picker ────────────────────────────────────────
+// A version folder holds the source under a ProffieOS/ directory, so props live
+// at <version>/ProffieOS/props/. versionsPanel.js roots its tree on the same
+// name and proffieos.js's searchVersionFiles joins it too.
+const _OS_TREE_ROOT = 'ProffieOS';
+
+// Not a prop: it is the base class every real prop derives from, and including
+// it alone never sets PROP_TYPE, so the build would silently fall back to the
+// default saber prop.
+const _PROP_PICK_EXCLUDE = new Set(['prop_base.h']);
+
+async function _openPropPicker() {
+  if (!fileIsOpen) return;
+
+  const selected = document.getElementById('input-version')?.value;
+  if (!selected || (window.isVersionSentinel && isVersionSentinel(selected))) {
+    showToast('Set a ProffieOS version for this config first.');
+    return;
+  }
+
+  const listEl = document.getElementById('modal-prop-pick-list');
+  const subEl  = document.getElementById('modal-prop-pick-sub');
+  subEl.textContent =
+    `This config names no prop, so it would build with ProffieOS’s default (saber.h) — basic controls only. These are the props in ${selected}.`;
+  listEl.innerHTML = '<div class="prop-pick-empty">Loading…</div>';
+  document.getElementById('modal-prop-pick').classList.add('active');
+
+  const dir = `${_OS_TREE_ROOT}/props`;
+  let entries = [];
+  try {
+    const res = await window.electronAPI.listVersionDir(selected, dir);
+    if (res?.ok) {
+      entries = res.entries.filter(e =>
+        e.type === 'file' && /\.h$/i.test(e.name) && !_PROP_PICK_EXCLUDE.has(e.name)
+      );
+    }
+  } catch { entries = []; }
+
+  if (!entries.length) {
+    listEl.innerHTML = '<div class="prop-pick-empty">No props found in this version.</div>';
+    return;
+  }
+
+  listEl.innerHTML = '';
+  for (const e of entries) {
+    const row = document.createElement('div');
+    row.className = 'prop-pick-row';
+    const name = document.createElement('span');
+    name.className   = 'prop-pick-name';
+    name.textContent = e.name;
+    row.appendChild(name);
+    if (e.name === _JMT_PROP_FILE) {
+      const tag = document.createElement('span');
+      tag.className   = 'prop-pick-tag';
+      tag.textContent = 'JMT Add-ons';
+      row.appendChild(tag);
+    }
+    row.addEventListener('click', () => {
+      document.getElementById('modal-prop-pick').classList.remove('active');
+      _linkPropFromVersion(`${dir}/${e.name}`, selected);
+    });
+    listEl.appendChild(row);
+  }
+}
+
+document.getElementById('modal-prop-pick-cancel')?.addEventListener('click', () => {
+  document.getElementById('modal-prop-pick').classList.remove('active');
+});
+
+// ── Link Prop (from the OS Versions file tree / viewer) ─────────
+// The tree can browse any installed version, but the config is staged into the
+// SELECTED version at build time, so that tree has to hold the prop. Checking
+// here turns a raw "no such file" at compile time into a sentence.
+// filePath is the tree-relative path ("ProffieOS/props/saber.h"); browsedVersion
+// is the version whose tree it came from, which is NOT necessarily the version
+// the config builds with.
+async function _linkPropFromVersion(filePath, browsedVersion) {
+  if (!fileIsOpen) return;
+
+  const fileName = _propFileFromPath(filePath);
+  const selected = document.getElementById('input-version')?.value;
+  if (!selected || (window.isVersionSentinel && isVersionSentinel(selected))) {
+    showToast('Set a ProffieOS version for this config first.');
+    return;
+  }
+
+  // Look in the SAME directory the file was browsed from, but inside the config's
+  // own version. Deriving it from filePath keeps this correct without hardcoding
+  // the tree root, which sits above props/ in every version folder.
+  const propsDir = filePath.includes('/') ? filePath.slice(0, filePath.lastIndexOf('/')) : 'props';
+
+  let present = false;
+  try {
+    const res = await window.electronAPI.listVersionDir(selected, propsDir);
+    present = !!(res?.ok && res.entries.some(e => e.type === 'file' && e.name === fileName));
+  } catch { present = false; }
+
+  if (!present) {
+    const sameVersion = browsedVersion === selected;
+    document.getElementById('modal-prop-missing-body').textContent = sameVersion
+      ? `${fileName} could not be found in the props folder of ${selected}.`
+      : `${fileName} is in ${browsedVersion}, but this config builds with ${selected}, which does not have it. Linking it would fail to compile.`;
+    document.getElementById('modal-prop-missing-hint').textContent = sameVersion
+      ? 'Reopen the OS Versions tab to refresh the file list, then try again.'
+      : `Switch this config to ${browsedVersion}, or pick a prop that exists in ${selected}.`;
+    document.getElementById('modal-prop-missing').classList.add('active');
+    return;
+  }
+
+  await _insertJmtPropInclude(_propIncludePathFor(fileName), {
+    intro: `Your config already includes a different prop. Only one prop can compile at a time, so the existing line must be resolved before linking ${fileName}:`,
+    toast: `${fileName} is now this config's prop.`,
+  });
+}
+window._linkPropFromVersion = _linkPropFromVersion;
+
+// A prop this app can link: a .h sitting DIRECTLY in the tree's props/ folder.
+// Tree paths carry the version's root segment ("ProffieOS/props/saber.h"), and
+// search results build the same shape, so allow one optional leading segment.
+// Anything deeper than props/<file>.h is rejected — `../props/<file>.h` could
+// not resolve to it.
+window._LINKABLE_PROP_RE   = /^(?:[^/]+\/)?props\/[^/]+\.h$/i;
+window._isLinkablePropPath = p => window._LINKABLE_PROP_RE.test(String(p || '').replace(/\\/g, '/'));
+
+document.getElementById('modal-prop-missing-close')?.addEventListener('click', () => {
+  document.getElementById('modal-prop-missing').classList.remove('active');
 });
 
 // ── Style Library ──────────────────────────────────────
@@ -11938,6 +13006,32 @@ const _SL_JMT_HEADER_RE      = /^\/\/ =+\r?\n\/\/ Style Library[^\n]*\r?\n(?:\/\
 // and the guard wrap that's emitted around the section.
 const _SL_CHARGING_GUARD            = 'FUNCTIONS_CHARGE_FULL_PROP_H';
 const _SL_JMT_DEPENDENT_SYMBOLS     = ['ChargeFullPropF'];
+
+// JMT convention: when JMT_CHARGE_STYLE_PRESET is defined, the LAST preset is the
+// charge style ("Enables last preset to be a charge style based on current blade
+// config") and has to STAY last - so anything meaning "add to the end" must land
+// second to last instead. Line-anchored so a commented-out define does not count,
+// same as the MOUNT_SD_SETTING probe.
+//
+// THIS IS THE ONLY COPY OF THIS RULE. It lived inline inside the Sound Fonts
+// add-preset-with-font path and nowhere else, so the plain `+` button - the
+// obvious way to add a preset - appended AFTER the charge preset for as long as
+// both have existed. Third time in one day that a rule written beside one caller
+// failed to reach the others. Any new "append a preset" path calls this.
+// (2026-08-15)
+// Does the config declare the convention at all? Separate from the question below
+// because the single-preset case needs this WITHOUT the count guard: one preset
+// that IS the charge preset still means "insert above it".
+function _jmtChargeStyleDefined(fullText) {
+  return /^[ \t]*#define[ \t]+JMT_CHARGE_STYLE_PRESET\b/m.test(fullText);
+}
+function _jmtChargeHoldsLastSlot(fullText, presetCount) {
+  return presetCount >= 2 && _jmtChargeStyleDefined(fullText);
+}
+// Index to insert at so a new preset lands at the end of the USER's presets.
+function _jmtAppendPresetIndex(fullText, presetCount) {
+  return presetCount - (_jmtChargeHoldsLastSlot(fullText, presetCount) ? 1 : 0);
+}
 const _SL_CHARGING_SYMBOL_RE        = new RegExp(`\\b(?:${_SL_JMT_DEPENDENT_SYMBOLS.join('|')})\\b`);
 // Symbols that require the JMT pixel-relay styles include. Same shape as charging:
 // list drives both detection and the #ifdef wrap.
@@ -18008,7 +19102,7 @@ require(['vs/editor/editor.main'], function () {
         _sfVpInstallInFlight = true;
         const installBtn = document.getElementById('sf-voicepack-install');
         const cancelBtn = document.getElementById('sf-voicepack-cancel');
-        if (installBtn) { installBtn.disabled = true; installBtn.textContent = 'Installing…'; }
+        if (installBtn) { installBtn.disabled = true; _btnBusy(installBtn, 'Installing'); }
         if (cancelBtn) cancelBtn.disabled = true;
         _sfVpSetStatus('Installing voicepack…');
         _sfVpHideFallback();
@@ -18018,7 +19112,7 @@ require(['vs/editor/editor.main'], function () {
         catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
         _sfVpSetProgress(false);
         _sfVpInstallInFlight = false;
-        if (installBtn) { installBtn.disabled = false; installBtn.textContent = 'Install'; }
+        if (installBtn) { installBtn.disabled = false; _btnIdle(installBtn, 'Install'); }
         if (cancelBtn) cancelBtn.disabled = false;
         if (!res || !res.ok) {
           _sfVpSetStatus(`Install failed: ${(res && res.error) || 'unknown error'}`, 'error');
@@ -29491,13 +30585,9 @@ require(['vs/editor/editor.main'], function () {
         const bladeCount = result.bladeCount || 1;
         const fullText = editor.getValue();
         const lines = fullText.split('\n');
-        // JMT convention: when JMT_CHARGE_STYLE_PRESET is defined, the LAST preset is
-        // the charge style ("Enables last preset to be a charge style based on current
-        // blade config") and has to stay last, so a newly added font lands second to
-        // last instead. Line-anchored like the MOUNT_SD_SETTING probe above, so a
-        // commented-out define correctly does not count.
-        const hasChargePreset = /^[ \t]*#define[ \t]+JMT_CHARGE_STYLE_PRESET\b/m.test(fullText);
-        const beforeCharge = hasChargePreset && arr.presets.length >= 2;
+        // The rule and the reason live with _jmtChargeHoldsLastSlot. They used to
+        // live HERE, inline, which is precisely why the `+` button never had them.
+        const beforeCharge = _jmtChargeHoldsLastSlot(fullText, arr.presets.length);
         const lastEndLine = arr.presets[beforeCharge ? arr.presets.length - 2
                                                      : arr.presets.length - 1].endLine;
         // Detect whether there's already a blank line separating the
@@ -29513,7 +30603,7 @@ require(['vs/editor/editor.main'], function () {
         // Charge preset present and it is the ONLY preset: there is nothing to append
         // after, so the new font goes directly above it. No lead-in blank is needed
         // because we are not following another preset's `},`.
-        const onlyCharge = hasChargePreset && arr.presets.length === 1;
+        const onlyCharge = _jmtChargeStyleDefined(fullText) && arr.presets.length === 1;
         const lineAfterPrev = lines[lastEndLine] || '';
         const prevHasTrailingBlank = onlyCharge || lineAfterPrev.trim() === '';
         let insertLine;
@@ -32317,6 +33407,23 @@ require(['vs/editor/editor.main'], function () {
     let _restoreSlotBody        = null;
     let _silentStylesText       = null;
     let _reopenAfterRebuild     = null; // { presetIdx, slotIdx }
+    // The custom-expression textarea is the ONLY control in the slot editor that
+    // holds uncommitted state; every other one writes to the document the moment
+    // it is touched. So closing the editor threw the user's typing away, and the
+    // only way to keep it was a small checkmark that reads as decoration - which
+    // is not how any other edit in this app behaves. `_closeSlotArgEdit` has 14
+    // call sites (the X, click-outside, Escape, tab switch, sidecar close, a
+    // rebuild); a per-site fix would have drifted, so the commit happens in the
+    // one function they all funnel through.
+    //
+    // Set by the custom-expression editor, called on close, then cleared. Paths
+    // that ALREADY wrote to the document (apply, library pick, Add to Library,
+    // clear/delete slot, undo/redo) null it themselves first, so nothing commits
+    // twice and an undo is never fought by a re-commit of the text it removed.
+    //
+    // No confirm on discard and none needed: every commit is a normal Monaco
+    // edit, so Ctrl+Z takes it back. (2026-08-15)
+    let _pendingSlotCommit      = null; // () => void, or null
     let _disabledPresets        = [];   // scanned /* @jmt-disabled */ blocks
     let _selectedDisabledPreset = null; // currently selected disabled preset object
     let _selectedLive           = new Set(); // live preset indices in multi-selection
@@ -33419,6 +34526,27 @@ require(['vs/editor/editor.main'], function () {
     window._renderPresetDetail = () => _renderDetail();
     function _renderDetail() {
       const detail = document.getElementById('preset-detail');
+      // This wipe destroys any open slot editor's DOM WITHOUT going through
+      // _closeSlotArgEdit - selecting another preset lands here, and that is not
+      // one of its 14 call sites. Two consequences, both observed:
+      //   1. Text typed into the custom-expression textarea existed only in that
+      //      node, so switching presets silently threw it away.
+      //   2. Worse, `_pendingSlotCommit` survived the wipe and fired on the NEXT
+      //      close - against the PREVIOUS slot's captured line/column. It looked
+      //      like the edit was lost, then reappeared later; on a preset with
+      //      different line numbers it would have written to the wrong place.
+      // Flushing here is also the consistent answer: switching presets keeps your
+      // typing, exactly like switching slots does. During a post-commit rebuild
+      // the hook is already null, so this is a no-op and cannot recurse.
+      // (2026-08-15)
+      if (_pendingSlotCommit) {
+        const pending = _pendingSlotCommit;
+        _pendingSlotCommit = null;
+        try { pending(); } catch (e) { console.warn('[slot] pending commit failed', e); }
+      }
+      _editingSlot         = false;
+      _activeSlotArgEditor = null;
+      _restoreSlotBody     = null;   // its target node is about to be discarded
       detail.innerHTML = '';
       if (_selectedDisabledPreset) { _renderDisabledDetail(_selectedDisabledPreset); return; }
       const arr = _parseResult?.arrays[_activeArrayIndex];
@@ -36028,7 +37156,16 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
     // ── Slot inline editor ─────────────────────────────────────────────────────
 
     function _startSlotArgEdit(tile, preset, slot, slotIdx) {
-      _closeSlotArgEdit();
+      // Closing may now COMMIT the previous slot's typed text, which rewrites the
+      // document - and `slot` here was captured when the sidecar was last built,
+      // so its line/column are stale the moment that happens. Feeding stale
+      // coordinates to a Monaco range edit corrupts the config, so hand off to
+      // the rebuild and let it reopen this slot with fresh coordinates. This is
+      // the same mechanism applyEdit already uses. (2026-08-15)
+      if (_closeSlotArgEdit()) {
+        _reopenAfterRebuild = { presetIdx: _selectedPresetIndex, slotIdx };
+        return;
+      }
       _editingSlot = true;
       tile.classList.add('editing');
 
@@ -36530,6 +37667,7 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
         }]);
         editor.focus();
         _reopenAfterRebuild = { presetIdx: _selectedPresetIndex, slotIdx };
+        _pendingSlotCommit = null;   // written above
         _closeSlotArgEdit();
       }
 
@@ -36588,12 +37726,37 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
         if (innerName && helperNames.has(innerName)) {
           _reopenAfterRebuild = { presetIdx: _selectedPresetIndex, slotIdx };
         }
+        _pendingSlotCommit = null;   // written; nothing left pending
         _closeSlotArgEdit();
       }
+
+      // Closing the editor now keeps valid typed text instead of dropping it.
+      // Deliberately does NOT reopen the editor the way applyEdit does: the user
+      // is closing, so honouring that is the point. Unbalanced brackets cannot be
+      // written, so they are still lost - the checkmark is already disabled in
+      // that state, and the alternative is a prompt on a path that also fires
+      // from a rebuild. (2026-08-15)
+      _pendingSlotCommit = () => {
+        const raw = ta.value.trim();
+        if (!raw || raw === originalExpr) return false;
+        const v = _normalizeCustomExpr(raw);
+        if (!_validateSlotExpression(v)) return false;
+        _commitSlotEdit(slot, v, _extractLeadingComment(raw));
+        return true;   // document moved — callers must not reuse cached slot coords
+      };
+
       ta.addEventListener('input', () => { updateApplyState(); ta.classList.remove('invalid'); });
       ta.addEventListener('keydown', e => {
         if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); applyEdit(); }
-        else if (e.key === 'Escape') { e.preventDefault(); _closeSlotArgEdit(); }
+        else if (e.key === 'Escape') {
+          e.preventDefault();
+          // Escape is the ONE gesture that means discard. Every other close -
+          // the X, clicking away, opening another slot, closing the sidecar -
+          // keeps the typed text, because that is how every other edit in this
+          // app behaves. (2026-08-15)
+          _pendingSlotCommit = null;
+          _closeSlotArgEdit();
+        }
       });
       okBtn.addEventListener('click', e => { e.stopPropagation(); applyEdit(); });
       body.appendChild(ta);
@@ -36624,11 +37787,24 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
           _addStyleConfirmCallback = newStyleName => {
             _commitSlotEdit(slot, `${originalWrapper}<${newStyleName}>()`);
             _reopenAfterRebuild = { presetIdx: _selectedPresetIndex, slotIdx };
+            _pendingSlotCommit = null;   // written above
             _closeSlotArgEdit();
           };
           _openAddStyleModal();
-          // Pull the full text from the editor (includes leading /* comment */ if present)
-          const fullText = _getFullSlotTextFromEditor(slot);
+          // The textarea is the only control in this editor holding uncommitted
+          // state; every other one writes to the document the moment it is touched.
+          // Reading the slot from the model unconditionally therefore saved the
+          // PREVIOUS expression under the new name whenever the user had typed
+          // without applying first - a silent wrong save. Prefer the live text.
+          // Unchanged text still reads from the model, which carries any leading
+          // /* comment */ the slot already had (the name source for the parse).
+          // An EDITED expression deliberately does not inherit that comment: it
+          // described the old style, so falling through to the preset display
+          // name below is the more truthful label. (2026-08-12)
+          const _liveExpr = ta.value.trim();
+          const fullText = (_liveExpr && _liveExpr !== originalExpr)
+            ? _liveExpr
+            : _getFullSlotTextFromEditor(slot);
           if (!fullText) return;
           const parsed = _parseClipboardStyle(fullText);
           // Fall back to preset display name if the comment didn't supply one
@@ -36672,6 +37848,7 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
             _openLibComboDropdown(comboWrap, filter, name => {
               _commitSlotEdit(slot, `${originalWrapper}<${name}>()`);
               _reopenAfterRebuild = { presetIdx: _selectedPresetIndex, slotIdx };
+              _pendingSlotCommit = null;   // written above
               _closeSlotArgEdit();
             }, _getLibraryStyles());
           }
@@ -37187,6 +38364,17 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
     }
 
     function _closeSlotArgEdit() {
+      // Before any teardown: the textarea is about to be removed from the DOM,
+      // so this is the last moment its text exists. Cleared unconditionally,
+      // including when it throws, so a failure here can never leave a stale
+      // closure that commits into the NEXT slot the user opens.
+      const pending = _pendingSlotCommit;
+      _pendingSlotCommit = null;
+      let committed = false;
+      if (pending) {
+        try { committed = pending() === true; }
+        catch (e) { console.warn('[slot] pending commit failed', e); }
+      }
       _closeColorPopup();
       _closeLibComboDropdown();
       _activeArgSwatchControllers.forEach(c => c.destroy());
@@ -37196,6 +38384,7 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
       document.querySelectorAll('.preset-slot-tile.editing').forEach(t => t.classList.remove('editing'));
       _editingSlot = false;
       _scheduleRebuild();
+      return committed;
     }
 
     // ── Color popup (fixed-position, appended to body) ─────────────────────────
@@ -37760,6 +38949,7 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
         },
         text: 'StylePtr<Black>()',
       }]);
+      _pendingSlotCommit = null;   // slot deliberately replaced; do not re-commit
       _closeSlotArgEdit();
       // Defer focus past the current click event. A synchronous editor.focus()
       // inside a click handler can be reasserted back onto the clicked button
@@ -37788,6 +38978,7 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
         },
         text: '',
       }]);
+      _pendingSlotCommit = null;   // slot deliberately emptied; do not re-commit
       _closeSlotArgEdit();
       // Defer focus past the click event so Ctrl+Z reaches Monaco without
       // requiring the user to click into the editor first.
@@ -38984,7 +40175,11 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
 
     document.getElementById('btn-preset-add').addEventListener('click', () => {
       const arr = _parseResult?.arrays[_activeArrayIndex];
-      _addPreset(_activeArrayIndex, arr ? arr.presets.length : 0);
+      // "Add preset to end" means the end of the USER's presets, which is before
+      // the charge preset when the config declares one. _addPreset inserts ahead
+      // of presets[insertAtIndex], so length-1 lands in front of the last entry.
+      _addPreset(_activeArrayIndex,
+                 arr ? _jmtAppendPresetIndex(editor.getValue(), arr.presets.length) : 0);
     });
 
     // ── Sidecar auto-play toggle ──────────────────────────────────────
@@ -39082,6 +40277,10 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
     editor.onDidChangeModelContent(e => {
       if ((e.isUndoing || e.isRedoing) && e.changes.length) {
         editor.revealLineInCenter(e.changes[0].range.startLineNumber);
+        // Discard, never commit: an undo that removed this very text would be
+        // immediately re-applied by a pending commit, so Ctrl+Z would appear not
+        // to work. (2026-08-15)
+        _pendingSlotCommit = null;
         if (_editingSlot) _closeSlotArgEdit(); // stale slot editor — close and let rebuild reflect undo/redo
       }
       // Always schedule a rebuild — _rebuildSidecar updates the strip label even

@@ -496,7 +496,12 @@ function readStagedStyles() {
  * under a user-supplied name. sourcePath must be a folder named "ProffieOS"
  * containing ProffieOS.ino.
  */
-function importVersion(sourcePath, versionName, proffieVersion) {
+// coreVersion is stamped at import time so every tree carries the core that was
+// current when it arrived. Passed in rather than resolved here: resolving means
+// a network call, this function is synchronous, and proffieos cannot require
+// toolchain without a cycle. Omitting it leaves the version following latest,
+// which is the correct degradation rather than a failure.
+function importVersion(sourcePath, versionName, proffieVersion, coreVersion) {
   if (path.basename(sourcePath) !== 'ProffieOS') {
     return { ok: false, error: 'Selected folder must be named "ProffieOS".' };
   }
@@ -517,11 +522,15 @@ function importVersion(sourcePath, versionName, proffieVersion) {
   try {
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     copyDirSync(sourcePath, dest);
-    const ver = (proffieVersion || '').trim();
-    if (ver) {
+    const ver  = (proffieVersion || '').trim();
+    const core = (coreVersion || '').trim();
+    if (ver || core) {
+      const meta = { source: 'import' };
+      if (ver)  meta.proffieVersion = ver;
+      if (core) meta.coreVersion    = core;
       fs.writeFileSync(
         path.join(path.dirname(dest), '.jmt_meta.json'),
-        JSON.stringify({ proffieVersion: ver, source: 'import' }, null, 2),
+        JSON.stringify(meta, null, 2),
         'utf8'
       );
     }
@@ -584,6 +593,62 @@ function writeVersionMeta(versionName, updates) {
   } catch (e) { return { ok: false, error: e.message }; }
 }
 
+// ── Per-version core selection ─────────────────────────
+//
+// Which Proffieboard core this ProffieOS version builds against. Stored on the
+// version rather than app-wide because the two move together: a config that
+// fits on core 3.6 and overflows on 4.6 is a property of this tree and this
+// board, not of the user.
+//
+// Null means "not chosen", and the caller resolves that to whatever is newest.
+// An absent value is deliberately NOT written as the current latest at read
+// time - that would silently freeze a version onto today's core the first time
+// anything glanced at it.
+function getVersionCore(versionName) {
+  const meta = readVersionMeta(versionName);
+  return meta.coreVersion || null;
+}
+
+// Passing null clears the choice and returns the version to following latest.
+function setVersionCore(versionName, coreVersion) {
+  return writeVersionMeta(versionName, { coreVersion: coreVersion || null });
+}
+
+/**
+ * One-time upgrade backfill: pin every existing version to the core it has
+ * actually been building with.
+ *
+ * Before 1.8 the core was hardcoded, so every tree on the machine was built
+ * against that one version whether anyone chose it or not. Leaving those trees
+ * on "follow latest" would look harmless right up until a newer core is
+ * published, and then, with no user action at all, they would each get a
+ * different compiler: the whole build cache misses, a several-hundred-megabyte
+ * core downloads, and a config that only just fitted may stop linking. Newer
+ * cores produce larger binaries, which is the entire reason this feature exists.
+ *
+ * So an upgrade must be something the user chooses, not something that happens
+ * to them. Pinning here makes follow-latest an opt-in.
+ *
+ * The value is passed in rather than read from disk on purpose. Every pre-1.8
+ * build used the hardcoded version regardless of what else is installed, and
+ * inspecting a machine that has several cores on it invites the wrong answer.
+ *
+ * Callers must guard this to run once. It only ever fills a MISSING field, so a
+ * second run is harmless, but a user who deliberately cleared a version back to
+ * follow-latest must not have it silently re-pinned.
+ */
+function backfillVersionCores(coreVersion) {
+  if (!coreVersion) return { ok: false, error: 'A core version is required.', stamped: [] };
+  const stamped = [];
+  for (const name of listVersions()) {
+    const meta = readVersionMeta(name);
+    if (meta.coreVersion) continue;
+    const res = writeVersionMeta(name, { coreVersion });
+    if (res.ok) stamped.push(name);
+  }
+  return { ok: true, stamped, coreVersion };
+}
+
 function readNotes(versionName) {
   const p = getNotesPath(versionName);
   if (!p || !fs.existsSync(p)) return null;
@@ -616,6 +681,7 @@ function listVersionsDetails() {
       notesPreview:   notes ? notes.split('\n').find(l => l.trim()) || null : null,
       proffieVersion: meta.proffieVersion || null,
       jmtVersion:     meta.jmtVersion     || null,
+      coreVersion:    meta.coreVersion    || null,
     };
   }).filter(Boolean);
 }
@@ -809,6 +875,9 @@ module.exports = {
   writeNotes,
   readVersionMeta,
   writeVersionMeta,
+  getVersionCore,
+  setVersionCore,
+  backfillVersionCores,
   renameVersion,
   duplicateVersion,
   deleteVersion,

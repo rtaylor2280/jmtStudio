@@ -8,8 +8,9 @@
 const path      = require('path');
 const fs        = require('fs');
 const { spawn } = require('child_process');
-const proffie   = require('./proffieos');
-const cache     = require('./cacheManager');
+const proffie      = require('./proffieos');
+const cache        = require('./cacheManager');
+const coreVersions = require('./coreVersions');
 
 // ── Abort state ───────────────────────────────────────
 let _currentProc = null;
@@ -60,7 +61,68 @@ function abort() {
 
 // ── Constants ──────────────────────────────────────────
 const CORE_ID       = 'proffieboard:stm32l4';
-const CORE_VERSION  = '4.6.0';
+
+// Which core this session builds against.
+//
+// This was a hardcoded '4.6.0'. That silently excluded flash-tight boards: a
+// style-heavy config can link on 3.6 and overflow 4.6 by kilobytes, which on a
+// 256 KB V2/V2.2 is a quarter of the board. Now it is resolved from the
+// published index at startup and can be overridden per ProffieOS version.
+//
+// FALLBACK_VERSION is a floor for a first launch with no network, not a pin.
+let _activeCoreVersion  = coreVersions.FALLBACK_VERSION;
+// True once the user (or a ProffieOS version's saved preference) has named a
+// version explicitly, as opposed to us defaulting to whatever is newest. An
+// explicit choice always builds against our own copy, because the core sitting
+// on the machine is whatever some other Arduino tool installed and matching it
+// by luck is not a guarantee.
+let _coreVersionIsExplicit = false;
+
+// Recording which plugins SHOULD be on this machine.
+//
+// The store lives in main.js; toolchain only reports. The distinction that makes
+// this safe is worth stating, because a remembered answer here is what caused
+// the 1.7.2 defect: this record NEVER answers "is it installed" - that stays a
+// live disk check, since another Arduino tool can change the tree between builds.
+// It answers "should it be here", which is intent, and intent is the one thing
+// that genuinely cannot be discovered.
+//
+// Without it, a plugin removed behind the app's back plus a pin moved elsewhere
+// leaves nothing saying it ever mattered - so its cached builds read as dead
+// when they are only dormant, and the next sweep takes them. (2026-08-15)
+let _recordPlugin = null;
+let _forgetPlugin = null;
+// Bracket an install so an interrupted one is recognisable next launch.
+//
+// arduino-cli unpacks as it goes, so a process killed mid-install can leave a
+// platform directory complete enough that `isVersionInstalled` says yes -
+// boards.txt written, tools missing - and the next compile then fails in a way
+// that looks like the config's fault. A plugin that exists and cannot build is
+// worse than no plugin, because every check that asks "is it there" is satisfied.
+//
+// A marker still standing at startup means the process did not finish.
+// (2026-08-15)
+let _beginInstall = null;
+let _endInstall   = null;
+function setPluginHooks({ record = null, forget = null, begin = null, end = null } = {}) {
+  _recordPlugin = record;
+  _forgetPlugin = forget;
+  _beginInstall = begin;
+  _endInstall   = end;
+}
+
+function getActiveCoreVersion() { return _activeCoreVersion; }
+
+function setActiveCoreVersion(version, { explicit = true } = {}) {
+  const next = coreVersions.normalizeVersion(version);
+  if (next !== _activeCoreVersion) {
+    // Isolation was decided for the previous version, so it has to be re-asked.
+    _useIsolatedCore = null;
+  }
+  _activeCoreVersion     = next;
+  _coreVersionIsExplicit = explicit;
+  return _activeCoreVersion;
+}
 
 // Every build appends this FQBN option. A core that predates it rejects the
 // whole FQBN before compiling a single file, which surfaces to the user as
@@ -78,6 +140,49 @@ let _useIsolatedCore = null;
 // Additional URL needed for proffieboard core
 const BOARD_MANAGER_URL = 'https://profezzorn.github.io/arduino-proffieboard/package_proffieboard_index.json';
 
+// Where arduino-cli keeps packages when nobody redirects it: the user's own
+// tree, shared with Arduino IDE and every other Proffie tool.
+//
+// We never write here. It is read for two reasons: to adopt a core the user
+// already has rather than making them download a second copy of it, and so the
+// cache sweep can see that a core still exists before calling its builds dead.
+function getSystemArduinoDataPath() {
+  const os   = require('os');
+  const home = os.homedir();
+  if (process.platform === 'win32') {
+    return path.join(process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'), 'Arduino15');
+  }
+  if (process.platform === 'darwin') return path.join(home, 'Library', 'Arduino15');
+  return path.join(home, '.arduino15');
+}
+
+/**
+ * Every core version reachable on this machine, and where each one lives.
+ *
+ * Returns [{ version, source }] with source 'system' or 'jmt'. The distinction is
+ * user-visible on purpose: a system core is theirs, so it is offered but never
+ * reclaimed, while a JMT core is ours to remove when nothing needs it.
+ *
+ * When a version exists in both, the system copy wins. That is the
+ * leave-your-machine-alone choice, and it makes our redundant copy reclaimable
+ * rather than permanent, so the footprint self-corrects downward.
+ */
+function listAvailableCores() {
+  const seen = new Map();
+  for (const v of coreVersions.listInstalled(getSystemArduinoDataPath())) {
+    seen.set(coreVersions.normalizeVersion(v), 'system');
+  }
+  // Every tree of ours, not just the one the active core happens to live in.
+  // Reading a single path meant a core installed into its own directory was
+  // present on disk, usable, and invisible in the picker. (2026-08-12)
+  for (const { version } of listCoreTrees()) {
+    const n = coreVersions.normalizeVersion(version);
+    if (!seen.has(n)) seen.set(n, 'jmt');
+  }
+  return Array.from(seen, ([version, source]) => ({ version, source }))
+    .sort((a, b) => coreVersions.compareVersions(a.version, b.version));
+}
+
 // ── CLI path resolution ────────────────────────────────
 function getCliPath() {
   const platform = process.platform === 'win32' ? 'windows'
@@ -87,15 +192,138 @@ function getCliPath() {
   return path.join(proffie.getResourcesPath(), 'arduino-cli', platform, bin);
 }
 
-function getArduinoDataPath() {
-  // Always use the prod userData path for arduino-data so installed packages are
-  // shared between dev and prod builds. In dev mode, app.getPath('userData') is
-  // overridden to 'jmt-studio-dev', which would be missing the board packages.
+/**
+ * Every Arduino data directory that belongs to US, newest question first: which
+ * of our trees holds this core version?
+ *
+ * Returns { path, dirName } for the tree holding it, or null when no tree of
+ * ours has it. The system tree is deliberately not searched. A core in the
+ * user's Arduino15 belongs to them and to every other Proffie tool on the
+ * machine, so it is never a candidate for removal and must not become one by
+ * accident.
+ *
+ * Searches every tree of ours, which is what lets a reset remove 3.6 and 4.6
+ * while 4.7 stays in use: each is targeted at its own directory rather than at
+ * whatever the environment happens to point to.
+ */
+function findOurCoreTree(version) {
+  const want = coreVersions.normalizeVersion(version);
+  for (const { path: p } of listCoreTrees()) {
+    const dirName = coreVersions.installedVersionString(p, want);
+    if (dirName) return { path: p, dirName };
+  }
+  return null;
+}
+
+// The root every core tree of ours lives under. Always the prod userData path so
+// installed packages are shared between dev and prod builds: in dev mode
+// app.getPath('userData') is overridden to 'jmt-studio-dev', which would be
+// missing the board packages.
+function getCoreTreeRoot() {
   const { app } = require('electron');
   const base = app.isPackaged
     ? app.getPath('userData')
     : path.join(app.getPath('appData'), 'jmt-studio');
   return path.join(base, 'arduino-data');
+}
+
+// The pre-1.8 layout: one tree at the root, holding whatever single core the
+// machine last installed. Kept as a first-class location rather than migrated,
+// see getCoreTreePath.
+function getLegacyCoreTreePath() {
+  return getCoreTreeRoot();
+}
+
+/**
+ * Where THIS core version lives, or would live.
+ *
+ * arduino-cli holds exactly one platform version per data directory - that is
+ * why `core uninstall` refuses a version argument - so one directory can never
+ * hold both 3.6 and 4.6. A user with no system Arduino tree at all therefore
+ * could not have both, which is precisely the person this feature exists for.
+ * One directory per core version is the only arrangement that works.
+ *
+ * Nothing is migrated. The pre-1.8 tree is adopted in place when it already
+ * holds the version being asked for, so upgrading re-downloads nothing and there
+ * is no move to half-finish. Every other version gets its own subdirectory, so
+ * the legacy tree simply stops growing. (2026-08-12)
+ */
+function getCoreTreePath(version) {
+  const want = coreVersions.normalizeVersion(version);
+  const legacy = getLegacyCoreTreePath();
+  if (coreVersions.installedVersionString(legacy, want)) return legacy;
+  return path.join(getCoreTreeRoot(), want);
+}
+
+/**
+ * Every tree of ours that currently holds a core, as { path, version }.
+ *
+ * The legacy tree is included when it holds one. Used by anything that has to
+ * reason about the whole set rather than a single version: what is installed,
+ * what a reset can reclaim, which tree an uninstall must target.
+ */
+// Every tree DIRECTORY, whether or not a core currently lives in it.
+//
+// `listCoreTrees` answers "which cores exist"; this answers "which directories
+// are ours". Space accounting and the reset sweep need the second question, and
+// using the first for them is a bug with a long tail. `listCoreTrees` yields a
+// tree only while `listInstalled` finds a core in it, so a tree the reset has
+// just emptied is excluded from the very sweep meant to include it - its
+// `staging/` is skipped, and no later reset can reach it either, because the
+// tree stays unlisted for as long as it holds no core.
+//
+// Reasoned from the call path, NOT from a disk measurement: a reading taken
+// 2026-08-12 that appeared to show it was confounded by a reinstall running at
+// the same time. Also catches the empty shells `runCli`'s unconditional mkdir
+// leaves behind. (2026-08-12)
+function listCoreTreePaths() {
+  const root = getCoreTreeRoot();
+  const out  = new Set([getLegacyCoreTreePath()]);
+  try {
+    for (const d of fs.readdirSync(root, { withFileTypes: true })) {
+      if (!d.isDirectory()) continue;
+      // Same rule as listCoreTrees: `staging` and `tmp` live here too and are
+      // never trees.
+      if (!/^\d+\.\d+(\.\d+)?$/.test(d.name)) continue;
+      out.add(path.join(root, d.name));
+    }
+  } catch { /* no root yet: nothing installed */ }
+  return Array.from(out);
+}
+
+function listCoreTrees() {
+  const root = getCoreTreeRoot();
+  const out  = [];
+  const seen = new Set();
+
+  const add = (p) => {
+    const found = coreVersions.listInstalled(p);
+    for (const v of found) {
+      if (seen.has(v)) continue;
+      seen.add(v);
+      out.push({ path: p, version: v });
+    }
+  };
+
+  add(getLegacyCoreTreePath());
+  try {
+    for (const d of fs.readdirSync(root, { withFileTypes: true })) {
+      if (!d.isDirectory()) continue;
+      // Only version-shaped subdirectories are trees. `staging` and `tmp` live
+      // here too and must never be mistaken for one.
+      if (!/^\d+\.\d+(\.\d+)?$/.test(d.name)) continue;
+      add(path.join(root, d.name));
+    }
+  } catch { /* no root yet: nothing installed */ }
+
+  return out;
+}
+
+// Retained so the many callers that just want "our data directory" keep working
+// while the per-version call sites are converted. Resolves to the tree for the
+// core currently in play, which is what every one of them meant.
+function getArduinoDataPath() {
+  return getCoreTreePath(getActiveCoreVersion());
 }
 
 function getBuildOutputPath() {
@@ -129,6 +357,36 @@ function _isCompileErrorLine(line) {
   return !/\b(warning|note)\s*:/i.test(line);
 }
 
+// arduino-cli colours its post-build "Used library / Used platform" summary with
+// ANSI SGR escapes. Nothing downstream renders them - the modal log, the Build
+// Output panel and the error extractor all treat them as literal text - so they
+// reach the user as `[92m` garbage in front of every column. Strip once at the
+// single point every line passes through, rather than at each display site, so
+// the captured stdout/stderr the classifier and size parser read is clean too.
+// (2026-08-12)
+//
+// Imported rather than redefined: when the summariser moved to ./compileErrors.js
+// it took a copy of this with it, and two copies of a stripping rule is how the
+// display path and the classifier drift apart. (2026-08-15)
+const { _stripAnsi } = require('./compileErrors');
+
+// arduino-cli emits a progress line per chunk, so one 174 MB download produces
+// dozens of them and buries every line that carries information. When it does
+// not know the total it still divides by it:
+//
+//   proffieboard:stm32l4@3.6 370.95 KiB / ?  3798.50%
+//
+// A percentage of 78479% reads as a broken app even though the download is fine.
+// The moving bar and phase label already say "working", so these carry nothing
+// the user does not have, and dropping them makes `downloaded` and `installed`
+// findable.
+//
+// Tight on purpose - a size fraction AND a percentage on one line. Compiler
+// output has no such shape, so "Sketch uses 259008 bytes (98%)" is unaffected.
+// (2026-08-15)
+const _DL_PROGRESS_RE = /\s[\d.]+\s*(B|KiB|MiB|GiB)\s*\/\s*(\?|[\d.]+\s*(B|KiB|MiB|GiB))\s+[\d.]+%/;
+function _isDownloadProgress(s) { return _DL_PROGRESS_RE.test(s); }
+
 // opts.raw runs arduino-cli with no config file and no environment override, so
 // it resolves exactly as it would for someone typing the command themselves.
 // That is the only way to find out which core a normal compile will really use.
@@ -140,7 +398,10 @@ function runCli(args, onLog, opts = {}) {
       return resolve({ ok: false, code: -1, stdout: '', stderr: v.error });
     }
 
-    const dataPath = getArduinoDataPath();
+    // One resolved tree for BOTH the config file and the environment. They must
+    // never disagree: a command aimed at 3.6's tree while reading 4.6's yaml is
+    // reading a config whose entire content is the path of a different tree.
+    const dataPath = opts.dataDir || getArduinoDataPath();
     fs.mkdirSync(dataPath, { recursive: true });
 
     // Inject isolated data dir and board manager URL into every command
@@ -165,8 +426,19 @@ function runCli(args, onLog, opts = {}) {
     // only isolation actually available — applied only when the system core
     // cannot build what we ask for, so machines that are already fine are left
     // exactly as they are and nobody re-downloads a core that works.
+    // `_useIsolatedCore` says where we BUILD. It must never be read as where we
+    // DELETE. On 2026-08-12 an uninstall inherited it while a system core was
+    // adopted, so isolation was off, and `core uninstall proffieboard:stm32l4`
+    // removed the user's OWN Arduino15 platform.
+    //
+    // So a destructive command never asks "are we isolated right now" - it names
+    // the exact tree it means. `core uninstall` takes no version, which makes an
+    // untargeted call a command to remove whatever happens to live wherever the
+    // environment happens to point.
     const env = { ...process.env };
-    if (!opts.raw && _useIsolatedCore) env.ARDUINO_DIRECTORIES_DATA = dataPath;
+    if (!opts.raw && (opts.dataDir || _useIsolatedCore)) {
+      env.ARDUINO_DIRECTORIES_DATA = dataPath;
+    }
 
     const proc = spawn(v.cliPath, fullArgs, {
       cwd: dataPath,
@@ -191,9 +463,18 @@ function runCli(args, onLog, opts = {}) {
           buf += chunk;
           const parts = buf.split(/\r?\n/);
           buf = parts.pop();
-          parts.filter(Boolean).forEach(onLine);
+          parts.filter(Boolean).forEach(l => {
+            const clean = _stripAnsi(l);
+            if (!_isDownloadProgress(clean)) onLine(clean);
+          });
         },
-        flush() { if (buf.trim()) onLine(buf); buf = ''; },
+        flush() {
+          if (buf.trim()) {
+            const clean = _stripAnsi(buf);
+            if (!_isDownloadProgress(clean)) onLine(clean);
+          }
+          buf = '';
+        },
       };
     }
 
@@ -221,8 +502,12 @@ function runCli(args, onLog, opts = {}) {
 }
 
 // ── First-run: write arduino-cli config yaml ───────────
-async function ensureCliConfig(onLog) {
-  const dataPath  = getArduinoDataPath();
+// Per TREE, not per app. Each core directory is a complete arduino-cli data
+// directory with its own config, staging and user folders, because the config's
+// whole job is to name the data directory it belongs to. One shared yaml would
+// point every tree at whichever one wrote it first. Callers pass the tree they
+// are about to use; omitting it means the one for the core in play.
+async function ensureCliConfig(onLog, dataPath = getArduinoDataPath()) {
   const yamlPath  = path.join(dataPath, 'arduino-cli.yaml');
 
   fs.mkdirSync(dataPath, { recursive: true });
@@ -366,70 +651,344 @@ function _ourCoreCanBuild(dataPath) {
   });
 }
 
-async function ensureCore(onLog) {
-  const dataPath     = getArduinoDataPath();
+// Does the core we are actually going to build with declare this FQBN menu
+// option?
+//
+// Only one option has ever differed between cores, and it is the one that
+// matters: `pclk`, absent in 3.6 and present from 4.4 on. Compared across the
+// 3.6 and 4.4 tags for both board types, usb / dosfs / speed / opt are
+// identical down to cdc_msc and sdmmc1. Sending `pclk` to 3.6 rejects the whole
+// FQBN before a single file compiles, which is what made 3.6 unusable here.
+//
+// Asked of boards.txt rather than of a version number, for the same reason the
+// capability probe above is: it tests the thing that breaks and stays true when
+// the next core lands.
+//
+// When we are NOT isolated the system core is in play, and it necessarily has
+// the required option, because that is precisely what _systemCoreCanBuild
+// tested to decide isolation. No second probe needed.
+function _activeCoreSupports(option) {
+  // Not isolated means _systemCoreCanBuild returned true, and that probe tests
+  // for REQUIRED_FQBN_OPTION specifically. So that one option is known-present
+  // and needs no filesystem lookup. Any other option would need its own probe;
+  // there is no such caller today, and guessing true would be the kind of
+  // silent wrong answer this function exists to avoid.
+  if (_useIsolatedCore === false) return option === REQUIRED_FQBN_OPTION;
+  return coreVersions.coreSupportsOption(getArduinoDataPath(), getActiveCoreVersion(), option);
+}
+
+/**
+ * Download and install one plugin into ONE named tree.
+ *
+ * Extracted so the session path and the self-contained path cannot drift. The
+ * tree is a parameter and never inferred, which is the property that matters:
+ * arduino-cli holds one platform version per data directory, so installing
+ * REPLACES, and an install that resolves its own destination can replace
+ * something in a tree we do not own. (2026-08-15)
+ */
+async function _installCoreInto(onLog, version, dataPath, sentinelPath) {
+  onLog(`Installing Proffieboard Plugin ${version} - this may take a few minutes on first run...`, false);
+
+  // NAME THE TREE. Do not let `_useIsolatedCore` decide where an install lands.
+  //
+  // That flag describes the plugin currently IN PLAY, and it is session-wide and
+  // mutable. Ask ensureCore for some other plugin - a background repair, a
+  // version switch resolving out of order - and the flag can still be describing
+  // the previous one. When it said "not isolated", ARDUINO_DIRECTORIES_DATA was
+  // never set, and arduino-cli fell through to the USER'S OWN Arduino15 and
+  // replaced the plugin living there. It uninstalled a working 4.6 and its
+  // compiler from a tree this app is never allowed to write to.
+  //
+  // uninstallCore has said exactly this since 2026-08-12 - "a destructive
+  // command never asks 'are we isolated right now', it names the exact tree it
+  // means" - and installing is just as destructive, because arduino-cli holds
+  // one platform version per data directory and installing REPLACES.
+  //
+  // dataPath is always one of ours here: everything above this line has already
+  // returned for the adopt case. (2026-08-15)
+  const opts = { dataDir: dataPath };
+  await ensureCliConfig(onLog, dataPath);
+
+  // From here until the verify below, this tree is in an indeterminate state.
+  try { _beginInstall?.(version); } catch {}
+
+  // Update index first - pass URL directly so it works regardless of config file parsing
+  const update = await runCli(['core', 'update-index', `--additional-urls=${BOARD_MANAGER_URL}`], onLog, opts);
+  // "Failed to update board index" describes our internal step, not the user's
+  // situation. This step is a network fetch and being offline is far and away
+  // the common reason it fails, so say the thing that is true - we could not
+  // reach it - and name the action that fixes it. Deliberately not asserting
+  // WHY it was unreachable: a proxy, DNS or the host being down all land here,
+  // and "could not reach" covers every one of them. (2026-08-15)
+  if (!update.ok) {
+    return {
+      ok: false,
+      // Names what the USER wanted, not the step we were on. "Index" is
+      // arduino-cli's vocabulary for a catalogue file; nobody asked for one.
+      // They asked for a plugin, and they did not get it. (2026-08-15)
+      error: `Could not download Proffieboard Plugin ${version}. Check your internet connection and try again.`,
+    };
+  }
+
+  // Install core
+  const install = await runCli(['core', 'install', `${CORE_ID}@${version}`, `--additional-urls=${BOARD_MANAGER_URL}`], onLog, opts);
+  if (!install.ok) {
+    return {
+      ok: false,
+      error: `Could not download Proffieboard Plugin ${version}. Check your internet connection and try again.`,
+    };
+  }
+
+  // Verify rather than assume. arduino-cli can exit zero having resolved a
+  // different version than the one asked for, and a wrong core reported as
+  // right is the failure this whole path exists to prevent.
+  if (!coreVersions.isVersionInstalled(dataPath, version)) {
+    return {
+      ok: false,
+      error: `Proffieboard Plugin ${version} reported success but is not present on disk. ` +
+             `Installed: ${coreVersions.listInstalled(dataPath).join(', ') || 'none'}.`,
+    };
+  }
+
+  // Records the last version installed. Diagnostics only - nothing branches on it.
+  try { fs.writeFileSync(sentinelPath, version, 'utf8'); } catch {}
+
+  _ensureLinuxDfuSuffix(onLog);
+  _ensureMacDfuSuffix(onLog);
+
+  onLog(`Proffieboard Plugin installed successfully.`, false);
+  try { _recordPlugin?.(version, 'jmt'); } catch {}
+  // Cleared only after the on-disk verify above, so the marker never comes down
+  // on the strength of an exit code alone.
+  try { _endInstall?.(version); } catch {}
+  return { ok: true, version, isolated: true };
+}
+
+/**
+ * @param opts.activate  false = fetch this plugin WITHOUT making it the session's
+ *                       active one and without touching the shared isolation
+ *                       flag. For installs that serve something other than the
+ *                       build in progress.
+ *
+ * The self-contained mode exists because the shared state is contagious. Asking
+ * for a plugin used to mean adopting it: setActiveCoreVersion moved the session
+ * onto it and re-decided `_useIsolatedCore`, a flag that describes where the
+ * CURRENT build should come from. A background repair then left the session
+ * pointing at a plugin nobody selected, and a stale isolation answer sent an
+ * install into the user's own Arduino15. Restoring the pin afterwards patched
+ * the symptom; not moving it is the fix. (2026-08-15)
+ */
+async function ensureCore(onLog, requestedVersion = null, { activate = true } = {}) {
+  // Resolve the version BEFORE the tree. These lines used to be the other way
+  // round, which read fine while every core shared one directory and becomes a
+  // real defect the moment they do not: the install would target the previous
+  // core's tree. (2026-08-12)
+  if (requestedVersion && activate) setActiveCoreVersion(requestedVersion);
+  const version      = activate
+    ? getActiveCoreVersion()
+    : coreVersions.normalizeVersion(requestedVersion);
+  const dataPath     = getCoreTreePath(version);
   const sentinelPath = path.join(dataPath, '.core-installed');
+
+  // Self-contained path. Decides isolation for THIS version only, from the disk,
+  // and writes none of it back to module state.
+  if (!activate) {
+    if (coreVersions.isVersionInstalled(getSystemArduinoDataPath(), version)) {
+      onLog(`Proffieboard Plugin ${version} is already on this system.`, false);
+      try { _recordPlugin?.(version, 'system'); } catch {}
+      return { ok: true, version, isolated: false };
+    }
+    if (coreVersions.isVersionInstalled(dataPath, version)) {
+      try { _recordPlugin?.(version, 'jmt'); } catch {}
+      return { ok: true, version, isolated: true };
+    }
+    return await _installCoreInto(onLog, version, dataPath, sentinelPath);
+  }
 
   // Decide isolation before anything else: it determines whether "installed"
   // means the system core or ours, and it is what every later spawn keys off.
+  //
+  // An EXPLICIT version choice adopts the system core ONLY when that tree holds
+  // exactly the version asked for, and the check happens here, at build time,
+  // rather than being recorded anywhere. Another Arduino tool can change that
+  // tree between builds, so a remembered answer is the 1.7.2 defect wearing a
+  // new costume.
+  //
+  // Version-exact is what makes adoption safe. The earlier rule isolated on
+  // every explicit choice on the grounds that a match would be coincidence, but
+  // a coincidence you verify is just a fact: someone who picked 3.6 for a
+  // flash-tight board still gets 3.6, they just do not re-download a copy of it
+  // they already have. Always-isolate cost every user roughly 1.5 GB even when
+  // their machine was already correct. (2026-08-12)
   if (_useIsolatedCore === null) {
-    _useIsolatedCore = !(await _systemCoreCanBuild());
-    if (_useIsolatedCore) {
-      onLog(`The Proffieboard core on this system cannot build for this board ` +
-            `(no '${REQUIRED_FQBN_OPTION}' option). Using JMT Studio's own copy instead; ` +
-            `your other Arduino tools are left untouched.`, false);
+    if (_coreVersionIsExplicit) {
+      if (coreVersions.isVersionInstalled(getSystemArduinoDataPath(), version)) {
+        _useIsolatedCore = false;
+        onLog(`Proffieboard Plugin ${version} is already installed on this system. ` +
+              `Building against it as-is - nothing to download, and your other Arduino ` +
+              `tools are left untouched.`, false);
+      } else {
+        _useIsolatedCore = true;
+        onLog(`Proffieboard Plugin ${version} was chosen for this ProffieOS version. ` +
+              `Using JMT Studio's own copy so the build is against exactly that plugin; ` +
+              `your other Arduino tools are left untouched.`, false);
+      }
+    } else {
+      _useIsolatedCore = !(await _systemCoreCanBuild());
+      if (_useIsolatedCore) {
+        onLog(`The Proffieboard Plugin on this system cannot build for this board ` +
+              `(no '${REQUIRED_FQBN_OPTION}' option). Using JMT Studio's own copy instead; ` +
+              `your other Arduino tools are left untouched.`, false);
+      }
     }
   }
 
   if (!_useIsolatedCore) {
     // System core is fine. Leave the machine exactly as it is - no install, no
     // download, no change from previous releases for the large majority.
-    onLog(`Core ${CORE_ID} on this system can build for this board.`, false);
+    onLog(`The Proffieboard Plugin on this system can build for this board.`, false);
     _ensureLinuxDfuSuffix(onLog);
     _ensureMacDfuSuffix(onLog);
-    return { ok: true };
+    // Adopted plugins are recorded too. If Arduino IDE later removes it, the
+    // builds made with it are dormant rather than abandoned, exactly as for ours.
+    try { _recordPlugin?.(version, 'system'); } catch {}
+    return { ok: true, version, isolated: false };
   }
 
-  // Isolated from here down: only our own directory counts. The sentinel is a
-  // speed-up, never evidence - verify the files are actually there before
-  // trusting it, or a stale sentinel silently skips the install it stands for.
-  if (fs.existsSync(sentinelPath) &&
-      fs.readFileSync(sentinelPath, 'utf8').trim() === CORE_VERSION &&
-      _ourCoreCanBuild(dataPath)) {
-    onLog(`Core ${CORE_ID}@${CORE_VERSION} already installed.`, false);
+  // Isolated from here down, and now the question is version-EXACT rather than
+  // "can anything here build". The old check accepted any core carrying the
+  // required option, which was right when one version was allowed and every
+  // other was a mistake. Once the user can choose, "some core is present" stops
+  // being an answer: with 3.6 and 4.6 both installed, a capability check is
+  // satisfied by the wrong one.
+  //
+  // The sentinel is no longer consulted for the decision. It held a single
+  // version string, which cannot describe a machine with two cores on it, and
+  // trusting it is what let 1.7.1 record a core it had not installed. The
+  // directory check below is cheap and is actual evidence, so it does the work.
+  if (coreVersions.isVersionInstalled(dataPath, version)) {
+    onLog(`Proffieboard Plugin ${version} already installed.`, false);
+    try { fs.writeFileSync(sentinelPath, version, 'utf8'); } catch {}
     _ensureLinuxDfuSuffix(onLog);
     _ensureMacDfuSuffix(onLog);
-    return { ok: true };
+    try { _recordPlugin?.(version, 'jmt'); } catch {}
+    return { ok: true, version, isolated: true };
   }
 
-  // Also check our own arduino-data directory directly, for the exact version.
-  // Any-version-will-do is what let a 3.6 install masquerade as 4.6.0.
-  if (_ourCoreCanBuild(dataPath)) {
-    onLog(`Core ${CORE_ID}@${CORE_VERSION} already installed.`, false);
-    fs.writeFileSync(sentinelPath, CORE_VERSION, 'utf8');
-    _ensureLinuxDfuSuffix(onLog);
-    _ensureMacDfuSuffix(onLog);
-    return { ok: true };
+  return await _installCoreInto(onLog, version, dataPath, sentinelPath);
+}
+
+// Remove a core we installed, through arduino-cli rather than by deleting
+// directories. The CLI owns that layout and knows how the platform relates to
+// its tools; hand-deleting risks leaving the package index describing something
+// that is no longer there.
+//
+// Refuses to remove the core currently in play. A reset that leaves the app
+// unable to build is not a reset.
+async function uninstallCore(onLog, version) {
+  const target = coreVersions.normalizeVersion(version);
+  if (target === getActiveCoreVersion()) {
+    return { ok: false, error: `Proffieboard Plugin ${target} is in use and was not removed.` };
   }
 
-  onLog(`Installing core ${CORE_ID}@${CORE_VERSION} — this may take a few minutes on first run...`, false);
+  // Find the tree that holds THIS version, among ours only. The system tree is
+  // never searched, so it can never be the thing removed.
+  const tree = findOurCoreTree(target);
+  if (!tree) {
+    // Present in the system tree but not in any of ours: theirs to keep, and
+    // saying so beats a silent success that implies we removed something.
+    if (coreVersions.isVersionInstalled(getSystemArduinoDataPath(), target)) {
+      return { ok: false, error: `Proffieboard Plugin ${target} belongs to your own Arduino installation and was left alone.` };
+    }
+    return { ok: true, version: target, alreadyAbsent: true };
+  }
 
-  // Update index first — pass URL directly so it works regardless of config file parsing
-  const update = await runCli(['core', 'update-index', `--additional-urls=${BOARD_MANAGER_URL}`], onLog);
-  if (!update.ok) return { ok: false, error: 'Failed to update board index.' };
+  // `core uninstall` takes PACKAGER:ARCH and REFUSES a version:
+  //
+  //     Invalid parameter proffieboard:stm32l4@3.6: version not allowed
+  //
+  // arduino-cli holds one platform version per data directory, so there is
+  // nothing to disambiguate and the flag does not exist. We were passing
+  // `@3.6.0`, which failed on the version being present at all rather than on
+  // its format, removed nothing, and surfaced nowhere. Verified against the CLI
+  // itself rather than reasoned about. (2026-08-12)
+  //
+  // Removing the arch removes whatever version that tree holds, which is why the
+  // resolve above runs first and why the tree is named explicitly here: the two
+  // together mean this can only ever delete the core it was asked to delete.
+  const res = await runCli(['core', 'uninstall', CORE_ID], onLog, { dataDir: tree.path });
+  if (!res.ok) return { ok: false, error: `Could not remove Proffieboard Plugin ${target}.` };
 
-  // Install core
-  const install = await runCli(['core', 'install', `${CORE_ID}@${CORE_VERSION}`, `--additional-urls=${BOARD_MANAGER_URL}`], onLog);
-  if (!install.ok) return { ok: false, error: `Failed to install core ${CORE_ID}@${CORE_VERSION}.` };
+  // Verify rather than trust the exit code, the same way install does, and
+  // verify in the tree we actually targeted.
+  if (coreVersions.isVersionInstalled(tree.path, target)) {
+    return { ok: false, error: `Proffieboard Plugin ${target} reported removed but is still present.` };
+  }
+  // The ONLY place intent is dropped. Reaching here means the user chose to
+  // remove this plugin through Reset Build Space, which already counts and warns
+  // about the builds that stops being usable. Anything else - a pin moving, a
+  // directory vanishing - leaves the record standing, which is the whole point.
+  try { _forgetPlugin?.(target); } catch {}
+  return { ok: true, version: target, tree: tree.path };
+}
 
-  // Write sentinel so subsequent startups skip this flow
-  fs.writeFileSync(sentinelPath, CORE_VERSION, 'utf8');
+/**
+ * Cancel an install that is still running, and leave nothing half-written.
+ *
+ * A plain kill is not enough. arduino-cli unpacks as it goes, so an interrupted
+ * install leaves a partly populated platform directory that `listInstalled`
+ * may well report as present - a plugin that exists, cannot build, and would be
+ * trusted by every check that asks "is it installed". Worse than no plugin.
+ *
+ * Deleting the whole directory is safe here BY CONSTRUCTION, and the guards
+ * below are what make that true rather than hopeful:
+ *   - it is under our own tree root, never the user's Arduino15
+ *   - it is never the legacy root, which holds shared config and builtin tools
+ *   - the name is version-shaped, so `staging` and `tmp` can never be the target
+ * A versioned tree is a container we created to hold exactly one plugin, so if
+ * that plugin never finished arriving the container has no other contents worth
+ * keeping. Same reasoning the reset already uses to remove emptied trees.
+ *
+ * Does NOT touch `_aborted`. That flag belongs to the compile path, and setting
+ * it here would make the next compile believe it had been cancelled.
+ * (2026-08-15)
+ */
+async function cancelCoreInstall(version) {
+  const target = coreVersions.normalizeVersion(version);
+  if (!/^\d+\.\d+\.\d+$/.test(target)) {
+    return { ok: false, error: 'Not a plugin version.' };
+  }
 
-  _ensureLinuxDfuSuffix(onLog);
-  _ensureMacDfuSuffix(onLog);
+  if (_currentProc) {
+    try { _killTree(_currentProc); } catch {}
+  }
 
-  onLog(`Core installed successfully.`, false);
-  return { ok: true };
+  // Windows keeps file handles open until the tree is actually dead, so a
+  // delete issued immediately fails with EBUSY. Wait for runCli's close handler
+  // to clear the process, with a ceiling so a wedged kill cannot hang the UI.
+  const deadline = Date.now() + 4000;
+  while (_currentProc && Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 100));
+  }
+
+  const root   = getCoreTreeRoot();
+  const legacy = getLegacyCoreTreePath();
+  const dir    = path.join(root, target);
+  if (dir === legacy || !dir.startsWith(root + path.sep)) {
+    return { ok: false, error: 'Refusing to remove that directory.' };
+  }
+  if (!fs.existsSync(dir)) return { ok: true, version: target, removed: false };
+
+  // One retry: a handle can outlive the process by a moment.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+      return { ok: true, version: target, removed: true };
+    } catch (e) {
+      if (attempt === 1) return { ok: false, error: `Could not remove the partial install: ${e.message}` };
+      await new Promise(r => setTimeout(r, 400));
+    }
+  }
 }
 
 // ── Initialize toolchain ───────────────────────────────
@@ -596,12 +1155,38 @@ async function compile(configContent, fqbn, buildOptions, onLog) {
   // (useless for timing) and bench builds shouldn't pollute the real cache.
   const bench = !!(buildOptions && buildOptions.bench);
 
+  // What this build is made of, stated before anything is staged.
+  //
+  // The log used to open with the config path and nothing else, so a build was
+  // not self-describing: none of the four inputs that decide whether it links
+  // appeared anywhere in it. The plugin was the worst of them - ensureCore is
+  // the only code that ever names one and it runs at startup, so a normal
+  // compile never printed the compiler that was about to read the config.
+  //
+  // Raw values on purpose. These are what arduino-cli is handed, so a log
+  // pasted into a forum thread carries the real FQBN rather than a label only
+  // this app uses. The friendly names live in the UI, where the user is looking
+  // at the control that set them.
+  //
+  // The plugin's TREE is part of the fact, not decoration: the same version
+  // number can be the user's own Arduino install or our copy, and which one is
+  // in play is the first thing worth knowing about a build behaving oddly.
+  // Isolation is resolved above, so this reports the real answer. (2026-08-15)
+  onLog(`Board:               ${fqbn}`, false);
+  onLog(`ProffieOS:           ${proffie.getSelectedVersion() || 'unknown'}`, false);
+  onLog(`Proffieboard Plugin: ${getActiveCoreVersion()} ` +
+        `(${_useIsolatedCore ? 'JMT Studio' : 'system'})`, false);
+  onLog(`USB:                 ${usb}`, false);
+
   const refCheck = proffie.ensureConfigFileRef(onLog);
   if (!refCheck.ok) { onLog(refCheck.error, true); return { ok: false, error: refCheck.error }; }
 
   const staged = proffie.stageConfig(configContent);
   if (!staged.ok) { onLog(staged.error, true); return { ok: false, error: staged.error }; }
-  onLog(`Config staged to: ${staged.stagedPath}`, false);
+  // Padded to the same column as the build-identity block above, so the opening
+  // of every compile log reads as one aligned run rather than four tidy lines
+  // and a ragged one. (2026-08-15)
+  onLog(`Config staged to:    ${staged.stagedPath}`, false);
 
   const sketchPath = proffie.getProffieOSRoot();
   const buildPath  = getBuildOutputPath();
@@ -610,9 +1195,17 @@ async function compile(configContent, fqbn, buildOptions, onLog) {
   // dosfs=sdmmc1 uses SDIO high-speed on V3 (L452RE); V1/V2 only support sdspi
   const dosfs = fqbn.includes('L452') ? 'sdmmc1' : 'sdspi';
 
+  // Composed rather than hardcoded, because the option set is not the same on
+  // every core. `pclk` does not exist before 4.4, and passing an option a core
+  // does not declare rejects the FQBN outright - the build fails in 0:00 with
+  // "invalid option 'pclk'" and nothing is compiled. Every other option here is
+  // present on both 3.6 and 4.6, so this is the only conditional needed.
+  const fqbnOptions = [`usb=${usb}`, `dosfs=${dosfs}`, 'speed=80', `opt=${opt}`];
+  if (_activeCoreSupports('pclk')) fqbnOptions.push('pclk=2');
+
   const args = [
     'compile',
-    '--fqbn', `${fqbn}:usb=${usb},dosfs=${dosfs},speed=80,opt=${opt},pclk=2`,
+    '--fqbn', `${fqbn}:${fqbnOptions.join(',')}`,
     '--build-path', buildPath,
     '--warnings', 'none',
     '--verbose',
@@ -653,7 +1246,7 @@ async function compile(configContent, fqbn, buildOptions, onLog) {
   // one retry, and only for this signature, so a genuine config error is never
   // compiled twice.
   if (!result.ok && !_aborted && _looksLikeUnusableCore(result)) {
-    onLog('The Proffieboard core on this system cannot build for this board. ' +
+    onLog('The Proffieboard Plugin on this system cannot build for this board. ' +
           'Switching to JMT Studio\'s own copy...', false);
     _useIsolatedCore = null;
     const core = await ensureCore(onLog);
@@ -672,7 +1265,7 @@ async function compile(configContent, fqbn, buildOptions, onLog) {
     ok: result.ok,
     aborted: wasAborted,
     errorClass: result.ok ? null : (wasAborted ? 'aborted' : _classifyCompileError(output)),
-    coreVersion: CORE_VERSION,
+    coreVersion: getActiveCoreVersion(),
     opt,
     lto,
     usb,
@@ -695,10 +1288,40 @@ async function compile(configContent, fqbn, buildOptions, onLog) {
         const proffieOSHash = proffie.hashVersion(proffie.getSelectedVersion());
         const stylesContent = proffie.readStagedStyles();
         cache.cacheCompileResult(buildPath, configContent, fqbn, usb, proffieOSHash,
-          new Date().toISOString(), app.getVersion(), stylesContent, durationMs);
+          getActiveCoreVersion(), new Date().toISOString(), app.getVersion(),
+          stylesContent, durationMs);
       } catch {}
     }
-    return { ok: true, buildPath, durationMs, ...sizeReport };
+    // coreVersion rides along so the renderer can stamp @jmt:core without a
+    // second IPC round trip, and so the marker records the core that actually
+    // produced THIS build rather than whatever is selected by the time the
+    // event is handled.
+    // osVersion rides along for the same reason coreVersion does, and it has to
+    // come from HERE rather than from the renderer's dropdown: this is the tree
+    // that was actually staged and compiled, read at the moment it succeeded.
+    // The dropdown is a setting the user can move mid-build, and @jmt:os_version
+    // follows it to disk on any save - so neither can stand in for "the version
+    // this binary was built from". (2026-08-15)
+    // The board and USB mode go back too, and for a reason beyond this app: a
+    // config gets pasted into a forum thread when someone needs help, and a
+    // helper reads its markers as facts about the saber. @jmt:board and
+    // @jmt:usb are SETTINGS - they follow the dropdowns to disk on any save -
+    // so "usb = cdc_msc" can mean "mass storage was flashed to this board" or
+    // "they ticked the box once and never built". Those two diagnoses are
+    // nothing alike, and mass storage without MOUNT_SD_SETTING is the setting
+    // that corrupts SD cards.
+    //
+    // The FQBN rather than the friendly name: it is what was handed to
+    // arduino-cli, it is unambiguous about the board variant, and it matches
+    // the identity block printed at the top of the build log. (2026-08-15)
+    return {
+      ok: true, buildPath, durationMs,
+      coreVersion:   getActiveCoreVersion(),
+      osVersion:     proffie.getSelectedVersion(),
+      compiledFqbn:  fqbn,
+      compiledUsb:   usb,
+      ...sizeReport,
+    };
   } else {
     _aborted = false;
     if (wasAborted) {
@@ -707,7 +1330,10 @@ async function compile(configContent, fqbn, buildOptions, onLog) {
       return { ok: false, aborted: true, error: 'Compile aborted' };
     }
     onLog('--- Compile failed ---', true);
-    const cleanError = extractCompileError(result.stderr + result.stdout);
+    // Capacity comes from the same output being summarised, so it can never
+    // describe a different board than the one that failed.
+    const cleanError = extractCompileError(result.stderr + result.stdout,
+                                           _boardCapacityFrom(result.stdout));
     return { ok: false, error: cleanError, durationMs, errorClass: _classifyCompileError(output) };
   }
 }
@@ -750,31 +1376,44 @@ async function benchCompile(configContent, fqbn, buildOptions, optList, onLog) {
 //   4. Cap at 3 errors total — first usually identifies the root cause, the rest
 //      are usually cascading from it.
 // Falls back to the last 10 non-empty lines when no `error:` line matches.
-function extractCompileError(raw) {
-  const lines = raw.split(/\r?\n/);
-  const errorLines = lines.filter(l =>
-    / error: /.test(l) && !/ note: /.test(l) && !l.startsWith('>')
-  );
-  if (!errorLines.length) {
-    return lines.filter(Boolean).slice(-10).join('\n');
-  }
-  const MAX_MSG = 180;
-  const summarize = (line) => {
-    const m = line.match(/^(?:.*[\\/])?([^\\/:]+):(\d+)(?::\d+)?:\s+error:\s+(.*)$/);
-    if (!m) {
-      return line.length > MAX_MSG ? line.slice(0, MAX_MSG) + '…' : line;
-    }
-    const file = m[1];
-    const ln   = m[2];
-    let msg    = m[3];
-    if (msg.length > MAX_MSG) msg = msg.slice(0, MAX_MSG) + '…';
-    return `${file}:${ln} — ${msg}`;
-  };
-  const summary = errorLines.slice(0, 3).map(summarize).join('\n');
-  const moreCount = errorLines.length - 3;
-  return moreCount > 0
-    ? `${summary}\n…and ${moreCount} more (full output in Build Output panel)`
-    : summary;
+// A line that is an echoed command, not a message. arduino-cli prints the full
+// Compile-failure summarisation moved to ./compileErrors.js so the test suite can
+// import the SAME code it checks - it previously kept a private copy, which passed
+// while this one was broken. See that file's header. (2026-08-15)
+const { extractCompileError } = require('./compileErrors');
+
+// What the board can hold, for the message shown when a build does not fit.
+//
+// `Sketch uses X of Y` is printed by arm-none-eabi-size, which arduino-cli runs
+// only AFTER a successful link - so on the one failure where the capacity matters
+// most, it was never printed. The linker reports the shortfall and nothing else.
+//
+// Read from the boards.txt of the platform arduino-cli ACTUALLY used, which it
+// names in its own output. Taking it from there rather than rebuilding the path
+// is what makes this correct whether the plugin was adopted from the system tree
+// or installed into one of ours - the two are different directories and only the
+// output knows which one won.
+//
+// Returns null rather than a guess. A message that omits the capacity is worse
+// than one that invents it. (2026-08-15)
+const _PLATFORM_LINE_RE =
+  /Using board '([^']+)' from platform in folder:\s*(.+?)\s*$/m;
+
+function _boardCapacityFrom(output) {
+  const m = String(output || '').match(_PLATFORM_LINE_RE);
+  if (!m) return null;
+  const [, boardId, platformDir] = m;
+  try {
+    const txt = fs.readFileSync(path.join(platformDir, 'boards.txt'), 'utf8');
+    const esc = boardId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const max  = txt.match(new RegExp(`^${esc}\\.upload\\.maximum_size=(\\d+)`, 'm'));
+    const name = txt.match(new RegExp(`^${esc}\\.name=(.+)$`, 'm'));
+    if (!max) return null;
+    return {
+      boardName: name ? name[1].trim() : boardId,
+      maxFlash:  Number(max[1]),
+    };
+  } catch { return null; }
 }
 
 // ── Tools path ─────────────────────────────────────────
@@ -968,10 +1607,32 @@ function waitForDfuAccessible(onLog, deadlineMs = 25000) {
           // present but we could not open it" (libusb access on Windows is exclusive, so a
           // concurrent dfu-util - including a diagnostic one - can lock us out). Cheap, and it
           // only prints on the failure path.
-          const reported = lines.map(l => l.trim()).filter(Boolean).slice(-4);
-          onLog(reported.length
-            ? `dfu-util reported: ${reported.join(' | ')}`
-            : 'dfu-util returned no output at all.', false);
+          // Keep the diagnostic, drop what is not diagnostic. dfu-util prints a copyright and
+          // warranty banner on every run, and on a busy machine it also reports failing to open
+          // USB devices that have nothing to do with us - a webcam, a keyboard. Verbatim, that
+          // handed a maker a licence notice and someone else's hardware ID as the explanation for
+          // their flash failing.
+          //
+          // Anything mentioning OUR ids survives untouched, and so does any other genuine error,
+          // because that is the whole reason this line exists. (2026-08-14)
+          const BOILERPLATE = /copyright|free software|absolutely no warranty|report bugs|^dfu-util \d/i;
+          const OUR_IDS     = /0483:df11|1209:6668/i;
+          // "Cannot open DFU device 04f2:b6cb" for a device that is not a Proffieboard bootloader.
+          const OTHER_DEVICE = /cannot open dfu device\s+([0-9a-f]{4}:[0-9a-f]{4})/i;
+
+          const kept = lines
+            .map(l => l.trim())
+            .filter(Boolean)
+            .filter(l => !BOILERPLATE.test(l))
+            .filter(l => {
+              const m = l.match(OTHER_DEVICE);
+              return !m || OUR_IDS.test(m[1]);   // drop failures about other people's hardware
+            })
+            .slice(-4);
+
+          onLog(kept.length
+            ? `dfu-util reported: ${kept.join(' | ')}`
+            : 'dfu-util did not find a Proffieboard bootloader.', false);
           return resolve({ openable: false, everPresent, elapsedMs: elapsed });
         }
         setTimeout(check, 750);
@@ -1606,14 +2267,41 @@ function getStatus() {
 function checkCacheAndRestore(configContent, fqbn, usb) {
   const proffieOSHash = proffie.hashVersion(proffie.getSelectedVersion());
   const stylesContent = proffie.readStagedStyles();
-  return cache.checkAndRestore(configContent, fqbn, usb, proffieOSHash, stylesContent);
+  return cache.checkAndRestore(configContent, fqbn, usb, proffieOSHash,
+    getActiveCoreVersion(), stylesContent);
 }
 
-function needsCoreInstall() {
-  const dataPath     = getArduinoDataPath();
-  const sentinelPath = path.join(dataPath, '.core-installed');
-  if (!fs.existsSync(sentinelPath)) return true;
-  return fs.readFileSync(sentinelPath, 'utf8').trim() !== CORE_VERSION;
+// Drives the first-run setup banner. Asks about the version actually in play
+// rather than a constant, so choosing a core the machine does not have yet
+// surfaces the same honest "installing, this takes a few minutes" flow a first
+// launch gets, instead of a silent stall inside the first compile.
+//
+// Reads the directory, not the sentinel. A single version string cannot
+// describe a machine with two cores installed, and the sentinel saying "4.6"
+// tells us nothing about whether the 3.6 someone just selected is present.
+/**
+ * Will starting a build actually DOWNLOAD something?
+ *
+ * Its only caller sends the `toolchain-setup` signal, which opens the build log and shows the
+ * setup notice - a promise that a download is beginning. So the question it has to
+ * answer is "is a download coming", not "is this version in our own tree".
+ *
+ * It used to ask the second, checking `getArduinoDataPath()` alone. That tree is ours, and it
+ * ignores the system Arduino install we are perfectly willing to adopt - so anyone who already had
+ * the Proffieboard Plugin from Arduino IDE, and anyone who had just run Reset Build Space, was told
+ * JMT Studio was setting up a plugin and had the log panel opened for a download that never
+ * happened. The worst instance is a genuine first run: most people arrive having already installed
+ * the plugin by following pod.hubbe.net.
+ *
+ * `listAvailableCores()` is the same merged, version-exact view (system tree plus every tree of
+ * ours) that the picker and the reset already use, so this answer cannot drift from theirs.
+ * Adoption is still decided at build time by ensureCore; this only decides whether to promise a
+ * download. (2026-08-14)
+ */
+function needsCoreInstall(version = null) {
+  const want = coreVersions.normalizeVersion(version || getActiveCoreVersion());
+  return !listAvailableCores()
+    .some(c => coreVersions.normalizeVersion(c.version) === want);
 }
 
 module.exports = {
@@ -1630,7 +2318,30 @@ module.exports = {
   needsCoreInstall,
   validateCli,
   CORE_ID,
-  CORE_VERSION,
+
+  // Core version selection. CORE_VERSION used to be exported as a constant;
+  // callers now ask for the version in play, because it changes per ProffieOS
+  // version and a stale copy of it is how the build and the cache disagree.
+  getActiveCoreVersion,
+  setActiveCoreVersion,
+  ensureCore,
+  uninstallCore,
+  cancelCoreInstall,
+  setPluginHooks,
+
+  // Where our own copy of the core lives. Exported for the same reason
+  // coreCanBuildAt is: anything asking about installed cores has to look in the
+  // directory the compiler will actually use. portDetector still keeps a local
+  // copy of this rule, which is a drift risk worth collapsing separately.
+  getArduinoDataPath,
+  getCoreTreeRoot,
+  getCoreTreePath,
+  getLegacyCoreTreePath,
+  listCoreTrees,
+  listCoreTreePaths,
+  getSystemArduinoDataPath,
+  listAvailableCores,
+
   // Exported so portDetector can look for the core in the same place the
   // compiler does. Duplicating the rule is how the two drift apart, and a
   // board list reading a different directory than the compile is exactly the

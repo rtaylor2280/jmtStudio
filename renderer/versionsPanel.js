@@ -16,7 +16,10 @@ async function _vpDoSaveNotes() {
   const saveBtn  = document.getElementById('vp-btn-save-notes');
   const statusEl = document.getElementById('vp-notes-status');
   if (!_vpSelected || !notesEl) return;
-  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
+  // _btnBusy/_btnIdle live in index.html's script, which has already run by the
+  // time this file is injected. Label without the ellipsis; the class animates it.
+  if (saveBtn) saveBtn.disabled = true;
+  _btnBusy(saveBtn, 'Saving');
   const result = await window.electronAPI.writeVersionNotes(_vpSelected.name, notesEl.value);
   if (result.ok) {
     _vpNotesOriginal = notesEl.value;
@@ -28,7 +31,8 @@ async function _vpDoSaveNotes() {
   } else {
     if (statusEl) statusEl.textContent = `Error: ${result.error}`;
   }
-  if (saveBtn) { saveBtn.textContent = 'Save Notes'; saveBtn.disabled = notesEl.value === _vpNotesOriginal; }
+  _btnIdle(saveBtn, 'Save Notes');
+  if (saveBtn) saveBtn.disabled = notesEl.value === _vpNotesOriginal;
 }
 
 // ── Helpers ────────────────────────────────────────────
@@ -202,6 +206,11 @@ function _vpRenderDetail(v) {
 
     <div id="vp-jmt-panel" style="display:none;margin-bottom:18px;padding:12px;background:var(--c-bg-inset);border:1px solid var(--c-border);border-radius:5px;font-size:0.82rem;"></div>
 
+    <div class="vp-section" id="vp-core-section">
+      <div class="vp-section-label">Proffieboard Plugin</div>
+      <div id="vp-core-body" style="font-size:0.82rem;color:var(--c-text-dim);">Loading…</div>
+    </div>
+
     <div class="vp-section">
       <div class="vp-section-label">Notes</div>
       <textarea id="vp-notes" class="vp-notes-editor" spellcheck="false" placeholder="Add notes about this version: changes, known issues, source, etc.">${notesVal}</textarea>
@@ -247,7 +256,7 @@ function _vpRenderDetail(v) {
 
   saveBtn.addEventListener('click', async () => {
     saveBtn.disabled = true;
-    saveBtn.textContent = 'Saving…';
+    _btnBusy(saveBtn, 'Saving');
     const result = await window.electronAPI.writeVersionNotes(v.name, notesEl.value);
     if (result.ok) {
       _vpNotesOriginal = notesEl.value;
@@ -260,7 +269,7 @@ function _vpRenderDetail(v) {
     } else {
       statusEl.textContent = `Error: ${result.error}`;
     }
-    saveBtn.textContent = 'Save Notes';
+    _btnIdle(saveBtn, 'Save Notes');
     saveBtn.disabled = notesEl.value === _vpNotesOriginal;
   });
 
@@ -271,6 +280,11 @@ function _vpRenderDetail(v) {
   document.getElementById('vp-btn-rename')?.addEventListener('click', () => _vpRename(v));
   document.getElementById('vp-btn-delete')?.addEventListener('click', () => _vpDelete(v));
   document.getElementById('vp-btn-jmt')?.addEventListener('click', () => _vpJmtFlow(v));
+
+  // Populated after render because it needs the board index, which can touch
+  // the network. Rendering the pane synchronously and filling this in keeps a
+  // slow or unreachable index from stalling the whole detail view.
+  _vpRenderCoreSection(v);
 
   // Dev-mode branch toggle. Only present when window._jmtDevMode is true (set via
   // the 7-tap unlock in Settings). Flipping the branch refetches the manifest and
@@ -330,6 +344,460 @@ function _vpRenderDetail(v) {
 }
 
 // ── Version tree: ProffieOS as the fixed root ──────────
+
+// Which Proffieboard Plugin version this ProffieOS version compiles with.
+//
+// Called "Proffieboard Plugin" throughout, never "core" and never "build tools".
+// That is the community's own name for it, verified rather than assumed
+// (2026-08-12): Arduino's Boards Manager lists the package as literally
+// "Proffieboard Plugin", pod.hubbe.net's setup page tells users to install
+// "the latest version Proffieboard Plugin", and profezzorn titles his own
+// release threads "Arduino-Proffieboard Plugin v3.6 beta" / "Arduino-proffieboard
+// plugin 4.6 beta". In running copy the forum shortens it to "plugin 4.6".
+//
+// "core" is arduino-cli's word (`core install`) and stays internal. "Build
+// tools" was OUR invention and was worse than both: it matched nothing the user
+// had ever seen. Someone who set this up in Arduino IDE has read the exact
+// string "Proffieboard Plugin", so using it is free recognition.
+//
+// Worth a control rather than a constant because the choice decides whether a
+// build links at all: a style-heavy config can fit on 3.6 and overflow 4.6 by
+// kilobytes, which on a 256 KB V2 or V2.2 is a quarter of the board.
+//
+// There is deliberately no "follow latest" option. A version that followed
+// latest would change compiler the day a new release shipped - cache misses, an
+// unrequested download, and a config that only just fitted possibly failing to
+// link. Versions are pinned; a newer release is reported as a fact to act on.
+//
+// The select is styled inline on purpose. A class name renders an unstyled
+// native control; the declarations below are copied from the include-common
+// picker, which is the reference for selects in this app.
+// The three phases arduino-cli actually reports, and the words the panel shows
+// for them. Module scope because BOTH install paths paint them now: one started
+// from the dropdown here, one started by ensureCore at startup. Same work, so
+// the same labels and the same moving bar. (2026-08-15)
+// Local three-part normaliser. The panel cannot require coreVersions, and
+// `3.6` vs `3.6.0` from two different senders would otherwise never match.
+const coreVersions_normalize = v => String(v || '').trim().split('.').slice(0, 3)
+  .concat(['0', '0', '0']).slice(0, 3).join('.');
+
+const _VP_PHASE = {
+  index:       'Checking for plugin',
+  downloading: 'Downloading plugin',
+  installing:  'Installing plugin',
+};
+// Unsubscribed and re-taken on every render, so a repaint cannot leave a
+// listener behind writing into an element that no longer exists.
+let _vpPhaseUnsub = null;
+
+const _VP_SELECT_CSS =
+  'width:100%;max-width:320px;padding:6px 8px;background:var(--c-bg-inset);' +
+  'color:var(--c-text);border:1px solid var(--c-border-strong);border-radius:3px;' +
+  'font-size:0.82rem;';
+
+// opts.autoInstall: the user just PICKED this core, so if it is missing, fetch it
+// without making them confirm the thing they already said. Deliberately not the
+// default: merely rendering the panel must never start a several-hundred-megabyte
+// download, so the button still exists for that state and for retrying a failure.
+async function _vpRenderCoreSection(v, opts = {}) {
+  const body = document.getElementById('vp-core-body');
+  if (!body) return;
+
+  let avail, current;
+  try {
+    [avail, current] = await Promise.all([
+      window.electronAPI.listCoreVersions(),
+      window.electronAPI.getCoreForVersion(v.name),
+    ]);
+  } catch {
+    body.textContent = 'Could not read the list of available Proffieboard Plugin versions.';
+    return;
+  }
+  // The pane may have moved on to another version while this was in flight.
+  if (!document.getElementById('vp-core-body') || current.name !== v.name) return;
+
+  const sources = avail.sources || {};
+
+  // Already filtered and newest-first by the main process: at or above the
+  // floor, plus anything present on the machine. Every entry is a real choice.
+  //
+  // "system" and "installed" are different facts and the user should see which.
+  // A system core lives in their own Arduino tree - usable, but never ours to
+  // remove - while an installed one we downloaded and a reset can reclaim.
+  const options = (avail.versions || []).map(ver => {
+    const src   = sources[ver];
+    const badge = src === 'system' ? ' · system' : src === 'jmt' ? ' · installed' : '';
+    return `<option value="${_vpEsc(ver)}"${current.pinned === ver ? ' selected' : ''}>` +
+           `${_vpEsc(ver)}${badge}</option>`;
+  }).join('');
+
+  // Explanation lives in a tooltip, not inline. An inline paragraph is height
+  // every user pays on every visit, including everyone who already knows.
+  const sectionTitle =
+    'The Proffieboard Plugin version this ProffieOS version compiles with - the same ' +
+    'plugin you would install in Arduino IDE. Each plugin brings its own compiler, so ' +
+    'the version you pick changes how large the firmware is and can decide whether a ' +
+    'big config fits on a 256 KB board. Which one comes out smaller depends on the ' +
+    'ProffieOS version, so it is worth trying both. This never changes on its own.';
+
+  body.innerHTML = `
+    <div title="${_vpEsc(sectionTitle)}" style="display:flex;flex-direction:column;gap:8px;">
+      <select id="vp-core-select" style="${_VP_SELECT_CSS}">${options}</select>
+      <div id="vp-core-status" style="display:flex;align-items:center;gap:10px;min-height:24px;"></div>
+    </div>
+  `;
+
+  try { _vpPhaseUnsub?.(); } catch {}
+  _vpPhaseUnsub = null;
+
+  const sel    = document.getElementById('vp-core-select');
+  const status = document.getElementById('vp-core-status');
+
+  // A render can land WHILE an install is running - this function re-renders
+  // itself on success, and a refresh can come from elsewhere - and each one
+  // builds a fresh select that is enabled by default. Re-apply the lock, or the
+  // race reopens for whatever is left of the download. (2026-08-15)
+  if (sel && window._coreInstallInFlight) sel.disabled = true;
+
+  // Runs the download and owns the whole visible arc of it. Shared by the auto
+  // path and the button so there is one behaviour, not two that drift.
+  async function doInstall(pinned, revertTo = null) {
+    // One at a time, whatever the entry point. The select is locked while an
+    // install runs, but this function is also reached from the Install button
+    // and from autoInstall on a re-render, and two concurrent arduino-cli runs
+    // against overlapping trees is the failure this whole lock exists to stop.
+    if (window._coreInstallInFlight || window._backgroundPluginInstall) return;
+
+    // Several hundred megabytes with no percentage available, so a static line
+    // is indistinguishable from a hung app. Same moving bar the build modal uses.
+    // Three labels, and they DO flip back and forth - that is correct, not a defect.
+    //
+    // arduino-cli works package by package: download a tool, install it, download the platform,
+    // install it. So the display crosses between Downloading and Installing more than once, and it
+    // is reporting exactly what is happening at that moment. Collapsing them into one label was
+    // tried on 2026-08-14 and reverted the same hour: it hid real work to make the sequence look
+    // tidier, which is a lie about a thing the user can otherwise watch happen.
+    // Do not "fix" the flipping. Let it do its thing.
+    const PHASE = _VP_PHASE;
+    const paintPhase = (label) => {
+      const t = document.getElementById('vp-core-phase');
+      if (t) t.textContent = `${label} ${pinned}…`;
+    };
+    // Open on the FIRST REAL PHASE, not a placeholder. This used to read "Getting plugin X…"
+    // until the first progress event replaced it, which put a state in front of the user that
+    // never described anything: getting, then downloading, then installing, where the first was
+    // only "we have not heard back yet". Starting at `index` costs nothing - it is what is
+    // actually happening at that instant - and the sequence loses a step nobody needed.
+    // (2026-08-14)
+    // Cancel is the way out, since the dropdown is locked for the duration. It
+    // is not merely a stop: the handler removes the partially written tree, so
+    // the machine ends where it started rather than holding a plugin that is
+    // present, unusable, and reported as installed. (2026-08-15)
+    status.innerHTML =
+      `<span id="vp-core-phase" style="color:var(--c-text-dim);">${PHASE.index} ${_vpEsc(pinned)}…</span>` +
+      `<span class="vp-wait-track"><div class="bm-bar-knightrider"></div></span>` +
+      `<button class="vp-action-btn" id="vp-core-cancel">Cancel</button>`;
+
+    let cancelled = false;
+    document.getElementById('vp-core-cancel')?.addEventListener('click', async () => {
+      cancelled = true;
+      const btn = document.getElementById('vp-core-cancel');
+      // Was hand-rolled here; routed through the shared helper so this file has one
+      // way of showing a working state. (2026-08-15)
+      if (btn) btn.disabled = true;
+      _btnBusy(btn, 'Cancelling');
+      const phaseEl = document.getElementById('vp-core-phase');
+      if (phaseEl) phaseEl.textContent = 'Stopping and cleaning up…';
+      const res = await window.electronAPI.cancelCoreInstall?.(pinned).catch(() => null);
+      // The install's own finally runs too and re-renders; this only reports a
+      // cleanup that FAILED, since a clean cancel needs no announcement.
+      if (res && !res.ok) {
+        const s = document.getElementById('vp-core-status');
+        if (s) s.innerHTML = `<span style="color:#e44;">${_vpEsc(res.error)}</span>`;
+      }
+    });
+
+    // Downloading and installing are two long waits, and giving both one label
+    // makes the second one look like the first has stalled.
+    const stopPhase = window.electronAPI.onCoreInstallProgress?.(({ phase }) => {
+      if (phase && PHASE[phase]) paintPhase(PHASE[phase]);
+    });
+
+    // Compile must not be available against a plugin that is still arriving.
+    window._coreInstallInFlight = pinned;
+    window.updateCompileButton?.();
+    // Neither may the SELECT. It was live for the whole download, and switching
+    // during one started a second install while the first was still running:
+    // two arduino-cli processes against overlapping trees, two phase listeners
+    // repainting a status element that a re-render had already replaced, and a
+    // visible error before it settled. The pin is a one-line write and the
+    // download is minutes, so the control has to be held for the long half.
+    //
+    // Held rather than cancelled, deliberately. Aborting mid-install leaves a
+    // partially written plugin tree, and there is no cleanup for that today -
+    // refusing the change is honest, while a Cancel that strands a half tree
+    // would be worse than the race it replaced. (2026-08-15)
+    sel.disabled = true;
+    // ...and the status bar must not still read "Toolchain ready" while it arrives. That indicator
+    // is written at startup and never revisited, so without this the app disabled Compile for a
+    // reason its own status line contradicted. (2026-08-14)
+    window.setToolchainBusy?.(`Installing Proffieboard Plugin ${pinned}...`);
+    let res = null;
+    try {
+      res = await window.electronAPI.installCoreVersion(pinned);
+    } catch { res = null; }
+    finally {
+      // Every install would otherwise leave a live listener behind, and each one
+      // repaints a status element from an install that already finished.
+      try { stopPhase?.(); } catch {}
+      window._coreInstallInFlight = null;
+      window.updateCompileButton?.();
+      window.clearToolchainBusy?.();
+      // The element may have been replaced by a re-render while we waited, so
+      // re-read rather than trusting the captured reference.
+      const live = document.getElementById('vp-core-select');
+      if (live) live.disabled = false;
+    }
+    if (res && res.ok) { _vpRenderCoreSection(v); return; }
+    // A cancelled install is not a failure and must not be reported as one. The
+    // killed CLI returns not-ok exactly like a real error would, so without this
+    // the user's own deliberate stop came back as "Could not get the plugin."
+    // Re-render instead: the tree is gone, so it lands on the honest
+    // "not installed yet" state with an Install button. (2026-08-15)
+    if (cancelled) {
+      // Put the pin back where it was. Choosing a plugin and downloading it are
+      // ONE action from the user's side - the pick is what starts the download -
+      // so cancelling has to undo both halves. Leaving the pin on a plugin that
+      // is now provably absent is the state that made the toolbar lie.
+      //
+      // `revertTo` is null when the install came from the Install button rather
+      // than from a change: there the pin was already what the user wanted and
+      // only the download was cancelled, so moving it would undo a decision they
+      // never revisited. (2026-08-15)
+      if (revertTo && revertTo !== pinned) {
+        try {
+          const back = await window.electronAPI.setCoreForVersion(v.name, revertTo);
+          if (back && back.ok && back.appliedToActive) {
+            window.onCoreVersionChanged?.(`Proffieboard Plugin changed to ${back.pinned} — recompile needed`);
+          }
+        } catch { /* the re-render below still shows the truth */ }
+      }
+      _vpRenderCoreSection(v);
+      return;
+    }
+    // Failure is where the button earns its place: offline is the common case,
+    // and the choice stays pinned so it can simply be retried later.
+    paintStatus(pinned, false, avail.stale, current.newerAvailable,
+                (res && res.error) || 'Could not get the plugin.', current.dormant);
+  }
+
+  function paintStatus(pinned, installed, stale, newerAvailable, failure, dormant) {
+    // Keep the build toolbar honest. This panel is the only place that knows the
+    // pinned plugin is absent, and the toolbar's indicator is a startup snapshot
+    // that would otherwise keep saying "Toolchain ready" over a plugin the next
+    // build has to download first. Only speaks for the version being BUILT with;
+    // editing another version's pin must not change what the toolbar reports.
+    // (2026-08-15)
+    const activeVersion = document.getElementById('input-version')?.value || null;
+    if (!activeVersion || activeVersion === v.name) {
+      window.setToolchainPluginMissing?.(installed ? null : pinned);
+    }
+    const bits = [];
+    // An install started by the MAIN process - ensureCore, at startup or on a
+    // version switch - is running right now. "Not installed" is TRUE at this
+    // instant and completely useless: the plugin is on its way, and the button
+    // beside it offers to fetch what is already being fetched.
+    //
+    // Not merely disabled. doInstall refuses re-entry while the flag is set, so
+    // the button was already inert - and an inert button is a dead click, which
+    // reads as the app having stopped responding. Show the work instead, with
+    // the same moving bar the panel's own installs use. (2026-08-15)
+    // Either kind of install running in the main process: the startup/toolchain
+    // one, or a background repair of this very plugin.
+    const healing = window._backgroundPluginInstall &&
+                    coreVersions_normalize(window._backgroundPluginInstall) === coreVersions_normalize(pinned);
+    const mainInstalling = !installed && (!!window._coreInstallInFlight || !!healing);
+
+    if (mainInstalling) {
+      const flag  = window._coreInstallInFlight || window._backgroundPluginInstall;
+      const which = typeof flag === 'string' ? flag : pinned;
+      bits.push(
+        `<span id="vp-core-phase" style="color:var(--c-text-dim);">` +
+        `${_VP_PHASE.index} ${_vpEsc(which)}…</span>` +
+        `<span class="vp-wait-track"><div class="bm-bar-knightrider"></div></span>`
+      );
+    } else if (!installed) {
+      // NO "Install X" BUTTON, and no "not installed yet". (2026-08-15)
+      //
+      // "yet" claims the plugin was never here, and this panel cannot know that -
+      // it may have been removed five minutes ago by another Arduino tool. Nor
+      // can it say "anymore". So it states what IS true: not installed, and what
+      // will happen about it.
+      //
+      // The button went for a plainer reason: it was never the thing that got a
+      // plugin onto the machine. Installs fire on their own - when the pin
+      // changes, at startup, and again the next time the toolchain initialises,
+      // which is what quietly fixes it when a connection comes back. The button
+      // duplicated all of that and only ever appeared in the window where it
+      // could not work.
+      //
+      // "Try again" survives, because after a FAILURE the user has just been told
+      // something went wrong and offering the retry is the coherent next move.
+      // "missing" and "not installed" are different facts, and only the record
+      // can tell them apart. Missing means JMT Studio put it here and something
+      // took it away - a machine that has drifted. Not installed means it was
+      // simply never fetched. Neither says what will happen next, because
+      // offline that is not knowable. (2026-08-15)
+      // Two facts, no story: it is expected, and it is not here. Saying it "was
+      // installed by JMT Studio and has been removed since" names an agent and
+      // an event we cannot know - hand deletion today, a backup restore that
+      // omitted it tomorrow, or something else entirely. (2026-08-15)
+      const absence = dormant
+        ? `Proffieboard Plugin ${_vpEsc(pinned)} is expected but is not on this computer. ` +
+          `Saved builds made with it are kept.`
+        : `Proffieboard Plugin ${_vpEsc(pinned)} is not installed.`;
+      bits.push(
+        failure
+          ? `<span style="color:var(--c-text-dim);">${absence}</span>` +
+            `<span style="color:#e44;">${_vpEsc(failure)}</span>` +
+            `<button class="vp-action-btn" id="vp-core-install">Try again</button>`
+          : `<span style="color:var(--c-text-dim);">${absence}</span>`
+      );
+    } else {
+      bits.push(`<span style="color:var(--c-text-dim);">Building with ${_vpEsc(pinned)}.</span>`);
+    }
+    // A fact, not a nudge. Someone pinned to 3.6 because 4.6 overflows their
+    // board needs to know a newer release exists without being pushed toward a
+    // build that cannot link for them, so this states it and offers nothing.
+    // The dropdown above is how they take it, if they want it.
+    if (newerAvailable) {
+      bits.push(`<span style="color:var(--c-text-faint);">${_vpEsc(newerAvailable)} is available.</span>`);
+    }
+    // Said plainly rather than hidden, because "newest" from a cached list is a
+    // claim we cannot currently stand behind.
+    if (stale) {
+      bits.push('<span style="color:var(--c-text-faint);">Could not reach the board index, so this list may be out of date.</span>');
+    }
+    status.innerHTML = bits.join('');
+
+    // Follow the phases of an install we did not start. Without this the line
+    // sat on "Checking" for the whole download, which is the static-label
+    // problem the moving bar exists to avoid, just one level up.
+    if (mainInstalling) {
+      const flag2  = window._coreInstallInFlight || window._backgroundPluginInstall;
+      const which2 = typeof flag2 === 'string' ? flag2 : pinned;
+      _vpPhaseUnsub = window.electronAPI.onCoreInstallProgress?.(({ phase }) => {
+        const t = document.getElementById('vp-core-phase');
+        if (t && phase && _VP_PHASE[phase]) t.textContent = `${_VP_PHASE[phase]} ${which2}…`;
+      }) || null;
+    }
+
+    document.getElementById('vp-core-install')
+      // No revertTo: this button installs the pin the user is already on, so
+      // cancelling stops a download without undoing a choice they did not just make.
+      ?.addEventListener('click', () => doInstall(pinned));
+  }
+
+  paintStatus(current.pinned, current.installed, avail.stale, current.newerAvailable, null, current.dormant);
+
+  // Picking a core IS asking for it. Making someone click Install afterwards is
+  // asking them to confirm what they just said, so the only time that button is
+  // the right answer is when getting it failed, or when the panel is merely
+  // showing a pin that predates the tools being present.
+  if (opts.autoInstall && !current.installed) doInstall(current.pinned, opts.revertTo || null);
+
+  // Tracks the last committed selection so a cancelled or failed change can put
+  // the control back. Reassigned on success: a value captured once at render
+  // would revert to the original choice after the second change, not the last.
+  let previousValue = sel.value;
+
+  sel.addEventListener('change', async () => {
+    const choice   = sel.value;
+    const priorPin = previousValue;
+
+    // Warn before the switch, not after. Changing the build tools changes the
+    // cache key, so builds cached under the old ones stop being reachable.
+    //
+    // They are NOT deleted, and saying so matters. evictOldEntries is scoped to
+    // one build-package directory, so compiling with the new tools only evicts
+    // within their own directory, and the orphan sweep keeps anything whose
+    // ProffieOS hash still matches an installed version AND whose tools are
+    // still installed. Switching back therefore hits the old builds again.
+    // Calling that "lost" would push people into copying things they do not need
+    // to copy, and would make a reversible choice feel permanent.
+    //
+    // Stated from what is recorded, never estimated - the rule the Clear-cache
+    // dialog set after an invented duration turned out to be wrong by 25x.
+    const impact = await window.electronAPI
+      .coreSwitchImpact(v.name, choice)
+      .catch(() => null);
+
+    if (impact && impact.ok && impact.changed && impact.losing > 0) {
+      const one    = impact.losing === 1;
+      const builds = one ? '1 cached build' : `${impact.losing} cached builds`;
+      const lines  = [
+        `<p>${builds} for <strong>${_vpEsc(v.name)}</strong> ` +
+        `${one ? 'was' : 'were'} compiled with plugin ` +
+        `<strong>${_vpEsc(impact.fromCore)}</strong> and cannot be reused with ` +
+        `<strong>${_vpEsc(impact.toCore)}</strong>. The first compile of each config ` +
+        `with the new plugin runs from scratch.</p>`,
+        // The reassurance is the important half. Nothing is deleted, so this is
+        // a reversible choice and nobody needs to copy anything to keep it.
+        `<p style="color:var(--c-text-dim);">${one ? 'It is' : 'They are'} not deleted. ` +
+        `Switch back to ${_vpEsc(impact.fromCore)} later and ${one ? 'it' : 'they'} ` +
+        `will be reused again.</p>`,
+      ];
+      // Only claim a duration when one was actually recorded.
+      if (impact.longestLosingMs != null) {
+        const secs = Math.round(impact.longestLosingMs / 1000);
+        const fmt  = window._sfFormatDuration ? window._sfFormatDuration(secs) : `${secs}s`;
+        lines.push(`<p>The longest of those took <strong>${_vpEsc(fmt)}</strong> to build.</p>`);
+      }
+      if (impact.keeping > 0) {
+        lines.push(`<p style="color:var(--c-text-dim);">${impact.keeping} build` +
+                   `${impact.keeping === 1 ? '' : 's'} already cached against ` +
+                   `${_vpEsc(impact.toCore)} will still be reused.</p>`);
+      }
+      if (!impact.installed) {
+        lines.push(`<p style="color:var(--c-text-dim);">Plugin ${_vpEsc(impact.toCore)} ` +
+                   `is not installed yet and will need to be downloaded.</p>`);
+      }
+
+      const go = await window.promptConfirm({
+        title:       'Change the Proffieboard Plugin?',
+        messageHtml: lines.join(''),
+        confirmText: 'Change',
+        confirmKind: 'danger',
+      });
+      if (!go) { sel.value = previousValue; return; }
+    }
+
+    sel.disabled = true;
+    const res = await window.electronAPI.setCoreForVersion(v.name, choice);
+    sel.disabled = false;
+    if (!res || !res.ok) {
+      sel.value = previousValue;
+      status.innerHTML = `<span style="color:#e44;">${_vpEsc((res && res.error) || 'Could not save that choice.')}</span>`;
+      return;
+    }
+    v.coreVersion = res.pinned;
+    previousValue = sel.value;
+    // Re-render rather than repaint: the newer-available line depends on what is
+    // now pinned, and a stale one would claim an update exists after it is taken.
+    // autoInstall, because reaching here means the user chose this core.
+    // The pin before this change, so a cancelled download can put it back. It
+    // has to travel through opts: the re-render replaces this closure, and
+    // `previousValue` does not survive it.
+    _vpRenderCoreSection(v, { autoInstall: true, revertTo: priorPin });
+
+    // If this is the version being built with, the compiled state is now stale.
+    // Drop it the same way a board or USB change does, or Flash stays armed
+    // over a binary made by the previous tools.
+    if (res.appliedToActive && window.onCoreVersionChanged) {
+      window.onCoreVersionChanged(`Proffieboard Plugin changed to ${res.pinned} — recompile needed`);
+    }
+  });
+}
 
 function _vpInitVersionTree(versionName, container) {
   container.innerHTML = '';
@@ -407,6 +875,7 @@ async function _vpSearch(versionName, query, container) {
       `;
       row.title = `Click to view ${entry.name}`;
       row.addEventListener('click', () => _vpOpenFile(versionName, entry.path, entry.name, query));
+      _vpAttachPropCtxMenu(row, entry.path, entry.name, versionName);
     }
     container.appendChild(row);
   });
@@ -477,11 +946,10 @@ async function _vpLoadTree(versionName, subPath, container, depth) {
         <span class="vp-tree-name">${_vpEsc(entry.name)}</span>
         <span class="vp-tree-size">${entry.size != null ? _vpFmtBytes(entry.size) : ''}</span>
       `;
+      const filePath = subPath ? `${subPath}/${entry.name}` : entry.name;
       row.title = `Click to view ${entry.name}`;
-      row.addEventListener('click', () => {
-        const filePath = subPath ? `${subPath}/${entry.name}` : entry.name;
-        _vpOpenFile(versionName, filePath, entry.name);
-      });
+      row.addEventListener('click', () => _vpOpenFile(versionName, filePath, entry.name));
+      _vpAttachPropCtxMenu(row, filePath, entry.name, versionName);
       container.appendChild(row);
     }
   });
@@ -497,10 +965,29 @@ async function _vpLoadTree(versionName, subPath, container, depth) {
 
 // ── File viewer ────────────────────────────────────────
 
+// The prop currently open in the viewer as { filePath, versionName }, or null.
+// versionName matters because the tree can be browsing a version the config does
+// not build with. Read by the Link Prop button in index.html.
+let _vpViewerProp = null;
+
+// Link Prop is only offered for a prop header, and only when there is a config
+// open for it to be written into.
+function _vpUpdateLinkPropBtn() {
+  const btn = document.getElementById('vp-file-modal-link-prop-btn');
+  if (!btn) return;
+  const eligible = !!_vpViewerProp && !!(window.isConfigOpen && window.isConfigOpen());
+  btn.style.display = eligible ? '' : 'none';
+}
+
 async function _vpOpenFile(versionName, filePath, fileName, searchQuery) {
   const modal    = document.getElementById('vp-file-modal');
   const titleEl  = document.getElementById('vp-file-modal-title');
   const editorEl = document.getElementById('vp-file-modal-editor');
+
+  _vpViewerProp = (window._isLinkablePropPath && window._isLinkablePropPath(filePath))
+    ? { filePath, versionName }
+    : null;
+  _vpUpdateLinkPropBtn();
 
   titleEl.textContent = filePath;
   modal.classList.add('active');
@@ -555,6 +1042,35 @@ async function _vpOpenFile(versionName, filePath, fileName, searchQuery) {
 function _vpCloseFileModal() {
   document.getElementById('vp-file-modal').classList.remove('active');
   if (_vpFileViewer) { _vpFileViewer.dispose(); _vpFileViewer = null; }
+  _vpViewerProp = null;
+  _vpUpdateLinkPropBtn();
+}
+
+// Right-click a prop header in the tree to link it without opening it first.
+// Reuses the shared preset-ctx-menu DOM every other browser in the app uses,
+// including its mousedown-to-activate convention.
+function _vpAttachPropCtxMenu(row, filePath, fileName, versionName) {
+  if (!window._isLinkablePropPath || !window._isLinkablePropPath(filePath)) return;
+  row.addEventListener('contextmenu', e => {
+    // Nothing to link it into, so offer nothing rather than a dead item.
+    if (!(window.isConfigOpen && window.isConfigOpen())) return;
+    e.preventDefault();
+    const menu = document.getElementById('preset-ctx-menu');
+    if (!menu) return;
+    menu.innerHTML = '';
+    const item = document.createElement('div');
+    item.className   = 'preset-ctx-item';
+    item.textContent = `\u{1F517} Link ${fileName} as this config's prop`;
+    item.addEventListener('mousedown', ev => {
+      ev.stopPropagation();
+      menu.style.display = 'none';
+      if (window._linkPropFromVersion) window._linkPropFromVersion(filePath, versionName);
+    });
+    menu.appendChild(item);
+    menu.style.left = Math.min(e.clientX, window.innerWidth - 320) + 'px';
+    menu.style.top  = Math.min(e.clientY, window.innerHeight - 60) + 'px';
+    menu.style.display = 'block';
+  });
 }
 
 // ── Version actions ────────────────────────────────────
@@ -971,6 +1487,7 @@ window.initVersionsPanel = initVersionsPanel;
 window.vpRefresh         = vpRefresh;
 window.vpCloseFileModal  = _vpCloseFileModal;
 window.vpOpenFind        = () => { if (_vpFileViewer) _vpFileViewer.trigger('keyboard', 'actions.find', null); };
+window.vpViewerProp      = () => _vpViewerProp;
 window.vpSelectVersion   = (name) => {
   const v = _vpVersions.find(x => x.name === name);
   if (v) _vpSelectVersion(v);

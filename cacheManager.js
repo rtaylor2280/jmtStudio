@@ -22,9 +22,24 @@ const crypto  = require('crypto');
 const path    = require('path');
 const fs      = require('fs');
 const { app } = require('electron');
+// Safe to import: coreVersions pulls in nothing from this module, so there is no cycle, and reusing
+// its version normalisation beats a second copy of the two-part / three-part rule living here.
+const coreVersions = require('./coreVersions');
 
-// Must stay in sync with CORE_VERSION in toolchain.js
-const CORE_VERSION = '4.6.0';
+// The core version is NOT a constant here any more, and deliberately not
+// imported from toolchain either.
+//
+// It used to be a copy of toolchain's constant with a comment asking whoever
+// edited one to remember the other. That was survivable while exactly one core
+// was ever installed. Now the core is chosen per ProffieOS version, and a cache
+// key computed from a stale copy of the version is not a cosmetic bug: two
+// builds against different cores collide on one key and the second one gets
+// handed the first one's binary. A stale binary flashed to a board is the worst
+// outcome this app has.
+//
+// So every entry point that needs it takes it as an explicit argument and
+// refuses to guess. Importing toolchain would also be a require cycle, since
+// toolchain already imports this module.
 
 const MAX_ENTRIES_PER_LINEAGE = 5;
 
@@ -236,8 +251,15 @@ function computeConfigHash(content, stylesContent = '') {
  * Computes a stable hash of the build package identity.
  * Any change to FQBN, USB mode, core version, or ProffieOS source produces a new hash.
  */
-function computeBuildPackageHash(fqbn, usb, proffieOSHash) {
-  const identity = `fqbn=${fqbn}|usb=${usb}|core=${CORE_VERSION}|os=${proffieOSHash || ''}`;
+function computeBuildPackageHash(fqbn, usb, proffieOSHash, coreVersion) {
+  // Throwing beats defaulting. A missing core version would silently produce a
+  // key that two different cores both match, and the symptom would be a stale
+  // binary on someone's board rather than an error anyone could trace back
+  // here. Loud and early is the only safe failure for a cache identity.
+  if (!coreVersion) {
+    throw new Error('computeBuildPackageHash requires an explicit coreVersion');
+  }
+  const identity = `fqbn=${fqbn}|usb=${usb}|core=${coreVersion}|os=${proffieOSHash || ''}`;
   return crypto.createHash('sha256').update(identity, 'utf8').digest('hex').slice(0, 16);
 }
 
@@ -394,17 +416,60 @@ function evictStaleHashEntries() {
  * Exactness is the point. A size cap or an age cap can delete a build the user is about to want;
  * an orphaned OS hash cannot be hit by definition, so this can never cost a real hit.
  *
+ * The same argument applies to the CORE, which became a second way a directory can be stranded once
+ * the core stopped being hardcoded. buildPkgHash is derived from the core version too, so a
+ * directory built with a core that is no longer installed can never be produced by a lookup again.
+ * Removing a toolchain used to leave its builds behind permanently: unusable, invisible, and
+ * occupying space. An unreachable cached compile should always be reclaimed — that is already the
+ * rule for the hash algorithm and the OS version, and the core is simply the third case.
+ *
+ * Note the asymmetry with the toolchain itself, which is deliberate. Reclaiming an unreachable BUILD
+ * costs nothing, so it happens automatically. Removing the TOOLS costs a download that may be
+ * metered or unavailable, so that stays user-initiated and is never done here.
+ *
+ * PROTECTED CORES IS WIDER THAN "INSTALLED", AND THE DIFFERENCE MATTERS.
+ *
+ * arduino-cli holds exactly ONE version of a platform per data directory - installing 3.6 uninstalls
+ * 4.6 - so "installed" is a moving target that says nothing about intent. Keyed on that alone, this
+ * sweep would delete every 4.6 build the moment somebody switched to 3.6, which is precisely the
+ * switch-back-and-it-still-works property the cache exists to provide.
+ *
+ * So a core is protected if it is available ANYWHERE (the user's system tree or any of our per-core
+ * trees) OR still named by an installed ProffieOS version. The second half covers the case where a
+ * core vanishes outside the app: another tool upgrades the system 2.2 away while a version is still
+ * pinned to it. Intent survives the disappearance, so the builds are kept and the user is offered
+ * the download. Only when nothing has it and nothing wants it are the builds provably dead.
+ *
  * @param {Set<string>|string[]} validOsHashes  every hash an installed version currently produces
- * @returns {{removed: string[], bytes: number, skipped: string|null}}
+ * @param {Set<string>|string[]} protectedCores every core available anywhere or referenced by a version
+ * @returns {{removed: string[], bytes: number, skipped: string|null, coreCheckSkipped: boolean}}
  */
-function evictOrphanedBuildPkgs(validOsHashes) {
+function evictOrphanedBuildPkgs(validOsHashes, protectedCores) {
   const valid = validOsHashes instanceof Set ? validOsHashes : new Set(validOsHashes || []);
-  const result = { removed: [], bytes: 0, skipped: null };
+  const cores = new Set(
+    Array.from(protectedCores instanceof Set ? protectedCores : (protectedCores || []))
+      .map(coreVersions.normalizeVersion)
+  );
+  // `removed` counts DIRECTORIES; `builds` counts what the user counts.
+  //
+  // A buildPkg directory holds one entry per config compiled against that
+  // fqbn/usb/core/os combination, so removing one directory can remove several
+  // builds. The log said "removed 1 orphaned build package(s)" while the Cached
+  // Builds row dropped from 9 to 7 - both true, about different units, and
+  // together they read as a miscount. The user's unit is the build, and nothing
+  // outside this file has ever heard of a package. (2026-08-15)
+  const result = { removed: [], builds: 0, bytes: 0, skipped: null, coreCheckSkipped: false };
 
   // THE GUARD THAT MATTERS: an empty set means "no installed version hashes to anything", which is
   // never true in practice — it means enumeration or hashing failed. Proceeding would read every
   // directory as orphaned and delete the entire cache. Fail closed.
   if (valid.size === 0) { result.skipped = 'no valid OS hashes supplied'; return result; }
+
+  // Same guard, narrower blast radius. An empty set means enumeration failed, not that no core is
+  // protected - the app could not have compiled anything without one, and every installed ProffieOS
+  // version names one. Skip only the core rule rather than the whole sweep, so a core-side failure
+  // cannot disable OS-orphan cleanup that is working perfectly well.
+  if (cores.size === 0) result.coreCheckSkipped = true;
 
   const cacheRoot = getCacheRoot();
   if (!fs.existsSync(cacheRoot)) return result;
@@ -417,20 +482,37 @@ function evictOrphanedBuildPkgs(validOsHashes) {
     if (!d.isDirectory()) continue;
     const pkgDir = path.join(cacheRoot, d.name);
 
-    // Read the OS hash from any entry inside. Every entry under one buildPkg shares it by
-    // construction. Unreadable or empty -> leave it alone; we do not delete what we cannot identify.
-    let osHash = null;
+    // Read the key components from any entry inside. Every entry under one buildPkg shares them by
+    // construction, since the directory name is their hash. Unreadable or empty -> leave it alone;
+    // we do not delete what we cannot identify.
+    let osHash = null, entryCore = null;
     try {
       for (const sub of fs.readdirSync(pkgDir, { withFileTypes: true })) {
         if (!sub.isDirectory()) continue;
         const metaPath = path.join(pkgDir, sub.name, 'metadata.json');
         if (!fs.existsSync(metaPath)) continue;
-        osHash = JSON.parse(fs.readFileSync(metaPath, 'utf8')).proffieOSHash || null;
+        const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+        osHash    = meta.proffieOSHash || null;
+        entryCore = meta.coreVersion   || null;
         if (osHash) break;
       }
     } catch { continue; }
 
-    if (!osHash || valid.has(osHash)) continue;
+    if (!osHash) continue;
+
+    // ORPHANED means any component of buildPkgHash can no longer be produced, so no lookup can ever
+    // land here again. The key is fqbn|usb|core|os. fqbn and usb are always available - every board
+    // and USB mode is declared by whatever core is installed - so the two that can actually vanish
+    // are the OS version and the core. Both are checked here. If a component is ever added to the
+    // key, it needs a check added here too, or the directories it strands become invisible dead
+    // weight exactly as the core's did.
+    const osGone   = !valid.has(osHash);
+    // A missing coreVersion is a pre-1.8 entry, not evidence of a vanished core. Never inferred as
+    // orphaned; the stale-hash sweep is what reclaims those.
+    const coreGone = !result.coreCheckSkipped && !!entryCore &&
+                     !cores.has(coreVersions.normalizeVersion(entryCore));
+
+    if (!osGone && !coreGone) continue;
 
     let bytes = 0;
     try {
@@ -441,8 +523,14 @@ function evictOrphanedBuildPkgs(validOsHashes) {
           else { try { bytes += fs.statSync(full).size; } catch {} }
         }
       })(pkgDir);
+      // Counted BEFORE the delete, from the same walk that measured the bytes.
+      let entries = 0;
+      for (const e of fs.readdirSync(pkgDir, { withFileTypes: true })) {
+        if (e.isDirectory() && fs.existsSync(path.join(pkgDir, e.name, 'metadata.json'))) entries++;
+      }
       fs.rmSync(pkgDir, { recursive: true, force: true });
       result.removed.push(d.name);
+      result.builds += entries;
       result.bytes += bytes;
     } catch {}
   }
@@ -469,7 +557,7 @@ function saveToCache(buildOutputPath, configHash, buildPkgHash, meta) {
       buildPkgHash,
       fqbn:        meta.fqbn,
       usb:         meta.usb,
-      coreVersion: CORE_VERSION,
+      coreVersion: meta.coreVersion,
     }, null, 2), 'utf8');
   }
 
@@ -497,7 +585,7 @@ function saveToCache(buildOutputPath, configHash, buildPkgHash, meta) {
     fqbn:          meta.fqbn,
     usb:           meta.usb,
     proffieOSHash: meta.proffieOSHash,
-    coreVersion:   CORE_VERSION,
+    coreVersion:   meta.coreVersion,
     compiledAt:    meta.compiledAt,
     toolVersion:   meta.toolVersion,
     // How long this build actually took. Stored ON the entry rather than derived later, so the
@@ -583,9 +671,9 @@ function restoreToOutput(configHash, buildPkgHash) {
  * Given config content + build parameters, checks the cache and restores if hit.
  * Returns { hit, buildPath?, metadata? }
  */
-function checkAndRestore(configContent, fqbn, usb, proffieOSHash, stylesContent = '') {
+function checkAndRestore(configContent, fqbn, usb, proffieOSHash, coreVersion, stylesContent = '') {
   const configHash   = computeConfigHash(configContent, stylesContent);
-  const buildPkgHash = computeBuildPackageHash(fqbn, usb, proffieOSHash);
+  const buildPkgHash = computeBuildPackageHash(fqbn, usb, proffieOSHash, coreVersion);
   const result       = restoreToOutput(configHash, buildPkgHash);
   if (!result.ok) return { hit: false };
   return { hit: true, buildPath: result.buildPath, metadata: result.metadata };
@@ -596,12 +684,12 @@ function checkAndRestore(configContent, fqbn, usb, proffieOSHash, stylesContent 
  * Extracts configId from configContent automatically.
  * Called from toolchain.js after a successful compile.
  */
-function cacheCompileResult(buildOutputPath, configContent, fqbn, usb, proffieOSHash, compiledAt, toolVersion, stylesContent = '', compileDurationMs = null) {
+function cacheCompileResult(buildOutputPath, configContent, fqbn, usb, proffieOSHash, coreVersion, compiledAt, toolVersion, stylesContent = '', compileDurationMs = null) {
   const configHash   = computeConfigHash(configContent, stylesContent);
-  const buildPkgHash = computeBuildPackageHash(fqbn, usb, proffieOSHash);
+  const buildPkgHash = computeBuildPackageHash(fqbn, usb, proffieOSHash, coreVersion);
   const configId     = extractConfigId(configContent);
   return saveToCache(buildOutputPath, configHash, buildPkgHash, {
-    fqbn, usb, proffieOSHash, compiledAt, toolVersion, configId, compileDurationMs,
+    fqbn, usb, proffieOSHash, coreVersion, compiledAt, toolVersion, configId, compileDurationMs,
   });
 }
 

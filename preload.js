@@ -52,6 +52,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getCacheSize:    () => ipcRenderer.invoke('cache:getSize'),
   clearBuilds:     () => ipcRenderer.invoke('cache:clearBuilds'),
   resetWorkspace:  () => ipcRenderer.invoke('cache:resetWorkspace'),
+  // Reset Build Space. Survey first so the confirm can state what will actually
+  // happen this time, then reset. Two calls on purpose: the modal has to be able
+  // to say "only working files" or "also build tools you are not using" without
+  // the caller guessing which.
+  surveyBuildSpace: () => ipcRenderer.invoke('space:survey'),
+  resetBuildSpace:  () => ipcRenderer.invoke('space:reset'),
   getDataSize:     () => ipcRenderer.invoke('cache:getDataSize'),
 
   // ── Port detection ───────────────────────────────────
@@ -119,6 +125,29 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listVersionDir:      (name, subPath)         => ipcRenderer.invoke('versions:listDir', { name, subPath }),
   readVersionFile:     (name, subPath)         => ipcRenderer.invoke('versions:readFile', { name, subPath }),
   searchVersionFiles:  (name, query)           => ipcRenderer.invoke('versions:search', { name, query }),
+
+  // ── Proffieboard core, chosen per ProffieOS version ──────
+  // Which core a version builds against. Exposed per version rather than
+  // app-wide because a config that fits on 3.6 can overflow 4.6 by kilobytes,
+  // and on a 256 KB V2/V2.2 that decides whether the build links at all.
+  listCoreVersions:    ()                      => ipcRenderer.invoke('core:listAvailable'),
+  getCoreForVersion:   (name)                  => ipcRenderer.invoke('core:getForVersion', name),
+  // Pass null as coreVersion to clear the choice and follow latest again.
+  setCoreForVersion:   (name, coreVersion)     => ipcRenderer.invoke('core:setForVersion', { name, coreVersion }),
+  installCoreVersion:  (coreVersion)           => ipcRenderer.invoke('core:install', { coreVersion }),
+  // Stop an install in flight and delete what it had written. The dropdown is
+  // locked while one runs, so this is the only way out of a long download.
+  cancelCoreInstall:   (coreVersion)           => ipcRenderer.invoke('core:cancelInstall', { coreVersion }),
+  // Which half of "getting a core" is running: 'index', 'downloading',
+  // 'installing', or null when it is over.
+  onCoreInstallProgress: (cb) => {
+    const handler = (_, data) => cb(data);
+    ipcRenderer.on('core:installProgress', handler);
+    return () => ipcRenderer.removeListener('core:installProgress', handler);
+  },
+  // What switching this version to another core would really cost, from what
+  // is recorded rather than estimated. Same rule as the Clear-cache dialog.
+  coreSwitchImpact:    (versionName, toCore)   => ipcRenderer.invoke('cache:coreSwitchImpact', { versionName, toCore }),
   fetchReleases:       ()                       => ipcRenderer.invoke('versions:fetchReleases'),
   downloadRelease:     (downloadUrl, versionName, proffieVersion) => ipcRenderer.invoke('versions:downloadRelease', { downloadUrl, versionName, proffieVersion }),
   onDownloadProgress:  (cb) => {

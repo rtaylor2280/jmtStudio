@@ -6,6 +6,7 @@ const toolchain   = require('./toolchain');
 const portDetect  = require('./portDetector');
 const proffie     = require('./proffieos');
 const cacheManager = require('./cacheManager');
+const coreVersions = require('./coreVersions');
 const soundFontSources = require('./soundFontSources');
 const soundFontVendors = require('./soundFontVendors');
 const soundFontCandidates = require('./soundFontCandidates');
@@ -198,6 +199,37 @@ app.whenReady().then(() => {
     : (versions[0] || null);
   if (initVersion) proffie.setSelectedVersion(initVersion);
 
+  // Upgrade backfill, once ever. Everything installed before 1.8 was built with
+  // the hardcoded core, so pin those trees to it rather than leaving them on
+  // follow-latest. Otherwise the day a newer core is published every existing
+  // user silently changes compiler, loses their whole build cache, downloads a
+  // new toolchain and may find a config that used to fit no longer links.
+  //
+  // Guarded by a flag rather than by "is the field missing", so a user who
+  // deliberately clears a version back to follow-latest is not re-pinned on the
+  // next launch. Synchronous and local: no network, so it cannot delay startup.
+  if (!Store.get('coreBackfillDone')) {
+    try {
+      const res = proffie.backfillVersionCores(coreVersions.PRE_1_8_CORE_VERSION);
+      if (res.ok) {
+        Store.set('coreBackfillDone', true);
+        if (res.stamped.length) {
+          console.log(`[core] pinned ${res.stamped.length} existing version(s) to core ${res.coreVersion}`);
+        }
+      }
+    } catch (e) {
+      // Leaving the flag unset means it retries next launch, which is the safe
+      // direction: an un-run backfill is recoverable, a half-recorded one is not.
+      console.warn('[core] backfill failed, will retry next launch:', e.message);
+    }
+  }
+
+  // Point the toolchain at this version's core before the window opens. Not
+  // awaited: it can touch the network, and a slow or unreachable index must
+  // never delay the app appearing. Until it lands the toolchain holds its
+  // default, and every consumer of the value runs later than this anyway.
+  if (initVersion) _applyCoreForVersion(initVersion);
+
   createWindow();
   startPortPolling();
   scheduleOrphanCacheSweep();
@@ -211,8 +243,130 @@ app.whenReady().then(() => {
 //
 // Self-healing by design: it runs every launch, so a version deleted today is reclaimed tomorrow
 // with no user action and nothing to remember.
-function scheduleOrphanCacheSweep() {
-  setTimeout(() => {
+//
+// TRIGGERED BY TOOLCHAIN RESOLUTION, NOT BY A CLOCK. (2026-08-15)
+//
+// It used to fire on a bare 5-second timer, chosen to clear first paint. But a
+// plugin removed by another Arduino tool is re-downloaded during startup, and
+// several hundred megabytes is nowhere near done at t+5s - so the sweep ran
+// against a machine mid-repair, seeing an installed set that was briefly
+// missing a plugin whose builds it was deciding about.
+//
+// Nothing was lost, because protection is by PIN and the pin outlives the
+// files. But the sweep should not depend on that being airtight; it should see
+// the settled machine. Now it waits for `toolchain:initialize` to finish -
+// success or failure - so `listAvailableCores()` reports what is really there.
+//
+// Runs once per launch. The timer survives only as a backstop for a launch
+// where initialize is never invoked at all, and it is deliberately long: firing
+// early would restore the exact condition this removed.
+let _orphanSweepRan = false;
+// Plugins this app has installed or adopted, and therefore expects to find.
+//
+// PERSISTS INTENT, NEVER PRESENCE. Nothing reads this to decide whether a plugin
+// is on disk - that is always a live check, because another Arduino tool can
+// change the tree between builds, and trusting a remembered answer is exactly
+// the 1.7.2 defect. It answers only "should this be here", which no amount of
+// looking at the disk can tell you once both the files and the pin are gone.
+// (2026-08-15)
+const PLUGIN_RECORD_KEY = 'installedPlugins';
+
+function _recordedPlugins() {
+  const rec = Store.get(PLUGIN_RECORD_KEY);
+  return (rec && typeof rec === 'object') ? rec : {};
+}
+function _recordPlugin(version, source) {
+  const v   = coreVersions.normalizeVersion(version);
+  const rec = _recordedPlugins();
+  // firstSeen is not refreshed on later installs: it records when this machine
+  // first expected the plugin, which is the useful fact, not the last time we
+  // happened to confirm it.
+  if (!rec[v]) rec[v] = { source, firstSeen: new Date().toISOString() };
+  else rec[v].source = source;
+  Store.set(PLUGIN_RECORD_KEY, rec);
+}
+function _forgetPlugin(version) {
+  const v   = coreVersions.normalizeVersion(version);
+  const rec = _recordedPlugins();
+  if (!(v in rec)) return;
+  delete rec[v];
+  Store.set(PLUGIN_RECORD_KEY, rec);
+}
+// A plugin install that was in flight when the app went away.
+//
+// The marker goes up before the install and comes down only after the on-disk
+// verify, never on an exit code alone. So a marker still standing at startup
+// means the process did not finish - killed, crashed, or the machine went off.
+// A failed install leaves it standing too, deliberately: a tree that failed
+// halfway is exactly as indeterminate as one that was interrupted, and cleaning
+// it costs nothing but a re-download of scaffolding.
+//
+// Recovery is identical to a cancel: remove the versioned tree, which is a
+// container we created for one plugin and which has no other contents worth
+// keeping. (2026-08-15)
+const PENDING_INSTALL_KEY = 'pendingPluginInstall';
+
+async function _recoverInterruptedInstall() {
+  const pending = Store.get(PENDING_INSTALL_KEY);
+  if (!pending) return;
+  Store.delete(PENDING_INSTALL_KEY);
+  try {
+    const res = await toolchain.cancelCoreInstall(pending);
+    if (res && res.removed) {
+      console.log(`[core] cleaned a partial ${pending} install left by a previous session`);
+    }
+  } catch (e) {
+    console.warn('[core] could not clean a partial install:', e.message);
+  }
+}
+
+toolchain.setPluginHooks({
+  record: _recordPlugin,
+  forget: _forgetPlugin,
+  begin:  (v) => Store.set(PENDING_INSTALL_KEY, coreVersions.normalizeVersion(v)),
+  end:    ()  => Store.delete(PENDING_INSTALL_KEY),
+});
+
+// Runs before anything reads the trees, because a partial install would lie
+// about what is present - and the backfill just below is one of the readers.
+_recoverInterruptedInstall();
+
+// One-time backfill. The record starts empty, so every plugin already on this
+// machine was invisible to it - and a plugin installed before the record existed
+// could never be recognised as dormant, which is the exact case it was built
+// for. Anything present at first run was put there deliberately, by this app or
+// by Arduino IDE, so recording it is a statement of fact rather than a guess.
+//
+// Guarded by its own flag rather than by "is the record empty", so a user who
+// deliberately clears it is not silently refilled on the next launch.
+// (2026-08-15)
+if (!Store.get('pluginRecordBackfilled')) {
+  try {
+    for (const c of toolchain.listAvailableCores()) _recordPlugin(c.version, c.source);
+    Store.set('pluginRecordBackfilled', true);
+  } catch (e) {
+    console.warn('[core] plugin record backfill failed, will retry next launch:', e.message);
+  }
+}
+
+/**
+ * Plugins we expect but cannot find. The DORMANT set.
+ *
+ * Anything here has cached builds worth keeping and is worth fetching again
+ * when there is a connection - it is a machine that has drifted from the state
+ * the app put it in, not a decision the user made.
+ */
+function _dormantPlugins() {
+  const present = new Set(
+    toolchain.listAvailableCores().map(c => coreVersions.normalizeVersion(c.version))
+  );
+  return Object.keys(_recordedPlugins()).filter(v => !present.has(v));
+}
+
+function runOrphanCacheSweep() {
+  if (_orphanSweepRan) return;
+  _orphanSweepRan = true;
+  {
     try {
       const validOsHashes = new Set();
       let failed = false;
@@ -234,13 +388,78 @@ function scheduleOrphanCacheSweep() {
       // version is gone. Stale ENTRIES sit inside perfectly live packages and went dead when the
       // config hash algorithm changed — the sweep above cannot see those, and nothing else
       // reclaims them.
-      const pkgs    = cacheManager.evictOrphanedBuildPkgs(validOsHashes);
+      // PROTECTED cores, which is wider than installed and deliberately so.
+      //
+      // arduino-cli keeps one platform version per data directory, so "installed" flips every time
+      // someone switches. Keyed on that alone this sweep would delete every 4.6 build the moment a
+      // user tried 3.6 — the exact opposite of what a cache is for.
+      //
+      // Protected = available anywhere (their system tree or ours) OR still named by an installed
+      // ProffieOS version. The second half is what saves the user whose system core was upgraded by
+      // another program while a version still points at the old one: the intent outlived the files,
+      // so the builds are kept and they get offered the download instead.
+      // Built by coreVersions.protectedCoreSet so the rule has one definition and
+      // a test. It was assembled inline here, which left the guard between an
+      // interrupted download and a 38-minute build as the only untested part of
+      // this path. (2026-08-15)
+      const protectedCores = coreVersions.protectedCoreSet({
+        available: toolchain.listAvailableCores().map(c => c.version),
+        pinned:    proffie.listVersions().map(n => proffie.getVersionCore(n)),
+        // Recorded intent. Without this term, a plugin removed outside the app
+        // AND a pin moved away leaves its builds looking abandoned when they are
+        // only dormant - and moving the pin is exactly what an offline user does
+        // to keep working.
+        expected:  Object.keys(_recordedPlugins()),
+        active:    toolchain.getActiveCoreVersion(),
+      });
+
+      const pkgs    = cacheManager.evictOrphanedBuildPkgs(validOsHashes, protectedCores);
       const entries = cacheManager.evictStaleHashEntries();
       const mb = b => (b / 1048576).toFixed(0);
       if (pkgs.removed.length) {
-        console.log(`[cache] removed ${pkgs.removed.length} orphaned build package(s), ${mb(pkgs.bytes)} MB`);
+        // Reports BUILDS, the unit shown in Settings. "Packages" is this file's
+        // internal grouping and reconciles with nothing the user can see.
+        const n = pkgs.builds || pkgs.removed.length;
+        // NOT "no longer on this computer" - that is the wrong criterion and it
+        // contradicts the protection this app now provides.
+        //
+        // A dormant plugin is also absent, and its builds are deliberately KEPT,
+        // because something still expects it. What makes a build reclaimable is
+        // that NOTHING REQUESTS IT: no installed ProffieOS version names it, it
+        // is in no tree, and it is in no record. Absence is not the test; being
+        // unwanted is. Writing it as absence would describe the dormant case too
+        // and be false about it.
+        //
+        // Leads with "no longer needed" for the same reason the order was
+        // changed before: the reader's first question is whether anything of
+        // value went, and the answer is that nothing could ever have used these
+        // again. Cause second, size last. (2026-08-15)
+        const line = `${n} cached build${n === 1 ? '' : 's'} ${n === 1 ? 'is' : 'are'} no longer ` +
+                     `needed - nothing requests the ProffieOS version or Proffieboard Plugin ` +
+                     `${n === 1 ? 'it was' : 'they were'} built for. Removed, freeing ` +
+                     `${mb(pkgs.bytes)} MB.`;
+        console.log(`[cache] ${line}`);
+        // Also where the user can find it. Cached builds disappearing with no
+        // explanation anywhere they would look is the same reason-for-a-change
+        // gap as the rest of today; until now this only existed in a terminal
+        // nobody but a developer has open.
+        //
+        // Written straight to the log rather than through the setup signal, so
+        // it does NOT open the panel: nothing is happening that needs watching
+        // and the work is already finished. It waits there for anyone who opens
+        // the log, which is the whole difference between a record and an
+        // interruption. Silent when nothing was reclaimed, which is nearly
+        // always. (2026-08-15)
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('build:log', { line, isError: false });
+        }
       }
       if (pkgs.skipped) console.log(`[cache] orphan sweep skipped: ${pkgs.skipped}`);
+      // Distinguished from "nothing to reclaim" so a core-enumeration failure that quietly disables
+      // half the sweep on every launch is visible rather than silent.
+      if (pkgs.coreCheckSkipped) {
+        console.log('[cache] orphan sweep ran on OS version only: no installed cores could be enumerated');
+      }
       if (!pkgs.removed.length && !pkgs.skipped && !entries.removed) {
         console.log('[cache] sweep found nothing to reclaim');
       }
@@ -248,7 +467,96 @@ function scheduleOrphanCacheSweep() {
         console.log(`[cache] removed ${entries.removed} entr(ies) keyed by a superseded config hash, ${mb(entries.bytes)} MB`);
       }
     } catch {}
-  }, 5000);
+  }
+}
+
+// Fetch back plugins the machine has drifted away from.
+//
+// Runs after the toolchain has settled, so the plugin the user actually needs is
+// already handled and this only ever deals with the rest. Nothing is blocked on
+// it: these are plugins no ProffieOS version is currently pointing at, so the
+// user is not waiting, and if it fails they are no worse off than before.
+//
+// Deliberately NOT silent. It is a real download and it says so in the log,
+// because a several-hundred-megabyte fetch nobody asked for should be visible
+// even when it is the right thing to do. Restoring what the app installed is
+// repair, not a new decision - but repair still gets announced.
+//
+// Once per launch, sequential, and never retried after a failure in the same
+// session: offline is the common reason, and hammering it helps nobody.
+// (2026-08-15)
+let _healRan = false;
+async function healDormantPlugins() {
+  if (_healRan) return;
+  _healRan = true;
+
+  const dormant = _dormantPlugins();
+  if (!dormant.length) return;
+
+  const log = makeLogger();
+  for (const version of dormant) {
+    // The user may have started their own install in the meantime; theirs wins.
+    if (toolchain.getActiveCoreVersion() === version) continue;
+    // A header, not a sentence. What follows is several hundred megabytes of
+    // arduino-cli output that started without the user asking for anything, and
+    // one line at the top of it scrolls away before the download even begins.
+    //
+    // Same shape as the compile identity block: what this is, what it is about,
+    // and why it is happening - stated before any work, so the log is
+    // self-describing when it is read later or pasted into a support thread.
+    // (2026-08-15)
+    log('', false);
+    log('--- Restoring a missing Proffieboard Plugin ---', false);
+    log(`Plugin:  ${version}`, false);
+    // States the two things that are KNOWN: it is expected, and it is absent.
+    //
+    // An earlier version said it "was installed by JMT Studio and has been
+    // removed since", which asserts an agent and an event we have no evidence
+    // for. Today the cause is someone clearing disk space by hand; tomorrow it
+    // is a restore from a backup that did not include it, or something nobody
+    // has thought of. The cause does not change what happens next and we cannot
+    // know it, so we do not claim it. (2026-08-15)
+    log('Reason:  JMT Studio expects this plugin and it is not on this computer', false);
+    log('Nothing is waiting on this. Compiling and flashing stay available.', false);
+    // Tell the renderer. A background heal was invisible to it, so the plugin
+    // dropdown would cheerfully start a SECOND install of the plugin already
+    // arriving. Deliberately NOT the toolchain-setup signal: this must not block
+    // Compile, because the plugin being fetched is one nothing is pinned to and
+    // the user's own build is unaffected. (2026-08-15)
+    const announce = (running) => {
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('build:status', { type: 'plugin-heal', coreVersion: version, running });
+      }
+    };
+    announce(true);
+    try {
+      // activate:false - fetch it without making it the session's plugin. The
+      // heal serves a version nobody selected, so hijacking the active core (and
+      // the isolation flag with it) is how a background repair reached into a
+      // tree it had no business in.
+      const res = await toolchain.ensureCore(_installPhaseLogger(log), version, { activate: false });
+      if (res && res.ok) log(`--- Proffieboard Plugin ${version} restored ---`, false);
+      else {
+        log(`Could not restore Proffieboard Plugin ${version} right now. ` +
+            `Its saved builds are kept and it will be tried again next launch.`, false);
+        break;   // almost certainly offline; the rest will fail the same way
+      }
+    } catch { break; }
+    finally { announce(false); _clearInstallPhase(); }
+  }
+  // No pin restore needed any more: activate:false means the session's active
+  // core was never moved. Restoring it afterwards was patching a side effect
+  // that should not have existed.
+}
+
+// Backstop only. If the renderer never asks the toolchain to initialize - a
+// window that fails to load, a future path that skips it - the sweep would
+// otherwise never run at all. Three minutes is long enough that a real startup,
+// including a plugin download, has finished first; the point is that it fires
+// eventually, not promptly. Missing one launch costs nothing, since the sweep
+// is self-healing and runs again next time.
+function scheduleOrphanCacheSweep() {
+  setTimeout(runOrphanCacheSweep, 180000);
 }
 app.on('window-all-closed', () => app.quit());
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
@@ -406,13 +714,19 @@ ipcMain.on('title:set', (_, title) => win.setTitle(title));
 
 // ── IPC: Toolchain ─────────────────────────────────────
 ipcMain.handle('toolchain:initialize', async () => {
-  const log = makeLogger();
+  // Same phase reporting as a panel-initiated install: this path runs the exact
+  // same ensureCore, so it should look the same while it does. (2026-08-15)
+  const log = _installPhaseLogger(makeLogger());
 
+  // The version being fetched travels with the signal so the notice can name it.
+  // Without that the banner has to speak in generalities, and generalities are
+  // what let it claim to be first-time setup. (2026-08-15)
   if (toolchain.needsCoreInstall() && win && !win.isDestroyed()) {
     win.webContents.send('build:status', {
       type: 'toolchain-setup',
       ok: null,
-      message: 'Setting up build tools...'
+      coreVersion: toolchain.getActiveCoreVersion(),
+      message: 'Setting up the Proffieboard Plugin...'
     });
   }
 
@@ -434,6 +748,36 @@ ipcMain.handle('toolchain:initialize', async () => {
       message: msg
     });
   }
+
+  // The machine has settled: any plugin this startup needed has been installed
+  // or has definitively failed. Only now can the sweep read a true picture of
+  // what is on disk. Called on failure too - a toolchain that could not resolve
+  // does not make the cache rules wrong, and skipping it would mean an offline
+  // launch never reclaims anything. Guarded to run once per launch, so the
+  // repeat calls from every version switch are free. (2026-08-15)
+  _clearInstallPhase();
+  runOrphanCacheSweep();
+  // Re-enabled 2026-08-15 once installs stopped inferring their destination.
+  // The failure was never the heal itself: ensureCore resolved WHERE to install
+  // from a session-wide flag, so any caller asking about a plugin other than the
+  // one in play could send it into the user's own Arduino15. Fixed at the source
+  // - the tree is a parameter now - and the heal additionally runs with
+  // activate:false, so it cannot touch session state at all.
+  // PREVIOUS NOTE, kept because it is the reason this exists:
+  //
+  // It called ensureCore for a plugin nobody had selected, and ensureCore decides
+  // WHERE to install from `_useIsolatedCore` - a session-wide flag describing the
+  // plugin in play, not the one being fetched. Asked for a plugin out of band,
+  // that flag was stale, and arduino-cli installed into the USER'S OWN Arduino15,
+  // replacing their 4.6 with 3.6 and uninstalling the 4.6 compiler.
+  //
+  // Do not re-enable until ensureCore names its target tree explicitly, the way
+  // uninstallCore already does. That function's comment says exactly this and
+  // dates from 2026-08-12: a destructive command must never ask "are we isolated
+  // right now", it must name the tree it means. The lesson was learned for
+  // uninstall and never carried across to install.
+  healDormantPlugins();
+
   return result;
 });
 
@@ -731,6 +1075,11 @@ ipcMain.handle('cache:getDataSize', () => {
   const cachedBytes = dirSize(cacheRoot);
   const outputBytes = dirSize(outputRoot);
 
+  // This used to also walk `arduino-data` and the ProffieOS versions tree and return both
+  // sizes. Nothing ever read them. On a machine holding three cores that is 13,495 files and
+  // ~1.9 GB measured synchronously on the main process every time Settings opens — about 1.4
+  // seconds of blocked UI to produce two numbers no surface displays. Anything that needs the
+  // core trees sized should ask `space:survey`, which itemises them for a reason. (2026-08-14)
   return {
     // Unchanged: must still equal what cache:clear deletes, or the old bug returns where the label
     // says 10.3 MB and 38.2 MB disappears.
@@ -739,8 +1088,348 @@ ipcMain.handle('cache:getDataSize', () => {
     outputBytes,
     cachedBuilds,
     longestCompileMs,
-    arduinoData: dirSize(path.join(userData, 'arduino-data')),
-    versions:    dirSize(path.join(userData, 'ProffieOS-versions')),
+  };
+});
+
+// ── Reset Build Space ──────────────────────────────────
+//
+// One action that shrinks the arduino-cli footprint as far as it safely can. A
+// RESET, not a delete: it never goes below what is in use, so it can always
+// still build afterwards.
+//
+// The parts have genuinely different costs to undo, which is why the modal
+// itemises rather than quoting one number. Working files cost a slower next
+// compile. Unpacked installers cost nothing at all. Build tools cost a download
+// that may be metered or unavailable, and that is the one worth naming out loud.
+
+// Every core any installed ProffieOS version points at. Stricter than "installed"
+// on purpose: the automatic cache sweep only reclaims builds whose tools are
+// GONE, while this decides which tools may be removed at all, and removing one a
+// version still names would strand that version.
+async function _referencedCores() {
+  const refs = new Set();
+  for (const name of proffie.listVersions()) {
+    try {
+      const eff = await _effectiveCoreFor(name);
+      if (eff && eff.version) refs.add(coreVersions.normalizeVersion(eff.version));
+    } catch { /* skip */ }
+  }
+  // The core in play right now, even if version enumeration missed it.
+  refs.add(coreVersions.normalizeVersion(toolchain.getActiveCoreVersion()));
+  return refs;
+}
+
+async function _surveyBuildSpace() {
+  const userData  = app.getPath('userData');
+  const dataPath  = toolchain.getArduinoDataPath();
+  const idx  = await coreVersions.resolveLatest(userData);
+  const keep = await _referencedCores();
+
+  // Only cores WE downloaded are removable. A core in the user's own Arduino
+  // tree is theirs: we may build against it, but reclaiming it would be reaching
+  // into software we do not own, and the whole isolation design exists so we
+  // never do that.
+  const ours = toolchain.listAvailableCores()
+    .filter(c => c.source === 'jmt')
+    .map(c => c.version);
+
+  const removableCores = ours.filter(v => !keep.has(coreVersions.normalizeVersion(v)));
+
+  // Sized in the tree each core actually occupies. Reading one path measured
+  // whichever tree the active core happened to resolve to, so two installed and
+  // unused cores were reported as nothing to reclaim at all. (2026-08-12)
+  // Needed by the removable-core loop below as well as the orphan-tree scan further down.
+  const legacyPath = toolchain.getLegacyCoreTreePath();
+
+  let toolBytes = 0;
+  const treeFor = new Map(toolchain.listCoreTrees()
+    .map(t => [coreVersions.normalizeVersion(t.version), t.path]));
+  // Every tool directory already accounted for, so the stray sweep below cannot count one twice.
+  const countedToolPaths = new Set();
+  // Every TREE already counted whole. Anything living inside one of these has
+  // been counted with it, so no later sum may add it again.
+  //
+  // NESTED PATHS CANNOT BE SUMMED - the rule footprintBytes below already
+  // follows, and which `total` did not. A versioned tree is counted whole here,
+  // and then its `staging/` was added again by stagingBytes and its leftover
+  // compilers again by strayToolBytes. Measured on a real reset: a 1.92 GB
+  // footprint reported 3.29 GB deleted and left 86.5 MB, so about 1.83 GB
+  // actually went and the dialog claimed nearly double.
+  //
+  // The reset itself was correct throughout; only the accounting was wrong. That
+  // is the harder kind to notice, because nothing misbehaves - the arithmetic
+  // simply does not close, and only a before/after check finds it. (2026-08-15)
+  const countedTreePaths = new Set();
+  const insideCountedTree = p =>
+    [...countedTreePaths].some(t => p === t || p.startsWith(t + path.sep));
+
+  for (const v of removableCores) {
+    const treePath = treeFor.get(coreVersions.normalizeVersion(v));
+    if (!treePath) continue;
+    // The directory is named whatever arduino-cli called it, which is not always
+    // our normalised form: 3.6 lives in `3.6`, not `3.6.0`. Sizing the normalised
+    // path measured a directory that does not exist, so the confirm dialog offered
+    // to reclaim "0 B" of a core that was about 198 MB.
+    const onDisk = coreVersions.installedVersionString(treePath, v);
+    if (!onDisk) continue;
+
+    // A VERSIONED tree exists only to hold this one plugin, so removing the plugin empties it and
+    // the reset then deletes the whole directory. Count the whole directory.
+    //
+    // Counting just the platform and its compiler missed the tree's own arduino-cli scaffolding -
+    // a ~50 MB `library_index.json`, the package indexes, the builtin tools - about 77 MB per tree
+    // that got deleted and never itemised. A reset promising 1.19 GB removed 1.27 GB. The
+    // `orphanTrees` bullet does not cover it either: that only sees trees ALREADY empty when the
+    // survey ran, not one this reset is about to empty.
+    //
+    // The legacy root is different - it survives the reset - so there only the platform and the
+    // tools it leaves behind are reclaimable. (2026-08-14)
+    if (treePath !== legacyPath) {
+      toolBytes += _dirSize(treePath);
+      countedTreePaths.add(treePath);
+      continue;
+    }
+
+    toolBytes += _dirSize(path.join(coreVersions.getHardwarePath(treePath), onDisk));
+    // Its compiler too. Each tree carries its own toolchain - 3.6 needs
+    // 9-2020-q2-update and 4.6 needs 14-2-rel1-xpack, sharing no bytes - and it
+    // is the larger half by a wide margin. Counting only the platform reported a
+    // fraction of what removing the core actually frees.
+    for (const t of coreVersions.unusedToolDirs(treePath, Array.from(keep), idx.toolDeps)) {
+      toolBytes += _dirSize(t.path);
+      countedToolPaths.add(t.path);
+    }
+  }
+
+  // Stray tool directories in trees we are NOT removing a plugin from.
+  //
+  // The survey counted unused tools only inside the trees of plugins being removed, while the reset
+  // sweeps `unusedToolDirs` across EVERY tree - including trees whose plugin is kept, and the legacy
+  // root. So a leftover compiler elsewhere was deleted and never itemised, and the arithmetic did
+  // not close: a reset promising 1.88 GB removed about 2.08 GB, a ~160 MB silent surplus.
+  //
+  // Erring generous is still erring. The confirm has to state what the action does, and the sums
+  // have to reconcile or nobody can check them. Counted with the same call the reset uses, over the
+  // same set of trees, so the two cannot drift again. (2026-08-14)
+  let strayToolBytes = 0;
+  try {
+    for (const treePath of toolchain.listCoreTreePaths()) {
+      // Its whole directory is already in toolBytes, compilers included.
+      if (insideCountedTree(treePath)) continue;
+      for (const t of coreVersions.unusedToolDirs(treePath, Array.from(keep), idx.toolDeps)) {
+        if (countedToolPaths.has(t.path) || insideCountedTree(t.path)) continue;
+        countedToolPaths.add(t.path);
+        strayToolBytes += _dirSize(t.path);
+      }
+    }
+  } catch {}
+
+  // Cached builds that only work with tools being removed. They go out together;
+  // freeing the tools and stranding their builds would be a half-measure.
+  let strandedBuilds = 0, strandedBytes = 0;
+  if (removableCores.length) {
+    const gone = new Set(removableCores.map(coreVersions.normalizeVersion));
+    const root = path.join(userData, 'build-cache');
+    try {
+      for (const pkg of fs.readdirSync(root, { withFileTypes: true })) {
+        if (!pkg.isDirectory()) continue;
+        for (const e of fs.readdirSync(path.join(root, pkg.name), { withFileTypes: true })) {
+          if (!e.isDirectory()) continue;
+          const dir = path.join(root, pkg.name, e.name);
+          const mp  = path.join(dir, 'metadata.json');
+          if (!fs.existsSync(mp)) continue;
+          let m; try { m = JSON.parse(fs.readFileSync(mp, 'utf8')); } catch { continue; }
+          if (m.coreVersion && gone.has(coreVersions.normalizeVersion(m.coreVersion))) {
+            strandedBuilds++; strandedBytes += _dirSize(dir);
+          }
+        }
+      }
+    } catch { /* no cache yet */ }
+  }
+
+  const workspaceBytes = _dirSize(path.join(userData, 'build-output'));
+  // Every tree has its own staging directory, so summing one of them under-reports
+  // by however many cores have been installed since.
+  const stagingRoots = new Set([dataPath, ...toolchain.listCoreTreePaths()]);
+  let stagingBytes = 0;
+  for (const r of stagingRoots) {
+    // A tree counted whole above already includes its own staging.
+    if (insideCountedTree(r)) continue;
+    stagingBytes += _dirSize(path.join(r, 'staging'));
+  }
+
+  // Trees that no longer hold a plugin at all.
+  //
+  // Removing a core leaves its tree standing, full of arduino-cli scaffolding it regenerates on
+  // the next install: `library_index.json` alone is ~54 MB, plus the package indexes, the builtin
+  // discovery tools and `tmp/`. Measured on a real machine after a reset: 77 MB in each of two
+  // emptied trees, ~154 MB total, none of it ours to keep and none of it the user's.
+  //
+  // Worse than the size, it was UNREACHABLE. `listCoreTrees()` yields a tree only while a core is
+  // installed in it, so `toolBytes` above can never count an emptied one - the reset that emptied
+  // the tree was also the last chance to reclaim it. Same shape as the 2026-08-12 bug where a
+  // just-emptied tree was excluded from the sweep meant to include it.
+  //
+  // The LEGACY root is deliberately excluded: it is the shared arduino-cli data directory, holding
+  // the config and the builtin tools every tree relies on. Only `arduino-data/<version>/` is a
+  // per-plugin container that exists for one purpose and is finished when that purpose is.
+  // (2026-08-14)
+  const liveTrees   = new Set(toolchain.listCoreTrees().map(t => t.path));
+  const orphanTrees = toolchain.listCoreTreePaths()
+    .filter(p => p !== legacyPath && !liveTrees.has(p));
+  let orphanTreeBytes = 0;
+  for (const p of orphanTrees) orphanTreeBytes += _dirSize(p);
+
+  // TWO numbers, because the row and the button answer different questions.
+  //
+  // `footprintBytes` is what Build Space IS: every byte the build system occupies, whether or not
+  // it can be reclaimed today. `total` is what a reset would actually delete right now.
+  //
+  // They were one number, and the row showed the reclaimable one under a label that named the
+  // thing. So the figure lurched by ~710 MB when a plugin merely stopped being referenced -
+  // nothing moved on disk, but a whole tree crossed from "in use" to "removable". A size beside a
+  // noun has to describe the noun.
+  //
+  // The footprint deliberately EXCLUDES cached builds. They are the row above's subject, and
+  // counting stranded ones here made the two rows silently overlap. A reset still deletes them -
+  // they are unusable once their plugin goes - so they stay in `total`. (2026-08-14)
+  // ONE walk of the tree root, never a sum over `listCoreTreePaths()`. That list holds the legacy
+  // root (`arduino-data/`) AND every versioned tree (`arduino-data/3.6.0/`), which live INSIDE it -
+  // so summing them counted each versioned tree twice, and `staging` three times, since staging is
+  // inside the trees. It reported 2.45 GB where a reset then freed 1.06 GB and left 183.5 MB; the
+  // arithmetic not closing is what exposed it.
+  //
+  // NESTED PATHS CANNOT BE SUMMED. Walk the container once. `build-output` is the only part of the
+  // build space living outside that root, so it is the only thing added - and `stagingBytes` is
+  // deliberately NOT added here for the same reason. (2026-08-14)
+  const footprintBytes = workspaceBytes + _dirSize(toolchain.getCoreTreeRoot());
+
+  // Cached builds are NOT build space, in either number. Build space is temp files and plugins.
+  // A reset still removes builds that only work with a plugin it is deleting - they are unusable
+  // the moment it goes - but that is a CONSEQUENCE of the reset, not part of what build space is
+  // made of, and counting it here made this row overlap the Cached Builds row above. The confirm
+  // states it as a consequence and `strandedBytes` travels for exactly that. (2026-08-14)
+  const total = workspaceBytes + stagingBytes + toolBytes + orphanTreeBytes + strayToolBytes;
+  return {
+    ok: true,
+    workspaceBytes,
+    stagingBytes,
+    footprintBytes,
+    orphanTrees: { paths: orphanTrees, bytes: orphanTreeBytes },
+    strayToolBytes,
+    tools: {
+      versions: removableCores,
+      bytes:    toolBytes,
+      strandedBuilds,
+      strandedBytes,
+      // `redownloadBytes` was here - the compressed archive size, ~198 MB - and the confirm printed
+      // it beside the reclaimed size. They are different measurements of the same thing (unpacked
+      // on disk vs compressed download), so side by side they read as a contradiction. The bullet
+      // now states the consequence without a figure, and nothing reads this, so it is gone rather
+      // than computed and discarded. (2026-08-14)
+    },
+    total,
+    // Nothing to RECLAIM is a real answer and the button should say so, even when the footprint
+    // above it is large. The two are independent: a machine can be holding a gigabyte of build
+    // space with none of it removable.
+    empty: total === 0,
+  };
+}
+
+ipcMain.handle('space:survey', async () => {
+  try { return await _surveyBuildSpace(); }
+  catch (e) { return { ok: false, error: e.message }; }
+});
+
+ipcMain.handle('space:reset', async () => {
+  const log      = makeLogger();
+  const userData = app.getPath('userData');
+  const dataPath = toolchain.getArduinoDataPath();
+  const before   = await _surveyBuildSpace();
+  const removed  = { tools: [], failed: [] };
+
+  // Tools first. Their cached builds become reclaimable only once the tools are
+  // actually gone, so ordering matters for the sweep below.
+  for (const v of before.tools.versions) {
+    const res = await toolchain.uninstallCore(log, v);
+    if (res.ok) removed.tools.push(v); else removed.failed.push(res.error);
+  }
+
+  // Whatever arduino-cli left behind that no remaining core depends on, in every
+  // tree rather than one. Re-listed AFTER the uninstalls above so a tree that has
+  // just been emptied is included. (2026-08-12)
+  // Tree DIRECTORIES, not trees-that-still-hold-a-core. `listCoreTrees` yields a
+  // tree only while a core is installed in it, so the tree this reset has just
+  // emptied - the one whose staging most needs sweeping - was the one guaranteed
+  // to be excluded, and stayed excluded on every later reset too. (2026-08-12)
+  const treesNow = new Set([dataPath, ...toolchain.listCoreTreePaths()]);
+  try {
+    const idx  = await coreVersions.resolveLatest(userData);
+    const keep = await _referencedCores();
+    for (const r of treesNow) {
+      for (const t of coreVersions.unusedToolDirs(r, Array.from(keep), idx.toolDeps)) {
+        try { fs.rmSync(t.path, { recursive: true, force: true }); } catch {}
+      }
+    }
+  } catch {}
+
+  const scratch = [path.join(userData, 'build-output')];
+  for (const r of treesNow) scratch.push(path.join(r, 'staging'));
+  for (const dir of scratch) {
+    try { if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  }
+
+  // A versioned tree with no plugin left in it has no reason to exist. Remove the directory, not
+  // just its contents: it is a per-plugin container we created, everything inside is arduino-cli
+  // scaffolding regenerated on the next install, and leaving it standing puts ~77 MB somewhere no
+  // later survey can see - `listCoreTrees()` skips a tree the moment it holds no core.
+  //
+  // Re-listed AFTER the uninstalls above so trees emptied by THIS run are included, not just ones
+  // orphaned by a previous one. The legacy root is excluded: it is the shared arduino-cli data
+  // directory, and its config, indexes and builtin tools are what every other tree depends on.
+  // (2026-08-14)
+  const legacyPath = toolchain.getLegacyCoreTreePath();
+  let treesRemoved = 0;
+  try {
+    const stillLive = new Set(toolchain.listCoreTrees().map(t => t.path));
+    for (const p of toolchain.listCoreTreePaths()) {
+      if (p === legacyPath || stillLive.has(p)) continue;
+      try {
+        fs.rmSync(p, { recursive: true, force: true });
+        treesRemoved++;
+        log(`Removed empty Proffieboard Plugin tree: ${path.basename(p)}`, false);
+      } catch (e) {
+        removed.failed.push(`Could not remove the empty ${path.basename(p)} tree: ${e.message}`);
+      }
+    }
+  } catch {}
+
+  // This used to also evict the cached builds the removed plugins had just stranded, reusing the
+  // launch sweep. Removed 2026-08-14, because it made one action own two things:
+  //
+  //   - Cached builds are NOT build space. They are the row above's subject, with its own button
+  //     for deliberate clearing.
+  //   - They are reclaimed anyway. The launch sweep evicts a build whose plugin is gone, so the
+  //     space returns on its own at the next start; this only made it sooner.
+  //   - The coupling caused a real defect. `strandedBytes` was inside `before.total` AND added
+  //     again as `sweptBytes`, so the reported "freed" overstated by their size. One action
+  //     reporting on two subjects is what produced the double-count.
+  //
+  // A reset therefore leaves those builds in place for one launch. The confirm still WARNS about
+  // them, because losing them is a genuine consequence of removing the plugin - it just is not
+  // this action's doing.
+
+  const after = await _surveyBuildSpace();
+  return {
+    // A removal that failed must not read as a reset that worked. This returned
+    // ok:true unconditionally and put failures in `errors`, which nothing read,
+    // so a reset that removed nothing still printed a tick and a byte count.
+    // Same shape as flashing a board and reporting success for a board that was
+    // never written. (2026-08-12)
+    ok: removed.failed.length === 0,
+    freed: Math.max(0, before.total - after.total),
+    removedTools: removed.tools,
+    errors: removed.failed,
   };
 });
 
@@ -3282,10 +3971,262 @@ ipcMain.handle('proffieOS:getArgumentNames', (_, versionName) => {
   return { ok: true, version: v, entries: proffie.getArgumentNames(v) };
 });
 
-ipcMain.handle('proffieOS:selectVersion', (_, name) => {
+// ── Core version, per ProffieOS version ────────────────
+//
+// Every ProffieOS version is PINNED to a specific core. There is deliberately no
+// "follow latest": a tree that followed latest would change compiler the day a
+// new core shipped, which means a cache that misses, a download nobody asked
+// for, and a config that only just fitted possibly failing to link. The rule is
+// one sentence - your build core never changes unless you change it - and a
+// newer core is surfaced as a fact to act on rather than applied silently.
+//
+// Resolution never touches the network. A version arrives stamped at download
+// time; anything unstamped (an import made while the index was unreachable, or
+// a tree that predates the field and missed the backfill) is healed here from
+// what is already on disk, then written so it is pinned like everything else.
+async function _effectiveCoreFor(versionName) {
+  const saved = versionName ? proffie.getVersionCore(versionName) : null;
+  if (saved) return { version: coreVersions.normalizeVersion(saved), pinned: true };
+
+  // 4.6.0 is the default for everyone, every time, and it is a product decision
+  // rather than a fallback: it is the most stable core and the experience we want
+  // a first-time user to get. Adopted when the system already has exactly it,
+  // installed into our own tree when not.
+  //
+  // Deliberately NOT "newest core already installed". That rule let the machine
+  // choose the policy - a user whose system happened to hold only 3.6 would be
+  // silently pinned to 3.6 on first launch and never see the default we intend.
+  // An older core is a considered choice for a flash-tight board, never
+  // something to inherit by accident. (2026-08-12)
+  const healed = coreVersions.FALLBACK_VERSION;
+
+  if (versionName) {
+    try { proffie.setVersionCore(versionName, healed); } catch { /* pin next time */ }
+  }
+  return { version: healed, pinned: false, healed: true };
+}
+
+/**
+ * Is this core reachable for a build at all, from EITHER tree?
+ *
+ * The Build Tools panel asks two questions that have to agree: the dropdown
+ * labels each version system or installed from the union of both trees, while
+ * this decides whether to offer a download. Asking only our own tree made the
+ * panel label a core "system" and offer to install it on the very next line.
+ *
+ * Read live rather than recorded, matching ensureCore: another Arduino tool can
+ * add or remove a system core between builds. (2026-08-12)
+ */
+function _coreIsAvailable(version) {
+  const want = coreVersions.normalizeVersion(version);
+  return toolchain.listCoreTrees().some(t => coreVersions.normalizeVersion(t.version) === want)
+      || coreVersions.isVersionInstalled(toolchain.getSystemArduinoDataPath(), want);
+}
+
+// Point the toolchain at the right core for a version. Called on startup and on
+// every version switch, because the FQBN, the install check and the build-cache
+// key all read from it, and a switch that left it pointing at the old core
+// would compile against one core and key the cache with another.
+async function _applyCoreForVersion(versionName) {
+  try {
+    const eff = await _effectiveCoreFor(versionName);
+    // Always explicit now. Every version names its core, so the build must go
+    // against exactly that one rather than against whatever the machine happens
+    // to have lying around from another Arduino tool.
+    toolchain.setActiveCoreVersion(eff.version, { explicit: true });
+    return eff;
+  } catch {
+    // Never let core resolution stop a version from being selected. The
+    // toolchain keeps whatever it already had, which is a working default.
+    return null;
+  }
+}
+
+ipcMain.handle('proffieOS:selectVersion', async (_, name) => {
   proffie.setSelectedVersion(name);
   Store.set('lastVersion', name);
-  return { ok: true, name };
+  const core = await _applyCoreForVersion(name);
+  return { ok: true, name, core: core ? core.version : null };
+});
+
+// What the user can choose from, and what is already on disk. `stale` means the
+// index could not be reached and this list came from cache or a floor, so the
+// UI can avoid presenting a guess as the published truth.
+ipcMain.handle('core:listAvailable', async () => {
+  const res       = await coreVersions.resolveLatest(app.getPath('userData'), { force: false });
+  const available = toolchain.listAvailableCores();      // [{version, source}]
+  const byVersion = Object.fromEntries(available.map(c => [c.version, c.source]));
+  return {
+    ok:        true,
+    // Filtered and newest-first. The index publishes back to 0.1, and everything
+    // below the floor predates ProffieOS 7, so listing it would put eight traps
+    // in a dropdown. Anything present on the machine is always included even
+    // below the floor, so the list can never hide a core the user actually has.
+    versions:  coreVersions.offeredVersions(res.versions, Object.keys(byVersion)),
+    latest:    res.latest,
+    // Where each one lives. 'system' means the user's own Arduino tree: usable,
+    // and never ours to remove. 'jmt' means we downloaded it, so a reset can
+    // take it back.
+    sources:   byVersion,
+    active:    toolchain.getActiveCoreVersion(),
+    stale:     res.stale,
+    source:    res.source,
+  };
+});
+
+ipcMain.handle('core:getForVersion', async (_, name) => {
+  const eff = await _effectiveCoreFor(name);
+  const res = await coreVersions.resolveLatest(app.getPath('userData'));
+  const installed = _coreIsAvailable(eff.version);
+  return {
+    ok:        true,
+    name,
+    pinned:    eff.version,
+    installed,
+    // Expected but absent. Lets the panel say "missing" - a fact about a machine
+    // that has drifted - instead of "not installed", which reads as though the
+    // user never had it. (2026-08-15)
+    dormant:   !installed && Object.keys(_recordedPlugins())
+                 .includes(coreVersions.normalizeVersion(eff.version)),
+    // A newer core exists. Reported as a fact, never as a recommendation: someone
+    // on 3.6 because 4.6 overflows their board should see that 4.7 exists without
+    // being nudged into a build that cannot link for them. Suppressed when the
+    // index could not be reached, since a cached list is no basis for the claim.
+    newerAvailable: res.stale ? null : coreVersions.newerThan(eff.version, res.versions),
+  };
+});
+
+// coreVersion is required. There is no "unset" any more - a version is always
+// pinned, so clearing would just mean picking a different pin.
+ipcMain.handle('core:setForVersion', async (_, { name, coreVersion }) => {
+  if (!coreVersion) return { ok: false, error: 'A Proffieboard Plugin version is required.' };
+  const res = proffie.setVersionCore(name, coreVersion);
+  if (!res.ok) return res;
+  // Only re-point the toolchain if this is the version currently selected;
+  // editing another version's setting must not change what a build in flight
+  // is compiling against.
+  const appliedToActive = proffie.getSelectedVersion() === name;
+  if (appliedToActive) await _applyCoreForVersion(name);
+  const eff = await _effectiveCoreFor(name);
+  return {
+    ok:        true,
+    name,
+    pinned:    eff.version,
+    installed: _coreIsAvailable(eff.version),
+    // Tells the renderer whether the CURRENT compiled state just became stale.
+    // The build cache is keyed by core so it is safe on its own, but the
+    // session's "there is a good build ready to flash" flag is not keyed by
+    // anything and has to be dropped explicitly.
+    appliedToActive,
+  };
+});
+
+// What switching this version to another core would actually cost the user.
+//
+// Follows the rule the Clear-cache dialog established: state what THEY would
+// really pay, from what is recorded, never an invented duration. An invented
+// "10 to 15 minutes" was wrong by 25x at both ends of the real range, because a
+// light config builds in about 70 seconds and a heavy one in over half an hour.
+//
+// Cached builds are counted by walking metadata.json rather than by recomputing
+// keys, because entries for one ProffieOS version are spread across a buildPkg
+// directory per board and USB mode, and the metadata already records both the
+// tree and the core each entry was built with.
+ipcMain.handle('cache:coreSwitchImpact', async (_, { versionName, toCore }) => {
+  const fromCore = (await _effectiveCoreFor(versionName)).version;
+  const target   = coreVersions.normalizeVersion(toCore || fromCore);
+  const osHash   = proffie.hashVersion(versionName);
+
+  let losing = 0, longestLosingMs = null, keeping = 0;
+  const root = path.join(app.getPath('userData'), 'build-cache');
+  try {
+    for (const pkg of fs.readdirSync(root, { withFileTypes: true })) {
+      if (!pkg.isDirectory()) continue;
+      for (const e of fs.readdirSync(path.join(root, pkg.name), { withFileTypes: true })) {
+        if (!e.isDirectory()) continue;
+        const mp = path.join(root, pkg.name, e.name, 'metadata.json');
+        if (!fs.existsSync(mp)) continue;
+        let m;
+        try { m = JSON.parse(fs.readFileSync(mp, 'utf8')); } catch { continue; }
+        if (m.proffieOSHash !== osHash) continue;
+        const entryCore = coreVersions.normalizeVersion(m.coreVersion || '');
+        if (entryCore === target) { keeping++; continue; }
+        if (entryCore === coreVersions.normalizeVersion(fromCore)) {
+          losing++;
+          const d = m.compileDurationMs;
+          if (typeof d === 'number' && (longestLosingMs === null || d > longestLosingMs)) longestLosingMs = d;
+        }
+      }
+    }
+  } catch { /* no cache yet: losing stays 0, which is the truthful answer */ }
+
+  return {
+    ok: true,
+    fromCore,
+    toCore: target,
+    changed: coreVersions.compareVersions(fromCore, target) !== 0,
+    // Builds that stop being reachable. NOT deleted - the eviction sweep
+    // reclaims them later - but they will not be hit again from this version.
+    losing,
+    // The real worst case from this user's own recorded builds. Null when
+    // nothing recorded a duration, and the caller must then say nothing rather
+    // than guess.
+    longestLosingMs,
+    // Reassurance where it is due: switching back to a core they have already
+    // built with can still hit.
+    keeping,
+    installed: _coreIsAvailable(target),
+  };
+});
+
+// Install on demand. Separate from selection on purpose: choosing a core the
+// machine does not have yet is a several-hundred-megabyte download, and that
+// deserves its own visible step rather than happening inside the first compile.
+// Getting a plugin is two long phases wearing one word. arduino-cli already says
+// which it is in its own output, so this reads the phase off the stream rather
+// than inventing a second source of truth or guessing at percentages we cannot
+// back up. Anything unrecognised leaves the phase alone. (2026-08-12)
+//
+// Shared by BOTH install paths. It used to live inside the `core:install`
+// handler, so an install the user started from the panel reported its phases
+// while the identical install started by ensureCore at startup reported nothing
+// - same work, same wait, two different amounts of UI. (2026-08-15)
+function _installPhaseLogger(base) {
+  let phase = null;
+  const send = (next) => {
+    if (next === phase) return;
+    phase = next;
+    if (win && !win.isDestroyed()) win.webContents.send('core:installProgress', { phase: next });
+  };
+  return (line, isError) => {
+    const s = String(line || '');
+    if (/^Downloading index/i.test(s))            send('index');
+    else if (/Downloading packages|Downloading\s+\S+@/i.test(s)) send('downloading');
+    else if (/^Installing (platform|tool)|Installing\s+\S+@/i.test(s)) send('installing');
+    base(line, isError);
+  };
+}
+function _clearInstallPhase() {
+  if (win && !win.isDestroyed()) win.webContents.send('core:installProgress', { phase: null });
+}
+
+ipcMain.handle('core:install', async (_, { coreVersion }) => {
+  const log = _installPhaseLogger(makeLogger());
+  try {
+    return await toolchain.ensureCore(log, coreVersion);
+  } finally {
+    _clearInstallPhase();
+  }
+});
+
+// Stop an install and remove what it had written so far. The renderer holds the
+// dropdown locked while one runs, so this is the only way out of a long download
+// the user has changed their mind about - and it has to leave the machine in the
+// state it was in before, not with a half-unpacked plugin that later reads as
+// installed. (2026-08-15)
+ipcMain.handle('core:cancelInstall', async (_, { coreVersion }) => {
+  try { return await toolchain.cancelCoreInstall(coreVersion); }
+  catch (e) { return { ok: false, error: e.message }; }
 });
 
 ipcMain.handle('dialog:selectFolder', async () => {
@@ -3335,11 +4276,45 @@ ipcMain.handle('proffieOS:validateSource', (_, sourcePath) => {
   return { ok: true };
 });
 
-ipcMain.handle('proffieOS:importVersion', (_, { sourcePath, versionName, proffieVersion }) => {
-  return proffie.importVersion(sourcePath, versionName, proffieVersion);
+// The core to stamp onto a newly arrived ProffieOS version. Never null: every
+// tree must land pinned, or it becomes the one version whose compiler can move
+// under it. If the index cannot be reached we pin the newest core already on
+// disk, which is both deterministic and the one guaranteed to work offline.
+async function _coreToStamp() {
+  // Across every tree of ours, not one of them. Reading a single path made the
+  // offline answer depend on which core happened to be active at the time.
+  const installedBest = () =>
+    coreVersions.pickLatest(toolchain.listCoreTrees().map(t => t.version)) ||
+    coreVersions.FALLBACK_VERSION;
+  try {
+    const res = await coreVersions.resolveLatest(app.getPath('userData'));
+    return res.stale ? installedBest() : res.latest;
+  } catch { return installedBest(); }
+}
+
+ipcMain.handle('proffieOS:importVersion', async (_, { sourcePath, versionName, proffieVersion }) => {
+  return proffie.importVersion(sourcePath, versionName, proffieVersion, await _coreToStamp());
 });
 
-ipcMain.handle('versions:listDetails', () => proffie.listVersionsDetails());
+ipcMain.handle('versions:listDetails', async () => {
+  const rows = proffie.listVersionsDetails();
+  // EVERY ProffieOS version has a plugin. `listVersionsDetails` reads the raw
+  // meta, which is null for a tree that arrived while the index was unreachable
+  // and has not been looked at since - but that is an unstamped FILE, not an
+  // absent choice. Resolution heals it, so callers get the version that would
+  // actually be built with and nothing downstream has to model "no plugin" as a
+  // state it can render.
+  //
+  // Routed through _effectiveCoreFor rather than defaulting here, so the rule
+  // lives in one place and the value arrives normalised - `3.6` and `3.6.0`
+  // otherwise reach the renderer as different strings and compare unequal.
+  // Free: it does no I/O beyond the meta read and never touches the network.
+  // (2026-08-15)
+  for (const r of rows) {
+    try { r.coreVersion = (await _effectiveCoreFor(r.name)).version; } catch { /* leave raw */ }
+  }
+  return rows;
+});
 ipcMain.handle('versions:readNotes',  (_, name) => proffie.readNotes(name));
 ipcMain.handle('versions:writeNotes', (_, { name, content }) => proffie.writeNotes(name, content));
 ipcMain.handle('versions:rename',     (_, { oldName, newName }) => proffie.renameVersion(oldName, newName));
@@ -3511,9 +4486,12 @@ ipcMain.handle('versions:downloadRelease', async (event, { downloadUrl, versionN
     const proffieFolder = _findProffieOSFolder(extractDir);
     if (!proffieFolder) throw new Error('Could not find ProffieOS folder in downloaded zip.');
 
-    // Import
+    // Import. The core current at download time is stamped onto the tree, so a
+    // version keeps building against the core it arrived with even after a
+    // newer one is published. Following latest forever would silently change
+    // the compiler under a config that was fitting on the old one.
     win.webContents.send('versions:downloadProgress', { phase: 'importing' });
-    return proffie.importVersion(proffieFolder, versionName, proffieVersion);
+    return proffie.importVersion(proffieFolder, versionName, proffieVersion, await _coreToStamp());
   } catch (e) {
     return { ok: false, error: e.message };
   } finally {
