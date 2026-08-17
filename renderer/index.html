@@ -37746,7 +37746,15 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
           const def = (templateParams[i].defaultExpr || '').trim();
           if (val && val !== def) { lastNonDefault = i; break; }
         }
-        if (lastNonDefault < 0) return helperBaseName; // all at default, omit angle brackets
+        // Every argument sits at its default. Omit the VALUES, never the angle
+        // brackets: this is a templated helper (the length===0 case returned
+        // above), and an alias template's bare name is not a type. Returning it
+        // rewrote a working `HexSpiralStyle<0>` into `HexSpiralStyle` on any
+        // commit through this path - resetting an argument, or the INNER
+        // prepopulate - and the config then stopped compiling.
+        // arm-none-eabi-g++ 14.2: `StylePtr<Foo>` gives "expected a type, got
+        // 'Foo'"; `Foo<>` and `Foo<0>` both compile. (2026-08-16)
+        if (lastNonDefault < 0) return `${helperBaseName}<>`;
         const argStrs = [];
         for (let i = 0; i <= lastNonDefault; i++) {
           argStrs.push((editTemplateArgs[i] || templateParams[i].defaultExpr || '').trim());
@@ -37784,6 +37792,14 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
 
       function updateApplyState() {
         const raw = ta.value.trim();
+        // A declaration is written, not refused - see _slotExprIsDeclaration.
+        // It is flagged here so the user sees the problem while they can still
+        // act on it, rather than meeting it later as a compile error.
+        const isDecl = _slotExprIsDeclaration(raw);
+        ta.classList.toggle('invalid', isDecl);
+        if (slotDeclHint) {
+          slotDeclHint.style.display = isDecl ? 'block' : 'none';
+        }
         if (!raw || raw === originalExpr) {
           okBtn.disabled = true;
           okBtn.title = raw === originalExpr ? 'No changes to apply' : 'Enter an expression';
@@ -37794,7 +37810,9 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
             okBtn.title = 'Check bracket balance';
           } else {
             okBtn.disabled = false;
-            okBtn.title = 'Apply (Ctrl+Enter)';
+            okBtn.title = isDecl
+              ? 'Apply anyway - this is a definition, not an expression'
+              : 'Apply (Ctrl+Enter)';
           }
         }
       }
@@ -37813,6 +37831,17 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
       ta.style.cssText = 'width:100%;box-sizing:border-box;margin-bottom:0;';
       ta.value = fullSlotText;
       ta.addEventListener('click', e => e.stopPropagation());
+
+      // Shown when the text is a style DEFINITION rather than an expression.
+      // Names the cause and the fix; the text is still written either way.
+      const slotDeclHint = document.createElement('div');
+      slotDeclHint.style.cssText =
+        'display:none;font-size:0.65rem;line-height:1.35;color:#e44;margin-top:2px;';
+      // Short on purpose. The offending text is on screen directly above this,
+      // so naming the tokens back to the user is words they do not need. What
+      // is missing from their head is only: wrong thing, right place.
+      slotDeclHint.textContent =
+        'That’s a definition, not an expression. Add it to the Style Library, then pick it here.';
 
       function applyEdit() {
         const raw = ta.value.trim();
@@ -37860,6 +37889,7 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
       });
       okBtn.addEventListener('click', e => { e.stopPropagation(); applyEdit(); });
       body.appendChild(ta);
+      body.appendChild(slotDeclHint);
 
       const customBtnRow = document.createElement('div');
       customBtnRow.style.cssText = 'display:flex;gap:4px;align-items:center;';
@@ -39114,6 +39144,30 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
       // Strip trailing () — StylePtr<T>() supplies its own parens
       v = v.replace(/\(\s*\)\s*$/, '').trim();
       return v;
+    }
+
+    // Why a slot expression cannot be written: null when it is fine, otherwise
+    // 'declaration' or 'brackets'. The two need DIFFERENT handling and that is
+    // the whole point of separating them - a declaration is a complete, correct
+    // thing pasted into the wrong place, so it must be explained, while
+    // unbalanced brackets are self-evidently mid-edit. (2026-08-16)
+    // A slot holds an EXPRESSION, and a declaration is not one. Pasting one is a
+    // real path: the Style Library displays entries as
+    // `template<int dir = 0> using X = ...;` and copying the whole block is the
+    // obvious thing to try. Neither token can appear in a valid style
+    // expression, so this is a fact rather than a heuristic - no false
+    // positives.
+    //
+    // INFORM, DO NOT BLOCK (2026-08-16). This deliberately does NOT feed
+    // _validateSlotExpression. Making it "invalid" routed it into the
+    // cannot-be-written path, where closing the editor DISCARDED the paste with
+    // no word said - the user loses their work and learns nothing. Their text is
+    // theirs: write it, flag it, explain it. The compiler is the backstop, and a
+    // visible error at the point of the mistake is the whole product thesis.
+    // (Blocking is still right where the APP generates the bad text, e.g. Copy
+    // Style refusing a value parameter it would have to invent.)
+    function _slotExprIsDeclaration(v) {
+      return /\btemplate\s*</.test(v) || /^\s*using\s+\w+\s*=/.test(v);
     }
 
     function _validateSlotExpression(v) {
