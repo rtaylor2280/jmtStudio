@@ -12232,6 +12232,23 @@ document.getElementById('btn-styles-delete').addEventListener('click', async () 
   })) return;
   const result = await window.electronAPI.deleteStylesFile();
   if (!result.ok) return;
+  // Empty the code buffer first (B-191, 2026-08-17). Every "what styles exist"
+  // read resolves _stylesEditorInstance.getValue() and only falls back to
+  // _silentStylesText when the instance is null: _libraryEntries() plus three
+  // inlined copies of the same ternary. The instance is created once and never
+  // destroyed, and this button lives on the Style Library tab, so it is always
+  // non-null by the time we get here — which makes the clearLibraryCache() call
+  // below unreachable on this path and left a deleted library still answering
+  // "yes, that style exists" for the rest of the session.
+  // Nulling the instance is NOT the fix: initStylesPanel() guards on
+  // _addStyleEditor, so the editor would never be recreated on re-import and the
+  // tab would be dead. Re-import repopulates it via _activateStylesLibrary().
+  // setValue fires onDidChangeModelContent, which sets the dirty flag — hence
+  // this runs before _setStylesDirty(false), not after.
+  // Entry metadata is deliberately left alone: a sound font keeps its
+  // linkedStyleLibraryEntry and the "Last used style" field simply stops
+  // rendering, which is exactly what an app restart already did.
+  if (_stylesEditorInstance) _stylesEditorInstance.setValue('');
   _setStylesDirty(false);
   if (window._presetSidecar) { window._presetSidecar.closeSlotEdit?.(); window._presetSidecar.clearLibraryCache?.(); }
   await window._applyStylesImportButtons(false);
@@ -12843,6 +12860,39 @@ let _stylesHelperEditor    = null;
 // my_styles.h read straight from disk, used when the Style Library editor is
 // not open. Written by presetSidecarModule, read by _getHelperTemplateParams.
 let _silentStylesText      = null;
+
+// What `Black` means in a style slot (B-178, implemented 2026-08-17).
+// Every preset-scaffolding path writes StylePtr<Black>() into each blade, and
+// _resetSlot writes the same thing when a slot is cleared, so the parser reports
+// those slots with expr === 'Black'. That is the app's placeholder for "nothing
+// chosen yet", NOT something the user typed.
+// Two places needed to know this and disagreed: the slot editor treated Black as
+// a placeholder and opened the tile in Style Library mode, while the last-used
+// style auto-populate used a bare truthiness test, counted Black as user content
+// and backed off. A new preset was therefore "empty" to the UI and "already
+// written by the user" to the feature at the same time, so the feature could
+// never fire on a new preset - the only time anyone wants it.
+// One definition, exported, so a third caller cannot invent a fourth.
+function _jmtIsPlaceholderStyleExpr(expr) {
+  return (expr || '').trim() === 'Black';
+}
+if (typeof window !== 'undefined') window._jmtIsPlaceholderStyleExpr = _jmtIsPlaceholderStyleExpr;
+
+// How a Style Library name becomes a blade slot expression (2026-08-17).
+// Entries from _getLibraryStyles() are non-helper `using` aliases - a TYPE, not
+// a callable - so a slot has to wrap them: StylePtr<Name>(). Writing `Name()`
+// instead produces something the preset parser does not recognise as a style at
+// all, which makes the blade stop counting as a slot and shifts every later
+// index by one.
+// Already-wrapped input and `&`-prefixed refs pass through untouched.
+function _jmtStyleSlotExpr(expr) {
+  const s = (expr || '').trim();
+  if (!s) return s;
+  if (s.startsWith('&')) return s;
+  if (/^\w*StylePtr\s*</.test(s)) return s;
+  return `StylePtr<${s}>()`;
+}
+if (typeof window !== 'undefined') window._jmtStyleSlotExpr = _jmtStyleSlotExpr;
 let _helperEditorOrigCode    = '';
 let _helperEditorOrigDisplay = '';
 let _helperEditorOrigNotes   = '';
@@ -30772,8 +30822,27 @@ require(['vs/editor/editor.main'], function () {
         const refLine = (insertLine <= lines.length ? lines[insertLine - 1] : '') || '';
         const indent = (refLine.match(/^(\s*)/) || ['', ''])[1];
         const inner = indent + '  ';
+        // "+ Add to config" is the most likely way to add a font that already has
+        // a style recorded against it, and it was the one path that ignored the
+        // record entirely - the auto-populate helper is wired only to the preset
+        // editor's font-field commit, which this path never goes through (B-178).
+        // Same guards as that helper: the entry must exist, name a style, and that
+        // style must still be in the library. Otherwise blade 1 keeps the
+        // placeholder, because scaffolding a name with no definition behind it is
+        // worse than scaffolding nothing.
+        let blade1Expr = 'StylePtr<Black>()';
+        try {
+          const entry  = (window._sfEntriesCache || []).find(e => e.name === fontName);
+          const linked = (entry && entry.meta && entry.meta.linkedStyleLibraryEntry || '').toString().trim();
+          const libStyles = (typeof window._getLibraryStyles === 'function')
+            ? window._getLibraryStyles()
+            : [];
+          if (linked && libStyles.includes(linked)) blade1Expr = _jmtStyleSlotExpr(linked);
+        } catch {}
         const styleLines = [];
-        for (let i = 0; i < bladeCount; i++) styleLines.push(`${inner}StylePtr<Black>(),`);
+        for (let i = 0; i < bladeCount; i++) {
+          styleLines.push(`${inner}${i === 0 ? blade1Expr : 'StylePtr<Black>()'},`);
+        }
         const leadIn = prevHasTrailingBlank ? [] : [''];
         const newText = [
           ...leadIn,
@@ -34950,15 +35019,19 @@ require(['vs/editor/editor.main'], function () {
     //     (stale reference; the SF entry detail will surface it red but
     //     auto-populating with a name that won't compile is worse than
     //     leaving the slot empty).
-    //   - Skip when blade 1 already has a non-empty user-set expression
-    //     (never override what the user already wrote).
+    //   - Skip when blade 1 already has a real user-set expression (never
+    //     override what the user already wrote). The app's own StylePtr<Black>()
+    //     placeholder does NOT count as user content - see
+    //     _jmtIsPlaceholderStyleExpr. A bare truthiness test here is what made
+    //     this helper unreachable on new presets (B-178).
     // Auto-populate writes blade 1's slot expression to the style's
     // name followed by `()` — the standard library-style invocation
     // shape. _scheduleRebuild fires so the sidecar re-renders with the
     // new slot tile visible immediately.
-    function _sfMaybeAutoPopulateBlade1Style(preset, fontName) {
+    function _sfMaybeAutoPopulateBlade1Style(fontName) {
       try {
         if (!fontName) return;
+        if (!editor) return;
         const entries = window._sfEntriesCache || [];
         const entry = entries.find(e => e.name === fontName);
         if (!entry) return;
@@ -34968,15 +35041,28 @@ require(['vs/editor/editor.main'], function () {
           ? window._getLibraryStyles()
           : [];
         if (!libStyles.includes(linkedName)) return;
-        // Blade 1 occupancy check. preset.styles is the parsed snapshot
-        // from the last render; styles[0] is blade 1. Treat as occupied
-        // when present with a non-empty expr.
+        // RE-PARSE, do not trust a caller-supplied snapshot. The only caller is
+        // the font field's commit closure, which writes the new font into the
+        // buffer immediately before calling us — so every line and column in the
+        // snapshot taken at the last render is already stale, and applying a slot
+        // range from it lands mid-token and shreds the preset. Exactly the failure
+        // _getFreshFieldRange was written for; this call site never got it, and the
+        // bug stayed invisible because the occupancy guard used to return early on
+        // every real preset (B-178, 2026-08-17).
+        const fresh   = presetParser.parsePresets(editor.getValue());
+        const arr     = fresh.arrays[_activeArrayIndex];
+        const preset  = arr?.presets[_selectedPresetIndex];
+        if (!preset) return;
+        // Blade 1 occupancy check. styles[0] is blade 1. Treat as occupied when
+        // present with a non-empty expr that is not the app's own placeholder.
         const slot0 = preset.styles && preset.styles[0];
-        if (slot0 && slot0.expr && slot0.expr.trim()) return;
-        // Build the slot's text. Standard library-style invocation is
-        // `StyleName()`. Matches what the Style Library picker produces
-        // when the user picks a library entry into a slot.
-        const expr = `${linkedName}()`;
+        if (slot0 && slot0.expr && slot0.expr.trim() && !_jmtIsPlaceholderStyleExpr(slot0.expr)) return;
+        // Build the slot's text through the same rule the Style Library picker
+        // uses (_commitSlotEdit), so the result is byte-identical to picking the
+        // style by hand. The comment that used to sit here claimed a bare
+        // `StyleName()` was what the picker produced; it is not, and emitting
+        // that wrote an expression the parser could not read as a style.
+        const expr = _jmtStyleSlotExpr(linkedName);
         // Only replace an existing blade-1 slot. When blade 1 doesn't
         // exist at all (preset has zero styles), skip auto-populate
         // and leave the user to use the regular missing-slot click
@@ -34984,11 +35070,15 @@ require(['vs/editor/editor.main'], function () {
         // display-name range and trailing brace that aren't worth
         // duplicating here.
         if (!slot0 || !slot0.startLine || !slot0.endLine) return;
-        if (!editor) return;
+        // Column convention matches _resetSlot and _commitFieldEdit: the parser
+        // reports 0-based columns and Monaco wants 1-based, so BOTH ends get +1.
+        // This used to add +1 only to the end column, which started every
+        // replacement one character early and left a fragment of the old text
+        // behind.
         _atomicEdit(editor, 'autopopulate-b1-style', [{
           range: {
-            startLineNumber: slot0.startLine, startColumn: slot0.startCol || 1,
-            endLineNumber:   slot0.endLine,   endColumn:   (slot0.endCol || 1) + 1,
+            startLineNumber: slot0.startLine, startColumn: slot0.startCol + 1,
+            endLineNumber:   slot0.endLine,   endColumn:   slot0.endCol + 1,
           },
           text: expr,
         }]);
@@ -35147,7 +35237,7 @@ require(['vs/editor/editor.main'], function () {
         // present in the current Style Library, AND blade 1 is empty
         // or missing, populate blade 1 with that style. Never override
         // a slot the user has already filled in.
-        _sfMaybeAutoPopulateBlade1Style(preset, (newName || '').trim());
+        _sfMaybeAutoPopulateBlade1Style((newName || '').trim());
       };
 
       // Library combo (input + arrow + dropdown) — same pattern the Style
@@ -38490,7 +38580,7 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
       tile.appendChild(expand);
 
       // ── Set initial mode ───────────────────────────────────────────────────
-      const isBlackPlaceholder = (slot.expr || '').trim() === 'Black';
+      const isBlackPlaceholder = _jmtIsPlaceholderStyleExpr(slot.expr);
       if (hasModes && (isLibrarySlot || (isBlackPlaceholder && helpers.length > 0))) showLibraryMode();
       else showCustomMode();
     }
@@ -39187,8 +39277,7 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
 
     function _commitSlotEdit(slot, newExpr, leadingComment) {
       if (!editor) return;
-      const exprText = newExpr.startsWith('&') ? newExpr
-        : /^\w*StylePtr\s*</.test(newExpr) ? newExpr : `StylePtr<${newExpr}>()`;
+      const exprText = _jmtStyleSlotExpr(newExpr);
 
       if (leadingComment) {
         // Replace any existing comment above the slot together with the slot itself,
