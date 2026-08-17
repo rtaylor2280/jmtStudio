@@ -37837,11 +37837,13 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
       const slotDeclHint = document.createElement('div');
       slotDeclHint.style.cssText =
         'display:none;font-size:0.65rem;line-height:1.35;color:#e44;margin-top:2px;';
-      // Short on purpose. The offending text is on screen directly above this,
-      // so naming the tokens back to the user is words they do not need. What
-      // is missing from their head is only: wrong thing, right place.
+      // Short on purpose: the offending text is on screen directly above this,
+      // so naming the tokens back to the user is words they have already read.
+      // What is missing is only wrong thing, right place. Flat register, no
+      // contractions - the house style for user-facing copy.
       slotDeclHint.textContent =
-        'That’s a definition, not an expression. Add it to the Style Library, then pick it here.';
+        'A preset slot holds an expression, not a definition. '
+        + 'Add this to the Style Library, then select it here.';
 
       function applyEdit() {
         const raw = ta.value.trim();
