@@ -13729,6 +13729,26 @@ function _parseStyleMeta(comment, gapText) {
   return meta;
 }
 
+// One-shot flag, mirroring _sfAutoClearOnEmpty on the Sound Fonts side. Delete
+// paths set it true so the NEXT render, if it lands filtered-empty on a library
+// that still has styles, clears the filters instead of showing a confusing empty
+// panel. A TYPED search that matches nothing does not set it, so an active search
+// stays put. Consumed on the next render whatever the outcome.
+let _stylesAutoClearOnEmpty = false;
+
+// Clear every filter, search included, since search is just another filter.
+// Shared by the no-match "Clear filters" link and the auto-clear-on-delete path,
+// the same way _sfClearAllFilters is shared on the Sound Fonts side (B-156).
+function _stylesClearAllFilters() {
+  const si = document.getElementById('styles-search');
+  if (si) si.value = '';
+  const sc = document.getElementById('styles-search-clear');
+  if (sc) sc.style.display = 'none';
+  _activeFilterTags    = new Set();
+  _activeFilterEffects = new Set();
+  _applyStylesSearch();
+}
+
 function _applyStylesSearch() {
   const q     = (document.getElementById('styles-search')?.value || '').toLowerCase();
   const cards = document.querySelectorAll('#styles-visual-list .style-card');
@@ -13767,6 +13787,40 @@ function _applyStylesSearch() {
   });
   const countEl = document.getElementById('styles-search-count');
   if (countEl) countEl.textContent = shown < cards.length ? `${shown} of ${cards.length}` : `${cards.length} styles`;
+
+  // No-results empty state (B-156, 2026-08-17). "0 of 138" in the corner is
+  // accurate but does not answer the question the user is actually asking, which
+  // is whether the library broke or they filtered it away. Someone who lands here
+  // right after DELETING a style has every reason to fear the first, which is how
+  // this was originally reported. Matches the Sound Fonts list, which already had
+  // all three cases; this side had none of them.
+  const listEl     = document.getElementById('styles-visual-list');
+  const isFiltering = !!q || _activeFilterTags.size > 0 || _activeFilterEffects.size > 0;
+  const autoClear  = _stylesAutoClearOnEmpty;
+  _stylesAutoClearOnEmpty = false;
+  if (listEl) {
+    const prior = document.getElementById('styles-nomatch');
+    if (prior) prior.remove();
+    if (shown === 0 && cards.length > 0 && isFiltering) {
+      // A delete emptied the filtered view while styles remain: restore the list
+      // rather than leave a false-empty. Re-enters this function once, and the
+      // second pass cannot reach here because isFiltering is then false.
+      if (autoClear) { _stylesClearAllFilters(); return; }
+      // A live search that genuinely matches nothing. Keep the filter, since the
+      // user is actively narrowing, but never leave it a dead end.
+      const nm = document.createElement('div');
+      nm.id = 'styles-nomatch';
+      nm.className = 'styles-empty';
+      nm.textContent = 'No styles match. ';
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = 'Clear filters';
+      btn.style.cssText = 'background:none;border:none;color:var(--jmt-blue);cursor:pointer;font:inherit;text-decoration:underline;padding:0';
+      btn.addEventListener('click', () => _stylesClearAllFilters());
+      nm.appendChild(btn);
+      listEl.appendChild(nm);
+    }
+  }
   _renderActiveFilterChips();
 }
 
@@ -13872,7 +13926,11 @@ function _renderActiveFilterChips() {
   }
   if (fxBtn) fxBtn.classList.toggle('has-active', _activeFilterEffects.size > 0);
   if (!strip) return;
-  const totalActive = _activeFilterTags.size + _activeFilterEffects.size;
+  // Search counts as a filter here, same as on the Sound Fonts side (B-156,
+  // 2026-08-17). A query typed minutes ago is otherwise invisible state: the list
+  // is short, nothing says why, and the only clue is a count in the corner.
+  const searchQ = (document.getElementById('styles-search')?.value || '').trim();
+  const totalActive = _activeFilterTags.size + _activeFilterEffects.size + (searchQ ? 1 : 0);
   if (!totalActive) {
     strip.style.display = 'none';
     strip.innerHTML = '';
@@ -13892,6 +13950,30 @@ function _renderActiveFilterChips() {
   const clearAll = totalActive > 1
     ? `<button class="styles-active-filter-clear" id="styles-clear-all-filters">Clear all</button>` : '';
   strip.innerHTML = `<span class="styles-active-filters-label">Filtering by:</span>${tagChips}${fxChips}${clearAll}`;
+  // The search chip is built as DOM rather than interpolated into the innerHTML
+  // above: the query is user-typed, and this function has no escape helper in
+  // scope. textContent removes the question entirely. Inserted directly after the
+  // label so it reads first, matching the Sound Fonts order.
+  if (searchQ) {
+    const sChip = document.createElement('span');
+    sChip.className = 'styles-active-filter-chip';
+    sChip.dataset.search = '1';
+    sChip.textContent = '“' + searchQ + '”';
+    const sRm = document.createElement('button');
+    sRm.className = 'styles-active-filter-remove';
+    sRm.title = 'Clear search';
+    sRm.innerHTML = '&#10005;';
+    sRm.addEventListener('click', e => {
+      e.stopPropagation();
+      const si = document.getElementById('styles-search');
+      if (si) si.value = '';
+      const sc = document.getElementById('styles-search-clear');
+      if (sc) sc.style.display = 'none';
+      _applyStylesSearch();
+    });
+    sChip.appendChild(sRm);
+    strip.querySelector('.styles-active-filters-label')?.after(sChip);
+  }
   strip.querySelectorAll('.styles-active-filter-chip').forEach(chip => {
     chip.querySelector('.styles-active-filter-remove').addEventListener('click', e => {
       e.stopPropagation();
@@ -14197,6 +14279,10 @@ async function _deleteStyleEntry(entry, isHelper) {
   const kept = segments.filter(s => s.entry.name !== entry.name);
   _stylesEditorInstance.setValue(preamble + kept.map(s => s.text).join(''));
   _setStylesDirty(true);
+  // Arm the one-shot: if this delete removed the last card matching an active
+  // filter, the rebuild below should restore the full list rather than leave a
+  // blank panel that reads as "my library is gone" (B-156).
+  _stylesAutoClearOnEmpty = true;
   _buildStylesVisual();
 }
 
