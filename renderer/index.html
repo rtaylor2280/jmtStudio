@@ -468,18 +468,27 @@
   #input-board    { width: 160px; }
   #input-version  { width: 160px; max-width: 160px; background:var(--c-bg-raised); border:1px solid var(--c-border-input); border-radius:3px; color:var(--c-text); font-size:0.78rem; padding:4px 6px; outline:none; cursor:pointer; overflow:hidden; text-overflow:ellipsis; }
 
-  .field-error {
+  /* .version-missing rides on the SAME treatment: no version is selected because
+     the config asked for one that is not installed, and that is an error state by
+     any reading — Compile and Flash both refuse. Kept as its own class rather than
+     reusing .field-error because applyOSVersionSignal owns that one and toggles it
+     on every repaint; a second writer is how the two would drift. Sharing the
+     declarations means they can never LOOK different. (2026-08-19) */
+  .field-error,
+  .version-missing {
     border-color: var(--c-danger-text) !important;
     background: var(--c-danger-bg) !important;
   }
-  .field-error:focus { border-color: var(--c-danger-text) !important; }
+  .field-error:focus,
+  .version-missing:focus { border-color: var(--c-danger-text) !important; }
   /* The state belongs to the CONTROL, not to its contents. On a <select> the
      danger background is inherited by every option, so opening the dropdown
      showed the whole list on red - which reads as "all of these are wrong"
      rather than "this field disagrees with the board".
      `.field-changed` already resets `option` colour for exactly this reason
      (see above); .field-error simply never got the equivalent. (2026-08-15) */
-  .field-error option {
+  .field-error option,
+  .version-missing option {
     background: var(--c-bg-raised);
     color: var(--c-text);
   }
@@ -1952,6 +1961,13 @@
     white-space: nowrap;
     flex: 1;
   }
+  /* Default-version star. Mirrors .sf-common-row-star on the common folder
+     cards, scoped to version cards so the two don't share state. Renders only
+     when 2+ versions are installed — with one there is nothing to choose. */
+  .vp-card-star { background: none; border: none; color: var(--c-text-faint); font-size: 1.05rem; cursor: pointer; padding: 0 2px; border-radius: 3px; line-height: 1; transition: color 0.15s; flex-shrink: 0; opacity: 0.7; }
+  .vp-card-star:hover { color: var(--c-text-soft); opacity: 1; }
+  .vp-card-star.is-starred { color: var(--jmt-blue); opacity: 1; }
+  .vp-card-star.is-starred:hover { color: #1a78c0; }
   .vp-badge {
     font-size: 0.6rem;
     text-transform: uppercase;
@@ -2006,6 +2022,30 @@
     text-align: center;
     padding: 60px 20px;
   }
+  /* Hidden whenever there is no choice to make — see "Do not show a surface to
+     users who cannot use it" in ui-conventions.md. The sidebar is purely a
+     selector here (no controls of its own), so at 0 or 1 versions it is 240px
+     restating the detail pane. The empty state moved to .vp-empty-detail
+     BECAUSE of this: #vp-list used to be the only thing saying "no versions
+     installed", and hiding the sidebar would have deleted that message. */
+  .vp-sidebar.is-hidden { display: none; }
+  .vp-empty-detail {
+    text-align: center;
+    padding: 70px 20px;
+  }
+  .vp-empty-detail-title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--c-text);
+    margin-bottom: 8px;
+  }
+  .vp-empty-detail-body {
+    font-size: 0.82rem;
+    color: var(--c-text-dim);
+    line-height: 1.55;
+    max-width: 460px;
+    margin: 0 auto;
+  }
   .vp-detail-header {
     margin-bottom: 16px;
     padding-bottom: 14px;
@@ -2013,7 +2053,7 @@
   }
   .vp-detail-title-row { display: flex; align-items: center; gap: 10px; margin-bottom: 5px; }
   .vp-detail-name { font-size: 1.05rem; font-weight: 700; color: var(--c-text-bright); }
-  .vp-badge.builtin-lg { font-size: 0.65rem; }
+  .vp-badge.builtin-lg, .vp-badge.lg { font-size: 0.65rem; }
   .vp-detail-stats {
     font-size: 0.75rem;
     color: var(--c-text-muted);
@@ -7404,7 +7444,15 @@ window.getCompiledUsb = () => metaCompiledUsb;
 
 function _buildTargetMoved() {
   const name = document.getElementById('input-version')?.value;
-  const osMoved = !!(metaCompiledOs && name && metaCompiledOs !== name);
+  // No selection means there is no build target, and a target that does not
+  // exist cannot have MOVED. Without this the plugin half still fired — a config
+  // last built on plugin 3.6.0 against a current pin of 4.6.0 painted the field's
+  // text red for the second before the cache restore rewrote metaCore to 4.6.0
+  // and it went white again. A true-but-meaningless signal, erased by the same
+  // laundering as the rest. The empty selection is already saying the real thing,
+  // in the red outline it shares with .field-error. (2026-08-19)
+  if (!name) return false;
+  const osMoved = !!(metaCompiledOs && metaCompiledOs !== name);
   return osMoved || _pluginState().stale;
 }
 
@@ -7844,7 +7892,15 @@ function stripJmtLines(content) {
 function injectMetadata(content) {
   const desc    = document.getElementById('input-desc').value.trim();
   const board   = document.getElementById('input-board').value.trim();
-  const version = document.getElementById('input-version').value.trim();
+  // An EMPTY dropdown does not mean "no version wanted" — since 2026-08-19 it is
+  // how the app says "this config asked for something that is not installed", so
+  // the requested name has to survive the save. Writing the dropdown blindly would
+  // drop the @jmt:os_version line entirely and erase the record of what the config
+  // was written for, which is the same harm as overwriting it and quieter: there
+  // would be nothing left to notice. The user's request stands until the user
+  // changes it, not until we fail to honour it.
+  const versionSel = document.getElementById('input-version').value.trim();
+  const version    = versionSel || (window._configOsVersionMissing || '').trim();
   const now     = nowIso();
   if (!metaCreated) metaCreated = now;
   if (!metaConfigId) metaConfigId = crypto.randomUUID();
@@ -8105,7 +8161,27 @@ function loadContent(rawContent, filePath) {
   const resolvedVersion = exactMatch ? exactMatch.value : null;
   if (resolvedVersion) {
     versionSel.value = resolvedVersion;
+    clearVersionNotInstalled(versionSel);   // a previous config may have left it
     if (window.electronAPI) window.electronAPI.selectVersion(resolvedVersion);
+  } else if (version) {
+    // *** The substitution, and it was never even a decision. ***
+    // This branch used to not exist: the comment above said "invalid/missing
+    // metadata leaves the dropdown at its current selection", so a config asking
+    // for a version we do not have simply INHERITED whatever the previous config
+    // or the startup default had left in the box — and then the cache hit on it,
+    // the field went green, and a save rewrote @jmt:os_version to the inherited
+    // value. Ryan, 2026-08-19: "it would be better to make no selection than
+    // decide on even the default and not be red."
+    // Select nothing, name what is missing, and let compileBlockedReason refuse.
+    showVersionNotInstalled(versionSel, version);
+    // Deliberately NOT calling selectVersion(''): that handler writes
+    // Store.lastVersion, so clearing it here would let one config's unmet request
+    // wipe a real preference that survives restarts — the same shape of harm this
+    // whole change exists to stop. The renderer shows no selection and
+    // compileBlockedReason refuses to build, so nothing can use the main-side
+    // value while it sits stale.
+  } else {
+    clearVersionNotInstalled(versionSel);
   }
   // The config ASKED for a version we do not have, so the dropdown quietly fell
   // back to something else and will build against that. Recorded by name so the
@@ -8122,6 +8198,16 @@ function loadContent(rawContent, filePath) {
   // permanent paragraph for a condition that ends at the next save was not
   // earning its place. Written to window because buildPanel.js may not be loaded
   // yet on a boot-restored config. (2026-08-15)
+  // TWO FACTS, not one. `_configOsVersionWanted` is what the config ASKED for and
+  // changes only when the config does. `_configOsVersionMissing` is whether that
+  // request is currently unmet, and is DERIVED — recomputed by populateVersionSelect
+  // every time the installed set changes.
+  //
+  // They were one variable until 2026-08-19, and it made the clear one-way: install
+  // the missing version and the flag cleared correctly, but it took the request with
+  // it, so deleting the version again left nothing to re-derive from and the app
+  // fell silent about a config it still could not honour.
+  window._configOsVersionWanted  = version || null;
   window._configOsVersionMissing = (version && !resolvedVersion) ? version : null;
   window.refreshOSVersionSignal?.();
   metaCreated  = created  || null;
@@ -8190,6 +8276,10 @@ function clearMeta() {
   // input-version stays at current selection (persistent compile setting). A new
   // config has asked for nothing, so there is nothing it asked for that we lack -
   // the note this drives is only for a config naming a version that is missing.
+  // Both halves, or the request outlives the config that made it: populateVersionSelect
+  // re-derives `missing` from `wanted`, so a leftover `wanted` would resurrect the note
+  // on the NEXT config the moment the installed set changed. (2026-08-19)
+  window._configOsVersionWanted  = null;
   window._configOsVersionMissing = null;
   window.refreshOSVersionSignal?.();
   ['input-board','input-version'].forEach(id =>
@@ -9779,13 +9869,101 @@ function isVersionSentinel(v) {
 }
 window.isVersionSentinel = isVersionSentinel;
 
+// ── Default OS version ─────────────────────────────────
+// The version a config falls back to when it names none, or names one that is
+// no longer installed. Before this existed the fallback was versions[0] — which
+// listVersions() produces by reverse-alphabetical folder name, so the pick was
+// a string sort ("ProffieOS 8.9" beats "ProffieOS 8.10") and invisible to the
+// user. The star on the Versions panel makes that choice explicit and settable.
+//
+// Lives here rather than in versionsPanel.js because the panel is lazy-loaded
+// on first tab activation, and the dropdown needs this answer at boot whether
+// or not that tab is ever opened.
+let _defaultOSVersion = null;
+
+async function _loadDefaultOSVersion() {
+  try {
+    const v = await window.electronAPI.getSetting('defaultOSVersion', null);
+    _defaultOSVersion = (typeof v === 'string' && v) ? v : null;
+  } catch { _defaultOSVersion = null; }
+}
+window.loadDefaultOSVersion = _loadDefaultOSVersion;
+
+// The version that should be pre-selected given what is actually installed.
+// A stored default that has been renamed or deleted degrades to the old
+// versions[0] behaviour rather than leaving the dropdown empty. Deliberately
+// NOT persisted on degrade: re-importing the version restores the choice.
+function getEffectiveDefaultOSVersion(versions) {
+  if (!versions || !versions.length) return null;
+  if (_defaultOSVersion && versions.includes(_defaultOSVersion)) return _defaultOSVersion;
+  return versions[0];
+}
+window.getEffectiveDefaultOSVersion = getEffectiveDefaultOSVersion;
+
+async function setDefaultOSVersion(name) {
+  if (!name || name === _defaultOSVersion) return;
+  _defaultOSVersion = name;
+  try { await window.electronAPI.setSetting('defaultOSVersion', name); } catch {}
+}
+window.setDefaultOSVersion = setDefaultOSVersion;
+
+// A version was NAMED and we do not have it. Select nothing, and say which.
+//
+// Shared because two independent paths reach this state and both used to paper
+// over it: the config-open resolution (which left the dropdown on whatever was
+// already selected) and populateVersionSelect (which reached for the default).
+// A rule written beside one caller never reaches the other, and these two
+// disagreeing is exactly how a config asking for 6.9 came to display 8.10.
+function showVersionNotInstalled(sel, name) {
+  // Idempotent: the config-open path does not rebuild the option list, so a
+  // second open would otherwise stack these up.
+  Array.from(sel.querySelectorAll('option[data-missing]')).forEach(o => o.remove());
+  const missing = document.createElement('option');
+  missing.value = '';
+  // Short on purpose. The field is 160px and truncates, so "Not installed:
+  // ProffieOS 6.9" rendered as "Not installed: Proffie..." — the one word that
+  // mattered was the part cut off. Matches Board's own "Select board...".
+  // WHICH version is missing belongs in the tooltip, which has room and already
+  // says "This config was written for ProffieOS 6.9, which isn't installed."
+  missing.textContent = 'Select version...';
+  missing.title = `This config was written for ${name}, which isn't installed.`;
+  missing.dataset.missing = '1';
+  missing.disabled = true;
+  missing.hidden   = true;   // collapsed label only, never a row in the open list
+  sel.insertBefore(missing, sel.firstChild);
+  sel.value = '';
+  sel.classList.add('version-missing');
+}
+
+// Undo it. Kept beside the setter so the two cannot drift.
+function clearVersionNotInstalled(sel) {
+  Array.from(sel.querySelectorAll('option[data-missing]')).forEach(o => o.remove());
+  sel.classList.remove('version-missing');
+  sel.style.color = '';
+}
+window.clearVersionNotInstalled = clearVersionNotInstalled;
+window.showVersionNotInstalled = showVersionNotInstalled;
+
 function populateVersionSelect(sel, versions, selectedName) {
   sel.innerHTML = '';
+  // innerHTML drops the options but not the class, so a stale red survives a
+  // repopulate. Cleared up front and re-applied below if it still applies.
+  sel.classList.remove('version-missing');
+  sel.style.color = '';
+  // Dimmed while empty so "No versions installed" reads as the absence of a
+  // value rather than as the name of one. The two sentinel options below set
+  // their own colour inline, so they are unaffected.
+  sel.style.color = versions.length ? '' : 'var(--c-text-dim)';
   if (!versions.length) {
     const placeholder = document.createElement('option');
     placeholder.value = '';
     placeholder.textContent = 'No versions installed';
     placeholder.disabled = true;
+    // hidden, not just disabled: a disabled option still occupies a row in the
+    // open list and renders as the highlighted selection, so the popup offered
+    // two usable actions and one dead line restating the closed value. Hidden
+    // keeps it as the collapsed label and drops it from the list.
+    placeholder.hidden = true;
     sel.appendChild(placeholder);
   }
   versions.forEach(name => {
@@ -9807,10 +9985,61 @@ function populateVersionSelect(sel, versions, selectedName) {
   if (!versions.length) { sel.appendChild(dl); sel.appendChild(sep); }
   else                  { sel.appendChild(sep); sel.appendChild(dl); }
 
+  // Three cases, and the middle one used to be folded into the last.
+  //
+  // A version was ASKED FOR and we do not have it is NOT the same as nothing was
+  // asked for. Substituting the default there was the app answering a question it
+  // had no answer to: the config named 6.9, the connected board also said 6.9, and
+  // the one thing neither of them asked for is what got selected — then the cache
+  // hit on the substitute and the field went green. Ryan, 2026-08-19: "it would be
+  // better to make no selection than decide on even the default and not be red."
+  //
+  // An empty required field needs no colour convention and no tooltip to be
+  // understood, and compileBlockedReason already refuses to build without a
+  // version. So the whole class of silently-confident states stops existing rather
+  // than each one earning its own warning.
+  // The open config's unhonoured request, if it has one. Checked BEFORE falling
+  // back to the default, because an empty selection is not the same as no
+  // request: once the field has been blanked, every later refresh passes
+  // sel.value — now '' — and would read that absence as "nothing was asked for"
+  // and helpfully re-substitute the default. Ryan watched exactly that happen:
+  // "I believe it was empty at first but got swallowed by the cached version."
+  const wanted      = (window._configOsVersionWanted  || '').trim();
+  const configWants = (window._configOsVersionMissing || '').trim() || wanted;
+
+  // The request has just become satisfiable — the user installed the very version
+  // the tooltip told them to install. _configOsVersionMissing is computed once at
+  // config load and nothing recomputed it, so the app went on saying "which isn't
+  // installed" about a version sitting in the list. Clearing it here catches every
+  // path that changes the installed set, because they all repopulate. The
+  // SELECTION is only taken if the field is empty: if the user picked something in
+  // the meantime that is their choice, and overriding it would be the same
+  // substitution in the other direction. (2026-08-19)
+  if (configWants && versions.includes(configWants)) {
+    window._configOsVersionMissing = null;
+    if (!selectedName) selectedName = configWants;
+  } else if (wanted && !versions.includes(wanted)) {
+    // Re-derive in the other direction too: the version was there and is not any
+    // more (deleted, renamed, moved). Without this the clear above is a one-way
+    // door and the app goes quiet about a request it still cannot meet.
+    window._configOsVersionMissing = wanted;
+  }
+
   if (selectedName && versions.includes(selectedName)) {
     sel.value = selectedName;
+  } else if (selectedName) {
+    // Named, but absent. Covers a config asking for a version that is not
+    // installed and the user deleting whatever was selected — in both cases we
+    // were told what to use and cannot comply.
+    showVersionNotInstalled(sel, selectedName);
+  } else if (configWants && !versions.includes(configWants)) {
+    // Nothing passed in, but the open config's request is still unmet. Hold the
+    // state rather than letting a refresh quietly resolve it to the default.
+    showVersionNotInstalled(sel, configWants);
   } else if (versions.length) {
-    sel.value = versions[0];
+    // Nothing was asked for, so there is no request to honour and the user's
+    // starred default is exactly the right answer. This is what B-080 built it for.
+    sel.value = getEffectiveDefaultOSVersion(versions);
   } else {
     sel.value = '';
   }
@@ -9828,6 +10057,10 @@ window.populateVersionSelect = populateVersionSelect;
 
 async function _refreshVersionDropdown(preferName) {
   const versions = await window.electronAPI.listProffieVersions();
+  // Every path that repopulates the dropdown comes through here, so this is the
+  // one place the cached default has to be fresh — including at boot, before
+  // the Versions panel has ever been loaded.
+  await _loadDefaultOSVersion();
   const verSel = document.getElementById('input-version');
   const sel = preferName !== undefined ? preferName : verSel.value;
   populateVersionSelect(verSel, versions, sel);

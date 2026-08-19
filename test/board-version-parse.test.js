@@ -40,6 +40,24 @@ const cases = [
   ['point release with a suffix',      'v8.10a\r\nmy_config.h\r\n',                    'v8.10a'],
   ['CONFIG_FILE with a path',          'v7.14\r\nconfigs/liam.h\r\n',                  'v7.14'],
 
+  // Trailing sentence punctuation. The suffix class allows `.` so point releases
+  // parse, which meant a banner ending in a full stop captured it: "v6.9." matched
+  // no installed tree and reddened the OS Version field against a tree that agreed.
+  // Every fixture above happened to use a banner with no trailing period, so the
+  // real board's output was the first thing to hit it (2026-08-19).
+  // ProffieOS 6.9's reply shape, copied off Ryan's board 2026-08-19. It answers
+  // with `Installed: <date>` and NO CONFIG_FILE line, so the original `.h`-only
+  // follower test rejected a correct reply and the probe timed out with the answer
+  // already in the buffer. Every fixture above had been written against 8.10.
+  ['6.9 reply — Installed follower',   'v6.9\r\nInstalled: Aug 19 2026 10:29:12\r\n',   'v6.9'],
+  ['6.9 reply buried in battery chatter',
+    'Battery voltage: 4.07\r\n'.repeat(3) + 'v6.9\r\nInstalled: Aug 19 2026 10:29:12\r\n', 'v6.9'],
+  ['banner ending in a full stop',     'Welcome to ProffieOS v6.9.\r\n',               'v6.9'],
+  ['banner, no v, full stop',          'Welcome to ProffieOS 7.15.\r\n',               'v7.15'],
+  ['reply line ending in a full stop', 'v6.9.\r\nmy_config.h\r\n',                     'v6.9'],
+  ['a genuine point release survives', 'Welcome to ProffieOS v8.10.1\r\n',             'v8.10.1'],
+  ['suffix release still survives',    'Welcome to ProffieOS v8.10a.\r\n',             'v8.10a'],
+
   // The reason the trailing .h line is required. A Proffieboard prints plenty of
   // bare decimals, and any of these matching would light the field red wrongly.
   ['bare battery reading on its own line', 'battery: 3.85\r\n3.85\r\nvolts\r\n',       null],

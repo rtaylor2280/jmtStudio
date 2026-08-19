@@ -2396,6 +2396,18 @@ window.getLastFlashedSN    = () => lastFlashedSN;
 // (2026-08-14)
 function flashBlockedReason() {
   if (isBusy)         return 'A build or flash is already running.';
+  // No OS version selected means the config asked for one we do not have. Any
+  // binary sitting in the cache was built against the version the app used to
+  // SUBSTITUTE in that case, so offering to flash it puts firmware on a board
+  // that this config never asked for - the same harm the empty selection exists
+  // to prevent, arriving through the other button. compileSuccess survives a
+  // cache restore, so it cannot be the only gate. (2026-08-19)
+  const _ver = el('input-version')?.value;
+  if (!_ver || isVersionSentinel(_ver)) {
+    return window._configOsVersionMissing
+      ? `This config was written for ${window._configOsVersionMissing}, which isn't installed. Install it, or pick a version, before flashing.`
+      : 'Select a ProffieOS version before flashing.';
+  }
   if (!compileSuccess) return 'Compile first, then flash.';
   if (!isDfuMode && !selectedPort) return 'Connect your Proffieboard and select its port.';
   return null;
@@ -2409,10 +2421,16 @@ function applyFlashTitle() {
 }
 
 function setFlashEnabled(enabled) {
+  // A state-derived condition rather than a caller flag, same as !selectedPort:
+  // no version selected means there is nothing this config legitimately built
+  // against, whatever the cache is holding. Ten call sites pass `enabled` for
+  // their own reasons and none of them know about this one.
+  const _ver     = el('input-version')?.value;
+  const _noVer   = !_ver || isVersionSentinel(_ver);
   if (isDfuMode) {
-    el('bp-btn-flash').disabled = !enabled || isBusy;
+    el('bp-btn-flash').disabled = !enabled || isBusy || _noVer;
   } else {
-    el('bp-btn-flash').disabled = !enabled || !selectedPort || isBusy;
+    el('bp-btn-flash').disabled = !enabled || !selectedPort || isBusy || _noVer;
   }
   applyFlashTitle();
 }
@@ -2565,9 +2583,32 @@ async function checkCacheForConfig(missStatus) {
   // we must clear that flag here — otherwise Compile stays disabled forever after a + New flow
   // where loadContent dispatches a board='' change while content/FQBN are still unset.
   const content = (window.electronAPI && window.getEditorContent) ? window.getEditorContent() : null;
-  const canCheck = !!(window.electronAPI && selectedFqbn && content && content.trim());
+  // The OS version is NOT a parameter of checkCache — the main process keys on
+  // whatever selectVersion last told it. When the config asked for a version we
+  // do not have, the renderer selects nothing and deliberately does NOT call
+  // selectVersion('') (that would wipe Store.lastVersion over one bad config), so
+  // main is still holding the previous version and will happily answer for it.
+  // The result was "Compile restored from cache" over a config with no selection,
+  // claiming a ready build for a version the user never chose — the same
+  // substitution wearing a status message. Do not ask while nothing is selected.
+  // (2026-08-19)
+  const _ver     = el('input-version')?.value;
+  const hasVer   = !!(_ver && !isVersionSentinel(_ver));
+  const canCheck = !!(window.electronAPI && selectedFqbn && hasVer && content && content.trim());
 
   if (!canCheck) {
+    // Blocked specifically because no version is selected, with a config open that
+    // asked for one we do not have: any compileSuccess and any "restored from
+    // cache" on screen belong to a DIFFERENT version and must not survive. Skipping
+    // the check alone would leave the old claim standing, which is how the status
+    // line kept promising a ready build over an empty selection. Narrowed to this
+    // reason on purpose — the other !canCheck paths (+ New with no content or no
+    // FQBN yet) must keep their existing behaviour.
+    if (!hasVer && window._configOsVersionMissing && seq === _cacheCheckSeq) {
+      compileSuccess = false;
+      setFlashEnabled(false);
+      setStatus('compile', '', 'Not compiled');
+    }
     // Still guard the clear: a newer check may already be in flight and owns the button now.
     if (cacheCheckPending && seq === _cacheCheckSeq) { cacheCheckPending = false; updateCompileButton(); }
     return;
@@ -3044,6 +3085,10 @@ async function watchForSerialAfterDfu() {
 
 let _osVersionMap    = null;   // folderName → "v8.10", from each tree's own .ino
 let _boardOSVersion  = null;   // what the connected board reported, or null
+// When that firmware was flashed, as the board itself reports it. A SEPARATE
+// absence from _boardOSVersion: a board can answer `version` and not print an
+// install date, and that is not a failed probe. (2026-08-19)
+let _boardInstalled  = null;
 let _probedSN        = null;   // board we already asked; don't re-probe per poll
 
 // Whether the open config declared a version lives on window, not here: this
@@ -3070,17 +3115,19 @@ async function probeBoardOSVersion(port) {
   try {
     const r = await window.electronAPI?.probeBoardVersion?.(port.path);
     _boardOSVersion = r?.ok ? r.version : null;
+    _boardInstalled = r?.ok ? (r.installed || null) : null;
     // "The port was busy" is not "the board won't answer." Clear the marker so
     // the next detection tries again, once the monitor or the flash is done.
     // A timeout or a failed open does mean the board is not talking, and that
     // one is left alone rather than retried on every port event.
     if (r?.reason === 'monitor-open' || r?.reason === 'aborted') _probedSN = null;
-  } catch { _boardOSVersion = null; }
+  } catch { _boardOSVersion = null; _boardInstalled = null; }
   applyOSVersionSignal();
 }
 
 function forgetBoardOSVersion() {
   _boardOSVersion = null;
+  _boardInstalled = null;
   _probedSN       = null;
   applyOSVersionSignal();
 }
@@ -3121,12 +3168,71 @@ function applyOSVersionSignal() {
   // A owns the target; this owns the board. The contrast still lands, because
   // the two sit one line apart. (2026-08-15)
   if (mismatch || (_boardOSVersion && !tree)) {
-    notes.push(`JMT Studio detected ProffieOS ${_boardOSVersion} on the connected board.`);
+    // BUILT, not "installed" and not "flashed". The board prints `Installed:`, but
+    // ProffieOS defines it as `const char install_time[] = __DATE__ " " __TIME__`
+    // (common/common.h:19) — COMPILE-time macros. It is the build timestamp of the
+    // firmware, not when anyone put it on the board. Ryan's own numbers said so
+    // before the source did: board 10:29:12, his compile 10:29, his flash 10:30.
+    // ProffieOS uses it as a build identity itself, invalidating saved presets via
+    // `f->Expect(install_time)` (common/config_file.h:108).
+    // "installed" is also already taken in this app and means "present on the
+    // computer" — see ui-conventions.md. "built" matches what the target line
+    // already says ("last built on ProffieOS 6.9") and what @jmt:compiled records.
+    // already taken in this app and means something else: whether a ProffieOS tree
+    // is present on the COMPUTER ("INSTALLED VERSIONS", "No versions installed",
+    // "which isn't installed"). Both meanings appeared in one tooltip on
+    // 2026-08-19 and Ryan caught the collision. "Flashed" is the community's word
+    // for putting firmware on a board and matches @jmt:flashed, which is the same
+    // event recorded from our side — so the eventual comparison reads straight.
+    // The install date rides on the same sentence: both are facts about the board
+    // in front of you, and it is what turns "a v6.9 board" into "THIS board, flashed
+    // at 10:29" - the thing a version alone can never tell you when several configs
+    // build against the same ProffieOS. Omitted silently when the board did not
+    // print one, rather than saying 'unknown' about something nobody asked.
+    notes.push(_boardInstalled
+      ? `JMT Studio detected ProffieOS ${_boardOSVersion} on the connected board, built ${_boardInstalled}.`
+      : `JMT Studio detected ProffieOS ${_boardOSVersion} on the connected board.`);
+    // Naming the mismatch answers "do these match?" and drops the data. What
+    // the user wants next is to switch to a tree that DOES match, and folder
+    // names do not carry the version — three installed trees can all be v8.10.
+    // _osVersionMap is the only thing that knows which is which, and it is
+    // already loaded here, which is what makes the comparison above possible.
+    // So this is a filter over a map in hand, not a new lookup. (2026-08-19)
+    // Guarded on the map EXISTING, not just on it having matches: when the load
+    // failed it is null, and "no installed version is v7.15" would then be a
+    // confident claim about something unread. No map means no sentence.
+    if (_osVersionMap) {
+      const matches = Object.keys(_osVersionMap)
+        .filter(folder => _osVersionMap[folder] === _boardOSVersion);
+      if (matches.length) {
+        notes.push(`You have ${_boardOSVersion} installed as: ${matches.join(', ')}.`);
+      } else {
+        // Two lines, two subjects: this one is about the BOARD's version, the
+        // config-was-written-for line below is about the CONFIG's. They usually
+        // differ and both earn their place. When they name the SAME version they
+        // collapse into one fact stated twice, and the other line says it better
+        // - it names what to do about it. So yield to it. (Ryan, 2026-08-19.)
+        // Compared on the version number rather than the string, because one side
+        // is a reported version ("v6.9") and the other a folder name
+        // ("ProffieOS 6.9").
+        const _num = v => (String(v || '').match(/(\d+\.\d+[\w.\-]*)/) || [])[1] || null;
+        const boardNum  = _num(_boardOSVersion);
+        const configNum = _num(window._configOsVersionMissing);
+        const saidBelow = !!(boardNum && configNum && boardNum === configNum);
+        // Silence with nothing else to say leaves a red field and a detected
+        // version with no way forward, which is the dead end this note removes.
+        if (!saidBelow) notes.push(`You have no ${_boardOSVersion} installed.`);
+      }
+    }
   }
   // The config named a version that is not installed, so it is building against
   // something it did not ask for. Same rule as above: no "it will build against
   // X instead" - the target line already said so.
-  if (window._configOsVersionMissing && name && !isVersionSentinel(name)) {
+  // NOT gated on a selection any more. Since 2026-08-19 an unhonoured request
+  // leaves the dropdown EMPTY, so requiring `name` dropped this line in the exact
+  // state it exists to describe — the one where nothing is selected because the
+  // config asked for something absent.
+  if (window._configOsVersionMissing && !isVersionSentinel(name)) {
     notes.push(`This config was written for ${window._configOsVersionMissing}, which isn't installed.`);
   }
   // Single newline. These are short lines about one field, not paragraphs of

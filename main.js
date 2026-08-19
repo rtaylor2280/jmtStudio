@@ -3844,11 +3844,49 @@ let _abortVersionProbe = null;
 // being mistaken for a version. The boot banner is accepted too, since a board
 // that just enumerated may print it before our command lands.
 function parseBoardVersion(buf) {
+  // The suffix class has to allow `.` for point releases (8.10.1), which means it
+  // also swallows sentence punctuation: a banner reading "Welcome to ProffieOS
+  // v6.9." captured "6.9." and produced "v6.9.". Nothing equals that. The value is
+  // compared against each installed tree's own version string, so one stray
+  // character turns a matching board and tree into a mismatch - a red OS Version
+  // field, and (once B-183 landed) "No installed version is v6.9.." printed over a
+  // v6.9 tree sitting right there in the list. A trailing separator is never part
+  // of a version, so it is stripped rather than excluded from the class.
+  // (Found on Ryan's board 2026-08-19; every fixture here had used a banner with
+  // no trailing period, which is why it survived.)
+  const trim = v => v.replace(/[.\-]+$/, '');
   const banner = buf.match(/Welcome to ProffieOS\s+v?(\d+\.\d+[\w.\-]*)/i);
-  if (banner) return 'v' + banner[1];
-  const reply = buf.match(/^[ \t]*v?(\d+\.\d+[\w.\-]*)[ \t]*\r?\n[ \t]*\S*\.h[ \t]*\r?$/m);
-  if (reply) return 'v' + reply[1];
+  if (banner) return 'v' + trim(banner[1]);
+  // The follower line is what separates a real answer from the board's ordinary
+  // chatter, and there is MORE THAN ONE SHAPE OF IT. 8.10 answers
+  //   v8.10 / my_config.h / prop: ... — hence the original `.h` requirement.
+  // 6.9 answers
+  //   v6.9 / Installed: Aug 19 2026 10:29:12
+  // with no CONFIG_FILE line at all, so the `.h` test rejected a correct reply and
+  // the probe timed out with the answer sitting in the buffer. On 6.9 that left the
+  // boot banner as the only path that ever worked, which is why detection succeeded
+  // right after a flash or a power cycle and never again. (Read off Ryan's own board
+  // 2026-08-19; every fixture here had been written against 8.10's shape.)
+  //
+  // Still deliberately narrow: a bare decimal followed by anything is NOT a version.
+  // "3.85 / volts" and "2.0 / EVENT: Clash" must keep failing, which is the whole
+  // reason a follower is required at all.
+  const reply = buf.match(/^[ \t]*v?(\d+\.\d+[\w.\-]*)[ \t]*\r?\n[ \t]*(?:\S*\.h|Installed:)[ \t\S]*\r?$/m);
+  if (reply) return 'v' + trim(reply[1]);
   return null;
+}
+
+// When the firmware was flashed, as the board reports it:
+//   > version
+//   v6.9
+//   Installed: Aug 19 2026 10:29:12
+// A `__DATE__ __TIME__` string in the board's own sense, with no timezone, so it
+// is for DISPLAY and loose comparison against @jmt:flashed — never exact equality.
+// Separate from parseBoardVersion on purpose: two facts, two absences. A board
+// that reports a version and no install date must not look like a failed probe.
+function parseBoardInstalled(buf) {
+  const m = buf.match(/^[ \t]*Installed:[ \t]*(\S.*?)\s*$/m);
+  return m ? m[1] : null;
 }
 
 ipcMain.handle('serial:probeVersion', async (_, { port } = {}) => {
@@ -3888,6 +3926,7 @@ ipcMain.handle('serial:probeVersion', async (_, { port } = {}) => {
       if (done) return closed;
       done = true;
       clearTimeout(timer);
+      if (graceTimer) clearTimeout(graceTimer);
       closed = shut();
       _abortVersionProbe = null;
       closed.then(() => resolve(result));
@@ -3897,10 +3936,25 @@ ipcMain.handle('serial:probeVersion', async (_, { port } = {}) => {
     // port is actually free when it resolves.
     _abortVersionProbe = () => finish({ ok: false, reason: 'aborted' });
 
+    let graceTimer = null;
     sp.on('data', chunk => {
       buf += chunk.toString('utf8');
       const v = parseBoardVersion(buf);
-      if (v) return finish({ ok: true, version: v });
+      if (v) {
+        const inst = parseBoardInstalled(buf);
+        // 6.9 prints `Installed:` as the line right after the version, so it is
+        // already here. 8.10 prints CONFIG_FILE, prop and buttons first, so a
+        // finish-on-version would beat it by a few milliseconds and the date
+        // would appear on old boards and not new ones. One short grace window,
+        // set once, buys the rest of the reply without touching the 2.5s budget.
+        if (inst) return finish({ ok: true, version: v, installed: inst });
+        if (!graceTimer) {
+          graceTimer = setTimeout(
+            () => finish({ ok: true, version: v, installed: parseBoardInstalled(buf) }),
+            250);
+        }
+        return;
+      }
       // A flooding board (charge-detect chatter, a serial-print loop) would grow
       // this without bound. Keep a tail large enough to hold a whole reply.
       if (buf.length > 64 * 1024) buf = buf.slice(-8192);

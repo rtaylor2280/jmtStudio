@@ -102,6 +102,9 @@ async function initVersionsPanel(initialName) {
 
 async function vpRefresh(preferName) {
   const versions = await window.electronAPI.listVersionsDetails();
+  // The starred default is read here as well as by the config dropdown, because
+  // this panel can be opened before anything has repopulated that dropdown.
+  await window.loadDefaultOSVersion?.();
   _vpVersions = versions;
   _vpRenderCards();
   const preferred = preferName ? versions.find(v => v.name === preferName) : null;
@@ -109,9 +112,53 @@ async function vpRefresh(preferName) {
   _vpSelectVersion(preferred || still || versions[0] || null);
 }
 
+// ── Default version ────────────────────────────────────
+// The star state is owned by index.html, not by this panel — the config
+// dropdown needs the answer at boot and this file is only loaded when the
+// Versions tab is first opened. Both helpers degrade to null/no-op if that
+// script has not defined them yet.
+
+function _vpDefaultName() {
+  return window.getEffectiveDefaultOSVersion?.(_vpVersions.map(v => v.name)) ?? null;
+}
+
+async function _vpSetDefault(name) {
+  if (!name) return;
+  // Deliberately NOT guarded against the currently-shown star. Until something
+  // is stored the shown default is the versions[0] fallback, which drifts the
+  // moment a higher-sorting name is imported; clicking it is how the user pins
+  // it. setDefaultOSVersion guards against a redundant write itself.
+  await window.setDefaultOSVersion?.(name);
+  _vpRenderCards();
+  // Patch the detail badge in place rather than re-rendering the pane —
+  // _vpRenderDetail resets _vpNotesOriginal from the stored record, which would
+  // silently drop whatever the user has typed into the notes box.
+  _vpUpdateDetailDefaultBadge();
+}
+
+function _vpUpdateDetailDefaultBadge() {
+  const slot = document.getElementById('vp-detail-default-badge');
+  if (!slot) return;
+  const show = _vpVersions.length > 1 && _vpSelected && _vpSelected.name === _vpDefaultName();
+  slot.innerHTML = show
+    ? '<span class="vp-badge lg" title="Pre-selected for new configs">&#9733; Default</span>'
+    : '';
+}
+
+// The sidebar is only a selector — its header holds a title and nothing else,
+// and every field on a card is repeated in the detail pane. With fewer than two
+// versions there is no selection to make, so it goes away entirely rather than
+// collapsing: a collapsed chooser still advertises a decision that does not
+// exist. Download / Import live in the view's top-right chrome, not in here, so
+// nothing becomes unreachable.
+function _vpApplyLayout() {
+  document.querySelector('.vp-sidebar')?.classList.toggle('is-hidden', _vpVersions.length < 2);
+}
+
 // ── Cards ──────────────────────────────────────────────
 
 function _vpRenderCards() {
+  _vpApplyLayout();
   const list = document.getElementById('vp-list');
   if (!list) return;
   list.innerHTML = '';
@@ -121,13 +168,23 @@ function _vpRenderCards() {
     return;
   }
 
+  // With a single version installed there is no choice to express, so the star
+  // is hidden entirely — same gate the common folder cards use.
+  const showStars   = _vpVersions.length > 1;
+  const defaultName = _vpDefaultName();
+
   _vpVersions.forEach(v => {
     const card = document.createElement('div');
     card.className = 'vp-card' + (v.name === _vpSelected?.name ? ' active' : '');
     card.dataset.name = v.name;
+    const isDefault = v.name === defaultName;
+    const starBtn = showStars
+      ? `<button class="vp-card-star${isDefault ? ' is-starred' : ''}" data-star-name="${_vpEsc(v.name)}" title="${isDefault ? 'Default OS version for new configs' : 'Set as default'}">${isDefault ? '&#9733;' : '&#9734;'}</button>`
+      : '';
     card.innerHTML = `
       <div class="vp-card-top">
         <span class="vp-card-name">${_vpEsc(v.name)}</span>
+        ${starBtn}
       </div>
       <div class="vp-card-meta">
         <span class="vp-card-size">${_vpFmtBytes(v.size)}</span>
@@ -136,7 +193,15 @@ function _vpRenderCards() {
       ${v.proffieVersion ? `<div class="vp-card-proffie-ver">ProffieOS ${_vpEsc(v.proffieVersion)}</div>` : ''}
       ${v.notesPreview ? `<div class="vp-card-notes-preview">${_vpEsc(v.notesPreview)}</div>` : ''}
     `;
-    card.addEventListener('click', async () => {
+    card.addEventListener('click', async (e) => {
+      // The star sits inside the card, so its click would otherwise also
+      // select the card and run the unsaved-notes prompt on the way.
+      const starEl = e.target.closest?.('.vp-card-star');
+      if (starEl) {
+        e.stopPropagation();
+        await _vpSetDefault(starEl.dataset.starName);
+        return;
+      }
       if (_vpNotesDirty) {
         const choice = await (window.promptUnsaved?.('Unsaved notes — save before switching versions?') ?? Promise.resolve('discard'));
         if (choice === 'cancel') return;
@@ -163,7 +228,22 @@ function _vpRenderDetail(v) {
   if (!pane) return;
 
   if (!v) {
-    pane.innerHTML = '<div class="vp-no-selection">Select a version to view details.</div>';
+    // Two different nothings. With versions installed this is a transient
+    // no-selection state and the sidebar is on screen to fix it. With none
+    // installed it is the first thing a new user sees, and the sidebar that
+    // used to carry "No versions installed." is hidden — so the route to a
+    // version has to be named here or the pane dead-ends.
+    pane.innerHTML = _vpVersions.length === 0
+      ? `<div class="vp-empty-detail">
+           <div class="vp-empty-detail-title">No ProffieOS versions installed</div>
+           <div class="vp-empty-detail-body">
+             JMT Studio builds your config against a copy of the ProffieOS source on this
+             computer. Use <strong>Download Version</strong> above to fetch an official
+             release, or <strong>Import Version</strong> if you already have a ProffieOS
+             folder on disk.
+           </div>
+         </div>`
+      : '<div class="vp-no-selection">Select a version to view details.</div>';
     return;
   }
 
@@ -174,6 +254,7 @@ function _vpRenderDetail(v) {
     <div class="vp-detail-header">
       <div class="vp-detail-title-row">
         <h2 class="vp-detail-name">${_vpEsc(v.name)}</h2>
+        <span id="vp-detail-default-badge"></span>
       </div>
       <div class="vp-detail-stats">
         <span>${_vpFmtBytes(v.size)}</span>
@@ -274,6 +355,7 @@ function _vpRenderDetail(v) {
   });
 
   // Action buttons
+  _vpUpdateDetailDefaultBadge();
   document.getElementById('vp-btn-duplicate')?.addEventListener('click', () => _vpDuplicate(v));
   document.getElementById('vp-btn-open-folder')?.addEventListener('click', () => window.electronAPI.openVersionFolder(v.name));
   document.getElementById('vp-btn-export')?.addEventListener('click', () => _vpExport(v));
