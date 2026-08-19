@@ -582,6 +582,18 @@ function saveToCache(buildOutputPath, configHash, buildPkgHash, meta) {
     configHashVersion: CONFIG_HASH_VERSION,
     buildPkgHash,
     configId:      meta.configId || null,
+    // ONE ENTRY CAN BELONG TO SEVERAL CONFIGS. computeConfigHash strips comments, and
+    // the @jmt: markers - including config_id itself - are comments. So two configs
+    // that differ only in their metadata block hash identically and share this entry.
+    // That is desirable: a cosmetic edit must not cost a rebuild. What was wrong is
+    // that the entry could only name ONE of them, and the second config never wrote
+    // anything (it takes the cache hit), so its dependence was invisible and could
+    // never be reconstructed afterwards.
+    // `configId` above is kept as the CREATOR and for entries written before this.
+    // (2026-08-19. Ryan: "we need 1 to many and easiest way is to save the config ids
+    // as an array. How we decide to work with those can be later." Deliberately data
+    // only - nothing consumes this yet, and no behaviour changes.)
+    configIds:     meta.configId ? [meta.configId] : [],
     fqbn:          meta.fqbn,
     usb:           meta.usb,
     proffieOSHash: meta.proffieOSHash,
@@ -630,7 +642,7 @@ function lookupCache(configHash, buildPkgHash) {
  * Restores a cached build to the build output directory.
  * Returns { ok, buildPath, metadata } on hit, or { ok: false } on miss.
  */
-function restoreToOutput(configHash, buildPkgHash) {
+function restoreToOutput(configHash, buildPkgHash, restoringConfigId = null) {
   const entry = lookupCache(configHash, buildPkgHash);
   if (!entry) return { ok: false };
 
@@ -656,6 +668,20 @@ function restoreToOutput(configHash, buildPkgHash) {
   // Best-effort: a failure here must never turn a good cache hit into a miss.
   try {
     entry.metadata.lastUsedAt = new Date().toISOString();
+    // The config taking this hit may not be the one that created the entry. Record it
+    // so the association is not lost - a restoring config writes nothing else, so this
+    // is the only moment it can ever be captured. Self-cleaning by construction: the
+    // list lives inside the entry, so it dies with it and no eviction path has to
+    // remember to tidy up after itself.
+    if (restoringConfigId) {
+      if (!Array.isArray(entry.metadata.configIds)) {
+        // Entry predates the array: seed from the scalar so nothing is lost.
+        entry.metadata.configIds = entry.metadata.configId ? [entry.metadata.configId] : [];
+      }
+      if (!entry.metadata.configIds.includes(restoringConfigId)) {
+        entry.metadata.configIds.push(restoringConfigId);
+      }
+    }
     fs.writeFileSync(
       path.join(entry.cacheDir, 'metadata.json'),
       JSON.stringify(entry.metadata, null, 2)
@@ -674,7 +700,7 @@ function restoreToOutput(configHash, buildPkgHash) {
 function checkAndRestore(configContent, fqbn, usb, proffieOSHash, coreVersion, stylesContent = '') {
   const configHash   = computeConfigHash(configContent, stylesContent);
   const buildPkgHash = computeBuildPackageHash(fqbn, usb, proffieOSHash, coreVersion);
-  const result       = restoreToOutput(configHash, buildPkgHash);
+  const result       = restoreToOutput(configHash, buildPkgHash, extractConfigId(configContent));
   if (!result.ok) return { hit: false };
   return { hit: true, buildPath: result.buildPath, metadata: result.metadata };
 }
