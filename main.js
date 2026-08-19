@@ -843,8 +843,8 @@ ipcMain.handle('toolchain:flash', async (_, { port, fqbn, expectedSN }) => {
 });
 
 ipcMain.handle('toolchain:getStatus', () => toolchain.getStatus());
-ipcMain.handle('cache:check', (_, { configContent, fqbn, usb }) =>
-  toolchain.checkCacheAndRestore(configContent, fqbn, usb));
+ipcMain.handle('cache:check', (_, { configContent, fqbn, usb, configId }) =>
+  toolchain.checkCacheAndRestore(configContent, fqbn, usb, configId));
 
 // ── Config template (user-editable in a future release) ──────────────────────
 // Read the default-config template from `userData/templates/default.h`. Create it on first

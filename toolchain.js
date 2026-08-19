@@ -1289,7 +1289,7 @@ async function compile(configContent, fqbn, buildOptions, onLog) {
         const stylesContent = proffie.readStagedStyles();
         cache.cacheCompileResult(buildPath, configContent, fqbn, usb, proffieOSHash,
           getActiveCoreVersion(), new Date().toISOString(), app.getVersion(),
-          stylesContent, durationMs);
+          stylesContent, durationMs, buildOptions && buildOptions.configId);
       } catch {}
     }
     // coreVersion rides along so the renderer can stamp @jmt:core without a
@@ -2264,11 +2264,11 @@ function getStatus() {
   };
 }
 
-function checkCacheAndRestore(configContent, fqbn, usb) {
+function checkCacheAndRestore(configContent, fqbn, usb, configId = null) {
   const proffieOSHash = proffie.hashVersion(proffie.getSelectedVersion());
   const stylesContent = proffie.readStagedStyles();
   return cache.checkAndRestore(configContent, fqbn, usb, proffieOSHash,
-    getActiveCoreVersion(), stylesContent);
+    getActiveCoreVersion(), stylesContent, configId);
 }
 
 // Drives the first-run setup banner. Asks about the version actually in play

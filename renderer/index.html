@@ -9800,6 +9800,10 @@ window.setFlashedTimestamp = async (port, sn) => {
 };
 window.getLastPort    = () => metaPort;
 window.getMetaBoardSN = () => metaBoardSN;
+// The open config's own id. buildPanel needs it for the build cache and cannot get
+// it from the editor text: the @jmt block is stripped on load and re-injected only
+// on save, so the content the compile sends has never carried it. (2026-08-19)
+window.getMetaConfigId = () => metaConfigId;
 
 // ── Recent files dropdown ──────────────────────────────
 async function openRecent(filePath) {

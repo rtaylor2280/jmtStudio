@@ -697,10 +697,13 @@ function restoreToOutput(configHash, buildPkgHash, restoringConfigId = null) {
  * Given config content + build parameters, checks the cache and restores if hit.
  * Returns { hit, buildPath?, metadata? }
  */
-function checkAndRestore(configContent, fqbn, usb, proffieOSHash, coreVersion, stylesContent = '') {
+function checkAndRestore(configContent, fqbn, usb, proffieOSHash, coreVersion, stylesContent = '', explicitConfigId = null) {
   const configHash   = computeConfigHash(configContent, stylesContent);
   const buildPkgHash = computeBuildPackageHash(fqbn, usb, proffieOSHash, coreVersion);
-  const result       = restoreToOutput(configHash, buildPkgHash, extractConfigId(configContent));
+  // Same reason as the write path: the content reaching us is the stripped editor
+  // text, so extraction alone never saw an id. This is the ONLY moment a restoring
+  // config can be recorded, so losing it here loses it permanently.
+  const result       = restoreToOutput(configHash, buildPkgHash, explicitConfigId || extractConfigId(configContent));
   if (!result.ok) return { hit: false };
   return { hit: true, buildPath: result.buildPath, metadata: result.metadata };
 }
@@ -710,10 +713,16 @@ function checkAndRestore(configContent, fqbn, usb, proffieOSHash, coreVersion, s
  * Extracts configId from configContent automatically.
  * Called from toolchain.js after a successful compile.
  */
-function cacheCompileResult(buildOutputPath, configContent, fqbn, usb, proffieOSHash, coreVersion, compiledAt, toolVersion, stylesContent = '', compileDurationMs = null) {
+function cacheCompileResult(buildOutputPath, configContent, fqbn, usb, proffieOSHash, coreVersion, compiledAt, toolVersion, stylesContent = '', compileDurationMs = null, explicitConfigId = null) {
   const configHash   = computeConfigHash(configContent, stylesContent);
   const buildPkgHash = computeBuildPackageHash(fqbn, usb, proffieOSHash, coreVersion);
-  const configId     = extractConfigId(configContent);
+  // The @jmt block is STRIPPED from the editor on load (index.html: `clean:
+  // stripJmtLines(content)`) and re-injected only on save, so what the compile path
+  // hands us has never contained config_id. Extraction from content was therefore
+  // dead on arrival - every entry since the field was added recorded null. The
+  // renderer holds the id in memory and now passes it explicitly; extraction stays
+  // as the fallback for any caller that does have a full config. (2026-08-19)
+  const configId     = explicitConfigId || extractConfigId(configContent);
   return saveToCache(buildOutputPath, configHash, buildPkgHash, {
     fqbn, usb, proffieOSHash, coreVersion, compiledAt, toolVersion, configId, compileDurationMs,
   });

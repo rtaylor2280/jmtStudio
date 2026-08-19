@@ -569,7 +569,11 @@ async function doCompile() {
   setFlashEnabled(false);
   setStatus('compile', 'pending', 'Compiling...');
 
-  const result = await window.electronAPI.compile(content, selectedFqbn, { usb: selectedUsb });
+  // The config's own id, from the @jmt block. It cannot be read back out of the
+  // content we are sending: the block is stripped from the editor on load and only
+  // re-injected on save, so the compile path has never carried it. Passed
+  // explicitly so the cache can record WHICH config produced this build.
+  const result = await window.electronAPI.compile(content, selectedFqbn, { usb: selectedUsb, configId: window.getMetaConfigId?.() || null });
   setBusy(false);
   if (result.ok) {
     compileSuccess = true;
@@ -2629,7 +2633,7 @@ async function checkCacheForConfig(missStatus) {
 
   let result;
   try {
-    result = await window.electronAPI.checkCache(content, selectedFqbn, selectedUsb);
+    result = await window.electronAPI.checkCache(content, selectedFqbn, selectedUsb, window.getMetaConfigId?.() || null);
   } catch {
     if (seq !== _cacheCheckSeq) return;
     cacheCheckPending = false;

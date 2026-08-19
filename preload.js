@@ -47,8 +47,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getAppVersion:      ()         => ipcRenderer.invoke('app:getVersion'),
   isDevMode:          ()         => ipcRenderer.invoke('app:isDevMode'),
   getArduinoDataPath: ()         => ipcRenderer.invoke('app:getArduinoDataPath'),
-  checkCache: (configContent, fqbn, usb) =>
-    ipcRenderer.invoke('cache:check', { configContent, fqbn, usb }),
+  checkCache: (configContent, fqbn, usb, configId) =>
+    ipcRenderer.invoke('cache:check', { configContent, fqbn, usb, configId }),
   getCacheSize:    () => ipcRenderer.invoke('cache:getSize'),
   clearBuilds:     () => ipcRenderer.invoke('cache:clearBuilds'),
   resetWorkspace:  () => ipcRenderer.invoke('cache:resetWorkspace'),
