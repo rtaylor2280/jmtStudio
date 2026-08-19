@@ -3385,6 +3385,24 @@ window.resetToolchainStatus     = () => {
   if (getBtn) getBtn.style.display = '';
   updateCompileButton();
 };
+// Save As only. The copy changes no build input, so the debounced content check
+// never fires - yet from the moment it is written it is the config sitting on the
+// current build, with Flash lit. That dependence exists for exactly one instant and
+// is unreconstructable afterwards, so it gets recorded here. No restore: nothing
+// needs copying, only the entry's owner list needs to grow. Silent by design -
+// there is no user-visible outcome, and a no-op when no entry matches is correct.
+async function claimCacheForCurrentConfig() {
+  try {
+    if (!window.electronAPI?.claimCache || !selectedFqbn) return false;
+    const configId = window.getMetaConfigId?.();
+    if (!configId) return false;
+    const content = window.getEditorContent?.() || '';
+    if (!content.trim()) return false;
+    return await window.electronAPI.claimCache(content, selectedFqbn, selectedUsb, configId);
+  } catch { return false; }
+}
+
+window.claimCacheForCurrentConfig = claimCacheForCurrentConfig;
 window.checkCacheForConfig      = checkCacheForConfig;
 window.updateUsbChangedIndicator  = updateUsbChangedIndicator;
 window.updatePortChangedIndicator = updatePortChangedIndicator;

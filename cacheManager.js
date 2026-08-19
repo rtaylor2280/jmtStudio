@@ -691,12 +691,52 @@ function restoreToOutput(configHash, buildPkgHash, restoringConfigId = null) {
   return { ok: true, buildPath: buildOutputPath, metadata: entry.metadata };
 }
 
+/**
+ * Records that a config relies on an already-cached build, WITHOUT restoring it.
+ *
+ * Save As is the case this exists for. The copy inherits a build that is already
+ * on disk and already flashable, so it depends on that entry from the instant it
+ * is written - but it changes no build input, so no cache check fires and the
+ * dependence is never recorded. Running a full restore just to append one field
+ * would re-copy the entire build tree to change a string.
+ *
+ * Returns true only when an entry existed and now names this config.
+ */
+function claimEntry(configHash, buildPkgHash, configId) {
+  if (!configId) return false;
+  const entry = lookupCache(configHash, buildPkgHash);
+  if (!entry) return false;
+  try {
+    if (!Array.isArray(entry.metadata.configIds)) {
+      entry.metadata.configIds = entry.metadata.configId ? [entry.metadata.configId] : [];
+    }
+    if (entry.metadata.configIds.includes(configId)) return true;
+    entry.metadata.configIds.push(configId);
+    fs.writeFileSync(
+      path.join(entry.cacheDir, 'metadata.json'),
+      JSON.stringify(entry.metadata, null, 2)
+    );
+    return true;
+  } catch { return false; }
+}
+
 // ── Public API ─────────────────────────────────────────
 
 /**
  * Given config content + build parameters, checks the cache and restores if hit.
  * Returns { hit, buildPath?, metadata? }
  */
+/**
+ * Claim path for callers that hold config content rather than raw hashes.
+ * Mirrors checkAndRestore's inputs exactly so the two can never disagree about
+ * which entry a given config maps to.
+ */
+function claimForConfig(configContent, fqbn, usb, proffieOSHash, coreVersion, stylesContent = '', explicitConfigId = null) {
+  const configHash   = computeConfigHash(configContent, stylesContent);
+  const buildPkgHash = computeBuildPackageHash(fqbn, usb, proffieOSHash, coreVersion);
+  return claimEntry(configHash, buildPkgHash, explicitConfigId || extractConfigId(configContent));
+}
+
 function checkAndRestore(configContent, fqbn, usb, proffieOSHash, coreVersion, stylesContent = '', explicitConfigId = null) {
   const configHash   = computeConfigHash(configContent, stylesContent);
   const buildPkgHash = computeBuildPackageHash(fqbn, usb, proffieOSHash, coreVersion);
@@ -732,6 +772,7 @@ module.exports = {
   computeConfigHash,
   computeBuildPackageHash,
   checkAndRestore,
+  claimForConfig,
   cacheCompileResult,
   readBuildProvenance,
   startupEviction,

@@ -846,6 +846,11 @@ ipcMain.handle('toolchain:getStatus', () => toolchain.getStatus());
 ipcMain.handle('cache:check', (_, { configContent, fqbn, usb, configId }) =>
   toolchain.checkCacheAndRestore(configContent, fqbn, usb, configId));
 
+// Save As inherits a build without touching a build input, so no check fires.
+// Claim-only: append the new id, copy nothing.
+ipcMain.handle('cache:claim', (_, { configContent, fqbn, usb, configId }) =>
+  toolchain.claimCacheForConfig(configContent, fqbn, usb, configId));
+
 // ── Config template (user-editable in a future release) ──────────────────────
 // Read the default-config template from `userData/templates/default.h`. Create it on first
 // request with the V3 scaffold below if it doesn't exist yet, then return the file contents.

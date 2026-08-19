@@ -2264,6 +2264,13 @@ function getStatus() {
   };
 }
 
+function claimCacheForConfig(configContent, fqbn, usb, configId = null) {
+  const proffieOSHash = proffie.hashVersion(proffie.getSelectedVersion());
+  const stylesContent = proffie.readStagedStyles();
+  return cache.claimForConfig(configContent, fqbn, usb, proffieOSHash,
+    getActiveCoreVersion(), stylesContent, configId);
+}
+
 function checkCacheAndRestore(configContent, fqbn, usb, configId = null) {
   const proffieOSHash = proffie.hashVersion(proffie.getSelectedVersion());
   const stylesContent = proffie.readStagedStyles();
@@ -2315,6 +2322,7 @@ module.exports = {
   abort,
   getStatus,
   checkCacheAndRestore,
+  claimCacheForConfig,
   needsCoreInstall,
   validateCli,
   CORE_ID,

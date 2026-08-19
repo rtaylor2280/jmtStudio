@@ -8889,6 +8889,10 @@ async function doSaveAs() {
   if (window.updateUsbChangedIndicator) window.updateUsbChangedIndicator();
   // Same "Last used style" write-back as doSave above.
   _sfWriteBackLastUsedStyles();
+  // The fresh id above means a config that has never told the build cache it
+  // exists, while sitting on a build it can flash right now. Record the claim
+  // while it is still knowable. (2026-08-19)
+  window.claimCacheForCurrentConfig?.();
   return true;
 }
 
