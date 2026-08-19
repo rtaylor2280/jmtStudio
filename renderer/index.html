@@ -8163,6 +8163,19 @@ function loadContent(rawContent, filePath) {
     versionSel.value = resolvedVersion;
     clearVersionNotInstalled(versionSel);   // a previous config may have left it
     if (window.electronAPI) window.electronAPI.selectVersion(resolvedVersion);
+    // Setting .value programmatically fires NO change event, so nothing downstream
+    // learned the version had moved. `_statPluginVersion` therefore kept the pin of
+    // whatever was selected BEFORE this config opened, and the OS Version tooltip
+    // claimed a plugin the selected version does not use — 8.10 +JMT's 4.6.0 shown
+    // over a 6.9 tree pinned to 3.6.0. Nudging the dropdown by hand fired change,
+    // refreshed it, and the wrong claim vanished, which is what made it look stale
+    // rather than never-loaded.
+    // The BOARD select three lines up already dispatches its own change for exactly
+    // this reason; the version select simply never got the equivalent. Calling the
+    // refresh directly rather than dispatching, because onOsVersionChange also
+    // kicks a cache check and a toolchain init that this path has already done.
+    // (2026-08-19)
+    window._refreshSelectedVersionJmtState?.();
   } else if (version) {
     // *** The substitution, and it was never even a decision. ***
     // This branch used to not exist: the comment above said "invalid/missing

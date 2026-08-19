@@ -2062,6 +2062,16 @@ async function closeSerialMonitor() {
   _serialOpen = false;
   _serialSetStatus('disconnected', false);
   _updateSerialPauseButton();
+  // The monitor was holding the port, which is the one blocking reason that lasts
+  // as long as the user wants it to. Releasing it is a real trigger, and without
+  // this the version stayed unknown until some unrelated port event happened to
+  // fire. NOT on the flash path: pauseSerialBeforeFlash sets _serialAutoPaused
+  // before calling us, and the flash needs the port we would be grabbing.
+  // (probeBoardOSVersion also guards on isBusy, so this is belt and braces.)
+  if (!_serialAutoPaused && !_boardOSVersion && selectedPort && selectedPortIsProffieboard) {
+    _probedSN = null;
+    probeBoardOSVersion({ path: selectedPort, isProffieboard: true, serialNumber: selectedPortSN });
+  }
 }
 
 function _switchLogTab(name) {
@@ -3089,6 +3099,12 @@ let _boardOSVersion  = null;   // what the connected board reported, or null
 // absence from _boardOSVersion: a board can answer `version` and not print an
 // install date, and that is not a failed probe. (2026-08-19)
 let _boardInstalled  = null;
+// Why we do not have a version, when we do not have one. Until 2026-08-19 only the
+// VALUE was kept, so every failure looked identical to success-with-a-match: the
+// field went plain and the tooltip omitted the board entirely. An absent answer
+// rendered as an agreeing one. null = never asked (transient, say nothing);
+// otherwise the probe's own reason.
+let _boardOSReason   = null;
 let _probedSN        = null;   // board we already asked; don't re-probe per poll
 
 // Whether the open config declared a version lives on window, not here: this
@@ -3116,18 +3132,28 @@ async function probeBoardOSVersion(port) {
     const r = await window.electronAPI?.probeBoardVersion?.(port.path);
     _boardOSVersion = r?.ok ? r.version : null;
     _boardInstalled = r?.ok ? (r.installed || null) : null;
+    _boardOSReason  = r?.ok ? null : (r?.reason || 'error');
     // "The port was busy" is not "the board won't answer." Clear the marker so
     // the next detection tries again, once the monitor or the flash is done.
     // A timeout or a failed open does mean the board is not talking, and that
     // one is left alone rather than retried on every port event.
-    if (r?.reason === 'monitor-open' || r?.reason === 'aborted') _probedSN = null;
-  } catch { _boardOSVersion = null; _boardInstalled = null; }
+    // EVERY transient reason clears the latch, not just these two. _probedSN is set
+    // before the await and was only cleared for monitor-open and aborted, so a
+    // 'timeout' or 'open-failed' disqualified that board for the LIFE OF THE
+    // SESSION - keyed on serial number, so re-plugging did not help either. Both
+    // are things that resolve on their own: a board mid-boot, a port still
+    // enumerating, a driver hiccup. (2026-08-19)
+    if (['monitor-open', 'aborted', 'timeout', 'open-failed', 'error'].includes(r?.reason)) {
+      _probedSN = null;
+    }
+  } catch { _boardOSVersion = null; _boardInstalled = null; _boardOSReason = 'error'; _probedSN = null; }
   applyOSVersionSignal();
 }
 
 function forgetBoardOSVersion() {
   _boardOSVersion = null;
   _boardInstalled = null;
+  _boardOSReason  = null;   // "not asked", not "asked and failed"
   _probedSN       = null;
   applyOSVersionSignal();
 }
@@ -3167,6 +3193,42 @@ function applyOSVersionSignal() {
   // once that line names the plugin too, the restatement is not even complete.
   // A owns the target; this owns the board. The contrast still lands, because
   // the two sit one line apart. (2026-08-15)
+  // A board is connected and we have no version from it. Saying nothing here is
+  // what made "could not read" render identically to "board agrees" - the whole
+  // defect this entry opens with. Only speaks when there is a REASON: a null
+  // reason means the probe has not run yet, which resolves in a moment and is not
+  // worth a line. Deliberately no colour change: nothing is known to be WRONG, the
+  // selected version may be perfectly right, and red would be a claim we cannot
+  // support. This states what is unknown, which is all we have. (2026-08-19)
+  if (!_boardOSVersion && _boardOSReason && selectedPort && selectedPortIsProffieboard) {
+    // Each line names the way out, not just the fault. Same rule as the
+    // empty-filter state in ui-conventions.md: say so, and offer the way out.
+    // Ports ARE polled - every 4.5s in main (_pollPortsNow) - but the poll builds a
+    // signature from the port PATHS and emits ports:changed only when that differs.
+    // SerialPort.list() reports COM6 whether or not another process holds it open,
+    // so the signature never moves and the poller correctly sees nothing. Releasing
+    // a port from another program is therefore invisible to us, and the user has to
+    // ask. Without naming the button a correct message dead-ends.
+    // Deliberately NOT solved by probing on a timer: the probe is not passive - it
+    // opens the port and writes to it, holding it for up to 2.5s - so a poller would
+    // periodically seize the port the user may want for the Serial Monitor.
+    // Ryan, 2026-08-19, on leaving it manual: "it's a very rare case."
+    // monitor-open is the exception: closing the monitor re-probes on its own.
+    // Short sentences rather than one clause-chain: this sits under a target line
+    // that is already a mouthful, and each fact lands on its own. Also keeps dashes
+    // out of a shipped UI string, which the keep-tells-out rule covers alongside
+    // commit messages and public docs.
+    const RETRY = 'Use ↺ next to Detected to retry.';
+    const CANT  = "Could not read the board's ProffieOS.";
+    const why = {
+      'monitor-open': `${CANT} The Serial Monitor has the port. Close it and the check runs again.`,
+      'timeout':      `${CANT} The board did not answer. ${RETRY}`,
+      'open-failed':  `${CANT} Another program may have the port. ${RETRY}`,
+      'write-failed': `${CANT} ${RETRY}`,
+      'no-port':      `${CANT} ${RETRY}`,
+    }[_boardOSReason] || `${CANT} ${RETRY}`;
+    notes.push(why);
+  }
   if (mismatch || (_boardOSVersion && !tree)) {
     // BUILT, not "installed" and not "flashed". The board prints `Installed:`, but
     // ProffieOS defines it as `const char install_time[] = __DATE__ " " __TIME__`
