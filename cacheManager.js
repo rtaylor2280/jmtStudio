@@ -84,15 +84,34 @@ function getBuildOutputPath() {
 // store and this file stays a small, single-purpose flash safety net.
 const BUILD_PROVENANCE_FILE = '_jmt_build_meta.json';
 
-function writeBuildProvenance(buildOutputPath, proffieOSHash) {
+function writeBuildProvenance(buildOutputPath, proffieOSHash, configHash = null, buildPkgHash = null) {
   try {
     fs.mkdirSync(buildOutputPath, { recursive: true });
     fs.writeFileSync(
       path.join(buildOutputPath, BUILD_PROVENANCE_FILE),
-      JSON.stringify({ proffieOSHash, writtenAt: new Date().toISOString() }, null, 2),
+      JSON.stringify({ proffieOSHash, configHash, buildPkgHash,
+                       writtenAt: new Date().toISOString() }, null, 2),
       'utf8'
     );
   } catch { /* sidecar is advisory — failure shouldn't abort a successful compile */ }
+}
+
+/**
+ * Does the build sitting in build-output belong to THIS config and these build settings?
+ *
+ * The build folder is a real place holding a real build, and until 2026-08-23 nothing could say
+ * whose. That gap cost a flash: a compile succeeded, the cache save failed, and the next cache
+ * lookup missed - so the app cleared its belief in a build that was sitting right there, valid, and
+ * refused to flash it. A miss means "nothing is STORED", which says nothing about the folder.
+ *
+ * Ryan, finding it in one sentence: "shouldn't the build folder already be populated at this point
+ * and not need cached version? sure it couldn't save it, but it should be still available at the
+ * moment right?" Yes. This is how the app can now answer that instead of guessing. (B-216)
+ */
+function buildOutputMatches(configHash, buildPkgHash) {
+  const prov = readBuildProvenance(getBuildOutputPath());
+  if (!prov || !prov.configHash || !prov.buildPkgHash) return false;
+  return prov.configHash === configHash && prov.buildPkgHash === buildPkgHash;
 }
 
 function readBuildProvenance(buildOutputPath) {
@@ -642,54 +661,7 @@ function lookupCache(configHash, buildPkgHash) {
  * Restores a cached build to the build output directory.
  * Returns { ok, buildPath, metadata } on hit, or { ok: false } on miss.
  */
-function restoreToOutput(configHash, buildPkgHash, restoringConfigId = null) {
-  const entry = lookupCache(configHash, buildPkgHash);
-  if (!entry) return { ok: false };
 
-  const buildOutputPath = getBuildOutputPath();
-  fs.mkdirSync(buildOutputPath, { recursive: true });
-
-  for (const f of fs.readdirSync(entry.cacheDir, { withFileTypes: true })) {
-    if (f.isFile() && f.name !== 'metadata.json') {
-      fs.copyFileSync(
-        path.join(entry.cacheDir, f.name),
-        path.join(buildOutputPath, f.name)
-      );
-    }
-  }
-
-  // Restored build's provenance comes from the cache entry's metadata.
-  writeBuildProvenance(buildOutputPath, entry.metadata.proffieOSHash);
-
-  // Stamp last use. Nothing tracked this before — metadata carried compiledAt only, so there was
-  // no way to tell a cache entry restored this morning from one untouched for months, and any
-  // size-management policy that wants LRU needs it. It is useless retroactively, which is why it
-  // lands with the change that invalidates the cache rather than with the UI that consumes it.
-  // Best-effort: a failure here must never turn a good cache hit into a miss.
-  try {
-    entry.metadata.lastUsedAt = new Date().toISOString();
-    // The config taking this hit may not be the one that created the entry. Record it
-    // so the association is not lost - a restoring config writes nothing else, so this
-    // is the only moment it can ever be captured. Self-cleaning by construction: the
-    // list lives inside the entry, so it dies with it and no eviction path has to
-    // remember to tidy up after itself.
-    if (restoringConfigId) {
-      if (!Array.isArray(entry.metadata.configIds)) {
-        // Entry predates the array: seed from the scalar so nothing is lost.
-        entry.metadata.configIds = entry.metadata.configId ? [entry.metadata.configId] : [];
-      }
-      if (!entry.metadata.configIds.includes(restoringConfigId)) {
-        entry.metadata.configIds.push(restoringConfigId);
-      }
-    }
-    fs.writeFileSync(
-      path.join(entry.cacheDir, 'metadata.json'),
-      JSON.stringify(entry.metadata, null, 2)
-    );
-  } catch {}
-
-  return { ok: true, buildPath: buildOutputPath, metadata: entry.metadata };
-}
 
 /**
  * Records that a config relies on an already-cached build, WITHOUT restoring it.
@@ -737,16 +709,81 @@ function claimForConfig(configContent, fqbn, usb, proffieOSHash, coreVersion, st
   return claimEntry(configHash, buildPkgHash, explicitConfigId || extractConfigId(configContent));
 }
 
-function checkAndRestore(configContent, fqbn, usb, proffieOSHash, coreVersion, stylesContent = '', explicitConfigId = null) {
+/**
+ * Answers "is there a stored build for this?" and WRITES NOTHING.
+ *
+ * This is what every UI-driven caller wants, and until 2026-08-23 there was no such function - the
+ * only lookup available also copied the whole entry over build-output. Ten call sites used it, one
+ * of them a 600 ms debounce on TYPING, so the build folder was being rewritten behind the user
+ * constantly. A flash makes the board re-enumerate, that fired the port handler, and the restore
+ * landed on top of the firmware the flash was mid-way through sending. (B-216)
+ *
+ * The rule this restores, which is what the app was always supposed to do: the build folder is
+ * written when a build is actually needed, and never because something changed.
+ *
+ * Returns the entry's directory so a caller that DOES need the build can read it where it lies,
+ * rather than copying it somewhere first.
+ */
+function checkOnly(configContent, fqbn, usb, proffieOSHash, coreVersion, stylesContent = '', explicitConfigId = null) {
   const configHash   = computeConfigHash(configContent, stylesContent);
   const buildPkgHash = computeBuildPackageHash(fqbn, usb, proffieOSHash, coreVersion);
-  // Same reason as the write path: the content reaching us is the stripped editor
-  // text, so extraction alone never saw an id. This is the ONLY moment a restoring
-  // config can be recorded, so losing it here loses it permanently.
-  const result       = restoreToOutput(configHash, buildPkgHash, explicitConfigId || extractConfigId(configContent));
-  if (!result.ok) return { hit: false };
-  return { hit: true, buildPath: result.buildPath, metadata: result.metadata };
+  const entry = lookupCache(configHash, buildPkgHash);
+  // Two independent questions, and the caller needs both. A cache miss with a matching build folder
+  // is still a flashable state - that is exactly the case a failed save produces.
+  const inOutput = buildOutputMatches(configHash, buildPkgHash);
+  if (!entry) return { hit: false, buildOutputMatches: inOutput, configHash, buildPkgHash };
+  return {
+    hit: true,
+    buildOutputMatches: inOutput,
+    buildDir: entry.cacheDir,
+    metadata: entry.metadata,
+    configHash,
+    buildPkgHash,
+    configId: explicitConfigId || extractConfigId(configContent),
+  };
 }
+
+/**
+ * Records that an entry was actually USED: stamps lastUsedAt and appends the adopting configId.
+ *
+ * Separated from the lookup on purpose. A check is not a use - the old code stamped both on every
+ * restore, which meant typing in the editor counted as using a build. Callers invoke this at the
+ * moment they adopt the entry (skipping a compile, or flashing from it), so the record describes
+ * what happened rather than what was considered.
+ *
+ * Writes only inside the cache entry. Never touches build-output.
+ */
+function adoptEntry(configHash, buildPkgHash, adoptingConfigId = null) {
+  const entry = lookupCache(configHash, buildPkgHash);
+  if (!entry) return { ok: false };
+  try {
+    entry.metadata.lastUsedAt = new Date().toISOString();
+    if (adoptingConfigId) {
+      if (!Array.isArray(entry.metadata.configIds)) {
+        entry.metadata.configIds = entry.metadata.configId ? [entry.metadata.configId] : [];
+      }
+      if (!entry.metadata.configIds.includes(adoptingConfigId)) {
+        entry.metadata.configIds.push(adoptingConfigId);
+      }
+    }
+    fs.writeFileSync(path.join(entry.cacheDir, 'metadata.json'),
+                     JSON.stringify(entry.metadata, null, 2));
+  } catch { /* bookkeeping must never fail a build or a flash */ }
+  return { ok: true, buildDir: entry.cacheDir, metadata: entry.metadata };
+}
+
+// checkAndRestore() and restoreToOutput() were REMOVED on 2026-08-23. Do not bring them back.
+//
+// They copied a cache entry over build-output, and were reachable from ten UI paths including a
+// 600 ms debounce on typing. That is how a flash sent another config's firmware: a flash makes the
+// board re-enumerate, port detection fired a "check", and the check rewrote the file dfu-util was
+// mid-way through reading. It is also how another board's build.options.json reached a build tree
+// whose object files came from somewhere else (B-196) - the entry holds no core/, libraries/ or
+// sketch/, so restoring it bought no incremental speed while asserting a consistency that was false.
+//
+// Nothing needs this. A build is read WHERE IT LIVES: build-output after a compile, the entry
+// itself after a hit. Use checkOnly() to ask, adoptEntry() to record a use.
+
 
 /**
  * Saves a completed compile to the cache.
@@ -771,7 +808,11 @@ function cacheCompileResult(buildOutputPath, configContent, fqbn, usb, proffieOS
 module.exports = {
   computeConfigHash,
   computeBuildPackageHash,
-  checkAndRestore,
+  checkOnly,
+  buildOutputMatches,
+  writeBuildProvenance,
+  adoptEntry,
+  getBuildOutputPath,
   claimForConfig,
   cacheCompileResult,
   readBuildProvenance,

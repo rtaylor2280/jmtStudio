@@ -331,6 +331,17 @@ function getBuildOutputPath() {
   return path.join(app.getPath('userData'), 'build-output');
 }
 
+// Where the flash writes the .bin/.dfu it derives from a build's .elf.
+//
+// Deliberately NOT build-output and deliberately NOT beside the .elf. build-output is arduino-cli's
+// scratch space, and a build's .elf may live in a cache entry, which nothing outside the cache may
+// write to. Giving the flash its own directory means it has exactly one writer and one reader, and
+// its contents belong to the flash that is running rather than to whatever built last. (B-216)
+function getFlashStagePath() {
+  const { app } = require('electron');
+  return path.join(app.getPath('userData'), 'flash-staging');
+}
+
 // ── Validation ─────────────────────────────────────────
 function validateCli() {
   const cliPath = getCliPath();
@@ -1280,6 +1291,27 @@ async function compile(configContent, fqbn, buildOptions, onLog) {
 
   if (result.ok) {
     onLog(`--- Compile successful (${(durationMs / 1000).toFixed(1)}s) ---`, false);
+    // Set when the build could not be filed away for reuse. Carried back to the renderer so the
+    // flash hint line can say it too: a red line inside a wall of verbose compiler output is fine
+    // for diagnosis and trivially scrolled past, and the flash is the one moment the user is
+    // definitely looking at the screen. (B-216)
+    let cacheSaveError = null;
+    // STAMP THE BUILD FOLDER FIRST, and independently of whether it can be cached.
+    //
+    // The sidecar describes what is IN build-output, so it belongs to the compile that produced it,
+    // not to the copy that files it away. Writing it inside the cache save meant a failed save left
+    // the folder holding a real, valid, flashable build that nothing could identify - and the next
+    // cache lookup then cleared the app's belief in it. (B-216)
+    if (!bench) {
+      try {
+        const stylesForHash = proffie.readStagedStyles();
+        const osHash = proffie.hashVersion(proffie.getSelectedVersion());
+        cache.writeBuildProvenance(
+          buildPath, osHash,
+          cache.computeConfigHash(configContent, stylesForHash),
+          cache.computeBuildPackageHash(fqbn, usb, osHash, getActiveCoreVersion()));
+      } catch { /* advisory: never fail a good compile over a sidecar */ }
+    }
     // Save to persistent cache (skipped for bench runs so timing harnesses
     // never pollute the real cache).
     if (!bench) {
@@ -1290,7 +1322,22 @@ async function compile(configContent, fqbn, buildOptions, onLog) {
         cache.cacheCompileResult(buildPath, configContent, fqbn, usb, proffieOSHash,
           getActiveCoreVersion(), new Date().toISOString(), app.getVersion(),
           stylesContent, durationMs, buildOptions && buildOptions.configId);
-      } catch {}
+      } catch (e) {
+        cacheSaveError = e.message;
+        // Say it, do not swallow it, and colour it RED. The build itself is fine - it is in
+        // build-output and the flash reads it from there - but the app was asked to store it and
+        // could not, so it is a failed operation and should look like one. What is lost is the next
+        // build of this config being instant, which the second line says outright rather than
+        // leaving it implied by a soft colour.
+        //
+        // Report the REAL reason instead of guessing "disk full": build-output and build-cache are
+        // siblings under userData and a compile writes far more than this copy does, so a space
+        // problem would almost always have failed the compile first. A locked file or a permission
+        // problem is likelier. Same rule as the compile-error work - say what happened, do not
+        // invent why.
+        onLog(`Could not save this build for reuse: ${e.message}`, true);
+        onLog('The build is fine and ready to flash. This config will need a recompile next time.', true);
+      }
     }
     // coreVersion rides along so the renderer can stamp @jmt:core without a
     // second IPC round trip, and so the marker records the core that actually
@@ -1315,7 +1362,7 @@ async function compile(configContent, fqbn, buildOptions, onLog) {
     // arduino-cli, it is unambiguous about the board variant, and it matches
     // the identity block printed at the top of the build log. (2026-08-15)
     return {
-      ok: true, buildPath, durationMs,
+      ok: true, buildPath, durationMs, cacheSaveError,
       coreVersion:   getActiveCoreVersion(),
       osVersion:     proffie.getSelectedVersion(),
       compiledFqbn:  fqbn,
@@ -1644,8 +1691,13 @@ function waitForDfuAccessible(onLog, deadlineMs = 25000) {
 
 // ── Prepare firmware (shared by flash and flashDFU) ───
 // Converts .elf → .bin → .dfu and returns { ok, dfuPath, toolsDir }
-async function prepareFirmware(onLog) {
-  const buildPath = getBuildOutputPath();
+async function prepareFirmware(onLog, sourceDir) {
+  // WHERE THE BUILD IS, rather than where builds are made. A fresh compile leaves it in
+  // build-output; a cache hit leaves it in the cache entry. Flash takes the path instead of
+  // assuming one, so nothing ever has to be copied into the build tree to make it flashable -
+  // which is what the cache used to do, on a typing debounce, over the top of a running flash.
+  // (B-216, and it removes the mechanism behind B-196 as well.)
+  const buildPath = sourceDir || getBuildOutputPath();
   if (!fs.existsSync(buildPath)) {
     const msg = 'No compiled firmware found. Run Compile before flashing.';
     onLog(msg, true);
@@ -1682,8 +1734,13 @@ async function prepareFirmware(onLog) {
   }
 
   const elfPath  = path.join(buildPath, elfFiles[0]);
-  const binPath  = path.join(buildPath, 'ProffieOS.bin');
-  const dfuPath  = path.join(buildPath, 'ProffieOS.dfu');
+  // Flash artifacts land in a directory the FLASH owns, never beside the .elf. Beside the .elf
+  // would mean writing into a cache entry whenever we flash from one, and the whole point of this
+  // change is that the stored copy is read-only to everything except the code that stores it.
+  const stagePath = getFlashStagePath();
+  fs.mkdirSync(stagePath, { recursive: true });
+  const binPath  = path.join(stagePath, 'ProffieOS.bin');
+  const dfuPath  = path.join(stagePath, 'ProffieOS.dfu');
   const toolsDir = getToolsPath();
 
   // Convert .elf to .bin
@@ -2009,7 +2066,7 @@ const _isBoardSerial = (sn) => typeof sn === 'string' && /^[0-9A-Fa-f]{12}$/.tes
 
 // expectedSN is the serial of the board the USER selected. It pins the flash to that
 // board (see runDfuFlash) and lets us refuse when a different one is in the bootloader.
-async function flash(port, fqbn, onLog, expectedSN) {
+async function flash(port, fqbn, onLog, expectedSN, sourceDir) {
   onLog('--- Flash started ---', false);
   if (expectedSN && !_isBoardSerial(expectedSN)) expectedSN = null;
 
@@ -2048,7 +2105,7 @@ async function flash(port, fqbn, onLog, expectedSN) {
     return { error: { ok: false, error: msg, wrongBoard: true, expectedSN, foundSN: serials } };
   };
 
-  const prep = await prepareFirmware(onLog);
+  const prep = await prepareFirmware(onLog, sourceDir);
   if (!prep.ok) return prep;
 
   const { dfuPath, toolsDir } = prep;
@@ -2138,10 +2195,10 @@ async function flash(port, fqbn, onLog, expectedSN) {
  * onLog(line, isError) streams output back to renderer.
  * Returns { ok, error? }
  */
-async function flashDFU(onLog) {
+async function flashDFU(onLog, sourceDir) {
   onLog('--- DFU Flash started ---', false);
 
-  const prep = await prepareFirmware(onLog);
+  const prep = await prepareFirmware(onLog, sourceDir);
   if (!prep.ok) return prep;
 
   return await runDfuFlash(prep.dfuPath, prep.toolsDir, onLog);
@@ -2271,12 +2328,28 @@ function claimCacheForConfig(configContent, fqbn, usb, configId = null) {
     getActiveCoreVersion(), stylesContent, configId);
 }
 
-function checkCacheAndRestore(configContent, fqbn, usb, configId = null) {
+/**
+ * Is there a stored build for this config? Answers, and writes nothing at all.
+ *
+ * Replaces the old check-and-restore on every UI-driven path. That one copied the entry over
+ * build-output as a side effect of being asked a question, from ten callers including a typing
+ * debounce - see checkOnly in cacheManager for the full story. (B-216)
+ *
+ * Hands back `buildDir` so a caller that decides to USE this build can read it where it lies.
+ */
+function checkCacheOnly(configContent, fqbn, usb, configId = null) {
   const proffieOSHash = proffie.hashVersion(proffie.getSelectedVersion());
   const stylesContent = proffie.readStagedStyles();
-  return cache.checkAndRestore(configContent, fqbn, usb, proffieOSHash,
+  return cache.checkOnly(configContent, fqbn, usb, proffieOSHash,
     getActiveCoreVersion(), stylesContent, configId);
 }
+
+/** Stamp an entry as used, at the moment a compile is skipped or a flash reads it. No file copies. */
+function adoptCacheEntry(configHash, buildPkgHash, configId = null) {
+  return cache.adoptEntry(configHash, buildPkgHash, configId);
+}
+
+
 
 // Drives the first-run setup banner. Asks about the version actually in play
 // rather than a constant, so choosing a core the machine does not have yet
@@ -2321,7 +2394,9 @@ module.exports = {
   ensureDfuDriver,
   abort,
   getStatus,
-  checkCacheAndRestore,
+  checkCacheOnly,
+  adoptCacheEntry,
+  getFlashStagePath,
   claimCacheForConfig,
   needsCoreInstall,
   validateCli,

@@ -41,14 +41,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('toolchain:compile', { configContent, fqbn, buildOptions }),
   benchCompile: (configContent, fqbn, buildOptions, optList) =>
     ipcRenderer.invoke('toolchain:benchCompile', { configContent, fqbn, buildOptions, optList }),
-  flash:   (port, fqbn, expectedSN) => ipcRenderer.invoke('toolchain:flash', { port, fqbn, expectedSN }),
+  // sourceDir = WHERE THIS BUILD IS: build-output after a compile, the cache entry after a hit.
+  // The flash reads the .elf from there instead of assuming build-output holds it. (B-216)
+  flash:   (port, fqbn, expectedSN, sourceDir) => ipcRenderer.invoke('toolchain:flash', { port, fqbn, expectedSN, sourceDir }),
   getToolStatus:  ()             => ipcRenderer.invoke('toolchain:getStatus'),
   abortCompile:   ()             => ipcRenderer.invoke('toolchain:abort'),
   getAppVersion:      ()         => ipcRenderer.invoke('app:getVersion'),
   isDevMode:          ()         => ipcRenderer.invoke('app:isDevMode'),
   getArduinoDataPath: ()         => ipcRenderer.invoke('app:getArduinoDataPath'),
+  // Read-only. Returns { hit, buildDir, metadata, configHash, buildPkgHash, configId }.
   checkCache: (configContent, fqbn, usb, configId) =>
     ipcRenderer.invoke('cache:check', { configContent, fqbn, usb, configId }),
+  adoptCache: (configHash, buildPkgHash, configId) =>
+    ipcRenderer.invoke('cache:adopt', { configHash, buildPkgHash, configId }),
   claimCache: (configContent, fqbn, usb, configId) =>
     ipcRenderer.invoke('cache:claim', { configContent, fqbn, usb, configId }),
   getCacheSize:    () => ipcRenderer.invoke('cache:getSize'),

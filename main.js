@@ -817,7 +817,7 @@ ipcMain.handle('toolchain:benchCompile', async (_, { configContent, fqbn, buildO
   return result;
 });
 
-ipcMain.handle('toolchain:flash', async (_, { port, fqbn, expectedSN }) => {
+ipcMain.handle('toolchain:flash', async (_, { port, fqbn, expectedSN, sourceDir }) => {
   const log = makeLogger();
   await _abortVersionProbe?.();  // never let a version probe hold the port a flash needs
 
@@ -828,7 +828,7 @@ ipcMain.handle('toolchain:flash', async (_, { port, fqbn, expectedSN }) => {
   // expectedSN pins the flash to the board the user picked. Without it dfu-util targets
   // whichever board is in the bootloader, which is how a flash aimed at one board landed
   // on another (2026-07-26).
-  const result = await toolchain.flash(port, fqbn, log, expectedSN);
+  const result = await toolchain.flash(port, fqbn, log, expectedSN, sourceDir);
 
   if (win && !win.isDestroyed()) {
     win.webContents.send('build:status', {
@@ -843,8 +843,15 @@ ipcMain.handle('toolchain:flash', async (_, { port, fqbn, expectedSN }) => {
 });
 
 ipcMain.handle('toolchain:getStatus', () => toolchain.getStatus());
+// READ-ONLY. Answers whether a stored build exists and writes nothing - see checkOnly in
+// cacheManager. Ten UI paths call this, including a typing debounce, and until 2026-08-23 every
+// one of them silently rewrote the build folder. (B-216)
 ipcMain.handle('cache:check', (_, { configContent, fqbn, usb, configId }) =>
-  toolchain.checkCacheAndRestore(configContent, fqbn, usb, configId));
+  toolchain.checkCacheOnly(configContent, fqbn, usb, configId));
+
+// Stamps an entry as used, at the moment a compile is skipped or a flash reads from it.
+ipcMain.handle('cache:adopt', (_, { configHash, buildPkgHash, configId }) =>
+  toolchain.adoptCacheEntry(configHash, buildPkgHash, configId));
 
 // Save As inherits a build without touching a build input, so no check fires.
 // Claim-only: append the new id, copy nothing.

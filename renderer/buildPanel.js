@@ -30,6 +30,16 @@ let _flashTargetSN            = null;
 let selectedFqbn              = null;
 let compileSuccess      = false;   // true after successful compile this session
 let cacheCheckPending   = false;   // true while cache check is in flight
+// WHERE the current build lives on disk, or null if there isn't one.
+//
+// compileSuccess says a build EXISTS; this says where. They used to be the same fact, because a
+// cache check copied the entry into the build folder as a side effect of being asked - from ten
+// callers, one of them a typing debounce. That copy is what could land on top of a running flash.
+// Now nothing copies: a fresh compile leaves the build in build-output, a cache hit leaves it in
+// the cache entry, and the flash reads whichever this points at. (B-216)
+let _currentBuildDir    = null;
+// The entry a cache hit came from, so we can stamp it as used at the moment it is actually used.
+let _currentBuildKey    = null;   // { configHash, buildPkgHash, configId }
 let _cacheCheckSeq      = 0;       // only the newest checkCacheForConfig run may write state
 // Carried from a failed flash into the Bootloader Mode modal, which clears its own log on open.
 // Set only when the port the user picked was never identified as a Proffieboard.
@@ -101,6 +111,10 @@ let _compileStartTime     = 0;
 // One-shot lead message typed into the flash hint line when an SD fix at the
 // flash gate resolved to a cached build (no recompile). Set by _flashAfterSdFix.
 let _sdFlashLeadMsg       = null;
+// One-shot message for the flash hint line, set when something happened during the build that
+// the user should see at the flash rather than only in the log. Same mechanism as the SD lead
+// message above, different trigger.
+let _pendingFlashHint     = null;
 
 // ── Compile hint typewriter ────────────────────────────
 let _hintActive          = false;
@@ -219,6 +233,8 @@ window._isFlashing = false;
 window.onEditorContentChanged = () => {
   if (compileSuccess) {
     compileSuccess = false;
+    _currentBuildDir = null;
+    _currentBuildKey = null;
     setFlashEnabled(false);
     cacheCheckPending = true;
     updateCompileButton();
@@ -235,6 +251,8 @@ window.onEditorContentChanged = () => {
 window.invalidateCompile = (msg) => {
   if (compileSuccess) {
     compileSuccess = false;
+    _currentBuildDir = null;
+    _currentBuildKey = null;
     setFlashEnabled(false);
     cacheCheckPending = true;
     updateCompileButton();
@@ -361,6 +379,8 @@ async function initBuildPanel() {
     }
     if (compileSuccess) {
       compileSuccess = false;
+      _currentBuildDir = null;
+      _currentBuildKey = null;
       setFlashEnabled(false);
       setStatus('compile', 'warn', 'USB mode changed — recompile needed');
     }
@@ -566,6 +586,8 @@ async function doCompile() {
   setBusy(true);
   clearLog();
   compileSuccess = false;
+  _currentBuildDir = null;
+  _currentBuildKey = null;
   setFlashEnabled(false);
   setStatus('compile', 'pending', 'Compiling...');
 
@@ -577,6 +599,12 @@ async function doCompile() {
   setBusy(false);
   if (result.ok) {
     compileSuccess = true;
+    _currentBuildDir = null;   // null = build-output, where the compile just wrote it
+    _currentBuildKey = null;
+    // The build compiled but could not be filed away for reuse. The log already says so in red,
+    // but the log is a wall of compiler output and scrolls; the flash hint line is the one place
+    // the user is definitely looking. Short form here, full reason with the OS error in the log.
+    if (result.cacheSaveError) _pendingFlashHint = 'Build not stored. This config will need a recompile next time.';
     if (!isDfuMode) setFlashEnabled(!!selectedPort); // DFU mode: onBuildDone sets flash state
     updateCompileButton();
   }
@@ -700,9 +728,19 @@ async function doFlash() {
   document.getElementById('bm-close').style.display = 'none';
   if (_sdFlash === 'flash-anyway') {
     typeHintMessage('Flashing without SD card protection. I have a bad feeling about this…');
-  } else if (_sdFlashLeadMsg) {
-    typeHintMessage(_sdFlashLeadMsg);
-    _sdFlashLeadMsg = null;
+  } else if (_sdFlashLeadMsg || _pendingFlashHint) {
+    // ONE line, two possible occupants, so they must not step on each other. The SD lead message
+    // wins: it explains the action happening right now (why we just recompiled after fixing the
+    // card). The build-not-stored hint is about a FUTURE compile and is also in the log, so losing
+    // it here costs nothing.
+    //
+    // Both are cleared either way. Leaving the loser set would have it surface on some later,
+    // unrelated flash, attached to nothing the user did - a stale message is worse than no message.
+    // Reachable rather than theoretical: _flashAfterSdFix compiles on a cache miss and auto-flashes,
+    // so a failed save during that compile sets both.
+    typeHintMessage(_sdFlashLeadMsg || _pendingFlashHint);
+    _sdFlashLeadMsg   = null;
+    _pendingFlashHint = null;
   }
   document.getElementById('bm-retry').style.display = 'none';
   document.getElementById('build-modal').style.display = 'flex';
@@ -725,7 +763,13 @@ async function doFlash() {
   // Send the serial too, not just the port. The port only drives the touch reset; without
   // the serial dfu-util matches on VID:PID alone and flashes whichever board is in the
   // bootloader. This value was already being frozen here and then left unused.
-  await window.electronAPI.flash(selectedPort, selectedFqbn, _flashTargetSN);
+  if (_currentBuildKey) {
+    // Stamp the entry as used at the moment it is used, not when it was merely looked at.
+    try { await window.electronAPI.adoptCache(_currentBuildKey.configHash,
+                                              _currentBuildKey.buildPkgHash,
+                                              _currentBuildKey.configId); } catch {}
+  }
+  await window.electronAPI.flash(selectedPort, selectedFqbn, _flashTargetSN, _currentBuildDir);
   setBusy(false);
 }
 
@@ -1051,6 +1095,8 @@ function onInputBoardChange() {
 
   if (compileSuccess) {
     compileSuccess = false;
+    _currentBuildDir = null;
+    _currentBuildKey = null;
     setFlashEnabled(false);
     setStatus('compile', 'warn', 'Board changed — recompile needed');
   }
@@ -1075,6 +1121,8 @@ window.onCoreVersionChanged = function (label) {
   const msg = label || 'Build core changed — recompile needed';
   if (compileSuccess) {
     compileSuccess = false;
+    _currentBuildDir = null;
+    _currentBuildKey = null;
     setFlashEnabled(false);
     setStatus('compile', 'warn', msg);
   }
@@ -1252,6 +1300,8 @@ function onBuildDone({ type, ok, error, aborted, retriable, needsDfuDriver, sour
   if (type === 'compile') {
     if (ok) {
       compileSuccess = true;
+      _currentBuildDir = null;   // build-output
+      _currentBuildKey = null;
       updateCompileButton();
       const durationSec = _compileStartTime ? Math.round((Date.now() - _compileStartTime) / 1000) : null;
       if (window.setCompiledTimestamp) window.setCompiledTimestamp(undefined, durationSec, coreVersion, osVersion, compiledFqbn, compiledUsb);
@@ -1298,10 +1348,14 @@ function onBuildDone({ type, ok, error, aborted, retriable, needsDfuDriver, sour
       }
     } else if (aborted) {
       compileSuccess = false;
+      _currentBuildDir = null;
+      _currentBuildKey = null;
       setFlashEnabled(false);
       finishBuildModal(false, '⊘ Compile Aborted', 'Compile was stopped.');
     } else {
       compileSuccess = false;
+      _currentBuildDir = null;
+      _currentBuildKey = null;
       setFlashEnabled(false);
       finishBuildModal(false, '✗ Compile Failed', error);
       if (error) appendLog(`\n⚠ ${error}`, true);
@@ -1344,6 +1398,8 @@ function onBuildDone({ type, ok, error, aborted, retriable, needsDfuDriver, sour
       // and the user can recompile against the new source state.
       if (sourceChanged) {
         compileSuccess = false;
+        _currentBuildDir = null;
+        _currentBuildKey = null;
         setFlashEnabled(false);
         setStatus('compile', 'warn', 'OS source changed — recompile needed');
         updateCompileButton();
@@ -2620,6 +2676,8 @@ async function checkCacheForConfig(missStatus) {
     // FQBN yet) must keep their existing behaviour.
     if (!hasVer && window._configOsVersionMissing && seq === _cacheCheckSeq) {
       compileSuccess = false;
+      _currentBuildDir = null;
+      _currentBuildKey = null;
       setFlashEnabled(false);
       setStatus('compile', '', 'Not compiled');
     }
@@ -2649,6 +2707,12 @@ async function checkCacheForConfig(missStatus) {
 
   if (result.hit) {
     compileSuccess = true;
+    // The build stays where it is. Before B-216 this check had already copied the entry over
+    // build-output by the time we got here; now it has touched nothing and the flash reads the
+    // entry directly.
+    _currentBuildDir = result.buildDir || null;
+    _currentBuildKey = { configHash: result.configHash, buildPkgHash: result.buildPkgHash,
+                         configId: result.configId || null };
     setFlashEnabled(isDfuMode ? compileSuccess : !!selectedPort);
     updateCompileButton();
     setStatus('compile', 'ok', 'Compile restored from cache');
@@ -2673,8 +2737,23 @@ async function checkCacheForConfig(missStatus) {
     // just ran with current inputs and didn't find a match, so the previous "success"
     // state was based on stale inputs (e.g., my_styles.h edited in another tab, OS
     // files changed via JMT apply, etc.). The miss is the authoritative truth.
+    if (result.buildOutputMatches) {
+      // NOT STORED, BUT STILL BUILT. The cache has no copy, but the build folder holds a build
+      // stamped with this exact config and these exact build settings - so it is flashable, and
+      // saying "not compiled" would be false. This is the state a failed cache save leaves behind,
+      // and it is also what clearing the cache from Settings leaves behind. (B-216)
+      compileSuccess = true;
+      _currentBuildDir = null;   // null = build-output
+      _currentBuildKey = null;
+      setFlashEnabled(isDfuMode ? true : !!selectedPort);
+      updateCompileButton();
+      setStatus('compile', 'ok', 'Compiled (not stored for reuse)');
+      return;
+    }
     if (compileSuccess) {
       compileSuccess = false;
+      _currentBuildDir = null;
+      _currentBuildKey = null;
       setFlashEnabled(false);
     }
     updateCompileButton();
@@ -3043,9 +3122,19 @@ async function doFlashDFU() {
   setStatus('flash', 'pending', 'Flashing via DFU...');
   if (_sdFlash === 'flash-anyway') {
     typeHintMessage('Flashing without SD card protection. I have a bad feeling about this…');
-  } else if (_sdFlashLeadMsg) {
-    typeHintMessage(_sdFlashLeadMsg);
-    _sdFlashLeadMsg = null;
+  } else if (_sdFlashLeadMsg || _pendingFlashHint) {
+    // ONE line, two possible occupants, so they must not step on each other. The SD lead message
+    // wins: it explains the action happening right now (why we just recompiled after fixing the
+    // card). The build-not-stored hint is about a FUTURE compile and is also in the log, so losing
+    // it here costs nothing.
+    //
+    // Both are cleared either way. Leaving the loser set would have it surface on some later,
+    // unrelated flash, attached to nothing the user did - a stale message is worse than no message.
+    // Reachable rather than theoretical: _flashAfterSdFix compiles on a cache miss and auto-flashes,
+    // so a failed save during that compile sets both.
+    typeHintMessage(_sdFlashLeadMsg || _pendingFlashHint);
+    _sdFlashLeadMsg   = null;
+    _pendingFlashHint = null;
   }
 
   await window.electronAPI.flashDFU();
@@ -3319,6 +3408,8 @@ function onOsVersionChange() {
   // Here we only handle compile-state invalidation.
   if (compileSuccess) {
     compileSuccess = false;
+    _currentBuildDir = null;
+    _currentBuildKey = null;
     setFlashEnabled(false);
     setStatus('compile', 'warn', 'OS version changed — recompile needed');
   }
@@ -3354,6 +3445,8 @@ window.recheckOnConfigReturn = () => {
 };
 window.resetCompileState        = () => {
   compileSuccess = false;
+  _currentBuildDir = null;
+  _currentBuildKey = null;
   setFlashEnabled(false);
   setStatus('compile', 'warn', 'Cache cleared — recompile needed');
   updateCompileButton();
@@ -3364,6 +3457,8 @@ window.resetCompileState        = () => {
 // config, which misrepresents what's actually been done with the new content.
 window.resetBuildStatusForFileLoad = () => {
   compileSuccess = false;
+  _currentBuildDir = null;
+  _currentBuildKey = null;
   setFlashEnabled(false);
   setStatus('compile', '', 'Not compiled');
   setStatus('flash',   '', 'Not flashed');
