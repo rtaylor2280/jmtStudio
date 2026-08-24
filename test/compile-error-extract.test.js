@@ -194,6 +194,96 @@ check('a source path keeps its file and line',
   extractCompileError(SRC_DIAG),
   "my_config.h:431 — expected ',' or ';' before 'BladeConfig'");
 
+// ── RAM overflow (B-032) ───────────────────────────────────────────────────
+//
+// The form the proffieboard linker actually produces. Its script does not let
+// the region overflow in the ordinary way - it reserves 1,024 bytes of stack and
+// ASSERTs __StackLimit >= __HeapLimit, so ld prints that assertion's own string,
+// which has no byte count and no backticks around RAM.
+const RAM_ASSERT = [
+  'Compiling sketch...',
+  LONG_CMD,
+  `${LD}: region RAM overflowed with stack`,
+  'collect2.exe: error: ld returned 1 exit status',
+  'Error during build: exit status 1',
+].join('\n');
+
+check('a RAM overflow with no byte count claims no byte count',
+  extractCompileError(RAM_ASSERT),
+  'Out of RAM: this config needs more memory than the board has.\n'
+  + '\n'
+  + 'Presets are rarely the cause - each costs 12 bytes plus 4 per blade, so filling '
+  + 'RAM takes thousands (a Proffieboard V2 links at 2,272 presets, a V3 at about '
+  + '8,378, both measured). Deleting presets will not help unless you have thousands.');
+
+// GNU ld's ordinary region form, accepted so the message does not depend on
+// which of the two the toolchain happens to emit.
+const RAM_BYTES = [
+  'Compiling sketch...',
+  `${LD}: region \`RAM' overflowed by 1288 bytes`,
+  'collect2.exe: error: ld returned 1 exit status',
+].join('\n');
+
+checkThat('a RAM overflow states the byte count when there is one',
+  extractCompileError(RAM_BYTES).startsWith('Out of RAM: 1,288 bytes over'),
+  extractCompileError(RAM_BYTES));
+
+// THE POINT OF THE MESSAGE. "Out of space" reads as "too many presets", and the
+// measured ceiling is thousands - so the one thing it must never do is send
+// someone to delete presets, which is what the FLASH message correctly says.
+checkThat('a RAM overflow does not send the user to cut presets',
+  !/Reduce preset count/.test(extractCompileError(RAM_ASSERT))
+  && /will not help/.test(extractCompileError(RAM_ASSERT)),
+  extractCompileError(RAM_ASSERT));
+
+checkThat('a RAM overflow summary carries no exit-status noise',
+  !/ld returned|exit status/i.test(extractCompileError(RAM_ASSERT)),
+  extractCompileError(RAM_ASSERT));
+
+// ── the build machine ran out of memory (B-032) ────────────────────────────
+const HOST_OOM = [
+  'Compiling sketch...',
+  LONG_CMD,
+  'cc1plus.exe: out of memory allocating 65536 bytes after a total of 2147483648 bytes',
+  'lto-wrapper.exe: fatal error: ... returned 1 exit status',
+  'collect2.exe: error: ld returned 1 exit status',
+].join('\n');
+
+checkThat('a host out-of-memory is named as the computer, not the board',
+  /your computer ran out of memory/.test(extractCompileError(HOST_OOM))
+  && /not the board/.test(extractCompileError(HOST_OOM)),
+  extractCompileError(HOST_OOM));
+
+// ORDERING REGRESSION. A failed LTO link prints `lto-wrapper ... failed`
+// alongside the real reason, so a flash overflow can carry host-OOM-shaped
+// noise. Flash is the more specific signature and has to win, or the user is
+// told to close applications when their config simply does not fit.
+const OVERFLOW_WITH_LTO_NOISE = [
+  'Compiling sketch...',
+  `${LD}: region \`FLASH' overflowed by 5400 bytes`,
+  'lto-wrapper.exe: fatal error: ... failed',
+  'collect2.exe: error: ld returned 1 exit status',
+].join('\n');
+
+checkThat('flash wins over LTO noise in the same output',
+  /Config overflow: 5,400 bytes/.test(extractCompileError(OVERFLOW_WITH_LTO_NOISE)),
+  extractCompileError(OVERFLOW_WITH_LTO_NOISE));
+
+// The translation matcher is deliberately narrower than the metrics bucket in
+// toolchain.js, which also counts a bare `Killed` and a bare `lto-wrapper
+// failed` as lto_oom. Those are fine for sorting a corpus and too loose to put
+// a sentence on screen, so neither may reach the user as an out-of-memory
+// answer on its own.
+const LTO_FAILED_ONLY = [
+  'Compiling sketch...',
+  'lto-wrapper.exe: fatal error: ... failed',
+  'collect2.exe: error: ld returned 1 exit status',
+].join('\n');
+
+checkThat('a bare lto-wrapper failure is not translated as out of memory',
+  !/ran out of memory/.test(extractCompileError(LTO_FAILED_ONLY)),
+  extractCompileError(LTO_FAILED_ONLY));
+
 // ── degenerate input ───────────────────────────────────────────────────────
 check('nothing usable still says something honest',
   extractCompileError(`${LONG_CMD}\n\n`),

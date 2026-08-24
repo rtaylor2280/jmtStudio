@@ -120,7 +120,7 @@ const _FLASH_OVERFLOW_RE = /region [`'"]?FLASH['"`]? overflowed by (\d+) bytes/i
 // is measured against the linker's. So the total would be quietly 16 KB light on
 // the most common board. Report the two figures that were measured and let the
 // reader add them. (2026-08-15)
-function _translateKnownFailure(text, ctx) {
+function _translateFlashOverflow(text, ctx) {
   const m = text.match(_FLASH_OVERFLOW_RE);
   if (!m) return null;
   const n     = Number(m[1]);
@@ -151,6 +151,87 @@ function _translateKnownFailure(text, ctx) {
   // and the display decides what it costs. Messages without one are untouched.
   lines.push('', 'Reduce preset count or reuse styles across presets to fit.');
   return lines.join('\n');
+}
+
+// ── RAM overflow ───────────────────────────────────────────────────────────
+//
+// SECOND MIGRATED SIGNATURE, and unlike flash-overflow it has no entry in
+// local/crucible/error-translations.js to migrate FROM - that matrix's 44
+// signatures cover neither RAM nor a host out-of-memory. The numbers below come
+// from local/crucible/ram-preset-ceiling.md, which measured the wall on both
+// boards against the linker's own symbols. None is read off a datasheet.
+//
+// Two forms reach us and the message must not depend on which. The proffieboard
+// linker script reserves 1,024 bytes of stack and asserts
+// __StackLimit >= __HeapLimit, so the failure it actually produces is
+// "region RAM overflowed with stack" and carries NO byte count. GNU ld's
+// ordinary region form ("overflowed by N bytes") is accepted too, and the count
+// is stated only when it is there.
+//
+// Board capacity is NOT quoted the way flash capacity is, because there is
+// nothing honest to quote it from: proffieboard's boards.txt defines
+// upload.maximum_size but no upload.maximum_data_size, which is the same reason
+// arduino-cli prints a flash line and no RAM line.
+const _RAM_OVERFLOW_RE =
+  /region [`'"]?RAM['"`]? overflowed(?: by (\d+) bytes| with stack)?/i;
+
+function _translateRamOverflow(text) {
+  const m = text.match(_RAM_OVERFLOW_RE);
+  if (!m) return null;
+  const lines = [m[1]
+    ? `Out of RAM: ${Number(m[1]).toLocaleString('en-US')} bytes over the board's memory.`
+    : "Out of RAM: this config needs more memory than the board has."];
+  // The whole value of this message is heading off the WRONG fix. "Out of
+  // space" reads as "too many presets", and for RAM that is almost never true:
+  // a preset costs 12 bytes plus 4 per blade - measured at exactly 16.0 B on a
+  // single blade and linear from 1 to 8,378 presets - so the count needed to
+  // fill RAM is in the thousands on both boards.
+  //
+  // What is deliberately NOT here is a cause. Nothing in this output names one,
+  // and the obvious guess is wrong: an extra 144-LED blade's display buffer
+  // costs a few hundred bytes against ~36 KB of headroom on a V2. Saying what
+  // this is not, with a receipt, beats inventing what it is.
+  lines.push('',
+    'Presets are rarely the cause - each costs 12 bytes plus 4 per blade, so filling '
+  + 'RAM takes thousands (a Proffieboard V2 links at 2,272 presets, a V3 at about '
+  + '8,378, both measured). Deleting presets will not help unless you have thousands.');
+  return lines.join('\n');
+}
+
+// ── The build machine ran out of memory ────────────────────────────────────
+//
+// THIRD MIGRATED SIGNATURE. The distinction is the entire point: every other
+// "out of space" failure here is about the BOARD, and this one is about the
+// computer doing the compiling. Someone who reads it as a board limit goes and
+// cuts their config for no reason.
+//
+// Deliberately NARROWER than the `lto_oom` bucket in toolchain.js
+// (_classifyCompileError), and the difference is on purpose rather than drift.
+// That bucket also fires on a bare `Killed` and on `lto-wrapper ... failed`,
+// which is right for sorting a metrics corpus and wrong for putting a sentence
+// on screen: an LTO link prints `lto-wrapper failed` for ordinary reasons,
+// including a flash overflow. Requiring explicit memory language keeps a wrong
+// root cause off the screen - which the translation matrix's own resolution
+// notes rank as worse than giving no answer at all.
+const _HOST_OOM_RE = /out of memory|memory exhausted|std::bad_alloc/i;
+
+function _translateHostOom(text) {
+  if (!_HOST_OOM_RE.test(text)) return null;
+  return [
+    'Out of memory: your computer ran out of memory while compiling.',
+    '',
+    'This is the build machine, not the board - it does not mean the config is too '
+  + 'big to fit. Close other applications and build again.',
+  ].join('\n');
+}
+
+// Ordered, and the order is load-bearing. Flash is tried first because a failed
+// LTO link prints its own noise beside the real reason, so the most specific
+// signature has to win before anything looser is tried against the same text.
+function _translateKnownFailure(text, ctx) {
+  return _translateFlashOverflow(text, ctx)
+      || _translateRamOverflow(text)
+      || _translateHostOom(text);
 }
 
 function extractCompileError(raw, ctx) {
