@@ -35355,6 +35355,10 @@ require(['vs/editor/editor.main'], function () {
     //     something not in the library).
     //   - Skip when the entry's linkedStyleLibraryEntry is empty
     //     (no last-used style recorded yet for this font).
+    //   - Skip when the Style Library is not linked into THIS config. The
+    //     library can hold the style and the config still have no #include
+    //     for it, in which case the name cannot compile here. Without this
+    //     the flow wrote a red slot the user never typed (B-210).
     //   - Skip when the named style isn't in the current Style Library
     //     (stale reference; the SF entry detail will surface it red but
     //     auto-populating with a name that won't compile is worse than
@@ -35377,6 +35381,11 @@ require(['vs/editor/editor.main'], function () {
         if (!entry) return;
         const linkedName = (entry.meta && entry.meta.linkedStyleLibraryEntry || '').toString().trim();
         if (!linkedName) return;
+        // Library linked into this config? _stylesLinked is recomputed from the
+        // live buffer by _updateStylesLinkBtn, one of whose callers is
+        // editor.onDidChangeModelContent — and the caller's own font write goes
+        // through _atomicEdit before we run, so this is never stale here.
+        if (!_stylesLinked) return;
         const libStyles = (typeof window._getLibraryStyles === 'function')
           ? window._getLibraryStyles()
           : [];
