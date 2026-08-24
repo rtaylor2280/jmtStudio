@@ -1167,8 +1167,9 @@ function _vpDuplicate(v) {
 async function _vpExport(v) {
   const result = await window.electronAPI.exportVersion(v.name);
   if (!result.ok && result.error !== 'cancelled') {
-    if (window.promptError) window.promptError('Export failed', result.error);
-    else alert(`Export failed: ${result.error}`);
+    // No native-alert fallback: this file is lazy-loaded from index.html
+    // (index.html:33923), which defines promptError long before the panel exists.
+    window.promptError('Export failed', result.error);
   }
   // On success, shell.showItemInFolder is called from main process
 }
