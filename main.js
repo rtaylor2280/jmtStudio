@@ -4395,8 +4395,17 @@ ipcMain.handle('versions:export', async (_, name) => {
   });
   if (canceled || !filePaths.length) return { ok: false, error: 'cancelled' };
   const destFolder = filePaths[0];
-  const dest = path.join(destFolder, name);
-  if (fs.existsSync(dest)) return { ok: false, error: `"${name}" already exists in the selected folder.` };
+  // An export to a folder the user picked never refuses because something is already there, and
+  // never overwrites: it lands beside it as name_1, name_2, the way a browser handles downloading
+  // the same file twice. Nothing is destroyed, so there is no confirm to write and no destructive
+  // path to guard. This used to dead-end on an error whose only button was OK.
+  //
+  // NOT the rule for names the app OWNS. A sound font library entry is keyed by its name and
+  // deduped by content hash, so a silent _1 there would fragment the library - soundFonts:importFont
+  // above refuses on purpose and must stay that way. See local/ui-conventions.md. (2026-08-23)
+  let dest = path.join(destFolder, name);
+  for (let n = 1; fs.existsSync(dest) && n < 1000; n++) dest = path.join(destFolder, `${name}_${n}`);
+  if (fs.existsSync(dest)) return { ok: false, error: 'Too many copies of this version in that folder.' };
   const allVersions = proffie.listVersionsDetails();
   const versionInfo = allVersions.find(v => v.name === name);
   if (!versionInfo) return { ok: false, error: 'Version not found.' };
