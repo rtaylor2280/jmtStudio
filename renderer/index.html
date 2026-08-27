@@ -3974,9 +3974,31 @@
      explains the consequence. */
   .preset-detail-field-value.not-in-library { color: #e44; cursor: help; }
 
-  .preset-common-toggle { display: inline-flex; align-items: center; gap: 3px; cursor: default; user-select: none; flex-shrink: 0; margin-left: 8px; font-size: 0.72rem; color: var(--c-text-muted); }
+  /* The blade Follow toggle shares these declarations rather than restating them. Two rules with
+     the same values drift apart the first time one is touched, and the Common toggle is the
+     reference for what an inline checkbox looks like in this app. (B-219) */
+  .preset-common-toggle,
+  .preset-follow-toggle { display: inline-flex; align-items: center; gap: 3px; cursor: default; user-select: none; flex-shrink: 0; margin-left: 8px; font-size: 0.72rem; color: var(--c-text-muted); }
   .preset-common-toggle-label { cursor: help; }
-  .preset-common-toggle input[type="checkbox"] { cursor: pointer; width: 11px; height: 11px; accent-color: var(--jmt-blue); margin: 0; }
+  .preset-common-toggle input[type="checkbox"],
+  .preset-follow-toggle input[type="checkbox"] { cursor: pointer; width: 11px; height: 11px; accent-color: var(--jmt-blue); margin: 0; }
+  /* Follow sits at the RIGHT edge of the blade name row, and the checkbox, the word and the target
+     WRAP AS ONE UNIT. They are a single statement - "follow B1" - so a break between them would
+     read as three unrelated controls sharing a row. nowrap on the group, wrap on the row.
+     The row also reserves space on the right because .preset-slot-actions is absolutely positioned
+     over that corner; without the reservation the × sits on top of the word. */
+  .preset-follow-group { display: inline-flex; align-items: center; white-space: nowrap; flex-shrink: 0; margin-left: auto; }
+  .preset-follow-group .preset-follow-toggle { margin-left: 0; }
+  /* Resting control, so --c-border-input rather than the blue that means "an edit is open". */
+  .preset-follow-target { font: inherit; font-size: 0.72rem; color: var(--c-text); background: var(--c-bg-card); border: 1px solid var(--c-border-input); border-radius: 2px; padding: 0 2px; margin-left: 3px; outline: none; cursor: pointer; flex-shrink: 0; }
+  /* A resting select takes --c-border-input; this one is blue only while the answer is outstanding,
+     because until it commits it IS an open edit. Same rule the name row's input follows. */
+  .preset-follow-target.choosing { border-color: var(--jmt-blue); }
+  /* Locked when a follow exists that this preset stepped out of. Present says "there is a follow
+     here"; locked says "you are not in it". Hiding it would say neither. */
+  .preset-follow-target:disabled { cursor: default; opacity: 0.5; }
+  /* Shown in place of the dropdown when only one blade could ever be the target. */
+  .preset-follow-static { font-size: 0.72rem; color: var(--c-text); margin-left: 3px; flex-shrink: 0; }
   /* Red-state when the SF library has no common folder. Both the
      label text and the checkbox accent shift to a warning red; the
      tooltip on the label explains the consequence. */
@@ -4008,6 +4030,74 @@
   .preset-slot-tile.slot-ref     { background: rgba(40,180,170,0.12); color: var(--c-text); }
   .preset-slot-tile.slot-inline  { background: rgba(220,170,40,0.10); color: var(--c-text); }
   .preset-slot-tile.slot-missing, .preset-slot-tile.slot-excess, .preset-slot-tile.slot-unlinked { background: rgba(228,68,68,0.12); color: #e44; border-color: rgba(228,68,68,0.45); }
+  /* FOLLOWING IS A SECOND CHANNEL, NOT A COLOUR. Hue above says where the expression came from;
+     intensity says who authored it. A followed slot takes its style from another blade, so it is
+     shown quieter than one that was written here - and it returns to full colour the instant the
+     text diverges, which is the whole confirmation that an override just happened.
+     Opacity rather than a second set of backgrounds: those tints are already 0.10-0.12 with no room
+     to go quieter, and one property carries the expression text and the colour swatch with it,
+     which are equally derived. Never grey - grey reads as disabled, and a followed slot is
+     precisely the one that CAN be edited. Hover restores it so it stays readable while being read. */
+  .preset-slot-tile.slot-following { opacity: 0.55; }
+  .preset-slot-tile.slot-following:hover { opacity: 0.9; }
+  /* HOVERING A RESTING FOLLOWED TILE ANSWERS "why is this dim?" rather than just making it readable.
+     Brightening on its own was the awkward part - dim, bright, dim reads as something having
+     changed when nothing did. Fading the content out and putting the reason in its place gives the
+     brighten a purpose. Note this is the centred overlay that FAILED over the open editor, and it
+     works here for exactly one reason: there is nothing legible underneath it any more. Same
+     element, two presentations, chosen by whether the tile is open. */
+  /* THE BADGE STAYS. It is a control, not a label - click navigates to the line and mousedown starts
+     the reorder drag - so fading it to zero would leave something invisible and still draggable.
+     It is also the subject of the sentence: the mark names the TARGET, and without "B3" beside it
+     "Following Blade 1" is half a statement on the one row being pointed at. */
+  .preset-slot-tile.slot-following .preset-slot-body { transition: opacity 0.12s; }
+  .preset-slot-tile.slot-following:not(.editing):hover .preset-slot-body { opacity: 0; }
+  .preset-slot-tile.slot-following:not(.editing):hover .preset-slot-follow-mark {
+    /* Starts past the badge rather than at inset 0, so the text centres in the space it actually
+       has instead of centring on the tile and drifting under the badge. 22px badge + 7px tile
+       padding + 6px gap. */
+    display: flex; position: absolute; inset: 0 8px 0 35px; align-items: center; justify-content: center;
+    text-align: center; pointer-events: none; z-index: 2;
+    color: var(--c-text-sub);
+    font-size: 0.62rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+    /* Same reason as the banner: the tile's break-all is for code, not for prose. */
+    word-break: normal; overflow-wrap: break-word;
+  }
+  /* The instruction is dropped on hover and kept on the open banner: a resting tile has one line
+     beside the badge, and "what is this" is the only question a hover is asking. */
+  .preset-slot-tile.slot-following:not(.editing):hover .preset-slot-follow-hint { display: none; }
+  /* OPEN STAYS MUTED, at the same value as closed. The argument for lifting it was legibility while
+     editing, and it loses to consistency: the mute MEANS following, so it must not blink off the
+     moment a tile is opened - that would read as the state having changed when nothing did. The
+     banner is an addition to the signal, not a replacement for it.
+     Declared after :hover deliberately - equal specificity, so this wins and an open tile stays
+     muted while the pointer is over it, which is most of the time it is open. */
+  .preset-slot-tile.slot-following.editing { opacity: 0.55; }
+  /* A BANNER, NOT A WATERMARK. Laid over the open editor it collided with the controls, was
+     illegible against whatever happened to sit behind it, and implied the slot was not editable -
+     when typing through it is the whole point. As its own full-width row it carries its own
+     background, cannot overlap anything, and stays readable whatever the tile contains.
+     order:-1 with flex:0 0 100% puts it first on the tile's existing flex-wrap row. */
+  .preset-slot-follow-mark { display: none; }
+  .preset-slot-tile.slot-following.editing .preset-slot-follow-mark {
+    /* box-sizing and no horizontal margin are load-bearing, not tidiness: a 100% basis PLUS padding
+       PLUS negative side margins overflows the row, and with flex-shrink 0 it cannot back off - the
+       siblings get squeezed to min-content and the tile collapses into a one-character column.
+       Shrink stays enabled for the same reason. */
+    display: block; order: -1; flex: 0 1 100%; box-sizing: border-box; min-width: 0;
+    margin: 0 0 3px; padding: 3px 6px; border-radius: 2px;
+    background: rgba(0,0,0,0.22); color: var(--c-text-sub);
+    font-size: 0.62rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+    pointer-events: none; line-height: 1.35;
+    /* The tile sets word-break:break-all so long StylePtr expressions wrap anywhere. Prose must NOT
+       inherit that - it split OVERRIDE into "O / ERRIDE". break-word only breaks a word that cannot
+       fit on a line of its own, which is what a very long blade name needs and nothing else does. */
+    word-break: normal; overflow-wrap: break-word;
+  }
+  /* Its own line rather than a "·" separator: the two halves answer different questions, and one
+     run of text re-wraps unpredictably as the blade name grows. Two blocks each wrap on their own
+     terms and the second one can never be pushed into the middle of the first. */
+  .preset-slot-tile.slot-following.editing .preset-slot-follow-hint { display: block; }
 
   .preset-slot-num { flex-shrink: 0; width: 22px; text-align: center; color: var(--c-text-muted); font-weight: 600; font-size: 0.7rem; background: rgba(0,0,0,0.15); border-radius: 2px; padding: 1px 0; }
   .preset-slot-tile.slot-missing .preset-slot-num, .preset-slot-tile.slot-excess .preset-slot-num, .preset-slot-tile.slot-unlinked .preset-slot-num { color: #e44; }
@@ -4018,6 +4108,13 @@
   .preset-slot-color-swatch { flex-shrink: 0; }
 
   .preset-slot-actions { position: absolute; top: 3px; right: 3px; display: flex; gap: 2px; opacity: 0.3; transition: opacity 0.1s; }
+  /* OPACITY MULTIPLIES, so a followed tile at .55 turned the 0.3 above into ~0.17 and all but
+     erased the affordance. 0.545 lands back on 0.3 effective. Compensating rather than accepting it:
+     the faintness was arithmetic, not a decision, and it was quietest on the tile where deleting
+     costs most - removing a followed slot runs the cascade.
+     MUST stay above the :hover rule. Equal specificity, so source order decides and hover has to
+     keep winning. */
+  .preset-slot-tile.slot-following .preset-slot-actions { opacity: 0.545; }
   .preset-slot-tile:hover .preset-slot-actions { opacity: 1; }
   .preset-slot-tile.slot-excess .preset-slot-actions { opacity: 1; }
   .preset-slot-action { background: var(--c-bg-card); border: 1px solid var(--c-border); border-radius: 2px; cursor: pointer; font-size: 0.7rem; padding: 1px 4px; color: var(--c-text-muted); }
@@ -36893,10 +36990,25 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
               insertLine = preset.startLine + 1;
               indent = '  ';
             }
+            // If this blade FOLLOWS another one, the slot has to arrive holding the target's style,
+            // not the default. Following is derived from the text matching, so a slot added as
+            // StylePtr<Black>() differs from its target the instant it exists - which reads as a
+            // deliberate per-preset override and permanently excludes that preset from
+            // propagation. The user would have declared a follower and silently got an exception.
+            // (B-219)
+            const followArrNow = _parseResult?.arrays[_activeArrayIndex];
+            const followsTo    = followArrNow?.follows?.[i + 1];
+            let addExpr = 'StylePtr<Black>()';
+            if (followsTo) {
+              const tgt = (preset.styles || [])[followsTo - 1];
+              // Falls back to the default when the target slot is itself missing - adding B3 while
+              // B2 is also absent - rather than inventing something to copy.
+              if (tgt && tgt.startLine) addExpr = model.getValueInRange(_slotRange(tgt));
+            }
             _atomicEdit(editor,'add-missing-style', [{
               range: { startLineNumber: insertLine, startColumn: 1,
                        endLineNumber:   insertLine, endColumn: 1 },
-              text: `${indent}StylePtr<Black>(),\n`,
+              text: `${indent}${addExpr},\n`,
             }]);
             editor.focus();
             _reopenAfterRebuild = { presetIdx: _selectedPresetIndex, slotIdx: i };
@@ -36938,6 +37050,27 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
       return result;
     }
 
+    // Is THIS preset's copy of this blade still following, or has it been overridden here?
+    //
+    // There is no override list by design, so the answer is not stored anywhere - following IS the
+    // two expressions matching, and overridden IS them differing. That makes reorder, insert,
+    // delete and duplicate free, and it makes this the only way to ask the question.
+    // Returns false rather than guessing when either slot is absent: a blade that is not present
+    // cannot be following anything.
+    function _slotIsFollowingHere(preset, slotIdx) {
+      if (!editor) return false;
+      const arr       = _parseResult?.arrays[_activeArrayIndex];
+      const targetNum = arr?.follows?.[slotIdx + 1];
+      if (!targetNum) return false;
+      const styles   = preset?.styles || [];
+      const follower = styles[slotIdx];
+      const target   = styles[targetNum - 1];
+      if (!follower?.startLine || !target?.startLine) return false;
+      const model = editor.getModel();
+      return presetParser.sameExpr(model.getValueInRange(_slotRange(follower)),
+                                   model.getValueInRange(_slotRange(target)));
+    }
+
     function _buildSlotTile(preset, slot, slotIdx, isMissing, isExcess, abbr, fullLabel) {
       const tile = document.createElement('div');
       tile.className = 'preset-slot-tile';
@@ -36955,6 +37088,32 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
       else if (slot.styleClass === 'helper') tile.classList.add('slot-helper');
       else if (slot.styleClass === 'ref')    tile.classList.add('slot-ref');
       else                                   tile.classList.add('slot-inline');
+      // FOLLOWING RIDES ON TOP OF THE PROVENANCE CLASS, never instead of it. A followed slot is
+      // still a helper, a ref or an inline expression; replacing that class would trade "where this
+      // came from" for "who wrote it" when both are worth knowing. Never on a red tile either -
+      // those are conditions, not provenance, and a follower fills the Missing placeholder rather
+      // than asking, so the two should not co-occur. (B-219)
+      if (!isMissing && !isExcess && !isUnlinked && _slotIsFollowingHere(preset, slotIdx)) {
+        tile.classList.add('slot-following');
+        const followArrNow = _parseResult?.arrays[_activeArrayIndex];
+        const followedName = _bladeDisplayName(followArrNow, followArrNow?.follows?.[slotIdx + 1]);
+        // Two halves, because the two presentations want different amounts. Hovering a resting tile
+        // asks "what is this?", and the answer is the first half; the instruction is not actionable
+        // until the tile is open, where there is a full row to hold it. Split rather than shortened:
+        // the hint is hidden by CSS on hover, so one element serves both without a second string.
+        const mark = document.createElement('span');
+        mark.className = 'preset-slot-follow-mark';
+        const markWhat = document.createElement('span');
+        markWhat.textContent = `Following ${followedName}`;
+        const markHint = document.createElement('span');
+        markHint.className   = 'preset-slot-follow-hint';
+        // "for this preset" is the whole reason this line exists. Overriding here does NOT stop the
+        // blade following everywhere - that is the checkbox, and it is global - so without the
+        // scope someone could reasonably read this as turning the feature off.
+        markHint.textContent = 'Modify to override for this preset';
+        mark.append(markWhat, markHint);
+        tile.appendChild(mark);
+      }
       if (isExcess)    tile.title = `Excess slot: NUM_BLADES is ${_parseResult.bladeCount}, this is blade ${slotIdx + 1}`;
       if (isUnlinked)  tile.title = `"${slot.expr?.match(/^\w+/)?.[0] || slot.expr}" looks like a library style but my_styles.h is not linked in this config. If defined externally it may still compile correctly, otherwise it will be undefined at compile time.`;
 
@@ -37115,17 +37274,27 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
       actions.appendChild(resetBtn);
       tile.appendChild(actions);
 
-      // Clicking an excess tile deletes it directly
-      if (isExcess) {
-        tile.addEventListener('click', e => {
-          if (e.target === resetBtn || resetBtn.contains(e.target)) return; // × already handled
-          e.stopPropagation();
-          _deleteExcessSlot(slot);
-        });
-      }
+      // THE TILE IS NOT A DELETE BUTTON. It used to be - clicking anywhere on an excess tile ran
+      // _deleteExcessSlot - and that destroyed a style on a single click with no confirmation, on
+      // the ONE tile in the app that does not open an editor when clicked. So the natural move,
+      // clicking to look at what you are about to lose, was the move that lost it. (2026-08-26)
+      //
+      // The answer is not a confirmation. A confirmation compensates for an ambiguous trigger;
+      // removing the ambiguity is upstream of needing one. The x is the delete, it is the only
+      // delete, and because reaching for it is unmistakably deliberate it needs no gate.
+      //
+      // An excess tile is inert on a body click for now. Whether it should instead open the editor
+      // like every other tile - so a style can be read or copied before it goes - is open, and is
+      // tracked with the rest of this control's redesign in B-226.
 
       // Clicking the tile body toggles the inline editor (missing tiles are navigate-only)
-      if (!isMissing && !isExcess) {
+      //
+      // EXCESS TILES OPEN LIKE ANY OTHER. They used to be excluded here because the click deleted
+      // them instead; with that gone, excluding them would leave one inert tile in a panel where
+      // every other tile opens, which reads as broken rather than as careful. It is also the tile
+      // most worth reading before acting: a style about to be removed is one somebody may want to
+      // copy out first. A missing tile stays navigate-only because there is no slot to edit.
+      if (!isMissing) {
         tile.addEventListener('click', e => {
           if (_activeColorPopup || _activeLibComboDropdown) return;
           e.stopPropagation(); // prevent outside-click handler from closing the editor we just opened
@@ -37135,7 +37304,13 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
             _startSlotArgEdit(tile, preset, slot, slotIdx);
           }
         });
+      }
 
+      // DRAG STAYS EXCLUDED FOR EXCESS TILES, unlike the click above. Opening an editor is a local,
+      // reversible look at one slot; a drop calls _reorderBlades, which is GLOBAL by construction
+      // and moves that blade in every preset. Letting a slot that sits past NUM_BLADES drive that
+      // is the confusing operation B-226 is about, not something to enable in passing.
+      if (!isMissing && !isExcess) {
         // Drag to reorder (draggable enabled only via badge mousedown, blocked during editing)
         tile.addEventListener('dragstart', e => {
           if (_editingSlot) { e.preventDefault(); tile.draggable = false; return; }
@@ -37169,7 +37344,8 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
           const after = (e.clientY - tile.getBoundingClientRect().top) > tile.offsetHeight / 2;
           const insertPos = after ? slotIdx + 1 : slotIdx;
           const toIdx = fromIdx < insertPos ? insertPos - 1 : insertPos;
-          if (toIdx !== fromIdx) _reorderSlots(_selectedPresetIndex, fromIdx, toIdx);
+          // Global by construction - no preset index, because a blade is not a per-preset thing.
+          if (toIdx !== fromIdx) _reorderBlades(fromIdx, toIdx);
         });
       }
       return tile;
@@ -37755,7 +37931,9 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
       let   labelCurrent = labelArr?.labels?.[slotIdx + 1] || null;
 
       const labelRow = document.createElement('div');
-      labelRow.style.cssText = 'display:flex;align-items:center;gap:3px;padding-bottom:4px;margin-bottom:4px;border-bottom:1px solid var(--c-border);';
+      // padding-right clears the absolutely-positioned .preset-slot-actions × in the tile corner;
+      // flex-wrap lets the follow group drop to its own line when the blade name is long.
+      labelRow.style.cssText = 'display:flex;align-items:center;flex-wrap:wrap;gap:3px;padding-right:22px;padding-bottom:4px;margin-bottom:4px;border-bottom:1px solid var(--c-border);';
 
       // B1 fallback — always in DOM, hidden when a label exists
       const labelPosId = document.createElement('span');
@@ -37803,7 +37981,10 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
       labelErrorEl.textContent = 'Label must be at least 2 characters';
 
       function _openLabelEdit() {
-        if (labelRow.querySelector('input')) return; // already open
+        // input[type=text], NOT any input: the Follow checkbox also lives on this row, so a bare
+        // 'input' selector matches it on every blade above B1 and this bails out before opening.
+        // (Regression from adding the follow control, 2026-08-24.)
+        if (labelRow.querySelector('input[type="text"]')) return; // already open
 
         const input = document.createElement('input');
         input.type = 'text';
@@ -37864,15 +38045,211 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
       // Single delegating handler: opens edit when ✎, applies when ✓ (input present)
       labelPencil.addEventListener('click', e => {
         e.stopPropagation();
-        if (labelRow.querySelector('input')) {
+        const inp = labelRow.querySelector('input[type="text"]');
+        if (inp) {
           // Currently in edit mode — the input's own Enter/Escape handles most cases;
           // clicking the checkmark should apply
-          const inp = labelRow.querySelector('input');
           inp.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
         } else {
           _openLabelEdit();
         }
       });
+
+      // ── Blade follow control ───────────────────────────────────────────────
+      //
+      // Lives ON the name row, not under it. Naming a blade and pointing it at another blade are
+      // both statements about the blade's identity, so they belong on the same line.
+      //
+      // Never built for B1. A follower may only mirror a LOWER-numbered blade, so blade 1 has
+      // nothing available to follow - the same structural rule the parser enforces, surfacing here
+      // as an absent control rather than a disabled one that has to explain itself.
+      const followBladeNum = slotIdx + 1;
+      if (followBladeNum > 1) {
+        const followArr = _parseResult?.arrays[_activeArrayIndex];
+        let followTarget = followArr?.follows?.[followBladeNum] || null;
+        const followAbbrs = _computeAbbreviations(followArr?.labels || {}, followBladeNum);
+
+        // THE CHECKBOX REPORTS THIS PRESET, NOT THE DECLARATION. It used to mirror the marker, which
+        // made it a global switch wearing a per-preset control's clothes. Reading the state the tile
+        // colour already shows gives three states instead of two, and turns "get this preset
+        // following again" from an unreachable corner into a click on a control already on screen.
+        //
+        //   no declaration            -> unchecked, target hidden
+        //   declared, overridden here -> unchecked, target VISIBLE BUT LOCKED
+        //   declared, following here  -> checked,   target editable
+        //
+        // The middle state is why hidden-until-checked gets an exception: a present-but-locked
+        // target says "there is a follow here, you are not in it", which hiding it cannot say.
+        const followPreset = followArr?.presets?.[_selectedPresetIndex] || null;
+        const followsHere  = _slotIsFollowingHere(followPreset, slotIdx);
+
+        const followWrap = document.createElement('label');
+        followWrap.className = 'preset-follow-toggle';
+
+        const followCb = document.createElement('input');
+        followCb.type    = 'checkbox';
+        followCb.checked = followsHere;
+
+        // CHECK IS PER-PRESET, UNCHECK IS GLOBAL, and that asymmetry is forced rather than chosen:
+        // following IS the two expressions matching, so "stop following but keep identical text" is
+        // a state this design cannot record. Removing the declaration is the only thing unchecking
+        // can mean - so the scope has to be stated BEFORE the click, which makes these tooltips
+        // load-bearing rather than decorative. They name the blade because several pairs coexist.
+        const _followSelfName = () => _bladeDisplayName(followArr, followBladeNum);
+        const _syncFollowWrapTitle = () => {
+          followWrap.title =
+            followCb.checked
+              ? `Stop ${_followSelfName()} following ${_bladeDisplayName(followArr, followTarget)} in every preset`
+              : followTarget
+                ? `Follow ${_bladeDisplayName(followArr, followTarget)} again in this preset`
+                : 'Use another blade’s style for this blade in every preset';
+        };
+        _syncFollowWrapTitle();
+
+        const followLbl = document.createElement('span');
+        followLbl.textContent = 'Follow';
+
+        followWrap.append(followCb, followLbl);
+
+        // A dropdown only exists when there is something to choose between. On B2 the single lower
+        // blade is B1 and no other answer is possible, so a one-option dropdown would be a control
+        // that cannot do anything - the target is shown as text instead.
+        const hasTargetChoice = followBladeNum > 2;
+        let followSel = null;
+
+        if (hasTargetChoice) {
+          followSel = document.createElement('select');
+          followSel.className = 'preset-follow-target';
+          // ALWAYS the abbreviation, with the full name in a tooltip. The first version swapped the
+          // option text to the long form while the list was open, which also rewrote the SELECTED
+          // option - so the closed control grew and shrank, and if focus never left it, it stayed
+          // wide. Never resize a control to show information; hang the information off it.
+          for (let n = 1; n < followBladeNum; n++) {
+            const opt = document.createElement('option');
+            opt.value = String(n);
+            opt.textContent = followAbbrs[n - 1] || `B${n}`;
+            opt.title = _bladeDisplayName(followArr, n);
+            followSel.appendChild(opt);
+          }
+          // NO DEFAULT WHERE THERE IS A CHOICE. Preselecting the lowest blade is what let ticking
+          // the box become an answer nobody gave - it bulk-rewrote every preset against B1. It also
+          // broke the commit: since the write happens on `change`, picking the blade that was
+          // already showing fires no event at all. The placeholder is not an option anyone selects,
+          // it is the absence of one, so it is disabled and cannot be returned to.
+          if (followTarget) {
+            followSel.value = String(followTarget);
+          } else {
+            const ph = document.createElement('option');
+            ph.value = '';
+            ph.textContent = '—';
+            ph.disabled = true;
+            followSel.insertBefore(ph, followSel.firstChild);
+            followSel.value = '';
+          }
+          // Locked, not hidden, when a follow exists that this preset opted out of. Editing the
+          // target from a preset that is not in the follow would retarget every preset from a row
+          // that is not participating - the one place a global act would be least expected.
+          followSel.disabled = !!followTarget && !followsHere;
+          // The select carries the selected blade's full name too, so hovering the closed control
+          // answers "which blade is this" without opening it.
+          const _syncFollowTitle = () => {
+            const v = parseInt(followSel.value, 10);
+            followSel.title = v ? _bladeDisplayName(followArr, v) : 'Choose the blade to follow';
+          };
+          _syncFollowTitle();
+          followSel.addEventListener('change', _syncFollowTitle);
+        }
+
+        const followStatic = hasTargetChoice ? null : document.createElement('span');
+        if (followStatic) {
+          followStatic.className   = 'preset-follow-static';
+          followStatic.textContent = followAbbrs[0] || 'B1';
+          followStatic.title       = _bladeDisplayName(followArr, 1);
+        }
+
+        // HIDDEN only when there is nothing to be part of. With a declaration in the file the target
+        // stays on screen even for a preset that overrode it - locked rather than absent - because
+        // "there is a follow here and you are outside it" is a different fact from "this blade
+        // follows nothing", and hiding renders them identical.
+        const followTargetEl = followSel || followStatic;
+        followTargetEl.style.display = followTarget ? '' : 'none';
+
+        // 0 means "not answered yet", never a default. Callers must not treat it as a blade.
+        const _readFollowTarget = () => followSel ? (parseInt(followSel.value, 10) || 0) : 1;
+
+        // Turning it on and retargeting it are the same operation: this blade now takes its style
+        // from that one, and either way there is a one-time copy to make.
+        async function _applyFollowTarget(targetNum) {
+          const ok = await _enableBladeFollow(followBladeNum, targetNum);
+          if (!ok) {                       // declined at the confirm — put the control back
+            followCb.checked             = followsHere;
+            if (followSel) {
+              followSel.value = followTarget ? String(followTarget) : '';
+              followSel.classList.remove('choosing');
+            }
+            followTargetEl.style.display = followTarget ? '' : 'none';
+            _syncFollowWrapTitle();
+            return;
+          }
+          // The write moved this slot's own text and every line below the declaration, so the
+          // coordinates this editor is holding are now stale. Close rather than refresh, exactly as
+          // a slot reset does, and drop the pending commit so nothing writes back through them.
+          //
+          // NO REOPEN ANY MORE. This used to come back on the has-a-choice path because ticking the
+          // box committed to the lowest blade and the user needed a second look to correct an answer
+          // they never gave. With no default there is no wrong answer to return to, so closing is
+          // the right end to the interaction on every path - the same end B2 always had.
+          _pendingSlotCommit = null;
+          _closeSlotArgEdit();
+        }
+
+        followWrap.addEventListener('click', e => e.stopPropagation());
+        followCb.addEventListener('change', () => {
+          if (!followCb.checked) {
+            // No confirm on the way out, and that is the design rather than an oversight: every
+            // preset KEEPS the text it already has, so this deletes a declaration and destroys
+            // nothing. Turning the feature off is meant to be free. It is GLOBAL because it cannot
+            // be anything else - see the tooltip note above - and the tooltip said so before the
+            // click.
+            _removeBladeFollow(followBladeNum);
+            _pendingSlotCommit = null;
+            _closeSlotArgEdit();
+            return;
+          }
+          if (followTarget) {
+            // A declaration exists and this preset stepped out of it. Checking puts THIS preset
+            // back and touches nothing else. One slot, so no dialog: picking from the Style Library
+            // overwrites a slot with no gate either, and the gate tracks scope rather than
+            // destructiveness.
+            _restoreFollowHere(followBladeNum, followTarget);
+            return;
+          }
+          if (!hasTargetChoice) { _applyFollowTarget(1); return; }  // one answer possible: a whole sentence
+          // A choice exists, so ticking is only half a sentence. Reveal the target and write
+          // nothing; the dropdown wears the blue border because it now IS an open edit.
+          followTargetEl.style.display = '';
+          if (followSel) {
+            followSel.classList.add('choosing');
+            followSel.focus();
+          }
+        });
+
+        if (followSel) {
+          followSel.addEventListener('click',  e => e.stopPropagation());
+          followSel.addEventListener('change', () => {
+            const picked = _readFollowTarget();
+            if (!picked) return;                       // still on the placeholder; nothing was said
+            followSel.classList.remove('choosing');
+            _applyFollowTarget(picked);
+          });
+        }
+
+        // One container so the three wrap together rather than breaking apart mid-statement.
+        const followGroup = document.createElement('span');
+        followGroup.className = 'preset-follow-group';
+        followGroup.append(followWrap, followTargetEl);
+        labelRow.append(followGroup);
+      }
 
       body.prepend(labelErrorEl);
       body.prepend(labelRow);
@@ -39478,48 +39855,53 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
         endLineNumber:   searchEnd,            endColumn:   10000,
       });
 
+      const baseOffset = model.getOffsetAt(slotStart);
+      let absStart, absEnd, repText;
+
       const strMatch = slotText.match(/"([^"]*)"/);
       if (strMatch) {
         const matchOffset = slotText.indexOf(strMatch[0]);
-        const baseOffset  = model.getOffsetAt(slotStart);
-        const repStart    = model.getPositionAt(baseOffset + matchOffset);
-        const repEnd      = model.getPositionAt(baseOffset + matchOffset + strMatch[0].length);
-        _atomicEdit(editor,'slot-parens', [{
-          range: {
-            startLineNumber: repStart.lineNumber, startColumn: repStart.column,
-            endLineNumber:   repEnd.lineNumber,   endColumn:   repEnd.column,
-          },
-          // When clearing: replace just the quoted string with nothing — outer parens remain, giving ()
-          text: newParensStr ? `"${newParensStr}"` : '',
-        }]);
+        absStart = baseOffset + matchOffset;
+        absEnd   = absStart + strMatch[0].length;
+        // When clearing: replace just the quoted string with nothing — outer parens remain, giving ()
+        repText  = newParensStr ? `"${newParensStr}"` : '';
       } else {
         // No string yet — find empty parens and insert
         const parenMatch = slotText.match(/\(\s*\)/);
-        if (parenMatch) {
-          const matchOffset = slotText.indexOf(parenMatch[0]);
-          const baseOffset  = model.getOffsetAt(slotStart);
-          const repStart    = model.getPositionAt(baseOffset + matchOffset);
-          const repEnd      = model.getPositionAt(baseOffset + matchOffset + parenMatch[0].length);
-          _atomicEdit(editor,'slot-parens', [{
-            range: {
-              startLineNumber: repStart.lineNumber, startColumn: repStart.column,
-              endLineNumber:   repEnd.lineNumber,   endColumn:   repEnd.column,
-            },
-            text: `("${newParensStr}")`,
-          }]);
-        }
+        if (!parenMatch) return;
+        const matchOffset = slotText.indexOf(parenMatch[0]);
+        absStart = baseOffset + matchOffset;
+        absEnd   = absStart + parenMatch[0].length;
+        repText  = `("${newParensStr}")`;
       }
+
+      const repStart = model.getPositionAt(absStart);
+      const repEnd   = model.getPositionAt(absEnd);
+      // An argument change alters the expression, so a follower still matching has to change with
+      // it or it silently becomes an override. This edit lands INSIDE the slot, so the follower
+      // text has to be computed rather than handed over; null means the match ran past the slot
+      // end, and propagating a guess is worse than not propagating.
+      const after = _slotTextAfterReplace(slot, absStart, absEnd, repText);
+      _atomicEdit(editor,'slot-parens', [{
+        range: {
+          startLineNumber: repStart.lineNumber, startColumn: repStart.column,
+          endLineNumber:   repEnd.lineNumber,   endColumn:   repEnd.column,
+        },
+        text: repText,
+      }, ...(after === null ? [] : _followEdits(slot, after))]);
     }
 
     function _resetSlot(slot) {
       if (!editor || !slot.startLine) return;
+      // A reset is a write like any other, so it carries to the followers that were still
+      // matching. Leaving it out would mean resetting a blade quietly orphans everything below it.
       _atomicEdit(editor,'slot-reset', [{
         range: {
           startLineNumber: slot.startLine, startColumn: slot.startCol + 1,
           endLineNumber:   slot.endLine,   endColumn:   slot.endCol + 1,
         },
         text: 'StylePtr<Black>()',
-      }]);
+      }, ..._followEdits(slot, 'StylePtr<Black>()')]);
       _pendingSlotCommit = null;   // slot deliberately replaced; do not re-commit
       _closeSlotArgEdit();
       // Defer focus past the current click event. A synchronous editor.focus()
@@ -39529,26 +39911,118 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
       setTimeout(() => editor.focus(), 0);
     }
 
+    /** Delete range for a slot, swallowing the comma that precedes it. */
+    function _slotDeleteRange(model, full, startOff, endOff) {
+      // Walk back past whitespace/newlines to find the preceding comma
+      let delStart = startOff;
+      let k = startOff - 1;
+      while (k >= 0 && /[ \t\r\n]/.test(full[k])) k--;
+      if (k >= 0 && full[k] === ',') delStart = k;
+      const startPos = model.getPositionAt(delStart);
+      const endPos   = model.getPositionAt(endOff);
+      return {
+        startLineNumber: startPos.lineNumber, startColumn: startPos.column,
+        endLineNumber:   endPos.lineNumber,   endColumn:   endPos.column,
+      };
+    }
+
+    /**
+     * Removing a follower blade removes it everywhere it was STILL FOLLOWING.
+     *
+     * Reducing NUM_BLADES marks the same slot excess in every preset, so without this the user
+     * deletes it once per preset - the same per-preset labour the feature exists to remove, and on a
+     * disabled preset there is no tile to click at all.
+     *
+     * NOTHING UNIQUE IS LOST, which is why this needs no confirm: every slot removed here holds text
+     * identical to its target, and the target is still sitting in that same preset. A preset that
+     * overrode the blade does not match, so it is retained - and it is reported, because it is the
+     * reason the job is not finished.
+     */
+    function _followerDeleteCascade(arr, bladeNum, targetNum, skipPreset) {
+      const model = editor.getModel();
+      const full  = model.getValue();
+      const edits = [];
+      let retained = 0;
+
+      for (const preset of arr.presets) {
+        if (preset === skipPreset) continue;          // the caller deletes this one itself
+        const styles   = preset.styles || [];
+        const follower = styles[bladeNum - 1];
+        if (!follower || !follower.startLine) continue;
+        const target = styles[targetNum - 1];
+        if (!target || !target.startLine) { retained++; continue; }
+        const fText = model.getValueInRange(_slotRange(follower));
+        const tText = model.getValueInRange(_slotRange(target));
+        // An EMPTY slot goes too. Only a style the user actually wrote is worth keeping, and
+        // StylePtr<Black>() is the app's own placeholder - treating it as an override would leave
+        // a trail of empty slots behind and report them as presets still needing attention.
+        if (!presetParser.sameExpr(fText, tText) && !_slotIsEmpty(fText)) { retained++; continue; }
+        const sOff = model.getOffsetAt({ lineNumber: follower.startLine, column: follower.startCol + 1 });
+        const eOff = model.getOffsetAt({ lineNumber: follower.endLine,   column: follower.endCol   + 1 });
+        edits.push({ range: _slotDeleteRange(model, full, sOff, eOff), text: '' });
+      }
+
+      const blocks = _scanDisabledPresets(full)
+        .filter(b => b.startLine > arr.startLine && b.endLine < arr.endLine);
+      for (const b of blocks) {
+        const innerStart = model.getOffsetAt({ lineNumber: b.startLine + 1, column: 1 });
+        const innerEnd   = model.getOffsetAt({ lineNumber: b.endLine,       column: 1 });
+        const innerText  = full.slice(innerStart, innerEnd);
+        const slots      = presetParser.extractStyleSlots(innerText);
+        const follower   = slots[bladeNum - 1];
+        if (!follower) continue;
+        const target = slots[targetNum - 1];
+        if (!target) { retained++; continue; }
+        const fText = innerText.slice(follower.startOffset, follower.endOffset);
+        const tText = innerText.slice(target.startOffset,   target.endOffset);
+        if (!presetParser.sameExpr(fText, tText) && !_slotIsEmpty(fText)) { retained++; continue; }
+        edits.push({
+          range: _slotDeleteRange(model, full,
+                                  innerStart + follower.startOffset,
+                                  innerStart + follower.endOffset),
+          text: '',
+        });
+      }
+      return { edits, retained };
+    }
+
     function _deleteExcessSlot(slot) {
       if (!editor || !slot.startLine) return;
       const model = editor.getModel();
       const full  = model.getValue();
       const slotStartOff = model.getOffsetAt({ lineNumber: slot.startLine, column: slot.startCol + 1 });
       const slotEndOff   = model.getOffsetAt({ lineNumber: slot.endLine,   column: slot.endCol + 1 });
-      // Walk back past whitespace/newlines to find the preceding comma
-      let delStart = slotStartOff;
-      let k = slotStartOff - 1;
-      while (k >= 0 && /[ \t\r\n]/.test(full[k])) k--;
-      if (k >= 0 && full[k] === ',') delStart = k;
-      const startPos = model.getPositionAt(delStart);
-      const endPos   = model.getPositionAt(slotEndOff);
-      _atomicEdit(editor,'slot-delete', [{
-        range: {
-          startLineNumber: startPos.lineNumber, startColumn: startPos.column,
-          endLineNumber:   endPos.lineNumber,   endColumn:   endPos.column,
-        },
-        text: '',
-      }]);
+      const edits = [{ range: _slotDeleteRange(model, full, slotStartOff, slotEndOff), text: '' }];
+
+      // If this blade follows another one, the same slot in every still-following preset is the
+      // same following copy, and removing it here means removing it there.
+      const arr       = _parseResult?.arrays[_activeArrayIndex];
+      const here      = _locateSlot(slot);
+      const bladeNum  = here?.bladeNum;
+      const targetNum = (arr && bladeNum) ? arr.follows?.[bladeNum] : null;
+      let cascade = null;
+      if (targetNum) {
+        cascade = _followerDeleteCascade(arr, bladeNum, targetNum, here.preset);
+        edits.push(...cascade.edits);
+        // The declaration describes a blade, so it goes only when nothing is left to describe.
+        // A preset that overrode the blade still holds its slot, and while one does the record of
+        // what that slot was stays in the file.
+        if (cascade.retained === 0) {
+          const declEdit = _followPairRemovalEdit(arr, bladeNum);
+          if (declEdit) edits.push(declEdit);
+        }
+      }
+
+      _atomicEdit(editor,'slot-delete', edits);
+      if (cascade && cascade.edits.length) {
+        const n = cascade.edits.length;
+        showToast(_bladeDisplayName(arr, bladeNum) + ' was also removed from ' + n
+                + (n === 1 ? ' other preset that was following it.' : ' other presets that were following it.')
+                + (cascade.retained
+                    ? ' ' + cascade.retained + (cascade.retained === 1 ? ' preset' : ' presets')
+                      + ' kept a different style and still need attention.'
+                    : ''));
+      }
       _pendingSlotCommit = null;   // slot deliberately emptied; do not re-commit
       _closeSlotArgEdit();
       // Defer focus past the click event so Ctrl+Z reaches Monaco without
@@ -39628,6 +40102,12 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
       if (!editor) return;
       const exprText = _jmtStyleSlotExpr(newExpr);
 
+      // Followers receive the EXPRESSION only, never the leading comment block. That matches what
+      // changing a style by hand already does in this app - the comment above a slot is left where
+      // it is - and a Fett263 header copied into every follower of every preset would bury the
+      // file the user has to read.
+      const followEdits = _followEdits(slot, exprText);
+
       if (leadingComment) {
         // Replace any existing comment above the slot together with the slot itself,
         // inserting the new comment followed by the expression at the slot's indent.
@@ -39638,7 +40118,7 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
             endLineNumber:   slot.endLine,                endColumn:   slot.endCol + 1,
           },
           text: leadingComment + '\n' + indent + exprText,
-        }]);
+        }, ...followEdits]);
       } else {
         _atomicEdit(editor,'preset-slot-edit', [{
           range: {
@@ -39646,7 +40126,7 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
             endLineNumber:   slot.endLine,   endColumn:   slot.endCol + 1,
           },
           text: exprText,
-        }]);
+        }, ...followEdits]);
       }
       editor.focus();
     }
@@ -39757,6 +40237,529 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
       editor.focus();
       _parseResult = presetParser.parsePresets(editor.getValue());
       _refreshTileAbbreviations();
+    }
+
+    // ── Blade follow writers ───────────────────────────────────────────────────
+    //
+    // `// @jmt-follow: B3=B1` says blade 3 mirrors blade 1's style expression. Its OWN line, never
+    // merged into @jmt-labels: two concerns on one line makes the delete-when-empty logic fragile,
+    // and the two have independent lifetimes - a blade can be named without following and vice
+    // versa.
+    //
+    // NOTHING RECORDS WHICH PRESETS ARE OVERRIDDEN, and that is the design rather than an omission.
+    // The follower writes TEXT, so after the write its expression IS the target's. Therefore
+    // following means "the two expressions match" and overridden means "they differ" - derivable
+    // from the file, keyed to nothing. Preset reorder, insert, delete, duplicate and hand-editing in
+    // Monaco are all free, and turning the feature off is deleting one line, because every preset
+    // already holds the right text. (B-219)
+
+    /** Update or insert the Bn=Bm pair in an existing @jmt-follow: line. */
+    function _updateFollowPairInLine(lineText, followerNum, targetNum) {
+      const pairRe  = new RegExp(`B${followerNum}\\s*=\\s*B\\d+`);
+      const newPair = `B${followerNum}=B${targetNum}`;
+      return pairRe.test(lineText)
+        ? lineText.replace(pairRe, newPair)
+        : lineText.trimEnd() + ' ' + newPair;
+    }
+
+    /** The single edit that declares `followerNum` a follower of `targetNum`. */
+    function _followDeclEdit(arr, followerNum, targetNum) {
+      if (arr.followLine !== null) {
+        const oldText = (editor.getValue().split('\n')[arr.followLine - 1]) || '';
+        return {
+          range: { startLineNumber: arr.followLine, startColumn: 1,
+                   endLineNumber:   arr.followLine, endColumn: oldText.length + 1 },
+          text: _updateFollowPairInLine(oldText, followerNum, targetNum),
+        };
+      }
+      // Sit directly under the labels line when there is one, so the two read as a block.
+      // Otherwise take the same slot the labels line would have taken.
+      const insertLine = arr.labelLine !== null
+        ? arr.labelLine + 1
+        : (arr.presets.length > 0 ? arr.presets[0].startLine : arr.bodyStartLine + 1);
+      return {
+        range: { startLineNumber: insertLine, startColumn: 1,
+                 endLineNumber:   insertLine,  endColumn: 1 },
+        text: `// @jmt-follow: B${followerNum}=B${targetNum}\n`,
+      };
+    }
+
+    /**
+     * Set (or change) which blade a follower mirrors. Writes to the editor only.
+     *
+     * `extraEdits` exists so the bulk copy can land in the SAME undo step as the declaration.
+     * Separating them would leave a reachable state where the line says B3 follows B1 while no
+     * preset has been copied yet - and under the derived-override rule that state reads as "every
+     * preset overrode it", which is the opposite of what the user just asked for.
+     */
+    function _setBladeFollow(followerNum, targetNum, extraEdits = []) {
+      if (!editor) return;
+      // Structural guard, not a validation message: a follower may only mirror a LOWER-numbered
+      // blade. Cycles become impossible rather than detectable, and "never offered on B1" falls out.
+      if (!(targetNum < followerNum)) return;
+      const arr = _getLabelArray();
+      if (!arr) return;
+
+      _atomicEdit(editor, 'blade-follow',
+        [_followDeclEdit(arr, followerNum, targetNum), ...extraEdits]);
+      editor.focus();
+      _parseResult = presetParser.parsePresets(editor.getValue());
+    }
+
+    /**
+     * Stop a blade following. Removes the whole line with the last pair.
+     *
+     * Every preset KEEPS the text it has. That is not a convenience, it is what makes the feature
+     * safe to turn off: the styles were written to the file as they were adopted, so removing the
+     * declaration removes only the future propagation.
+     */
+    /** The single edit that drops one Bn=Bm pair, or the whole line when it was the last one. */
+    function _followPairRemovalEdit(arr, followerNum) {
+      if (!editor || !arr || arr.followLine === null) return null;
+      const lines   = editor.getValue().split('\n');
+      const lineIdx = arr.followLine - 1;
+      const oldText = lines[lineIdx] || '';
+      const pairRe  = new RegExp(`\\s*B${followerNum}\\s*=\\s*B\\d+`);
+      if (!pairRe.test(oldText)) return null;
+      const newText = oldText.replace(pairRe, '');
+
+      const hasMore = /B\d+\s*=\s*B\d+/.test(newText.replace('// @jmt-follow:', ''));
+      if (!hasMore) {
+        const nextLine = lines[lineIdx + 1];
+        const endLine  = (nextLine !== undefined && nextLine.trim() === '')
+          ? arr.followLine + 2
+          : arr.followLine + 1;
+        return {
+          range: { startLineNumber: arr.followLine, startColumn: 1,
+                   endLineNumber:   endLine,        endColumn: 1 },
+          text: '',
+        };
+      }
+      return {
+        range: { startLineNumber: arr.followLine, startColumn: 1,
+                 endLineNumber:   arr.followLine, endColumn: oldText.length + 1 },
+        text: newText,
+      };
+    }
+
+    // Put ONE preset back under a follow it had stepped out of.
+    //
+    // Cheap precisely because there is no override list: following IS the two expressions matching,
+    // so restoring is nothing more than giving this slot the target's current text. No flag is
+    // cleared, nothing is recorded, and the state becomes true rather than being declared true.
+    //
+    // Routed through _commitSlotEdit rather than writing the range directly, so this blade's OWN
+    // followers move with it - restoring B3 has to carry B4 along exactly as any other edit to B3
+    // would. The pending commit is dropped first: it holds coordinates from before this write.
+    function _restoreFollowHere(bladeNum, targetNum) {
+      if (!editor) return;
+      const arr      = _parseResult?.arrays[_activeArrayIndex];
+      const styles   = arr?.presets?.[_selectedPresetIndex]?.styles || [];
+      const follower = styles[bladeNum - 1];
+      const target   = styles[targetNum - 1];
+      // Nothing to copy from, or nowhere to copy to. Silent rather than inventing a style: the
+      // checkbox simply does not take, and the next rebuild re-renders it unchecked and honest.
+      if (!follower?.startLine || !target?.startLine) return;
+      const targetText = editor.getModel().getValueInRange(_slotRange(target));
+      _pendingSlotCommit = null;
+      _commitSlotEdit(follower, targetText);
+      _closeSlotArgEdit();
+    }
+
+    function _removeBladeFollow(followerNum) {
+      if (!editor) return;
+      const arr = _getLabelArray();
+      if (!arr || arr.followLine === null) return;
+      const edit = _followPairRemovalEdit(arr, followerNum);
+      if (!edit) return;
+      _atomicEdit(editor, 'blade-follow', [edit]);
+      editor.focus();
+      _parseResult = presetParser.parsePresets(editor.getValue());
+    }
+
+    // WHEN A FOLLOW PAIR IS DEAD, and the old answer here was wrong.
+    //
+    // This file used to carry a _pruneDeadFollows(bladeCount) that dropped any pair naming a blade
+    // above NUM_BLADES. It had no caller, which is the only reason it never did damage. Reducing
+    // the blade count marks every preset's extra slot excess, but the slots are all still there and
+    // the user still has to deal with them - and the declaration is precisely the record saying
+    // those slots were following copies rather than work somebody did. Pruning on the count would
+    // have destroyed that record at the exact moment the delete cascade needs it.
+    //
+    // The rule instead: a pair is dead when NOTHING IS LEFT TO DESCRIBE - when no preset holds a
+    // slot at that position any more. That is tested where it is known, in the delete cascade, by
+    // whether any preset retained the slot. (Ryan's rule, 2026-08-24.)
+
+    /** How a blade is named to the user: its label when it has one, its position when it does not. */
+    function _bladeDisplayName(arr, num) {
+      const label = arr?.labels?.[num];
+      return label ? `${label} (B${num})` : `Blade ${num}`;
+    }
+
+    /**
+     * The one-time copy that turning follow ON performs: every preset's follower slot rewritten to
+     * its target's text.
+     *
+     * A preset already holding the right text produces no edit, which also makes the length of this
+     * array the honest answer to "how many presets does this change" - counting presets that are
+     * already identical would overstate the cost in the confirm.
+     */
+    // The app's own placeholder for "nothing here yet" - written by a slot reset and by the
+    // missing-slot tile. Overwriting it costs the user nothing they wrote, so it is counted as
+    // filling an empty blade rather than as replacing a style. Matched exactly, not by pattern: a
+    // style that merely CONTAINS Black is a real style someone built.
+    const EMPTY_SLOT_EXPR = 'StylePtr<Black>()';
+    function _slotIsEmpty(text) {
+      return presetParser.sameExpr(text, EMPTY_SLOT_EXPR);
+    }
+
+    function _bulkFollowEdits(arr, followerNum, targetNum) {
+      const out = { replace: [], fill: [], matched: 0 };
+      if (!editor || !arr) return out;
+      const model = editor.getModel();
+      for (const preset of arr.presets) {
+        const styles = preset.styles || [];
+        const target = styles[targetNum - 1];
+        if (!target || !target.startLine) continue;
+        const targetText = model.getValueInRange(_slotRange(target));
+        const follower   = styles[followerNum - 1];
+
+        if (!follower || !follower.startLine) {
+          const ins = _followInsertPoint(styles, followerNum);
+          if (ins) out.fill.push({ range: ins.range, text: `,\n${ins.indent}${targetText}` });
+          continue;
+        }
+        const followerText = model.getValueInRange(_slotRange(follower));
+        // COUNTED, not just skipped. A preset that already matches is one the turn-on leaves alone,
+        // and whether ANY exist is what separates "some of them change" from "all of them change" -
+        // which is the difference between a question and a confirmation downstream.
+        if (presetParser.sameExpr(targetText, followerText)) { out.matched++; continue; }
+        // An empty blade and an absent one are the same decision to the user - there was nothing
+        // there - so they share a bucket and neither one earns a warning about losing work.
+        (_slotIsEmpty(followerText) ? out.fill : out.replace)
+          .push({ range: _slotRange(follower), text: targetText });
+      }
+      return out;
+    }
+
+    /**
+     * Where a missing follower slot gets written, or null when it must not be.
+     *
+     * A missing slot is a QUESTION the app puts to the user - the red "Missing, click to add" tile -
+     * and a follower blade means the question already has an answer. So it is filled rather than
+     * asked about, which is the whole point: the alternative is clicking once per preset, and on a
+     * disabled preset there is nowhere to click at all.
+     *
+     * Only ever the NEXT slot. Slots are positional and a shortfall is always trailing, so inserting
+     * B4 into a preset holding two styles would silently land as B3 and every blade below it would
+     * be wrong. Anything else is left for the red tile, which asks.
+     */
+    function _followInsertPoint(styles, followerNum) {
+      if (styles.length !== followerNum - 1) return null;
+      const last = styles[styles.length - 1];
+      if (!last || !last.endLine) return null;
+      const model  = editor.getModel();
+      const indent = (model.getLineContent(last.endLine).match(/^(\s*)/) || ['', ''])[1];
+      // Zero-width, at the end of the last style and BEFORE its trailing comma, so the existing
+      // comma ends the inserted line and the entry stays well formed.
+      return {
+        indent,
+        range: { startLineNumber: last.endLine, startColumn: last.endCol + 1,
+                 endLineNumber:   last.endLine, endColumn:   last.endCol + 1 },
+      };
+    }
+
+    /**
+     * The same one-time copy, for the presets that are DISABLED.
+     *
+     * A disabled preset is wrapped in an `@jmt-disabled` block comment, so the preset parser cannot
+     * see it and `_bulkFollowEdits` walks straight past it. Skipping them is not harmless: it is still
+     * a preset the user intends to bring back, and re-enabling one later would produce a blade
+     * holding a style that never received the copy. Under the derived-override rule that reads as a
+     * deliberate override, so the mistake would look like a decision.
+     *
+     * Uses the parser's own `extractStyleSlots` on the block's text rather than matching StylePtr
+     * lines. A second, weaker slot parser would disagree with the first one somewhere - a style
+     * split over two lines, or two on one line - and the disagreement would land as a wrong edit.
+     */
+    function _disabledFollowEdits(arr, followerNum, targetNum) {
+      const out = { replace: [], fill: [], matched: 0 };
+      if (!editor || !arr) return out;
+      const model = editor.getModel();
+      const full  = model.getValue();
+      // Only the blocks inside THIS bank. A config with two preset arrays has its own disabled
+      // blocks in each, and blade numbering is per-array.
+      const blocks = _scanDisabledPresets(full)
+        .filter(b => b.startLine > arr.startLine && b.endLine < arr.endLine);
+
+      for (const b of blocks) {
+        // Block text is the lines between the opening marker line and the line that closes it.
+        const innerStart = model.getOffsetAt({ lineNumber: b.startLine + 1, column: 1 });
+        const innerEnd   = model.getOffsetAt({ lineNumber: b.endLine,       column: 1 });
+        const innerText  = full.slice(innerStart, innerEnd);
+
+        const slots  = presetParser.extractStyleSlots(innerText);
+        const target = slots[targetNum - 1];
+        if (!target) continue;
+        const targetText = innerText.slice(target.startOffset, target.endOffset);
+        const follower   = slots[followerNum - 1];
+
+        // A disabled preset short a blade is the case that made this necessary: there is no tile to
+        // click, so without filling it the preset would sit wrong until it was enabled and repaired
+        // by hand, once per preset.
+        if (!follower) {
+          if (slots.length !== followerNum - 1) continue;
+          const last = slots[slots.length - 1];
+          const pos  = model.getPositionAt(innerStart + last.endOffset);
+          const indent = (model.getLineContent(pos.lineNumber).match(/^(\s*)/) || ['', ''])[1];
+          out.fill.push({
+            range: { startLineNumber: pos.lineNumber, startColumn: pos.column,
+                     endLineNumber:   pos.lineNumber, endColumn:   pos.column },
+            text: `,\n${indent}${targetText}`,
+          });
+          continue;
+        }
+
+        const followerText = innerText.slice(follower.startOffset, follower.endOffset);
+        if (presetParser.sameExpr(targetText, followerText)) { out.matched++; continue; }
+
+        const s = model.getPositionAt(innerStart + follower.startOffset);
+        const e = model.getPositionAt(innerStart + follower.endOffset);
+        (_slotIsEmpty(followerText) ? out.fill : out.replace).push({
+          range: { startLineNumber: s.lineNumber, startColumn: s.column,
+                   endLineNumber:   e.lineNumber, endColumn:   e.column },
+          text: targetText,
+        });
+      }
+      return out;
+    }
+
+    /**
+     * Turn following ON, asking first when it would overwrite styles.
+     *
+     * A MODAL confirm rather than an inline one: the blast radius is every preset, and the tile the
+     * checkbox lives on shows exactly one. Keeping that tile visible buys the user nothing, because
+     * the styles being replaced are not on it. (ui-conventions, "Inline confirm vs. modal confirm")
+     *
+     * No confirm when nothing would be overwritten - there is no cost to warn about, and a dialog
+     * that always appears is one the user learns to dismiss without reading.
+     *
+     * Returns true when following was turned on, so the caller knows whether to keep its checkbox.
+     */
+    async function _enableBladeFollow(followerNum, targetNum) {
+      if (!editor || !(targetNum < followerNum)) return false;
+      const arr = _getLabelArray();
+      if (!arr) return false;
+
+      const live     = _bulkFollowEdits(arr, followerNum, targetNum);
+      const disabled = _disabledFollowEdits(arr, followerNum, targetNum);
+      const replace  = [...live.replace, ...disabled.replace];
+      const fill     = [...live.fill,    ...disabled.fill];
+      const bulk     = [...replace, ...fill];
+      const follower = _bladeDisplayName(arr, followerNum);
+      const target   = _bladeDisplayName(arr, targetNum);
+
+      // What actually gets written, and how many presets the user chose to leave alone.
+      let chosen = bulk;
+      let kept   = 0;
+
+      // ONLY a replacement raises a question. A preset that was missing this blade gains one and
+      // loses nothing - there is nothing to decide, and a config where every preset only GAINS a
+      // slot would otherwise open a danger-styled dialog over an edit with no downside.
+      if (replace.length) {
+        // THE DIALOG EXISTS ONLY BECAUSE SOMETHING GETS OVERWRITTEN, SO THAT IS ITS SUBJECT.
+        // It said "X will follow Y in every preset", which is what the user just asked for and
+        // therefore not news. The scope lives in the title. The body is the exceptions and nothing
+        // else - the presets carrying a style somebody chose, which is the only thing at risk.
+        //
+        // Empty blades are absent from this entirely. Filling one is not overwriting, so counting
+        // it here would inflate the only number the user is weighing. The disabled count is absent
+        // too - it does not change the decision, and the toast reports it after the fact.
+        const n = replace.length;
+        // FULL SCOPE IS A DIFFERENT DIALOG, not the same one with a bigger number.
+        //
+        // "Everything" means no preset already matches - blanks and StylePtr<Black>() do not count,
+        // because those are absences the app treats as fillable and nobody chose them. So when
+        // `matched` is zero, every style anyone actually wrote is about to be replaced, and Keep
+        // Existing stops being a real answer: keeping ALL of them leaves no preset following
+        // anything, so the outcome is INDISTINGUISHABLE FROM CANCEL. Two buttons with the same
+        // observable result is one button too many, and offering it implies a difference that is
+        // not there.
+        //
+        // With one outcome, this knows what it is about to do - so it becomes a confirmation, and a
+        // confirmation states the whole result UP FRONT and takes no toast. A toast afterwards could
+        // only repeat the sentence the user just read and agreed to. Partial scope stays a question
+        // and keeps its toast, because which presets moved is genuinely new information.
+        const fullScope = (live.matched + disabled.matched) === 0;
+        const dAll = disabled.replace.length + disabled.fill.length;
+
+        if (fullScope) {
+          const ok = await promptConfirm({
+            title: `Replace every ${follower} style?`,
+            // "from the same preset" trails the noun, so it reads as one particular preset rather
+            // than each preset's own. Establishing the per-preset frame FIRST - "in each one" -
+            // fixes it without a possessive that would give the preset ownership it has not got.
+            message: `All ${n} preset${n === 1 ? '' : 's'} ${n === 1 ? 'has' : 'have'} a different style on ${follower}`
+                   + (dAll ? `, including ${dAll} disabled` : '') + '. '
+                   + (n === 1 ? `It will be replaced by that preset's ${target} style.`
+                              : `In each one, ${follower} will be replaced by that preset's ${target} style.`)
+                   + `\n\n${follower} then follows ${target} in any preset where their styles match. `
+                   + `Editing ${follower} in a preset overrides it there.`,
+            confirmText: 'Replace All',
+            confirmKind: 'danger',
+          });
+          // Two buttons, so promptConfirm resolves a plain boolean rather than a button name.
+          if (!ok) return false;
+          _setBladeFollow(followerNum, targetNum, chosen);
+          return true;                                   // stated up front; nothing left to report
+        }
+
+        // A REAL QUESTION, NOT A CONFIRMATION. Per-preset overrides are a first-class part of this
+        // feature, so "destroy them or do not turn follow on at all" is a false choice - keeping
+        // them is a legitimate answer, not a refusal. Cancel stays for the third answer, which is
+        // that the user did not mean to do this.
+        const choice = await promptConfirm({
+          title: 'Replace the different styles?',
+          // "the style on Blade 1" was WRONG, not merely wordy: there is no single Blade 1 style.
+          // Every preset has its own, and each follower takes the one from the preset it lives in.
+          //
+          // Flat statements, no idiom and no personification: "will lose it" was casual and vague
+          // about what happens to the text, and "its own style" gives the preset agency it has not
+          // got. A preset HAS a different style; it does not own one.
+          //
+          // The last line is what makes this a choice rather than a warning: without it, Keep and
+          // Cancel look like the same answer. It used to read "follows from now on either way" -
+          // wrong twice over. "Either way" invites "in either direction" on a feature whose whole
+          // meaning is directional, and the flat promise is not true of a preset that keeps a
+          // different style, because a preset only follows while the two expressions match. Stating
+          // the RULE is true in every case and teaches what the mute in the tile is showing.
+          message: `${n} preset${n === 1 ? '' : 's'} ${n === 1 ? 'has' : 'have'} a different style on ${follower}. `
+                 + `Replacing uses that preset's own ${target} style in each case.`
+                 + `\n\nBoth choices turn on following. ${follower} then follows ${target} `
+                 + `in any preset where their styles match.`,
+          confirmText: 'Replace All',
+          confirmKind: 'danger',
+          middleText:  'Keep Existing',
+        });
+        if (choice === 'cancel') return false;
+        // Keep Existing still fills the blades that had nothing on them - those are not exceptions
+        // anybody chose, and leaving them empty would turn on a follow that visibly did nothing.
+        if (choice === 'middle') { chosen = fill; kept = n; }
+      }
+
+      _setBladeFollow(followerNum, targetNum, chosen);
+
+      // THE DIALOG ASKS, THE TOAST REPORTS, and once the dialog became a real question the two
+      // cannot possibly duplicate each other: a question does not know its own outcome, because the
+      // outcome is which button was pressed. The toast is the only place the user learns what was
+      // actually done. It is also where Undo belongs - a dialog explaining how to undo spends
+      // attention before the fact on a recovery the user may never want, while the toast carries it
+      // as one click at the moment it is useful.
+      // KEEP EXISTING WRITES TOO, and the toast used to report only what it left alone. `chosen`
+      // becomes `fill` on that path, so empty and absent slots were filled and nothing said so -
+      // including in disabled presets, where `dApplied` was even computed for this branch and then
+      // never used. A toast whose job is carrying the outcome must not report the non-outcome.
+      const dApplied = kept ? disabled.fill.length
+                            : disabled.replace.length + disabled.fill.length;
+      // ONE EDIT PER PRESET TOUCHED, so the edit count IS the preset count. Leading with it also
+      // retires "now follows in every preset", which overstated things whenever some presets
+      // already matched and were never touched at all.
+      const updated = chosen.length;
+      const s       = (k) => k === 1 ? '' : 's';
+      // COUNT FIRST, RELATIONSHIP LAST. "Blade 3 now follows Blade 1. 57 presets updated." put a
+      // sentence ending in a digit against one starting with a digit, and "1. 57" reads as a
+      // decimal. Leading with the count also puts what CHANGED before what is now true, which is
+      // the order a toast is read in.
+      const scope = `Updated ${updated} preset${s(updated)}`
+                  + (dApplied ? `, including ${dApplied} disabled` : '');
+      showToast(
+        kept
+          // Zero is worth saying out loud. Keeping every style and filling nothing means the
+          // declaration went in and the config did not move, and a toast that only reported what it
+          // left alone would read as though something had happened.
+          ? (updated ? `${scope}; ` : 'No presets changed; ')
+            + `${kept} kept ${kept === 1 ? 'a different style' : 'different styles'}. `
+            + `${follower} now follows ${target}.`
+          // Same for the no-dialog path: when every preset already held the target's style there is
+          // nothing to count, and "Updated 0 presets" is a worse sentence than the reason.
+          : (updated ? `${scope}. ` : 'Every preset already matched. ')
+            + `${follower} now follows ${target}.`,
+        // One atomic edit went in, so one undo takes all of it back out.
+        { action: { label: 'Undo', onClick: () => { try { editor.trigger('toast', 'undo', null); } catch {} } } },
+      );
+      return true;
+    }
+
+    // ── Blade follow propagation ───────────────────────────────────────────────
+    //
+    // Writing a followed blade writes its followers, in the SAME preset and nowhere else. Every
+    // path that writes a whole slot expression routes through here, so following survives a
+    // library pick, a typed expression, a wrapper swap, an argument change and a reset - if any
+    // one of them skipped it, that edit would silently turn following into overridden.
+    //
+    // The propagated edits ride in the SAME _atomicEdit as the edit that caused them: one undo
+    // step, because from the user's side it was one action. Monaco resolves a multi-edit against
+    // the original coordinates, so the ranges below do not need shifting.
+
+    /** The slot's Monaco range. */
+    function _slotRange(slot) {
+      return {
+        startLineNumber: slot.startLine, startColumn: slot.startCol + 1,
+        endLineNumber:   slot.endLine,   endColumn:   slot.endCol + 1,
+      };
+    }
+
+    /** Which preset and which blade number a slot object is, found by position. */
+    function _locateSlot(slot) {
+      const arr = _parseResult?.arrays[_activeArrayIndex];
+      if (!arr || !slot || !slot.startLine) return null;
+      for (const preset of arr.presets) {
+        const idx = (preset.styles || []).findIndex(
+          s => s.startLine === slot.startLine && s.startCol === slot.startCol);
+        if (idx >= 0) return { preset, bladeNum: idx + 1 };
+      }
+      return null;
+    }
+
+    /**
+     * The slot's text as it WILL read once [absStart, absEnd) is replaced by `text`.
+     * Null when the replacement is not wholly inside the slot - the caller then skips propagation
+     * rather than mirroring a string it had to guess at.
+     */
+    function _slotTextAfterReplace(slot, absStart, absEnd, text) {
+      if (!editor || !slot || !slot.startLine) return null;
+      const model        = editor.getModel();
+      const slotStartOff = model.getOffsetAt({ lineNumber: slot.startLine, column: slot.startCol + 1 });
+      const slotEndOff   = model.getOffsetAt({ lineNumber: slot.endLine,   column: slot.endCol + 1 });
+      if (absStart < slotStartOff || absEnd > slotEndOff) return null;
+      const cur = model.getValueInRange(_slotRange(slot));
+      return cur.slice(0, absStart - slotStartOff) + text + cur.slice(absEnd - slotStartOff);
+    }
+
+    /**
+     * Edits that mirror `newText` into the followers of `slot` within its own preset.
+     * Empty when nothing follows, when the slot cannot be placed, or when every follower here
+     * has been overridden. Reads current text from the model rather than the parse, so the
+     * follow/override comparison is made against what is actually on screen.
+     */
+    function _followEdits(slot, newText) {
+      if (!editor) return [];
+      const arr = _parseResult?.arrays[_activeArrayIndex];
+      if (!arr || !arr.follows || Object.keys(arr.follows).length === 0) return [];
+      const here = _locateSlot(slot);
+      if (!here) return [];
+
+      const model = editor.getModel();
+      const texts = {};
+      here.preset.styles.forEach((s, i) => {
+        if (s && s.startLine) texts[i + 1] = model.getValueInRange(_slotRange(s));
+      });
+      const oldText = texts[here.bladeNum];
+      if (oldText === undefined) return [];
+
+      return presetParser
+        .planFollowWrites(arr.follows, here.bladeNum, oldText, newText, texts)
+        .map(w => ({ range: _slotRange(here.preset.styles[w.blade - 1]), text: w.text }));
     }
 
     // ── Library picker ─────────────────────────────────────────────────────────
@@ -40389,20 +41392,30 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
     }
 
     // ── Reorder slots within a preset ─────────────────────────────────────────
-    function _reorderSlots(presetIdx, fromIdx, toIdx) {
-      if (!editor || fromIdx === toIdx) return;
-      const parsed = presetParser.parsePresets(editor.getValue());
-      const preset = parsed.arrays[_activeArrayIndex]?.presets[presetIdx];
-      if (!preset || preset.styles.length < 2) return;
-      const model = editor.getModel();
-      const full  = model.getValue();
-      const slots = preset.styles;
-      const offs = slots.map(s => ({
-        start: model.getOffsetAt({ lineNumber: s.startLine, column: s.startCol + 1 }),
-        end:   model.getOffsetAt({ lineNumber: s.endLine,   column: s.endCol   + 1 }),
-      }));
+    // ── Global blade reorder (B-220) ──────────────────────────────────────────
+    //
+    // A BLADE'S POSITION IS ITS IDENTITY. blades[] declares blade 1, 2, 3 and every preset merely
+    // fills those in, so a preset's style list is not an ordered list the user owns - the order is a
+    // property of the hardware. Moving a blade therefore moves it in EVERY preset.
+    //
+    // There is no per-preset reorder any more. This replaced a _reorderSlots that shuffled one
+    // preset's styles, which produced a config that compiles, flashes, and lights the wrong LEDs
+    // with nothing anywhere reporting it. That behaviour was never a decision: the drag arrived in
+    // v1.4.4 (commit 873f969, 2026-04-23), described in the commit purely as swapping slot
+    // expressions - four months before blades had any identity in this app at all.
+    //
+    // No confirm. The old plan called for one, but that existed only to disambiguate two possible
+    // blast radii, and with a single meaning there is nothing to warn about. Nothing is destroyed
+    // either: every style still exists, in a different position. So it toasts, with Undo.
+
+    /** Rebuild a run of slots with one moved, as ONE edit. Null when the move cannot apply here. */
+    function _reorderSpanEdit(model, full, offs, fromIdx, toIdx) {
+      if (offs.length < 2) return null;
+      if (fromIdx >= offs.length || toIdx >= offs.length) return null;
       const texts = offs.map(o => full.slice(o.start, o.end));
-      const seps  = [];
+      // Separators are kept in PLACE rather than moved with their slots, so indentation and any
+      // blank lines between entries survive a reorder untouched.
+      const seps = [];
       for (let i = 0; i < offs.length - 1; i++) seps.push(full.slice(offs[i].end, offs[i + 1].start));
       const newTexts = [...texts];
       const [moved] = newTexts.splice(fromIdx, 1);
@@ -40412,17 +41425,151 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
         rebuilt += newTexts[i];
         if (i < seps.length) rebuilt += seps[i];
       }
-      const startPos = model.getPositionAt(offs[0].start);
-      const endPos   = model.getPositionAt(offs[offs.length - 1].end);
-      _atomicEdit(editor,'slot-reorder', [{
-        range: {
-          startLineNumber: startPos.lineNumber, startColumn: startPos.column,
-          endLineNumber:   endPos.lineNumber,   endColumn:   endPos.column,
-        },
+      const s = model.getPositionAt(offs[0].start);
+      const e = model.getPositionAt(offs[offs.length - 1].end);
+      return {
+        range: { startLineNumber: s.lineNumber, startColumn: s.column,
+                 endLineNumber:   e.lineNumber, endColumn:   e.column },
         text: rebuilt,
-      }]);
+      };
+    }
+
+    /** Leading whitespace of a 1-based line, so a rewritten comment keeps its indentation. */
+    function _lineIndent(lines, lineNo) {
+      return ((lines[lineNo - 1] || '').match(/^\s*/) || [''])[0];
+    }
+
+    /**
+     * Rewrite the @jmt-labels line under the new numbering.
+     *
+     * The NAME FOLLOWS THE BLADE, never the slot - but names are stored BY POSITION, so a move has
+     * to rewrite which number holds which name. Get this wrong and every blade is silently
+     * mislabelled, which is the same invisible-failure class as the reorder itself.
+     */
+    function _renumberLabelsEdit(arr, lines, map) {
+      if (arr.labelLine === null) return null;
+      const renumbered = presetParser.renumberLabels(arr.labels || {}, map);
+      const pairs = Object.keys(renumbered)
+        .map(Number)
+        .sort((a, b) => a - b)
+        .map(n => `B${n}="${renumbered[n]}"`);
+      if (!pairs.length) return null;
+      const old = lines[arr.labelLine - 1] || '';
+      return {
+        range: { startLineNumber: arr.labelLine, startColumn: 1,
+                 endLineNumber:   arr.labelLine, endColumn: old.length + 1 },
+        text: `${_lineIndent(lines, arr.labelLine)}// @jmt-labels: ${pairs.join(' ')}`,
+      };
+    }
+
+    /**
+     * Rewrite the @jmt-follow line under the new numbering, dropping any pair the move inverted.
+     *
+     * A follower may only mirror a LOWER-numbered blade - that is what makes cycles impossible by
+     * construction rather than by detection. A reorder can violate it: move a follower above its
+     * target and the pair becomes a forward reference, which the parser drops anyway.
+     *
+     * So the pair is dropped HERE, deliberately and reported. Nothing is lost but future
+     * propagation: every preset keeps the text it already has, exactly as it does when following is
+     * switched off, and the user can turn it back on in the new direction with one click. The
+     * alternative - permitting forward references - would trade a structural guarantee for a class
+     * of cycle bugs, to save that one click. (2026-08-24)
+     */
+    function _renumberFollowsEdit(arr, lines, map) {
+      if (arr.followLine === null) return { edit: null, dropped: 0 };
+      const { kept: keptMap, dropped } = presetParser.renumberFollows(arr.follows || {}, map);
+      const kept = Object.keys(keptMap).map(f => [Number(f), keptMap[f]]);
+      const old = lines[arr.followLine - 1] || '';
+      if (!kept.length) {
+        // Nothing left to declare, so the line goes rather than sitting there empty.
+        const nextLine = lines[arr.followLine];
+        const endLine  = (nextLine !== undefined && nextLine.trim() === '')
+          ? arr.followLine + 2
+          : arr.followLine + 1;
+        return {
+          edit: { range: { startLineNumber: arr.followLine, startColumn: 1,
+                           endLineNumber:   endLine,        endColumn: 1 }, text: '' },
+          dropped,
+        };
+      }
+      kept.sort((a, b) => a[0] - b[0]);
+      return {
+        edit: {
+          range: { startLineNumber: arr.followLine, startColumn: 1,
+                   endLineNumber:   arr.followLine, endColumn: old.length + 1 },
+          text: `${_lineIndent(lines, arr.followLine)}// @jmt-follow: `
+              + kept.map(([f, t]) => `B${f}=B${t}`).join(' '),
+        },
+        dropped,
+      };
+    }
+
+    /** Move a blade from one position to another, in every preset in the bank. */
+    function _reorderBlades(fromIdx, toIdx) {
+      if (!editor || fromIdx === toIdx) return;
+      const model  = editor.getModel();
+      const full   = model.getValue();
+      const parsed = presetParser.parsePresets(full);
+      const arr    = parsed.arrays[_activeArrayIndex];
+      if (!arr) return;
+
+      const lines = full.split('\n');
+      const edits = [];
+      let changed = 0, skipped = 0;
+
+      for (const preset of arr.presets) {
+        const styles = preset.styles || [];
+        const offs = styles.map(s => ({
+          start: model.getOffsetAt({ lineNumber: s.startLine, column: s.startCol + 1 }),
+          end:   model.getOffsetAt({ lineNumber: s.endLine,   column: s.endCol   + 1 }),
+        }));
+        const edit = _reorderSpanEdit(model, full, offs, fromIdx, toIdx);
+        // A preset with fewer blades than the one being moved cannot take the move. It is left
+        // alone and REPORTED - it is already short a blade and already flagged, and silently
+        // leaving it in the old order is exactly the desync this feature exists to prevent.
+        if (edit) { edits.push(edit); changed++; } else skipped++;
+      }
+
+      // Disabled presets move too, and it matters MORE here than it does for follow. A missing slot
+      // comes back flagged in red; a preset left in the OLD ORDER comes back looking perfectly fine
+      // and lighting the wrong blade.
+      const blocks = _scanDisabledPresets(full)
+        .filter(b => b.startLine > arr.startLine && b.endLine < arr.endLine);
+      for (const b of blocks) {
+        const innerStart = model.getOffsetAt({ lineNumber: b.startLine + 1, column: 1 });
+        const innerEnd   = model.getOffsetAt({ lineNumber: b.endLine,       column: 1 });
+        const innerText  = full.slice(innerStart, innerEnd);
+        const offs = presetParser.extractStyleSlots(innerText)
+          .map(s => ({ start: innerStart + s.startOffset, end: innerStart + s.endOffset }));
+        const edit = _reorderSpanEdit(model, full, offs, fromIdx, toIdx);
+        if (edit) { edits.push(edit); changed++; } else skipped++;
+      }
+
+      if (!edits.length) return;
+
+      // Renumbering rides along in the SAME edit. Split into two undo steps there would be a
+      // reachable state where the styles have moved and the names still point at the old positions.
+      const count      = Math.max(parsed.bladeCount || 0,
+                                  ...arr.presets.map(p => (p.styles || []).length));
+      const map        = presetParser.planBladeReorder(count, fromIdx, toIdx);
+      const labelEdit  = _renumberLabelsEdit(arr, lines, map);
+      const followInfo = _renumberFollowsEdit(arr, lines, map);
+      if (labelEdit)       edits.push(labelEdit);
+      if (followInfo.edit) edits.push(followInfo.edit);
+
+      _atomicEdit(editor, 'blade-reorder', edits);
       editor.focus();
       _scheduleRebuild();
+
+      const name = _bladeDisplayName(arr, fromIdx + 1);
+      showToast(
+        `${name} moved to position ${toIdx + 1} in ${changed} preset${changed === 1 ? '' : 's'}.`
+        + (skipped ? ` ${skipped} preset${skipped === 1 ? ' has' : 's have'} fewer blades and `
+                     + `${skipped === 1 ? 'was' : 'were'} left alone.` : '')
+        + (followInfo.dropped ? ` ${followInfo.dropped} follow setting no longer fits the new order `
+                                + `and was turned off.` : ''),
+        { action: { label: 'Undo', onClick: () => { try { editor.trigger('toast', 'undo', null); } catch {} } } },
+      );
     }
 
     // ── Sidecar resize (width) ────────────────────────────────────────────────

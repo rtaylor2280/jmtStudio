@@ -456,6 +456,128 @@
     return { labels, labelBodyOffset: match.index };
   }
 
+  /**
+   * Scans an array body for a `// @jmt-follow:` comment and parses Bn=Bm pairs.
+   * Returns { follows: { [follower]: target }, followBodyOffset: number|null }.
+   *
+   * Its own line, deliberately NOT merged into @jmt-labels. Two concerns on one comment line makes
+   * the delete-when-empty logic fragile, which this codebase has been bitten by before, and the two
+   * have independent lifetimes: a blade can be named without following, and vice versa.
+   *
+   * A follower may only target a LOWER-numbered blade. That makes cycles structurally impossible
+   * instead of something to detect, and "never on B1" falls out of it rather than being a special
+   * case. Pairs that break the rule are dropped here rather than trusted downstream. (B-219)
+   */
+  function extractFollows(bodyContent) {
+    const re = /\/\/\s*@jmt-follow:\s*(.*)/;
+    const match = re.exec(bodyContent);
+    if (!match) return { follows: {}, followBodyOffset: null };
+    const follows = {};
+    try {
+      const pairRe = /B(\d+)\s*=\s*B(\d+)/g;
+      let pm;
+      while ((pm = pairRe.exec(match[1])) !== null) {
+        const follower = parseInt(pm[1], 10);
+        const target   = parseInt(pm[2], 10);
+        // Self-follow and forward references are meaningless; a malformed line must not be able to
+        // make the app write a blade from itself or chase a cycle.
+        if (target < follower) follows[follower] = target;
+      }
+    } catch (_) { /* ignore malformed */ }
+    return { follows, followBodyOffset: match.index };
+  }
+
+  /** Whitespace-insensitive comparison of two slot expressions. */
+  function sameExpr(a, b) {
+    return (a || '').replace(/\s+/g, '') === (b || '').replace(/\s+/g, '');
+  }
+
+  /**
+   * Decide which followers of `sourceBlade` should receive `newText` within ONE preset.
+   *
+   * Returns [{ blade, text }] for the blades that must be written, ascending. Pure: the caller
+   * supplies the preset's current slot text and turns the result into editor edits.
+   *
+   * WHY THIS IS CONDITIONAL, and it is the load-bearing half of the no-override-list design.
+   * Nothing anywhere records that a preset overrode a follower. It does not need to: the follower
+   * holds TEXT, so a follower whose text still equals the target's PREVIOUS text was following, and
+   * one that differs was overridden by hand. Writing unconditionally would silently destroy every
+   * per-preset exception, which is the one thing the feature must never do.
+   *
+   * The cascade is stepwise for the same reason. With B2=B1 and B3=B2, an edit to B1 reaches B3 only
+   * if B2 actually moved: if B2 is overridden in this preset, B3 is following a blade that did not
+   * change, so it stays put. Termination is structural rather than guarded - a follower always has a
+   * higher number than its target - and `done` covers a hand-edited line that broke the rule anyway.
+   */
+  function planFollowWrites(follows, sourceBlade, oldText, newText, currentTextByBlade) {
+    if (!follows || sameExpr(oldText, newText)) return [];
+    const writes = [];
+    const done   = new Set([sourceBlade]);
+    const queue  = [{ blade: sourceBlade, oldText }];
+    while (queue.length) {
+      const cur = queue.shift();
+      for (const followerStr of Object.keys(follows)) {
+        const follower = parseInt(followerStr, 10);
+        if (follows[followerStr] !== cur.blade || done.has(follower)) continue;
+        const followerText = currentTextByBlade[follower];
+        if (followerText === undefined) continue;      // no such slot in this preset
+        if (!sameExpr(followerText, cur.oldText)) continue;  // overridden here; leave it alone
+        done.add(follower);
+        writes.push({ blade: follower, text: newText });
+        queue.push({ blade: follower, oldText: followerText });
+      }
+    }
+    return writes.sort((a, b) => a.blade - b.blade);
+  }
+
+  /**
+   * Old 1-based blade number to new 1-based blade number, for a move of fromIdx to toIdx.
+   *
+   * Pure and separately testable on purpose: a wrong entry here does not throw and does not look
+   * wrong. It silently attaches every name to the wrong blade, which is the same invisible-failure
+   * class as the reorder it serves. (B-220)
+   */
+  function planBladeReorder(count, fromIdx, toIdx) {
+    const map = {};
+    if (!(count > 0) || fromIdx === toIdx) {
+      for (let i = 1; i <= count; i++) map[i] = i;
+      return map;
+    }
+    const order = [];
+    for (let i = 0; i < count; i++) order.push(i);
+    const moved = order.splice(fromIdx, 1)[0];
+    order.splice(toIdx, 0, moved);
+    order.forEach((oldIdx, newIdx) => { map[oldIdx + 1] = newIdx + 1; });
+    return map;
+  }
+
+  /** Blade names under a new numbering. The NAME FOLLOWS THE BLADE, never the slot. */
+  function renumberLabels(labels, map) {
+    const out = {};
+    for (const n of Object.keys(labels || {})) out[map[n] || +n] = labels[n];
+    return out;
+  }
+
+  /**
+   * Follow pairs under a new numbering, dropping any the move inverted.
+   *
+   * A follower may only mirror a LOWER-numbered blade, which is what makes cycles impossible by
+   * construction. A reorder can violate that - move a follower above its target and the pair points
+   * forward. Such a pair is DROPPED rather than kept, because keeping it would trade a structural
+   * guarantee for a class of cycle bugs. Nothing is lost but future propagation: every preset still
+   * holds the text it was given.
+   */
+  function renumberFollows(follows, map) {
+    const kept = {};
+    let dropped = 0;
+    for (const follower of Object.keys(follows || {})) {
+      const f = map[follower] || +follower;
+      const t = map[follows[follower]] || +follows[follower];
+      if (t < f) kept[f] = t; else dropped++;
+    }
+    return { kept, dropped };
+  }
+
   // ── Preset array detection ─────────────────────────────────────────────────
 
   /**
@@ -588,6 +710,7 @@
       });
 
       const labelData = extractLabels(decl.bodyContent);
+      const followData = extractFollows(decl.bodyContent);
       return {
         name:          decl.name,
         startLine:     lineAt(text, decl.declarationStart),
@@ -598,6 +721,10 @@
         labelLine:     labelData.labelBodyOffset !== null
                          ? lineAt(text, decl.bodyStart + labelData.labelBodyOffset)
                          : null,
+        follows:       followData.follows,
+        followLine:    followData.followBodyOffset !== null
+                         ? lineAt(text, decl.bodyStart + followData.followBodyOffset)
+                         : null,
       };
     });
 
@@ -607,9 +734,9 @@
   // ── Export ─────────────────────────────────────────────────────────────────
 
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { parsePresets };
+    module.exports = { parsePresets, planFollowWrites, sameExpr, extractStyleSlots, planBladeReorder, renumberLabels, renumberFollows };
   } else {
-    root.presetParser = { parsePresets };
+    root.presetParser = { parsePresets, planFollowWrites, sameExpr, extractStyleSlots, planBladeReorder, renumberLabels, renumberFollows };
   }
 
 }(typeof globalThis !== 'undefined' ? globalThis : this));
