@@ -1,4 +1,4 @@
-﻿// Shared tracks: matchesAt, planExport, and additive export.
+﻿// Shared tracks: planExport and additive export.
 //
 // The guarantee under all of it: NOTHING at the destination is ever deleted,
 // including tracks the library has never heard of. A card is the user's, not a
@@ -11,9 +11,11 @@
 // those work for font sounds because Proffie picks among them at random, but a
 // preset names exactly ONE track path, so a numbered copy would never play.
 //
-// matchesAt exists so the app can stay silent when a destination is already up
-// to date. A false "identical" would leave a card stale while telling nobody, so
-// anything unreadable must come back not-identical.
+// A content-comparing matchesAt used to live here, with six cases of its own.
+// Both were removed 2026-08-27 (B-168): the ask-first redesign replaced it with
+// existsAt, a single stat, and matchesAt sat behind a live IPC channel with no
+// caller. The cases went with the code they tested rather than being kept as
+// coverage of something nothing reaches.
 'use strict';
 
 const fs   = require('fs');
@@ -72,45 +74,6 @@ const TRACKS = {
 };
 
 // ----------------------------------------------------------------------
-
-{
-  const { userData, dest } = setup(TRACKS, TRACKS);
-  check('identical folders match',
-    st.matchesAt(userData, dest), { ok: true, exists: true, identical: true });
-}
-
-{
-  // The library folder carries a hash sidecar that never ships to a card. If it
-  // counted as content, every card in the world would read as different.
-  const withSidecar = Object.assign({}, TRACKS, { '.jmt-hashes.json': '{"records":[]}' });
-  const { userData, dest } = setup(withSidecar, TRACKS);
-  check('the library hash sidecar is not content',
-    st.matchesAt(userData, dest), { ok: true, exists: true, identical: true });
-}
-
-{
-  const extra = Object.assign({}, TRACKS, { 'endor.wav': 'DDDD-endor' });
-  const { userData, dest } = setup(TRACKS, extra);
-  check('a card with an extra track is not identical',
-    st.matchesAt(userData, dest), { ok: true, exists: true, identical: false, reason: 'hash' });
-}
-
-{
-  const changed = Object.assign({}, TRACKS, { 'mars.wav': 'ZZZZ-mars' });
-  const { userData, dest } = setup(TRACKS, changed);
-  check('a changed track is not identical',
-    st.matchesAt(userData, dest), { ok: true, exists: true, identical: false, reason: 'hash' });
-}
-
-{
-  const { userData, dest } = setup(TRACKS, null);
-  check('no tracks folder at the destination',
-    st.matchesAt(userData, dest), { ok: true, exists: false, identical: false, reason: 'missing' });
-}
-
-{
-  check('missing arguments fail closed', st.matchesAt('', ''), { ok: false });
-}
 
 // ----------------------------------------------------------------------
 

@@ -2527,10 +2527,6 @@ ipcMain.handle('sharedTracks:existsAt', (_, { destDir } = {}) => {
   try { return soundFontSharedTracks.existsAt(destDir); }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
-ipcMain.handle('sharedTracks:matchesAt', (_, { destDir } = {}) => {
-  try { return soundFontSharedTracks.matchesAt(app.getPath('userData'), destDir); }
-  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
-});
 // Read-only: what would an export add, leave alone, or have to ask about.
 // Top-level folder names at an export destination. Used by the save summary to
 // answer "what else is on this card" without pulling in a full SD scan.

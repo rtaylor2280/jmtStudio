@@ -241,6 +241,81 @@ for (let from = 0; from < 4; from++) {
 }
 check('no surviving pair ever points forward, across every move', invariantHolds, true);
 
+// ── B-226: deleting a blade, which is NOT a reorder with a gap ───────────────────────────────────
+//
+// renumberLabels and renumberFollows both fall back to the original number for a blade absent from
+// the map (`map[n] || +n`). That is right for a move and would RESURRECT a deleted blade - its name
+// landing on whatever now holds that number, its pair pointing at something gone. planBladeDelete
+// filters first so the fallback can never fire on a blade that no longer exists.
+
+const del = (count, blade, labels, follows) => pp.planBladeDelete(count, blade, labels, follows);
+// What actually reaches the file: filtered, then renumbered through the same path a move uses.
+const finalFollows = (count, blade, follows) => {
+  const p = del(count, blade, {}, follows);
+  return pp.renumberFollows(p.follows, p.map).kept;
+};
+const finalLabels = (count, blade, labels) => {
+  const p = del(count, blade, labels, {});
+  return pp.renumberLabels(p.labels, p.map);
+};
+
+check('the deleted blade is absent from the map, not mapped to something',
+  del(3, 2, {}, {}).map, { 1: 1, 3: 2 });
+
+check('deleting the FIRST blade shifts everything down',
+  del(3, 1, {}, {}).map, { 2: 1, 3: 2 });
+
+check('deleting the last blade leaves the others alone',
+  del(3, 3, {}, {}).map, { 1: 1, 2: 2 });
+
+// The three shapes of pair, one answer each.
+check('deleted blade IS the follower - the pair is dead',
+  finalFollows(3, 2, { 2: 1 }), {});
+
+check('deleted blade IS the target - the pair is dead, the follower survives',
+  finalFollows(3, 2, { 3: 2 }), {});
+
+check('deleted blade is NEITHER - the pair renumbers and survives',
+  finalFollows(3, 2, { 3: 1 }), { 2: 1 });
+
+// A chain produces BOTH answers from one deletion, which is the case most likely to be got wrong.
+check('a chain drops one pair and renumbers the other',
+  finalFollows(4, 2, { 3: 2, 4: 3 }), { 3: 2 });
+
+check('two followers of the deleted blade both die',
+  finalFollows(4, 2, { 3: 2, 4: 2 }), {});
+
+check('deleting blade 1 renumbers a pair that did not involve it',
+  finalFollows(3, 1, { 3: 2 }), { 2: 1 });
+
+check('an unrelated pair below the deletion is untouched',
+  finalFollows(5, 4, { 2: 1 }), { 2: 1 });
+
+check('dropped pairs are reported so they can be named in a toast',
+  del(4, 2, {}, { 3: 2, 4: 2 }).droppedPairs,
+  [{ follower: 3, target: 2 }, { follower: 4, target: 2 }]);
+
+check('nothing is dropped when the deletion misses every pair',
+  del(4, 4, {}, { 3: 1 }).droppedPairs, []);
+
+// Names belong to blades, not to slots - the same rule the reorder follows.
+check('the deleted blade takes its name with it and the rest shift',
+  finalLabels(3, 2, { 1: 'Main', 2: 'Chamber', 3: 'Ring' }), { 1: 'Main', 2: 'Ring' });
+
+check('a deleted blade with no name changes nothing else',
+  finalLabels(3, 2, { 1: 'Main', 3: 'Ring' }), { 1: 'Main', 2: 'Ring' });
+
+check('no names means nothing to renumber on delete',
+  finalLabels(3, 2, {}), {});
+
+// The invariant again, this time across every possible deletion rather than every possible move.
+let delInvariant = true;
+for (let blade = 1; blade <= 4; blade++) {
+  const kept = finalFollows(4, blade, { 2: 1, 3: 1, 4: 3 });
+  for (const f of Object.keys(kept)) if (!(kept[f] < Number(f))) delInvariant = false;
+}
+check('no surviving pair ever points forward, across every deletion', delInvariant, true);
+
 if (failures) {
   console.log(`\n${failures} failure(s)`);
   process.exit(1);

@@ -5820,7 +5820,7 @@
       <!-- Restructure -->
       <section class="sf-reorg-card" id="sf-reorg-card-restructure">
         <h3 class="sf-reorg-card-title">Restructure layout</h3>
-        <p class="sf-reorg-card-help">Group multi-file sound types into subfolders, or flatten back to a single folder. Single files stay at the root either way.</p>
+        <p class="sf-reorg-card-help">Group multi-file sound types into subfolders, or flatten back to a single folder. Single files stay at the root.</p>
         <div class="sf-reorg-restructure-preview" id="sf-reorg-restructure-preview"></div>
         <div class="sf-reorg-card-actions">
           <button class="modal-btn-cancel" id="btn-sf-reorg-flatten">Flatten into folder</button>
@@ -6629,6 +6629,13 @@ function promptConfirm(opts) {
         msgEl.appendChild(document.createTextNode(line));
       });
     }
+    // An empty message is a real answer, not a caller bug: some questions are fully carried by
+    // the title and have nothing honest to add under it. Left visible, the <p> still contributes
+    // its own margin and the dialog gets a gap where a sentence used to be. Note the default
+    // 'Are you sure?' means only an EXPLICIT empty string reaches this.
+    // Reachable since 2026-08-29, when the blade-collapse dialog stopped stating what a delete
+    // does - with no authored styles and no follow pair its body is now genuinely empty.
+    msgEl.style.display = (messageHtml || msgEl.textContent.trim()) ? '' : 'none';
     const cbRow   = document.getElementById('modal-confirm-checkbox-row');
     const cbInput = document.getElementById('modal-confirm-checkbox');
     const cbLabel = document.getElementById('modal-confirm-checkbox-label');
@@ -8044,7 +8051,24 @@ function injectMetadata(content) {
 // instead of stacking another one. Useful when rapid successive events shouldn't
 // produce a flickering toast cascade — they collapse into one persistent toast.
 function showToast(message, opts = {}) {
-  const { kind = 'info', durationMs = 4500, id, action = null } = opts;
+  // A TOAST CARRYING AN ACTION GETS A LONGER CLOCK, AUTOMATICALLY. (2026-08-27)
+  //
+  // 4500ms is right for "here is what happened" and wrong for "here is what
+  // happened, and here is the button that takes it back": the toast invites you
+  // to go and LOOK at the result, and by the time you have, the Undo is gone.
+  // Found on the B-226 dev pass. The precise finding, and it is sharper than "too
+  // short": it was reachable, but only just, and only because the reader already
+  // KNEW what the message said. Someone meeting it for the first time spends that
+  // margin reading the sentence before they can decide whether they want it back.
+  //
+  // Defaulted here rather than passed per call because it had already drifted:
+  // the decision was made once, written at ONE call site as an explicit 8000, and
+  // the four Undo toasts added later all silently took the 4500 default.
+  //
+  // The stakes are annoyance rather than loss - Monaco's undo stack is not on a
+  // timer, so Ctrl+Z still works long after the toast is gone. The button is a
+  // convenience, and 12s is a judgement call, not a measurement.
+  const { kind = 'info', durationMs = (opts.action ? 12000 : 4500), id, action = null } = opts;
   const host = document.getElementById('toast-host');
   if (!host) return;
   // Render message plus an optional action button (e.g. Undo). Message lives
@@ -29430,7 +29454,7 @@ require(['vs/editor/editor.main'], function () {
         const n = differing.length;
         const choices = await _sfPromptSaveConflicts(differing, {
           title: n === 1 ? 'One track differs from your library' : `${n} tracks differ from your library`,
-          description: 'These tracks exist at the destination with different contents. Replace them with your library version, or keep what is already there. Anything else there is left alone either way.',
+          description: 'These tracks exist at the destination with different contents. Replace them with your library version, or keep what is already there. Anything else there is left alone.',
           defaultMode: 'replace',
         });
         if (!choices) return null;
@@ -30131,6 +30155,19 @@ require(['vs/editor/editor.main'], function () {
           await _sfShowExportSummary({
             destDir, names, modeByName, unchangedFonts, commonMissing,
             commonFolderName: 'common',
+            // *** WITHOUT THIS THE APP HANGS WITH NO WAY OUT. (B-204) ***
+            // The scan overlay is deliberately left up above, because each
+            // surface closes it from the inside once it is ready to paint -
+            // otherwise there is a frame with no backdrop, which reads as a
+            // full-screen flash. Every other exit from the scan does that: the
+            // conflicts dialog and the tracks dialog both hide() before opening,
+            // and the two other summary call sites both pass closeProgress.
+            // THIS ONE DID NOT, so on the nothing-to-write path the summary
+            // opened BEHIND the overlay, its dismiss button was unreachable, and
+            // this await never resolved. The overlay has no cancel, so the only
+            // exit was killing the app.
+            // It fires precisely when the export SUCCEEDED and had nothing to do.
+            closeProgress: () => _sfDeleteProgress.hide(),
             title: skippedByChoice === 0 ? 'Already up to date' : 'Card left as it was',
             commonOutcome: commonAlreadyCurrent
               ? { state: 'current', ...commonNames }
@@ -34664,8 +34701,8 @@ require(['vs/editor/editor.main'], function () {
         ? `Styles (${actual}/${expected} blades)`
         : `Styles (${actual} blades)`;
       label.title = mismatch
-        ? `NUM_BLADES is ${expected}, this preset has ${actual} style(s)`
-        : 'This indicates the preset includes one style for each blade defined by NUM_BLADES, covering all outputs defined in the BladeConfig such as main blade, crystal chamber, or accent LEDs.';
+        ? `Your config has ${expected} blade${expected === 1 ? '' : 's'}, this preset has ${actual} style${actual === 1 ? '' : 's'}`
+        : 'A preset carries one style per blade. How many blades you have is set by the defined NUM_BLADES in your config, and each blade is described in the BladeConfig - main blade, crystal chamber, accent LEDs, and so on.';
     }
 
     function _renderEmpty(msg) {
@@ -35156,7 +35193,7 @@ require(['vs/editor/editor.main'], function () {
         const label = document.createElement('div');
         label.className = 'preset-detail-slots-label';
         label.textContent = `Styles (${dp.styleLines.length} blades)`;
-        label.title = 'This indicates the preset includes one style for each blade defined by NUM_BLADES, covering all outputs defined in the BladeConfig such as main blade, crystal chamber, or accent LEDs.';
+        label.title = 'A preset carries one style per blade. How many blades you have is set by the defined NUM_BLADES in your config, and each blade is described in the BladeConfig - main blade, crystal chamber, accent LEDs, and so on.';
         slotsWrap.appendChild(label);
         const slotsEl = document.createElement('div');
         slotsEl.className = 'preset-detail-slots';
@@ -35425,7 +35462,7 @@ require(['vs/editor/editor.main'], function () {
       detail.appendChild(heading);
       detail.appendChild(_buildFontField(preset));
       detail.appendChild(_buildTrackField(preset));
-      detail.appendChild(_buildSlotsSection(preset));
+      detail.appendChild(_buildSlotsSection(preset, idx));
 
       // Add Preset / Add Bank set `_autoOpenEmpty` on the new preset so the Name input
       // opens automatically with the default "Preset N" pre-selected. From there the
@@ -36929,7 +36966,11 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
       return wrap;
     }
 
-    function _buildSlotsSection(preset) {
+    // presetIdx is threaded through to the slot tiles so a click can say WHICH
+    // preset it came from by position. It cannot say so by object identity:
+    // _collapseBladeSlot re-parses the document, and an object from that parse is
+    // never === an object from the parse these tiles were built from. (B-226)
+    function _buildSlotsSection(preset, presetIdx) {
       const wrap = document.createElement('div');
       const expected = _parseResult?.bladeCount || 0;
       const actual   = preset.styles.length;
@@ -36947,15 +36988,15 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
         ? `Styles (${actual}/${expected} blades)`
         : `Styles (${actual} blades)`;
       label.title = mismatch
-        ? `NUM_BLADES is ${expected}, this preset has ${actual} style(s)`
-        : 'This indicates the preset includes one style for each blade defined by NUM_BLADES, covering all outputs defined in the BladeConfig such as main blade, crystal chamber, or accent LEDs. You can set custom names for each blade below.';
+        ? `Your config has ${expected} blade${expected === 1 ? '' : 's'}, this preset has ${actual} style${actual === 1 ? '' : 's'}`
+        : 'A preset carries one style per blade. How many blades you have is set by the defined NUM_BLADES in your config, and each blade is described in the BladeConfig - main blade, crystal chamber, accent LEDs, and so on. You can set custom names for each blade below.';
       wrap.appendChild(label);
 
       const slots = document.createElement('div');
       slots.className = 'preset-detail-slots';
       preset.styles.forEach((slot, i) => {
         const excess = expected > 0 && i >= expected;
-        slots.appendChild(_buildSlotTile(preset, slot, i, false, excess, abbrs[i], arrLabels[i + 1] || null));
+        slots.appendChild(_buildSlotTile(preset, slot, i, false, excess, abbrs[i], arrLabels[i + 1] || null, presetIdx));
       });
       if (expected > 0 && actual < expected) {
         for (let i = actual; i < expected; i++) {
@@ -37071,7 +37112,7 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
                                    model.getValueInRange(_slotRange(target)));
     }
 
-    function _buildSlotTile(preset, slot, slotIdx, isMissing, isExcess, abbr, fullLabel) {
+    function _buildSlotTile(preset, slot, slotIdx, isMissing, isExcess, abbr, fullLabel, presetIdx) {
       const tile = document.createElement('div');
       tile.className = 'preset-slot-tile';
       tile.dataset.slotIdx = slotIdx;
@@ -37114,7 +37155,7 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
         mark.append(markWhat, markHint);
         tile.appendChild(mark);
       }
-      if (isExcess)    tile.title = `Excess slot: NUM_BLADES is ${_parseResult.bladeCount}, this is blade ${slotIdx + 1}`;
+      if (isExcess)    tile.title = `Extra blade: your config has ${_parseResult.bladeCount} blades, this is blade ${slotIdx + 1}`;
       if (isUnlinked)  tile.title = `"${slot.expr?.match(/^\w+/)?.[0] || slot.expr}" looks like a library style but my_styles.h is not linked in this config. If defined externally it may still compile correctly, otherwise it will be undefined at compile time.`;
 
       // Badge: abbreviation (or default Bn) — click navigates; mousedown initiates drag for normal slots
@@ -37264,9 +37305,32 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
       resetBtn.className = 'preset-slot-action preset-slot-delete';
       resetBtn.tabIndex  = -1; // not a tab stop — slot tiles are mouse-driven
       resetBtn.innerHTML = '&times;';
-      if (isExcess) {
-        resetBtn.title = 'Remove excess blade';
-        resetBtn.addEventListener('click', e => { e.stopPropagation(); _deleteExcessSlot(slot); });
+      // THE DISCRIMINATOR IS THE PRESET'S CONDITION, NOT THE SLOT'S POSITION. (B-226)
+      //
+      // The x used to delete on a slot past NUM_BLADES and reset on every other, which meant one
+      // glyph carrying two meanings told apart only by a tooltip - and only the TRAILING slot could
+      // ever go, so keeping blade 3 and dropping blade 2 was unreachable without a round trip
+      // through NUM_BLADES and a global reorder.
+      //
+      // Now: while this preset holds MORE slots than NUM_BLADES it is already invalid, there is no
+      // correct mapping of its slots onto the declared blades, and removing ANY of them is a repair.
+      // So every x on such a preset deletes and closes the gap. Once the count is right, every x
+      // resets. Two meanings still, but the discriminator is the visible "n/m BLADES" header on the
+      // preset rather than an invisible rule about which slots happen to sit past the limit.
+      const overCount = (preset?.styles || []).length > (_parseResult?.bladeCount || 0);
+      if (overCount) {
+        // BLADE LANGUAGE WAS WRONG HERE, AND IT DESCRIBED AN ACTION THE USER ALREADY TOOK
+        // SOMEWHERE ELSE. (2026-08-29) A preset is a list of StylePtr entries - there is no blade in
+        // it. The blade is gone already, removed from BladeConfig, which is the whole reason this
+        // preset is red; what is left behind is styles with no blade to drive. So "delete this
+        // blade" named an object that is not here and an action that already happened.
+        // The correct words were sitting inside this very sentence, in its own parenthetical:
+        // "more blade STYLES than your config has blades".
+        // "Slot" rather than "position" because the other branch of this same x already says slot
+        // ("Reset slot to default style"), so the two meanings now read as siblings - one noun, two
+        // verbs - instead of as unrelated features.
+        resetBtn.title = `Delete the style in this slot and move the rest up (this preset has more blade styles than your config has blades)`;
+        resetBtn.addEventListener('click', e => { e.stopPropagation(); _collapseBladeSlot(slotIdx + 1, presetIdx); });
       } else {
         resetBtn.title = 'Reset slot to default style';
         resetBtn.addEventListener('click', e => { e.stopPropagation(); _resetSlot(slot); });
@@ -37274,8 +37338,10 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
       actions.appendChild(resetBtn);
       tile.appendChild(actions);
 
-      // THE TILE IS NOT A DELETE BUTTON. It used to be - clicking anywhere on an excess tile ran
-      // _deleteExcessSlot - and that destroyed a style on a single click with no confirmation, on
+      // THE TILE IS NOT A DELETE BUTTON. It used to be - clicking anywhere on an excess tile ran a
+      // per-preset delete-with-cascade (since removed with the rest of that path, 2026-08-29, when
+      // B-226 left it callerless) - and that destroyed a style on a single click with no
+      // confirmation, on
       // the ONE tile in the app that does not open an editor when clicked. So the natural move,
       // clicking to look at what you are about to lose, was the move that lost it. (2026-08-26)
       //
@@ -39927,41 +39993,78 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
     }
 
     /**
-     * Removing a follower blade removes it everywhere it was STILL FOLLOWING.
+     * Remove blade `bladeNum` from every OVER-COUNT preset and let the rest close up. (B-226)
      *
-     * Reducing NUM_BLADES marks the same slot excess in every preset, so without this the user
-     * deletes it once per preset - the same per-preset labour the feature exists to remove, and on a
-     * disabled preset there is no tile to click at all.
+     * WHY THIS IS GLOBAL. A blade's position IS its identity - blades[] declares it and presets fill
+     * it in - so removing it from one preset would leave that preset's slot 2 holding a different
+     * blade than everyone else's. Per-preset was tried on paper and rejected for the same reason
+     * per-preset REORDER was: it is the incoherence, not the repair.
      *
-     * NOTHING UNIQUE IS LOST, which is why this needs no confirm: every slot removed here holds text
-     * identical to its target, and the target is still sitting in that same preset. A preset that
-     * overrode the blade does not match, so it is retained - and it is reported, because it is the
-     * reason the job is not finished.
+     * WHY ONLY OVER-COUNT PRESETS. A preset already at NUM_BLADES is not broken, and taking a slot
+     * from it would push it BELOW the count - trading one invalid state for another. Presets are
+     * repaired individually and nothing requires them all to be resolved at once, so a mixed result
+     * is an accepted outcome rather than a failure. (Ryan's call, 2026-08-26.)
+     *
+     * WHY NO COLLAPSE OF THE SLOT TEXT ITSELF. Slots are positional: deleting slot 2's text makes
+     * what was slot 3 the second slot. The "collapse" is the deletion. Only the LABELS and FOLLOWS
+     * lines carry blade numbers, and those are rewritten through the same renumbering path a global
+     * reorder uses, filtered first by planBladeDelete so a deleted blade cannot be resurrected.
      */
-    function _followerDeleteCascade(arr, bladeNum, targetNum, skipPreset) {
-      const model = editor.getModel();
-      const full  = model.getValue();
-      const edits = [];
-      let retained = 0;
+    // clickedIdx is the preset's POSITION in arr.presets, not the preset object.
+    //
+    // *** IT WAS THE OBJECT, AND THAT MADE THE WHOLE SCOPE QUESTION UNREACHABLE.
+    // Found on the first case of the B-226 dev pass, 2026-08-27. *** The tiles are
+    // built from _parseResult; this function re-parses the document and iterates
+    // the NEW objects, so `preset === clickedPreset` compared two different parses
+    // and was never true. hereEdit therefore stayed null, the three-button scope
+    // dialog could not fire, and the single-preset confirm ran in its place - while
+    // `scope` was still 'all'. So a dialog reading "delete from this preset"
+    // deleted from every over-count preset. The wording and the action disagreed,
+    // and only the wording was visible.
+    // Position is exact here because the re-parse is of the SAME text the tiles
+    // were built from, so index i means the same preset in both.
+    async function _collapseBladeSlot(bladeNum, clickedIdx) {
+      if (!editor || !(bladeNum > 0)) return false;
+      const model  = editor.getModel();
+      const full   = model.getValue();
+      const parsed = presetParser.parsePresets(full);
+      const arr    = parsed.arrays[_activeArrayIndex];
+      if (!arr) return false;
 
-      for (const preset of arr.presets) {
-        if (preset === skipPreset) continue;          // the caller deletes this one itself
-        const styles   = preset.styles || [];
-        const follower = styles[bladeNum - 1];
-        if (!follower || !follower.startLine) continue;
-        const target = styles[targetNum - 1];
-        if (!target || !target.startLine) { retained++; continue; }
-        const fText = model.getValueInRange(_slotRange(follower));
-        const tText = model.getValueInRange(_slotRange(target));
-        // An EMPTY slot goes too. Only a style the user actually wrote is worth keeping, and
-        // StylePtr<Black>() is the app's own placeholder - treating it as an override would leave
-        // a trail of empty slots behind and report them as presets still needing attention.
-        if (!presetParser.sameExpr(fText, tText) && !_slotIsEmpty(fText)) { retained++; continue; }
-        const sOff = model.getOffsetAt({ lineNumber: follower.startLine, column: follower.startCol + 1 });
-        const eOff = model.getOffsetAt({ lineNumber: follower.endLine,   column: follower.endCol   + 1 });
-        edits.push({ range: _slotDeleteRange(model, full, sOff, eOff), text: '' });
+      const limit = parsed.bladeCount || 0;
+      if (!(limit > 0)) return false;
+      const lines = full.split('\n');
+
+      // A slot is only WORK LOST when somebody wrote it. Empty and StylePtr<Black>() are absences
+      // the app already treats as fillable, and a slot that still matches what it follows is a
+      // derived copy - deleting either destroys nothing. Same three buckets the turn-on scan uses,
+      // deliberately, so "what counts as losing something" has one definition in this feature.
+      const targetOf  = arr.follows?.[bladeNum] || null;
+      const collapses = [];
+      let authored = 0;
+      let hereEdit = null;                                  // the clicked preset's own deletion
+
+      for (let pi = 0; pi < arr.presets.length; pi++) {
+        const preset = arr.presets[pi];
+        const styles = preset.styles || [];
+        if (styles.length <= limit) continue;              // not over-count: leave it alone
+        const slot = styles[bladeNum - 1];
+        if (!slot || !slot.startLine) continue;
+        const sOff = model.getOffsetAt({ lineNumber: slot.startLine, column: slot.startCol + 1 });
+        const eOff = model.getOffsetAt({ lineNumber: slot.endLine,   column: slot.endCol   + 1 });
+        const text = model.getValueInRange(_slotRange(slot));
+        if (Number.isInteger(clickedIdx) && pi === clickedIdx) {
+          hereEdit = { range: _slotDeleteRange(model, full, sOff, eOff), text: '' };
+        }
+        const tgt  = targetOf ? styles[targetOf - 1] : null;
+        const derived = tgt && tgt.startLine
+          && presetParser.sameExpr(text, model.getValueInRange(_slotRange(tgt)));
+        collapses.push({ range: _slotDeleteRange(model, full, sOff, eOff) });
+        if (!_slotIsEmpty(text) && !derived) authored++;
       }
 
+      // Disabled presets are over-count too, and they are text like any other. Skipping them would
+      // leave a preset that comes back looking fine and holding a blade the config no longer has.
       const blocks = _scanDisabledPresets(full)
         .filter(b => b.startLine > arr.startLine && b.endLine < arr.endLine);
       for (const b of blocks) {
@@ -39969,65 +40072,252 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
         const innerEnd   = model.getOffsetAt({ lineNumber: b.endLine,       column: 1 });
         const innerText  = full.slice(innerStart, innerEnd);
         const slots      = presetParser.extractStyleSlots(innerText);
-        const follower   = slots[bladeNum - 1];
-        if (!follower) continue;
-        const target = slots[targetNum - 1];
-        if (!target) { retained++; continue; }
-        const fText = innerText.slice(follower.startOffset, follower.endOffset);
-        const tText = innerText.slice(target.startOffset,   target.endOffset);
-        if (!presetParser.sameExpr(fText, tText) && !_slotIsEmpty(fText)) { retained++; continue; }
-        edits.push({
+        if (slots.length <= limit) continue;
+        const slot = slots[bladeNum - 1];
+        if (!slot) continue;
+        const text = innerText.slice(slot.startOffset, slot.endOffset);
+        const tgt  = targetOf ? slots[targetOf - 1] : null;
+        const derived = tgt
+          && presetParser.sameExpr(text, innerText.slice(tgt.startOffset, tgt.endOffset));
+        collapses.push({
           range: _slotDeleteRange(model, full,
-                                  innerStart + follower.startOffset,
-                                  innerStart + follower.endOffset),
-          text: '',
+                                  innerStart + slot.startOffset,
+                                  innerStart + slot.endOffset),
         });
-      }
-      return { edits, retained };
-    }
-
-    function _deleteExcessSlot(slot) {
-      if (!editor || !slot.startLine) return;
-      const model = editor.getModel();
-      const full  = model.getValue();
-      const slotStartOff = model.getOffsetAt({ lineNumber: slot.startLine, column: slot.startCol + 1 });
-      const slotEndOff   = model.getOffsetAt({ lineNumber: slot.endLine,   column: slot.endCol + 1 });
-      const edits = [{ range: _slotDeleteRange(model, full, slotStartOff, slotEndOff), text: '' }];
-
-      // If this blade follows another one, the same slot in every still-following preset is the
-      // same following copy, and removing it here means removing it there.
-      const arr       = _parseResult?.arrays[_activeArrayIndex];
-      const here      = _locateSlot(slot);
-      const bladeNum  = here?.bladeNum;
-      const targetNum = (arr && bladeNum) ? arr.follows?.[bladeNum] : null;
-      let cascade = null;
-      if (targetNum) {
-        cascade = _followerDeleteCascade(arr, bladeNum, targetNum, here.preset);
-        edits.push(...cascade.edits);
-        // The declaration describes a blade, so it goes only when nothing is left to describe.
-        // A preset that overrode the blade still holds its slot, and while one does the record of
-        // what that slot was stays in the file.
-        if (cascade.retained === 0) {
-          const declEdit = _followPairRemovalEdit(arr, bladeNum);
-          if (declEdit) edits.push(declEdit);
-        }
+        if (!_slotIsEmpty(text) && !derived) authored++;
       }
 
-      _atomicEdit(editor,'slot-delete', edits);
-      if (cascade && cascade.edits.length) {
-        const n = cascade.edits.length;
-        showToast(_bladeDisplayName(arr, bladeNum) + ' was also removed from ' + n
-                + (n === 1 ? ' other preset that was following it.' : ' other presets that were following it.')
-                + (cascade.retained
-                    ? ' ' + cascade.retained + (cascade.retained === 1 ? ' preset' : ' presets')
-                      + ' kept a different style and still need attention.'
-                    : ''));
+      if (!collapses.length) return false;
+
+      const name = _bladeDisplayName(arr, bladeNum);
+
+      // *** SCOPE IS A QUESTION, NOT A CONFIRMATION, because both answers are real. ***
+      //
+      // Global-only was wrong and the reason I gave for it was wrong. Position-is-identity forbids a
+      // per-preset REORDER, because a reorder permutes which blade IS which. A collapse only decides
+      // which of three styles survives into two slots, and styles are per-preset already - one preset
+      // keeping B2's style while another keeps B3's leaves both with two valid slots and one physical
+      // blade 2 carrying different styles in different presets, which is ordinary.
+      //
+      // So repairing just this preset is legitimate, and so is doing the lot. The dialog does not know
+      // its own outcome until a button is pressed, which is exactly what earns a toast afterwards.
+      // *** WE INTERRUPT FOR A QUESTION, NEVER FOR A CONFIRMATION. (Ryan, 2026-08-27) ***
+      //
+      // Only ONE preset over-count means there is nothing to choose, and the single-preset
+      // confirmation that used to fire there has been removed. His challenge: "why do I need
+      // confirmation on deleting one preset? seems only needed when it's more than that."
+      //
+      // WHAT SETTLED IT WAS THE ADJACENT CONTROL, not an argument about severity. On a
+      // correct-count preset the SAME x runs _resetSlot, which overwrites an authored style with
+      // StylePtr<Black>() and shows no dialog and no toast - nothing. So the same glyph on the same
+      // tile was destroying authored work silently in one state and asking permission in the other.
+      // That inconsistency is worse than either choice by itself.
+      // Delete still ends up better protected than reset: it leaves a toast carrying an Undo.
+      //
+      // Same family as "we don't need a confirm, we need to only delete if they really delete"
+      // (2026-08-26): the x is already unambiguous on an over-count preset, so the guard was
+      // charging for a legitimate action rather than preventing a mistake.
+      // *** A CONSEQUENCE YOU CAN KNOW BEFORE THE CLICK BELONGS IN THE DIALOG, NOT A TOAST.
+      // (Ryan, 2026-08-27: "shouldn't that be worded better and be included in the original
+      // message?") *** It used to be reported afterwards, which is too late to matter - a toast
+      // cannot change a decision that has already been made. This is option-specific information in
+      // a question between two options, which is precisely what the question is for.
+      //
+      // AND IT STATES WHAT HAPPENS, not what will eventually be noticed. His correction of my first
+      // draft, which predicted the future symptom ("later changes will stop reaching this preset"):
+      // "it's more about stating what it does... PC follows CC and that relationship will be
+      // removed." He is right, and it is the same trim as every other one today - the symptom
+      // version asks the reader to model time, while "following" is already a visible concept in
+      // this UI with its own colour and its own row.
+      //
+      // It also collapses the two cases into one sentence. The deleted blade can be the FOLLOWER or
+      // the TARGET; either way exactly one relationship exists and it is removed for this preset.
+      // Only the naming order differs.
+      const followTargetOf = arr.follows?.[bladeNum] || null;
+      const followersOf    = Object.keys(arr.follows || {})
+                                   .filter(f => +arr.follows[f] === bladeNum).map(Number);
+      let hereFollowNote = '';
+      if (followTargetOf || followersOf.length) {
+        const pair = followTargetOf
+          ? `${name} follows ${_bladeDisplayName(arr, followTargetOf)}`
+          : `${_bladeDisplayName(arr, followersOf[0])} follows ${name}`;
+        hereFollowNote = `${pair}. Deleting it removes that relationship here or in `
+                       + `all ${collapses.length}.`;
       }
-      _pendingSlotCommit = null;   // slot deliberately emptied; do not re-commit
-      _closeSlotArgEdit();
-      // Defer focus past the click event so Ctrl+Z reaches Monaco without
-      // requiring the user to click into the editor first.
-      setTimeout(() => editor.focus(), 0);
+
+      // WHAT "ALL N" DOES BEYOND THE STYLES, and it is the half that is invisible: the named blade
+      // position goes with them. (2026-08-29) Built in three parts because either half can be
+      // absent - a slot can be a derived copy with nothing authored, and a position can carry no
+      // label at all, in which case there is no name to delete and claiming otherwise would be a
+      // lie. With both absent the buttons carry the question on their own.
+      const isNamed = !!arr.labels?.[bladeNum];
+      const removes = [authored ? 'those styles' : null,
+                       isNamed  ? 'the blade position' : null].filter(Boolean);
+      // EACH SENTENCE NAMES ITS BUTTON VERBATIM. (2026-08-29) The title offers "this style" while
+      // the button says "This Preset", and that gap is what has to be closed - binding the button's
+      // own words to its own effect is what makes the two options legibly different operations
+      // rather than one operation at two scales.
+      // The pair ships together or not at all: "This Preset removes only this style" is a CONTRAST,
+      // and alone (nothing authored, no label) it has nothing to contrast against and reads as the
+      // app narrating a click.
+      const globalNote = [
+        authored
+          ? `${authored} preset${authored === 1 ? '' : 's'} `
+            + `${authored === 1 ? 'has' : 'have'} a style on ${name}.`
+          : null,
+        removes.length
+          ? `All ${collapses.length} Presets removes ${removes.join(' and ')}.`
+          : null,
+        removes.length && hereEdit ? `This Preset removes only this style.` : null,
+      ].filter(Boolean).join(' ');
+
+      let scope = 'all';
+      if (collapses.length > 1) {
+        const choice = await promptConfirm({
+          // "or from every preset?" OVERCLAIMED, and the title is where it mattered most:
+          // correct-count presets are never touched. The exact set is "presets with more blades
+          // than NUM_BLADES", which is too long for a title - but the COUNT says it precisely, is
+          // already on the button, and the red "4/2 BLADES" headers show which ones.
+          // (Ryan, 2026-08-27: "it's every preset that has the same condition.")
+          // PHRASING IS NOT NEW - it matches the attachment dialog already in the app,
+          // "Remove it from just this source, or from all 3?". Same question, same shape.
+          // *** THE TWO OPTIONS ARE TWO DIFFERENT OPERATIONS, AND THE TITLE USED TO PRETEND THEY
+          // WERE ONE. *** (2026-08-29)
+          //   This Preset - one style out of one preset. No label, no follow pair, nothing named
+          //                 changes anywhere. The list re-packs HERE only.
+          //   All N       - the named blade is deleted: its label goes, follows renumber, and its
+          //                 style comes out of every over-count preset.
+          // "Delete <blade> from just this preset, or from all N?" put one object in front of both,
+          // which made the per-preset option read as deleting a blade it never touches - and it is
+          // what sent the dev pass looking for a defect that was not there.
+          // The asymmetry now lives in the question, so each half names its own object and the
+          // buttons carry the scope.
+          // The fallback keeps the single-object phrasing because with no hereEdit there is only
+          // one operation on offer. (Unreachable today - see middleText below.)
+          title: hereEdit
+            ? `Delete this style, or the ${name} blade position?`
+            : `Delete ${name} from all ${collapses.length} presets?`,
+          // Dropped 2026-08-27: "N presets have more blades than NUM_BLADES." Ryan: "not sure
+          // the value add here." Right - the red "4/2 BLADES" header on every over-count preset
+          // already says they are invalid, and the confirm button already carries the count. It
+          // was explaining the screen back to the reader.
+          // CONSEQUENCE: the authored clause used to read "N OF THEM", where "them" was that
+          // sentence's presets. With the antecedent gone it has to stand on its own.
+          //
+          // *** THE OPENING SENTENCE WAS CUT 2026-08-29. *** It read "Deleting <name> closes the
+          // gap and moves the remaining blades up", or "removes that slot" when nothing followed.
+          // It failed the test written six lines above it: option-specific information belongs in a
+          // question between two options. The gap closes identically whether you choose This Preset
+          // or All N, so it never helped anyone choose - unlike the follow note, which is the only
+          // part of this dialog that differs between the two answers.
+          // It is also the expected behaviour of a delete. The version worth explaining was the OLD
+          // one, which deleted a slot and left the hole behind. And the no-shift branch could not be
+          // false at all: deleting a slot removes that slot.
+          // Caught visually first (2026-08-29: "look visually... the first ~4 words are the same") -
+          // the body opened on the title's own words, which is what a sentence with nothing to add
+          // looks like from across the room.
+          // NOTE the message can now be EMPTY - no authored styles and no pair leaves the title
+          // carrying the whole question. `promptConfirm` hides the element in that case.
+          message: [globalNote || null, hereFollowNote || null].filter(Boolean).join('\n\n'),
+          // Dropped 2026-08-27: "Presets already at NUM_BLADES are left alone."
+          // Third statement of one fact - the opening line scopes it with a count
+          // and the button repeats that count. It was also the only line implying
+          // the correct presets were ever at risk, and the dialog never threatened
+          // them, so it planted the doubt it was answering.
+          confirmText: `All ${collapses.length} Presets`,
+          confirmKind: 'danger',
+          // Only offer "This Preset" when we actually know which one was clicked.
+          // Unreachable today - the x only exists on an over-count preset, so hereEdit
+          // is always set - but a two-button question is honest if that ever changes,
+          // where a middle button that cannot be honoured would not be.
+          ...(hereEdit ? { middleText: 'This Preset' } : {}),
+        });
+        if (choice === 'cancel') return false;
+        if (choice === 'middle') scope = 'here';
+      }
+
+      // THIS PRESET ONLY: no renumbering, and that is not an omission. The labels and follow lines
+      // describe the ARRAY, and every other preset still holds the old numbering, so rewriting them
+      // to suit one preset would break them for all the rest.
+      //
+      // THIS PRESET ONLY: NO TOAST AT ALL, DELIBERATELY. (Ryan, 2026-08-27)
+      //
+      // One click, one slot, one preset is exactly what was asked for, and narrating it back is the
+      // app telling you what you just did. The follow consequence - the one genuinely invisible part
+      // - MOVED INTO THE DIALOG above, where it can still change the decision. Reporting it here
+      // afterwards was too late to be worth an interruption.
+      //
+      // Cost, stated so it can be reversed: no toast means no Undo BUTTON on this path, only Ctrl+Z.
+      // That matches _resetSlot, which destroys an authored style with no dialog and no toast
+      // either, and consistency with that adjacent control is what removed the confirmation too.
+      // If this reads wrong in use, revisit both decisions together rather than patching one.
+      if (scope === 'here') {
+        _atomicEdit(editor, 'blade-collapse', [hereEdit]);
+        editor.focus();
+        _scheduleRebuild();
+        return true;
+      }
+
+      // The numbering rides in the SAME edit as the deletions. Split apart there is a reachable
+      // state where the slots have closed up and the names and follow pairs still point at the old
+      // positions - which is the invisible-failure class this whole area is built to avoid.
+      const count = Math.max(limit, ...arr.presets.map(p => (p.styles || []).length));
+      const plan  = presetParser.planBladeDelete(count, bladeNum, arr.labels, arr.follows);
+      const arrAfter   = Object.assign({}, arr, { labels: plan.labels, follows: plan.follows });
+      const labelEdit  = _renumberLabelsEdit(arrAfter, lines, plan.map);
+      const followInfo = _renumberFollowsEdit(arrAfter, lines, plan.map);
+
+      const edits = collapses.map(c => ({ range: c.range, text: '' }));
+      if (labelEdit)       edits.push(labelEdit);
+      if (followInfo.edit) edits.push(followInfo.edit);
+
+      _atomicEdit(editor, 'blade-collapse', edits);
+      editor.focus();
+      _scheduleRebuild();
+
+      const n = collapses.length;
+      // Same rule as the per-preset path above: report the CONSEQUENCE, not the edit. Several
+      // presets changed from one click, or a follow pair stopped existing - both are more than was
+      // asked for. One preset and no pair is just the click, and says nothing.
+      // (n === 1 is reachable here: with only one preset over-count there is no scope question, so
+      // this branch runs with a single collapse.)
+      // BLADE LANGUAGE IS CORRECT HERE, and briefly was not. (2026-08-29) This toast only ever
+      // fires on the GLOBAL path, which is the one that really does delete the named blade - the
+      // label goes and the follows renumber. A style-language sweep reached it and made it wrong;
+      // the discriminator is the scope, not the feature.
+      //
+      // "The rest moved up" CUT 2026-08-29: irrelevant. It is what a delete does, and it was the
+      // last survivor of the same sentence removed from the dialog earlier the same evening.
+      //
+      // THE DROPPED PAIR IS NAMED RATHER THAN COUNTED. (2026-08-29) "1 follow pair no longer
+      // applies" tells you a relationship died without telling you WHICH, and the one thing you
+      // might act on is the follower that just became a standalone style. Names come from the
+      // PRE-delete array, which is the numbering the user was looking at when they clicked - the
+      // labels renumber as part of this same edit.
+      // A pair dies two ways and only one is worth reporting. Lose the TARGET and the follower
+      // survives as a now-standalone style - that is a thing you might act on. Lose the FOLLOWER
+      // and the pair went with the blade you just deleted, so saying it aloud narrates the click
+      // and names something that is no longer there. (2026-08-29)
+      // The gate counts REPORTED pairs, not dropped ones: a suppressed pair must not be able to
+      // summon a toast that then says nothing beyond what was clicked.
+      // THE TARGET IS NEVER NAMED TWICE. (2026-08-29) Every pair that survives the filter above has
+      // the deleted blade as its TARGET - that is what the filter leaves - so the target is always
+      // the blade the first sentence just named, and "it" is unambiguous by construction. Naming it
+      // per pair put "Crystal Chamber (B2)" three times in one toast on the two-follower case.
+      const pairs = plan.droppedPairs.filter(p => p.follower !== bladeNum);
+      const names = pairs.map(p => _bladeDisplayName(arr, p.follower));
+      const pairNote = names.length
+        ? ` ${names.length === 1
+              ? names[0]
+              : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`}`
+          + ` no longer follow${names.length === 1 ? 's' : ''} it.`
+        : '';
+      if (n > 1 || pairs.length) showToast(
+        `${name} removed from ${n} preset${n === 1 ? '' : 's'}.` + pairNote,
+        // One atomic edit, so one undo takes the slots, the names and the follow line back together.
+        { action: { label: 'Undo', onClick: () => { try { editor.trigger('toast', 'undo', null); } catch {} } } },
+      );
+      return true;
     }
 
     // Extracts the leading /* ... */ comment block(s) from pasted text (e.g. Fett263 headers).
@@ -41482,8 +41772,16 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
       const old = lines[arr.followLine - 1] || '';
       if (!kept.length) {
         // Nothing left to declare, so the line goes rather than sitting there empty.
-        const nextLine = lines[arr.followLine];
-        const endLine  = (nextLine !== undefined && nextLine.trim() === '')
+        //
+        // THE TRAILING BLANK GOES ONLY IF REMOVING THIS LINE WOULD LEAVE TWO BLANKS TOUCHING.
+        // (2026-08-29) It used to go whenever it existed, which is right when the follow line is
+        // alone - `{`, blank, follow, blank, preset collapses to one separator - and wrong when a
+        // labels line sits above it, where that blank is the separator between the comment block
+        // and the first preset. Deleting a lone pair then left `// @jmt-labels: ...` butting
+        // straight into `{ "Jinn_EP1;common", ...`.
+        const prevBlank = (lines[arr.followLine - 2] || '').trim() === '';
+        const nextLine  = lines[arr.followLine];
+        const endLine   = (nextLine !== undefined && nextLine.trim() === '' && prevBlank)
           ? arr.followLine + 2
           : arr.followLine + 1;
         return {

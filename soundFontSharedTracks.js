@@ -161,48 +161,23 @@ function folderExistsAt(destDir) {
   catch { return false; }
 }
 
-// Only flat top-level .wav files count as track content. The library folder
-// also carries a .jmt-hashes.json sidecar that never ships, so a comparison
-// that included it would report every card as different.
-function _wavOnly(relPath) {
-  return !relPath.includes('/') && /\.wav$/i.test(relPath);
-}
-
-// Does destDir/tracks/ already hold exactly what we hold? Same discipline as
-// commonMatchesAt: content is read, nothing is inferred from a sidecar or a
-// remembered value, and anything unreadable comes back not-identical so the
-// caller asks rather than assuming. Used to stay silent when a destination is
-// already up to date, which is the one case where saying nothing is honest.
 // Does this destination already have a tracks/ folder? One stat, no reads.
-// Deliberately separate from matchesAt: the export flow asks the user BEFORE
-// comparing anything, because if they say leave it alone there is nothing to
-// compare and the whole folder is skipped. Hashing to decide whether a
-// question is worth asking is backwards when the answer can make the work
-// unnecessary.
+//
+// This replaced a content-comparing matchesAt, which was removed 2026-08-27
+// (B-168) once it had no callers. The export flow asks the user BEFORE comparing
+// anything, because if they say leave it alone there is nothing to compare and
+// the whole folder is skipped. Hashing to decide whether a question is worth
+// asking is backwards when the answer can make the work unnecessary.
+//
+// If something later needs a real content comparison here, read the per-file
+// hash records the way the rest of the export path does. Do not reinstate a
+// whole-folder rehash.
 function existsAt(destDir) {
   if (!destDir) return { ok: false, error: 'Missing destDir' };
   const destTracks = path.join(destDir, 'tracks');
   let exists = false;
   try { exists = fs.existsSync(destTracks) && fs.statSync(destTracks).isDirectory(); } catch {}
   return { ok: true, exists };
-}
-
-function matchesAt(userData, destDir) {
-  if (!destDir) return { ok: false, error: 'Missing destDir' };
-  const srcDir  = sharedTracksRoot(userData);
-  const destTracks = path.join(destDir, 'tracks');
-
-  let destExists = false;
-  try { destExists = fs.existsSync(destTracks) && fs.statSync(destTracks).isDirectory(); } catch {}
-  if (!destExists) return { ok: true, exists: false, identical: false, reason: 'missing' };
-  if (!fs.existsSync(srcDir)) return { ok: true, exists: true, identical: false, reason: 'unreadable' };
-
-  const { collectFileRecords, hashRecords } = require('./soundFontFileHash');
-  const mine  = collectFileRecords(srcDir, null, _wavOnly);
-  const theirs = collectFileRecords(destTracks, null, _wavOnly);
-  if (!mine || !theirs) return { ok: true, exists: true, identical: false, reason: 'unreadable' };
-  const identical = hashRecords(mine) === hashRecords(theirs);
-  return { ok: true, exists: true, identical, reason: identical ? null : 'hash' };
 }
 
 // What WOULD an export do? Read-only, writes nothing, so the caller can put a
@@ -422,7 +397,6 @@ module.exports = {
   deleteFile,
   deleteAll,
   folderExistsAt,
-  matchesAt,
   existsAt,
   planExport,
   exportToFolder,

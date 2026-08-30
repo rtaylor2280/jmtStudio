@@ -551,6 +551,52 @@
     return map;
   }
 
+  /**
+   * Numbering, names and follow pairs after blade `bladeNum` STOPS EXISTING.
+   *
+   * Deletion is not a reorder with a gap. renumberLabels and renumberFollows both fall back to the
+   * original number for a blade absent from the map (`map[n] || +n`), which is correct for a move
+   * and would silently RESURRECT a deleted blade here - its name reappearing on whatever now holds
+   * that number, its follow pair pointing at a blade that is gone. So the filtering happens once, in
+   * this function, and callers cannot get it wrong by forgetting.
+   *
+   * Three shapes of follow pair, one answer each (B-226):
+   *   deleted blade is the FOLLOWER  -> pair is dead
+   *   deleted blade is the TARGET    -> pair is dead; the follower keeps the text it was given
+   *   deleted blade is NEITHER       -> pair survives and renumbers
+   * A chain produces both at once: deleting B2 with B4=B3 and B3=B2 kills one pair and renumbers
+   * the other, from a single deletion.
+   *
+   * Returns pairs FILTERED but NOT renumbered - the caller passes them through the same
+   * renumberLabels/renumberFollows the reorder uses, so there is one renumbering path, not two.
+   */
+  function planBladeDelete(count, bladeNum, labels, follows) {
+    const map = {};
+    for (let n = 1; n <= count; n++) {
+      if (n === bladeNum) continue;              // gone, and deliberately absent from the map
+      map[n] = n < bladeNum ? n : n - 1;
+    }
+
+    const keptLabels = {};
+    for (const n of Object.keys(labels || {})) {
+      if (+n === bladeNum) continue;             // a name belongs to its blade, so it goes too
+      keptLabels[n] = labels[n];
+    }
+
+    const keptFollows = {};
+    const droppedPairs = [];
+    for (const follower of Object.keys(follows || {})) {
+      const target = +follows[follower];
+      if (+follower === bladeNum || target === bladeNum) {
+        droppedPairs.push({ follower: +follower, target });
+        continue;
+      }
+      keptFollows[follower] = target;
+    }
+
+    return { map, labels: keptLabels, follows: keptFollows, droppedPairs };
+  }
+
   /** Blade names under a new numbering. The NAME FOLLOWS THE BLADE, never the slot. */
   function renumberLabels(labels, map) {
     const out = {};
@@ -734,9 +780,9 @@
   // ── Export ─────────────────────────────────────────────────────────────────
 
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { parsePresets, planFollowWrites, sameExpr, extractStyleSlots, planBladeReorder, renumberLabels, renumberFollows };
+    module.exports = { parsePresets, planFollowWrites, sameExpr, extractStyleSlots, planBladeReorder, planBladeDelete, renumberLabels, renumberFollows };
   } else {
-    root.presetParser = { parsePresets, planFollowWrites, sameExpr, extractStyleSlots, planBladeReorder, renumberLabels, renumberFollows };
+    root.presetParser = { parsePresets, planFollowWrites, sameExpr, extractStyleSlots, planBladeReorder, planBladeDelete, renumberLabels, renumberFollows };
   }
 
 }(typeof globalThis !== 'undefined' ? globalThis : this));
