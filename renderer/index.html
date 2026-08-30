@@ -6558,7 +6558,13 @@ function setFileOpen(open) {
 
 // ── Unsaved modal ──────────────────────────────────────
 // Resolves to one of: 'cancel' | 'discard' | 'saveas' | 'save'.
-// opts.saveAs  (default false) — show the Save As button (config flows).
+// opts.saveAs  (default false) — ASK for the Save As button (config flows). It is
+//   shown only when there is also a current file path: with no path, doSave()
+//   already falls through to doSaveAs(), so both buttons open the same picker and
+//   mean the same thing. Suppressed HERE rather than per-caller so the rule cannot
+//   drift — it is a property of the state, not of who is asking. (2026-08-30, after
+//   the compile prompt was fixed and the close / new-config prompts still showed
+//   it. [B-198])
 // opts.discard (default true)  — show the Discard button. Compile passes false because
 //   discarding mid-compile would build from the on-disk (un-edited) content, which is
 //   almost never what the user wants — Cancel / Save / Save As are the meaningful options.
@@ -6568,7 +6574,7 @@ function promptUnsaved(msg, opts) {
     const overlay    = document.getElementById('modal-unsaved');
     const saveAsBtn  = document.getElementById('modal-unsaved-saveas');
     const discardBtn = document.getElementById('modal-unsaved-discard');
-    saveAsBtn.style.display  = opts?.saveAs ? '' : 'none';
+    saveAsBtn.style.display  = (opts?.saveAs && window._currentFilePath) ? '' : 'none';
     discardBtn.style.display = (opts?.discard === false) ? 'none' : '';
     overlay.classList.add('active');
     const cleanup = r => { overlay.classList.remove('active'); resolve(r); };
@@ -7712,6 +7718,11 @@ async function _offerBoardHelpIfMissing() {
     message:     "This config doesn't have a board set yet, so it can't compile. Choose your Proffieboard and JMT Studio will add it to the config.",
     dropdown:    { label: 'Board', value: options[0].value, options },
     confirmText: 'Insert',
+    // NOT "Cancel". Cancel means backing out of something the user started, and
+    // they started nothing here - the app volunteered the offer on open. Declining
+    // is "not yet", and that is literally true: the board field keeps its red cue
+    // and picking a board later fires the same offer again. (Ryan, 2026-08-30.)
+    cancelText:  'Not now',
     confirmKind: 'save',
   });
   if (!res || !res.confirmed) return; // declined → the red board field is the quiet reminder
@@ -9119,11 +9130,26 @@ function _restoreFilenameReadonly() {
 
 // ── Open ───────────────────────────────────────────────
 async function doOpen() {
-  if (!await guardUnsaved('Save current file before opening another?')) return;
   if (isElectron) {
+    // PICK FIRST, GUARD SECOND, and the order is the whole point. The guard used to
+    // run before the picker, so cancelling the picker left the user having already
+    // saved - or DISCARDED - for a switch that then never happened. Discard is
+    // destructive and it was firing for nothing.
+    // Every other way of leaving a config (Close, a favourite, the filename
+    // dropdown, the window X) is guard-then-act correctly, because none of them has
+    // a selection step in the middle that the user can back out of. Open is the only
+    // one that does, which is why it alone needs the order reversed. Same dialog,
+    // same words - it just has to ask about a switch that is actually going to
+    // happen. (Ryan found it in dev test, 2026-08-30. [B-240])
     const res = await window.electronAPI.openFile();
-    if (res) loadContent(res.content, res.filePath);
+    if (!res) return;                       // picker cancelled - nothing has changed
+    if (!await guardUnsaved('Save current file before opening another?')) return;
+    loadContent(res.content, res.filePath);
   } else {
+    // Browser build: the <input type=file> change handler is what actually switches,
+    // so the same reordering belongs THERE rather than here. Left alone deliberately
+    // rather than half-moved - noted in [B-240].
+    if (!await guardUnsaved('Save current file before opening another?')) return;
     document.getElementById('file-input').click();
   }
 }

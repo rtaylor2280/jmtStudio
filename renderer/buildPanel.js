@@ -549,15 +549,25 @@ async function doCompile() {
   // Dirty checks — prompt the user instead of auto-saving. Config first (Save As is
   // offered since the user may want to compile a copy at a new path), then Style
   // Library if applicable (fixed path, no Save As). Cancel from either bails out.
-  if (window.getIsDirty?.()) {
-    const fileName = window._currentFilePath
-      ? window._currentFilePath.split(/[\\/]/).pop()
-      : 'this config';
+  // A never-saved config takes this path too, even though it is not DIRTY: doNew()
+  // deliberately leaves a freshly loaded template clean, so the dirty flag alone
+  // would skip the prompt and the compile would have nowhere to write. Being
+  // pathless is the same problem as being dirty - there is no file on disk that
+  // matches what is about to be built - so it gets the same prompt. [B-198]
+  const _neverSaved = !window._currentFilePath;
+  if (window.getIsDirty?.() || _neverSaved) {
     // Hide Discard for compile — discarding would build from on-disk content (the
     // un-edited version), which is almost never what the user wants. Cancel / Save
-    // / Save As are the meaningful options.
+    // / Save As are the meaningful options. For a never-saved config there is no
+    // on-disk content at all, which is the other reason Discard makes no sense here.
+    const _msg = _neverSaved
+      ? 'This config has not been saved yet. Give it a name before compiling.'
+      : `Unsaved changes in "${window._currentFilePath.split(/[\\/]/).pop()}" — save before compiling?`;
+    // Save As is asked for unconditionally: promptUnsaved suppresses it whenever
+    // there is no file path, because "save as" is never valid for something that
+    // has never been saved. That rule lives there, once, so every caller gets it.
     const choice = await window.promptUnsaved(
-      `Unsaved changes in "${fileName}" — save before compiling?`,
+      _msg,
       { saveAs: true, discard: false }
     );
     if (choice === 'cancel') return;
@@ -2384,7 +2394,15 @@ function wireSerialMonitor() {
 // should deal with rather than whichever check happens to be listed first.
 function compileBlockedReason() {
   if (isBusy)                   return 'A build or flash is already running.';
-  if (!window._currentFilePath) return 'Open a config file to compile.';
+  // A config that has never been saved is NOT "no config open" - it is an open
+  // config that has no path yet, and doCompile already knows how to ask for one
+  // (the dirty prompt offers Save As, and doSave falls through to doSaveAs when
+  // there is no path). Blocking on the path alone disabled the button BEFORE that
+  // prompt could ever run, and told the user to open a config file they already
+  // had open. So refuse only when nothing is open at all. [B-198]
+  if (!window.isConfigOpen?.() && !window._currentFilePath) {
+    return 'Open a config file to compile.';
+  }
   if (!selectedFqbn)            return 'Select your board.';
   const version = document.getElementById('input-version')?.value;
   if (!version || isVersionSentinel(version)) {
