@@ -104,6 +104,33 @@ function nameInUse(userData, name, excludeUuid = null) {
   return false;
 }
 
+// Next free common-folder name using the app-wide `_N` convention. Same rule as
+// the renderer's _jmtNumberedName, kept here because main-process callers cannot
+// reach it: strip a trailing _N off the base, then take one above the highest _N
+// already taken (never the first gap, so a name that was freed does not get
+// silently reused).
+//
+// It exists because the voicepack installer had grown its OWN numbering - a
+// " (2)" suffix - so the same library ended up holding `X (2)` from a download
+// and `X_1` from a duplicate. One convention, one helper. OS Versions' "copy" is
+// the only deliberate exception in the app. (2026-08-31, found in a dev pass.)
+function nextNumberedName(userData, base) {
+  const root = String(base || '').replace(/_\d+$/, '');
+  if (!root) return '';
+  if (!nameInUse(userData, root)) return root;
+  const prefix = root.toLowerCase() + '_';
+  let max = 0;
+  for (const c of listCommons(userData)) {
+    const nm = (c.meta.name || '').toLowerCase();
+    if (!nm.startsWith(prefix)) continue;
+    const rest = nm.slice(prefix.length);
+    if (/^\d+$/.test(rest) && parseInt(rest, 10) > max) max = parseInt(rest, 10);
+  }
+  let n = max + 1;
+  while (nameInUse(userData, `${root}_${n}`)) n++;
+  return `${root}_${n}`;
+}
+
 // Recursive folder copy used by import + duplicate. Files only (no symlinks,
 // no device files). Throws on first I/O error so the caller can clean up
 // the partial destination tree before surfacing the failure.
@@ -985,6 +1012,83 @@ function commonMatchesAt(userData, uuid, destDir, targetName = 'common') {
 // flow can treat both uniformly. Target name is "common" by Proffie's SD
 // convention; rename mode bumps to "common (N)" if collisions can't be
 // avoided otherwise.
+// Export a common OUT OF THE APP as a portable zip. A DIFFERENT VERB from
+// exportCommonToFolder below, which puts a pack on an SD card - and the two were
+// the same function until 2026-08-31, reached from a right-click that had nothing
+// to do with cards. Three things were wrong with that: the pack's NAME was lost
+// (the card path hardcodes `targetName = 'common'`, because that is what Proffie
+// requires), a sync manifest was written into whatever folder the user picked,
+// and the SD conflict dialog asked about replacing "the current common folder".
+//
+// THE SHAPE IS THE ONE THE PACKS ACTUALLY SHIP IN, verified 2026-08-31 against a
+// real download (ProffieOS_V2_Voicepack_ChineseA.zip, 218 entries):
+//     <Pack Name>.zip
+//       └── common/
+//             (the wavs)
+// The pack's name lives in the FILENAME; there is no wrapper folder inside. An
+// earlier version of this nested `<Pack>/common/` and the name read twice over -
+// Ryan checked a real vendor zip and it does not do that.
+// Two consequences worth keeping: unzipping hands you a `common/` folder that
+// can go straight onto a card, and what we emit is indistinguishable from what
+// people already receive. Our own importer takes either shape
+// (_findCommonSubfolder searches for a `common` directory at any depth), so this
+// round-trips: export it, hand it over, they import it and get the same pack.
+//
+// No manifest and no conflict prompt: nothing here is syncing with a card, and
+// the destination is a single file the OS save dialog has already confirmed.
+async function exportCommonAsZip(userData, uuid, destPath, onBytes = null) {
+  if (!uuid) return { ok: false, error: 'Missing uuid' };
+  if (!destPath) return { ok: false, error: 'Missing destPath' };
+  const dir = path.join(commonRoot(userData), uuid);
+  const srcDir = path.join(dir, 'files');
+  if (!fs.existsSync(srcDir)) return { ok: false, error: `Common files not found: ${uuid}` };
+  const meta = _readMeta(dir) || {};
+  const packName = String(meta.name || 'common').trim() || 'common';
+
+  const archiver = require('archiver');
+  // Same atomic-write pattern as the backup writer: stream to a sibling
+  // .partial and rename on success, so the user's chosen path is never a
+  // half-written zip a sync agent can pick up.
+  const partialPath = destPath + '.partial';
+  return await new Promise((resolve) => {
+    let settled = false;
+    const done = (r) => { if (!settled) { settled = true; resolve(r); } };
+    let ws;
+    try { ws = fs.createWriteStream(partialPath); }
+    catch (err) { return done({ ok: false, error: `Cannot write: ${err.message}` }); }
+    const archive = archiver('zip', { zlib: { level: 6 }, forceZip64: true });
+    archive.on('error', (err) => {
+      try { ws.destroy(); } catch {}
+      try { fs.unlinkSync(partialPath); } catch {}
+      done({ ok: false, error: `Export failed: ${err.message}` });
+    });
+    // Progress from archiver's own 'progress' event, NOT from 'data' chunks.
+    // 'data' is COMPRESSED output, which cannot be measured against the pack's
+    // known size on disk - the bar would run to some fraction of the total and
+    // stop. `fs.processedBytes` is source bytes read, which is exactly what the
+    // caller already knows the total of.
+    if (onBytes) {
+      let seen = 0;
+      archive.on('progress', (p) => {
+        const done = (p && p.fs && p.fs.processedBytes) || 0;
+        if (done > seen) { const d = done - seen; seen = done; try { onBytes(d); } catch {} }
+      });
+    }
+    ws.on('close', () => {
+      if (settled) return;
+      try { fs.renameSync(partialPath, destPath); }
+      catch (err) {
+        try { fs.unlinkSync(partialPath); } catch {}
+        return done({ ok: false, error: `Cannot finalise: ${err.message}` });
+      }
+      done({ ok: true, path: destPath, name: packName });
+    });
+    archive.pipe(ws);
+    archive.directory(srcDir, 'common');
+    archive.finalize();
+  });
+}
+
 async function exportCommonToFolder(userData, uuid, destDir, mode = 'rename', onBytes = null) {
   if (!uuid) return { ok: false, error: 'Missing uuid' };
   if (!destDir) return { ok: false, error: 'Missing destDir' };
@@ -1180,6 +1284,7 @@ module.exports = {
   listCommons,
   getCommon,
   nameInUse,
+  nextNumberedName,
   importCommonFromFolder,
   importCommonFromZip,
   renameCommon,
@@ -1198,6 +1303,7 @@ module.exports = {
   moveCommonFiles,
   readCommonFileBytes,
   commonFolderExistsAt,
+  exportCommonAsZip,
   exportCommonToFolder,
   writeCommonReadme,
   readCommonMarkerAt,

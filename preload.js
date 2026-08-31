@@ -382,6 +382,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   commonFolderExistsAt:  (params)     => ipcRenderer.invoke('common:folderExistsAt', params),
   commonMatchesAt:       (params)     => ipcRenderer.invoke('common:matchesAt', params),
   writeCommonMarker:     (params)     => ipcRenderer.invoke('common:writeMarker', params),
+  pickExportZipPath:     (params)     => ipcRenderer.invoke('common:pickExportZipPath', params),
+  exportCommonAsZip:     (params)     => ipcRenderer.invoke('common:exportAsZip', params),
   exportCommonToFolder:  (params)     => ipcRenderer.invoke('common:exportToFolder', params),
   resolveCommonContentDirty: (params) => ipcRenderer.invoke('common:resolveContentDirty', params),
   setCommonGroup:        (params)     => ipcRenderer.invoke('common:setGroup', params),

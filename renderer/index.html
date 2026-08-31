@@ -19432,7 +19432,10 @@ require(['vs/editor/editor.main'], function () {
             const r = await window.electronAPI.commonNameInUse({ name, excludeUuid });
             if (r && r.ok && r.inUse) {
               await promptError('Name in use', `A common folder named "${name}" already exists.`);
-              suggested = name;
+              // Re-offer a NUMBERED name, not the colliding one. Handing back the
+              // same name that was just rejected makes the user invent the
+              // convention themselves, and they will not land on _N.
+              suggested = _jmtNumberedName(name, _sfCommons.map(x => (x.meta?.name || '')));
               continue;
             }
           } catch {}
@@ -19444,7 +19447,17 @@ require(['vs/editor/editor.main'], function () {
         try { pick = await window.electronAPI.selectCommonSource({ mode }); }
         catch (err) { promptError('Could not open picker', err && err.message || err); return; }
         if (!pick || !pick.ok) return;
-        const defaultName = _sfDefaultCommonName(pick.filePath);
+        // Number the proposed name on a collision, the same way Duplicate does
+        // (_jmtNumberedName, the app-wide _N convention). Import used to offer the
+        // bare folder/zip basename and then reject it, so the two paths taught
+        // different conventions for the same problem.
+        // Guarded on an actual collision: _jmtNumberedName always appends, so an
+        // unguarded call would name every first import "<folder>_1".
+        const _cmnNames = _sfCommons.map(x => (x.meta?.name || ''));
+        const _cmnBase = _sfDefaultCommonName(pick.filePath);
+        const defaultName = _cmnNames.some(n => n.toLowerCase() === _cmnBase.toLowerCase())
+          ? _jmtNumberedName(_cmnBase, _cmnNames)
+          : _cmnBase;
         const name = await _sfPromptCommonName({ title: 'Import common folder', defaultValue: defaultName });
         if (!name) return;
         _sfDeleteProgress.show('Importing common folder', name);
@@ -20015,66 +20028,56 @@ require(['vs/editor/editor.main'], function () {
       // destination as a "common/" subfolder. Same conflict semantics as the
       // bulk Save flow, just scoped to one common. Cheaper UX than mixing
       // single-common export into the main Save which is fonts-driven.
+      // Export a common OUT OF THE APP: one portable zip, named for the pack.
+      // NOT the SD-card path - that is bulk Save, and it is unchanged. This used
+      // to call exportCommonToFolder, the card exporter, so a right-click that
+      // had nothing to do with a card lost the pack's name (the card layout
+      // hardcodes "common"), wrote a sync manifest into the chosen folder, and
+      // asked an SD conflict question. The shape it writes now round-trips
+      // through our own importer. (2026-08-31, found in the B-121 dev pass.)
       const _sfExportCommonPrompt = async (uuid) => {
         const c = _sfCommons.find(x => x.uuid === uuid);
         if (!c) return;
+        const label = (c.meta && c.meta.name) || 'common folder';
+        // PICK FIRST, THEN show progress. The dialog is the user browsing; there
+        // is no work happening behind it, and a bar sitting at zero while they
+        // look for a folder reports progress on a job that has not started.
         let pick;
-        try { pick = await window.electronAPI.selectSaveDestination(); }
-        catch (err) { promptError('Could not open folder picker', err && err.message || err); return; }
-        if (!pick || !pick.ok) return;
-        const destDir = pick.dirPath;
-        // If a "common" already exists at the destination, ask how to handle
-        // it. The shared conflict modal expects a list of names; pass just
-        // "common".
-        let mode = 'rename';
-        try {
-          const r = await window.electronAPI.commonFolderExistsAt({ destDir });
-          // Same rule the bulk flow follows: if the destination already holds
-          // exactly this pack, there is nothing to decide, so do not ask and do
-          // not re-copy. This path had the same bug found in the font flow.
-          let already = false;
-          try {
-            const m = await window.electronAPI.commonMatchesAt({ uuid, destDir });
-            already = !!(m && m.ok && m.identical);
-          } catch {}
-          if (already) {
-            await promptConfirm({
-              title: 'Already up to date',
-              message: `This location already has "${(c.meta && c.meta.name) || 'this voice pack'}". Nothing was copied.`,
-              confirmText: 'OK',
-              confirmKind: 'primary',
-              hideCancel: true,
-            });
-            return;
-          }
-          if (r && r.ok && r.exists) {
-            // Same default as the bulk flow: Replace. The user picked this pack
-            // and chose to export it, so declining by default would undo the
-            // action they just took. Row names the pack, not the folder.
-            const marker = (r.marker && r.marker.name) || '';
-            const choices = await _sfPromptSaveConflicts(['common'], {
-              title: 'A common folder already exists at the destination',
-              description: 'Choose whether to replace it with the version in your library or keep what is already there. Treats the common folder as a unit, so files are never mixed between old and new.',
-              defaultMode: 'replace',
-              labelFor: () => 'common',
-              subLabelFor: () => {
-                const out = [];
-                const mine = (c.meta && c.meta.name) || '';
-                if (mine) out.push(`Selected voice pack: ${mine}`);
-                out.push(marker
-                  ? `Replaces current common: ${marker}`
-                  : `Replaces the current contents of this folder`);
-                return out;
-              },
-            });
-            if (!choices) return; // cancelled
-            mode = choices.get('common') || 'replace';
-          }
-        } catch {}
-        _sfDeleteProgress.show('Exporting common folder', c.meta.name);
+        try { pick = await window.electronAPI.pickExportZipPath({ uuid }); }
+        catch (err) { promptError('Could not open the save dialog', String(err && err.message || err)); return; }
+        // Cancelling is not a failure and says nothing worth reading - the user
+        // closed a dialog they opened.
+        if (!pick || pick.canceled) return;
+        if (!pick.ok) { promptError('Export failed', pick.error || 'unknown error'); return; }
+        // Real bytes, not the busy fill. show() without a fraction paints a fixed
+        // 50% by design - fine for an instant op, wrong for a 20 MB pack, where it
+        // reads as a bar that started half done and then hung. The pack's size is
+        // already known from listCommons, and the exporter reports source bytes
+        // read, so the two are directly comparable.
+        // Bytes processed + elapsed only, no estimate: the house rule for any
+        // long-running operation.
+        const totalBytes = (c && c.totalBytes) || 0;
+        let doneBytes = 0;
+        const t0 = Date.now();
+        const fmtB = window._sfFormatBytes || ((n) => `${n} B`);
+        const fmtD = window._sfFormatDuration || ((s) => `${Math.round(s)}s`);
+        const paint = () => {
+          const secs = Math.floor((Date.now() - t0) / 1000);
+          const frac = totalBytes > 0 ? doneBytes / totalBytes : 0;
+          _sfDeleteProgress.setPhase(
+            totalBytes > 0 ? `Compressing · ${fmtB(doneBytes)} of ${fmtB(totalBytes)}` : 'Compressing',
+            frac, label, `${fmtD(secs)} elapsed`);
+        };
+        _sfDeleteProgress.show('Exporting common folder', label, 0);
+        paint();
+        const tick = setInterval(paint, 250);
+        const offProg = window.electronAPI.onSoundFontExportProgress(({ delta } = {}) => {
+          doneBytes += (delta || 0); paint();
+        });
         let res;
-        try { res = await window.electronAPI.exportCommonToFolder({ uuid, destDir, mode }); }
+        try { res = await window.electronAPI.exportCommonAsZip({ uuid, destPath: pick.filePath }); }
         catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
+        finally { clearInterval(tick); try { if (typeof offProg === 'function') offProg(); } catch {} }
         await _sfDeleteProgress.hide();
         if (!res || !res.ok) { promptError('Export failed', (res && res.error) || 'unknown error'); return; }
       };

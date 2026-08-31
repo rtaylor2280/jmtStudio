@@ -2443,6 +2443,45 @@ ipcMain.handle('common:writeMarker', (_, { uuid, destDir, targetName } = {}) => 
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
+// Export a common OUT OF THE APP as a portable zip. Deliberately separate from
+// common:exportToFolder, which is the SD-card path - different verb, different
+// output, no manifest, no conflict prompt. (2026-08-31.)
+//
+// TWO handlers, not one, and the split is the point: the renderer cannot show a
+// progress modal until it knows there is work to do. Folded together, the modal
+// went up, the OS save dialog opened on top of it, and the bar sat at zero for as
+// long as the user browsed for a folder - progress reported for a job that had
+// not started, which is the same class of lie as a stale "Flash successful".
+ipcMain.handle('common:pickExportZipPath', async (event, { uuid } = {}) => {
+  try {
+    const list = soundFontCommon.listCommons(app.getPath('userData'));
+    const c = list.find(x => x.uuid === uuid);
+    if (!c) return { ok: false, error: 'Common folder not found' };
+    const packName = (c.meta && c.meta.name) || 'common';
+    // Sanitise for a FILENAME only. The name inside the zip keeps the real
+    // pack name; only the file on disk has to survive the filesystem.
+    const safeFile = String(packName).replace(/[\/:*?"<>|]/g, '_').trim() || 'common';
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const { canceled, filePath } = await dialog.showSaveDialog(win, {
+      title: 'Export common folder',
+      defaultPath: safeFile + '.zip',
+      filters: [{ name: 'Zip archive', extensions: ['zip'] }],
+    });
+    if (canceled || !filePath) return { ok: false, canceled: true };
+    return { ok: true, filePath, name: packName };
+  } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+ipcMain.handle('common:exportAsZip', async (event, { uuid, destPath } = {}) => {
+  try {
+    if (!destPath) return { ok: false, error: 'Missing destPath' };
+    const emit = _sfExportProgressEmitter(event);
+    const r = await soundFontCommon.exportCommonAsZip(app.getPath('userData'), uuid, destPath, emit.onBytes);
+    emit.flush();
+    return r;
+  } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
 ipcMain.handle('common:exportToFolder', async (event, { uuid, destDir, mode } = {}) => {
   try {
     const emit = _sfExportProgressEmitter(event);

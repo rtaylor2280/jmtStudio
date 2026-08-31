@@ -213,12 +213,11 @@ async function downloadAndInstall({ id, userData, onProgress }) {
     fs.writeFileSync(tmpZip, buf);
 
     if (onProgress) onProgress({ phase: 'installing' });
-    let name = entry.baseName;
-    let counter = 2;
-    while (soundFontCommon.nameInUse(userData, name)) {
-      name = `${entry.baseName} (${counter++})`;
-      if (counter > 99) return { ok: false, error: 'Could not find a free name' };
-    }
+    // The app-wide `_N` convention, via the shared helper. This used to grow its
+    // own " (2)" suffix, so a library could hold `X (2)` from a download beside
+    // `X_1` from a duplicate - two conventions for one problem, in one list.
+    const name = soundFontCommon.nextNumberedName(userData, entry.baseName);
+    if (!name) return { ok: false, error: 'Could not find a free name' };
     return await soundFontCommon.importCommonFromZip(userData, tmpZip, name);
   } catch (err) {
     return { ok: false, error: `Install failed: ${err.message}` };
