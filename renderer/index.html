@@ -8029,7 +8029,16 @@ function injectMetadata(content) {
   // change). Same DOM-state-authoritative pattern as the other meta
   // fields — read here at save time, never written into the editor
   // during normal editing.
-  const commonName = (window._sfActiveCommonForConfig || '').trim();
+  // Dropped from the file when the config does not use a common - no preset
+  // references ";common" and the prop does not require a voice pack. Otherwise a
+  // config that once used one carries the marker forever, and reopening it
+  // re-selects a pack that nothing will ship. Same predicate the meta-bar control
+  // uses, so the file and the screen cannot disagree. (2026-08-31.)
+  // Defaults to KEEPING the marker if the predicate is unavailable: losing a
+  // user's recorded choice is the worse failure of the two.
+  const _needsCommon = (typeof window._sfConfigNeedsCommon === 'function')
+    ? window._sfConfigNeedsCommon() : true;
+  const commonName = _needsCommon ? (window._sfActiveCommonForConfig || '').trim() : '';
   if (desc)    lines.push(`// @jmt:description ${desc}`);
   if (board)   lines.push(`// @jmt:board       ${board}`);
   if (version) lines.push(`// @jmt:os_version  ${version}`);
@@ -19113,14 +19122,60 @@ require(['vs/editor/editor.main'], function () {
       // Selection persists IN the config text via the JMT_COMMON marker
       // (sticks to the file when copied/shared); falls back to the
       // global star when no marker is present.
+      // Does the PROP require a voice pack, independent of any ";common" in a
+      // preset. __vpkRequiresVoicepack walks the prop include chain through a
+      // preprocessor pass, so it is async and cannot be read inline by the
+      // render. Cached here and refreshed alongside it; a re-render fires only
+      // when the answer CHANGES, so this cannot loop.
+      let _sfPropNeedsCommon = false;
+      const _sfRefreshPropCommonNeed = async () => {
+        let v = false;
+        try {
+          const text = (typeof editor !== 'undefined' && editor) ? editor.getValue() : '';
+          if (text && typeof window.__vpkRequiresVoicepack === 'function') {
+            v = (await window.__vpkRequiresVoicepack(text)) === true;
+          }
+        } catch {}
+        if (v !== _sfPropNeedsCommon) {
+          _sfPropNeedsCommon = v;
+          _sfRenderConfigCommonField();
+        }
+      };
+      // Shared by the field above and by the metadata writer, so the control and
+      // the saved marker can never disagree about whether this config uses a
+      // common. One predicate, two callers.
+      window._sfConfigNeedsCommon = () => {
+        try { return _sfConfigWantsCommon() || _sfPropNeedsCommon; }
+        catch { return true; }
+      };
       const _sfRenderConfigCommonField = () => {
         const field = document.getElementById('config-common-field');
         const content = document.getElementById('config-common-content');
         if (!field || !content) return;
         const commons = _sfCommons || [];
         const referenced = _sfConfigWantsCommon();
+        // NEEDED, not AVAILABLE (2026-08-31, his call, filed as a bug). The rule
+        // used to be "show whenever the library has any commons", so a config that
+        // referenced none still displayed a dropdown with the starred default
+        // SELECTED - asserting a common this config uses when Save writes none,
+        // because Save gates on the same `needsCommon` we compute here. Same class
+        // as a build chip reading "Flash successful" about a build that was never
+        // flashed: a control that states a fact the app will not honour.
+        //
+        // Two ways a config genuinely needs one, and the second is the half that
+        // makes this correct rather than merely tidier: a preset references
+        // ";common", OR the prop/OS in use requires a voice pack at all
+        // (__vpkRequiresVoicepack - the Fett263 prop, MENU_SPEC_TEMPLATE being
+        // defined, the BC props). Without that second test this would hide the
+        // control on exactly the configs that will fail on the saber.
+        _sfRefreshPropCommonNeed();
+        const needed = referenced || _sfPropNeedsCommon;
+        if (!needed) {
+          field.style.display = 'none';
+          return;
+        }
         const hasLibrary = !!(window._sfEntriesCache && window._sfEntriesCache.length);
-        if (commons.length === 0 && (!referenced || !hasLibrary)) {
+        if (commons.length === 0 && !hasLibrary) {
           field.style.display = 'none';
           return;
         }
