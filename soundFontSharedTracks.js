@@ -88,23 +88,59 @@ function addFiles(userData, sourceFilePaths) {
   const root = sharedTracksRoot(userData);
   const added = [];
   const skipped = [];
-  for (const src of sourceFilePaths) {
-    if (!/\.wav$/i.test(src)) { skipped.push({ src, reason: 'Not a .wav file' }); continue; }
-    const base = path.basename(src);
+  // Tracks you ALREADY HAVE, by content. Reported separately from `skipped`,
+  // which means "could not be added": having it already is a success, not a
+  // failure. (2026-08-31 — [B-005] item 5.)
+  //
+  // WHY THIS WAS NEEDED. Every file used to be copied, and a name collision was
+  // resolved by _uniqueName suffixing it — so re-importing the same card wrote
+  // `track1_1.wav`, `track1_2.wav`, and the shared folder doubled every time.
+  // `findByHash` has existed in soundFontSharedTracksHash the whole time and was
+  // never called from here. Filename is not identity; content is.
+  let _index = null;
+  try { _index = hashIndex.ensureIndex(userData); } catch {}
+  const duplicates = [];
+  for (const entry of sourceFilePaths) {
+    // Either a path, or { path, name } when the caller has a name to land it under.
+    // Bulk import's review lets the user rename a track before it is copied, and
+    // that is the only moment the name can carry any context: this folder is one
+    // flat global pool, so `track1.wav` from three cards is three collisions the
+    // user can no longer tell apart afterwards. (2026-08-31.)
+    const src = (entry && typeof entry === 'object') ? entry.path : entry;
+    const wanted = (entry && typeof entry === 'object' && entry.name) ? entry.name : null;
+    if (!src || !/\.wav$/i.test(src)) { skipped.push({ src, reason: 'Not a .wav file' }); continue; }
+    const base = wanted || path.basename(src);
     const safe = _safeFileName(base);
     if (!safe) { skipped.push({ src, reason: 'Invalid filename' }); continue; }
+    // Content check BEFORE the copy, so an identical track is never written and
+    // never renamed. A hashing failure falls through to copying: not being able to
+    // read a file is not evidence that we already have it.
+    if (_index) {
+      try {
+        // ⚠️ findByHash returns an ARRAY of matches and `[]` when there are none.
+        // An empty array is truthy, so a bare `if (hit)` reports every track as a
+        // duplicate against an empty library — which is exactly what it did until
+        // the test caught it. Check the length.
+        const h = hashIndex.hashFile(src);
+        const hits = h ? hashIndex.findByHash(_index, h) : null;
+        if (hits && hits.length) { duplicates.push({ src, have: hits[0].name || '' }); continue; }
+      } catch {}
+    }
     const dest = _uniqueName(root, safe);
     try {
       fs.copyFileSync(src, path.join(root, dest));
       // Hash + record. Failure here doesn't abort the add — the file
       // is on disk and ensureIndex will backfill it on next read.
       try { hashIndex.recordAdd(userData, dest); } catch {}
+      // Keep the in-memory index current within this call, so adding a batch
+      // that contains the same track twice writes it once.
+      if (_index) { try { _index = hashIndex.ensureIndex(userData); } catch {} }
       added.push(dest);
     } catch (err) {
       skipped.push({ src, reason: String(err && err.message || err) });
     }
   }
-  return { ok: true, added, skipped };
+  return { ok: true, added, skipped, duplicates };
 }
 
 function renameFile(userData, oldName, newName) {

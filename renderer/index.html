@@ -3004,13 +3004,29 @@
   .g-group-toggle::before { content: '\25BE'; display: inline-block; transition: transform 0.1s; }
   .g-group.collapsed .g-group-toggle::before { transform: rotate(-90deg); }
   .g-group.collapsed .g-group-body { display: none; }
+  /* Shared tracks. A track is a name and a size, so they tile several per line
+     instead of stacking forty full-width rows — but every column has to line up,
+     which a wrapping flex row cannot do because each name box sizes to its own
+     text. One grid for the tiles, one grid inside each tile, so the checkbox,
+     name, size and play button all sit on the same four verticals. */
+  /* .g-group-body.g-tracks, both classes: the element carries BOTH, and the
+     plain `.g-group-body { display: flex }` rule below sits later in the sheet
+     at equal specificity, so it won and stacked every track full width. Two
+     classes outrank one regardless of order. */
+  .g-group-body.g-tracks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 5px 22px; padding: 2px 2px 4px; border-left: none; margin-left: 0; padding-left: 0; }
+  @media (max-width: 720px) { .g-group-body.g-tracks { grid-template-columns: 1fr; } }
+  .g-track { display: grid; grid-template-columns: 16px minmax(0, 1fr) 64px 26px; align-items: center; gap: 8px; font-size: 0.78rem; }
+  .g-track.have-it-track { opacity: 0.55; }
+  .g-track-name { font: inherit; padding: 2px 6px; min-width: 0; width: 100%; }
+  .g-track-size { text-align: right; opacity: 0.65; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .g-track .g-play-chip { justify-self: end; }
   .g-group-vendor { flex: 0 1 200px; background: var(--c-bg-inset); border: 1px solid var(--c-border-input); border-radius: 3px; color: var(--c-text); padding: 4px 8px; font-size: 0.86rem; font-weight: 600; outline: none; }
   .g-group-vendor:focus { border-color: var(--jmt-blue); }
   .g-group-count { font-size: 0.72rem; color: var(--c-text-dim); flex-shrink: 0; }
   .g-group-website-wrap { flex: 1 1 160px; min-width: 120px; }
   .g-group-website { background: var(--c-bg-inset); border: 1px solid var(--c-border-input); border-radius: 3px; color: var(--c-text); padding: 4px 8px; font-size: 0.78rem; outline: none; }
   .g-group-website:focus { border-color: var(--jmt-blue); }
-  .g-group-free-lbl { display: inline-flex; align-items: center; gap: 5px; font-size: 0.78rem; color: var(--c-text-sub); cursor: pointer; flex-shrink: 0; }
   /* Fonts are indented and share a faint left rail so they read clearly as
      "belonging to" the vendor above and stay separate from the next group. */
   .g-group-body { display: flex; flex-direction: column; gap: 8px; margin-left: 9px; padding-left: 14px; border-left: 2px solid var(--c-border-faint); }
@@ -4479,6 +4495,7 @@
               <p class="sf-empty-desc">Pick a vendor's .zip file or an unzipped folder. JMT Studio archives it, identifies the fonts inside, and adds your picks to the library.</p>
               <button class="sf-empty-action" id="btn-sf-import-font">Import Sound Font</button>
               <p style="margin-top:14px;font-size:0.78rem;color:var(--c-text-sub)">Already have many fonts to add? <a href="#" id="btn-sf-import-bulk-empty" style="color:var(--jmt-blue);text-decoration:underline;cursor:pointer">Bulk import from a folder</a></p>
+              <p style="margin-top:6px;font-size:0.78rem;color:var(--c-text-sub)">Fonts already on a card? <a href="#" id="btn-sf-import-sd-empty" style="color:var(--jmt-blue);text-decoration:underline;cursor:pointer">Read my Proffie SD card</a></p>
             </div>
           </div>
           <div class="sf-cards" id="sf-cards"></div>
@@ -5133,8 +5150,8 @@
         <h3>Source</h3>
         <div class="sf-import-review-source-path" id="sf-import-review-source-path"></div>
         <div class="import-field">
-          <label>Vendor</label>
-          <input type="text" id="sf-review-vendor" list="sf-review-vendor-list" placeholder="Vendor name" maxlength="120" autocomplete="off">
+          <label>Creator</label>
+          <input type="text" id="sf-review-vendor" list="sf-review-vendor-list" placeholder="Creator name" maxlength="120" autocomplete="off">
           <datalist id="sf-review-vendor-list"></datalist>
           <div class="sf-review-vendor-info" id="sf-review-vendor-info"></div>
         </div>
@@ -6003,13 +6020,15 @@
       <p class="sf-import-hint" id="sf-bulk-import-review-summary"></p>
       <div id="sf-bulk-import-review-breakdown" class="sf-bulk-review-breakdown"></div>
       <p class="sf-import-hint" style="color: var(--c-text-muted); margin: 10px 0 5px;">
-        <strong>Quick import</strong> adds them all now with the names and vendors we detected. Anything we couldn't identify comes in with a <span style="color: var(--jmt-amber, #d49b3a)">Needs review</span> flag to fix later.
+        <strong>Quick import</strong> adds the ready ones now, with the names and creators we detected. Anything we couldn't identify comes in with a <span style="color: var(--jmt-amber, #d49b3a)">Needs review</span> flag to fix later.
       </p>
       <p class="sf-import-hint" style="color: var(--c-text-muted); margin: 0 0 8px;">
-        <strong>Review import</strong> lets you rename, set vendors, add a demo link, preview the sound, and pick exactly which fonts to add.
+        <strong>Review import</strong> lets you rename, set creators, add a demo link, preview the sound, and pick exactly which fonts to add.
       </p>
       <p class="sf-import-hint" id="sf-bulk-import-review-note" style="color: var(--c-text-muted); margin: 0;">
-        Duplicates are skipped on import. A font that exactly matches one already in your library won't be added again, and an edited version comes in as its own new font.
+        Fonts you already have are skipped — both an identical archive and a copy whose sounds your
+        library already contains. Review import shows them unchecked, so you can take one anyway; it
+        comes in as a separate font.
       </p>
     </div>
 
@@ -9168,6 +9187,12 @@ document.getElementById('btn-new-empty').addEventListener('click', doNew);
 document.getElementById('btn-open').addEventListener('click', doOpen);
 document.getElementById('btn-open-empty').addEventListener('click', doOpen);
 document.getElementById('link-sdcard-empty')?.addEventListener('click', (e) => { e.preventDefault(); startSdCardImport(); });
+// The Sound Font Library is where a user IS when they are thinking "I want
+// fonts", and a card was invisible from there — the whole read-a-card surface
+// was reachable only from the Config Manager. Same call, second door. Wired here
+// rather than in the Sound Fonts scope so it cannot drift into a parallel
+// implementation of the flow. ([B-245], 2026-08-31.)
+document.getElementById('btn-sf-import-sd-empty')?.addEventListener('click', (e) => { e.preventDefault(); startSdCardImport(); });
 
 // Path-2 on-ramp: read a Proffie SD card, then (next increments) populate the Sound Font
 // Library from it and surface any configs to open. Entry point only for now — the card
@@ -10997,7 +11022,13 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
   let progressUnsub = null;
   let runInFlight = false;
   let guidedRows = [];       // flat list of all rows { src, idx, enriched, el, nameInput, checkbox, group }
-  let _guidedGroups = [];    // vendor groups built after enrichment { key, vendor, rows, vendorInput, websiteInput, freeCheckbox, el }
+  // Creator groups built from the analyze pass { key, vendor, rows, vendorInput,
+  // websiteInput, el }. NO free/licence control: a licence belongs to a FONT, not
+  // to everyone a creator ever made, and one checkbox over a group of 42 could
+  // only ever assert something false about most of them. Removed 2026-08-31; the
+  // real per-font model is [B-146]. Dropping the field is not the same as sending
+  // false - with it absent the backend keeps whatever detection found.
+  let _guidedGroups = [];
   let enrichUnsub = null;
 
   const showPhase = (phase) => {
@@ -11048,9 +11079,18 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     // Discard any analyzed-but-not-imported prepared sources. Safe: the backend
     // only deletes ones that were never finalized (committed sources have meta
     // and are left alone), so we can hand it every prepared uuid.
+    //
+    // _staged is the duplicates' half of this. Analyze zips a source before it
+    // can know the archive is one we already hold, so a card that is already in
+    // the library produces a full set of staged zips and NOTHING to commit —
+    // the case that leaks most is the case that used to be missed entirely.
     try {
       if (currentPlan && Array.isArray(currentPlan.sources)) {
-        const uuids = currentPlan.sources.filter(s => s._prepared && s._prepared.uuid).map(s => s._prepared.uuid);
+        const uuids = [];
+        for (const s of currentPlan.sources) {
+          if (s._prepared && s._prepared.uuid) uuids.push(s._prepared.uuid);
+          if (s._staged) uuids.push(s._staged);
+        }
         if (uuids.length) window.electronAPI.bulkImportDiscardPrepared?.({ uuids });
       }
     } catch {}
@@ -11070,11 +11110,18 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
   // everything else the user types (parens, hyphens, etc.) is allowed through.
   const _guidedNameOk = (s) => { const t = String(s || '').trim(); return t.length > 0 && !/[<>:"/\\|?*\x00-\x1f]/.test(t); };
 
+  // The shared-tracks row's checkbox. Its own thing, not a font, so it is counted
+  // and labelled separately — but it IS a decision, which it was not before: the
+  // summary said "will be imported" and gave the user no say. (2026-08-31.)
+  let _guidedTracksCb = null;
+  let _guidedTrackRows = [];
   const _updateGuidedCount = () => {
     const n = guidedRows.filter(r => r.checkbox && r.checkbox.checked && !r.nameInput.classList.contains('invalid')).length;
     if (els.guidedImportBtn) {
       els.guidedImportBtn.textContent = n ? `Import (${n})` : 'Import';
-      els.guidedImportBtn.disabled = n === 0;
+      // Tracks alone are still something to import, so the button cannot be dead
+      // just because no font is checked.
+      els.guidedImportBtn.disabled = n === 0 && !(_guidedTracksCb && _guidedTracksCb.checked);
     }
   };
 
@@ -11187,7 +11234,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     const srcName = escapeHtml(src.cleanedName || src.rawName || '');
     row.innerHTML =
       `<div class="g-main">`
-      + `<span class="g-grip" title="Drag to another vendor" draggable="true">&#10303;</span>`
+      + `<span class="g-grip" title="Drag to another creator" draggable="true">&#10303;</span>`
       + `<input type="checkbox" class="g-check" checked>`
       + `<div class="g-name-wrap">`
       +   `<div class="sf-url-input-wrap g-name-shell">`
@@ -11213,7 +11260,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       // and free/paid live at the GROUP level, not per row. The "where to get
       // it" link is source-tied and deferred; the per-font Demo link above is
       // the one per-font link we surface.
-      + `<div class="g-sub"><button type="button" class="g-details-toggle">Details</button><button type="button" class="g-move-vendor" title="Move this font to another vendor">Change vendor</button><span class="g-docs"></span></div>`
+      + `<div class="g-sub"><button type="button" class="g-details-toggle">Details</button><button type="button" class="g-move-vendor" title="Move this font to another creator">Change creator</button><span class="g-docs"></span></div>`
       + `<div class="g-details">`
       +   `<label class="g-fld"><span>Source name</span><input type="text" class="g-srcname" maxlength="64" value="${srcName}" autocomplete="off"></label>`
       +   `<label class="g-fld g-fld-grow"><span>Acquired</span><input type="date" class="g-date"></label>`
@@ -11349,7 +11396,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       item.addEventListener('mousedown', (ev) => { ev.stopPropagation(); menu.style.display = 'none'; menu.style.minWidth = ''; _guidedMoveRow(rowObj, g); });
       menu.appendChild(item);
     }
-    if (!menu.children.length) { const it = document.createElement('div'); it.className = 'preset-ctx-item'; it.style.opacity = '0.6'; it.textContent = 'No other vendor groups'; menu.appendChild(it); }
+    if (!menu.children.length) { const it = document.createElement('div'); it.className = 'preset-ctx-item'; it.style.opacity = '0.6'; it.textContent = 'No other creators'; menu.appendChild(it); }
     const r = anchorEl.getBoundingClientRect();
     const mw = menu.offsetWidth || 200;
     menu.style.left = Math.min(r.left, window.innerWidth - mw - 8) + 'px';
@@ -11386,19 +11433,31 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     for (const g of _guidedGroups) {
       const isNone = g.key === '__none__';
       const count = g.rows.length;
+      // A creator whose every font is skipped starts COLLAPSED. Nothing in it is
+      // going to be imported, so it costs a screen of rows to say so; on a card
+      // that is mostly already owned, the handful of fonts the user actually has
+      // a decision to make about were buried under creators they did not.
+      // (Ryan, 2026-08-31.) Runs here because ownership is already settled by the
+      // time groups are built, and because this builds once — a later expand is
+      // the user's and must not be undone.
+      //
+      // Every row UNCHECKED is the test, not "owned": it is the same question the
+      // Import button asks, so a group collapses exactly when it contributes
+      // nothing to the count. A row without a checkbox keeps its group open —
+      // over-expanding is the safe direction when the state is unreadable.
+      const allSkipped = count > 0 && g.rows.every(r => r.checkbox && !r.checkbox.checked);
       const sec = document.createElement('div');
-      sec.className = 'g-group' + (isNone ? ' g-group-none' : '');
+      sec.className = 'g-group' + (isNone ? ' g-group-none' : '') + (allSkipped ? ' collapsed' : '');
       sec.innerHTML =
         `<div class="g-group-header">`
         + `<button type="button" class="g-group-toggle" title="Collapse or expand"></button>`
-        + `<input type="text" class="g-group-vendor" value="${escapeHtml(g.vendor)}" list="sf-review-vendor-list" placeholder="Vendor">`
+        + `<input type="text" class="g-group-vendor" value="${escapeHtml(g.vendor)}" list="sf-review-vendor-list" placeholder="Creator">`
         + `<span class="g-group-count">${count} font${count === 1 ? '' : 's'}</span>`
         + `<span class="sf-url-input-wrap g-group-website-wrap">`
         +   `<input type="text" class="g-group-website" placeholder="Website" value="${escapeHtml(g.website)}" autocomplete="off">`
         +   `<button type="button" class="sf-url-input-paste" title="Paste clipboard URL"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="4" width="8" height="4" rx="1"/><path d="M16 6h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2"/></svg></button>`
         +   `<button type="button" class="sf-url-input-clear" title="Clear">&#10005;</button>`
         + `</span>`
-        + `<label class="g-group-free-lbl"><input type="checkbox" class="g-group-free"${g.free ? ' checked' : ''}> Free</label>`
         + `</div>`
         + `<div class="g-group-body"></div>`;
       const body = sec.querySelector('.g-group-body');
@@ -11428,7 +11487,6 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       g.el = sec;
       g.vendorInput = sec.querySelector('.g-group-vendor');
       g.websiteInput = sec.querySelector('.g-group-website');
-      g.freeCheckbox = sec.querySelector('.g-group-free');
       // Website paste + clear (same shell as the single-source import).
       const gwPaste = sec.querySelector('.g-group-website-wrap .sf-url-input-paste');
       const gwClear = sec.querySelector('.g-group-website-wrap .sf-url-input-clear');
@@ -11444,6 +11502,101 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       g.vendorInput.addEventListener('input', () => { g.vendor = g.vendorInput.value.trim(); _updateGuidedGroupReview(g); });
       _updateGuidedGroupReview(g);
       els.guidedList.appendChild(sec);
+    }
+    // ── Shared tracks ──────────────────────────────────────────────────────
+    // Every track, shown the way every font is shown: the ones you already have
+    // are listed and unchecked, naming what they match. A card's `track3.wav` may
+    // already be in your library as `Duel_of_the_Fates.wav`, and that is the useful
+    // half of "you already have this".
+    //
+    // ⚠️ RENAME IS NOT A NICETY HERE. Shared tracks is ONE flat global folder — a
+    // font lands in a directory named after itself, a track lands next to every
+    // other track you own. Import three cards and you have `track1.wav`,
+    // `track1_1.wav`, `track1_2.wav` and no way to tell them apart afterwards.
+    // Import is the only moment you know which card a file came from.
+    _guidedTracksCb = null;
+    _guidedTrackRows = [];
+    const _tk = currentPlan && currentPlan._analyzeStats && currentPlan._analyzeStats.tracks;
+    if (currentPlan && currentPlan.tracksFolders && currentPlan.tracksFolders.length) {
+      const tsec = document.createElement('div');
+      tsec.className = 'g-group';
+      tsec.id = 'sf-guided-tracks';
+      const nNew = _tk ? _tk.new : null;
+      const nHave = _tk ? _tk.owned : 0;
+      const detail = nNew == null
+        ? "Adds the tracks you don’t already have."
+        : (nNew === 0
+            ? `You already have all ${nHave} of these.`
+            : `${nNew} new${nHave ? `, ${nHave} you already have` : ''}.`);
+      // Built from the SAME parts a creator group uses - .g-group /
+      // .g-group-header / .g-group-toggle / .g-group-body - so it collapses with
+      // the same control, the same rotating chevron and the same rules. Hand-rolling
+      // a second expander gave it a different arrow and a different feel on a screen
+      // whose whole point is consistency.
+      const items = (_tk && Array.isArray(_tk.items)) ? _tk.items : [];
+      tsec.className = 'g-group' + (items.length ? ' collapsed' : '');
+      tsec.innerHTML =
+        `<div class="g-group-header">`
+        + (items.length ? `<button type="button" class="g-group-toggle" title="Collapse or expand"></button>` : '')
+        + `<input type="checkbox" id="sf-guided-tracks-cb"${nNew === 0 ? '' : ' checked'}>`
+        + `<span><strong>Shared tracks</strong> <span style="opacity:.75">${escapeHtml(detail)}</span></span>`
+        + `</div>`
+        + `<div class="g-group-body g-tracks"></div>`;
+      const head = tsec.querySelector('.g-group-header');
+      const body = tsec.querySelector('.g-tracks');
+      for (const it of items) {
+        // A div, not a label. A label forwards stray clicks to its first control,
+        // so clicking the size or the empty gap would silently toggle the checkbox.
+        const wrap = document.createElement('div');
+        wrap.className = 'g-track' + (it.owned ? ' have-it-track' : '');
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = !it.owned;
+        if (it.owned) {
+          cb.title = it.matchName
+            ? `Already in your library as ${it.matchName}`
+            : 'Already in your library';
+        }
+        const nm = document.createElement('input');
+        nm.type = 'text';
+        nm.value = it.name;
+        nm.className = 'g-track-name';
+        const sz = document.createElement('span');
+        sz.className = 'g-track-size';
+        sz.textContent = window._sfFormatBytes ? window._sfFormatBytes(it.size || 0) : '';
+        const play = document.createElement('span');
+        play.className = 'sf-effect-chip g-play-chip';
+        play.textContent = '▶';
+        play.title = `Play ${it.name}`;
+        play.addEventListener('click', (ev) => {
+          ev.preventDefault(); ev.stopPropagation();
+          if (window._sfQuickAudioChip === play) { try { window._sfQuickAudioStop?.(); } catch {} return; }
+          const dir = String(it.absPath).replace(/[\/][^\/]*$/, '');
+          try { window._sfQuickPlay && window._sfQuickPlay({ kind: 'path', id: dir, subPath: it.name, chipEl: play }); } catch {}
+        });
+        wrap.appendChild(cb); wrap.appendChild(nm); wrap.appendChild(sz); wrap.appendChild(play);
+        body.appendChild(wrap);
+        _guidedTrackRows.push({ item: it, cb, nameInput: nm });
+      }
+      tsec.querySelector('.g-group-toggle')?.addEventListener('click', () => tsec.classList.toggle('collapsed'));
+      els.guidedList.appendChild(tsec);
+      _guidedTracksCb = head.querySelector('#sf-guided-tracks-cb');
+      // The header box is a master switch over the items, and it follows them: turn
+      // every track off by hand and the section reads off, rather than claiming to
+      // be on with nothing selected.
+      const syncHead = () => {
+        if (!_guidedTracksCb) return;
+        _guidedTracksCb.checked = _guidedTrackRows.some(r => r.cb.checked);
+        _updateGuidedCount();
+      };
+      _guidedTrackRows.forEach(r => r.cb.addEventListener('change', syncHead));
+      _guidedTracksCb?.addEventListener('change', () => {
+        const on = _guidedTracksCb.checked;
+        // Turning it back on restores the sensible default — the ones you do not
+        // already have — not everything.
+        _guidedTrackRows.forEach(r => { r.cb.checked = on ? !r.item.owned : false; });
+        _updateGuidedCount();
+      });
     }
     _updateGuidedCount();
   };
@@ -11500,7 +11653,12 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     // Duplicates (already in the library) are excluded from the review — no point
     // making you look at fonts that won't import. Rows AND enrichment run on the
     // SAME filtered set so streamed indices stay aligned.
-    const _guidedSources = currentPlan.sources.filter(src => !src._duplicate);
+    // ALL of them (2026-08-31, his call: "they said they wanted to review, we show
+    // them"). Exact-archive duplicates used to be filtered out here, so the review
+    // said "Reviewing 57" one click after the summary said 59 — the same two
+    // screens disagreeing about the same card that started this whole thread.
+    // They come in unchecked, with their reason on the row, like everything else.
+    const _guidedSources = currentPlan.sources.slice();
     const _gTotal = _guidedSources.length;
     guidedRows = _guidedSources.map((src, idx) => _buildGuidedRow(src, idx));
     // Duplicate recognition for the guided rows (async): edited/partial copies
@@ -11508,85 +11666,110 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     // them, and uncheck have-it rows the user hasn't touched. A card copy
     // with files deleted reads as fully contained ("already in your library").
     document.getElementById('sf-guided-dup-hint')?.remove();
-    window.electronAPI.bulkImportMatchGuided({
-      sources: _guidedSources.map((src, idx) => ({
-        idx,
-        absPath: src.absPath || null,
-        preparedUuid: (src._prepared && src._prepared.uuid) || null,
-      })),
-    }).then((r) => {
-      if (!r || !r.ok || !Array.isArray(r.results)) return;
-      for (const res of r.results) {
-        const row = guidedRows[res.idx];
-        if (!row || !row.el) continue;
+    // Ownership is ALREADY DECIDED — analyze computed it, so this is a synchronous
+    // read of `src._match` / `src._owned` rather than an 8-second library match
+    // fired off beside the screen and landing after it opened.
+    //
+    // WHAT THIS REPLACED, so it is not reintroduced: `bulkImportMatchGuided` used to
+    // run here, unawaited, while `bulkImportEnrichGuided` opened the review. On a
+    // card with owned fonts the review appeared fully checked, then seconds later
+    // boxes unchecked themselves and the Import count dropped 56 -> 54 while the
+    // user watched. Measured at ~7.8s on a 60-font card. Ryan's rule: what review
+    // shows is exactly what quick import would do, and it does not change after
+    // the fact.
+    {
+      _guidedSources.forEach((src, idx) => {
+        const row = guidedRows[idx];
+        if (!row || !row.el) return;
+        const m = src._match;
+        // An exact-archive duplicate has no `_match` — analyze knew it was owned
+        // from the hash alone and never ran the content comparison. It still needs
+        // to say so on the row, because it is now shown like everything else.
+        if (!m && !src._duplicate) return;
         let note = row.el.querySelector('.g-dup-note');
         if (!note) {
           note = document.createElement('div');
           note.className = 'g-dup-note';
           row.el.querySelector('.g-name-wrap')?.appendChild(note);
         }
-        // Green + uncheck ONLY for fully-owned; a copy carrying sounds the
-        // library lacks stays checked in amber (skipping would lose them).
-        // Short green label; "(as X)" only when the row name differs.
+        if (src._duplicate) {
+          // "(as X)" when the library's name differs from the one we are proposing.
+          // This row is the case that needs it most: an exact archive whose display
+          // name came from a readme, so `Graflex8` shows as `Episode_8_Graflex_Font`
+          // and nothing otherwise connects the two.
+          {
+            const dupName = src._match && src._match.matchName;
+            const rowName = (row.nameInput?.value || '').trim();
+            const asClause = (dupName && rowName.toLowerCase() !== String(dupName).toLowerCase())
+              ? ` (as ${dupName})` : '';
+            note.textContent = `Already in your library${asClause}; your copy is identical.`;
+          }
+          note.classList.add('have-it');
+          if (row.checkbox) {
+            row.checkbox.checked = false;
+            // Disabled, not merely unchecked. There is no staged copy to import:
+            // the archive hashed identical to one already in the library, so
+            // analyze deduped it rather than preparing a zip. Offering a box that
+            // cannot do anything would be worse than not offering one.
+            // Unchecked, NOT disabled. Single import already offers "Re-import as
+            // new" on an exact match (forceNewSource — a parallel copy with its own
+            // number), so refusing here would make the review screen the one place
+            // in the app that says no. "Open existing" is the other choice there and
+            // has no meaning mid-bulk, so the checkbox IS the re-import choice.
+            row.checkbox.title = 'You already have this. Check it to re-import as a new copy.';
+          }
+          row.el.classList.add('excluded');
+          return;
+        }
+        // Green + unchecked ONLY for fully-owned; a copy carrying sounds the library
+        // lacks stays checked in amber, because skipping it would lose them.
         const gRowName = (row.nameInput?.value || '').trim();
-        note.textContent = (res.fullyOwned && res.matchName
-            && gRowName.toLowerCase() !== String(res.matchName).toLowerCase())
-          ? `${res.label} (as ${res.matchName})`
-          : res.label;
-        note.classList.toggle('have-it', !!res.fullyOwned);
-        if (res.tip && row.checkbox) row.checkbox.title = res.tip;
-        if (res.fullyOwned && row.checkbox && row.checkbox.checked
+        // "(as X)" only when the names differ, and "yours has more" only when it is
+        // true — that clause is the whole reason this one escaped the archive-hash
+        // test, and without it identical-looking rows claim the same thing for two
+        // different reasons.
+        let _txt = m.label;
+        if (m.fullyOwned && m.matchName
+            && gRowName.toLowerCase() !== String(m.matchName).toLowerCase()) {
+          _txt = `${m.label} (as ${m.matchName})`;
+        }
+        // Two outcomes, said in parallel about YOUR copy — "your copy", not "yours",
+        // which reads as a pronoun with no noun behind it. Identical and
+        // contains-this-and-more are genuinely different facts about the CARD, not
+        // about our two detection tests, so collapsing them into one sentence lost
+        // something real: on a card whose files are rotting, "your copy is more
+        // complete" is worth knowing.
+        // "more complete" is comparative on purpose: it says the card's copy is
+        // lesser without implying it is damaged, which is the corrupted row's word.
+        if (m.fullyOwned) _txt += m.libHasMore
+          ? '; your copy is more complete.'
+          : '; your copy is identical.';
+        note.textContent = _txt;
+        note.classList.toggle('have-it', !!m.fullyOwned);
+        if (m.tip && row.checkbox) row.checkbox.title = m.tip;
+        if (m.fullyOwned && row.checkbox && row.checkbox.checked
             && row.el.dataset.touched !== 'true' && !row.el.classList.contains('g-corrupt')) {
           row.checkbox.checked = false;
           row.el.classList.add('excluded');
         }
-      }
-      // Summary hint (information, not force): explain the auto-uncheck, that
-      // the boxes still work, the Duplicate path, and how many rows are
-      // flagged for a look.
-      const haveIts = r.results.filter(x => x.fullyOwned).length;
-      const flagged = r.results.length - haveIts;
-      if ((haveIts > 0 || flagged > 0) && els.guidedSummary) {
-        let hint = document.getElementById('sf-guided-dup-hint');
-        if (!hint) {
-          hint = document.createElement('div');
-          hint.id = 'sf-guided-dup-hint';
-          hint.className = 'sf-import-hint';
-          hint.style.color = 'var(--c-success-text)';
-          els.guidedSummary.parentNode?.insertBefore(hint, els.guidedSummary.nextSibling);
-        }
-        hint.textContent = window._sfDupSummaryText(haveIts, flagged, _gTotal);
-      }
+      });
       _updateGuidedCount();
-    }).catch(() => {});
-    showPhase('scan');
-    const _scanLabel = els.phaseScan && els.phaseScan.querySelector('.sf-import-progress-label');
-    if (_scanLabel) _scanLabel.textContent = 'Analyzing fonts…';
-    let _enrDone = 0;
-    const _setProg = () => { if (els.scanDetail) els.scanDetail.textContent = `${_enrDone} / ${_gTotal} ready`; };
-    _setProg();
-    if (enrichUnsub) { try { enrichUnsub(); } catch {} enrichUnsub = null; }
-    enrichUnsub = window.electronAPI.onBulkImportEnrichProgress((data) => {
-      if (!data || !data.done || data.idx == null) return;
-      const row = guidedRows[data.idx];
-      if (row) _fillGuidedRow(row, data.result);   // fills the off-screen row
-      _enrDone++; _setProg();
+    }
+    // NO WAIT HERE. Creator detection, the preview clips, the doc list and the wav
+    // count all came out of analyze with the rest of the answer, so this is a
+    // render, not a phase. His test for whether moving enrich was worth doing:
+    // "there should be nothing other than loading a screen between the two."
+    _guidedSources.forEach((src, i) => {
+      const row = guidedRows[i];
+      if (row && src._enrich) _fillGuidedRow(row, src._enrich);
     });
-    window.electronAPI.bulkImportEnrichGuided({ plan: { ...currentPlan, sources: _guidedSources } }).then((res) => {
-      if (enrichUnsub) { try { enrichUnsub(); } catch {} enrichUnsub = null; }
-      // Backstop: fill any rows that never got their streamed event.
-      if (res && res.ok && Array.isArray(res.enriched)) {
-        res.enriched.forEach((e, i) => { const row = guidedRows[i]; if (row && !row.enriched) _fillGuidedRow(row, e); });
-      }
-      // Everything is ready — render the complete grouped view in ONE shot.
-      els.guidedSummary.innerHTML =
-        `Reviewing <strong>${_gTotal}</strong> font${_gTotal === 1 ? '' : 's'}. Uncheck any you don't want, fix names or vendors, `
-        + `preview the sound, then <strong>Import</strong>. Each becomes its own source.`;
-      _regroupByVendor();   // clears + populates guidedList with the grouped rows
-      showPhase('guided');
-      if (_scanLabel) _scanLabel.textContent = 'Scanning folder…'; // restore for the next real scan
-      _updateGuidedCount();
-    }).catch(() => {});
+    els.guidedSummary.innerHTML =
+      `Reviewing <strong>${_gTotal}</strong> font${_gTotal === 1 ? '' : 's'}. Skipped items are unchecked. `
+      + `Check or uncheck any, fix names or creators, preview the sound, then <strong>Import</strong>. `
+      + `Each becomes its own source.`;
+    _regroupByVendor();   // clears + populates guidedList with the grouped rows
+    showPhase('guided');
+    _updateGuidedCount();
   };
 
   // ANALYZE ("prepare") pass — hash + dedup + corruption-mark up front so the
@@ -11619,6 +11802,23 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         if (els.progBar) els.progBar.style.width = `${total ? (((_aIdx) / total) * 100).toFixed(1) : 0}%`;
         if (els.progLabel) els.progLabel.textContent = `Analyzing fonts · ${_aIdx + 1} of ${total}`;
         if (els.progDetail) els.progDetail.textContent = _aLabel;
+      } else if (data.stage === 'match-start' && data.sourceIdx != null) {
+        // Second pass, its own label and its own bar. Without this the analyze bar
+        // sat at "59 of 59" and 100% while the library match was still running,
+        // which reads as finished-but-hung. (2026-08-31.)
+        _aIdx = data.sourceIdx;
+        if (els.progBar) els.progBar.style.width = `${total ? (((_aIdx) / total) * 100).toFixed(1) : 0}%`;
+        if (els.progLabel) els.progLabel.textContent = `Checking your library · ${_aIdx + 1} of ${total}`;
+        if (els.progDetail) els.progDetail.textContent = data.label || '';
+      } else if (data.stage === 'enrich-start' && data.sourceIdx != null) {
+        _aIdx = data.sourceIdx;
+        if (els.progBar) els.progBar.style.width = `${total ? (((_aIdx) / total) * 100).toFixed(1) : 0}%`;
+        if (els.progLabel) els.progLabel.textContent = `Reading creators and previews · ${_aIdx + 1} of ${total}`;
+        if (els.progDetail) els.progDetail.textContent = data.label || '';
+      } else if (data.stage === 'tracks-check') {
+        if (els.progLabel) els.progLabel.textContent = 'Checking your shared tracks';
+        if (els.progDetail) els.progDetail.textContent = data.label || '';
+        if (els.progBar && data.total) els.progBar.style.width = `${((data.done || 0) / data.total * 100).toFixed(1)}%`;
       } else if (data.stage === 'source-progress' && data.sub) {
         if (data.sub.percent != null && els.progBar) {
           const within = Math.max(0, Math.min(100, data.sub.percent)) / 100;
@@ -11641,9 +11841,19 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     for (const r of (res.results || [])) {
       const s = plan.sources[r.idx];
       if (!s) continue;
-      if (r.isDuplicate) { s._duplicate = true; s._existingUuid = r.existingUuid; delete s._prepared; }
+      // A duplicate has no _prepared (it is not going to be committed), but the
+      // analyze pass still WROTE a zip for it before it could know that. Keep
+      // that uuid on _staged so closeModal can discard it; without it the zip
+      // is unreachable and waits out the 6h orphan sweep.
+      if (r.isDuplicate) { s._duplicate = true; s._existingUuid = r.existingUuid; delete s._prepared; s._staged = (r.staged && r.staged.uuid) || null; }
       else if (r.prepared) { s._prepared = r.prepared; }
       if (r.corrupt) s._corrupt = r.corrupt;
+      // Ownership now arrives WITH the analysis instead of landing on the review
+      // screen seconds after it opens. `_owned` means "you already have these
+      // sounds" whichever test found it; `_match` carries the row's note.
+      if (r.owned) s._owned = true;
+      if (r.match) s._match = r.match;
+      if (r.enrich) s._enrich = r.enrich;
     }
     plan._analyzeStats = res.stats || null;
     plan._analyzed = true;
@@ -11669,9 +11879,14 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         `<code>${escapeHtml(plan._displayRoot || plan.rootDir)}</code>.`;
       const rows = [];
       if (st) {
+        // Plain nouns. This screen has no checkboxes, so "(unchecked)" names a
+        // concept the reader cannot see yet — that belongs on the review screen.
+        // One "already in your library" line: the split between the archive-hash
+        // test and the content test is ours, not the user's. (2026-08-31.)
         rows.push(['New sound fonts', st.new]);
-        if (st.duplicate) rows.push(['Already in your library (skipped)', st.duplicate]);
-        if (st.corrupt)   rows.push(['Corrupted (unchecked)', st.corrupt]);
+        const _owned = (typeof st.owned === 'number') ? st.owned : (st.duplicate || 0);
+        if (_owned)     rows.push(['Already in your library (skipped)', _owned]);
+        if (st.corrupt) rows.push(['Corrupted (skipped)', st.corrupt]);
       } else {
         const byKind = {};
         for (const s of plan.sources) byKind[s.kind] = (byKind[s.kind] || 0) + 1;
@@ -11679,10 +11894,25 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         if (byKind['folder-solo']) rows.push(['Sound fonts', byKind['folder-solo']]);
       }
       if (plan.commonFolders.length) rows.push(['Common folders (will be imported)', plan.commonFolders.length]);
-      if (plan.tracksFolders && plan.tracksFolders.length) rows.push(['Shared tracks folder (will be imported)', plan.tracksFolders.length]);
-      if (plan.skipped.length)   rows.push(['Skipped (no Proffie content)', plan.skipped.length]);
-      let html = rows.map(([l, v]) =>
-        `<div class="br-row"><span class="br-label">${escapeHtml(l)}</span><span class="br-val">${v}</span></div>`).join('');
+      if (plan.tracksFolders && plan.tracksFolders.length) {
+        // "(will be imported)" said nothing about WHAT — the folder is merged into
+        // the one shared tracks folder and only the tracks you do not already have
+        // are copied. Now that analyze checks them by content, say the numbers.
+        rows.push(['Shared tracks folder', plan.tracksFolders.length]);
+        const tk = st && st.tracks;
+        if (tk) {
+          rows.push([' New tracks', tk.new, true]);
+          if (tk.owned) rows.push([' Tracks already in your library (skipped)', tk.owned, true]);
+        }
+      }
+      // The "Skipped (no Proffie content)" row is deliberately gone (2026-08-31).
+      // It counted System Volume Information — Hidden+System, so Explorer does not
+      // show it and the user counts one fewer folder than we do — plus a seller's
+      // note folder and a menu voice pack. None is a decision, and none is a sound
+      // font, so listing them under a stack of font counts invited adding every row
+      // together into a number (63) that describes nothing the user can see.
+      let html = rows.map(([l, v, sub]) =>
+        `<div class="br-row"${sub ? ' style="opacity:.72"' : ''}><span class="br-label">${escapeHtml(l)}</span><span class="br-val">${v}</span></div>`).join('');
       if (plan.depthHalted) {
         html += `<div class="br-row" style="margin-top:8px"><span class="br-label" style="color: var(--jmt-amber)">Scan halted at depth ${6}. Pick a closer folder if you have more nested fonts.</span></div>`;
       }
@@ -11786,7 +12016,12 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       // a prepared (stripped) zip too — so they'd match _prepared — but they must
       // stay opt-in via Review, never swept in by Quick. Exclude them here; their
       // staged zips are discarded on close if never committed.
-      const fresh = runPlan.sources.filter(s => s._prepared && !s._corrupt);
+      // `!s._owned` (2026-08-31): quick import commits exactly what the review
+      // screen would show CHECKED. Ownership is now decided in analyze, so a font
+      // the user already has is skipped here instead of being imported and then
+      // stamped `needsReview` after the fact — which is what made quick produce 56
+      // entries where review produced 54 from the same card.
+      const fresh = runPlan.sources.filter(s => s._prepared && !s._corrupt && !s._owned);
       if (!fresh.length) { closeModal(); return; }
       runPlan = { ...runPlan, sources: fresh };
     }
@@ -12086,7 +12321,6 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       // Vendor / website / free come from the row's VENDOR GROUP (shared).
       guidedVendor: (r.group && r.group.vendorInput && r.group.vendorInput.value.trim()) || undefined,
       guidedWebsite: (r.group && r.group.websiteInput && r.group.websiteInput.value.trim()) || undefined,
-      guidedFree: !!(r.group && r.group.freeCheckbox && r.group.freeCheckbox.checked),
       // Per-font fields stay on the row. The Demo link (chain icon) is the
       // per-font link; it maps to the entry's demoUrl. Prefer the live input
       // value, fall back to the tracked dataset value.
@@ -12097,7 +12331,22 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     }));
     if (enrichUnsub) { try { enrichUnsub(); } catch {} enrichUnsub = null; }
     try { window.electronAPI.bulkImportEnrichCancel?.(); } catch {}
-    runImport({ ...currentPlan, sources });
+    // Unchecking the tracks row means exactly that: no tracks folder goes to the
+    // runner, so quick and review differ only by what the user changed.
+    // Exactly the tracks that are ticked, under the names shown. `tracksPicked`
+    // overrides the folder glob so a rename or an exclusion in the review is what
+    // actually lands — the folder itself is still passed so the runner knows there
+    // was one.
+    const _picked = _guidedTrackRows
+      .filter(r => r.cb.checked)
+      .map(r => ({ absPath: r.item.absPath, name: (r.nameInput.value || '').trim() || r.item.name }));
+    const _keepTracks = (!_guidedTracksCb || _guidedTracksCb.checked) && _picked.length > 0;
+    runImport({
+      ...currentPlan,
+      sources,
+      tracksFolders: _keepTracks ? currentPlan.tracksFolders : [],
+      tracksPicked: _keepTracks ? _picked : null,
+    });
   });
   // Backdrop click + Esc are silently blocked while an import is in
   // flight so the user can't accidentally dismiss the modal mid-run
@@ -22170,7 +22419,7 @@ require(['vs/editor/editor.main'], function () {
           if (_sfImportEls.website) _sfImportEls.website.value = '';
           if (_sfImportEls.purchased) _sfImportEls.purchased.checked = false;
           if (_sfImportEls.vendorInfo) {
-            _sfImportEls.vendorInfo.textContent = 'No vendor pattern matched. Type a vendor name (required).';
+            _sfImportEls.vendorInfo.textContent = 'No creator matched. Type a creator name (required).';
             _sfImportEls.vendorInfo.classList.remove('detected');
             _sfImportEls.vendorInfo.classList.remove('suggested');
           }

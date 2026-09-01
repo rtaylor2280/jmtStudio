@@ -17,7 +17,13 @@ const INNER_ZIP_SEP = '!';
 // changed what gets emitted for multi-board bundles). Stored alongside
 // the cached candidates on source meta. A stamped value below the current
 // constant triggers re-detection.
-const CANDIDATES_SCHEMA_VERSION = 2;
+//
+// 3 (2026-08-31): a folder whose only audio is font.wav now counts as a
+// font. Any source stamped under 2 may hold a cached `candidates: []` that
+// this rule would now fill, and the cache is authoritative until the
+// version moves — so the detection change is only half a change without
+// this line.
+const CANDIDATES_SCHEMA_VERSION = 3;
 
 // Sound Fonts — candidate detection (Phase 1, slice 4).
 //
@@ -211,12 +217,31 @@ function _collectEffectTypes(folders, files, byParent) {
   return types;
 }
 
+// The one shape allowed below the MIN_EFFECT_TYPES floor: a folder whose
+// entire content is font.wav. font.wav is the spoken NAME of a font — it
+// exists at a font's root and nowhere else, so "nothing but font.wav" is a
+// font that announces itself and plays nothing (K:\Power on a real card is
+// exactly this). Written as "only font.wav" rather than "font.wav present"
+// on purpose: the 3-type floor exists to keep bonus/extras folders out, and
+// a mere-presence test would re-open every 2-type folder that ships a name
+// clip. Child folders disqualify too, because CASE A returns without
+// descending — promoting a dir that has children would swallow whatever
+// fonts live under it.
+function _isFontAnnounceOnly(childFolders, childFiles) {
+  if (childFolders && childFolders.length) return false;
+  const wavs = (childFiles || []).filter(f => /\.wav$/i.test(String(f.name || '')));
+  if (!wavs.length) return false;
+  return wavs.every(f => /^font\d*\.wav$/i.test(String(f.name)));
+}
+
 // A folder counts as a Proffie font when it contains at least
 // MIN_EFFECT_TYPES distinct recognized effect types at its immediate
 // level (with alt expansion). The threshold and vocabulary were tuned
 // against the real-world library — see analyzer notes above.
 function looksLikeProffieFont(childFolders, childFiles, byParent) {
-  return _collectEffectTypes(childFolders, childFiles, byParent || new Map()).size >= MIN_EFFECT_TYPES;
+  const types = _collectEffectTypes(childFolders, childFiles, byParent || new Map());
+  if (types.size >= MIN_EFFECT_TYPES) return true;
+  return _isFontAnnounceOnly(childFolders, childFiles);
 }
 
 // ── Entry tree helpers ──────────────────────────────────

@@ -475,16 +475,25 @@ async function runBulkImport({ plan, userData }, callbacks = {}) {
   const tracksDirs = Array.isArray(plan.tracksFolders) ? plan.tracksFolders : [];
   if (tracksDirs.length > 0 && !shouldCancel()) {
     onProgress({ stage: 'tracks-start', totalTracksFolders: tracksDirs.length });
-    const wavPaths = [];
-    for (const t of tracksDirs) {
-      try {
-        const entries = fs.readdirSync(t.absPath, { withFileTypes: true });
-        for (const e of entries) {
-          if (e.isFile() && /\.wav$/i.test(e.name)) {
-            wavPaths.push(path.join(t.absPath, e.name));
+    // An explicit pick from the review screen wins over globbing the folder: the
+    // user may have excluded some and renamed others, and that decision has to be
+    // what lands. Falls back to every wav when nothing was picked (quick import).
+    let wavPaths = [];
+    if (Array.isArray(plan.tracksPicked) && plan.tracksPicked.length) {
+      wavPaths = plan.tracksPicked
+        .filter(t => t && t.absPath)
+        .map(t => (t.name ? { path: t.absPath, name: t.name } : t.absPath));
+    } else {
+      for (const t of tracksDirs) {
+        try {
+          const entries = fs.readdirSync(t.absPath, { withFileTypes: true });
+          for (const e of entries) {
+            if (e.isFile() && /\.wav$/i.test(e.name)) {
+              wavPaths.push(path.join(t.absPath, e.name));
+            }
           }
-        }
-      } catch {}
+        } catch {}
+      }
     }
     if (wavPaths.length > 0) {
       try {
@@ -547,7 +556,15 @@ async function analyzeBulkImport({ plan, userData, corruptFonts }, callbacks = {
     } catch (e) { res = { ok: false, error: String(e && e.message || e) }; }
     if (res && res.ok && res.isDuplicate) {
       dupCount++;
-      results.push({ idx: i, isDuplicate: true, existingUuid: res.uuid, corrupt });
+      // `res.staged` is the zip we just wrote before discovering it was a
+      // duplicate. importSource KEEPS it on purpose (see soundFontSources'
+      // duplicate branch — "import again as a new source" finalizes it with no
+      // re-zip), on the understanding that cancel/close discards it. Dropping
+      // the field here severed that: the renderer had no uuid to hand back, so
+      // every duplicate's zip sat on disk until the 6h orphan sweep. One
+      // re-analyze of a 12 GB card that was already imported leaked ~1.9 GB,
+      // and runs inside the same 6h window stacked. (2026-08-31.)
+      results.push({ idx: i, isDuplicate: true, existingUuid: res.uuid, staged: res.staged || null, corrupt });
     } else if (res && res.ok && res.prepared) {
       if (corrupt) corruptCount++; else newCount++;
       results.push({ idx: i, prepared: {
@@ -559,8 +576,175 @@ async function analyzeBulkImport({ plan, userData, corruptFonts }, callbacks = {
       results.push({ idx: i, error: (res && res.error) || 'prepare failed', corrupt });
     }
   }
+  // ── OWNERSHIP, COMPUTED HERE (2026-08-31) ─────────────────────────────────
+  // "Do I already have these sounds?" used to be asked TWICE, at two different
+  // times, with two different consequences: the review screen asked it before
+  // committing and acted on the answer, while quick import asked it AFTER
+  // committing, where the only thing left to do was stamp `needsReview` on a font
+  // it had just imported. Same test, same card, two outcomes — 56 entries from one
+  // button and 54 from the other.
+  //
+  // Asking it once, here, is what makes the two paths agree by construction rather
+  // than by luck: analyze produces one answer and both paths read it. Ryan's
+  // acceptance test: "when I go to review, I'm reviewing exactly what we said we
+  // were already going to do as a quick import, and they will not change after the
+  // fact."
+  //
+  // TWO TESTS, ONE QUESTION. The duplicate check in the loop above compares the
+  // staged ZIP HASH — "have I imported this exact archive before". This compares
+  // per-file hashes — "do I already have all of these sounds". Both are needed and
+  // they catch different shapes (an identical download versus a subset or a rename),
+  // but to the user they mean the same thing, so `owned` covers both and the
+  // breakdown reports one number.
+  let ownedCount = 0;
+  try {
+    const compare = require('./soundFontCompare');
+    const { index } = compare.buildLibraryIndex(userData);
+    if (index.length) {
+      for (let i = 0; i < results.length; i++) {
+        if (shouldCancel()) break;
+        const r = results[i];
+        const src = sources[r.idx];
+        // An exact-archive duplicate is already known to be owned; it needs no
+        // second opinion and its entry name comes from the dedup hit.
+        if (r.isDuplicate) {
+          r.owned = true; ownedCount++;
+          // Name what it matched. The row can otherwise only say "already in your
+          // library" while proposing to import it under a DIFFERENT name — the card
+          // folder `Graflex8` displays as `Episode_8_Graflex_Font` from its readme,
+          // so without this the one case that needs the clause most is the one case
+          // that lacks it. Fully-owned rows have said "(as X)" all along.
+          try {
+            const existing = soundFontSources.listSources(userData)
+              .find(x => x && x.uuid === r.existingUuid);
+            const nm = existing && (existing.name || (existing.meta && existing.meta.name));
+            if (nm) r.match = { label: 'Already in your library', matchName: nm, fullyOwned: true, tip: '' };
+          } catch {}
+          continue;
+        }
+        if (!r.prepared || !src) continue;
+        onProgress({ stage: 'match-start', sourceIdx: r.idx, total, label: src.cleanedName || src.rawName });
+        let m = null;
+        try {
+          let isDir = false;
+          try { isDir = !!(src.absPath && fs.existsSync(src.absPath) && fs.statSync(src.absPath).isDirectory()); } catch {}
+          if (isDir) {
+            // 200MB cap rather than the 20MB default: the ownership claim counts
+            // tracks, and a library's track wavs sit in the 20-60MB band the tight
+            // default would leave invisible. Same figure the guided matcher used.
+            const sets = compare.buildFontSetsFromDir(src.absPath, { maxFileBytes: 200 * 1024 * 1024 });
+            if (sets && sets.core.size) m = compare.matchAgainstLibrary(sets, index);
+          } else {
+            const mf = await soundFontSources.ensureSourceManifest(userData, r.prepared.uuid);
+            if (mf && Array.isArray(mf.records)) m = compare.matchCandidateAgainstLibrary(mf.records, '', index);
+          }
+        } catch {}
+        if (!m || !m.bestMatch) continue;
+        const label = (m.verdict === 'variant' && m.coreContainment < compare.VARIANT_DISPLAY_MIN)
+          ? null : compare.verdictLabel(m);
+        if (!label) continue;
+        r.match = {
+          label, tip: compare.verdictTip(m), matchName: m.bestMatch,
+          verdict: m.verdict, fullyOwned: compare.isFullyOwned(m),
+          // Does the library copy carry files this one does not? That is the
+          // difference between "your copy is identical" and "your copy is more
+          // complete" on the row - a fact about the CARD, not about which of our
+          // two tests happened to catch it.
+          libHasMore: (m.libCoreCount > m.cardCoreCount) || (m.libCustCount > m.cardCustCount),
+        };
+        // Move it out of the bucket it was actually counted in. A corrupt font was
+        // never added to newCount (the loop above counts it as corrupt), so
+        // decrementing newCount for one would put the breakdown out by one and it
+        // would stop summing to the total.
+        if (r.match.fullyOwned) {
+          r.owned = true; ownedCount++;
+          if (r.corrupt) corruptCount--; else newCount--;
+        }
+      }
+    }
+  } catch {}
+
+  // ── ENRICH, ALSO HERE ─────────────────────────────────────────────────────
+  // Creator detection, the font/hum preview clips, the doc list and the wav count.
+  // This used to run when the user clicked Review Import, behind its own progress
+  // bar, and quick import ran the creator half AGAIN after committing each source
+  // (see the detectVendor call in runBulkImport). Two paths, same work, twice.
+  //
+  // His test for whether moving it was worth doing: "there should be nothing other
+  // than loading a screen between the two" — so ALL of it moves, not just the half
+  // quick import shares. Analyze is already opening and reading every source to zip
+  // and hash it, so the readme reads and the preview picks ride along; review
+  // becomes a pure render with no wait at all.
+  try {
+    for (let i = 0; i < sources.length; i++) {
+      if (shouldCancel()) break;
+      const src = sources[i];
+      onProgress({ stage: 'enrich-start', sourceIdx: i, total, label: src.cleanedName || src.rawName });
+      let e = null;
+      try { e = await enrichSourceForGuided(src); } catch {}
+      if (e) {
+        const r = results.find(x => x && x.idx === i);
+        if (r) r.enrich = e;
+      }
+    }
+  } catch {}
+
+  // ── SHARED TRACKS, COUNTED THE SAME WAY ───────────────────────────────────
+  // The summary used to say "Shared tracks folder (will be imported): 1", which
+  // named a folder and described nothing. The folder is merged into the one global
+  // shared-tracks folder and only tracks you do not already have get copied — so
+  // the useful numbers are how many are new and how many you already have. Counted
+  // here by CONTENT, the same test the import itself now applies, so the summary
+  // and the outcome cannot disagree. (2026-08-31.)
+  let tracks = null;
+  try {
+    const tracksDirs = Array.isArray(plan.tracksFolders) ? plan.tracksFolders : [];
+    if (tracksDirs.length) {
+      const hashIndex = require('./soundFontSharedTracksHash');
+      const idx = hashIndex.ensureIndex(userData);
+      const wavs = [];
+      for (const t of tracksDirs) {
+        let entries = [];
+        try { entries = fs.readdirSync(t.absPath, { withFileTypes: true }); } catch {}
+        for (const e of entries) {
+          if (e.isFile() && /\.wav$/i.test(e.name)) wavs.push(path.join(t.absPath, e.name));
+        }
+      }
+      let tNew = 0, tOwned = 0, done = 0;
+      const seen = new Map();
+      // Per-track detail, not just a count. The review screen shows every track the
+      // same way it shows every font: the ones you already have are listed and
+      // unchecked, naming what they match — a card's `track3.wav` may already be in
+      // your library as `Duel_of_the_Fates.wav`, and that is worth knowing.
+      const items = [];
+      for (const w of wavs) {
+        if (shouldCancel()) break;
+        done++;
+        onProgress({ stage: 'tracks-check', done, total: wavs.length, label: path.basename(w) });
+        let h = null, size = 0;
+        try { size = fs.statSync(w).size; } catch {}
+        try { h = hashIndex.hashFile(w); } catch {}
+        let owned = false, matchName = '';
+        if (h && seen.has(h)) {
+          // The same audio twice in one batch: only the first is new.
+          owned = true; matchName = seen.get(h);
+        } else {
+          const hits = h ? hashIndex.findByHash(idx, h) : null;
+          if (hits && hits.length) { owned = true; matchName = hits[0].name || ''; }
+          if (h) seen.set(h, path.basename(w));
+        }
+        if (owned) tOwned++; else tNew++;
+        items.push({ absPath: w, name: path.basename(w), size, owned, matchName });
+      }
+      tracks = { total: wavs.length, new: tNew, owned: tOwned, items };
+    }
+  } catch {}
+
   onProgress({ stage: 'done', total });
-  return { ok: true, results, stats: { total, new: newCount, duplicate: dupCount, corrupt: corruptCount } };
+  // `duplicate` is kept for callers that still distinguish the archive-hash hit;
+  // `owned` is the number the user is shown, because the distinction between the
+  // two tests is ours, not theirs.
+  return { ok: true, results, stats: { total, new: newCount, owned: ownedCount, duplicate: dupCount, corrupt: corruptCount, tracks } };
 }
 
 // Discard prepared-but-not-committed sources (user pruned them or cancelled).
@@ -637,6 +821,12 @@ async function importPlannedSource({ userData, src, fromSdCard }, onSubProgress)
       originalName,
       metadata: {},
       stripCorrupt: !!src._corrupt,
+      // The user checked a row we had already marked as owned, so they mean it.
+      // Without this, importSource would spot the identical hash and skip — which
+      // would make the review screen the one place in the app that refuses to take
+      // a second copy, when the single-import path happily gives you one with a new
+      // number. Consistency wins. (2026-08-31, his call.)
+      forceNewSource: !!src._duplicate,
       onProgress: (p) => onSubProgress && onSubProgress({ phase: 'import', ...p }),
     });
     if (!importRes || !importRes.ok) {
@@ -657,11 +847,25 @@ async function importPlannedSource({ userData, src, fromSdCard }, onSubProgress)
   // nested-zip bundle drilling internally so this single call covers
   // both Kyberphonic-style bundle-of-inner-zips and ordinary single-zip
   // shapes.
+  // Reuse what analyze already found. Detection opens the source and reads its
+  // readmes; analyze does exactly that for every font before the summary screen,
+  // so doing it again here was the same work twice on the quick path — the same
+  // shape as the ownership match running after commit. Only fall back when analyze
+  // did not run (the legacy one-shot path). (2026-08-31.)
   let vendorRes = null;
-  try {
-    const sourceObj = soundFontSources.openSource(userData, sourceUuid);
-    if (sourceObj) vendorRes = await soundFontVendors.detectVendor(sourceObj);
-  } catch {}
+  if (src._enrich && (src._enrich.vendor || src._enrich.vendorWebsite)) {
+    vendorRes = {
+      vendor: src._enrich.vendor,
+      confidence: src._enrich.vendorConfidence,
+      vendorWebsite: src._enrich.vendorWebsite,
+      purchasedDefault: src._enrich.purchasedDefault,
+    };
+  } else if (!src._enrich) {
+    try {
+      const sourceObj = soundFontSources.openSource(userData, sourceUuid);
+      if (sourceObj) vendorRes = await soundFontVendors.detectVendor(sourceObj);
+    } catch {}
+  }
   const detectedVendor = vendorRes && vendorRes.vendor ? vendorRes.vendor : null;
   const detectedConfidence = vendorRes && vendorRes.confidence ? vendorRes.confidence : null;
   const detectedWebsite = vendorRes && vendorRes.vendorWebsite ? vendorRes.vendorWebsite : null;
@@ -1080,6 +1284,10 @@ async function enrichSourceForGuided(src) {
     out.wavCount = entries.reduce((n, e) => n + (!e.isDir && /\.wav$/i.test(e.fileName) ? 1 : 0), 0);
     for (const e of entries) {
       if (e.isDir) continue;
+      // `._readme.txt` and friends are AppleDouble sidecars, not documents. They
+      // are already excluded from hashing and from the import; the doc list was
+      // the one place they still reached the screen. (2026-08-31.)
+      if (isNoiseName(e.fileName.split('/').pop())) continue;
       if (/\.(txt|md|nfo|rtf)$/i.test(e.fileName) || /(^|\/)read\s?me/i.test(e.fileName)) {
         out.textFiles.push({
           fileName: e.fileName,

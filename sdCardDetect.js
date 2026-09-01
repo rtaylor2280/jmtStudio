@@ -118,7 +118,25 @@ const NON_FONT_DIRS = new Set([
   'system volume information', 'set', 'common', 'tracks', 'poweron', 'all-lightfile',
   'sd config', '$recycle.bin', 'found.000',
 ]);
-const FAKE_MARKER_RX = /【|attention\s*please|警告|注意/i;
+// Folders left on a card by whoever preloaded it - a seller's note, usually
+// CJK-bracketed and often called "attention please". They are NOT fonts, so they
+// are skipped by the font count and the import scan. That is the whole of it.
+//
+// ⚠️ IT USED TO BE CALLED VENDOR_NOTE_DIR_RX AND DROVE A "this card shows signs of
+// being counterfeit" VERDICT. Removed 2026-08-31, his call: "not sure where we
+// decided to call this counterfeit. and we are not even testing." He was right on
+// both counts. The app performs NO capacity test anywhere, and a folder name is a
+// property of whoever last wrote to the card, not of the card - copy that folder
+// onto a genuine SanDisk and it would have been accused too. Asserting counterfeit
+// about hardware someone paid for, on that evidence, is the app stating something
+// it cannot show.
+// The contrast that settles it, and it is the standard to hold: [B-214] refuses
+// executables by reading `MZ` out of the file. That is a fact about the bytes. This
+// was an inference about a vendor. Assert the consequence you can prove, never the
+// identity you inferred (ui-conventions, 2026-08-28).
+// Do NOT reintroduce a verdict here. If fake capacity is ever worth answering, it
+// takes a write-verify pass over the whole card, and nothing less.
+const VENDOR_NOTE_DIR_RX = /【|attention\s*please|警告|注意/i;
 
 function safeReaddir(p) {
   try { return fs.readdirSync(p, { withFileTypes: true }); }
@@ -146,7 +164,7 @@ function classifyCard(vol) {
   // Font-folder categories (per soundboard-sd-signatures.md).
   const numberedDirs = dirNames.filter(n => /^\d+$/.test(n));            // Xeno/SN/TXQ: 1/ 2/ 3/
   const nNameDirs    = dirNames.filter(n => /^\d+-\S/.test(n));          // CFX: 1-Graflex/
-  const namedFontDirs = dirNames.filter(n => !NON_FONT_DIRS.has(n.toLowerCase()) && !/^\d+$/.test(n) && !/^\d+-/.test(n) && !FAKE_MARKER_RX.test(n));
+  const namedFontDirs = dirNames.filter(n => !NON_FONT_DIRS.has(n.toLowerCase()) && !/^\d+$/.test(n) && !/^\d+-/.test(n) && !VENDOR_NOTE_DIR_RX.test(n));
   const provenProffieFonts = namedFontDirs.filter(n => looksLikeProffieFontDir(path.join(vol.mountPath, n))).length;
 
   // Proffie common/ voicepack: known voicepack sounds OR e_*.wav error files.
@@ -171,7 +189,6 @@ function classifyCard(vol) {
   const meaningfulDirs = dirNames.filter(n => !NON_FONT_DIRS.has(n.toLowerCase()));
   const meaningfulFiles = files.filter(f => f.name.toLowerCase() !== SIDECAR_NAME);
   const isEmpty = meaningfulDirs.length === 0 && meaningfulFiles.length === 0 && numberedDirs.length === 0;
-  const fakeMarker = dirNames.find(n => FAKE_MARKER_RX.test(n)) || null;
 
   // Counts for the report. Font folders = any top-level dir (minus system dirs)
   // that is a Proffie font: it holds .wav files DIRECTLY (flat layout) OR it
@@ -193,7 +210,7 @@ function classifyCard(vol) {
   // summary count and the import scan agree.
   const CORE_EFFECT_FILE = /^(boot|hum|font)\d*\.wav$/i;
   const fontFolders = dirNames.filter(n => {
-    if (NON_FONT_DIRS.has(n.toLowerCase()) || FAKE_MARKER_RX.test(n)) return false;
+    if (NON_FONT_DIRS.has(n.toLowerCase()) || VENDOR_NOTE_DIR_RX.test(n)) return false;
     const ents = safeReaddir(path.join(vol.mountPath, n));
     if (ents.__error) return false;
     if (ents.some(e => e.isFile() && CORE_EFFECT_FILE.test(e.name))) return true;
@@ -235,7 +252,7 @@ function classifyCard(vol) {
     kind, confidence,
     counts: { fonts: fontFolders, configs: configFiles, otherFiles },
     contentTypes, mixed,
-    signals: { matched, namedFontDirs: namedFontDirs.length, numberedFontDirs: numberedDirs.length, nNameDirs: nNameDirs.length, provenProffieFonts, fakeCapacityMarker: fakeMarker },
+    signals: { matched, namedFontDirs: namedFontDirs.length, numberedFontDirs: numberedDirs.length, nNameDirs: nNameDirs.length, provenProffieFonts },
   };
 }
 
@@ -248,7 +265,6 @@ function buildVerdict(card) {
   const noun = card.isFolder ? 'folder' : 'card';
   if (kind === 'unreadable') return { level: 'bad', headline: `This ${noun} couldn't be read.`, detail: 'It may be damaged or not seated properly. Try re-inserting it, or a different reader.' };
   if (card.health && card.health !== 'Healthy') return { level: 'bad', headline: 'This card reports a health warning.', detail: 'Your computer flags this card as unhealthy, which can mean its files are corrupted. Inspect them before relying on it, and if they are damaged, reformat the card and repopulate it with known-good data before use rather than trusting what is on it now.' };
-  if (cls.signals && cls.signals.fakeCapacityMarker) return { level: 'bad', headline: `This ${noun} shows signs of being counterfeit.`, detail: 'It carries markers common to fake-capacity cards. Verify it before relying on it.' };
   if (kind === 'empty') return { level: 'good', headline: `This ${noun} is empty.`, detail: 'There is nothing on it to import yet.' };
   if (kind === 'proffie') {
     const headline = card.isFolder ? 'These look like Proffie fonts.' : 'This is a Proffie card.';
@@ -275,7 +291,6 @@ function assessCard(vol) {
   const warnings = [];
   if (vol.health && vol.health !== 'Healthy') warnings.push(`OS health: ${vol.health}`);
   if (identity.vsnDegenerate && !vol.isFolder) warnings.push('degenerate volume serial (identity cannot rely on VSN)');
-  if (classification.signals && classification.signals.fakeCapacityMarker) warnings.push(`possible counterfeit marker: "${classification.signals.fakeCapacityMarker}"`);
   const card = { ...vol, volumeSerialFmt: formatVsn(vol.volumeSerial), identity, classification, warnings };
   card.verdict = buildVerdict(card);
   return card;
@@ -679,7 +694,7 @@ async function analyzeFonts(dirPath) {
   const fonts = [];
   for (const e of ents) {
     if (!e.isDirectory()) continue;
-    if (NON_FONT_DIRS.has(e.name.toLowerCase()) || FAKE_MARKER_RX.test(e.name)) continue;
+    if (NON_FONT_DIRS.has(e.name.toLowerCase()) || VENDOR_NOTE_DIR_RX.test(e.name)) continue;
     const full = path.join(dirPath, e.name);
     if (!looksLikeProffieFontDir(full)) continue;
     const inner = safeReaddir(full);
