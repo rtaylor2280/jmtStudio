@@ -77,7 +77,12 @@ function _uniqueName(root, desired) {
   throw new Error('Could not find a non-colliding filename');
 }
 
-function addFiles(userData, sourceFilePaths) {
+// `onFileProgress({ done, total, name })` is OPTIONAL and fires once per file.
+// Without it the caller can only report at FOLDER level, which on a tracks-only
+// import means one unit of work: the bar sits at 0 and jumps to done, so a real
+// copy of hundreds of megabytes looks like nothing is happening. (Ryan spotted it
+// 2026-09-01: "might be doing the whole folder level rather than the files".)
+function addFiles(userData, sourceFilePaths, onFileProgress) {
   if (!Array.isArray(sourceFilePaths) || sourceFilePaths.length === 0) {
     return { ok: false, error: 'No files supplied' };
   }
@@ -100,7 +105,14 @@ function addFiles(userData, sourceFilePaths) {
   let _index = null;
   try { _index = hashIndex.ensureIndex(userData); } catch {}
   const duplicates = [];
+  const _total = sourceFilePaths.length;
+  let _done = 0;
   for (const entry of sourceFilePaths) {
+    _done++;
+    if (typeof onFileProgress === 'function') {
+      const _n = (entry && typeof entry === 'object') ? (entry.name || entry.path) : entry;
+      try { onFileProgress({ done: _done, total: _total, name: path.basename(String(_n || '')) }); } catch {}
+    }
     // Either a path, or { path, name } when the caller has a name to land it under.
     // Bulk import's review lets the user rename a track before it is copied, and
     // that is the only moment the name can carry any context: this folder is one

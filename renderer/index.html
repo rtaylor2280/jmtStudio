@@ -6111,10 +6111,10 @@
     <div class="sf-import-phase" id="sf-bulk-import-phase-review" style="display:none">
       <p class="sf-import-hint" id="sf-bulk-import-review-summary"></p>
       <div id="sf-bulk-import-review-breakdown" class="sf-bulk-review-breakdown"></div>
-      <p class="sf-import-hint" style="color: var(--c-text-muted); margin: 10px 0 5px;">
+      <p class="sf-import-hint" id="sf-bulk-import-review-quickline" style="color: var(--c-text-muted); margin: 10px 0 5px;">
         <strong>Quick import</strong> adds the ready ones now, with the names and creators we detected. Anything we couldn't identify comes in with a <span style="color: var(--jmt-amber, #d49b3a)">Needs review</span> flag to fix later.
       </p>
-      <p class="sf-import-hint" style="color: var(--c-text-muted); margin: 0 0 8px;">
+      <p class="sf-import-hint" id="sf-bulk-import-review-reviewline" style="color: var(--c-text-muted); margin: 0 0 8px;">
         <strong>Review import</strong> lets you rename, set creators, add a demo link, preview the sound, and pick exactly which fonts to add.
       </p>
       <p class="sf-import-hint" id="sf-bulk-import-review-note" style="color: var(--c-text-muted); margin: 0;">
@@ -9777,7 +9777,7 @@ async function _sdRenderBrowse() {
     // version of "Import fonts to library"). The scan treats a lone font
     // folder as a single source, so it lands in the same import flow.
     if (e.isDir) {
-      el.addEventListener('contextmenu', (ev) => {
+      el.addEventListener('contextmenu', async (ev) => {
         ev.preventDefault();
         const menu = document.getElementById('preset-ctx-menu');
         if (!menu) return;
@@ -9786,23 +9786,69 @@ async function _sdRenderBrowse() {
         const item = document.createElement('div');
         item.className = 'preset-ctx-item';
         const corrupt = _health && _health.dirs && _health.dirs[e.name];
-        if (corrupt) {
-          // A single corrupted font can't be imported on its own: there's no
-          // review step to drop the damaged file, and reading it can stall the
-          // zip. (Corrupt fonts import fine ALONGSIDE others — unchecked in the
-          // guided review.) Offer nothing actionable here, just explain why.
-          item.textContent = 'Corrupted font: fix the damaged file(s) first';
-          item.style.opacity = '0.55';
-          item.style.cursor = 'default';
-        } else {
-          item.textContent = 'Import to Sound Font Library';
-          item.addEventListener('mousedown', (mev) => { mev.stopPropagation(); menu.style.display = 'none'; menu.style.minWidth = ''; _sdImportFolderToLibrary(e); });
+        // ⚠️ THE MENU IS BUILT AFTER WE KNOW WHAT THE FOLDER IS, never before.
+        // Offering "Import to Sound Font Library" on a folder holding no fonts walked
+        // the user through a required Creator field on a form that could never be
+        // submitted. [B-280] Same rule the Adopt collision check taught: do not render
+        // an actionable control before the answer is in.
+        // A token guards the shared menu element — a second right-click while a check
+        // is in flight must not be overwritten by the first one landing late.
+        const token = (_sdReport._ctxToken = (_sdReport._ctxToken || 0) + 1);
+        const stale = () => token !== _sdReport._ctxToken;
+        const place = () => {
+          const mw = menu.offsetWidth || 220;
+          menu.style.left = Math.min(ev.clientX, window.innerWidth - mw - 8) + 'px';
+          menu.style.top = Math.min(ev.clientY, window.innerHeight - 60) + 'px';
+          menu.style.display = 'block';
+        };
+        const disabledItem = (text) => {
+          const d = document.createElement('div');
+          d.className = 'preset-ctx-item';
+          d.textContent = text;
+          d.style.opacity = '0.55';
+          d.style.cursor = 'default';
+          return d;
+        };
+        if (!corrupt) {
+          // Shown while the shape is being read. Cheap (one readdir) but not free
+          // on a slow card, and an empty menu would read as broken.
+          menu.appendChild(disabledItem('Checking this folder…'));
+          place();
+          let shape = null;
+          try {
+            const r = await window.electronAPI.sdFolderShape(e.path);
+            shape = (r && r.ok) ? r.shape : null;
+          } catch { shape = null; }
+          if (stale()) return;
+          menu.innerHTML = '';
+          if (shape === 'font') {
+            item.textContent = 'Import to Sound Font Library';
+            item.addEventListener('mousedown', (mev) => { mev.stopPropagation(); menu.style.display = 'none'; menu.style.minWidth = ''; _sdImportFolderToLibrary(e); });
+            menu.appendChild(item);
+          } else if (shape === 'tracks') {
+            item.textContent = 'Import as shared tracks';
+            item.addEventListener('mousedown', (mev) => { mev.stopPropagation(); menu.style.display = 'none'; menu.style.minWidth = ''; _sdImportTracksFolder(e); });
+            menu.appendChild(item);
+          } else if (shape === 'common') {
+            // Common folders have their own import path elsewhere; saying so is
+            // better than offering a font import that will find nothing.
+            menu.appendChild(disabledItem('Shared "common" folder, not a sound font'));
+          } else if (shape === 'other') {
+            menu.appendChild(disabledItem('No sound fonts or tracks in this folder'));
+          } else {
+            menu.appendChild(disabledItem('Could not read this folder'));
+          }
+          place();
+          return;
         }
-        menu.appendChild(item);
-        const mw = menu.offsetWidth || 220;
-        menu.style.left = Math.min(ev.clientX, window.innerWidth - mw - 8) + 'px';
-        menu.style.top = Math.min(ev.clientY, window.innerHeight - 60) + 'px';
-        menu.style.display = 'block';
+        // A single corrupted font can't be imported on its own: there's no review
+        // step to drop the damaged file, and reading it can stall the zip. (Corrupt
+        // fonts import fine ALONGSIDE others — unchecked in the guided review.)
+        // Offer nothing actionable, just say why — this is the pattern the three
+        // cases above follow. (Ryan, 2026-09-01: "the fix first thing is the pattern.")
+        // No shape check needed: corruption is already known from the card scan.
+        menu.appendChild(disabledItem('Corrupted font: fix the damaged file(s) first'));
+        place();
       });
     }
     if (!(e.isDir || e.isText || isAud(e.name) || isImg(e.name))) return;
@@ -9857,6 +9903,23 @@ async function _sdRenderBrowse() {
 // Scoped import: scan just the picked folder (a lone font folder = one source)
 // and run it through the same import flow. Mirrors _sdImportFontsFromCard's
 // step-aside-and-restore dance so the SD browser comes back on close.
+// Import ONE folder of loose wavs as shared tracks. [B-281]
+// His shape: "a similar process as full import but limited to just that folder
+// instead of the whole card." So this is not a second screen — it is the SAME
+// review, handed a plan whose only bucket is tracksFolders. `showReview` already
+// takes a prebuilt plan, and tracksFolders is already its own bucket, so nothing
+// new has to be scanned or rendered.
+function _sdImportTracksFolder(entry) {
+  if (!entry || !entry.path) return;
+  if (!window._sfTracksImportFromPath) {
+    promptConfirm({ title: 'Importer unavailable', message: 'The track importer could not be reached.', confirmText: 'OK', confirmKind: 'primary', hideCancel: true });
+    return;
+  }
+  const sdOv = document.getElementById('sd-report-overlay');
+  if (sdOv) sdOv.classList.remove('active');
+  window._sfReturnToSdBrowser = true;
+  window._sfTracksImportFromPath(entry.path, entry.name);
+}
 function _sdImportFolderToLibrary(entry) {
   if (!entry || !entry.path) return;
   // A single folder is NOT a bulk import — route it through the normal
@@ -11677,7 +11740,11 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
   // (set once for all its fonts); rows keep only per-font fields. Blank-vendor
   // fonts collect in a "Needs a vendor" group (the review one).
   const _regroupByVendor = () => {
-    if (!guidedRows.length) return;
+    // ⚠️ THE SHARED-TRACKS SECTION IS BUILT AT THE BOTTOM OF THIS FUNCTION, so
+    // bailing on "no font rows" skipped it too and a tracks-only review opened
+    // completely empty. Grouping by vendor is a font concept; rendering the list is
+    // not. [B-281]
+    if (!guidedRows.length && !(currentPlan && currentPlan.tracksFolders && currentPlan.tracksFolders.length)) return;
     const groups = new Map();
     for (const row of guidedRows) {
       const v = String((row.enriched && row.enriched.vendor) || '').trim();
@@ -11802,7 +11869,11 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       // a second expander gave it a different arrow and a different feel on a screen
       // whose whole point is consistency.
       const items = (_tk && Array.isArray(_tk.items)) ? _tk.items : [];
-      tsec.className = 'g-group' + (items.length ? ' collapsed' : '');
+      // Collapsed by default when it sits under a list of fonts — it is a footnote
+      // there. On a TRACKS-ONLY import it is the entire screen, and a screen whose
+      // only content is collapsed shows nothing at all. [B-281]
+      const _tracksAreTheWholeScreen = !guidedRows.length;
+      tsec.className = 'g-group' + ((items.length && !_tracksAreTheWholeScreen) ? ' collapsed' : '');
       tsec.innerHTML =
         `<div class="g-group-header">`
         + (items.length ? `<button type="button" class="g-group-toggle" title="Collapse or expand"></button>` : '')
@@ -12038,7 +12109,15 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
   };
 
   const openGuided = () => {
-    if (!currentPlan || !currentPlan.sources || !currentPlan.sources.length) return;
+    // ⚠️ "No fonts" is not "nothing to review". A tracks-only plan has zero sources
+    // and is entirely reviewable — that IS the review it came for. This guard
+    // returned silently, so Review looked dead. Everything below iterates
+    // currentPlan.sources, which is simply empty here, and the tracks section is
+    // rendered by _regroupByVendor off tracksFolders. [B-281]
+    if (!currentPlan) return;
+    const _srcCount = (currentPlan.sources || []).length;
+    const _trkCount = (currentPlan.tracksFolders || []).length;
+    if (!_srcCount && !_trkCount) return;
     const total = currentPlan.sources.length;
     _guidedSharedTagList = [];
     _guidedWireTagBar();
@@ -12179,13 +12258,22 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     // with 59 fonts you can commit the whole import without ever learning tracks
     // were in it. One sentence, and the link goes there. (Ryan, 2026-09-01.)
     const _tracksIncluded = !!(currentPlan && currentPlan.tracksFolders && currentPlan.tracksFolders.length);
-    els.guidedSummary.innerHTML =
-      `Reviewing <strong>${_gTotal}</strong> font${_gTotal === 1 ? '' : 's'}. Skipped items are unchecked. `
-      + `Check or uncheck any, fix names or creators, preview the sound, then <strong>Import</strong>. `
-      + `Each becomes its own source.`
-      + (_tracksIncluded
-          ? ` Shared tracks from this card are included, <button type="button" id="sf-guided-tracks-jump" class="g-tracks-jump">listed below the fonts</button>.`
-          : '');
+    // ⚠️ TRACKS CARRY NO TAGS AND NO CREATOR. (Ryan, 2026-09-01: "there are no tags
+    // on tracks so can't completely reuse... slightly different.") On a tracks-only
+    // import the whole font apparatus is meaningless, so the tag bar is hidden and
+    // the copy stops talking about fonts, sources and creators. [B-281]
+    const _tracksOnly = _gTotal === 0 && _tracksIncluded;
+    const _tagbar = document.getElementById('sf-bulk-guided-tagbar');
+    if (_tagbar) _tagbar.style.display = _tracksOnly ? 'none' : '';
+    els.guidedSummary.innerHTML = _tracksOnly
+      ? `Reviewing the shared tracks in <strong>${escapeHtml(currentPlan._displayRoot || 'this folder')}</strong>. `
+        + `The ones you already have are unchecked. Check or uncheck any, fix names, preview the sound, then <strong>Import</strong>.`
+      : `Reviewing <strong>${_gTotal}</strong> font${_gTotal === 1 ? '' : 's'}. Skipped items are unchecked. `
+        + `Check or uncheck any, fix names or creators, preview the sound, then <strong>Import</strong>. `
+        + `Each becomes its own source.`
+        + (_tracksIncluded
+            ? ` Shared tracks from this card are included, <button type="button" id="sf-guided-tracks-jump" class="g-tracks-jump">listed below the fonts</button>.`
+            : '');
     // Queried on click, not now: the section is built by _regroupByVendor below.
     // Expanding as well as scrolling, because it starts collapsed and landing on a
     // shut header is not what "show me" means.
@@ -12214,7 +12302,11 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     const total = plan.sources.length;
     const _fmtDurA = (s) => (window._sfFormatDuration ? window._sfFormatDuration(s) : `${Math.round(s)}s`);
     const _aT0 = Date.now();
-    if (els.progLabel) els.progLabel.textContent = `Analyzing fonts · 0 of ${total}`;
+    // A tracks-only plan has no fonts to count, so "Analyzing fonts · 0 of 0" would
+    // be both wrong and alarming. [B-281]
+    if (els.progLabel) els.progLabel.textContent = total === 0
+      ? 'Checking these tracks against your library'
+      : `Analyzing fonts · 0 of ${total}`;
     if (els.progBar) els.progBar.style.width = '0%';
     if (els.progDetail) els.progDetail.textContent = '';
     if (els.progElapsed) els.progElapsed.textContent = `${_fmtDurA(0)} elapsed`;
@@ -12288,15 +12380,60 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     return true;
   };
 
+  // The review screen's three explanatory lines, in both modes. Set explicitly
+  // either way — leaving the font copy as a silent default meant a font import
+  // opened after a tracks import would keep the tracks wording. [B-281]
+  const _setReviewExplainer = (tracksOnly) => {
+    const q = document.getElementById('sf-bulk-import-review-quickline');
+    const r = document.getElementById('sf-bulk-import-review-reviewline');
+    const n = document.getElementById('sf-bulk-import-review-note');
+    if (tracksOnly) {
+      if (q) q.innerHTML = `<strong>Quick import</strong> adds every track you do not already have, under the names shown on the card.`;
+      if (r) r.innerHTML = `<strong>Review import</strong> lets you rename them, preview the sound, and pick exactly which ones to add.`;
+      if (n) n.textContent = 'Tracks you already have are skipped, matched by content rather than by name, so a track you own under a different name still counts as owned. Review import lists them too, where you can take the card’s name for your copy.';
+      return;
+    }
+    if (q) q.innerHTML = `<strong>Quick import</strong> adds the ready ones now, with the names and creators we detected. Anything we couldn't identify comes in with a <span style="color: var(--jmt-amber, #d49b3a)">Needs review</span> flag to fix later.`;
+    if (r) r.innerHTML = `<strong>Review import</strong> lets you rename, set creators, add a demo link, preview the sound, and pick exactly which fonts to add.`;
+    if (n) n.textContent = 'Fonts you already have are skipped, both an identical archive and a copy whose sounds your library already contains. Review import shows them unchecked, so you can take one anyway; it comes in as a separate font.';
+  };
+
   const showReview = async (plan) => {
     currentPlan = plan;
     const total = plan.sources.length;
-    if (total > 0) {
+    // ⚠️ ANALYZE MUST RUN FOR A TRACKS-ONLY PLAN TOO. It is what hashes each track
+    // and decides owned / matchName / ownedIn / dupGroup — everything the review's
+    // shared-tracks section renders. Gating it on sources.length alone left a
+    // tracks import with no track data at all. [B-281]
+    const _hasTracks = !!(plan.tracksFolders && plan.tracksFolders.length);
+    if (total > 0 || _hasTracks) {
       const ok = await _runAnalyze(plan);
       if (!ok) return; // failed/cancelled — closeModal already ran
     }
     const st = plan._analyzeStats;
-    if (total === 0) {
+    if (total === 0 && _hasTracks) {
+      // A tracks-only import is a real import, not the empty case below.
+      const tk = st && st.tracks;
+      const nNew = tk ? tk.new : null;
+      els.reviewSummary.innerHTML =
+        `Shared tracks from <code>${escapeHtml(plan._displayRoot || plan.rootDir)}</code>.`;
+      const rows = [];
+      if (tk) {
+        rows.push(['New tracks', tk.new]);
+        if (tk.owned) rows.push(['Already in your library (skipped)', tk.owned]);
+      }
+      // Same markup the font path uses (br-row / br-label / br-val), not a new one.
+      els.reviewBreakdown.innerHTML = rows.map(([l, v]) =>
+        `<div class="br-row"><span class="br-label">${escapeHtml(l)}</span><span class="br-val">${v}</span></div>`).join('');
+      // ⚠️ THE THREE EXPLAINER LINES ARE FONT COPY and are static in the markup.
+      // On a tracks-only import they describe things that do not exist here: names
+      // and creators we detected, a Needs review flag, demo links, "which fonts to
+      // add", archives. Tracks have none of that. [B-281]
+      _setReviewExplainer(true);
+      // Nothing new is still worth opening — the review shows what you already have
+      // and Adopt works there — but there is nothing to commit.
+      els.startBtn.disabled = (nNew === 0);
+    } else if (total === 0) {
       els.reviewSummary.textContent = 'No sound fonts found in that folder.';
       els.reviewBreakdown.innerHTML = '';
       els.startBtn.disabled = true;
@@ -12345,12 +12482,22 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         html += `<div class="br-row" style="margin-top:8px"><span class="br-label" style="color: var(--jmt-amber)">Scan halted at depth ${6}. Pick a closer folder if you have more nested fonts.</span></div>`;
       }
       els.reviewBreakdown.innerHTML = html;
+      _setReviewExplainer(false);
       // Quick import only has something to do when there are new fonts.
       els.startBtn.disabled = !!st && st.new === 0;
     }
     showPhase('review');
     // No new fonts to review -> hide the guided entry (dups/corrupt aren't "reviewable" here).
-    if (els.reviewBtn) els.reviewBtn.style.display = (total === 0 || (st && st.new === 0 && st.corrupt === 0)) ? 'none' : '';
+    // ⚠️ `total === 0` ALSO MEANT "tracks-only", which hid Review on the one screen
+    // whose whole point is reviewing tracks. A tracks-only plan is reviewable
+    // whenever the card has tracks at all — even with nothing new, since the review
+    // is where Adopt lives and where you see what you already own. [B-281]
+    if (els.reviewBtn) {
+      const _reviewable = _hasTracks
+        ? true
+        : !(total === 0 || (st && st.new === 0 && st.corrupt === 0));
+      els.reviewBtn.style.display = _reviewable ? '' : 'none';
+    }
   };
 
   const startScan = async () => {
@@ -12433,6 +12580,39 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
   };
   window._sfBulkImportFromPaths = startScanWithPaths;
 
+  // TRACKS-ONLY IMPORT of a single folder. [B-281] No scan: we already know what
+  // this folder is (the browser's right-click menu asked sdcard:folderShape before
+  // offering the option), so the plan is constructed directly. Every downstream
+  // step — analyze's per-track hashing, the review's shared-tracks section, the
+  // duplicate radio, Adopt, the runner — reads tracksFolders and needs nothing else.
+  const startTracksImport = async (absPath, displayName) => {
+    if (!absPath) return;
+    const name = displayName || String(absPath).split(/[\\/]/).pop();
+    // ⚠️ MODAL UP FIRST, THEN THE WORK. showReview runs analyze, which hashes every
+    // wav — a couple of seconds on a real tracks folder. Activating the modal after
+    // that await meant the screen sat EMPTY for the whole pass and the summary
+    // appeared out of nowhere, with the progress phase painting into a hidden modal.
+    // startScanWithPaths gets this right (showPhase then activate, then scan); this
+    // entry point was written backwards. (Ryan saw the blank and pushed back on my
+    // "it is just too fast to see" — he was right, it was never on screen.)
+    els.modal?.classList.add('active');
+    showPhase('progress');
+    await showReview({
+      rootDir: absPath,
+      _displayRoot: name,
+      sources: [],
+      commonFolders: [],
+      tracksFolders: [{ absPath, relPath: name, name }],
+      skipped: [],
+      depthHalted: false,
+      totalSizeBytes: 0,
+      fromSdCard: true,
+      corruptFonts: null,
+      _tracksOnly: true,
+    });
+  };
+  window._sfTracksImportFromPath = startTracksImport;
+
   const runImport = async (planOverride) => {
     let runPlan = planOverride || currentPlan;
     if (!runPlan) return;
@@ -12450,7 +12630,13 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       // stamped `needsReview` after the fact — which is what made quick produce 56
       // entries where review produced 54 from the same card.
       const fresh = runPlan.sources.filter(s => s._prepared && !s._corrupt && !s._owned);
-      if (!fresh.length) { closeModal(); return; }
+      // ⚠️ NO FRESH FONTS IS NOT NOTHING TO DO. A tracks-only plan has zero sources
+      // by definition, so this closed the modal and returned — quick import looked
+      // like it silently did nothing. Commons are in the same position. Only bail
+      // when there is genuinely no work in ANY bucket. [B-281]
+      const _otherWork = ((runPlan.tracksFolders || []).length > 0)
+                      || ((runPlan.commonFolders || []).length > 0);
+      if (!fresh.length && !_otherWork) { closeModal(); return; }
       runPlan = { ...runPlan, sources: fresh };
     }
     runInFlight = true;
@@ -12566,6 +12752,19 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
           }
           renderOverallLine();
         }
+      } else if (data.stage === 'tracks-start') {
+        // Tracks are copied AFTER every font source, so on a mixed card the bar is
+        // already at 100% of the font work by now. On a tracks-only import there
+        // were no font events at all and it is still sitting at 0. Either way the
+        // track copy owns the bar from here. [B-281]
+        els.progLabel.textContent = 'Copying shared tracks…';
+      } else if (data.stage === 'tracks-progress') {
+        const t = Math.max(1, data.total || 1);
+        const pct = Math.min(100, ((data.done || 0) / t) * 100);
+        els.progBar.style.width = `${pct.toFixed(1)}%`;
+        lastOverallPct = pct;
+        els.progLabel.textContent = `Copying ${data.label || 'shared tracks'} · ${data.done} of ${t}`;
+        renderOverallLine();
       } else if (data.stage === 'done') {
         els.progBar.style.width = '100%';
         lastOverallIdx = total;
@@ -12608,9 +12807,16 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       totalVersionsSkipped += imp.versionsSkipped || 0;
       totalVariantsEmitted += imp.variantsEmitted || 0;
     }
-    text += `<strong>${sourceCount}</strong> source${sourceCount === 1 ? '' : 's'} imported`;
-    if (fontCount !== sourceCount) {
-      text += ` (<strong>${fontCount}</strong> font${fontCount === 1 ? '' : 's'})`;
+    // ⚠️ A TRACKS-ONLY IMPORT HAS NO SOURCES, and leading with "0 sources imported"
+    // puts a zero in front of the thing that actually happened. Say nothing about
+    // fonts when there were never any to import; the tracks line below carries it.
+    // [B-281]
+    const _hadFontWork = runPlan.sources.length > 0;
+    if (_hadFontWork) {
+      text += `<strong>${sourceCount}</strong> source${sourceCount === 1 ? '' : 's'} imported`;
+      if (fontCount !== sourceCount) {
+        text += ` (<strong>${fontCount}</strong> font${fontCount === 1 ? '' : 's'})`;
+      }
     }
     if (sum.skipped.length) text += `, <strong>${sum.skipped.length}</strong> already in library (skipped)`;
     if (sum.failed.length)  text += `, <strong>${sum.failed.length}</strong> failed`;
@@ -12628,14 +12834,15 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       breakdownParts.push(`<strong>${totalVersionsSkipped}</strong> older version${totalVersionsSkipped === 1 ? '' : 's'} skipped`);
     }
     if (breakdownParts.length > 0) {
-      text += `.<br>${breakdownParts.join(', ')}`;
+      // `.<br>` only separates from something already said. [B-281]
+      text += `${text ? '.<br>' : ''}${breakdownParts.join(', ')}`;
     }
     // Common folder line is separate so it stays scannable even when zero.
     const commonsImported = (sum.commonsImported || []).length;
     const commonsSkipped  = (sum.commonsSkipped  || []).length;
     const commonsFailed   = (sum.commonsFailed   || []).length;
     if (commonsImported || commonsSkipped || commonsFailed) {
-      text += '.<br>';
+      if (text) text += '.<br>';
       const parts = [];
       if (commonsImported) parts.push(`<strong>${commonsImported}</strong> common folder${commonsImported === 1 ? '' : 's'} imported`);
       if (commonsSkipped)  parts.push(`<strong>${commonsSkipped}</strong> already in library`);
@@ -12649,7 +12856,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     const tracksSkipped = sum.tracksSkipped || 0;
     const tracksFailed  = sum.tracksFailed  || 0;
     if (tracksAdded || tracksSkipped || tracksFailed) {
-      text += '.<br>';
+      if (text) text += '.<br>';
       const parts = [];
       if (tracksAdded)   parts.push(`<strong>${tracksAdded}</strong> shared track${tracksAdded === 1 ? '' : 's'} imported`);
       if (tracksSkipped) parts.push(`<strong>${tracksSkipped}</strong> already in library`);

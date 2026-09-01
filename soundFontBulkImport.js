@@ -497,7 +497,11 @@ async function runBulkImport({ plan, userData }, callbacks = {}) {
     }
     if (wavPaths.length > 0) {
       try {
-        const result = soundFontSharedTracks.addFiles(userData, wavPaths);
+        // Per-FILE progress. `tracks-start` alone is folder-level, which is one
+        // unit of work on a tracks-only import - the bar cannot move. [B-281]
+        const result = soundFontSharedTracks.addFiles(userData, wavPaths, (p) => {
+          onProgress({ stage: 'tracks-progress', done: p.done, total: p.total, label: p.name });
+        });
         if (result && result.ok) {
           summary.tracksAdded = (result.added || []).length;
           // addFiles' skipped is per-file (Invalid filename, copy error,

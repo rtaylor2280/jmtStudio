@@ -188,6 +188,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   scanPath: (p) => ipcRenderer.invoke('sdcard:scanPath', p),
   listSdDir: (p) => ipcRenderer.invoke('sdcard:listDir', p),
   sdFolderHealth: (p) => ipcRenderer.invoke('sdcard:folderHealth', p),
+  sdFolderShape: (p) => ipcRenderer.invoke('sdcard:folderShape', p),
   readSdText: (p) => ipcRenderer.invoke('sdcard:readText', p),
   readSdBytes: (p) => ipcRenderer.invoke('sdcard:readBytes', p),
   findSdConfigs: (p) => ipcRenderer.invoke('sdcard:findConfigs', p),

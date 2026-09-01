@@ -4821,6 +4821,36 @@ ipcMain.handle('sdcard:pickFolder', async () => {
 ipcMain.handle('sdcard:scanPath', (_, p) => sdCardDetect.assessPicked(p));
 ipcMain.handle('sdcard:listDir', (_, p) => sdCardDetect.listDir(p));
 ipcMain.handle('sdcard:folderHealth', (_, p) => { try { return sdCardDetect.scanFolderHealth(p); } catch { return { files: {}, dirs: {} }; } });
+// What KIND of folder is this, for the browser's right-click menu. [B-280/B-281]
+//
+// ⚠️ THE FONT TEST IS soundFontBulkImport.looksLikeProffieDir, NOT A COPY OF IT.
+// That rule already exists twice (here and in sdCardDetect.classifyCard) with
+// comments in both saying they must agree or the card count disagrees with the
+// import. A third copy in the renderer is exactly the drift being removed.
+//
+// ⚠️ THE TRACKS TEST IS DELIBERATELY BROADER THAN THE SCANNER'S. `looksLikeTracksDir`
+// matches the NAME `tracks` only, because the scanner walks a whole card unattended
+// and must not guess. Here the user has right-clicked one specific folder, so intent
+// is explicit and "holds wavs, is not a font" is the honest test. Two rules on
+// purpose.
+ipcMain.handle('sdcard:folderShape', (_, dirPath) => {
+  try {
+    if (!dirPath || !fs.existsSync(dirPath)) return { ok: false, error: 'Folder not found' };
+    if (soundFontBulkImport.looksLikeProffieDir(dirPath)) return { ok: true, shape: 'font' };
+    // ⚠️ looksLikeCommonDir takes a NAME, looksLikeProffieDir takes a PATH. Verified,
+    // not assumed — passing the path to the name-based one silently never matches.
+    if (soundFontBulkImport.looksLikeCommonDir(path.basename(dirPath))) {
+      return { ok: true, shape: 'common' };
+    }
+    let wavs = 0;
+    for (const e of fs.readdirSync(dirPath, { withFileTypes: true })) {
+      if (e.isFile() && /\.wav$/i.test(e.name)) wavs++;
+    }
+    return { ok: true, shape: wavs > 0 ? 'tracks' : 'other', wavs };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
 // The viewer is a translator, not a converter: a .docx is shown as plain text pulled
 // from its zip in memory (sdCardDetect.docxToText), never written back to disk.
 ipcMain.handle('sdcard:readText', async (_, p) => {
