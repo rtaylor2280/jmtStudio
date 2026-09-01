@@ -791,8 +791,12 @@
   .sf-entry-files-row.sd-clickable { cursor: pointer; }
   /* Corruption marks in the SD browser: red accent (not a lighter/disabled
      look) + a warning glyph, with the specific reason in the tooltip. */
-  .sf-entry-files-row.sd-corrupt .sf-entry-files-row-name { color: #e5534b; }
-  .sf-entry-files-row .sd-corrupt-mark { color: #e5534b; font-size: 0.82rem; line-height: 1; flex-shrink: 0; margin-left: 3px; cursor: help; }
+  /* Corruption is one colour everywhere: the row name, the mark beside it, and the
+     card-summary flag that stands for both. Was a hardcoded #e5534b, which is the
+     same red in both themes and goes washy on the light one; --c-danger-text is
+     #e55 on dark and #b82020 on light. */
+  .sf-entry-files-row.sd-corrupt .sf-entry-files-row-name { color: var(--c-danger-text); }
+  .sf-entry-files-row .sd-corrupt-mark { color: var(--c-danger-text); font-size: 0.82rem; line-height: 1; flex-shrink: 0; margin-left: 3px; cursor: help; }
   /* SD/guided doc viewer — reuses the SFL .sf-doc-viewer-* body styling. */
   .modal.sd-doc-modal { width: 720px; max-width: 96vw; height: min(80vh, 600px); display: flex; flex-direction: column; position: relative; padding-bottom: 16px; }
   #btn-open-empty, #btn-new-empty {
@@ -3018,9 +3022,97 @@
   @media (max-width: 720px) { .g-group-body.g-tracks { grid-template-columns: 1fr; } }
   .g-track { display: grid; grid-template-columns: 16px minmax(0, 1fr) 64px 26px; align-items: center; gap: 8px; font-size: 0.78rem; }
   .g-track.have-it-track { opacity: 0.55; }
-  .g-track-name { font: inherit; padding: 2px 6px; min-width: 0; width: 100%; }
+  /* ⚠️ NO SECOND FADE LEVEL. A deeper fade for the card-duplicate spare was tried
+     2026-09-01 and removed the same hour: the spare is TOGGLEABLE — clicking it
+     swaps which name gets imported — so fading it hardest made the only actionable
+     grey row look the most disabled. It also put a third background behind the name
+     fields, which read as inconsistent rather than as meaningful. (Ryan: "you can
+     check the dup in file to toggle the radio relationship, so that's also wrong to
+     be disabled in color... the background for the fields is inconsistent.")
+     ⚠️ AND A SECOND ROW-LEVEL OPACITY WAS ALSO WRONG, for a reason that only shows
+     up on screen: row opacity fades the FIELD too, so three opacities meant three
+     different backgrounds down one column and the section read as ragged rather
+     than as carrying meaning. (Ryan, 2026-09-01: "note that we have three different
+     background colors.")
+     SO: EVERY UNCHECKED ROW SHARES ONE BACKGROUND, and the card-duplicate
+     distinction lives in the TEXT instead — see .dup-choice below. That keeps the
+     field and the checkbox at the same level as their neighbours, so nothing reads
+     as disabled, and hover still answers on the checkbox because it is live. */
+  /* The checkbox has to fade the SAME DIRECTION as its row. These were bare native
+     inputs, so a DISABLED one painted Chromium's washed light-grey box — which in
+     the dark theme is BRIGHTER than its surroundings, so the one row that can never
+     be actioned drew the most attention. (Ryan, 2026-09-01: "checkbox goes with the
+     same fade direction.")
+     Same custom checkbox as .sf-libpick-row, for the reason written there: a
+     transparent square with a token border recedes toward whatever is behind it in
+     either theme, where a painted background can only be right in one. */
+  .g-track input[type="checkbox"] { appearance: none; -webkit-appearance: none; width: 14px; height: 14px; margin: 0; padding: 0; border: 1px solid var(--c-border-strong); border-radius: 2px; background: transparent; cursor: pointer; flex-shrink: 0; display: inline-grid; place-content: center; transition: background 0.1s, border-color 0.1s; }
+  .g-track input[type="checkbox"]:hover:not(:disabled) { border-color: var(--jmt-blue); }
+  .g-track input[type="checkbox"]:checked { background: var(--jmt-blue); border-color: var(--jmt-blue); }
+  .g-track input[type="checkbox"]:checked::before { content: ''; width: 4px; height: 8px; border: solid white; border-width: 0 2px 2px 0; transform: translateY(-1px) rotate(45deg); }
+  /* ⚠️ NO EXTRA FADE HERE, unlike .sf-libpick-row. 0.5 on a checkbox inside a row
+     already at 0.55 composites to ~0.28, so the signal erases itself on exactly the
+     rows that carry it. (Measured 2026-09-01, after Ryan could "barely" see it.)
+     The row's own opacity already says inert; the checkbox only has to stay
+     legible. Compounding opacity is the general trap: a child's fade multiplies
+     the parent's, it does not replace it. */
+  .g-track input[type="checkbox"]:disabled { cursor: default; }
+  /* ⚠️ THESE WERE UNSTYLED NATIVE INPUTS until 2026-09-01 — font and padding only,
+     no background, no colour, no border — so they rendered with Chromium's white
+     box and black text in BOTH themes. That is what made the fields read as three
+     different colours down the column: a white field faded by row opacity lands on
+     a different grey at every level. Same failure the .sf-libpick-row checkbox
+     comment describes, one control over.
+     Matched to the sibling inputs in this same modal (.sf-guided-row .g-fld input)
+     rather than invented. */
+  .g-track-name { font: inherit; padding: 2px 6px; min-width: 0; width: 100%;
+    background: var(--c-bg-raised); border: 1px solid var(--c-border-input);
+    border-radius: 3px; color: var(--c-text); outline: none; box-sizing: border-box; }
+  .g-track-name:focus { border-color: var(--jmt-blue); }
+  /* The redundant copy of an audio whose twin is already coming in: same field, same
+     checkbox, same background as every other unchecked row — only the NAME recedes
+     toward the field it sits on. (Ryan, 2026-09-01: "make the text closer in color
+     to the background it's on.") --c-text-faint is the token that does that in both
+     themes: #555 on dark, #999 on light, so it moves toward the surface either way
+     rather than always toward grey. */
+  /* The redundant copy: same field, same checkbox, same background as every other
+     unchecked row — only the NAME recedes toward the field behind it. Written as a
+     mix rather than a fixed grey so it is literally "the normal text at N%", which
+     is the dial to turn: raise the number to make it easier to see, lower it to
+     push it further back. Not `opacity`, which would take the field's background
+     with it and put the three-colour problem straight back. */
+  .g-track.dup-choice .g-track-name { color: color-mix(in srgb, var(--c-text) 35%, transparent); }
+  /* Text that acts, styled the way every other inline link in the app is: JMT blue,
+     underlined, pointer. A <button> rather than an <a href="#"> because it moves you
+     within the page, it does not navigate. */
+  .g-tracks-jump { background: none; border: none; padding: 0; font: inherit;
+    color: var(--jmt-blue); text-decoration: underline; cursor: pointer; }
   .g-track-size { text-align: right; opacity: 0.65; white-space: nowrap; font-variant-numeric: tabular-nums; }
   .g-track .g-play-chip { justify-self: end; }
+  /* Adopt lives INSIDE the name field, right-aligned, on a row you already own.
+     The field already holds the name, so a button in it reads as "adopt this name"
+     with no label to explain it. Same positioning idiom as .sf-url-input-clear. */
+  .g-track-name-wrap { position: relative; min-width: 0; display: block; }
+  /* The gutter follows whether Adopt is actually SHOWING, not whether the row
+     could ever have one. Reserving it at creation time gave Luke — owned, names
+     already matching, button hidden — an empty 50px gutter and a ragged right
+     edge against its neighbours. (His dev test, 2026-09-01.) */
+  .g-track-name-wrap.has-adopt .g-track-name { padding-right: 52px; }
+  .g-track-adopt { position: absolute; right: 3px; top: 50%; transform: translateY(-50%);
+    font: inherit; font-size: 0.68rem; line-height: 1; padding: 2px 6px; cursor: pointer;
+    border: 1px solid var(--c-border); border-radius: 3px; background: var(--c-bg);
+    color: var(--c-text-sub); opacity: 0.85; transition: opacity .1s, color .1s, border-color .1s; }
+  .g-track-adopt:hover:not(:disabled) { opacity: 1; color: var(--c-text); border-color: var(--jmt-blue); }
+  .g-track-adopt:disabled { cursor: not-allowed; opacity: 0.4; }
+  /* Undo is the same control in a different mode, so it wears the same clothes —
+     a filled blue button read as a primary action, which it is not. Only the glyph
+     changes. (His dev test, 2026-09-01.) */
+  .g-track-adopt.adopted { font-size: 0.8rem; padding: 1px 7px; }
+  /* The dimming means "not being imported", which stays true after an adopt — the
+     row is still skipped. Undimming it read as a state change that had not
+     happened. (His dev test, 2026-09-01: "the undo is also undimming the skipped
+     row.") The button carries the state; the row does not need to. */
+  /* Extension is shown but never editable — it is not a choice. */
   .g-group-vendor { flex: 0 1 200px; background: var(--c-bg-inset); border: 1px solid var(--c-border-input); border-radius: 3px; color: var(--c-text); padding: 4px 8px; font-size: 0.86rem; font-weight: 600; outline: none; }
   .g-group-vendor:focus { border-color: var(--jmt-blue); }
   .g-group-count { font-size: 0.72rem; color: var(--c-text-dim); flex-shrink: 0; }
@@ -9404,7 +9496,15 @@ function _sdLooksLikeFontRoot(entries) {
 function _sdFileHealthFlag(c) {
   const fh = c && c.fileHealth;
   if (!fh || !fh.damaged) return '';
-  return `<span style="color:var(--jmt-amber);">file corruption found</span>`;
+  // RED, MATCHING THE MARK ON THE FILE ITSELF. This was amber until 2026-09-01,
+  // while `.sd-corrupt-mark` on the actual damaged folder was red — the same
+  // finding painted two ways, with the SUMMARY looking less serious than the detail
+  // it summarises. (Ryan: "I think it should always be red.")
+  // ⚠️ It does NOT contradict a green card dot sitting beside it. The dot is the
+  // CARD and this is the FILES on it, and "a healthy card can still hold a dead
+  // file" is the whole point of that work — a green dot next to red text is the
+  // finding, not a conflict.
+  return `<span style="color:var(--c-danger-text);">file corruption found</span>`;
 }
 function _sdCardSummaryHtml(c, wide) {
   const v = c.verdict || {}, cls = c.classification || {}, ct = cls.counts || {};
@@ -11146,6 +11246,143 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
   // summary said "will be imported" and gave the user no say. (2026-08-31.)
   let _guidedTracksCb = null;
   let _guidedTrackRows = [];
+  // Every .wav already in the shared-tracks folder, lowercased. Adopt needs it to
+  // answer "is this name free" BEFORE the user commits, rather than letting
+  // renameFile refuse afterwards. His rule: better to prevent than error. [B-246]
+  // null until the fetch lands. Adopt stays DISABLED while it is null: an enabled
+  // button before we know the answer is exactly the "prevent, don't error" case.
+  let _guidedTrackLibNames = null;
+  // What the field is asking the library to be called. Shared tracks are always
+  // .wav (listFiles and renameFile both enforce it), so a user who types a bare
+  // name means the wav.
+  // ONE definition of "what this row is called", used by both consumers. The field
+  // holds a base name, but nothing stops someone typing ".wav" into it, so strip
+  // any trailing extension before re-adding exactly one. Two call sites doing this
+  // separately is how you get Fire.wav.wav in one path and Fire.wav in the other.
+  const _trackFileName = (row) => {
+    const base = String(row.nameInput?.value || '').trim().replace(/\.wav$/i, '');
+    return base ? `${base}.wav` : String(row.item.name);
+  };
+  const _adoptTarget = (row) => _trackFileName(row);
+  // ADOPT COMMITS IMMEDIATELY. (Ryan, 2026-09-01: it is a convenience tool used
+  // while examining a card, not part of the import transaction — the rename is to
+  // HIS library and does not depend on importing anything.) What the click-time
+  // commit costs is reversibility, so every row that has been changed keeps an
+  // undo in the same slot, back to the name it had when the screen opened.
+  //
+  // Recomputed for EVERY row on every keystroke and every click, because one row's
+  // name can take the name another row wanted.
+  const _refreshAdopt = () => {
+    // Names that will exist once this import commits: the new tracks coming in
+    // under the names shown. (Owned rows are already counted in the library set.)
+    const incoming = new Map();   // lowercased name -> the row claiming it
+    for (const r of _guidedTrackRows) {
+      if (!r.cb.checked || r.item.owned) continue;
+      const n = String(r.nameInput?.value || '').trim() || r.item.name;
+      incoming.set(n.toLowerCase(), r);
+    }
+    for (const r of _guidedTrackRows) {
+      const btn = r.adoptBtn;
+      const mine = r.item.matchName;
+      if (!btn || !mine) continue;
+      const target = _adoptTarget(r);
+      const same = target.toLowerCase() === String(mine).toLowerCase();
+      const changed = String(mine).toLowerCase() !== String(r.origName || mine).toLowerCase();
+
+      // Three states, and every one of them is reachable:
+      //   field ≠ library name              -> Adopt
+      //   they agree, but this row changed  -> undo, back to the original
+      //   they agree and nothing changed    -> nothing to offer, hidden
+      const showing = (!same || changed);
+      btn.style.display = showing ? '' : 'none';
+      // Reserve the gutter only while the button is actually there.
+      btn.parentElement?.classList.toggle('has-adopt', showing);
+      if (r.busy) { btn.disabled = true; btn.title = 'Working…'; continue; }
+
+      if (same && changed) {
+        btn.classList.add('adopted');
+        btn.disabled = false;
+        btn.textContent = '↺';
+        btn.title = `Rename your copy back to ${r.origName}`;
+      } else if (!same) {
+        const claimedBy = incoming.get(target.toLowerCase());
+        const libKnown = _guidedTrackLibNames instanceof Set;
+        const takenByLibrary = libKnown
+          && _guidedTrackLibNames.has(target.toLowerCase())
+          && target.toLowerCase() !== String(mine).toLowerCase();
+        const takenByBatch = claimedBy && claimedBy !== r;
+        const badName = !_guidedNameOk(target.replace(/\.wav$/i, ''));
+        btn.classList.remove('adopted');
+        btn.textContent = 'Adopt';
+        if (!libKnown) {
+          btn.disabled = true;
+          btn.title = 'Checking your library…';
+        } else if (badName) {
+          btn.disabled = true;
+          btn.title = 'That name cannot be used for a file.';
+        } else if (takenByLibrary) {
+          btn.disabled = true;
+          btn.title = `Another track in your library is already called ${target}.`;
+        } else if (takenByBatch) {
+          btn.disabled = true;
+          btn.title = `Another track in this import is coming in as ${target}.`;
+        } else {
+          btn.disabled = false;
+          btn.title = `Rename your copy (${mine}) to ${target} now.`;
+        }
+      }
+      // A row whose library copy was renamed is no longer just a skip.
+      r.cb.title = same
+        ? 'Already in your library'
+        : `Already in your library as ${mine}`;
+    }
+  };
+  // The one place a shared track is renamed from this screen. Keeps the local
+  // library-name set and the row's own matchName in step with the disk, so the
+  // collision test stays true for every later keystroke without re-fetching.
+  const _adoptRename = async (row, from, to) => {
+    if (!from || !to || String(from).toLowerCase() === String(to).toLowerCase()) return;
+    row.busy = true; _refreshAdopt();
+    try {
+      const res = await window.electronAPI.sharedTracksRenameFile({ oldName: from, newName: to });
+      if (res && res.ok === false) {
+        // The enabled state was painted from a snapshot; the write happens later.
+        // Anything that changed the folder in between (another row's adopt, an undo,
+        // a sweep outside the app) makes them disagree, so a refusal is the moment
+        // to re-read the truth rather than keep offering the same impossible action.
+        try {
+          const lr = await window.electronAPI.sharedTracksListFiles();
+          const list = (lr && lr.ok && lr.files) || null;
+          _guidedTrackLibNames = Array.isArray(list)
+            ? new Set(list.map(f => String(f && f.name || f).toLowerCase()))
+            : null;
+        } catch { _guidedTrackLibNames = null; }
+        try { await promptError?.('Could not rename', `${from} → ${to}: ${res.error || 'unknown error'}`); } catch {}
+        return;
+      }
+      const landed = (res && res.newName) || to;   // renameFile sanitises; trust what it wrote
+      if (!row.origName) row.origName = from;
+      // ⚠️ EVERY ROW THAT NAMED THAT FILE HAS TO LEARN THE NEW NAME, not just the
+      // one clicked. A card holding the same audio twice gives TWO rows the same
+      // matchName, and both legitimately offer to rename it — but after the first
+      // rename the second still pointed at a file that no longer exists, so its
+      // Adopt failed with "source file not found". Same class as the bug that
+      // surfaced this feature on the first dev test. (Ryan spotted the overlap
+      // 2026-09-01.) Their own origName is untouched, so each still undoes to the
+      // name the screen opened with.
+      _guidedTrackRows
+        .filter(r => r.item.matchName === from)
+        .forEach(r => { r.item.matchName = landed; });
+      if (_guidedTrackLibNames instanceof Set) {
+        _guidedTrackLibNames.delete(String(from).toLowerCase());
+        _guidedTrackLibNames.add(String(landed).toLowerCase());
+      }
+    } catch (err) {
+      try { await promptError?.('Could not rename', `${from} → ${to}: ${String(err && err.message || err)}`); } catch {}
+    } finally {
+      row.busy = false; _refreshAdopt();
+    }
+  };
   const _updateGuidedCount = () => {
     const n = guidedRows.filter(r => r.checkbox && r.checkbox.checked && !r.nameInput.classList.contains('invalid')).length;
     if (els.guidedImportBtn) {
@@ -11583,15 +11820,61 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         const cb = document.createElement('input');
         cb.type = 'checkbox';
         cb.checked = !it.owned;
-        if (it.owned) {
-          cb.title = it.matchName
-            ? `Already in your library as ${it.matchName}`
-            : 'Already in your library';
+        // ⚠️ A TRACK YOU ALREADY OWN CANNOT BE IMPORTED AGAIN. (Ryan, 2026-09-01.)
+        // The rule behind it, and it is why fonts differ: A DUPLICATE IS ONLY WORTH
+        // ALLOWING WHERE DIVERGENCE IS POSSIBLE. A duplicated FONT can be made
+        // different — you change which sounds it uses — so importing one is a real
+        // choice. "We don't edit wav files in app... so there is no need for
+        // duplicate. None." A second copy of a wav is identical forever, in a flat
+        // folder, costing disk for nothing. Adopt is how you get the card's NAME
+        // without the copy, which is what people actually wanted here.
+        // Batch twins stay enabled — that pair is a radio, not a block.
+        if (it.ownedIn === 'library') {
+          cb.disabled = true;
         }
+        if (it.owned) {
+          // ownedIn distinguishes "your library already has this" from "the same
+          // audio appears twice on THIS CARD". Saying "already in your library" for
+          // the second is untrue — the library has never seen either copy. [B-246]
+          cb.title = it.ownedIn === 'batch'
+            ? `The same audio as ${it.matchName} on this card`
+            : (it.matchName ? `Already in your library as ${it.matchName}` : 'Already in your library');
+        }
+        const nmWrap = document.createElement('div');
+        nmWrap.className = 'g-track-name-wrap';
         const nm = document.createElement('input');
         nm.type = 'text';
-        nm.value = it.name;
+        // THE FIELD HOLDS THE BASE NAME ONLY; ".wav" is rendered beside it and is
+        // not editable. A shared track is always a wav — listFiles and renameFile
+        // both enforce it — so the extension was never a choice, and letting it be
+        // typed only allowed names the backend would refuse. (His dev test,
+        // 2026-09-01: "fine to show it, but when editing, the extension shouldn't
+        // be editable.") Every consumer re-appends it: _adoptTarget and _picked.
+        nm.value = String(it.name).replace(/\.wav$/i, '');
         nm.className = 'g-track-name';
+        nmWrap.appendChild(nm);
+        // NO ".wav" SHOWN. It was rendered beside the field for one revision and
+        // earned nothing: every file in this section is a wav by definition
+        // (listFiles only returns .wav, renameFile refuses anything else), so it is
+        // four characters that can never differ, on every row, in a narrow field.
+        // Not editable and not displayed is strictly better than displayed-but-
+        // frozen. (Ryan, 2026-09-01: "how necessary is .wav anyway if we're doing it
+        // like this?") The field holds the base name; _trackFileName adds the rest.
+        // ADOPT — only ever on a row you already own, and only while the two names
+        // disagree. It does NOT mean "take the card's name": it means "make my
+        // library match this field", which is why it is driven by the field as the
+        // user types and not by it.matchName. [B-246]
+        let adoptBtn = null;
+        // Only a LIBRARY match can be adopted — there is nothing on disk to rename
+        // when the twin is another file on the same card. [B-246]
+        if (it.owned && it.matchName && it.ownedIn !== 'batch') {
+          adoptBtn = document.createElement('button');
+          adoptBtn.type = 'button';
+          adoptBtn.className = 'g-track-adopt';
+          adoptBtn.textContent = 'Adopt';
+          adoptBtn.tabIndex = -1;
+          nmWrap.appendChild(adoptBtn);
+        }
         const sz = document.createElement('span');
         sz.className = 'g-track-size';
         sz.textContent = window._sfFormatBytes ? window._sfFormatBytes(it.size || 0) : '';
@@ -11605,9 +11888,36 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
           const dir = String(it.absPath).replace(/[\/][^\/]*$/, '');
           try { window._sfQuickPlay && window._sfQuickPlay({ kind: 'path', id: dir, subPath: it.name, chipEl: play }); } catch {}
         });
-        wrap.appendChild(cb); wrap.appendChild(nm); wrap.appendChild(sz); wrap.appendChild(play);
+        wrap.appendChild(cb); wrap.appendChild(nmWrap); wrap.appendChild(sz); wrap.appendChild(play);
         body.appendChild(wrap);
-        _guidedTrackRows.push({ item: it, cb, nameInput: nm });
+        // origName is the library's name for this track when the screen opened.
+        // Undo always returns here, however many times the row was adopted, so a
+        // second adopt refines the destination without losing the way back.
+        const row = { item: it, cb, nameInput: nm, adoptBtn, rowEl: wrap, origName: null, busy: false };
+        _guidedTrackRows.push(row);
+        if (adoptBtn) {
+          adoptBtn.addEventListener('click', async (ev) => {
+            ev.preventDefault(); ev.stopPropagation();
+            if (row.busy) return;
+            const mine = row.item.matchName;
+            const target = _adoptTarget(row);
+            const same = target.toLowerCase() === String(mine).toLowerCase();
+            if (same && row.origName) {
+              // Undo puts the LIBRARY back, and the field back to the CARD's name —
+              // not the library's. Restoring the library name into the field left
+              // the two agreeing, so Adopt stayed hidden and the row could never be
+              // adopted again. (His dev test, 2026-09-01.) The field is the card's
+              // side of the disagreement; that is what it is there to show.
+              const back = row.origName;
+              await _adoptRename(row, mine, back);
+              if (row.item.matchName === back) { row.origName = null; nm.value = String(row.item.name).replace(/\.wav$/i, ''); }
+              _refreshAdopt();
+            } else if (!same) {
+              await _adoptRename(row, mine, target);
+            }
+          });
+          nm.addEventListener('input', _refreshAdopt);
+        }
       }
       tsec.querySelector('.g-group-toggle')?.addEventListener('click', () => tsec.classList.toggle('collapsed'));
       els.guidedList.appendChild(tsec);
@@ -11620,14 +11930,84 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         _guidedTracksCb.checked = _guidedTrackRows.some(r => r.cb.checked);
         _updateGuidedCount();
       };
-      _guidedTrackRows.forEach(r => r.cb.addEventListener('change', syncHead));
+      // ONE DECISION PER PIECE OF AUDIO. Rows sharing a dupGroup are the same bytes
+      // under different names on the same card, so they behave as a radio: checking
+      // one clears its twins and takes the dimming with it. Two independent
+      // checkboxes could express "import both", which puts two identical files in a
+      // flat folder under two names — not a choice anyone wants, and it made the
+      // one real question ("which name?") harder to answer. (Ryan, 2026-09-01:
+      // "they are byte identical. I see no use case and the opposite is confusing.")
+      // ⚠️ THE DUP RADIO ONLY EXISTS FOR ROWS THAT CAN ACTUALLY BE IMPORTED.
+      // When the card holds the same audio twice AND the library already has it,
+      // every copy is library-owned, so every checkbox is disabled and NONE of them
+      // is coming in. "Which one wins" is not a question there, and treating it as
+      // one made the faint text assert something untrue. (Ryan spotted the overlap
+      // 2026-09-01.) `_liveDup` is the test both the radio and the fade use.
+      const _liveDup = (r) => !!r.item.dupGroup && r.item.ownedIn !== 'library';
+      const _syncDupGroup = (row) => {
+        if (!_liveDup(row) || !row.cb.checked) return;
+        _guidedTrackRows
+          .filter(r => r !== row && _liveDup(r) && r.item.dupGroup === row.item.dupGroup)
+          .forEach(r => { r.cb.checked = false; });
+      };
+      // GREY MEANS "YOU ALREADY HAVE THIS AUDIO" — a fact about the library or
+      // about a twin in this batch — NOT "unchecked". Driving it from the checkbox
+      // was wrong in both directions: it would grey a NEW track the user simply
+      // chose not to take, which claims they own something they do not. So only
+      // duplicate-group rows re-sync, because there "which one is the spare" is the
+      // user's live choice; every other row's grey is fixed at render.
+      const _syncTrackDim = () => {
+        _guidedTrackRows
+          .filter(_liveDup)
+          .forEach(r => {
+            const spare = !r.cb.checked;
+            r.rowEl?.classList.toggle('have-it-track', spare);
+            // Faint only means "its twin is coming in instead of this one", which
+            // is only true when a twin actually can come in.
+            r.rowEl?.classList.toggle('dup-choice', spare);
+          });
+      };
+      _guidedTrackRows.forEach(r => _syncDupGroup(r));
+      _syncTrackDim();
+      _guidedTrackRows.forEach(r => r.cb.addEventListener('change', () => {
+        _syncDupGroup(r); _syncTrackDim(); syncHead(); _refreshAdopt();
+      }));
       _guidedTracksCb?.addEventListener('change', () => {
         const on = _guidedTracksCb.checked;
         // Turning it back on restores the sensible default — the ones you do not
         // already have — not everything.
         _guidedTrackRows.forEach(r => { r.cb.checked = on ? !r.item.owned : false; });
+        // Restores the analyze-time default, which already picks exactly one member
+        // of each duplicate group; this just puts the dimming back in step.
+        _guidedTrackRows.forEach(r => _syncDupGroup(r));
+        _syncTrackDim();
         _updateGuidedCount();
+        _refreshAdopt();
       });
+      // The library's own track names decide whether a name is free. Fetched once
+      // per render; the button paints its real state as soon as this lands, and
+      // renders conservatively (nothing enabled) until then.
+      _refreshAdopt();
+      (async () => {
+        // ⚠️ THE IPC RETURNS { ok, files }, NOT AN ARRAY. Every other caller unwraps
+        // it as (res && res.ok && res.files) || []. This one did not, so `.map` threw
+        // on every single call — and the old `catch { new Set() }` swallowed it into
+        // an EMPTY set, which passes `instanceof Set`, so every name read as free and
+        // every Adopt went enabled. That is what let Adopt be clicked on a name the
+        // library already held. Two bugs stacked: a wrong assumption about the
+        // response shape, hidden by an error handler that failed toward permissive.
+        // (2026-09-01. The module's own listFiles() DOES return an array — the
+        // handler wraps it, and I read the module instead of the handler.)
+        _guidedTrackLibNames = await (async () => {
+          try {
+            const res = await window.electronAPI.sharedTracksListFiles();
+            const list = (res && res.ok && res.files) || null;
+            if (!Array.isArray(list)) return null;   // null = unknown, keeps Adopt disabled
+            return new Set(list.map(f => String(f && f.name || f).toLowerCase()));
+          } catch { return null; }
+        })();
+        _refreshAdopt();
+      })();
     }
     _updateGuidedCount();
   };
@@ -11794,10 +12174,27 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       const row = guidedRows[i];
       if (row && src._enrich) _fillGuidedRow(row, src._enrich);
     });
+    // TRACKS ARE PART OF THIS IMPORT AND NOTHING ON THE FIRST SCREEN SAID SO.
+    // The section renders BELOW every font group and starts collapsed, so on a card
+    // with 59 fonts you can commit the whole import without ever learning tracks
+    // were in it. One sentence, and the link goes there. (Ryan, 2026-09-01.)
+    const _tracksIncluded = !!(currentPlan && currentPlan.tracksFolders && currentPlan.tracksFolders.length);
     els.guidedSummary.innerHTML =
       `Reviewing <strong>${_gTotal}</strong> font${_gTotal === 1 ? '' : 's'}. Skipped items are unchecked. `
       + `Check or uncheck any, fix names or creators, preview the sound, then <strong>Import</strong>. `
-      + `Each becomes its own source.`;
+      + `Each becomes its own source.`
+      + (_tracksIncluded
+          ? ` Shared tracks from this card are included, <button type="button" id="sf-guided-tracks-jump" class="g-tracks-jump">listed below the fonts</button>.`
+          : '');
+    // Queried on click, not now: the section is built by _regroupByVendor below.
+    // Expanding as well as scrolling, because it starts collapsed and landing on a
+    // shut header is not what "show me" means.
+    document.getElementById('sf-guided-tracks-jump')?.addEventListener('click', () => {
+      const sec = document.getElementById('sf-guided-tracks');
+      if (!sec) return;
+      sec.classList.remove('collapsed');
+      sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
     _regroupByVendor();   // clears + populates guidedList with the grouped rows
     showPhase('guided');
     _updateGuidedCount();
@@ -12333,7 +12730,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     try { window.electronAPI.bulkImportEnrichCancel?.(); } catch {}
     showPhase('review');
   });
-  els.guidedImportBtn?.addEventListener('click', () => {
+  els.guidedImportBtn?.addEventListener('click', async () => {
     if (!currentPlan) return;
     const chosen = guidedRows.filter(r => r.checkbox.checked && !r.nameInput.classList.contains('invalid'));
     if (!chosen.length) return;
@@ -12368,9 +12765,10 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     // overrides the folder glob so a rename or an exclusion in the review is what
     // actually lands — the folder itself is still passed so the runner knows there
     // was one.
+    // The field holds the base name; _trackFileName puts the fixed extension back.
     const _picked = _guidedTrackRows
-      .filter(r => r.cb.checked)
-      .map(r => ({ absPath: r.item.absPath, name: (r.nameInput.value || '').trim() || r.item.name }));
+      .filter(r => r.cb.checked && !r.cb.disabled)
+      .map(r => ({ absPath: r.item.absPath, name: _trackFileName(r) }));
     const _keepTracks = (!_guidedTracksCb || _guidedTracksCb.checked) && _picked.length > 0;
     runImport({
       ...currentPlan,

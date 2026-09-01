@@ -724,17 +724,45 @@ async function analyzeBulkImport({ plan, userData, corruptFonts }, callbacks = {
         let h = null, size = 0;
         try { size = fs.statSync(w).size; } catch {}
         try { h = hashIndex.hashFile(w); } catch {}
-        let owned = false, matchName = '';
-        if (h && seen.has(h)) {
-          // The same audio twice in one batch: only the first is new.
-          owned = true; matchName = seen.get(h);
-        } else {
-          const hits = h ? hashIndex.findByHash(idx, h) : null;
-          if (hits && hits.length) { owned = true; matchName = hits[0].name || ''; }
-          if (h) seen.set(h, path.basename(w));
+        let owned = false, matchName = '', ownedIn = '';
+        // THE LIBRARY IS CHECKED FIRST, ALWAYS. It used to short-circuit on `seen`,
+        // so the second copy of an audio that is ALSO in the library was filed as a
+        // card-sibling and never learned the library had it — which would leave it
+        // importable as a duplicate of a file already on disk.
+        const hits = h ? hashIndex.findByHash(idx, h) : null;
+        if (hits && hits.length) {
+          owned = true; matchName = hits[0].name || ''; ownedIn = 'library';
+        } else if (h && seen.has(h)) {
+          // The same audio twice in one batch: the match is ANOTHER FILE ON THIS
+          // CARD, not something in the library.
+          owned = true; matchName = seen.get(h); ownedIn = 'batch';
         }
+        if (h && !seen.has(h)) seen.set(h, path.basename(w));
         if (owned) tOwned++; else tNew++;
-        items.push({ absPath: w, name: path.basename(w), size, owned, matchName });
+        // ⚠️ `ownedIn` EXISTS BECAUSE `matchName` MEANS TWO DIFFERENT THINGS, and the
+        // UI had been showing both as "Already in your library as X" — which is a lie
+        // for the batch case, where X is a sibling on the same card that the library
+        // has never seen. Harmless while the row only had a checkbox; the moment
+        // Adopt tried to rename that name it failed with "source file not found",
+        // which is how it surfaced (2026-09-01, his dev test). Anything acting on
+        // matchName MUST check ownedIn first. [B-246]
+        items.push({ absPath: w, name: path.basename(w), size, owned, matchName, ownedIn, hash: h });
+      }
+      // SAME AUDIO, TWO NAMES, ON ONE CARD. Only the SECOND copy learned it had a
+      // twin (via `seen`), so the first had no idea and the pair could not be
+      // treated as one decision. Tag every member of a 2+ group with a shared key.
+      // Byte-identical files in the flat shared-tracks folder are never worth
+      // importing twice — the only real question is which NAME to keep, which is a
+      // single choice, not two independent checkboxes. (Ryan, 2026-09-01.)
+      const byHash = new Map();
+      for (const it of items) {
+        if (!it.hash) continue;
+        if (!byHash.has(it.hash)) byHash.set(it.hash, []);
+        byHash.get(it.hash).push(it);
+      }
+      for (const [h, group] of byHash) {
+        if (group.length < 2) continue;
+        for (const it of group) it.dupGroup = h;
       }
       tracks = { total: wavs.length, new: tNew, owned: tOwned, items };
     }

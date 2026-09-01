@@ -235,9 +235,20 @@ const DEFAULT_THRESHOLDS = {
 // font has too few character sounds to trust the score.
 function classifyVerdict(cmp, thresholds = DEFAULT_THRESHOLDS) {
   const lowConfidence = cmp.cardCoreCount < thresholds.minCoreForConfidence;
+  // A PURE SUPERSET IS OWNERSHIP, NOT A COINCIDENCE. [B-025]
+  // The Jaccard guard exists to stop a TINY card font being "contained" in a big
+  // library font by accident. But when containment is exactly 1, Jaccard is just
+  // the size ratio between the two fonts — so an ordinary vendor revision (the
+  // library copy has a few extra sounds) got penalised as if it were a
+  // coincidence, and the row rendered amber and stayed CHECKED while its own note
+  // said every sound in it was already owned. Importing it gains nothing.
+  // The tiny-font case this guard was written for is already covered by
+  // lowConfidence, which is why that is the condition here and not a lower bar:
+  // moving the Jaccard bar tunes a number, this states the rule.
+  const pureSuperset = cmp.coreContainment >= 1 && !lowConfidence;
   let verdict;
   if (cmp.coreContainment >= thresholds.haveItContainment &&
-      cmp.coreJaccard >= thresholds.haveItJaccard) {
+      (pureSuperset || cmp.coreJaccard >= thresholds.haveItJaccard)) {
     verdict = 'have_it';
   } else if (cmp.coreContainment >= thresholds.variantContainment) {
     verdict = 'variant';
