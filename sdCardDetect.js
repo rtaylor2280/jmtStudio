@@ -285,6 +285,65 @@ function buildVerdict(card) {
   return { level: 'info', headline: `This ${noun} has content, but an unrecognized layout.`, detail };
 }
 
+// ── Whole-card FILE health, which is NOT the volume health Windows reports ──
+// A filesystem tracks WHERE bytes live, not whether they are the RIGHT bytes, so a
+// volume can be perfectly consistent while a file inside it is garbage. Both are true
+// of Ryan's F: card at once: Windows says Healthy and is CORRECT, and
+// Revan/Hyswing/swng01.wav is 78,258 bytes beginning `85 02 28 86`. The volume warning
+// path already works (see buildVerdict); this is the other axis. ([B-042] item 3.)
+//
+// *** WE REPORT A FINDING, NEVER AN ABSENCE. *** Ryan's rule, 2026-08-31: "we can speak
+// to proof not absence." Zero damaged files produces NO text at all - not "no problems
+// found", not a green tick. That is what makes the time budget below safe: stopping
+// early can never manufacture a false all-clear, because a clean result says nothing
+// either way. It also keeps us honest about checkWavHealth's real limit - it reads the
+// first 256 bytes, so it catches a smashed header and a truncated file but PASSES bytes
+// flipped or zeroed deep in the audio data (measured 2026-08-31). We are not entitled to
+// say a card is clean; we are entitled to say we found something.
+//
+// Budgeted because a card mounted through a board is far slower than through a reader
+// (~1.2s for 5,496 headers on a reader). Blocking the card modal on a slow mount is the
+// concern behind [B-238]; the budget means the feature degrades to silence rather than
+// to a hang.
+function scanCardFileHealth(mountPath, opts) {
+  const o = opts || {};
+  const budgetMs = o.budgetMs == null ? 2500 : o.budgetMs;
+  const maxReport = o.maxReport == null ? 50 : o.maxReport;
+  const t0 = Date.now();
+  const out = { checked: 0, damaged: 0, firstReason: null, firstPath: null, complete: true, ms: 0 };
+  const overBudget = () => (Date.now() - t0) > budgetMs;
+  const walk = (dir, depth) => {
+    if (depth > 6 || out.damaged >= maxReport) return;
+    if (overBudget()) { out.complete = false; return; }
+    const ents = safeReaddir(dir);
+    if (ents.__error) return;
+    for (const e of ents) {
+      if (out.damaged >= maxReport) { out.complete = false; return; }
+      if (overBudget()) { out.complete = false; return; }
+      if (_isSdNoise(e.name)) continue;
+      if (NON_FONT_DIRS.has(e.name.toLowerCase()) && e.isDirectory() && depth === 0
+          && e.name.toLowerCase() === 'system volume information') continue;
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) { walk(full, depth + 1); continue; }
+      if (!_WAV_RX.test(e.name)) continue;
+      let size = 0;
+      try { size = fs.statSync(full).size; } catch { continue; }
+      out.checked++;
+      const h = checkWavHealth(full, size);
+      if (h.corrupt) {
+        out.damaged++;
+        if (!out.firstReason) {
+          out.firstReason = h.reason;
+          out.firstPath = path.relative(mountPath, full).split(path.sep).join('/');
+        }
+      }
+    }
+  };
+  try { walk(mountPath, 0); } catch { out.complete = false; }
+  out.ms = Date.now() - t0;
+  return out;
+}
+
 function assessCard(vol) {
   const identity = resolveIdentity(vol);
   const classification = classifyCard(vol);
@@ -292,6 +351,11 @@ function assessCard(vol) {
   if (vol.health && vol.health !== 'Healthy') warnings.push(`OS health: ${vol.health}`);
   if (identity.vsnDegenerate && !vol.isFolder) warnings.push('degenerate volume serial (identity cannot rely on VSN)');
   const card = { ...vol, volumeSerialFmt: formatVsn(vol.volumeSerial), identity, classification, warnings };
+  // Skipped on an empty or unreadable card - there is nothing to find and the walk
+  // would only cost time on the one card least able to spare it.
+  const _k = classification && classification.kind;
+  card.fileHealth = (_k && _k !== 'empty' && _k !== 'unreadable')
+    ? scanCardFileHealth(vol.mountPath) : null;
   card.verdict = buildVerdict(card);
   return card;
 }
@@ -728,4 +792,4 @@ async function analyzeFonts(dirPath) {
   return { path: dirPath, fonts };
 }
 
-module.exports = { scan, assessCard, assessPath, assessPicked, classifyCard, listDir, findConfigs, deriveFontName, nameFromReadmeText, docxToText, recoverNameFromDocx, analyzeFonts, resolveIdentity, isDegenerateVsn, formatVsn, enumerateAllVolumes, enumerateRemovableVolumes, scanFolderHealth, checkWavHealth, checkWavBuffer };
+module.exports = { scan, assessCard, assessPath, assessPicked, classifyCard, listDir, findConfigs, deriveFontName, nameFromReadmeText, docxToText, recoverNameFromDocx, analyzeFonts, resolveIdentity, isDegenerateVsn, formatVsn, enumerateAllVolumes, enumerateRemovableVolumes, scanFolderHealth, checkWavHealth, checkWavBuffer, scanCardFileHealth };

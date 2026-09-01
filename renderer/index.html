@@ -9375,6 +9375,37 @@ function _sdLooksLikeFontRoot(entries) {
   const others = ['font', 'blst', 'clsh', 'swng', 'swing', 'swingh', 'swingl', 'boot', 'out', 'in', 'lock', 'drag', 'preon', 'force', 'stab', 'melt'];
   return others.filter(isEff).length >= 2;
 }
+// A damaged FILE on a card whose VOLUME is fine. Separate facts, kept separate: the
+// health line is untouched and this is one more COUNT beside the others, never a
+// replacement and never an escalation to the card. Flagging the volume would send
+// someone reformatting a good 14.8 GB card over one swing sound; the remedy is
+// replacing the FILE.
+//
+// *** SPEAKS ONLY TO PROOF, NEVER TO ABSENCE *** (Ryan, 2026-08-31: "we can leave the
+// healthy... and saying only when something was found. we can speak to proof not
+// absence."). Zero findings renders NOTHING - no all-clear, no green tick. That is what
+// lets the backend scan run on a time budget without ever lying: a partial scan that
+// found nothing is silent, which is exactly what it is entitled to say. It also respects
+// the measured limit of the check - 256 bytes, so a smashed header or truncated file is
+// caught and rot deep in the audio data is not. We can say we FOUND something; we can
+// never say a card is clean. ([B-042] item 3.)
+//
+// A FLAG, NOT A SENTENCE AND NOT A COUNT. Two rounds of Ryan cutting this down: naming
+// the file inline was "too much for the message. especially if there was a whole [lot]",
+// and then - "just mention potential file corruption and the next page shows it already
+// anyway."
+// ⚠️ Dropping the number is also the more HONEST shape, which is why it survives review
+// rather than merely reading shorter. A count asserts a TOTAL, and we cannot support one:
+// the scan is time-budgeted (K: hit its cap after 1,545 of ~6,000 files) and the check
+// reads 256 bytes, so rot deep in the audio data is invisible at any budget. What we can
+// stand behind is that we found damage. "Some" is provable; "one" is not.
+// The browser marks the damaged folders and files already, so the detail lives one click
+// away where someone can act on it.
+function _sdFileHealthFlag(c) {
+  const fh = c && c.fileHealth;
+  if (!fh || !fh.damaged) return '';
+  return `<span style="color:var(--jmt-amber);">file corruption found</span>`;
+}
 function _sdCardSummaryHtml(c, wide) {
   const v = c.verdict || {}, cls = c.classification || {}, ct = cls.counts || {};
   const dot = v.level === 'good' ? '#3fb950' : v.level === 'bad' ? '#e5534b' : '#d29922';
@@ -9382,7 +9413,7 @@ function _sdCardSummaryHtml(c, wide) {
   const label = _sdEsc(_sdDriveLabel(c));
   const countsTxt = hasContent ? `${_sdPlur(ct.fonts || 0, 'sound font')} &middot; ${_sdPlur(ct.configs || 0, 'config')} &middot; ${_sdPlur(ct.otherFiles || 0, 'other file')}` : '';
   const metaTxt = c.isFolder ? 'Folder' : `${_sdEsc(c.fileSystem || '')} &middot; ${_sdFmtGB(c.freeBytes)} free of ${_sdFmtGB(c.sizeBytes)} &middot; health: ${_sdEsc(c.health || '?')}`;
-  const stats = [countsTxt, metaTxt].filter(Boolean).join(' &middot; ');
+  const stats = [countsTxt, _sdFileHealthFlag(c), metaTxt].filter(Boolean).join(' &middot; ');
   const dotSpan = `<span style="color:${dot};">&#9679;</span>`;
   if (wide) {
     // Browse header: horizontal room, so favor fewer lines — identity + verdict share a
