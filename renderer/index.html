@@ -3679,6 +3679,44 @@
      track here", 2026-09-02.) */
   .styles-tag-filter-badge.sf-badge-muted { background: var(--c-bg-card); color: var(--c-text);
                                             box-shadow: inset 0 0 0 1px var(--c-border-strong); }
+  /* ONE control that must read as a BUTTON, and match the ones beside it. It
+     carries .btn-neutral for colour and border; the sizing has to be reproduced
+     by hand because the base `button` rule (5px 12px / 0.8rem / 600) does not
+     apply to a span. Getting that wrong made it visibly shorter and lighter than
+     Duplicate and Delete either side of it. [B-287] */
+  .sf-export-group { display: inline-flex; align-items: center; border-radius: 4px;
+                     padding: 0 9px 0 0; vertical-align: middle; }
+  /* ⚠️ ONE SURFACE, NOT TWO PANES. A divider plus a per-section hover made this
+     read as a split button - two things bolted together. It is one control with a
+     small option living inside it, so the option gets no border, no background
+     and no panel of its own; only the Export text lights on hover, which is what
+     tells you which part is the button. [B-287]
+     The OPTION sits to the RIGHT: you read the verb first and the modifier
+     second, and the checkbox is not the first thing your eye lands on. */
+  .sf-export-tracks { display: inline-flex; align-items: center; gap: 4px; font-size: 0.7rem;
+                      font-weight: 400; color: var(--c-text-muted); white-space: nowrap;
+                      cursor: pointer; user-select: none; padding: 0; margin-left: 2px; }
+  .sf-export-tracks:hover { color: var(--c-text); }
+  /* ⚠️ NOT BLUE, checkbox included. Blue is the active-filter colour everywhere
+     else in this toolbar, and this is neither a filter nor active state - it is
+     an option on the button it sits in. accent-color overrides the browser's
+     blue tick. */
+  /* Smaller than a default checkbox: it is a modifier inside a button, not a
+     form field, so it should not out-weigh the word it follows. */
+  .sf-export-tracks input { margin: 0; cursor: pointer; accent-color: var(--c-text-sub);
+                            width: 10px; height: 10px; }
+  /* Forced by the open config: stated fact rather than an offer. */
+  .sf-export-tracks.forced { cursor: default; opacity: 0.75; }
+  .sf-export-tracks.forced input { cursor: default; }
+  /* Matches the base `button` metrics exactly so the group stands the same
+     height as Duplicate and Delete on either side. */
+  /* Matches the base `button` metrics so the group stands the same height as
+     Duplicate and Delete either side. Right padding trimmed because the option
+     supplies the gap on that edge. */
+  .sf-export-btn { background: transparent; border: none; border-radius: 0; color: inherit;
+                   cursor: pointer; padding: 5px 8px 5px 12px; font-size: 0.8rem; font-weight: 600;
+                   white-space: nowrap; }
+  .sf-export-btn:hover { color: var(--c-text-bright); }
   .sf-toolbar-divider { width: 1px; height: 18px; margin: 0 2px; background: var(--c-border); flex: 0 0 auto; }
   #btn-sf-new-filter:hover { color: var(--jmt-green); }
   #btn-sf-new-filter.active { color: var(--jmt-green); border-color: rgba(63,157,82,0.5); background: rgba(63,157,82,0.10); }
@@ -4491,7 +4529,18 @@
         <button id="btn-sf-clear-selection" class="btn-neutral" style="display:none" title="Deselect all">Clear selection</button>
         <button id="btn-sf-bulk-tag" class="btn-neutral" style="display:none" title="Edit tags shared across the selected fonts">Tags</button>
         <button id="btn-sf-bulk-duplicate" class="btn-neutral" style="display:none" title="Duplicate the selected fonts. Each copy shares its source and is numbered (_1, _2, ...) so it doesn't collide with the original">&#10697; Duplicate</button>
-        <button id="btn-sf-bulk-save" class="btn-neutral" style="display:none" title="Export the selected fonts as Proffie-shaped folders to a destination (SD card, etc.)">&#8599; Export</button>
+        <!-- The tracks choice sits INSIDE the Export control, not beside it: a
+             separate chip did not make it clear the setting belonged to that
+             button. A <button> may not contain interactive content, so the GROUP
+             carries the border and the button inside it is borderless. The word
+             "include" is dropped - a checkbox already means include. [B-287] -->
+        <span id="sf-export-group" class="sf-export-group btn-neutral" style="display:none">
+          <button id="btn-sf-bulk-save" class="sf-export-btn" title="Export the selected fonts as Proffie-shaped folders to a destination (SD card, etc.)">&#8599; Export</button>
+          <label id="sf-bulk-tracks-wrap" class="sf-export-tracks">
+            <span id="sf-bulk-tracks-label">tracks</span>
+            <input type="checkbox" id="sf-bulk-tracks-include">
+          </label>
+        </span>
         <button id="btn-sf-bulk-delete" class="btn-red" style="display:none" title="Delete the selected fonts">Delete</button>
         <div class="toolbar-divider"></div>
         <div class="styles-tag-filter-wrap">
@@ -19555,7 +19604,7 @@ require(['vs/editor/editor.main'], function () {
         const ae = document.activeElement;
         if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT')) return;
         e.preventDefault();
-        _sfSelectedNames.clear();
+        _sfSelectedNames.clear(); _sfBulkIncludeTracks = null;   // [B-287]
         _sfRenderGrid();
       });
       // Ctrl/Cmd+C / Ctrl/Cmd+V on the common folder file tree. Active only
@@ -19877,12 +19926,13 @@ require(['vs/editor/editor.main'], function () {
           if (!prefKnown && typeof window._sfGetIncludeTracksPref === 'function') {
             window._sfGetIncludeTracksPref().then(() => { try { _sfRenderGrid(); } catch {} });
           }
-          const inclRow = _sfSelectedNames.size > 0
-            ? `<label class="sf-tracks-include" data-tracks-include-wrap="1" title="Include the shared tracks folder every time you export fonts, not just this once. Same setting as the one in the tracks folder itself.&#10;&#10;Off by default: a tracks folder at the card root is read by the ProffieOS 8 Edit Track menu, but Fett263's Track Player looks in each font's own tracks folder instead.&#10;&#10;To put tracks on one card without changing this, open the tracks folder and use Export.">
-                 <input type="checkbox" data-tracks-include="1"${window._sfIncludeTracksPrefValue ? ' checked' : ''}>
-                 <span>Always include with exports</span>
-               </label>`
-            : '';
+          // ⚠️ THE STANDING PREFERENCE IS NO LONGER ON THIS CARD. It used to
+          // appear here only WHILE a selection existed - in the very position
+          // every other card shows its selection tick - so a ticked box read as a
+          // seventh selected item and made "Delete (6)" look like it would take
+          // the tracks too. The preference lives in the tracks detail modal; the
+          // per-run choice lives beside Export. One control, one meaning. [B-287]
+          const inclRow = '';
           return `<div class="${klasses.join(' ')}" data-shared-tracks="1" title="Shared tracks folder. Maps to /tracks/ at the SD card root. Universal tracks available to every preset.">
             <button class="card-delete-btn" data-shared-tracks-delete="1" title="Delete Shared Tracks folder">&#10005;</button>
             <div class="sf-card-name-row">
@@ -21788,7 +21838,7 @@ require(['vs/editor/editor.main'], function () {
           if (clearBtn) clearBtn.style.display = 'none';
           if (tagBtn) tagBtn.style.display = 'none';
           if (dupBtn) dupBtn.style.display = 'none';
-          if (saveBtn) saveBtn.style.display = 'none';
+          if (saveBtn) { const g = document.getElementById('sf-export-group'); if (g) g.style.display = 'none'; }
         } else {
           if (delBtn) {
             delBtn.style.display = '';
@@ -21807,9 +21857,16 @@ require(['vs/editor/editor.main'], function () {
             dupBtn.textContent = `⧉ Duplicate (${n})`;
           }
           if (saveBtn) {
-            saveBtn.style.display = '';
             saveBtn.textContent = `↗ Export (${n})`;
+            const grp = document.getElementById('sf-export-group');
+            if (grp) grp.style.display = '';   // the button is nested now [B-287]
           }
+          // Per-run tracks toggle: seeded from the standing preference, reset on
+          // every fresh selection, and FORCED when the open config references the
+          // shared tracks folder - unticking it there would boot to missing
+          // tracks, so the control states the fact instead of offering a choice
+          // it cannot honour. [B-287]
+          _sfSyncBulkTracksToggle();
         }
         // Select-helpers appear whenever there are entries to act on. Hide
         // "Select all" if every visible entry is already selected (no-op).
@@ -21825,6 +21882,47 @@ require(['vs/editor/editor.main'], function () {
           inUseBtn.textContent = `Select in-use (${visibleInUseCount})`;
         }
       };
+      // The per-run tracks control. Three states:
+      //   forced  - the open config references tracks/: ticked, not clickable
+      //   on      - the user's standing preference, or their tick this run
+      //   off     - no tracks folder exists, or they unticked it for this run
+      // ⚠️ `_sfBulkIncludeTracks` is null until the user touches it, which is how
+      // "seeded from the preference" stays true across re-renders without
+      // overwriting a deliberate untick on the very next repaint.
+      // null = untouched this selection, so the standing preference still speaks.
+      // true/false = the user's deliberate choice for THIS export.
+      let _sfBulkIncludeTracks = null;
+      const _sfSyncBulkTracksToggle = () => {
+        const wrap = document.getElementById('sf-bulk-tracks-wrap');
+        const box  = document.getElementById('sf-bulk-tracks-include');
+        const lbl  = document.getElementById('sf-bulk-tracks-label');
+        if (!wrap || !box) return;
+        const hasTracks = !!window._sfSharedTracksExists;
+        if (!hasTracks) { wrap.style.display = 'none'; return; }
+        const forced = !!_sfIsSharedTracksInUse?.();
+        const pref   = !!window._sfIncludeTracksPrefValue;
+        const on     = forced || (_sfBulkIncludeTracks == null ? pref : _sfBulkIncludeTracks);
+        wrap.style.display = '';
+        wrap.classList.toggle('forced', forced);
+        box.checked  = on;
+        box.disabled = forced;
+        // ⚠️ "This export only" was not enough: it never said WHY the box was
+        // already ticked. The tooltip now states the DEFAULT and what clicking
+        // will do, and flips once the user has overridden it - so the control can
+        // always answer "why is it like this" and "what happens if I click".
+        // The forced wording is lifted verbatim from the export summary, which
+        // already says this. One voice for one fact. [B-287]
+        if (lbl) lbl.textContent = 'tracks';   // a checkbox already means "include"
+        const overridden = !forced && _sfBulkIncludeTracks != null && _sfBulkIncludeTracks !== pref;
+        wrap.title = forced
+          ? 'Your config references the tracks folder.'
+          : overridden
+            ? `Match the default: ${pref ? 'included' : 'disabled'}.`
+            : pref
+              ? 'Included by default. Disable for this export only.'
+              : 'Disabled by default. Include for this export only.';
+      };
+
       // ── Tag filter (slice 9) ──────────────────────────
       // Dropdown of available tags + counts. matchSet for dropdown options
       // applies search + active CREATOR filters but intentionally NOT the
@@ -22423,7 +22521,7 @@ require(['vs/editor/editor.main'], function () {
           // Stale selection from before the last delete would otherwise keep
           // the bulk action bar populated with phantom counts. Clear it and
           // sync the bar.
-          _sfSelectedNames.clear();
+          _sfSelectedNames.clear(); _sfBulkIncludeTracks = null;   // [B-287]
           _sfLastMatchingNames = [];
           _sfLastInUseFonts = new Set();
           _sfUpdateBulkActionBar();
@@ -30678,7 +30776,7 @@ require(['vs/editor/editor.main'], function () {
           await window.refreshSoundFontsView();
           return;
         }
-        _sfSelectedNames.clear();
+        _sfSelectedNames.clear(); _sfBulkIncludeTracks = null;   // [B-287]
         await window.refreshSoundFontsView();
       };
       // Promise-returning conflict-resolution modal. Receives the list of
@@ -31105,6 +31203,10 @@ require(['vs/editor/editor.main'], function () {
           if (tracksOutcome.replaced) tb.push(`${n(tracksOutcome.replaced)} replaced`);
           const total = (tracksOutcome.unchanged || 0) + (tracksOutcome.added || 0) + (tracksOutcome.replaced || 0);
           if (tb.length) {
+            // 'setting' and 'run' deliberately say NOTHING. Both are cases where
+            // the user already knows why tracks shipped - they set the preference,
+            // or they ticked the box beside Export a moment ago. Only the reasons
+            // the APP decided on its own are worth explaining. [B-287]
             const why = tracksOutcome.reason === 'config'
               ? ' Your config references the tracks folder.'
               : tracksOutcome.reason === 'destination'
@@ -31334,8 +31436,17 @@ require(['vs/editor/editor.main'], function () {
           });
           if (!ok) return false;
         } else if (hasTracksFolder) {
-          includeTracks = await _sfGetIncludeTracksPref();
-          if (includeTracks) tracksReason = 'setting';
+          // The per-run toggle beside Export wins over the standing preference
+          // when the user has touched it; untouched, the preference still speaks.
+          // 'run' joins the existing reasons rather than replacing them, so the
+          // summary can still say WHY tracks shipped. [B-287]
+          if (_sfBulkIncludeTracks != null) {
+            includeTracks = _sfBulkIncludeTracks;
+            if (includeTracks) tracksReason = 'run';
+          } else {
+            includeTracks = await _sfGetIncludeTracksPref();
+            if (includeTracks) tracksReason = 'setting';
+          }
         }
         let pick;
         try { pick = await window.electronAPI.selectSaveDestination(); }
@@ -31351,7 +31462,13 @@ require(['vs/editor/editor.main'], function () {
         // This also carries anyone who used to answer "Include" to the old
         // per-export prompt: their card already has the folder, so they get
         // asked once here instead of quietly losing it to the new default.
-        if (!includeTracks && hasTracksFolder) {
+        // ⚠️ NOT AFTER A DELIBERATE UNTICK. This prompt exists to catch a stale
+        // SETTING - a card that already has tracks while the preference says no.
+        // Someone who just unticked the toggle for this export has answered the
+        // question already, and asking again overrides an explicit choice with a
+        // dialog. Only the untouched case is ambiguous enough to be worth a
+        // prompt. [B-287]
+        if (!includeTracks && hasTracksFolder && _sfBulkIncludeTracks !== false) {
           try {
             // ASK FIRST, COMPARE ONLY IF THEY SAY YES. This used to hash every
             // wav in the library tracks folder AND every wav at the destination
@@ -31734,7 +31851,7 @@ require(['vs/editor/editor.main'], function () {
           // KEEPS the selection, because changing that decision is the one thing
           // the user might want to do next.
           if (skippedByChoice === 0) {
-            _sfSelectedNames.clear();
+            _sfSelectedNames.clear(); _sfBulkIncludeTracks = null;   // [B-287]
             _sfRenderGrid();
           }
           return false;
@@ -31930,7 +32047,7 @@ require(['vs/editor/editor.main'], function () {
           elapsedSec: (Date.now() - _sfExportT0) / 1000,
           closeProgress: () => _sfDeleteProgress.hide(),
         });
-        _sfSelectedNames.clear();
+        _sfSelectedNames.clear(); _sfBulkIncludeTracks = null;   // [B-287]
         _sfRenderGrid();
         return true;
       };
@@ -32082,7 +32199,7 @@ require(['vs/editor/editor.main'], function () {
           await window.refreshSoundFontsView();
           return true;
         }
-        _sfSelectedNames.clear();
+        _sfSelectedNames.clear(); _sfBulkIncludeTracks = null;   // [B-287]
         await window.refreshSoundFontsView();
         return true;
       };
@@ -33231,6 +33348,11 @@ require(['vs/editor/editor.main'], function () {
           ? new Set(_sfAllEntries.filter(f => f.meta && f.meta.needsReview).map(f => f.name))
           : new Set();
         _sfRenderGrid();
+      });
+      document.getElementById('sf-bulk-tracks-include')?.addEventListener('change', (e) => {
+        e.stopPropagation();
+        _sfBulkIncludeTracks = e.target.checked;   // deliberate, for this export only [B-287]
+        _sfSyncBulkTracksToggle();
       });
       document.getElementById('btn-sf-not-in-use-filter')?.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -35293,7 +35415,7 @@ require(['vs/editor/editor.main'], function () {
         } else {
           const made = names.length;
           const created = Array.from(batch);
-          _sfSelectedNames.clear();
+          _sfSelectedNames.clear(); _sfBulkIncludeTracks = null;   // [B-287]
           _sfRenderGrid();
           showToast(`Duplicated ${made} font${made === 1 ? '' : 's'}.`, {
             durationMs: 8000,
@@ -35477,7 +35599,7 @@ require(['vs/editor/editor.main'], function () {
       // hidden in the "click anywhere" gesture.
       document.getElementById('btn-sf-clear-selection')?.addEventListener('click', (e) => {
         e.stopPropagation();
-        _sfSelectedNames.clear();
+        _sfSelectedNames.clear(); _sfBulkIncludeTracks = null;   // [B-287]
         _sfRenderGrid();
       });
       document.getElementById('btn-sf-import-font')?.addEventListener('click', _sfOpenImport);
