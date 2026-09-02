@@ -212,7 +212,32 @@ function readAttachment(userData, id) {
   return { ok: true, id, name: info.name || path.basename(p), size: info.size || bytes.length, bytes };
 }
 
+// Drop links that point at nothing. A source's meta.json travels inside
+// the source folder, so a backup taken before the attachment store was
+// carried (anything before 2026-09-02) restores `attachments: [id]` with
+// no file behind it. listAttachments already filters those out, so they
+// are invisible rather than broken — but invisible junk still gets copied
+// forward into every future backup and quietly widens the gap between
+// what meta claims and what exists. Runs after a restore/merge, and is a
+// no-op on a healthy library.
+function pruneDanglingLinks(userData) {
+  let dirs; try { dirs = fs.readdirSync(sourcesRoot(userData)); } catch { return { ok: true, pruned: 0, sources: 0 }; }
+  let pruned = 0, touched = 0;
+  for (const u of dirs) {
+    const m = readSourceMeta(userData, u);
+    if (!m || !Array.isArray(m.attachments) || m.attachments.length === 0) continue;
+    const kept = m.attachments.filter(id => fs.existsSync(path.join(attachmentsRoot(userData), id)));
+    if (kept.length === m.attachments.length) continue;
+    pruned += m.attachments.length - kept.length;
+    touched++;
+    m.attachments = kept;
+    try { writeSourceMeta(userData, u, m); } catch {}
+  }
+  return { ok: true, pruned, sources: touched };
+}
+
 module.exports = {
+  pruneDanglingLinks,
   addAttachments, listAttachments, attachmentFilePath, unlinkAttachment,
   listAllAttachments, linkAttachments, readAttachment,
   sourcesForAttachment, linkAttachmentToSources, addAttachmentToSources,

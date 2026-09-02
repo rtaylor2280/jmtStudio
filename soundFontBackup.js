@@ -102,14 +102,16 @@ function _dirBytes(dir) {
 
 // Survey what's in the library — count + size per bucket. Bucket keys
 // match the on-disk directory names ('sources', 'library', 'common',
-// 'sharedTracks') so the archive layout, manifest counts, and restore
-// code all use the same vocabulary. Renderer translates 'library' to
-// "fonts" for display. sharedTracks is a flat singleton folder (counts
-// = number of .wav files, not subdirs).
+// 'sharedTracks', 'attachments') so the archive layout, manifest counts,
+// and restore code all use the same vocabulary. Renderer translates
+// 'library' to "fonts" for display. sharedTracks is a flat singleton
+// folder (counts = number of .wav files, not subdirs). attachments is
+// dir-keyed like sources/common, but the dir NAME is the content sha256,
+// which is what lets the restore side dedup without hashing anything.
 function surveyLibrary(userData) {
-  const buckets = ['sources', 'library', 'common'];
-  const counts = { sources: 0, library: 0, common: 0, sharedTracks: 0 };
-  const totals = { sources: 0, library: 0, common: 0, sharedTracks: 0 };
+  const buckets = ['sources', 'library', 'common', 'attachments'];
+  const counts = { sources: 0, library: 0, common: 0, sharedTracks: 0, attachments: 0 };
+  const totals = { sources: 0, library: 0, common: 0, sharedTracks: 0, attachments: 0 };
   for (const b of buckets) {
     const root = path.join(_soundFontsRoot(userData), b);
     if (!fs.existsSync(root)) continue;
@@ -133,7 +135,7 @@ function surveyLibrary(userData) {
       try { totals.sharedTracks += fs.statSync(path.join(stRoot, e.name)).size; } catch {}
     }
   }
-  const totalBytes = totals.sources + totals.library + totals.common + totals.sharedTracks;
+  const totalBytes = totals.sources + totals.library + totals.common + totals.sharedTracks + totals.attachments;
   return { counts, totals, totalBytes };
 }
 
@@ -233,7 +235,7 @@ async function exportBackup({
   // (drives both phase counters), plus per-item file counts (drives
   // the per-font / per-folder archive labels). One disk walk now
   // instead of duplicate walks per phase.
-  const bucketTops = { sources: [], library: [], common: [] };
+  const bucketTops = { sources: [], library: [], common: [], attachments: [] };
   const filesPerTopItem = new Map();
   // Commons live on disk under <uuid>/ — the user-facing label needs the
   // friendly name from meta.json. Read it once during pre-scan and look
@@ -244,7 +246,11 @@ async function exportBackup({
   // ("Source Files") but the per-file line under the bar reads
   // "sources/<friendly>/file.ext" instead of leaking a raw uuid.
   const sourceNameByUuid = new Map();
-  for (const bucket of ['sources', 'library', 'common']) {
+  // Attachment dirs are named by content sha256. A 64-hex string flashing
+  // past in the progress label tells the user nothing, so resolve each to
+  // its display name the same way the chips do (label, else filename).
+  const attachmentNameById = new Map();
+  for (const bucket of ['sources', 'library', 'common', 'attachments']) {
     const root = path.join(_soundFontsRoot(userData), bucket);
     if (!fs.existsSync(root)) continue;
     let topEntries;
@@ -281,6 +287,13 @@ async function exportBackup({
           const m = JSON.parse(fs.readFileSync(path.join(abs, 'meta.json'), 'utf8'));
           const friendly = (m && (m.bundleName || m.originalName)) || '';
           if (friendly) sourceNameByUuid.set(top.name, friendly);
+        } catch {}
+      }
+      if (bucket === 'attachments') {
+        try {
+          const a = JSON.parse(fs.readFileSync(path.join(abs, 'attachment.json'), 'utf8'));
+          const friendly = (a && (a.label || a.name)) || '';
+          if (friendly) attachmentNameById.set(top.name, friendly);
         } catch {}
       }
     }
@@ -463,6 +476,10 @@ async function exportBackup({
   // its files stream into the zip.
   const archiveSources = { idx: 0, total: bucketTops.sources.length, seenTops: new Set() };
   const archiveSharedTracks = { idx: 0, total: sharedTracksItemCount };
+  // attachments aggregate the same way sources do — the counter is the
+  // item index, not a file index, because a receipt is one item to the
+  // user no matter how the store lays it out (file + sidecar json).
+  const archiveAttachments = { idx: 0, total: bucketTops.attachments.length, seenTops: new Set() };
   // Bucket-level file counters drive the inter-bucket gates. archiver
   // can interleave entries across bucket boundaries too (the whole
   // sources/ bucket dispatches as one archive.directory() call which
@@ -473,12 +490,21 @@ async function exportBackup({
     (sum, it) => sum + (filesPerTopItem.get(`sources/${it.name}`) || 0), 0
   );
   let sharedTracksFilesEmitted = 0;
+  let attachmentsFilesEmitted = 0;
+  const attachmentsFilesExpected = bucketTops.attachments.reduce(
+    (sum, it) => sum + (filesPerTopItem.get(`attachments/${it.name}`) || 0), 0
+  );
   const sourcesBucketGate = (() => {
     let resolve;
     const promise = new Promise(r => { resolve = r; });
     return { promise, resolve };
   })();
   const sharedTracksBucketGate = (() => {
+    let resolve;
+    const promise = new Promise(r => { resolve = r; });
+    return { promise, resolve };
+  })();
+  const attachmentsBucketGate = (() => {
     let resolve;
     const promise = new Promise(r => { resolve = r; });
     return { promise, resolve };
@@ -525,6 +551,9 @@ async function exportBackup({
       }
       if (bucket === 'common' && commonNameByUuid.has(topName)) {
         return `common/${commonNameByUuid.get(topName)}/${parts.slice(2).join('/')}`;
+      }
+      if (bucket === 'attachments') {
+        return `attachments/${attachmentNameById.get(topName) || topName}`;
       }
       return entry.name;
     })();
@@ -587,6 +616,28 @@ async function exportBackup({
       sharedTracksFilesEmitted++;
       if (archiveSharedTracks.total > 0 && sharedTracksFilesEmitted >= archiveSharedTracks.total) {
         sharedTracksBucketGate.resolve();
+      }
+    } else if (bucket === 'attachments') {
+      // Counter is per ITEM, not per file: the store writes a sidecar
+      // beside each attachment, and "2 of 3" jumping to "4 of 3" because
+      // of a json the user never saw would be a lie about the work.
+      const topKey = `${bucket}/${topName}`;
+      if (!archiveAttachments.seenTops.has(topKey)) {
+        archiveAttachments.seenTops.add(topKey);
+        archiveAttachments.idx++;
+      }
+      onProgress({
+        verb: 'Backing up',
+        processedBytes,
+        totalBytes: survey.totalBytes,
+        currentItem: displayName,
+        topItemName: 'Attachments',
+        topItemFilesProcessed: archiveAttachments.idx,
+        topItemFilesTotal: archiveAttachments.total,
+      });
+      attachmentsFilesEmitted++;
+      if (attachmentsFilesExpected > 0 && attachmentsFilesEmitted >= attachmentsFilesExpected) {
+        attachmentsBucketGate.resolve();
       }
     }
   });
@@ -669,6 +720,13 @@ async function exportBackup({
       if (fs.existsSync(stRoot)) {
         archive.directory(stRoot, 'sharedTracks');
         if (archiveSharedTracks.total > 0) await sharedTracksBucketGate.promise;
+      }
+    }
+    if (!cancelled) {
+      const attRoot = path.join(_soundFontsRoot(userData), 'attachments');
+      if (fs.existsSync(attRoot)) {
+        archive.directory(attRoot, 'attachments');
+        if (attachmentsFilesExpected > 0) await attachmentsBucketGate.promise;
       }
     }
 
@@ -778,8 +836,9 @@ async function inspectBackup(zipPath) {
       library: { count: 0, bytes: 0 },
       common: { count: 0, bytes: 0 },
       sharedTracks: { count: 0, bytes: 0 },
+      attachments: { count: 0, bytes: 0 },
     };
-    const topDirs = { sources: new Set(), library: new Set(), common: new Set() };
+    const topDirs = { sources: new Set(), library: new Set(), common: new Set(), attachments: new Set() };
     for (const key of Object.keys(entries)) {
       const e = entries[key];
       if (!e.name || e.name === '/' || e.name === 'manifest.json') continue;
@@ -797,14 +856,14 @@ async function inspectBackup(zipPath) {
       if (parts[1] && parts[1] !== '') topDirs[bucket].add(parts[1]);
       if (!e.isDirectory) buckets[bucket].bytes += (e.size || 0);
     }
-    for (const b of ['sources', 'library', 'common']) buckets[b].count = topDirs[b].size;
-    const observedTotal = buckets.sources.bytes + buckets.library.bytes + buckets.common.bytes + buckets.sharedTracks.bytes;
+    for (const b of ['sources', 'library', 'common', 'attachments']) buckets[b].count = topDirs[b].size;
+    const observedTotal = buckets.sources.bytes + buckets.library.bytes + buckets.common.bytes + buckets.sharedTracks.bytes + buckets.attachments.bytes;
     return {
       ok: true,
       manifest,
       observed: {
-        counts: { sources: buckets.sources.count, library: buckets.library.count, common: buckets.common.count, sharedTracks: buckets.sharedTracks.count },
-        totals: { sources: buckets.sources.bytes, library: buckets.library.bytes, common: buckets.common.bytes, sharedTracks: buckets.sharedTracks.bytes, totalBytes: observedTotal },
+        counts: { sources: buckets.sources.count, library: buckets.library.count, common: buckets.common.count, sharedTracks: buckets.sharedTracks.count, attachments: buckets.attachments.count },
+        totals: { sources: buckets.sources.bytes, library: buckets.library.bytes, common: buckets.common.bytes, sharedTracks: buckets.sharedTracks.bytes, attachments: buckets.attachments.bytes, totalBytes: observedTotal },
       },
     };
   } finally {
@@ -1224,7 +1283,11 @@ async function applyReplace({
     // already with the right noun ("Source Files", "Ahsoka Files",
     // "Shared Tracks") so the renderer doesn't have to know about
     // per-bucket grammar.
-    const bucketFiles = { sources: [], library: [], common: [], sharedTracks: [] };
+    // NOTE: this object is the bucket ALLOWLIST — an entry whose first
+    // path segment is not a key here is silently dropped. Any new bucket
+    // added to exportBackup must be added here too or it round-trips into
+    // the zip and out of existence.
+    const bucketFiles = { sources: [], library: [], common: [], sharedTracks: [], attachments: [] };
     for (const key of Object.keys(entries)) {
       const e = entries[key];
       if (e.isDirectory) continue;
@@ -1390,6 +1453,39 @@ async function applyReplace({
       }
     }
 
+    // --- AGGREGATE: attachments ---
+    // Counter unit is the attachment, not the file: each store dir holds
+    // the document plus a sidecar json, and counting the sidecar would
+    // double every number the user sees against a receipt they can count
+    // themselves.
+    if (!cancelled && bucketFiles.attachments.length > 0) {
+      const byId = new Map();
+      const idOrder = [];
+      for (const e of bucketFiles.attachments) {
+        const id = e.name.split('/')[1] || '';
+        if (!id) continue;
+        if (!byId.has(id)) { byId.set(id, []); idOrder.push(id); }
+        byId.get(id).push(e);
+      }
+      const totalAttachments = idOrder.length;
+      for (let i = 0; i < totalAttachments; i++) {
+        if (cancelled) break;
+        for (const e of byId.get(idOrder[i])) {
+          if (cancelled) break;
+          const ok = await extractFile(e);
+          if (!ok) continue;
+          onProgress({
+            processedBytes,
+            totalBytes,
+            currentItem: e.name.split('/').slice(2).join('/') || e.name,
+            topItemName: 'Attachments',
+            topItemFilesProcessed: i + 1,
+            topItemFilesTotal: totalAttachments,
+          });
+        }
+      }
+    }
+
     if (cancelled) {
       throw Object.assign(new Error('Cancelled'), { cancelled: true });
     }
@@ -1426,8 +1522,8 @@ async function applyReplace({
   // modal can stamp "Restored N sources, M fonts, P common folders." The
   // bucket dirs are authoritative — counts whatever's actually on disk
   // post-restore, which includes reused items moved from the snapshot.
-  const counts = { sources: 0, library: 0, common: 0, sharedTracks: 0 };
-  for (const bucket of ['sources', 'library', 'common']) {
+  const counts = { sources: 0, library: 0, common: 0, sharedTracks: 0, attachments: 0 };
+  for (const bucket of ['sources', 'library', 'common', 'attachments']) {
     try {
       const d = fs.readdirSync(path.join(sfRoot, bucket), { withFileTypes: true });
       counts[bucket] = d.filter(x => x.isDirectory()).length;
@@ -1437,6 +1533,11 @@ async function applyReplace({
     const d = fs.readdirSync(path.join(sfRoot, 'sharedTracks'), { withFileTypes: true });
     counts.sharedTracks = d.filter(x => x.isFile() && /\.wav$/i.test(x.name)).length;
   } catch {}
+
+  // Restoring a pre-2026-09-02 backup lands sources whose meta links
+  // attachments the archive never carried. Drop those links here so the
+  // restored library's meta describes what is actually on disk.
+  try { require('./soundFontAttachments').pruneDanglingLinks(userData); } catch {}
 
   return { manifest, counts };
 }
@@ -2051,9 +2152,10 @@ async function applyMerge({
     library: { added: 0, replaced: 0, keptBoth: 0, keptYours: 0 },
     common:  { added: 0, replaced: 0, keptBoth: 0, keptYours: 0 },
     sharedTracks: { added: 0 },
+    attachments: { added: 0 },
   };
   for (const cat of Object.keys(counts)) {
-    if (cat === 'sharedTracks') continue;
+    if (cat === 'sharedTracks' || cat === 'attachments') continue;
     const decisions = plan[cat] || {};
     for (const id of Object.keys(decisions)) {
       const raw = decisions[id];
@@ -2115,6 +2217,16 @@ async function applyMerge({
     if (!key.startsWith('sharedTracks/')) continue;
     const e = entries[key];
     if (!e.isDirectory && /\.wav$/i.test(e.name)) sharedTracksEvalTotal++;
+  }
+
+  // Pre-count the attachment ITEMS (store dirs) the backup carries. The
+  // counter is per item, not per file, so the sidecar json each store dir
+  // holds never shows up as work the user did not ask about.
+  const zipAttachmentIds = new Set();
+  for (const key of Object.keys(entries)) {
+    if (!key.startsWith('attachments/')) continue;
+    const id = key.split('/')[1];
+    if (id) zipAttachmentIds.add(id);
   }
 
   // Extract every file under a zip prefix into a target dir on disk.
@@ -2458,6 +2570,64 @@ async function applyMerge({
       }
     }
 
+    // ── Attachments (receipts / proof-of-purchase) ──
+    // The simplest bucket in the file, and deliberately so: a store dir is
+    // NAMED by the sha256 of its content, so "do I already have this?" is
+    // a directory-exists check. No hashing, no filename collisions, no
+    // local-wins rule — identical name means identical bytes.
+    //
+    // Attachments are not part of the merge PLAN and never will be. The
+    // user picks which fonts to merge; nobody wants to adjudicate their
+    // own receipts one at a time, and a receipt that arrives without its
+    // source is still the proof they paid for something. So they ride
+    // along unconditionally, and the links resolve or get pruned below.
+    if (!cancelled) {
+      const attPrefix = 'attachments/';
+      const attRootAbs = path.join(sfRoot, 'attachments');
+      if (zipAttachmentIds.size > 0) {
+        try { fs.mkdirSync(attRootAbs, { recursive: true }); } catch {}
+        const attCreated = [];
+        let attEvalDone = 0;
+        for (const id of zipAttachmentIds) {
+          if (cancelled) break;
+          attEvalDone++;
+          const destDir = path.join(attRootAbs, id);
+          const already = fs.existsSync(destDir);
+          onProgress({
+            processedBytes,
+            totalBytes,
+            currentItem: `${attPrefix}${id}`,
+            topItemName: 'Attachments',
+            topItemFilesProcessed: attEvalDone,
+            topItemFilesTotal: zipAttachmentIds.size,
+          });
+          if (already) continue;
+          try {
+            for (const key of Object.keys(entries)) {
+              if (!key.startsWith(`${attPrefix}${id}/`)) continue;
+              const e = entries[key];
+              if (e.isDirectory) continue;
+              const rel = key.substring(`${attPrefix}${id}/`.length);
+              if (!rel || rel.includes('/') || rel.includes('\\')) continue;
+              const target = path.join(destDir, rel);
+              fs.mkdirSync(destDir, { recursive: true });
+              await zip.extract(key, target);
+              processedBytes += (e.size || 0);
+            }
+            if (fs.existsSync(destDir)) attCreated.push(destDir);
+          } catch (err) {
+            throw new Error(`Failed extracting ${attPrefix}${id}: ${err && err.message || err}`);
+          }
+        }
+        rollbackLog.push(() => {
+          for (const p of attCreated) { try { fs.rmSync(p, { recursive: true, force: true }); } catch {} }
+        });
+        counts.attachments.added = attCreated.length;
+      } else {
+        await emitBucketSkip('Attachments');
+      }
+    }
+
     if (cancelled) {
       throw Object.assign(new Error('Cancelled'), { cancelled: true });
     }
@@ -2480,6 +2650,10 @@ async function applyMerge({
   } catch {}
 
   try { await zip.close(); } catch {}
+  // Sources that arrived from the backup can carry attachment links whose
+  // files were never in it (any backup taken before 2026-09-02). Drop the
+  // links rather than leave meta claiming proof that does not exist.
+  try { require('./soundFontAttachments').pruneDanglingLinks(userData); } catch {}
   return { manifest: manifestApplied, counts };
 }
 
