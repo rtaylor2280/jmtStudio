@@ -2686,6 +2686,14 @@
   .sf-import-phase::-webkit-scrollbar-track { background: transparent; }
   .sf-import-phase::-webkit-scrollbar-thumb { background: var(--c-border-strong); border-radius: 3px; }
   .sf-import-hint { font-size: 0.78rem; color: var(--c-text-sub); margin: 0 0 12px 0; line-height: 1.45; }
+  /* The secondary ways in (bulk folder, SD card) sit as ONE block so a second
+     line costs one line of height and nothing else. They used to be two loose
+     <p>s, which in the empty state meant each one also collected the card's
+     14px flex gap — 20px of air between two sentences that belong together.
+     Wrapping them makes the gap apply once, to the pair. ([B-245]) */
+  .sf-import-alt-links { margin-top: 14px; display: flex; flex-direction: column; gap: 3px; text-align: center; font-size: 0.78rem; color: var(--c-text-sub); }
+  .sf-import-alt-links p { margin: 0; }
+  .sf-import-alt-links a { color: var(--jmt-blue); text-decoration: underline; cursor: pointer; }
   /* Override the global `.modal p { text-wrap: balance }` for import hints —
      balance evens out line lengths (good for short prompts) but on this longer
      body copy it wraps early and leaves ragged right whitespace. Fill normally. */
@@ -4758,8 +4766,10 @@
               <h2 class="sf-empty-title">Import your first sound font</h2>
               <p class="sf-empty-desc">Pick a vendor's .zip file or an unzipped folder. JMT Studio archives it, identifies the fonts inside, and adds your picks to the library.</p>
               <button class="sf-empty-action" id="btn-sf-import-font">Import Sound Font</button>
-              <p style="margin-top:14px;font-size:0.78rem;color:var(--c-text-sub)">Already have many fonts to add? <a href="#" id="btn-sf-import-bulk-empty" style="color:var(--jmt-blue);text-decoration:underline;cursor:pointer">Bulk import from a folder</a></p>
-              <p style="margin-top:6px;font-size:0.78rem;color:var(--c-text-sub)">Fonts already on a card? <a href="#" id="btn-sf-import-sd-empty" style="color:var(--jmt-blue);text-decoration:underline;cursor:pointer">Read my Proffie SD card</a></p>
+              <div class="sf-import-alt-links">
+                <p>Already have many fonts to add? <a href="#" id="btn-sf-import-bulk-empty">Bulk import from a folder</a></p>
+                <p>Fonts already on a card? <a href="#" id="btn-sf-import-sd-empty">Read my Proffie SD card</a></p>
+              </div>
             </div>
           </div>
           <div class="sf-cards" id="sf-cards"></div>
@@ -5384,8 +5394,10 @@
           <button class="modal-btn-primary" id="sf-import-pick-folder">Pick folder…</button>
           <button class="modal-btn-primary" id="sf-import-pick-link">Paste a link</button>
         </div>
-        <p style="margin-top:14px;font-size:0.78rem;color:var(--c-text-sub);text-align:center">Already have many fonts to add? <a href="#" id="btn-sf-import-bulk-from-picker" style="color:var(--jmt-blue);text-decoration:underline;cursor:pointer">Bulk import from a folder</a></p>
-        <p style="margin-top:6px;font-size:0.78rem;color:var(--c-text-sub);text-align:center">Fonts already on a card? <a href="#" id="btn-sf-import-sd-from-picker" style="color:var(--jmt-blue);text-decoration:underline;cursor:pointer">Read my Proffie SD card</a></p>
+        <div class="sf-import-alt-links">
+          <p>Already have many fonts to add? <a href="#" id="btn-sf-import-bulk-from-picker">Bulk import from a folder</a></p>
+          <p>Fonts already on a card? <a href="#" id="btn-sf-import-sd-from-picker">Read my Proffie SD card</a></p>
+        </div>
       </div>
       <!-- Link view: focused sub-flow shown only after "Paste a link". -->
       <div class="sf-import-link-block" id="sf-import-link-block" style="display:none">
