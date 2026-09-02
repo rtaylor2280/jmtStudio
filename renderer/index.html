@@ -3538,8 +3538,14 @@
   input.styles-helper-editor-name.editable { display: block; }
   input.styles-helper-editor-name::placeholder { color: var(--c-text-faint); font-weight: 400; }
   input.styles-helper-editor-name.invalid { border-color: #c44; }
-  #helper-name-error { font-size: 0.66rem; color: #c44; padding: 1px 8px 3px; display: none; }
-  #helper-name-error.visible { display: block; }
+  /* One inline name-error style for every surface that names a C++ alias.
+     Grouped rather than copied so the three cannot drift apart. */
+  #helper-name-error,
+  #add-style-name-error,
+  #style-detail-name-error { font-size: 0.66rem; color: #c44; padding: 1px 8px 3px; display: none; }
+  #helper-name-error.visible,
+  #add-style-name-error.visible,
+  #style-detail-name-error.visible { display: block; }
   /* Body invalid: red border around the helper Monaco container so the user
      sees WHERE the problem is (name field has its own .invalid border above). */
   #styles-helper-monaco.invalid { box-shadow: inset 0 0 0 1px #c44; }
@@ -4699,6 +4705,7 @@
         <button class="detail-pencil" id="btn-detail-name-edit" title="Edit name">&#9998;</button>
         <button class="detail-pencil" id="btn-detail-name-confirm" title="Confirm name" style="display:none;color:#4a4;opacity:0.7">&#10003;</button>
       </div>
+      <div id="style-detail-name-error"></div>
     </div>
     <div id="style-detail-meta">
       <div class="style-meta-row" id="detail-source-row">
@@ -5063,6 +5070,7 @@
         <span class="style-meta-label">Name</span>
         <input id="add-style-name" type="text" class="detail-meta-input visible" placeholder="Required" style="flex:1;font-size:0.82rem">
       </div>
+      <div id="add-style-name-error"></div>
       <div class="style-meta-row">
         <span class="style-meta-label">Source</span>
         <input id="add-style-source" type="text" class="detail-meta-input visible" placeholder="Optional" style="flex:1;font-size:0.82rem">
@@ -14755,7 +14763,10 @@ const _COPY_STYLE_INNER_PLACEHOLDER = 'InOutHelper<Blue,300,800>';
 //                                 number would be arbitrary, so refuse
 function _composeCopyStyleExpr(name, usingCode) {
   const body = String(usingCode || '')
-    .replace(/^using\s+\w+\s*=\s*/, '')
+    // Same `=` anchor as the rename path: \w+ stopped at the first character
+    // outside [A-Za-z0-9_], so an alias named with a paren kept its `using X =`
+    // prefix in the copied expression. An alias name cannot contain `=`.
+    .replace(/^using\s+[^=]+=\s*/, '')
     .replace(/;\s*$/, '')
     .trim();
 
@@ -16356,7 +16367,14 @@ function _detailHasError() {
 function _setDetailDirty(val) {
   _detailDirty = val;
   const hasErr = _updateDetailErrorMarkers();
-  document.getElementById('btn-style-detail-save').disabled = !val || hasErr;
+  // ⚠️ ONE WRITER for this button's disabled state. The name rule is a THIRD
+  // input to the same expression, not a second place that sets it — a separate
+  // writer would enable Save on a pristine modal whenever the name happened to
+  // be valid, which is the opposite of what either rule wants.
+  const nameBad = !!_styleNameError(document.getElementById('style-detail-name-input')?.value);
+  const saveBtn = document.getElementById('btn-style-detail-save');
+  saveBtn.disabled = !val || hasErr || nameBad;
+  saveBtn.title = nameBad ? STYLE_NAME_MSG : '';
   // Button label tracks intent: "Close" when nothing to lose, "Discard" once the
   // user has unsaved edits. Avoids the "Discard … what?" confusion when Save is
   // disabled because the modal is still pristine.
@@ -16480,16 +16498,31 @@ function _openStyleDetail(entry) {
 
   _setDetailDirty(false);
   setTimeout(() => _updateDetailErrorMarkers(true), 100); // slight delay for layout
+  // Clear any name error and re-enable Save from the previous style — the state
+  // is per-open, and a stale disabled Save is its own bug.
+  _refreshDetailNameState();
   document.getElementById('modal-style-detail').classList.add('active');
   setTimeout(() => _stylesDetailEditor?.layout(), 50);
 }
 
 async function _closeDetailModal() {
   if (_detailDirty) {
-    const r = await promptUnsaved('You have unsaved changes to this style.');
-    if (r === 'cancel') return;
-    if (r === 'save')   { await _saveDetail(); return; }
-    // discard: fall through to close
+    // ⚠️ DON'T OFFER A SAVE THAT CANNOT HAPPEN. With an invalid name there is no
+    // save to make, so the three-way prompt would hand the user a Save button
+    // that silently does nothing and closes as if it had worked. Remove the
+    // option instead of guarding it: same call as everywhere else that has
+    // nothing to save, and the reason is stated in the message.
+    if (!_styleNameError(document.getElementById('style-detail-name-input')?.value)) {
+      const r = await promptUnsaved('You have unsaved changes to this style.');
+      if (r === 'cancel') return;
+      if (r === 'save')   { await _saveDetail(); return; }
+      // discard: fall through to close
+    } else {
+      const proceed = await _promptDiscard(
+        'This style has unsaved changes, but the name is not a valid identifier so it cannot be saved.\n\n' +
+        STYLE_NAME_MSG);
+      if (!proceed) return;
+    }
   }
   document.getElementById('modal-style-detail').classList.remove('active');
 }
@@ -16519,11 +16552,29 @@ async function _saveDetail() {
   const newName = nameInp.value.trim() || oldName;
   const rawEditor = _stylesDetailEditor.getValue();
   const { prefix: editorTmpl, code: editorUsing } = _splitTemplatePrefix(rawEditor);
+  // ⚠️ NAME FIRST. _validateCollapsedStyle takes the name but only checks the CODE,
+  // so an invalid alias used to sail through and land in the `using` line below.
+  // Inline and non-destructive: nothing is written, the modal stays open and the
+  // field stays editable, so the fix is one keystroke rather than a lost save.
+  const nameErr = _styleNameError(newName);
+  if (nameErr) {
+    _setStyleNameError(nameInp, document.getElementById('style-detail-name-error'), nameErr);
+    nameInp.focus();
+    return;
+  }
+  _setStyleNameError(nameInp, document.getElementById('style-detail-name-error'), '');
   const compacted = _compactStyleCode(editorUsing);
   const detailValErr = _validateCollapsedStyle(compacted, newName);
   if (detailValErr) { promptError('Save aborted', `Structural error in style:\n\n${detailValErr}`); return; }
-  // compacted = "using OldName = expr;" — replace identifier with newName
-  const newUsingCode = `using ${newName} = ${compacted.replace(/^using\s+\w+\s*=\s*/, '')}`;
+  // compacted = "using OldName = expr;" — replace identifier with newName.
+  // ⚠️ ANCHOR ON THE `=`, NOT ON \w+. The old /^using\s+\w+\s*=\s*/ stopped at the
+  // first character outside [A-Za-z0-9_], so a name like Waving_Flag_(USA) failed to
+  // match at all, the strip silently did nothing, and every rename PREPENDED another
+  // alias: `using A = using B) = using C_) = ... = Layers<...>`. An alias name can
+  // never contain `=`, so [^=]+ is safe for any name the parser can produce, valid
+  // or not — which matters, because a library imported before this guard existed can
+  // still hold one.
+  const newUsingCode = `using ${newName} = ${compacted.replace(/^using\s+[^=]+=\s*/, '')}`;
 
   let current = _stylesEditorInstance.getValue();
 
@@ -17443,7 +17494,12 @@ function _updateAddStyleConfirmBtn() {
       : '';
     hasErr = checkContent ? !!_findBracketError(_compactStyleCode(checkContent)) : false;
   }
-  document.getElementById('btn-add-style-confirm').disabled = !name || !hasCode || hasErr;
+  // The name has to be a valid C++ alias before Add can commit it. Shown inline
+  // and live, so the field can be corrected rather than the save failing later.
+  const nameErr = _styleNameError(name);
+  _setStyleNameError(document.getElementById('add-style-name'),
+                     document.getElementById('add-style-name-error'), nameErr);
+  document.getElementById('btn-add-style-confirm').disabled = !name || !hasCode || hasErr || !!nameErr;
 }
 
 // Style names and preset bank names become C++ `using` aliases / array names. They
@@ -17459,6 +17515,42 @@ function _updateAddStyleConfirmBtn() {
 // opts.hyphen (default true): also convert '-' -> '_'. Style identifiers can't
 // contain hyphens so they need it; font folder names CAN (and cleanSuggestedName
 // preserves them), so those callers pass { hyphen: false } and only spaces convert.
+// THE IDENTIFIER RULE, IN ONE PLACE. A style name becomes a C++ `using` alias, so
+// it has to match [A-Za-z_][A-Za-z0-9_]*. The helper editor already enforced this;
+// the Style Library's Add and rename paths did not, which is how "Waving Flag (USA)"
+// reached the alias and took the rename strip below down with it.
+//
+// WHY REJECT RATHER THAN CONVERT, and the line is Ryan's (2026-09-02): space and
+// hyphen have a lossless, obvious mapping to `_`, so _wireStyleNameSanitize converts
+// those silently. A paren, a `#`, a `;` or a leading digit has no honest conversion —
+// rewriting "Waving Flag (USA)" into "Waving_Flag_USA_" hands back a name the user
+// did not choose. So those are refused inline WITH THE FIELD LEFT EDITABLE, never by
+// failing the operation.
+// ⚠️ THAT CHOICE IS ONLY AVAILABLE BECAUSE SOMEONE IS TYPING. An automatic path has
+// nobody to correct it and must sanitize instead — which is exactly what the sound
+// font side does with cleanSuggestedName on folder-derived names. No automatic path
+// creates a style name today (the only bulk route imports a whole my_styles.h, whose
+// names are already valid C++), so rejecting here cannot fail an import.
+const STYLE_NAME_RX = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const STYLE_NAME_MSG = 'Name must start with a letter or underscore. Only letters, digits, and underscores allowed.';
+function _styleNameError(name) {
+  const n = String(name || '').trim();
+  // Empty is the confirm button's business, not a red line shouted at someone
+  // who has not typed anything yet.
+  if (!n) return '';
+  return STYLE_NAME_RX.test(n) ? '' : STYLE_NAME_MSG;
+}
+// Paints (or clears) one field's inline error. Returns true when the field is OK,
+// so callers can read it as a guard.
+function _setStyleNameError(inputEl, errEl, msg) {
+  if (errEl) {
+    errEl.textContent = msg || '';
+    errEl.classList.toggle('visible', !!msg);
+  }
+  if (inputEl) inputEl.classList.toggle('invalid', !!msg);
+  return !msg;
+}
+
 function _wireStyleNameSanitize(el, opts) {
   const hyphen = !opts || opts.hyphen !== false;
   const pasteRx = hyphen ? /[\s-]+/g : /\s+/g;
@@ -17484,6 +17576,26 @@ function _wireStyleNameSanitize(el, opts) {
 _wireStyleNameSanitize(document.getElementById('add-style-name'));
 _wireStyleNameSanitize(document.getElementById('style-detail-name-input'));
 _wireStyleNameSanitize(document.getElementById('styles-helper-editor-name'));
+// Live on the rename field too, so the rule is visible while typing rather than
+// only at Save. The Add field gets this through _updateAddStyleConfirmBtn, which
+// already runs on every input.
+// Live on the rename field, and it drives the SAVE BUTTON rather than only
+// refusing at save time. A Save that is clickable, does nothing, and leaves the
+// dialog looking like it committed is worse than no validation at all — the user
+// is told the rule and then handed a button that appears to overrule it.
+// (Ryan, 2026-09-02, testing this very change: "doesn't really save but closes
+// out the field and acts like it's saving.")
+function _refreshDetailNameState() {
+  const el = document.getElementById('style-detail-name-input');
+  if (!el) return true;
+  const ok = _setStyleNameError(el, document.getElementById('style-detail-name-error'),
+                                _styleNameError(el.value));
+  // Recompute through the single writer rather than setting `disabled` here, so
+  // dirtiness, body errors and the name rule cannot contradict each other.
+  _setDetailDirty(_detailDirty);
+  return ok;
+}
+document.getElementById('style-detail-name-input').addEventListener('input', _refreshDetailNameState);
 
 // Live sync: name field → editor
 document.getElementById('add-style-name').addEventListener('input', () => {
