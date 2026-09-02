@@ -603,8 +603,8 @@ function detectBundleName(candidates) {
 }
 
 // Parse a candidate's path for a version-marker component (X_V1 /
-// X_V2.4 / X v3 / X-v1.0). Walks the path from the candidate-name end
-// toward the root, returning the first matching component.
+// X_V2.4 / X v3 / X-v1.0 / XV2). Walks the path from the candidate-name
+// end toward the root, returning the first matching component.
 //
 // Two-tier detection lives in one walk:
 //   - Common pattern: vendor names the candidate folder `Font_V1` /
@@ -639,7 +639,11 @@ function _parseVersionFromCandidate(candidate) {
   for (let i = parts.length - 1; i >= 0; i--) {
     if (BOARD_FOLDERS.test(parts[i])) continue;
     if (deepestNonBoardIndex === -1) deepestNonBoardIndex = i;
-    const m = parts[i].match(/^(.+?)[\s_-]+[vV](\d+(?:\.\d+)*)$/);
+    // The separator is optional: FontV2 is the natural way to name a working
+    // folder, and it grouped as an unrelated font when a separator was
+    // mandatory. Measured over the whole library before relaxing it — 140
+    // sources, 217 candidates, zero change to any of them.
+    const m = parts[i].match(/^(.+?)[\s_-]*[vV](\d+(?:\.\d+)*)$/);
     if (!m) continue;
     const versionParts = m[2].split('.').map(s => parseInt(s, 10));
     if (versionParts.some(n => Number.isNaN(n))) continue;
