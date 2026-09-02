@@ -11,6 +11,11 @@
   :root {
     --jmt-blue:       #025192;
     --jmt-amber:      #d49b3a;
+    /* NEW = never seen. Third named accent, added 2026-09-02 with the NEW
+       badge. Green reads as "fresh, you have not looked" beside amber's
+       "something is wrong". It was partly spoken for by the free tag; that
+       chip takes a colour of its own when [B-146] renames it. [B-213] */
+    --jmt-green:      #3f9d52;
     --c-bg:           #111111;
     --c-bg-toolbar:   #0e0e0e;
     --c-bg-raised:    #181818;
@@ -2439,7 +2444,14 @@
   /* On-card effect chips appear only when the Effects filter is active.
      Mirror the modal's chip language (JMT blue tint, with a gray unknown
      variant) so the user sees the same affordance on cards and modal. */
-  .sf-card-effects { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 2px; }
+  /* Pinned to the BOTTOM of the card, not stacked under the tags. Cards are a
+     fixed height, so without this the effects row rides up on any card that
+     happens to have no tags - and effects are not tags, so they should not
+     move with them. `margin-top: auto` in the card's existing flex column
+     does it; the select and delete buttons are absolutely positioned and are
+     unaffected. (Ryan spotted it 2026-09-02: same-size cards, chips at
+     different heights.) */
+  .sf-card-effects { display: flex; flex-wrap: wrap; gap: 3px; margin-top: auto; padding-top: 2px; }
   .sf-card-effect-chip { font-size: 0.63rem; color: var(--jmt-blue); background: rgba(60, 120, 200, 0.10); border: 1px solid rgba(60, 120, 200, 0.30); border-radius: 3px; padding: 1px 5px; white-space: nowrap; cursor: pointer; font-family: inherit; transition: background 0.25s, color 0.25s, border-color 0.25s; }
   .sf-card-effect-chip:hover { background: rgba(60, 120, 200, 0.22); border-color: var(--jmt-blue); }
   .sf-card-effect-chip.unknown { color: var(--c-text-sub); background: var(--c-bg-raised); border-color: var(--c-border); }
@@ -3654,12 +3666,74 @@
   #btn-sf-needs-review-filter:hover { color: var(--jmt-amber); }
   #btn-sf-needs-review-filter.active { color: var(--jmt-amber); border-color: rgba(212,155,58,0.5); background: rgba(212,155,58,0.08); }
   #btn-sf-needs-review-filter #sf-needs-review-count { background: var(--jmt-amber); }
+  /* Sort is not a filter. Same row, because "225 fonts, ordered A-Z, filtered
+     by..." reads correctly left to right - but a group separator so the two
+     kinds of control are not one undifferentiated pill soup. [B-213] */
+  /* A short tick, not a full-height rule: .sf-search-bar is 42px and centred,
+     so `align-self: stretch` would draw a wall between the two groups rather
+     than a separator. 18px reads as a comma. */
+  /* The inverse count reads as the LEFTOVER set, not a peer of the coloured
+     counts — card grey rather than a bright pill. White on #222 is muddy, so
+     the text lifts to --c-text with a hairline to keep the pill shape legible
+     against the toolbar. (Ryan: "the grey of the cards... like you see on
+     track here", 2026-09-02.) */
+  .styles-tag-filter-badge.sf-badge-muted { background: var(--c-bg-card); color: var(--c-text);
+                                            box-shadow: inset 0 0 0 1px var(--c-border-strong); }
+  .sf-toolbar-divider { width: 1px; height: 18px; margin: 0 2px; background: var(--c-border); flex: 0 0 auto; }
+  #btn-sf-new-filter:hover { color: var(--jmt-green); }
+  #btn-sf-new-filter.active { color: var(--jmt-green); border-color: rgba(63,157,82,0.5); background: rgba(63,157,82,0.10); }
+  #btn-sf-new-filter #sf-new-count { background: var(--jmt-green); }
+  .styles-active-filter-chip.sf-active-filter-new { color: var(--jmt-green); background: rgba(63,157,82,0.10); border-color: rgba(63,157,82,0.5); }
+  /* ⚠️ A chip type needs TWO rules, not one: .styles-active-filter-remove has
+     its own colour (--jmt-blue), so the × does NOT inherit the chip's. Every
+     other type carries this companion rule; New was missing it and its × came
+     out blue on a green chip. (Ryan spotted it 2026-09-02.) */
+  .styles-active-filter-chip.sf-active-filter-new .styles-active-filter-remove { color: var(--jmt-green); }
+  /* Card badge: the same green, on the card itself, so NEW is visible without
+     opening the filter. Border only - a fill would fight the in-use tint. */
+  .sf-card.is-new { border-color: rgba(63,157,82,0.55); }
+  .sf-card-new-badge { font-size: 0.6rem; font-weight: 700; letter-spacing: .06em; color: var(--jmt-green);
+                       border: 1px solid rgba(63,157,82,0.5); border-radius: 3px; padding: 0 4px; margin-left: 6px; }
   .styles-active-filter-chip.sf-active-filter-needs-review { color: var(--jmt-amber); background: rgba(212,155,58,0.10); border-color: rgba(212,155,58,0.5); }
   .styles-active-filter-chip.sf-active-filter-needs-review .styles-active-filter-remove { color: var(--jmt-amber); }
   /* In Use filter mirrors the .sf-card.in-use blue tint so the visual
      vocabulary is consistent — same color signal in toolbar and card. */
   #btn-sf-in-use-filter:hover { color: var(--jmt-blue); }
   #btn-sf-in-use-filter.active { color: var(--jmt-blue); border-color: rgba(0,130,255,0.5); background: rgba(0,100,220,0.08); }
+  /* The inverse chip needs its own active rule — the class was landing on
+     nothing, so the filter could be ON with no way to see it. Same blue as its
+     twin, because the ACTIVE state means the same thing on both; the label and
+     the muted badge are what say which polarity. */
+  /* ⚠️ ACTIVE IS A FILL HERE, NOT A COLOUR. Every other chip tints itself with
+     the colour it stands for; this one stands for the LEFTOVER set and has no
+     colour of its own, so borrowing its twin's blue fought the grey badge sitting
+     inside it. A fill says "on" without importing a meaning from somewhere else,
+     and the chip stays entirely greyscale. (Ryan, 2026-09-02: "the blue outline on
+     the grey still feels off... can we fill the tile when selected instead?") */
+  /* Fill measured, not eyeballed: --c-bg-hover (#252525) is only 1.23:1 against
+     the #111 toolbar, so it would not read as ON at all, and the #222 badge inside
+     it vanishes at 1.04:1. #444 clears both - 1.94:1 against the bar, 1.63:1
+     against the badge - so the chip reads as filled and the pill still reads as a
+     pill sitting in it. */
+  /* ⚠️ THE THIRD BASE RULE THIS CHIP HAD TO OPT OUT OF, and it is a pattern in
+     this stylesheet: a filter chip inherits colour from THREE places -
+     .styles-tag-filter-btn:hover (blue), .styles-active-filter-remove (blue),
+     and its own .active rule. A chip that is not blue has to override all
+     three, and missing any one shows up only in that one state. */
+  #btn-sf-not-in-use-filter:hover { color: var(--c-text-bright); }
+  #btn-sf-not-in-use-filter.active { color: var(--c-text-bright); background: #444444;
+                                     border-color: #565656; }
+  /* ⚠️ The fill has to INVERT for the light theme. Dark mode fills LIGHTER than
+     the #111 bar; light mode has to fill DARKER than its #f5f5f5 bar, because the
+     badge there is #ffffff and a lighter fill would swallow it. #c8c8c8 clears
+     both (1.53:1 vs the bar, 1.67:1 vs the badge). A single hardcoded fill would
+     have been a dark chip on a light toolbar with an invisible pill inside it. */
+  html.light-mode #btn-sf-not-in-use-filter.active { color: var(--c-text-bright); background: #c8c8c8;
+                                                     border-color: #b0b0b0; }
+  /* ⚠️ The badge stays GREY even when active, deliberately. Blue outline says
+     the filter is on; grey says this is the leftover set — and that is still
+     true while it is the one filtering. Two signals, two jobs. (Ryan,
+     2026-09-02: "blue outline but keep the grey number oval".) */
   #btn-sf-in-use-filter #sf-in-use-count { background: var(--jmt-blue); }
   .styles-active-filter-chip.sf-active-filter-in-use { color: var(--jmt-blue); background: rgba(0,100,220,0.10); border-color: rgba(0,130,255,0.5); }
   .styles-active-filter-chip.sf-active-filter-in-use .styles-active-filter-remove { color: var(--jmt-blue); }
@@ -4564,6 +4638,19 @@
           </div>
           <span class="sf-search-count" id="sf-search-count"></span>
           <div class="styles-tag-filter-wrap">
+            <!-- Sort sits FIRST and apart from the filter chips: it changes the
+                 ORDER of everything, the chips change WHICH things. The button
+                 shows the current order rather than the word "Sort", so the
+                 library's state is readable without opening anything. [B-213] -->
+            <button id="btn-sf-sort" class="styles-tag-filter-btn" title="Sort order">
+              <span class="styles-tag-filter-icon">&#9662;</span> <span id="sf-sort-label">Name A&ndash;Z</span>
+            </button>
+            <div id="sf-sort-dropdown" class="styles-tag-dropdown" style="display:none">
+              <div id="sf-sort-dropdown-list"></div>
+            </div>
+          </div>
+          <div class="sf-toolbar-divider"></div>
+          <div class="styles-tag-filter-wrap">
             <button id="btn-sf-tag-filter" class="styles-tag-filter-btn" title="Filter by tag">
               <span class="styles-tag-filter-icon">&#9662;</span> Tags<span id="sf-tag-filter-badge" class="styles-tag-filter-badge" style="display:none">0</span>
             </button>
@@ -4587,11 +4674,24 @@
               <div id="sf-effects-dropdown-list"></div>
             </div>
           </div>
-          <button id="btn-sf-needs-review-filter" class="styles-tag-filter-btn" title="Show only entries with missing fields" style="display:none">
+          <button id="btn-sf-needs-review-filter" class="styles-tag-filter-btn" title="Only fonts with something to confirm" style="display:none">
             Needs review<span id="sf-needs-review-count" class="styles-tag-filter-badge" style="display:none">0</span>
           </button>
-          <button id="btn-sf-in-use-filter" class="styles-tag-filter-btn" title="Show only fonts referenced by the open config's presets" style="display:none">
+          <button id="btn-sf-in-use-filter" class="styles-tag-filter-btn" title="Only fonts used by the open config" style="display:none">
             In use<span id="sf-in-use-count" class="styles-tag-filter-badge" style="display:none">0</span>
+          </button>
+          <!-- The inverse is its own chip, and it only appears once the in-use
+               filter is engaged at all. A click-cycle hid it: nobody clicks a
+               filter they have already switched on to see whether it does
+               something else. Revealing it in context makes it discoverable
+               without adding an eighth control to the default row. (Ryan,
+               2026-09-02.) ⚠️ The reveal is "either polarity active", NOT "In use
+               active" - otherwise it disappears the moment you switch to it. -->
+          <button id="btn-sf-not-in-use-filter" class="styles-tag-filter-btn" title="Only fonts NOT used by the open config" style="display:none">
+            Not in use<span id="sf-not-in-use-count" class="styles-tag-filter-badge sf-badge-muted" style="display:none">0</span>
+          </button>
+          <button id="btn-sf-new-filter" class="styles-tag-filter-btn" title="Only fonts not opened or used" style="display:none">
+            New<span id="sf-new-count" class="styles-tag-filter-badge" style="display:none">0</span>
           </button>
         </div>
         <div id="sf-active-filters" class="styles-active-filters" style="display:none"></div>
@@ -10240,6 +10340,9 @@ window.setFlashedTimestamp = async (port, sn) => {
   metaPort     = port || null;
   metaBoardSN  = sn   || null;
   updateStatusMeta();
+  // Both flash paths - serial and post-DFU - funnel through here, so the "this
+  // font is on a saber now" stamp lives here rather than at two call sites. [B-213]
+  try { window._sfMarkFlashedFontsSeen?.(); } catch {}
   if (currentFilePath) await doSave();
 };
 window.getLastPort    = () => metaPort;
@@ -19274,6 +19377,52 @@ require(['vs/editor/editor.main'], function () {
       // _sfToggleFilterEffect: off → present → absent → off.
       let _sfActiveFilterEffectsMissing = new Set();
       let _sfNeedsReviewFilterOn = false;
+      // NEW = never SEEN. Absent seenAt means never opened and never used. [B-213]
+      let _sfNewFilterOn = false;
+      // Names held in view for the life of a filter session — see the join-but-
+      // not-leave rule at the filter predicates. Captured when the filter goes ON
+      // and dropped when it goes OFF, so toggling is how you ask again.
+      let _sfNewHeld = new Set();
+      let _sfNeedsReviewHeld = new Set();
+
+      // ── Library sort ────────────────────────────────────────────────────
+      // The grid was name-ascending and that was the ONLY order it had. At 220
+      // fonts the alphabet stops being an answer, and the thing most often wanted
+      // is the last thing you did - which is why this earned its place off bulk
+      // import: after importing a card, "what did I just add" was unanswerable.
+      // Every field here already exists on every entry; no migration. [B-213]
+      //
+      // ⚠️ ADDED vs ACQUIRED ARE DIFFERENT QUESTIONS AND BOTH ARE REAL. On Ryan's
+      // library they sit a YEAR apart - ANH_Graflex was created 2026-06-26 and
+      // acquired 2025-06-09 - because the library was built long after the fonts
+      // were bought. "When did this arrive in my library" and "when did I buy it"
+      // are separate, so neither is a default for the other.
+      const _SF_SORTS = [
+        { key: 'name',     label: 'Name',     asc: 'A–Z',        desc: 'Z–A',       get: f => (f.name || '').toLowerCase(), text: true },
+        { key: 'added',    label: 'Added',    asc: 'Oldest',     desc: 'Newest',    get: f => Date.parse(f.meta?.createdAt || '') || 0 },
+        { key: 'acquired', label: 'Acquired', asc: 'Oldest',     desc: 'Newest',    get: f => Date.parse(f.meta?.acquisitionDate || '') || 0 },
+        { key: 'updated',  label: 'Updated',  asc: 'Oldest',     desc: 'Newest',    get: f => Date.parse(f.meta?.updatedAt || '') || 0 },
+        { key: 'size',     label: 'Size',     asc: 'Smallest',   desc: 'Largest',   get: f => Number(f.meta?.contentTotalBytes) || 0 },
+      ];
+      let _sfSort = { key: 'name', dir: 'asc' };
+      const _sfSortDef = () => _SF_SORTS.find(x => x.key === _sfSort.key) || _SF_SORTS[0];
+      const _sfLoadSort = async () => {
+        try {
+          const v = await window.electronAPI.getSetting('librarySort', null);
+          if (v && _SF_SORTS.some(x => x.key === v.key) && (v.dir === 'asc' || v.dir === 'desc')) _sfSort = v;
+        } catch {}
+      };
+      // Name is the tiebreak on every other key, so two fonts added in the same
+      // import (identical createdAt to the second) still land in a stable, readable
+      // order instead of shuffling between renders.
+      const _sfCompareEntries = (a, b) => {
+        const d = _sfSortDef();
+        const av = d.get(a), bv = d.get(b);
+        let c = d.text ? String(av).localeCompare(String(bv)) : (av === bv ? 0 : (av < bv ? -1 : 1));
+        if (_sfSort.dir === 'desc') c = -c;
+        if (c !== 0) return c;
+        return (a.name || '').localeCompare(b.name || '');
+      };
       // In-use filter: when true, the SF grid shows only entries whose
       // names appear in the open config's preset font refs. Mirrors the
       // Needs Review filter shape (toggle button, badge count, active
@@ -19281,7 +19430,15 @@ require(['vs/editor/editor.main'], function () {
       // editor.getValue() through presetParser — same source the card
       // .in-use class reads from, so toolbar count and card highlight
       // stay in lockstep.
-      let _sfInUseFilterOn = false;
+      // TRI-STATE, not a boolean: '' off, 'in' = used by the open config,
+      // 'not' = everything else. The Effects filter is already tri-state, so this
+      // matches an existing idea rather than inventing one.
+      // ⚠️ THE LABEL CARRIES THE POLARITY, NOT A COLOUR. Red would read as an
+      // error (it means corruption elsewhere) and grey is what the chip already
+      // looks like when OFF, so a colour could only say "on" ambiguously. The
+      // active styling says the filter is on; the word says which way. (Ryan,
+      // 2026-09-02.) [B-213]
+      let _sfInUseFilter = '';
       // Sentinel value for the "missing creator" row in the Creators filter
       // dropdown. Stored verbatim in _sfActiveFilterCreators when the user
       // toggles it; filter predicates special-case it against entries with
@@ -19486,7 +19643,10 @@ require(['vs/editor/editor.main'], function () {
         _sfActiveFilterEffects = new Set();
         _sfActiveFilterEffectsMissing = new Set();
         _sfNeedsReviewFilterOn = false;
-        _sfInUseFilterOn = false;
+        _sfNewFilterOn = false;
+        _sfNewHeld = new Set();
+        _sfNeedsReviewHeld = new Set();
+        _sfInUseFilter = '';
         _sfRenderGrid();
       };
       const _sfRenderGrid = () => {
@@ -19494,7 +19654,7 @@ require(['vs/editor/editor.main'], function () {
         const countEl = document.getElementById('sf-search-count');
         if (!list) return;
         const q = (_sfSearchQuery || '').toLowerCase();
-        const sorted = _sfAllEntries.slice().sort((a, b) => a.name.localeCompare(b.name));
+        const sorted = _sfAllEntries.slice().sort(_sfCompareEntries);   // [B-213]
         const filterTagsLower = Array.from(_sfActiveFilterTags).map(t => t.toLowerCase());
         const matchesSearch = (f) => {
           if (!q) return true;
@@ -19533,17 +19693,36 @@ require(['vs/editor/editor.main'], function () {
           for (const e of filterEffectsMissingLower) if (effSet.has(e)) return false;
           return true;
         };
+        // ⚠️ WHILE A FILTER IS ON, ITEMS MAY JOIN THE VIEW BUT MAY NOT LEAVE IT.
+        // Acting on a card from inside a filtered view used to remove it under the
+        // cursor: open the third NEW font and the two behind it jump left, so the
+        // next click lands on something else. Every unread-style list solves this
+        // the same way - the filtered view is the answer to a question you asked,
+        // not a live query that rewrites itself as you work.
+        // The badge still clears and the count still ticks down, so the feedback is
+        // intact; only the card's PLACE is held. A newly imported font still
+        // appears, because joining is a new answer rather than something being
+        // pulled away. Toggling the filter off and on asks again. [B-213]
+        // The app already had this instinct for selection, which deliberately
+        // overrides the toggle filters for the same "keep this" reason.
         const matchesNeedsReviewFilter = (f) => {
           if (!_sfNeedsReviewFilterOn) return true;
-          return !!(f.meta && f.meta.needsReview);
+          return !!(f.meta && f.meta.needsReview) || _sfNeedsReviewHeld.has(f.name);
+        };
+        // Never seen = never opened AND never used. Written by three call sites
+        // rather than derived, because "used" cannot be derived - see [B-213].
+        const isNew = (f) => !(f.meta && f.meta.seenAt);
+        const matchesNewFilter = (f) => {
+          if (!_sfNewFilterOn) return true;
+          return isNew(f) || _sfNewHeld.has(f.name);
         };
         // In-use lookup hoisted above the matching filter so matchesInUseFilter
         // can read it. Also reused later for the card .in-use class and the
         // Select-in-use action-bar affordance.
         const inUseFonts = _sfComputeInUseFonts();
         const matchesInUseFilter = (f) => {
-          if (!_sfInUseFilterOn) return true;
-          return inUseFonts.has(f.name);
+          if (!_sfInUseFilter) return true;
+          return _sfInUseFilter === 'in' ? inUseFonts.has(f.name) : !inUseFonts.has(f.name);
         };
         // Text search is authoritative: a typed query gates EVERY card,
         // selected or not. A search that matches nothing must show nothing
@@ -19559,17 +19738,29 @@ require(['vs/editor/editor.main'], function () {
         const matching = sorted.filter(f =>
           matchesSearch(f) &&
           (_sfSelectedNames.has(f.name) ||
-            (matchesTagFilter(f) && matchesCreatorFilter(f) && matchesEffectsFilter(f) && matchesNeedsReviewFilter(f) && matchesInUseFilter(f)))
+            (matchesTagFilter(f) && matchesCreatorFilter(f) && matchesEffectsFilter(f) && matchesNeedsReviewFilter(f) && matchesInUseFilter(f) && matchesNewFilter(f)))
         );
-        const isFiltering = !!q || _sfActiveFilterTags.size > 0 || _sfActiveFilterCreators.size > 0 || _sfActiveFilterEffects.size > 0 || _sfActiveFilterEffectsMissing.size > 0 || _sfNeedsReviewFilterOn || _sfInUseFilterOn;
+        const isFiltering = !!q || _sfActiveFilterTags.size > 0 || _sfActiveFilterCreators.size > 0 || _sfActiveFilterEffects.size > 0 || _sfActiveFilterEffectsMissing.size > 0 || _sfNeedsReviewFilterOn || !!_sfInUseFilter || _sfNewFilterOn;
         // Needs Review filter button: visible only when at least one entry
         // has the flag. Badge shows the count; button gets the active style
         // when the filter is on.
-        const needsReviewCount = sorted.filter(f => f.meta && f.meta.needsReview).length;
+        // How many would remain if this toggle were applied ON TOP of everything
+        // else currently active - every other filter honoured, this one's own
+        // polarity excluded so the count is what you would GET, not what you have.
+        // A chip promising 2 and yielding 0 is worse than no chip: the count IS
+        // the promise, and the "hide when zero" rule below then works by itself.
+        const _sfCountWith = (pred, exclude) => sorted.filter(f =>
+          matchesSearch(f)
+          && matchesTagFilter(f) && matchesCreatorFilter(f) && matchesEffectsFilter(f)
+          && (exclude === 'nr'  || matchesNeedsReviewFilter(f))
+          && (exclude === 'use' || matchesInUseFilter(f))
+          && (exclude === 'new' || matchesNewFilter(f))
+          && pred(f)).length;
+        const needsReviewCount = _sfCountWith(f => !!(f.meta && f.meta.needsReview), 'nr');
         const nrBtn = document.getElementById('btn-sf-needs-review-filter');
         const nrBadge = document.getElementById('sf-needs-review-count');
         if (nrBtn) {
-          nrBtn.style.display = needsReviewCount > 0 ? '' : 'none';
+          nrBtn.style.display = (needsReviewCount > 0 || _sfNeedsReviewFilterOn) ? '' : 'none';
           nrBtn.classList.toggle('active', _sfNeedsReviewFilterOn);
         }
         if (nrBadge) {
@@ -19580,18 +19771,35 @@ require(['vs/editor/editor.main'], function () {
             nrBadge.style.display = 'none';
           }
         }
+        // NEW filter button: same shape as Needs review - visible only when there
+        // is something to show, badge carries the count, and the count goes DOWN
+        // as the user works, which is what makes it a worklist. [B-213]
+        const newCount = _sfCountWith(isNew, 'new');
+        const newBtn = document.getElementById('btn-sf-new-filter');
+        const newBadge = document.getElementById('sf-new-count');
+        if (newBtn) {
+          newBtn.style.display = (newCount > 0 || _sfNewFilterOn) ? '' : 'none';
+          newBtn.classList.toggle('active', _sfNewFilterOn);
+        }
+        if (newBadge) {
+          if (newCount > 0) { newBadge.style.display = ''; newBadge.textContent = String(newCount); }
+          else newBadge.style.display = 'none';
+        }
         // In-use filter button: visible only when at least one entry is
         // referenced by an open-config preset. Badge shows the count of
         // library entries actually referenced (i.e. in the intersection
         // of inUseFonts and the library), not the raw inUseFonts size —
         // a preset's font ref that doesn't resolve to a library entry
         // (missing or typo'd font name) shouldn't inflate the counter.
-        const inUseInLibraryCount = sorted.filter(f => inUseFonts.has(f.name)).length;
+        const inUseInLibraryCount = _sfCountWith(f => inUseFonts.has(f.name), 'use');
         const inUseBtn = document.getElementById('btn-sf-in-use-filter');
         const inUseBadge = document.getElementById('sf-in-use-count');
+        // The count follows the polarity: flipping to "Not in use" shows how many
+        // that actually is, which is the honest signal for a filter that broad.
+        const notInUseCount = _sfCountWith(f => !inUseFonts.has(f.name), 'use');
         if (inUseBtn) {
-          inUseBtn.style.display = inUseInLibraryCount > 0 ? '' : 'none';
-          inUseBtn.classList.toggle('active', _sfInUseFilterOn);
+          inUseBtn.style.display = (inUseInLibraryCount > 0 || !!_sfInUseFilter) ? '' : 'none';
+          inUseBtn.classList.toggle('active', _sfInUseFilter === 'in');
         }
         if (inUseBadge) {
           if (inUseInLibraryCount > 0) {
@@ -19600,6 +19808,16 @@ require(['vs/editor/editor.main'], function () {
           } else {
             inUseBadge.style.display = 'none';
           }
+        }
+        const notInUseBtn = document.getElementById('btn-sf-not-in-use-filter');
+        const notInUseBadge = document.getElementById('sf-not-in-use-count');
+        if (notInUseBtn) {
+          notInUseBtn.style.display = !!_sfInUseFilter ? '' : 'none';
+          notInUseBtn.classList.toggle('active', _sfInUseFilter === 'not');
+        }
+        if (notInUseBadge) {
+          notInUseBadge.style.display = '';
+          notInUseBadge.textContent = String(notInUseCount);
         }
         // inUseFonts was computed above the matching filter so the In-use
         // filter predicate could read it; stash it (and the matching names)
@@ -19750,10 +19968,18 @@ require(['vs/editor/editor.main'], function () {
           const isInUse = inUseFonts.has(f.name);
           const needsReview = !!meta.needsReview;
           const reviewChip = needsReview
-            ? '<span class="sf-card-needs-review-chip" title="Open the entry to fill in missing fields">Needs review</span>'
+            ? '<span class="sf-card-needs-review-chip" title="Open to see what needs confirming">Needs review</span>'
+            : '';
+          // NEW on the card as well as in the filter, so it is visible while
+          // browsing rather than only when you go looking for it. Border tint plus
+          // a small badge; no fill, because a fill would fight the in-use tint on a
+          // font that is both. [B-213]
+          const cardIsNew = isNew(f);
+          const newChip = cardIsNew
+            ? '<span class="sf-card-new-badge" title="Not opened or used yet">NEW</span>'
             : '';
           const checkmark = isSelected ? '&#10003;' : '';
-          const cardClass = `sf-card${isSelected ? ' selected' : ''}${isInUse ? ' in-use' : ''}${needsReview ? ' needs-review' : ''}`;
+          const cardClass = `sf-card${isSelected ? ' selected' : ''}${isInUse ? ' in-use' : ''}${needsReview ? ' needs-review' : ''}${cardIsNew ? ' is-new' : ''}`;
           return `<div class="${cardClass}" data-font="${_sfEscape(f.name)}">
             <button class="card-delete-btn" data-card-delete="${_sfEscape(f.name)}" title="Delete font">&#10005;</button>
             <div class="sf-card-name-row">
@@ -19761,6 +19987,7 @@ require(['vs/editor/editor.main'], function () {
               ${demoBtn}
               ${linkBtn}
               ${reviewChip}
+              ${newChip}
             </div>
             ${author}${desc}${tags}${cardEffectsHtml}
             <button class="sf-card-select-btn" data-card-select="${_sfEscape(f.name)}" title="Select">${checkmark}</button>
@@ -21606,6 +21833,42 @@ require(['vs/editor/editor.main'], function () {
       // the user couldn't see/add a second tag. Counts reflect how many
       // entries within the cross-dimension filter carry that tag, which is
       // honest about "this tag has N matches if you add it."
+      // Same grammar as the facet sort bar [B-285]: the ACTIVE row carries the
+      // direction, clicking it flips, clicking another switches key at its natural
+      // default. One interaction rule across both surfaces rather than two.
+      const _sfRenderSortDropdown = () => {
+        const list = document.getElementById('sf-sort-dropdown-list');
+        if (!list) return;
+        list.innerHTML = _SF_SORTS.map(d => {
+          const sel = d.key === _sfSort.key;
+          const dirLabel = sel ? (_sfSort.dir === 'asc' ? d.asc : d.desc) : '';
+          return `<button class="styles-tag-dropdown-item${sel ? ' selected' : ''}" data-sort-key="${d.key}">
+            <span class="styles-tag-dropdown-check">${sel ? '&#10003;' : ''}</span>
+            <span class="styles-tag-dropdown-name">${d.label}</span>
+            <span class="styles-tag-dropdown-count">${dirLabel}</span>
+          </button>`;
+        }).join('');
+        list.querySelectorAll('[data-sort-key]').forEach(btn => {
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const key = btn.dataset.sortKey;
+            // Natural default per key: names read A–Z, dates and sizes read
+            // biggest-first, because "newest" and "largest" are the questions
+            // being asked when you pick them.
+            if (_sfSort.key === key) _sfSort.dir = _sfSort.dir === 'asc' ? 'desc' : 'asc';
+            else _sfSort = { key, dir: key === 'name' ? 'asc' : 'desc' };
+            try { window.electronAPI.setSetting('librarySort', _sfSort); } catch {}
+            _sfRenderSortDropdown();
+            _sfRenderGrid();
+          });
+        });
+        const lbl = document.getElementById('sf-sort-label');
+        if (lbl) {
+          const d = _sfSortDef();
+          lbl.textContent = `${d.label} ${_sfSort.dir === 'asc' ? d.asc : d.desc}`;
+        }
+      };
+
       const _sfRenderTagDropdown = () => {
         const list = document.getElementById('sf-tag-dropdown-list');
         const badge = document.getElementById('sf-tag-filter-badge');
@@ -21678,9 +21941,10 @@ require(['vs/editor/editor.main'], function () {
         const strip = document.getElementById('sf-active-filters');
         if (!strip) return;
         const needsReviewActive = _sfNeedsReviewFilterOn ? 1 : 0;
-        const inUseActive = _sfInUseFilterOn ? 1 : 0;
+        const inUseActive = _sfInUseFilter ? 1 : 0;
+        const newActive = _sfNewFilterOn ? 1 : 0;
         const searchActive = (_sfSearchQuery && _sfSearchQuery.trim()) ? 1 : 0;
-        const total = searchActive + _sfActiveFilterTags.size + _sfActiveFilterCreators.size + _sfActiveFilterEffects.size + _sfActiveFilterEffectsMissing.size + needsReviewActive + inUseActive;
+        const total = searchActive + _sfActiveFilterTags.size + _sfActiveFilterCreators.size + _sfActiveFilterEffects.size + _sfActiveFilterEffectsMissing.size + needsReviewActive + inUseActive + newActive;
         if (total === 0) {
           strip.style.display = 'none';
           strip.innerHTML = '';
@@ -21712,13 +21976,16 @@ require(['vs/editor/editor.main'], function () {
         const needsReviewChip = _sfNeedsReviewFilterOn
           ? `<span class="styles-active-filter-chip sf-active-filter-needs-review" data-needs-review="1">Needs review<button class="styles-active-filter-remove" data-filter-remove-needs-review="1" title="Remove">&#10005;</button></span>`
           : '';
-        const inUseChip = _sfInUseFilterOn
-          ? `<span class="styles-active-filter-chip sf-active-filter-in-use" data-in-use="1">In use<button class="styles-active-filter-remove" data-filter-remove-in-use="1" title="Remove">&#10005;</button></span>`
+        const newChip = _sfNewFilterOn
+          ? `<span class="styles-active-filter-chip sf-active-filter-new" data-new="1">New<button class="styles-active-filter-remove" data-filter-remove-new="1" title="Remove">&#10005;</button></span>`
+          : '';
+        const inUseChip = _sfInUseFilter
+          ? `<span class="styles-active-filter-chip sf-active-filter-in-use" data-in-use="1">${_sfInUseFilter === 'not' ? 'Not in use' : 'In use'}<button class="styles-active-filter-remove" data-filter-remove-in-use="1" title="Remove">&#10005;</button></span>`
           : '';
         const clearAll = total >= 2
           ? `<button class="styles-active-filter-clear" id="sf-clear-all-filters">Clear all</button>`
           : '';
-        strip.innerHTML = `<span class="styles-active-filters-label">Filtering by:</span>${searchChip}${tagChips}${creatorChips}${effectChips}${needsReviewChip}${inUseChip}${clearAll}`;
+        strip.innerHTML = `<span class="styles-active-filters-label">Filtering by:</span>${searchChip}${tagChips}${creatorChips}${effectChips}${needsReviewChip}${newChip}${inUseChip}${clearAll}`;
       };
       const _sfToggleFilterTag = (tag) => {
         if (!tag) return;
@@ -22167,6 +22434,7 @@ require(['vs/editor/editor.main'], function () {
           _sfRenderGrid();
         }
       };
+      await _sfLoadSort();   // before the first render, so the grid opens in the saved order [B-213]
       const _soundFontsEnabledRaw = await window.electronAPI.getSetting('soundFontsTabEnabled', true);
       // Coerce explicitly: getSetting can return null when prefs.json is missing/corrupt
       // (Store.get's catch block returns null on read failure, and the handler treats null
@@ -24366,9 +24634,63 @@ require(['vs/editor/editor.main'], function () {
           </div>`;
         }).join('');
       };
+      // SEEN is stamped, never derived. One helper so a fourth way of using a
+      // font joins by calling this rather than by re-deriving the rule. Fire and
+      // forget: it is write-once on the main side, the first caller wins, and a
+      // failure costs a badge rather than data. [B-213]
+      const _sfMarkSeen = (entryName) => {
+        if (!entryName) return;
+        try {
+          window.electronAPI.markEntrySeen({ name: entryName }).then(r => {
+            // Only repaint when it actually changed something, so the common
+            // case (already seen) does not re-render the grid on every click.
+            if (r && r.ok && r.stamped) {
+              const e = _sfAllEntries.find(x => x.name === entryName);
+              if (e && e.meta) e.meta.seenAt = new Date().toISOString();
+              _sfRenderGrid();
+            }
+          }).catch(() => {});
+        } catch {}
+      };
+
+      // Exposed because two of the three writers live outside this IIFE - the
+      // preset sidecar's font assignment and the card export. One definition,
+      // reachable from anywhere that can make a font "used".
+      window._sfMarkSeen = _sfMarkSeen;
+
+      // A FLASHED config is the strongest "used" signal there is: the font is on a
+      // saber, and nobody flashes by accident. Deliberately NOT the same as merely
+      // opening a config - that is passive and would clear dozens of badges at once
+      // for no act of the user's. Flashing is one act with an unmistakable meaning.
+      // (Ryan, 2026-09-02.) [B-213]
+      //
+      // Batched: stamp them all, then repaint ONCE. The per-entry helper re-renders
+      // on every change, which on a 45-font config would be 45 grid rebuilds.
+      // The in-use set splits on ';' so it can contain "common"; that stamps nothing
+      // because no library entry is named for it, which is the right no-op.
+      window._sfMarkFlashedFontsSeen = async () => {
+        try {
+          const names = _sfComputeInUseFonts();
+          if (!names || !names.size) return;
+          let changed = false;
+          for (const name of names) {
+            try {
+              const r = await window.electronAPI.markEntrySeen({ name });
+              if (r && r.ok && r.stamped) {
+                changed = true;
+                const e = _sfAllEntries.find(x => x.name === name);
+                if (e && e.meta) e.meta.seenAt = new Date().toISOString();
+              }
+            } catch {}
+          }
+          if (changed) _sfRenderGrid();
+        } catch {}
+      };
+
       const _sfOpenEntryDetail = async (entryName, opts = {}) => {
         const entry = _sfAllEntries.find(e => e.name === entryName);
         if (!entry || !_sfEntryDetailEls.modal) return;
+        _sfMarkSeen(entryName);              // (1) looked at
         const m = entry.meta || {};
         _sfDetailOriginalName = entry.name;
         _sfDetailEdit = {
@@ -31502,6 +31824,10 @@ require(['vs/editor/editor.main'], function () {
           _sfRenderExportProg();
           try {
             const r = await window.electronAPI.exportEntryToFolder({ name, destDir, mode });
+            // (3) put on a card. Arguable - you can export a whole library
+            // without looking at any of it - but you have acted on it, and the
+            // alternative is a font living on your saber while still flagged NEW.
+            if (r && r.ok && !r.skipped) window._sfMarkSeen?.(name);
             if (!r || !r.ok) {
               failures.push({ name, error: (r && r.error) || 'unknown error' });
             } else if (r.skipped) {
@@ -32456,6 +32782,7 @@ require(['vs/editor/editor.main'], function () {
       // Async only because the shared-folder decision may read the prop source. The
       // parse below happens AFTER the await, so it always reads current editor state.
       const _sfAddPresetWithFont = async (fontName) => {
+        _sfMarkSeen(fontName);   // choosing it for a config IS using it [B-213]
         if (typeof editor === 'undefined' || !editor) return;
         if (typeof presetParser === 'undefined' || !presetParser) return;
         // The font PATH gets the shared folder; the display NAME must not, or the preset
@@ -32565,6 +32892,7 @@ require(['vs/editor/editor.main'], function () {
       // settles, find the newly-created preset and overwrite both fields
       // with the font name we wanted to seed.
       const _sfPatchFreshPresetFont = async (arrayIdx, presetIdx, fontName) => {
+        _sfMarkSeen(fontName);   // [B-213]
         try {
           // Resolve the shared folder BEFORE parsing, so the ranges used below are read
           // after the await rather than across it.
@@ -32580,7 +32908,7 @@ require(['vs/editor/editor.main'], function () {
           const fontPath = (shared && !already) ? `${fontName};${shared}` : fontName;
           // window._commitFieldEdit because this runs in the SF view's
           // IIFE and _commitFieldEdit is scoped to the Config Manager's.
-          if (p.fontRange && window._commitFieldEdit) window._commitFieldEdit(p.fontRange, fontPath);
+          if (p.fontRange && window._commitFieldEdit) _commitPresetFont(p.fontRange, fontPath);
           if (p.displayNameRange && window._commitFieldEdit) window._commitFieldEdit(p.displayNameRange, fontName);
         } catch {}
       };
@@ -32591,6 +32919,7 @@ require(['vs/editor/editor.main'], function () {
       // font's card — the latter may have just lost its in-use status,
       // and the user wants visible confirmation either way.
       const _sfReplacePresetFont = async (arrayIdx, presetIdx, fontName) => {
+        _sfMarkSeen(fontName);   // [B-213] — the field write below is branch-conditional
         if (typeof editor === 'undefined' || !editor) return;
         if (typeof presetParser === 'undefined' || !presetParser) return;
         const result = presetParser.parsePresets(editor.getValue());
@@ -32606,7 +32935,7 @@ require(['vs/editor/editor.main'], function () {
         // window._commitFieldEdit because this runs in the SF view's
         // IIFE and _commitFieldEdit is scoped to the Config Manager's.
         if (preset.fontRange && window._commitFieldEdit) {
-          window._commitFieldEdit(preset.fontRange, newFontValue);
+          _commitPresetFont(preset.fontRange, newFontValue);
         }
         // No re-render YET — all visual change (old card fade-off + new
         // card highlight) lands as a single beat AFTER any rename prompt
@@ -32872,6 +33201,17 @@ require(['vs/editor/editor.main'], function () {
       const _sfCreatorDropdown = document.getElementById('sf-creator-dropdown');
       const _sfEffectsFilterBtn = document.getElementById('btn-sf-effects-filter');
       const _sfEffectsDropdown = document.getElementById('sf-effects-dropdown');
+      document.getElementById('btn-sf-sort')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const dd = document.getElementById('sf-sort-dropdown');
+        if (!dd) return;
+        const opening = dd.style.display === 'none';
+        if (_sfTagDropdown) _sfTagDropdown.style.display = 'none';
+        if (_sfCreatorDropdown) _sfCreatorDropdown.style.display = 'none';
+        if (_sfEffectsDropdown) _sfEffectsDropdown.style.display = 'none';
+        dd.style.display = opening ? '' : 'none';
+        if (opening) _sfRenderSortDropdown();
+      });
       _sfTagFilterBtn?.addEventListener('click', (e) => {
         e.stopPropagation();
         if (!_sfTagDropdown) return;
@@ -32887,11 +33227,27 @@ require(['vs/editor/editor.main'], function () {
       document.getElementById('btn-sf-needs-review-filter')?.addEventListener('click', (e) => {
         e.stopPropagation();
         _sfNeedsReviewFilterOn = !_sfNeedsReviewFilterOn;
+        _sfNeedsReviewHeld = _sfNeedsReviewFilterOn
+          ? new Set(_sfAllEntries.filter(f => f.meta && f.meta.needsReview).map(f => f.name))
+          : new Set();
+        _sfRenderGrid();
+      });
+      document.getElementById('btn-sf-not-in-use-filter')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        _sfInUseFilter = _sfInUseFilter === 'not' ? '' : 'not';
+        _sfRenderGrid();
+      });
+      document.getElementById('btn-sf-new-filter')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        _sfNewFilterOn = !_sfNewFilterOn;
+        _sfNewHeld = _sfNewFilterOn
+          ? new Set(_sfAllEntries.filter(f => !(f.meta && f.meta.seenAt)).map(f => f.name))
+          : new Set();
         _sfRenderGrid();
       });
       document.getElementById('btn-sf-in-use-filter')?.addEventListener('click', (e) => {
         e.stopPropagation();
-        _sfInUseFilterOn = !_sfInUseFilterOn;
+        _sfInUseFilter = _sfInUseFilter === 'in' ? '' : 'in';
         _sfRenderGrid();
       });
       _sfTagDropdown?.addEventListener('click', (e) => {
@@ -32977,6 +33333,9 @@ require(['vs/editor/editor.main'], function () {
         const inCreator = _sfCreatorDropdown?.contains(e.target) || _sfCreatorFilterBtn?.contains(e.target);
         const inEffects = _sfEffectsDropdown?.contains(e.target) || _sfEffectsFilterBtn?.contains(e.target);
         const inBackup = _sfBackupDropdown?.contains(e.target) || _sfBackupMenuBtn?.contains(e.target);
+        const _sortDd = document.getElementById('sf-sort-dropdown');
+        const inSort = _sortDd?.contains(e.target) || document.getElementById('btn-sf-sort')?.contains(e.target);
+        if (!inSort && _sortDd && _sortDd.style.display !== 'none') _sortDd.style.display = 'none';
         if (!inTag && _sfTagDropdown && _sfTagDropdown.style.display !== 'none') _sfTagDropdown.style.display = 'none';
         if (!inCreator && _sfCreatorDropdown && _sfCreatorDropdown.style.display !== 'none') _sfCreatorDropdown.style.display = 'none';
         if (!inEffects && _sfEffectsDropdown && _sfEffectsDropdown.style.display !== 'none') _sfEffectsDropdown.style.display = 'none';
@@ -33010,14 +33369,25 @@ require(['vs/editor/editor.main'], function () {
         const nrRemove = e.target.closest('[data-filter-remove-needs-review]');
         if (nrRemove) {
           e.stopPropagation();
+          // Only this filter. An earlier blanket edit had this clearing New too,
+          // so removing one chip silently removed another.
           _sfNeedsReviewFilterOn = false;
+          _sfNeedsReviewHeld = new Set();
+          _sfRenderGrid();
+          return;
+        }
+        const newRemove = e.target.closest('[data-filter-remove-new]');
+        if (newRemove) {
+          e.stopPropagation();
+          _sfNewFilterOn = false;
+          _sfNewHeld = new Set();
           _sfRenderGrid();
           return;
         }
         const inUseRemove = e.target.closest('[data-filter-remove-in-use]');
         if (inUseRemove) {
           e.stopPropagation();
-          _sfInUseFilterOn = false;
+          _sfInUseFilter = '';
           _sfRenderGrid();
           return;
         }
@@ -36939,7 +37309,7 @@ require(['vs/editor/editor.main'], function () {
         // reads as though COMMON were the font, and the compile check would flag it as
         // having no shared folder at all. (2026-07-30.)
         const full = cb.checked ? (newName ? newName + ';common' : ';common') : (newName || '');
-        _commitFieldEdit(_getFreshFieldRange('font') || preset.fontRange, full);
+        _commitPresetFont(_getFreshFieldRange('font') || preset.fontRange, full);
         // "Last used style" auto-populate. When the user picks a font
         // that has a linkedStyleLibraryEntry pointing at a style still
         // present in the current Style Library, AND blade 1 is empty
@@ -37169,7 +37539,7 @@ require(['vs/editor/editor.main'], function () {
         const path = comboInput.value.trim();
         // Same leading-semicolon rule as the font field above.
         const full = cb.checked ? (path ? path + ';common' : ';common') : path;
-        _commitFieldEdit(_getFreshFieldRange('font') || preset.fontRange, full);
+        _commitPresetFont(_getFreshFieldRange('font') || preset.fontRange, full);
         _scheduleRebuild();
       });
       // Keyboard nav: while the checkbox has focus, suppress destructive rebuilds so a
@@ -39048,7 +39418,24 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
     // so each commit needs a fresh range derived from the current Monaco source. Without
     // this, the second commit in a Tab chain writes to the WRONG byte range and corrupts
     // the file ("No presets found").
-    function _getFreshFieldRange(fieldName) {
+    // Assigning a font to a preset IS using it, so it stops being NEW. [B-213]
+//
+// ⚠️ FOUR PATHS WRITE A PRESET'S FONT and only one had the stamp when this was
+// first built - the three that were missed are the ones actually used: replacing
+// a font in a config, the font-folder dropdown in the sidecar, and the ;common
+// checkbox. Wrapping the WRITE rather than stamping at each caller is what stops
+// the fifth path from missing it too.
+//
+// ⚠️ The value can carry ";common" (or several segments). The library entry is
+// the FIRST segment; stamping the raw value would look up a name that does not
+// exist and silently do nothing.
+function _commitPresetFont(range, value) {
+  window._commitFieldEdit(range, value);
+  const name = String(value || '').split(';')[0].trim();
+  if (name) window._sfMarkSeen?.(name);
+}
+
+function _getFreshFieldRange(fieldName) {
       if (!editor) return null;
       const fresh  = presetParser.parsePresets(editor.getValue());
       const arr    = fresh.arrays[_activeArrayIndex];

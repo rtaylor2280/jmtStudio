@@ -1131,6 +1131,66 @@ function markEntryContentDirty(userData, entryName) {
   catch {}
 }
 
+// ── SEEN: what makes a font stop being NEW ────────────────────────────────
+// NEW is "never seen", not a clock. Every time-based rule breaks: "since last
+// launch" resets five times an hour for a heavy user and never for someone who
+// leaves the app open; "within N days" keeps flagging fonts you already worked
+// through, while a user away N+1 days sees nothing new when everything is.
+// Never-seen survives an absence and makes the badge about the USER. It sits
+// beside Needs review because it is the same shape - a worklist that clears by
+// acting rather than by waiting. [B-213]
+//
+// SEEN MEANS LOOKED AT *OR* USED, and "used" cannot be derived:
+// _sfComputeInUseFonts parses only the config currently OPEN in the editor, so
+// a derived badge would pop back to NEW the moment that config closed. Hence a
+// stamp. ONE field, SEVERAL writers - detail view opened, assigned to a preset,
+// exported to a card - so a fourth way to use a font gets it for free.
+//
+// WRITE-ONCE ON PURPOSE: the FIRST time counts. Re-opening a font must not keep
+// moving the date, because the date is also what a "recently seen" sort would
+// read, and a value that moves every time you glance at it sorts by nothing.
+function markEntrySeen(userData, entryName, whenIso) {
+  const root = entriesRoot(userData);
+  const metaPath = path.join(root, entryName, 'meta.json');
+  if (!fs.existsSync(metaPath)) return false;
+  let meta;
+  try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); }
+  catch { return false; }
+  if (meta.seenAt) return false;                 // already seen — first wins
+  meta.seenAt = whenIso || new Date().toISOString();
+  try { fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2)); }
+  catch { return false; }
+  return true;
+}
+
+// One-time backfill, and it MUST run in the same build that ships the badge.
+// Absent seenAt means never seen, so without this every entry already in the
+// library lights up NEW at once - wrong, useless, and it would train the user to
+// ignore the badge on the first day it exists. Stamping them makes NEW start
+// EMPTY and only ever mean what arrives afterwards.
+//
+// Stamped with the entry's own createdAt where it has one, rather than "now":
+// pretending the whole library was seen at upgrade-time is a lie that a later
+// "recently seen" sort would read back as fact.
+function backfillSeenAt(userData) {
+  const root = entriesRoot(userData);
+  if (!fs.existsSync(root)) return { ok: true, stamped: 0 };
+  let stamped = 0;
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const metaPath = path.join(root, entry.name, 'meta.json');
+    if (!fs.existsSync(metaPath)) continue;
+    let meta;
+    try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); }
+    catch { continue; }
+    if (meta.seenAt) continue;
+    meta.seenAt = meta.createdAt || new Date().toISOString();
+    try { fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2)); stamped++; }
+    catch {}
+  }
+  return { ok: true, stamped };
+}
+
 // Resolve the dirty flag if set — call from the renderer when an
 // entry's detail modal closes so a batched rehash happens once per
 // editing session instead of per file op. No-op when not flagged.
@@ -1311,6 +1371,8 @@ module.exports = {
   recomputeEntryContentHash,
   getEntryContentHash,
   markEntryContentDirty,
+  markEntrySeen,
+  backfillSeenAt,
   resolveEntryContentDirty,
   computeEntryEffects,
   recomputeEntryEffects,

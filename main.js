@@ -1954,9 +1954,30 @@ ipcMain.handle('entries:list', () => {
     if (!_entriesMigrationRan) {
       _entriesMigrationRan = true;
       try { soundFontEntries.migrateSourceLevelFields(app.getPath('userData')); } catch {}
+      // ⚠️ ONCE EVER, NOT ONCE PER LAUNCH - and the distinction is the whole
+      // feature. `_entriesMigrationRan` above is a PROCESS flag, so it re-runs on
+      // every start; a backfill behind it would stamp every newly imported font as
+      // seen the next time the app opened. Import, restart, and NEW silently
+      // empties. The persisted flag is what makes this a one-time upgrade step
+      // rather than a nightly eraser. [B-213]
+      try {
+        if (!Store.get('seenBackfillDone')) {
+          const r = soundFontEntries.backfillSeenAt(app.getPath('userData'));
+          Store.set('seenBackfillDone', true);
+          console.log(`[seen] one-time backfill stamped ${r.stamped} entries`);
+        }
+      } catch {}
     }
     return { ok: true, entries: soundFontEntries.listEntries(app.getPath('userData')) };
   }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+// Stamp an entry as seen, so it stops being NEW. Idempotent and write-once;
+// callers fire it freely and the first one wins. [B-213]
+ipcMain.handle('entries:markSeen', (_, { name } = {}) => {
+  if (!name) return { ok: false, error: 'Missing name' };
+  try { return { ok: true, stamped: soundFontEntries.markEntrySeen(app.getPath('userData'), name) }; }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
