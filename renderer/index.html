@@ -22756,16 +22756,20 @@ require(['vs/editor/editor.main'], function () {
       window._sfDupSummaryText = (owned, flagged, total) => {
         const parts = [];
         if (owned > 0) {
-          // Singular frame when the whole review is ONE font — "one of these
-          // fonts" reads wrong with a single row on screen.
-          parts.push(total === 1
-            ? 'This font is already in your library, so it starts unchecked.'
-            : owned === 1
-              ? 'One of these fonts is already in your library, so it starts unchecked.'
-              : `${owned === total ? 'All' : owned} of these fonts are already in your library, so they start unchecked.`);
+          // Two things are already on screen and are NOT restated here: the
+          // unchecked box, and the row's own "Already in your library" label.
+          // What the user cannot see is the count across a long list, and what
+          // checking one would actually do — so that is all this says.
+          // The count is dropped entirely for a single-row review, where it
+          // would only repeat the one label in front of them.
+          if (total > 1) {
+            parts.push(owned === 1
+              ? 'One of these fonts is already in your library.'
+              : `${owned === total ? 'All' : owned} of these fonts are already in your library.`);
+          }
           parts.push(owned === 1
-            ? 'You can still check it to import a second copy. To customize a font you already own, open it in your library and duplicate it there.'
-            : 'You can still check any of them to import a second copy. To customize a font you already own, open it in your library and duplicate it there.');
+            ? `Checking ${total === 1 ? 'this font' : 'it'} imports a second copy. To customize a font you already own, open it in your library and duplicate it there.`
+            : 'Checking any of them imports a second copy. To customize a font you already own, open it in your library and duplicate it there.');
         }
         if (flagged > 0) {
           parts.push(total === 1
