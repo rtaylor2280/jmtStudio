@@ -3678,6 +3678,23 @@
   .styles-tag-filter-icon { font-size: 0.6rem; opacity: 0.7; }
   .styles-tag-filter-badge { background: var(--jmt-blue); color: #fff; font-size: 0.62rem; font-weight: 600; padding: 0 5px; border-radius: 9px; margin-left: 2px; line-height: 1.4; }
   .styles-tag-dropdown { position: absolute; top: calc(100% + 4px); right: 0; background: var(--c-bg-raised); border: 1px solid var(--c-border-heavy); border-radius: 4px; padding: 4px 0; min-width: 200px; max-width: 280px; max-height: calc(100vh - 160px); overflow-y: auto; z-index: 100; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+  /* Sort bar for the facet dropdowns (tags / creators / effects, both tabs).
+     STICKY because the list scrolls: an un-sticky control disappears behind
+     forty tags at exactly the moment it is wanted. One row, not two - these
+     dropdowns are height-capped and every row spent here is a tag not shown. */
+  .facet-sort-bar { position: sticky; top: -4px; z-index: 1; display: flex; align-items: center; justify-content: space-between;
+                    gap: 8px; padding: 4px 12px 5px; margin-bottom: 3px; background: var(--c-bg-raised);
+                    border-bottom: 1px solid var(--c-border-faint); }
+  .facet-sort-btn { background: none; border: none; padding: 0; cursor: pointer; font-size: 0.68rem;
+                    font-family: var(--mono, ui-monospace, Consolas, monospace); letter-spacing: .04em;
+                    color: var(--c-text-sub); white-space: nowrap; }
+  .facet-sort-btn:hover { color: var(--c-text); }
+  /* The ACTIVE column is the only one that carries a direction arrow, and the
+     only one in blue. That pairing is what makes the bar report STATE rather
+     than destination: highlight says which column is sorting, arrow says which
+     way, and the muted twin is self-evidently the alternative. */
+  .facet-sort-btn.active { color: var(--jmt-blue); }
+  .facet-sort-arrow { margin-left: 3px; }
   .styles-tag-dropdown-item { display: flex; align-items: center; gap: 8px; width: 100%; background: transparent; border: none; color: var(--c-text); padding: 5px 12px; font-size: 0.75rem; cursor: pointer; text-align: left; }
   .styles-tag-dropdown-item:hover { background: var(--c-bg-inset); }
   .styles-tag-dropdown-item.selected { color: var(--jmt-blue); background: rgba(0,130,255,0.08); }
@@ -13058,6 +13075,11 @@ document.getElementById('theme-selector').addEventListener('click', (e) => {
   if (btn) applyTheme(btn.dataset.theme);
 });
 
+// Read the facet sort preference once at boot, before any dropdown can open.
+// Failing silently is correct: the default is today's behaviour, so a missing
+// or malformed value costs nothing. [B-285]
+_loadFacetSort();
+
 // ── Recent files count slider ──────────────────────────
 let _recentFilesLimit = 5;
 (async () => {
@@ -15199,13 +15221,9 @@ function _computeAvailableTagsWithCounts() {
       counts.set(tag, (counts.get(tag) || 0) + 1);
     });
   });
-  return Array.from(counts.entries()).sort((a, b) => {
-    const aSel = _activeFilterTags.has(a[0]);
-    const bSel = _activeFilterTags.has(b[0]);
-    if (aSel !== bSel) return aSel ? -1 : 1;
-    if (a[1] !== b[1]) return b[1] - a[1];
-    return a[0].localeCompare(b[0]);
-  });
+  return Array.from(counts.entries()).sort((a, b) =>
+    _facetSortCompare(a[0], a[1], _activeFilterTags.has(a[0]),
+                      b[0], b[1], _activeFilterTags.has(b[0])));   // [B-285]
 }
 
 // Same shape as _computeAvailableTagsWithCounts, but for the effect facet.
@@ -15218,12 +15236,72 @@ function _computeAvailableEffectsWithCounts() {
       counts.set(fx, (counts.get(fx) || 0) + 1);
     });
   });
-  return Array.from(counts.entries()).sort((a, b) => {
-    const aSel = _activeFilterEffects.has(a[0]);
-    const bSel = _activeFilterEffects.has(b[0]);
-    if (aSel !== bSel) return aSel ? -1 : 1;
-    if (a[1] !== b[1]) return b[1] - a[1];
-    return a[0].localeCompare(b[0]);
+  return Array.from(counts.entries()).sort((a, b) =>
+    _facetSortCompare(a[0], a[1], _activeFilterEffects.has(a[0]),
+                      b[0], b[1], _activeFilterEffects.has(b[0])));   // [B-285]
+}
+
+// ── Facet sort: ONE rule for all five dropdowns ───────────────────────────
+// Sound Fonts tags / creators / effects, and Style Library tags / effects, each
+// carried its own copy of "selected first, then count desc, then alpha". Count
+// order answers "what are my biggest tags", which is useful once; it fails at
+// what people do daily, which is find a tag whose name they already know. Worse,
+// a tag's position MOVES as counts change, so something used weekly drifts.
+// [B-285]
+//
+// ⚠️ ONE preference across all five, not five. The point is that they stop
+// disagreeing with each other. Default preserves today's behaviour so nobody's
+// muscle memory breaks on upgrade.
+let _facetSort = { key: 'count', dir: 'desc' };
+async function _loadFacetSort() {
+  try {
+    const v = await window.electronAPI.getSetting('facetSort', null);
+    if (v && (v.key === 'name' || v.key === 'count') && (v.dir === 'asc' || v.dir === 'desc')) _facetSort = v;
+  } catch {}
+}
+window.loadFacetSort = _loadFacetSort;
+
+// Shared comparator. Selected-at-top is NOT part of the toggle and never moves:
+// an active filter you cannot find is worse than an unsorted list.
+function _facetSortCompare(aName, aCount, aSel, bName, bCount, bSel) {
+  if (aSel !== bSel) return aSel ? -1 : 1;
+  if (_facetSort.key === 'name') {
+    const c = String(aName).localeCompare(String(bName));
+    return _facetSort.dir === 'asc' ? c : -c;
+  }
+  if (aCount !== bCount) return _facetSort.dir === 'desc' ? bCount - aCount : aCount - bCount;
+  return String(aName).localeCompare(String(bName));   // stable tiebreak
+}
+
+// The bar reports STATE, not destination — a header persists on screen, so it
+// has to say how things ARE. Only the active column shows an arrow, and the
+// letters carry the direction the way Explorer and Excel render it.
+function _facetSortBarHtml() {
+  const nameActive  = _facetSort.key === 'name';
+  const nameLabel   = (nameActive && _facetSort.dir === 'desc') ? 'Z–A' : 'A–Z';
+  const countLabel  = (!nameActive && _facetSort.dir === 'asc') ? '1–9' : '9–1';
+  const arrow       = '<span class="facet-sort-arrow">&#8595;</span>';
+  return `<div class="facet-sort-bar">
+    <button type="button" class="facet-sort-btn${nameActive ? ' active' : ''}" data-facet-sort="name"
+            title="Sort by name">${nameLabel}${nameActive ? arrow : ''}</button>
+    <button type="button" class="facet-sort-btn${nameActive ? '' : ' active'}" data-facet-sort="count"
+            title="Sort by how many carry it">${countLabel}${nameActive ? '' : arrow}</button>
+  </div>`;
+}
+
+// Clicking the ACTIVE column flips its direction; clicking the muted one makes
+// it active at its natural default (names ascending, counts highest-first).
+function _wireFacetSortBar(container, rerender) {
+  if (!container) return;
+  container.querySelectorAll('[data-facet-sort]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const key = btn.dataset.facetSort;
+      if (_facetSort.key === key) _facetSort.dir = _facetSort.dir === 'asc' ? 'desc' : 'asc';
+      else _facetSort = { key, dir: key === 'name' ? 'asc' : 'desc' };
+      try { window.electronAPI.setSetting('facetSort', _facetSort); } catch {}
+      if (typeof rerender === 'function') rerender();
+    });
   });
 }
 
@@ -15235,7 +15313,7 @@ function _renderTagFilterDropdown() {
     list.innerHTML = '<div class="styles-tag-dropdown-empty">No tags available</div>';
     return;
   }
-  list.innerHTML = tags.map(([tag, count]) => {
+  list.innerHTML = _facetSortBarHtml() + tags.map(([tag, count]) => {
     const sel = _activeFilterTags.has(tag);
     return `<button class="styles-tag-dropdown-item${sel ? ' selected' : ''}" data-tag="${tag}">`
       + `<span class="styles-tag-dropdown-check">${sel ? '&#10003;' : ''}</span>`
@@ -15243,6 +15321,7 @@ function _renderTagFilterDropdown() {
       + `<span class="styles-tag-dropdown-count">${count}</span>`
       + `</button>`;
   }).join('');
+  _wireFacetSortBar(list, _renderTagFilterDropdown);   // [B-285]
   list.querySelectorAll('.styles-tag-dropdown-item').forEach(btn => {
     btn.addEventListener('click', e => {
       e.stopPropagation();
@@ -15390,7 +15469,7 @@ function _renderEffectFilterDropdown() {
     list.innerHTML = '<div class="styles-tag-dropdown-empty">No effects available</div>';
     return;
   }
-  list.innerHTML = fx.map(([effect, count]) => {
+  list.innerHTML = _facetSortBarHtml() + fx.map(([effect, count]) => {
     const sel = _activeFilterEffects.has(effect);
     return `<button class="styles-tag-dropdown-item styles-effect-dropdown-item${sel ? ' selected' : ''}" data-effect="${effect}">`
       + `<span class="styles-tag-dropdown-check">${sel ? '&#10003;' : ''}</span>`
@@ -15398,6 +15477,7 @@ function _renderEffectFilterDropdown() {
       + `<span class="styles-tag-dropdown-count">${count}</span>`
       + `</button>`;
   }).join('');
+  _wireFacetSortBar(list, _renderEffectFilterDropdown);   // [B-285]
   list.querySelectorAll('.styles-effect-dropdown-item').forEach(btn => {
     btn.addEventListener('click', e => {
       e.stopPropagation();
@@ -21577,19 +21657,14 @@ require(['vs/editor/editor.main'], function () {
           }
         }
         const entries = Array.from(counts.entries())
-          .sort((a, b) => {
-            // Active filters at top, then by count desc, then alpha.
-            const aSel = _sfActiveFilterTags.has(a[1].display);
-            const bSel = _sfActiveFilterTags.has(b[1].display);
-            if (aSel !== bSel) return aSel ? -1 : 1;
-            if (a[1].count !== b[1].count) return b[1].count - a[1].count;
-            return a[1].display.localeCompare(b[1].display);
-          });
+          .sort((a, b) => _facetSortCompare(   // [B-285]
+            a[1].display, a[1].count, _sfActiveFilterTags.has(a[1].display),
+            b[1].display, b[1].count, _sfActiveFilterTags.has(b[1].display)));
         if (entries.length === 0) {
           list.innerHTML = '<div class="styles-tag-dropdown-empty">No tags on current results.</div>';
           return;
         }
-        list.innerHTML = entries.map(([key, info]) => {
+        list.innerHTML = _facetSortBarHtml() + entries.map(([key, info]) => {
           const sel = _sfActiveFilterTags.has(info.display);
           return `<button class="styles-tag-dropdown-item${sel ? ' selected' : ''}" data-tag="${_sfEscape(info.display)}">
             <span class="styles-tag-dropdown-check">${sel ? '&#10003;' : ''}</span>
@@ -21597,6 +21672,7 @@ require(['vs/editor/editor.main'], function () {
             <span class="styles-tag-dropdown-count">${info.count}</span>
           </button>`;
         }).join('');
+        _wireFacetSortBar(list, _sfRenderTagDropdown);   // [B-285]
       };
       const _sfRenderActiveFilters = () => {
         const strip = document.getElementById('sf-active-filters');
@@ -21754,13 +21830,9 @@ require(['vs/editor/editor.main'], function () {
           else counts.set(key, { display: a, count: 1 });
         }
         const entries = Array.from(counts.entries())
-          .sort((a, b) => {
-            const aSel = _sfActiveFilterCreators.has(a[1].display);
-            const bSel = _sfActiveFilterCreators.has(b[1].display);
-            if (aSel !== bSel) return aSel ? -1 : 1;
-            if (a[1].count !== b[1].count) return b[1].count - a[1].count;
-            return a[1].display.localeCompare(b[1].display);
-          });
+          .sort((a, b) => _facetSortCompare(   // [B-285]
+            a[1].display, a[1].count, _sfActiveFilterCreators.has(a[1].display),
+            b[1].display, b[1].count, _sfActiveFilterCreators.has(b[1].display)));
         // Append the "(no creator)" pseudo-row when ANY entry in the library
         // is missing a creator. Showing it even when filtered down to zero
         // empties in the current matchSet would be confusing (the count
@@ -21787,7 +21859,8 @@ require(['vs/editor/editor.main'], function () {
             <span class="styles-tag-dropdown-count">${emptyCount}</span>
           </button>`;
         }
-        list.innerHTML = namedRows + noCreatorRow;
+        list.innerHTML = _facetSortBarHtml() + namedRows + noCreatorRow;
+        _wireFacetSortBar(list, _sfRenderCreatorDropdown);   // [B-285]
       };
       const _sfToggleFilterCreator = (creator) => {
         if (!creator) return;
@@ -21902,20 +21975,15 @@ require(['vs/editor/editor.main'], function () {
         const presentSet = new Set(Array.from(_sfActiveFilterEffects).map(e => e.toLowerCase()));
         const absentSet = new Set(Array.from(_sfActiveFilterEffectsMissing).map(e => e.toLowerCase()));
         const entries = Array.from(counts.entries())
-          .sort((a, b) => {
-            // Active filters at top (present or absent), then by count
-            // desc, then alpha.
-            const aSel = presentSet.has(a[0]) || absentSet.has(a[0]);
-            const bSel = presentSet.has(b[0]) || absentSet.has(b[0]);
-            if (aSel !== bSel) return aSel ? -1 : 1;
-            if (a[1].count !== b[1].count) return b[1].count - a[1].count;
-            return a[1].display.localeCompare(b[1].display);
-          });
+          // Effects are tri-state, so "selected" is present OR absent. [B-285]
+          .sort((a, b) => _facetSortCompare(
+            a[1].display, a[1].count, presentSet.has(a[0]) || absentSet.has(a[0]),
+            b[1].display, b[1].count, presentSet.has(b[0]) || absentSet.has(b[0])));
         if (entries.length === 0) {
           list.innerHTML = '<div class="styles-tag-dropdown-empty">No effects on current results.</div>';
           return;
         }
-        list.innerHTML = entries.map(([key, info]) => {
+        list.innerHTML = _facetSortBarHtml() + entries.map(([key, info]) => {
           const isPresent = presentSet.has(key);
           const isAbsent = absentSet.has(key);
           let stateClass = '';
@@ -21943,6 +22011,7 @@ require(['vs/editor/editor.main'], function () {
             <span class="styles-tag-dropdown-count">${info.count}</span>
           </button>`;
         }).join('');
+        _wireFacetSortBar(list, _sfRenderEffectsDropdown);   // [B-285]
       };
       // Left-click toggle: manages the present polarity. If currently
       // present, clears it. Otherwise sets present and clears any
