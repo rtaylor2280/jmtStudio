@@ -8292,7 +8292,47 @@ window._jmtNumberedName = _jmtNumberedName;
 // typing — into a single undo unit, which produces the surprising "one undo reverted
 // three things" behavior. Calling pushUndoStop before AND after isolates the edit
 // from whatever came before it and whatever comes next.
+// Edits that change WHICH presets or slots exist, or their order — as opposed to
+// the text inside one field. The preset sidecar renders from a cached parse and
+// refuses to re-render while its inline slot editor is open, because a rebuild
+// would tear that editor's DOM out from under the cursor. That guard cannot tell
+// a keystroke from a structural change, so a structural edit made with the editor
+// open leaves the list painting rows that no longer exist — while the blades
+// label, which the light path still updates, contradicts them.
+//
+// ⚠️ THIS LIVES HERE BECAUSE IT DOES NOT WORK AT CALL SITES. The same rule has
+// been rediscovered and fixed three times — opening a config (2026-08-14),
+// undo/redo (2026-08-15), deleting a preset (2026-09-02) — and roughly eighteen
+// writers are in this class. Every one of them already routes through
+// _atomicEdit and already names its edit, so the name is the classifier and a
+// writer nobody has written yet is covered for free. [B-284]
+//
+// ⚠️ MEMBERSHIP IS DELIBERATELY NARROW. This function has ~39 call sites. Only
+// tags that plainly ADD, REMOVE or REORDER belong. Text-within-a-field edits
+// (preset-field-edit, preset-slot-edit, slot-parens, slot-reset, preset-tp-edit,
+// autopopulate-b1-style) must never join: the slot editor committing its own text
+// is precisely the case the sidecar's guard exists to protect.
+const _STRUCTURAL_EDITS = new Set([
+  // whole presets appearing or disappearing
+  'preset-add', 'preset-add-first', 'preset-add-first-in-bank', 'sf-card-add-preset',
+  'preset-delete', 'disabled-preset-delete', 'batch-delete',
+  'preset-disable', 'preset-enable', 'batch-disable', 'batch-enable', 'enable-all',
+  'sf-missing-disable', 'isolate-preset',
+  // whole banks
+  'preset-bank-delete', 'preset-bank-duplicate',
+  // order, and slot count
+  'preset-reorder', 'blade-reorder', 'blade-collapse', 'add-missing-style',
+  // lines inserted or removed ABOVE the presets, which shifts every slot's
+  // captured coordinates even though no slot is added or removed
+  'blade-label', 'blade-follow',
+]);
+
 function _atomicEdit(monacoEditor, source, edits) {
+  // Drop the slot editor BEFORE the edit lands, while its DOM and the captured
+  // coordinates still match the text on screen.
+  if (_STRUCTURAL_EDITS.has(source)) {
+    try { window._presetSidecar?.dropSlotEdit?.(); } catch {}
+  }
   monacoEditor.pushUndoStop();
   monacoEditor.executeEdits(source, edits);
   monacoEditor.pushUndoStop();
@@ -40517,6 +40557,27 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
       return committed;
     }
 
+    // Structural sibling of _closeSlotArgEdit: tears the editor down WITHOUT
+    // running what is pending. Called from _atomicEdit for any edit that adds,
+    // removes or reorders presets or slots. [B-284]
+    //
+    // ⚠️ DISCARD IS THE POINT, and it is a real trade: a pending commit holds
+    // line/column coordinates captured before the edit, so on a delete it writes
+    // the slot's text straight back into the row being removed, and on a reorder
+    // it writes into whatever now occupies those lines. Losing in-flight typing
+    // is the smaller harm than writing it somewhere wrong, and the undo path
+    // reached the same conclusion independently: "an undo that removed this very
+    // text would be immediately re-applied by a pending commit." (2026-08-15)
+    //
+    // Returns whether anything was actually open, so a caller can tell the
+    // difference between "closed it" and "there was nothing to close".
+    function _dropSlotArgEdit() {
+      if (!_editingSlot) return false;
+      _pendingSlotCommit = null;      // discard, never run — see above
+      _closeSlotArgEdit();            // ends with its own _scheduleRebuild()
+      return true;
+    }
+
     // ── Color popup (fixed-position, appended to body) ─────────────────────────
 
     // 12 quick colors, 3 pages of 4
@@ -43450,7 +43511,9 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
     // sub-50ms file read; subsequent _ensureStylesLoaded calls no-op.
     _ensureStylesLoaded();
 
-    window._presetSidecar = { open: _openSidecar, close: _closeSidecar, rebuild: _rebuildSidecar, closeSlotEdit: _closeSlotArgEdit, clearLibraryCache: () => { _silentStylesText = null; } };
+    // closeSlotEdit COMMITS what is pending; dropSlotEdit DISCARDS it. Structural
+    // edits must use drop — see _dropSlotArgEdit for why. [B-284]
+    window._presetSidecar = { open: _openSidecar, close: _closeSidecar, rebuild: _rebuildSidecar, closeSlotEdit: _closeSlotArgEdit, dropSlotEdit: _dropSlotArgEdit, clearLibraryCache: () => { _silentStylesText = null; } };
     // Expose the library-combo dropdown so other modules (e.g. the Sound
     // Fonts entry detail's "Last used style" picker) can reuse the exact
     // same searchable dropdown instead of reimplementing it. Generic when
