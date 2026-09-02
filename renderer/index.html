@@ -42595,6 +42595,20 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
         text: '',
       }]);
       editor.focus();
+      // WHERE THE SELECTION LANDS IS THE WRITER'S JOB, and delete was the one that
+      // never said. _renderDetail clamps, so it mostly self-corrected and looked
+      // fine - the app was choosing the next preset by accident rather than on
+      // purpose, and when the index went past the end (deleting the last ENABLED
+      // preset, which happens whenever the next one is disabled) the list kept
+      // painting the row that was gone. [B-284]
+      //
+      // Clamp, do not wrap. This lands on whatever slid into the deleted row's
+      // place, falling back to the previous row when the deleted one was last.
+      // Wrapping to the first preset would throw the user to the top of the list
+      // for deleting the bottom of it, and would contradict _disablePreset below,
+      // which walks backwards.
+      const count = result.arrays[arrayIndex]?.presets?.length || 0;
+      _selectedPresetIndex = Math.max(0, Math.min(presetIndex, count - 2));
       _scheduleRebuild();
     }
 
@@ -42637,6 +42651,21 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
       }]);
       editor.focus();
       _selectedDisabledPreset = null;
+      // Select the preset you just brought back. Enabling is an act ON a specific
+      // preset, and leaving the selection wherever it happened to be means the app
+      // answers a deliberate action by showing you something else. (Ryan,
+      // 2026-09-02: "when I enable a preset, shouldn't that preset get selected?")
+      //
+      // Found by START LINE rather than by counting, because the index is not
+      // knowable in advance: the enabled preset takes its place among the live ones
+      // by document order, and disabled presets are not in that list at all. The
+      // replacement writes `inner` beginning at dp.startLine, so that line is the
+      // anchor - the same content-anchored approach the rest of this file uses to
+      // locate things after an edit. [B-284]
+      const fresh = presetParser.parsePresets(editor.getValue());
+      const idx = (fresh.arrays[_activeArrayIndex]?.presets || [])
+        .findIndex(p => p.startLine === dp.startLine);
+      if (idx >= 0) _selectedPresetIndex = idx;
       _scheduleRebuild();
     }
 
