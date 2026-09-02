@@ -3245,8 +3245,25 @@ ipcMain.handle('sources:exportToDownloads', async (event, { uuid, destDir, forma
       }
     };
     const result = await source.exportToDownloads(target, { format, onProgress });
+    // Curation sidecar ([B-283]): a zip export carries the hand-authored values
+    // back with it, so re-importing after a delete returns the link, the style
+    // link, the demo URL and the tags rather than just the audio. Zip only —
+    // a folder export has no archive to strip it out of again on the way in.
+    // buildForSource returns null for an uncurated source, so an untouched
+    // export is still a byte-for-byte copy of what we hold.
+    let curationWritten = false;
+    if (result && result.format === 'zip' && result.destPath) {
+      try {
+        const cur = require('./soundFontCuration');
+        const payload = cur.buildForSource(app.getPath('userData'), uuid, app.getVersion());
+        if (payload) {
+          const r = await cur.injectIntoZip(result.destPath, payload, onProgress);
+          curationWritten = !!(r && r.injected);
+        }
+      } catch { /* the export succeeded; decorating it is best-effort */ }
+    }
     if (pending) { try { event.sender.send('soundFonts:sourceExportProgress', pending); } catch {} }
-    return { ok: true, ...result };
+    return { ok: true, ...result, curationWritten };
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };
   }
@@ -3543,6 +3560,11 @@ ipcMain.handle('sources:finalizeStaged', async (_event, staged = {}) => {
       fileSize: staged.fileSize,
       sourceFileDate: staged.sourceFileDate,
       sourceFileMtimeMs: staged.sourceFileMtimeMs,
+      // Carried straight through from the prepare result — the staged zip was
+      // already stripped, and this is the curation that came out of it. ([B-283])
+      curation: staged.curation,
+      curationTmp: staged.curationTmp,
+      curationPayloadDir: staged.curationPayloadDir,
     });
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };

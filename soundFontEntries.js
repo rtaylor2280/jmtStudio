@@ -230,6 +230,22 @@ async function createEntry({ userData, sourceUuid, candidate, name, metadata, on
   const source = soundFontSources.openSource(userData, sourceUuid);
   if (!source) return { ok: false, error: `Source not found: ${sourceUuid}` };
 
+  // Curation sidecar ([B-283]): if this source arrived from a JMT export that
+  // carried its curation, the block for THIS candidate path fills anything the
+  // caller did not specify. The caller always wins — the review screen is where
+  // the user just made decisions, and a file on disk must not overrule them.
+  // Keyed by candidatePath because it is the only identifier an entry has that
+  // survives a rename.
+  if (source.meta && source.meta.curation) {
+    try {
+      const fromSidecar = require('./soundFontCuration')
+        .entryCurationFor(source.meta.curation, candidate.path || '');
+      if (fromSidecar) {
+        metadata = { ...fromSidecar, ...(metadata || {}) };
+      }
+    } catch { /* curation is a bonus, never a blocker */ }
+  }
+
   const root = ensureEntriesRoot(userData);
   const entryDir = path.join(root, entryName);
 

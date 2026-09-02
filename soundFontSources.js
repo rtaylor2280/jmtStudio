@@ -519,6 +519,47 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
   const emit = (stage, payload) => {
     if (onProgress) onProgress({ stage, ...payload });
   };
+
+  // ── Curation sidecar ([B-283]) ──
+  // A zip we exported can carry the hand-authored curation that a delete would
+  // otherwise destroy. It is stripped HERE, before anything else looks at the
+  // archive, and the archive is repackaged — so the hash, the dedup check, the
+  // stored source and every consumer downstream see the font exactly as the
+  // vendor shipped it, with our additions gone. Nothing else in the pipeline
+  // learns that curation exists.
+  // The cost is gated: an ordinary vendor zip pays one central-directory read
+  // and moves on. Only an archive that actually carries a sidecar is repacked.
+  let curation = null;
+  let curationTmp = null;
+  let curationPayloadDir = null;
+  if (isZip && !knownHash) {
+    try {
+      const cur = require('./soundFontCuration');
+      curation = await cur.peekZip(sourcePath);
+      if (curation) {
+        emit('hashing', { percent: 0 });
+        const stripped = await cur.stripAndRepackage(sourcePath, curation, (p) => onProgress && onProgress({ stage: 'hashing', percent: 0, ...p }));
+        sourcePath = stripped.zipPath;
+        curationTmp = stripped.tmpDir;
+        curationPayloadDir = stripped.payloadDir;
+        try { stat = fs.statSync(sourcePath); } catch {}
+      }
+    } catch {
+      // A sidecar we cannot read must never block the font behind it. Import
+      // the archive as-is; the user loses the curation, not the fonts.
+      curation = null;
+    }
+  }
+
+  // Every exit that is not the prepareOnly hand-off is done with the temp dir
+  // the strip produced. prepareOnly keeps it, because its commit happens later
+  // and the receipts have to still be there.
+  const _dropCurationTmp = () => {
+    if (!curationTmp) return;
+    try { fs.rmSync(curationTmp, { recursive: true, force: true }); } catch {}
+    curationTmp = null;
+  };
+
   emit('hashing', { percent: 0 });
 
   let hash;
@@ -560,6 +601,7 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
       const existing = findByHash(userData, hash);
       if (existing) {
         emit('done', { isDuplicate: true });
+        _dropCurationTmp();
         return { ok: true, isDuplicate: true, uuid: existing.uuid, hash, format };
       }
     }
@@ -622,6 +664,7 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
             }
           } catch {}
           emit('done', { isDuplicate: true });
+          _dropCurationTmp();
           return { ok: true, isDuplicate: true, uuid: existing.uuid, hash, format,
             staged: { uuid, format, name, hash, fileSize, sourceFileDate: sfd, sourceFileMtimeMs: sfm } };
         }
@@ -650,14 +693,19 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
       // zip as an orphan before we finalize it.
       try { fs.writeFileSync(path.join(uuidDir, '.preparing'), ''); } catch {}
       emit('done', { isDuplicate: false, prepared: true });
-      return { ok: true, isDuplicate: false, prepared: true, uuid, uuidDir, hash, format, name, fileSize, sourceFileDate, sourceFileMtimeMs, totalBytes, fileCount, strippedFiles };
+      // Curation travels with the prepared source rather than being applied
+      // now: the meta this belongs on does not exist until finalize. The temp
+      // dir holding the receipts stays alive until then, and finalize removes it.
+      return { ok: true, isDuplicate: false, prepared: true, uuid, uuidDir, hash, format, name, fileSize, sourceFileDate, sourceFileMtimeMs, totalBytes, fileCount, strippedFiles, curation, curationTmp, curationPayloadDir };
     }
 
-    const res = await _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format, name, hash, fileSize, sourceFileDate, sourceFileMtimeMs, metadata, strippedFiles });
+    const res = await _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format, name, hash, fileSize, sourceFileDate, sourceFileMtimeMs, metadata, strippedFiles, curation, curationPayloadDir });
     emit('done', { isDuplicate: false });
-    return { ...res, strippedFiles };
+    _dropCurationTmp();
+    return { ...res, strippedFiles, curationApplied: res.curationApplied || null };
   } catch (err) {
     cleanupPartialSource(uuidDir);
+    _dropCurationTmp();
     return { ok: false, error: `Import failed: ${err.message}` };
   }
 }
@@ -665,7 +713,7 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
 // Shared meta writer + candidate-cache warm. Used by importSource's finalize
 // path AND finalizePreparedSource (the deferred commit of a prepareOnly source),
 // so the written meta is identical whichever way a source is committed.
-async function _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format, name, hash, fileSize, sourceFileDate, sourceFileMtimeMs, metadata, strippedFiles }) {
+async function _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format, name, hash, fileSize, sourceFileDate, sourceFileMtimeMs, metadata, strippedFiles, curation, curationPayloadDir }) {
   const meta = {
     schemaVersion: 1,
     uuid,
@@ -684,18 +732,34 @@ async function _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format, name,
     readmePaths: [],
     // Provenance: damaged wavs that were removed on import (empty/absent when none).
     ...(strippedFiles && strippedFiles.length ? { strippedFiles } : {}),
+    // The curation this archive arrived carrying, kept whole on the source so
+    // createEntry can read the per-candidate half later without the review
+    // screen having to carry it through. Source-level fields are applied
+    // immediately, just below. ([B-283])
+    ...(curation ? { curation } : {}),
   };
   fs.writeFileSync(path.join(uuidDir, 'meta.json'), JSON.stringify(meta, null, 2));
+  // Curation: apply the source fields and re-store the receipts that rode
+  // along. Deliberately AFTER the meta write, because updateSourceMeta patches
+  // a file that has to exist. Never fatal - a font that imports without its
+  // curation is still an imported font.
+  let curationApplied = null;
+  if (curation) {
+    try {
+      curationApplied = require('./soundFontCuration')
+        .applySourceCuration(userData, uuid, curation, curationPayloadDir);
+    } catch { curationApplied = null; }
+  }
   // Warm the candidate cache (best-effort; a stamp failure just leaves it cold).
   try { await recomputeAndStampCandidates(userData, uuid); } catch {}
-  return { ok: true, isDuplicate: false, uuid, hash, format, sourceFileDate };
+  return { ok: true, isDuplicate: false, uuid, hash, format, sourceFileDate, curationApplied };
 }
 
 // Commit a source previously staged by importSource({ prepareOnly: true }). Its
 // uuid/source.zip is already on disk, hashed and dedup-cleared — this only writes
 // the meta and warms the cache. NO re-hash. The prepared fields come back from
 // the prepare result and pass straight through.
-async function finalizePreparedSource({ userData, uuid, format, name, hash, fileSize, sourceFileDate, sourceFileMtimeMs, metadata }) {
+async function finalizePreparedSource({ userData, uuid, format, name, hash, fileSize, sourceFileDate, sourceFileMtimeMs, metadata, curation, curationTmp, curationPayloadDir }) {
   if (!userData || !uuid) return { ok: false, error: 'Missing userData/uuid' };
   const uuidDir = path.join(sourcesRoot(userData), uuid);
   if (!fs.existsSync(path.join(uuidDir, 'source.zip'))) return { ok: false, error: 'Prepared source is missing its archive' };
@@ -703,9 +767,13 @@ async function finalizePreparedSource({ userData, uuid, format, name, hash, file
   // into the source's content signature.
   try { fs.unlinkSync(path.join(uuidDir, '.preparing')); } catch {}
   try {
-    return await _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format: format || 'zip', name, hash, fileSize, sourceFileDate, sourceFileMtimeMs, metadata });
+    return await _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format: format || 'zip', name, hash, fileSize, sourceFileDate, sourceFileMtimeMs, metadata, curation, curationPayloadDir });
   } catch (err) {
     return { ok: false, error: `Finalize failed: ${err.message}` };
+  } finally {
+    // The prepare kept this alive so the receipts would still be on disk at
+    // commit time. Whatever happened above, it is done with now. ([B-283])
+    if (curationTmp) { try { fs.rmSync(curationTmp, { recursive: true, force: true }); } catch {} }
   }
 }
 

@@ -575,6 +575,10 @@ async function analyzeBulkImport({ plan, userData, corruptFonts }, callbacks = {
         uuid: res.uuid, hash: res.hash, format: res.format, name: res.name,
         fileSize: res.fileSize, sourceFileDate: res.sourceFileDate, sourceFileMtimeMs: res.sourceFileMtimeMs,
         strippedFiles: res.strippedFiles || [],
+        // Carried from prepare to commit — see the finalize call below. ([B-283])
+        curation: res.curation || null,
+        curationTmp: res.curationTmp || null,
+        curationPayloadDir: res.curationPayloadDir || null,
       }, corrupt });
     } else {
       results.push({ idx: i, error: (res && res.error) || 'prepare failed', corrupt });
@@ -837,6 +841,13 @@ async function importPlannedSource({ userData, src, fromSdCard }, onSubProgress)
       sourceFileDate: src._prepared.sourceFileDate,
       sourceFileMtimeMs: src._prepared.sourceFileMtimeMs,
       metadata: {},
+      // The analyze phase already stripped the curation sidecar out of this
+      // zip; this carries it to the commit that writes the meta it belongs on,
+      // so a bulk import restores curation the same way a single one does.
+      // ([B-283])
+      curation: src._prepared.curation,
+      curationTmp: src._prepared.curationTmp,
+      curationPayloadDir: src._prepared.curationPayloadDir,
     });
     if (!importRes || !importRes.ok) {
       return { ok: false, error: (importRes && importRes.error) || 'Finalize failed' };
