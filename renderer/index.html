@@ -21284,11 +21284,12 @@ require(['vs/editor/editor.main'], function () {
           confirmKind: 'danger',
         });
         if (!ok) return;
-        _sfDeleteProgress.show(`Deleting files`, '');
+        _sfDeleteProgress.show(`Deleting files`, '', 0);
         const failures = [];
         for (let i = 0; i < paths.length; i++) {
           const subPath = paths[i];
-          _sfDeleteProgress.show(`Deleting files (${i + 1} of ${paths.length})`, subPath.split('/').pop());
+          _sfDeleteProgress.show(`Deleting files (${i + 1} of ${paths.length})`,
+            subPath.split('/').pop(), i / paths.length);
           try {
             const res = await window.electronAPI.deleteCommonFile({ uuid: _sfSelectedCommonUuid, subPath });
             if (!res || !res.ok) failures.push({ name: subPath, error: (res && res.error) || 'unknown error' });
@@ -26548,45 +26549,8 @@ require(['vs/editor/editor.main'], function () {
         // 3) Export with live progress in the import-convention layout: section +
         // metric above the bar (one metric per section), current file below,
         // elapsed clock last. Sections: Reading files → Rebuilding → Compressing.
-        let bytesDone = 0, totalBytes = 0, fileCount = 0, totalFiles = 0, phase = '', currentFile = '';
-        const t0 = Date.now();
-        const PHASE_LABEL = { reading: 'Reading files', reconstruct: 'Rebuilding', compress: 'Compressing' };
-        const _fmtDur = (sec) => (window._sfFormatDuration ? window._sfFormatDuration(sec) : `${Math.round(sec)}s`);
-        const render = () => {
-          const secs = Math.floor((Date.now() - t0) / 1000);
-          let frac, info;
-          if (phase === 'compress') {
-            frac = totalBytes ? Math.max(0, Math.min(1, bytesDone / totalBytes)) : 0;
-            info = totalBytes ? `${fmtB(bytesDone)} of ${fmtB(totalBytes)}` : '';
-          } else {
-            frac = totalFiles ? Math.max(0, Math.min(1, fileCount / totalFiles)) : 0;
-            info = totalFiles ? `${fileCount.toLocaleString()} of ${totalFiles.toLocaleString()} files` : '';
-          }
-          const labelLine = [PHASE_LABEL[phase] || 'Exporting', info].filter(Boolean).join(' · ');
-          _sfDeleteProgress.setPhase(labelLine, frac, currentFile, `${_fmtDur(secs)} elapsed`);
-        };
-        const offProg = window.electronAPI.onSourceExportProgress((p) => {
-          if (!p) return;
-          if (p.phase) phase = p.phase;
-          if (typeof p.fileCount === 'number') fileCount = p.fileCount;
-          if (typeof p.totalFiles === 'number') totalFiles = p.totalFiles;
-          if (typeof p.bytesDone === 'number') bytesDone = p.bytesDone;
-          if (typeof p.totalBytes === 'number') totalBytes = p.totalBytes;
-          if (p.currentFile) currentFile = p.currentFile;
-          render();
-        });
-        _sfDeleteProgress.show('Exporting source', label, 0);
-        const tick = setInterval(render, 250);
-        let r;
-        try {
-          r = await window.electronAPI.exportSourceToDownloads({ uuid, destDir: pick.destDir, format });
-        } catch (err) {
-          r = { ok: false, error: String(err && err.message || err) };
-        } finally {
-          clearInterval(tick);
-          if (offProg) offProg();
-          await _sfDeleteProgress.hide();
-        }
+        const r = await _sfRunSourceExport({ uuid, destDir: pick.destDir, format, label });
+        await _sfDeleteProgress.hide();
 
         // 4) Outcome. Errors keep the existing dialog. Success shows an in-modal
         // summary (what it did + where it landed) with a Show-in-folder button —
@@ -26680,8 +26644,7 @@ require(['vs/editor/editor.main'], function () {
           exportDir = pick.destDir;
         }
         if (wantExport) {
-          _sfDeleteProgress.show('Exporting source', sourceLabel);
-          if (!await _sfExportSourceBeforeDelete(uuid, wantExport, exportDir)) {
+          if (!await _sfExportSourceBeforeDelete(uuid, wantExport, exportDir, sourceLabel)) {
             await _sfDeleteProgress.hide();
             _sfSourceDetailEls.modal?.classList.add('active');
             return;
@@ -26689,8 +26652,11 @@ require(['vs/editor/editor.main'], function () {
         }
         // Cascade-delete entries first, then the source.
         const failures = [];
-        for (const e of entries) {
-          _sfDeleteProgress.show('Deleting fonts', e.name);
+        for (let i = 0; i < entries.length; i++) {
+          const e = entries[i];
+          _sfDeleteProgress.show(
+            entries.length > 1 ? `Deleting fonts (${i + 1} of ${entries.length})` : 'Deleting fonts',
+            e.name, i / entries.length);
           const dr = await window.electronAPI.deleteEntry({ name: e.name });
           if (!dr || !dr.ok) failures.push({ name: e.name, error: dr && dr.error || 'unknown error' });
         }
@@ -29849,11 +29815,63 @@ require(['vs/editor/editor.main'], function () {
       // wasn't requested), false if the user opted in but the export failed —
       // in which case the caller should abort the delete so the user has a
       // chance to retry or reconsider.
-      const _sfExportSourceBeforeDelete = async (sourceUuid, requested, destDir) => {
+      // Run a source export with the live-progress layout and return the raw
+      // IPC result. Owns the progress modal for the whole call: show, tick,
+      // hide. There are three callers — the standalone export, and the two
+      // delete paths that offer to save a copy first — and only the first of
+      // them was ever wired, so the other two showed a static 50% bar for the
+      // slowest operation in the app. The wiring lives here so a caller cannot
+      // forget it, and a fourth caller gets it for free.
+      const _sfRunSourceExport = async ({ uuid, destDir, format, label }) => {
+        let bytesDone = 0, totalBytes = 0, fileCount = 0, totalFiles = 0, phase = '', currentFile = '';
+        const t0 = Date.now();
+        const PHASE_LABEL = { reading: 'Reading files', reconstruct: 'Rebuilding', compress: 'Compressing' };
+        const _fmtDur = (sec) => (window._sfFormatDuration ? window._sfFormatDuration(sec) : `${Math.round(sec)}s`);
+        const fmtB = window._sfFormatBytes || ((n) => `${n} B`);
+        const render = () => {
+          const secs = Math.floor((Date.now() - t0) / 1000);
+          let frac, info;
+          if (phase === 'compress') {
+            frac = totalBytes ? Math.max(0, Math.min(1, bytesDone / totalBytes)) : 0;
+            info = totalBytes ? `${fmtB(bytesDone)} of ${fmtB(totalBytes)}` : '';
+          } else {
+            frac = totalFiles ? Math.max(0, Math.min(1, fileCount / totalFiles)) : 0;
+            info = totalFiles ? `${fileCount.toLocaleString()} of ${totalFiles.toLocaleString()} files` : '';
+          }
+          const labelLine = [PHASE_LABEL[phase] || 'Exporting', info].filter(Boolean).join(' · ');
+          _sfDeleteProgress.setPhase(labelLine, frac, currentFile, `${_fmtDur(secs)} elapsed`);
+        };
+        const offProg = window.electronAPI.onSourceExportProgress((p) => {
+          if (!p) return;
+          if (p.phase) phase = p.phase;
+          if (typeof p.fileCount === 'number') fileCount = p.fileCount;
+          if (typeof p.totalFiles === 'number') totalFiles = p.totalFiles;
+          if (typeof p.bytesDone === 'number') bytesDone = p.bytesDone;
+          if (typeof p.totalBytes === 'number') totalBytes = p.totalBytes;
+          if (p.currentFile) currentFile = p.currentFile;
+          render();
+        });
+        // Show only once the work can actually start — a bar that appears
+        // behind a file dialog sits at zero and reads as a hang.
+        _sfDeleteProgress.show('Exporting source', label || '', 0);
+        const tick = setInterval(render, 250);
+        let r;
+        try {
+          r = await window.electronAPI.exportSourceToDownloads(
+            format ? { uuid, destDir, format } : { uuid, destDir });
+        } catch (err) {
+          r = { ok: false, error: String(err && err.message || err) };
+        } finally {
+          clearInterval(tick);
+          if (offProg) offProg();
+        }
+        return r;
+      };
+      const _sfExportSourceBeforeDelete = async (sourceUuid, requested, destDir, label) => {
         if (!requested || !sourceUuid) return true;
         if (!destDir) return false;
         try {
-          const r = await window.electronAPI.exportSourceToDownloads({ uuid: sourceUuid, destDir });
+          const r = await _sfRunSourceExport({ uuid: sourceUuid, destDir, label });
           if (!r || !r.ok) {
             promptError('Could not export source', `${(r && r.error) || 'unknown error'}\n\nNothing was deleted.`);
             return false;
@@ -29885,10 +29903,18 @@ require(['vs/editor/editor.main'], function () {
           const l = this.labelEl(), e = this.elapsedEl();
           if (l) { l.textContent = ''; l.style.display = 'none'; }
           if (e) { e.textContent = ''; e.style.display = 'none'; }
-          // Determinate when a fraction is passed (bulk export tracks real
-          // bytes); otherwise the legacy 50% "busy" fill for quick single ops
-          // that have no meaningful progress to show.
-          if (b) b.style.width = (typeof frac === 'number' ? Math.max(0, Math.min(1, frac)) * 100 : 50) + '%';
+          // Determinate when a fraction is passed. Otherwise the bar goes
+          // INDETERMINATE rather than painting a fixed 50%: an operation with
+          // no measurable progress is a different thing from one that is half
+          // done, and a static half-full bar reads as a hang the moment the
+          // work takes more than an instant. Same class the import and guided
+          // bars already use, so no new CSS and no new vocabulary.
+          if (b) {
+            const known = typeof frac === 'number';
+            b.classList.toggle('indeterminate', !known);
+            if (known) b.style.width = Math.max(0, Math.min(1, frac)) * 100 + '%';
+            else b.style.width = '';
+          }
           if (m && !m.classList.contains('active')) {
             m.classList.add('active');
             this.startTs = Date.now();
@@ -29899,7 +29925,10 @@ require(['vs/editor/editor.main'], function () {
         // operation between show() calls.
         setProgress(frac, detail) {
           const b = this.barEl(), d = this.detailEl();
-          if (b) b.style.width = Math.max(0, Math.min(1, frac)) * 100 + '%';
+          if (b) {
+            b.classList.remove('indeterminate');
+            b.style.width = Math.max(0, Math.min(1, frac)) * 100 + '%';
+          }
           if (d && detail != null) d.textContent = detail;
         },
         // Import-convention phase display (2026-07-23): section + metric
@@ -29908,7 +29937,10 @@ require(['vs/editor/editor.main'], function () {
         setPhase(labelText, frac, file, elapsedText) {
           const l = this.labelEl(), b = this.barEl(), d = this.detailEl(), e = this.elapsedEl();
           if (l) { l.style.display = ''; l.textContent = labelText || ''; }
-          if (b) b.style.width = Math.max(0, Math.min(1, frac || 0)) * 100 + '%';
+          if (b) {
+            b.classList.remove('indeterminate');
+            b.style.width = Math.max(0, Math.min(1, frac || 0)) * 100 + '%';
+          }
           if (d) d.textContent = file || '';
           if (e) { e.style.display = ''; e.textContent = elapsedText || ''; }
         },
@@ -29929,8 +29961,7 @@ require(['vs/editor/editor.main'], function () {
           || (_sfAllSourcesByUuid[sourceUuid]?.meta?.originalName)
           || '';
         if (wantExport) {
-          _sfDeleteProgress.show('Exporting source', sourceLabel);
-          const ok = await _sfExportSourceBeforeDelete(sourceUuid, wantExport, exportDir);
+          const ok = await _sfExportSourceBeforeDelete(sourceUuid, wantExport, exportDir, sourceLabel);
           if (!ok) { await _sfDeleteProgress.hide(); return false; }
         }
         _sfDeleteProgress.show('Deleting', name);
@@ -30066,11 +30097,11 @@ require(['vs/editor/editor.main'], function () {
         // modal is the only thing on screen — same anti-clutter rule as the
         // other modal stacks.
         _sfBulkTagClose();
-        _sfDeleteProgress.show('Updating tags', '');
+        _sfDeleteProgress.show('Updating tags', '', 0);
         const failures = [];
         for (let i = 0; i < names.length; i++) {
           const name = names[i];
-          _sfDeleteProgress.show(`Updating tags (${i + 1} of ${names.length})`, name);
+          _sfDeleteProgress.show(`Updating tags (${i + 1} of ${names.length})`, name, i / names.length);
           const entry = _sfAllEntries.find(e => e.name === name);
           const existing = Array.isArray(entry?.meta?.tags) ? entry.meta.tags.slice() : [];
           // Apply removes (case-insensitive), then merge in adds where missing.
