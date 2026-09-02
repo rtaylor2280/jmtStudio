@@ -5385,6 +5385,7 @@
           <button class="modal-btn-primary" id="sf-import-pick-link">Paste a link</button>
         </div>
         <p style="margin-top:14px;font-size:0.78rem;color:var(--c-text-sub);text-align:center">Already have many fonts to add? <a href="#" id="btn-sf-import-bulk-from-picker" style="color:var(--jmt-blue);text-decoration:underline;cursor:pointer">Bulk import from a folder</a></p>
+        <p style="margin-top:6px;font-size:0.78rem;color:var(--c-text-sub);text-align:center">Fonts already on a card? <a href="#" id="btn-sf-import-sd-from-picker" style="color:var(--jmt-blue);text-decoration:underline;cursor:pointer">Read my Proffie SD card</a></p>
       </div>
       <!-- Link view: focused sub-flow shown only after "Paste a link". -->
       <div class="sf-import-link-block" id="sf-import-link-block" style="display:none">
@@ -9498,7 +9499,7 @@ document.getElementById('link-sdcard-empty')?.addEventListener('click', (e) => {
 // was reachable only from the Config Manager. Same call, second door. Wired here
 // rather than in the Sound Fonts scope so it cannot drift into a parallel
 // implementation of the flow. ([B-245], 2026-08-31.)
-document.getElementById('btn-sf-import-sd-empty')?.addEventListener('click', (e) => { e.preventDefault(); startSdCardImport(); });
+document.getElementById('btn-sf-import-sd-empty')?.addEventListener('click', (e) => { e.preventDefault(); startSdCardImport('sfl'); });
 
 // Path-2 on-ramp: read a Proffie SD card, then (next increments) populate the Sound Font
 // Library from it and surface any configs to open. Entry point only for now — the card
@@ -10287,9 +10288,14 @@ function _sdBack() {
   _sdReport.stack = []; _sdReport.card = null; _sdRenderList();
 }
 
-async function startSdCardImport() {
+async function startSdCardImport(context) {
   let cards = [];
-  _sdReport.context = 'config'; // Config Manager entry point — a future SFL launcher sets 'sfl'
+  // Which action leads on the card summary. _sdActionRowHtml already reads this and
+  // already intends it ("from the Sound Font Library, 'Import fonts' leads") — but
+  // nothing ever passed 'sfl', so every door landed on "Open a config" as the hero,
+  // including the two that exist precisely because the user wants FONTS. Defaults to
+  // 'config' so the Config Manager caller is unchanged. ([B-245])
+  _sdReport.context = (context === 'sfl') ? 'sfl' : 'config';
   _sdBusy(true, 'Looking for your SD card...');
   try { cards = await window.electronAPI.scanSdCards(); } catch { cards = []; }
   _sdBusy(false);
@@ -35639,6 +35645,18 @@ require(['vs/editor/editor.main'], function () {
         e.preventDefault();
         _sfCloseImport();
         if (window._sfStartBulkImport) window._sfStartBulkImport();
+      });
+      // Card link inside the picker — the same door the empty state offers, so it
+      // stops disappearing the moment the library holds one font. Deliberately the
+      // SAME call as the empty-state link (startSdCardImport), not a variant: the
+      // card browser, the analyze pass and the review screen are one surface, and a
+      // second entry point that behaved differently would drift from it. Closes the
+      // import modal first for the same reason the bulk link does — the card modal
+      // must not open on top of it. ([B-245])
+      document.getElementById('btn-sf-import-sd-from-picker')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        _sfCloseImport();
+        if (typeof startSdCardImport === 'function') startSdCardImport('sfl');
       });
       _sfImportEls.pickZipBtn?.addEventListener('click', () => _sfPickAndImport('zip'));
       _sfImportEls.pickFolderBtn?.addEventListener('click', () => _sfPickAndImport('folder'));
