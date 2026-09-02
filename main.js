@@ -49,6 +49,14 @@ function addRecentFile(filePath) {
 }
 
 // ── Window ─────────────────────────────────────────────
+// Every BrowserWindow we open spreads this. macOS takes its icon from the app
+// bundle, so it deliberately contributes nothing there; Windows and Linux fall
+// back to the stock Electron atom without it.
+const WINDOW_ICON =
+    process.platform === 'win32' ? { icon: path.join(__dirname, 'assets', 'icon.ico') }
+  : process.platform === 'linux' ? { icon: path.join(__dirname, 'assets', 'logo.png') }
+  : {};
+
 let win;
 let _splashDismissed = false; // tracked so the renderer can defer
                               // build-panel-open until splash is gone
@@ -75,6 +83,7 @@ function showSplash(parentWin) {
     skipTaskbar: true,
     resizable: false,
     focusable: false,
+    ...WINDOW_ICON,
     webPreferences: { contextIsolation: true }
   });
 
@@ -123,9 +132,7 @@ function createWindow() {
     minHeight: 692,
     backgroundColor: '#111111',
     titleBarStyle: 'default',
-    ...(process.platform === 'win32'  ? { icon: path.join(__dirname, 'assets', 'icon.ico') }
-      : process.platform === 'linux'  ? { icon: path.join(__dirname, 'assets', 'logo.png') }
-      : {}),
+    ...WINDOW_ICON,
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -3341,6 +3348,7 @@ ipcMain.handle('linkImport:browser', async (event, { url, autoHidden } = {}) => 
       show: !autoHidden,
       title: 'Download your font from the vendor',
       autoHideMenuBar: true,
+      ...WINDOW_ICON,
       webPreferences: { partition: 'persist:jmt-linkimport', sandbox: true },
     });
     // Auto-hidden mode: we already have the vendor's session cookies, so try to
