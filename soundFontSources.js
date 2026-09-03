@@ -327,6 +327,51 @@ function readSourceMeta(uuidDir) {
 //
 // Returns { removed: [<uuid>...], errors: [<string>...] } so the caller
 // can surface what happened.
+// Remove every staged-but-never-committed source. Called at app STARTUP and at
+// QUIT, which are the two moments nothing can be in flight. ([B-298])
+//
+// THE REASONING, because it is what makes this safe to do unconditionally: a
+// staged source can never be used again once its session ends. The plan holding
+// its uuid lives in the renderer, and nothing in the app adopts an orphaned
+// prepared source. So across sessions it is not "possibly in flight" - it is
+// garbage, always, and keeping it buys nothing.
+//
+// The no-meta test is the safety rail: finalize unlinks the marker BEFORE it
+// stamps meta.json, so a committed source never wears one. Requiring both
+// conditions means a real source cannot be caught by this even if a marker were
+// somehow left behind on one.
+function clearStagedSources(userData) {
+  const root = sourcesRoot(userData);
+  const result = { removed: [], bytes: 0 };
+  if (!fs.existsSync(root)) return result;
+  let entries;
+  try { entries = fs.readdirSync(root, { withFileTypes: true }); }
+  catch { return result; }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const uuidDir = path.join(root, entry.name);
+    if (!fs.existsSync(path.join(uuidDir, '.preparing'))) continue;
+    if (fs.existsSync(path.join(uuidDir, 'meta.json'))) continue; // committed — never touch
+    let bytes = 0;
+    try {
+      const walk = (d) => {
+        for (const it of fs.readdirSync(d, { withFileTypes: true })) {
+          const p = path.join(d, it.name);
+          if (it.isDirectory()) walk(p);
+          else { try { bytes += fs.statSync(p).size; } catch {} }
+        }
+      };
+      walk(uuidDir);
+    } catch {}
+    try {
+      fs.rmSync(uuidDir, { recursive: true, force: true });
+      result.removed.push(entry.name);
+      result.bytes += bytes;
+    } catch {}
+  }
+  return result;
+}
+
 function cleanupOrphanSources(userData) {
   const root = sourcesRoot(userData);
   const result = { removed: [], errors: [] };
@@ -358,12 +403,16 @@ function cleanupOrphanSources(userData) {
     // finalize). Marked with .preparing so a sibling prepare/import in the same
     // bulk run doesn't sweep it as an "archive without meta" orphan. Skip recent
     // ones; only reclaim a marker older than 6h (a crashed session's straggler).
-    const prepMarker = path.join(uuidDir, '.preparing');
-    if (fs.existsSync(prepMarker)) {
-      try {
-        if (Date.now() - fs.statSync(prepMarker).mtimeMs < 6 * 3600 * 1000) continue;
-      } catch { continue; }
-    }
+    // A marker present DURING a session always means in-flight, so it is always
+    // skipped. There is no age test any more: clearStagedSources() removes every
+    // marker at startup and at quit, so anything wearing one here was staged by
+    // THIS session and may still be on its way to finalize. ([B-298])
+    //
+    // The old rule reclaimed a marker over six hours old, which was a guess at
+    // "is this still running?" - wrong in both directions. It let an abandoned
+    // stage sit for six hours, and it would delete a genuinely running analyze
+    // the moment it crossed the line.
+    if (fs.existsSync(path.join(uuidDir, '.preparing'))) continue;
     const metaPath = path.join(uuidDir, 'meta.json');
     const hasMeta = fs.existsSync(metaPath);
     const hasZip = fs.existsSync(path.join(uuidDir, 'source.zip'));
@@ -2410,6 +2459,7 @@ module.exports = {
   hashFolder,
   listSources,
   cleanupOrphanSources,
+  clearStagedSources,
   findByHash,
   importSource,
   finalizePreparedSource,

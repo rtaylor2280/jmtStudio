@@ -190,6 +190,22 @@ app.whenReady().then(() => {
   // Evict stale cache entries before window opens
   try { cacheManager.startupEviction(); } catch {}
 
+  // Clear sound-font sources that were staged by an import that never finished.
+  // At startup nothing can be in flight BY DEFINITION, so this needs no age test
+  // and no judgement — a staged source cannot be adopted by a later session, so
+  // it is garbage the moment its own session ends. ([B-298])
+  //
+  // Deliberately here rather than on the Sound Fonts tab's own sweep: this app
+  // is primarily a config editor, and a user who imports once and then spends
+  // three weeks in Config Manager would never trigger a tab-render cleanup.
+  // Startup is the one moment no habit of theirs can dodge.
+  try {
+    const staged = soundFontSources.clearStagedSources(app.getPath('userData'));
+    if (staged.removed.length) {
+      console.log(`[startup] cleared ${staged.removed.length} staged source(s), ${(staged.bytes / 1048576).toFixed(1)} MB`);
+    }
+  } catch {}
+
   // If launched via "Open With", override lastFile so the renderer loads it
   const argFile = process.argv.slice(1)
     .find(a => !a.startsWith('-') && /\.(h|txt)$/i.test(a) && fs.existsSync(a));
@@ -567,6 +583,18 @@ function scheduleOrphanCacheSweep() {
 }
 app.on('window-all-closed', () => app.quit());
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+
+// Same sweep on the way out, so a clean exit reclaims the space NOW instead of
+// at the next launch. This is the optimisation, not the fix — the startup sweep
+// is what guarantees the space comes back, because a force-quit, a crash or a
+// power cut never reaches this handler. ([B-298])
+//
+// Synchronous on purpose: before-quit is not a place to start async work, and
+// deleting a handful of directories is fast. If it throws we let the app exit
+// anyway — startup will do it.
+app.on('before-quit', () => {
+  try { soundFontSources.clearStagedSources(app.getPath('userData')); } catch {}
+});
 
 // ── Log forwarder ──────────────────────────────────────
 // Sends streaming log lines from toolchain to renderer
