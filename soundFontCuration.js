@@ -44,11 +44,43 @@ const SCHEMA_VERSION = 1;
 // Source-level fields worth carrying. Deliberately NOT the derived ones:
 // purchaseDate / acquisitionDate come from the archive's file date and restore
 // themselves correctly, so shipping them would only create a chance to be wrong.
+// ⚠️ bundleName WAS REMOVED FROM THIS LIST EARLIER ON 2026-09-03 AND THAT WAS
+// WRONG — RESTORED. I checked `_writeSourceMetaAndStamp`, saw it never writes a
+// bundleName, and concluded the field did not exist. It is written LATER, by the
+// review's commit (`updateSourceMeta({ bundleName: userBundle })`), and 56 of
+// Ryan's 159 sources carry one. Checking the wrong writer is not the same as
+// checking for the field.
+// It is also the field that MATTERS MOST here: bundleName is the user-facing
+// Source Name, so it is hand-authored the moment anyone renames a source, and
+// `originalName` (the archive's filename) cannot stand in for it. Without this a
+// restore falls back to the file it was picked from — which for an auto-numbered
+// export reads "Outcast_Knight (1)".
 const SOURCE_FIELDS = ['bundleName', 'vendor', 'vendorWebsite', 'linkUrl', 'userNotes', 'purchased'];
 // Entry-level fields, keyed by candidatePath — the only stable identifier an
 // entry has across a delete and re-import. A name can be edited; the path the
 // font occupies inside the archive cannot.
 const ENTRY_FIELDS = ['name', 'tags', 'linkedStyleLibraryEntry', 'author', 'description', 'demoUrl', 'userNotes', 'purchased'];
+// Record provenance, not curation: WHEN this entry existed in the library.
+//
+// ⚠️ THE LINE IS HISTORY versus ATTENTION, and it took two passes to find.
+// `createdAt` is when the font entered the user's collection - a fact about the
+// font's place in the library, and restoring it is what makes a round trip
+// leave no trace. `seenAt` is whether they have LOOKED at it since it appeared,
+// and it just appeared. Restoring it suppressed the NEW badge, so three fonts
+// landed in the grid with nothing marking them.
+// Ryan, 2026-09-03: "yes, the created date goes back to original, but the new
+// tag should still come on." HISTORY IS RESTORED; ATTENTION STATE IS NOT.
+// ⚠️ There is a real argument the other way and it should be seen before this is
+// "fixed" back: the badge's own definition is "never opened and never used"
+// (index.html:19498), and a restored font HAS been used. His call stands
+// because the badge's value AT IMPORT is showing what just landed.
+// Safe from the one-time `backfillSeenAt`, which is gated behind a persisted
+// flag precisely so it cannot silently re-stamp newly arrived entries.
+//
+// ⚠️ entryUuid is deliberately NOT here either. It is the record's identity, and
+// restoring one while a copy of that entry still exists would put two rows in
+// the library under the same id. The timestamps carry no such hazard.
+const ENTRY_PROV_FIELDS = ['createdAt', 'updatedAt', 'acquisitionDate'];
 
 function _pick(obj, fields) {
   const out = {};
@@ -67,7 +99,15 @@ function _pick(obj, fields) {
 // that came from it, and the attachments it links. Returns null when there is
 // nothing worth carrying — an untouched source should not grow a sidecar,
 // because that would change its exported bytes for no gain.
-function buildForSource(userData, uuid, appVersion) {
+// opts.includeAttachments (default true) is the export's PARAMETER, not a
+// question this module asks. Set false and the receipts are left behind while
+// the fields still travel — which is the one thing the source-export checkbox
+// can turn off. Skipping them here rather than filtering later matters: the
+// "nothing worth carrying" test at the bottom then sees the real payload, so a
+// source whose ONLY curation was a receipt correctly produces no sidecar at all
+// and its exported bytes stay untouched.
+function buildForSource(userData, uuid, appVersion, opts) {
+  const includeAttachments = !(opts && opts.includeAttachments === false);
   const sources = require('./soundFontSources');
   const entriesMod = require('./soundFontEntries');
   const attachMod = require('./soundFontAttachments');
@@ -85,6 +125,8 @@ function buildForSource(userData, uuid, appVersion) {
   if (sourceMeta.vendorAutoDetected) { delete source.vendor; delete source.vendorWebsite; }
 
   const entries = {};
+  const entryProvenance = {};
+  const importedPaths = [];
   let entryList = [];
   try { entryList = entriesMod.listEntries(userData) || []; } catch { entryList = []; }
   for (const e of entryList) {
@@ -98,13 +140,33 @@ function buildForSource(userData, uuid, appVersion) {
     // entry with tags and a demo URL produced "entries": {}.)
     const key = m.candidatePath;
     if (key == null) continue;
+    // ⭐ WHICH CANDIDATES WERE ACTUALLY IMPORTED, recorded UNCONDITIONALLY and
+    // before the curation test below. (Ryan, 2026-09-03: "if I chose to not
+    // import certain files, in other words left them unchecked, those checked
+    // versus unchecked I don't believe are included and they should be.")
+    // A bundle of six where he took three is a DECISION. Without this the
+    // review re-opens with all six ticked by default and the restore quietly
+    // undoes it - another trace of the delete.
+    // ⚠️ IT CANNOT BE INFERRED FROM `entries`. That map only gains a key when
+    // the font carried curation, so an imported-but-uncurated font would look
+    // like one he had deliberately skipped - exactly backwards.
+    importedPaths.push(key);
     const block = _pick(m, ENTRY_FIELDS);
     if (Object.keys(block).length === 0) continue;
     entries[key] = block;
+    // Record-level provenance, kept SEPARATE from the curation block above
+    // because they are different kinds of fact: `entries` is what the user
+    // wrote, this is when the record existed.
+    // ⭐ Ryan's bar, 2026-09-03: "there should be no trace of me ever deleting
+    // and bringing it back." A createdAt of today is exactly such a trace - the
+    // font entered HIS library in August; only the row is new. Same for the
+    // NEW badge, which is `seenAt` being empty.
+    const prov = _pick(m, ENTRY_PROV_FIELDS);
+    if (Object.keys(prov).length > 0) entryProvenance[key] = prov;
   }
 
   const attachments = [];
-  const ids = Array.isArray(sourceMeta.attachments) ? sourceMeta.attachments : [];
+  const ids = includeAttachments && Array.isArray(sourceMeta.attachments) ? sourceMeta.attachments : [];
   for (const id of ids) {
     let abs = null;
     try { abs = attachMod.attachmentFilePath(userData, id); } catch { abs = null; }
@@ -123,9 +185,67 @@ function buildForSource(userData, uuid, appVersion) {
     });
   }
 
+  // ── PROVENANCE ──────────────────────────────────────────────────────────
+  // Ryan's bar, 2026-09-03: "it should for me be identical to what it was
+  // before I deleted." Curation alone does not reach that. Two things were
+  // still lost across the round trip, and neither is a value the user typed:
+  //
+  //   THE DATES. purchaseDate / acquisition were deliberately left OUT of
+  //   SOURCE_FIELDS on the grounds that they "restore themselves from the
+  //   archive's file date". ⚠️ THAT IS TRUE ONLY WHEN THE EXPORT AND THE
+  //   ORIGINAL SHARE A DATE, which was the case the day it was measured and is
+  //   false in general — the export was written TODAY, so a bundle acquired in
+  //   August came back acquired today. Carry them.
+  //
+  //   THE IDENTITY. A rebuilt export can never match the vendor's archive
+  //   bytes, so the app cannot recognise its own export as the same source.
+  //   Carrying the ORIGINAL hashes is what makes "if I didn't delete first, it
+  //   should know that it's imported" answerable.
+  //
+  // contentHash here is the PER-SOURCE MANIFEST's fold over the files INSIDE
+  // the archive — the container-independent one. ⚠️ NOT meta.contentHash,
+  // which is hashItemDir over the source DIRECTORY and therefore covers
+  // exactly one file, source.zip, making it the archive hash under another
+  // name. Two different values, same field name; do not swap them.
+  const provenance = {
+    archiveHash: sourceMeta.hash || null,
+    contentHash: null,
+    // ⭐ THE DATE, and his rule is the whole specification (2026-09-03): "the date
+    // is the date of the file. The user can override that or the restore can
+    // override it. That's it." One value, three sources, in precedence: the
+    // file's date, the user's override, the restore's value.
+    // ⚠️ IT IS CARRIED UNDER EVERY NAME THE APP CURRENTLY KEEPS IT UNDER. The same
+    // value has accumulated three (purchaseDate / acquisitionDate /
+    // sourceFileDate) plus a routing map and a legacy fallback, and picking which
+    // ones "matter" is exactly the per-field judgement that dropped
+    // acquisitionDate and left a restored source with a blank Acquired where the
+    // original had 2025-08-21. Carry what was THERE, not what is READ.
+    // (Collapsing the three names to one is its own job, deliberately not here.)
+    purchaseDate: sourceMeta.purchaseDate || null,
+    acquisitionDate: sourceMeta.acquisitionDate || null,
+    sourceFileDate: sourceMeta.sourceFileDate || null,
+    sourceFileMtimeMs: sourceMeta.sourceFileMtimeMs || null,
+    updatedAt: sourceMeta.updatedAt || null,
+    // Carried so a restored vendor keeps its provenance: a name the app guessed
+    // must not come back looking like one the user asserted.
+    vendorAutoDetected: !!sourceMeta.vendorAutoDetected,
+  };
+  try {
+    const fh = require('./soundFontFileHash');
+    const man = fh.readFileHashManifest(
+      path.join(userData, 'soundFonts', '.filehashes', 'sources', `${uuid}.json`));
+    if (man && man.contentHash) provenance.contentHash = man.contentHash;
+  } catch { /* no manifest: identity falls back to the archive hash alone */ }
+
   const hasSource = Object.keys(source).length > 0;
   const hasEntries = Object.keys(entries).length > 0;
-  if (!hasSource && !hasEntries && attachments.length === 0) return null;
+  // Provenance alone is worth carrying — an uncurated source that was deleted
+  // and re-imported should still come back with its own dates and identity.
+  const hasProv = !!(provenance.archiveHash || provenance.purchaseDate);
+  // A partial import is itself a decision worth carrying, even with no curation
+  // and no provenance: taking 3 of 6 fonts is a choice the restore must honour.
+  const hasPartial = importedPaths.length > 0;
+  if (!hasSource && !hasEntries && attachments.length === 0 && !hasProv && !hasPartial) return null;
 
   return {
     schemaVersion: SCHEMA_VERSION,
@@ -135,21 +255,44 @@ function buildForSource(userData, uuid, appVersion) {
     originalName: sourceMeta.originalName || '',
     source,
     entries,
+    entryProvenance,
+    importedPaths,
     attachments,
+    provenance,
   };
+}
+
+// Record-level provenance for one candidate: the timestamps that make a
+// restored entry indistinguishable from the one that was deleted. Separate
+// from entryCurationFor because the caller applies them differently — curation
+// is metadata the review may overrule, these are stamped after the record is
+// built and nothing else competes for them.
+function entryProvenanceFor(payload, candidatePath) {
+  if (!payload || !payload.entryProvenance) return null;
+  const block = payload.entryProvenance[_rootKey(candidatePath)];
+  if (!block) return null;
+  const out = _pick(block, ENTRY_PROV_FIELDS);
+  return Object.keys(out).length ? out : null;
 }
 
 // Drop the sidecar (and its payload files) into a reconstructed tree, just
 // before it is archived. The _abs keys are stripped on the way out so the
 // written JSON carries no machine-specific paths.
+// Returns { ok, attachmentsWritten } — the COUNT is the point, not a nicety.
+// A receipt that cannot be read is skipped rather than failing the export, so
+// the number of attachments that landed can be lower than the number the
+// payload lists. Anything reporting what the archive carries has to count what
+// was written, or it describes a file that is not in there.
 function writeIntoTree(treeDir, payload) {
-  if (!payload) return false;
+  if (!payload) return { ok: false, attachmentsWritten: 0 };
+  let attachmentsWritten = 0;
   for (const a of (payload.attachments || [])) {
     if (!a._abs) continue;
     const dest = path.join(treeDir, ...a.file.split('/'));
     try {
       fs.mkdirSync(path.dirname(dest), { recursive: true });
       fs.copyFileSync(a._abs, dest);
+      attachmentsWritten++;
     } catch { /* a receipt that cannot be read must not fail the export */ }
   }
   const clean = {
@@ -158,8 +301,52 @@ function writeIntoTree(treeDir, payload) {
   };
   try {
     fs.writeFileSync(path.join(treeDir, SIDECAR_NAME), JSON.stringify(clean, null, 2));
-    return true;
-  } catch { return false; }
+    return { ok: true, attachmentsWritten };
+  } catch { return { ok: false, attachmentsWritten }; }
+}
+
+// What a written sidecar actually carries, in the user's categories rather than
+// the schema's field names. Returned by injectIntoZip so a caller that wants to
+// SAY what went into the zip reads it off the export instead of re-deriving it
+// from the library.
+//
+// ⚠️ THE RE-DERIVATION IS THE BUG THIS EXISTS TO PREVENT. The first disclosure
+// was assembled in the renderer by re-reading the source and calling
+// listAttachments — and it looked only at the source fields, so an export
+// carrying an entry's tag and demo URL announced "Includes your links". A
+// disclosure that under-reports is worse than none: it tells the user they know
+// what is in the file when they do not. There is only one thing that knows what
+// was written, and it is the payload that was written.
+//
+// Key PRESENCE is the whole test, deliberately. _pick already dropped
+// undefined, null, blank strings and empty arrays on the way in, so a key that
+// survived into the payload is a value the user actually has. Re-testing
+// emptiness here would be a second definition of "empty", free to drift from
+// the first.
+// attachmentsWritten, when given, overrides the payload's own attachment count.
+// The payload says what we MEANT to carry; the writer says what landed. A
+// receipt that could not be read is skipped silently, so counting the payload
+// would claim a proof of purchase the recipient will not find.
+function summarize(payload, attachmentsWritten) {
+  const none = { notes: false, tags: false, links: false, attachments: 0, any: false };
+  if (!payload) return none;
+  const src = payload.source || {};
+  const blocks = Object.values(payload.entries || {});
+  const on = (o, k) => !!o && Object.prototype.hasOwnProperty.call(o, k);
+  const anyEntry = (k) => blocks.some(b => on(b, k));
+
+  const notes = on(src, 'userNotes') || anyEntry('userNotes');
+  const tags = anyEntry('tags');
+  // One bucket for every kind of link, because that is the word the user owns.
+  // A style-library reference is not a URL, but "links" is what they would call
+  // it, and splitting it out lengthens the sentence without telling them more.
+  const links = on(src, 'linkUrl') || on(src, 'vendorWebsite')
+    || anyEntry('demoUrl') || anyEntry('linkedStyleLibraryEntry');
+  const attachments = typeof attachmentsWritten === 'number'
+    ? attachmentsWritten
+    : (payload.attachments || []).length;
+
+  return { notes, tags, links, attachments, any: notes || tags || links || attachments > 0 };
 }
 
 // Add the sidecar to a zip that has already been written. Done as a post-step
@@ -173,7 +360,7 @@ function writeIntoTree(treeDir, payload) {
 // uncurated source never reaches this, so its exported bytes are still the
 // vendor's archive copied verbatim.
 async function injectIntoZip(zipPath, payload, onProgress) {
-  if (!payload) return { ok: true, injected: false };
+  if (!payload) return { ok: true, injected: false, carried: summarize(null) };
   const sources = require('./soundFontSources');
   // ⚠️ THE WORKING TREE MUST LIVE BESIDE THE DESTINATION, NOT IN os.tmpdir().
   // The rebuilt archive is moved into place with renameSync, and rename CANNOT
@@ -203,7 +390,7 @@ async function injectIntoZip(zipPath, payload, onProgress) {
     }
     await zip.close();
     zip = null;
-    writeIntoTree(treeDir, payload);
+    const written = writeIntoTree(treeDir, payload);
     const outPath = path.join(tmpDir, 'out.zip');
     await sources.zipFolderToFile(treeDir, outPath, (p) => onProgress && onProgress({
       phase: 'curation-repack', bytesDone: p.bytesProcessed, totalBytes: p.totalBytes, currentFile: p.currentFile,
@@ -223,11 +410,14 @@ async function injectIntoZip(zipPath, payload, onProgress) {
       throw err;
     }
     try { fs.rmSync(backup, { force: true }); } catch {}
-    return { ok: true, injected: true };
+    return { ok: true, injected: true, carried: summarize(payload, written.attachmentsWritten) };
   } catch (err) {
     // An export that succeeded must never be destroyed by a failure to decorate
     // it. Every path above either leaves the original in place or restores it.
-    return { ok: false, injected: false, error: String(err && err.message || err) };
+    // carried reports the empty set, not the payload: the archive on disk is the
+    // one WITHOUT the sidecar, so anything else would describe a file that is
+    // not there.
+    return { ok: false, injected: false, carried: summarize(null), error: String(err && err.message || err) };
   } finally {
     if (zip) { try { await zip.close(); } catch {} }
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
@@ -279,10 +469,18 @@ async function stripAndRepackage(zipPath, payload, onProgress) {
     // rather than discarded — they are the point of carrying them — but they do
     // not go into the tree that gets rehashed, so they cannot affect identity.
     const payloadDir = path.join(tmpDir, 'payload');
+    const _isPayload = (rel) => rel === PAYLOAD_DIR || rel.startsWith(`${PAYLOAD_DIR}/`);
+    // ⚠️ THE DENOMINATOR MUST COUNT ONLY WHAT THE COUNTER COUNTS. `done` is
+    // incremented for CONTENT files only, so totalling every key made the strip
+    // half stop short of its 50% by exactly the number of receipts riding along.
+    // Invisible on a 1,500-file bundle, obvious on a ten-file font with two
+    // proofs of purchase, where the bar parks at 40% and then jumps.
+    const contentTotal = keys.reduce(
+      (n, k) => n + (_isPayload(entries[k].name.replace(/\\/g, '/')) ? 0 : 1), 0);
     let done = 0;
     for (const k of keys) {
       const rel = entries[k].name.replace(/\\/g, '/');
-      const isPayload = rel === PAYLOAD_DIR || rel.startsWith(`${PAYLOAD_DIR}/`);
+      const isPayload = _isPayload(rel);
       const root = isPayload ? payloadDir : treeDir;
       const dest = path.resolve(root, rel);
       if (isPayload) {
@@ -296,7 +494,10 @@ async function stripAndRepackage(zipPath, payload, onProgress) {
       fs.mkdirSync(path.dirname(dest), { recursive: true });
       await zip.extract(entries[k].name, dest);
       done++;
-      if (onProgress) onProgress({ phase: 'curation-strip', fileCount: done, totalFiles: keys.length });
+      // currentFile keeps the line under the bar alive through the strip half;
+      // without it the filename freezes while only the bar moves, which reads as
+      // stuck on one file rather than working through many.
+      if (onProgress) onProgress({ phase: 'curation-strip', fileCount: done, totalFiles: contentTotal, currentFile: rel });
     }
     await zip.close();
     zip = null;
@@ -349,10 +550,22 @@ function applySourceCuration(userData, uuid, payload, attDir) {
 // The entry half. Returned as a metadata object for createEntry, which already
 // takes one — so a re-imported font comes back with its tags, its style link
 // and its demo URL without the review screen having to learn anything new.
+// ⚠️ THE READERS AND THE WRITER TREAT A MISSING PATH DIFFERENTLY, ON PURPOSE.
+// buildForSource skips an entry whose stored candidatePath is null, because a
+// missing recorded value must not be invented into a root key. Here we hold a
+// LIVE candidate, and everywhere else in the app a candidate with no path IS
+// the archive root — `source.extractTo(candidate.path || '', ...)` is the
+// established form. So nullish normalises to '' rather than bailing out.
+// The previous `candidatePath == null` bail could never fire: the only caller
+// already passed `candidate.path || ''`, so the guard read as a real
+// distinction while doing nothing. Normalising here makes the two agree.
+function _rootKey(candidatePath) {
+  return candidatePath == null ? '' : candidatePath;
+}
+
 function entryCurationFor(payload, candidatePath) {
-  // Same rule as the writer: '' is the archive root and a legitimate key.
-  if (!payload || !payload.entries || candidatePath == null) return null;
-  const block = payload.entries[candidatePath];
+  if (!payload || !payload.entries) return null;
+  const block = payload.entries[_rootKey(candidatePath)];
   if (!block) return null;
   const out = _pick(block, ENTRY_FIELDS);
   // The name is the review's to decide — it is shown, edited and deduped
@@ -361,17 +574,20 @@ function entryCurationFor(payload, candidatePath) {
   return Object.keys(out).length ? out : null;
 }
 
-// The suggested name for a candidate, separate from the metadata above so the
-// review can OFFER it rather than have it applied behind the user.
-function suggestedNameFor(payload, candidatePath) {
-  if (!payload || !payload.entries || candidatePath == null) return null;
-  const block = payload.entries[candidatePath];
-  return (block && typeof block.name === 'string' && block.name.trim()) ? block.name : null;
-}
+// ⚠️ `suggestedNameFor` LIVED HERE AND NEVER HAD A CALLER (removed 2026-09-03).
+// It was written for the import review to offer the sidecar's name, and the
+// review was never wired to it - so a curated re-import came back with the
+// detector's raw folder names (`1.blue`, `2.orange`, `3.red`) instead of the
+// user's own. The review now reads the payload's entry blocks directly, since
+// they are plain JSON and it already has them in hand, which makes a backend
+// helper for one field lookup pure indirection. Deleted rather than left
+// standing: dead code that describes a feature nobody can reach reads as
+// evidence the feature exists.
 
 module.exports = {
   SIDECAR_NAME, PAYLOAD_DIR, SCHEMA_VERSION,
   SOURCE_FIELDS, ENTRY_FIELDS,
-  buildForSource, writeIntoTree, injectIntoZip, peekZip, stripAndRepackage,
-  applySourceCuration, entryCurationFor, suggestedNameFor,
+  buildForSource, writeIntoTree, injectIntoZip, peekZip, stripAndRepackage, summarize,
+  applySourceCuration, entryCurationFor, entryProvenanceFor,
+  ENTRY_PROV_FIELDS,
 };

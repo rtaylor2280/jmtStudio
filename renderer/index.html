@@ -3370,6 +3370,14 @@
   .sf-doc-chip { background: none; border: none; padding: 0; font: inherit; cursor: pointer; color: var(--jmt-blue); text-decoration: underline; text-underline-offset: 2px; }
   .sf-doc-chip:hover { opacity: 0.8; }
   .sf-doc-sep { color: var(--c-text-sub); }
+  /* Inline remove on the IMPORT REVIEW's proof-of-purchase chips only. The
+     source-detail chips deliberately keep the open-then-remove route; a form is
+     where you expect to take back out what you just put in. Fade rather than
+     colour at rest: removing a receipt is not an error state. */
+  .sf-pop-chip-wrap { display: inline-flex; align-items: center; gap: 2px; }
+  .sf-pop-chip-x { background: none; border: none; padding: 0 2px; font: inherit; font-size: 0.8em; line-height: 1;
+                   color: var(--c-text-sub); cursor: pointer; opacity: 0.5; }
+  .sf-pop-chip-x:hover { opacity: 1; color: var(--c-danger-text, #e05555); }
   .sf-doc-empty { font-size: 0.72rem; color: var(--c-text-dim); font-style: italic; }
   /* Text viewer modal */
   #modal-sf-doc-viewer .modal { width: 720px; max-width: 96vw; height: min(80vh, 600px); display: flex; flex-direction: column; position: relative; padding-bottom: 16px; }
@@ -5467,6 +5475,28 @@
           <label>Notes</label>
           <textarea id="sf-review-notes" placeholder="Anything you want to remember about this source (optional)" maxlength="500"></textarea>
         </div>
+        <!-- ── Proof of Purchase, at IMPORT time ── (Ryan, 2026-09-03: "we should
+             always be able to attach a proof of purchase on import time so it
+             should have been a form field")
+             Attaching a receipt is exactly the moment you have it: you just
+             downloaded the thing. Making the user commit the import, open the
+             source, and then attach is asking them to come back for something
+             they had in hand.
+             It also removes an accident. Attachments were the ONE piece of
+             curation that survived a re-import, purely because they were not a
+             form field and so nothing overwrote them. That is luck, not design.
+             Same chips + actions as the source detail's Proof of Purchase row,
+             deliberately: this is the same object in a different place. -->
+        <div class="import-field" id="sf-review-pop-field">
+          <label>Proof of Purchase</label>
+          <div class="sf-meta-val sf-pop-val">
+            <span class="sf-doc-chips sf-pop-chips" id="sf-review-pop-chips" data-doc-scope="pop"></span>
+            <span class="sf-pop-actions">
+              <button class="sf-pop-action" id="btn-sf-review-add-pop" type="button" title="Add a receipt or proof-of-purchase file from your computer">+ Add</button>
+            </span>
+          </div>
+          <div class="sf-import-field-hint">A receipt or order confirmation. Kept with the source, never inside the font files, and it travels with a zip export so a re-import brings it back.</div>
+        </div>
       </div>
 
       <div class="sf-import-review-section">
@@ -6897,10 +6927,16 @@ window.promptUnsaved = promptUnsaved;
 //                      a bare boolean so the caller can branch three ways.
 //   opts.hideCancel  — when true, hides the Cancel button so the modal reads
 //                      as an info notice (single OK). Resolves true on OK.
-//   opts.checkbox    — optional { label } to show a checkbox between message and
-//                      buttons. When provided, resolves with { confirmed, checked }
-//                      instead of a bare boolean so the caller can branch on the
-//                      checkbox state. Always starts unchecked.
+//   opts.checkbox    — optional { label, hint, checked } to show a checkbox
+//                      between message and buttons. Starts unchecked unless
+//                      `checked: true`.
+//
+//   FORM CONTROLS AND THE RETURN SHAPE. A dropdown or a checkbox is a
+//   PARAMETER; the buttons are how you submit. Whenever either is present the
+//   result is an object carrying the answer plus every control's value:
+//     no controls          -> true/false, or 'cancel'|'middle'|'alt'|'confirm'
+//     controls, 2 buttons  -> { confirmed, value?, checked? }
+//     controls, 3+ buttons -> { choice,    value?, checked? }
 function promptConfirm(opts) {
   return new Promise(resolve => {
     const {
@@ -6946,7 +6982,10 @@ function promptConfirm(opts) {
     const cbHint  = document.getElementById('modal-confirm-checkbox-hint');
     if (checkbox && cbRow && cbInput && cbLabel) {
       cbLabel.textContent = checkbox.label || '';
-      cbInput.checked = false;
+      // Unchecked stays the default, so every existing caller is unmoved. Opt in
+      // with `checked: true` where the box is an INCLUSION the user would have to
+      // go out of their way to want dropped.
+      cbInput.checked = !!checkbox.checked;
       if (cbHint) {
         if (checkbox.hint) {
           cbHint.textContent = checkbox.hint;
@@ -6980,6 +7019,25 @@ function promptConfirm(opts) {
     }
     const okBtn = document.getElementById('modal-confirm-ok');
     okBtn.textContent = confirmText;
+    // ⭐ THE BUTTON SAYS WHAT IT WILL DO. When a checkbox CHANGES THE OPERATION
+    // rather than just a setting, the confirm label follows it: ticking "Export
+    // source first" on the delete dialog means the button now exports AND deletes,
+    // and leaving it reading "Delete" under-describes an action nobody can undo.
+    // `checkbox.confirmTextChecked` supplies the label for the ticked state.
+    // ⚠️ AN OPTION, NOT A DOM POKE FROM THE CALLER — the checkbox is a parameter of
+    // this dialog, so what it implies about the buttons belongs in the dialog too.
+    // Callers that do not pass it are unaffected.
+    // ⚠️ AND IT HAS TO LIVE HERE, BELOW `okBtn.textContent = confirmText`. Putting it
+    // up with the checkbox rendering hit `okBtn` before its `const` (TDZ) and would
+    // then have been overwritten by that assignment anyway.
+    if (cbInput) {
+      // Always reassign: this element is reused across dialogs, so a stale handler
+      // from a previous caller would keep rewriting the wrong button.
+      cbInput.onchange = (checkbox && checkbox.confirmTextChecked)
+        ? () => { okBtn.textContent = cbInput.checked ? checkbox.confirmTextChecked : confirmText; }
+        : null;
+      if (cbInput.onchange) cbInput.onchange();
+    }
     okBtn.className = confirmKind === 'primary' ? 'modal-btn-primary'
                     : confirmKind === 'save'    ? 'modal-btn-save'
                     : 'modal-btn-discard';
@@ -7022,17 +7080,29 @@ function promptConfirm(opts) {
     // Multi-button mode (any of middle/alt present) resolves with strings so the
     // caller can branch; plain two-button mode keeps the historical boolean shape.
     const multi = !!(middleText || altText);
+    // ⭐ A DROPDOWN OR A CHECKBOX IS A FORM PARAMETER; THE BUTTONS ARE HOW YOU
+    // SUBMIT (Ryan, 2026-09-03: "it's not a checkbox with the buttons it's a
+    // checkbox as parameters like a form"). So the values come back with
+    // WHATEVER the buttons answered, and the branching is on "are there
+    // controls", never on which control paired with which button set.
+    //
+    // What this replaces: four independent shapes where multi-button mode
+    // resolved a bare string and silently discarded any control's value. No
+    // caller had combined them, so nothing was broken — but the trap was one
+    // branch wide for BOTH controls, and fixing only the checkbox would have
+    // left the identical hole for the next dropdown beside three buttons.
+    //
+    // Backward compatible by construction. Controls present: the historical
+    // { confirmed, ... } object, now also { choice, ... } in multi mode.
+    // No controls: the bare boolean or the bare string, exactly as before.
     const cleanup = (result) => {
       overlay.classList.remove('active');
-      if (multi) {
-        resolve(result);
-      } else if (dropdown) {
-        resolve({ confirmed: result === true, value: ddSel ? ddSel.value : null });
-      } else if (checkbox) {
-        resolve({ confirmed: result === true, checked: !!(cbInput && cbInput.checked) });
-      } else {
-        resolve(result === true);
-      }
+      const answer = multi ? result : (result === true);
+      if (!dropdown && !checkbox) { resolve(answer); return; }
+      const out = multi ? { choice: answer } : { confirmed: answer };
+      if (dropdown) out.value   = ddSel ? ddSel.value : null;
+      if (checkbox) out.checked = !!(cbInput && cbInput.checked);
+      resolve(out);
     };
     okBtn.onclick     = () => cleanup(multi ? 'confirm' : true);
     cancelBtn.onclick = () => cleanup(multi ? 'cancel'  : false);
@@ -21976,6 +22046,22 @@ require(['vs/editor/editor.main'], function () {
             try { window.electronAPI.setSetting('librarySort', _sfSort); } catch {}
             _sfRenderSortDropdown();
             _sfRenderGrid();
+            // ⚠️ CLOSE ON PICK. Sort is a SINGLE choice, so the menu has nothing
+            // left to offer once it is made and every path cost an extra click
+            // to dismiss: open, choose, click away. The TAG dropdown stays open
+            // on purpose and should keep doing so - it is multi-select
+            // (`_sfActiveFilterTags` is a Set) and its own comment says why:
+            // picking one must not stop you seeing and adding a second. Creator
+            // and effects follow that dropdown. Sort is the odd one out because
+            // it is the only single-choice menu of the set.
+            // ⚠️ NOT a break with the shared grammar the comment above cites:
+            // that rule is about the ACTIVE row carrying the direction and
+            // clicking it flipping, and its sibling is the facet sort BAR, which
+            // has no open state at all. Flipping direction still costs the same
+            // two actions it always did (open, click) - it just no longer leaves
+            // a menu hanging over the grid afterwards.
+            const dd = document.getElementById('sf-sort-dropdown');
+            if (dd) dd.style.display = 'none';
           });
         });
         const lbl = document.getElementById('sf-sort-label');
@@ -22635,6 +22721,9 @@ require(['vs/editor/editor.main'], function () {
         purchased:   document.getElementById('sf-review-purchased'),
         purchaseDate:document.getElementById('sf-review-purchase-date'),
         notes:       document.getElementById('sf-review-notes'),
+        popField:    document.getElementById('sf-review-pop-field'),
+        popChips:    document.getElementById('sf-review-pop-chips'),
+        addPopBtn:   document.getElementById('btn-sf-review-add-pop'),
         bundleField: document.getElementById('sf-review-bundle-field'),
         bundleNameInput: document.getElementById('sf-review-bundle-name'),
         candCount:   document.getElementById('sf-review-cand-count'),
@@ -23481,6 +23570,11 @@ require(['vs/editor/editor.main'], function () {
         }
         _sfImport.uuid = importRes.uuid;
         _sfImport.sourceFileDate = importRes.sourceFileDate || null;
+        // The curation this archive arrived carrying, if any. The review PRE-FILLS
+        // from it. That is not a nicety: the review writes its fields back over the
+        // source seconds later (updateSourceMeta, below), so an empty form actively
+        // erased everything the sidecar had just restored. ([B-283])
+        _sfImport.curation = importRes.curation || null;
         // Pre-review library check: build (or twin-seed) the manifest NOW with
         // an honest progress bar, so the review screen opens with duplicate
         // notes ready instead of them arriving minutes late on big bundles.
@@ -23596,12 +23690,30 @@ require(['vs/editor/editor.main'], function () {
           _sfImportEls.vendorList.innerHTML = '<option value="Unknown"></option>'
             + _sfGetKnownVendors().filter(v => v.name !== 'Unknown').map(v => `<option value="${_sfEscape(v.name)}"></option>`).join('');
         }
-        // Source-level Link starts empty on every fresh source import —
-        // there's no auto-detection signal for "this bundle's page" so the
-        // field is purely user-input. Add-more / duplicate flows hide the
-        // source section entirely, so this reset only ever runs in the
-        // user-facing case.
-        if (_sfImportEls.link) _sfImportEls.link.value = '';
+        // ── Curation sidecar pre-fill ([B-283]) ──────────────────────────
+        // A JMT export carries the hand-authored values back. They are ALREADY
+        // applied to the source by the time this runs, so pre-filling looks
+        // cosmetic and is not: the commit path writes every one of these fields
+        // back from the form (updateSourceMeta, :24079), so an empty form
+        // OVERWRITES what the sidecar just restored. Ryan's real re-import came
+        // back with no link, no notes, no demo URLs and none of his names, and
+        // this is why. The receipt survived only because it was not a form
+        // field - which is the tell, not the exception.
+        //
+        // Precedence, deliberately: the SIDECAR beats the detector. Both are
+        // guesses about the same thing, and one of them is the user's own
+        // recorded answer from last time.
+        const _cur = (_sfImport && _sfImport.curation) || null;
+        const _curSrc = (_cur && _cur.source) || {};
+        const _curHas = (k) => Object.prototype.hasOwnProperty.call(_curSrc, k);
+        // Source-level Link has no auto-detection signal at all, so it is either
+        // the sidecar's or empty. Add-more / duplicate flows hide the source
+        // section entirely, so this only ever runs in the user-facing case.
+        if (_sfImportEls.link) _sfImportEls.link.value = _curHas('linkUrl') ? _curSrc.linkUrl : '';
+        if (_sfImportEls.notes && _curHas('userNotes')) _sfImportEls.notes.value = _curSrc.userNotes;
+        // Source Name is set LATE, at the bundle-name block below — that writer is
+        // unconditional, so anything set here would be erased. Deliberately not
+        // done twice.
         // Track the last demoUrl committed during this import session.
         // Smart paste on each candidate row compares clipboard against
         // this value to decide whether to auto-paste — if the clipboard
@@ -23682,10 +23794,49 @@ require(['vs/editor/editor.main'], function () {
         // today only when birthtime wasn't reported by the OS. The user
         // can always retype.
         if (_sfImportEls.purchaseDate) {
-          _sfImportEls.purchaseDate.value = _sfImport.sourceFileDate
+          // ⚠️ THE SIDECAR'S DATE WINS. The archive's own file date is the date
+          // the EXPORT was written, which is today — so without this a bundle
+          // bought in August comes back acquired today, and the form then
+          // writes that wrong date onto the source. ([B-283])
+          const _provDate = (_sfImport.curation && _sfImport.curation.provenance
+            && (_sfImport.curation.provenance.purchaseDate
+                || _sfImport.curation.provenance.sourceFileDate)) || null;
+          _sfImportEls.purchaseDate.value = _provDate
+            || _sfImport.sourceFileDate
             || new Date().toISOString().slice(0, 10);
         }
-        if (_sfImportEls.notes) _sfImportEls.notes.value = '';
+        // ⚠️ THE SIDECAR OVERRIDE GOES HERE, AFTER the detector branches and the
+        // date default, because every one of them assigns unconditionally — an
+        // earlier pre-fill would simply be overwritten. (Notes used to be cleared
+        // on this exact line, which is what ate the pre-filled value first time.)
+        //
+        // Sidecar beats detector on purpose. Both are answers to the same
+        // question, and one of them is the user's own, recorded last time.
+        if (_sfImportEls.notes) {
+          _sfImportEls.notes.value = _curHas('userNotes') ? _curSrc.userNotes : '';
+        }
+        if (_cur) {
+          if (_curHas('vendor') && _sfImportEls.vendor) _sfImportEls.vendor.value = _curSrc.vendor;
+          if (_curHas('vendorWebsite') && _sfImportEls.website) _sfImportEls.website.value = _curSrc.vendorWebsite;
+          // The checkbox reads "Free content", so it is the INVERSE of purchased.
+          if (_curHas('purchased') && _sfImportEls.purchased) {
+            _sfImportEls.purchased.checked = (_curSrc.purchased === false);
+          }
+          if (_sfImportEls.vendorInfo && (_curHas('vendor') || _curHas('linkUrl') || _curHas('userNotes'))) {
+            // Say where these came from. Without this the fields look
+            // auto-detected, and the user has no way to tell a value they typed
+            // months ago from one the app guessed thirty seconds ago.
+            _sfImportEls.vendorInfo.textContent =
+              'Filled in from the details saved inside this export. Change anything you like.';
+            _sfImportEls.vendorInfo.classList.add('detected');
+            _sfImportEls.vendorInfo.classList.remove('suggested');
+          }
+        }
+        // Receipts restored from a sidecar are already linked to the source by
+        // now, so this both lists them and IS the pre-fill for that field.
+        // Fire-and-forget: a chip that arrives a beat late is fine, and blocking
+        // the review render on it is not.
+        _sfRenderReviewPop();
         const cands = _sfImport.candidates || [];
         if (_sfImportEls.candCount) _sfImportEls.candCount.textContent = cands.length === 0 ? '(none)' : `(${cands.length})`;
         // Reset the duplicate-recognition summary from any prior review.
@@ -23707,7 +23858,17 @@ require(['vs/editor/editor.main'], function () {
           _sfImportEls.bundleField.style.display = cands.length >= 1 ? '' : 'none';
         }
         if (_sfImportEls.bundleNameInput) {
-          _sfImportEls.bundleNameInput.value = bundleName || sourceFallback;
+          // ⚠️ THE SIDECAR WINS, AND IT HAS TO BE DECIDED *HERE*. This assignment is
+          // unconditional and runs late, so an earlier pre-fill is simply erased -
+          // which is what happened: the field showed "Outcast_Knight (2)", derived
+          // from `sourceFallback` (the PICKED FILE'S name), even though the export
+          // carried the real one. Same shape as the Notes clear further up; the
+          // only safe place to prefer the sidecar is the last writer.
+          // Order: the source's own name, then the sidecar's original file name,
+          // then the detector's bundle name, then the picked filename.
+          const _curBundle = (_cur && _curHas('bundleName') && String(_curSrc.bundleName).trim())
+            || (_cur && _cur.originalName ? String(_cur.originalName).replace(/\.zip$/i, '') : '');
+          _sfImportEls.bundleNameInput.value = _curBundle || bundleName || sourceFallback;
         }
         // Prepend-prefix checkbox only makes sense when 2+ candidates would
         // share the prefix; hide it for single-font sources.
@@ -23762,7 +23923,18 @@ require(['vs/editor/editor.main'], function () {
             // user has to pick which ones explicitly.
             const _autoCheckDup = isDuplicate && cands.length === 1;
             _sfImportEls.candList.innerHTML = cands.map((c, i) => {
-              const initialName = _sfSuggestName(c, i, currentPrefix, prependBundle);
+              // ⚠️ THE SIDECAR'S NAME WINS OVER THE DETECTOR'S GUESS. This is a
+              // name the user typed once already; `_sfSuggestName` is derived from
+              // the folder the font happens to sit in. Ryan re-imported his own
+              // export and got `1.blue` / `2.orange` / `3.red` back because
+              // nothing consulted the payload here. ([B-283])
+              // Keyed by candidatePath, and '' IS a valid key - a single-font
+              // source puts its font at the archive root.
+              const _curEntry = (_cur && _cur.entries) ? _cur.entries[c.path || ''] : null;
+              const _curName = (_curEntry && typeof _curEntry.name === 'string' && _curEntry.name.trim())
+                ? _curEntry.name : null;
+              const _curDemo = (_curEntry && typeof _curEntry.demoUrl === 'string') ? _curEntry.demoUrl : '';
+              const initialName = _curName || _sfSuggestName(c, i, currentPrefix, prependBundle);
               const alreadyName = existingByPath.get(c.path || '');
               const isAlready = !!alreadyName;
               const badges = [];
@@ -23801,7 +23973,18 @@ require(['vs/editor/editor.main'], function () {
                 // Default check state: checked unless already-imported (locked
                 // off) or this is an alternate-version row (off by default but
                 // user can opt in — they're real candidates, not noise).
-                const defaultChecked = !c.alternateVersion;
+                //
+                // ⭐ A SIDECAR OVERRULES BOTH DEFAULTS. It records exactly which
+                // candidates were imported last time, so a bundle where the user
+                // took 3 of 6 comes back with those 3 ticked and the other 3
+                // clear. Without this the restore silently re-imports fonts they
+                // had deliberately skipped. (Ryan, 2026-09-03.)
+                // It wins over the alternate-version default too: if he took an
+                // alternate version once, that was a decision, not noise.
+                const _impPaths = (_cur && Array.isArray(_cur.importedPaths)) ? _cur.importedPaths : null;
+                const defaultChecked = _impPaths
+                  ? _impPaths.includes(c.path || '')
+                  : !c.alternateVersion;
                 checkAttrs = isAlready ? 'disabled' : (defaultChecked ? 'checked' : '');
                 nameAttrs = isAlready ? 'disabled' : '';
                 nameVal = isAlready ? alreadyName : initialName;
@@ -23814,7 +23997,10 @@ require(['vs/editor/editor.main'], function () {
               // entry detail link panel (chain swaps to checkmark when
               // open, single click commits and closes, Enter/Escape work
               // the same way, X clears).
-              return `<div class="sf-review-candidate-row${rowAlreadyClass}" data-idx="${i}" data-already="${rowAlreadyData}" data-demourl="">
+              // data-demourl carries the sidecar's demo link so the commit path
+              // sends it instead of the '' it was sending. Empty when there is no
+              // sidecar, which is the old behaviour exactly.
+              return `<div class="sf-review-candidate-row${rowAlreadyClass}" data-idx="${i}" data-already="${rowAlreadyData}" data-demourl="${_sfEscape(_curDemo)}">
                 <div class="cand-row-main">
                   <input type="checkbox" class="cand-check" ${checkAttrs}>
                   <div class="cand-main">
@@ -23843,6 +24029,17 @@ require(['vs/editor/editor.main'], function () {
           const name  = row.querySelector('.cand-name');
           row.dataset.edited = 'false';
           row.dataset.suggested = name?.value || '';
+          // A demo link restored from the sidecar has to be SHOWN, not just
+          // carried. The demo row is collapsed by default and only opens on the
+          // chain icon, so a pre-filled value would commit correctly and stay
+          // invisible - which is the same "no way to tell it worked" the
+          // pre-fill exists to end. Open it only when there is something in it.
+          const _preDemo = row.dataset.demourl || '';
+          if (_preDemo) {
+            const dRow = row.querySelector('.cand-demo-row');
+            const dInput = row.querySelector('.cand-demo-input');
+            if (dRow && dInput) { dInput.value = _preDemo; dRow.style.display = ''; }
+          }
           const validate = () => _sfRevalidateCandidates();
           check?.addEventListener('change', () => {
             // User took a stance on this row — async results (duplicate
@@ -25745,6 +25942,57 @@ require(['vs/editor/editor.main'], function () {
       _sfSourceDetailEls.addPopBtn?.addEventListener('click', () => _sfOpenPopAdd());
       _sfSourceDetailEls.linkPopBtn?.addEventListener('click', () => _sfOpenPopLink());
 
+      // The same chips, on the import review. The source already exists by the
+      // time the review renders (import runs first), so an attachment added here
+      // links to a real source immediately - no deferred queue to get wrong.
+      // A sidecar's receipts are already restored and linked by then, so this
+      // simply lists them and the pre-fill is free.
+      const _sfRenderReviewPop = async () => {
+        const chips = _sfImportEls.popChips;
+        if (!chips) return;
+        const uuid = (_sfImport && _sfImport.uuid) || '';
+        chips.setAttribute('data-doc-key', uuid);
+        if (!uuid) { chips.innerHTML = ''; return; }
+        let items = [];
+        try { const r = await window.electronAPI.listAttachments({ uuid }); if (r && r.ok) items = r.attachments || []; } catch {}
+        if (!_sfImport || _sfImport.uuid !== uuid) return; // import changed while loading
+        if (!items.length) { chips.innerHTML = ''; return; }
+        // ⚠️ AN INLINE REMOVE, unlike the source detail's chips. On a FORM you
+        // expect to take something back out where you put it in; the detail
+        // panel's route (click the chip, read the PDF, press Remove from source)
+        // is right when you are inspecting a stored source and wrong here.
+        // Ryan, 2026-09-03: "no way to delete one you already added without
+        // opening which is counter intuitive for this form."
+        chips.innerHTML = items.map(a => {
+          const disp = a.label || a.name;
+          const sizeHint = a.size ? ` (${_sfFmtSize(a.size)})` : '';
+          const sizeAttr = a.size ? ` data-doc-size="${a.size}"` : '';
+          const labelAttr = a.label ? ` data-att-label="${_sfEscape(a.label)}"` : '';
+          return `<span class="sf-pop-chip-wrap"><button class="sf-doc-chip" data-att-id="${_sfEscape(a.id)}" data-doc-path="${_sfEscape(a.name)}"${labelAttr}${sizeAttr} title="Open ${_sfEscape(disp)}${_sfEscape(sizeHint)}">${_sfEscape(disp)}</button>`
+            + `<button class="sf-pop-chip-x" data-remove-att="${_sfEscape(a.id)}" type="button" title="Remove ${_sfEscape(disp)}">&#10005;</button></span>`;
+        }).join('<span class="sf-doc-sep">, </span>');
+      };
+      // Delegated so it survives every re-render.
+      _sfImportEls.popChips?.addEventListener('click', async (e) => {
+        const x = e.target.closest('.sf-pop-chip-x');
+        if (!x) return;
+        e.preventDefault();
+        e.stopPropagation();          // don't let the chip's open-viewer handler fire
+        const id = x.getAttribute('data-remove-att');
+        const uuid = _sfImport && _sfImport.uuid;
+        if (!id || !uuid) return;
+        // No confirm. Unlinking is refcounted and the file is only reclaimed
+        // when nothing else points at it, so the cost of a mis-click is one
+        // "+ Add" away. A gate here would charge every correct use for a
+        // mistake that is cheap to undo.
+        try { await window.electronAPI.unlinkAttachment({ uuid, id }); } catch {}
+        _sfRenderReviewPop();
+      });
+      _sfImportEls.addPopBtn?.addEventListener('click', () => {
+        if (!_sfImport || !_sfImport.uuid) return;
+        _sfOpenPopAdd(_sfImport.uuid, 'modal-sf-import', _sfRenderReviewPop);
+      });
+
       // ── Link existing proof of purchase (multi-select picker) ──────
       // Lists every attachment already in the store (minus those already on
       // this source) as checkboxes; linking attaches the chosen ids to this
@@ -25844,8 +26092,16 @@ require(['vs/editor/editor.main'], function () {
           }).join('');
         _sfPopAddEls.list.innerHTML = rows || '<div class="sf-pop-link-empty">No sources match.</div>';
       };
-      const _sfOpenPopAdd = () => {
-        const uuid = _sfSourceOriginalUuid;
+      // Which chips to refresh once a file lands. Set by the opener, because the
+      // same picker now serves two surfaces: the source detail and the import
+      // review. Defaults to the source detail so the original caller is unchanged.
+      let _sfPopAddOnDone = null;
+      // uuidOverride / stashModalId make this callable from the import review,
+      // where the source exists but is not the one open in the detail modal.
+      // Parameters rather than a second copy of the picker.
+      const _sfOpenPopAdd = (uuidOverride, stashModalId, onDone) => {
+        const uuid = uuidOverride || _sfSourceOriginalUuid;
+        _sfPopAddOnDone = onDone || null;
         if (!uuid || !_sfPopAddEls.modal) return;
         _sfPopAddCurrentUuid = uuid;
         _sfPopAddFile = null;
@@ -25859,8 +26115,10 @@ require(['vs/editor/editor.main'], function () {
         _sfRenderPopAddList('');
         _sfUpdatePopAddConfirm();
         _sfPopAddStashed = [];
-        const sd = document.getElementById('modal-sf-source-detail');
-        if (sd && sd.classList.contains('active')) { sd.classList.remove('active'); _sfPopAddStashed.push('modal-sf-source-detail'); }
+        // Full modal over full modal, so stash and restore rather than stack.
+        const stashId = stashModalId || 'modal-sf-source-detail';
+        const sd = document.getElementById(stashId);
+        if (sd && sd.classList.contains('active')) { sd.classList.remove('active'); _sfPopAddStashed.push(stashId); }
         _sfPopAddEls.modal.classList.add('active');
       };
       _sfPopAddEls.browseBtn?.addEventListener('click', async () => {
@@ -25882,7 +26140,7 @@ require(['vs/editor/editor.main'], function () {
         const label = (_sfPopAddEls.nameInput && _sfPopAddEls.nameInput.value || '').trim();
         const uuids = Array.from(_sfPopAddSelected);
         const r = await window.electronAPI.addAttachmentToSources({ filePath: _sfPopAddFile.filePath, label, uuids });
-        if (r && r.ok) { _sfClosePopAdd(); _sfRenderSourcePop(); }
+        if (r && r.ok) { _sfClosePopAdd(); (_sfPopAddOnDone || _sfRenderSourcePop)(); }
         else if (r && r.error) promptError('Add failed', r.error);
       });
       _sfPopAddEls.close?.addEventListener('click', _sfClosePopAdd);
@@ -26984,7 +27242,7 @@ require(['vs/editor/editor.main'], function () {
             message,
             confirmText: 'Delete',
             confirmKind: 'danger',
-            checkbox: willRemove ? { label: 'Export source first', hint: 'Source archive keeps its original date.' } : null,
+            checkbox: willRemove ? { label: 'Export source first', hint: 'Source archive keeps its original date.', confirmTextChecked: 'Export and Delete' } : null,
           });
           const confirmed = willRemove ? res && res.confirmed : res;
           const wantExport = willRemove ? !!(res && res.checked) : false;
@@ -27196,54 +27454,114 @@ require(['vs/editor/editor.main'], function () {
         // co-equal buttons. Export is the same decision in the other direction
         // and should look like it.
         //
-        // COPY RULES: lead with the INTENTION, not the mechanism - nobody wants
-        // a zip, they want a backup or a card that works. The old wording ("Zip
+        // COPY RULES: lead with the INTENTION, not the mechanism. Keep the
+        // buttons SHORT and let the message carry the explanation, where length
+        // is free. No em dashes, his standing preference. The old wording ("Zip
         // archive: one file, for backup or re-import" / "Folder: extracted tree,
         // ready for an SD card") put the format first and used two words the
         // user does not own: "extracted tree" is engineering language found
-        // nowhere else in the app, and "re-import" is our name for it. Keep the
-        // buttons SHORT and let the message carry the explanation, where length
-        // is free. No em dashes, his standing preference.
+        // nowhere else in the app, and "re-import" is our name for it.
         //
-        // The zip half also carries the disclosure [B-283] owes: an export takes
-        // the owner's curation with it. Said as part of what a zip IS FOR rather
-        // than as a warning, and only when there is something to disclose - a
-        // source with no curation is told nothing about curation, same
-        // suppression rule as [B-105].
-        let _nAtt = 0;
+        // ⚠️ AND "READY FOR AN SD CARD" WAS FACTUALLY WRONG, in the old copy and
+        // in the first rewrite of it, which carried the claim forward unchecked
+        // (his catch, 2026-09-02: "the folder is not ready for an SD card. It's
+        // just a folder version that doesn't zip it."). A SOURCE is a vendor
+        // BUNDLE - board-format folders, readmes, sometimes several fonts - so
+        // extracting it gives you that bundle unzipped, NOT a card layout.
+        // Getting fonts onto a card is a different job with its own flow. Do not
+        // let this line grow a purpose it cannot deliver.
+        //
+        // ⚠️ NOR CALL THE TWO "the same files" - they are not. The zip holds the
+        // font files PLUS the sidecar; the folder holds the font files alone. An
+        // equivalence that is almost true is the kind a user only discovers when
+        // the thing they wanted is missing. (His catch, 2026-09-02: "not the same
+        // folder... since doesn't include that.")
+        //
+        // ⭐ DESCRIBE WHAT THE FORMAT DOES, NOT WHAT THIS SOURCE HOLDS. That is
+        // why this line can be FIXED rather than assembled. Earlier versions
+        // listed what was actually present ("Includes your notes, tags and
+        // links"), which changed length per source, needed suppressing when
+        // empty, and under-reported the moment it missed a field. "A zip
+        // remembers the details you added" is true of the FORMAT, so it is true
+        // every time and needs no logic behind it.
+        //
+        // AND THE ZIP/FOLDER CONTRAST IS THE ACTUAL DECISION (his framing,
+        // 2026-09-02): "the zip does that and the folder doesn't, cause the zip
+        // is for re-importing in JMT Studio." The sidecar is only read on a ZIP
+        // import, so a folder export genuinely loses the curation. That fact is
+        // what makes the choice matter, and it is the disclosure [B-283] owes,
+        // carried as the REASON to pick zip rather than as a warning.
+        //
+        // Avoid the word "metadata" (his steer). It is their information, in
+        // their words: the details you added.
+        //
+        // ⭐ BUTTON LABELS ARE `Folder` AND `Zip archive` (his ruling,
+        // 2026-09-03), and the reason is evidence rather than taste. "One .zip
+        // file" was wrong three ways at once: it led with a COUNT, when the
+        // choice is packed-versus-loose and not one-versus-many; it used a file
+        // EXTENSION as an adjective, which no other button in the app does; and
+        // it was not grammatically parallel with its partner, which is what made
+        // it read as off before the reason was visible. The app already owns
+        // words for these two things IN THIS FLOW - the completion dialog says
+        // "as a folder" / "as a Zip archive" and the detail panel labels the
+        // field ARCHIVE SIZE - so the chooser was the odd one out, not the
+        // vocabulary. Measured against every other paired prompt in the app
+        // (Fonts only, Use default, This source only, Keep Existing, Leave it),
+        // short and article-free is the house style; the length belongs in the
+        // message, where it is free. The wider extension/ellipsis sweep is
+        // [B-300].
+        //
+        // ⭐ THE CHECKBOX NAMES ITS OWN CONSTRAINT (his wording, 2026-09-03:
+        // "labeled for Include proof of purchase with zip archive so it's clear
+        // that's the only way you get it"). The format is chosen by pressing a
+        // BUTTON, so the checkbox is necessarily set before we know which. Saying
+        // "with zip archive" in the label resolves that without a disabled state
+        // or a reactive rule: leave it ticked and press Folder, and the label
+        // already told you why nothing rode along. It is true of the whole
+        // sidecar, not just the receipt - a folder export carries no curation at
+        // all, which is what the message says.
+        //
+        // Defaults to CHECKED, per the 2026-09-02 call that an export is
+        // overwhelmingly the owner's own copy and a proof of purchase is the
+        // thing they would most regret losing. The box is also the disclosure:
+        // it says the receipt is going in AND lets them stop it, at the moment
+        // they are deciding, which is better than a sentence afterwards.
+        //
+        // Suppressed entirely when the source has no attachments - B-002's rule,
+        // his words: "why would we ask if there's none to choose from?"
+        let _att = [];
         try {
           const ar = await window.electronAPI.listAttachments({ uuid: _sfSourceOriginalUuid });
-          if (ar && ar.ok) _nAtt = (ar.attachments || []).length;
+          if (ar && ar.ok) _att = ar.attachments || [];
         } catch {}
-        // ⚠️ COUNT THE ENTRY CURATION TOO, not just the source fields. Most of
-        // what the sidecar carries lives on the ENTRIES - tags, demo links, the
-        // author, a renamed font - and the first version of this looked only at
-        // the source, so an export carrying a tag and a demo URL announced
-        // "Includes your links." A disclosure that under-reports is worse than
-        // none: it tells the user they know what is in the file when they do not.
-        const _carries = (() => {
-          const m = _sfSourceEdit || {};
-          const em = (Array.isArray(m.entries) ? m.entries : []).map(e => (e && e.meta) || {});
-          const has = (v) => !!(v && String(v).trim());
-          const parts = [];
-          if (has(m.userNotes) || em.some(x => has(x.userNotes))) parts.push('notes');
-          if (em.some(x => Array.isArray(x.tags) && x.tags.length > 0)) parts.push('tags');
-          if (has(m.linkUrl) || has(m.vendorWebsite) || em.some(x => has(x.demoUrl))) parts.push('links');
-          if (_nAtt) parts.push(_nAtt === 1 ? '1 proof of purchase' : `${_nAtt} proofs of purchase`);
-          if (!parts.length) return '';
-          const list = parts.length === 1 ? parts[0]
-            : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
-          return `, and carries your ${list}`;
-        })();
-        const choice = await promptConfirm({
+        const _attBox = _att.length ? {
+          label: _att.length === 1
+            ? 'Include proof of purchase with zip archive'
+            : `Include ${_att.length} proofs of purchase with zip archive`,
+          // Name the actual file. It is the one fact not already on this screen,
+          // and it is the one someone about to pass a zip on would want.
+          hint: _att.length === 1
+            ? (_att[0].name || '')
+            : _att.map(a => a.name).filter(Boolean).join(', '),
+          checked: true,
+        } : null;
+        const res = await promptConfirm({
           title: `Export "${label}"`,
-          message: `A zip keeps it as one file to store or back up${_carries}. `
-                 + 'A folder is ready to copy onto an SD card.',
-          middleText: 'A folder of files',
-          confirmText: 'One .zip file',
+          message: 'A zip keeps it as one file and remembers the details you added, '
+                 + 'so importing it back into JMT Studio brings them with it. '
+                 + 'A folder is just the files, unzipped.',
+          middleText: 'Folder',
+          confirmText: 'Zip archive',
           confirmKind: 'primary',
           cancelText: 'Cancel',
+          ...(_attBox ? { checkbox: _attBox } : {}),
         });
+        // A checkbox turns the multi-button answer into { choice, checked }.
+        // Without one it is still the bare string, so read both shapes rather
+        // than assuming which arrived.
+        const choice = (res && typeof res === 'object') ? res.choice : res;
+        // No box means nothing to include, so the answer is false, not true.
+        const includeAttachments = !!(_attBox && res && typeof res === 'object' && res.checked);
         if (choice !== 'confirm' && choice !== 'middle') { return; }
         const format = choice === 'middle' ? 'folder' : 'zip';
 
@@ -27254,7 +27572,7 @@ require(['vs/editor/editor.main'], function () {
         // 3) Export with live progress in the import-convention layout: section +
         // metric above the bar (one metric per section), current file below,
         // elapsed clock last. Sections: Reading files → Rebuilding → Compressing.
-        const r = await _sfRunSourceExport({ uuid, destDir: pick.destDir, format, label });
+        const r = await _sfRunSourceExport({ uuid, destDir: pick.destDir, format, label, includeAttachments });
         await _sfDeleteProgress.hide();
 
         // 4) Outcome. Errors keep the existing dialog. Success shows an in-modal
@@ -27274,9 +27592,47 @@ require(['vs/editor/editor.main'], function () {
         const lines = [
           `Exported <strong>${esc(label)}</strong> as ${kind}${meta.length ? `: ${meta.join(' · ')}` : ''}${r.reconstructed ? ', rebuilt in full from your space-optimized source' : ''}.`,
         ];
-        if (r.folders && r.folders.length) {
-          const names = r.folders.map(f => String(f).replace(/\.zip$/i, ''));
-          lines.push(`<span style="color:var(--c-text-sub)">Includes ${esc(names.join(', '))}.</span>`);
+        // NO INVENTORY OF THE FONT CONTENT (his call, 2026-09-02). This used to
+        // list every top-level folder, which was written for the multi-board
+        // case ("Asteria, Cfx, GoldenHarvest, Proffie, verso, XenopixelV3") and
+        // was noise everywhere else: a single font showed its own effect dirs
+        // ("blst, clsh, force, preon..."), and a single-folder bundle showed one
+        // folder named after the thing you just exported. The sentence above
+        // already carries the fact that mattered - "rebuilt in full from your
+        // space-optimized source" answers "did the formats you trimmed come
+        // back?" without naming any of them.
+        //
+        // ⭐ WHAT DOES BELONG HERE IS THE PART THAT IS NOT FONT CONTENT. An
+        // export carries the owner's curation, and since 2026-09-02 it carries
+        // it on EVERY export, including the one handed to another person. His
+        // decision was that the residual risk is answered with visibility rather
+        // than a gate or a question: nothing to decide, nothing blocked, and
+        // someone about to pass a zip on can see what is in it. The receipt is
+        // the sharp edge - a tag leaking is untidy, a PDF with a real name and
+        // an order number on it is a different kind of mistake.
+        //
+        // ⚠️ THE FACTS COME FROM THE EXPORT, NEVER FROM THE LIBRARY. r.curation
+        // is what injectIntoZip actually wrote. The first version of this
+        // sentence was assembled here by re-reading the source and calling
+        // listAttachments, and it looked only at source fields - so an export
+        // carrying an entry's tag and demo URL announced "Includes your links".
+        // Under-reporting is the worst failure available to a disclosure: it
+        // tells the user they know what is in the file when they do not.
+        // Absent or all-false means nothing of theirs went in, and then this
+        // says nothing at all - same suppression rule as [B-105]'s "0 proofs of
+        // purchase". Only say it when it is true.
+        const _c = r.curation;
+        if (_c && _c.any) {
+          const parts = [];
+          if (_c.notes) parts.push('notes');
+          if (_c.tags) parts.push('tags');
+          if (_c.links) parts.push('links');
+          if (_c.attachments) {
+            parts.push(_c.attachments === 1 ? '1 proof of purchase' : `${_c.attachments} proofs of purchase`);
+          }
+          const list = parts.length === 1 ? parts[0]
+            : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
+          lines.push(`<span style="color:var(--c-text-sub)">Includes your ${list}.</span>`);
         }
         lines.push(`<span style="opacity:.75;font-family:monospace;font-size:12px;word-break:break-all;">${esc(r.destPath)}</span>`);
         const showIt = await promptConfirm({
@@ -27326,7 +27682,7 @@ require(['vs/editor/editor.main'], function () {
           message,
           confirmText: 'Delete',
           confirmKind: 'danger',
-          checkbox: { label: 'Export source first', hint: 'Source archive keeps its original date.' },
+          checkbox: { label: 'Export source first', hint: 'Source archive keeps its original date.', confirmTextChecked: 'Export and Delete' },
         });
         const confirmed = res && res.confirmed;
         const wantExport = !!(res && res.checked);
@@ -30520,14 +30876,28 @@ require(['vs/editor/editor.main'], function () {
       // wasn't requested), false if the user opted in but the export failed —
       // in which case the caller should abort the delete so the user has a
       // chance to retry or reconsider.
-      // Run a source export with the live-progress layout and return the raw
-      // IPC result. Owns the progress modal for the whole call: show, tick,
-      // hide. There are three callers — the standalone export, and the two
-      // delete paths that offer to save a copy first — and only the first of
-      // them was ever wired, so the other two showed a static 50% bar for the
-      // slowest operation in the app. The wiring lives here so a caller cannot
-      // forget it, and a fourth caller gets it for free.
-      const _sfRunSourceExport = async ({ uuid, destDir, format, label }) => {
+      // THE one way to export a source. Every door goes through here — the
+      // standalone Export button and both delete paths that offer to save a
+      // copy first — so the progress wiring, the IPC shape and the report of
+      // what the archive carries are decided once instead of per caller.
+      //
+      // ⚠️ THIS COMMENT USED TO CLAIM THREE CALLERS AND THERE WERE ONLY TWO.
+      // Bulk delete had its own copy of the call so it could drive its own
+      // step-count modal, which is a PRESENTATION reason to fork an OPERATION —
+      // and it cost exactly what forking costs: it never got the live progress
+      // this function exists to provide, and anything added here reached two
+      // doors out of three. (Ryan, 2026-09-03: "export is export... don't want
+      // similar but separate flows.")
+      //
+      // `progress` is how that fork was closed. Pass a sink and this reports
+      // into it instead of owning the shared progress modal, so a caller with
+      // its own modal keeps its own modal and still shares everything else.
+      // Omit it and the standalone/single-delete behaviour is unchanged.
+      // `includeAttachments` is a PARAMETER of the export, not a question the
+      // export asks. Only the source modal has a user to ask; both delete paths
+      // know the answer already and pass it (see their call sites), which is the
+      // whole point of one parameterised process rather than three flows.
+      const _sfRunSourceExport = async ({ uuid, destDir, format, label, progress, includeAttachments = true }) => {
         let bytesDone = 0, totalBytes = 0, fileCount = 0, totalFiles = 0, phase = '', currentFile = '';
         const t0 = Date.now();
         const PHASE_LABEL = { reading: 'Reading files', reconstruct: 'Rebuilding', compress: 'Compressing' };
@@ -30544,7 +30914,9 @@ require(['vs/editor/editor.main'], function () {
             info = totalFiles ? `${fileCount.toLocaleString()} of ${totalFiles.toLocaleString()} files` : '';
           }
           const labelLine = [PHASE_LABEL[phase] || 'Exporting', info].filter(Boolean).join(' · ');
-          _sfDeleteProgress.setPhase(labelLine, frac, currentFile, `${_fmtDur(secs)} elapsed`);
+          const elapsed = `${_fmtDur(secs)} elapsed`;
+          if (progress) progress({ labelLine, frac, currentFile, elapsed });
+          else _sfDeleteProgress.setPhase(labelLine, frac, currentFile, elapsed);
         };
         const offProg = window.electronAPI.onSourceExportProgress((p) => {
           if (!p) return;
@@ -30557,13 +30929,14 @@ require(['vs/editor/editor.main'], function () {
           render();
         });
         // Show only once the work can actually start — a bar that appears
-        // behind a file dialog sits at zero and reads as a hang.
-        _sfDeleteProgress.show('Exporting source', label || '', 0);
+        // behind a file dialog sits at zero and reads as a hang. A caller with
+        // its own sink already has a modal up and owns showing and hiding it.
+        if (!progress) _sfDeleteProgress.show('Exporting source', label || '', 0);
         const tick = setInterval(render, 250);
         let r;
         try {
           r = await window.electronAPI.exportSourceToDownloads(
-            format ? { uuid, destDir, format } : { uuid, destDir });
+            format ? { uuid, destDir, format, includeAttachments } : { uuid, destDir, includeAttachments });
         } catch (err) {
           r = { ok: false, error: String(err && err.message || err) };
         } finally {
@@ -30576,7 +30949,11 @@ require(['vs/editor/editor.main'], function () {
         if (!requested || !sourceUuid) return true;
         if (!destDir) return false;
         try {
-          const r = await _sfRunSourceExport({ uuid: sourceUuid, destDir, label });
+          // Attachments always ride on a delete-first export. That export exists
+          // to be the LAST COPY, and a proof of purchase is the thing you would
+          // most regret losing. Stated rather than defaulted, because "the
+          // caller knows the answer" is the design.
+          const r = await _sfRunSourceExport({ uuid: sourceUuid, destDir, label, includeAttachments: true });
           if (!r || !r.ok) {
             promptError('Could not export source', `${(r && r.error) || 'unknown error'}\n\nNothing was deleted.`);
             return false;
@@ -32151,6 +32528,7 @@ require(['vs/editor/editor.main'], function () {
           checkbox: sourcesToRemove.length > 0
             ? {
                 label: sourcesToRemove.length === 1 ? 'Export source first' : 'Export sources first',
+                confirmTextChecked: 'Export and Delete',
                 hint: sourcesToRemove.length === 1
                   ? 'Source archive keeps its original date.'
                   : 'Source archives keep their original dates.',
@@ -32199,9 +32577,27 @@ require(['vs/editor/editor.main'], function () {
         if (wantExport) {
           for (let i = 0; i < sourcesToRemove.length; i++) {
             const src = sourcesToRemove[i];
-            showProgress(`Exporting sources (${i + 1} of ${sourcesToRemove.length})`, src.label);
+            const step = `Exporting sources (${i + 1} of ${sourcesToRemove.length})`;
+            showProgress(step, src.label);
             try {
-              const er = await window.electronAPI.exportSourceToDownloads({ uuid: src.uuid, destDir: bulkExportDir });
+              // Through the shared export, not a second copy of the IPC call.
+              // The sink keeps THIS modal's bar on the step count — one bar
+              // across exports and deletes, which is the bulk design and stays
+              // the bulk design — while the detail line gains the live phase
+              // and moving count it never had. Before this it showed src.label
+              // and nothing else for the whole export, so the slowest operation
+              // in the app looked identical to a hang.
+              //
+              // The filename is deliberately NOT here. This modal gives detail
+              // one line for source AND phase AND counts; the single-source
+              // layout has four separate fields for the same information. The
+              // moving count already answers "is it stuck", which is the job.
+              const er = await _sfRunSourceExport({
+                uuid: src.uuid, destDir: bulkExportDir, label: src.label,
+                includeAttachments: true,   // last copy — same reason as the single-delete path
+                progress: ({ labelLine }) =>
+                  showProgress(step, [src.label, labelLine].filter(Boolean).join(' · ')),
+              });
               if (!er || !er.ok) {
                 hideProgress();
                 await promptError(`Could not export "${src.label}"`, `${(er && er.error) || 'unknown error'}\n\nNothing was deleted.`);
@@ -32674,7 +33070,7 @@ require(['vs/editor/editor.main'], function () {
             message,
             confirmText: 'Delete',
             confirmKind: 'danger',
-            checkbox: willRemove ? { label: 'Export source first', hint: 'Source archive keeps its original date.' } : null,
+            checkbox: willRemove ? { label: 'Export source first', hint: 'Source archive keeps its original date.', confirmTextChecked: 'Export and Delete' } : null,
           });
           const confirmed = willRemove ? res && res.confirmed : res;
           const wantExport = willRemove ? !!(res && res.checked) : false;
@@ -33438,8 +33834,12 @@ require(['vs/editor/editor.main'], function () {
         e.stopPropagation();
         const tag = item.dataset.tag;
         if (tag) _sfToggleFilterTag(tag);
-        // Match the Style Library: dropdown auto-dismisses after a pick.
-        // User re-opens the button to make another selection.
+        // ⚠️ CLOSES ON PICK, AND THAT IS KNOWN TO BE WRONG - LEFT AS-IS ON PURPOSE.
+        // This is a multi-select filter, so by the rule in ui-conventions.md it
+        // should stay open. It is not being fixed piecemeal because the whole
+        // filter model is being rebuilt as one piece in [B-305]: every facet ORs
+        // internally, facets AND together, search becomes a facet, and the chip
+        // row shows the grouping. Half-applying that here would fight the rebuild.
         if (_sfTagDropdown) _sfTagDropdown.style.display = 'none';
       });
       _sfCreatorFilterBtn?.addEventListener('click', (e) => {
@@ -33457,7 +33857,7 @@ require(['vs/editor/editor.main'], function () {
         e.stopPropagation();
         const creator = item.dataset.creator;
         if (creator) _sfToggleFilterCreator(creator);
-        if (_sfCreatorDropdown) _sfCreatorDropdown.style.display = 'none';
+        if (_sfCreatorDropdown) _sfCreatorDropdown.style.display = 'none';  // see the tag handler: [B-305]
       });
       _sfEffectsFilterBtn?.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -33476,7 +33876,7 @@ require(['vs/editor/editor.main'], function () {
         if (effect) _sfToggleFilterEffect(effect);
         // Each gesture is a one-shot selection (no cycling), so close
         // after the click matching the Tags/Creators dropdown behavior.
-        if (_sfEffectsDropdown) _sfEffectsDropdown.style.display = 'none';
+        if (_sfEffectsDropdown) _sfEffectsDropdown.style.display = 'none';  // see the tag handler: [B-305]
       });
       // Right-click on a row → toggle the absent polarity. Suppresses
       // the browser context menu and closes the dropdown on completion.

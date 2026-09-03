@@ -360,6 +360,25 @@ async function createEntry({ userData, sourceUuid, candidate, name, metadata, on
       updatedAt: new Date().toISOString(),
     };
 
+    // ── Record provenance restore ([B-283]) ──────────────────────────────
+    // ⭐ Ryan's bar, 2026-09-03: "there should be no trace of me ever deleting
+    // and bringing it back." A createdAt of today IS such a trace. The font
+    // entered his library in August; only this row is new, and that is a
+    // database fact he never asked to be shown. Same for the NEW badge, which
+    // is simply `seenAt` being empty.
+    // Applied AFTER the meta is built, deliberately: these compete with
+    // nothing, so unlike curation there is no caller-wins question to settle.
+    // ⚠️ entryUuid is NOT restored - see ENTRY_PROV_FIELDS. It is the record's
+    // identity, and reviving one while a copy still exists would put two rows
+    // in the library under the same id.
+    if (source.meta && source.meta.curation) {
+      try {
+        const prov = require('./soundFontCuration')
+          .entryProvenanceFor(source.meta.curation, candidate.path || '');
+        if (prov) Object.assign(meta, prov);
+      } catch { /* provenance is a restoration, never a blocker */ }
+    }
+
     fs.writeFileSync(path.join(entryDir, 'meta.json'), JSON.stringify(meta, null, 2));
 
     // Stamp the content hash at creation so future surveyMerge /

@@ -439,8 +439,21 @@ function cleanupOrphanSources(userData) {
     const isEntryLess = !referencedUuids.has(uuid);
     if (!isCorrupt && !isEntryLess) continue;
     try {
-      fs.rmSync(uuidDir, { recursive: true, force: true });
-      result.removed.push(uuid);
+      // ⚠️ THROUGH deleteSource, NOT A BARE rmSync. This is the SECOND door to
+      // removing a source and it had drifted from the first: the plain rmSync
+      // left the per-source file-hash manifest behind in .filehashes/sources/
+      // AND never released the source's attachments, so a receipt nobody
+      // pointed at stayed in the store forever.
+      // Found 2026-09-03 the hard way: entries were moved out of the library to
+      // free their names, which made their source entry-less, and the next
+      // import swept it here - taking the source the dedup check was about to
+      // look for. The receipt survived only because another source happened to
+      // link it too.
+      // One definition of "delete a source", used by both callers. If the rule
+      // grows again, it grows in one place.
+      const r = deleteSource(userData, uuid);
+      if (r && r.ok) result.removed.push(uuid);
+      else result.errors.push(`Could not remove ${uuid}: ${(r && r.error) || 'unknown error'}`);
     } catch (err) {
       result.errors.push(`Could not remove ${uuid}: ${err.message}`);
     }
@@ -463,7 +476,53 @@ function listSources(userData) {
 
 function findByHash(userData, hash) {
   for (const s of listSources(userData)) {
-    if (s.meta && s.meta.hash === hash) return s;
+    if (!s.meta) continue;
+    if (s.meta.hash === hash) return s;
+    // ⚠️ THE RESTORED-SOURCE CASE, and it runs the OTHER WAY from
+    // findByProvenance ([B-283], Ryan 2026-09-03: "if I were to then try to
+    // re-import from the vendor's source... it'll tell me that it already
+    // existed in my library").
+    // A source restored from a JMT export holds `hash` = the EXPORT's bytes and
+    // `originArchiveHash` = the vendor archive it came from. So re-picking the
+    // vendor's original zip computes the vendor hash, which matches nothing in
+    // `hash` and would import a second copy of something already held.
+    // Matching origin here closes it. Recognition only — the caller's answer is
+    // a duplicate prompt the user can override, never a refusal.
+    if (s.meta.originArchiveHash && s.meta.originArchiveHash === hash) return s;
+  }
+  return null;
+}
+
+// Find a source by the identity a curated export CLAIMS to have come from.
+// ([B-283], 2026-09-03.)
+//
+// ⚠️ WHY A SECOND LOOKUP EXISTS AT ALL, because "just make the bytes match" is
+// the obvious answer and it is not available: a JMT export can never be
+// byte-identical to the vendor's archive. Zip bytes encode the compression
+// level, per-entry timestamps, entry order, unix modes and the central
+// directory layout — our zipper is not theirs, so the archive hash differs
+// however carefully the sidecar is stripped. Stripping buys agreement between
+// two JMT exports; it cannot buy agreement with the original.
+//
+// So identity has to be asked a different question, and the export carries the
+// answer: the ORIGINAL source's hashes, recorded when it was exported.
+// Matching either against a live source means "you already have this", which
+// is the case where the user exported, did NOT delete, and re-imported.
+//
+// ⚠️ A SIDECAR IS USER-EDITABLE, so this is a CLAIM, not proof. It is used only
+// to say "you already have this" — a recognition, never a permission and never
+// a licence to overwrite the source it points at.
+function findByProvenance(userData, provenance) {
+  if (!provenance) return null;
+  const { archiveHash, contentHash } = provenance;
+  if (!archiveHash && !contentHash) return null;
+  for (const s of listSources(userData)) {
+    const m = s.meta;
+    if (!m) continue;
+    // The original still sitting in the library under its vendor hash, or a
+    // previous restore of the same original carrying the same provenance.
+    if (archiveHash && (m.hash === archiveHash || m.originArchiveHash === archiveHash)) return s;
+    if (contentHash && m.originContentHash === contentHash) return s;
   }
   return null;
 }
@@ -498,6 +557,26 @@ function deleteSource(userData, uuid) {
   const dir = path.join(sourcesRoot(userData), uuid);
   if (!fs.existsSync(dir)) return { ok: true, deleted: false };
   try {
+    // ⚠️ RELEASE THE ATTACHMENTS FIRST, WHILE THE META STILL EXISTS TO NAME THEM.
+    // Deleting the source dir takes its meta.json with it, and the meta is the
+    // ONLY record of which attachments this source linked - so after the rmSync
+    // nothing knows, and a receipt nobody points at sits in the store forever.
+    // Nothing reclaimed it either: pruneDanglingLinks only drops LINKS pointing
+    // at missing files, never files with no remaining links, and it runs only
+    // during backup/restore.
+    // unlinkAttachment already does the refcounted half correctly - it removes
+    // the stored file only when no other source still links it - so this is
+    // reusing that rule, not inventing a second one. A receipt shared by five
+    // sources survives the deletion of one. (2026-09-03.)
+    // Found via the import review: cancelling an import deletes the staged
+    // source, so every cancelled import that had touched a receipt leaked one.
+    try {
+      const att = require('./soundFontAttachments');
+      const meta = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8'));
+      for (const id of (Array.isArray(meta.attachments) ? meta.attachments : [])) {
+        try { att.unlinkAttachment(userData, uuid, id); } catch {}
+      }
+    } catch { /* no meta, or unreadable: nothing to release */ }
     fs.rmSync(dir, { recursive: true, force: true });
     removeSourceManifest(userData, uuid); // drop the central per-file manifest too
     return { ok: true, deleted: true };
@@ -577,6 +656,19 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
     if (onProgress) onProgress({ stage, ...payload });
   };
 
+  // ⚠️ THE ARCHIVE'S OWN DATE, CAPTURED BEFORE ANYTHING CAN REPLACE THE FILE.
+  // The curation strip below repackages the zip into a temp file, and `stat` is
+  // re-taken on that temp file because fileSize has to describe the repacked
+  // archive. Its mtime is seconds old, so reading the date off it stamps every
+  // curated import with TODAY. That is not cosmetic: purchaseDate and
+  // acquisitionDate are derived from this, and the sidecar deliberately does
+  // NOT carry them precisely because they restore themselves from the archive's
+  // file date (soundFontCuration.js, SOURCE_FIELDS). Restore a backup zip made
+  // in June and it would come back dated the day you restored it. Size comes
+  // from the file we end up storing; the DATE belongs to the file the user
+  // picked. ([B-283], 2026-09-03.)
+  const inputMtimeMs = (stat && stat.mtimeMs) || 0;
+
   // ── Curation sidecar ([B-283]) ──
   // A zip we exported can carry the hand-authored curation that a delete would
   // otherwise destroy. It is stripped HERE, before anything else looks at the
@@ -595,7 +687,25 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
       curation = await cur.peekZip(sourcePath);
       if (curation) {
         emit('hashing', { percent: 0 });
-        const stripped = await cur.stripAndRepackage(sourcePath, curation, (p) => onProgress && onProgress({ stage: 'hashing', percent: 0, ...p }));
+        // ⚠️ FORWARD A REAL PERCENT. The first version passed `percent: 0` and then
+        // spread the payload over it - which carries no percent of its own - so the
+        // bar sat empty for the entire pass while filenames streamed past and the
+        // clock ticked. An 18-second wait against a bar that never moves reads as
+        // hung. (Found on a real re-import 2026-09-02.)
+        //
+        // Two phases, split evenly: extracting the archive minus our additions,
+        // then repacking it. Each drives its own half from its own counter, so the
+        // number always tracks work actually done.
+        const stripped = await cur.stripAndRepackage(sourcePath, curation, (p) => {
+          if (!onProgress) return;
+          let percent = 0;
+          if (p.phase === 'curation-strip' && p.totalFiles > 0) {
+            percent = Math.round((p.fileCount / p.totalFiles) * 50);
+          } else if (p.phase === 'curation-repack' && p.totalBytes > 0) {
+            percent = 50 + Math.round((p.bytesDone / p.totalBytes) * 50);
+          }
+          onProgress({ stage: 'hashing', ...p, percent: Math.max(0, Math.min(100, percent)) });
+        });
         sourcePath = stripped.zipPath;
         curationTmp = stripped.tmpDir;
         curationPayloadDir = stripped.payloadDir;
@@ -655,7 +765,11 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
     }
     }
     if (!forceNewSource) {
-      const existing = findByHash(userData, hash);
+      // Archive-bytes match first: an identical FILE re-picked. Then the
+      // provenance claim, which catches the case bytes never can - exporting a
+      // source, not deleting it, and importing the export back. ([B-283])
+      const existing = findByHash(userData, hash)
+        || findByProvenance(userData, curation && curation.provenance);
       if (existing) {
         emit('done', { isDuplicate: true });
         _dropCurationTmp();
@@ -715,9 +829,9 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
           try { fs.writeFileSync(path.join(uuidDir, '.preparing'), ''); } catch {}
           let sfd = null, sfm = null;
           try {
-            if (stat.mtimeMs && stat.mtimeMs > 0) {
-              sfd = new Date(stat.mtimeMs).toISOString().slice(0, 10);
-              sfm = stat.mtimeMs;
+            if (inputMtimeMs > 0) {
+              sfd = new Date(inputMtimeMs).toISOString().slice(0, 10);
+              sfm = inputMtimeMs;
             }
           } catch {}
           emit('done', { isDuplicate: true });
@@ -728,16 +842,17 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
       }
     }
 
-    // Capture the original archive's modification date as the default
+    // The original archive's modification date, used as the default
     // acquisitionDate (mtime, not birthtime — birthtime gets rewritten by sync
-    // clients). Captured HERE so it's identical whether we finalize now or later
-    // via a prepareOnly split.
+    // clients). Read from inputMtimeMs, captured above BEFORE the curation strip
+    // could swap the file underneath it, and used here so it's identical whether
+    // we finalize now or later via a prepareOnly split.
     let sourceFileDate = null;
     let sourceFileMtimeMs = null;
     try {
-      if (stat.mtimeMs && stat.mtimeMs > 0) {
-        sourceFileDate = new Date(stat.mtimeMs).toISOString().slice(0, 10);
-        sourceFileMtimeMs = stat.mtimeMs;
+      if (inputMtimeMs > 0) {
+        sourceFileDate = new Date(inputMtimeMs).toISOString().slice(0, 10);
+        sourceFileMtimeMs = inputMtimeMs;
       }
     } catch {}
 
@@ -759,7 +874,12 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
     const res = await _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format, name, hash, fileSize, sourceFileDate, sourceFileMtimeMs, metadata, strippedFiles, curation, curationPayloadDir });
     emit('done', { isDuplicate: false });
     _dropCurationTmp();
-    return { ...res, strippedFiles, curationApplied: res.curationApplied || null };
+    // ⚠️ THE PAYLOAD ITSELF GOES BACK TO THE CALLER, not just a count of what was
+    // applied. The import review has to PRE-FILL from it, and until it did, the
+    // review's empty fields were written straight over these values seconds after
+    // they landed - so a curated re-import came back with almost nothing. Returning
+    // only `curationApplied` was what forced the renderer to guess. ([B-283])
+    return { ...res, strippedFiles, curation: curation || null, curationApplied: res.curationApplied || null };
   } catch (err) {
     cleanupPartialSource(uuidDir);
     _dropCurationTmp();
@@ -795,6 +915,48 @@ async function _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format, name,
     // immediately, just below. ([B-283])
     ...(curation ? { curation } : {}),
   };
+  // ── Provenance restore ([B-283]) ────────────────────────────────────────
+  // "It should be identical to what it was before I deleted." Two halves:
+  //
+  // 1. THE DATES come back from the sidecar, not from the export's own file
+  //    date. The export was written today; the bundle was acquired months ago,
+  //    and reading the date off the file we just received makes every restored
+  //    source look brand new.
+  //
+  // 2. THE ORIGINAL IDENTITY is recorded as originArchiveHash /
+  //    originContentHash. ⚠️ IT DOES NOT OVERWRITE `hash`. `hash` is the
+  //    sha256 of the source.zip we actually hold, and a great deal downstream
+  //    verifies against it — a meta that lies about its own file is worse than
+  //    one that cannot recognise a re-import. These are separate fields
+  //    precisely so both statements stay true: this IS the same content, and
+  //    this is NOT the same file.
+  const _prov = (curation && curation.provenance) || null;
+  if (_prov) {
+    // THE RESTORE OVERRIDES THE DATE - the third of the three sources in his rule
+    // (file's date / user's override / restore). Every name the value is kept
+    // under is set, so no surface can come back blank: a source with no Acquired
+    // date is a trace of the delete, and there are none in a real library.
+    if (_prov.purchaseDate)      meta.purchaseDate      = _prov.purchaseDate;
+    if (_prov.acquisitionDate)   meta.acquisitionDate   = _prov.acquisitionDate;
+    if (_prov.sourceFileDate)    meta.sourceFileDate    = _prov.sourceFileDate;
+    if (_prov.sourceFileMtimeMs) meta.sourceFileMtimeMs = _prov.sourceFileMtimeMs;
+    if (_prov.updatedAt)         meta.updatedAt         = _prov.updatedAt;
+    // A vendor the app once guessed must not come back as a user assertion.
+    if (_prov.vendorAutoDetected) meta.vendorAutoDetected = true;
+    if (_prov.archiveHash) meta.originArchiveHash = _prov.archiveHash;
+    if (_prov.contentHash) meta.originContentHash = _prov.contentHash;
+    // ⚠️ originalName IS PROVENANCE, and not carrying it made an artefact COMPOUND.
+    // It is normally taken from the FILENAME OF THE FILE PICKED (:653). An export
+    // written beside an existing one gets auto-numbered, so importing
+    // "Outcast_Knight (1).zip" bakes that suffix into the library permanently -
+    // originalName is in _SOURCE_META_IMMUTABLE and cannot be corrected afterwards.
+    // The next export is named from it, collides again, and you get
+    // "Outcast_Knight (1) (1).zip". Every round trip adds one. (Ryan hit exactly
+    // this on 2026-09-03.)
+    // A RESTORE IS NOT A FRESH IMPORT: the sidecar knows the true name, so use it
+    // rather than whatever the file we happen to be holding is called.
+    if (curation.originalName) meta.originalName = curation.originalName;
+  }
   fs.writeFileSync(path.join(uuidDir, 'meta.json'), JSON.stringify(meta, null, 2));
   // Curation: apply the source fields and re-store the receipts that rode
   // along. Deliberately AFTER the meta write, because updateSourceMeta patches
@@ -1181,6 +1343,16 @@ function _createZipSource({ uuid, uuidDir, meta }) {
     async exportToDownloads(destDir, { format = 'zip', onProgress } = {}) {
       if (!destDir) throw new Error('exportToDownloads requires destDir');
       if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+      // ⚠️ THE EXPORT IS NAMED FROM originalName, AND THAT IS DELIBERATE.
+      // (Ryan, 2026-09-03: "I don't want the file name to be overritable by user.
+      // just the name.") The Source Name (bundleName) is the label he can edit;
+      // the FILE keeps the name it arrived under. A rename must not silently
+      // change what a subsequent export is called.
+      // ⚠️ I briefly changed this to prefer bundleName and backed it out - it made
+      // the filename user-overridable by the back door, which is the one thing he
+      // ruled out. The suffix-compounding it was meant to solve is already fixed
+      // upstream: a restore now takes originalName from the sidecar, so the
+      // artefact never enters the library to be re-emitted.
       const baseName = String(meta.originalName || uuid).replace(/\.zip$/i, '');
       const files = (await this.listAll()).filter(e => !e.isDir);
       const folders = _topFolders(files.map(e => ({ relPath: e.fileName })));
@@ -1309,6 +1481,16 @@ function _createFolderSource({ uuid, uuidDir, meta }) {
     async exportToDownloads(destDir, { format = 'zip', onProgress } = {}) {
       if (!destDir) throw new Error('exportToDownloads requires destDir');
       if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+      // ⚠️ THE EXPORT IS NAMED FROM originalName, AND THAT IS DELIBERATE.
+      // (Ryan, 2026-09-03: "I don't want the file name to be overritable by user.
+      // just the name.") The Source Name (bundleName) is the label he can edit;
+      // the FILE keeps the name it arrived under. A rename must not silently
+      // change what a subsequent export is called.
+      // ⚠️ I briefly changed this to prefer bundleName and backed it out - it made
+      // the filename user-overridable by the back door, which is the one thing he
+      // ruled out. The suffix-compounding it was meant to solve is already fixed
+      // upstream: a restore now takes originalName from the sidecar, so the
+      // artefact never enters the library to be re-emitted.
       const baseName = String(meta.originalName || uuid).replace(/\.zip$/i, '');
       const files = (await this.listAll()).filter(e => !e.isDir);
       const folders = _topFolders(files.map(e => ({ relPath: e.fileName })));

@@ -3251,7 +3251,7 @@ ipcMain.handle('dialog:selectCommonSource', async (_, { mode = 'folder' } = {}) 
   return { ok: true, filePath: result.filePaths[0] };
 });
 
-ipcMain.handle('sources:exportToDownloads', async (event, { uuid, destDir, format } = {}) => {
+ipcMain.handle('sources:exportToDownloads', async (event, { uuid, destDir, format, includeAttachments = true } = {}) => {
   try {
     const source = soundFontSources.openSource(app.getPath('userData'), uuid);
     if (!source) return { ok: false, error: `Source not found: ${uuid}` };
@@ -3279,19 +3279,24 @@ ipcMain.handle('sources:exportToDownloads', async (event, { uuid, destDir, forma
     // a folder export has no archive to strip it out of again on the way in.
     // buildForSource returns null for an uncurated source, so an untouched
     // export is still a byte-for-byte copy of what we hold.
-    let curationWritten = false;
+    // `curation` reports what the finished archive ACTUALLY carries, so any
+    // caller can say so without re-deriving it from the library. Null means
+    // nothing was added — an uncurated source, a folder export, or an injection
+    // that failed and left the plain archive in place. Every one of those is
+    // honestly described by "there is nothing of yours in this file".
+    let curation = null;
     if (result && result.format === 'zip' && result.destPath) {
       try {
         const cur = require('./soundFontCuration');
-        const payload = cur.buildForSource(app.getPath('userData'), uuid, app.getVersion());
+        const payload = cur.buildForSource(app.getPath('userData'), uuid, app.getVersion(), { includeAttachments });
         if (payload) {
           const r = await cur.injectIntoZip(result.destPath, payload, onProgress);
-          curationWritten = !!(r && r.injected);
+          if (r && r.injected && r.carried && r.carried.any) curation = r.carried;
         }
       } catch { /* the export succeeded; decorating it is best-effort */ }
     }
     if (pending) { try { event.sender.send('soundFonts:sourceExportProgress', pending); } catch {} }
-    return { ok: true, ...result, curationWritten };
+    return { ok: true, ...result, curation };
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };
   }

@@ -60,12 +60,7 @@
       "afterInstall": "build/linux-after-install.sh"
     },
     "files": [
-      "main.js",
-      "preload.js",
-      "toolchain.js",
-      "portDetector.js",
-      "proffieos.js",
-      "cacheManager.js",
+      "*.js",
       "renderer/**/*",
       "assets/**/*",
       "LICENSE.txt"
