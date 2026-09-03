@@ -350,7 +350,15 @@ function clearStagedSources(userData) {
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
     const uuidDir = path.join(root, entry.name);
-    if (!fs.existsSync(path.join(uuidDir, '.preparing'))) continue;
+    // Keyed on meta.json, NOT on the .preparing marker. importSource creates the
+    // dir and writes the archive BEFORE it writes the marker, so quitting inside
+    // that window leaves a staged source wearing no marker at all — found on a
+    // real quit 2026-09-02, a 32 KB source.zip alone in its directory.
+    //
+    // meta.json is the honest test: _writeSourceMetaAndStamp is the only thing
+    // that writes it, and it is the last step of committing. No meta therefore
+    // means never committed, and an uncommitted source cannot be adopted by a
+    // later session. The marker is an IN-SESSION signal only. ([B-298])
     if (fs.existsSync(path.join(uuidDir, 'meta.json'))) continue; // committed — never touch
     let bytes = 0;
     try {
