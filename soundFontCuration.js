@@ -169,7 +169,14 @@ function writeIntoTree(treeDir, payload) {
 async function injectIntoZip(zipPath, payload, onProgress) {
   if (!payload) return { ok: true, injected: false };
   const sources = require('./soundFontSources');
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jmt-curation-out-'));
+  // ⚠️ THE WORKING TREE MUST LIVE BESIDE THE DESTINATION, NOT IN os.tmpdir().
+  // The rebuilt archive is moved into place with renameSync, and rename CANNOT
+  // cross volumes — it throws EXDEV. A user whose Desktop or Downloads is on a
+  // different drive from the system temp (D:\Desktop with temp on C:, which is
+  // exactly Ryan's machine) would hit that every single time. Staging in the
+  // destination's own directory makes the move same-volume by construction.
+  // Cost us a real 708 MB export on 2026-09-02. ([B-283])
+  const tmpDir = fs.mkdtempSync(path.join(path.dirname(zipPath), '.jmt-curation-'));
   const treeDir = path.join(tmpDir, 'tree');
   fs.mkdirSync(treeDir, { recursive: true });
   let zip;
@@ -195,12 +202,25 @@ async function injectIntoZip(zipPath, payload, onProgress) {
     await sources.zipFolderToFile(treeDir, outPath, (p) => onProgress && onProgress({
       phase: 'curation-repack', bytesDone: p.bytesProcessed, totalBytes: p.totalBytes, currentFile: p.currentFile,
     }));
-    fs.rmSync(zipPath, { force: true });
-    fs.renameSync(outPath, zipPath);
+    // ⚠️ ORDER IS LOad-BEARING: move the ORIGINAL aside first, put the rebuilt
+    // one in place, and only then delete the original. The first version of this
+    // deleted the destination BEFORE the rename and lost a 708 MB export when
+    // the rename then failed. At no point may the destination path be empty
+    // while the replacement is still only a hope.
+    const backup = `${zipPath}.jmt-prev`;
+    try { fs.rmSync(backup, { force: true }); } catch {}
+    fs.renameSync(zipPath, backup);        // original safe, dest now free
+    try {
+      fs.renameSync(outPath, zipPath);     // same volume by construction
+    } catch (err) {
+      try { fs.renameSync(backup, zipPath); } catch {}  // put it back, exactly as it was
+      throw err;
+    }
+    try { fs.rmSync(backup, { force: true }); } catch {}
     return { ok: true, injected: true };
   } catch (err) {
-    // An export that succeeded must not be destroyed by a failure to decorate
-    // it. The archive on disk is untouched unless the rename above ran.
+    // An export that succeeded must never be destroyed by a failure to decorate
+    // it. Every path above either leaves the original in place or restores it.
     return { ok: false, injected: false, error: String(err && err.message || err) };
   } finally {
     if (zip) { try { await zip.close(); } catch {} }
