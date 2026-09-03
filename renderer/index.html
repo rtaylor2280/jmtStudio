@@ -27208,15 +27208,26 @@ require(['vs/editor/editor.main'], function () {
           const ar = await window.electronAPI.listAttachments({ uuid: _sfSourceOriginalUuid });
           if (ar && ar.ok) _nAtt = (ar.attachments || []).length;
         } catch {}
+        // ⚠️ COUNT THE ENTRY CURATION TOO, not just the source fields. Most of what
+        // the sidecar carries lives on the ENTRIES - tags, demo links, the author,
+        // a renamed font - and the first version of this clause looked only at the
+        // source, so an export carrying a tag and a demo URL announced "Includes
+        // your links." The disclosure has to describe what is actually in the zip
+        // or it is worse than none. (His catch, 2026-09-02: "only keeps links?")
         const _curationClause = (() => {
           const m = _sfSourceEdit || {};
-          const hasNotes = !!(m.userNotes && String(m.userNotes).trim());
-          const hasLinks = !!((m.linkUrl && String(m.linkUrl).trim()) || (m.vendorWebsite && String(m.vendorWebsite).trim()));
-          const nAtt = _nAtt;
+          const ents = Array.isArray(m.entries) ? m.entries : [];
+          const em = ents.map(e => (e && e.meta) || {});
+          const nonEmpty = (v) => !!(v && String(v).trim());
+          const hasNotes = nonEmpty(m.userNotes) || em.some(x => nonEmpty(x.userNotes));
+          const hasTags  = em.some(x => Array.isArray(x.tags) && x.tags.length > 0);
+          const hasLinks = nonEmpty(m.linkUrl) || nonEmpty(m.vendorWebsite)
+            || em.some(x => nonEmpty(x.demoUrl));
           const parts = [];
           if (hasNotes) parts.push('notes');
+          if (hasTags)  parts.push('tags');
           if (hasLinks) parts.push('links');
-          if (nAtt) parts.push(nAtt === 1 ? '1 proof of purchase' : `${nAtt} proofs of purchase`);
+          if (_nAtt)    parts.push(_nAtt === 1 ? '1 proof of purchase' : `${_nAtt} proofs of purchase`);
           if (!parts.length) return '';
           const list = parts.length === 1 ? parts[0]
             : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
