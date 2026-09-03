@@ -27186,70 +27186,66 @@ require(['vs/editor/editor.main'], function () {
         // the detail modal reappearing under "Show in folder".
 
         // 1) Zip or folder?
-        // COPY RULE, 2026-09-02: lead with the INTENTION, not the mechanism.
-        // Nobody wants a zip; they want a backup, or a card they can put in a
-        // saber. The old wording ("Zip archive: one file, for backup or
-        // re-import" / "Folder: extracted tree, ready for an SD card") put the
-        // format first and buried the reason after a colon, and used two words
-        // the user does not own: "extracted tree" is engineering language that
-        // appears nowhere else in the app, and "re-import" is our name for it.
-        // No em dashes anywhere here - his standing preference.
+        // TWO SHORT BUTTONS, NOT A DROPDOWN (2026-09-02, his call). A <select>
+        // for a binary choice took THREE interactions to express it: expand,
+        // select, then click "Choose destination...". The button IS the choice
+        // now, so it goes straight to the destination picker.
         //
-        // The zip line also carries the disclosure [B-283] owes: that export now
-        // takes the owner's notes and links with it. Stated as a REASON to pick
-        // zip rather than as a warning, and only when there is something to
-        // disclose - same suppression rule as the "0 proofs of purchase" case in
-        // [B-105]. A source with no curation must not be told about curation.
-        // Read the LIVE edit state, which is flat (no .meta), so a note typed
-        // seconds ago is counted. Attachments are not on it — the chips render
-        // from their own call — so ask for the count the same way they do.
+        // Shape copied from the single-source IMPORT modal, which already had
+        // this exact problem and solved it: a short hint paragraph, then
+        // co-equal buttons. Export is the same decision in the other direction
+        // and should look like it.
+        //
+        // COPY RULES: lead with the INTENTION, not the mechanism - nobody wants
+        // a zip, they want a backup or a card that works. The old wording ("Zip
+        // archive: one file, for backup or re-import" / "Folder: extracted tree,
+        // ready for an SD card") put the format first and used two words the
+        // user does not own: "extracted tree" is engineering language found
+        // nowhere else in the app, and "re-import" is our name for it. Keep the
+        // buttons SHORT and let the message carry the explanation, where length
+        // is free. No em dashes, his standing preference.
+        //
+        // The zip half also carries the disclosure [B-283] owes: an export takes
+        // the owner's curation with it. Said as part of what a zip IS FOR rather
+        // than as a warning, and only when there is something to disclose - a
+        // source with no curation is told nothing about curation, same
+        // suppression rule as [B-105].
         let _nAtt = 0;
         try {
           const ar = await window.electronAPI.listAttachments({ uuid: _sfSourceOriginalUuid });
           if (ar && ar.ok) _nAtt = (ar.attachments || []).length;
         } catch {}
-        // ⚠️ COUNT THE ENTRY CURATION TOO, not just the source fields. Most of what
-        // the sidecar carries lives on the ENTRIES - tags, demo links, the author,
-        // a renamed font - and the first version of this clause looked only at the
-        // source, so an export carrying a tag and a demo URL announced "Includes
-        // your links." The disclosure has to describe what is actually in the zip
-        // or it is worse than none. (His catch, 2026-09-02: "only keeps links?")
-        const _curationClause = (() => {
+        // ⚠️ COUNT THE ENTRY CURATION TOO, not just the source fields. Most of
+        // what the sidecar carries lives on the ENTRIES - tags, demo links, the
+        // author, a renamed font - and the first version of this looked only at
+        // the source, so an export carrying a tag and a demo URL announced
+        // "Includes your links." A disclosure that under-reports is worse than
+        // none: it tells the user they know what is in the file when they do not.
+        const _carries = (() => {
           const m = _sfSourceEdit || {};
-          const ents = Array.isArray(m.entries) ? m.entries : [];
-          const em = ents.map(e => (e && e.meta) || {});
-          const nonEmpty = (v) => !!(v && String(v).trim());
-          const hasNotes = nonEmpty(m.userNotes) || em.some(x => nonEmpty(x.userNotes));
-          const hasTags  = em.some(x => Array.isArray(x.tags) && x.tags.length > 0);
-          const hasLinks = nonEmpty(m.linkUrl) || nonEmpty(m.vendorWebsite)
-            || em.some(x => nonEmpty(x.demoUrl));
+          const em = (Array.isArray(m.entries) ? m.entries : []).map(e => (e && e.meta) || {});
+          const has = (v) => !!(v && String(v).trim());
           const parts = [];
-          if (hasNotes) parts.push('notes');
-          if (hasTags)  parts.push('tags');
-          if (hasLinks) parts.push('links');
-          if (_nAtt)    parts.push(_nAtt === 1 ? '1 proof of purchase' : `${_nAtt} proofs of purchase`);
+          if (has(m.userNotes) || em.some(x => has(x.userNotes))) parts.push('notes');
+          if (em.some(x => Array.isArray(x.tags) && x.tags.length > 0)) parts.push('tags');
+          if (has(m.linkUrl) || has(m.vendorWebsite) || em.some(x => has(x.demoUrl))) parts.push('links');
+          if (_nAtt) parts.push(_nAtt === 1 ? '1 proof of purchase' : `${_nAtt} proofs of purchase`);
           if (!parts.length) return '';
           const list = parts.length === 1 ? parts[0]
             : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
-          return ` Includes your ${list}.`;
+          return `, and carries your ${list}`;
         })();
         const choice = await promptConfirm({
-          title: 'Export source',
-          message: `Export "${label}"`,
-          dropdown: {
-            label: '',
-            value: 'zip',
-            options: [
-              { value: 'zip', label: `One .zip file, to keep or back up.${_curationClause}` },
-              { value: 'folder', label: 'A folder of files, ready to copy onto an SD card.' },
-            ],
-          },
-          confirmText: 'Choose destination…',
+          title: `Export "${label}"`,
+          message: `A zip keeps it as one file to store or back up${_carries}. `
+                 + 'A folder is ready to copy onto an SD card.',
+          middleText: 'A folder of files',
+          confirmText: 'One .zip file',
           confirmKind: 'primary',
           cancelText: 'Cancel',
         });
-        if (!choice || !choice.confirmed) { return; }
-        const format = choice.value || 'zip';
+        if (choice !== 'confirm' && choice !== 'middle') { return; }
+        const format = choice === 'middle' ? 'folder' : 'zip';
 
         // 2) Where to?
         const pick = await window.electronAPI.pickExportDir({ title: `Export "${label}" to…` });
