@@ -90,8 +90,14 @@ function buildForSource(userData, uuid, appVersion) {
   for (const e of entryList) {
     const m = e && e.meta;
     if (!m || m.sourceUuid !== uuid) continue;
+    // ⚠️ '' IS A VALID candidatePath, not a missing one - a single-font source
+    // puts its font at the archive ROOT, so the path is the empty string. The
+    // first version tested `if (!key) continue`, which silently dropped the
+    // entry curation for every single-font source, the most common kind. Only
+    // null/undefined means "no path". (Found on a real export 2026-09-02: an
+    // entry with tags and a demo URL produced "entries": {}.)
     const key = m.candidatePath;
-    if (!key) continue;
+    if (key == null) continue;
     const block = _pick(m, ENTRY_FIELDS);
     if (Object.keys(block).length === 0) continue;
     entries[key] = block;
@@ -344,7 +350,8 @@ function applySourceCuration(userData, uuid, payload, attDir) {
 // takes one — so a re-imported font comes back with its tags, its style link
 // and its demo URL without the review screen having to learn anything new.
 function entryCurationFor(payload, candidatePath) {
-  if (!payload || !payload.entries || !candidatePath) return null;
+  // Same rule as the writer: '' is the archive root and a legitimate key.
+  if (!payload || !payload.entries || candidatePath == null) return null;
   const block = payload.entries[candidatePath];
   if (!block) return null;
   const out = _pick(block, ENTRY_FIELDS);
@@ -357,7 +364,7 @@ function entryCurationFor(payload, candidatePath) {
 // The suggested name for a candidate, separate from the metadata above so the
 // review can OFFER it rather than have it applied behind the user.
 function suggestedNameFor(payload, candidatePath) {
-  if (!payload || !payload.entries || !candidatePath) return null;
+  if (!payload || !payload.entries || candidatePath == null) return null;
   const block = payload.entries[candidatePath];
   return (block && typeof block.name === 'string' && block.name.trim()) ? block.name : null;
 }
