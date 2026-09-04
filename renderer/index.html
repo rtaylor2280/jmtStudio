@@ -2814,7 +2814,13 @@
      is unlinking the partial file. Tells the user "work is happening"
      without claiming a percentage we don't know. The 40% inline width
      gives the sliding chip enough mass to read at a glance. */
-  .sf-import-progress-bar.indeterminate { position: absolute; left: 0; width: 30% !important; background: var(--jmt-blue); transition: none; animation: knightrider 1.4s ease-in-out infinite; }
+  /* The honest 'working, no idea how far' bar. [B-303] Two consumers now: the
+     import modal and the ProffieOS download, which parked at a hardcoded 90%
+     then 97% through extract and import - phases that report no percent at
+     all. Extending this selector rather than writing a third copy of the
+     animation; #build-progress-bar has its own, older variant. */
+  .sf-import-progress-bar.indeterminate,
+  #dl-progress-bar.indeterminate { position: absolute; left: 0; width: 30% !important; background: var(--jmt-blue); transition: none; animation: knightrider 1.4s ease-in-out infinite; }
   /* The detail line under every determinate progress bar is ONE line that
      TRUNCATES with an ellipsis — it never wraps or grows the modal (2026-07-23; supersedes the 07-22 fixed two-line variant). */
   .sf-import-progress-detail { font-size: 0.72rem; color: var(--c-text-dim); margin: 4px 0 0 0; font-variant-numeric: tabular-nums; min-height: 1em; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -6555,7 +6561,7 @@
     <div id="dl-version-error" style="color:#e44;font-size:0.82rem;min-height:1.2em;margin-top:4px;"></div>
     <div id="dl-progress-wrap" style="display:none;margin-top:10px;">
       <span id="dl-progress-label" style="font-size:0.82rem;color:var(--c-text-sub);">Downloading…</span>
-      <div id="dl-progress-track" style="margin-top:6px;height:6px;background:var(--c-bg-inset);border-radius:3px;overflow:hidden;">
+      <div id="dl-progress-track" style="margin-top:6px;height:6px;background:var(--c-bg-inset);border-radius:3px;overflow:hidden;position:relative;">
         <div id="dl-progress-bar"  style="height:100%;width:0%;background:var(--jmt-blue);transition:width 0.15s;border-radius:3px;"></div>
       </div>
     </div>
@@ -13653,22 +13659,41 @@ document.getElementById('dl-confirm-btn').addEventListener('click', async () => 
   cancelBtn.disabled       = true;
   document.getElementById('dl-releases-body').style.opacity  = '0.5';
   document.getElementById('dl-progress-wrap').style.display  = '';
-  document.getElementById('dl-progress-bar').style.width     = '0%';
+  // Sweep from the first frame. "Connecting…" over an EMPTY track reads as
+  // nothing happening; the connect is real work and should look like it.
+  document.getElementById('dl-progress-bar').classList.add('indeterminate');
   document.getElementById('dl-progress-label').textContent   = 'Connecting…';
 
   _dlProgressUnsub = window.electronAPI.onDownloadProgress(({ phase, percent }) => {
     const bar   = document.getElementById('dl-progress-bar');
     const label = document.getElementById('dl-progress-label');
-    if (phase === 'downloading') {
-      label.textContent = percent ? `Downloading… ${percent}%` : 'Downloading…';
-      bar.style.width = `${percent || 0}%`;
-    } else if (phase === 'extracting') {
-      label.textContent = 'Extracting…';
-      bar.style.width = '90%';
-    } else if (phase === 'importing') {
-      label.textContent = 'Importing…';
-      bar.style.width = '97%';
-    }
+    // ⭐ INDETERMINATE THROUGHOUT, AND THE LABEL CARRIES THE PHASE. [B-303]
+    //
+    // It used to be a real percentage for the download and then a hardcoded 90%
+    // and 97% through extract and import — two phases that report nothing. Ryan
+    // watched it 2026-09-03: "connecting almost looked like a progress bar and
+    // then indeterminate on installing. never saw it flow all the way... seems
+    // awkward. like should it all be indeterminate?"
+    //
+    // ⚠️ THREE REASONS IT IS ALL ONE MODE NOW, and the last one decides it:
+    //   1. Switching mid-flight LOOKS LIKE GOING BACKWARDS. The sweep is 30%
+    //      wide and starts at the left, so a bar that had filled toward 100%
+    //      appears to collapse.
+    //   2. The percentage was already unreliable: it divides by content-length,
+    //      and a server that omits it (redirects commonly do) pinned the bar at
+    //      0% for the whole download — the same static lie in another costume.
+    //   3. ⭐ THESE FILES ARE 2-3 MB. The download finishes before a percentage
+    //      can render, which is exactly why he never saw it move. A mode that
+    //      cannot be perceived is not worth the transition it costs.
+    //
+    // What is lost: a real percentage on a slow connection. What is gained: one
+    // honest signal that never reverses and never invents a number. If ProffieOS
+    // releases ever get large enough for the download to be worth watching, the
+    // percentage is two lines away — but bring back the transition problem with it.
+    if (phase === 'downloading')      label.textContent = 'Downloading…';
+    else if (phase === 'extracting')  label.textContent = 'Extracting…';
+    else if (phase === 'importing')   label.textContent = 'Importing…';
+    bar.classList.add('indeterminate');
   });
 
   const result = await window.electronAPI.downloadRelease(rel.downloadUrl, name, rel.version);
@@ -22864,6 +22889,29 @@ require(['vs/editor/editor.main'], function () {
       // this source" path so cancel feels like a back-step, not an exit.
       let _sfReturnToSourceUuid = null;
 
+      // The ONE way to move the import progress bar. [B-303]
+      //
+      // Pass a number for a real percentage; pass nothing for INDETERMINATE — the
+      // knightrider sweep that honestly says "working, no idea how far".
+      //
+      // ⚠️ WHY A HELPER RATHER THAN ADDING A CLASS AT THE TWO CALL SITES THAT NEED
+      // IT: `.sf-import-progress-bar.indeterminate` carries `width: 30% !important`,
+      // and NINE places write to this same element. Leave the class on once and
+      // every later import bar is pinned at 30% and silently ignores its own width.
+      // Routing every writer through here means the class cannot be stranded — it
+      // is removed on the same line that sets a real number.
+      //
+      // Ryan, 2026-09-03: "found another 50% static". A bar parked at a made-up
+      // position is the app asserting half the work is done, and on a big source it
+      // reads as HUNG — which is exactly when someone force-quits. The elapsed clock
+      // beside it carries "still going"; the bar should not pretend to know more.
+      const _sfSetImportBar = (pct) => {
+        const b = _sfImportEls.progBar;
+        if (!b) return;
+        if (typeof pct !== 'number' || !isFinite(pct)) { b.classList.add('indeterminate'); return; }
+        b.classList.remove('indeterminate');
+        b.style.width = `${Math.min(100, Math.max(0, pct))}%`;
+      };
       const _sfShowPhase = (phase) => {
         if (_sfImportEls.phasePick)   _sfImportEls.phasePick.style.display   = phase === 'pick'     ? '' : 'none';
         if (_sfImportEls.phaseProg)   _sfImportEls.phaseProg.style.display   = phase === 'progress' ? '' : 'none';
@@ -23488,7 +23536,7 @@ require(['vs/editor/editor.main'], function () {
         _sfImport = { sourcePath, uuid: null, vendor: null, candidates: [], runId: myRun, fromLink: !!fromLink };
         _sfShowPhase('progress');
         if (_sfImportEls.progLabel) _sfImportEls.progLabel.textContent = 'Reading source…';
-        if (_sfImportEls.progBar) _sfImportEls.progBar.style.width = '0%';
+        _sfSetImportBar(0);
         if (_sfImportEls.progDetail) _sfImportEls.progDetail.textContent = '';
         if (_sfImportEls.progElapsed) _sfImportEls.progElapsed.textContent = '';
         // Elapsed clock: same "no estimates, elapsed only" pattern as the
@@ -23513,7 +23561,7 @@ require(['vs/editor/editor.main'], function () {
           const labels = { hashing: 'Reading source…', copying: 'Copying source…', checking: 'Checking your library…', done: 'Finding fonts…' };
           if (_sfImportEls.progLabel && labels[data.stage]) _sfImportEls.progLabel.textContent = labels[data.stage];
           const pct = typeof data.percent === 'number' ? data.percent : 0;
-          _sfImportEls.progBar.style.width = `${Math.min(100, Math.max(0, pct))}%`;
+          _sfSetImportBar(pct);
           if (_sfImportEls.progDetail) {
             let detail = '';
             if (data.bytes && data.totalBytes) {
@@ -23581,13 +23629,13 @@ require(['vs/editor/editor.main'], function () {
         // Byte-identical re-imports seed from their twin and pass instantly;
         // the Optimize step's Cataloging section is pre-warmed either way.
         if (_sfImportEls.progLabel) _sfImportEls.progLabel.textContent = 'Checking your library…';
-        if (_sfImportEls.progBar) _sfImportEls.progBar.style.width = '0%';
+        _sfSetImportBar(0);
         if (_sfImportEls.progDetail) _sfImportEls.progDetail.textContent = '';
         try { await window.electronAPI.ensureSourceManifest({ uuid: importRes.uuid }); } catch {}
         endProgressPhase();
         if (!_sfImport || _sfImport.runId !== myRun) return; // cancelled during the check
         if (_sfImportEls.progLabel) _sfImportEls.progLabel.textContent = 'Finding fonts…';
-        if (_sfImportEls.progBar) _sfImportEls.progBar.style.width = '100%';
+        _sfSetImportBar(100);
         const [vendorRes, candidates] = await Promise.all([
           window.electronAPI.detectSourceVendor({ uuid: importRes.uuid }),
           _sfFetchSourceCandidatesCached(importRes.uuid),
@@ -24497,7 +24545,7 @@ require(['vs/editor/editor.main'], function () {
         if (_sfImportEls.linkBrowserBtn) _sfImportEls.linkBrowserBtn.style.display = 'none';
         _sfShowPhase('progress');
         if (_sfImportEls.progLabel) _sfImportEls.progLabel.textContent = 'Downloading font…';
-        if (_sfImportEls.progBar) _sfImportEls.progBar.style.width = '0%';
+        _sfSetImportBar(0);
         if (_sfImportEls.progDetail) _sfImportEls.progDetail.textContent = 'Following the link…';
         const startMs = Date.now();
         const fmtDur = (sec) => (window._sfFormatDuration ? window._sfFormatDuration(sec) : `${Math.round(sec)}s`);
@@ -24509,7 +24557,7 @@ require(['vs/editor/editor.main'], function () {
           if (!d || !_sfImportEls.progDetail) return;
           if (d.total) {
             const pct = Math.min(100, Math.max(0, (d.received / d.total) * 100));
-            if (_sfImportEls.progBar) _sfImportEls.progBar.style.width = `${pct}%`;
+            _sfSetImportBar(pct);
             _sfImportEls.progDetail.textContent = `${_sfFormatBytes(d.received)} / ${_sfFormatBytes(d.total)} (${Math.floor(pct)}%)`;
           } else {
             _sfImportEls.progDetail.textContent = `${_sfFormatBytes(d.received)} downloaded`;
@@ -24551,7 +24599,7 @@ require(['vs/editor/editor.main'], function () {
         if (_sfImportEls.linkBrowserBtn) _sfImportEls.linkBrowserBtn.style.display = 'none';
         _sfShowPhase('progress');
         if (_sfImportEls.progLabel) _sfImportEls.progLabel.textContent = auto ? 'Trying with your saved login…' : 'Waiting for your download in the browser window…';
-        if (_sfImportEls.progBar) _sfImportEls.progBar.style.width = '0%';
+        _sfSetImportBar(0);
         if (_sfImportEls.progDetail) _sfImportEls.progDetail.textContent = auto ? 'Using the login you already have with this vendor.' : 'Click the vendor Download button. We will grab it and import it automatically.';
         const startMs = Date.now();
         const fmtDur = (sec) => (window._sfFormatDuration ? window._sfFormatDuration(sec) : `${Math.round(sec)}s`);
@@ -24571,7 +24619,7 @@ require(['vs/editor/editor.main'], function () {
           if (_sfImportEls.progLabel) _sfImportEls.progLabel.textContent = 'Downloading font…';
           if (d.total) {
             const pct = Math.min(100, Math.max(0, (d.received / d.total) * 100));
-            if (_sfImportEls.progBar) _sfImportEls.progBar.style.width = `${pct}%`;
+            _sfSetImportBar(pct);
             _sfImportEls.progDetail.textContent = `${_sfFormatBytes(d.received)} / ${_sfFormatBytes(d.total)} (${Math.floor(pct)}%)`;
           } else {
             _sfImportEls.progDetail.textContent = `${_sfFormatBytes(d.received)} downloaded`;
@@ -30645,7 +30693,7 @@ require(['vs/editor/editor.main'], function () {
         _sfReturnToSourceUuid = uuid;
         _sfShowPhase('progress');
         if (_sfImportEls.progLabel) _sfImportEls.progLabel.textContent = 'Reading source…';
-        if (_sfImportEls.progBar) _sfImportEls.progBar.style.width = '50%';
+        _sfSetImportBar();   // indeterminate: the candidate scan reports nothing to count
         if (_sfImportEls.progDetail) _sfImportEls.progDetail.textContent = '';
         if (opts.swapFromModalId) {
           document.getElementById(opts.swapFromModalId)?.classList.remove('active');
@@ -30683,7 +30731,7 @@ require(['vs/editor/editor.main'], function () {
         _sfReturnToSourceUuid = uuid;
         _sfShowPhase('progress');
         if (_sfImportEls.progLabel) _sfImportEls.progLabel.textContent = 'Reading source…';
-        if (_sfImportEls.progBar) _sfImportEls.progBar.style.width = '50%';
+        _sfSetImportBar();   // indeterminate: the candidate scan reports nothing to count
         if (_sfImportEls.progDetail) _sfImportEls.progDetail.textContent = '';
         if (opts.swapFromModalId) {
           document.getElementById(opts.swapFromModalId)?.classList.remove('active');
