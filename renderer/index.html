@@ -4637,7 +4637,7 @@
         </span>
       </div>
       <select id="input-board">
-        <option value="">Select board...</option>
+        <option value="">Select board…</option>
         <option value="Proffieboard V3" data-fqbn="proffieboard:stm32l4:ProffieboardV3-L452RE">Proffieboard V3</option>
         <option value="Proffieboard V2" data-fqbn="proffieboard:stm32l4:ProffieboardV2-L433CC">Proffieboard V2</option>
         <option value="Proffieboard"    data-fqbn="proffieboard:stm32l4:Proffieboard-L433CC">Proffieboard</option>
@@ -4975,7 +4975,10 @@
 
   <div class="port-group">
     <label id="bp-label-port">Port</label>
-    <select id="bp-port-select"><option value="">Scanning...</option></select>
+    <!-- Scanning… keeps a literal ellipsis: .busy-dots renders via ::after and browsers do
+         not paint pseudo-elements inside a native <option>, so this one cannot animate. It is
+         also not a command control, so there is no command/state collision to resolve. -->
+    <select id="bp-port-select"><option value="">Scanning…</option></select>
     <label id="bp-label-detected" style="margin-left:8px">Detected</label>
     <input type="text" id="bp-board-display" readonly placeholder="—" />
     <button id="bp-btn-refresh-ports" title="Refresh ports">↺</button>
@@ -5404,7 +5407,7 @@
       <div class="sf-import-chooser" id="sf-import-chooser">
         <p class="sf-import-hint">Pick a sound font as it came from the vendor with preference for the original .zip download. JMT Studio keeps the archive intact and lets you choose which fonts inside to add to your library.</p>
         <div class="sf-import-pick-row">
-          <button class="modal-btn-primary" id="sf-import-pick-zip">Pick .zip file…</button>
+          <button class="modal-btn-primary" id="sf-import-pick-zip">Pick zip file…</button>
           <button class="modal-btn-primary" id="sf-import-pick-folder">Pick folder…</button>
           <button class="modal-btn-primary" id="sf-import-pick-link">Paste a link</button>
         </div>
@@ -5570,7 +5573,7 @@
       <div class="sf-entry-byline-wrap">
         <span class="sf-byline-prefix" id="sf-byline-prefix">by</span>
         <span id="sf-entry-detail-byline" class="sf-edit-display"></span>
-        <input type="text" id="sf-entry-detail-byline-input" class="sf-edit-input" list="sf-detail-creator-list" placeholder="Add creator&hellip;" style="display:none">
+        <input type="text" id="sf-entry-detail-byline-input" class="sf-edit-input" list="sf-detail-creator-list" placeholder="Add creator…" style="display:none">
         <datalist id="sf-detail-creator-list"></datalist>
         <button class="detail-pencil" id="btn-sf-byline-edit" title="Edit creator">&#9998;</button>
         <button class="detail-confirm" id="btn-sf-byline-confirm" title="Confirm" style="display:none">&#10003;</button>
@@ -5631,7 +5634,7 @@
           <span class="sf-meta-label">Tags</span>
           <div class="sf-meta-val sf-tags-edit">
             <div class="sf-tags-chips" id="sf-detail-tags-chips"></div>
-            <input type="text" id="sf-detail-tags-input" class="sf-tag-add-input" list="sf-all-tags-datalist" autocomplete="off" placeholder="Add tag&hellip;" maxlength="40" title="Type a tag and press Enter. Type &quot;free&quot; to mark this entry as free content.">
+            <input type="text" id="sf-detail-tags-input" class="sf-tag-add-input" list="sf-all-tags-datalist" autocomplete="off" placeholder="Add tag…" maxlength="40" title="Type a tag and press Enter. Type &quot;free&quot; to mark this entry as free content.">
           </div>
         </div>
         <div class="sf-meta-row" id="sf-detail-docs-row" style="display:none">
@@ -5653,7 +5656,7 @@
       <div class="sf-entry-detail-section">
         <h3>Source</h3>
         <div class="sf-entry-detail-source" id="sf-entry-detail-source"></div>
-        <button class="sf-edit-source-link" id="btn-sf-open-source-detail">Edit source&hellip;</button>
+        <button class="sf-edit-source-link" id="btn-sf-open-source-detail">Edit source…</button>
       </div>
       <!-- ── Files section (slice 13) — shows the entry's on-disk contents
            exactly as they would land on the SD card. List view with a
@@ -5673,10 +5676,10 @@
               <button class="btn-neutral sf-entry-files-head-btn" id="btn-sf-entry-add-files" title="Add files to this entry">+ Add</button>
               <div id="sf-entry-add-dropdown" class="styles-tag-dropdown" style="display:none;min-width:160px;right:0;left:auto">
                 <button id="btn-sf-entry-add-browse" class="styles-tag-dropdown-item">
-                  <span class="styles-tag-dropdown-name">Browse&hellip;</span>
+                  <span class="styles-tag-dropdown-name">Browse…</span>
                 </button>
                 <button id="btn-sf-entry-add-library" class="styles-tag-dropdown-item">
-                  <span class="styles-tag-dropdown-name">From library&hellip;</span>
+                  <span class="styles-tag-dropdown-name">From library…</span>
                 </button>
               </div>
             </span>
@@ -5713,7 +5716,7 @@
       <div class="sf-entry-byline-wrap">
         <span class="sf-byline-prefix" id="sf-source-byline-prefix">by</span>
         <span id="sf-source-detail-creator" class="sf-edit-display"></span>
-        <input type="text" id="sf-source-detail-creator-input" class="sf-edit-input" list="sf-source-creator-list" placeholder="Add creator&hellip;" style="display:none">
+        <input type="text" id="sf-source-detail-creator-input" class="sf-edit-input" list="sf-source-creator-list" placeholder="Add creator…" style="display:none">
         <datalist id="sf-source-creator-list"></datalist>
         <button class="detail-pencil" id="btn-sf-source-creator-edit" title="Edit creator">&#9998;</button>
         <button class="detail-confirm" id="btn-sf-source-creator-confirm" title="Confirm" style="display:none">&#10003;</button>
@@ -5764,7 +5767,7 @@
           <span class="sf-meta-label">Tags</span>
           <div class="sf-meta-val sf-tags-edit">
             <div class="sf-tags-chips" id="sf-source-tags-chips"></div>
-            <input type="text" id="sf-source-tags-input" class="sf-tag-add-input" list="sf-all-tags-datalist" autocomplete="off" placeholder="Add tag&hellip;" maxlength="40" title="Type a tag and press Enter. Type &quot;free&quot; to mark this source as free content.">
+            <input type="text" id="sf-source-tags-input" class="sf-tag-add-input" list="sf-all-tags-datalist" autocomplete="off" placeholder="Add tag…" maxlength="40" title="Type a tag and press Enter. Type &quot;free&quot; to mark this source as free content.">
           </div>
         </div>
         <div class="sf-meta-row" id="sf-source-docs-row" style="display:none">
@@ -5781,7 +5784,7 @@
             <span class="sf-doc-chips sf-pop-chips" id="sf-source-pop-chips" data-doc-scope="pop"></span>
             <span class="sf-pop-actions">
               <button class="sf-pop-action" id="btn-sf-source-add-pop" type="button" title="Add a receipt or proof-of-purchase file from your computer">+ Add</button>
-              <button class="sf-pop-action" id="btn-sf-source-link-pop" type="button" title="Link a proof-of-purchase file you already added to another source">Link existing&hellip;</button>
+              <button class="sf-pop-action" id="btn-sf-source-link-pop" type="button" title="Link a proof-of-purchase file you already added to another source">Link existing…</button>
             </span>
           </div>
         </div>
@@ -5791,7 +5794,7 @@
             <div class="sf-entry-notes-block">
               <button class="sf-entry-notes-toggle detail-notes-toggle" type="button" id="sf-source-notes-toggle"><span class="notes-arrow">&#9654;</span> Notes</button>
               <div class="sf-entry-notes-body" id="sf-source-notes-body">
-                <textarea id="sf-source-notes-input" class="sf-notes-textarea" placeholder="Anything you want to remember about this source&hellip;" maxlength="2000"></textarea>
+                <textarea id="sf-source-notes-input" class="sf-notes-textarea" placeholder="Anything you want to remember about this source…" maxlength="2000"></textarea>
               </div>
             </div>
           </div>
@@ -5821,8 +5824,8 @@
       </div>
     </div>
     <div class="modal-btns" style="margin-top: 12px;">
-      <button class="modal-btn-cancel sf-source-delete-btn" id="btn-sf-source-delete">Delete source&hellip;</button>
-      <button class="modal-btn-cancel" id="btn-sf-source-export" title="Save a copy of the source archive to a folder you pick.&#10;Preserves the original file date for archive integrity.">Export source&hellip;</button>
+      <button class="modal-btn-cancel sf-source-delete-btn" id="btn-sf-source-delete">Delete source…</button>
+      <button class="modal-btn-cancel" id="btn-sf-source-export" title="Save a copy of the source archive to a folder you pick.&#10;Preserves the original file date for archive integrity.">Export source…</button>
       <button class="modal-btn-cancel" id="sf-source-detail-discard">Close</button>
       <button class="modal-btn-primary" id="sf-source-detail-save" disabled>Save</button>
     </div>
@@ -5892,8 +5895,8 @@
     <div class="sf-pop-add-field">
       <label class="sf-pop-add-label">File</label>
       <div class="sf-pop-add-file-row">
-        <input type="text" id="sf-pop-add-file" class="sf-edit-input" placeholder="Choose a receipt or order file&hellip;" readonly>
-        <button class="modal-btn-cancel" id="sf-pop-add-browse" type="button">Browse&hellip;</button>
+        <input type="text" id="sf-pop-add-file" class="sf-edit-input" placeholder="Choose a receipt or order file…" readonly>
+        <button class="modal-btn-cancel" id="sf-pop-add-browse" type="button">Browse…</button>
       </div>
     </div>
     <div class="sf-pop-add-field">
@@ -5902,7 +5905,7 @@
     </div>
     <div class="sf-pop-add-field">
       <label class="sf-pop-add-label">Attach to sources</label>
-      <input type="text" id="sf-pop-add-search" class="sf-edit-input" placeholder="Search sources&hellip;" autocomplete="off" style="margin-bottom:6px;">
+      <input type="text" id="sf-pop-add-search" class="sf-edit-input" placeholder="Search sources…" autocomplete="off" style="margin-bottom:6px;">
       <div class="sf-pop-link-list sf-pop-add-list" id="sf-pop-add-list"></div>
     </div>
     <div class="modal-btns" style="margin-top: 12px;">
@@ -5957,10 +5960,10 @@
               <button class="btn-neutral sf-entry-files-head-btn" id="btn-sf-shared-tracks-add" title="Add files to the Shared Tracks folder">+ Add</button>
               <div id="sf-shared-tracks-add-dropdown" class="styles-tag-dropdown" style="display:none;min-width:160px;right:0;left:auto">
                 <button id="btn-sf-shared-tracks-add-browse" class="styles-tag-dropdown-item">
-                  <span class="styles-tag-dropdown-name">Browse&hellip;</span>
+                  <span class="styles-tag-dropdown-name">Browse…</span>
                 </button>
                 <button id="btn-sf-shared-tracks-add-library" class="styles-tag-dropdown-item">
-                  <span class="styles-tag-dropdown-name">From library&hellip;</span>
+                  <span class="styles-tag-dropdown-name">From library…</span>
                 </button>
               </div>
             </span>
@@ -5985,9 +5988,9 @@
   <div class="modal">
     <h2>Import Common Folder</h2>
     <div class="sf-import-pick-row">
-      <button class="modal-btn-primary" id="sf-common-import-zip">Pick .zip file&hellip;</button>
-      <button class="modal-btn-primary" id="sf-common-import-folder">Pick folder&hellip;</button>
-      <button class="modal-btn-primary" id="sf-common-import-voicepack">Download voicepack&hellip;</button>
+      <button class="modal-btn-primary" id="sf-common-import-zip">Pick zip file…</button>
+      <button class="modal-btn-primary" id="sf-common-import-folder">Pick folder…</button>
+      <button class="modal-btn-primary" id="sf-common-import-voicepack">Download voicepack…</button>
     </div>
     <div class="modal-btns" style="margin-top: 16px">
       <button class="modal-btn-cancel" id="sf-common-import-cancel">Cancel</button>
@@ -6031,7 +6034,7 @@
     </div>
 
     <div class="sf-voicepack-more-panel" id="sf-voicepack-more-panel" style="display:none">
-      <p class="sf-voicepack-help" style="margin-top:0">Community-made voicepacks and other external sources. Download from the linked page, then use "Pick .zip file&hellip;" in the import chooser to add it.</p>
+      <p class="sf-voicepack-help" style="margin-top:0">Community-made voicepacks and other external sources. Download from the linked page, then use "Pick zip file…" in the import chooser to add it.</p>
       <div class="sf-voicepack-more-item">
         <div class="sf-voicepack-more-name">Additional Voicepacks &mdash; Brian Conner (NoSloppy)</div>
         <div class="sf-voicepack-more-desc">60+ character voicepacks (Vader, Yoda, GLaDOS, K.I.T.T., HK-47, many more) plus the V2 update of the official defaults. Free, donations welcome.</div>
@@ -6292,7 +6295,7 @@
     <p class="sf-import-hint">Press Enter or comma to stage each tag. Existing tags will appear as suggestions.</p>
     <div class="sf-tags-edit" style="margin-top: 8px">
       <div class="sf-tags-chips" id="sf-bulk-tag-chips"></div>
-      <input type="text" id="sf-bulk-tag-input" class="sf-tag-add-input" list="sf-all-tags-datalist" placeholder="Add tag&hellip;" maxlength="40" autocomplete="off">
+      <input type="text" id="sf-bulk-tag-input" class="sf-tag-add-input" list="sf-all-tags-datalist" placeholder="Add tag…" maxlength="40" autocomplete="off">
     </div>
     <div class="modal-btns" style="margin-top: 16px">
       <button class="modal-btn-cancel" id="sf-bulk-tag-cancel">Cancel</button>
@@ -6307,7 +6310,7 @@
      even when fs.copyFile doesn't emit per-byte progress. ── -->
 <div class="modal-overlay" id="modal-sf-bulk-progress">
   <div class="modal">
-    <h2 id="sf-bulk-progress-title">Working&hellip;</h2>
+    <h2 id="sf-bulk-progress-title">Working…</h2>
     <p id="sf-bulk-progress-label" class="sf-import-progress-label" style="display:none"></p>
     <div class="sf-import-progress-track">
       <div id="sf-bulk-progress-bar" class="sf-import-progress-bar"></div>
@@ -6326,7 +6329,7 @@
     <h2 id="sf-bulk-import-title">Bulk import sound fonts</h2>
 
     <div class="sf-import-phase" id="sf-bulk-import-phase-scan">
-      <p class="sf-import-progress-label">Scanning folder&hellip;</p>
+      <p class="sf-import-progress-label">Scanning folder…</p>
       <div class="sf-import-progress-track"><div class="sf-import-progress-bar indeterminate"></div></div>
       <p class="sf-import-progress-detail" id="sf-bulk-import-scan-detail"></p>
     </div>
@@ -6359,7 +6362,7 @@
         <label>Tag all fonts</label>
         <div class="sf-tags-edit">
           <div class="sf-tags-chips" id="sf-bulk-guided-tag-chips"></div>
-          <input type="text" id="sf-bulk-guided-tags" class="sf-tag-add-input" list="sf-all-tags-datalist" placeholder="Add tag&hellip;" maxlength="40" autocomplete="off">
+          <input type="text" id="sf-bulk-guided-tags" class="sf-tag-add-input" list="sf-all-tags-datalist" placeholder="Add tag…" maxlength="40" autocomplete="off">
         </div>
       </div>
     </div>
@@ -6376,7 +6379,7 @@
            the dominant hash/copy phases (zip sources hash as a single
            byte stream), so we omit the file-flash row entirely and
            keep the modal compact. -->
-      <p class="sf-import-progress-label" id="sf-bulk-import-prog-label">Importing&hellip;</p>
+      <p class="sf-import-progress-label" id="sf-bulk-import-prog-label">Importing…</p>
       <div class="sf-import-progress-track"><div class="sf-import-progress-bar" id="sf-bulk-import-prog-bar"></div></div>
       <p class="sf-import-progress-detail" id="sf-bulk-import-prog-detail"></p>
       <p class="sf-import-progress-detail" id="sf-bulk-import-prog-elapsed" style="color:var(--c-text-sub);font-size:0.78rem;margin-top:4px"></p>
@@ -6405,7 +6408,7 @@
 <div class="modal-overlay" id="modal-sf-backup-prep">
   <div class="modal">
     <h2>Export Sound Font library</h2>
-    <p class="sf-import-hint" id="sf-backup-prep-summary">Surveying library&hellip;</p>
+    <p class="sf-import-hint" id="sf-backup-prep-summary">Surveying library…</p>
     <div class="sf-import-progress-track" id="sf-backup-prep-progress-track" style="display:none">
       <div class="sf-import-progress-bar indeterminate"></div>
     </div>
@@ -6456,7 +6459,7 @@
      cancel goes through a confirm + rollback (partial zip deleted). ── -->
 <div class="modal-overlay" id="modal-sf-backup-progress">
   <div class="modal">
-    <h2 id="sf-backup-progress-title">Exporting Sound Font library&hellip;</h2>
+    <h2 id="sf-backup-progress-title">Exporting Sound Font library…</h2>
     <!-- Three-line progress shape mirrors the bulk import modal:
          label above bar (item N of M, overall %), item-name on its
          OWN line right under the label so a long name (uuid, deep
@@ -6465,7 +6468,7 @@
          detail below bar combines phase + bytes + within-item % +
          elapsed time so the user reads one cohesive status line
          instead of two separate stats. -->
-    <p class="sf-import-progress-label" id="sf-backup-progress-label">Preparing&hellip;</p>
+    <p class="sf-import-progress-label" id="sf-backup-progress-label">Preparing…</p>
     <p class="sf-backup-progress-item-name" id="sf-backup-progress-item-name">&nbsp;</p>
     <div class="sf-import-progress-track">
       <div class="sf-import-progress-bar" id="sf-backup-progress-bar" style="width:0%"></div>
@@ -6497,7 +6500,7 @@
       <label>ProffieOS Folder</label>
       <div class="import-folder-row">
         <input type="text" id="import-folder-path" placeholder="Select a folder named ProffieOS..." readonly />
-        <button id="import-browse-btn">Browse...</button>
+        <button id="import-browse-btn">Browse…</button>
       </div>
       <div style="margin-top:6px;">
         <button id="import-switch-to-download" style="background:none;border:none;color:var(--jmt-blue);font-size:0.75rem;cursor:pointer;padding:0;">&#8595; Download from the official ProffieOS GitHub</button>
@@ -6519,7 +6522,7 @@
     </div>
     <div id="import-version-error"></div>
     <div id="import-progress-wrap">
-      <span id="import-progress-label">Copying files...</span>
+      <span id="import-progress-label" class="busy-dots">Copying files</span>
       <div id="import-progress-track"><div id="import-progress-bar"></div></div>
     </div>
     <div class="modal-btns" style="margin-top:18px;">
@@ -6785,7 +6788,7 @@
     </div>
     <div class="modal-btns" style="margin-top:14px;flex-shrink:0;">
       <button class="modal-btn-cancel" id="compare-pick-cancel">Cancel</button>
-      <button class="modal-btn-primary" id="compare-pick-browse">Browse...</button>
+      <button class="modal-btn-primary" id="compare-pick-browse">Browse…</button>
     </div>
   </div>
 </div>
@@ -7765,7 +7768,7 @@ window.checkVoicepackDeclared = async function () {
     const label = p.label ? ` &mdash; ${_vpkEsc(p.label)}` : '';
     return `<li>Preset ${p.index}${label} &nbsp;<code>${_vpkEsc(p.font)}</code></li>`;
   }).join('');
-  const more = missing.length > 8 ? `<li>&hellip;and ${missing.length - 8} more</li>` : '';
+  const more = missing.length > 8 ? `<li>…and ${missing.length - 8} more</li>` : '';
 
   const one = missing.length === 1;
 
@@ -10632,7 +10635,7 @@ function showVersionNotInstalled(sel, name) {
   // mattered was the part cut off. Matches Board's own "Select board...".
   // WHICH version is missing belongs in the tooltip, which has room and already
   // says "This config was written for ProffieOS 6.9, which isn't installed."
-  missing.textContent = 'Select version...';
+  missing.textContent = 'Select version…';
   missing.title = `This config was written for ${name}, which isn't installed.`;
   missing.dataset.missing = '1';
   missing.disabled = true;
@@ -10683,11 +10686,11 @@ function populateVersionSelect(sel, versions, selectedName) {
   // presumes a ProffieOS folder already on their disk.
   const dl = document.createElement('option');
   dl.value = '__download_version__';
-  dl.textContent = '↓ Download version...';
+  dl.textContent = '↓ Download version…';
   dl.style.color = 'var(--jmt-blue)';
   const sep = document.createElement('option');
   sep.value = '__add_version__';
-  sep.textContent = '＋ Import version...';
+  sep.textContent = '＋ Import version…';
   sep.style.color = 'var(--jmt-blue)';
   if (!versions.length) { sel.appendChild(dl); sel.appendChild(sep); }
   else                  { sel.appendChild(sep); sel.appendChild(dl); }
@@ -10808,7 +10811,9 @@ function openImportVersionModal(duplicateFrom) {
   document.getElementById('import-version-error').textContent = '';
   document.getElementById('import-confirm-btn').disabled  = isDupe ? false : true;
   document.getElementById('import-confirm-btn').textContent = isDupe ? 'Duplicate' : 'Import';
-  document.getElementById('import-progress-label').textContent = isDupe ? 'Duplicating files...' : 'Copying files...';
+  // No trailing dots: the element carries .busy-dots, which supplies animated
+  // ones via ::after. Writing them here too would render six. [B-300]
+  document.getElementById('import-progress-label').textContent = isDupe ? 'Duplicating files' : 'Copying files';
   document.getElementById('import-progress-wrap').style.display = 'none';
   document.getElementById('modal-import-version').classList.add('active');
   const nameEl = document.getElementById('import-version-name');
@@ -21361,7 +21366,7 @@ require(['vs/editor/editor.main'], function () {
           if (entry.installUrl && window.electronAPI?.openExternal) {
             window.electronAPI.openExternal(entry.installUrl);
           }
-          _sfVpSetStatus(`Your browser opened the source folder. Download "${entry.baseName}.zip" from there, then close this window and use "Pick .zip file…" in the import chooser to add it.`, 'success');
+          _sfVpSetStatus(`Your browser opened the source folder. Download "${entry.baseName}.zip" from there, then close this window and use "Pick zip file…" in the import chooser to add it.`, 'success');
           return;
         }
         _sfVpStopSample();
@@ -26465,7 +26470,7 @@ require(['vs/editor/editor.main'], function () {
               return `<div class="sf-source-entry-row editing" data-entry-name="${escName}">
                 <button class="sf-source-entry-pencil" data-entry-cancel="${escName}" title="Discard edits for this row">&#10005;</button>
                 <input type="text" class="sf-source-entry-name-input" data-entry-name-input="${escName}" value="${_sfEscape(effName)}" maxlength="200" autocomplete="off">
-                <input type="text" class="sf-source-entry-desc-input" data-entry-desc-input="${escName}" value="${_sfEscape(effDesc)}" placeholder="Add description&hellip;" maxlength="500" autocomplete="off">
+                <input type="text" class="sf-source-entry-desc-input" data-entry-desc-input="${escName}" value="${_sfEscape(effDesc)}" placeholder="Add description…" maxlength="500" autocomplete="off">
                 <div class="sf-source-entry-edit-actions">
                   <button class="detail-confirm" data-entry-confirm="${escName}" title="Lock in (saves when the modal is saved)">&#10003;</button>
                 </div>
@@ -26634,11 +26639,11 @@ require(['vs/editor/editor.main'], function () {
         // visual weight doesn't shift when the data lands.
         const _entriesCountEl = _sfSourceDetailEls.entriesCount;
         if (_entriesCountEl) _entriesCountEl.textContent = '';
-        _sfSourceDetailEls.entriesList.innerHTML = '<div class="sf-source-entries-empty sf-loading-pulse">Loading fonts&hellip;</div>';
+        _sfSourceDetailEls.entriesList.innerHTML = '<div class="sf-source-entries-empty sf-loading-pulse">Loading fonts…</div>';
         const _docsRow = document.getElementById('sf-source-docs-row');
         if (_docsRow) _docsRow.style.display = 'none';
         const _filesListEl = document.getElementById('sf-source-files-list');
-        if (_filesListEl) _filesListEl.innerHTML = '<div class="sf-source-entries-empty sf-loading-pulse">Loading files&hellip;</div>';
+        if (_filesListEl) _filesListEl.innerHTML = '<div class="sf-source-entries-empty sf-loading-pulse">Loading files…</div>';
         _sfSourceFilesTree = [];
         _sfSourceFilesPath = '';
         _sfSourceFilesSelected = new Set();
@@ -30439,7 +30444,7 @@ require(['vs/editor/editor.main'], function () {
         // until that resolves.
         const currentNode = _sfFindNodeAtPath(_sfSourceFilesTree, _sfSourceFilesPath);
         if (currentNode && currentNode.isInnerZip && currentNode.children === null) {
-          list.innerHTML = `<div class="sf-entry-files-empty sf-loading-pulse">Loading archive contents&hellip;</div>`;
+          list.innerHTML = `<div class="sf-entry-files-empty sf-loading-pulse">Loading archive contents…</div>`;
           return;
         }
         const children = _sfChildrenAt(_sfSourceFilesTree, _sfSourceFilesPath);
@@ -44682,7 +44687,7 @@ function _getFreshFieldRange(fieldName) {
 <!-- ── Build modal ── -->
 <div id="build-modal" style="display:none;">
   <div id="bm-inner">
-    <div id="bm-title">Compiling...</div>
+    <div id="bm-title" class="busy-dots">Compiling</div>
 
     <!-- Knight Rider / progress bar -->
     <div id="bm-bar-track">
