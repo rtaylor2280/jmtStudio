@@ -318,6 +318,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Library entries (Phase 1, slice 5)
   listEntries:           ()           => ipcRenderer.invoke('entries:list'),
   entryExistsByName:     (name)       => ipcRenderer.invoke('entries:existsByName', name),
+  entryCustomization:    (params)     => ipcRenderer.invoke('entries:customization', params),
+  inspectFontFolder:     (params)     => ipcRenderer.invoke('sources:inspectFolder', params),
   createEntry:           (params)     => ipcRenderer.invoke('entries:create', params),
   duplicateEntry:        (params)     => ipcRenderer.invoke('entries:duplicate', params),
   updateEntryMeta:       (params)     => ipcRenderer.invoke('entries:updateMeta', params),

@@ -883,8 +883,84 @@ async function detectCandidates(source) {
   return { candidates, bundleName, bundlePrefix };
 }
 
+// ── "IS THIS A FONT?" FOR A FOLDER ON DISK ─────────────────────────────────
+// Wraps a picked folder in the minimal shape detectCandidates already accepts
+// (listAll + readFile) and runs THE SAME walker the importer runs. Deliberately
+// not a second heuristic: a private "does this look like a font" check here
+// would be free to drift from the one that decides what a real import accepts,
+// and the two disagreeing is a bug the user experiences as the app contradicting
+// itself. One walker, one answer.
+//
+// Verdicts, which are three and not two:
+//   'font'      — the folder ITSELF is a font. This is the one we can attach.
+//   'contains'  — it is not a font, but fonts live inside it. Worth saying so
+//                 precisely, because "not a font" would be a lie the user can
+//                 see through by opening the folder, and they would be right.
+//   'not-a-font'— no font anywhere beneath it.
+async function inspectFolderAsFont(folderPath) {
+  const fs = require('fs');
+  const path = require('path');
+  if (!folderPath) return { ok: false, error: 'No folder given' };
+  let st;
+  try { st = fs.statSync(folderPath); } catch { return { ok: false, error: 'Folder not found' }; }
+  if (!st.isDirectory()) return { ok: false, error: 'That is a file, not a folder' };
+
+  // Memoised: detectCandidates walks it, and we walk it again for the file
+  // count. One disk walk, two readers.
+  let _all = null;
+  const source = {
+    meta: { originalName: path.basename(folderPath) },
+    async listAll() {
+      if (_all) return _all;
+      const out = [];
+      const walk = (dir, relBase) => {
+        let entries;
+        try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
+        catch { return; }
+        for (const e of entries) {
+          const rel = relBase ? `${relBase}/${e.name}` : e.name;
+          if (e.isDirectory()) { out.push({ fileName: `${rel}/`, size: 0, isDir: true }); walk(path.join(dir, e.name), rel); }
+          else if (e.isFile()) {
+            let size = 0;
+            try { size = fs.statSync(path.join(dir, e.name)).size; } catch {}
+            out.push({ fileName: rel, size, isDir: false });
+          }
+        }
+      };
+      walk(folderPath, '');
+      _all = out;
+      return out;
+    },
+    async readFile(p) { return await fs.promises.readFile(path.join(folderPath, p)); },
+  };
+
+  let candidates = [];
+  try { candidates = (await detectCandidates(source)).candidates || []; }
+  catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
+
+  const self = candidates.find(c => !c.path);   // '' path == the folder we pointed at
+  const name = path.basename(folderPath);
+  if (self) {
+    // The candidate carries no size figures, so total them from the same walk.
+    let fileCount = 0, totalBytes = 0;
+    // Skip a root meta.json the same way collectFileRecords does, so a folder
+    // picked from inside the library counts the same here as it does on its row.
+    for (const e of (_all || [])) {
+      if (e.isDir || e.fileName === 'meta.json') continue;
+      fileCount++; totalBytes += (e.size || 0);
+    }
+    return { ok: true, verdict: 'font', name, folderPath, candidate: self, fileCount, totalBytes };
+  }
+  if (candidates.length) {
+    return { ok: true, verdict: 'contains', name, folderPath,
+             inner: candidates.map(c => ({ name: c.name, path: c.path })) };
+  }
+  return { ok: true, verdict: 'not-a-font', name, folderPath };
+}
+
 module.exports = {
   detectCandidates,
+  inspectFolderAsFont,
   detectBundleName,
   INNER_ZIP_SEP,
   CANDIDATES_SCHEMA_VERSION,

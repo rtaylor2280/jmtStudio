@@ -2003,6 +2003,18 @@ ipcMain.handle('entries:list', () => {
 
 // Stamp an entry as seen, so it stops being NEW. Idempotent and write-once;
 // callers fire it freely and the first one wins. [B-213]
+// Does this entry differ from the source archive it came from? [B-304]
+// Cheap: a diff of two manifests already on disk, nothing extracted or re-hashed.
+ipcMain.handle('entries:customization', (_, { name } = {}) => {
+  try { return soundFontEntries.getEntryCustomization(app.getPath('userData'), name); }
+  catch (err) { return { ok: false, known: false, error: String(err && err.message || err) }; }
+});
+// "Is this folder a font?" — asked BEFORE anything is copied, so a wrong pick
+// costs the user a dialog rather than a bad entry attached to a real source.
+ipcMain.handle('sources:inspectFolder', async (_, { folderPath } = {}) => {
+  try { return await require('./soundFontCandidates').inspectFolderAsFont(folderPath); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
 ipcMain.handle('entries:markSeen', (_, { name } = {}) => {
   if (!name) return { ok: false, error: 'Missing name' };
   try { return { ok: true, stamped: soundFontEntries.markEntrySeen(app.getPath('userData'), name) }; }
@@ -2062,7 +2074,11 @@ ipcMain.handle('entries:duplicate', async (_, { sourceName, newName, mode } = {}
   }
 });
 
-ipcMain.handle('entries:create', async (event, { sourceUuid, candidate, name, metadata } = {}) => {
+// folderSource ({ folderPath }) is the folder-attach path [B-304]: files come
+// from a folder the user picked, identity still comes from the source named by
+// sourceUuid + candidate. Absent on every other caller, which keeps the archive
+// path byte-for-byte what it was.
+ipcMain.handle('entries:create', async (event, { sourceUuid, candidate, name, metadata, folderSource } = {}) => {
   const send = (payload) => {
     try { event.sender.send('entries:createProgress', payload); } catch {}
   };
@@ -2073,6 +2089,7 @@ ipcMain.handle('entries:create', async (event, { sourceUuid, candidate, name, me
       candidate,
       name,
       metadata,
+      folderSource,
       onProgress: send,
     });
   } catch (err) {

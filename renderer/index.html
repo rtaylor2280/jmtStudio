@@ -3231,6 +3231,21 @@
      4 rows of content + breadcrumb header + a little breathing room; the
      outer modal body only scrolls if EVEN that minimum can't fit. */
   .sf-files-section { flex: 1 1 auto; min-height: 130px; display: flex; flex-direction: column; }
+  /* Customized marker [B-304]. Left-aligned under the browser so it reads as a
+     caption on the files it describes, and in JMT blue because the next step marks
+     the changed files and folders in that same blue - the colour is what ties the
+     summary to the things it is summarising.
+     ⚠️ IT CONSUMES NO LAYOUT HEIGHT AT ALL. The files section is a flex column with
+     the browser on `flex: 1`, so anything that occupies space below it resizes the
+     black window. There is already a gap between the browser and the buttons, so the
+     marker paints INTO that gap: 3 top + 15 tall + -18 bottom nets to zero, and the
+     browser is pixel-identical whether the text is there or not.
+     ⚠️ Do not "tidy" this into a normal block with a margin - that reintroduces the
+     resize. And no display toggle either; only the text comes and goes.
+     (2026-09-03: "the black window to stay the same size", then "there's enough
+     space as is and this customized word doesn't need to be given any space.") */
+  .sf-entry-customized { margin-right: auto; align-self: center; font-size: 0.78rem; color: var(--jmt-blue); }
+  .sf-entry-customized .sf-cust-note { opacity: 0.7; }
   .sf-entry-files-browser { background: var(--c-bg-inset); border: 1px solid var(--c-border-faint); border-radius: 4px; padding: 6px 8px; flex: 1; min-height: 100px; overflow-y: auto; }
   /* Row-major list: items flow left-to-right and wrap to the next row
      when they hit the container edge. Vertical scroll lives on the
@@ -3480,7 +3495,14 @@
      match the confirm-button visibility level so the two row actions feel
      equally weighted. */
   .sf-source-entry-row.editing .sf-source-entry-pencil { opacity: 0.7; }
-  .sf-source-entry-row .ent-name { color: var(--c-text); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* The name cell is a flex pair, not a text node: the name keeps the ellipsis
+     and the "Customized" marker sits beside it without ever being truncated
+     away. The row is subgrid with exactly four children, so the marker CANNOT
+     be a fifth sibling — it would shift every column. */
+  .sf-source-entry-row .ent-name { color: var(--c-text); font-weight: 600; display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+  .sf-source-entry-row .ent-name-txt { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sf-source-entry-row .ent-cust { flex: none; color: var(--jmt-blue); font-weight: 500; font-size: 0.72rem; white-space: nowrap; }
+  .sf-source-entry-row .ent-cust .sf-cust-note { color: var(--c-text-dim); }
   .sf-source-entry-row .ent-desc { color: var(--c-text-sub); font-size: 0.78rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sf-source-entry-row .ent-meta { color: var(--c-text-dim); font-size: 0.72rem; white-space: nowrap; justify-self: end; }
   .sf-source-entry-name-input { flex: 0 1 160px; min-width: 80px; font-size: 0.82rem; font-weight: 600; background: var(--c-bg-inset); color: var(--c-text); border: 1px solid var(--jmt-blue); border-radius: 3px; padding: 2px 6px; outline: none; font-family: inherit; }
@@ -5691,6 +5713,18 @@
       </div>
     </div>
     <div class="modal-btns" style="margin-top: 12px;">
+      <!-- ── Customized marker ── [B-304]
+           ⚠️ IT LIVES IN THE BUTTON ROW, NOT UNDER THE FILE BROWSER, and that is the
+           whole trick. The files section is a flex column with the browser on
+           `flex: 1`, so a sibling below it resizes the black window; and painting
+           into the gap with a negative margin does not work either, because
+           .sf-entry-detail-body is `overflow-y: auto` and clips anything drawn
+           outside its box. That was tried and it simply vanished.
+           This row is already there, already has empty space on the left, and sits
+           OUTSIDE the scrolling container. Zero cost, nothing moves, nothing clips.
+           (2026-09-03: "there's enough space as is and this customized word
+           doesn't need to be given any space.") -->
+      <span class="sf-entry-customized" id="sf-entry-customized"></span>
       <button class="modal-btn-cancel" id="sf-entry-detail-discard">Close</button>
       <button class="modal-btn-primary" id="sf-entry-detail-save" disabled>Save</button>
     </div>
@@ -24654,6 +24688,7 @@ require(['vs/editor/editor.main'], function () {
 
       // ── Entry detail view (Phase 3, slice 8 editable) ──
       const _sfEntryDetailEls = {
+        customized:  document.getElementById('sf-entry-customized'),
         modal:        document.getElementById('modal-sf-entry-detail'),
         closeX:       document.getElementById('sf-entry-detail-close'),
         // Name (display + input + pencil + confirm)
@@ -24959,6 +24994,15 @@ require(['vs/editor/editor.main'], function () {
         return cur;
       };
       const _sfRenderEntryFiles = () => {
+        // ⭐ LIVE, not just on open. [B-304] This runs after every file operation in
+        // the modal — add, delete, new folder, reorganize — so the marker follows the
+        // edit that caused it instead of waiting for the next open. Found by deleting
+        // a file and having to close and reopen to see it (2026-09-03).
+        // ⚠️ This is only safe because getEntryCustomization now recomputes a dirty
+        // manifest before reading it. Without that guard, running it right after an
+        // edit would answer from the manifest the edit just invalidated — a live
+        // wrong answer, which is worse than a correct late one.
+        if (_sfDetailOriginalName) _sfRenderCustomized(_sfDetailOriginalName);
         const list = document.getElementById('sf-entry-files-list');
         const crumbEl = document.getElementById('sf-entry-files-breadcrumb');
         if (!list || !crumbEl) return;
@@ -25051,6 +25095,39 @@ require(['vs/editor/editor.main'], function () {
           }
           if (changed) _sfRenderGrid();
         } catch {}
+      };
+
+      // Show the Customized marker for an entry, or nothing. [B-304]
+      //
+      // ⚠️ SILENCE ON "CANNOT TELL" IS DELIBERATE, not laziness. The backend returns
+      // known:false for a missing manifest, a nested candidate, or a source whose
+      // manifest has no records at that path — 35 of 220 entries measured. Flagging one
+      // of those as the user's own work is worse than leaving it unflagged: the whole
+      // point of this marker is that it tells you what you would LOSE, and a false
+      // one makes every true one less believable.
+      //
+      // Fire-and-forget, and guarded on the entry still being the open one — the read
+      // is two manifests off disk but the user can close or switch before it lands.
+      const _sfRenderCustomized = async (entryName) => {
+        const el = _sfEntryDetailEls.customized;
+        if (!el) return;
+        // ⚠️ NEVER TOGGLE display HERE. The row is reserved in CSS so the file
+        // browser keeps its height; hiding the element would hand that space back
+        // and resize the black window every time the answer changed.
+        el.textContent = '';
+        el.title = '';
+        let r = null;
+        try { r = await window.electronAPI.entryCustomization({ name: entryName }); } catch {}
+        if (!r || !r.known || !r.customized) return;
+        if (_sfDetailOriginalName !== entryName) return;   // switched away while we read
+        // "(tracks only)" names WHAT was added rather than demoting it. Music you
+        // added is still yours to lose. Measured on his library: 26 tracks-only
+        // against 24 with edited font files, so the distinction earns its place.
+        const note = r.tracksOnly ? ' <span class="sf-cust-note">(tracks only)</span>' : '';
+        el.innerHTML = 'Customized' + note;
+        el.title = r.tracksOnly
+          ? 'This font has tracks the original did not include. They are yours, and deleting it would take them with it.'
+          : 'This font differs from the source it came from. Those changes are yours, and deleting it would take them with it.';
       };
 
       const _sfOpenEntryDetail = async (entryName, opts = {}) => {
@@ -25342,6 +25419,10 @@ require(['vs/editor/editor.main'], function () {
           document.getElementById(opts.swapFromModalId)?.classList.remove('active');
         }
         _sfEntryDetailEls.modal.classList.add('active');
+        // After the modal is up: the marker reads two manifests off disk, so it is
+        // not worth holding the open on. It hides itself first and only appears if
+        // the answer is a confident yes. [B-304]
+        _sfRenderCustomized(entryName);
       };
       const _sfCloseEntryDetail = () => {
         if (_sfEntryDetailEls.modal) _sfEntryDetailEls.modal.classList.remove('active');
@@ -26420,8 +26501,42 @@ require(['vs/editor/editor.main'], function () {
       // the candidate detection), pass them in to skip the redundant IPC.
       // Post-mutation refreshes (add / duplicate / rename / delete) leave
       // it null so we always pick up fresh disk state.
+      // Every render bumps this. The customization fill is slow and out-of-band,
+      // so it checks the token before each write — a list re-rendered underneath
+      // it (delete, rename, add) abandons the stale pass instead of painting
+      // markers onto rows that now belong to different fonts.
+      let _sfSourceEntriesToken = 0;
+      // Filled AFTER the list paints, one font at a time. Deliberately
+      // sequential: entryCustomization recomputes a stale content hash, which on
+      // a large font is a full directory walk, and the IPC handlers run on the
+      // main process's single thread. Firing twenty at once would stall the app;
+      // this way rows light up as they resolve and nothing blocks.
+      const _sfFillSourceEntryCustomized = async (token) => {
+        const list = _sfSourceDetailEls.entriesList;
+        if (!list) return;
+        const slots = Array.from(list.querySelectorAll('.ent-cust[data-cust]'));
+        for (const slot of slots) {
+          if (token !== _sfSourceEntriesToken) return;
+          let r = null;
+          try { r = await window.electronAPI.entryCustomization({ name: slot.dataset.cust }); } catch {}
+          if (token !== _sfSourceEntriesToken) return;
+          // Mark RESOLVED even when the answer is "not customized" — the context
+          // menu needs to tell "known clean" apart from "not asked yet", and an
+          // empty marker alone cannot carry that difference.
+          slot.dataset.done = '1';
+          if (!r || !r.known || !r.customized) continue;
+          // Same word, same blue, same tooltip as the entry detail view. A
+          // second vocabulary for the same fact would just make the user ask
+          // whether it means something different here.
+          slot.innerHTML = 'Customized' + (r.tracksOnly ? ' <span class="sf-cust-note">(tracks only)</span>' : '');
+          slot.title = r.tracksOnly
+            ? 'This font has tracks the original did not include. They are yours, and deleting it would take them with it.'
+            : 'This font differs from the source it came from. Those changes are yours, and deleting it would take them with it.';
+        }
+      };
       const _sfRenderSourceEntries = async (uuid, preloadedEntries = null) => {
         if (!_sfSourceDetailEls.entriesList) return;
+        const token = ++_sfSourceEntriesToken;
         let entries;
         if (Array.isArray(preloadedEntries)) {
           entries = preloadedEntries;
@@ -26483,12 +26598,13 @@ require(['vs/editor/editor.main'], function () {
             const descTooltip = effDesc.length > 200 ? effDesc.slice(0, 200) + '…' : effDesc;
             return `<div class="sf-source-entry-row" data-entry-name="${escName}">
               <button class="sf-source-entry-pencil" data-entry-edit-toggle="${escName}" title="Edit name and description">&#9998;</button>
-              <span class="ent-name">${_sfEscape(effName)}</span>
+              <span class="ent-name"><span class="ent-name-txt">${_sfEscape(effName)}</span><span class="ent-cust" data-cust="${escName}"></span></span>
               <span class="ent-desc"${effDesc ? ` title="${_sfEscape(descTooltip)}"` : ''}>${_sfEscape(effDesc)}</span>
               <span class="ent-meta">${meta}</span>
               <button class="sf-source-entry-delete" data-entry-delete="${escName}" title="Delete this font from your library">&times;</button>
             </div>`;
           }).join('');
+          _sfFillSourceEntryCustomized(token);   // not awaited — the list is already usable
         }
         // "Add more" button visibility — reuses the candidates fetched at
         // the top of this function so we don't pay a second detection cost.
@@ -27421,15 +27537,34 @@ require(['vs/editor/editor.main'], function () {
           if (!res || !res.ok) { promptError('Duplicate failed', (res && res.error) || 'unknown'); return; }
           await _sfFinishEntryDuplicate(res.name || newName);
         });
-        mkItem('Duplicate from source', '', async () => {
-          const newName = _sfSuggestCopyEntryName(name);
-          let res;
-          try {
-            res = await window.electronAPI.duplicateEntry({ sourceName: name, newName, mode: 'source' });
-          } catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
-          if (!res || !res.ok) { promptError('Duplicate failed', (res && res.error) || 'unknown'); return; }
-          await _sfFinishEntryDuplicate(res.name || newName);
-        });
+        // "Duplicate from source" only earns a slot when the two would DIFFER.
+        // On an unmodified font the copy and the source version are the same
+        // bytes, so offering both is a choice with one outcome — noise that
+        // makes the user stop and wonder which is right. "Duplicate" is the
+        // survivor rather than the other way round because a copy is a copy, and
+        // that reads clearer when it stands alone.
+        // ⚠️ Read from the SLOT the fill wrote, so the menu always agrees with
+        // the marker on screen. `done` absent = the answer has not landed yet
+        // (cold read on a big font) — show both, because hiding a capability we
+        // cannot rule out is the worse failure of the two.
+        const cust = row.querySelector('.ent-cust[data-cust]');
+        const resolved = !!(cust && cust.dataset.done);
+        const isCustomized = !!(cust && cust.textContent.trim());
+        if (isCustomized || !resolved) {
+          mkItem('Duplicate from source', '', async () => {
+            const newName = _sfSuggestCopyEntryName(name);
+            let res;
+            try {
+              res = await window.electronAPI.duplicateEntry({ sourceName: name, newName, mode: 'source' });
+            } catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
+            if (!res || !res.ok) { promptError('Duplicate failed', (res && res.error) || 'unknown'); return; }
+            await _sfFinishEntryDuplicate(res.name || newName);
+          });
+        }
+        // Sits with the duplicate actions because it is the same intent from the
+        // other direction: those make a version of this font from what we hold,
+        // this makes one from a folder the user already has.
+        mkItem('Add from folder…', '', () => { _sfAddFontFromFolder(name); });
         mkSep();
         // Delete — programmatically click the existing × so the full
         // delete flow (confirm prompt, source-cleanup, source close)
@@ -27444,6 +27579,118 @@ require(['vs/editor/editor.main'], function () {
         menu.style.display = 'block';
       });
       // "Add more fonts from this source" reuses the import review flow.
+      // "Add from folder…" — pick a folder on disk and put it through the SAME
+      // font walker the importer uses before anything is copied. A wrong pick
+      // costs a dialog, not an entry wired to the wrong source.
+      // ⭐ It lives on the ROW's context menu, not on a standalone button
+      // (2026-09-04), and that placement is what settles the entry's identity:
+      // anchored to a font, the folder is understood as a VERSION OF THAT FONT,
+      // so the new entry inherits that row's sourceUuid AND candidatePath. It
+      // then diffs against the same source subtree the original came from and
+      // reports Customized on its own — no special case, and true. A standalone
+      // button had no font to anchor to, which forced a null candidatePath and
+      // an entry that could never say what it was.
+      const _sfAddFontFromFolder = async (anchorEntryName) => {
+        if (!_sfSourceOriginalUuid) return;
+        let folderPath = null;
+        try { folderPath = await window.electronAPI.selectSoundFontSource({ mode: 'folder' }); } catch {}
+        if (!folderPath) return;
+        let r = null;
+        try { r = await window.electronAPI.inspectFontFolder({ folderPath }); } catch (err) { r = { ok: false, error: String(err && err.message || err) }; }
+        if (!r || !r.ok) { promptError('Could not read that folder', (r && r.error) || 'unknown'); return; }
+        if (r.verdict === 'not-a-font') {
+          promptError('That folder is not a sound font',
+            `“${r.name}” has no hum, no font files and no effect folders, so there is nothing here to add.`);
+          return;
+        }
+        if (r.verdict === 'contains') {
+          // Naming what IS inside beats a flat refusal the user can disprove by
+          // opening the folder — they would be right and we would look wrong.
+          const names = r.inner.slice(0, 6).map(i => i.name).join(', ');
+          promptError('That folder holds fonts, but is not one itself',
+            `“${r.name}” contains ${r.inner.length} font${r.inner.length === 1 ? '' : 's'} (${names}${r.inner.length > 6 ? ', …' : ''}). `
+            + 'Pick the font folder itself, one level down.');
+          return;
+        }
+        // The anchor row supplies the new entry's PROVENANCE, and it has to come
+        // off the anchor's own meta rather than be assembled here: candidatePath
+        // is what the customization diff compares against, and a wrong one is
+        // not a cosmetic error, it is a font reporting confidently on the wrong
+        // subtree. No meta, no attach.
+        const anchorMeta = ((_sfAllEntries || []).find(en => en.name === anchorEntryName) || {}).meta;
+        if (!anchorMeta || !anchorMeta.sourceUuid || anchorMeta.candidatePath == null) {
+          promptError('Could not read that font',
+            `“${anchorEntryName}” has no source details recorded, so there is nothing to add a version to.`);
+          return;
+        }
+        // Sanitize BEFORE numbering, via the existing mirror of the backend's
+        // rule. A folder called "Ahsoka V2" lands on disk as "Ahsoka_V2", so
+        // numbering the raw name would walk collisions against names the library
+        // cannot hold - and the dialog below would state a name the app then
+        // does not use.
+        const newName = _sfSuggestCopyEntryName(_sfSanitizeName(r.name) || 'font');
+        const ok = await promptConfirm({
+          title: 'Add this folder as a version',
+          message: `“${r.name}” — ${r.fileCount} files · ${_sfFormatBytes(r.totalBytes)}.\n`
+            + `It joins the library as “${newName}”, alongside “${anchorEntryName}” and from the same source, `
+            + 'so the two can be compared. You can rename it straight after.',
+          confirmText: 'Add font', confirmKind: 'primary',
+        });
+        if (!ok) return;
+        // Identity from the anchor, content facts from the FOLDER. Both halves
+        // are true and neither can supply the other: only the anchor knows which
+        // source subtree this is a version of, and only the walker that just read
+        // the folder knows whether it holds board-format variants. `nested` rides
+        // with the identity half because it decides whether a diff against the
+        // source is possible at all — claiming false on a nested anchor would
+        // diff against a path the manifest has no records for and report the
+        // whole font as changed.
+        const candidate = {
+          ...(r.candidate || {}),
+          path: anchorMeta.candidatePath || '',
+          nested: !!anchorMeta.nested,
+        };
+        let unsub = null;
+        let res;
+        try {
+          _sfDeleteProgress.show(`Adding ${newName}`, '', 0);
+          // Determinate, because the inspect already measured the total. Bytes
+          // rather than files: a font is a handful of big wavs beside a lot of
+          // small ones, so a file count crawls and then jumps.
+          unsub = window.electronAPI.onEntryCreateProgress((d) => {
+            if (!d || d.stage !== 'extracting') return;
+            const frac = r.totalBytes > 0 ? (d.totalBytes || 0) / r.totalBytes : 0;
+            _sfDeleteProgress.setProgress(frac, d.currentFile || '');
+          });
+          res = await window.electronAPI.createEntry({
+            sourceUuid: anchorMeta.sourceUuid,
+            candidate,
+            name: newName,
+            folderSource: { folderPath: r.folderPath },
+            // Seeded like a sibling, the same fields duplicateEntry's from-source
+            // mode carries. Description and notes are deliberately NOT among them:
+            // those describe the anchor's files, and these are different files the
+            // user brought from somewhere else.
+            metadata: {
+              tags: Array.isArray(anchorMeta.tags) ? anchorMeta.tags.slice() : [],
+              author: anchorMeta.author || '',
+              acquisitionDate: anchorMeta.acquisitionDate || '',
+              purchased: !!anchorMeta.purchased,
+              demoUrl: anchorMeta.demoUrl || '',
+              linkedStyleLibraryEntry: anchorMeta.linkedStyleLibraryEntry || null,
+            },
+          });
+        } catch (err) {
+          res = { ok: false, error: String(err && err.message || err) };
+        } finally {
+          if (unsub) { try { unsub(); } catch {} }
+          await _sfDeleteProgress.hide();
+        }
+        if (!res || !res.ok) { promptError('Could not add that folder', (res && res.error) || 'unknown'); return; }
+        // Same landing as a duplicate: refresh, then open the new row's name for
+        // editing. The folder's name is a starting point, not a decision.
+        await _sfFinishEntryDuplicate(res.name || newName);
+      };
       _sfSourceDetailEls.addMoreBtn?.addEventListener('click', async () => {
         if (!_sfSourceOriginalUuid) return;
         if (_sfSourceDirty) {

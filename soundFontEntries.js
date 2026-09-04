@@ -205,17 +205,70 @@ async function _extractNestedZipToDir(source, innerZipPath, destDir, onProgress)
   }
 }
 
-// createEntry({ userData, sourceUuid, candidate, name?, metadata?, onProgress? })
+// Copy a folder that is already on disk into a new entry directory, returning
+// and reporting in exactly the shape createEntry expects back from
+// source.extractTo. Backs the folder-attach path ([B-304]): the BYTES come from
+// a folder the user picked, while the entry's identity still comes from the
+// source it is being attached to.
+//
+// A root meta.json is skipped, and that is not housekeeping. inspectFolderAsFont
+// skips it when it counts the folder, so copying it would make the entry's
+// stored file count disagree with the figure the user was shown in the dialog
+// one click earlier. (It would also be overwritten by this entry's own meta
+// write moments later.)
+async function _copyFolderIntoDir(folderPath, destDir, onProgress) {
+  // Picking an ancestor of the destination would have the walk copying its own
+  // output forever. Cheap to rule out, and impossible to recover from if not.
+  const srcRes = path.resolve(folderPath);
+  const dstRes = path.resolve(destDir);
+  if (dstRes === srcRes || dstRes.startsWith(srcRes + path.sep)) {
+    throw new Error('That folder contains the library, so it cannot be added to it');
+  }
+  let fileCount = 0, totalBytes = 0;
+  const walk = (dir, relBase) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const rel = relBase ? `${relBase}/${e.name}` : e.name;
+      const abs = path.join(dir, e.name);
+      if (e.isDirectory()) {
+        fs.mkdirSync(path.join(destDir, rel), { recursive: true });
+        walk(abs, rel);
+      } else if (e.isFile()) {
+        if (rel === 'meta.json') continue;
+        fs.copyFileSync(abs, path.join(destDir, rel));
+        let size = 0;
+        try { size = fs.statSync(abs).size; } catch {}
+        fileCount++;
+        totalBytes += size;
+        if (onProgress) onProgress({ fileCount, totalBytes, currentFile: rel });
+      }
+    }
+  };
+  fs.mkdirSync(destDir, { recursive: true });
+  walk(srcRes, '');
+  return { fileCount, totalBytes };
+}
+
+// createEntry({ userData, sourceUuid, candidate, name?, metadata?, onProgress?, folderSource? })
 //
 // Extracts the candidate from the source into a new library entry. The name
 // defaults to the candidate's suggested name; the caller is expected to have
 // run findEntryByName first if they want to surface a friendlier collision
 // message than the generic "already exists" error.
 //
+// `folderSource` ({ folderPath }) swaps WHERE THE FILES COME FROM and nothing
+// else ([B-304], 2026-09-04). The source is still opened, so curation, restored
+// provenance, source-field propagation, the content hash, the effect scan and
+// every id are stamped by the same code on both paths — which is the whole
+// reason this is an override on one line rather than a second entry writer.
+// The caller supplies the candidate, so it decides what the new entry claims to
+// be: attaching a folder as a version of an existing font passes THAT font's
+// candidatePath, which is what lets the result diff against the same source
+// subtree and report Customized on its own.
+//
 // Returns one of:
 //   { ok: true, name, meta }
 //   { ok: false, error: <string>, existing?: true }
-async function createEntry({ userData, sourceUuid, candidate, name, metadata, onProgress }) {
+async function createEntry({ userData, sourceUuid, candidate, name, metadata, onProgress, folderSource }) {
   if (!userData) return { ok: false, error: 'Missing userData' };
   if (!sourceUuid) return { ok: false, error: 'Missing sourceUuid' };
   if (!candidate) return { ok: false, error: 'Missing candidate' };
@@ -258,7 +311,15 @@ async function createEntry({ userData, sourceUuid, candidate, name, metadata, on
     emit('extracting', { percent: 0 });
 
     let result;
-    if (candidate.nested) {
+    if (folderSource && folderSource.folderPath) {
+      // FIRST, deliberately: the candidate carries the anchor font's identity,
+      // including its `nested` flag, and none of that describes where these
+      // bytes live. Reading nested here would send a folder attach down the
+      // inner-zip extractor.
+      result = await _copyFolderIntoDir(folderSource.folderPath, entryDir, (p) => {
+        emit('extracting', p);
+      });
+    } else if (candidate.nested) {
       result = await _extractNestedZipToDir(source, candidate.path, entryDir, (p) => {
         emit('extracting', p);
       });
@@ -1365,6 +1426,132 @@ function resolveEntryEffectsDirty(userData, entryName) {
 // condition forces a recompute. The dirty flag is the primary signal
 // for "content changed since last stamp"; the cheap-signal walk is the
 // backup catch for any op path that forgot to mark dirty.
+// Has this entry been CUSTOMIZED — does its content differ from the source archive
+// it was extracted from? [B-304]
+//
+// ⭐ THE REFERENCE POINT IS THE SOURCE FILE, NOT "the source as it stands now"
+// (2026-09-03: "it's not now, it's from its source file"). A stored source
+// archive is immutable, so this is a fixed comparison that cannot drift — the same
+// distinction the context menu already draws between Duplicate and Duplicate from
+// source.
+//
+// ⚠️ NOTHING IS EXTRACTED AND NOTHING IS RE-HASHED. Both sides already keep per-file
+// manifests: the entry's own, and the source's covering every file in the archive.
+// The source's paths are archive-relative, so stripping the entry's candidatePath
+// prefix lines the two up directly. Verified on real data 2026-09-03: 90 records
+// each side, names equal after the strip, hashes equal.
+//
+// Returns { ok, known, customized, added, removed, changed }. `known: false` means we
+// could not tell — a missing manifest, no candidatePath — and a caller must show
+// NOTHING in that case rather than guessing either way. An entry wrongly flagged as
+// the user's own work is worse than an unflagged one.
+function getEntryCustomization(userData, entryName) {
+  const unknown = { ok: true, known: false, customized: false, added: 0, removed: 0, changed: 0 };
+  let meta;
+  try { meta = JSON.parse(fs.readFileSync(path.join(entriesRoot(userData), entryName, 'meta.json'), 'utf8')); }
+  catch { return unknown; }
+  if (!meta || !meta.sourceUuid || meta.candidatePath == null || !meta.entryUuid) return unknown;
+  // A nested-zip candidate lives inside an inner archive, so the source manifest has
+  // no records at that path to compare against. Not customized — unknowable.
+  if (meta.nested) return unknown;
+
+  // ── THE STAMP (2026-09-03) ─────────────────────────────────────────────────
+  // Customization is a FACT ABOUT THE FONT, so it lives on the font rather than in
+  // a cache beside it. The only place it can change is inside the entry the user is
+  // editing, and every file op there sets contentHashDirty — so keying the stamp to
+  // the content hash it was derived from makes it self-invalidating: the detail view
+  // stays live, and every other view reads an answer that is already computed.
+  // That is what makes the marker affordable in the 220-card grid, where computing
+  // it live would be 220 round trips.
+  // srcUuid is part of the key because re-pointing an entry at a different source
+  // changes the comparison even when the entry's own bytes did not.
+  const st = meta.customization;
+  if (!meta.contentHashDirty && meta.contentHash && st
+      && st.forHash === meta.contentHash && st.srcUuid === meta.sourceUuid) {
+    return { ok: true, known: true, customized: !!st.customized, added: st.added|0,
+             removed: st.removed|0, changed: st.changed|0, tracksOnly: !!st.tracksOnly, cached: true };
+  }
+  // Persist a KNOWN answer onto the entry. Deliberately never stamps `unknown`:
+  // unknown usually means a manifest is missing, and those get backfilled — a
+  // stamped unknown would make a recoverable gap permanent.
+  const stamp = (res) => {
+    try {
+      const p = path.join(entriesRoot(userData), entryName, 'meta.json');
+      const m = JSON.parse(fs.readFileSync(p, 'utf8'));
+      m.customization = {
+        customized: res.customized, tracksOnly: !!res.tracksOnly,
+        added: res.added, removed: res.removed, changed: res.changed,
+        forHash: m.contentHash || null, srcUuid: m.sourceUuid || null,
+        at: new Date().toISOString(),
+      };
+      fs.writeFileSync(p, JSON.stringify(m, null, 2));
+    } catch {}
+    return res;
+  };
+
+  // ⚠️ readFileHashManifest is required LOCALLY here. It is pulled in inside other
+  // functions in this file rather than at module scope, so it is not in scope by
+  // default — assuming it was is the kind of thing that parses fine and throws live.
+  const { readFileHashManifest } = require('./soundFontFileHash');
+  // ⚠️ FRESHNESS FIRST, or this answers from a stale manifest. Editing an entry's
+  // files marks it dirty and leaves the manifest behind until something recomputes;
+  // reading it blind meant the marker only caught up on the NEXT open, which is
+  // exactly what showed up after deleting a file (2026-09-03). Same guard the
+  // content-hash comparison in this file already uses: recompute when dirty, then
+  // trust the manifest ONLY if its hash still matches the meta's.
+  if (meta.contentHashDirty || !meta.contentHash) {
+    try { recomputeEntryContentHash(userData, entryName); } catch {}
+    try { meta = JSON.parse(fs.readFileSync(path.join(entriesRoot(userData), entryName, 'meta.json'), 'utf8')); }
+    catch { return unknown; }
+    if (!meta || !meta.entryUuid) return unknown;
+  }
+  const em = readFileHashManifest(fileHashManifestPath(userData, 'entries', meta.entryUuid));
+  if (!em || !Array.isArray(em.records)) return unknown;
+  // A manifest that no longer describes the entry is not evidence of anything.
+  if (em.contentHash && meta.contentHash && em.contentHash !== meta.contentHash) return unknown;
+  // Two locations, same order the source layer uses: the breadcrumb kept beside the
+  // archive first, then the central store. (soundFontSources._loadSourceBreadcrumb
+  // does exactly this and is private, so the order is mirrored rather than called.)
+  const sDir = path.join(userData, 'soundFonts', 'sources', meta.sourceUuid);
+  const sm = readFileHashManifest(path.join(sDir, '.jmt-source-manifest.json'))
+    || readFileHashManifest(fileHashManifestPath(userData, 'sources', meta.sourceUuid));
+  if (!sm || !Array.isArray(sm.records)) return unknown;
+
+  const cp = String(meta.candidatePath || '');
+  const pfx = cp ? cp + '/' : '';
+  const src = new Map();
+  for (const r of sm.records) {
+    const rp = String(r.relPath || '');
+    if (pfx && !rp.startsWith(pfx)) continue;
+    src.set(rp.slice(pfx.length), r.fileHash);
+  }
+  // No records under that path at all: the manifest predates this source's shape, or
+  // the candidate is not a plain subtree. Cannot tell.
+  if (src.size === 0) return unknown;
+
+  const lib = new Map(em.records.map(r => [String(r.relPath || ''), r.fileHash]));
+  // ⭐ TRACKS ARE THEIR OWN STATE, not an exclusion (2026-09-03:
+  // "Customized (tracks only)"). Measured on a real library the day this was built:
+  // 50 of 220 entries differ from their source, and 31 of those differ ONLY by
+  // tracks/ — music added through the shared-tracks feature rather than by editing
+  // font files. Folding them in makes the marker common and therefore ignorable;
+  // dropping them hides a real difference that an export still has to carry. So it
+  // reports WHICH, and the label says which.
+  const isTrack = (k) => k === 'tracks' || k.startsWith('tracks/');
+  let added = 0, removed = 0, changed = 0, nonTrack = 0;
+  for (const [k, h] of lib) {
+    if (!src.has(k)) { added++; if (!isTrack(k)) nonTrack++; }
+    else if (src.get(k) !== h) { changed++; if (!isTrack(k)) nonTrack++; }
+  }
+  for (const k of src.keys()) if (!lib.has(k)) { removed++; if (!isTrack(k)) nonTrack++; }
+  const customized = (added + removed + changed) > 0;
+  return stamp({
+    ok: true, known: true, customized, added, removed, changed,
+    // Only meaningful when customized. True = every difference is in tracks/.
+    tracksOnly: customized && nonTrack === 0,
+  });
+}
+
 function getEntryContentHash(userData, entryName) {
   const root = entriesRoot(userData);
   const entryDir = path.join(root, entryName);
@@ -1405,6 +1592,7 @@ module.exports = {
   migrateSourceLevelFields,
   recomputeEntryContentHash,
   getEntryContentHash,
+  getEntryCustomization,
   markEntryContentDirty,
   markEntrySeen,
   backfillSeenAt,
