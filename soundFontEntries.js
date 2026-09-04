@@ -540,6 +540,13 @@ async function duplicateEntry({ userData, sourceName, newName, mode = 'current' 
       meta.createdAt = now;
       meta.updatedAt = now;
       meta.addedFromSource = [];
+      // seenAt is LIVED EXPERIENCE, not provenance, so it does not come across.
+      // The spread above copies the whole source meta, and inheriting a seen
+      // stamp made a brand-new duplicate permanently un-NEW: the badge means
+      // "never opened and never used", and nobody has opened THIS one. Dropped
+      // here beside the other per-entry fields rather than in the caller,
+      // because every caller of a duplicate wants the same answer. [B-312]
+      delete meta.seenAt;
       // Drop the source's stamped hash — content matches now, but
       // recomputing keeps fileCount/totalBytes/contentHashedAt accurate
       // for this duplicate.
