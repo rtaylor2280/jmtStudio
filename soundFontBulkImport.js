@@ -829,7 +829,7 @@ async function importPlannedSource({ userData, src, fromSdCard }, onSubProgress)
   let importRes;
   if (src._prepared && src._prepared.uuid) {
     // COMMIT path: this source was already staged by the analyze phase
-    // (importSource prepareOnly) — its tree is on disk, hashed and dedup-cleared.
+    // (importSource prepareOnly) — its zip is on disk, hashed and dedup-cleared.
     // Finalize just writes meta; NO re-hash (this is what makes quick import fast).
     importRes = await soundFontSources.finalizePreparedSource({
       userData,
@@ -838,10 +838,6 @@ async function importPlannedSource({ userData, src, fromSdCard }, onSubProgress)
       name: src._prepared.name || originalName,
       hash: src._prepared.hash,
       fileSize: src._prepared.fileSize,
-      // [B-309] carried through so a bulk-imported source records its origin
-      // archive the same way a single import does.
-      archiveHash: src._prepared.archiveHash,
-      archiveSize: src._prepared.archiveSize,
       sourceFileDate: src._prepared.sourceFileDate,
       sourceFileMtimeMs: src._prepared.sourceFileMtimeMs,
       metadata: {},

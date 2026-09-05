@@ -241,178 +241,6 @@ async function zipFolderToFile(srcDir, destZipPath, onProgress, stripCorruptWavs
   return { hash: hasher.digest('hex'), totalBytes, fileCount, strippedFiles };
 }
 
-// ── STORING A SOURCE EXTRACTED RATHER THAN ZIPPED ([B-309]) ────────────────
-// Two writers, one contract. Both land a source's content as a real tree under
-// the uuid dir and return the same shape zipFolderToFile returns, so the import
-// path can swap which one it calls without any caller learning the difference:
-//     { hash, totalBytes, fileCount, strippedFiles }
-//
-// ⭐ THE IDENTITY HASH IS THE MANIFEST AGGREGATE, not a hash of any container.
-// hashRecords folds sorted relPath + size + per-file sha256, so it is stable
-// across machines and carries no mtimes or permissions - which is what
-// zipFolderToFile's three determinism rules were manufacturing by hand. The
-// walk that produces it is the same walk that produces the source manifest, so
-// identity and manifest come out of one pass instead of two.
-//
-// ⭐⭐ AND IT MAKES THE TWO ROUTES CONVERGE, which is a capability we did not
-// have: the same font imported as a folder and as a zip now hashes IDENTICALLY,
-// because the hash describes the CONTENT rather than the container. Today those
-// are two different numbers and the second import is not recognised as a
-// duplicate at all.
-// ⚠️ The picked zip's own sha256 does not disappear - it becomes
-// originArchiveHash, which findByProvenance already matches against. Both
-// statements stay true: this is the same content, and this is not the same file.
-// ⚠️ ALL THREE FIGURES COME FROM ONE WALK OF THE FINISHED TREE, never from
-// counters accumulated as we write. Extraction expands inner archives and then
-// DELETES them, so a running total counts an archive once and its contents
-// again - it reported 11 files for a tree holding 9, and that number is stored
-// on the source and read back as fact. Deriving from what is actually on disk
-// removes the whole class rather than correcting one sum. (Found by test,
-// 2026-09-04.)
-function _treeStats(dirPath) {
-  const fh = require('./soundFontFileHash');
-  const records = fh.collectFileRecords(dirPath) || [];
-  let totalBytes = 0;
-  for (const r of records) totalBytes += (r.size || 0);
-  return { hash: fh.hashRecords(records), fileCount: records.length, totalBytes, records };
-}
-
-// Extract every file of a zip into destDir, minus filesystem noise.
-// ⚠️ NO stripCorruptWavs PARAMETER, DELIBERATELY. The strip exists because
-// reading a scrambled wav off a bad SD sector can stall the pass, and it is
-// only ever passed on the folder route for exactly that reason. A zip is a
-// local file that reads fine, so adding it here would be inventing a case that
-// does not occur and paying a header read on every clean import.
-//
-// ⭐⭐ IT RECURSES, AND THAT IS WHAT RETIRES `nested` ([B-309] slice 2). A vendor
-// who ships Proffie.zip and CFX.zip inside their bundle used to give us a
-// candidate we could not look inside: the detector emits `nested: true`, the
-// customization diff answers "unknowable", and the font can never say whether
-// the user changed it. Measured on the real library: 35 entries, 0.90 GB, all
-// permanently unanswerable.
-// Extracting inner archives at import makes that class disappear WITHOUT
-// touching the detector - it stops emitting nested candidates because by the
-// time it runs there are no .zip files left to defer on. One change, and the
-// concept retires rather than being special-cased everywhere it is read.
-const INNER_ZIP_MAX_DEPTH = 4;
-
-async function extractZipToDir(zipPath, destDir, onProgress, _depth = 0) {
-  const zip = _openZip(zipPath);
-  try {
-    const entries = (await _readAllZipEntries(zip))
-      .filter(e => !e.isDir && !_isNoisePath(e.fileName));
-    const totalBytes = entries.reduce((s, e) => s + (e.size || 0), 0);
-    let bytesProcessed = 0, fileCount = 0;
-    fs.mkdirSync(destDir, { recursive: true });
-    for (const e of entries) {
-      const rel = e.fileName;
-      const abs = path.join(destDir, rel);
-      fs.mkdirSync(path.dirname(abs), { recursive: true });
-      const buf = await _readZipEntryToBuffer(zip, e);
-      fs.writeFileSync(abs, buf);
-      bytesProcessed += buf.length;
-      fileCount++;
-      if (onProgress) onProgress({ bytesProcessed, totalBytes, currentFile: rel });
-    }
-    try { await zip.close(); } catch {}
-    const inner = await _expandInnerZips(destDir, onProgress, _depth + 1);
-    const stats = _treeStats(destDir);
-    return {
-      hash: stats.hash,
-      totalBytes: stats.totalBytes,
-      fileCount: stats.fileCount,
-      strippedFiles: [],
-      innerZipsExpanded: inner.expanded,
-      innerZipsLeft: inner.left,
-    };
-  } finally {
-    try { await zip.close(); } catch {}
-  }
-}
-
-// Expand any .zip files sitting inside an already-extracted tree, replacing each
-// with a folder of the same name, and repeat until none are left. [B-309]
-//
-// ⭐ THIS IS WHAT RETIRES `nested`. detectCandidates emits a deferred candidate
-// whenever it meets a .zip it cannot look inside; run this first and it never
-// meets one, so the whole unknowable class stops being produced. The detector is
-// not touched.
-//
-// ⚠️ A ZIP WHOSE FOLDER NAME IS ALREADY TAKEN IS LEFT ALONE, not merged. A vendor
-// shipping both Proffie/ and Proffie.zip is telling us something we cannot read,
-// and merging one over the other would silently pick a winner between two things
-// that may differ. Leaving it costs only that the old deferred-candidate
-// behaviour survives for that source - the honest outcome - and `left` reports it
-// so the case stops being hypothetical if it ever shows up.
-//
-// ⚠️ DEPTH-CAPPED, AND THE COUNTER IS THREADED THROUGH THE RECURSION rather than
-// held in a loop here. This function and extractZipToDir call each other, so a
-// cap owned locally would be reset at every level and bound nothing at all - a
-// chain of archives would descend until the stack gave out. `depth` is passed in
-// and passed on; four levels is far past anything a font bundle has ever used,
-// and hitting the cap leaves the remaining archives in place rather than failing
-// the import.
-async function _expandInnerZips(rootDir, onProgress, depth) {
-  const expanded = [], left = [];
-  const zips = walkFolderSorted(rootDir)
-    .filter(f => /\.zip$/i.test(f.relPath) && !_isNoisePath(f.relPath));
-  if (!zips.length) return { expanded, left };
-  if (depth >= INNER_ZIP_MAX_DEPTH) {
-    return { expanded, left: zips.map(z => z.relPath) };
-  }
-  for (const z of zips) {
-    const targetRel = z.relPath.replace(/\.zip$/i, '');
-    const targetAbs = path.join(rootDir, targetRel);
-    if (fs.existsSync(targetAbs)) { left.push(z.relPath); continue; }
-    // Each nested extract expands its OWN inner archives on the way back up, so
-    // one pass here is enough - no loop, and no chance of re-walking a tree we
-    // just changed.
-    const nested = await extractZipToDir(z.absPath, targetAbs, onProgress
-      ? (p) => onProgress({ ...p, currentFile: `${targetRel}/${p.currentFile}` })
-      : null, depth);
-    fs.rmSync(z.absPath, { force: true });
-    expanded.push(z.relPath, ...(nested.innerZipsExpanded || []).map(r => `${targetRel}/${r}`));
-    left.push(...(nested.innerZipsLeft || []).map(r => `${targetRel}/${r}`));
-  }
-  // No counters returned, deliberately: the caller derives every figure from the
-  // finished tree, so a total kept here could only ever disagree with it.
-  return { expanded, left };
-}
-
-// Copy a picked folder into destDir, minus filesystem noise.
-// stripCorruptWavs keeps its meaning and its timing from zipFolderToFile: the
-// header check runs BEFORE the file is copied, so a scrambled wav on a failing
-// card is never read in full. That is the whole point of it - moving the check
-// after the copy would reintroduce the stall it exists to avoid.
-async function copyFolderToDir(srcDir, destDir, onProgress, stripCorruptWavs) {
-  let files = walkFolderSorted(srcDir).filter(f => !_isNoisePath(f.relPath));
-  const strippedFiles = [];
-  if (stripCorruptWavs) {
-    const { checkWavHealth } = require('./sdCardDetect');
-    files = files.filter(f => {
-      if (!/\.wav$/i.test(f.relPath)) return true;
-      const h = checkWavHealth(f.absPath, f.size);
-      if (h && h.corrupt) { strippedFiles.push({ relPath: f.relPath, reason: h.reason }); return false; }
-      return true;
-    });
-  }
-  const totalBytes = files.reduce((s, f) => s + f.size, 0);
-  let bytesProcessed = 0, fileCount = 0;
-  fs.mkdirSync(destDir, { recursive: true });
-  for (const f of files) {
-    const abs = path.join(destDir, f.relPath);
-    fs.mkdirSync(path.dirname(abs), { recursive: true });
-    fs.copyFileSync(f.absPath, abs);
-    bytesProcessed += f.size;
-    fileCount++;
-    if (onProgress) onProgress({ bytesProcessed, totalBytes, currentFile: f.relPath });
-  }
-  // Derived from the finished tree, same as the zip route, so the two can never
-  // drift apart in how they describe what they stored.
-  const stats = _treeStats(destDir);
-  return { hash: stats.hash, totalBytes: stats.totalBytes, fileCount: stats.fileCount, strippedFiles };
-}
-
 // Walk a folder tree, return an array of {relPath, absPath, size} sorted
 // deterministically by forward-slash relative path. Used by both the hash
 // pass and the import-copy pass so they see the same files in the same order.
@@ -814,17 +642,14 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
     return { ok: false, error: 'Source must be a folder or a .zip file' };
   }
 
-  // ── [B-309] EVERY SOURCE IS STORED EXTRACTED ───────────────────────────────
-  // Whatever the user picked, what we keep is a plain tree under uuid/source/,
-  // so `format` is 'folder' on both routes — it describes the STORED shape, not
-  // the delivered one. originalName still preserves what was picked, so the
-  // user-facing label stays honest about where it came from.
-  //
-  // This inverts the old rule (folder-picked sources were zipped on import).
-  // The measurement that decided it: .wav compresses 8.8%, not the 67% I first
-  // reported — so the archive was buying almost nothing while costing a decode
-  // on every read. Extracting costs 1.19 GB and reclaims 5.72 GB.
-  const format = 'folder';
+  // Folder-picked sources get zip-transformed on import (see
+  // zipFolderToFile above for the why). format flips to 'zip' even
+  // when the user picked a folder, so the rest of the source layer
+  // (openSource, listSourceFiles, browse paths) treats it uniformly
+  // as a zip source for the rest of its lifetime. originalName still
+  // preserves the folder basename so the user-facing label is honest
+  // about what they imported.
+  const format = 'zip';
   const name = originalName || path.basename(sourcePath);
 
   const emit = (stage, payload) => {
@@ -909,34 +734,32 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
   let totalBytes = 0;
   let fileCount = 0;
   let strippedFiles = []; // damaged wavs dropped when stripCorrupt is set (folder imports)
-  // The sha256 of the .zip the user picked. It is no longer the source's
-  // identity — that is now the content hash — but it is still the answer to
-  // "have I picked this exact file before", so it is kept and stored.
-  let archiveHash = null;
-  let archiveSize = 0;
 
-  // Zip-format input: hash the ARCHIVE first, because it is a single file we can
-  // stream in place, and a re-pick of the identical file can then short-circuit
-  // before we write anything. The content hash cannot do that job — it does not
-  // exist until the archive is extracted.
+  // Zip-format input: hash THEN dedup THEN copy, like before. Dedup
+  // can short-circuit cleanly before we write anything because the
+  // input is already a single file we can stream-hash in place.
   if (isZip) {
     if (knownHash && forceNewSource) {
       // Duplicate-prompt hand-off: the initial scan already hashed this exact
       // file seconds ago and the user chose "import again as a new source" —
       // reuse that hash instead of re-reading the whole archive. Only honored
       // with forceNewSource (the dedup-check path must always hash fresh).
-      archiveHash = knownHash;
-      archiveSize = stat.size;
+      hash = knownHash;
+      fileSize = stat.size;
+      totalBytes = stat.size;
+      fileCount = 1;
     } else {
     try {
-      archiveHash = await hashZipFile(sourcePath, ({ bytesHashed, totalBytes: tb }) => {
+      hash = await hashZipFile(sourcePath, ({ bytesHashed, totalBytes: tb }) => {
         emit('hashing', {
           percent: tb > 0 ? Math.floor((bytesHashed / tb) * 100) : 0,
           bytes: bytesHashed,
           totalBytes: tb,
         });
       });
-      archiveSize = stat.size;
+      fileSize = stat.size;
+      totalBytes = stat.size;
+      fileCount = 1;
     } catch (err) {
       return { ok: false, error: `Hash failed: ${err.message}` };
     }
@@ -945,15 +768,12 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
       // Archive-bytes match first: an identical FILE re-picked. Then the
       // provenance claim, which catches the case bytes never can - exporting a
       // source, not deleting it, and importing the export back. ([B-283])
-      // ⚠️ findByHash matches meta.hash OR meta.originArchiveHash, so this still
-      // recognises an archive we once picked even though what we now store under
-      // `hash` is the extracted content rather than those bytes.
-      const existing = findByHash(userData, archiveHash)
+      const existing = findByHash(userData, hash)
         || findByProvenance(userData, curation && curation.provenance);
       if (existing) {
         emit('done', { isDuplicate: true });
         _dropCurationTmp();
-        return { ok: true, isDuplicate: true, uuid: existing.uuid, hash: archiveHash, format };
+        return { ok: true, isDuplicate: true, uuid: existing.uuid, hash, format };
       }
     }
   }
@@ -965,58 +785,60 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
   try {
     fs.mkdirSync(uuidDir, { recursive: true });
 
-    // ── ONE STORAGE SHAPE, TWO INPUTS ([B-309]) ──────────────────────────────
-    // Both routes land the same tree at uuid/source/ and both get their identity
-    // from its CONTENT, so the same font delivered as a zip and as a folder now
-    // hashes identically — the second one is recognised as a duplicate, which it
-    // never was before. The container stops being part of what the font IS.
-    const destDir = path.join(uuidDir, 'source');
-    emit('copying', { percent: 0 });
-    const onCopy = ({ bytesProcessed, totalBytes: tb, currentFile }) => {
-      emit('copying', {
-        percent: tb > 0 ? Math.floor((bytesProcessed / tb) * 100) : 0,
-        bytes: bytesProcessed,
-        totalBytes: tb,
-        currentFile,
+    if (isZip) {
+      const destZip = path.join(uuidDir, 'source.zip');
+      emit('copying', { percent: 0, totalBytes });
+      await copyFileStreamed(sourcePath, destZip, ({ bytesCopied, totalBytes: tb }) => {
+        emit('copying', {
+          percent: tb > 0 ? Math.floor((bytesCopied / tb) * 100) : 0,
+          bytes: bytesCopied,
+          totalBytes: tb,
+        });
       });
-    };
-    // stripCorrupt is deliberately folder-only: it exists so a scrambled wav on
-    // a failing card is never read in full, and a local .zip reads fine.
-    const result = isZip
-      ? await extractZipToDir(sourcePath, destDir, onCopy)
-      : await copyFolderToDir(sourcePath, destDir, onCopy, stripCorrupt);
-    hash = result.hash;
-    totalBytes = result.totalBytes;
-    fileCount = result.fileCount;
-    strippedFiles = result.strippedFiles || [];
-    // What we actually hold on disk, which is now the extracted tree rather than
-    // an archive. The picked archive's own size survives as originArchiveSize.
-    fileSize = totalBytes;
-
-    // ⚠️ CONTENT DEDUP RUNS AFTER THE WRITE, ON BOTH ROUTES NOW, because the
-    // content hash does not exist until the tree is on disk. The zip route's
-    // cheap pre-check above already caught the identical-file case; this catches
-    // the same CONTENT arriving in a different container.
-    if (!forceNewSource) {
-      const existing = findByHash(userData, hash);
-      if (existing) {
-        // The finished tree is already here, so KEEP it staged rather than
-        // deleting work we would immediately redo: "import again as a new
-        // source" finalizes it directly with no second extract; keep/cancel
-        // discard it. The orphan sweep reclaims a crashed straggler.
-        try { fs.writeFileSync(path.join(uuidDir, '.preparing'), ''); } catch {}
-        let sfd = null, sfm = null;
-        try {
-          if (inputMtimeMs > 0) {
-            sfd = new Date(inputMtimeMs).toISOString().slice(0, 10);
-            sfm = inputMtimeMs;
-          }
-        } catch {}
-        emit('done', { isDuplicate: true });
-        _dropCurationTmp();
-        return { ok: true, isDuplicate: true, uuid: existing.uuid, hash, format,
-          staged: { uuid, format, name, hash, fileSize, archiveHash, archiveSize,
-                    sourceFileDate: sfd, sourceFileMtimeMs: sfm } };
+    } else {
+      // Folder-format input: zip directly into the uuid dir in one pass.
+      // The hash is the sha256 of the produced zip's bytes (tapped via
+      // a Transform between archiver and the file write stream). Dedup
+      // happens AFTER the write rather than before because the hash
+      // doesn't exist until the zip pass completes; on a dup hit we
+      // clean up the just-written zip via cleanupPartialSource below.
+      // Same total I/O as the old two-walk shape (one pass instead of
+      // two) so there's no extra cost paid for the post-write dedup.
+      const destZip = path.join(uuidDir, 'source.zip');
+      const result = await zipFolderToFile(sourcePath, destZip, ({ bytesProcessed, totalBytes: tb, currentFile }) => {
+        emit('hashing', {
+          percent: tb > 0 ? Math.floor((bytesProcessed / tb) * 100) : 0,
+          bytes: bytesProcessed,
+          totalBytes: tb,
+          currentFile,
+        });
+      }, stripCorrupt);
+      hash = result.hash;
+      totalBytes = result.totalBytes;
+      fileCount = result.fileCount;
+      strippedFiles = result.strippedFiles || [];
+      fileSize = fs.statSync(destZip).size;
+      if (!forceNewSource) {
+        const existing = findByHash(userData, hash);
+        if (existing) {
+          // Duplicate — but for folders the hash IS the zip-transform, so the
+          // finished archive already exists. KEEP it as a staged source (the
+          // folder analog of the zip path's knownHash hand-off): "import again
+          // as a new source" finalizes it directly with no re-zip; keep/cancel
+          // discard it. The orphan sweep reclaims a crashed straggler after 6h.
+          try { fs.writeFileSync(path.join(uuidDir, '.preparing'), ''); } catch {}
+          let sfd = null, sfm = null;
+          try {
+            if (inputMtimeMs > 0) {
+              sfd = new Date(inputMtimeMs).toISOString().slice(0, 10);
+              sfm = inputMtimeMs;
+            }
+          } catch {}
+          emit('done', { isDuplicate: true });
+          _dropCurationTmp();
+          return { ok: true, isDuplicate: true, uuid: existing.uuid, hash, format,
+            staged: { uuid, format, name, hash, fileSize, sourceFileDate: sfd, sourceFileMtimeMs: sfm } };
+        }
       }
     }
 
@@ -1037,7 +859,7 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
     // prepareOnly (the "analyze" half of bulk import): the zip is written, hashed,
     // and dedup-checked — but we DON'T write meta or create the entry yet. The
     // caller shows real stats, lets the user prune/edit, then calls
-    // finalizePreparedSource to commit (no re-extract — the tree is already here).
+    // finalizePreparedSource to commit (no re-hash — the zip is already here).
     if (prepareOnly) {
       // Mark as in-flight so a sibling prepare/import doesn't sweep this staged
       // zip as an orphan before we finalize it.
@@ -1046,10 +868,10 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
       // Curation travels with the prepared source rather than being applied
       // now: the meta this belongs on does not exist until finalize. The temp
       // dir holding the receipts stays alive until then, and finalize removes it.
-      return { ok: true, isDuplicate: false, prepared: true, uuid, uuidDir, hash, format, name, fileSize, archiveHash, archiveSize, sourceFileDate, sourceFileMtimeMs, totalBytes, fileCount, strippedFiles, curation, curationTmp, curationPayloadDir };
+      return { ok: true, isDuplicate: false, prepared: true, uuid, uuidDir, hash, format, name, fileSize, sourceFileDate, sourceFileMtimeMs, totalBytes, fileCount, strippedFiles, curation, curationTmp, curationPayloadDir };
     }
 
-    const res = await _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format, name, hash, fileSize, archiveHash, archiveSize, sourceFileDate, sourceFileMtimeMs, metadata, strippedFiles, curation, curationPayloadDir });
+    const res = await _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format, name, hash, fileSize, sourceFileDate, sourceFileMtimeMs, metadata, strippedFiles, curation, curationPayloadDir });
     emit('done', { isDuplicate: false });
     _dropCurationTmp();
     // ⚠️ THE PAYLOAD ITSELF GOES BACK TO THE CALLER, not just a count of what was
@@ -1068,7 +890,7 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
 // Shared meta writer + candidate-cache warm. Used by importSource's finalize
 // path AND finalizePreparedSource (the deferred commit of a prepareOnly source),
 // so the written meta is identical whichever way a source is committed.
-async function _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format, name, hash, fileSize, archiveHash, archiveSize, sourceFileDate, sourceFileMtimeMs, metadata, strippedFiles, curation, curationPayloadDir }) {
+async function _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format, name, hash, fileSize, sourceFileDate, sourceFileMtimeMs, metadata, strippedFiles, curation, curationPayloadDir }) {
   const meta = {
     schemaVersion: 1,
     uuid,
@@ -1084,18 +906,6 @@ async function _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format, name,
     importedAt: new Date().toISOString(),
     userNotes: (metadata && metadata.userNotes) || '',
     fileSize,
-    // ── [B-309] THE PICKED ARCHIVE'S OWN IDENTITY ────────────────────────────
-    // `hash` is now the CONTENT, so the bytes of the .zip the user handed us
-    // would otherwise be lost — and with them the ability to answer "have I
-    // picked this exact file before". findByHash already matches this field,
-    // which is why re-picking a vendor zip is still recognised.
-    // ⚠️ Set on EVERY zip import, not only on restores. It used to be written
-    // by the provenance-restore block alone, so an ordinary import had no record
-    // of the file it came from. A restore still overrides it below, and should:
-    // the sidecar knows the VENDOR's original archive, which is the more useful
-    // of the two answers.
-    ...(archiveHash ? { originArchiveHash: archiveHash } : {}),
-    ...(archiveSize ? { originArchiveSize: archiveSize } : {}),
     readmePaths: [],
     // Provenance: damaged wavs that were removed on import (empty/absent when none).
     ...(strippedFiles && strippedFiles.length ? { strippedFiles } : {}),
@@ -1168,15 +978,15 @@ async function _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format, name,
 // uuid/source.zip is already on disk, hashed and dedup-cleared — this only writes
 // the meta and warms the cache. NO re-hash. The prepared fields come back from
 // the prepare result and pass straight through.
-async function finalizePreparedSource({ userData, uuid, format, name, hash, fileSize, archiveHash, archiveSize, sourceFileDate, sourceFileMtimeMs, metadata, curation, curationTmp, curationPayloadDir }) {
+async function finalizePreparedSource({ userData, uuid, format, name, hash, fileSize, sourceFileDate, sourceFileMtimeMs, metadata, curation, curationTmp, curationPayloadDir }) {
   if (!userData || !uuid) return { ok: false, error: 'Missing userData/uuid' };
   const uuidDir = path.join(sourcesRoot(userData), uuid);
-  if (!fs.existsSync(path.join(uuidDir, 'source'))) return { ok: false, error: 'Prepared source is missing its files' };
+  if (!fs.existsSync(path.join(uuidDir, 'source.zip'))) return { ok: false, error: 'Prepared source is missing its archive' };
   // No longer in-flight — clear the marker BEFORE stamping so it isn't hashed
   // into the source's content signature.
   try { fs.unlinkSync(path.join(uuidDir, '.preparing')); } catch {}
   try {
-    return await _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format: format || 'folder', name, hash, fileSize, archiveHash, archiveSize, sourceFileDate, sourceFileMtimeMs, metadata, curation, curationPayloadDir });
+    return await _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format: format || 'zip', name, hash, fileSize, sourceFileDate, sourceFileMtimeMs, metadata, curation, curationPayloadDir });
   } catch (err) {
     return { ok: false, error: `Finalize failed: ${err.message}` };
   } finally {
@@ -2833,11 +2643,6 @@ module.exports = {
   _virtualizeSource,
   isNoisePath: _isNoisePath,
   zipFolderToFile,
-  // [B-309] extracted-source storage writers. Exported now so they can be
-  // tested and swapped in on their own; importSource still calls
-  // zipFolderToFile until the flip.
-  extractZipToDir,
-  copyFolderToDir,
   walkFolderSorted,
   openSourceAtPath,
   hashZipFile,
