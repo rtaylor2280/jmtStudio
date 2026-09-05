@@ -216,7 +216,17 @@ async function _extractNestedZipToDir(source, innerZipPath, destDir, onProgress)
 // stored file count disagree with the figure the user was shown in the dialog
 // one click earlier. (It would also be overwritten by this entry's own meta
 // write moments later.)
-async function _copyFolderIntoDir(folderPath, destDir, onProgress) {
+// ⭐ CONTENT WE ALREADY HOLD IS LINKED, NOT COPIED ([B-315], 2026-09-05). This is
+// the recovery path — attaching the folders off a saber's SD card is how the
+// customized versions of a font come home — and every one of those folders is
+// mostly sounds the library already has. Copying them unconditionally landed a
+// full second copy of each. `contentIndex` is built once by the caller and
+// threaded through, so a whole folder costs one pass over the manifests.
+//
+// A file the library does NOT hold is still written here, into the entry. Where
+// sourceless content should live longer-term is [B-316] and is a separate call;
+// nothing about that changes the dedup property this gives us.
+async function _copyFolderIntoDir(folderPath, destDir, onProgress, contentIndex) {
   // Picking an ancestor of the destination would have the walk copying its own
   // output forever. Cheap to rule out, and impossible to recover from if not.
   const srcRes = path.resolve(folderPath);
@@ -224,7 +234,7 @@ async function _copyFolderIntoDir(folderPath, destDir, onProgress) {
   if (dstRes === srcRes || dstRes.startsWith(srcRes + path.sep)) {
     throw new Error('That folder contains the library, so it cannot be added to it');
   }
-  let fileCount = 0, totalBytes = 0;
+  let fileCount = 0, totalBytes = 0, linkedFiles = 0, linkedBytes = 0;
   const walk = (dir, relBase) => {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
       const rel = relBase ? `${relBase}/${e.name}` : e.name;
@@ -234,9 +244,21 @@ async function _copyFolderIntoDir(folderPath, destDir, onProgress) {
         walk(abs, rel);
       } else if (e.isFile()) {
         if (rel === 'meta.json') continue;
-        fs.copyFileSync(abs, path.join(destDir, rel));
+        const dest = path.join(destDir, rel);
         let size = 0;
         try { size = fs.statSync(abs).size; } catch {}
+        let linked = false;
+        if (contentIndex) {
+          const r = contentIndex.ingest({ srcAbs: abs, destAbs: dest });
+          // ingestFile only reports !ok when the COPY failed too, which is a
+          // real error; let the original copy raise it so the message is the
+          // one this path has always produced.
+          if (r.ok) linked = r.linked;
+          else fs.copyFileSync(abs, dest);
+        } else {
+          fs.copyFileSync(abs, dest);
+        }
+        if (linked) { linkedFiles++; linkedBytes += size; }
         fileCount++;
         totalBytes += size;
         if (onProgress) onProgress({ fileCount, totalBytes, currentFile: rel });
@@ -245,7 +267,7 @@ async function _copyFolderIntoDir(folderPath, destDir, onProgress) {
   };
   fs.mkdirSync(destDir, { recursive: true });
   walk(srcRes, '');
-  return { fileCount, totalBytes };
+  return { fileCount, totalBytes, linkedFiles, linkedBytes };
 }
 
 // createEntry({ userData, sourceUuid, candidate, name?, metadata?, onProgress?, folderSource? })
@@ -316,9 +338,12 @@ async function createEntry({ userData, sourceUuid, candidate, name, metadata, on
       // including its `nested` flag, and none of that describes where these
       // bytes live. Reading nested here would send a folder attach down the
       // inner-zip extractor.
+      // One index for the whole folder, built here so the manifests are read
+      // once rather than per file ([B-315]).
+      const contentIndex = require('./soundFontContentIndex').buildIndex(userData);
       result = await _copyFolderIntoDir(folderSource.folderPath, entryDir, (p) => {
         emit('extracting', p);
-      });
+      }, contentIndex);
     } else if (candidate.nested) {
       result = await _extractNestedZipToDir(source, candidate.path, entryDir, (p) => {
         emit('extracting', p);

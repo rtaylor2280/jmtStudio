@@ -109,7 +109,21 @@ async function setup() {
     check('the add succeeded', r && r.ok, JSON.stringify(r && r.failed));
     check('the entry has it', fs.existsSync(t.entFile('custom.wav')));
     check('⭐ the source does NOT', !fs.existsSync(t.srcFile('custom.wav')));
-    check('and it is its own file', fs.statSync(t.entFile('custom.wav')).nlink === 1);
+    // This asserted nlink === 1 until [B-316] gave added content a home of its
+    // own. An added file is now stored in the pool and the entry holds a link to
+    // it, so the count is 2 — the change the entry asked for, not a regression.
+    // What the old line was really protecting is that adding a file must never
+    // reach into the vendor's copy, and that is asserted directly below rather
+    // than through a count that only happened to imply it.
+    const added = fs.statSync(t.entFile('custom.wav'));
+    check('⭐ it shares nothing with the source bundle', (() => {
+      const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap(e =>
+        e.isDirectory() ? walk(path.join(dir, e.name)) : [path.join(dir, e.name)]);
+      return walk(path.join(S.sourcesRoot(t.userData), t.sourceUuid))
+        .every(p => fs.statSync(p).ino !== added.ino);
+    })());
+    check('and it has a home outside the font, so deleting the font cannot lose it',
+      added.nlink >= 2, `nlink=${added.nlink}`);
   }
 
   {

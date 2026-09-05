@@ -841,6 +841,9 @@ async function importPlannedSource({ userData, src, fromSdCard }, onSubProgress)
       sourceFileDate: src._prepared.sourceFileDate,
       sourceFileMtimeMs: src._prepared.sourceFileMtimeMs,
       metadata: {},
+      // Measured during the analyze phase's copy ([B-317]); it cannot be
+      // recomputed here, so it rides through to the commit that writes meta.
+      crossLinked: src._prepared.crossLinked,
       // The analyze phase already stripped the curation sidecar out of this
       // zip; this carries it to the commit that writes the meta it belongs on,
       // so a bulk import restores curation the same way a single one does.

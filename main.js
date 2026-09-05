@@ -3610,6 +3610,9 @@ ipcMain.handle('sources:finalizeStaged', async (_event, staged = {}) => {
       fileSize: staged.fileSize,
       sourceFileDate: staged.sourceFileDate,
       sourceFileMtimeMs: staged.sourceFileMtimeMs,
+      // What the staged tree shared with the library at store time ([B-317]).
+      // Measured during the copy, so it can only reach the meta by riding along.
+      crossLinked: staged.crossLinked,
       // Carried straight through from the prepare result — the staged zip was
       // already stripped, and this is the curation that came out of it. ([B-283])
       curation: staged.curation,

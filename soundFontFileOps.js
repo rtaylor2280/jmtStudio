@@ -509,6 +509,16 @@ function addFilesAt({ userData, kind, id, subPath, sourceFilePaths, destNames })
   const destRoot = path.resolve(_root(userData, kind, id));
   const added = [];
   const failed = [];
+  // ⭐ A FILE YOU ADD IS ONLY STORED IF IT IS NOVEL ([B-315] + [B-316], 2026-09-05).
+  // Every file here goes through the library-wide content index. Content we
+  // already hold anywhere — a vendor source, another font, the pool — becomes a
+  // second NAME for it. Content we have never seen is written to the pool and
+  // this location gets a pointer, so an added sound is a thing in the library
+  // rather than a property of whichever font first received it: there is one
+  // place to look for it, and it outlives the font that first used it.
+  const CI = require('./soundFontContentIndex');
+  const index = CI.buildIndex(userData);
+  let linkedFiles = 0, pooled = 0;
   for (let i = 0; i < sourceFilePaths.length; i++) {
     const src = sourceFilePaths[i];
     try {
@@ -519,7 +529,18 @@ function addFilesAt({ userData, kind, id, subPath, sourceFilePaths, destNames })
       const desiredName = (destNames && destNames[i]) || path.basename(src);
       const finalName = _proffieVariantName(destDir, desiredName);
       const destPath = path.join(destDir, finalName);
-      fs.copyFileSync(src, destPath);
+      // Give the content a home first. storeInPool returns what we already hold
+      // when we hold it, so nothing is written twice — then the name here is a
+      // link to that home. Any failure falls through to the plain copy, which is
+      // always correct and only larger.
+      const home = CI.storeInPool({ index, srcAbs: src, preferredName: desiredName });
+      let done = false;
+      if (home.ok) {
+        if (home.stored) pooled++;
+        const r = CI.ingestFile({ index, srcAbs: home.absPath, destAbs: destPath });
+        if (r.ok) { done = true; if (r.linked) linkedFiles++; }
+      }
+      if (!done) fs.copyFileSync(src, destPath);
       const rel = path.relative(destRoot, destPath).replace(/\\/g, '/');
       added.push(rel);
     } catch (err) {
@@ -527,7 +548,7 @@ function addFilesAt({ userData, kind, id, subPath, sourceFilePaths, destNames })
     }
   }
   if (added.length > 0) _markLocationDirty(userData, kind, id);
-  return { ok: true, added, failed };
+  return { ok: true, added, failed, linkedFiles, pooled };
 }
 
 module.exports = {

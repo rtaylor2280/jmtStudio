@@ -646,6 +646,75 @@ async function copyFolderRecursive(srcDir, destDir, onFile, opts) {
   }
 }
 
+// Link a freshly stored source's files to identical content the library already
+// holds, ACROSS sources ([B-317], 2026-09-05). Two vendors shipping the same wav,
+// or the same font bought twice under different names, were stored twice — §13
+// dedup only ever looked WITHIN one bundle. Measured on a 61-source library:
+// 317 MB / 15.3% beyond what within-source dedup reaches.
+//
+// `records` is the per-file list collectFileRecords just produced for the totals,
+// so the hashes are free and nothing is read twice.
+//
+// ⚠️ THIS RUNS AFTER EXTRACTION, NOT DURING IT, AND THAT IS A REAL DIFFERENCE.
+// The property we want is "identical content is never stored twice"; what this
+// gives is "…is never stored twice once the import finishes." Peak disk during
+// an import is still the whole bundle, and only then falls to the novel part.
+// The alternative is hashing inside _extractZipSubtree, which is shared with the
+// entry-extraction path — deliberately not touched for a transient overshoot.
+// Say the bound rather than calling the window harmless: on a 200 MB bundle that
+// is 80% recycled, peak is 200 MB and steady state is 40 MB.
+//
+// ⚠️ Sources are immutable, which is why cross-source sharing is safe: nothing
+// ever writes into one, so an inode shared between two vendors' bundles cannot
+// surprise either. Deleting one source drops its names; the other's names keep
+// the content alive.
+async function _linkAgainstLibrary(userData, destDir, records, onProgress) {
+  if (!userData || !Array.isArray(records) || !records.length) {
+    return { linkedFiles: 0, savedBytes: 0 };
+  }
+  let CI;
+  try { CI = require('./soundFontContentIndex'); } catch { return { linkedFiles: 0, savedBytes: 0 }; }
+  const index = CI.buildIndex(userData);
+  if (!index.byHash.size) return { linkedFiles: 0, savedBytes: 0 };
+
+  let linkedFiles = 0, savedBytes = 0, done = 0;
+  const total = records.length;
+  for (const r of records) {
+    done++;
+    if (!r || !r.fileHash || r.fileHash === '<empty>') continue;
+    if (_isCompositePath(r.relPath)) continue;
+    const abs = path.join(destDir, r.relPath.replace(/\//g, path.sep));
+    // findExisting re-hashes the candidate: the index narrows the search, it
+    // never authorises the link.
+    const existing = CI.findExisting(index, r.fileHash);
+    if (!existing) continue;
+    let st, existSt;
+    try { st = fs.statSync(abs); existSt = fs.statSync(existing); } catch { continue; }
+    // Already the same content by identity — nothing to do. Asking about inodes
+    // rather than "is this shared with anything" is the same correction
+    // _dedupeFolderSource had to make: our own files legitimately carry links.
+    if (st.ino === existSt.ino && st.dev === existSt.dev) continue;
+    // The file we are about to discard must be what the manifest says it is.
+    let actual = null;
+    try { actual = require('./soundFontFileHash').hashFile(abs); } catch {}
+    if (actual !== r.fileHash) continue;
+    const tmp = abs + '.xlink-tmp';
+    try {
+      try { fs.rmSync(tmp, { force: true }); } catch {}
+      fs.linkSync(existing, tmp);
+      fs.renameSync(tmp, abs);
+      linkedFiles++;
+      savedBytes += st.size || 0;
+    } catch {
+      try { fs.rmSync(tmp, { force: true }); } catch {}
+    }
+    if (onProgress && (done % 25 === 0 || done === total)) {
+      onProgress({ fileCount: done, totalFiles: total, currentFile: r.relPath });
+    }
+  }
+  return { linkedFiles, savedBytes };
+}
+
 // Best-effort cleanup of a partial source directory on import failure.
 function cleanupPartialSource(uuidDir) {
   try { fs.rmSync(uuidDir, { recursive: true, force: true }); }
@@ -780,6 +849,7 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
   // What inner-archive expansion did. Reported rather than assumed, so a bundle
   // that refused to expand is visible instead of quietly looking ordinary.
   let innerArchives = { expanded: [], left: [] };
+  let crossLinked = { linkedFiles: 0, savedBytes: 0 };
 
   // Zip-format input: hash THEN dedup THEN copy, like before. Dedup
   // can short-circuit cleanly before we write anything because the
@@ -861,6 +931,12 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
       totalBytes = recz.reduce((s, r) => s + (r.size || 0), 0);
       fileCount = recz.length;
       fileSize = totalBytes;
+      // ⚠️ THE TOTALS ABOVE STAY LOGICAL, deliberately, and are read before this
+      // runs. They describe the CONTENT of the bundle, which is what the user
+      // imported and what every downstream consumer means by its size. Linking
+      // changes what the bundle OCCUPIES, never what it holds.
+      crossLinked = await _linkAgainstLibrary(userData, destDir, recz,
+        (p) => emit('deduping', p));
     } else {
       // Folder input: copy the selected files straight in. The selection (noise
       // filtering, corrupt-wav stripping) is the same list zipFolderToFile uses.
@@ -894,6 +970,15 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
       totalBytes = recs.reduce((s, r) => s + (r.size || 0), 0);
       fileCount = recs.length;
       fileSize = totalBytes;
+      // ⚠️ AFTER the identity hash, and that ordering is load-bearing. `hash` is
+      // what this source IS, and it must describe the tree the user handed us —
+      // linking is a storage decision taken afterwards. Computing it the other
+      // way round would still produce the same digest today (a link does not
+      // change any file's content or path), but it would make re-import
+      // recognition depend on what else happened to be in the library at the
+      // time, which is not a property identity may have.
+      crossLinked = await _linkAgainstLibrary(userData, destDir, recs,
+        (p) => emit('deduping', p));
       if (!forceNewSource) {
         const existing = findByHash(userData, hash);
         if (existing) {
@@ -913,7 +998,7 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
           emit('done', { isDuplicate: true });
           _dropCurationTmp();
           return { ok: true, isDuplicate: true, uuid: existing.uuid, hash, format,
-            staged: { uuid, format, name, hash, fileSize, sourceFileDate: sfd, sourceFileMtimeMs: sfm } };
+            staged: { uuid, format, name, hash, fileSize, sourceFileDate: sfd, sourceFileMtimeMs: sfm, crossLinked } };
         }
       }
     }
@@ -944,10 +1029,10 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
       // Curation travels with the prepared source rather than being applied
       // now: the meta this belongs on does not exist until finalize. The temp
       // dir holding the receipts stays alive until then, and finalize removes it.
-      return { ok: true, isDuplicate: false, prepared: true, uuid, uuidDir, hash, format, name, fileSize, sourceFileDate, sourceFileMtimeMs, totalBytes, fileCount, strippedFiles, curation, curationTmp, curationPayloadDir };
+      return { ok: true, isDuplicate: false, prepared: true, uuid, uuidDir, hash, format, name, fileSize, sourceFileDate, sourceFileMtimeMs, totalBytes, fileCount, strippedFiles, crossLinked, curation, curationTmp, curationPayloadDir };
     }
 
-    const res = await _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format, name, hash, fileSize, sourceFileDate, sourceFileMtimeMs, metadata, strippedFiles, curation, curationPayloadDir });
+    const res = await _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format, name, hash, fileSize, sourceFileDate, sourceFileMtimeMs, metadata, strippedFiles, curation, curationPayloadDir, crossLinked });
     emit('done', { isDuplicate: false });
     _dropCurationTmp();
     // ⚠️ THE PAYLOAD ITSELF GOES BACK TO THE CALLER, not just a count of what was
@@ -955,7 +1040,7 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
     // review's empty fields were written straight over these values seconds after
     // they landed - so a curated re-import came back with almost nothing. Returning
     // only `curationApplied` was what forced the renderer to guess. ([B-283])
-    return { ...res, strippedFiles, curation: curation || null, curationApplied: res.curationApplied || null };
+    return { ...res, strippedFiles, crossLinked, curation: curation || null, curationApplied: res.curationApplied || null };
   } catch (err) {
     cleanupPartialSource(uuidDir);
     _dropCurationTmp();
@@ -966,7 +1051,7 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
 // Shared meta writer + candidate-cache warm. Used by importSource's finalize
 // path AND finalizePreparedSource (the deferred commit of a prepareOnly source),
 // so the written meta is identical whichever way a source is committed.
-async function _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format, name, hash, fileSize, sourceFileDate, sourceFileMtimeMs, metadata, strippedFiles, curation, curationPayloadDir }) {
+async function _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format, name, hash, fileSize, sourceFileDate, sourceFileMtimeMs, metadata, strippedFiles, curation, curationPayloadDir, crossLinked }) {
   const meta = {
     schemaVersion: 1,
     uuid,
@@ -990,6 +1075,11 @@ async function _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format, name,
     // screen having to carry it through. Source-level fields are applied
     // immediately, just below. ([B-283])
     ...(curation ? { curation } : {}),
+    // What this bundle shared with content the library already held ([B-317]).
+    // Written HERE rather than stamped afterwards so both doors to committing a
+    // source — the direct finalize and finalizePreparedSource — record it the
+    // same way, which is the reason this function exists.
+    ...(crossLinked && crossLinked.linkedFiles ? { crossLinkStats: crossLinked } : {}),
   };
   // ── Provenance restore ([B-283]) ────────────────────────────────────────
   // "It should be identical to what it was before I deleted." Two halves:
@@ -1054,7 +1144,7 @@ async function _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format, name,
 // uuid/source.zip is already on disk, hashed and dedup-cleared — this only writes
 // the meta and warms the cache. NO re-hash. The prepared fields come back from
 // the prepare result and pass straight through.
-async function finalizePreparedSource({ userData, uuid, format, name, hash, fileSize, sourceFileDate, sourceFileMtimeMs, metadata, curation, curationTmp, curationPayloadDir }) {
+async function finalizePreparedSource({ userData, uuid, format, name, hash, fileSize, sourceFileDate, sourceFileMtimeMs, metadata, curation, curationTmp, curationPayloadDir, crossLinked }) {
   if (!userData || !uuid) return { ok: false, error: 'Missing userData/uuid' };
   const uuidDir = path.join(sourcesRoot(userData), uuid);
   // A prepared source is a TREE now ([B-309]). Checked strictly rather than
@@ -1065,7 +1155,7 @@ async function finalizePreparedSource({ userData, uuid, format, name, hash, file
   // into the source's content signature.
   try { fs.unlinkSync(path.join(uuidDir, '.preparing')); } catch {}
   try {
-    return await _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format: format || 'zip', name, hash, fileSize, sourceFileDate, sourceFileMtimeMs, metadata, curation, curationPayloadDir });
+    return await _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format: format || 'zip', name, hash, fileSize, sourceFileDate, sourceFileMtimeMs, metadata, curation, curationPayloadDir, crossLinked });
   } catch (err) {
     return { ok: false, error: `Finalize failed: ${err.message}` };
   } finally {
