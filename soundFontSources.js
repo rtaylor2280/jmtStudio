@@ -132,18 +132,22 @@ async function copyFileStreamed(srcPath, destPath, onProgress) {
 // hash was an aggregate of per-file hashes, the new one is a hash of
 // the zip stream — different shape). Acceptable edge case for the
 // one-time format transition.
-async function zipFolderToFile(srcDir, destZipPath, onProgress, stripCorruptWavs) {
-  const archiver = require('archiver');
-  const { Transform } = require('stream');
-
+// Which files of a picked folder actually become the source, and which are dropped.
+//
+// Lifted out of zipFolderToFile unchanged so the storage step can choose what it
+// WRITES without re-deciding what it KEEPS ([B-309]). Two callers, one answer: a
+// second copy of this rule would be free to drift, and the drift would show up as
+// two imports of the same folder disagreeing about their own contents.
+//
+// When the user chose to import a font flagged as corrupt, the damaged wavs are
+// dropped BEFORE anything reads them in full. That salvages the good files — which
+// is what "import it anyway" is expected to mean — and, because the scrambled file
+// is never read through, removes the very read that can stall the pass on a failing
+// card. Header-only check, the SAME one that flagged the font, so a flagged file is
+// readable here and will not hang. Opt-in, so clean imports pay nothing and no
+// bad-sector header read happens unprompted.
+function _selectFolderFiles(srcDir, stripCorruptWavs) {
   let files = walkFolderSorted(srcDir).filter(f => !_isNoisePath(f.relPath));
-  // When the user chose to import a font flagged as corrupt, drop the damaged
-  // wavs BEFORE they reach the archive. This salvages the good files (which is
-  // what "import it anyway" is expected to mean) AND, because the scrambled
-  // file is never read/zipped, removes the very read that can stall the pass.
-  // Header-only check — the SAME one that flagged the font — so a flagged file
-  // is readable here and won't hang. Opt-in (corrupt fonts only) so clean
-  // imports pay nothing and no bad-sector header read is done unprompted.
   const strippedFiles = [];
   if (stripCorruptWavs) {
     const { checkWavHealth } = require('./sdCardDetect');
@@ -154,6 +158,14 @@ async function zipFolderToFile(srcDir, destZipPath, onProgress, stripCorruptWavs
       return true;
     });
   }
+  return { files, strippedFiles };
+}
+
+async function zipFolderToFile(srcDir, destZipPath, onProgress, stripCorruptWavs) {
+  const archiver = require('archiver');
+  const { Transform } = require('stream');
+
+  const { files, strippedFiles } = _selectFolderFiles(srcDir, stripCorruptWavs);
   const totalBytes = files.reduce((s, f) => s + f.size, 0);
   const fileCount = files.length;
 
@@ -590,7 +602,31 @@ function deleteSource(userData, uuid) {
 // noise (__MACOSX subtree, AppleDouble ._* files, .DS_Store, Thumbs.db,
 // desktop.ini) so library entries land clean even when the source folder
 // has metadata leftovers from a Mac or Windows copy.
-async function copyFolderRecursive(srcDir, destDir, onFile) {
+// `link: true` makes each destination file a HARDLINK to the source file rather
+// than a copy, which is what turns a library entry into a folder of pointers
+// ([B-309]). A hardlink is an equal NAME for the same content, not a reference to
+// another file, and that distinction is the whole design:
+//   - renaming the entry's name leaves the source's name alone
+//   - deleting the entry's name leaves the content alive under the source's name
+//   - deleting the SOURCE leaves the entry working, with the link count dropped
+//   - the bytes exist once and are freed when the last name goes
+// There is nothing to refcount and no in-use guard to write, because the
+// filesystem already does exactly that accounting. A symlink or a reference table
+// would need both.
+//
+// ⚠️ FALLS BACK TO COPYING, never fails. Hardlinks need the same volume and a
+// filesystem that supports them; an export to a USB stick satisfies neither. A
+// copy is always correct, just larger, so the fallback costs space and never
+// correctness.
+//
+// ⚠️ AND IT IS ONLY SAFE BECAUSE NOTHING WRITES CONTENT INTO AN EXISTING ENTRY
+// FILE. Every entry operation is a rename, an unlink, or a create-with-a-free-name
+// (_proffieVariantName). Writing through a shared name would reach into the
+// vendor's copy — see the invariant test in test/entry-pointers.test.js, which
+// exists so that stops being a thing we remember and starts being a thing that
+// fails.
+async function copyFolderRecursive(srcDir, destDir, onFile, opts) {
+  const link = !!(opts && opts.link);
   if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
   const entries = fs.readdirSync(srcDir, { withFileTypes: true });
   for (const e of entries) {
@@ -598,9 +634,13 @@ async function copyFolderRecursive(srcDir, destDir, onFile) {
     const srcPath = path.join(srcDir, e.name);
     const destPath = path.join(destDir, e.name);
     if (e.isDirectory()) {
-      await copyFolderRecursive(srcPath, destPath, onFile);
+      await copyFolderRecursive(srcPath, destPath, onFile, opts);
     } else if (e.isFile()) {
-      await fs.promises.copyFile(srcPath, destPath);
+      let linked = false;
+      if (link) {
+        try { fs.linkSync(srcPath, destPath); linked = true; } catch { linked = false; }
+      }
+      if (!linked) await fs.promises.copyFile(srcPath, destPath);
       if (onFile) onFile(srcPath);
     }
   }
@@ -649,7 +689,10 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
   // as a zip source for the rest of its lifetime. originalName still
   // preserves the folder basename so the user-facing label is honest
   // about what they imported.
-  const format = 'zip';
+  // ⭐ ONE FORMAT ([B-309]). A source is stored as a tree whichever way it arrived.
+  // The old value was 'zip' even for a folder pick, because a folder was zipped on
+  // the way in; that conversion is gone, so the label is simply true now.
+  const format = 'folder';
   const name = originalName || path.basename(sourcePath);
 
   const emit = (stage, payload) => {
@@ -785,39 +828,53 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
   try {
     fs.mkdirSync(uuidDir, { recursive: true });
 
+    // ── ONE STORAGE SHAPE: THE TREE ([B-309]) ────────────────────────────────
+    // Both inputs land at uuid/source/. What changed is only WHERE THE BYTES GO;
+    // identity, dedup, staging, curation and every consumer are untouched.
+    // ⚠️ IDENTITY IS DELIBERATELY NOT REDEFINED HERE. `hash` stays what it has
+    // always been: the identity of what ARRIVED. A picked archive is still
+    // identified by its own sha256 (already computed above, before anything was
+    // written), which is also what dedup relies on when it rewrites what we hold
+    // and leaves `hash` alone. Only the FOLDER route's hash had to change, and
+    // only because the zip it used to hash is no longer produced.
+    const destDir = path.join(uuidDir, 'source');
     if (isZip) {
-      const destZip = path.join(uuidDir, 'source.zip');
       emit('copying', { percent: 0, totalBytes });
-      await copyFileStreamed(sourcePath, destZip, ({ bytesCopied, totalBytes: tb }) => {
+      const result = await _extractZipSubtree(sourcePath, '', destDir, ({ fileCount: fc, totalBytes: tb, currentFile }) => {
         emit('copying', {
-          percent: tb > 0 ? Math.floor((bytesCopied / tb) * 100) : 0,
-          bytes: bytesCopied,
-          totalBytes: tb,
+          percent: totalBytes > 0 ? Math.floor((tb / totalBytes) * 100) : 0,
+          bytes: tb, totalBytes, currentFile,
         });
       });
-    } else {
-      // Folder-format input: zip directly into the uuid dir in one pass.
-      // The hash is the sha256 of the produced zip's bytes (tapped via
-      // a Transform between archiver and the file write stream). Dedup
-      // happens AFTER the write rather than before because the hash
-      // doesn't exist until the zip pass completes; on a dup hit we
-      // clean up the just-written zip via cleanupPartialSource below.
-      // Same total I/O as the old two-walk shape (one pass instead of
-      // two) so there's no extra cost paid for the post-write dedup.
-      const destZip = path.join(uuidDir, 'source.zip');
-      const result = await zipFolderToFile(sourcePath, destZip, ({ bytesProcessed, totalBytes: tb, currentFile }) => {
-        emit('hashing', {
-          percent: tb > 0 ? Math.floor((bytesProcessed / tb) * 100) : 0,
-          bytes: bytesProcessed,
-          totalBytes: tb,
-          currentFile,
-        });
-      }, stripCorrupt);
-      hash = result.hash;
       totalBytes = result.totalBytes;
       fileCount = result.fileCount;
-      strippedFiles = result.strippedFiles || [];
-      fileSize = fs.statSync(destZip).size;
+      fileSize = result.totalBytes;
+    } else {
+      // Folder input: copy the selected files straight in. The selection (noise
+      // filtering, corrupt-wav stripping) is the same list zipFolderToFile uses.
+      // ⚠️ The hash can only be taken AFTER the copy, because there is no
+      // container to hash on the way past — so the dedup check below stays where
+      // it is, after the write, exactly as the zip-transform needed it.
+      const sel = _selectFolderFiles(sourcePath, stripCorrupt);
+      strippedFiles = sel.strippedFiles;
+      fs.mkdirSync(destDir, { recursive: true });
+      let done = 0;
+      const selTotal = sel.files.reduce((s, f) => s + f.size, 0);
+      for (const f of sel.files) {
+        const abs = path.join(destDir, f.relPath.replace(/\//g, path.sep));
+        fs.mkdirSync(path.dirname(abs), { recursive: true });
+        fs.copyFileSync(f.absPath, abs);
+        done += f.size;
+        emit('hashing', {
+          percent: selTotal > 0 ? Math.floor((done / selTotal) * 100) : 0,
+          bytes: done, totalBytes: selTotal, currentFile: f.relPath,
+        });
+      }
+      const stats = require('./soundFontFileHash').collectFileRecords(destDir) || [];
+      hash = require('./soundFontFileHash').hashRecords(stats);
+      totalBytes = stats.reduce((s, r) => s + (r.size || 0), 0);
+      fileCount = stats.length;
+      fileSize = totalBytes;
       if (!forceNewSource) {
         const existing = findByHash(userData, hash);
         if (existing) {
@@ -981,7 +1038,10 @@ async function _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format, name,
 async function finalizePreparedSource({ userData, uuid, format, name, hash, fileSize, sourceFileDate, sourceFileMtimeMs, metadata, curation, curationTmp, curationPayloadDir }) {
   if (!userData || !uuid) return { ok: false, error: 'Missing userData/uuid' };
   const uuidDir = path.join(sourcesRoot(userData), uuid);
-  if (!fs.existsSync(path.join(uuidDir, 'source.zip'))) return { ok: false, error: 'Prepared source is missing its archive' };
+  // A prepared source is a TREE now ([B-309]). Checked strictly rather than
+  // permissively: accepting either shape here is how a mixed library would creep
+  // in, and there is deliberately no such state.
+  if (!fs.existsSync(path.join(uuidDir, 'source'))) return { ok: false, error: 'Prepared source is missing its files' };
   // No longer in-flight — clear the marker BEFORE stamping so it isn't hashed
   // into the source's content signature.
   try { fs.unlinkSync(path.join(uuidDir, '.preparing')); } catch {}
@@ -1295,46 +1355,7 @@ function _createZipSource({ uuid, uuidDir, meta }) {
     },
 
     async extractTo(subPath, destDir, onProgress) {
-      const norm = _normalizeSubPath(subPath);
-      const prefix = norm ? norm + '/' : '';
-      const zip = _openZip(zipPath);
-      try {
-        const entries = await _readAllZipEntries(zip);
-        const matching = entries.filter(e => {
-          if (norm && !e.fileName.startsWith(prefix) && e.fileName !== norm && e.fileName !== prefix) return false;
-          if (_isNoisePath(e.fileName)) return false;
-          return true;
-        });
-        if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
-        const destDirResolved = path.resolve(destDir);
-        let fileCount = 0;
-        let totalBytes = 0;
-        for (const entry of matching) {
-          const rel = norm ? entry.fileName.slice(prefix.length) : entry.fileName;
-          if (!rel) continue;
-          const destPath = path.join(destDir, rel.replace(/\//g, path.sep));
-          // Zip-slip guard: refuse any entry whose resolved destination
-          // escapes destDir (e.g. "../../etc/passwd"). node-stream-zip
-          // doesn't validate this for us, so we enforce it here.
-          const resolved = path.resolve(destPath);
-          if (resolved !== destDirResolved && !resolved.startsWith(destDirResolved + path.sep)) {
-            throw new Error(`Refused to extract outside destination: ${rel}`);
-          }
-          if (entry.isDir) {
-            if (!fs.existsSync(destPath)) fs.mkdirSync(destPath, { recursive: true });
-            continue;
-          }
-          const parent = path.dirname(destPath);
-          if (!fs.existsSync(parent)) fs.mkdirSync(parent, { recursive: true });
-          await _writeZipEntryToFile(zip, entry, destPath);
-          fileCount++;
-          totalBytes += entry.size || 0;
-          if (onProgress) onProgress({ fileCount, totalBytes, currentFile: rel });
-        }
-        return { fileCount, totalBytes };
-      } finally {
-        await zip.close();
-      }
+      return await _extractZipSubtree(zipPath, subPath, destDir, onProgress);
     },
 
     // Export the source. 'zip' (default) copies the on-disk archive exactly (it IS a zip
@@ -1376,6 +1397,59 @@ function _createZipSource({ uuid, uuidDir, meta }) {
       return { destPath, format: 'zip', fileCount: files.length, totalBytes, folders };
     },
   };
+}
+
+// Extract a subtree of a zip onto disk. `subPath` of '' means the whole archive.
+//
+// ⭐ ONE IMPLEMENTATION, TWO CALLERS ([B-309]). This is the body that used to live
+// inside _createZipSource.extractTo, lifted out unchanged so IMPORT can store a
+// picked archive as a tree using the very same code a stored source uses to pull a
+// candidate out of itself. The alternative — a second extractor written beside this
+// one for the import path — is exactly the mistake that cost a build today: a
+// parallel path drifts from the pipeline around it, and the drift is silent.
+// Everything the original did is load-bearing and stays: noise filtering, the
+// zip-slip guard, per-file progress, and the { fileCount, totalBytes } contract.
+async function _extractZipSubtree(zipPath, subPath, destDir, onProgress) {
+  const norm = _normalizeSubPath(subPath);
+  const prefix = norm ? norm + '/' : '';
+  const zip = _openZip(zipPath);
+  try {
+    const entries = await _readAllZipEntries(zip);
+    const matching = entries.filter(e => {
+      if (norm && !e.fileName.startsWith(prefix) && e.fileName !== norm && e.fileName !== prefix) return false;
+      if (_isNoisePath(e.fileName)) return false;
+      return true;
+    });
+    if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+    const destDirResolved = path.resolve(destDir);
+    let fileCount = 0;
+    let totalBytes = 0;
+    for (const entry of matching) {
+      const rel = norm ? entry.fileName.slice(prefix.length) : entry.fileName;
+      if (!rel) continue;
+      const destPath = path.join(destDir, rel.replace(/\//g, path.sep));
+      // Zip-slip guard: refuse any entry whose resolved destination
+      // escapes destDir (e.g. "../../etc/passwd"). node-stream-zip
+      // doesn't validate this for us, so we enforce it here.
+      const resolved = path.resolve(destPath);
+      if (resolved !== destDirResolved && !resolved.startsWith(destDirResolved + path.sep)) {
+        throw new Error(`Refused to extract outside destination: ${rel}`);
+      }
+      if (entry.isDir) {
+        if (!fs.existsSync(destPath)) fs.mkdirSync(destPath, { recursive: true });
+        continue;
+      }
+      const parent = path.dirname(destPath);
+      if (!fs.existsSync(parent)) fs.mkdirSync(parent, { recursive: true });
+      await _writeZipEntryToFile(zip, entry, destPath);
+      fileCount++;
+      totalBytes += entry.size || 0;
+      if (onProgress) onProgress({ fileCount, totalBytes, currentFile: rel });
+    }
+    return { fileCount, totalBytes };
+  } finally {
+    await zip.close();
+  }
 }
 
 function _createFolderSource({ uuid, uuidDir, meta }) {
@@ -1451,7 +1525,11 @@ function _createFolderSource({ uuid, uuidDir, meta }) {
       return await _resolveCompositeReadBytes({ readFile: _readFlat }, filePath);
     },
 
-    async extractTo(subPath, destDir, onProgress) {
+    // opts.link — hand back POINTERS instead of copies. Used when the destination
+    // is a library entry, which is a set of names over the source's files rather
+    // than a second copy of them. Export leaves it off: a folder the user carries
+    // away has to be independent files. ([B-309])
+    async extractTo(subPath, destDir, onProgress, opts) {
       const norm = _normalizeSubPath(subPath);
       const srcDir = norm ? path.join(folderRoot, norm) : folderRoot;
       if (!fs.existsSync(srcDir)) throw new Error(`Not found in source: ${norm}`);
@@ -1461,7 +1539,9 @@ function _createFolderSource({ uuid, uuidDir, meta }) {
       const stat = fs.statSync(srcDir);
       if (stat.isFile()) {
         const destPath = path.join(destDir, path.basename(srcDir));
-        await fs.promises.copyFile(srcDir, destPath);
+        let linked = false;
+        if (opts && opts.link) { try { fs.linkSync(srcDir, destPath); linked = true; } catch {} }
+        if (!linked) await fs.promises.copyFile(srcDir, destPath);
         fileCount = 1;
         totalBytes = stat.size;
         if (onProgress) onProgress({ fileCount, totalBytes, currentFile: path.basename(srcDir) });
@@ -1471,7 +1551,7 @@ function _createFolderSource({ uuid, uuidDir, meta }) {
         fileCount++;
         try { totalBytes += fs.statSync(srcFile).size; } catch {}
         if (onProgress) onProgress({ fileCount, totalBytes, currentFile: path.relative(srcDir, srcFile) });
-      });
+      }, opts);
       return { fileCount, totalBytes };
     },
 
@@ -1695,7 +1775,15 @@ function openSource(userData, uuid) {
   // consumer keeps seeing the complete multi-format bundle; only the bytes on disk are
   // deduped. Flag off (no meta.deduped, the case for every source today) → the physical
   // source is returned unchanged, so this is inert until dedup actually ships.
-  if (meta.deduped) {
+  // ⚠️ ONLY AN ARCHIVE NEEDS THE VIRTUAL VIEW ([B-309]). A deduped TREE has nothing
+  // to reconstruct — dedup there replaces duplicates with hardlinks, so every
+  // original path is still a real file that opens, reads and copies normally.
+  // Wrapping one costs work for nothing AND hides capability: the wrapper predates
+  // extractTo's `opts`, so a virtualized source silently dropped the request for
+  // pointers and handed back full copies instead. Caught 2026-09-04 by checking
+  // extractTo's ARITY on a live source after a duplicate came out 22 MB heavier
+  // than the font it was duplicating.
+  if (meta.deduped && meta.format !== 'folder') {
     const bc = _loadSourceBreadcrumb(userData, uuid, uuidDir);
     if (bc && Array.isArray(bc.records)) return _virtualizeSource(src, bc.records);
   }
@@ -2515,6 +2603,124 @@ async function _dedupeInnerZipSource(userData, uuid, uuidDir, meta, records, byH
   }
 }
 
+// §13 for a source stored as a TREE rather than an archive. Same rule as the zip path — one
+// canonical copy per unique file, Proffie preferred, verify before commit — realised in the
+// filesystem instead of in a manifest.
+//
+// ⭐ THE DUPLICATES BECOME HARDLINKS, AND THAT IS WHY THIS IS SMALLER THAN THE ZIP PATH.
+// A trimmed archive has to record what it removed and reconstruct those paths on every read,
+// which is what the breadcrumb and _virtualizeSource exist for. A hardlinked tree removes
+// nothing: every original path is still a real file that opens, reads and copies normally, and
+// an export still zips the complete bundle. The sharing is a filesystem fact, so nothing
+// downstream has to know it happened.
+//
+// ⚠️ SAFE BECAUSE SOURCES ARE IMMUTABLE. Writing through one link would change every path that
+// shares the file. Nothing writes into a stored source — entries are extracted copies — so the
+// aliasing has no way to surprise anyone. That invariant is the precondition for this whole
+// approach, not a footnote to it.
+//
+// VERIFY BEFORE COMMIT, per file rather than per archive: the duplicate's bytes are confirmed
+// to match the canonical's recorded hash BEFORE it is replaced, and the link is created under a
+// temp name and renamed over the original, so an interruption leaves either the original file
+// or the finished link and never a hole.
+async function _dedupeFolderSource(userData, uuid, uuidDir, meta, onProgress) {
+  const fh = require('./soundFontFileHash');
+  const crypto = require('crypto');
+  const root = path.join(uuidDir, 'source');
+  if (!fs.existsSync(root)) return { deduped: false, reason: 'no-tree' };
+
+  let bc = fh.readFileHashManifest(fileHashManifestPath(userData, 'sources', uuid));
+  if (!bc || !Array.isArray(bc.records)) bc = await ensureSourceManifest(userData, uuid, onProgress);
+  if (!bc || !Array.isArray(bc.records)) return { deduped: false, reason: 'no-breadcrumb' };
+  // Composite paths live inside an inner archive, which this cannot link. They are left
+  // exactly as they are rather than failing the source.
+  const records = bc.records.filter(r => r.fileHash !== '<empty>' && !_isCompositePath(r.relPath));
+  if (!records.length) return { deduped: false, reason: 'no-records' };
+
+  const byHash = new Map();
+  for (const r of records) {
+    if (!byHash.has(r.fileHash)) byHash.set(r.fileHash, []);
+    byHash.get(r.fileHash).push(r.relPath);
+  }
+  if (byHash.size === records.length) return { deduped: false, reason: 'no-duplicates' };
+
+  const hashOf = (abs) => crypto.createHash('sha256').update(fs.readFileSync(abs)).digest('hex');
+  const byRel = new Map(records.map(r => [r.relPath, r.fileHash]));
+  // Every path this pass writes or points at, so the post-check can speak only about
+  // its own work.
+  const touched = new Set();
+  let linked = 0, savedBytes = 0, skipped = 0;
+  const total = records.length - byHash.size;
+  let done = 0;
+
+  for (const [h, paths] of byHash) {
+    if (paths.length < 2) continue;
+    const canonRel = _pickCanonical(paths);
+    const canonAbs = path.join(root, canonRel);
+    if (!fs.existsSync(canonAbs)) { skipped += paths.length - 1; continue; }
+    // The canonical must still be what the manifest says before anything is pointed at it.
+    let canonOk = false;
+    try { canonOk = hashOf(canonAbs) === h; } catch {}
+    if (!canonOk) { skipped += paths.length - 1; continue; }
+    touched.add(canonRel);
+
+    for (const rel of paths) {
+      if (rel === canonRel) continue;
+      const abs = path.join(root, rel);
+      done++;
+      if (onProgress) onProgress({ phase: 'dedupe', fileCount: done, totalFiles: total, currentFile: rel });
+      let st;
+      try { st = fs.statSync(abs); } catch { skipped++; continue; }
+      // Already sharing storage with something — nothing to do, and re-linking would
+      // churn the tree on every run. This is what makes the pass idempotent.
+      if (st.nlink > 1) continue;
+      // The duplicate must be what the manifest claims before it is thrown away.
+      try { if (hashOf(abs) !== h) { skipped++; continue; } } catch { skipped++; continue; }
+      const tmp = abs + '.dedup-tmp';
+      try {
+        try { fs.rmSync(tmp, { force: true }); } catch {}
+        fs.linkSync(canonAbs, tmp);
+        fs.renameSync(tmp, abs);
+        touched.add(rel);
+        linked++;
+        savedBytes += st.size;
+      } catch (e) {
+        // A filesystem that will not hardlink is a reason to leave the source whole,
+        // never a reason to lose a file.
+        try { fs.rmSync(tmp, { force: true }); } catch {}
+        skipped++;
+      }
+    }
+  }
+
+  if (!linked) return { deduped: false, reason: skipped ? 'not-linkable' : 'no-duplicates' };
+
+  // Post-check across THE PATHS THIS PASS TOUCHED, and only those.
+  // ⚠️ It verified the whole tree at first, and a test tampering with one duplicate behind
+  // the manifest's back exposed why that is wrong: dedup correctly REFUSED to link over the
+  // altered file, and was then reported as verify-failed for damage it had declined to touch.
+  // A pre-existing mismatch is a real finding, but it belongs to the source, not to this pass
+  // — blaming it here would make the honest refusal look like the failure.
+  let verified = 0;
+  for (const rel of touched) {
+    const rec = byRel.get(rel);
+    const abs = path.join(root, rel);
+    try { if (rec && hashOf(abs) === rec) verified++; } catch {}
+  }
+  if (verified !== touched.size) {
+    return { deduped: false, reason: `verify-failed (${verified}/${touched.size})` };
+  }
+
+  try {
+    updateSourceMeta(userData, uuid, { deduped: true, dedupStats: {
+      originalFiles: records.length, uniqueFiles: byHash.size,
+      linkedFiles: linked, savedBytes,
+    } });
+  } catch {}
+  return { deduped: true, originalFiles: records.length, uniqueFiles: byHash.size,
+    linkedFiles: linked, savedBytes, skipped };
+}
+
 // Trim intra-source duplicate files (§13): rewrite the archive keeping ONE canonical copy per
 // unique file (Proffie-folder preferred), leaving a durable breadcrumb so every trimmed path
 // reconstructs on demand. SAFETY: verify-before-commit — the slim archive is built to a temp
@@ -2527,6 +2733,9 @@ async function dedupeSource(userData, uuid, onProgress) {
   const meta = readSourceMeta(uuidDir);
   if (!meta) return { deduped: false, reason: 'no-meta' };
   if (meta.deduped) return { deduped: false, reason: 'already' };
+  if (meta.format === 'folder') {
+    return await _dedupeFolderSource(userData, uuid, uuidDir, meta, onProgress);
+  }
   if (meta.format !== 'zip') return { deduped: false, reason: 'not-zip' };
 
   const crypto = require('crypto');

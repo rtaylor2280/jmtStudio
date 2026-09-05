@@ -324,9 +324,15 @@ async function createEntry({ userData, sourceUuid, candidate, name, metadata, on
         emit('extracting', p);
       });
     } else {
+      // ⭐ POINTERS, NOT A SECOND COPY ([B-309]). The entry's files are hardlinks to
+      // the source's, so the bytes exist once. Each name is independent: rename or
+      // delete one here and the source keeps its own; add a file and only this
+      // folder has it; delete the whole source and this entry still works.
+      // A zip source cannot link (there is no file on disk to name), so it copies —
+      // the option is a request, not a requirement.
       result = await source.extractTo(candidate.path || '', entryDir, (p) => {
         emit('extracting', p);
-      });
+      }, { link: true });
     }
 
     // Tags array. When the caller supplies metadata.tags, that wins (the
@@ -517,13 +523,35 @@ async function duplicateEntry({ userData, sourceName, newName, mode = 'current' 
       // Recursive disk copy. Two-pass approach keeps it simple and
       // safe: build the destination tree, copy each file. No symlink
       // handling — entry trees are plain files.
+      // ⭐ POINTERS, like every other way a font enters the library ([B-309]).
+      // A duplicate shares its original's bytes rather than doubling them, which
+      // also means it shares whatever the original already shares with its source:
+      // duplicating a 24 MB font costs kilobytes.
+      // Safe for the same reason entry-to-source pointers are safe — nothing
+      // writes content into an existing entry file, so the two names can never
+      // surprise each other. Renaming, deleting and adding are all local to
+      // whichever copy you do them in.
+      // ⚠️ Copy is the fallback, never an error: a filesystem that will not link
+      // still gets a correct duplicate, just a larger one.
       const walkCopy = (sd, dd) => {
         fs.mkdirSync(dd, { recursive: true });
         for (const ent of fs.readdirSync(sd, { withFileTypes: true })) {
           const s = path.join(sd, ent.name);
           const d = path.join(dd, ent.name);
           if (ent.isDirectory()) walkCopy(s, d);
-          else if (ent.isFile()) fs.copyFileSync(s, d);
+          else if (ent.isFile()) {
+            // ⚠️ meta.json IS NEVER LINKED. It is per-entry state, and the caller
+            // rewrites the destination's copy immediately below — through a shared
+            // name that write would land in the ORIGINAL entry's meta and rename a
+            // font nobody touched. The one file here that is written rather than
+            // only read is the one file that must stay private.
+            const isEntryMeta = (sd === srcDir && ent.name === 'meta.json');
+            let linked = false;
+            if (!isEntryMeta) {
+              try { fs.linkSync(s, d); linked = true; } catch { linked = false; }
+            }
+            if (!linked) fs.copyFileSync(s, d);
+          }
         }
       };
       walkCopy(srcDir, destDir);
@@ -1472,6 +1500,22 @@ function getEntryCustomization(userData, entryName) {
   // it live would be 220 round trips.
   // srcUuid is part of the key because re-pointing an entry at a different source
   // changes the comparison even when the entry's own bytes did not.
+  // ⚠️ FRESHNESS IS CHECKED AGAINST THE DISK, NOT AGAINST A FLAG.
+  // `contentHashDirty` only becomes true if a writer remembers to set it, and one
+  // did not: a font with a file added by hand reported contentHash, manifest and
+  // stamp all agreeing with each other and all describing 67 files while 68 sat on
+  // disk — so it was permanently, confidently wrong about itself with nothing able
+  // to notice. (Found 2026-09-04: a duplicate of that font read "Customized" while
+  // the original it was copied from did not.)
+  // getEntryContentHash already solves this the reliable way — it compares the live
+  // file count and byte total against the stored ones and recomputes on any
+  // mismatch, which no addition or deletion can slip past. Reusing it here costs one
+  // stat-walk (no hashing) and removes a whole class of silent staleness.
+  try { getEntryContentHash(userData, entryName); } catch {}
+  try { meta = JSON.parse(fs.readFileSync(path.join(entriesRoot(userData), entryName, 'meta.json'), 'utf8')); }
+  catch { return unknown; }
+  if (!meta || !meta.entryUuid) return unknown;
+
   const st = meta.customization;
   if (!meta.contentHashDirty && meta.contentHash && st
       && st.forHash === meta.contentHash && st.srcUuid === meta.sourceUuid) {

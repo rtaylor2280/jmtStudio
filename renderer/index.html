@@ -26693,16 +26693,25 @@ require(['vs/editor/editor.main'], function () {
         // Read-only fields.
         if (_sfSourceDetailEls.originalFile) _sfSourceDetailEls.originalFile.textContent = sm.originalName || '(unknown)';
         if (_sfSourceDetailEls.archiveSize) _sfSourceDetailEls.archiveSize.textContent = sm.fileSize ? _sfFormatBytes(sm.fileSize) : '(unknown)';
-        // Space-optimized indicator: a deduped source (§13) shows what trimming its duplicate
-        // board-format copies saved. Hidden for normal (non-deduped) sources. Nothing is lost —
-        // the full bundle rebuilds on export from the breadcrumb.
+        // Space-optimized indicator: a deduped source (§13) shows what keeping one copy of
+        // each duplicated file saved. Hidden for normal (non-deduped) sources.
+        // ⚠️ `savedBytes` FIRST. A tree-stored source has no archive to measure, so the old
+        // originalArchiveBytes/dedupedArchiveBytes pair is absent and the subtraction read
+        // "saved 0 B by trimming 224 duplicate files" — a sentence that contradicts itself
+        // in the same breath, over a real 76 MB saving. The archive pair stays as the
+        // fallback so a source deduped under the old scheme still reports honestly.
         if (_sfSourceDetailEls.optimizedRow && _sfSourceDetailEls.optimizedVal) {
           const ds = sm.deduped && sm.dedupStats;
           if (ds) {
-            const saved = Math.max(0, (ds.originalArchiveBytes || 0) - (ds.dedupedArchiveBytes || 0));
+            const saved = ds.savedBytes != null
+              ? Math.max(0, ds.savedBytes)
+              : Math.max(0, (ds.originalArchiveBytes || 0) - (ds.dedupedArchiveBytes || 0));
             const trimmed = Math.max(0, (ds.originalFiles || 0) - (ds.uniqueFiles || 0));
+            // ⭐ "Every file is still here" is TRUE of a hardlinked tree in a way it was not
+            // of a trimmed archive, where paths were genuinely reconstructed on export.
+            // Nothing was removed, so nothing has to be rebuilt — say that instead.
             _sfSourceDetailEls.optimizedVal.textContent =
-              `Space-optimized: saved ${_sfFormatBytes(saved)} by trimming ${trimmed} duplicate files. Full bundle rebuilds on export.`;
+              `Space-optimized: saved ${_sfFormatBytes(saved)} because ${trimmed} identical files share one copy. Every file is still here.`;
             _sfSourceDetailEls.optimizedRow.style.display = '';
           } else {
             _sfSourceDetailEls.optimizedRow.style.display = 'none';
