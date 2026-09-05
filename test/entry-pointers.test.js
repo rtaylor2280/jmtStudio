@@ -17,6 +17,7 @@ const path = require('path');
 const S = require('../soundFontSources');
 const E = require('../soundFontEntries');
 const fileOps = require('../soundFontFileOps');
+const CI = require('../soundFontContentIndex');
 
 let failures = 0;
 function check(label, cond, detail) {
@@ -124,6 +125,73 @@ async function setup() {
     })());
     check('and it has a home outside the font, so deleting the font cannot lose it',
       added.nlink >= 2, `nlink=${added.nlink}`);
+  }
+
+  {
+    console.log('an attached folder is pointers too, however novel its files are');
+    // [B-316], his ruling 2026-09-05: "just because it happens to be all unique
+    // if you added a folder doesn't mean we start keeping real files in a
+    // folder." So the ALL-NOVEL case is the one worth asserting — the tempting
+    // shortcut is to pool only what looks like an added file and leave a whole
+    // attached font sitting as real bytes.
+    const t = await setup();
+    const card = tmp('card');
+    fs.writeFileSync(path.join(card, 'hum.wav'), wav('HUM-VENDOR'));      // stock
+    fs.writeFileSync(path.join(card, 'swing1.wav'), wav('MY-EDIT'));      // customized
+    fs.mkdirSync(path.join(card, 'tracks'));
+    fs.writeFileSync(path.join(card, 'tracks', 'mine.wav'), wav('MY-TRACK'));
+
+    const r = await E.createEntry({
+      userData: t.userData, sourceUuid: t.sourceUuid, candidate: { path: 'Ahsoka' },
+      name: 'AhsokaFromCard', folderSource: { folderPath: card },
+    });
+    check('the attach succeeded', r && r.ok, JSON.stringify(r && r.error));
+    const att = (rel) => path.join(E.entriesRoot(t.userData), r.name, rel.replace(/\//g, path.sep));
+
+    check('the untouched sound links to the vendor copy we already held',
+      fs.statSync(att('hum.wav')).ino === fs.statSync(t.srcFile('hum.wav')).ino);
+    check('⭐ the CUSTOMIZED sound is a pointer, not a real file in the folder',
+      fs.statSync(att('swing1.wav')).nlink >= 2, `nlink=${fs.statSync(att('swing1.wav')).nlink}`);
+    check('⭐ so is the track that exists nowhere else',
+      fs.statSync(att('tracks/mine.wav')).nlink >= 2, `nlink=${fs.statSync(att('tracks/mine.wav')).nlink}`);
+    check('and every one of them reads back correctly',
+      fs.readFileSync(att('hum.wav')).includes('HUM-VENDOR')
+      && fs.readFileSync(att('swing1.wav')).includes('MY-EDIT')
+      && fs.readFileSync(att('tracks/mine.wav')).includes('MY-TRACK'));
+
+    // Retention: the pooled content goes when the last thing using it goes.
+    const pool = () => fs.existsSync(CI.poolRoot(t.userData))
+      ? fs.readdirSync(CI.poolRoot(t.userData)).filter(f => !f.startsWith('.')) : [];
+    check('the pool is holding the novel content', pool().length === 2, JSON.stringify(pool()));
+    E.deleteEntry(t.userData, r.name);
+    check('⭐ deleting the font takes its pooled sounds with it', pool().length === 0,
+      JSON.stringify(pool()));
+    check('⚠️ but the vendor source is untouched — it was never the pool\'s to free',
+      fs.readFileSync(t.srcFile('hum.wav')).includes('HUM-VENDOR'));
+  }
+
+  {
+    console.log('deleting one file releases its pooled content, deleting one of two does not');
+    const t = await setup();
+    const outside = path.join(tmp('shared'), 'quote.wav');
+    fs.writeFileSync(outside, wav('SHARED-QUOTE'));
+    // The same sound added to two different fonts.
+    const second = await E.createEntry({
+      userData: t.userData, sourceUuid: t.sourceUuid, candidate: { path: 'Ahsoka' }, name: 'Ahsoka2',
+    });
+    for (const id of [t.entryName, second.name]) {
+      fileOps.addFilesAt({ userData: t.userData, kind: 'entry', id, subPath: '', sourceFilePaths: [outside] });
+    }
+    const pool = () => fs.readdirSync(CI.poolRoot(t.userData)).filter(f => !f.startsWith('.'));
+    check('one sound, added twice, is stored once', pool().length === 1, JSON.stringify(pool()));
+
+    fileOps.deleteFilesAt({ userData: t.userData, kind: 'entry', id: t.entryName, subPaths: ['quote.wav'] });
+    check('⚠️ one font dropping it is NOT the last user', pool().length === 1, JSON.stringify(pool()));
+    check('and the other font still reads it',
+      fs.readFileSync(path.join(E.entriesRoot(t.userData), second.name, 'quote.wav')).includes('SHARED-QUOTE'));
+
+    fileOps.deleteFilesAt({ userData: t.userData, kind: 'entry', id: second.name, subPaths: ['quote.wav'] });
+    check('⭐ the last one does', pool().length === 0, JSON.stringify(pool()));
   }
 
   {

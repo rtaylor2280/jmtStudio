@@ -428,7 +428,15 @@ function deleteFilesAt({ userData, kind, id, subPaths }) {
       failed.push({ source: sub, error: String(err && err.message || err) });
     }
   }
-  if (deleted.length > 0) _markLocationDirty(userData, kind, id);
+  if (deleted.length > 0) {
+    _markLocationDirty(userData, kind, id);
+    // Deleting the last font using a pooled sound leaves the pool holding the
+    // only name for it, which is zero users ([B-316]). Same ordering as
+    // deleteEntry: the link count only falls once the name above is gone.
+    // Deleting ONE file is as much a last-user event as deleting a whole font,
+    // so this door needs the sweep too.
+    try { require('./soundFontContentIndex').releasePoolOrphans(userData); } catch {}
+  }
   return { ok: true, deleted, failed };
 }
 

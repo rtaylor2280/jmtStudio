@@ -216,16 +216,28 @@ async function _extractNestedZipToDir(source, innerZipPath, destDir, onProgress)
 // stored file count disagree with the figure the user was shown in the dialog
 // one click earlier. (It would also be overwritten by this entry's own meta
 // write moments later.)
-// ⭐ CONTENT WE ALREADY HOLD IS LINKED, NOT COPIED ([B-315], 2026-09-05). This is
-// the recovery path — attaching the folders off a saber's SD card is how the
-// customized versions of a font come home — and every one of those folders is
-// mostly sounds the library already has. Copying them unconditionally landed a
-// full second copy of each. `contentIndex` is built once by the caller and
-// threaded through, so a whole folder costs one pass over the manifests.
+// ⭐ A FONT FOLDER IS ONLY EVER POINTERS ([B-315] + [B-316], 2026-09-05).
 //
-// A file the library does NOT hold is still written here, into the entry. Where
-// sourceless content should live longer-term is [B-316] and is a separate call;
-// nothing about that changes the dedup property this gives us.
+// This is the recovery path — attaching the folders off a saber's SD card is how
+// the customized versions of a font come home — and such a folder is mostly
+// sounds the library already has. Those link to the copy we hold. What is left
+// is the part that was actually customized, and it goes to the POOL, with this
+// folder holding a name for it like any other file.
+//
+// ⚠️ THE RULE IS ABOUT THE FOLDER, NOT ABOUT THE ODDS. An attached folder that
+// happens to be entirely novel is not a reason to start keeping real bytes in an
+// entry: "just because it happens to be all unique if you added a folder doesn't
+// mean we start keeping real files in a folder" (2026-09-05). Every file in
+// every font folder points at something with a home — a vendor source or the
+// pool — so there is one rule and no second category of file.
+//
+// What the dedup ratio here actually measures is how much of the font is still
+// stock: a file left alone is byte-identical to the vendor's and links, a file
+// customized is not and is stored. The files that do NOT dedup are exactly the
+// ones the operation exists to recover.
+//
+// `contentIndex` is built once by the caller and threaded through, so a whole
+// folder costs one pass over the manifests.
 async function _copyFolderIntoDir(folderPath, destDir, onProgress, contentIndex) {
   // Picking an ancestor of the destination would have the walk copying its own
   // output forever. Cheap to rule out, and impossible to recover from if not.
@@ -249,12 +261,21 @@ async function _copyFolderIntoDir(folderPath, destDir, onProgress, contentIndex)
         try { size = fs.statSync(abs).size; } catch {}
         let linked = false;
         if (contentIndex) {
-          const r = contentIndex.ingest({ srcAbs: abs, destAbs: dest });
-          // ingestFile only reports !ok when the COPY failed too, which is a
-          // real error; let the original copy raise it so the message is the
-          // one this path has always produced.
-          if (r.ok) linked = r.linked;
-          else fs.copyFileSync(abs, dest);
+          // Give the content a home first. storeInPool hands back what we
+          // already hold when we hold it, so nothing is written twice; only
+          // genuinely novel bytes land in the pool. Then the name here is a link
+          // to that home, whichever it turned out to be.
+          const home = contentIndex.store({ srcAbs: abs, preferredName: path.basename(rel) });
+          if (home.ok) {
+            const r = contentIndex.ingest({ srcAbs: home.absPath, destAbs: dest });
+            // ingestFile only reports !ok when the COPY failed too, which is a
+            // real error; let the plain copy below raise it so the message is
+            // the one this path has always produced.
+            if (r.ok) linked = r.linked;
+            else fs.copyFileSync(abs, dest);
+          } else {
+            fs.copyFileSync(abs, dest);
+          }
         } else {
           fs.copyFileSync(abs, dest);
         }
@@ -909,6 +930,17 @@ function deleteEntry(userData, name) {
     if (entryUuid) {
       try { fs.rmSync(fileHashManifestPath(userData, 'entries', entryUuid), { force: true }); } catch {}
     }
+    // ⚠️ AFTER the folder is gone, never before ([B-316], 2026-09-05). Pooled
+    // content is kept exactly as long as something uses it — "once they're no
+    // longer used by anything, they are deleted" — and the filesystem answers
+    // that: the pool holds one name, so a file with any user has nlink >= 2.
+    // The link count only falls once this font's names are actually removed, so
+    // sweeping first would find every file still in use and free nothing.
+    // deleteSource's refcounted unlinkAttachment carries the same ordering note
+    // for the same reason.
+    // Best-effort: a pooled orphan costs space, never correctness, and it is
+    // reclaimed by the next deletion.
+    try { require('./soundFontContentIndex').releasePoolOrphans(userData); } catch {}
     return { ok: true, deleted: true };
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };
