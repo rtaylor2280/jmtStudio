@@ -3595,10 +3595,10 @@ ipcMain.handle('sources:matchCandidates', async (_event, { uuid, candidates } = 
   }
 });
 
-// Finalize a source STAGED by the folder-duplicate path (see importSource's
-// folder branch): the zip is already built and hashed; this just writes meta.
-// Used by the duplicate prompt's "import again as a new source" so a folder
-// re-import doesn't redo the whole zip-transform.
+// Finalize a source STAGED by the content-duplicate path (see importSource):
+// the tree is already extracted and hashed; this just writes meta. Used by the
+// duplicate prompt's "import again as a new source" so a re-import doesn't redo
+// the whole extract. [B-309] both routes stage this way now, not just folders.
 ipcMain.handle('sources:finalizeStaged', async (_event, staged = {}) => {
   try {
     return await soundFontSources.finalizePreparedSource({
@@ -3608,6 +3608,10 @@ ipcMain.handle('sources:finalizeStaged', async (_event, staged = {}) => {
       name: staged.name,
       hash: staged.hash,
       fileSize: staged.fileSize,
+      // [B-309] the picked archive's own identity, so a staged commit records
+      // the file it came from exactly as a direct import does.
+      archiveHash: staged.archiveHash,
+      archiveSize: staged.archiveSize,
       sourceFileDate: staged.sourceFileDate,
       sourceFileMtimeMs: staged.sourceFileMtimeMs,
       // Carried straight through from the prepare result — the staged zip was
