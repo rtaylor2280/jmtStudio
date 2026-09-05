@@ -13,6 +13,7 @@
 // to defend against any caller passing "../" sequences.
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 function _root(userData, kind, id) {
@@ -106,6 +107,76 @@ function _proffieVariantName(destDir, srcName) {
 // src.kind === 'source' is async — files live inside an archive and have
 // to be extracted on the fly. We branch up front so the on-disk kinds
 // stay synchronous (their callers don't need to await anything extra).
+// Put library content at destPath AS A POINTER ([B-315]/[B-316], 2026-09-05).
+// "Add from library" was the last door writing real bytes into a font folder,
+// which broke the rule every other door now keeps: every file in every font
+// folder points at something with a home.
+//
+// ⭐ NOTHING IS HASHED ON THIS PATH, and that is the point rather than an
+// optimisation. The content is ALREADY in the library with a home — a source, a
+// pool file, another font's name for one of those. Copying from it is not a
+// dedup question ("do we hold these bytes?"), it is simply another name for a
+// file we are looking straight at. Linking is exact and free; hashing would be
+// asking a question we already have the answer to.
+//
+// ⚠️ Falls back to copying, never fails. A link needs the same volume, which
+// everything under userData is — but a filesystem that refuses costs space and
+// never correctness.
+function _linkInto(srcAbs, destPath) {
+  try {
+    const tmp = destPath + '.link-tmp';
+    try { fs.rmSync(tmp, { force: true }); } catch {}
+    fs.linkSync(srcAbs, tmp);
+    fs.renameSync(tmp, destPath);
+    return true;
+  } catch {
+    try { fs.rmSync(destPath + '.link-tmp', { force: true }); } catch {}
+    try { fs.copyFileSync(srcAbs, destPath); return false; } catch { throw new Error('Copy failed'); }
+  }
+}
+
+// A source file, landed at destPath as a pointer.
+//
+// The ordinary case is a real file in the source tree, so it links. The
+// exception is a COMPOSITE path — a file inside an inner archive that
+// _expandInnerArchives could not unpack — where there is no file on disk to
+// name. Those bytes have no home yet, so they get one in the pool and the
+// destination points there, which is the same answer an all-novel attached
+// folder gets: pooling follows from what a font folder IS, not from where the
+// bytes happened to come from.
+async function _pointAtSourceFile(userData, sourceUuid, subPath, destDir, finalName) {
+  const soundFontSources = require('./soundFontSources');
+  const destPath = path.join(destDir, finalName);
+  if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+  // Composite paths carry ".zip/" in them and never exist on disk.
+  if (!/\.zip\//i.test(String(subPath || ''))) {
+    const onDisk = path.join(soundFontSources.sourcesRoot(userData), sourceUuid, 'source',
+      String(subPath).replace(/\//g, path.sep));
+    try {
+      if (fs.existsSync(onDisk) && fs.statSync(onDisk).isFile()) {
+        _linkInto(onDisk, destPath);
+        return { destPath };
+      }
+    } catch { /* fall through to the extract route */ }
+  }
+  // No file to name: materialise the bytes, give them a home, point at it.
+  const CI = require('./soundFontContentIndex');
+  const buf = await soundFontSources.readSourceFileBytes(userData, sourceUuid, subPath);
+  const staging = path.join(os.tmpdir(), `jmt-pointat-${process.pid}-${Date.now()}`);
+  fs.mkdirSync(staging, { recursive: true });
+  const tmpFile = path.join(staging, finalName);
+  try {
+    fs.writeFileSync(tmpFile, buf);
+    const index = CI.buildIndex(userData);
+    const home = CI.storeInPool({ index, srcAbs: tmpFile, preferredName: finalName });
+    if (home.ok) _linkInto(home.absPath, destPath);
+    else fs.copyFileSync(tmpFile, destPath);
+  } finally {
+    try { fs.rmSync(staging, { recursive: true, force: true }); } catch {}
+  }
+  return { destPath };
+}
+
 async function copyAcrossLocations({
   userData,
   src,    // { kind, id }
@@ -234,7 +305,7 @@ async function copyAcrossLocations({
           // File path — current behavior, single extract with Proffie
           // variant naming on collision.
           const finalName = _proffieVariantName(destDir, desiredName);
-          await soundFontSources.extractSourceFileTo(userData, src.id, srcSubPath, destDir, finalName);
+          await _pointAtSourceFile(userData, src.id, srcSubPath, destDir, finalName);
           const rel = path.relative(destRoot, path.join(destDir, finalName)).replace(/\\/g, '/');
           added.push(rel);
         if (onFile) { try { onFile(rel, added.length, srcPaths.length); } catch {} }
@@ -254,8 +325,10 @@ async function copyAcrossLocations({
             if (!innerRel) continue;
             const outPath = path.join(outRoot, innerRel.replace(/\//g, path.sep));
             fs.mkdirSync(path.dirname(outPath), { recursive: true });
-            const buf = await source.readFile(entry.fileName);
-            fs.writeFileSync(outPath, buf);
+            // Pointers here too — a folder pulled out of a source is just many
+            // files, and each one gets the same treatment as a single pick.
+            await _pointAtSourceFile(userData, src.id, entry.fileName,
+              path.dirname(outPath), path.basename(outPath));
           }
           const rel = path.relative(destRoot, outRoot).replace(/\\/g, '/');
           added.push(rel);
@@ -295,7 +368,9 @@ async function copyAcrossLocations({
             const s = path.join(sd, ent.name);
             const d = path.join(dd, ent.name);
             if (ent.isDirectory()) walkCopy(s, d);
-            else if (ent.isFile()) fs.copyFileSync(s, d);
+            // Already library content with a home of its own, so this is another
+            // NAME for it rather than a second copy.
+            else if (ent.isFile()) _linkInto(s, d);
           }
         };
         walkCopy(srcAbs, outRoot);
@@ -310,7 +385,7 @@ async function copyAcrossLocations({
       }
       const finalName = _proffieVariantName(destDir, desiredName);
       const destPath = path.join(destDir, finalName);
-      fs.copyFileSync(srcAbs, destPath);
+      _linkInto(srcAbs, destPath);
       const rel = path.relative(destRoot, destPath).replace(/\\/g, '/');
       added.push(rel);
     } catch (err) {
