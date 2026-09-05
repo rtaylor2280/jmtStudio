@@ -777,6 +777,9 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
   let totalBytes = 0;
   let fileCount = 0;
   let strippedFiles = []; // damaged wavs dropped when stripCorrupt is set (folder imports)
+  // What inner-archive expansion did. Reported rather than assumed, so a bundle
+  // that refused to expand is visible instead of quietly looking ordinary.
+  let innerArchives = { expanded: [], left: [] };
 
   // Zip-format input: hash THEN dedup THEN copy, like before. Dedup
   // can short-circuit cleanly before we write anything because the
@@ -840,15 +843,24 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
     const destDir = path.join(uuidDir, 'source');
     if (isZip) {
       emit('copying', { percent: 0, totalBytes });
-      const result = await _extractZipSubtree(sourcePath, '', destDir, ({ fileCount: fc, totalBytes: tb, currentFile }) => {
+      // Percent comes from the extractor, which knows the real uncompressed total.
+      const result = await _extractZipSubtree(sourcePath, '', destDir, (p) => {
         emit('copying', {
-          percent: totalBytes > 0 ? Math.floor((tb / totalBytes) * 100) : 0,
-          bytes: tb, totalBytes, currentFile,
+          percent: p.percent, bytes: p.totalBytes, totalBytes: p.expectedBytes,
+          currentFile: p.currentFile,
         });
       });
-      totalBytes = result.totalBytes;
-      fileCount = result.fileCount;
-      fileSize = result.totalBytes;
+      // Expand before measuring, so the figures describe what we actually keep
+      // rather than the archives we just threw away.
+      // Its OWN stage: this is a distinct operation with its own denominator, and
+      // reusing 'copying' gave the user two consecutive bars labelled identically
+      // with the second appearing to restart for no reason. (His catch, 2026-09-04.)
+      innerArchives = await _expandInnerArchives(destDir, (p) => emit('expanding', p));
+      const fhz = require('./soundFontFileHash');
+      const recz = fhz.collectFileRecords(destDir) || [];
+      totalBytes = recz.reduce((s, r) => s + (r.size || 0), 0);
+      fileCount = recz.length;
+      fileSize = totalBytes;
     } else {
       // Folder input: copy the selected files straight in. The selection (noise
       // filtering, corrupt-wav stripping) is the same list zipFolderToFile uses.
@@ -865,15 +877,22 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
         fs.mkdirSync(path.dirname(abs), { recursive: true });
         fs.copyFileSync(f.absPath, abs);
         done += f.size;
-        emit('hashing', {
+        // Copying, not hashing — the old zip-transform hashed as it wrote, this
+        // does not, and the label followed the code rather than the truth.
+        emit('copying', {
           percent: selTotal > 0 ? Math.floor((done / selTotal) * 100) : 0,
           bytes: done, totalBytes: selTotal, currentFile: f.relPath,
         });
       }
-      const stats = require('./soundFontFileHash').collectFileRecords(destDir) || [];
-      hash = require('./soundFontFileHash').hashRecords(stats);
-      totalBytes = stats.reduce((s, r) => s + (r.size || 0), 0);
-      fileCount = stats.length;
+      // Expand before measuring: the tree we describe must be the tree we keep.
+      // Same stage as the zip route. It emitted 'hashing' here, which renders as
+      // "Reading source" while the app is actually unpacking archives.
+      innerArchives = await _expandInnerArchives(destDir, (p) => emit('expanding', p));
+      const fhm = require('./soundFontFileHash');
+      const recs = fhm.collectFileRecords(destDir) || [];
+      hash = fhm.hashRecords(recs);
+      totalBytes = recs.reduce((s, r) => s + (r.size || 0), 0);
+      fileCount = recs.length;
       fileSize = totalBytes;
       if (!forceNewSource) {
         const existing = findByHash(userData, hash);
@@ -1424,6 +1443,13 @@ async function _extractZipSubtree(zipPath, subPath, destDir, onProgress) {
     const destDirResolved = path.resolve(destDir);
     let fileCount = 0;
     let totalBytes = 0;
+    // ⚠️ THE DENOMINATOR IS THE UNCOMPRESSED TOTAL, taken from the central directory
+    // before a byte is written. Callers were computing a fraction against the
+    // ARCHIVE'S file size while counting extracted bytes out, which reads over 100%
+    // on anything that compresses at all - measured at 194% on a real bundle. The
+    // entry table already knows the true total, so the percent is reported from here
+    // and every caller stops having to invent one.
+    const expectedBytes = matching.reduce((s, e) => s + (e.isDir ? 0 : (e.size || 0)), 0);
     for (const entry of matching) {
       const rel = norm ? entry.fileName.slice(prefix.length) : entry.fileName;
       if (!rel) continue;
@@ -1444,12 +1470,118 @@ async function _extractZipSubtree(zipPath, subPath, destDir, onProgress) {
       await _writeZipEntryToFile(zip, entry, destPath);
       fileCount++;
       totalBytes += entry.size || 0;
-      if (onProgress) onProgress({ fileCount, totalBytes, currentFile: rel });
+      if (onProgress) onProgress({
+        fileCount, totalBytes, currentFile: rel,
+        expectedBytes,
+        percent: expectedBytes > 0 ? Math.max(0, Math.min(100, Math.floor((totalBytes / expectedBytes) * 100))) : 0,
+      });
     }
     return { fileCount, totalBytes };
   } finally {
     await zip.close();
   }
+}
+
+const INNER_ARCHIVE_MAX_DEPTH = 4;
+
+// Replace every .zip inside a freshly stored tree with a folder of the same name,
+// repeating until none are left. [B-309]
+//
+// ⭐⭐ THIS IS WHAT RETIRES `nested`, AND IT RETIRES IT WITHOUT TOUCHING THE
+// DETECTOR. detectCandidates emits a deferred, un-openable candidate whenever it
+// meets an archive it cannot look inside; run this first and it never meets one.
+// Everything downstream then applies for free: the manifest sees real files
+// instead of one line per archive, dedup can find what sibling fonts share, entries
+// become pointers, and the Customized marker can answer at all.
+// Measured on a real bundle before this existed: Power_Of_Many stored TEN sealed
+// archives totalling 2.18 GB as ELEVEN files, so its nine fonts got no dedup, no
+// pointers and a permanently unknowable customization state.
+//
+// ⚠️ A FLAT LOOP, NOT MUTUAL RECURSION. An earlier version had this function and the
+// extractor call each other, each holding its own cap — which reset at every level
+// and therefore bounded nothing. Depth is a counter here and archives revealed by
+// one pass are handled by the next.
+//
+// ⚠️ A NAME ALREADY TAKEN IS LEFT ALONE, never merged. A vendor shipping both
+// Proffie/ and Proffie.zip is telling us something we cannot read, and merging one
+// over the other silently picks a winner between two things that may differ. The
+// cost of leaving it is only that this source keeps the old deferred-candidate
+// behaviour, which is the honest outcome, and `left` reports it so the case stops
+// being hypothetical if it ever occurs.
+async function _expandInnerArchives(rootDir, onProgress) {
+  const expanded = [], left = [];
+  // ⚠️ THE BAR HAS TO MOVE, and it needs a denominator to move against. Forwarding
+  // the inner extractor's payload untouched sent no `percent` at all — and this is
+  // the LONGEST phase of importing a bundle-of-archives, so a motionless bar there
+  // reads as hung at exactly the wrong moment. (Seen on a real import, 2m31s in.)
+  // Progress is weighted by ARCHIVE SIZE, which is known from the walk before any
+  // of it is opened. The denominator grows as deeper archives are revealed, so it
+  // is `done / (done + remaining)` — honest at every instant rather than a number
+  // that would need the future to be already known.
+  let doneBytes = 0;
+  for (let depth = 0; depth < INNER_ARCHIVE_MAX_DEPTH; depth++) {
+    const found = walkFolderSorted(rootDir)
+      .filter(f => /\.zip$/i.test(f.relPath) && !_isNoisePath(f.relPath))
+      .filter(f => !left.includes(f.relPath));
+    if (!found.length) break;
+    const remaining = found.reduce((s, f) => s + (f.size || 0), 0);
+    const denom = doneBytes + remaining;
+    let did = false;
+    for (const z of found) {
+      const targetRel = z.relPath.replace(/\.zip$/i, '');
+      const targetAbs = path.join(rootDir, targetRel);
+      if (fs.existsSync(targetAbs)) { left.push(z.relPath); continue; }
+      const startedAt = doneBytes;
+      try {
+        await _extractZipSubtree(z.absPath, '', targetAbs, onProgress
+          ? (p) => {
+              // Within one archive, advance proportionally through its own share.
+              const inner = p.totalBytes > 0 ? Math.min(1, (p.totalBytes || 0) / Math.max(1, z.size)) : 0;
+              const at = startedAt + (z.size || 0) * inner;
+              onProgress({
+                percent: denom > 0 ? Math.max(0, Math.min(100, Math.floor((at / denom) * 100))) : 0,
+                bytes: Math.round(at), totalBytes: denom,
+                currentFile: `${targetRel}/${p.currentFile || ''}`,
+              });
+            }
+          : null);
+      } catch {
+        // An archive we cannot read is left as a file rather than failing the
+        // whole import — the user keeps the bundle, minus one expansion.
+        left.push(z.relPath);
+        continue;
+      }
+      fs.rmSync(z.absPath, { force: true });
+      // ⭐ AN ARCHIVE THAT WRAPS ITS CONTENT IN A FOLDER OF ITS OWN NAME IS UNWRAPPED.
+      // Sol.zip containing Sol/ expanded to Sol/Sol/..., doubling a segment on every
+      // path beneath it — noise in every candidate path, and real pressure on the
+      // Windows path limit for deep track folders. Only collapsed when the single
+      // top-level directory matches the archive name exactly, so a bundle whose one
+      // folder is genuinely a different thing is left alone.
+      try {
+        const kids = fs.readdirSync(targetAbs, { withFileTypes: true });
+        const only = kids.length === 1 && kids[0].isDirectory() ? kids[0].name : null;
+        if (only && only.toLowerCase() === path.basename(targetRel).toLowerCase()) {
+          const inner = path.join(targetAbs, only);
+          const stash = targetAbs + '.unwrap-tmp';
+          fs.renameSync(inner, stash);
+          fs.rmSync(targetAbs, { recursive: true, force: true });
+          fs.renameSync(stash, targetAbs);
+        }
+      } catch { /* leave the extra layer rather than risk the tree */ }
+      doneBytes += (z.size || 0);
+      expanded.push(z.relPath);
+      did = true;
+    }
+    if (!did) break;
+  }
+  // Anything still on disk after the cap is reported, not silently accepted.
+  for (const f of walkFolderSorted(rootDir)) {
+    if (/\.zip$/i.test(f.relPath) && !_isNoisePath(f.relPath) && !left.includes(f.relPath)) {
+      left.push(f.relPath);
+    }
+  }
+  return { expanded, left };
 }
 
 function _createFolderSource({ uuid, uuidDir, meta }) {
@@ -2671,9 +2803,17 @@ async function _dedupeFolderSource(userData, uuid, uuidDir, meta, onProgress) {
       if (onProgress) onProgress({ phase: 'dedupe', fileCount: done, totalFiles: total, currentFile: rel });
       let st;
       try { st = fs.statSync(abs); } catch { skipped++; continue; }
-      // Already sharing storage with something — nothing to do, and re-linking would
-      // churn the tree on every run. This is what makes the pass idempotent.
-      if (st.nlink > 1) continue;
+      // ⚠️ IDEMPOTENCE IS "DOES THIS ALREADY POINT AT ITS CANONICAL", NOT "IS THIS
+      // SHARED WITH ANYTHING". The first version skipped any file with nlink > 1,
+      // which is wrong the moment anything else can hold a name: library entries are
+      // created BEFORE optimize runs, so a source file a font points at already has
+      // nlink 2 and was walked straight past. Measured on a real bundle — 3,132
+      // duplicates found, only 2,329 linked, 803 skipped SILENTLY because this
+      // branch does not even count them. Comparing inodes asks the question we
+      // actually mean.
+      let canonSt;
+      try { canonSt = fs.statSync(canonAbs); } catch { skipped++; continue; }
+      if (st.ino === canonSt.ino && st.dev === canonSt.dev) continue;
       // The duplicate must be what the manifest claims before it is thrown away.
       try { if (hashOf(abs) !== h) { skipped++; continue; } } catch { skipped++; continue; }
       const tmp = abs + '.dedup-tmp';

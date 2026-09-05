@@ -123,6 +123,31 @@ const BUNDLE = {
   }
 
   {
+    console.log('a file an ENTRY already points at is still deduped');
+    // ⚠️ The regression this exists for: library entries are created BEFORE optimize
+    // runs, so a source file a font points at already has nlink 2. An idempotence
+    // guard written as "nlink > 1 means done" walks straight past those — measured on
+    // a real bundle as 3,132 duplicates found and only 2,329 linked, with the other
+    // 803 skipped silently. Idempotence means "already points at its canonical",
+    // which is an inode comparison, not a link count.
+    const { userData, uuid, src } = makeFolderSource(BUNDLE);
+    // Stand in for an entry: something outside the source holding a name for one of
+    // the duplicates, exactly as a font pointer does.
+    const elsewhere = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'jmt-dd-ent-')), 'hum.wav');
+    fs.linkSync(path.join(src, 'Xenopixel/Ahsoka/hum.wav'), elsewhere);
+    check('the duplicate now has an outside holder',
+      fs.statSync(path.join(src, 'Xenopixel/Ahsoka/hum.wav')).nlink === 2);
+
+    const r = await S.dedupeSource(userData, uuid);
+    check('it is still linked to the canonical', r.linkedFiles === 4, JSON.stringify(r));
+    check('⭐ and it now shares with Proffie, not just with the outsider',
+      fs.statSync(path.join(src, 'Xenopixel/Ahsoka/hum.wav')).ino
+        === fs.statSync(path.join(src, 'Proffie/Ahsoka/hum.wav')).ino);
+    check('the outside holder still reads its bytes',
+      fs.readFileSync(elsewhere).equals(HUM));
+  }
+
+  {
     console.log('a source with nothing to share is left alone');
     const { userData, uuid, uuidDir } = makeFolderSource({
       'Proffie/hum.wav': wav('A'), 'Proffie/swing1.wav': wav('B'), 'readme.txt': 'C',

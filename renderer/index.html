@@ -5427,7 +5427,7 @@
       <!-- Chooser view: the three co-equal methods. Hidden once a method that
            has its own sub-view (Paste a link) is chosen. -->
       <div class="sf-import-chooser" id="sf-import-chooser">
-        <p class="sf-import-hint">Pick a sound font as it came from the vendor with preference for the original .zip download. JMT Studio keeps the archive intact and lets you choose which fonts inside to add to your library.</p>
+        <p class="sf-import-hint">Pick a sound font as it came from the vendor, ideally the original .zip download. JMT Studio keeps everything it contained and lets you choose which fonts inside to add to your library.</p>
         <div class="sf-import-pick-row">
           <button class="modal-btn-primary" id="sf-import-pick-zip">Pick zip file…</button>
           <button class="modal-btn-primary" id="sf-import-pick-folder">Pick folder…</button>
@@ -5790,7 +5790,7 @@
           <span id="sf-source-original-file" class="sf-meta-val"></span>
         </div>
         <div class="sf-meta-row">
-          <span class="sf-meta-label">Archive size</span>
+          <span class="sf-meta-label">Source size</span>
           <span id="sf-source-archive-size" class="sf-meta-val"></span>
         </div>
         <div class="sf-meta-row" id="sf-source-optimized-row" style="display:none">
@@ -6378,9 +6378,9 @@
         <strong>Review import</strong> lets you rename, set creators, add a demo link, preview the sound, and pick exactly which fonts to add.
       </p>
       <p class="sf-import-hint" id="sf-bulk-import-review-note" style="color: var(--c-text-muted); margin: 0;">
-        Fonts you already have are skipped — both an identical archive and a copy whose sounds your
-        library already contains. Review import shows them unchecked, so you can take one anyway; it
-        comes in as a separate font.
+        Fonts you already have are skipped, matched by their sounds rather than by name, so a font
+        you own under a different name still counts as owned. Review import shows them unchecked, so
+        you can take one anyway; it comes in as a separate font.
       </p>
     </div>
 
@@ -12745,7 +12745,12 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     }
     if (q) q.innerHTML = `<strong>Quick import</strong> adds the ready ones now, with the names and creators we detected. Anything we couldn't identify comes in with a <span style="color: var(--jmt-amber, #d49b3a)">Needs review</span> flag to fix later.`;
     if (r) r.innerHTML = `<strong>Review import</strong> lets you rename, set creators, add a demo link, preview the sound, and pick exactly which fonts to add.`;
-    if (n) n.textContent = 'Fonts you already have are skipped, both an identical archive and a copy whose sounds your library already contains. Review import shows them unchecked, so you can take one anyway; it comes in as a separate font.';
+    // ⚠️ NOT "an identical archive". Both skip mechanisms are CONTENT comparisons - the
+    // import hash and the core-sound match - and a card has no archives at all, so the old
+    // wording described something that cannot happen in the flow it appears in. Sources also
+    // stopped being archives entirely ([B-309]). Phrased to match the tracks line above, which
+    // already said this correctly.
+    if (n) n.textContent = 'Fonts you already have are skipped, matched by their sounds rather than by name, so a font you own under a different name still counts as owned. Review import shows them unchecked, so you can take one anyway; it comes in as a separate font.';
   };
 
   const showReview = async (plan) => {
@@ -23597,7 +23602,10 @@ require(['vs/editor/editor.main'], function () {
           // shows, so label those gaps with the real work, never a premature
           // "Done". 'checking' is the pre-review manifest build (catalog
           // progress) that makes duplicate notes ready when the review opens.
-          const labels = { hashing: 'Reading source…', copying: 'Copying source…', checking: 'Checking your library…', done: 'Finding fonts…' };
+          // One label per real operation. `expanding` exists because unpacking the
+          // archives a bundle ships inside itself is its own phase with its own
+          // measure — sharing 'copying' put two identically-named bars back to back.
+          const labels = { hashing: 'Reading source…', copying: 'Copying source…', expanding: 'Unpacking bundled fonts…', checking: 'Cataloging files…', done: 'Finding fonts…' };
           if (_sfImportEls.progLabel && labels[data.stage]) _sfImportEls.progLabel.textContent = labels[data.stage];
           const pct = typeof data.percent === 'number' ? data.percent : 0;
           _sfSetImportBar(pct);
@@ -23624,7 +23632,7 @@ require(['vs/editor/editor.main'], function () {
           importRes = await window.electronAPI.importSource({ sourcePath, forceNewSource, knownHash });
         }
         // Progress teardown is deferred on the success path — the pre-review
-        // "Checking your library…" stage below reuses the same subscription
+        // "Cataloging files…" stage below reuses the same subscription
         // and elapsed clock. Every exit path calls this exactly once.
         const endProgressPhase = () => {
           if (_sfImportProgressUnsub) { try { _sfImportProgressUnsub(); } catch {} _sfImportProgressUnsub = null; }
@@ -23667,7 +23675,15 @@ require(['vs/editor/editor.main'], function () {
         // notes ready instead of them arriving minutes late on big bundles.
         // Byte-identical re-imports seed from their twin and pass instantly;
         // the Optimize step's Cataloging section is pre-warmed either way.
-        if (_sfImportEls.progLabel) _sfImportEls.progLabel.textContent = 'Checking your library…';
+        // ⚠️ THIS READS NOTHING FROM THE LIBRARY. It calls ensureSourceManifest, which
+        // hashes the NEW SOURCE's own files; having them catalogued is what lets the
+        // review screen show duplicate notes immediately, but that is the PURPOSE, not
+        // the work. The old wording described the purpose and got it wrong twice: it
+        // claimed to check a library that on a first import is empty, and it named the
+        // same operation the optimize step already calls "Cataloging files".
+        // (His catch, 2026-09-04: "isn't that preparing the specific files for the
+        // library... even a blank library would say that.")
+        if (_sfImportEls.progLabel) _sfImportEls.progLabel.textContent = 'Cataloging files…';
         _sfSetImportBar(0);
         if (_sfImportEls.progDetail) _sfImportEls.progDetail.textContent = '';
         try { await window.electronAPI.ensureSourceManifest({ uuid: importRes.uuid }); } catch {}
@@ -24502,7 +24518,11 @@ require(['vs/editor/editor.main'], function () {
             : `<strong>${successCount} fonts</strong> were added to your library.`);
           if (optRes && optRes.deduped && optRes.savedBytes > 0) {
             const dupes = Math.max(0, (optRes.originalFiles || 0) - (optRes.uniqueFiles || 0));
-            parts.push(`JMT Studio found <strong>${dupes.toLocaleString()} duplicate files</strong> inside the source and kept one copy of each, saving <strong>${fmtB(optRes.savedBytes)}</strong> on your disk. Nothing is lost: exporting the source rebuilds every original file exactly.`);
+            // ⭐ "Every file is still here" is literally true of a hardlinked tree, where the
+            // old "rebuilds on export" described a TRIMMED ARCHIVE that genuinely had to
+            // reconstruct removed paths. Nothing is removed now, so nothing is rebuilt - and
+            // the reassurance no longer needs a "nothing is lost" caveat to carry it. [B-309]
+            parts.push(`JMT Studio found <strong>${dupes.toLocaleString()} duplicate files</strong> inside the source and kept one copy of each, saving <strong>${fmtB(optRes.savedBytes)}</strong> on your disk. Every file is still here.`);
           }
           if (closeoutSrc && !closeoutSrc.fromLink && closeoutSrc.sourcePath) {
             const isFolder = !/\.zip$/i.test(closeoutSrc.sourcePath);
