@@ -13219,6 +13219,38 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       text += parts.join(', ');
     }
     text += '.';
+    // ── What the run saved ──────────────────────────────────────────────
+    // A bulk run measured this all along and threw it away, so the summary
+    // counted things and never said what any of it cost. The single-import
+    // close-out has always reported it. (2026-09-05.)
+    //
+    // TWO SEPARATE FACTS, said separately: duplicates found INSIDE a bundle,
+    // and content the library already held. Summing them into one number
+    // would leave neither checkable, and they answer different questions —
+    // the first is about how vendors pack their bundles, the second about
+    // how much overlap there is between the ones you own.
+    // ⚠️ Defined HERE. The identically-named helper further up lives inside the
+    // progress callback, which is a different scope — reaching for it from this
+    // builder is a ReferenceError that blanks the whole summary.
+    const _fmtSaved = (n) => (window._sfFormatBytes ? window._sfFormatBytes(n) : `${n} B`);
+    let _dupFiles = 0, _dupSaved = 0, _xFiles = 0, _xSaved = 0;
+    for (const imp of sum.imported) {
+      _dupFiles += imp.dedupFiles || 0; _dupSaved += imp.dedupSaved || 0;
+      _xFiles   += imp.crossFiles || 0; _xSaved   += imp.crossSaved || 0;
+    }
+    const _savingParts = [];
+    if (_dupSaved > 0) {
+      _savingParts.push(`<strong>${_dupFiles.toLocaleString()} duplicate file${_dupFiles === 1 ? '' : 's'}</strong> inside the sources, saving <strong>${_fmtSaved(_dupSaved)}</strong>`);
+    }
+    if (_xSaved > 0) {
+      _savingParts.push(`<strong>${_xFiles.toLocaleString()} file${_xFiles === 1 ? '' : 's'}</strong> your library already had, saving <strong>${_fmtSaved(_xSaved)}</strong>`);
+    }
+    if (_savingParts.length) {
+      // ⭐ "Every file is still here" carries the same reassurance the
+      // single-import close-out gives, and it is literally true: nothing was
+      // removed, the duplicates became additional names for one copy.
+      text += `<br><br>JMT Studio found ${_savingParts.join(', and ')}. Every file is still here.`;
+    }
     els.summaryText.innerHTML = text;
     if (els.summaryElapsed) {
       els.summaryElapsed.textContent = `Took ${_fmtDur(bulkFinalElapsedSec)}.`;

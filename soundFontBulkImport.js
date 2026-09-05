@@ -433,6 +433,10 @@ async function runBulkImport({ plan, userData }, callbacks = {}) {
           versionsSkipped: result.versionsSkipped || 0,
           variantsEmitted: result.variantsEmitted || 0,
           strippedFiles: result.strippedFiles || [],
+          dedupSaved: result.dedupSaved || 0,
+          dedupFiles: result.dedupFiles || 0,
+          crossSaved: result.crossSaved || 0,
+          crossFiles: result.crossFiles || 0,
         });
       } else {
         summary.failed.push({ src: src.relPath || src.absPath, reason: result.error });
@@ -1208,10 +1212,15 @@ async function importPlannedSource({ userData, src, fromSdCard }, onSubProgress)
   // Progress: the optimize passes' phases are folded onto one monotonic percent
   // (bands weighted by typical duration) so the bulk bar keeps moving instead of
   // freezing at the end of the extract phase.
+  // ⚠️ THE RESULT IS KEPT, not discarded. dedupeSource reports exactly what it
+  // reclaimed and this threw it away, so a bulk run had no savings to report even
+  // though every source had measured its own. The single-import close-out has
+  // shown this number all along; bulk simply never collected it. (2026-09-05.)
+  let dedupHere = null;
   try {
     const optForward = _optimizeProgressForwarder(onSubProgress);
     await soundFontSources.ensureSourceManifest(userData, sourceUuid, optForward);
-    await soundFontSources.dedupeSource(userData, sourceUuid, optForward);
+    dedupHere = await soundFontSources.dedupeSource(userData, sourceUuid, optForward);
   } catch {}
   // Duplicate recognition for QUICK import (no review screen to label): match
   // each created entry's candidate against the library EXCLUDING this source's
@@ -1269,6 +1278,14 @@ async function importPlannedSource({ userData, src, fromSdCard }, onSubProgress)
     variantsEmitted: variantsEmittedHere,
     strippedFiles: (importRes && importRes.strippedFiles)
       || (src._prepared && src._prepared.strippedFiles) || [],
+    // TWO SEPARATE SAVINGS, deliberately not summed here. Duplicates WITHIN this
+    // bundle and content shared with what the library already held are different
+    // facts, and folding them into one number would make neither checkable.
+    dedupSaved: (dedupHere && dedupHere.deduped && dedupHere.savedBytes) || 0,
+    dedupFiles: (dedupHere && dedupHere.deduped)
+      ? Math.max(0, (dedupHere.originalFiles || 0) - (dedupHere.uniqueFiles || 0)) : 0,
+    crossSaved: (importRes && importRes.crossLinked && importRes.crossLinked.savedBytes) || 0,
+    crossFiles: (importRes && importRes.crossLinked && importRes.crossLinked.linkedFiles) || 0,
   };
 }
 
