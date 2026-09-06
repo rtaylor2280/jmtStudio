@@ -1047,7 +1047,12 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
     // review's empty fields were written straight over these values seconds after
     // they landed - so a curated re-import came back with almost nothing. Returning
     // only `curationApplied` was what forced the renderer to guess. ([B-283])
-    return { ...res, strippedFiles, crossLinked, curation: curation || null, curationApplied: res.curationApplied || null };
+    // contentBytes is the LOGICAL size of what this source holds, before any
+    // sharing. The close-out needs it to say what the font costs on disk
+    // (holds minus saved), and it cannot be recovered later without
+    // re-walking the tree. ([B-317], 2026-09-06.)
+    return { ...res, strippedFiles, crossLinked, contentBytes: fileSize,
+      curation: curation || null, curationApplied: res.curationApplied || null };
   } catch (err) {
     cleanupPartialSource(uuidDir);
     _dropCurationTmp();

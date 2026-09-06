@@ -23709,6 +23709,7 @@ require(['vs/editor/editor.main'], function () {
         // ever report the WITHIN-source half — which on a bundle sharing 1.27 GB
         // with a sibling meant showing 3% of the real saving. ([B-317], 2026-09-05.)
         _sfImport.crossLinked = importRes.crossLinked || null;
+        _sfImport.contentBytes = importRes.contentBytes || 0;
         // The curation this archive arrived carrying, if any. The review PRE-FILLS
         // from it. That is not a nicety: the review writes its fields back over the
         // source seconds later (updateSourceMeta, below), so an empty form actively
@@ -24534,6 +24535,7 @@ require(['vs/editor/editor.main'], function () {
         // Captured alongside closeoutSrc, and for the same reason: _sfImport is
         // cleared a few lines below and the close-out renders after that.
         const closeoutCrossLinked = (_sfImport && _sfImport.crossLinked) || null;
+        const closeoutContentBytes = (_sfImport && _sfImport.contentBytes) || 0;
         // The source is now committed (referenced by at least one entry, or
         // attempted by the user). Clear the orphan-cleanup hook before close.
         if (_sfImport) _sfImport.uuid = null;
@@ -24563,26 +24565,29 @@ require(['vs/editor/editor.main'], function () {
           parts.push(successCount === 1
             ? `<strong>${esc(picks[0].name)}</strong> was added to your library.`
             : `<strong>${successCount} fonts</strong> were added to your library.`);
-          if (optRes && optRes.deduped && optRes.savedBytes > 0) {
-            const dupes = Math.max(0, (optRes.originalFiles || 0) - (optRes.uniqueFiles || 0));
-            // ⭐ "Every file is still here" is literally true of a hardlinked tree, where the
-            // old "rebuilds on export" described a TRIMMED ARCHIVE that genuinely had to
-            // reconstruct removed paths. Nothing is removed now, so nothing is rebuilt - and
-            // the reassurance no longer needs a "nothing is lost" caveat to carry it. [B-309]
-            parts.push(`JMT Studio found <strong>${dupes.toLocaleString()} duplicate files</strong> inside the source and kept one copy of each, saving <strong>${fmtB(optRes.savedBytes)}</strong> on your disk. Every file is still here.`);
-          }
-          // ⭐ THE OTHER HALF, AND USUALLY THE BIGGER ONE ([B-317], 2026-09-05).
-          // This close-out reported only the within-source saving for a while
-          // after cross-source linking shipped, because that number was wired
-          // into the BULK summary and nowhere else. On Cere it meant showing
-          // 43.7 MB of a 1,342.6 MB saving — the feature working perfectly and
-          // the screen calling it negligible.
-          // ⚠️ Wording is provisional; a pass over all three savings strings is
-          // owed and this one is deliberately shaped like its neighbour so they
-          // move together.
-          if (closeoutCrossLinked && closeoutCrossLinked.savedBytes > 0) {
-            const n = closeoutCrossLinked.linkedFiles || 0;
-            parts.push(`Another <strong>${n.toLocaleString()} file${n === 1 ? '' : 's'}</strong> matched audio your library already had, so they point at the copy you own instead of being stored again, saving a further <strong>${fmtB(closeoutCrossLinked.savedBytes)}</strong>.`);
+          // ── WHAT THIS FONT COSTS, not what our process found ──────────────
+          // Said as ONE outcome rather than two mechanisms. The user added a
+          // font; they did not run a within-source pass and a cross-source pass,
+          // and reporting those separately describes the implementation instead
+          // of the result. (2026-09-06.)
+          //
+          // The second sentence exists because the first one RAISES A QUESTION.
+          // "Holds 1.33 GB, takes up 17 MB" invites "so where did the rest go",
+          // and leaving that unanswered manufactures exactly the worry this copy
+          // is meant to remove. It answers it without teaching the mechanism.
+          //
+          // ⚠️ NO EM DASHES IN USER-FACING COPY.
+          // ⚠️ Suppressed entirely when nothing was shared: "holds 182 MB and
+          // takes up 182 MB" is worse than saying nothing.
+          // ⚠️ The footprint depends on IMPORT ORDER, and is honest about that.
+          // Dagen came first and pays 1.28 GB; Cere came second and pays 17 MB.
+          // Reversed, the numbers swap. It reports what this font costs you now,
+          // which is the actionable figure, not a property of the font.
+          const _savedTotal = ((optRes && optRes.deduped && optRes.savedBytes) || 0)
+            + ((closeoutCrossLinked && closeoutCrossLinked.savedBytes) || 0);
+          if (closeoutContentBytes > 0 && _savedTotal > 0) {
+            const footprint = Math.max(0, closeoutContentBytes - _savedTotal);
+            parts.push(`It holds <strong>${fmtB(closeoutContentBytes)}</strong> of audio and takes up <strong>${fmtB(footprint)}</strong> on your disk. Identical files are stored once and used in every location they appear, so nothing is missing or renamed.`);
           }
           if (closeoutSrc && !closeoutSrc.fromLink && closeoutSrc.sourcePath) {
             const isFolder = !/\.zip$/i.test(closeoutSrc.sourcePath);
