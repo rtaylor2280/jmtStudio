@@ -23637,7 +23637,12 @@ require(['vs/editor/editor.main'], function () {
           // One label per real operation. `expanding` exists because unpacking the
           // archives a bundle ships inside itself is its own phase with its own
           // measure — sharing 'copying' put two identically-named bars back to back.
-          const labels = { hashing: 'Reading source…', copying: 'Copying source…', expanding: 'Unpacking bundled fonts…', checking: 'Cataloging files…', done: 'Finding fonts…' };
+          // ⚠️ A STAGE MISSING FROM THIS MAP IS NOT A COSMETIC GAP. An unknown
+          // stage leaves the label stale AND, because such an event usually
+          // carries no `percent`, drops the bar to 0 — so it reads as the import
+          // restarting. Any new stage emitted by importSource belongs here and
+          // must send a percent. ([B-317], 2026-09-05.)
+          const labels = { hashing: 'Reading source…', copying: 'Copying source…', expanding: 'Unpacking bundled fonts…', deduping: 'Matching against your library…', checking: 'Cataloging files…', done: 'Finding fonts…' };
           if (_sfImportEls.progLabel && labels[data.stage]) _sfImportEls.progLabel.textContent = labels[data.stage];
           const pct = typeof data.percent === 'number' ? data.percent : 0;
           _sfSetImportBar(pct);

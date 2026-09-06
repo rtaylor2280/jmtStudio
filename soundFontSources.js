@@ -708,8 +708,15 @@ async function _linkAgainstLibrary(userData, destDir, records, onProgress) {
     } catch {
       try { fs.rmSync(tmp, { force: true }); } catch {}
     }
+    // ⚠️ PERCENT IS REQUIRED, not decorative. The import bar reads `percent` off
+    // every event and falls to 0 when it is absent, so a stage that omits it
+    // makes the bar snap backwards mid-import. Same failure the `expanding`
+    // stage was split out to fix, reached from the other direction.
     if (onProgress && (done % 25 === 0 || done === total)) {
-      onProgress({ fileCount: done, totalFiles: total, currentFile: r.relPath });
+      onProgress({
+        fileCount: done, totalFiles: total, currentFile: r.relPath,
+        percent: total > 0 ? Math.max(0, Math.min(100, Math.floor((done / total) * 100))) : 0,
+      });
     }
   }
   return { linkedFiles, savedBytes };
