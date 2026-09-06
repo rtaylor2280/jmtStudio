@@ -588,7 +588,7 @@ async function doCompile() {
   // Re-read content in case Save As changed the path / metadata.
   const content = window.getEditorContent();
 
-  showBuildModal('⚙ Compiling...');
+  showBuildModal('⚙ Compiling');
   const _recompileReason = window.consumeSdRecompileReason?.();
   startCompileHints(_recompileReason || (_sdCompile === 'compile-anyway'
     ? 'Compiling without SD card protection. I have a bad feeling about this…'
@@ -730,8 +730,7 @@ async function doFlash() {
   // or manual Retry) don't pile up. Persistent build-output panel keeps full history.
   stopCompileHints();
   stopCompileTimer();
-  document.getElementById('bm-title').textContent = '⚡ Flashing...';
-  document.getElementById('bm-title').style.color = 'var(--c-text-bright)';
+  setBuildTitle('⚡ Flashing', { busy: true, color: 'var(--c-text-bright)' });
   document.getElementById('bm-log').innerHTML = '';
   document.getElementById('bm-status').textContent = '';
   document.getElementById('bm-abort').style.display = 'none';
@@ -1321,8 +1320,7 @@ function onBuildDone({ type, ok, error, aborted, retriable, needsDfuDriver, sour
 
       if (isDfuMode) {
         // DFU mode — don't watch serial ports
-        document.getElementById('bm-title').textContent = '✓ Compile Successful';
-        document.getElementById('bm-title').style.color = 'var(--c-success-text)';
+        setBuildTitle('✓ Compile Successful', { color: 'var(--c-success-text)' });
         document.getElementById('bm-abort').style.display = 'none';
         setBarMode('success');
         if (dfuDeviceReady) {
@@ -1337,8 +1335,7 @@ function onBuildDone({ type, ok, error, aborted, retriable, needsDfuDriver, sour
         }
       } else if (selectedPortIsProffieboard && selectedPort) {
         // Board already connected — show success then flash immediately
-        document.getElementById('bm-title').textContent = '✓ Compile Successful';
-        document.getElementById('bm-title').style.color = 'var(--c-success-text)';
+        setBuildTitle('✓ Compile Successful', { color: 'var(--c-success-text)' });
         document.getElementById('bm-abort').style.display = 'none';
         document.getElementById('bm-close').style.display = 'none';
         document.getElementById('bm-status').textContent = 'Board connected. Flashing...';
@@ -1348,8 +1345,7 @@ function onBuildDone({ type, ok, error, aborted, retriable, needsDfuDriver, sour
       } else {
         // No board — show wait UI and start watcher
         setFlashEnabled(false);
-        document.getElementById('bm-title').textContent = '✓ Compile Successful';
-        document.getElementById('bm-title').style.color = 'var(--c-success-text)';
+        setBuildTitle('✓ Compile Successful', { color: 'var(--c-success-text)' });
         document.getElementById('bm-abort').style.display = 'none';
         document.getElementById('bm-close').style.display = 'inline-block';
         document.getElementById('bm-status').textContent = 'Connect your Proffieboard to flash...';
@@ -1422,8 +1418,7 @@ function onBuildDone({ type, ok, error, aborted, retriable, needsDfuDriver, sour
     }
     if (isDfuMode) {
       // Post-DFU flash: lastFlashedSN + setFlashedTimestamp set in watchForSerialAfterDfu once real port is known
-      document.getElementById('bm-title').textContent = '✓ Flash Complete';
-      document.getElementById('bm-title').style.color = 'var(--c-success-text)';
+      setBuildTitle('✓ Flash Complete', { color: 'var(--c-success-text)' });
       document.getElementById('bm-abort').style.display = 'none';
       document.getElementById('bm-close').style.display = 'inline-block';
       // Reset close label — the DFU driver-fix flow renames it to "Cancel" because
@@ -1464,8 +1459,7 @@ function showBuildModal(title) {
   stopCompileHints();
   const modal = document.getElementById('build-modal');
   modal.style.display = 'flex';
-  document.getElementById('bm-title').textContent = title;
-  document.getElementById('bm-title').style.color = 'var(--c-text-bright)';
+  setBuildTitle(title, { busy: true, color: 'var(--c-text-bright)' });
   document.getElementById('bm-log').innerHTML = '';
   document.getElementById('bm-status').textContent = '';
   document.getElementById('bm-close').style.display = 'none';
@@ -1487,6 +1481,25 @@ function showBuildModal(title) {
   document.getElementById('bm-timer-flash').style.display = 'none';
   setBarMode('knightrider');
   startCompileTimer();
+}
+
+// One writer for the build-modal title, so the text and the working-state
+// animation cannot disagree. `busy` adds the busy-dots component, which supplies
+// its own animated ellipsis through ::after - so titles are passed WITHOUT
+// trailing dots, or you get six.
+//
+// The half that was missing until 2026-09-06: the class was hardcoded on the
+// element in index.html and nothing ever removed it, so the dots kept running
+// under "Flash Complete", "Compile Failed" and "DFU Device Ready". Every
+// terminal state, and every state that is waiting on the USER rather than on
+// us, passes busy:false. Same construction as _sfSetImportBar - one owner of
+// every write means the class cannot be left on. [B-322]
+function setBuildTitle(text, { busy = false, color = null } = {}) {
+  const t = document.getElementById('bm-title');
+  if (!t) return;
+  t.textContent = text;
+  t.classList.toggle('busy-dots', !!busy);
+  if (color) t.style.color = color;
 }
 
 function setBarMode(mode) {
@@ -1581,8 +1594,7 @@ function _selectPortAndFlash(port, result) {
 
 function showWaitForBoardInModal() {
   document.getElementById('build-modal').style.display = 'flex';
-  document.getElementById('bm-title').textContent = '⚡ Connect Board';
-  document.getElementById('bm-title').style.color = 'var(--c-text-bright)';
+  setBuildTitle('⚡ Connect Board', { color: 'var(--c-text-bright)' });
   document.getElementById('bm-status').textContent = 'Connect your Proffieboard to continue...';
   document.getElementById('bm-abort').style.display = 'none';
   document.getElementById('bm-retry').style.display = 'none';
@@ -1655,8 +1667,7 @@ function finishBuildModal(success, title, statusMsg, { retriable = false, isFlas
   stopPortWatch();
   stopCompileTimer();
   stopFlashTimer();
-  document.getElementById('bm-title').textContent = title;
-  document.getElementById('bm-title').style.color = success ? 'var(--c-success-text)' : 'var(--c-danger-text)';
+  setBuildTitle(title, { color: success ? 'var(--c-success-text)' : 'var(--c-danger-text)' });
   _setStatusTiered(document.getElementById('bm-status'), statusMsg || '');
   document.getElementById('bm-abort').style.display = 'none';
   document.getElementById('bm-dfu-setup').style.display = 'none';
@@ -2860,8 +2871,7 @@ async function startDfuWaitModal(isRetry = false, autoFlash = true, justInstalle
     const modal = document.getElementById('build-modal');
     modal.style.display = 'flex';
     document.getElementById('bm-log').innerHTML = '';
-    document.getElementById('bm-title').textContent = '⚡ Bootloader Mode (DFU)';
-    document.getElementById('bm-title').style.color = 'var(--c-text-bright)';
+    setBuildTitle('⚡ Bootloader Mode (DFU)', { busy: true, color: 'var(--c-text-bright)' });
     document.getElementById('bm-dfu-setup').style.display = 'none';
     document.getElementById('bm-manual-row').style.display = 'none';
     document.getElementById('bm-dfu-note').style.display = 'none';
@@ -2996,9 +3006,7 @@ async function startDfuWaitModal(isRetry = false, autoFlash = true, justInstalle
     // Windows really does have a driver problem (WinUSB rebinding per port).
     // Linux/Mac don't — it's a permissions issue (udev rules), and calling it
     // a "driver" misleads users into searching for software that doesn't exist.
-    document.getElementById('bm-title').textContent =
-      isWin ? 'Fix DFU Driver' : 'Fix DFU Access';
-    document.getElementById('bm-title').style.color = 'var(--c-warn-text)';
+    setBuildTitle(isWin ? 'Fix DFU Driver' : 'Fix DFU Access', { color: 'var(--c-warn-text)' });
     document.getElementById('bm-abort').style.display = 'none';
     document.getElementById('bm-close').style.display = 'inline-block';
     document.getElementById('bm-close').textContent = 'Cancel';
@@ -3056,8 +3064,7 @@ async function startDfuWaitModal(isRetry = false, autoFlash = true, justInstalle
   document.getElementById('bm-log').innerHTML = '';
   appendModalLog('✓ Proffieboard detected in Bootloader Mode (DFU)', false);
   document.getElementById('bm-abort').style.display = 'none';
-  document.getElementById('bm-title').textContent = '⚡ DFU Device Ready';
-  document.getElementById('bm-title').style.color = 'var(--c-title-accent)';
+  setBuildTitle('⚡ DFU Device Ready', { color: 'var(--c-title-accent)' });
   setBarMode('success');
 
   if (autoFlash && compileSuccess) {
@@ -3124,8 +3131,7 @@ async function doFlashDFU() {
   }
 
   // Device confirmed present — go straight to flash
-  document.getElementById('bm-title').textContent = '⚡ Flashing (DFU)...';
-  document.getElementById('bm-title').style.color = 'var(--c-text-bright)';
+  setBuildTitle('⚡ Flashing (DFU)', { busy: true, color: 'var(--c-text-bright)' });
   document.getElementById('bm-abort').style.display = 'none';
   document.getElementById('bm-retry').style.display = 'none';
   document.getElementById('bm-close').style.display = 'none';

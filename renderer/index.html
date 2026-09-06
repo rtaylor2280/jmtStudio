@@ -45035,7 +45035,10 @@ function _getFreshFieldRange(fieldName) {
 <!-- ── Build modal ── -->
 <div id="build-modal" style="display:none;">
   <div id="bm-inner">
-    <div id="bm-title" class="busy-dots">Compiling</div>
+    <!-- No busy-dots class here: the working-state animation is owned entirely by
+         setBuildTitle() in buildPanel.js. Hardcoding it meant nothing ever removed
+         it and the dots ran under every terminal state. [B-322] -->
+    <div id="bm-title">Compiling</div>
 
     <!-- Knight Rider / progress bar -->
     <div id="bm-bar-track">
