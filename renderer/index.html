@@ -23702,6 +23702,13 @@ require(['vs/editor/editor.main'], function () {
         }
         _sfImport.uuid = importRes.uuid;
         _sfImport.sourceFileDate = importRes.sourceFileDate || null;
+        // ⚠️ STASHED HERE BECAUSE IT IS MEASURED HERE AND REPORTED MUCH LATER.
+        // What this source shared with content the library already held is known
+        // at store time and cannot be recomputed at the close-out, which runs in a
+        // different scope after the review. Without this the close-out could only
+        // ever report the WITHIN-source half — which on a bundle sharing 1.27 GB
+        // with a sibling meant showing 3% of the real saving. ([B-317], 2026-09-05.)
+        _sfImport.crossLinked = importRes.crossLinked || null;
         // The curation this archive arrived carrying, if any. The review PRE-FILLS
         // from it. That is not a nicety: the review writes its fields back over the
         // source seconds later (updateSourceMeta, below), so an empty form actively
@@ -24524,6 +24531,9 @@ require(['vs/editor/editor.main'], function () {
         const closeoutSrc = _sfImport
           ? { fromLink: !!_sfImport.fromLink, sourcePath: _sfImport.sourcePath || '' }
           : null;
+        // Captured alongside closeoutSrc, and for the same reason: _sfImport is
+        // cleared a few lines below and the close-out renders after that.
+        const closeoutCrossLinked = (_sfImport && _sfImport.crossLinked) || null;
         // The source is now committed (referenced by at least one entry, or
         // attempted by the user). Clear the orphan-cleanup hook before close.
         if (_sfImport) _sfImport.uuid = null;
@@ -24560,6 +24570,19 @@ require(['vs/editor/editor.main'], function () {
             // reconstruct removed paths. Nothing is removed now, so nothing is rebuilt - and
             // the reassurance no longer needs a "nothing is lost" caveat to carry it. [B-309]
             parts.push(`JMT Studio found <strong>${dupes.toLocaleString()} duplicate files</strong> inside the source and kept one copy of each, saving <strong>${fmtB(optRes.savedBytes)}</strong> on your disk. Every file is still here.`);
+          }
+          // ⭐ THE OTHER HALF, AND USUALLY THE BIGGER ONE ([B-317], 2026-09-05).
+          // This close-out reported only the within-source saving for a while
+          // after cross-source linking shipped, because that number was wired
+          // into the BULK summary and nowhere else. On Cere it meant showing
+          // 43.7 MB of a 1,342.6 MB saving — the feature working perfectly and
+          // the screen calling it negligible.
+          // ⚠️ Wording is provisional; a pass over all three savings strings is
+          // owed and this one is deliberately shaped like its neighbour so they
+          // move together.
+          if (closeoutCrossLinked && closeoutCrossLinked.savedBytes > 0) {
+            const n = closeoutCrossLinked.linkedFiles || 0;
+            parts.push(`Another <strong>${n.toLocaleString()} file${n === 1 ? '' : 's'}</strong> matched audio your library already had, so they point at the copy you own instead of being stored again, saving a further <strong>${fmtB(closeoutCrossLinked.savedBytes)}</strong>.`);
           }
           if (closeoutSrc && !closeoutSrc.fromLink && closeoutSrc.sourcePath) {
             const isFolder = !/\.zip$/i.test(closeoutSrc.sourcePath);
