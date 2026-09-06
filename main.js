@@ -2555,10 +2555,10 @@ ipcMain.handle('common:exportAsZip', async (event, { uuid, destPath } = {}) => {
   } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
-ipcMain.handle('common:exportToFolder', async (event, { uuid, destDir, mode } = {}) => {
+ipcMain.handle('common:exportToFolder', async (event, { uuid, destDir, mode, targetName } = {}) => {
   try {
     const emit = _sfExportProgressEmitter(event);
-    const r = await soundFontCommon.exportCommonToFolder(app.getPath('userData'), uuid, destDir, mode, emit.onBytes);
+    const r = await soundFontCommon.exportCommonToFolder(app.getPath('userData'), uuid, destDir, mode, emit.onBytes, targetName);
     emit.flush();
     return r;
   } catch (err) { return { ok: false, error: String(err && err.message || err) }; }

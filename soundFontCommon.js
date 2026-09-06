@@ -1089,7 +1089,11 @@ async function exportCommonAsZip(userData, uuid, destPath, onBytes = null) {
   });
 }
 
-async function exportCommonToFolder(userData, uuid, destDir, mode = 'rename', onBytes = null) {
+// `targetName` is the folder to CREATE on the card. Its three siblings
+// (commonFolderExistsAt, readCommonMarkerAt, commonMatchesAt) have taken this
+// parameter all along; only the write hardcoded the name, so a config organised
+// around "MC" was checked against MC and then written as common. [B-326]
+async function exportCommonToFolder(userData, uuid, destDir, mode = 'rename', onBytes = null, targetName = 'common') {
   if (!uuid) return { ok: false, error: 'Missing uuid' };
   if (!destDir) return { ok: false, error: 'Missing destDir' };
   const srcDir = path.join(commonRoot(userData), uuid, 'files');
@@ -1098,7 +1102,7 @@ async function exportCommonToFolder(userData, uuid, destDir, mode = 'rename', on
     try { fs.mkdirSync(destDir, { recursive: true }); }
     catch (err) { return { ok: false, error: `Cannot create destination: ${err.message}` }; }
   }
-  let targetName = 'common';
+  targetName = String(targetName || 'common').trim() || 'common';
   const exists = fs.existsSync(path.join(destDir, targetName));
   if (exists) {
     if (mode === 'skip') {

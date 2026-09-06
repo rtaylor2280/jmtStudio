@@ -7754,6 +7754,56 @@ window.__vpkRequiresV2 = async (text) => {
 // A preset needs at least one path element beyond the font itself. Name-agnostic
 // and count-agnostic, so it holds for "MC", for a nested "balvenos/common", and
 // for a per-preset dark/light split.
+// ── The font path model ────────────────────────────────────────────────────
+// A preset's font value is a ProffieOS SEARCH PATH, not a name. Segment 0 is the
+// font directory; every segment after it is another directory searched in order.
+// So a SHARED folder is identified by POSITION, never by being spelled "common" -
+// a card organised around "MC" is exactly as valid.
+//
+// This exists because the literal-string test was written out separately in a
+// dozen places, and each copy failed differently: a `;MC` config read as though
+// its fonts were missing, the checkbox beside it read unticked, ticking it
+// appended a second folder that did not exist, and swapping a font silently
+// DROPPED the shared segment. One model, consumed everywhere. [B-326]
+//
+// ⚠️ Empties are preserved at index 0 on purpose: ";common" means "no font yet,
+// plus the shared folder", and that is a different state from having no shared
+// folder at all. Callers that want a real name use the filtered accessors.
+function _sfFontPathParts(fontValue) {
+  return String(fontValue ?? '').split(';').map(s => s.trim());
+}
+// The font directory. '' when the value leads with ';' (declared shared folder,
+// no font chosen yet).
+function _sfFontDir(fontValue) {
+  return _sfFontPathParts(fontValue)[0] || '';
+}
+// Every shared directory this preset declares, in order. Empty array = none.
+function _sfSharedDirs(fontValue) {
+  return _sfFontPathParts(fontValue).slice(1).filter(Boolean);
+}
+window._sfFontPathParts = _sfFontPathParts;
+window._sfFontDir       = _sfFontDir;
+window._sfSharedDirs    = _sfSharedDirs;
+
+// The shared-folder name to WRITE when one is needed. The config's OWN name when it
+// uses exactly one, and the convention default only when there is nothing to read or a
+// genuine split. This is the rule the compile preflight's repair already follows
+// (`sharedNames.length === 1 ? sharedNames[0] : 'common'`), lifted so every writer obeys
+// it instead of appending a constant.
+//
+// It is what makes a recheck silent: on an MC config the box comes back as MC without
+// asking, and nothing ever invents a SECOND shared folder for a config that already has
+// one - which would need a second folder on the card or the saber throws FDNF. [B-326]
+function _sfPreferredSharedName(text) {
+  try {
+    const src = text != null ? text
+      : (typeof editor !== 'undefined' && editor ? editor.getValue() : '');
+    const names = _vpkScanPresets(src).sharedNames;
+    return names.length === 1 ? names[0] : 'common';
+  } catch { return 'common'; }
+}
+window._sfPreferredSharedName = _sfPreferredSharedName;
+
 function _vpkScanPresets(text) {
   const missing = [], sharedNames = new Set();
   try {
@@ -7761,17 +7811,16 @@ function _vpkScanPresets(text) {
     for (const arr of (result?.arrays || [])) {
       for (const p of (arr.presets || [])) {
         const font = String(p?.font ?? '').trim();
-        const raw  = font.split(';').map(s => s.trim());
         // No font at all is a different (bigger) problem than a missing shared folder,
         // and "add ;common" would not be a repair for it. This also covers a freshly
         // added preset seeded as ";common" — it has the folder, it just has no font yet.
-        if (!raw[0]) continue;
-        const parts = raw.filter(Boolean);
-        parts.slice(1).forEach(n => sharedNames.add(n));
-        if (parts.length < 2) {
+        if (!_sfFontDir(font)) continue;
+        const shared = _sfSharedDirs(font);
+        shared.forEach(n => sharedNames.add(n));
+        if (!shared.length) {
           missing.push({
             index: p.index,
-            font: parts[0] || font,
+            font: _sfFontDir(font) || font,
             label: p.displayName || '',
             range: p.fontRange,
             line: p.startLine,
@@ -9369,7 +9418,7 @@ async function _sfWriteBackLastUsedStyles() {
     for (const arr of parsed.arrays) {
       for (const preset of (arr.presets || [])) {
         const fontRaw = (preset.font || '');
-        const font = fontRaw.split(';').filter(p => p.trim() !== 'common').join(';').trim();
+        const font = _sfFontDir(fontRaw);
         if (!font) continue;
         const slot0 = preset.styles && preset.styles[0];
         if (!slot0) continue;
@@ -20283,11 +20332,17 @@ require(['vs/editor/editor.main'], function () {
         });
       };
       _sfHookEditorForInUse();
-      // Names that Proffie configs reference but aren't fonts in our sense.
-      // "common" is the shared-effects sidecar; flagged for future support
-      // (see backlog) but for the missing-fonts banner it's intentionally
-      // excluded so it doesn't show up as a perpetual missing reference.
-      const _SF_NON_FONT_REFS = new Set(['common']);
+      // Names the config references that are NOT fonts: every directory after the
+      // font in a preset's search path. Derived by POSITION from the open config,
+      // not from a name blocklist - the old Set(['common']) is why a card organised
+      // around "MC" showed a permanent unresolvable red chip in the missing-fonts
+      // bar for a folder that was never missing. [B-326]
+      const _sfConfigSharedRefs = () => {
+        try {
+          const src = (typeof editor !== 'undefined' && editor) ? editor.getValue() : '';
+          return new Set(_vpkScanPresets(src).sharedNames.map(n => n.toLowerCase()));
+        } catch { return new Set(); }
+      };
       const _sfRenderMissingBarAndLegend = (inUseFonts) => {
         const bar = document.getElementById('sf-missing-bar');
         const chipsEl = document.getElementById('sf-missing-chips');
@@ -20296,13 +20351,14 @@ require(['vs/editor/editor.main'], function () {
         // Missing = in-use directories that don't have a matching library
         // entry by name, with the non-font convention list filtered out.
         const haveNames = new Set(_sfAllEntries.map(e => e.name));
+        const sharedRefs = _sfConfigSharedRefs();
         const missing = [...inUseFonts]
-          .filter(name => !haveNames.has(name) && !_SF_NON_FONT_REFS.has(name.toLowerCase()))
+          .filter(name => !haveNames.has(name) && !sharedRefs.has(name.toLowerCase()))
           .sort((a, b) => a.localeCompare(b));
-        // Config references ;common but no common folder has been imported.
-        // Quiet when not needed — only triggers when the open config actually
-        // uses the convention AND the library has nothing to ship.
-        const wantsCommon = [...inUseFonts].some(n => n.toLowerCase() === 'common');
+        // Config declares a shared folder but none has been imported. Quiet when not
+        // needed — only when the open config actually uses one AND the library has
+        // nothing to ship.
+        const wantsCommon = sharedRefs.size > 0;
         const needsCommon = wantsCommon && _sfCommons.length === 0;
         if (missing.length === 0 && !needsCommon) {
           bar.style.display = 'none';
@@ -20570,9 +20626,9 @@ require(['vs/editor/editor.main'], function () {
           for (const arr of (result?.arrays || [])) {
             for (const preset of (arr.presets || [])) {
               if (!preset || !preset.font) continue;
-              for (const piece of String(preset.font).split(';')) {
-                if (piece.trim().toLowerCase() === 'common') return true;
-              }
+              // By POSITION, not by name - any segment after the font is a
+              // shared directory, whatever it is called. [B-326]
+              if (_sfSharedDirs(preset.font).length) return true;
             }
           }
         } catch {}
@@ -32136,7 +32192,13 @@ require(['vs/editor/editor.main'], function () {
         //     ";common" reference, because the folder is not optional there.
         //     2026-07-30: "auto included when required by prop in addition to what it
         //     already does." Same determination the compile-time preflight makes.
-        const wantsCommon = [..._sfLastInUseFonts].some(n => n.toLowerCase() === 'common');
+        // By position, not by name — an `MC` config wants the folder just as much. [B-326]
+        let wantsCommon = false;
+        try {
+          wantsCommon = _vpkScanPresets(
+            (typeof editor !== 'undefined' && editor) ? editor.getValue() : ''
+          ).sharedNames.length > 0;
+        } catch {}
         // A config can need the folder without any preset naming it yet — that is the
         // day-one shape, and asking "include it?" as a courtesy would be the wrong
         // question when the answer is compulsory.
@@ -32485,10 +32547,10 @@ require(['vs/editor/editor.main'], function () {
             const mineC = _sfCommons.find(x => x.uuid === cu);
             commonMineName = (mineC && mineC.meta && mineC.meta.name) || '';
             try {
-              const ex = await window.electronAPI.commonFolderExistsAt({ destDir });
+              const ex = await window.electronAPI.commonFolderExistsAt({ destDir, targetName: _sfPreferredSharedName() });
               commonCardName = (ex && ex.ok && ex.marker && ex.marker.name) || '';
             } catch {}
-            const r = await window.electronAPI.commonMatchesAt({ uuid: cu, destDir });
+            const r = await window.electronAPI.commonMatchesAt({ uuid: cu, destDir, targetName: _sfPreferredSharedName() });
             if (r && r.ok && r.exists) {
               // Decided on CONTENT, not on the marker. A marker states what we
               // wrote last time; the folder can have been edited by hand since,
@@ -32585,8 +32647,11 @@ require(['vs/editor/editor.main'], function () {
             title: _cTitle,
             description: _cBody,
             labelFor: (n) => n,
+            // 'common' here is the row's internal SENTINEL, not the folder name on the
+            // card. Say the name that will actually be written, or the dialog promises
+            // a `common` folder while the export creates `MC`. [B-326]
             titleFor: (n) => (n === 'common'
-              ? `The common folder at the destination${commonMineName ? `, receiving ${commonMineName}` : ''}`
+              ? `The ${_sfPreferredSharedName()} folder at the destination${commonMineName ? `, receiving ${commonMineName}` : ''}`
               : n),
             // Row heading stays the DESTINATION folder name. A long pack name
             // as the title overflowed the row and still did not say what it
@@ -32706,7 +32771,7 @@ require(['vs/editor/editor.main'], function () {
         // never write to the user's card.
         if (commonAlreadyCurrent) {
           const cu = _sfBulkSaveCommonOverride || _sfStarredCommonUuid;
-          try { await window.electronAPI.writeCommonMarker({ uuid: cu, destDir }); } catch {}
+          try { await window.electronAPI.writeCommonMarker({ uuid: cu, destDir, targetName: _sfPreferredSharedName() }); } catch {}
         }
         // Up FIRST, before any totals are summed or listeners wired. Pressing
         // Continue must produce something on screen immediately; the gap before
@@ -32810,6 +32875,10 @@ require(['vs/editor/editor.main'], function () {
               uuid: commonUuid,
               destDir,
               mode: commonMode,
+              // The card gets the folder name the CONFIG uses, so a `;MC` config
+              // exports an MC folder its presets can actually find. Falls back to
+              // the convention when no config is open or it declares none. [B-326]
+              targetName: _sfPreferredSharedName(),
             });
             if (!r || !r.ok) failures.push({ name: 'common', error: (r && r.error) || 'unknown error' });
             else if (r.skipped) {
@@ -33906,9 +33975,13 @@ require(['vs/editor/editor.main'], function () {
         if (!preset) return;
         // Preserve the existing ;common suffix — the user's intent is to
         // swap the font folder, not drop their common toggle preference.
-        const oldFontRaw = String(preset.font || '');
-        const hasCommon = oldFontRaw.split(';').some(p => p.trim() === 'common');
-        const newFontValue = hasCommon ? `${fontName};common` : fontName;
+        // Preserve EVERY shared directory, whatever it is called. Testing for the
+        // literal "common" here silently DROPPED a `;MC` segment on a font swap -
+        // data loss, not a display fault. [B-326]
+        const _sharedDirs = _sfSharedDirs(preset.font);
+        const newFontValue = _sharedDirs.length
+          ? [fontName, ..._sharedDirs].join(';')
+          : fontName;
         // window._commitFieldEdit because this runs in the SF view's
         // IIFE and _commitFieldEdit is scoped to the Config Manager's.
         if (preset.fontRange && window._commitFieldEdit) {
@@ -36878,7 +36951,7 @@ require(['vs/editor/editor.main'], function () {
           result.push({
             startLine, endLine,
             displayName: displayName || '(disabled)',
-            font: font.split(';').filter(p => p.trim() !== 'common').join(';'),
+            font: _sfFontDir(font),
             styleLines,
           });
           i = endLine - 1;
@@ -37496,8 +37569,7 @@ require(['vs/editor/editor.main'], function () {
       if (!nameEl) return;
       let bad = _presetFontIsUnknown(preset.font);
       if (!bad && preset.track) {
-        const fontFolder = String(preset.font || '')
-          .split(';').filter(x => x.trim() !== 'common').join(';').split('/')[0].trim();
+        const fontFolder = _sfFontDir(preset.font).split('/')[0].trim();
         try {
           const st = await _presetTrackState(preset.track, fontFolder);
           bad = !!(st && st.red);
@@ -37553,7 +37625,10 @@ require(['vs/editor/editor.main'], function () {
 
       const font = document.createElement('span');
       font.className = 'preset-row-font';
-      font.textContent = (preset.font || '').split(';').filter(p => p.trim() !== 'common').join(';');
+      // The FONT column shows the font, not the search path. Stripping only the
+      // literal "common" is why a `;common` config read as `Fire` here while an
+      // identical `;MC` config read as `Fire;MC`. [B-326]
+      font.textContent = _sfFontDir(preset.font);
       row.appendChild(font);
 
       const toggleBtn = document.createElement('button');
@@ -38371,14 +38446,19 @@ require(['vs/editor/editor.main'], function () {
       const valueWrap = document.createElement('span');
       valueWrap.className = 'preset-detail-field-value-wrap';
 
-      const displayFont = (preset.font || '').split(';').filter(p => p.trim() !== 'common').join(';');
+      // ⚠️ LOAD-BEARING, not cosmetic: the checkbox writer appends the shared name to
+      // whatever this combo holds. While it showed `Fire;MC`, ticking would have
+      // written `Fire;MC;MC`. The field holds the FONT; the shared folder is the
+      // checkbox's business. [B-326]
+      const displayFont = _sfFontDir(preset.font);
 
       // Common checkbox declared early so the combo's commit closure can
       // read its state. The font value the user picks gets ";common"
       // appended when the box is checked.
       const cb = document.createElement('input');
       cb.type = 'checkbox';
-      cb.checked = (preset.font || '').split(';').some(p => p.trim() === 'common');
+      // Declared, not spelled: ticked for `Fire;MC` exactly as for `Fire;common`.
+      cb.checked = _sfSharedDirs(preset.font).length > 0;
 
       // Declared `let` so the inline play-button wiring below can wrap
       // it to fire an existence re-check whenever a commit lands. Same
@@ -38389,7 +38469,8 @@ require(['vs/editor/editor.main'], function () {
         // semicolon means 'no font yet, plus the shared folder'. Without it the preset
         // reads as though COMMON were the font, and the compile check would flag it as
         // having no shared folder at all. (2026-07-30.)
-        const full = cb.checked ? (newName ? newName + ';common' : ';common') : (newName || '');
+        const _shared = _sfPreferredSharedName();
+        const full = cb.checked ? (newName ? newName + ';' + _shared : ';' + _shared) : (newName || '');
         _commitPresetFont(_getFreshFieldRange('font') || preset.fontRange, full);
         // "Last used style" auto-populate. When the user picks a font
         // that has a linkedStyleLibraryEntry pointing at a style still
@@ -38504,7 +38585,7 @@ require(['vs/editor/editor.main'], function () {
         // immediately — there's no dropdown to wait for.
         const doCommit = () => {
           const v = comboInput.value.trim();
-          const committed = (preset.font || '').split(';').filter(p => p.trim() !== 'common').join(';');
+          const committed = _sfFontDir(preset.font);
           if (v === committed) return; // unchanged — no-op
           commit(v);
           // Re-evaluate red flag: typed value may not be in the library
@@ -38619,7 +38700,10 @@ require(['vs/editor/editor.main'], function () {
       cb.addEventListener('change', () => {
         const path = comboInput.value.trim();
         // Same leading-semicolon rule as the font field above.
-        const full = cb.checked ? (path ? path + ';common' : ';common') : path;
+        // Reticking restores the config's OWN shared name, silently. Appending a
+        // constant here is what turned `Fire;MC` into `Fire;MC;common`. [B-326]
+        const _shared = _sfPreferredSharedName();
+        const full = cb.checked ? (path ? path + ';' + _shared : ';' + _shared) : path;
         _commitPresetFont(_getFreshFieldRange('font') || preset.fontRange, full);
         _scheduleRebuild();
       });
@@ -38657,7 +38741,17 @@ require(['vs/editor/editor.main'], function () {
       _cbLbl.title = _noCommon
         ? "Your Sound Fonts library has no common folder. Enabling this writes ';common' into the preset, but nothing will resolve at that path on the SD card until you import a common folder."
         : 'Consider enabling the common folder so missing or shared sound files automatically fall back to a central common folder, reducing duplication and making fonts easier to maintain.';
-      _cbLbl.textContent = 'common';
+      // The label names the folder THIS PRESET declares, and the per-preset unit is
+      // the point. A config-wide name is the wrong scope for a per-preset control:
+      // with one preset on `;common` and thirty-three on `;MC` the config-wide answer
+      // is ambiguous, falls back, and relabels ALL thirty-four as "common" while the
+      // field beside each one still reads `;MC`. Found by typing one `;common` in by
+      // hand. [B-326]
+      //
+      // The config-wide preferred name applies only when this preset declares NOTHING,
+      // because then the label is promising what ticking the box would WRITE.
+      const _presetShared = _sfSharedDirs(preset.font);
+      _cbLbl.textContent = _presetShared[0] || _sfPreferredSharedName();
       cbWrap.appendChild(_cbLbl);
       valueWrap.appendChild(cbWrap);
       wrap.appendChild(valueWrap);
@@ -38759,8 +38853,10 @@ require(['vs/editor/editor.main'], function () {
     // Font folder: red when the library has fonts and this is not one of
     // them. Free-form names stay legal, the red is a heads-up.
     const _presetFontIsUnknown = (fontValue) => {
-      const v = String(fontValue || '')
-        .split(';').filter(p => p.trim() !== 'common').join(';').trim();
+      // Only the FONT directory is looked up. Shared directories are not library
+      // fonts and never were - testing the whole path against the library is what
+      // made every `;MC` preset paint red as a missing font it plainly has. [B-326]
+      const v = _sfFontDir(fontValue);
       if (!v) return false;
       const names = (window._sfEntriesCache || [])
         .map(e => e.name || (e.meta && e.meta.name) || '').filter(Boolean);
@@ -38861,9 +38957,7 @@ require(['vs/editor/editor.main'], function () {
       valueWrap.className = 'preset-detail-field-value-wrap';
 
       const displayTrack = preset.track || '';
-      const currentFontFolder = (preset.font || '')
-        .split(';').filter(p => p.trim() !== 'common').join(';')
-        .split('/')[0].trim();
+      const currentFontFolder = _sfFontDir(preset.font).split('/')[0].trim();
 
       // Declared `let` so the inline play-button wiring below can wrap
       // it to fire an existence re-check after each commit. Same shape
@@ -45063,9 +45157,7 @@ function _getFreshFieldRange(fieldName) {
       // Stop whatever was playing (likely from the previous preset).
       try { window._sfQuickAudioStop?.(); } catch {}
       if (!preset || !preset.font) return;
-      const fontName = String(preset.font)
-        .split(';').filter(p => p.trim() !== 'common').join(';')
-        .split('/')[0].trim();
+      const fontName = _sfFontDir(preset.font).split('/')[0].trim();
       if (!fontName) return;
       let subPath = null;
       try { subPath = await _presetResolveEntryEffectFile(fontName, 'font'); }
