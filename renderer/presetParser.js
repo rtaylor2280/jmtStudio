@@ -232,10 +232,20 @@
   /**
    * Extracts all style slots from a preset entry text span.
    * Handles:
-   *   XxxStylePtr<T>()         — standard
-   *   XxxStylePtr<T>("arg")    — with color arg
-   *   XxxStylePtr<T>(// c\n"") — comment in parens
+   *   StylePtr<T>()            — standard
+   *   StylePtr<T>("arg")       — with color arg
+   *   StylePtr<T>(// c\n"")    — comment in parens
    *   &style_identifier        — raw pointer reference
+   *
+   * The wrapper name varies TWO ways and the pattern has to cover both, which is
+   * why it is `\w*Style\w*Ptr` and not `\w*StylePtr`. Enumerated from the 8.10
+   * source, seven names exist: StylePtr, StyleNormalPtr, StyleFirePtr,
+   * StyleStrobePtr, StyleRainbowPtr, StyleRainBowPtr (a real second spelling,
+   * not a typo) and ChargingStylePtr — so the variant sits in the MIDDLE for six
+   * of them and at the FRONT for the seventh. The old suffix-anchored pattern
+   * matched only bare StylePtr, so a preset built from any other form parsed as
+   * having zero styles and the sidecar offered to "add" styles that were already
+   * there. (2026-09-06)
    * Returns array of { type, expr, colorArg, startOffset, endOffset }.
    *   type     = 'styleptr' | 'ref'
    *   expr     = inner content of <> (for styleptr) or identifier (for ref)
@@ -244,8 +254,8 @@
   function extractStyleSlots(text) {
     const results = [];
 
-    // Pass 1: XxxStylePtr<T>(...)
-    const re = /\b\w*StylePtr\s*</g;
+    // Pass 1: any Style*Ptr wrapper (see the note above on the two name shapes)
+    const re = /\b\w*Style\w*Ptr\w*\s*</g;
     let m;
     while ((m = re.exec(text)) !== null) {
       const openAngle = m.index + m[0].length - 1;

@@ -14595,7 +14595,7 @@ function _jmtStyleSlotExpr(expr) {
   const s = (expr || '').trim();
   if (!s) return s;
   if (s.startsWith('&')) return s;
-  if (/^\w*StylePtr\s*</.test(s)) return s;
+  if (/^\w*Style\w*Ptr\w*\s*</.test(s)) return s;
   return `StylePtr<${s}>()`;
 }
 if (typeof window !== 'undefined') window._jmtStyleSlotExpr = _jmtStyleSlotExpr;
@@ -14628,7 +14628,7 @@ let _activeFilterEffects   = new Set();
 // Extracts the inner expression from any *StylePtr<Expr>() variant using bracket balancing
 // Matches: StylePtr, ChargingStylePtr, BladeStylePtr, etc.
 function _extractStylePtrInner(text) {
-  const m = text.match(/\b\w*StylePtr\s*</);
+  const m = text.match(/\b\w*Style\w*Ptr\w*\s*</);
   if (!m) return null;
   const start = m.index + m[0].length; // first char after '<'
   let depth = 1;
@@ -14648,7 +14648,7 @@ function _normalizeStyleInput(raw) {
   const usingM = text.match(/^using\s+(\w+)\s*=\s*([\s\S]+?)\s*;?\s*$/);
   if (usingM) return { name: usingM[1], expr: usingM[2].replace(/\s+/g, ' ').trim() };
   // *StylePtr<Expr>() — any variant
-  if (/\b\w*StylePtr\s*</.test(text)) {
+  if (/\b\w*Style\w*Ptr\w*\s*</.test(text)) {
     const inner = _extractStylePtrInner(text);
     if (inner) return { name: '', expr: inner.replace(/\s+/g, ' ').trim() };
   }
@@ -17921,7 +17921,7 @@ function _parseClipboardStyle(text) {
     const semi = _findUsingExprEnd(raw, exprStart);
     const exprRaw = semi >= 0 ? raw.slice(exprStart, semi) : raw.slice(exprStart);
     result.expr = exprRaw.replace(/\s+/g, ' ').trim();
-  } else if (/\b\w*StylePtr\s*</.test(raw)) {
+  } else if (/\b\w*Style\w*Ptr\w*\s*</.test(raw)) {
     const inner = _extractStylePtrInner(raw);
     if (inner) result.expr = inner.replace(/\s+/g, ' ').trim();
   } else {
@@ -36852,7 +36852,7 @@ require(['vs/editor/editor.main'], function () {
           while ((sm = stringRe.exec(innerText)) !== null) {
             strings.push({ value: sm[1], start: sm.index });
           }
-          const slotRe   = /\b\w*StylePtr\s*</g;
+          const slotRe   = /\b\w*Style\w*Ptr\w*\s*</g;
           const slotStarts = [];
           while ((sm = slotRe.exec(innerText)) !== null) slotStarts.push(sm.index);
           const lastSlotPos = slotStarts.length ? slotStarts[slotStarts.length - 1] : -1;
@@ -36864,7 +36864,7 @@ require(['vs/editor/editor.main'], function () {
           }
           // Fallback (no styles in entry — extremely unusual): take the last string overall
           if (!displayName && strings.length > 1) displayName = strings[strings.length - 1].value;
-          const styleLines = innerLines.filter(l => /StylePtr/.test(l)).map(l => l.trim());
+          const styleLines = innerLines.filter(l => /\w*Style\w*Ptr\s*</.test(l)).map(l => l.trim());
           result.push({
             startLine, endLine,
             displayName: displayName || '(disabled)',
@@ -37817,7 +37817,7 @@ require(['vs/editor/editor.main'], function () {
           const expr = document.createElement('span');
           expr.className = 'preset-slot-expr';
           // Extract inner expression for display
-          const m = line.match(/\b\w*StylePtr\s*<([\s\S]*)>\s*\(/);
+          const m = line.match(/\b\w*Style\w*Ptr\w*\s*<([\s\S]*)>\s*\(/);
           expr.textContent = m ? m[1].trim() : line;
           body.appendChild(expr);
           tile.appendChild(num);
@@ -40601,10 +40601,17 @@ function _getFreshFieldRange(fieldName) {
         fullSlotText = slot.type === 'ref' ? `&${slot.expr}` : `StylePtr<${slot.expr}>()`;
       }
 
-      // Preserve non-standard wrappers; everything else normalises to StylePtr
-      const _KNOWN_WRAPPERS = new Set(['ChargingStylePtr','StyleNormalPtr','StyleFirePtr','StyleRainbowPtr','StyleStrobePtr']);
-      const _wm = fullSlotText.match(/^(\w+StylePtr)\s*</);
-      const originalWrapper = (_wm && _KNOWN_WRAPPERS.has(_wm[1])) ? _wm[1] : 'StylePtr';
+      // Preserve whatever wrapper the config actually used. There is deliberately
+      // NO list of known factories to check against: the only thing a list can add
+      // is permission to REWRITE a name we do not recognise, and rewriting the
+      // user's own text is the worse failure. It also goes stale - the list that
+      // stood here named six, and ProffieOS 8.10 defines eight, missing
+      // StyleNormalPtrX and StyleRainbowPtrX outright.
+      // Matching the SHAPE keeps working when the OS or the JMT wrapper adds one.
+      // Falls back to StylePtr only when the text carries no wrapper at all - a
+      // ref, or the synthesised fallback above. [B-321]
+      const _wm = fullSlotText.match(/^(\w*Style\w*Ptr\w*)\s*</);
+      const originalWrapper = _wm ? _wm[1] : 'StylePtr';
 
       const body     = tile.querySelector('.preset-slot-body');
       const exprSpan = tile.querySelector('.preset-slot-expr');
@@ -42980,17 +42987,17 @@ function _getFreshFieldRange(fieldName) {
       // Strip trailing comma (common when copying from an array context)
       v = v.replace(/\s*,\s*$/, '').trim();
       // Already a recognised StylePtr wrapper — use as-is
-      if (/^\w*StylePtr\s*</.test(v)) return v;
+      if (/^\w*Style\w*Ptr\w*\s*</.test(v)) return v;
       // Strip leading and trailing /* ... */ block comments (Fett263 headers/footers)
       v = v.replace(/^(\s*\/\*[\s\S]*?\*\/\s*)+/, '').trim();
       v = v.replace(/(\s*\/\*[\s\S]*?\*\/\s*)+$/, '').trim();
       // Re-check after stripping comments
-      if (/^\w*StylePtr\s*</.test(v)) return v;
+      if (/^\w*Style\w*Ptr\w*\s*</.test(v)) return v;
       // Strip 'using Name = expr;' → keep the expression only
       const um = v.match(/^using\s+\w+\s*=\s*([\s\S]*?)\s*;?\s*$/);
       if (um) {
         const extracted = um[1].trim();
-        if (/^\w*StylePtr\s*</.test(extracted)) return extracted;
+        if (/^\w*Style\w*Ptr\w*\s*</.test(extracted)) return extracted;
         v = extracted;
       }
       // Strip trailing () — StylePtr<T>() supplies its own parens
