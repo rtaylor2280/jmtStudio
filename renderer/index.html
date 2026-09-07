@@ -37079,6 +37079,25 @@ require(['vs/editor/editor.main'], function () {
         e.stopPropagation();
         await _sfBulkDelete();
       });
+      // [B-336] Delete and Backspace are ALIASES for the Delete button, landing
+      // on the same confirm dialog - the gate stays, no silent delete. Guards,
+      // each necessary: the Sound Fonts view is the active tab; there is a
+      // selection (same condition that shows the button); no modal is open
+      // above the grid (the card browser is a modal-overlay too, so a card
+      // selection can never trigger a font delete); and no text field or
+      // editable surface has focus - the search box is right there, and Delete
+      // while typing must edit text, never pop the dialog.
+      document.addEventListener('keydown', async (e) => {
+        if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+        const sfView = document.getElementById('soundfonts-view');
+        if (!sfView || !sfView.classList.contains('active')) return;
+        if (_sfSelectedNames.size === 0) return;
+        if (document.querySelector('.modal-overlay.active')) return;
+        const ae = document.activeElement;
+        if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT' || ae.isContentEditable)) return;
+        e.preventDefault();
+        await _sfBulkDelete();
+      });
       // Clear-selection button does the same thing the document-level click
       // handler would do, but is discoverable in the toolbar instead of
       // hidden in the "click anywhere" gesture.
