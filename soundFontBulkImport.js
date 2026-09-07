@@ -1032,6 +1032,26 @@ async function importPlannedSource({ userData, src, fromSdCard }, onSubProgress)
       multiCandidate: candidates.length >= 2,
     });
   } catch {}
+  // ── OPTIMIZE BEFORE ENTRIES, AND THE ORDER IS LOAD-BEARING ([B-334]) ──
+  // The within-source dedup rewrites duplicate source names onto one canonical
+  // inode. Entries hardlink to source names, so entries created BEFORE the
+  // rewrite are left the last holders of the old bytes - lone full copies,
+  // silently outside the pool. Measured on disk 2026-09-07: a four-board-variant
+  // vendor font orphaned its entire entry this way. Deduping first means the
+  // names entries link to are canonical and nothing rewrites underneath them.
+  // Dedup preserves every name (duplicates become links), so candidate paths
+  // detected above stay valid.
+  // Inline and synchronous for the same reasons as ever: idempotent,
+  // verify-before-commit, no-op for single-format/folder sources.
+  // ⚠️ THE RESULT IS KEPT, not discarded. dedupeSource reports exactly what it
+  // reclaimed and this threw it away, so a bulk run had no savings to report even
+  // though every source had measured its own. (2026-09-05.)
+  let dedupHere = null;
+  try {
+    const optForward = _optimizeProgressForwarder(onSubProgress);
+    await soundFontSources.ensureSourceManifest(userData, sourceUuid, optForward);
+    dedupHere = await soundFontSources.dedupeSource(userData, sourceUuid, optForward);
+  } catch {}
   // Per-source stat tallies aggregated into the bulk summary so the
   // completion screen can show fonts-vs-sources granularity.
   // versionsSkippedHere counts how many alternate-version candidates we
@@ -1215,24 +1235,8 @@ async function importPlannedSource({ userData, src, fromSdCard }, onSubProgress)
     }
     entries.push({ name: finalName, ok: true, candidatePath: cand.path, reviewReasons: reviewReasons.slice(), versionInfo });
   }
-  // Optimize the source INLINE (synchronous, no deferral): build the STATIC per-file manifest
-  // (the breadcrumb), then dedup it (trim duplicate board-format copies, §13 — a no-op for
-  // single-format and folder sources). Idempotent + verify-before-commit, so a failure leaves
-  // the source untouched. Done before this source's import reports complete, so the deduped
-  // state is correct the moment the view refreshes — no background, no stale-cache lag.
-  // Progress: the optimize passes' phases are folded onto one monotonic percent
-  // (bands weighted by typical duration) so the bulk bar keeps moving instead of
-  // freezing at the end of the extract phase.
-  // ⚠️ THE RESULT IS KEPT, not discarded. dedupeSource reports exactly what it
-  // reclaimed and this threw it away, so a bulk run had no savings to report even
-  // though every source had measured its own. The single-import close-out has
-  // shown this number all along; bulk simply never collected it. (2026-09-05.)
-  let dedupHere = null;
-  try {
-    const optForward = _optimizeProgressForwarder(onSubProgress);
-    await soundFontSources.ensureSourceManifest(userData, sourceUuid, optForward);
-    dedupHere = await soundFontSources.dedupeSource(userData, sourceUuid, optForward);
-  } catch {}
+  // (The optimize/dedup pass used to run HERE, after the entries - moved above
+  // the entry loop by [B-334] so entries link to canonical names.)
   // Duplicate recognition for QUICK import (no review screen to label): match
   // each created entry's candidate against the library EXCLUDING this source's
   // own just-created entries (they must not match themselves or their

@@ -24880,44 +24880,14 @@ require(['vs/editor/editor.main'], function () {
           if (!_sfImportEls.createElapsed) return;
           _sfImportEls.createElapsed.textContent = `${_fmtDurCreate((Date.now() - createStartMs) / 1000)} elapsed`;
         }, 1000);
-        if (_sfCreateProgressUnsub) { try { _sfCreateProgressUnsub(); } catch {} }
-        _sfCreateProgressUnsub = window.electronAPI.onEntryCreateProgress((data) => {
-          if (!data) return;
-          if (data.stage === 'extracting' && _sfImportEls.createDetail) {
-            _sfImportEls.createDetail.textContent = data.currentFile || '';
-          }
-        });
-        const failures = [];
-        for (let i = 0; i < picks.length; i++) {
-          const pick = picks[i];
-          if (_sfImportEls.createLabel) _sfImportEls.createLabel.textContent = `Adding ${pick.name} (${i + 1} of ${picks.length})…`;
-          if (_sfImportEls.createBar)   _sfImportEls.createBar.style.width = `${Math.round((i / picks.length) * 100)}%`;
-          // Tags inherit the user-edited bundle name ONLY when this source
-          // is actually a multi-font bundle. For single-font sources the
-          // source name and the font name are essentially the same thing,
-          // so auto-tagging would be noise.
-          const isBundle = (_sfImport.candidates || []).length >= 2;
-          const tags = (isBundle && userBundle) ? [userBundle] : [];
-          const res = await window.electronAPI.createEntry({
-            sourceUuid: _sfImport.uuid,
-            candidate: pick.candidate,
-            name: pick.name,
-            metadata: {
-              author: entryAuthor,
-              purchased,
-              acquisitionDate: purchaseDate,
-              description: '',
-              tags,
-              demoUrl: pick.demoUrl || '',
-            },
-          });
-          if (!res || !res.ok) failures.push({ name: pick.name, error: (res && res.error) || 'unknown error' });
-        }
-        if (_sfCreateProgressUnsub) { try { _sfCreateProgressUnsub(); } catch {} _sfCreateProgressUnsub = null; }
-        if (_sfImportEls.createBar) _sfImportEls.createBar.style.width = '100%';
-        if (failures.length) {
-          await _sfShowPartialFailures('Some entries failed', failures);
-        }
+        // ── OPTIMIZE FIRST, ENTRIES SECOND, AND THE ORDER IS LOAD-BEARING ──
+        // ([B-334], 2026-09-07.) The within-source dedup rewrites duplicate
+        // source names onto one canonical inode. Entries hardlink to source
+        // names, so an entry created BEFORE the rewrite is left the last holder
+        // of the old bytes - a lone full copy, silently outside the pool. On a
+        // four-board-variant vendor font that orphaned the ENTIRE entry
+        // (75/75 files measured on disk). Dedup the source first and entries
+        // link to canonical names that nothing rewrites underneath them.
         // Optimize storage SYNCHRONOUSLY so it's done — and the deduped state + indicator are
         // correct — by the time the import closes and the view refreshes. No background, no
         // stale-cache lag. Idempotent, verify-before-commit, no-op for single-format/folder.
@@ -24970,8 +24940,46 @@ require(['vs/editor/editor.main'], function () {
           });
           try { optRes = await window.electronAPI.optimizeSource({ uuid: _sfImport.uuid }); } catch {}
           if (offOpt) { try { offOpt(); } catch {} }
-          if (_sfImportEls.createBar) _sfImportEls.createBar.style.width = '100%';
+          if (_sfImportEls.createBar) _sfImportEls.createBar.style.width = '0%';
           if (_sfImportEls.createDetail) _sfImportEls.createDetail.textContent = '';
+        }
+        if (_sfCreateProgressUnsub) { try { _sfCreateProgressUnsub(); } catch {} }
+        _sfCreateProgressUnsub = window.electronAPI.onEntryCreateProgress((data) => {
+          if (!data) return;
+          if (data.stage === 'extracting' && _sfImportEls.createDetail) {
+            _sfImportEls.createDetail.textContent = data.currentFile || '';
+          }
+        });
+        const failures = [];
+        for (let i = 0; i < picks.length; i++) {
+          const pick = picks[i];
+          if (_sfImportEls.createLabel) _sfImportEls.createLabel.textContent = `Adding ${pick.name} (${i + 1} of ${picks.length})…`;
+          if (_sfImportEls.createBar)   _sfImportEls.createBar.style.width = `${Math.round((i / picks.length) * 100)}%`;
+          // Tags inherit the user-edited bundle name ONLY when this source
+          // is actually a multi-font bundle. For single-font sources the
+          // source name and the font name are essentially the same thing,
+          // so auto-tagging would be noise.
+          const isBundle = (_sfImport.candidates || []).length >= 2;
+          const tags = (isBundle && userBundle) ? [userBundle] : [];
+          const res = await window.electronAPI.createEntry({
+            sourceUuid: _sfImport.uuid,
+            candidate: pick.candidate,
+            name: pick.name,
+            metadata: {
+              author: entryAuthor,
+              purchased,
+              acquisitionDate: purchaseDate,
+              description: '',
+              tags,
+              demoUrl: pick.demoUrl || '',
+            },
+          });
+          if (!res || !res.ok) failures.push({ name: pick.name, error: (res && res.error) || 'unknown error' });
+        }
+        if (_sfCreateProgressUnsub) { try { _sfCreateProgressUnsub(); } catch {} _sfCreateProgressUnsub = null; }
+        if (_sfImportEls.createBar) _sfImportEls.createBar.style.width = '100%';
+        if (failures.length) {
+          await _sfShowPartialFailures('Some entries failed', failures);
         }
         // Stop the elapsed clock so the ticker can't leak past the modal close.
         clearInterval(createElapsedTicker);
