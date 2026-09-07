@@ -4046,8 +4046,11 @@
      first: a colour on the trigger CASCADES into every option in the open list, so
      without it the whole dropdown paints red and the one red thing stops meaning
      anything. Ghost options keep theirs. */
-  .config-common-content select.duplicate-pack { color: #e44; }
-  .config-common-content select.duplicate-pack option:not([data-ghost]) { color: var(--c-text); }
+  .config-common-content select.duplicate-pack,
+  .config-common-content select.version-low { color: #e44; }
+  .config-common-content select.duplicate-pack option:not([data-ghost]),
+  .config-common-content select.version-low option:not([data-ghost]) { color: var(--c-text); }
+
 
   .config-common-content select option[data-ghost="1"] { color: #e44; }
   .config-common-content select.ghost-selected option:not([data-ghost]) { color: var(--c-text); }
@@ -6069,13 +6072,13 @@
     <div class="sf-voicepack-row">
       <label class="sf-voicepack-label">Version:</label>
       <div class="sf-voicepack-toggle">
-        <button class="sf-voicepack-toggle-btn" id="sf-voicepack-v1" data-version="v1" title="The original ProffieOS voicepack from hubbe.net. ProffieOS 8 reads it as version 1, and most OS 8 props (including Fett263 and BC) require version 2, so on OS 8 a V1 pack makes the saber announce &quot;error in voice pack&quot; every time you change preset. Choose V1 for ProffieOS 7, or if you specifically want the original recordings.">V1</button>
+        <button class="sf-voicepack-toggle-btn" id="sf-voicepack-v1" data-version="v1" title="The original ProffieOS voicepack from hubbe.net. ProffieOS 8 reads it as version 1, and the Fett263 and BC props (and the OS8 menu system on any prop) require version 2, so on OS 8 a V1 pack makes the saber announce &quot;error in voice pack&quot; every time you change preset. Choose V1 for ProffieOS 7, or if you specifically want the original recordings.">V1</button>
         <button class="sf-voicepack-toggle-btn active" id="sf-voicepack-v2" data-version="v2" title="What ProffieOS 8 expects. Adds menu narration for OS 8 features (color adjustment menu, multi-preset reorder, style copy/paste) and is fully backward compatible with V1, so it also works on ProffieOS 7. Same languages as V1.">V2</button>
         <button class="sf-voicepack-toggle-btn" id="sf-voicepack-more" data-version="more" title="Community-made character voicepacks and other external sources.">More</button>
       </div>
     </div>
 
-    <p class="sf-voicepack-help" id="sf-voicepack-version-note" style="margin-top:2px">V2 is backwards compatible with V1, and some ProffieOS 8 props require it. On those, a V1 pack makes the saber announce &ldquo;error in voice pack&rdquo; on every preset change.</p>
+    <p class="sf-voicepack-help" id="sf-voicepack-version-note" style="margin-top:2px">V2 is backwards compatible with V1 and satisfies every ProffieOS 8 requirement.</p>
 
     <div class="sf-voicepack-row" id="sf-voicepack-language-row">
       <label class="sf-voicepack-label" for="sf-voicepack-language">Language:</label>
@@ -7705,8 +7708,15 @@ async function _vpkPropRequirement(text) {
   // The select carries a placeholder when nothing is chosen; treat it as unknown
   // rather than trying to read files out of a version that does not exist.
   try { if (typeof isVersionSentinel === 'function' && isVersionSentinel(versionName)) return null; } catch {}
-  const queue = _vpkPropIncludes(text).map(p => p.split('/').pop()).filter(Boolean);
-  if (!queue.length) return null;                       // no prop declared
+  let queue = _vpkPropIncludes(text).map(p => p.split('/').pop()).filter(Boolean);
+  // A config with no prop include still HAS a prop: ProffieOS.ino falls back to
+  // props/saber.h (ino:681). Returning null here made a default-prop config with
+  // MENU_SPEC_TEMPLATE invisible - on hardware, PropBase's constructor registers a
+  // V2 requirement (prop_base.h:76) whatever the prop is, while every surface of
+  // ours stayed silent. Seeding the fallback closes it, and costs nothing for a
+  // default-prop config WITHOUT the menu spec: the walk strips prop_base's #ifdef
+  // and reports not-required exactly as before. (2026-09-06, [B-003].)
+  if (!queue.length) queue = ['saber.h'];
   const defines = _vpkConfigDefines(text);
   const seen = new Set();
   while (queue.length && seen.size < 16) {
@@ -7732,7 +7742,11 @@ async function _vpkPropRequirement(text) {
       // as version 1. So this is binary, not a version number to compare.
       // (2026-07-31: "there is NO V1 requirement ever".)
       const isV1 = /sound_library_\s*\.\s*init/.test(hit[0]);
-      return { requires: true, v2: !isV1 };
+      // WHERE the registration lives is the attribution: a hit in the prop's own
+      // file means the prop demands it; a hit in prop_base.h means the USER's
+      // MENU_SPEC_TEMPLATE brought it in, and blaming "your prop" there is wrong -
+      // sa22c asks for nothing. (2026-09-06.)
+      return { requires: true, v2: !isV1, via: file === 'prop_base.h' ? 'menuspec' : 'prop' };
     }
     // Only chase further headers inside props/ — every init call site lives there,
     // and it keeps the walk bounded.
@@ -7750,16 +7764,28 @@ async function _vpkPropRequirement(text) {
 // declaration is already a property of window, so `window.X = t => X(t)`
 // overwrites the declaration and the arrow then calls itself forever.
 // (Shipped that exact bug for four minutes on 2026-07-30.)
-// Two questions, one walk. Callers that only need "is a voicepack required"
-// keep the original boolean contract; the export path needs the sharper one,
-// because only a V2 requirement can fail.
+// Historically two questions, one walk. Since 2026-09-06 both exports return the
+// SAME answer on purpose - if a pack is required at all it must in practice be a
+// V2 (see local/voicepack-requirement.md) - and the second name is kept only so
+// its call sites still say what they are asking.
 window.__vpkRequiresVoicepack = async (text) => {
   const r = await _vpkPropRequirement(text);
   return r === null ? null : r.requires;
 };
+// If a voice pack is required at all, it must in practice be a V2. A pack with no
+// voicepack.ini fails CheckVersion on hardware whatever the numeric requirement,
+// and real V1 packs predate the ini - so the which-init-spelling distinction that
+// r.v2 draws is real in the source and does not survive contact with the SD card.
+// Settled on hardware; mechanism closed 2026-09-06 evening. See [B-003].
 window.__vpkRequiresV2 = async (text) => {
   const r = await _vpkPropRequirement(text);
-  return r === null ? null : (r.requires && r.v2);
+  return r === null ? null : r.requires;
+};
+// 'prop' | 'menuspec' | null (not required / unknown) - so messages can attribute
+// the requirement to the thing that actually registered it.
+window.__vpkRequirementVia = async (text) => {
+  const r = await _vpkPropRequirement(text);
+  return r && r.requires === true ? (r.via || 'prop') : null;
 };
 
 // A preset needs at least one path element beyond the font itself. Name-agnostic
@@ -7907,7 +7933,9 @@ window.checkVoicepackDeclared = async function () {
   const res = await promptConfirm({
     title: 'Voicepack Folder Not Listed',
     messageHtml:
-      `Your prop requires a voicepack on ProffieOS 8, and ${one ? 'this preset does' : `${missing.length} presets do`} ` +
+      `${req.via === 'menuspec'
+        ? "Your config's OS8 menu system (MENU_SPEC_TEMPLATE) requires a voicepack"
+        : 'Your prop requires a voicepack on ProffieOS 8'}, and ${one ? 'this preset does' : `${missing.length} presets do`} ` +
       `not list a shared folder:<br><ul style="margin:8px 0 8px 18px">${shown}${more}</ul>` +
       `Unless ${one ? 'that font contains' : 'those fonts contain'} their own copy of the voicepack, the saber will ` +
       `announce <strong>&ldquo;voice pack not found&rdquo;</strong> every time you switch to ${one ? 'it' : 'them'}.<br><br>` +
@@ -20825,16 +20853,22 @@ require(['vs/editor/editor.main'], function () {
       // render. Cached here and refreshed alongside it; a re-render fires only
       // when the answer CHANGES, so this cannot loop.
       let _sfPropNeedsCommon = false;
+      // WHERE it comes from: 'prop' (fett/BC register it themselves) or 'menuspec'
+      // (the user's MENU_SPEC_TEMPLATE reaches prop_base.h). Cached beside the
+      // boolean so the tooltip can attribute honestly. (2026-09-06.)
+      let _sfPropCommonVia = null;
       const _sfRefreshPropCommonNeed = async () => {
-        let v = false;
+        let v = false, via = null;
         try {
           const text = (typeof editor !== 'undefined' && editor) ? editor.getValue() : '';
-          if (text && typeof window.__vpkRequiresVoicepack === 'function') {
-            v = (await window.__vpkRequiresVoicepack(text)) === true;
+          if (text && typeof window.__vpkRequirementVia === 'function') {
+            via = await window.__vpkRequirementVia(text);
+            v = via !== null;
           }
         } catch {}
-        if (v !== _sfPropNeedsCommon) {
+        if (v !== _sfPropNeedsCommon || via !== _sfPropCommonVia) {
           _sfPropNeedsCommon = v;
+          _sfPropCommonVia = via;
           _sfRenderConfigCommonField();
           // The preset sidecar states this requirement in its checkbox tooltip, so a
           // flip has to reach it as well. Only ON A CHANGE, so this cannot loop.
@@ -20852,6 +20886,7 @@ require(['vs/editor/editor.main'], function () {
       // cached value: __vpkRequiresVoicepack is an async include walk and cannot be
       // called from a render.
       window._sfPropRequiresVoicepack = () => _sfPropNeedsCommon === true;
+      window._sfPropRequiresVoicepackVia = () => _sfPropCommonVia;
       // Exposed so the OS Version change handler can re-ask: the answer depends on the
       // selected OS, not on the config text.
       window._sfRefreshPropCommonNeed = _sfRefreshPropCommonNeed;
@@ -21077,10 +21112,30 @@ require(['vs/editor/editor.main'], function () {
           selectedUuid = GHOST_VALUE;
           sel.classList.add('ghost-selected');
         }
+        // *** IF A VOICE PACK IS REQUIRED AT ALL, IT MUST BE A V2. *** The gate is
+        // `_sfPropNeedsCommon` - the SAME condition that auto-checks the common folder
+        // on a new preset - and not a separate "is V2 required" question. That
+        // distinction is settled: verified on hardware over hours, on OS8 and a handful
+        // of props. Do not re-derive it from the prop source; the source reading looks
+        // like it says otherwise and it has now cost two sessions. (2026-09-06.)
+        // The mechanism, settled the same night: a pack with no voicepack.ini FAILS
+        // CheckVersion on hardware whatever the numeric requirement, and real V1
+        // packs predate the ini - so "required at all" means "must be V2" in practice.
+        //
+        // The ini is read for ONE purpose only: to answer whether a given pack IS a V2,
+        // never whether a V2 is required.
+        //
+        // PROACTIVE, NOT BLOCKING. The version is shown on packs that cannot satisfy
+        // the requirement, so the problem is visible while choosing rather than
+        // ambushing at export - but the choice is not taken away. [B-003]
+        const _packVersion = (c) => Number((c && c.voicepackVersion) || 1);
         for (const c of sorted) {
           const opt = document.createElement('option');
           opt.value = c.uuid;
           opt.textContent = c.meta?.name || c.uuid;
+          // Annotated only when a pack is required at all; otherwise the version is not
+          // a fact the user has to weigh and labelling it would be noise.
+          if (_sfPropNeedsCommon && _packVersion(c) < 2) opt.textContent += '  (version 1)';
           sel.appendChild(opt);
         }
         // Sentinel options at the END of the list, matching the OS Version dropdown one
@@ -21122,6 +21177,19 @@ require(['vs/editor/editor.main'], function () {
         // A later slot pointing at a pack an earlier one already uses: the card would
         // get two folders with identical contents. Red on the closed trigger so it
         // reads without opening the list, and the tooltip carries both ways out.
+        // Already selected and below the requirement: cannot be prevented, only said.
+        // Comes from the config's own marker or the starred default, neither of which
+        // passed through this dropdown.
+        const _selPack = sorted.find(c => c.uuid === selectedUuid);
+        if (_sfPropNeedsCommon && _selPack && _packVersion(_selPack) < 2) {
+          sel.classList.add('version-low');
+          // Attribute the requirement to what actually registered it, same as the
+          // checkbox tooltip and the preflight. (2026-09-06.)
+          sel.title = (_sfPropCommonVia === 'menuspec'
+              ? "Your config's OS8 menu system needs a version 2 voice pack, and \""
+              : 'Your prop needs a version 2 voice pack, and "') +
+            (_selPack.meta?.name || _selPack.uuid) + '" is not one. The saber will report an error on every preset change.';
+        }
         if (dupeOf) {
           sel.classList.add('duplicate-pack');
           sel.title = 'Same common folder as "' + dupeOf + '". The card would get two identical copies. ' +
@@ -21929,6 +21997,15 @@ require(['vs/editor/editor.main'], function () {
         document.querySelectorAll('#modal-sf-voicepack-picker .sf-voicepack-toggle-btn').forEach(btn => {
           btn.classList.toggle('active', btn.getAttribute('data-version') === version);
         });
+        // Same words either way would be wrong somewhere: on V2 the requirement is
+        // plain information, on V1 it is a warning about the choice being made right
+        // now, and the consequence half wears the warning colour. (2026-09-06.)
+        const _vpNote = document.getElementById('sf-voicepack-version-note');
+        if (_vpNote) {
+          _vpNote.innerHTML = version === 'v1'
+            ? 'V2 is backwards compatible with V1. <span style="color:#d97706">On ProffieOS 8, the Fett263 and BC props, and the OS8 menu system on any prop, require a V2. A V1 pack there makes the saber announce &ldquo;error in voice pack&rdquo; on every preset change.</span>'
+            : 'V2 is backwards compatible with V1 and satisfies every ProffieOS 8 requirement.';
+        }
         _sfVpHideFallback();
         if (version === 'more') {
           _sfVpToggleCatalogControls(false);
@@ -32117,15 +32194,13 @@ require(['vs/editor/editor.main'], function () {
         if (!modal || !select) return Promise.resolve({ action: 'ignore' });
 
         const name = (chosen && chosen.meta && chosen.meta.name) || 'The selected voice pack';
-        // THE CHAIN, and both halves have to be in the sentence (2026-07-31):
-        //   what we OBSERVED  -> no voicepack.ini declaring it a V2
-        //   what that INDICATES -> it is likely missing the required V2 sounds
-        //
-        // Stating the sounds flatly would claim more than we checked. The
-        // Crucible reply could say it outright because he had COUNTED the files,
-        // 188 against 214. All the app has read is the declaration. But dropping
-        // the ini entirely, which I tried first, throws away the evidence and
-        // leaves an assertion with nothing behind it.
+        // SAY ONLY WHAT WE KNOW, AND STOP THERE (2026-09-06, superseding the
+        // 07-31 two-halves rule that used to be here). The copy states the
+        // observation (not identified as a V2) and the consequence (the saber
+        // announces the error) and NOTHING about why. The old second half -
+        // "likely missing the required V2 sounds" - both guessed beyond what was
+        // checked and pointed at the mechanism, which advertises exactly the
+        // ini-only workaround the paragraph below exists to avoid encouraging.
         //
         // The ini appears as the INDICATOR, never as a fix. "Add an ini" would
         // silence the error and leave the sounds missing, and profezzorn has
@@ -32134,9 +32209,15 @@ require(['vs/editor/editor.main'], function () {
         // it is not identified as a V2 one. Calling it V1 fills in something we
         // never checked. (2026-07-31.)
         if (msgEl) {
-          msgEl.textContent = `Your prop needs voice pack version 2 on ProffieOS 8. `
-            + `"${name}" isn't identified as a V2 pack, which means it is likely missing the required V2 sounds. `
-            + `Exporting it will make the saber announce a voice pack error on every preset change.`;
+          msgEl.textContent = (window._sfPropRequiresVoicepackVia?.() === 'menuspec'
+              ? `Your config's OS8 menu system needs voice pack version 2. `
+              : `Your prop needs voice pack version 2 on ProffieOS 8. `)
+            // Only what we KNOW, and no more (2026-09-06, tightening the
+            // 07-31 rule this block already carried): the pack is not identified as a
+            // V2, and the saber will announce the error. No speculation about WHY -
+            // "likely missing sounds" both guessed and pointed at the mechanism,
+            // which advertises exactly the workaround nobody wants encouraged.
+            + `"${name}" isn't identified as a V2 pack. If you use it anyway, the saber will announce a voice pack error on every preset change.`;
         }
         select.innerHTML = candidates
           .map(c => `<option value="${_sfEscape(c.uuid)}">${_sfEscape(c.meta.name || c.uuid)}</option>`)
@@ -32374,7 +32455,9 @@ require(['vs/editor/editor.main'], function () {
           const into = (o.slot && o.slot !== 'common') ? ` to ${esc(o.slot)}` : '';
           const inAt = (o.slot && o.slot !== 'common') ? ` in ${esc(o.slot)}` : '';
           const why = o.reason === 'prop'
-            ? ', required by your prop on ProffieOS 8'
+            ? (window._sfPropRequiresVoicepackVia?.() === 'menuspec'
+                ? ', required by the OS8 menu system in your config'
+                : ', required by your prop on ProffieOS 8')
             : o.reason === 'config'
               ? ', because your config references it'
               : '';
@@ -32436,7 +32519,9 @@ require(['vs/editor/editor.main'], function () {
         if (commonMissing) {
           lines.push(`<span style="color:#d97706">No common folder was included, because your library does not have one. `
             + `${commonMissing === 'prop'
-                ? 'Your prop needs a voicepack on ProffieOS 8'
+                ? (window._sfPropRequiresVoicepackVia?.() === 'menuspec'
+                    ? "Your config's OS8 menu system needs a voicepack"
+                    : 'Your prop needs a voicepack on ProffieOS 8')
                 : 'Your config references a common folder'}, so this destination will need one.</span>`);
         }
         const tail = [`${wroteSomething ? 'Saved to' : 'Checked'} ${destLink}.`];
@@ -39146,8 +39231,13 @@ require(['vs/editor/editor.main'], function () {
       // stronger because it holds even with the box off:
       //   prop requires a voice pack -> "voice pack not found" on every switch to it
       //   the preset references it    -> "font directory not found"
+      const _reqVia = (typeof window._sfPropRequiresVoicepackVia === 'function')
+        ? window._sfPropRequiresVoicepackVia() : 'prop';
       _cbLbl.title = _propRequires
-        ? 'Your prop requires a voice pack. Without a folder named "' + _slotName +
+        ? (_reqVia === 'menuspec'
+            ? 'Your config enables the OS8 menu system, which requires a voice pack.'
+            : 'Your prop requires a voice pack.') +
+          ' Without a folder named "' + _slotName +
           '" at the root of your SD card, this preset says "voice pack not found".'
         : cb.checked
           ? (_noCommon
