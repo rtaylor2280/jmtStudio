@@ -787,6 +787,13 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
   // from the file we end up storing; the DATE belongs to the file the user
   // picked. ([B-283], 2026-09-03.)
   const inputMtimeMs = (stat && stat.mtimeMs) || 0;
+  // The PICKED file's own size, captured before the curation strip can swap the
+  // file underneath it (same reason as the date above). This is the number the
+  // user saw in their Downloads folder, so it is the anchor the close-out's
+  // savings sentence opens with ("Your download started at ..."). Folders have
+  // no container; the close-out uses contentBytes as the anchor there.
+  // Kept on the return value only, riding beside contentBytes. ([B-317])
+  const inputArchiveBytes = stat && stat.isFile() ? stat.size : 0;
 
   // ── Curation sidecar ([B-283]) ──
   // A zip we exported can carry the hand-authored curation that a delete would
@@ -1036,7 +1043,7 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
       // Curation travels with the prepared source rather than being applied
       // now: the meta this belongs on does not exist until finalize. The temp
       // dir holding the receipts stays alive until then, and finalize removes it.
-      return { ok: true, isDuplicate: false, prepared: true, uuid, uuidDir, hash, format, name, fileSize, sourceFileDate, sourceFileMtimeMs, totalBytes, fileCount, strippedFiles, crossLinked, curation, curationTmp, curationPayloadDir };
+      return { ok: true, isDuplicate: false, prepared: true, uuid, uuidDir, hash, format, name, fileSize, archiveBytes: inputArchiveBytes, sourceFileDate, sourceFileMtimeMs, totalBytes, fileCount, strippedFiles, crossLinked, curation, curationTmp, curationPayloadDir };
     }
 
     const res = await _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format, name, hash, fileSize, sourceFileDate, sourceFileMtimeMs, metadata, strippedFiles, curation, curationPayloadDir, crossLinked });
@@ -1052,6 +1059,7 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
     // (holds minus saved), and it cannot be recovered later without
     // re-walking the tree. ([B-317], 2026-09-06.)
     return { ...res, strippedFiles, crossLinked, contentBytes: fileSize,
+      archiveBytes: inputArchiveBytes,
       curation: curation || null, curationApplied: res.curationApplied || null };
   } catch (err) {
     cleanupPartialSource(uuidDir);
@@ -1149,7 +1157,12 @@ async function _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format, name,
   }
   // Warm the candidate cache (best-effort; a stamp failure just leaves it cold).
   try { await recomputeAndStampCandidates(userData, uuid); } catch {}
-  return { ok: true, isDuplicate: false, uuid, hash, format, sourceFileDate, curationApplied };
+  // crossLinked is echoed so BOTH doors report it the same way, like the meta
+  // write above. The direct path re-adds its own copy (same value); without
+  // this echo the finalizePreparedSource door returned nothing, and the bulk
+  // summary read crossSaved as 0 for every prepared source. (2026-09-07.)
+  return { ok: true, isDuplicate: false, uuid, hash, format, sourceFileDate, curationApplied,
+    crossLinked: crossLinked || null };
 }
 
 // Commit a source previously staged by importSource({ prepareOnly: true }). Its

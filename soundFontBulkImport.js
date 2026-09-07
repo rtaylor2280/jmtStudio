@@ -437,6 +437,8 @@ async function runBulkImport({ plan, userData }, callbacks = {}) {
           dedupFiles: result.dedupFiles || 0,
           crossSaved: result.crossSaved || 0,
           crossFiles: result.crossFiles || 0,
+          contentBytes: result.contentBytes || 0,
+          archiveBytes: result.archiveBytes || 0,
         });
       } else {
         summary.failed.push({ src: src.relPath || src.absPath, reason: result.error });
@@ -583,6 +585,15 @@ async function analyzeBulkImport({ plan, userData, corruptFonts }, callbacks = {
         curation: res.curation || null,
         curationTmp: res.curationTmp || null,
         curationPayloadDir: res.curationPayloadDir || null,
+        // ⚠️ THIS OBJECT IS A FILTER. Cross-linking happens at PREPARE time, and
+        // this hand-picked list is the only bridge to commit — omitting a field
+        // here silently zeroes it downstream. crossLinked was omitted, so every
+        // UI-flow bulk import recorded crossSaved 0 and the summary undersold
+        // or hid the saving; the meta lost its crossLinkStats the same way.
+        // (Found 2026-09-07 when the kit's bulk fixture showed no savings
+        // sentence at all.)
+        crossLinked: res.crossLinked || null,
+        archiveBytes: res.archiveBytes || 0,
       }, corrupt });
     } else {
       results.push({ idx: i, error: (res && res.error) || 'prepare failed', corrupt });
@@ -1278,14 +1289,25 @@ async function importPlannedSource({ userData, src, fromSdCard }, onSubProgress)
     variantsEmitted: variantsEmittedHere,
     strippedFiles: (importRes && importRes.strippedFiles)
       || (src._prepared && src._prepared.strippedFiles) || [],
-    // TWO SEPARATE SAVINGS, deliberately not summed here. Duplicates WITHIN this
-    // bundle and content shared with what the library already held are different
-    // facts, and folding them into one number would make neither checkable.
+    // TWO SEPARATE SAVINGS, kept separate here as data. The summary's copy now
+    // says one outcome (2026-09-07: "Your source files started at X, JMT Studio
+    // saved you Y"), but the components stay distinct in the record so the
+    // number remains reconcilable when anyone checks it.
     dedupSaved: (dedupHere && dedupHere.deduped && dedupHere.savedBytes) || 0,
     dedupFiles: (dedupHere && dedupHere.deduped)
       ? Math.max(0, (dedupHere.originalFiles || 0) - (dedupHere.uniqueFiles || 0)) : 0,
-    crossSaved: (importRes && importRes.crossLinked && importRes.crossLinked.savedBytes) || 0,
-    crossFiles: (importRes && importRes.crossLinked && importRes.crossLinked.linkedFiles) || 0,
+    crossSaved: (importRes && importRes.crossLinked && importRes.crossLinked.savedBytes)
+      || (src._prepared && src._prepared.crossLinked && src._prepared.crossLinked.savedBytes) || 0,
+    crossFiles: (importRes && importRes.crossLinked && importRes.crossLinked.linkedFiles)
+      || (src._prepared && src._prepared.crossLinked && src._prepared.crossLinked.linkedFiles) || 0,
+    // The savings sentence's anchor, per source (2026-09-07). The commit path's
+    // finalizePreparedSource result carries neither figure, so both fall back to
+    // the prepare result: fileSize there is the same logical content total
+    // importSource returns as contentBytes.
+    contentBytes: (importRes && importRes.contentBytes)
+      || (src._prepared && src._prepared.fileSize) || 0,
+    archiveBytes: (importRes && importRes.archiveBytes)
+      || (src._prepared && src._prepared.archiveBytes) || 0,
   };
 }
 

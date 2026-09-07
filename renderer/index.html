@@ -13373,37 +13373,60 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       text += parts.join(', ');
     }
     text += '.';
-    // ── What the run saved ──────────────────────────────────────────────
-    // A bulk run measured this all along and threw it away, so the summary
-    // counted things and never said what any of it cost. The single-import
-    // close-out has always reported it. (2026-09-05.)
+    // ── What JMT Studio saved, said the close-out's way (2026-09-07) ────
+    // Same sentence shape as the single-import close-out, pluralized:
+    // "Your source files started at X. JMT Studio saved you Y, so these
+    // fonts added only Z on disk." The noun is "source files" because a
+    // batch mixes zips and folders, and "downloads" implies the internet.
+    // The old two-fact split (duplicates inside bundles vs files the
+    // library already had) stays in the RECORDS, where it keeps the number
+    // reconcilable; the copy says one outcome with a checkable anchor:
+    // started minus saved equals added.
     //
-    // TWO SEPARATE FACTS, said separately: duplicates found INSIDE a bundle,
-    // and content the library already held. Summing them into one number
-    // would leave neither checkable, and they answer different questions —
-    // the first is about how vendors pack their bundles, the second about
-    // how much overlap there is between the ones you own.
+    // Anchors are per-source (a zip anchors on its own file size, a folder
+    // on its content) and the footprint is clamped per-source, so one zip
+    // that expanded more than it shared cannot eat a sibling's saving.
+    // ⚠️ NO EM DASHES IN USER-FACING COPY.
+    // ⚠️ Same brag gate as the close-out: 10% of the start AND 5 MB, or
+    // silence. Constants mirror SAVINGS_BRAG_MIN_* beside the close-out copy.
     // ⚠️ Defined HERE. The identically-named helper further up lives inside the
     // progress callback, which is a different scope — reaching for it from this
     // builder is a ReferenceError that blanks the whole summary.
     const _fmtSaved = (n) => (window._sfFormatBytes ? window._sfFormatBytes(n) : `${n} B`);
-    let _dupFiles = 0, _dupSaved = 0, _xFiles = 0, _xSaved = 0;
+    let _bulkStarted = 0, _bulkFootprint = 0, _bulkSavedAny = 0;
     for (const imp of sum.imported) {
-      _dupFiles += imp.dedupFiles || 0; _dupSaved += imp.dedupSaved || 0;
-      _xFiles   += imp.crossFiles || 0; _xSaved   += imp.crossSaved || 0;
+      const _c = imp.contentBytes || 0;
+      const _s = (imp.dedupSaved || 0) + (imp.crossSaved || 0);
+      _bulkStarted += (imp.archiveBytes || 0) > 0 ? imp.archiveBytes : _c;
+      _bulkFootprint += Math.max(0, _c - _s);
+      _bulkSavedAny += _s;
     }
-    const _savingParts = [];
-    if (_dupSaved > 0) {
-      _savingParts.push(`<strong>${_dupFiles.toLocaleString()} duplicate file${_dupFiles === 1 ? '' : 's'}</strong> inside the sources, saving <strong>${_fmtSaved(_dupSaved)}</strong>`);
+    const _bulkShownSaved = Math.max(0, _bulkStarted - _bulkFootprint);
+    const _bulkBrag = _bulkSavedAny > 0 && _bulkStarted > 0
+      && _bulkShownSaved >= 5 * 1024 * 1024
+      && (_bulkShownSaved / _bulkStarted) >= 0.10;
+    if (_bulkBrag) {
+      // Singular says "source", not "source file": the one source may be a
+      // folder, and bare "source" is true of both shapes.
+      const _srcPlural = sourceCount === 1 ? 'source' : 'source files';
+      const _fontsNoun = fontCount === 1 ? 'this font' : 'these fonts';
+      const _addedTxt = _bulkFootprint > 0
+        ? `added only <strong>${_fmtSaved(_bulkFootprint)}</strong> on disk`
+        : `added nothing new on disk`;
+      text += `<br><br>Your ${_srcPlural} started at <strong>${_fmtSaved(_bulkStarted)}</strong>. JMT Studio saved you <strong>${_fmtSaved(_bulkShownSaved)}</strong>, so ${_fontsNoun} ${_addedTxt}. Identical files are stored once in your library and used in every location they appear, so nothing is missing or renamed.`;
     }
-    if (_xSaved > 0) {
-      _savingParts.push(`<strong>${_xFiles.toLocaleString()} file${_xFiles === 1 ? '' : 's'}</strong> your library already had, saving <strong>${_fmtSaved(_xSaved)}</strong>`);
-    }
-    if (_savingParts.length) {
-      // ⭐ "Every file is still here" carries the same reassurance the
-      // single-import close-out gives, and it is literally true: nothing was
-      // removed, the duplicates became additional names for one copy.
-      text += `<br><br>JMT Studio found ${_savingParts.join(', and ')}. Every file is still here.`;
+    // Reassurance only, never delete-guidance (2026-09-07). The bulk root is
+    // THEIR folder, and the scan silently ignores whatever does not match the
+    // pattern - artwork, readmes, receipts never enter the plan - so "this
+    // folder is no longer needed" could bless deleting something we never saw.
+    // The single-import close-out keeps its delete line because its claim is
+    // about one picked file/folder we provably swallowed whole. Asymmetry
+    // decides it: wrongly keep costs a folder on disk; wrongly delete costs
+    // someone's only copy. Advanced users can clean up on their own.
+    if (sum.imported.length > 0) {
+      text += `<br><br>${sum.imported.length === 1
+        ? 'The complete source is stored in your library. You can export a full copy whenever you need one.'
+        : 'The complete sources are stored in your library. You can export a full copy of any of them whenever you need one.'}`;
     }
     els.summaryText.innerHTML = text;
     if (els.summaryElapsed) {
@@ -24134,6 +24157,10 @@ require(['vs/editor/editor.main'], function () {
         // with a sibling meant showing 3% of the real saving. ([B-317], 2026-09-05.)
         _sfImport.crossLinked = importRes.crossLinked || null;
         _sfImport.contentBytes = importRes.contentBytes || 0;
+        // The picked file's own size (0 for folder imports). The close-out's
+        // savings sentence anchors on it: it is the number the user saw in
+        // their Downloads folder, so it is the one they can check us against.
+        _sfImport.archiveBytes = importRes.archiveBytes || 0;
         // The curation this archive arrived carrying, if any. The review PRE-FILLS
         // from it. That is not a nicety: the review writes its fields back over the
         // source seconds later (updateSourceMeta, below), so an empty form actively
@@ -24960,6 +24987,7 @@ require(['vs/editor/editor.main'], function () {
         // cleared a few lines below and the close-out renders after that.
         const closeoutCrossLinked = (_sfImport && _sfImport.crossLinked) || null;
         const closeoutContentBytes = (_sfImport && _sfImport.contentBytes) || 0;
+        const closeoutArchiveBytes = (_sfImport && _sfImport.archiveBytes) || 0;
         // The source is now committed (referenced by at least one entry, or
         // attempted by the user). Clear the orphan-cleanup hook before close.
         if (_sfImport) _sfImport.uuid = null;
@@ -24989,33 +25017,63 @@ require(['vs/editor/editor.main'], function () {
           parts.push(successCount === 1
             ? `<strong>${esc(picks[0].name)}</strong> was added to your library.`
             : `<strong>${successCount} fonts</strong> were added to your library.`);
-          // ── WHAT THIS FONT COSTS, not what our process found ──────────────
-          // Said as ONE outcome rather than two mechanisms. The user added a
-          // font; they did not run a within-source pass and a cross-source pass,
-          // and reporting those separately describes the implementation instead
-          // of the result. (2026-09-06.)
+          // ── WHAT JMT STUDIO DID FOR THEM, anchored on a number they can check ──
+          // One outcome, JMT Studio as the actor (2026-09-06/07): "Your download
+          // started at X. JMT Studio saved you Y, so this font added only Z."
+          // Started minus saved equals added, on purpose. The anchor is the
+          // number the user can SEE: the picked file's size for a zip or link
+          // import (what Downloads showed them), the folder's content for a
+          // folder import. Anchoring a zip on its compressed size UNDERSTATES
+          // the saving, deliberately (2026-09-07): the real win vs keeping
+          // zip + unzipped copy + kept folders is bigger, but a claim the user
+          // can reconcile beats a bigger one they cannot.
           //
-          // The second sentence exists because the first one RAISES A QUESTION.
-          // "Holds 1.33 GB, takes up 17 MB" invites "so where did the rest go",
-          // and leaving that unanswered manufactures exactly the worry this copy
-          // is meant to remove. It answers it without teaching the mechanism.
+          // The closing sentence answers the question the numbers raise ("where
+          // did the rest go") without teaching the mechanism. "In your library"
+          // widens the claim to the whole collection, which is the point: the
+          // more they keep, the more sharing there is to find.
           //
           // ⚠️ NO EM DASHES IN USER-FACING COPY.
-          // ⚠️ Suppressed entirely when nothing was shared: "holds 182 MB and
-          // takes up 182 MB" is worse than saying nothing.
+          // ⚠️ THE BRAG GATE (2026-09-07): savings are only mentioned when they
+          // clear 10% of the start AND 5 MB. "JMT Studio saved you 1 MB" reads
+          // as the app not knowing when a number is impressive, which spends
+          // the trust the big number needs. Below the gate: silence, which is
+          // also what a negative "saving" (a zip that expanded more than it
+          // shared) correctly falls into.
           // ⚠️ The footprint depends on IMPORT ORDER, and is honest about that.
           // Dagen came first and pays 1.28 GB; Cere came second and pays 17 MB.
           // Reversed, the numbers swap. It reports what this font costs you now,
           // which is the actionable figure, not a property of the font.
           const _savedTotal = ((optRes && optRes.deduped && optRes.savedBytes) || 0)
             + ((closeoutCrossLinked && closeoutCrossLinked.savedBytes) || 0);
-          if (closeoutContentBytes > 0 && _savedTotal > 0) {
-            const footprint = Math.max(0, closeoutContentBytes - _savedTotal);
-            parts.push(`It holds <strong>${fmtB(closeoutContentBytes)}</strong> of audio and takes up <strong>${fmtB(footprint)}</strong> on your disk. Identical files are stored once and used in every location they appear, so nothing is missing or renamed.`);
+          const _startedBytes = closeoutArchiveBytes > 0 ? closeoutArchiveBytes : closeoutContentBytes;
+          const _footprint = Math.max(0, closeoutContentBytes - _savedTotal);
+          const _shownSaved = Math.max(0, _startedBytes - _footprint);
+          const SAVINGS_BRAG_MIN_RATIO = 0.10;
+          const SAVINGS_BRAG_MIN_BYTES = 5 * 1024 * 1024;
+          const _bragSavings = closeoutContentBytes > 0 && _savedTotal > 0 && _startedBytes > 0
+            && _shownSaved >= SAVINGS_BRAG_MIN_BYTES
+            && (_shownSaved / _startedBytes) >= SAVINGS_BRAG_MIN_RATIO;
+          if (_bragSavings) {
+            // Vocabulary (2026-09-07): "download" implies the internet, so only
+            // a link import gets it. A picked zip is a "zip", a picked folder a
+            // "folder". One noun per close-out, or the sentences argue - the
+            // delete-the-original line below uses the same three-way split.
+            const _srcNoun = (closeoutSrc && closeoutSrc.fromLink) ? 'download'
+              : (closeoutSrc && closeoutSrc.sourcePath && !/\.zip$/i.test(closeoutSrc.sourcePath))
+                ? 'folder' : 'zip';
+            const _whatNoun = successCount === 1 ? 'this font' : 'this font package';
+            const _addedTxt = _footprint > 0
+              ? `added only <strong>${fmtB(_footprint)}</strong> on disk`
+              : `added nothing new on disk`;
+            parts.push(`Your ${_srcNoun} started at <strong>${fmtB(_startedBytes)}</strong>. JMT Studio saved you <strong>${fmtB(_shownSaved)}</strong>, so ${_whatNoun} ${_addedTxt}. Identical files are stored once in your library and used in every location they appear, so nothing is missing or renamed.`);
           }
           if (closeoutSrc && !closeoutSrc.fromLink && closeoutSrc.sourcePath) {
             const isFolder = !/\.zip$/i.test(closeoutSrc.sourcePath);
-            parts.push(`Your complete source now lives in the library, and you can export a full copy from the library whenever you need one. That means the original ${isFolder ? 'folder' : 'download'} on your computer is no longer needed, and it's safe to delete if you want the space back: <a href="#" id="sf-closeout-showpath" style="color:var(--jmt-blue);text-decoration:underline;cursor:pointer">${esc(closeoutSrc.sourcePath)}</a>`);
+            // "zip", not "download" (2026-09-07): a picked file was not
+            // downloaded by us, and the savings sentence above uses the same
+            // three-way noun. Only the link route says "download".
+            parts.push(`Your complete source now lives in the library, and you can export a full copy from the library whenever you need one. That means the original ${isFolder ? 'folder' : 'zip'} on your computer is no longer needed, and it's safe to delete if you want the space back: <a href="#" id="sf-closeout-showpath" style="color:var(--jmt-blue);text-decoration:underline;cursor:pointer">${esc(closeoutSrc.sourcePath)}</a>`);
           } else {
             parts.push('The complete source is stored in your library. You can export a full copy whenever you need one.');
           }

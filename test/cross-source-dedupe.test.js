@@ -202,6 +202,15 @@ async function importFont(userData, files, entryName) {
     await S.zipFolderToFile(zipDir, zipPath);
     const z = await S.importSource({ userData, sourcePath: zipPath, originalName: 'Zip Bundle', metadata: {} });
     check('the zip imported', z.ok && !z.isDuplicate, JSON.stringify(z).slice(0, 200));
+    // The close-out's savings sentence anchors on the picked file's own size
+    // ("Your download started at ..."), so the import result must carry it.
+    // A folder has no container and must report 0, which tells the close-out
+    // to anchor on contentBytes instead. ([B-317], 2026-09-07.)
+    check('the zip route reports the archive\'s own size for the close-out anchor',
+      z.archiveBytes === fs.statSync(zipPath).size,
+      `archiveBytes=${z.archiveBytes} stat=${fs.statSync(zipPath).size}`);
+    check('and the folder route reports no archive size',
+      a.archiveBytes === 0, String(a.archiveBytes));
     if (z.ok && !z.isDuplicate) {
       await E.createEntry({ userData, sourceUuid: z.uuid, candidate: { path: 'B' }, name: 'B' });
       const zHum = srcFile(userData, z.uuid, 'B/hum.wav');
