@@ -4012,7 +4012,7 @@
      border as #input-version; spans use display:block so they fill the
      field width and compute their height from padding just like the
      select does. */
-  #config-common-field select,
+  .config-common-content select,
   .config-common-name,
   .config-common-missing {
     display: block;
@@ -4031,15 +4031,26 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  #config-common-field select { cursor: pointer; }
-  #config-common-field select:focus { border-color: var(--jmt-blue); }
+  .config-common-content select { cursor: pointer; }
+  .config-common-content select:focus { border-color: var(--jmt-blue); }
   /* Ghost option (saved name not in current library) — red on both the
      closed trigger and inside the open dropdown so the mismatch reads
      at a glance. Trigger color cascades to options in the open list,
      so the non-ghost options need an explicit reset back to text color. */
-  #config-common-field select.ghost-selected { color: #e44; }
-  #config-common-field select option[data-ghost="1"] { color: #e44; }
-  #config-common-field select.ghost-selected option:not([data-ghost]) { color: var(--c-text); }
+  .config-common-content select.ghost-selected { color: #e44; }
+  /* A DIFFERENT red from ghost-selected on purpose, even though the colour matches:
+     ghost means "this name is not in your library", duplicate means "this is the same
+     folder as one above". Sharing a class would merge two states that need different
+     fixes. The action options keep their own inline colour. [B-014]
+     ⚠️ The reset on the second line is not optional, and ghost-selected above learned it
+     first: a colour on the trigger CASCADES into every option in the open list, so
+     without it the whole dropdown paints red and the one red thing stops meaning
+     anything. Ghost options keep theirs. */
+  .config-common-content select.duplicate-pack { color: #e44; }
+  .config-common-content select.duplicate-pack option:not([data-ghost]) { color: var(--c-text); }
+
+  .config-common-content select option[data-ghost="1"] { color: #e44; }
+  .config-common-content select.ghost-selected option:not([data-ghost]) { color: var(--c-text); }
   .config-common-name { cursor: default; }
   .config-common-missing { color: #e44; cursor: help; }
   .preset-add-btn { font-size: 0.7rem; padding: 1px 7px; line-height: 1; }
@@ -4679,15 +4690,15 @@
       <label>OS Version</label>
       <select id="input-version"></select>
     </div>
-    <!-- Common Folder — surfaces only when the open config references
-         ;common (any preset font with the `;common` suffix or a stored
-         JMT_COMMON marker) OR the library has commons available. One
-         element flips between three states: missing-needed (red text),
-         single-name display, and a dropdown when 2+ commons exist. -->
-    <div class="meta-field js-config-only" id="config-common-field" style="display:none">
-      <label>Common Folder</label>
-      <div id="config-common-content"></div>
-    </div>
+    <!-- One field per shared folder the config DECLARES, generated at runtime. The
+         config names the slots and the user fills them, so there is no mode switch
+         and no threshold: "Common Folder" is simply what the label reads when the
+         slot happens to be called `common`. Each field still flips between the same
+         three states it always had (missing-needed, single-name, dropdown).
+         `display: contents` so the generated fields are direct flex items of this
+         header row and inherit its spacing, instead of nesting a second row inside
+         one slot's width. [B-014] -->
+    <div class="js-config-only" id="config-slot-fields" style="display:none"></div>
     <span id="txt-convert-notice" style="display:none;margin-left:auto;font-size:0.7rem;color:#4caf50;white-space:nowrap;padding-bottom:6px;align-self:flex-end;"></span>
   </div>
 </header>
@@ -7804,6 +7815,20 @@ function _sfPreferredSharedName(text) {
 }
 window._sfPreferredSharedName = _sfPreferredSharedName;
 
+// The shared folders a config DECLARES, in first-appearance order. This is the
+// slot list: the config names the slots, the user fills them with library packs.
+// A slot is just a directory after the font in a preset's search path, so slots
+// appear and disappear as the config text changes and creating one must never
+// have a side effect. [B-014]
+function _sfConfigSlotNames(text) {
+  try {
+    const src = text != null ? text
+      : ((typeof editor !== 'undefined' && editor) ? editor.getValue() : '');
+    return _vpkScanPresets(src).sharedNames;
+  } catch { return []; }
+}
+window._sfConfigSlotNames = _sfConfigSlotNames;
+
 function _vpkScanPresets(text) {
   const missing = [], sharedNames = new Set();
   try {
@@ -8287,6 +8312,11 @@ document.getElementById('input-version').addEventListener('change', () => {
     window.electronAPI.initToolchain();
   }
   _refreshSelectedVersionJmtState();
+  // The voice-pack requirement comes from the PROP HEADERS, which are read out of the
+  // selected OS. Switching 8.10 to 7.15 changes the answer without changing a character
+  // of the config, and nothing here re-ran the walk - so "your prop requires a voice
+  // pack" survived a switch to a version that has none of that machinery. [B-014]
+  try { window._sfRefreshPropCommonNeed?.(); } catch {}
   // Touchpoint 0: upgrading an existing Mass Storage config to OS8 unlocks the
   // MOUNT_SD_SETTING protection, so offer it as a helper (not a warning).
   window.offerMountSdSettingOnOsChange?.();
@@ -8508,12 +8538,34 @@ function injectMetadata(content) {
   // user's recorded choice is the worse failure of the two.
   const _needsCommon = (typeof window._sfConfigNeedsCommon === 'function')
     ? window._sfConfigNeedsCommon() : true;
-  const commonName = _needsCommon ? (window._sfActiveCommonForConfig || '').trim() : '';
+  // One line per slot the config ACTUALLY DECLARES, so a slot that was renamed or
+  // removed cannot leave a stale assignment behind in the file. Slots the user has
+  // not filled write nothing.
+  // ⚠️ The `common` slot keeps the original single-line spelling byte for byte, so a
+  // build that predates slots still reads its selection correctly out of a new file.
+  // Everything else is `@jmt:common:<slot>`, which stripJmtLines already removes
+  // (it matches `@jmt:\S+`) and which the old single-value regex cannot match,
+  // because that one requires whitespace where this has a colon. [B-014]
+  const _slotPacks = (window._sfSlotPacks && typeof window._sfSlotPacks === 'object')
+    ? window._sfSlotPacks : {};
+  let _declaredSlots = [];
+  if (_needsCommon) {
+    _declaredSlots = _sfConfigSlotNames(content);
+    // Declares none but the prop requires one: the day-one shape, where there is a
+    // requirement and nothing written down yet.
+    if (!_declaredSlots.length) _declaredSlots = ['common'];
+  }
   if (desc)    lines.push(`// @jmt:description ${desc}`);
   if (board)   lines.push(`// @jmt:board       ${board}`);
   if (version) lines.push(`// @jmt:os_version  ${version}`);
   if (usbVal)  lines.push(`// @jmt:usb         ${usbVal}`);
-  if (commonName) lines.push(`// @jmt:common      ${commonName}`);
+  for (const _slot of _declaredSlots) {
+    const _pack = String(_slotPacks[_slot] || '').trim();
+    if (!_pack) continue;
+    lines.push(_slot === 'common'
+      ? `// @jmt:common      ${_pack}`
+      : `// @jmt:common:${_slot} ${_pack}`);
+  }
   metaUpdated = now;
   lines.push(`// @jmt:created     ${metaCreated}`);
   lines.push(`// @jmt:updated     ${now}`);
@@ -8776,17 +8828,32 @@ function extractMetadata(content) {
     port:     m(/^\/\/ @jmt:last_port\s+(.+)$/m),
     configId: m(/^\/\/ @jmt:config_id\s+(\S+)$/m),
     common:   m(/^\/\/ @jmt:common\s+(.+)$/m),
+    // slot -> pack. The bare `@jmt:common <pack>` is the `common` slot (the original
+    // spelling, still written for it); `@jmt:common:<slot> <pack>` is any other. An
+    // old file yields exactly { common: <pack> }, which is what it always meant. [B-014]
+    slotPacks: (() => {
+      const out = {};
+      const re = /^\/\/ @jmt:common(?::(\S+))?[ 	]+(.+)$/gm;
+      let mm;
+      while ((mm = re.exec(content)) !== null) {
+        const slot = String(mm[1] || 'common').trim();
+        const pack = String(mm[2] || '').trim();
+        if (slot && pack) out[slot] = pack;
+      }
+      return out;
+    })(),
     clean:    stripJmtLines(content)
   };
 }
 
 // ── Load content ───────────────────────────────────────
 function loadContent(rawContent, filePath) {
-  const { desc, board, version, created, updated, compiled, compileDuration, core, compiledOs, compiledBoard, compiledUsb, flashed, boardSn, usb, port, configId, common, clean } = extractMetadata(rawContent);
-  // Common-folder selection lives in window state during the session
-  // (file-state is generated at save time via injectMetadata). Seed it
-  // from the loaded file's @jmt:common, or clear if absent.
-  window._sfActiveCommonForConfig = common || '';
+  const { desc, board, version, created, updated, compiled, compileDuration, core, compiledOs, compiledBoard, compiledUsb, flashed, boardSn, usb, port, configId, common, slotPacks, clean } = extractMetadata(rawContent);
+  // Slot assignments live in window state during the session (file-state is
+  // generated at save time via injectMetadata). Seeded from the loaded file's
+  // markers, or cleared if absent. An old file carrying only `@jmt:common <pack>`
+  // arrives here as { common: <pack> }, which is exactly what it always meant. [B-014]
+  window._sfSlotPacks = slotPacks || {};
   const base = filePath ? filePath.split(/[\\/]/).pop().replace(/\.[^.]+$/, '') : null;
   document.getElementById('input-filename').value = base || 'my_config';
   document.getElementById('input-desc').value     = desc    || '';
@@ -20752,26 +20819,7 @@ require(['vs/editor/editor.main'], function () {
       // version — DOM-state authoritative mid-edit, file-state on
       // save). This keeps the @jmt: block out of the editor view during
       // normal editing.
-      const _sfSetActiveCommonForConfig = (name) => {
-        const cur = window._sfActiveCommonForConfig || '';
-        const next = name || '';
-        if (cur === next) return;
-        window._sfActiveCommonForConfig = next;
-        // Mark editor dirty so the user knows there's a pending save.
-        // The selection won't materialize in the file until then.
-        try { if (typeof setDirty === 'function') setDirty(true); } catch {}
-      };
-      // Config Manager top-bar Common Folder field. States:
-      //   1+ commons                              → dropdown (or name when exactly 1)
-      //   0 commons + referenced + has library    → "Common folder needed" red text
-      //   0 commons + (!referenced OR no library) → field hidden
-      // "Has library" mirrors the gate the font/track fields use
-      // (window._sfEntriesCache); without a library the red message is
-      // dead UI because the user can't act on it from this view.
-      // Selection persists IN the config text via the JMT_COMMON marker
-      // (sticks to the file when copied/shared); falls back to the
-      // global star when no marker is present.
-      // Does the PROP require a voice pack, independent of any ";common" in a
+      // Does the PROP require a voice pack, independent of any shared folder in a
       // preset. __vpkRequiresVoicepack walks the prop include chain through a
       // preprocessor pass, so it is async and cannot be read inline by the
       // render. Cached here and refreshed alongside it; a re-render fires only
@@ -20788,104 +20836,245 @@ require(['vs/editor/editor.main'], function () {
         if (v !== _sfPropNeedsCommon) {
           _sfPropNeedsCommon = v;
           _sfRenderConfigCommonField();
+          // The preset sidecar states this requirement in its checkbox tooltip, so a
+          // flip has to reach it as well. Only ON A CHANGE, so this cannot loop.
+          try { window._presetSidecar?.rebuild?.(); } catch {}
         }
       };
-      // Shared by the field above and by the metadata writer, so the control and
-      // the saved marker can never disagree about whether this config uses a
-      // common. One predicate, two callers.
+      // Shared by the fields above and by the metadata writer, so the controls and
+      // the saved markers can never disagree about whether this config uses a
+      // shared folder. One predicate, two callers.
       window._sfConfigNeedsCommon = () => {
         try { return _sfConfigWantsCommon() || _sfPropNeedsCommon; }
         catch { return true; }
       };
-      const _sfRenderConfigCommonField = () => {
-        const field = document.getElementById('config-common-field');
-        const content = document.getElementById('config-common-content');
-        if (!field || !content) return;
-        const commons = _sfCommons || [];
-        const referenced = _sfConfigWantsCommon();
-        // NEEDED, not AVAILABLE (2026-08-31, his call, filed as a bug). The rule
-        // used to be "show whenever the library has any commons", so a config that
-        // referenced none still displayed a dropdown with the starred default
-        // SELECTED - asserting a common this config uses when Save writes none,
-        // because Save gates on the same `needsCommon` we compute here. Same class
-        // as a build chip reading "Flash successful" about a build that was never
-        // flashed: a control that states a fact the app will not honour.
+      // The PROP-only half, read by the preset sidecar's tooltip. Deliberately the
+      // cached value: __vpkRequiresVoicepack is an async include walk and cannot be
+      // called from a render.
+      window._sfPropRequiresVoicepack = () => _sfPropNeedsCommon === true;
+      // Exposed so the OS Version change handler can re-ask: the answer depends on the
+      // selected OS, not on the config text.
+      window._sfRefreshPropCommonNeed = _sfRefreshPropCommonNeed;
+      // A slot's assigned pack. The config names the slots; this records which
+      // library pack fills each one. Replaces the single window._sfActiveCommonForConfig,
+      // which could only ever describe a config with one shared folder. The file
+      // representation is generated at save time by injectMetadata, same as board and
+      // os version: DOM state authoritative mid-edit, file state on save. [B-014]
+      const _sfSetSlotPack = (slot, name) => {
+        if (!slot) return;
+        if (!window._sfSlotPacks || typeof window._sfSlotPacks !== 'object') window._sfSlotPacks = {};
+        const cur  = window._sfSlotPacks[slot] || '';
+        const next = name || '';
+        if (cur === next) return;
+        window._sfSlotPacks[slot] = next;
+        // Assigning is a user action, so it flips dirty. Merely RENDERING a slot
+        // never does - see the note on the renderer below.
+        try { if (typeof setDirty === 'function') setDirty(true); } catch {}
+        // RE-RENDER EVERY SLOT, not just this one. The duplicate flag is a statement
+        // about the OTHERS - "same folder as MC" - so changing one field can clear the
+        // warning on a DIFFERENT field. Without this the red stays put after the
+        // selection that caused it is gone.
         //
-        // Two ways a config genuinely needs one, and the second is the half that
-        // makes this correct rather than merely tidier: a preset references
-        // ";common", OR the prop/OS in use requires a voice pack at all
-        // (__vpkRequiresVoicepack - the Fett263 prop, MENU_SPEC_TEMPLATE being
-        // defined, the BC props). Without that second test this would hide the
-        // control on exactly the configs that will fail on the saber.
+        // Deferred: this runs inside the select's own change handler and rendering
+        // replaces that select. Let the event finish first.
+        setTimeout(() => { try { _sfRenderConfigCommonField(); } catch {} }, 0);
+      };
+
+      // "common" already means something to makers; a name like "MC" does not, so the
+      // clarifier goes only where it is needed rather than onto both.
+      const _sfSlotLabel = (slot) =>
+        slot === 'common' ? 'Common Folder' : slot + ' Folder (voicepack)';
+
+      // The slots to draw: what the config declares, or - when it declares none but
+      // the prop requires a voice pack - the single implicit "common" slot. That is
+      // the day-one shape, a requirement with nothing written down yet.
+      const _sfActiveSlots = () => {
         _sfRefreshPropCommonNeed();
-        const needed = referenced || _sfPropNeedsCommon;
-        if (!needed) {
-          field.style.display = 'none';
-          return;
+        const declared = _sfConfigSlotNames();
+        if (declared.length) return declared;
+        return _sfPropNeedsCommon ? ['common'] : [];
+      };
+
+      // Rename every occurrence of one shared folder to another, in ONE edit.
+      //
+      // MERGE AND RENAME ARE THE SAME OPERATION. Renaming "MC" to a name the config
+      // already uses folds those presets into it; renaming to a name it does not use
+      // is a plain rename. Only the word on the option differs, and it differs so the
+      // option names the consequence rather than the mechanism. [B-014]
+      const _sfRenameSlot = async (from, to) => {
+        if (!from || !to || from === to) return;
+        if (typeof editor === 'undefined' || !editor) return;
+        // WHICH PACK SURVIVES. Renaming moves presets onto a different folder name, and
+        // the pack behind that name is what they will actually PLAY. Three cases, and
+        // only the third is a question:
+        //
+        //   the target slot does not exist yet -> a pure rename. Carry the pack across,
+        //     or the renamed slot comes back unassigned and silently falls to the
+        //     starred default. Nothing is lost and nothing is asked.
+        //   it exists and holds the SAME pack  -> nothing changes on the saber. Silent.
+        //   it exists and holds a DIFFERENT one -> these presets change which sounds
+        //     they play. Only the user knows which set they want, so ask, and let them
+        //     keep either side.
+        //
+        // Compared on the EFFECTIVE pack (assigned, else the starred default), because
+        // that is what the export would actually write. [B-014]
+        const _packOf = (s) => {
+          const n = (window._sfSlotPacks && window._sfSlotPacks[s]) || '';
+          if (n) return n;
+          const st = (_sfCommons || []).find(c => c.uuid === _sfStarredCommonUuid);
+          return (st && st.meta && st.meta.name) || '';
+        };
+        const _targetExists = _sfConfigSlotNames().includes(to);
+        const _fromPack = _packOf(from);
+        const _toPack   = _packOf(to);
+        let _chosenPack = null;   // set only when the user actually picked
+        if (!_targetExists) {
+          if (_fromPack) _sfSetSlotPack(to, _fromPack);
+        } else if (_fromPack !== _toPack) {
+          const choice = await promptConfirm({
+            title: 'These use different common folders',
+            message: `"${from}" uses ${_fromPack || 'nothing yet'}.\n"${to}" uses ${_toPack || 'nothing yet'}.\n\nAfter merging, every one of these presets uses a single folder. Which sounds should they play?`,
+            confirmText: `Keep ${to}'s`,
+            confirmKind: 'primary',
+            middleText: `Keep ${from}'s`,
+            cancelText: 'Cancel',
+          });
+          if (choice === 'cancel') return;
+          // THE DIALOG ASKS, THE TOAST REPORTS. A question does not know its own
+          // outcome - the outcome is which button was pressed - so the toast is the
+          // only place the user learns which pack survived. Same rule the blade-follow
+          // action settled: a fixed-outcome confirmation suppresses the toast, a real
+          // choice does not.
+          if (choice === 'middle' && _fromPack) _sfSetSlotPack(to, _fromPack);
+          _chosenPack = (choice === 'middle') ? _fromPack : _toPack;
         }
-        const hasLibrary = !!(window._sfEntriesCache && window._sfEntriesCache.length);
-        if (commons.length === 0 && !hasLibrary) {
-          field.style.display = 'none';
-          return;
+        let parsed;
+        try { parsed = presetParser.parsePresets(editor.getValue()); } catch { return; }
+        const edits = [];
+        let touched = 0;
+        for (const arr of (parsed?.arrays || [])) {
+          for (const p of (arr.presets || [])) {
+            if (!p || !p.fontRange) continue;
+            const parts = _sfFontPathParts(p.font);
+            if (!parts.slice(1).some(s => s === from)) continue;
+            const dir = parts[0] || '';
+            // Dedupe on the way out: a preset holding BOTH names must fold into one,
+            // not end up naming the destination twice.
+            const shared = [];
+            for (const s of parts.slice(1)) {
+              if (!s) continue;
+              const v = (s === from) ? to : s;
+              if (!shared.includes(v)) shared.push(v);
+            }
+            const value = [dir, ...shared].join(';');
+            const r = p.fontRange;
+            edits.push({
+              range: {
+                startLineNumber: r.startLine, startColumn: r.startCol + 1,
+                endLineNumber:   r.endLine,   endColumn:   r.endCol + 1,
+              },
+              text: '"' + value + '"',
+            });
+            touched++;
+          }
         }
-        field.style.display = '';
-        content.innerHTML = '';
-        if (commons.length === 0) {
+        if (!edits.length) return;
+        // One atomic edit, so renaming thirty-four presets is ONE Ctrl+Z.
+        window._atomicEdit(editor, 'shared-folder-rename', edits);
+        try { if (typeof setDirty === 'function') setDirty(true); } catch {}
+        // The old slot stops being declared, so injectMetadata stops writing its
+        // assignment - nothing has to clean the map up by hand.
+        _sfRenderConfigCommonField();
+        try {
+          const _n = touched === 1 ? '1 preset' : touched + ' presets';
+          showToast(_chosenPack
+            ? _n + ' now use "' + to + '", playing ' + _chosenPack + '.'
+            : _n + ' now use "' + to + '".');
+        } catch {}
+      };
+
+      // One control for one slot. Three states, carried over unchanged from the
+      // single-folder version: nothing in the library, exactly one pack, or a pick.
+      const _sfBuildSlotField = (slot, commons, allSlots, dupeOf) => {
+        const field = document.createElement('div');
+        field.className = 'meta-field js-config-only';
+        field.dataset.slot = slot;
+        const label = document.createElement('label');
+        label.textContent = _sfSlotLabel(slot);
+        field.appendChild(label);
+        const content = document.createElement('div');
+        content.className = 'config-common-content';
+        field.appendChild(content);
+
+        if (!commons.length) {
           const span = document.createElement('span');
           span.className = 'config-common-missing';
-          span.textContent = 'Common folder needed';
-          span.title = 'The open config references ;common but no common folder is in your library. Import one from the Sound Fonts tab.';
+          // The label directly above already says WHICH folder, so repeating "Common"
+          // here both contradicts a slot called something else and says a word the
+          // user can already read.
+          //
+          // "Needed by this config" was wrong: the requirement does not come from the
+          // NAMING, it comes from the prop demanding a voice pack or from a preset
+          // referencing the folder. Attributing it to the config overstated what we
+          // know. This states the gap we actually observed - the library is empty -
+          // and leaves the WHY to the tooltip, which can afford the sentence. [B-014]
+          span.textContent = slot === 'common' ? 'Common folder needed' : 'None in your library';
+          span.title = 'This config uses a shared folder called "' + slot +
+            '", but no common folder is in your library. Import one from the Sound Fonts tab.';
           content.appendChild(span);
-          return;
+          return field;
         }
+
         const sorted = [...commons].sort((a, b) =>
           (a.meta?.name || '').localeCompare(b.meta?.name || '')
         );
-        // Resolve from window state (set on file load from @jmt:common,
-        // and on dropdown change). Falls back to global star default.
-        const activeName = window._sfActiveCommonForConfig || '';
+        const activeName = (window._sfSlotPacks && window._sfSlotPacks[slot]) || '';
         const hit = activeName ? sorted.find(c => (c.meta?.name || '') === activeName) : null;
         const savedButMissing = activeName && !hit;
         let selectedUuid = hit ? hit.uuid : (_sfStarredCommonUuid || '');
-        // Label-only single-common shortcut applies when the library
-        // has exactly one common AND the saved value resolves to it (or
-        // no saved value exists). When the saved value is missing from
-        // the library, fall through to dropdown so the user can see the
-        // missing name as a ghost option and switch to the real one.
-        if (sorted.length === 1 && !savedButMissing) {
+
+        // Actions this slot can offer. Merge into any OTHER slot the config declares;
+        // or, when it is the only slot and is not already the convention name, rename
+        // it to that. One option per target - a native select is the picker, so there
+        // is no sub-menu to build.
+        const _others = (allSlots || []).filter(s => s !== slot);
+        const _slotActions = _others.map(o => ({ value: '__rename__' + o, label: 'Merge into "' + o + '"' }));
+        if (!_others.length && slot !== 'common') {
+          _slotActions.push({ value: '__rename__common', label: 'Rename to "common"' });
+        }
+
+        // Exactly one pack in the library and nothing conflicting saved: a label, not
+        // a dropdown. A picker with a single possible value is a label - but once
+        // there are ACTIONS there is something to choose, so the select earns its
+        // place again and the rename stays reachable.
+        if (sorted.length === 1 && !savedButMissing && !_slotActions.length) {
           const c = sorted[0];
           const name = c.meta?.name || c.uuid;
           const span = document.createElement('span');
           span.className = 'config-common-name';
           span.textContent = name;
-          span.title = `Using "${name}" (only common folder in your library).`;
+          span.title = 'Using "' + name + '" (only common folder in your library).';
           content.appendChild(span);
-          // Track this implicit selection in window state so save sees
-          // it. No dirty flip needed — this is a passive inference, not
-          // a user action.
-          if (!window._sfActiveCommonForConfig) {
-            window._sfActiveCommonForConfig = name;
-          }
-          return;
+          // Passive inference, not a user action: no dirty flip. Safe against a
+          // half-typed slot because injectMetadata only writes slots the config still
+          // declares, so a transient one can never reach the file.
+          if (!window._sfSlotPacks) window._sfSlotPacks = {};
+          if (!window._sfSlotPacks[slot]) window._sfSlotPacks[slot] = name;
+          return field;
         }
-        // Dropdown render. When the saved name doesn't match any
-        // library common, prepend a ghost option for it — selected by
-        // default — so the user can see what was saved and can choose
-        // to either keep it (no action) or switch to a real entry.
-        // Mirrors how OS Version behaves when its saved value is no
-        // longer in the installed-versions list: dropdown stays usable,
-        // the original value is preserved until the user changes it.
+
+        // A saved name that is not in the library stays visible as a red ghost option
+        // rather than being silently swapped for the starred default, so the user can
+        // see what the config asked for and decide. Same behaviour OS Version has.
         const sel = document.createElement('select');
         const GHOST_VALUE = '__missing__';
         if (savedButMissing) {
           const ghost = document.createElement('option');
           ghost.value = GHOST_VALUE;
-          ghost.textContent = `${activeName} (not in library)`;
+          ghost.textContent = activeName + ' (not in library)';
           ghost.dataset.ghost = '1';
           sel.appendChild(ghost);
           selectedUuid = GHOST_VALUE;
-          // Red trigger text while the ghost is selected so the
-          // mismatch is obvious without opening the dropdown.
           sel.classList.add('ghost-selected');
         }
         for (const c of sorted) {
@@ -20894,26 +21083,118 @@ require(['vs/editor/editor.main'], function () {
           opt.textContent = c.meta?.name || c.uuid;
           sel.appendChild(opt);
         }
+        // Sentinel options at the END of the list, matching the OS Version dropdown one
+        // row over (the `+ Import version` / `> Download version` pair): a leading
+        // glyph, inline var(--jmt-blue), no heading and no separator. Same meta-bar
+        // row, same visual weight, so this is the app's existing pattern rather than a
+        // second one. Inline colour also survives the ghost-selected reset below
+        // without needing an exception.
+        //
+        // NOT an <optgroup> - it indents its options natively and the indent cannot be
+        // removed reliably. No heading either: the option says what it does, so a label
+        // above it only repeats the row underneath.
+        //
+        // NO TRAILING ELLIPSIS, and that is deliberate rather than an oversight. Those
+        // two sentinels open a dialog before anything happens; these act immediately on
+        // the config. The app's own rule is that an ellipsis means "opens something
+        // first", so wearing one here would promise a step that does not exist.
+        for (const a of _slotActions) {
+          const o = document.createElement('option');
+          o.value = a.value;
+          o.textContent = '✎ ' + a.label;
+          o.style.color = 'var(--jmt-blue)';
+          sel.appendChild(o);
+        }
         sel.addEventListener('change', (e) => {
           const uuid = e.target.value;
-          // Toggle the red trigger class on every change so picking a
-          // real common clears it and re-picking the ghost re-applies.
+          if (uuid && uuid.indexOf('__rename__') === 0) {
+            sel.value = selectedUuid;          // never leave an action selected
+            _sfRenameSlot(slot, uuid.slice('__rename__'.length));   // async: fire and forget
+            return;
+          }
           sel.classList.toggle('ghost-selected', uuid === GHOST_VALUE);
-          // Ghost option re-selected (user reverted to the missing
-          // value) — keep the original activeName in place, don't
-          // overwrite with the star.
-          if (uuid === GHOST_VALUE) return;
+          if (uuid === GHOST_VALUE) return;   // reverted to the missing value: keep it
           if (!uuid) return;
           const c = sorted.find(x => x.uuid === uuid);
           const name = c?.meta?.name || '';
-          if (name) _sfSetActiveCommonForConfig(name);
+          if (name) _sfSetSlotPack(slot, name);
         });
+        // A later slot pointing at a pack an earlier one already uses: the card would
+        // get two folders with identical contents. Red on the closed trigger so it
+        // reads without opening the list, and the tooltip carries both ways out.
+        if (dupeOf) {
+          sel.classList.add('duplicate-pack');
+          sel.title = 'Same common folder as "' + dupeOf + '". The card would get two identical copies. ' +
+            'Pick a different one, or merge the names below.';
+        }
         content.appendChild(sel);
-        // Set value AFTER the select is in the DOM. Some browsers
-        // ignore .value assignment on detached selects when the value
-        // was supposed to override the first-option default.
+        // Value AFTER insertion: some browsers ignore .value on a detached select.
         if (selectedUuid) sel.value = selectedUuid;
+        return field;
       };
+
+      // WARNING: RENDERING A SLOT HAS NO SIDE EFFECT, and that property is what makes
+      // the panel safe. Slots come and go as the config text changes, so a half-typed
+      // name briefly draws a control - nothing here writes a marker, touches a card,
+      // or flips dirty. The only write is a user assigning a pack.
+      let _sfLastSlotKey = null;
+      const _sfRenderConfigCommonField = () => {
+        const host = document.getElementById('config-slot-fields');
+        if (!host) return;
+        const slots = _sfActiveSlots();
+        _sfLastSlotKey = JSON.stringify(slots);
+        const commons = _sfCommons || [];
+        const hasLibrary = !!(window._sfEntriesCache && window._sfEntriesCache.length);
+        // NEEDED, not AVAILABLE (2026-08-31): a config that uses no shared folder gets
+        // no control at all, because a dropdown with the starred default selected
+        // asserts a choice Save will not write. Same class as a build chip reading
+        // "Flash successful" about a build that was never flashed.
+        if (!slots.length || (!commons.length && !hasLibrary)) {
+          host.style.display = 'none';
+          host.innerHTML = '';
+          return;
+        }
+        host.innerHTML = '';
+        // Which slots repeat a pack an EARLIER slot already uses. The first use is
+        // presumed intended; the later ones are what to flag, so the config reads the
+        // way it was built rather than the whole row turning red.
+        //
+        // Judged on the EFFECTIVE pack, not just the assigned one: two unassigned slots
+        // both fall back to the starred default, and the export would genuinely write
+        // that same pack into two folders. Flagging only explicit assignments would
+        // stay quiet about the case a user is most likely to arrive in. [B-014]
+        const _starName = (() => {
+          const st = commons.find(c => c.uuid === _sfStarredCommonUuid);
+          return (st && st.meta && st.meta.name) || '';
+        })();
+        const _effPack = (s) => ((window._sfSlotPacks && window._sfSlotPacks[s]) || '') || _starName;
+        const _firstUse = new Map();
+        for (const slot of slots) {
+          const _pk = _effPack(slot);
+          const _dupeOf = (_pk && _firstUse.has(_pk)) ? _firstUse.get(_pk) : null;
+          if (_pk && !_firstUse.has(_pk)) _firstUse.set(_pk, slot);
+          host.appendChild(_sfBuildSlotField(slot, commons, slots, _dupeOf));
+        }
+        // "contents", not '' - the generated fields have to be direct flex items of the
+        // header row so they inherit its spacing, rather than nesting a second row
+        // inside one slot's width.
+        host.style.display = 'contents';
+      };
+
+      // Same slots -> render now, so toggling a shared folder on a preset updates the
+      // control immediately. Slot set CHANGED -> wait 400 ms. _rebuildSidecar calls
+      // this on a 50 ms debounce, so without the gate typing "c-o-m-m-o-n" mints a
+      // dropdown per keystroke. Existing controls stay responsive; new ones appear
+      // once typing stops. Precedent: _sfScheduleSidecarRuleRecheck, same interval.
+      let _sfSlotFieldsTimer = null;
+      const _sfScheduleConfigSlotFields = () => {
+        const key = JSON.stringify(_sfActiveSlots());
+        if (key === _sfLastSlotKey) { _sfRenderConfigCommonField(); return; }
+        clearTimeout(_sfSlotFieldsTimer);
+        _sfSlotFieldsTimer = setTimeout(_sfRenderConfigCommonField, 400);
+      };
+      window._sfScheduleConfigSlotFields = _sfScheduleConfigSlotFields;
+
       // Expose so the file-open path (outside this IIFE scope) can
       // refresh the field from the newly-loaded config's JMT_COMMON
       // marker. Name kept for the existing call site; the function it
@@ -23247,7 +23528,7 @@ require(['vs/editor/editor.main'], function () {
           elapsedSec: (Date.now() - _tracksT0) / 1000,
           // Closed from inside the summary, once it is ready to show.
           closeProgress: () => _sfDeleteProgress.hide(),
-          commonOutcome: null,
+          commonOutcomes: [],
           tracksOutcome: {
             reason: null,
             added: (r.added || []).length,
@@ -32043,7 +32324,7 @@ require(['vs/editor/editor.main'], function () {
       // The rule for the "why" notes: report what the APP decided, not what the
       // user chose. An inferred prop requirement earns a mention; their own
       // setting does not.
-      const _sfShowExportSummary = async ({ destDir, names, modeByName, commonOutcome, tracksOutcome, unchangedFonts, commonMissing, commonFolderName, elapsedSec, closeProgress, title }) => {
+      const _sfShowExportSummary = async ({ destDir, names, modeByName, commonOutcomes, tracksOutcome, unchangedFonts, commonMissing, commonFolderNames, elapsedSec, closeProgress, title }) => {
         const esc = _sfEscape;
         const n = (v) => `<strong>${v}</strong>`;
         const plural = (c, w) => `${w}${c === 1 ? '' : 's'}`;
@@ -32069,28 +32350,42 @@ require(['vs/editor/editor.main'], function () {
         try {
           const dl = await window.electronAPI.listDestFolders({ destDir });
           if (dl && dl.ok && Array.isArray(dl.folders)) {
-            const reserved = new Set(['common', 'tracks', String(commonFolderName || 'common')]);
+            // EVERY shared folder the config declares is reserved, not just one called
+            // "common". Reserving a single hardcoded name meant an `MC` folder on the
+            // card was counted as a FONT, so the summary reported a voice pack as "1
+            // not part of this export" on every export from such a config. [B-014]
+            const reserved = new Set(['common', 'tracks']);
+            for (const _r of (commonFolderNames || [])) if (_r) reserved.add(String(_r));
             const fontish = dl.folders.filter(f => !reserved.has(f));
             const extra = fontish.filter(f => !new Set(names).has(f)).length;
             lines.push(`${n(fontish.length)} ${plural(fontish.length, 'font')} at the destination${extra ? `, ${n(extra)} not part of this export` : ''}.`);
           }
         } catch {}
 
-        if (commonOutcome) {
-          const pack = esc(commonOutcome.name || 'your common folder');
-          const why = commonOutcome.reason === 'prop'
+        // ONE LINE PER FOLDER. This used to be a single outcome overwritten by each
+        // write, so a config shipping two shared folders had both written correctly and
+        // only the last one mentioned - an export that understated itself. [B-014]
+        //
+        // The folder is named only when it is NOT the convention: "written to MC" earns
+        // its place, "written to common" is a word the reader already assumed.
+        for (const o of (commonOutcomes || [])) {
+          if (!o) continue;
+          const pack = esc(o.name || 'your common folder');
+          const into = (o.slot && o.slot !== 'common') ? ` to ${esc(o.slot)}` : '';
+          const inAt = (o.slot && o.slot !== 'common') ? ` in ${esc(o.slot)}` : '';
+          const why = o.reason === 'prop'
             ? ', required by your prop on ProffieOS 8'
-            : commonOutcome.reason === 'config'
+            : o.reason === 'config'
               ? ', because your config references it'
               : '';
-          if (commonOutcome.state === 'current') {
+          if (o.state === 'current') {
             // Silence would read as "it did not ship", the wrong impression to
             // leave from a good outcome.
-            lines.push(`Voice pack ${pack} was already there.`);
-          } else if (commonOutcome.state === 'kept') {
-            lines.push(`Kept ${esc(commonOutcome.cardName || 'the voice pack that was there')}, at your choice. ${pack} was not written.`);
+            lines.push(`Voice pack ${pack} was already${inAt || ' there'}.`);
+          } else if (o.state === 'kept') {
+            lines.push(`Kept ${esc(o.cardName || 'the voice pack that was there')}${inAt}, at your choice. ${pack} was not written.`);
           } else {
-            lines.push(`Voice pack ${pack} written${why}.`);
+            lines.push(`Voice pack ${pack} written${into}${why}.`);
           }
         }
 
@@ -32128,7 +32423,7 @@ require(['vs/editor/editor.main'], function () {
         // "Saved to" is a lie when nothing was written, which is exactly the
         // no-write case this summary now also serves.
         const wroteSomething = written > 0
-          || (commonOutcome && commonOutcome.state === 'written')
+          || (commonOutcomes || []).some(o => o && o.state === 'written')
           || (tracksOutcome && ((tracksOutcome.added || 0) + (tracksOutcome.replaced || 0)) > 0);
         // A verb on both sides, and "Checked" deliberately echoes the phase the
         // user just watched ("Checking the destination…") so the summary closes
@@ -32218,43 +32513,84 @@ require(['vs/editor/editor.main'], function () {
         // the end, because the destination will need one.
         let commonMissing = null;
         const hasStarred = !!_sfStarredCommonUuid;
+        // Every shared folder this export will write: { slot, uuid }. Replaces the
+        // single include/override pair, which could only ever describe one folder.
+        // `includeCommon` below is kept as a derived boolean so the ~20 downstream
+        // sites that only ask "is there one at all" need no change. [B-014]
+        const commonSlots = [];
         let includeCommon = false;
-        // Tracks which common to include for this Save. Defaults to the
-        // starred uuid; the multi-common dropdown can override it.
-        let _sfBulkSaveCommonOverride = null;
         if (needsCommon) {
-          // Honor the common the OPEN CONFIG selected (@jmt:common, tracked
-          // as window._sfActiveCommonForConfig) before the global starred
-          // default. Shipping the starred common when the config asked for a
-          // different one puts the wrong sounds on the card.
-          const activeName = window._sfActiveCommonForConfig || '';
-          const configCommon = activeName
-            ? _sfCommons.find(c => (c.meta && c.meta.name) === activeName)
-            : null;
-          if (configCommon) {
-            includeCommon = true;
-            _sfBulkSaveCommonOverride = configCommon.uuid;
-          } else if (activeName && hasStarred) {
-            // Config named a specific common that isn't in the library. Don't
-            // silently substitute the (different) starred default — let the
-            // user ship it, ship fonts only, or cancel.
+          // The config names the slots; each one ships the pack assigned to it, into a
+          // folder of its own name. Shipping the starred default when the config asked
+          // for something else puts the wrong sounds on the card.
+          const _slots = (typeof _sfActiveSlots === 'function') ? _sfActiveSlots() : ['common'];
+          const _unresolved = [];
+          for (const _slot of _slots) {
+            const _name = (window._sfSlotPacks && window._sfSlotPacks[_slot]) || '';
+            const _pack = _name ? _sfCommons.find(c => (c.meta && c.meta.name) === _name) : null;
+            if (_pack) { commonSlots.push({ slot: _slot, uuid: _pack.uuid }); continue; }
+            // Named a pack that is not in the library: do not silently substitute a
+            // different one. Collected and asked about once, below.
+            if (_name) { _unresolved.push({ slot: _slot, name: _name }); continue; }
+            // Declared but never assigned: the starred default is the right pick.
+            if (hasStarred) commonSlots.push({ slot: _slot, uuid: _sfStarredCommonUuid });
+          }
+          if (_unresolved.length && hasStarred) {
+            // ONE dialog however many are unresolved. Asking per slot would be the same
+            // question repeated, which is what teaches people to click through.
+            const _list = _unresolved
+              .map(u => `"${u.name}" (for ${u.slot})`)
+              .join('\n');
+            const _one = _unresolved.length === 1;
             const choice = await promptConfirm({
-              title: 'Config common folder not found',
-              message: `The open config references the common folder "${activeName}", but it isn't in your library.\nInclude your default common folder instead, or save only the selected fonts?`,
+              title: _one ? 'Config common folder not found' : 'Config common folders not found',
+              message: `The open config asks for ${_one ? 'a common folder' : 'common folders'} that ${_one ? "isn't" : "aren't"} in your library:\n${_list}\n\nInclude your default common folder instead, or save only the selected fonts?`,
               confirmText: 'Use default',
               confirmKind: 'primary',
               middleText: 'Fonts only',
               cancelText: 'Cancel',
             });
             if (choice === 'cancel') return false;
-            includeCommon = choice === 'confirm';
-          } else if (hasStarred) {
-            // Config references ;common but didn't name a specific one; the
-            // starred default is the right pick.
-            includeCommon = true;
-          } else {
+            if (choice === 'confirm') {
+              for (const u of _unresolved) commonSlots.push({ slot: u.slot, uuid: _sfStarredCommonUuid });
+            }
+          }
+          if (!commonSlots.length && !hasStarred) {
             // Wanted, but the library has none. Recorded for the summary.
             commonMissing = wantsCommon ? 'config' : 'prop';
+          }
+          // TWO SLOTS, ONE PACK. The card would get two folders with identical
+          // contents, which usually means the config drifted rather than that someone
+          // wanted a duplicate.
+          //
+          // ⚠️ WE WARN AND OFFER CANCEL, WE DO NOT MERGE. The Sound Font Library never
+          // edits a config: by the time sounds are being written to a card the config
+          // has usually already been compiled and flashed, so changing it here would
+          // put the file and the board out of step. The merge lives in Config Manager,
+          // where editing the config is the point. (2026-09-06.)
+          const _byPack = new Map();
+          for (const cs of commonSlots) {
+            if (!_byPack.has(cs.uuid)) _byPack.set(cs.uuid, []);
+            _byPack.get(cs.uuid).push(cs.slot);
+          }
+          const _dupes = [..._byPack.values()].filter(v => v.length > 1);
+          if (_dupes.length) {
+            // "A", "B" and "C" - not "A" and "B" and "C". The last pair takes the
+            // conjunction, everything before it takes commas.
+            const _list = (arr) => arr.length <= 1 ? (arr[0] || '')
+              : arr.slice(0, -1).join(', ') + ' and ' + arr[arr.length - 1];
+            const _names = _dupes.map(g => _list(g.map(n => `"${n}"`))).join('; ');
+            // "All" of two is wrong. The button counts what the message just listed.
+            const _two = _dupes.reduce((a, g) => a + g.length, 0) === 2;
+            const ok = await promptConfirm({
+              title: _two ? 'The same common folder under two names'
+                          : 'The same common folder under several names',
+              message: `This config uses ${_names} for the same common folder, so the card would get identical copies under each name.\n\nContinue and write ${_two ? 'both' : 'them all'}, or cancel and merge the names in Config Manager first.`,
+              confirmText: _two ? 'Write both' : 'Write them all',
+              confirmKind: 'primary',
+              cancelText: 'Cancel',
+            });
+            if (!ok) return false;
           }
           // No ASK. The library has no common folder, so there is nothing to
           // choose from and therefore no question to put — this used to block
@@ -32271,27 +32607,34 @@ require(['vs/editor/editor.main'], function () {
           // Multi-common case: dropdown forces an explicit pick so we
           // don't silently assume the default in a courtesy ask. The
           // dropdown overrides the starred default into a per-Save
-          // selection captured in _sfBulkSaveCommonOverride.
+          // selection captured as this export's single `common` slot.
           if (_sfCommons.length === 1) {
             const choice = await promptConfirm({
               title: 'Include common folder?',
-              message: 'The open config does not reference a "common" folder, but you have a default common folder in your library. Include it in the export?',
+              // Name-neutral: this fires when the config declares NO shared folder at
+              // all, so asserting it does not reference "common" specifically was only
+              // ever accidentally true. [B-014]
+              message: 'The open config does not use a shared folder, but you have a default common folder in your library. Include it in the export?',
               confirmText: 'Include',
               confirmKind: 'primary',
               middleText: 'Skip',
               cancelText: 'Cancel',
             });
             if (choice === 'cancel') return false;
-            includeCommon = choice === 'confirm';
+            // Courtesy include: the config declares no shared folder, so there is no
+            // slot name to use and the convention name is the only honest answer.
+            if (choice === 'confirm') commonSlots.push({ slot: 'common', uuid: _sfStarredCommonUuid });
           } else {
             const result = await _sfPromptIncludeCommonChoice();
             if (result.action === 'cancel') return false;
             if (result.action === 'include') {
-              includeCommon = true;
-              _sfBulkSaveCommonOverride = result.uuid;
+              commonSlots.push({ slot: 'common', uuid: result.uuid || _sfStarredCommonUuid });
             }
           }
         }
+        // Derived, so every downstream site that only asks "is any shared folder being
+        // written" keeps working unchanged.
+        includeCommon = commonSlots.length > 0;
         // Shared Tracks inclusion logic — same shape as common, simpler
         // since the folder is singleton (no star, no dropdown).
         //   config refs tracks/ AND folder exists       → include silently
@@ -32432,13 +32775,15 @@ require(['vs/editor/editor.main'], function () {
               needsV2 = (await window.__vpkRequiresV2(editor.getValue())) === true;
             }
             if (needsV2) {
-              const cu = _sfBulkSaveCommonOverride || _sfStarredCommonUuid;
-              const chosen = _sfCommons.find(x => x.uuid === cu);
               // A MINIMUM, not an equality: sound_library.h:92 fails only when
               // found_version < required_version_, so a version 3 pack would
               // satisfy a version 2 requirement. A missing ini reads as 1.
               const packVersion = (c) => Number((c && c.voicepackVersion) || 1);
-              if (chosen && packVersion(chosen) < 2) {
+              // Per slot: each ships its own pack, so each can fail the version gate
+              // on its own and is asked about on its own. [B-014]
+              for (const cs of commonSlots) {
+                const chosen = _sfCommons.find(x => x.uuid === cs.uuid);
+                if (!chosen || packVersion(chosen) >= 2) continue;
                 const candidates = _sfCommons.filter(c => packVersion(c) >= 2);
                 const ans = await _sfPromptVoicepackVersion(chosen, candidates);
                 if (ans.action === 'cancel') return false;
@@ -32451,7 +32796,7 @@ require(['vs/editor/editor.main'], function () {
                   _sfOpenVoicepackPicker();
                   return false;
                 }
-                if (ans.action === 'use' && ans.uuid) _sfBulkSaveCommonOverride = ans.uuid;
+                if (ans.action === 'use' && ans.uuid) cs.uuid = ans.uuid;
               }
             }
           } catch {}
@@ -32478,7 +32823,7 @@ require(['vs/editor/editor.main'], function () {
         const _scanT0 = Date.now();
         // Only count steps we will actually perform, or the bar stops short of
         // full and the "N of M" reads as though something was missed.
-        const _scanTotal = names.length + (includeCommon ? 1 : 0) + (includeTracks ? 1 : 0);
+        const _scanTotal = names.length + commonSlots.length + (includeTracks ? 1 : 0);
         let _scanDone = 0;
         // `sub` is progress WITHIN the current unit, 0..1. The tracks step is one
         // unit but hashes a hundred-plus wavs inside it, so without this the bar
@@ -32541,16 +32886,20 @@ require(['vs/editor/editor.main'], function () {
         let commonMineName = '';
         let commonCardName = '';
         _scanTick('common folder');
-        if (includeCommon) {
+        // One destination folder per slot, each checked under THE NAME IT WILL BE
+        // WRITTEN UNDER. Checking one name and creating another is the whole class of
+        // bug this work removed. [B-014]
+        for (const cs of commonSlots) {
           try {
-            const cu = _sfBulkSaveCommonOverride || _sfStarredCommonUuid;
-            const mineC = _sfCommons.find(x => x.uuid === cu);
-            commonMineName = (mineC && mineC.meta && mineC.meta.name) || '';
+            const mineC = _sfCommons.find(x => x.uuid === cs.uuid);
+            cs.packName = (mineC && mineC.meta && mineC.meta.name) || '';
+            if (!commonMineName) commonMineName = cs.packName;
             try {
-              const ex = await window.electronAPI.commonFolderExistsAt({ destDir, targetName: _sfPreferredSharedName() });
-              commonCardName = (ex && ex.ok && ex.marker && ex.marker.name) || '';
+              const ex = await window.electronAPI.commonFolderExistsAt({ destDir, targetName: cs.slot });
+              const _nm = (ex && ex.ok && ex.marker && ex.marker.name) || '';
+              if (_nm && !commonCardName) commonCardName = _nm;
             } catch {}
-            const r = await window.electronAPI.commonMatchesAt({ uuid: cu, destDir, targetName: _sfPreferredSharedName() });
+            const r = await window.electronAPI.commonMatchesAt({ uuid: cs.uuid, destDir, targetName: cs.slot });
             if (r && r.ok && r.exists) {
               // Decided on CONTENT, not on the marker. A marker states what we
               // wrote last time; the folder can have been edited by hand since,
@@ -32558,13 +32907,23 @@ require(['vs/editor/editor.main'], function () {
               // at all yet may hold exactly the same pack. Both cases were wrong
               // before. Anything we cannot read comes back not-identical, so an
               // unknown always asks rather than silently skipping.
-              commonAlreadyCurrent = !!r.identical;
-              if (!commonAlreadyCurrent && !conflicts.includes('common')) conflicts.push('common');
+              cs.alreadyCurrent = !!r.identical;
+              if (!cs.alreadyCurrent) conflicts.push('slot:' + cs.slot);
             }
           } catch {}
+          _scanDone++; _scanTick(cs.slot + ' folder');
         }
-        if (includeCommon) { _scanDone++; _scanTick('common folder'); }
-        if (commonAlreadyCurrent) includeCommon = false;
+        // A slot whose card copy already matches is not written and is not a conflict,
+        // exactly as the single folder behaved. Dropped from the list so every count
+        // and every loop below sees only what will actually be written.
+        const commonCurrentSlots = [];
+        for (let i = commonSlots.length - 1; i >= 0; i--) {
+          if (commonSlots[i].alreadyCurrent) {
+            commonAlreadyCurrent = true;
+            commonCurrentSlots.unshift(commonSlots.splice(i, 1)[0]);
+          }
+        }
+        includeCommon = commonSlots.length > 0;
         // Tracks are PLANNED here, in the scan, even though their dialog opens
         // further down with the other decisions. Reading is reading: doing it
         // between two modals would put an unexplained pause in the middle of
@@ -32622,8 +32981,12 @@ require(['vs/editor/editor.main'], function () {
           // one row — so a fixed plural "Some fonts..." was wrong in several
           // real cases, including a lone common-folder row that is not a font
           // at all. (2026-07-31.)
-          const _cFonts = conflicts.filter(n => n !== 'common').length;
-          const _cCommon = conflicts.includes('common');
+          // Slot rows carry a `slot:` prefix, which no real folder name can contain
+          // (":" is illegal in a FAT filename), so a font called "MC" and a slot
+          // called "MC" stay two rows rather than colliding into one. [B-014]
+          const _isSlotKey = (n) => typeof n === 'string' && n.indexOf('slot:') === 0;
+          const _cFonts = conflicts.filter(n => !_isSlotKey(n)).length;
+          const _cCommon = conflicts.some(_isSlotKey);
           const _subject = _cFonts && _cCommon
             ? (_cFonts === 1 ? 'One font and the common folder' : 'Some fonts and the common folder')
             : _cFonts
@@ -32646,13 +33009,17 @@ require(['vs/editor/editor.main'], function () {
             defaultMode: 'replace',
             title: _cTitle,
             description: _cBody,
-            labelFor: (n) => n,
-            // 'common' here is the row's internal SENTINEL, not the folder name on the
-            // card. Say the name that will actually be written, or the dialog promises
-            // a `common` folder while the export creates `MC`. [B-326]
-            titleFor: (n) => (n === 'common'
-              ? `The ${_sfPreferredSharedName()} folder at the destination${commonMineName ? `, receiving ${commonMineName}` : ''}`
-              : n),
+            labelFor: (n) => (_isSlotKey(n) ? n.slice(5) : n),
+            // Row keys for slots are internal; the folder name is what follows the
+            // prefix. Say the name that will actually be written, or the dialog
+            // promises one folder while the export creates another. [B-014]
+            titleFor: (n) => {
+              if (!_isSlotKey(n)) return n;
+              const _s = n.slice(5);
+              const _cs = commonSlots.find(c => c.slot === _s);
+              const _pk = (_cs && _cs.packName) || commonMineName;
+              return `The ${_s} folder at the destination${_pk ? `, receiving ${_pk}` : ''}`;
+            },
             // Row heading stays the DESTINATION folder name. A long pack name
             // as the title overflowed the row and still did not say what it
             // was replacing, so both packs moved to the lines beneath it.
@@ -32686,13 +33053,14 @@ require(['vs/editor/editor.main'], function () {
         // Items the user chose to skip in the conflict modal don't count
         // toward the total (and don't increment the running step), so the
         // progress reflects real work.
-        const commonMode = includeCommon ? (modeByName.get('common') || 'rename') : null;
+        // Per slot, keyed the same way the conflict rows are.
+        const _slotMode = (cs) => modeByName.get('slot:' + cs.slot) || 'rename';
         const tracksMode = includeTracks ? 'additive' : null;
         // Byte-identical fonts ride the existing skip path: no IPC call, no
         // progress tick, nothing written.
         for (const n of unchangedFonts) modeByName.set(n, 'skip');
         const willWriteFonts = names.filter(n => (modeByName.get(n) || 'rename') !== 'skip').length;
-        const willWriteCommon = includeCommon && commonMode !== 'skip' ? 1 : 0;
+        const willWriteCommon = commonSlots.filter(cs => _slotMode(cs) !== 'skip').length;
         const willWriteTracks = includeTracks && (tracksToAdd.length || tracksReplace.length) ? 1 : 0;
         const totalSteps = willWriteFonts + willWriteCommon + willWriteTracks;
         // Nothing to write — an honest bail rather than an "Exporting (0 of 0)"
@@ -32719,12 +33087,12 @@ require(['vs/editor/editor.main'], function () {
           // (0 of 0)" progress bar flashes on the way here.
           const fontsSkipped = names.filter(n =>
             modeByName.get(n) === 'skip' && !unchangedFonts.includes(n)).length;
-          const commonSkipped = !!(includeCommon && commonMode === 'skip');
-          const skippedByChoice = fontsSkipped + (commonSkipped ? 1 : 0);
+          const commonSkipped = commonSlots.filter(cs => _slotMode(cs) === 'skip').length;
+          const skippedByChoice = fontsSkipped + commonSkipped;
           const commonNames = { name: commonMineName, cardName: commonCardName, reason: commonReason };
           await _sfShowExportSummary({
             destDir, names, modeByName, unchangedFonts, commonMissing,
-            commonFolderName: 'common',
+            commonFolderNames: _sfConfigSlotNames(),
             // *** WITHOUT THIS THE APP HANGS WITH NO WAY OUT. (B-204) ***
             // The scan overlay is deliberately left up above, because each
             // surface closes it from the inside once it is ready to paint -
@@ -32739,9 +33107,13 @@ require(['vs/editor/editor.main'], function () {
             // It fires precisely when the export SUCCEEDED and had nothing to do.
             closeProgress: () => _sfDeleteProgress.hide(),
             title: skippedByChoice === 0 ? 'Already up to date' : 'Card left as it was',
-            commonOutcome: commonAlreadyCurrent
-              ? { state: 'current', ...commonNames }
-              : (commonSkipped ? { state: 'kept', ...commonNames } : null),
+            // Same shape as the written path: one line per folder, not one for all.
+            commonOutcomes: [
+              ...commonCurrentSlots.map(cs => ({
+                state: 'current', ...commonNames, slot: cs.slot, name: cs.packName || commonMineName })),
+              ...commonSlots.filter(cs => _slotMode(cs) === 'skip').map(cs => ({
+                state: 'kept', ...commonNames, slot: cs.slot, name: cs.packName || commonMineName })),
+            ],
             tracksOutcome: includeTracks
               ? {
                   reason: tracksReason,
@@ -32769,9 +33141,8 @@ require(['vs/editor/editor.main'], function () {
         // inert to ProffieOS, and it makes the next compare cheap.
         // Deliberately placed AFTER every cancel and bail point: a pre-scan must
         // never write to the user's card.
-        if (commonAlreadyCurrent) {
-          const cu = _sfBulkSaveCommonOverride || _sfStarredCommonUuid;
-          try { await window.electronAPI.writeCommonMarker({ uuid: cu, destDir, targetName: _sfPreferredSharedName() }); } catch {}
+        for (const cs of commonCurrentSlots) {
+          try { await window.electronAPI.writeCommonMarker({ uuid: cs.uuid, destDir, targetName: cs.slot }); } catch {}
         }
         // Up FIRST, before any totals are summed or listeners wired. Pressing
         // Continue must produce something on screen immediately; the gap before
@@ -32781,9 +33152,12 @@ require(['vs/editor/editor.main'], function () {
         const results = { copied: 0, skipped: 0, replaced: 0 };
         // What actually happened, for the export summary.
         let tracksOutcome = null;
-        let commonOutcome = commonAlreadyCurrent
-          ? { state: 'current', reason: commonReason, name: commonMineName, cardName: commonCardName }
-          : null;
+        // One outcome per shared folder, seeded with the ones the card already had, so
+        // a quiet success still gets a line each rather than being summarised away.
+        const commonOutcomes = commonCurrentSlots.map(cs => ({
+          state: 'current', slot: cs.slot, reason: commonReason,
+          name: cs.packName || commonMineName, cardName: commonCardName,
+        }));
         let stepIdx = 0;
         // Byte-accurate progress. Sum the real byte totals of everything about
         // to be written, then advance the bar by bytes actually copied to the
@@ -32798,9 +33172,9 @@ require(['vs/editor/editor.main'], function () {
           if ((modeByName.get(nm) || 'rename') === 'skip') continue;
           _sfExportTotalBytes += _sfEntryBytes(nm);
         }
-        if (willWriteCommon) {
-          const cu = _sfBulkSaveCommonOverride || _sfStarredCommonUuid;
-          const c = _sfCommons.find(x => x.uuid === cu);
+        for (const cs of commonSlots) {
+          if (_slotMode(cs) === 'skip') continue;
+          const c = _sfCommons.find(x => x.uuid === cs.uuid);
           _sfExportTotalBytes += (c && (c.totalBytes || (c.meta && c.meta.contentTotalBytes))) || 0;
         }
         if (willWriteTracks) {
@@ -32864,36 +33238,33 @@ require(['vs/editor/editor.main'], function () {
             failures.push({ name, error: String(err && err.message || err) });
           }
         }
-        if (includeCommon && commonMode !== 'skip') {
-          const commonUuid = _sfBulkSaveCommonOverride || _sfStarredCommonUuid;
+        // One write per slot, each into a folder of ITS OWN name, so a config using
+        // several gets several folders its presets can actually find. [B-014]
+        for (const cs of commonSlots) {
+          const _mode = _slotMode(cs);
+          if (_mode === 'skip') { results.skipped++; continue; }
           stepIdx++;
-          _sfExportLabel = 'common folder';
+          _sfExportLabel = cs.slot + ' folder';
           _sfDeleteProgress.show(`Exporting (${stepIdx} of ${totalSteps})`, '');
           _sfRenderExportProg();
           try {
             const r = await window.electronAPI.exportCommonToFolder({
-              uuid: commonUuid,
+              uuid: cs.uuid,
               destDir,
-              mode: commonMode,
-              // The card gets the folder name the CONFIG uses, so a `;MC` config
-              // exports an MC folder its presets can actually find. Falls back to
-              // the convention when no config is open or it declares none. [B-326]
-              targetName: _sfPreferredSharedName(),
+              mode: _mode,
+              targetName: cs.slot,
             });
-            if (!r || !r.ok) failures.push({ name: 'common', error: (r && r.error) || 'unknown error' });
+            if (!r || !r.ok) failures.push({ name: cs.slot, error: (r && r.error) || 'unknown error' });
             else if (r.skipped) {
               results.skipped++;
-              commonOutcome = { state: 'kept', reason: commonReason, name: commonMineName, cardName: commonCardName };
+              commonOutcomes.push({ state: 'kept', slot: cs.slot, reason: commonReason, name: cs.packName || commonMineName, cardName: commonCardName });
             } else {
-              if (commonMode === 'replace') results.replaced++; else results.copied++;
-              commonOutcome = { state: 'written', reason: commonReason, name: commonMineName, cardName: commonCardName };
+              if (_mode === 'replace') results.replaced++; else results.copied++;
+              commonOutcomes.push({ state: 'written', slot: cs.slot, reason: commonReason, name: cs.packName || commonMineName, cardName: commonCardName });
             }
           } catch (err) {
-            failures.push({ name: 'common', error: String(err && err.message || err) });
+            failures.push({ name: cs.slot, error: String(err && err.message || err) });
           }
-        } else if (includeCommon && commonMode === 'skip') {
-          // User chose to keep the existing common at destination.
-          results.skipped++;
         }
         if (includeTracks && willWriteTracks) {
           stepIdx++;
@@ -32952,8 +33323,8 @@ require(['vs/editor/editor.main'], function () {
         // of its own (it lists the destination), so hiding first would leave the
         // screen with no overlay across an IPC round trip.
         await _sfShowExportSummary({
-          destDir, names, modeByName, commonOutcome, tracksOutcome, unchangedFonts, commonMissing,
-          commonFolderName: 'common',
+          destDir, names, modeByName, commonOutcomes, tracksOutcome, unchangedFonts, commonMissing,
+          commonFolderNames: _sfConfigSlotNames(),
           elapsedSec: (Date.now() - _sfExportT0) / 1000,
           closeProgress: () => _sfDeleteProgress.hide(),
         });
@@ -37314,10 +37685,13 @@ require(['vs/editor/editor.main'], function () {
       if (typeof _validatePresetIdentifiers === 'function') _validatePresetIdentifiers();
       _parseResult    = presetParser.parsePresets(editor.getValue());
       _refreshStrip();
-      // Common Folder meta-field: re-evaluate every rebuild so toggling
-      // ;common in a preset (or any edit that adds/removes the marker)
-      // flips the field's missing/needed state immediately.
-      try { window._sfRenderPresetSidecarCommonRow?.(); } catch {}
+      // Shared-folder fields: re-evaluate every rebuild so toggling a shared folder
+      // on a preset flips the control immediately. SCHEDULED, not rendered directly -
+      // this runs on a 50 ms debounce, and the slot SET must not change that fast or
+      // typing "c-o-m-m-o-n" mints a dropdown per keystroke. The scheduler renders
+      // straight away when the slots are unchanged and waits 400 ms when they are
+      // not, so existing controls stay responsive. [B-014]
+      try { window._sfScheduleConfigSlotFields?.(); } catch {}
       // "Last used style" write-back debounce — selection-time semantics
       // by design (saving is a backstop, not the primary trigger).
       // Schedules the write-back 500ms after the last edit so fast typing
@@ -38738,9 +39112,6 @@ require(['vs/editor/editor.main'], function () {
       const _cbLbl = document.createElement('span');
       _cbLbl.className = 'preset-common-toggle-label';
       const _noCommon = (typeof _sfCommons !== 'undefined' && _sfCommons.length === 0);
-      _cbLbl.title = _noCommon
-        ? "Your Sound Fonts library has no common folder. Enabling this writes ';common' into the preset, but nothing will resolve at that path on the SD card until you import a common folder."
-        : 'Consider enabling the common folder so missing or shared sound files automatically fall back to a central common folder, reducing duplication and making fonts easier to maintain.';
       // The label names the folder THIS PRESET declares, and the per-preset unit is
       // the point. A config-wide name is the wrong scope for a per-preset control:
       // with one preset on `;common` and thirty-three on `;MC` the config-wide answer
@@ -38751,7 +39122,40 @@ require(['vs/editor/editor.main'], function () {
       // The config-wide preferred name applies only when this preset declares NOTHING,
       // because then the label is promising what ticking the box would WRITE.
       const _presetShared = _sfSharedDirs(preset.font);
-      _cbLbl.textContent = _presetShared[0] || _sfPreferredSharedName();
+      const _slotName = _presetShared[0] || _sfPreferredSharedName();
+      _cbLbl.textContent = _slotName;
+      // Strongest true fact first, and we already know which one applies.
+      //
+      // WHEN THE PROP REQUIRES A VOICE PACK, "consider enabling" is simply wrong: on
+      // OS8 with the fett263 or BC props it is not a choice, and a preset without one
+      // announces "voice pack not found" every time it is selected. Suggesting an
+      // optimisation there would be the app understating a requirement it has already
+      // determined.
+      // Otherwise a name the user chose carries no meaning on its own, so the tooltip
+      // spends its one chance saying what the thing IS and what the card needs.
+      // "common" needs neither: makers know it, and repeating it would be noise.
+      // Short, because a tooltip nobody finishes reading says nothing. [B-014]
+      const _propRequires = (typeof window._sfPropRequiresVoicepack === 'function')
+        && window._sfPropRequiresVoicepack();
+      // TICKED IS THE DIVIDING LINE, and missing it made the copy give advice where it
+      // owed a consequence. "Consider enabling" is right for a box that is OFF. Once it
+      // is ON the folder is not optional, whatever the prop says: ProffieOS scans the
+      // path, does not find the folder, and this preset throws FONT DIRECTORY NOT FOUND.
+      //
+      // Two different requirements with two different symptoms, and the prop one is the
+      // stronger because it holds even with the box off:
+      //   prop requires a voice pack -> "voice pack not found" on every switch to it
+      //   the preset references it    -> "font directory not found"
+      _cbLbl.title = _propRequires
+        ? 'Your prop requires a voice pack. Without a folder named "' + _slotName +
+          '" at the root of your SD card, this preset says "voice pack not found".'
+        : cb.checked
+          ? (_noCommon
+              ? 'This preset uses a shared folder called "' + _slotName + '". Nothing is in your library yet, so there is nothing to put on the card.'
+              : 'This preset uses a shared folder called "' + _slotName + '", so a folder with that name has to be at the root of your SD card, or the preset says "font directory not found".')
+          : (_slotName === 'common'
+              ? 'Consider enabling the common folder so missing or shared sound files fall back to a central folder, reducing duplication and making fonts easier to maintain.'
+              : 'Enabling this makes the preset also look in "' + _slotName + '", the shared folder this config uses. That folder then has to be at the root of your SD card.');
       cbWrap.appendChild(_cbLbl);
       valueWrap.appendChild(cbWrap);
       wrap.appendChild(valueWrap);
@@ -38898,9 +39302,24 @@ require(['vs/editor/editor.main'], function () {
         }
         return { red: true, warn: null, title: `"${fileName}" isn't in your Shared Tracks folder. The config may still work if the file is on the SD card.` };
       }
-      // CASE K/L/M: common/tracks/<file>.wav - common-folder tracks reference
-      if (parts.length >= 3 && parts[0].toLowerCase() === 'common' && parts[1].toLowerCase() === 'tracks') {
-        const commonUuid = window._sfActiveCommonForConfig || '';
+      // CASE K/L/M: <shared>/tracks/<file>.wav - shared-folder tracks reference.
+      // ANY shared folder the config declares, not only one literally called
+      // "common": `MC/tracks/x.wav` is the same case. [B-014]
+      const _trackSlots = (typeof window._sfConfigSlotNames === 'function')
+        ? window._sfConfigSlotNames() : [];
+      const _trackSlot = parts.length >= 3
+        ? _trackSlots.find(s => s.toLowerCase() === parts[0].toLowerCase())
+        : null;
+      if (_trackSlot && parts[1].toLowerCase() === 'tracks') {
+        // The pack assigned to the slot this path names, resolved to its UUID.
+        // ⚠️ This used to pass a pack NAME straight into listCommonFiles, which wants a
+        // uuid - so the lookup always came back empty and every common/tracks/ file
+        // reported as missing. Pre-existing, fixed here because this is the line. [B-014]
+        const _trackPackName = (window._sfSlotPacks && window._sfSlotPacks[_trackSlot]) || '';
+        const _trackPack = _trackPackName
+          ? (_sfCommons || []).find(c => (c.meta && c.meta.name) === _trackPackName)
+          : null;
+        const commonUuid = _trackPack ? _trackPack.uuid : '';
         if (!commonUuid) {
           return { red: true, warn: null, title: `No common folder in your library yet. Import one from the Sound Fonts tab. The config may still work if the file is on the SD card.` };
         }
