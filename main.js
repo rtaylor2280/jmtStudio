@@ -1720,7 +1720,16 @@ ipcMain.handle('sources:list', () => {
 // Returns the chosen path so the renderer can pass it to bulkImport:scan.
 ipcMain.handle('bulkImport:pickRoot', async () => {
   try {
-    const lastDir = Store.get('lastBulkImportRoot') || app.getPath('home');
+    // [B-328] Default to the PARENT of the last pick, not the pick itself.
+    // Windows opens the dialog with defaultPath preselected in its parent's
+    // view, so Select Folder returns the previous choice again unless the user
+    // actively clears it - and zips are invisible in a folder picker, so a
+    // set folder can look empty and the preselected subfolder like the only
+    // option. One wrong pick then re-defaults every retry to the same wrong
+    // folder. Opening BESIDE the last choice keeps the useful anchor without
+    // re-answering the question on the user's behalf.
+    const _storedRoot = Store.get('lastBulkImportRoot');
+    const lastDir = _storedRoot ? path.dirname(_storedRoot) : app.getPath('home');
     const { canceled, filePaths } = await dialog.showOpenDialog(win, {
       title: 'Pick a folder of sound fonts to bulk import…',
       defaultPath: lastDir,

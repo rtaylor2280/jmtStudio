@@ -13026,11 +13026,16 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
   };
 
   const startScan = async () => {
+    // [B-328] The modal opens AFTER the picker resolves, not before. It used to
+    // go up in scan dress behind the OS dialog, bar and all, which read as
+    // work already happening on a folder nobody had chosen yet. Until a folder
+    // is actually picked there is nothing to show; a cancelled picker leaves
+    // no modal and no scan behind.
+    const pick = await window.electronAPI.bulkImportPickRoot();
+    if (!pick || pick.canceled) { closeModal(); return; }
     showPhase('scan');
     els.modal?.classList.add('active');
     els.scanDetail.textContent = '';
-    const pick = await window.electronAPI.bulkImportPickRoot();
-    if (!pick || pick.canceled) { closeModal(); return; }
     if (!pick.ok) {
       promptError('Could not open folder', pick.error || 'unknown error');
       closeModal();
