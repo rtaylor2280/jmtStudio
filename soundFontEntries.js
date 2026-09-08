@@ -388,10 +388,18 @@ async function createEntry({ userData, sourceUuid, candidate, name, metadata, on
     // sensibly seeded.
     let initialTags;
     if (metadata && Array.isArray(metadata.tags)) {
+      // Case-insensitive dedupe ([B-346] prerequisite): the backend is the
+      // last write door, so it must enforce the one-definition-of-has rule
+      // even when a caller (sidecar-restored tags, the bulk auto-bundle tag)
+      // never went through a UI input's guard. First spelling wins.
       initialTags = [];
+      const _seen = new Set();
       for (const t of metadata.tags) {
         const trimmed = String(t || '').trim();
-        if (trimmed && !initialTags.includes(trimmed)) initialTags.push(trimmed);
+        if (trimmed && !_seen.has(trimmed.toLowerCase())) {
+          _seen.add(trimmed.toLowerCase());
+          initialTags.push(trimmed);
+        }
       }
     } else if (candidate.bundleName) {
       initialTags = [candidate.bundleName];
@@ -1053,7 +1061,7 @@ function entryFolderExistsAt(name, destDir) {
 // (differing counts prove difference; matching counts prove nothing), content
 // read before claiming sameness, and anything unreadable comes back
 // not-identical so the caller asks rather than assuming.
-function entryMatchesAt(userData, name, destDir) {
+function entryMatchesAt(userData, name, destDir, opts = {}) {
   if (!name || !destDir) return { ok: false, error: 'Missing name or destDir' };
   const srcDir  = path.join(entriesRoot(userData), name);
   const destFont = path.join(destDir, name);
@@ -1110,12 +1118,18 @@ function entryMatchesAt(userData, name, destDir) {
     refreshed.set(rec.relPath, [st.size, mtime, destHash]);
     if (destHash !== rec.fileHash) identical = false;
   }
-  try { sync.mergeItem(destDir, name, refreshed); } catch {}
+  // ⚠️ THE CHECK'S CACHE IS THE SYNC MANIFEST, so a read-only question can
+  // seed jmt-studio-manifest.json at the destination ([B-358], his second
+  // catch 2026-09-08 14:49: the quick export's TOAST wording asks this
+  // question, and the manifest followed the question, not the copy).
+  // writeCache:false makes the question truly side-effect-free; the conflict
+  // scans keep the default and their speed.
+  if (opts.writeCache !== false) { try { sync.mergeItem(destDir, name, refreshed); } catch {} }
 
   return { ok: true, exists: true, identical, reason: identical ? null : 'hash', reused, hashed };
 }
 
-async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onBytes = null) {
+async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onBytes = null, opts = {}) {
   if (!name) return { ok: false, error: 'Missing name' };
   if (!destDir) return { ok: false, error: 'Missing destDir' };
   const srcDir = path.join(entriesRoot(userData), name);
@@ -1141,7 +1155,10 @@ async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onB
       // 'rename' (default) — fall through to "<name>_N" until free.
       // Underscore (not parens) so the resulting folder name is safe
       // for Proffie's font-folder matcher on the SD card destination.
-      let n = 1;
+      // Starts at _2 ([B-343], his rule): the ORIGINAL is implicitly
+      // number one, so the first copy of "Ahsoka" is "Ahsoka_2", never
+      // "Ahsoka_1". Names already minted on disk are data, not migrated.
+      let n = 2;
       while (fs.existsSync(path.join(destDir, targetName))) {
         targetName = `${name}_${n}`;
         n++;
@@ -1160,7 +1177,13 @@ async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onB
     // next export can tell "unchanged since we wrote it" with stat calls instead
     // of reading the folder back. Best effort: a manifest we cannot write only
     // costs a re-read next time.
-    try {
+    // ⚠️ CARD-SYNC BOOKKEEPING, NOT PART OF THE FONT ([B-358], Ryan 2026-09-08:
+    // the quick export "shouldn't be sending a manifest"). The save-to-card
+    // flow wants it — that destination is a card the sync will re-read — but a
+    // one-off copy to some folder must not seed a jmt-studio-manifest.json
+    // there. (The gate stops NEW writes; a manifest an earlier export already
+    // left at a destination is data and stays until the user removes it.)
+    if (opts.syncManifest !== false) try {
       const { collectFileRecords } = require('./soundFontFileHash');
       const recs = collectFileRecords(srcDir);
       if (recs) {
@@ -1574,11 +1597,14 @@ function getEntryCustomization(userData, entryName) {
   if (!meta || !meta.entryUuid) return unknown;
 
   // st.v gates the CODE the stamp came from, not the content: v2 is the
-  // empty-dir fix ([B-342]) — a stamp from the buggy diff matches its hashes
-  // perfectly and would sit wrong forever, so an old stamp recomputes once and
-  // heals. Bump on any future change to what "customized" means.
+  // empty-dir fix ([B-342]); v3 is the Customized TAG riding the stamp
+  // ([B-346]) — entries stamped customized before v3 would otherwise never
+  // get the tag, because their valid cache short-circuits the writer that
+  // adds it. The bump makes every pre-tag stamp recompute once on its next
+  // open and backfill the tag. Bump on any future change to what
+  // "customized" means or carries.
   const st = meta.customization;
-  if (!meta.contentHashDirty && meta.contentHash && st && st.v === 2
+  if (!meta.contentHashDirty && meta.contentHash && st && st.v === 3
       && st.forHash === meta.contentHash && st.srcUuid === meta.sourceUuid) {
     return { ok: true, known: true, customized: !!st.customized, added: st.added|0,
              removed: st.removed|0, changed: st.changed|0, tracksOnly: !!st.tracksOnly, cached: true };
@@ -1591,12 +1617,24 @@ function getEntryCustomization(userData, entryName) {
       const p = path.join(entriesRoot(userData), entryName, 'meta.json');
       const m = JSON.parse(fs.readFileSync(p, 'utf8'));
       m.customization = {
-        v: 2, // diff-code version, see the cache check above ([B-342])
+        v: 3, // stamp version, see the cache check above ([B-342]/[B-346])
         customized: res.customized, tracksOnly: !!res.tracksOnly,
         added: res.added, removed: res.removed, changed: res.changed,
         forHash: m.contentHash || null, srcUuid: m.sourceUuid || null,
         at: new Date().toISOString(),
       };
+      // ── The "Customized" TAG rides the stamp ([B-346], his spec) ──────────
+      // This function runs exactly at RE-DETERMINATION (the cached path above
+      // returns without ever reaching here), which is the delta-driven
+      // lifecycle he ruled: add when determined true (no-op if tagged),
+      // remove when determined false, and a MANUAL tag delete sticks — a
+      // mere re-read hits the cache and never rewrites the tag; only a real
+      // content change lands here and re-adds it. Case-insensitive on both
+      // sides so a hand-typed "customized" counts as the tag.
+      const _tags = Array.isArray(m.tags) ? m.tags : [];
+      const _hasTag = _tags.some(t => String(t).toLowerCase() === 'customized');
+      if (res.customized && !_hasTag) m.tags = [..._tags, 'Customized'];
+      else if (!res.customized && _hasTag) m.tags = _tags.filter(t => String(t).toLowerCase() !== 'customized');
       fs.writeFileSync(p, JSON.stringify(m, null, 2));
     } catch {}
     return res;

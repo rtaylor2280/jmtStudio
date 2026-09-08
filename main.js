@@ -2373,10 +2373,11 @@ function _sfExportProgressEmitter(event) {
   };
 }
 
-ipcMain.handle('entries:exportToFolder', async (event, { name, destDir, mode } = {}) => {
+ipcMain.handle('entries:exportToFolder', async (event, { name, destDir, mode, syncManifest } = {}) => {
   try {
     const emit = _sfExportProgressEmitter(event);
-    const r = await soundFontEntries.exportEntryToFolder(app.getPath('userData'), name, destDir, mode, emit.onBytes);
+    const r = await soundFontEntries.exportEntryToFolder(app.getPath('userData'), name, destDir, mode, emit.onBytes,
+      { syncManifest: syncManifest !== false });
     emit.flush();
     return r;
   } catch (err) {
@@ -2658,8 +2659,8 @@ ipcMain.handle('sharedTracks:existsAt', (_, { destDir } = {}) => {
 // Read-only: what would an export add, leave alone, or have to ask about.
 // Top-level folder names at an export destination. Used by the save summary to
 // answer "what else is on this card" without pulling in a full SD scan.
-ipcMain.handle('soundFonts:entryMatchesAt', (_, { name, destDir } = {}) => {
-  try { return soundFontEntries.entryMatchesAt(app.getPath('userData'), name, destDir); }
+ipcMain.handle('soundFonts:entryMatchesAt', (_, { name, destDir, writeCache } = {}) => {
+  try { return soundFontEntries.entryMatchesAt(app.getPath('userData'), name, destDir, { writeCache: writeCache !== false }); }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 ipcMain.handle('soundFonts:listDestFolders', (_, { destDir } = {}) => {
@@ -3454,7 +3455,7 @@ ipcMain.handle('linkImport:browser', async (event, { url, autoHidden } = {}) => 
       parent: win,
       width: 1040, height: 780,
       show: !autoHidden,
-      title: 'Download your font from the vendor',
+      title: 'Download your font from the creator',
       autoHideMenuBar: true,
       ...WINDOW_ICON,
       webPreferences: { partition: 'persist:jmt-linkimport', sandbox: true },
@@ -3478,7 +3479,7 @@ ipcMain.handle('linkImport:browser', async (event, { url, autoHidden } = {}) => 
     // fail with a plain, retryable message.
     bw.webContents.on('did-navigate', (_e, _navUrl, httpResponseCode) => {
       if (!gotDownload && httpResponseCode && httpResponseCode >= 400) {
-        finish({ ok: false, message: `The vendor site returned an error (HTTP ${httpResponseCode}). It may be temporarily down; try again in a few minutes.` });
+        finish({ ok: false, message: `The creator's site returned an error (HTTP ${httpResponseCode}). It may be temporarily down; try again in a few minutes.` });
       }
     });
     // A download link that opens via target=_blank / window.open: load it in the
@@ -4631,7 +4632,8 @@ ipcMain.handle('versions:export', async (_, name) => {
   // deduped by content hash, so a silent _1 there would fragment the library - soundFonts:importFont
   // above refuses on purpose and must stay that way. See local/ui-conventions.md. (2026-08-23)
   let dest = path.join(destFolder, name);
-  for (let n = 1; fs.existsSync(dest) && n < 1000; n++) dest = path.join(destFolder, `${name}_${n}`);
+  // First copy is _2 ([B-343]): the original is implicitly number one.
+  for (let n = 2; fs.existsSync(dest) && n < 1000; n++) dest = path.join(destFolder, `${name}_${n}`);
   if (fs.existsSync(dest)) return { ok: false, error: 'Too many copies of this version in that folder.' };
   const allVersions = proffie.listVersionsDetails();
   const versionInfo = allVersions.find(v => v.name === name);

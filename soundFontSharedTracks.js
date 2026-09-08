@@ -65,12 +65,13 @@ function _safeFileName(name) {
 }
 
 // Suggest a non-colliding filename. If "track.wav" exists, returns
-// "track_1.wav", then "track_2.wav", etc.
+// "track_2.wav", then "track_3.wav", etc. — the original is implicitly
+// number one, so _1 is never minted ([B-343], his rule).
 function _uniqueName(root, desired) {
   if (!fs.existsSync(path.join(root, desired))) return desired;
   const ext = (desired.match(/\.[^.]+$/) || [''])[0];
   const stem = desired.slice(0, desired.length - ext.length);
-  for (let i = 1; i < 1000; i++) {
+  for (let i = 2; i < 1000; i++) {
     const candidate = `${stem}_${i}${ext}`;
     if (!fs.existsSync(path.join(root, candidate))) return candidate;
   }
@@ -400,7 +401,8 @@ async function exportToFolder(userData, destDir, mode = 'rename', onBytes = null
       try { fs.rmSync(path.join(destDir, targetName), { recursive: true, force: true }); }
       catch (err) { return { ok: false, error: `Cannot remove existing folder: ${err.message}` }; }
     } else {
-      let n = 1;
+      // First suffix is _2 ([B-343]): the original is implicitly number one.
+      let n = 2;
       while (fs.existsSync(path.join(destDir, targetName))) {
         targetName = `tracks_${n}`;
         n++;

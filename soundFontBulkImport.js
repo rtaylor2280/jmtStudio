@@ -470,7 +470,12 @@ async function runBulkImport({ plan, userData }, callbacks = {}) {
   // the same importCommonFromFolder API the manual common-import flow
   // uses, so dedup-by-name and wav-presence checks apply identically.
   // Name comes from the folder basename; user can rename post-import.
-  const commons = Array.isArray(plan.commonFolders) ? plan.commonFolders : [];
+  // An explicit pick from the review's common rows wins ([B-351]): the user
+  // may have renamed or excluded some, and that decision is what lands.
+  // No picks (quick import) = every planned common under its own name.
+  const commons = (Array.isArray(plan.commonPicked) && plan.commonPicked.length)
+    ? plan.commonPicked.map(p => ({ absPath: p.absPath, relPath: p.name, name: p.name }))
+    : (Array.isArray(plan.commonFolders) ? plan.commonFolders : []);
   for (let i = 0; i < commons.length; i++) {
     if (shouldCancel()) { summary.cancelled = true; break; }
     const c = commons[i];
@@ -490,7 +495,10 @@ async function runBulkImport({ plan, userData }, callbacks = {}) {
       if (soundFontCommon.nameInUse(userData, importName)) {
         importName = soundFontCommon.nextNumberedName(userData, importName);
       }
-      const result = await soundFontCommon.importCommonFromFolder(userData, c.absPath, importName);
+      // Per-byte progress rides out as common-progress ([B-352]): a fontless
+      // run used to sit at a dead 0% bar for the whole common copy.
+      const result = await soundFontCommon.importCommonFromFolder(userData, c.absPath, importName,
+        (p) => onProgress({ stage: 'common-progress', commonIdx: i, totalCommons: commons.length, label: c.name, sub: p }));
       if (result && result.ok) {
         summary.commonsImported.push({ src: c.relPath || c.absPath, uuid: result.uuid, name: result.name });
       } else if (result && /already exists/i.test(result.error || '')) {

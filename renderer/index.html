@@ -3046,9 +3046,17 @@
      plain `.g-group-body { display: flex }` rule below sits later in the sheet
      at equal specificity, so it won and stacked every track full width. Two
      classes outrank one regardless of order. */
-  .g-group-body.g-tracks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 5px 22px; padding: 2px 2px 4px; border-left: none; margin-left: 0; padding-left: 0; }
-  @media (max-width: 720px) { .g-group-body.g-tracks { grid-template-columns: 1fr; } }
+  /* CSS columns, not a 2-col grid ([B-353], Ryan: "I don't think it reads
+     correctly"): an alphabetized NAME list is scanned DOWN a column, the way
+     every file manager lists names — the grid flowed row-major so alphabetical
+     neighbours sat across the gutter instead of underneath. Multi-column keeps
+     DOM order (all row wiring untouched) and flows down-then-across; identical
+     -audio pairs (cantina/cantina_1) now stack vertically, which reads better
+     for the same-audio note anyway. */
+  .g-group-body.g-tracks { display: block; columns: 2; column-gap: 22px;
+    padding: 2px 2px 4px; border-left: none; margin-left: 0; padding-left: 0; }
+  .g-group-body.g-tracks > .g-track { break-inside: avoid; margin-bottom: 5px; }
+  @media (max-width: 720px) { .g-group-body.g-tracks { columns: 1; } }
   .g-track { display: grid; grid-template-columns: 16px minmax(0, 1fr) 64px 26px; align-items: center; gap: 8px; font-size: 0.78rem; }
   .g-track.have-it-track { opacity: 0.55; }
   /* ⚠️ NO SECOND FADE LEVEL. A deeper fade for the card-duplicate spare was tried
@@ -4827,7 +4835,7 @@
                 <line x1="12" y1="3" x2="12" y2="15"/>
               </svg>
               <h2 class="sf-empty-title">Import your first sound font</h2>
-              <p class="sf-empty-desc">Pick a vendor's .zip file or an unzipped folder. JMT Studio archives it, identifies the fonts inside, and adds your picks to the library.</p>
+              <p class="sf-empty-desc">Pick a creator's .zip file or an unzipped folder. JMT Studio archives it, identifies the fonts inside, and adds your picks to the library.</p>
               <button class="sf-empty-action" id="btn-sf-import-font">Import Sound Font</button>
               <div class="sf-import-alt-links">
                 <p>Already have many fonts to add? <a href="#" id="btn-sf-import-bulk-empty">Bulk import from a folder</a></p>
@@ -5463,7 +5471,7 @@
       <!-- Chooser view: the three co-equal methods. Hidden once a method that
            has its own sub-view (Paste a link) is chosen. -->
       <div class="sf-import-chooser" id="sf-import-chooser">
-        <p class="sf-import-hint">Pick a sound font as it came from the vendor, ideally the original .zip download. JMT Studio keeps everything it contained and lets you choose which fonts inside to add to your library.</p>
+        <p class="sf-import-hint">Pick a sound font as it came from the creator, ideally the original .zip download. JMT Studio keeps everything it contained and lets you choose which fonts inside to add to your library.</p>
         <div class="sf-import-pick-row">
           <button class="modal-btn-primary" id="sf-import-pick-zip">Pick zip file…</button>
           <button class="modal-btn-primary" id="sf-import-pick-folder">Pick folder…</button>
@@ -5480,13 +5488,13 @@
         <h3 class="sf-import-link-title">Import from a link</h3>
         <div class="sf-import-link-row">
           <div class="sf-url-input-wrap">
-            <input type="text" id="sf-import-link-url" class="sf-edit-input" placeholder="Download link from your receipt (Dropbox, vendor page…)" autocomplete="off" spellcheck="false">
+            <input type="text" id="sf-import-link-url" class="sf-edit-input" placeholder="Download link from your receipt (Dropbox, creator's page…)" autocomplete="off" spellcheck="false">
             <button type="button" class="sf-url-input-paste" id="btn-sf-import-link-paste" title="Paste link from clipboard and import"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="4" width="8" height="4" rx="1"/><path d="M16 6h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2"/></svg></button>
             <button type="button" class="sf-url-input-clear" id="btn-sf-import-link-clear" title="Clear">&#10005;</button>
           </div>
           <button class="modal-btn-primary" id="sf-import-link-go">Import</button>
         </div>
-        <p class="sf-import-link-hint" id="sf-import-link-hint">Paste the download link the vendor gave you. We'll fetch it and import it. If it needs a login or a click, we'll open it in an in-app browser for you.</p>
+        <p class="sf-import-link-hint" id="sf-import-link-hint">Paste the download link the font creator gave you. We'll fetch it and import it. If it needs a login or a click, we'll open it in an in-app browser for you.</p>
         <p class="sf-import-link-error" id="sf-import-link-error" style="display:none"></p>
         <button class="modal-btn-primary sf-import-link-browser-btn" id="sf-import-link-browser" style="display:none">Open in an in-app browser to download</button>
       </div>
@@ -5733,11 +5741,15 @@
             <span class="styles-tag-filter-wrap" style="position:relative">
               <button class="btn-neutral sf-entry-files-head-btn" id="btn-sf-entry-add-files" title="Add files to this entry">+ Add</button>
               <div id="sf-entry-add-dropdown" class="styles-tag-dropdown" style="display:none;min-width:160px;right:0;left:auto">
-                <button id="btn-sf-entry-add-browse" class="styles-tag-dropdown-item">
-                  <span class="styles-tag-dropdown-name">Browse…</span>
-                </button>
+                <!-- From library leads: the option that grows more useful as
+                     the library fills is the preferred one; Browse is the
+                     fallback (his call, 2026-09-08). Same order in the
+                     shared-tracks +Add menu. -->
                 <button id="btn-sf-entry-add-library" class="styles-tag-dropdown-item">
                   <span class="styles-tag-dropdown-name">From library…</span>
+                </button>
+                <button id="btn-sf-entry-add-browse" class="styles-tag-dropdown-item">
+                  <span class="styles-tag-dropdown-name">Browse…</span>
                 </button>
               </div>
             </span>
@@ -6029,17 +6041,17 @@
             <span class="styles-tag-filter-wrap" style="position:relative">
               <button class="btn-neutral sf-entry-files-head-btn" id="btn-sf-shared-tracks-add" title="Add files to the Shared Tracks folder">+ Add</button>
               <div id="sf-shared-tracks-add-dropdown" class="styles-tag-dropdown" style="display:none;min-width:160px;right:0;left:auto">
-                <button id="btn-sf-shared-tracks-add-browse" class="styles-tag-dropdown-item">
-                  <span class="styles-tag-dropdown-name">Browse…</span>
-                </button>
                 <button id="btn-sf-shared-tracks-add-library" class="styles-tag-dropdown-item">
                   <span class="styles-tag-dropdown-name">From library…</span>
+                </button>
+                <button id="btn-sf-shared-tracks-add-browse" class="styles-tag-dropdown-item">
+                  <span class="styles-tag-dropdown-name">Browse…</span>
                 </button>
               </div>
             </span>
           </span>
         </h3>
-        <div class="sf-entry-files-browser">
+        <div class="sf-entry-files-browser" id="sf-shared-tracks-files-browser">
           <div id="sf-shared-tracks-file-list" class="sf-entry-files-list"></div>
         </div>
         <!-- Surfaces only when at least one undersized track exists in
@@ -8770,7 +8782,9 @@ function _jmtNumberedName(base, existingNames) {
     const rest = nm.slice(prefix.length);
     if (/^\d+$/.test(rest) && parseInt(rest, 10) > max) max = parseInt(rest, 10);
   }
-  let n = max + 1;
+  // Never mint _1 ([B-343], his rule): the ORIGINAL is implicitly number one,
+  // so the first copy is _2. Foo_2 still becomes Foo_3, never Foo_2_2.
+  let n = Math.max(max + 1, 2);
   while (taken.has(`${root.toLowerCase()}_${n}`)) n++;
   return `${root}_${n}`;
 }
@@ -11924,6 +11938,8 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
   // summary said "will be imported" and gave the user no say. (2026-08-31.)
   let _guidedTracksCb = null;
   let _guidedTrackRows = [];
+  // [B-351] One row per incoming common: { cb, nameInput, absPath, name, owned }.
+  let _guidedCommonRows = [];
   // Every .wav already in the shared-tracks folder, lowercased. Adopt needs it to
   // answer "is this name free" BEFORE the user commits, rather than letting
   // renameFile refuse afterwards. His rule: better to prevent than error. [B-246]
@@ -12067,7 +12083,8 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       els.guidedImportBtn.textContent = n ? `Import (${n})` : 'Import';
       // Tracks alone are still something to import, so the button cannot be dead
       // just because no font is checked.
-      els.guidedImportBtn.disabled = n === 0 && !(_guidedTracksCb && _guidedTracksCb.checked);
+      els.guidedImportBtn.disabled = n === 0 && !(_guidedTracksCb && _guidedTracksCb.checked)
+        && !_guidedCommonRows.some(r => r.cb.checked && !r.cb.disabled);   // [B-351]
     }
   };
 
@@ -12412,7 +12429,9 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     // bailing on "no font rows" skipped it too and a tracks-only review opened
     // completely empty. Grouping by vendor is a font concept; rendering the list is
     // not. [B-281]
-    if (!guidedRows.length && !(currentPlan && currentPlan.tracksFolders && currentPlan.tracksFolders.length)) return;
+    if (!guidedRows.length
+        && !(currentPlan && currentPlan.tracksFolders && currentPlan.tracksFolders.length)
+        && !(currentPlan && currentPlan.commonFolders && currentPlan.commonFolders.length)) return;   // [B-351]
     const groups = new Map();
     for (const row of guidedRows) {
       const v = String((row.enriched && row.enriched.vendor) || '').trim();
@@ -12770,6 +12789,61 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         _refreshAdopt();
       })();
     }
+    // ── Common folders as REAL ROWS ([B-351], his ask: "if we're doing the
+    // review version, we should be able to rename common"). Before this an
+    // incoming common rode the plan invisibly and landed under an auto-
+    // numbered name with no say at review time. One row per common: rename
+    // it, include or exclude it. Owned-by-content packs render disabled with
+    // the have-it note, the same grammar the tracks rows use. Verdicts come
+    // from the chooser's classify pass (plan._commonClassify), so the folder
+    // is never hashed twice.
+    _guidedCommonRows = [];
+    if (currentPlan && Array.isArray(currentPlan.commonFolders) && currentPlan.commonFolders.length) {
+      const _ccls = Array.isArray(currentPlan._commonClassify) ? currentPlan._commonClassify : [];
+      const csec = document.createElement('div');
+      csec.className = 'g-group';
+      csec.id = 'sf-guided-commons';
+      const _nOwnedC = _ccls.filter(c => c && c.ownedByContent).length;
+      const _nAllC = currentPlan.commonFolders.length;
+      const cdetail = _nOwnedC
+        ? `${_nAllC - _nOwnedC} new, ${_nOwnedC} you already have.`
+        : (_nAllC === 1 ? 'Voicepack and shared sounds from this card.' : `${_nAllC} folders.`);
+      csec.innerHTML =
+        `<div class="g-group-header"><span><strong>Common folder${_nAllC === 1 ? '' : 's'}</strong> <span style="opacity:.75">${escapeHtml(cdetail)}</span></span></div>`
+        + `<div class="g-group-body g-tracks" id="sf-guided-commons-body"></div>`;
+      const cbody = csec.querySelector('#sf-guided-commons-body');
+      for (const c of currentPlan.commonFolders) {
+        const k = _ccls.find(x => x && x.absPath === c.absPath);
+        const owned = !!(k && k.ownedByContent);
+        const wrap = document.createElement('div');
+        wrap.className = 'g-track' + (owned ? ' have-it-track' : '');
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = !owned;
+        if (owned) {
+          cb.disabled = true;
+          cb.title = (k && k.matchName)
+            ? `Already in your library as ${k.matchName} (matched by content)`
+            : 'Already in your library (matched by content)';
+        }
+        const nmWrap = document.createElement('div');
+        const nm = document.createElement('input');
+        nm.type = 'text';
+        nm.className = 'g-track-name';
+        nm.value = c.name || 'common';
+        nm.maxLength = 64;
+        if (owned) nm.disabled = true;
+        nmWrap.appendChild(nm);
+        const note = document.createElement('span');
+        note.style.opacity = '.6';
+        note.textContent = owned ? 'skipped' : '';
+        wrap.appendChild(cb); wrap.appendChild(nmWrap); wrap.appendChild(note);
+        cbody.appendChild(wrap);
+        cb.addEventListener('change', _updateGuidedCount);
+        _guidedCommonRows.push({ cb, nameInput: nm, absPath: c.absPath, name: c.name || 'common', owned });
+      }
+      els.guidedList.appendChild(csec);
+    }
     _updateGuidedCount();
   };
 
@@ -12807,7 +12881,13 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     if (!currentPlan) return;
     const _srcCount = (currentPlan.sources || []).length;
     const _trkCount = (currentPlan.tracksFolders || []).length;
-    if (!_srcCount && !_trkCount) return;
+    // Commons count as a reason to review too ([B-351] — his catch on the
+    // common-only chooser: "the review import doesn't work on this"). Same
+    // dead-gate shape as the tracks fix above it and the Import-button fix
+    // one function down: the section renders at the bottom of
+    // _regroupByVendor, and this guard silently kept the door shut.
+    const _cmnCount = (currentPlan.commonFolders || []).length;
+    if (!_srcCount && !_trkCount && !_cmnCount) return;
     const total = currentPlan.sources.length;
     _guidedSharedTagList = [];
     _guidedWireTagBar();
@@ -12952,18 +13032,32 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     // on tracks so can't completely reuse... slightly different.") On a tracks-only
     // import the whole font apparatus is meaningless, so the tag bar is hidden and
     // the copy stops talking about fonts, sources and creators. [B-281]
-    const _tracksOnly = _gTotal === 0 && _tracksIncluded;
+    // Commons carry no tags either (his catch, 2026-09-08: "can a common
+    // folder take a tag? I think it can't" — correct: common meta has no tags
+    // field and its importer accepts none), so the bar hides on ANY fontless
+    // review, not just tracks-only. [B-281]/[B-351]
+    const _commonsIncluded = !!(currentPlan && currentPlan.commonFolders && currentPlan.commonFolders.length);
+    const _fontless = _gTotal === 0;
     const _tagbar = document.getElementById('sf-bulk-guided-tagbar');
-    if (_tagbar) _tagbar.style.display = _tracksOnly ? 'none' : '';
-    els.guidedSummary.innerHTML = _tracksOnly
-      ? `Reviewing the shared tracks in <strong>${escapeHtml(currentPlan._displayRoot || 'this folder')}</strong>. `
+    if (_tagbar) _tagbar.style.display = _fontless ? 'none' : '';
+    let _summaryHtml;
+    if (_fontless && _tracksIncluded) {
+      _summaryHtml = `Reviewing the shared tracks in <strong>${escapeHtml(currentPlan._displayRoot || 'this folder')}</strong>. `
         + `The ones you already have are unchecked. Check or uncheck any, fix names, preview the sound, then <strong>Import</strong>.`
-      : `Reviewing <strong>${_gTotal}</strong> font${_gTotal === 1 ? '' : 's'}. Skipped items are unchecked. `
+        + (_commonsIncluded ? ' The common folder from this card is included below.' : '');
+    } else if (_fontless && _commonsIncluded) {
+      const _nC = currentPlan.commonFolders.length;
+      _summaryHtml = `Reviewing the common folder${_nC === 1 ? '' : 's'} from <strong>${escapeHtml(currentPlan._displayRoot || 'this folder')}</strong>. `
+        + `Rename ${_nC === 1 ? 'it' : 'them'} if you like, or uncheck ${_nC === 1 ? 'it' : 'any'}, then <strong>Import</strong>.`;
+    } else {
+      _summaryHtml = `Reviewing <strong>${_gTotal}</strong> font${_gTotal === 1 ? '' : 's'}. Skipped items are unchecked. `
         + `Check or uncheck any, fix names or creators, preview the sound, then <strong>Import</strong>. `
         + `Each becomes its own source.`
         + (_tracksIncluded
             ? ` Shared tracks from this card are included, <button type="button" id="sf-guided-tracks-jump" class="g-tracks-jump">listed below the fonts</button>.`
             : '');
+    }
+    els.guidedSummary.innerHTML = _summaryHtml;
     // Queried on click, not now: the section is built by _regroupByVendor below.
     // Expanding as well as scrolling, because it starts collapsed and landing on a
     // shut header is not what "show me" means.
@@ -13077,6 +13171,15 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     const q = document.getElementById('sf-bulk-import-review-quickline');
     const r = document.getElementById('sf-bulk-import-review-reviewline');
     const n = document.getElementById('sf-bulk-import-review-note');
+    // 'commons' is its own copy ([B-351]): the common-only chooser had
+    // inherited the tracks lines, which described tracks that were not on
+    // the screen (his catch on the TC-2902 pass).
+    if (tracksOnly === 'commons') {
+      if (q) q.innerHTML = `<strong>Quick import</strong> adds the common folders you do not already have, under the names shown.`;
+      if (r) r.innerHTML = `<strong>Review import</strong> lets you rename them and pick exactly which ones to add.`;
+      if (n) n.textContent = 'Common folders you already have are skipped, matched by content rather than by name, so a pack you own under a different name still counts as owned.';
+      return;
+    }
     if (tracksOnly) {
       if (q) q.innerHTML = `<strong>Quick import</strong> adds every track you do not already have, under the names shown on the card.`;
       if (r) r.innerHTML = `<strong>Review import</strong> lets you rename them, preview the sound, and pick exactly which ones to add.`;
@@ -13122,11 +13225,16 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     let _commonNew = 0;
     if (plan.commonFolders && plan.commonFolders.length) {
       let _cOwned = 0;
+      // Per-folder verdicts are STASHED for the guided review's common rows
+      // ([B-351]) — classify hashes the incoming folder, so asking twice
+      // would pay the walk twice for the same answer.
+      plan._commonClassify = [];
       for (const c of plan.commonFolders) {
         try {
           const r = await window.electronAPI.classifyIncomingCommon({ folderPath: c.absPath });
           if (r && r.ok && r.ownedByContent) _cOwned++;
-        } catch {}
+          plan._commonClassify.push({ absPath: c.absPath, ownedByContent: !!(r && r.ok && r.ownedByContent), matchName: (r && r.matchName) || null });
+        } catch { plan._commonClassify.push({ absPath: c.absPath, ownedByContent: false, matchName: null }); }
       }
       _commonNew = plan.commonFolders.length - _cOwned;
       if (_commonNew) _commonRowsArr.push(['Common folders (will be imported)', _commonNew]);
@@ -13168,7 +13276,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         `Common folders from <code>${escapeHtml(plan._displayRoot || plan.rootDir)}</code>.`;
       els.reviewBreakdown.innerHTML = _commonRowsArr.map(([l, v]) =>
         `<div class="br-row"><span class="br-label">${escapeHtml(l)}</span><span class="br-val">${v}</span></div>`).join('');
-      _setReviewExplainer(true);
+      _setReviewExplainer('commons');
       els.startBtn.disabled = (_commonNew === 0);
     } else if (total === 0) {
       els.reviewSummary.textContent = 'No sound fonts found in that folder.';
@@ -13237,7 +13345,10 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     // whenever the card has tracks at all — even with nothing new, since the review
     // is where Adopt lives and where you see what you already own. [B-281]
     if (els.reviewBtn) {
-      const _reviewable = _hasTracks
+      // Commons make a plan reviewable too ([B-351]): the review is where a
+      // common gets renamed or excluded, so a common-only (or new-common)
+      // plan must be able to reach it.
+      const _reviewable = (_hasTracks || _commonNew > 0)
         ? true
         : !(total === 0 || (st && st.new === 0 && st.corrupt === 0));
       els.reviewBtn.style.display = _reviewable ? '' : 'none';
@@ -13512,6 +13623,26 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
           }
           renderOverallLine();
         }
+      } else if (data.stage === 'common-start') {
+        // Commons run after the font sources; each phase owns the bar and
+        // restarts it (the house sections convention). This stage was missing
+        // from the map entirely, and [B-317]'s own rule says what that costs:
+        // a stale label and a bar stuck at 0 — exactly Ryan's fontless run.
+        // ([B-352])
+        const nC = Math.max(1, data.totalCommons || 1);
+        els.progBar.style.width = `${(((data.commonIdx || 0) / nC) * 100).toFixed(1)}%`;
+        els.progLabel.textContent = `Importing common folder ${data.label || ''}${nC > 1 ? ` · ${(data.commonIdx || 0) + 1} of ${nC}` : ''}`;
+      } else if (data.stage === 'common-progress' && data.sub) {
+        // Within-common byte progress from the source pipeline ([B-352]).
+        const nC = Math.max(1, data.totalCommons || 1);
+        const within = Math.max(0, Math.min(100, data.sub.percent || 0)) / 100;
+        els.progBar.style.width = `${((((data.commonIdx || 0) + within) / nC) * 100).toFixed(1)}%`;
+        const _fmtB = (n) => (window._sfFormatBytes ? window._sfFormatBytes(n) : `${n} B`);
+        const verbs = { hashing: 'Inspecting', copying: 'Copying', expanding: 'Unpacking', deduping: 'Optimizing', checking: 'Cataloging' };
+        const verb = verbs[data.sub.stage] || 'Importing';
+        const metric = (data.sub.bytes != null && data.sub.totalBytes)
+          ? ` · ${_fmtB(data.sub.bytes)} / ${_fmtB(data.sub.totalBytes)}` : '';
+        els.progLabel.textContent = `${verb} common folder ${data.label || ''}${metric}`;
       } else if (data.stage === 'tracks-start') {
         // Tracks are copied AFTER every font source, so on a mixed card the bar is
         // already at 100% of the font work by now. On a tracks-only import there
@@ -13768,7 +13899,13 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       .filter(r => r.cb.checked && !r.cb.disabled)
       .map(r => ({ absPath: r.item.absPath, name: _trackFileName(r) }));
     const _keepTracks = (!_guidedTracksCb || _guidedTracksCb.checked) && _pickedTracks.length > 0;
-    if (!chosen.length && !_keepTracks) return;
+    // Common rows commit like every other row ([B-351]): checked ones ride as
+    // commonPicked with the form's (possibly renamed) name; unchecked ones
+    // never land. The runner's nameInUse suffix stays as the backstop.
+    const _pickedCommons = _guidedCommonRows
+      .filter(r => r.cb.checked && !r.cb.disabled)
+      .map(r => ({ absPath: r.absPath, name: (r.nameInput.value || '').trim() || r.name }));
+    if (!chosen.length && !_keepTracks && !_pickedCommons.length) return;
     // Shared tags (chip list) from the static bottom tag bar — applied to every
     // font in this batch. Include a tag still typed but not yet committed to a chip.
     const _pendingTag = (document.getElementById('sf-bulk-guided-tags')?.value || '').trim();
@@ -13806,6 +13943,12 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       sources,
       tracksFolders: _keepTracks ? currentPlan.tracksFolders : [],
       tracksPicked: _keepTracks ? _pickedTracks : null,
+      // [B-351]: when common rows were shown, only the checked ones import —
+      // an all-unchecked section empties the bucket, same shape as tracks.
+      commonFolders: _guidedCommonRows.length
+        ? (_pickedCommons.length ? currentPlan.commonFolders : [])
+        : currentPlan.commonFolders,
+      commonPicked: _pickedCommons.length ? _pickedCommons : null,
     });
   });
   // Backdrop click + Esc are silently blocked while an import is in
@@ -24028,12 +24171,17 @@ require(['vs/editor/editor.main'], function () {
       });
       // Right-click context menu. Reuses the preset-ctx-menu DOM the
       // entry-files / common / source browsers all share. Items:
-      // Play (single-row), Copy (count), Paste (count, when clipboard
-      // has anything), Rename… (single-row), Export… (count),
-      // Delete (count). No "+ New folder" or "Renumber" — sharedTracks
-      // is a flat .wav-only folder with no numbering convention.
+      // Play (single-row), Copy (count), Rename… (single-row),
+      // Export… (count), Delete (count); blank space offers Paste here.
+      // No "+ New folder" or "Renumber" — sharedTracks is a flat
+      // .wav-only folder with no numbering convention.
+      // Gate on the bordered BROWSER, not the inner row list: the list
+      // is only as tall as its rows, so the blank area below them lives
+      // in the browser — gating on the list made blank-space right-click
+      // dead (his catch, 2026-09-08; the entry browser already gates on
+      // #sf-entry-files-browser for the same reason).
       document.addEventListener('contextmenu', (e) => {
-        if (!e.target.closest('#sf-shared-tracks-file-list')) return;
+        if (!e.target.closest('#sf-shared-tracks-files-browser')) return;
         const modal = document.getElementById('modal-sf-shared-tracks');
         if (!modal || !modal.classList.contains('active')) return;
         const row = e.target.closest('[data-st-file]');
@@ -24066,8 +24214,10 @@ require(['vs/editor/editor.main'], function () {
             mkItem('▶ Play', '', () => _sfOpenAudioPlayer({ kind: 'sharedTracks', id: '', subPath: name, label: name }));
             mkSep();
           }
+          // No Paste on a file row: it reads as "replace this file"
+          // (his read, 2026-09-08), and in a flat folder it lands in the
+          // same place as blank-space "Paste here" / Ctrl+V anyway.
           mkItem(count > 1 ? `Copy (${count})` : 'Copy', '', _sfCopySharedTracksSelection);
-          if (clipboardCount > 0) mkItem(`Paste (${clipboardCount})`, '', () => _sfPasteIntoSharedTracks());
           mkSep();
           if (count === 1) mkItem('Rename…', '', () => _sfRenameSharedTrackPrompt([..._sfSharedTracksSelected][0]));
           mkItem(count > 1 ? `↗ Export… (${count})` : '↗ Export…', '', () => _sfExportFiles({ kind: 'sharedTracks', id: '', subPaths: [..._sfSharedTracksSelected] }));
@@ -24183,6 +24333,31 @@ require(['vs/editor/editor.main'], function () {
         _sfSharedTracksAnchor = null;
         await _sfRefreshSharedTracksModal();
       };
+      // Ctrl/Cmd+C and Ctrl/Cmd+V scoped to the shared-tracks modal ([B-347]):
+      // the context menu had Copy/Paste all along, but the keyboard pair only
+      // existed in the entry detail modal — "can't ctrl v paste in the tracks
+      // folder like I can in other folders." Same gating as that handler:
+      // modal active, nothing stacked on top, focus not in a text field.
+      document.addEventListener('keydown', (e) => {
+        if (!(e.ctrlKey || e.metaKey)) return;
+        const key = e.key.toLowerCase();
+        if (key !== 'c' && key !== 'v') return;
+        const modal = document.getElementById('modal-sf-shared-tracks');
+        if (!modal || !modal.classList.contains('active')) return;
+        const topMost = [...document.querySelectorAll('.modal-overlay.active')].pop();
+        if (topMost && topMost !== modal) return;
+        const ae = document.activeElement;
+        if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
+        if (key === 'c') {
+          if (_sfSharedTracksSelected.size === 0) return;
+          e.preventDefault();
+          _sfCopySharedTracksSelection();
+        } else {
+          if (!_sfFileClipboard || _sfFileClipboard.paths.length === 0) return;
+          e.preventDefault();
+          _sfPasteIntoSharedTracks();
+        }
+      });
       const _sfCloseImport = () => {
         if (_sfImportProgressUnsub) { try { _sfImportProgressUnsub(); } catch {} _sfImportProgressUnsub = null; }
         if (_sfCreateProgressUnsub) { try { _sfCreateProgressUnsub(); } catch {} _sfCreateProgressUnsub = null; }
@@ -25710,7 +25885,7 @@ require(['vs/editor/editor.main'], function () {
         // DESIGNED to fall back to a visible sign-in (the browserShown branch
         // below names that honestly); this line now promises only what is true
         // either way. Same family as the never-claim-a-cause rule.
-        if (_sfImportEls.progDetail) _sfImportEls.progDetail.textContent = auto ? 'This works like a web browser: if you’re still signed in with this vendor from last time, the download starts on its own. If not, a sign-in window will open.' : 'Click the vendor Download button. We will grab it and import it automatically.';
+        if (_sfImportEls.progDetail) _sfImportEls.progDetail.textContent = auto ? 'This works like a web browser: if you’re still signed in with this creator from last time, the download starts on its own. If not, a sign-in window will open.' : 'Click the creator’s Download button. We will grab it and import it automatically.';
         const startMs = Date.now();
         const fmtDur = (sec) => (window._sfFormatDuration ? window._sfFormatDuration(sec) : `${Math.round(sec)}s`);
         if (_sfImportEls.progElapsed) _sfImportEls.progElapsed.textContent = `${fmtDur(0)} elapsed`;
@@ -25721,7 +25896,7 @@ require(['vs/editor/editor.main'], function () {
           if (!d) return;
           if (d.browserShown) {
             // Headless attempt needed a login/click, so the window was revealed.
-            if (_sfImportEls.progLabel) _sfImportEls.progLabel.textContent = 'Sign in if asked, then click the vendor Download button…';
+            if (_sfImportEls.progLabel) _sfImportEls.progLabel.textContent = 'Sign in if asked, then click the creator’s Download button…';
             if (_sfImportEls.progDetail) _sfImportEls.progDetail.textContent = 'A browser window opened so you can finish the download.';
             return;
           }
@@ -26189,8 +26364,25 @@ require(['vs/editor/editor.main'], function () {
         el.title = '';
         let r = null;
         try { r = await window.electronAPI.entryCustomization({ name: entryName }); } catch {}
-        if (!r || !r.known || !r.customized) return;
         if (_sfDetailOriginalName !== entryName) return;   // switched away while we read
+        // ── Keep the OPEN detail's tag list in step with the stamp ([B-346]).
+        // A FRESH determination (not cached) just moved the Customized tag on
+        // disk; the edit session's tag list predates it, so without this the
+        // chips look stale AND a later Save writes the old list back over the
+        // tag — a silent clobber that reads exactly like "tag not being
+        // added" (his report, 12:39). Cached reads change nothing here, which
+        // is what keeps a manual tag delete sticking.
+        if (r && r.known && !r.cached && _sfDetailEdit && Array.isArray(_sfDetailEdit.tags)) {
+          const _hasTag = _sfDetailEdit.tags.some(t => String(t).toLowerCase() === 'customized');
+          if (r.customized && !_hasTag) {
+            _sfDetailEdit.tags.push('Customized');
+            try { _sfRenderDetailTags(); } catch {}
+          } else if (!r.customized && _hasTag) {
+            _sfDetailEdit.tags = _sfDetailEdit.tags.filter(t => String(t).toLowerCase() !== 'customized');
+            try { _sfRenderDetailTags(); } catch {}
+          }
+        }
+        if (!r || !r.known || !r.customized) return;
         // "(tracks only)" names WHAT was added rather than demoting it. Music you
         // added is still yours to lose. Measured on his library: 26 tracks-only
         // against 24 with edited font files, so the distinction earns its place.
@@ -28484,11 +28676,11 @@ require(['vs/editor/editor.main'], function () {
           const name = del.getAttribute('data-entry-delete');
           if (!name) return;
           _sfSourceDetailEls.modal?.classList.remove('active');
-          const message = await _sfBuildDeleteMessage(name);
+          const messageHtml = await _sfBuildDeleteMessage(name);
           const { willRemove, sourceUuid } = await _sfWillSourceBeRemovedOnEntryDelete(name);
           const res = await promptConfirm({
             title: 'Delete font',
-            message,
+            messageHtml,
             confirmText: 'Delete',
             confirmKind: 'danger',
             checkbox: willRemove ? { label: 'Export source first', hint: 'Source archive keeps its original date.', confirmTextChecked: 'Export and Delete' } : null,
@@ -29084,15 +29276,24 @@ require(['vs/editor/editor.main'], function () {
         //     the question already names the source is just noise.
         //   - N entries: header sentence + bullet list of names; the list IS
         //     the warning, so we don't tack on a separate "cannot be undone".
-        let message;
+        let messageHtml;
         if (entries.length === 0) {
-          message = `Delete the source "${sourceLabel}"?`;
+          messageHtml = `Delete the source <strong>"${_sfEscape(sourceLabel)}"</strong>?`;
         } else if (entries.length === 1) {
-          message = `Delete the source "${sourceLabel}" and its font "${entries[0].name}"?`;
+          messageHtml = `Delete the source <strong>"${_sfEscape(sourceLabel)}"</strong> and its font <strong>"${_sfEscape(entries[0].name)}"</strong>?`;
         } else {
-          const names = entries.slice(0, 8).map(e => `· ${e.name}`).join('\n');
-          const more = entries.length > 8 ? `\n· …and ${entries.length - 8} more` : '';
-          message = `Delete the source "${sourceLabel}" and the ${entries.length} fonts that came from it?\n${names}${more}`;
+          const names = entries.slice(0, 8).map(e => `· ${_sfEscape(e.name)}`).join('<br>');
+          const more = entries.length > 8 ? `<br>· …and ${entries.length - 8} more` : '';
+          messageHtml = `Delete the source <strong>"${_sfEscape(sourceLabel)}"</strong> and the ${entries.length} fonts that came from it?` + _sfDelDimHtml(names + more);
+        }
+        // Customized fonts are named at the delete ([B-341]). This door always
+        // offers "Export source first", which carries the customized copies
+        // since [B-311], so the copy points at the exit.
+        if (entries.length) {
+          const _custNames = await _sfCustomizedAmong(entries.map(e => e.name));
+          if (_custNames.length) {
+            messageHtml += _sfDelWarnHtml(`${_custNames.length === 1 ? `"${_sfEscape(_custNames[0])}" is Customized` : `${_custNames.length} of these fonts are Customized`}. "Export source first" carries your customized ${_custNames.length === 1 ? 'copy' : 'copies'}; deleting without it destroys your edits.`);
+          }
         }
         // Temporarily hide the source detail modal so the confirm prompt
         // doesn't end up stacked behind it (DOM order would otherwise put
@@ -29100,7 +29301,7 @@ require(['vs/editor/editor.main'], function () {
         _sfSourceDetailEls.modal?.classList.remove('active');
         const res = await promptConfirm({
           title: 'Delete source',
-          message,
+          messageHtml,
           confirmText: 'Delete',
           confirmKind: 'danger',
           checkbox: { label: 'Export source first', hint: 'Source archive keeps its original date.', confirmTextChecked: 'Export and Delete' },
@@ -29552,6 +29753,15 @@ require(['vs/editor/editor.main'], function () {
         if (!destSubPath) return []; // root → no rename
         const folderName = destSubPath.split('/').pop();
         if (!folderName) return [];
+        // ⚠️ tracks/ NEVER prompts ([B-345]). A track's FILENAME IS ITS MEANING —
+        // a song title, shown by Track Player and our own tracks card, and the
+        // adopt-track-name feature exists because those names carry information.
+        // Renaming deorro.wav to track1.wav destroys the one fact the file has.
+        // Effect folders are the opposite (blst1/blst2 — position is the
+        // meaning), which is what this prompt was built for. The folder rule
+        // covers every caller (paste, + Add, library picker, + All tracks)
+        // without threading intent through them.
+        if (/^tracks$/i.test(folderName)) return []; // keep names, no prompt
         if (_sfAllNamesMatchFolder(incomingNames, folderName)) return []; // already correct
         const choice = await _sfPromptPasteRename({ folderName, count: incomingNames.length });
         if (choice === 'cancel') return null;
@@ -29795,28 +30005,44 @@ require(['vs/editor/editor.main'], function () {
         });
         const fonts = (_sfAllEntries || []).filter(e => isEntryMode ? e.name !== _sfDetailOriginalName : true)
           .slice().sort((a, b) => a.name.localeCompare(b.name));
+        // Common-backing sources get their own group at the bottom (Ryan,
+        // 2026-09-08: "voicepacks... should be in their own group... common
+        // folders"). A dozen-plus voicepack zips were drowning the Sources
+        // list. A source that backs any FONT stays in Sources — so "(this
+        // font's source)" always lives in the group its name promises — and
+        // only commons-exclusive sources move.
+        const _fontSrcUuids = new Set((_sfAllEntries || []).map(e => e?.meta?.sourceUuid).filter(Boolean));
+        const _commonSrcUuids = new Set((_sfCommons || []).map(c => c?.meta?.sourceUuid).filter(Boolean));
+        const _isCommonOnlySrc = (s) => _commonSrcUuids.has(s.uuid) && !_fontSrcUuids.has(s.uuid);
+        const fontSources = sources.filter(s => !_isCommonOnlySrc(s));
+        const commonSources = sources.filter(_isCommonOnlySrc);
+        const _srcOption = (s) => {
+          const label = s.meta?.bundleName || s.meta?.originalName || s.uuid;
+          const tail = s.uuid === ownSourceUuid ? '  (this font’s source)' : '';
+          return `<option value="source::${_sfEscape(s.uuid)}">${_sfEscape(label)}${tail}</option>`;
+        };
         const optgroups = [];
-        if (sources.length) {
-          const items = sources.map(s => {
-            const label = s.meta?.bundleName || s.meta?.originalName || s.uuid;
-            const tail = s.uuid === ownSourceUuid ? '  (this font’s source)' : '';
-            return `<option value="source::${_sfEscape(s.uuid)}">${_sfEscape(label)}${tail}</option>`;
-          }).join('');
-          optgroups.push(`<optgroup label="Sources">${items}</optgroup>`);
+        if (fontSources.length) {
+          optgroups.push(`<optgroup label="Sources">${fontSources.map(_srcOption).join('')}</optgroup>`);
         }
         if (fonts.length) {
           const items = fonts.map(f => `<option value="entry::${_sfEscape(f.name)}">${_sfEscape(f.name)}</option>`).join('');
           optgroups.push(`<optgroup label="Fonts">${items}</optgroup>`);
+        }
+        if (commonSources.length) {
+          optgroups.push(`<optgroup label="Common folders">${commonSources.map(_srcOption).join('')}</optgroup>`);
         }
         sel.innerHTML = optgroups.join('');
         // Default to the entry's own source when available, otherwise
         // first source, otherwise first font.
         if (ownSourceUuid && sources.some(s => s.uuid === ownSourceUuid)) {
           sel.value = `source::${ownSourceUuid}`;
-        } else if (sources.length) {
-          sel.value = `source::${sources[0].uuid}`;
+        } else if (fontSources.length) {
+          sel.value = `source::${fontSources[0].uuid}`;
         } else if (fonts.length) {
           sel.value = `entry::${fonts[0].name}`;
+        } else if (commonSources.length) {
+          sel.value = `source::${commonSources[0].uuid}`;
         }
       };
       const _sfLibPickLoadTarget = async () => {
@@ -31605,8 +31831,10 @@ require(['vs/editor/editor.main'], function () {
               mkSep();
             }
           }
+          // No Paste on a file row: it reads as "replace this file"
+          // (his read, 2026-09-08), and this browser shows one folder at
+          // a time, so it lands where blank-space "Paste here" does.
           mkItem(count > 1 ? `Copy (${count})` : 'Copy', '', _sfCopyEntryFilesSelection);
-          if (clipboardCount > 0) mkItem(`Paste (${clipboardCount})`, '', () => _sfPasteIntoEntry());
           mkSep();
           if (count === 1) mkItem('Rename…', '', () => _sfRenameEntryFilePrompt([..._sfEntryFilesSelected][0]));
           mkItem(count > 1 ? `↗ Export… (${count})` : '↗ Export…', '', () => _sfExportFiles({ kind: 'entry', id: _sfDetailOriginalName, subPaths: [..._sfEntryFilesSelected] }));
@@ -32246,7 +32474,11 @@ require(['vs/editor/editor.main'], function () {
               _sfMarkDetailDirty();
             }
           } else {
-            if (!_sfDetailEdit.tags.includes(raw)) {
+            // Case-insensitive ([B-346] prerequisite): "Customized" and
+            // "customized" must be one tag, or the auto-tagger's has(tag)
+            // has two definitions of has. Same test the source-detail and
+            // guided tag bars already use.
+            if (!_sfDetailEdit.tags.some(t => String(t).toLowerCase() === raw.toLowerCase())) {
               _sfDetailEdit.tags.push(raw);
               _sfMarkDetailDirty();
             }
@@ -34051,15 +34283,28 @@ require(['vs/editor/editor.main'], function () {
         const fontList = names.length <= 8
           ? names.join(', ')
           : `${names.slice(0, 8).join(', ')}, and ${names.length - 8} more`;
-        let message = `Delete ${names.length} font${names.length === 1 ? '' : 's'}?\n${fontList}`;
+        let messageHtml = `Delete ${names.length} font${names.length === 1 ? '' : 's'}?` + _sfDelDimHtml(_sfEscape(fontList));
         if (sourcesToRemove.length === 1) {
-          message += `\n\nThe source "${sourcesToRemove[0].label}" will also be removed (its last ${sourcesToRemove[0].total === 1 ? 'font' : `${sourcesToRemove[0].selected.length} of ${sourcesToRemove[0].total} fonts`}).`;
+          messageHtml += _sfDelDimHtml(`The source "${_sfEscape(sourcesToRemove[0].label)}" will also be removed (its last ${sourcesToRemove[0].total === 1 ? 'font' : `${sourcesToRemove[0].selected.length} of ${sourcesToRemove[0].total} fonts`}).`);
         } else if (sourcesToRemove.length > 1) {
-          message += `\n\n${sourcesToRemove.length} source archives will also be removed.`;
+          messageHtml += _sfDelDimHtml(`${sourcesToRemove.length} source archives will also be removed.`);
+        }
+        // Customized fonts are named at the delete ([B-341]), weighted like
+        // data loss. When the export checkbox is offered it carries the
+        // customized copies ([B-311]); when it is not (no source leaves),
+        // the edits have no exit and the copy says so plainly.
+        const _custNames = await _sfCustomizedAmong(names);
+        if (_custNames.length) {
+          const who = _custNames.length === 1
+            ? `"${_sfEscape(_custNames[0])}" is Customized`
+            : `${_custNames.length} of these are Customized (${_sfEscape(_custNames.slice(0, 4).join(', '))}${_custNames.length > 4 ? ', …' : ''})`;
+          messageHtml += sourcesToRemove.length > 0
+            ? _sfDelWarnHtml(`${who}. "Export ${sourcesToRemove.length === 1 ? 'source' : 'sources'} first" carries your customized ${_custNames.length === 1 ? 'copy' : 'copies'}; deleting without it destroys your edits.`)
+            : _sfDelWarnHtml(`${who}. Deleting destroys your edits: the sources that stay only hold the creators' originals.`);
         }
         const res = await promptConfirm({
           title: `Delete ${names.length} font${names.length === 1 ? '' : 's'}`,
-          message,
+          messageHtml,
           confirmText: 'Delete',
           confirmKind: 'danger',
           checkbox: sourcesToRemove.length > 0
@@ -34489,13 +34734,89 @@ require(['vs/editor/editor.main'], function () {
           const src = _sfAllSourcesByUuid[sourceUuid];
           isMultiCandidateSource = !!(src && src.meta && src.meta.multiCandidate === true);
         }
+        // ⚠️ CUSTOMIZATION IS NAMED AT THE DELETE, weighted like data loss,
+        // because it is ([B-341]): the app knew the font was Customized (the
+        // marker was on screen) and said nothing at the one moment the
+        // knowledge mattered most — "it never asked me on either path. just
+        // deleted... so lost?" The vendor source can always be re-imported;
+        // the edits exist nowhere else.
+        let _isCust = false;
+        try {
+          const cr = await window.electronAPI.entryCustomization({ name });
+          _isCust = !!(cr && cr.known && cr.customized);
+        } catch {}
+        // HTML with a visual hierarchy (his call, 2026-09-08 17:03: "this
+        // layout is a bit sloppy"): the QUESTION leads at full weight, the
+        // reassurance sits quieter below it, and the data-loss warning gets
+        // amber and its own space — weighted in pixels the way [B-341]
+        // weighted it in words. Same three-role split on all three delete
+        // doors via the two helpers.
+        const q = `Remove <strong>"${_sfEscape(name)}"</strong> from your library?`;
         if (othersFromSameSource > 0) {
-          return `Remove "${name}" from your library?\nThe source archive will stay on file (used by ${othersFromSameSource} other font${othersFromSameSource === 1 ? '' : 's'}), so you can add this font back later if you change your mind.`;
+          // No export checkbox on this branch (the source stays), so a
+          // customized delete here is a true loss: the surviving source only
+          // holds the creator's original.
+          const cust = _isCust ? _sfDelWarnHtml(`"${_sfEscape(name)}" is Customized. Deleting it destroys your edits: the source that stays only holds the creator's original.`) : '';
+          return q + _sfDelDimHtml(`The source archive will stay on file (used by ${othersFromSameSource} other font${othersFromSameSource === 1 ? '' : 's'}), so you can add this font back later if you change your mind.`) + cust;
         }
+        // These two branches offer "Export source first", and since [B-311]
+        // that export carries customized copies, so the honest copy points at
+        // the exit instead of only naming the loss.
+        const cust = _isCust ? _sfDelWarnHtml(`"${_sfEscape(name)}" is Customized. "Export source first" carries your customized copy; deleting without it destroys your edits.`) : '';
         if (isMultiCandidateSource) {
-          return `Remove "${name}" from your library?\nThis is the only remaining font from its source. The source archive will also be removed from your library.`;
+          return q + _sfDelDimHtml('This is the only remaining font from its source. The source archive will also be removed from your library.') + cust;
         }
-        return `Remove "${name}" from your library?\nThis is the only font from its source. The source archive will also be removed from your library.`;
+        return q + _sfDelDimHtml('This is the only font from its source. The source archive will also be removed from your library.') + cust;
+      };
+      // The delete dialogs' three visual roles ([B-341] layout pass): quiet
+      // context and amber warning. The question itself is the caller's first
+      // line at full weight.
+      const _sfDelDimHtml  = (t) => `<div style="margin-top:8px;color:var(--c-text-muted)">${t}</div>`;
+      const _sfDelWarnHtml = (t) => `<div style="margin-top:10px;color:var(--jmt-amber,#d49b3a)">⚠ ${t}</div>`;
+      // One font's whole delete flow — [B-341]-aware confirm, export-source-
+      // first when the source would leave — shared by the card's × and the
+      // card context menu's Delete (his ask, 2026-09-08: "shouldn't delete be
+      // an option?"). One flow, so the two doors can never drift.
+      const _sfDeleteFontFlow = async (name) => {
+        if (!name) return;
+        const messageHtml = await _sfBuildDeleteMessage(name);
+        const { willRemove, sourceUuid } = await _sfWillSourceBeRemovedOnEntryDelete(name);
+        const res = await promptConfirm({
+          title: 'Delete font',
+          messageHtml,
+          confirmText: 'Delete',
+          confirmKind: 'danger',
+          checkbox: willRemove ? { label: 'Export source first', hint: 'Source archive keeps its original date.', confirmTextChecked: 'Export and Delete' } : null,
+        });
+        const confirmed = willRemove ? res && res.confirmed : res;
+        const wantExport = willRemove ? !!(res && res.checked) : false;
+        if (!confirmed) return;
+        let exportDir = null;
+        if (wantExport) {
+          const sourceLabel = (_sfAllSourcesByUuid[sourceUuid]?.meta?.bundleName)
+            || (_sfAllSourcesByUuid[sourceUuid]?.meta?.originalName)
+            || 'source';
+          const pick = await window.electronAPI.pickExportDir({
+            title: `Choose export destination for "${sourceLabel}"…`,
+          });
+          if (!pick || !pick.ok) return;
+          exportDir = pick.destDir;
+        }
+        if (!await _sfPerformSingleDelete(name, sourceUuid, wantExport, exportDir)) return;
+        await window.refreshSoundFontsView();
+      };
+      // Which of these fonts are Customized ([B-341])? Asked at delete time,
+      // the one moment the answer matters most. Reads the same stamp the
+      // Customized marker renders from, so the dialog and the screen agree.
+      const _sfCustomizedAmong = async (names) => {
+        const out = [];
+        for (const n of names) {
+          try {
+            const r = await window.electronAPI.entryCustomization({ name: n });
+            if (r && r.known && r.customized) out.push(n);
+          } catch {}
+        }
+        return out;
       };
       // Card click delegation — the grid re-renders on refresh, so we listen
       // on the container once. Tag chips on cards toggle the filter; the
@@ -34601,31 +34922,7 @@ require(['vs/editor/editor.main'], function () {
           e.stopPropagation();
           const name = del.getAttribute('data-card-delete');
           if (!name) return;
-          const message = await _sfBuildDeleteMessage(name);
-          const { willRemove, sourceUuid } = await _sfWillSourceBeRemovedOnEntryDelete(name);
-          const res = await promptConfirm({
-            title: 'Delete font',
-            message,
-            confirmText: 'Delete',
-            confirmKind: 'danger',
-            checkbox: willRemove ? { label: 'Export source first', hint: 'Source archive keeps its original date.', confirmTextChecked: 'Export and Delete' } : null,
-          });
-          const confirmed = willRemove ? res && res.confirmed : res;
-          const wantExport = willRemove ? !!(res && res.checked) : false;
-          if (!confirmed) return;
-          let exportDir = null;
-          if (wantExport) {
-            const sourceLabel = (_sfAllSourcesByUuid[sourceUuid]?.meta?.bundleName)
-              || (_sfAllSourcesByUuid[sourceUuid]?.meta?.originalName)
-              || 'source';
-            const pick = await window.electronAPI.pickExportDir({
-              title: `Choose export destination for "${sourceLabel}"…`,
-            });
-            if (!pick || !pick.ok) return;
-            exportDir = pick.destDir;
-          }
-          if (!await _sfPerformSingleDelete(name, sourceUuid, wantExport, exportDir)) return;
-          await window.refreshSoundFontsView();
+          await _sfDeleteFontFlow(name);
           return;
         }
         const cardLink = e.target.closest('[data-card-link]');
@@ -35279,6 +35576,48 @@ require(['vs/editor/editor.main'], function () {
           if (!res || !res.ok) { promptError('Duplicate failed', (res && res.error) || 'unknown error'); return; }
           try { await window.refreshSoundFontsView(); } catch {}
         });
+        // One-off export of JUST the font folder (his ask, 2026-09-08:
+        // "a simple export... nothing to do with config or tracks or common,
+        // just the font folder"). No source machinery, no riders — the folder
+        // as Proffie reads it, straight to a picked destination. An identical
+        // copy already there says so and stops; a differing one auto-numbers
+        // to _2 per the house rules (export collisions auto-number, never
+        // dead-end; the original is number one).
+        mkItem('↗ Export font folder…', null, async () => {
+          const pick = await window.electronAPI.pickExportDir({
+            title: `Choose export destination for "${fontName}"…`,
+          });
+          if (!pick || !pick.ok) return;
+          // ⚠️ AN EXPLICIT EXPORT ALWAYS EXPORTS (Ryan, 2026-09-08: "thought we
+          // were doing it anyway since they asked and numbering?"). The first
+          // build refused when an identical copy was already there — logic
+          // borrowed from the conflict dialog, where it stops QUESTIONS about
+          // non-conflicts. Refusing an ACTION the user chose is a different
+          // thing: they clicked Export, numbering absorbs the collision, and
+          // identical folders on disk can still diverge afterwards. The
+          // identical check survives only to word the toast honestly.
+          let _identical = false;
+          try {
+            // writeCache:false — the toast's question must not seed the sync
+            // manifest at the destination ([B-358], his catch: the manifest
+            // followed the QUESTION, not the copy).
+            const m = await window.electronAPI.entryMatchesAt({ name: fontName, destDir: pick.destDir, writeCache: false });
+            _identical = !!(m && m.ok && m.exists && m.identical);
+          } catch {}
+          let r;
+          // syncManifest:false — a quick export is a plain copy, and must not
+          // seed card-sync bookkeeping (jmt-sync.json) at an arbitrary folder.
+          try { r = await window.electronAPI.exportEntryToFolder({ name: fontName, destDir: pick.destDir, mode: 'rename', syncManifest: false }); }
+          catch (err) { r = { ok: false, error: String(err && err.message || err) }; }
+          if (!r || !r.ok) { promptError('Export failed', (r && r.error) || 'unknown error'); return; }
+          const landed = (r.destPath || '').split(/[\\/]/).pop() || fontName;
+          showToast(landed === fontName
+            ? `"${fontName}" exported.`
+            : (_identical
+              ? `Exported as "${landed}". The "${fontName}" already there is identical.`
+              : `Exported as "${landed}": a different "${fontName}" was already there.`));
+        });
+        mkItem('× Delete', { cls: 'danger' }, () => _sfDeleteFontFlow(fontName));
         // Hide submenu when hovering a sibling item that isn't the
         // submenu parent. (The submenu itself stays visible while the
         // user moves into it.)
@@ -35839,10 +36178,15 @@ require(['vs/editor/editor.main'], function () {
           }
           mkItem(count > 1 ? `Copy (${count})` : 'Copy', '', _sfCopyCommonSelection);
           if (clipboardCount > 0) {
-            // Paste into THIS file's parent dir (sibling of the clicked file).
+            // Paste into THIS file's parent dir (sibling of the clicked
+            // file). Unlike the flat browsers this is a tree, so the
+            // shortcut earns its keep — but the label must name the
+            // destination folder: bare "Paste" on a file row reads as
+            // "replace this file" (his read, 2026-09-08).
             const parts = subPath.split('/'); parts.pop();
             const parentDir = parts.join('/');
-            mkItem(`Paste (${clipboardCount})`, '', () => _sfPasteCommonClipboard(_sfSelectedCommonUuid, parentDir));
+            const dirLabel = parentDir ? `"${parts[parts.length - 1]}"` : 'root';
+            mkItem(`Paste into ${dirLabel} (${clipboardCount})`, '', () => _sfPasteCommonClipboard(_sfSelectedCommonUuid, parentDir));
           }
           mkSep();
           if (count === 1) mkItem('Rename…', '', () => _sfRenameCommonFile([..._sfCommonFilesSelected][0]));
@@ -35853,7 +36197,8 @@ require(['vs/editor/editor.main'], function () {
           const subPath = dirRow.getAttribute('data-tree-dir');
           if (!subPath) return;
           if (clipboardCount > 0) {
-            mkItem(`Paste (${clipboardCount})`, '', () => _sfPasteCommonClipboard(_sfSelectedCommonUuid, subPath));
+            // Same destination-naming as the file-row paste above.
+            mkItem(`Paste into "${subPath.split('/').pop()}" (${clipboardCount})`, '', () => _sfPasteCommonClipboard(_sfSelectedCommonUuid, subPath));
             mkSep();
           }
           mkItem('Copy folder', '', () => {
@@ -36774,7 +37119,7 @@ require(['vs/editor/editor.main'], function () {
           const renameInput = allowsBoth[cat]
             ? `<div class="sf-merge-row-rename">
                 <label for="rn-${safeId}">Save backup as:</label>
-                <input id="rn-${safeId}" type="text" data-merge-rename="${cat}|${safeId}" value="${_sfEscape(item.name + '_1')}" maxlength="200">
+                <input id="rn-${safeId}" type="text" data-merge-rename="${cat}|${safeId}" value="${_sfEscape(item.name + '_2')}" maxlength="200">
               </div>`
             : '';
           return `<div class="sf-merge-row" data-merge-cat="${cat}" data-merge-id="${safeId}">
@@ -40925,18 +41270,44 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
             if (_editingSlot) { _closeSlotArgEdit(); return; }
             if (!editor) return;
             const model = editor.getModel();
-            // Determine insertion line and indentation
-            let insertLine, indent;
+            // Determine the insertion RANGE and how the new style wraps.
+            // ⚠️ COLUMN-PRECISE AFTER THE LAST STYLE, NEVER endLine+1 ([B-344]).
+            // The common tail shape puts the display name and closing brace ON
+            // THE SAME LINE as the last style (`...(), "Windu"},`), so a
+            // whole-line insert at endLine+1 landed BELOW the closing brace: an
+            // orphan StylePtr<Black>(), OUTSIDE the preset, inside the presets
+            // array — invalid initializer, config silently uncompilable. And
+            // because the orphan was outside, the re-parse still counted the
+            // preset short, the tile stayed "Missing", and every click added
+            // another orphan (seven on his screenshot). Anchoring just past
+            // the last style's own trailing comma keeps the insert inside the
+            // preset in every tail shape; the multi-line shape produces the
+            // same text the old line-insert did.
+            let indent, insRange, insTextFor;
             if (preset.styles.length > 0) {
               const lastSlot = preset.styles[preset.styles.length - 1];
-              insertLine = lastSlot.endLine + 1;
-              indent = (model.getLineContent(lastSlot.endLine).match(/^(\s*)/) || ['',''])[1];
+              const lineText = model.getLineContent(lastSlot.endLine);
+              indent = (lineText.match(/^(\s*)/) || ['', ''])[1];
+              const after = lineText.slice(lastSlot.endCol);
+              const cm = after.match(/^\s*,/);
+              const insCol = lastSlot.endCol + 1 + (cm ? cm[0].length : 0);
+              insRange = { startLineNumber: lastSlot.endLine, startColumn: insCol,
+                           endLineNumber:   lastSlot.endLine, endColumn:   insCol };
+              // With a trailing comma present we land after it and bring our
+              // own; without one (unusual) we supply the separator ourselves.
+              insTextFor = (expr) => cm ? `\n${indent}${expr},` : `,\n${indent}${expr}`;
             } else if (preset.displayNameRange) {
-              insertLine = preset.displayNameRange.startLine;
-              indent = (model.getLineContent(insertLine).match(/^(\s*)/) || ['',''])[1];
+              const insertLine = preset.displayNameRange.startLine;
+              indent = (model.getLineContent(insertLine).match(/^(\s*)/) || ['', ''])[1];
+              insRange = { startLineNumber: insertLine, startColumn: 1,
+                           endLineNumber:   insertLine, endColumn:   1 };
+              insTextFor = (expr) => `${indent}${expr},\n`;
             } else {
-              insertLine = preset.startLine + 1;
+              const insertLine = preset.startLine + 1;
               indent = '  ';
+              insRange = { startLineNumber: insertLine, startColumn: 1,
+                           endLineNumber:   insertLine, endColumn:   1 };
+              insTextFor = (expr) => `${indent}${expr},\n`;
             }
             // If this blade FOLLOWS another one, the slot has to arrive holding the target's style,
             // not the default. Following is derived from the text matching, so a slot added as
@@ -40954,9 +41325,8 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
               if (tgt && tgt.startLine) addExpr = model.getValueInRange(_slotRange(tgt));
             }
             _atomicEdit(editor,'add-missing-style', [{
-              range: { startLineNumber: insertLine, startColumn: 1,
-                       endLineNumber:   insertLine, endColumn: 1 },
-              text: `${indent}${addExpr},\n`,
+              range: insRange,
+              text: insTextFor(addExpr),
             }]);
             editor.focus();
             _reopenAfterRebuild = { presetIdx: _selectedPresetIndex, slotIdx: i };

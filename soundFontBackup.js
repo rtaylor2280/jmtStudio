@@ -2308,7 +2308,8 @@ async function applyMerge({
         chosenName = userPick;
       } else {
         chosenName = w.id;
-        let n = 0;
+        // First suffix is _2 ([B-343]): the original is implicitly number one.
+        let n = 1;
         while (fs.existsSync(path.join(bucketRoot, chosenName))) {
           n++;
           chosenName = `${w.id}_${n}`;

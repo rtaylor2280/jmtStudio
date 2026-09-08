@@ -126,7 +126,10 @@ function nextNumberedName(userData, base) {
     const rest = nm.slice(prefix.length);
     if (/^\d+$/.test(rest) && parseInt(rest, 10) > max) max = parseInt(rest, 10);
   }
-  let n = max + 1;
+  // Never mint _1 ([B-343], his rule): the ORIGINAL is implicitly number one,
+  // so the first copy is _2. An existing higher _N still numbers above itself;
+  // names already on disk are data and are not migrated.
+  let n = Math.max(max + 1, 2);
   while (nameInUse(userData, `${root}_${n}`)) n++;
   return `${root}_${n}`;
 }
@@ -334,7 +337,7 @@ function writeCommonReadme(userData, uuid, destDir) {
 // picked zip; importSource treats either as a source. Returns
 // { ok, uuid, name, sourceUuid, savings } where savings carries what the
 // close-out sentence needs (archiveBytes / contentBytes / crossLinked).
-async function _importCommonAsSource(userData, sourcePath, name) {
+async function _importCommonAsSource(userData, sourcePath, name, onProgress) {
   if (!sourcePath || !fs.existsSync(sourcePath)) {
     return { ok: false, error: 'Source not found' };
   }
@@ -344,8 +347,12 @@ async function _importCommonAsSource(userData, sourcePath, name) {
     return { ok: false, error: `A common folder named "${cleanName}" already exists` };
   }
   const S = require('./soundFontSources');
+  // onProgress rides straight into importSource ([B-352]): the source
+  // pipeline has emitted per-byte hashing/copying stages all along — this
+  // caller just never asked, so a bulk common import ran with a dead bar.
   const imp = await S.importSource({
     userData, sourcePath, originalName: path.basename(sourcePath), metadata: {},
+    onProgress: typeof onProgress === 'function' ? onProgress : undefined,
   });
   if (!imp || !imp.ok) return { ok: false, error: (imp && imp.error) || 'Source import failed' };
   const sourceUuid = imp.uuid;
@@ -424,8 +431,8 @@ function sourcesRoot_(userData) {
 }
 
 // Returns { ok: true, uuid, name } on success, { ok: false, error } on failure.
-async function importCommonFromFolder(userData, folderPath, name) {
-  return await _importCommonAsSource(userData, folderPath, name);
+async function importCommonFromFolder(userData, folderPath, name, onProgress) {
+  return await _importCommonAsSource(userData, folderPath, name, onProgress);
 }
 
 // Import a common folder from a zip file. The zip IS the source now - its
@@ -1249,7 +1256,8 @@ async function exportCommonToFolder(userData, uuid, destDir, mode = 'rename', on
       // safety rule as font folders. The user-facing "rename" mode is
       // really staging, since Proffie only matches the literal "common"
       // folder; either way, _N is the safer suffix.
-      let n = 1;
+      // First suffix is _2 ([B-343]): the original is implicitly number one.
+      let n = 2;
       while (fs.existsSync(path.join(destDir, targetName))) {
         targetName = `common_${n}`;
         n++;
