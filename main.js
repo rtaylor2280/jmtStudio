@@ -2430,6 +2430,13 @@ ipcMain.handle('common:importFromZip', async (_, { zipPath, name } = {}) => {
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
+// [B-340] Content-identity answer for an incoming common folder, so the bulk
+// chooser can promise exactly what the runner will do.
+ipcMain.handle('common:classifyIncoming', (_, { folderPath } = {}) => {
+  try { return { ok: true, ...soundFontCommon.classifyIncomingCommon(app.getPath('userData'), folderPath) }; }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
 ipcMain.handle('common:rename', (_, { uuid, newName } = {}) => {
   try { return soundFontCommon.renameCommon(app.getPath('userData'), uuid, newName); }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }

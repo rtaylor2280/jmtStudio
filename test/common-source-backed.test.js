@@ -99,6 +99,47 @@ const nlink = (p) => { try { return fs.statSync(p).nlink; } catch { return 0; } 
   }
 
   {
+    console.log('[B-340] card commons are judged by content, not by the name every card shares');
+    const userData = tmp('ud340');
+    const B = require('../soundFontBulkImport.js');
+    // Card A: a font plus a "common" voice pack.
+    const cardA = tmp('cardA');
+    put(cardA, 'FontA/hum.wav', wav('FH'));
+    put(cardA, 'FontA/clsh1.wav', wav('FC'));
+    put(cardA, 'common/mmain.wav', wav('VOICE-A'));
+    put(cardA, 'common/voicepack.ini', Buffer.from('version=2\r\n'));
+    // Card B: different font, different voice pack, SAME folder name "common".
+    const cardB = tmp('cardB');
+    put(cardB, 'FontB/hum.wav', wav('GH'));
+    put(cardB, 'FontB/clsh1.wav', wav('GC'));
+    put(cardB, 'common/mmain.wav', wav('VOICE-B'));
+    put(cardB, 'common/voicepack.ini', Buffer.from('version=2\r\n'));
+
+    const runCard = async (dir) => {
+      const scan = await B.scanForBulkImport({ rootDir: dir });
+      return await B.runBulkImport({ plan: scan.plan, userData }, {});
+    };
+    const a = await runCard(cardA);
+    check('card A common imported', a.summary.commonsImported.length === 1, JSON.stringify(a.summary));
+    // Re-run card A: identical content -> honestly skipped, under any name test.
+    const a2 = await runCard(cardA);
+    check('⭐ identical pack re-scanned is skipped by CONTENT',
+      a2.summary.commonsSkipped.length === 1 && a2.summary.commonsImported.length === 0,
+      JSON.stringify(a2.summary.commonsSkipped));
+    // Card B: same folder name, different audio -> imports under a derived name.
+    const b = await runCard(cardB);
+    check('⭐ a DIFFERENT pack wearing the shared name is imported, not dropped',
+      b.summary.commonsImported.length === 1, JSON.stringify(b.summary));
+    const names = C.listCommons(userData).map(c => c.meta.name).sort();
+    check('both packs live in the library under distinct names',
+      names.length === 2 && names[0] === 'common' && /^common_\d+$/.test(names[1]),
+      JSON.stringify(names));
+    // And the derived-name pack is source-backed like any other ([B-327]).
+    const derived = C.listCommons(userData).find(c => /^common_\d+$/.test(c.meta.name));
+    check('the derived-name pack carries a sourceUuid', !!(derived && derived.meta.sourceUuid));
+  }
+
+  {
     console.log('a zip common import dedups at the door against an existing source');
     const userData = tmp('ud3');
     const src = tmp('pack3');

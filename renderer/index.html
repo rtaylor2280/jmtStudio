@@ -13055,19 +13055,20 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         if (byKind['folder-solo']) rows.push(['Sound fonts', byKind['folder-solo']]);
       }
       if (plan.commonFolders.length) {
-        // [B-330] Promise only what the runner will do. The runner name-skips a
-        // common the library already holds ("already-in-library" in the
-        // summary), so the chooser asks the same cheap question up front and
-        // splits the row the way the fonts row does. One label promising an
-        // import that ends as a skip contradicts the summary minutes later.
-        let _haveCommons = new Set();
-        try {
-          const cr = await window.electronAPI.listCommons();
-          if (cr && cr.ok && Array.isArray(cr.commons)) {
-            _haveCommons = new Set(cr.commons.map(c => String((c.meta && c.meta.name) || '').toLowerCase()));
-          }
-        } catch {}
-        const _cOwned = plan.commonFolders.filter(c => _haveCommons.has(String(c.name || '').toLowerCase())).length;
+        // [B-330]/[B-340] Promise only what the runner will do, and decide it by
+        // CONTENT. Every card names its folder "common", so a name test read
+        // every later card's pack as owned and the runner dropped voicepacks
+        // the user did not have. classifyIncoming hashes the incoming folder
+        // and compares against the commons' stored content digests - identical
+        // pack under any name is owned; same name over new audio imports under
+        // the next numbered name, which is what the runner now does.
+        let _cOwned = 0;
+        for (const c of plan.commonFolders) {
+          try {
+            const r = await window.electronAPI.classifyIncomingCommon({ folderPath: c.absPath });
+            if (r && r.ok && r.ownedByContent) _cOwned++;
+          } catch {}
+        }
         const _cNew = plan.commonFolders.length - _cOwned;
         if (_cNew) rows.push(['Common folders (will be imported)', _cNew]);
         if (_cOwned) rows.push(['Common folders already in your library (skipped)', _cOwned]);

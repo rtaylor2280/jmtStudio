@@ -458,10 +458,25 @@ async function runBulkImport({ plan, userData }, callbacks = {}) {
     const c = commons[i];
     onProgress({ stage: 'common-start', commonIdx: i, totalCommons: commons.length, label: c.name });
     try {
-      const result = await soundFontCommon.importCommonFromFolder(userData, c.absPath, c.name);
+      // [B-340] Have-it is decided by CONTENT, not name. Every card names its
+      // folder "common", so the old name test read every later card's pack as
+      // owned and silently dropped voicepacks the user did not have. Identical
+      // content under any name skips honestly; a taken name over NEW content
+      // imports under the next numbered name instead of being thrown away.
+      const cls = soundFontCommon.classifyIncomingCommon(userData, c.absPath);
+      if (cls.ownedByContent) {
+        summary.commonsSkipped.push({ src: c.relPath || c.absPath, reason: 'already-in-library', matchName: cls.matchName });
+        continue;
+      }
+      let importName = c.name;
+      if (soundFontCommon.nameInUse(userData, importName)) {
+        importName = soundFontCommon.nextNumberedName(userData, importName);
+      }
+      const result = await soundFontCommon.importCommonFromFolder(userData, c.absPath, importName);
       if (result && result.ok) {
         summary.commonsImported.push({ src: c.relPath || c.absPath, uuid: result.uuid, name: result.name });
       } else if (result && /already exists/i.test(result.error || '')) {
+        // Belt only: the classify + rename above should make this unreachable.
         summary.commonsSkipped.push({ src: c.relPath || c.absPath, reason: 'already-in-library' });
       } else {
         summary.commonsFailed.push({ src: c.relPath || c.absPath, reason: (result && result.error) || 'unknown error' });

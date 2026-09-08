@@ -435,6 +435,42 @@ async function importCommonFromZip(userData, zipPath, name) {
   return await _importCommonAsSource(userData, zipPath, name);
 }
 
+// Answer "do I already have this pack?" by CONTENT, not name. ([B-340])
+// Every card names its common folder literally "common", so a name test made
+// every later card's pack read as owned - and the bulk path then dropped a
+// voicepack the user did not have. The digest compared here is
+// hashItemDir(files) - exactly what the [B-327] manifests store as
+// contentHash - so an incoming folder hashes once and existing commons are a
+// manifest read. A dirty or missing manifest falls back to a live hash of
+// that common's files, so an edited pack is never judged by stale rows.
+function classifyIncomingCommon(userData, folderPath) {
+  const out = { ownedByContent: false, matchName: null, nameTaken: false, contentHash: null };
+  if (!folderPath || !fs.existsSync(folderPath)) return out;
+  const fh = require('./soundFontFileHash');
+  const contentDir = _findCommonSubfolder(folderPath) || folderPath;
+  try { out.contentHash = fh.hashItemDir(contentDir); } catch { out.contentHash = null; }
+  if (!out.contentHash) return out;
+  for (const c of listCommons(userData)) {
+    let digest = null;
+    if (!(c.meta && c.meta.contentHashDirty)) {
+      try {
+        const mf = fh.readFileHashManifest(
+          path.join(userData, 'soundFonts', '.filehashes', 'commons', `${c.uuid}.json`));
+        digest = (mf && mf.contentHash) || null;
+      } catch { digest = null; }
+    }
+    if (!digest) {
+      try { digest = fh.hashItemDir(path.join(commonRoot(userData), c.uuid, 'files')); } catch { digest = null; }
+    }
+    if (digest && digest === out.contentHash) {
+      out.ownedByContent = true;
+      out.matchName = (c.meta && c.meta.name) || c.uuid;
+      break;
+    }
+  }
+  return out;
+}
+
 function getCommon(userData, uuid) {
   if (!uuid) return null;
   const dir = path.join(commonRoot(userData), uuid);
@@ -1400,6 +1436,7 @@ module.exports = {
   nextNumberedName,
   importCommonFromFolder,
   importCommonFromZip,
+  classifyIncomingCommon,
   renameCommon,
   duplicateCommon,
   deleteCommon,
