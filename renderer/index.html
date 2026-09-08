@@ -13054,7 +13054,24 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         if (byKind['zip'])         rows.push(['Zip archives', byKind['zip']]);
         if (byKind['folder-solo']) rows.push(['Sound fonts', byKind['folder-solo']]);
       }
-      if (plan.commonFolders.length) rows.push(['Common folders (will be imported)', plan.commonFolders.length]);
+      if (plan.commonFolders.length) {
+        // [B-330] Promise only what the runner will do. The runner name-skips a
+        // common the library already holds ("already-in-library" in the
+        // summary), so the chooser asks the same cheap question up front and
+        // splits the row the way the fonts row does. One label promising an
+        // import that ends as a skip contradicts the summary minutes later.
+        let _haveCommons = new Set();
+        try {
+          const cr = await window.electronAPI.listCommons();
+          if (cr && cr.ok && Array.isArray(cr.commons)) {
+            _haveCommons = new Set(cr.commons.map(c => String((c.meta && c.meta.name) || '').toLowerCase()));
+          }
+        } catch {}
+        const _cOwned = plan.commonFolders.filter(c => _haveCommons.has(String(c.name || '').toLowerCase())).length;
+        const _cNew = plan.commonFolders.length - _cOwned;
+        if (_cNew) rows.push(['Common folders (will be imported)', _cNew]);
+        if (_cOwned) rows.push(['Common folders already in your library (skipped)', _cOwned]);
+      }
       if (plan.tracksFolders && plan.tracksFolders.length) {
         // "(will be imported)" said nothing about WHAT — the folder is merged into
         // the one shared tracks folder and only the tracks you do not already have
