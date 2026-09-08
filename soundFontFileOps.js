@@ -332,7 +332,6 @@ async function copyAcrossLocations({
           }
           const rel = path.relative(destRoot, outRoot).replace(/\\/g, '/');
           added.push(rel);
-        if (onFile) { try { onFile(rel, added.length, srcPaths.length); } catch {} }
           if (onFile) { try { onFile(rel, added.length, srcPaths.length); } catch {} }
         }
       } catch (err) {
