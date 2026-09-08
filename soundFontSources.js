@@ -753,7 +753,7 @@ function cleanupPartialSource(uuidDir) {
 //   { ok: false, error: <string> }
 //
 // Progress events fire in three stages: hashing, copying, done.
-async function importSource({ userData, sourcePath, originalName, metadata, onProgress, forceNewSource, prepareOnly, stripCorrupt, knownHash }) {
+async function importSource({ userData, sourcePath, originalName, metadata, onProgress, forceNewSource, prepareOnly, stripCorrupt, knownHash, deferCustomized }) {
   if (!userData) return { ok: false, error: 'Missing userData' };
   if (!sourcePath) return { ok: false, error: 'Missing sourcePath' };
   // Sweep corrupt source dirs (meta without archive, archive without
@@ -824,7 +824,21 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
   let curation = null;
   let curationTmp = null;
   let curationPayloadDir = null;
-  if (isZip && !knownHash) {
+  // ⚠️ THE PEEK RUNS FOR EVERY ZIP, INCLUDING THE knownHash HAND-OFF. This
+  // used to be `isZip && !knownHash`, and the duplicate prompt's "import again
+  // as a new source" passes knownHash — so that door skipped the strip
+  // entirely: the forced source stored .jmt-curation/ (sidecar, receipts, the
+  // customized-font payload) INSIDE its tree as vendor content, restored
+  // nothing, and returned curation:null, which also disarmed the review's
+  // sidecar-outranks-heuristic guard. Ryan hit the full stack live
+  // (2026-09-08 00:44): re-importing his own export through the duplicate
+  // prompt lost the restore and the checked state. Proven by headless replay
+  // of both doors against his real export.
+  // The knownHash SHORTCUT below stays sound because it was computed by the
+  // scan on the SAME zip after the SAME strip, and stripAndRepackage +
+  // zipFolderToFile are deterministic — the re-strip here reproduces the
+  // exact bytes the scan hashed.
+  if (isZip) {
     try {
       const cur = require('./soundFontCuration');
       curation = await cur.peekZip(sourcePath);
@@ -1063,9 +1077,14 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
       return { ok: true, isDuplicate: false, prepared: true, uuid, uuidDir, hash, format, name, fileSize, archiveBytes: inputArchiveBytes, sourceFileDate, sourceFileMtimeMs, totalBytes, fileCount, strippedFiles, crossLinked, curation, curationTmp, curationPayloadDir };
     }
 
-    const res = await _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format, name, hash, fileSize, sourceFileDate, sourceFileMtimeMs, metadata, strippedFiles, curation, curationPayloadDir, crossLinked });
+    const res = await _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format, name, hash, fileSize, sourceFileDate, sourceFileMtimeMs, metadata, strippedFiles, curation, curationPayloadDir, crossLinked, deferCustomized });
     emit('done', { isDuplicate: false });
-    _dropCurationTmp();
+    // Deferred customized payload: the review form now owns the decision, so
+    // the strip's temp dir has to outlive this call — the commit restores the
+    // checked rows from it, the cancel discards it. Everything else drops the
+    // tmp here exactly as before. (2026-09-08.)
+    const _pendingKeepsTmp = !!(res.customizedPending && res.customizedPending.length && curationTmp);
+    if (!_pendingKeepsTmp) _dropCurationTmp();
     // ⚠️ THE PAYLOAD ITSELF GOES BACK TO THE CALLER, not just a count of what was
     // applied. The import review has to PRE-FILL from it, and until it did, the
     // review's empty fields were written straight over these values seconds after
@@ -1077,7 +1096,11 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
     // re-walking the tree. ([B-317], 2026-09-06.)
     return { ...res, strippedFiles, crossLinked, contentBytes: fileSize,
       archiveBytes: inputArchiveBytes,
-      curation: curation || null, curationApplied: res.curationApplied || null };
+      curation: curation || null, curationApplied: res.curationApplied || null,
+      // The payload's temp-dir handles ride to the caller ONLY while a deferred
+      // restore is pending — same round-trip discipline as the staged folder
+      // door, which already carries curationTmp through the renderer.
+      ...(_pendingKeepsTmp ? { curationTmp, curationPayloadDir } : {}) };
   } catch (err) {
     cleanupPartialSource(uuidDir);
     _dropCurationTmp();
@@ -1088,7 +1111,7 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
 // Shared meta writer + candidate-cache warm. Used by importSource's finalize
 // path AND finalizePreparedSource (the deferred commit of a prepareOnly source),
 // so the written meta is identical whichever way a source is committed.
-async function _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format, name, hash, fileSize, sourceFileDate, sourceFileMtimeMs, metadata, strippedFiles, curation, curationPayloadDir, crossLinked }) {
+async function _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format, name, hash, fileSize, sourceFileDate, sourceFileMtimeMs, metadata, strippedFiles, curation, curationPayloadDir, crossLinked, deferCustomized }) {
   const meta = {
     schemaVersion: 1,
     uuid,
@@ -1172,6 +1195,37 @@ async function _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format, name,
         .applySourceCuration(userData, uuid, curation, curationPayloadDir);
     } catch { curationApplied = null; }
   }
+  // Customized fonts that rode the export come back as library entries
+  // ([B-311]), HERE so both commit doors restore them identically — same
+  // reason this function exists. Must run while curationPayloadDir is still
+  // alive: the direct door drops it right after this returns, the prepared
+  // door in finalizePreparedSource's finally.
+  //
+  // ⚠️ EXCEPT when the caller defers ([B-311] rescope, 2026-09-08): the
+  // single-import doors show a review AFTER the source commits, and an eager
+  // restore put entries in the library before the user said import — the
+  // review's own matcher then found the copy it had just created and told the
+  // user their deleted font was "already in your library". Deferred, nothing
+  // lands until Add to Library, and only the rows left checked. The bulk door
+  // never defers: its finalize already runs after the user confirmed.
+  let customizedRestored = null;
+  let customizedPending = null;
+  if (curation && curationPayloadDir && Array.isArray(curation.customized) && curation.customized.length) {
+    if (deferCustomized) {
+      customizedPending = curation.customized.map((c, i) => ({
+        index: i,
+        name: (c.curation && typeof c.curation.name === 'string' && c.curation.name.trim())
+          ? c.curation.name.trim()
+          : (String(c.entryName || '').trim() || 'Customized font'),
+        candidatePath: c.candidatePath == null ? '' : c.candidatePath,
+      }));
+    } else {
+      try {
+        customizedRestored = await require('./soundFontCuration')
+          .restoreCustomizedEntries(userData, uuid, curation, curationPayloadDir);
+      } catch { customizedRestored = null; }
+    }
+  }
   // Warm the candidate cache (best-effort; a stamp failure just leaves it cold).
   try { await recomputeAndStampCandidates(userData, uuid); } catch {}
   // crossLinked is echoed so BOTH doors report it the same way, like the meta
@@ -1179,14 +1233,14 @@ async function _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format, name,
   // this echo the finalizePreparedSource door returned nothing, and the bulk
   // summary read crossSaved as 0 for every prepared source. (2026-09-07.)
   return { ok: true, isDuplicate: false, uuid, hash, format, sourceFileDate, curationApplied,
-    crossLinked: crossLinked || null };
+    customizedRestored, customizedPending, crossLinked: crossLinked || null };
 }
 
 // Commit a source previously staged by importSource({ prepareOnly: true }). Its
 // uuid/source.zip is already on disk, hashed and dedup-cleared — this only writes
 // the meta and warms the cache. NO re-hash. The prepared fields come back from
 // the prepare result and pass straight through.
-async function finalizePreparedSource({ userData, uuid, format, name, hash, fileSize, sourceFileDate, sourceFileMtimeMs, metadata, curation, curationTmp, curationPayloadDir, crossLinked }) {
+async function finalizePreparedSource({ userData, uuid, format, name, hash, fileSize, sourceFileDate, sourceFileMtimeMs, metadata, curation, curationTmp, curationPayloadDir, crossLinked, deferCustomized }) {
   if (!userData || !uuid) return { ok: false, error: 'Missing userData/uuid' };
   const uuidDir = path.join(sourcesRoot(userData), uuid);
   // A prepared source is a TREE now ([B-309]). Checked strictly rather than
@@ -1196,14 +1250,21 @@ async function finalizePreparedSource({ userData, uuid, format, name, hash, file
   // No longer in-flight — clear the marker BEFORE stamping so it isn't hashed
   // into the source's content signature.
   try { fs.unlinkSync(path.join(uuidDir, '.preparing')); } catch {}
+  let _keptTmpForPending = false;
   try {
-    return await _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format: format || 'zip', name, hash, fileSize, sourceFileDate, sourceFileMtimeMs, metadata, curation, curationPayloadDir, crossLinked });
+    const res = await _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format: format || 'zip', name, hash, fileSize, sourceFileDate, sourceFileMtimeMs, metadata, curation, curationPayloadDir, crossLinked, deferCustomized });
+    // Deferred pending rows: the review still owes the restore, so the payload
+    // stays alive past this call (same as the direct door). The commit or the
+    // cancel is what finally drops it.
+    _keptTmpForPending = !!(res.customizedPending && res.customizedPending.length && curationTmp);
+    return _keptTmpForPending ? { ...res, curationTmp, curationPayloadDir } : res;
   } catch (err) {
     return { ok: false, error: `Finalize failed: ${err.message}` };
   } finally {
     // The prepare kept this alive so the receipts would still be on disk at
-    // commit time. Whatever happened above, it is done with now. ([B-283])
-    if (curationTmp) { try { fs.rmSync(curationTmp, { recursive: true, force: true }); } catch {} }
+    // commit time. Whatever happened above, it is done with now — unless a
+    // deferred restore is still pending on it. ([B-283])
+    if (curationTmp && !_keptTmpForPending) { try { fs.rmSync(curationTmp, { recursive: true, force: true }); } catch {} }
   }
 }
 

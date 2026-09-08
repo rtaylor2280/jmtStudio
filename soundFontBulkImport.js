@@ -375,6 +375,24 @@ function scanForBulkImport({ rootDir }) {
       totalSizeBytes: 0,
     },
   };
+  // [B-290] A tracks or common folder handed to the scanner AS THE ROOT (the SD
+  // browser's multi-select does exactly this) used to classify as nothing:
+  // classifyChildrenAt only ever looks at CHILDREN, a flat folder of wavs has
+  // no directories, and the selected folder vanished from the plan without a
+  // word - "the selection bar counted 4, the review header counted 3, and no
+  // message connects them." Name conventions win over shape here in the same
+  // order the child classifier uses (common before tracks before Proffie).
+  const _rootBase = path.basename(rootDir);
+  if (looksLikeCommonDir(_rootBase)) {
+    ctx.results.commonFolders.push({ absPath: rootDir, relPath: _rootBase, name: _rootBase });
+    ctx.results.totalSizeBytes = safeDirSize(rootDir);
+    return { ok: true, plan: ctx.results };
+  }
+  if (looksLikeTracksDir(_rootBase)) {
+    ctx.results.tracksFolders.push({ absPath: rootDir, relPath: _rootBase, name: _rootBase });
+    ctx.results.totalSizeBytes = safeDirSize(rootDir);
+    return { ok: true, plan: ctx.results };
+  }
   // If the picked root itself IS a Proffie shape, emit as solo and skip
   // descent. Common single-font-folder case from "Import folder" workflow.
   if (looksLikeProffieDir(rootDir)) {

@@ -2964,6 +2964,9 @@
   .sf-review-candidate-row .cand-badge.multi-board { color: var(--jmt-blue); border-color: rgba(0,130,255,0.35); background: rgba(0,130,255,0.08); }
   .sf-review-candidate-row .cand-badge.nested { color: #cb6; border-color: rgba(204,180,100,0.35); background: rgba(204,180,100,0.08); }
   .sf-review-candidate-row .cand-badge.alt-version { color: var(--c-text-sub); border-color: var(--c-border-faint); background: var(--c-bg-inset); font-style: italic; }
+  /* Customized rows in the import review ([B-311]): JMT blue, the same colour
+     the Customized marker wears everywhere else in the app. */
+  .sf-review-candidate-row .cand-badge.customized { color: var(--jmt-blue); border-color: rgba(0,130,255,0.35); background: rgba(0,130,255,0.08); }
   /* Duplicate-recognition note (async). GREEN = already owned (good news),
      AMBER = close variant; rows carrying a note dim less when unchecked so
      the reason stays readable. */
@@ -5258,6 +5261,15 @@
       <span id="modal-confirm-checkbox-label"></span>
       <div id="modal-confirm-checkbox-hint" style="display:none; margin: 4px 0 0 22px; font-size: 0.75rem; color: var(--c-text-dim);"></div>
     </label>
+    <!-- Second independent inclusion, same shape ([B-311]: proofs of purchase
+         and customized fonts are separate decisions on the export dialog).
+         When both rows show, the first's bottom margin collapses via the
+         inline style promptConfirm applies, so the pair reads as one group. -->
+    <label id="modal-confirm-checkbox2-row" style="display:none; margin: 10px 0 20px; font-size: 0.9rem; user-select:none; cursor:pointer;">
+      <input type="checkbox" id="modal-confirm-checkbox2" style="margin-right: 6px; vertical-align: middle;">
+      <span id="modal-confirm-checkbox2-label"></span>
+      <div id="modal-confirm-checkbox2-hint" style="display:none; margin: 4px 0 0 22px; font-size: 0.75rem; color: var(--c-text-dim);"></div>
+    </label>
     <div id="modal-confirm-dropdown-row" style="display:none; margin: 12px 0 20px;">
       <label id="modal-confirm-dropdown-label" for="modal-confirm-dropdown" style="display:block; font-size:0.72rem; color:var(--c-text-sub); margin-bottom:6px; text-transform:uppercase; letter-spacing:0.05em;"></label>
       <select id="modal-confirm-dropdown"></select>
@@ -7009,6 +7021,12 @@ window.promptUnsaved = promptUnsaved;
 //   opts.checkbox    — optional { label, hint, checked } to show a checkbox
 //                      between message and buttons. Starts unchecked unless
 //                      `checked: true`.
+//   opts.checkbox2   — optional second checkbox, same shape, rendered under the
+//                      first; its state comes back as `checked2`. For dialogs
+//                      offering two independent inclusions ([B-311]: proofs of
+//                      purchase and customized fonts on the source export). No
+//                      confirmTextChecked — an inclusion rides the operation,
+//                      it does not change what the button does.
 //
 //   FORM CONTROLS AND THE RETURN SHAPE. A dropdown or a checkbox is a
 //   PARAMETER; the buttons are how you submit. Whenever either is present the
@@ -7031,6 +7049,7 @@ function promptConfirm(opts) {
       altKind     = 'cancel',
       hideCancel  = false,
       checkbox    = null,
+      checkbox2   = null,
       dropdown    = null,
     } = opts || {};
     document.getElementById('modal-confirm-title').textContent = title;
@@ -7077,8 +7096,37 @@ function promptConfirm(opts) {
       // <label> is inline by default; force block so vertical margins apply
       // and the row visually separates from the buttons below it.
       cbRow.style.display = 'block';
+      // Two rows shown together read as one group: pull the first's bottom
+      // margin in so the gap between the pair is smaller than the gap to the
+      // buttons. Reset when the second row is absent (element is reused).
+      cbRow.style.marginBottom = checkbox2 ? '4px' : '';
     } else if (cbRow) {
       cbRow.style.display = 'none';
+      cbRow.style.marginBottom = '';
+    }
+    // Second checkbox ([B-311]) — same contract as the first, minus
+    // confirmTextChecked (an inclusion rides the operation; it does not change
+    // what the button DOES). checkbox2 without checkbox is legal and just
+    // renders in the second slot; callers that want one box use `checkbox`.
+    const cb2Row   = document.getElementById('modal-confirm-checkbox2-row');
+    const cb2Input = document.getElementById('modal-confirm-checkbox2');
+    const cb2Label = document.getElementById('modal-confirm-checkbox2-label');
+    const cb2Hint  = document.getElementById('modal-confirm-checkbox2-hint');
+    if (checkbox2 && cb2Row && cb2Input && cb2Label) {
+      cb2Label.textContent = checkbox2.label || '';
+      cb2Input.checked = !!checkbox2.checked;
+      if (cb2Hint) {
+        if (checkbox2.hint) {
+          cb2Hint.textContent = checkbox2.hint;
+          cb2Hint.style.display = 'block';
+        } else {
+          cb2Hint.textContent = '';
+          cb2Hint.style.display = 'none';
+        }
+      }
+      cb2Row.style.display = 'block';
+    } else if (cb2Row) {
+      cb2Row.style.display = 'none';
     }
     const ddRow   = document.getElementById('modal-confirm-dropdown-row');
     const ddSel   = document.getElementById('modal-confirm-dropdown');
@@ -7177,10 +7225,11 @@ function promptConfirm(opts) {
     const cleanup = (result) => {
       overlay.classList.remove('active');
       const answer = multi ? result : (result === true);
-      if (!dropdown && !checkbox) { resolve(answer); return; }
+      if (!dropdown && !checkbox && !checkbox2) { resolve(answer); return; }
       const out = multi ? { choice: answer } : { confirmed: answer };
       if (dropdown) out.value   = ddSel ? ddSel.value : null;
       if (checkbox) out.checked = !!(cbInput && cbInput.checked);
+      if (checkbox2) out.checked2 = !!(cb2Input && cb2Input.checked);
       resolve(out);
     };
     okBtn.onclick     = () => cleanup(multi ? 'confirm' : true);
@@ -13184,12 +13233,23 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       let r;
       try { r = await window.electronAPI.bulkImportScan({ rootDir: p }); } catch { r = null; }
       if (r && r.ok && r.plan) {
+        // ⚠️ EVERY bucket the scan emits merges, not just sources ([B-290]).
+        // The backend correctly classifies a directly-selected tracks or
+        // common ROOT into its bucket — and this merge used to copy only
+        // `sources`, so the buckets survived the scan and died HERE. That is
+        // exactly how "4 selected" became "3 reviewed" with no sentence
+        // between them, one layer above the fix that was supposed to end it.
         merged.sources.push(...(r.plan.sources || []));
+        merged.commonFolders.push(...(r.plan.commonFolders || []));
+        merged.tracksFolders.push(...(r.plan.tracksFolders || []));
+        merged.skipped.push(...(r.plan.skipped || []));
         merged.totalSizeBytes += r.plan.totalSizeBytes || 0;
         if (r.plan.depthHalted) merged.depthHalted = true;
       }
     }
-    if (!merged.sources.length) {
+    // Tracks-only and common-only selections are importable plans — the gate
+    // matches what the runner accepts, not just the fonts half.
+    if (!merged.sources.length && !merged.tracksFolders.length && !merged.commonFolders.length) {
       promptError('Nothing to import', 'No importable sound fonts were found in the selected folders.');
       closeModal();
       return;
@@ -24042,10 +24102,21 @@ require(['vs/editor/editor.main'], function () {
         // so the just-committed source isn't deleted. Existing-source reviews
         // never clean up (the source predates this modal).
         const uuidToClean = _sfImport && _sfImport.uuid && !_sfImport.isExistingReview ? _sfImport.uuid : null;
+        // A deferred customized payload dies with the cancel ([B-311] rescope,
+        // 2026-09-08): nothing was restored yet — the review's rows were the
+        // only place it existed — so there are no entries to delete, only the
+        // strip's temp dir to drop. Gated on uuidToClean like the source
+        // cleanup: the confirm path clears _sfImport.uuid first and settles
+        // the payload itself (restore or discard).
+        const _payloadToDiscard = (uuidToClean && _sfImport && _sfImport.customizedPayload
+          && _sfImport.customizedPayload.curationTmp) || null;
         if (_sfImportEls.modal) _sfImportEls.modal.classList.remove('active');
         _sfImport = null;
         if (uuidToClean) {
           window.electronAPI.deleteSource({ uuid: uuidToClean }).catch(() => {});
+        }
+        if (_payloadToDiscard) {
+          window.electronAPI.discardCustomized({ curationTmp: _payloadToDiscard }).catch(() => {});
         }
         // Launched from the SD card browser? Bring it back now that the import
         // modal is truly closed (Cancel or completed import). The dup "Open
@@ -24256,7 +24327,14 @@ require(['vs/editor/editor.main'], function () {
           if (_sfImportEls.progLabel) _sfImportEls.progLabel.textContent = 'Finishing…';
           const fr = await window.electronAPI.finalizeStagedSource(finalizeStaged);
           importRes = (fr && fr.ok)
-            ? { ok: true, isDuplicate: false, uuid: finalizeStaged.uuid, sourceFileDate: finalizeStaged.sourceFileDate }
+            ? { ok: true, isDuplicate: false, uuid: finalizeStaged.uuid, sourceFileDate: finalizeStaged.sourceFileDate,
+                // Deferred customized payload rides through this door too
+                // ([B-311] rescope): the review owes the rows and the commit
+                // owes the restore, exactly like the direct door.
+                curation: finalizeStaged.curation || null,
+                customizedPending: fr.customizedPending || null,
+                curationTmp: fr.curationTmp || null,
+                curationPayloadDir: fr.curationPayloadDir || null }
             : fr;
         } else {
           importRes = await window.electronAPI.importSource({ sourcePath, forceNewSource, knownHash });
@@ -24275,6 +24353,11 @@ require(['vs/editor/editor.main'], function () {
           endProgressPhase();
           if (importRes && importRes.ok && importRes.uuid && !importRes.isDuplicate) {
             window.electronAPI.deleteSource({ uuid: importRes.uuid }).catch(() => {});
+            // A deferred customized payload from that run goes with it
+            // ([B-311]): a run the user abandoned must not leave a temp dir.
+            if (importRes.curationTmp) {
+              window.electronAPI.discardCustomized({ curationTmp: importRes.curationTmp }).catch(() => {});
+            }
           }
           return;
         }
@@ -24312,6 +24395,16 @@ require(['vs/editor/editor.main'], function () {
         // source seconds later (updateSourceMeta, below), so an empty form actively
         // erased everything the sidecar had just restored. ([B-283])
         _sfImport.curation = importRes.curation || null;
+        // Customized fonts the sidecar carried are PENDING, not restored
+        // ([B-311] rescope, 2026-09-08): they render as rows in the review and
+        // nothing lands in the library until Add to Library, checked rows
+        // only. The payload handles ride so the commit can restore from the
+        // strip's temp dir and the cancel can drop it.
+        _sfImport.customizedPending = (Array.isArray(importRes.customizedPending)
+          && importRes.customizedPending.length) ? importRes.customizedPending : null;
+        _sfImport.customizedPayload = (importRes.curationTmp && importRes.curationPayloadDir)
+          ? { curationTmp: importRes.curationTmp, curationPayloadDir: importRes.curationPayloadDir }
+          : null;
         // Pre-review library check: build (or twin-seed) the manifest NOW with
         // an honest progress bar, so the review screen opens with duplicate
         // notes ready instead of them arriving minutes late on big bundles.
@@ -24583,7 +24676,16 @@ require(['vs/editor/editor.main'], function () {
         // the review render on it is not.
         _sfRenderReviewPop();
         const cands = _sfImport.candidates || [];
-        if (_sfImportEls.candCount) _sfImportEls.candCount.textContent = cands.length === 0 ? '(none)' : `(${cands.length})`;
+        // Customized fonts riding the export render as rows in this same list
+        // ([B-311] rescope, 2026-09-08: "the custom versions need to be
+        // injected into the form") — so the count includes them: they are
+        // sound fonts found in this import, they just come from the payload
+        // rather than the vendor's tree.
+        const _pendingCust = _sfImport.customizedPending || [];
+        if (_sfImportEls.candCount) {
+          const _totalRows = cands.length + _pendingCust.length;
+          _sfImportEls.candCount.textContent = _totalRows === 0 ? '(none)' : `(${_totalRows})`;
+        }
         // Reset the duplicate-recognition summary from any prior review.
         const _dupHintEl = document.getElementById('sf-review-dup-hint');
         if (_dupHintEl) { _dupHintEl.style.display = 'none'; _dupHintEl.textContent = ''; }
@@ -24641,9 +24743,39 @@ require(['vs/editor/editor.main'], function () {
         }
         const currentPrefix = autoBundlePrefix;
         const prependBundle = currentPrefix && _sfImportEls.bundleCheck ? _sfImportEls.bundleCheck.checked : false;
+        // Rows for the customized fonts the sidecar carries ([B-311] rescope).
+        // Same structure as candidate rows so the validator, the count and the
+        // wiring loop treat them uniformly; data-kind tells the consumers that
+        // the content comes from the payload, not the vendor's tree. Checked
+        // by default — the export carried them because the user had them — and
+        // the name prefill collision-suffixes against the library so the form
+        // opens clean instead of opening on a red error. data-idx continues
+        // after the candidates so the validator's per-row bookkeeping stays
+        // unique across both kinds.
+        const _custRowsHtml = _pendingCust.map((pc, ci) => {
+          const _libNames = _sfAllEntries.map(e => e.name);
+          const seedName = _jmtNumberedName(pc.name || 'Customized font', _libNames);
+          return `<div class="sf-review-candidate-row" data-idx="${cands.length + ci}" data-kind="customized" data-cidx="${ci}" data-already="0">
+            <div class="cand-row-main">
+              <input type="checkbox" class="cand-check" checked>
+              <div class="cand-main">
+                <input type="text" class="cand-name" value="${_sfEscape(seedName)}" maxlength="64" autocomplete="off">
+                <div class="cand-path">${_sfEscape(pc.candidatePath || '(source root)')}</div>
+                <div class="cand-status"></div>
+                <div class="cand-dup-note cand-cust-note"></div>
+              </div>
+              <div class="cand-meta">
+                <div class="cand-badges"><span class="cand-badge customized" title="This font was customized after import. The export carried the customized copy, and checking this row brings it back exactly as it was.">Customized</span></div>
+              </div>
+            </div>
+          </div>`;
+        }).join('');
         if (_sfImportEls.candList) {
           if (cands.length === 0) {
-            _sfImportEls.candList.innerHTML = '<div class="sf-import-hint">No Proffie-shaped fonts detected inside this source.</div>';
+            // The hint would sit above real rows and argue with them, so it
+            // only renders when there is truly nothing to show.
+            _sfImportEls.candList.innerHTML = _custRowsHtml
+              || '<div class="sf-import-hint">No Proffie-shaped fonts detected inside this source.</div>';
           } else {
             // When reviewing an existing source ("Add more fonts from this
             // source"), mark candidates that already have a library entry
@@ -24661,6 +24793,16 @@ require(['vs/editor/editor.main'], function () {
             // (the app-wide numbering convention) so the import doesn't
             // immediately fail validation against the existing entry.
             const _suggestCopyName = (base) => _jmtNumberedName(base, _sfAllEntries.map(e => e.name));
+            // Names that already exist and therefore must not be OFFERED as a
+            // prefill ([B-311]): the library's own, plus the names the PENDING
+            // customized rows will claim at commit — those rows render in this
+            // same form, so a stock row offering one of their names sends the
+            // commit straight into "Entry already exists" (the deferred shape
+            // of what Ryan hit live, 2026-09-07).
+            const _takenNames = new Set(_sfAllEntries.map(e => e.name));
+            for (const _pc of (_sfImport.customizedPending || [])) {
+              if (_pc && _pc.name) _takenNames.add(_pc.name);
+            }
             const isDuplicate = !!(_sfImport && _sfImport.isDuplicateMode);
             // When duplicate-mode opens against a source with exactly
             // one candidate, pre-check it — there's only one thing
@@ -24676,7 +24818,11 @@ require(['vs/editor/editor.main'], function () {
               // Keyed by candidatePath, and '' IS a valid key - a single-font
               // source puts its font at the archive root.
               const _curEntry = (_cur && _cur.entries) ? _cur.entries[c.path || ''] : null;
-              const _curName = (_curEntry && typeof _curEntry.name === 'string' && _curEntry.name.trim())
+              // The sidecar's name wins — unless something already owns it
+              // ([B-311], see _takenNames above): then the detector's guess is
+              // the honest offer, because the sidecar's is unusable as-is.
+              const _curName = (_curEntry && typeof _curEntry.name === 'string' && _curEntry.name.trim()
+                  && !_takenNames.has(_curEntry.name.trim()))
                 ? _curEntry.name : null;
               const _curDemo = (_curEntry && typeof _curEntry.demoUrl === 'string') ? _curEntry.demoUrl : '';
               const initialName = _curName || _sfSuggestName(c, i, currentPrefix, prependBundle);
@@ -24765,9 +24911,23 @@ require(['vs/editor/editor.main'], function () {
                   <button class="cand-demo-clear" title="Clear demo link" data-cand-demo-clear="${i}">&#10005;</button>
                 </div>
               </div>`;
-            }).join('');
+            }).join('') + _custRowsHtml;
           }
         }
+        // The customized row's note is state, not decoration: green while the
+        // row is checked (this copy comes back), amber the moment it is not —
+        // his call, 2026-09-08: unchecking "needs to be clear by a colored
+        // note that it won't be included in the imported source."
+        const _refreshCustNote = (row) => {
+          const note = row.querySelector('.cand-cust-note');
+          const check = row.querySelector('.cand-check');
+          if (!note || !check) return;
+          note.textContent = check.checked
+            ? 'Customized copy, restored from this export.'
+            : 'Won’t be included with this imported source.';
+          note.classList.toggle('have-it', !!check.checked);
+          note.classList.toggle('variant', !check.checked);
+        };
         _sfImportEls.candList?.querySelectorAll('.sf-review-candidate-row').forEach(row => {
           if (row.dataset.already === '1') return; // already-imported rows are locked
           const check = row.querySelector('.cand-check');
@@ -24786,11 +24946,14 @@ require(['vs/editor/editor.main'], function () {
             if (dRow && dInput) { dInput.value = _preDemo; dRow.style.display = ''; }
           }
           const validate = () => _sfRevalidateCandidates();
+          const isCustRow = row.dataset.kind === 'customized';
+          if (isCustRow) _refreshCustNote(row);
           check?.addEventListener('change', () => {
             // User took a stance on this row — async results (duplicate
             // recognition) must not clobber it after the fact.
             row.dataset.touched = 'true';
             row.classList.toggle('disabled', !check.checked);
+            if (isCustRow) _refreshCustNote(row);
             validate();
           });
           name?.addEventListener('input', () => {
@@ -24800,7 +24963,9 @@ require(['vs/editor/editor.main'], function () {
           // Per-font Demo link (chain icon → inline edit row). Shared wiring
           // with the guided bulk-import rows via _sfWireDemoLink. Dedup the
           // source Website / product Link so neither auto-pastes into a demo slot.
-          _sfWireDemoLink(row, {
+          // Customized rows carry no demo elements — their link lives on the
+          // restored entry's own curation, which the payload already holds.
+          if (!isCustRow) _sfWireDemoLink(row, {
             dedupUrls: () => [_sfImportEls.website?.value, _sfImportEls.link?.value],
             getLast: () => (_sfImport && _sfImport._lastDemoUrl) || '',
             setLast: (u) => { if (_sfImport) _sfImport._lastDemoUrl = u; },
@@ -24823,6 +24988,20 @@ require(['vs/editor/editor.main'], function () {
             if (!r || !r.ok || !Array.isArray(r.results) || !r.results.length) return;
             if (!_sfImport || _sfImport.runId !== matchRun) return; // user moved on
             const byPath = new Map(r.results.map(x => [String(x.path || ''), x]));
+            // ⚠️ THE SIDECAR'S DECLARATION OUTRANKS THE CONTENT HEURISTIC
+            // ([B-311], Ryan's third round-trip 2026-09-07). importedPaths says
+            // this candidate WAS its own entry before the delete, so the
+            // restore must bring it back CHECKED. The heuristic disagreed for
+            // an honest but self-inflicted reason: the customized copy the
+            // sidecar restored moments ago is a SUPERSET of the stock
+            // candidate, so "the library truly holds every sound" was true —
+            // of the entry this same import just created. Unchecking on that
+            // undoes the both-copies rule ("they are both checked. Matches
+            // what was there before deletion"). The green note stays — it is
+            // true and explains where the sounds also live — only the
+            // auto-uncheck yields.
+            const _sidecarImported = (_sfImport.curation && Array.isArray(_sfImport.curation.importedPaths))
+              ? new Set(_sfImport.curation.importedPaths) : null;
             let changedAny = false;
             _sfImportEls.candList?.querySelectorAll('.sf-review-candidate-row').forEach(row => {
               const c = _sfImport.candidates[parseInt(row.dataset.idx, 10)];
@@ -24849,6 +25028,7 @@ require(['vs/editor/editor.main'], function () {
               const check = row.querySelector('.cand-check');
               if (check && hit.tip) check.title = hit.tip;
               if (hit.fullyOwned && row.dataset.already !== '1'
+                  && !(_sidecarImported && _sidecarImported.has(String(c.path || '')))
                   && row.dataset.touched !== 'true' && row.dataset.edited !== 'true') {
                 if (check && check.checked) {
                   check.checked = false;
@@ -24882,6 +25062,9 @@ require(['vs/editor/editor.main'], function () {
           _sfImport.bundlePrefix = currentPrefix;
           _sfImportEls.candList?.querySelectorAll('.sf-review-candidate-row').forEach(row => {
             if (row.dataset.edited === 'true') return;
+            // Customized rows keep their sidecar name — the bundle prefix
+            // describes the vendor's tree, and these rows don't come from it.
+            if (row.dataset.kind === 'customized') return;
             const idx = parseInt(row.dataset.idx, 10);
             const c = _sfImport.candidates[idx];
             const newName = _sfSuggestName(c, idx, currentPrefix, prepend);
@@ -24952,12 +25135,23 @@ require(['vs/editor/editor.main'], function () {
         if (!_sfImport || !_sfImport.uuid) return;
         const rows = Array.from(_sfImportEls.candList?.querySelectorAll('.sf-review-candidate-row') || []);
         const picks = [];
+        // Customized rows commit separately ([B-311] rescope): checked ones
+        // restore from the deferred payload, unchecked ones simply never
+        // land — the row's amber note already said so.
+        const custPicks = [];
         for (const row of rows) {
           if (row.dataset.already === '1') continue;
-          const idx = parseInt(row.dataset.idx, 10);
           const check = row.querySelector('.cand-check');
           const nameEl = row.querySelector('.cand-name');
           if (!check?.checked) continue;
+          if (row.dataset.kind === 'customized') {
+            custPicks.push({
+              index: parseInt(row.dataset.cidx, 10),
+              name: _sfSanitizeName(nameEl?.value || ''),
+            });
+            continue;
+          }
+          const idx = parseInt(row.dataset.idx, 10);
           // If the demo edit row is still open at submit time, pull the
           // current input value as the source of truth — the user may
           // have typed without clicking the toggle to commit.
@@ -24973,7 +25167,10 @@ require(['vs/editor/editor.main'], function () {
             demoUrl,
           });
         }
-        if (picks.length === 0) return;
+        // A customized-only commit is a legitimate import — it is exactly the
+        // customize-in-place round trip, where the stock row stays unchecked
+        // by the user's own record.
+        if (picks.length === 0 && custPicks.length === 0) return;
         const isAddMore = !!_sfImport.isExistingReview;
         // Use the existing source's saved meta for author/date/purchased
         // when we're in the add-more flow (the source-metadata form was
@@ -25089,6 +25286,36 @@ require(['vs/editor/editor.main'], function () {
           if (_sfImportEls.createBar) _sfImportEls.createBar.style.width = '0%';
           if (_sfImportEls.createDetail) _sfImportEls.createDetail.textContent = '';
         }
+        // ── Customized rows land NOW, and only the checked ones ([B-311]
+        // rescope, 2026-09-08: "this shouldn't be put in my library until the
+        // user says import and only if checked"). The payload temp dir is
+        // consumed either way: restore drops it after copying, discard drops
+        // it unread. After optimize for the same [B-334] reason as the stock
+        // entries below — restored files must not sit on inodes the dedup is
+        // about to rewrite.
+        let restoredNames = [];
+        if (_sfImport && _sfImport.customizedPayload) {
+          const _pl = _sfImport.customizedPayload;
+          _sfImport.customizedPayload = null; // consumed — the cancel path must not double-drop
+          if (custPicks.length) {
+            if (_sfImportEls.createLabel) _sfImportEls.createLabel.textContent = 'Restoring customized fonts…';
+            try {
+              const rr = await window.electronAPI.restoreCustomized({
+                uuid: _sfImport.uuid,
+                curationTmp: _pl.curationTmp,
+                curationPayloadDir: _pl.curationPayloadDir,
+                picks: custPicks,
+              });
+              if (rr && rr.ok && Array.isArray(rr.names)) restoredNames = rr.names;
+              else if (rr && rr.ok === false) {
+                await _sfShowPartialFailures('Some fonts could not be restored',
+                  custPicks.map(p => ({ name: p.name, error: rr.error || 'unknown error' })));
+              }
+            } catch {}
+          } else {
+            window.electronAPI.discardCustomized({ curationTmp: _pl.curationTmp }).catch(() => {});
+          }
+        }
         if (_sfCreateProgressUnsub) { try { _sfCreateProgressUnsub(); } catch {} }
         _sfCreateProgressUnsub = window.electronAPI.onEntryCreateProgress((data) => {
           if (!data) return;
@@ -25133,7 +25360,10 @@ require(['vs/editor/editor.main'], function () {
         // Close-out screen inputs, captured before import state is cleared. Fresh
         // imports only — add-more/duplicate reviews return to the source detail.
         const successCount = picks.length - failures.length;
-        const showCloseout = !!(_sfImport && !_sfImport.isExistingReview && successCount > 0);
+        // A customized-only commit added no stock rows but still changed the
+        // library — the close-out is owed either way.
+        const showCloseout = !!(_sfImport && !_sfImport.isExistingReview
+          && (successCount > 0 || restoredNames.length > 0));
         const closeoutSrc = _sfImport
           ? { fromLink: !!_sfImport.fromLink, sourcePath: _sfImport.sourcePath || '' }
           : null;
@@ -25142,6 +25372,11 @@ require(['vs/editor/editor.main'], function () {
         const closeoutCrossLinked = (_sfImport && _sfImport.crossLinked) || null;
         const closeoutContentBytes = (_sfImport && _sfImport.contentBytes) || 0;
         const closeoutArchiveBytes = (_sfImport && _sfImport.archiveBytes) || 0;
+        // Customized fonts restored at this commit ([B-311] rescope). They had
+        // checkbox rows this time, but the close-out still names them: the
+        // names may have been suffixed by the collision backstop, and this is
+        // where the user learns what the library actually gained.
+        const closeoutRestored = restoredNames;
         // The source is now committed (referenced by at least one entry, or
         // attempted by the user). Clear the orphan-cleanup hook before close.
         if (_sfImport) _sfImport.uuid = null;
@@ -25168,9 +25403,13 @@ require(['vs/editor/editor.main'], function () {
           const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
           const fmtB = (n) => (window._sfFormatBytes ? window._sfFormatBytes(n) : `${n} B`);
           const parts = [];
-          parts.push(successCount === 1
-            ? `<strong>${esc(picks[0].name)}</strong> was added to your library.`
-            : `<strong>${successCount} fonts</strong> were added to your library.`);
+          // A customized-only commit has no stock adds to announce; the
+          // restored sentence below is the lead there.
+          if (successCount > 0) {
+            parts.push(successCount === 1
+              ? `<strong>${esc(picks[0].name)}</strong> was added to your library.`
+              : `<strong>${successCount} fonts</strong> were added to your library.`);
+          }
           // ── WHAT JMT STUDIO DID FOR THEM, anchored on a number they can check ──
           // One outcome, JMT Studio as the actor (2026-09-06/07): "Your download
           // started at X. JMT Studio saved you Y, so this font added only Z."
@@ -25221,6 +25460,16 @@ require(['vs/editor/editor.main'], function () {
               ? `added only <strong>${fmtB(_footprint)}</strong> on disk`
               : `added nothing new on disk`;
             parts.push(`Your ${_srcNoun} started at <strong>${fmtB(_startedBytes)}</strong>. JMT Studio saved you <strong>${fmtB(_shownSaved)}</strong>, so ${_whatNoun} ${_addedTxt}. Identical files are stored once in your library and used in every location they appear, so nothing is missing or renamed.`);
+          }
+          // Restored customized fonts, named ([B-311]). "This zip" is safe as
+          // the noun: a sidecar only ever arrives inside a zip export.
+          // "also" only when a stock sentence came first; a customized-only
+          // commit opens with this line. No "your" (his call, 2026-09-08).
+          if (closeoutRestored.length) {
+            const _alsoWord = successCount > 0 ? ' also' : '';
+            parts.push(closeoutRestored.length === 1
+              ? `This zip${_alsoWord} carried the customized font <strong>${esc(closeoutRestored[0])}</strong>. JMT Studio restored it to your library.`
+              : `This zip${_alsoWord} carried ${closeoutRestored.length} customized fonts. JMT Studio restored them to your library: ${closeoutRestored.map(esc).join(', ')}.`);
           }
           if (closeoutSrc && !closeoutSrc.fromLink && closeoutSrc.sourcePath) {
             const isFolder = !/\.zip$/i.test(closeoutSrc.sourcePath);
@@ -28586,6 +28835,37 @@ require(['vs/editor/editor.main'], function () {
             : _att.map(a => a.name).filter(Boolean).join(', '),
           checked: true,
         } : null;
+        // Customized fonts get the identical treatment ([B-311], his call
+        // 2026-09-07: "option only on direct export and automatic on delete
+        // with export first"): a checkbox that names its own zip-only
+        // constraint, defaults to checked (the edits exist nowhere else — the
+        // thing they would most regret losing), suppressed entirely when no
+        // font of this source is Customized. The names in the hint are the
+        // disclosure: which of your fonts ride along.
+        // Read off the same stamp the source detail's Customized column uses,
+        // so this list and that column can never disagree.
+        let _custNames = [];
+        try {
+          const _er = await window.electronAPI.listEntriesBySource({ sourceUuid: _sfSourceOriginalUuid });
+          for (const _e of ((_er && _er.ok && _er.entries) || [])) {
+            try {
+              const _cr = await window.electronAPI.entryCustomization({ name: _e.name });
+              if (_cr && _cr.ok && _cr.known && _cr.customized) _custNames.push(_e.name);
+            } catch {}
+          }
+        } catch {}
+        const _custBox = _custNames.length ? {
+          label: _custNames.length === 1
+            ? 'Include customized font with zip archive'
+            : `Include ${_custNames.length} customized fonts with zip archive`,
+          hint: _custNames.join(', '),
+          checked: true,
+        } : null;
+        // Slot assignment: attachments first when present, customized fills
+        // whichever slot is left. The read-back below keys off the same
+        // variables, so the mapping cannot drift from itself.
+        const _box1 = _attBox || _custBox;
+        const _box2 = (_attBox && _custBox) ? _custBox : null;
         const res = await promptConfirm({
           title: `Export "${label}"`,
           message: 'A zip keeps it as one file and remembers the details you added, '
@@ -28595,14 +28875,19 @@ require(['vs/editor/editor.main'], function () {
           confirmText: 'Zip archive',
           confirmKind: 'primary',
           cancelText: 'Cancel',
-          ...(_attBox ? { checkbox: _attBox } : {}),
+          ...(_box1 ? { checkbox: _box1 } : {}),
+          ...(_box2 ? { checkbox2: _box2 } : {}),
         });
         // A checkbox turns the multi-button answer into { choice, checked }.
         // Without one it is still the bare string, so read both shapes rather
         // than assuming which arrived.
         const choice = (res && typeof res === 'object') ? res.choice : res;
         // No box means nothing to include, so the answer is false, not true.
+        // Attachments always hold slot 1 when they exist; customized reads
+        // from slot 2 exactly when both boxes rendered.
         const includeAttachments = !!(_attBox && res && typeof res === 'object' && res.checked);
+        const includeCustomized = !!(_custBox && res && typeof res === 'object'
+          && (_box2 ? res.checked2 : res.checked));
         if (choice !== 'confirm' && choice !== 'middle') { return; }
         const format = choice === 'middle' ? 'folder' : 'zip';
 
@@ -28613,7 +28898,7 @@ require(['vs/editor/editor.main'], function () {
         // 3) Export with live progress in the import-convention layout: section +
         // metric above the bar (one metric per section), current file below,
         // elapsed clock last. Sections: Reading files → Rebuilding → Compressing.
-        const r = await _sfRunSourceExport({ uuid, destDir: pick.destDir, format, label, includeAttachments });
+        const r = await _sfRunSourceExport({ uuid, destDir: pick.destDir, format, label, includeAttachments, includeCustomized });
         await _sfDeleteProgress.hide();
 
         // 4) Outcome. Errors keep the existing dialog. Success shows an in-modal
@@ -28670,6 +28955,11 @@ require(['vs/editor/editor.main'], function () {
           if (_c.links) parts.push('links');
           if (_c.attachments) {
             parts.push(_c.attachments === 1 ? '1 proof of purchase' : `${_c.attachments} proofs of purchase`);
+          }
+          // Counted by the writer, like the receipts: this is how many
+          // customized fonts actually landed in the archive ([B-311]).
+          if (_c.customized) {
+            parts.push(_c.customized === 1 ? '1 customized font' : `${_c.customized} customized fonts`);
           }
           const list = parts.length === 1 ? parts[0]
             : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
@@ -31938,7 +32228,10 @@ require(['vs/editor/editor.main'], function () {
       // export asks. Only the source modal has a user to ask; both delete paths
       // know the answer already and pass it (see their call sites), which is the
       // whole point of one parameterised process rather than three flows.
-      const _sfRunSourceExport = async ({ uuid, destDir, format, label, progress, includeAttachments = true }) => {
+      // `includeCustomized` ([B-311]) is the same kind of parameter for the
+      // same reason: the direct export has a checkbox, the delete paths pass
+      // true — that export is the last copy of edits that exist nowhere else.
+      const _sfRunSourceExport = async ({ uuid, destDir, format, label, progress, includeAttachments = true, includeCustomized = true }) => {
         let bytesDone = 0, totalBytes = 0, fileCount = 0, totalFiles = 0, phase = '', currentFile = '';
         const t0 = Date.now();
         const PHASE_LABEL = { reading: 'Reading files', reconstruct: 'Rebuilding', compress: 'Compressing' };
@@ -31977,7 +32270,8 @@ require(['vs/editor/editor.main'], function () {
         let r;
         try {
           r = await window.electronAPI.exportSourceToDownloads(
-            format ? { uuid, destDir, format, includeAttachments } : { uuid, destDir, includeAttachments });
+            format ? { uuid, destDir, format, includeAttachments, includeCustomized }
+                   : { uuid, destDir, includeAttachments, includeCustomized });
         } catch (err) {
           r = { ok: false, error: String(err && err.message || err) };
         } finally {
@@ -31990,11 +32284,12 @@ require(['vs/editor/editor.main'], function () {
         if (!requested || !sourceUuid) return true;
         if (!destDir) return false;
         try {
-          // Attachments always ride on a delete-first export. That export exists
-          // to be the LAST COPY, and a proof of purchase is the thing you would
-          // most regret losing. Stated rather than defaulted, because "the
-          // caller knows the answer" is the design.
-          const r = await _sfRunSourceExport({ uuid: sourceUuid, destDir, label, includeAttachments: true });
+          // Attachments and customized fonts always ride on a delete-first
+          // export. That export exists to be the LAST COPY: a proof of purchase
+          // is the thing you would most regret losing, and a customized font's
+          // edits exist nowhere else at all ([B-311]). Stated rather than
+          // defaulted, because "the caller knows the answer" is the design.
+          const r = await _sfRunSourceExport({ uuid: sourceUuid, destDir, label, includeAttachments: true, includeCustomized: true });
           if (!r || !r.ok) {
             promptError('Could not export source', `${(r && r.error) || 'unknown error'}\n\nNothing was deleted.`);
             return false;
@@ -33747,6 +34042,7 @@ require(['vs/editor/editor.main'], function () {
               const er = await _sfRunSourceExport({
                 uuid: src.uuid, destDir: bulkExportDir, label: src.label,
                 includeAttachments: true,   // last copy — same reason as the single-delete path
+                includeCustomized: true,    // and the edits exist nowhere else ([B-311])
                 progress: ({ labelLine }) =>
                   showProgress(step, [src.label, labelLine].filter(Boolean).join(' · ')),
               });

@@ -1573,8 +1573,12 @@ function getEntryCustomization(userData, entryName) {
   catch { return unknown; }
   if (!meta || !meta.entryUuid) return unknown;
 
+  // st.v gates the CODE the stamp came from, not the content: v2 is the
+  // empty-dir fix ([B-342]) — a stamp from the buggy diff matches its hashes
+  // perfectly and would sit wrong forever, so an old stamp recomputes once and
+  // heals. Bump on any future change to what "customized" means.
   const st = meta.customization;
-  if (!meta.contentHashDirty && meta.contentHash && st
+  if (!meta.contentHashDirty && meta.contentHash && st && st.v === 2
       && st.forHash === meta.contentHash && st.srcUuid === meta.sourceUuid) {
     return { ok: true, known: true, customized: !!st.customized, added: st.added|0,
              removed: st.removed|0, changed: st.changed|0, tracksOnly: !!st.tracksOnly, cached: true };
@@ -1587,6 +1591,7 @@ function getEntryCustomization(userData, entryName) {
       const p = path.join(entriesRoot(userData), entryName, 'meta.json');
       const m = JSON.parse(fs.readFileSync(p, 'utf8'));
       m.customization = {
+        v: 2, // diff-code version, see the cache check above ([B-342])
         customized: res.customized, tracksOnly: !!res.tracksOnly,
         added: res.added, removed: res.removed, changed: res.changed,
         forHash: m.contentHash || null, srcUuid: m.sourceUuid || null,
@@ -1627,8 +1632,19 @@ function getEntryCustomization(userData, entryName) {
 
   const cp = String(meta.candidatePath || '');
   const pfx = cp ? cp + '/' : '';
+  // ⚠️ EMPTY-DIR MARKERS ARE NOT CONTENT ([B-342]). The entry walker records an
+  // empty directory as a '<empty>' marker; the source manifest walker records
+  // nothing for it. Diffing the two verbatim made every font whose vendor
+  // ships empty effect folders read "Customized: 2 added" the moment it was
+  // imported — Ryan hit it on Volatile (empty bgndrag/ + enddrag/ in the
+  // vendor's own Proffie folder) on the first [B-311] dev pass, and a fresh
+  // copy-from-source lit up the same way. Filtered on BOTH sides so the answer
+  // cannot depend on which walker wrote which manifest. An empty folder the
+  // user adds is invisible to the marker, deliberately: no audio, no
+  // customization — and the export still carries it via the marker records.
   const src = new Map();
   for (const r of sm.records) {
+    if (!r || r.fileHash === '<empty>') continue;
     const rp = String(r.relPath || '');
     if (pfx && !rp.startsWith(pfx)) continue;
     src.set(rp.slice(pfx.length), r.fileHash);
@@ -1637,7 +1653,9 @@ function getEntryCustomization(userData, entryName) {
   // the candidate is not a plain subtree. Cannot tell.
   if (src.size === 0) return unknown;
 
-  const lib = new Map(em.records.map(r => [String(r.relPath || ''), r.fileHash]));
+  const lib = new Map(em.records
+    .filter(r => r && r.fileHash !== '<empty>')  // same rule as the source side ([B-342])
+    .map(r => [String(r.relPath || ''), r.fileHash]));
   // ⭐ TRACKS ARE THEIR OWN STATE, not an exclusion (2026-09-03:
   // "Customized (tracks only)"). Measured on a real library the day this was built:
   // 50 of 220 entries differ from their source, and 31 of those differ ONLY by

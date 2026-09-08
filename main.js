@@ -3284,7 +3284,11 @@ ipcMain.handle('dialog:selectCommonSource', async (_, { mode = 'folder' } = {}) 
   return { ok: true, filePath: result.filePaths[0] };
 });
 
-ipcMain.handle('sources:exportToDownloads', async (event, { uuid, destDir, format, includeAttachments = true } = {}) => {
+// includeCustomized ([B-311]) mirrors includeAttachments exactly: a parameter
+// of the export, defaulting to carry, turned off only by the direct-export
+// dialog's checkbox. The delete-with-export paths never pass false — that
+// export is the last copy, so everything rides.
+ipcMain.handle('sources:exportToDownloads', async (event, { uuid, destDir, format, includeAttachments = true, includeCustomized = true } = {}) => {
   try {
     const source = soundFontSources.openSource(app.getPath('userData'), uuid);
     if (!source) return { ok: false, error: `Source not found: ${uuid}` };
@@ -3321,7 +3325,7 @@ ipcMain.handle('sources:exportToDownloads', async (event, { uuid, destDir, forma
     if (result && result.format === 'zip' && result.destPath) {
       try {
         const cur = require('./soundFontCuration');
-        const payload = cur.buildForSource(app.getPath('userData'), uuid, app.getVersion(), { includeAttachments });
+        const payload = cur.buildForSource(app.getPath('userData'), uuid, app.getVersion(), { includeAttachments, includeCustomized });
         if (payload) {
           const r = await cur.injectIntoZip(result.destPath, payload, onProgress);
           if (r && r.injected && r.carried && r.carried.any) curation = r.carried;
@@ -3634,10 +3638,66 @@ ipcMain.handle('sources:finalizeStaged', async (_event, staged = {}) => {
       curation: staged.curation,
       curationTmp: staged.curationTmp,
       curationPayloadDir: staged.curationPayloadDir,
+      // This door serves the single-import review, so customized fonts wait
+      // for Add to Library like every other row ([B-311] rescope, 2026-09-08).
+      deferCustomized: true,
     });
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };
   }
+});
+
+// The strip's payload temp dir is only ever ours to remove: created by
+// stripAndRepackage as os.tmpdir()/jmt-curation-*. Anything else is refused —
+// same guard discipline as linkImport:cleanup.
+const _isCurationTmpDir = (p) => {
+  const os = require('os');
+  const pathC = require('path');
+  return !!p && pathC.basename(p).startsWith('jmt-curation-')
+    && pathC.resolve(p).startsWith(pathC.resolve(os.tmpdir()) + pathC.sep);
+};
+
+// Restore the customized fonts the review left CHECKED, at Add to Library time
+// ([B-311] rescope, 2026-09-08: "this shouldn't be put in my library until the
+// user says import and only if checked"). The payload JSON is read back off the
+// source's own meta — the sidecar was persisted there at commit — so the
+// renderer only round-trips the temp-dir handles it was handed, like the staged
+// folder door already does. The payload dir is dropped afterwards either way:
+// with the restore done, nothing owes it anything.
+ipcMain.handle('sources:restoreCustomized', async (_event, { uuid, curationTmp, curationPayloadDir, picks } = {}) => {
+  const fsr = require('fs');
+  const pathR = require('path');
+  try {
+    if (!uuid || !Array.isArray(picks)) return { ok: false, error: 'Missing uuid/picks' };
+    if (!_isCurationTmpDir(curationTmp)) return { ok: false, error: 'Not a curation temp dir' };
+    if (!curationPayloadDir
+        || !pathR.resolve(curationPayloadDir).startsWith(pathR.resolve(curationTmp) + pathR.sep)) {
+      return { ok: false, error: 'Payload dir is not inside the curation temp dir' };
+    }
+    const ud = app.getPath('userData');
+    const meta = soundFontSources.readSourceMeta(pathR.join(soundFontSources.sourcesRoot(ud), uuid));
+    const curation = meta && meta.curation;
+    if (!curation) return { ok: false, error: 'Source carries no curation' };
+    const r = await require('./soundFontCuration')
+      .restoreCustomizedEntries(ud, uuid, curation, curationPayloadDir, picks);
+    return r || { ok: false, error: 'Restore returned nothing' };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  } finally {
+    if (_isCurationTmpDir(curationTmp)) {
+      try { fsr.rmSync(curationTmp, { recursive: true, force: true }); } catch {}
+    }
+  }
+});
+
+// Drop a deferred customized payload without restoring anything: the cancel
+// path, and the commit path when every customized row was unchecked.
+ipcMain.handle('sources:discardCustomized', (_event, { curationTmp } = {}) => {
+  try {
+    if (!_isCurationTmpDir(curationTmp)) return { ok: false };
+    require('fs').rmSync(curationTmp, { recursive: true, force: true });
+    return { ok: true };
+  } catch (e) { return { ok: false, error: String(e && e.message || e) }; }
 });
 
 ipcMain.handle('sources:import', async (event, { sourcePath, originalName, metadata, forceNewSource, knownHash } = {}) => {
@@ -3653,6 +3713,11 @@ ipcMain.handle('sources:import', async (event, { sourcePath, originalName, metad
       forceNewSource,
       knownHash,
       onProgress: send,
+      // Single-import door: customized fonts ride the review as rows and are
+      // restored at Add to Library, checked rows only ([B-311], 2026-09-08).
+      // The bulk door calls finalizePreparedSource directly and keeps its
+      // eager restore — its commit already runs after the user confirmed.
+      deferCustomized: true,
     });
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };
