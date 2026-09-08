@@ -25340,9 +25340,20 @@ require(['vs/editor/editor.main'], function () {
         if (_sfImportEls.linkError) { _sfImportEls.linkError.style.display = 'none'; _sfImportEls.linkError.textContent = ''; }
         if (_sfImportEls.linkBrowserBtn) _sfImportEls.linkBrowserBtn.style.display = 'none';
         _sfShowPhase('progress');
-        if (_sfImportEls.progLabel) _sfImportEls.progLabel.textContent = auto ? 'Trying with your saved login…' : 'Waiting for your download in the browser window…';
+        // [B-332] Not "saved login" - that reads as a stored password, and the
+        // app never stores one. The truthful model is a browser's: you may
+        // still be signed in with the vendor from last time, and that session
+        // is all that exists.
+        if (_sfImportEls.progLabel) _sfImportEls.progLabel.textContent = auto ? 'Checking if you’re still signed in…' : 'Waiting for your download in the browser window…';
         _sfSetImportBar(0);
-        if (_sfImportEls.progDetail) _sfImportEls.progDetail.textContent = auto ? 'Using the login you already have with this vendor.' : 'Click the vendor Download button. We will grab it and import it automatically.';
+        // [B-332] Claim the ATTEMPT, never the outcome. The old line said
+        // "Using the login you already have with this vendor" while all the app
+        // knows is that a cookie jar exists - presence is not validity, and the
+        // vendor decides how long a session lives. The auto-hidden flow was
+        // DESIGNED to fall back to a visible sign-in (the browserShown branch
+        // below names that honestly); this line now promises only what is true
+        // either way. Same family as the never-claim-a-cause rule.
+        if (_sfImportEls.progDetail) _sfImportEls.progDetail.textContent = auto ? 'This works like a web browser: if you’re still signed in with this vendor from last time, the download starts on its own. If not, a sign-in window will open.' : 'Click the vendor Download button. We will grab it and import it automatically.';
         const startMs = Date.now();
         const fmtDur = (sec) => (window._sfFormatDuration ? window._sfFormatDuration(sec) : `${Math.round(sec)}s`);
         if (_sfImportEls.progElapsed) _sfImportEls.progElapsed.textContent = `${fmtDur(0)} elapsed`;
