@@ -12213,6 +12213,32 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     if (c) { const n = g.rows.length; c.textContent = `${n} font${n === 1 ? '' : 's'}`; }
     g.el.style.display = g.rows.length === 0 ? 'none' : ''; // hide a group emptied by moves
   };
+  // Assigned by the render pass; lets the Change-creator popover build a new
+  // group through the same section builder the render uses. ([B-329])
+  let _guidedBuildGroupSection = null;
+  // Move a row to the creator NAMED, creating the group when it does not exist
+  // yet. An existing name (any case) reuses its group instead of duplicating.
+  const _guidedMoveRowToVendor = (rowObj, vendorName) => {
+    const key = String(vendorName || '').trim();
+    if (!key) return;
+    let g = _guidedGroups.find(x => (x.vendor || '').toLowerCase() === key.toLowerCase());
+    if (!g) {
+      g = { key: key.toLowerCase(), vendor: key, website: '', rows: [] };
+      // Same order the render keeps: alphabetical, __none__ last.
+      const noneIdx = _guidedGroups.findIndex(x => x.key === '__none__');
+      let idx = _guidedGroups.findIndex(x => x.key !== '__none__' && (x.vendor || '').localeCompare(key) > 0);
+      if (idx < 0) idx = noneIdx >= 0 ? noneIdx : _guidedGroups.length;
+      _guidedGroups.splice(idx, 0, g);
+      if (_guidedBuildGroupSection) {
+        const sec = _guidedBuildGroupSection(g);
+        const nextG = _guidedGroups[idx + 1];
+        const before = (nextG && nextG.el) || document.getElementById('sf-guided-tracks');
+        if (before && before.parentNode) before.parentNode.insertBefore(sec, before);
+        else document.getElementById('sf-bulk-guided-list')?.appendChild(sec);
+      }
+    }
+    _guidedMoveRow(rowObj, g);
+  };
   const _guidedMoveRow = (rowObj, targetG) => {
     if (!rowObj || !targetG || rowObj.group === targetG) return;
     const fromG = rowObj.group;
@@ -12239,11 +12265,38 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       menu.appendChild(item);
     }
     if (!menu.children.length) { const it = document.createElement('div'); it.className = 'preset-ctx-item'; it.style.opacity = '0.6'; it.textContent = 'No other creators'; menu.appendChild(it); }
+    // [B-329] Type a creator that does not exist yet. The old menu offered only
+    // existing creators, which was guaranteed empty on the fresh library that
+    // needs a typed name most. Enter commits; an existing name (any case)
+    // moves the row to that group instead of duplicating it. The group is
+    // created through the render's own section builder, so it behaves exactly
+    // like one that was there from the start.
+    const _ncRow = document.createElement('div');
+    _ncRow.className = 'preset-ctx-item';
+    _ncRow.style.cursor = 'default';
+    const _ncInput = document.createElement('input');
+    _ncInput.type = 'text';
+    _ncInput.placeholder = 'New creator…';
+    _ncInput.setAttribute('list', 'sf-review-vendor-list');
+    _ncInput.style.cssText = 'width:170px;font-size:0.75rem;color:inherit;background:transparent;border:1px solid var(--c-border);border-radius:3px;padding:2px 6px;outline:none;';
+    _ncRow.addEventListener('mousedown', (ev) => ev.stopPropagation());
+    _ncInput.addEventListener('keydown', (ev) => {
+      ev.stopPropagation();
+      if (ev.key === 'Escape') { menu.style.display = 'none'; menu.style.minWidth = ''; return; }
+      if (ev.key !== 'Enter') return;
+      const typed = _ncInput.value.trim();
+      if (!typed) return;
+      menu.style.display = 'none'; menu.style.minWidth = '';
+      _guidedMoveRowToVendor(rowObj, typed);
+    });
+    _ncRow.appendChild(_ncInput);
+    menu.appendChild(_ncRow);
     const r = anchorEl.getBoundingClientRect();
     const mw = menu.offsetWidth || 200;
     menu.style.left = Math.min(r.left, window.innerWidth - mw - 8) + 'px';
     menu.style.top = Math.min(r.bottom + 2, window.innerHeight - 60) + 'px';
     menu.style.display = 'block';
+    _ncInput.focus();
   };
 
   // After enrichment completes, reorganize the flat rows into collapsible vendor
@@ -12285,7 +12338,10 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     // (2026-09-07). Fonts only - checked TRACKS do not rescue collapsed font
     // groups; the tracks section is its own world below.
     const _anyFontChecked = _guidedGroups.some(gg => gg.rows.some(r => r.checkbox && r.checkbox.checked));
-    for (const g of _guidedGroups) {
+    // Section builder, shared by this render and by Change creator's typed
+    // new-creator path ([B-329]), so a group created mid-review is built by the
+    // SAME code as a rendered one rather than a parallel copy that drifts.
+    _guidedBuildGroupSection = (g) => {
       const isNone = g.key === '__none__';
       const count = g.rows.length;
       // A creator whose every font is skipped starts COLLAPSED. Nothing in it is
@@ -12356,7 +12412,10 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       sec.querySelector('.g-group-toggle').addEventListener('click', () => sec.classList.toggle('collapsed'));
       g.vendorInput.addEventListener('input', () => { g.vendor = g.vendorInput.value.trim(); _updateGuidedGroupReview(g); });
       _updateGuidedGroupReview(g);
-      els.guidedList.appendChild(sec);
+      return sec;
+    };
+    for (const g of _guidedGroups) {
+      els.guidedList.appendChild(_guidedBuildGroupSection(g));
     }
     // ── Shared tracks ──────────────────────────────────────────────────────
     // Every track, shown the way every font is shown: the ones you already have
