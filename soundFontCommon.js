@@ -296,7 +296,7 @@ function writeCommonReadme(userData, uuid, destDir) {
     '',
     `Voice pack version : ${_versionLine(ver)}`,
     `Files              : ${fileCount}  (${_mb(totalBytes)})`,
-    `Written to card    : ${new Date().toISOString().slice(0, 10)}`,
+    `Written to card    : ${require('./localDate').localDateString()}`,
     '',
     'This file is ignored by ProffieOS. Deleting it is safe.',
   ];

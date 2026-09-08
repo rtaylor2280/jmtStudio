@@ -1691,7 +1691,7 @@ ipcMain.handle('soundFonts:importFont', async (event, { sourcePath, name, metada
       name,
       author: (metadata && metadata.author) || '',
       purchased: !!(metadata && metadata.purchased),
-      acquisitionDate: (metadata && metadata.acquisitionDate) || new Date().toISOString().slice(0, 10),
+      acquisitionDate: (metadata && metadata.acquisitionDate) || require('./localDate').localDateString(), // [B-339] local, not UTC
       description: (metadata && metadata.description) || '',
       linkedStyleLibraryEntry: (metadata && metadata.linkedStyleLibraryEntry) || null,
       importedAt: new Date().toISOString(),

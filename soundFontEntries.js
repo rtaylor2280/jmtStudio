@@ -445,7 +445,7 @@ async function createEntry({ userData, sourceUuid, candidate, name, metadata, on
       acquisitionDate: (metadata && metadata.acquisitionDate)
         || (source.meta && source.meta.sourceFileDate)
         || (source.meta && source.meta.importedAt && source.meta.importedAt.slice(0, 10))
-        || new Date().toISOString().slice(0, 10),
+        || require('./localDate').localDateString(), // [B-339] local, not UTC
       description: initialDescription,
       demoUrl: (metadata && metadata.demoUrl) || '',
       userNotes: (metadata && metadata.userNotes) || '',
@@ -651,7 +651,7 @@ async function duplicateEntry({ userData, sourceName, newName, mode = 'current' 
     const metadata = {
       tags: Array.isArray(srcMeta.tags) ? srcMeta.tags.slice() : [],
       author: srcMeta.author || '',
-      acquisitionDate: srcMeta.acquisitionDate || new Date().toISOString().slice(0, 10),
+      acquisitionDate: srcMeta.acquisitionDate || require('./localDate').localDateString(), // [B-339] local, not UTC
       description: srcMeta.description || '',
       userNotes: srcMeta.userNotes || '',
       purchased: !!srcMeta.purchased,

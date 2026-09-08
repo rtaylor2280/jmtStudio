@@ -1022,7 +1022,7 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
           let sfd = null, sfm = null;
           try {
             if (inputMtimeMs > 0) {
-              sfd = new Date(inputMtimeMs).toISOString().slice(0, 10);
+              sfd = require('./localDate').localDateString(inputMtimeMs); // [B-339] local, not UTC
               sfm = inputMtimeMs;
             }
           } catch {}
@@ -1043,7 +1043,7 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
     let sourceFileMtimeMs = null;
     try {
       if (inputMtimeMs > 0) {
-        sourceFileDate = new Date(inputMtimeMs).toISOString().slice(0, 10);
+        sourceFileDate = require('./localDate').localDateString(inputMtimeMs); // [B-339] local, not UTC
         sourceFileMtimeMs = inputMtimeMs;
       }
     } catch {}

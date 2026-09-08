@@ -6863,6 +6863,18 @@
 // ── Environment ────────────────────────────────────────
 const isElectron = !!window.electronAPI;
 
+// Date-only string in LOCAL time (YYYY-MM-DD). ([B-339]) The old
+// toISOString().slice(0, 10) idiom is the UTC date, and after 6 PM Mountain
+// that is TOMORROW - an evening import read "Acquired: September 8" on the
+// 7th. _sfFormatDate already parses date-only strings as local midnight, so a
+// local stamp round-trips exactly. Mirrors localDate.js on the main side.
+function _jmtLocalDateString(input) {
+  const d = input instanceof Date ? input : (input != null ? new Date(input) : new Date());
+  if (Number.isNaN(d.getTime())) return null;
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
 // ── Theme ──────────────────────────────────────────────
 function applyTheme(mode) {
   localStorage.setItem('jmt-theme', mode);
@@ -12141,7 +12153,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     // real acquisition date, so today (import day) is the sensible library date.
     // Pre-filling also means the field isn't a bare mm/dd/yyyy placeholder.
     const dateInput = row.querySelector('.g-date');
-    dateInput.value = new Date().toISOString().slice(0, 10);
+    dateInput.value = _jmtLocalDateString();
     // Corrupted fonts (from the card's already-run health scan — reused, not
     // recomputed) start UNCHECKED with a persistent note. The user can knowingly
     // re-check to import anyway; the note stays either way.
@@ -14166,7 +14178,7 @@ document.getElementById('modal-create-styles').addEventListener('click', e => {
 });
 document.getElementById('btn-create-styles-blank').addEventListener('click', async () => {
   document.getElementById('modal-create-styles').classList.remove('active');
-  const today = new Date().toISOString().slice(0, 10);
+  const today = _jmtLocalDateString();
   const content = _buildStyleLibraryJmtHeader(today) + '\n\n';
   await window.electronAPI.writeStylesFile(content);
   await _activateStylesLibrary(content);
@@ -14180,7 +14192,7 @@ document.getElementById('btn-create-styles-import').addEventListener('click', as
   _collapseEditorContent();
   // Apply JMT header + section structure on import
   if (_stylesEditorInstance) {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = _jmtLocalDateString();
     const structured = _applyStyleLibraryStructure(_stylesEditorInstance.getValue(), today);
     _stylesEditorInstance.setValue(structured);
     _setStylesDirty(true);
@@ -15056,7 +15068,7 @@ const _SL_PIXEL_RELAY_SYMBOLS       = ['PixelRelay'];
 const _SL_PIXEL_RELAY_SYMBOL_RE     = new RegExp(`\\b(?:${_SL_PIXEL_RELAY_SYMBOLS.join('|')})\\b`);
 
 function _buildStyleLibraryJmtHeader(createdDate) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = _jmtLocalDateString();
   const lines = [
     '// ============================================================',
     '// Style Library  —  JMT Studio (jmtfoundry.com)',
@@ -15220,7 +15232,7 @@ window.saveStylesFile = async function() {
   const { content: sorted, conflicts: sortConflicts } = _sortHelpersFirst(_stylesEditorInstance.getValue());
   _conflictTemplateNames = sortConflicts;
   // Rebuild section structure and refresh @jmt:updated on every save
-  const createdDate = _extractStyleLibraryCreatedDate(sorted) || new Date().toISOString().slice(0, 10);
+  const createdDate = _extractStyleLibraryCreatedDate(sorted) || _jmtLocalDateString();
   const structured = _applyStyleLibraryStructure(sorted, createdDate);
   if (structured !== _stylesEditorInstance.getValue()) {
     _stylesEditorInstance.setValue(structured);
@@ -24518,7 +24530,7 @@ require(['vs/editor/editor.main'], function () {
                 || _sfImport.curation.provenance.sourceFileDate)) || null;
           _sfImportEls.purchaseDate.value = _provDate
             || _sfImport.sourceFileDate
-            || new Date().toISOString().slice(0, 10);
+            || _jmtLocalDateString();
         }
         // ⚠️ THE SIDECAR OVERRIDE GOES HERE, AFTER the detector branches and the
         // date default, because every one of them assigns unconditionally — an
@@ -24953,14 +24965,14 @@ require(['vs/editor/editor.main'], function () {
           const src = _sfAllSourcesByUuid[_sfImport.uuid];
           const sm = (src && src.meta) || {};
           entryAuthor = sm.vendor || null;
-          purchaseDate = sm.purchaseDate || new Date().toISOString().slice(0, 10);
+          purchaseDate = sm.purchaseDate || _jmtLocalDateString();
           purchased = sm.purchased !== false;
           userBundle = sm.bundleName || null;
         } else {
           entryAuthor = (_sfImportEls.vendor?.value || '').trim() || null;
           const entryWebsite = (_sfImportEls.website?.value || '').trim() || null;
           const entryLink = (_sfImportEls.link?.value || '').trim() || null;
-          purchaseDate = _sfImportEls.purchaseDate?.value || new Date().toISOString().slice(0, 10);
+          purchaseDate = _sfImportEls.purchaseDate?.value || _jmtLocalDateString();
           purchased = !(_sfImportEls.purchased && _sfImportEls.purchased.checked);
           userBundle = (_sfImportEls.bundleNameInput?.value || '').trim() || null;
           const sourceNotes = (_sfImportEls.notes?.value || '').trim() || '';
@@ -26528,7 +26540,7 @@ require(['vs/editor/editor.main'], function () {
       });
       _sfEntryDetailEls.acquiredEditBtn?.addEventListener('click', () => {
         if (!_sfDetailEdit) return;
-        _sfStartFieldEdit(_sfEntryDetailEls.acquiredDisplay, _sfEntryDetailEls.acquiredInput, _sfEntryDetailEls.acquiredEditBtn, _sfEntryDetailEls.acquiredConfirmBtn, _sfDetailEdit.acquisitionDate || new Date().toISOString().slice(0, 10));
+        _sfStartFieldEdit(_sfEntryDetailEls.acquiredDisplay, _sfEntryDetailEls.acquiredInput, _sfEntryDetailEls.acquiredEditBtn, _sfEntryDetailEls.acquiredConfirmBtn, _sfDetailEdit.acquisitionDate || _jmtLocalDateString());
       });
       _sfEntryDetailEls.acquiredConfirmBtn?.addEventListener('click', () => {
         if (!_sfDetailEdit) return;
@@ -27805,7 +27817,7 @@ require(['vs/editor/editor.main'], function () {
       });
       _sfSourceDetailEls.acquiredEditBtn?.addEventListener('click', () => {
         if (!_sfSourceEdit) return;
-        _sfStartFieldEdit(_sfSourceDetailEls.acquiredDisplay, _sfSourceDetailEls.acquiredInput, _sfSourceDetailEls.acquiredEditBtn, _sfSourceDetailEls.acquiredConfirmBtn, _sfSourceEdit.purchaseDate || new Date().toISOString().slice(0, 10));
+        _sfStartFieldEdit(_sfSourceDetailEls.acquiredDisplay, _sfSourceDetailEls.acquiredInput, _sfSourceDetailEls.acquiredEditBtn, _sfSourceDetailEls.acquiredConfirmBtn, _sfSourceEdit.purchaseDate || _jmtLocalDateString());
       });
       _sfSourceDetailEls.acquiredConfirmBtn?.addEventListener('click', () => {
         if (!_sfSourceEdit) return;
