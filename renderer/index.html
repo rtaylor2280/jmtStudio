@@ -10098,7 +10098,9 @@ async function _sdImportFontsFromCard() {
   const sdOv = document.getElementById('sd-report-overlay');
   const impModal = document.getElementById('modal-sf-bulk-import');
   sdOv.classList.remove('active');
-  if (impModal && window.MutationObserver) {
+  // [B-337] The observer that restores the card browser only arms for the
+  // Config Manager context; an SFL-launched import lands back in the library.
+  if (_sdReport.context !== 'sfl' && impModal && window.MutationObserver) {
     const obs = new MutationObserver(() => {
       if (!impModal.classList.contains('active')) { obs.disconnect(); sdOv.classList.add('active'); }
     });
@@ -10411,7 +10413,10 @@ function _sdImportTracksFolder(entry) {
   }
   const sdOv = document.getElementById('sd-report-overlay');
   if (sdOv) sdOv.classList.remove('active');
-  window._sfReturnToSdBrowser = true;
+  // [B-337] Return-to-card is Config Manager behavior only. From the Sound Font
+  // Library, the import should land the user back in the library, where the
+  // result lives - not reopen the card.
+  window._sfReturnToSdBrowser = (_sdReport.context !== 'sfl');
   window._sfTracksImportFromPath(entry.path, entry.name);
 }
 function _sdImportFolderToLibrary(entry) {
@@ -10428,7 +10433,8 @@ function _sdImportFolderToLibrary(entry) {
   // browser back UNDER the dup dialog. This flag is only consumed at the real
   // close point (_sfCloseImport), and the dup "Open existing" path clears it so
   // we don't cover the source-detail view it navigates to.
-  window._sfReturnToSdBrowser = true;
+  // [B-337] From the SFL the flag stays false: land in the library, not the card.
+  window._sfReturnToSdBrowser = (_sdReport.context !== 'sfl');
   window._sfImportSourceFromPath(entry.path);
 }
 // Import the multi-selected folders. One folder is just the single-folder path;
@@ -10450,7 +10456,8 @@ function _sdImportSelected() {
   const sdOv = document.getElementById('sd-report-overlay');
   const impModal = document.getElementById('modal-sf-bulk-import');
   sdOv.classList.remove('active');
-  if (impModal && window.MutationObserver) {
+  // [B-337] Same context gate as the whole-card path above.
+  if (_sdReport.context !== 'sfl' && impModal && window.MutationObserver) {
     const obs = new MutationObserver(() => { if (!impModal.classList.contains('active')) { obs.disconnect(); sdOv.classList.add('active'); } });
     obs.observe(impModal, { attributes: true, attributeFilter: ['class'] });
   }
@@ -12269,6 +12276,15 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       return a.vendor.localeCompare(b.vendor);
     });
     els.guidedList.innerHTML = '';
+    // [B-331] The collapse rule only earns its keep as CONTRAST: skipped groups
+    // fold away so the checked ones stand out. When NO font anywhere is checked
+    // (a fully-owned re-scan), folding every group leaves two shut headers and
+    // hides exactly the rows the user came to read - why is everything skipped,
+    // what matched what. So the degenerate case expands everything: "when
+    // nothing at all is checked for the entire review, we should expand all"
+    // (2026-09-07). Fonts only - checked TRACKS do not rescue collapsed font
+    // groups; the tracks section is its own world below.
+    const _anyFontChecked = _guidedGroups.some(gg => gg.rows.some(r => r.checkbox && r.checkbox.checked));
     for (const g of _guidedGroups) {
       const isNone = g.key === '__none__';
       const count = g.rows.length;
@@ -12284,7 +12300,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       // Import button asks, so a group collapses exactly when it contributes
       // nothing to the count. A row without a checkbox keeps its group open —
       // over-expanding is the safe direction when the state is unreadable.
-      const allSkipped = count > 0 && g.rows.every(r => r.checkbox && !r.checkbox.checked);
+      const allSkipped = _anyFontChecked && count > 0 && g.rows.every(r => r.checkbox && !r.checkbox.checked);
       const sec = document.createElement('div');
       sec.className = 'g-group' + (isNone ? ' g-group-none' : '') + (allSkipped ? ' collapsed' : '');
       sec.innerHTML =
