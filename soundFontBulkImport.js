@@ -766,7 +766,7 @@ async function analyzeBulkImport({ plan, userData, corruptFonts }, callbacks = {
           if (e.isFile() && /\.wav$/i.test(e.name)) wavs.push(path.join(t.absPath, e.name));
         }
       }
-      let tNew = 0, tOwned = 0, done = 0;
+      let tNew = 0, tOwned = 0, tLibOwned = 0, tBatchDup = 0, done = 0;
       const seen = new Map();
       // Per-track detail, not just a count. The review screen shows every track the
       // same way it shows every font: the ones you already have are listed and
@@ -794,7 +794,15 @@ async function analyzeBulkImport({ plan, userData, corruptFonts }, callbacks = {
           owned = true; matchName = seen.get(h); ownedIn = 'batch';
         }
         if (h && !seen.has(h)) seen.set(h, path.basename(w));
-        if (owned) tOwned++; else tNew++;
+        // ⚠️ THE COUNT SPLITS WHERE THE ROWS ALREADY DID ([B-349]). `owned`
+        // lumped library hits and same-card twins into one number the UI
+        // labelled "already in your library" — against Ryan's 3-track library
+        // it claimed 42. The per-row ownedIn distinction existed ([B-246]);
+        // only the counter kept telling the lie.
+        if (owned) {
+          tOwned++;
+          if (ownedIn === 'library') tLibOwned++; else tBatchDup++;
+        } else tNew++;
         // ⚠️ `ownedIn` EXISTS BECAUSE `matchName` MEANS TWO DIFFERENT THINGS, and the
         // UI had been showing both as "Already in your library as X" — which is a lie
         // for the batch case, where X is a sibling on the same card that the library
@@ -820,7 +828,7 @@ async function analyzeBulkImport({ plan, userData, corruptFonts }, callbacks = {
         if (group.length < 2) continue;
         for (const it of group) it.dupGroup = h;
       }
-      tracks = { total: wavs.length, new: tNew, owned: tOwned, items };
+      tracks = { total: wavs.length, new: tNew, owned: tOwned, libOwned: tLibOwned, batchDup: tBatchDup, items };
     }
   } catch {}
 
