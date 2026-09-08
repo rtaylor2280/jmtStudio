@@ -272,6 +272,21 @@ function buildIndex(userData) {
     }
   }
 
+  // Commons ([B-327]): the third bucket joins the index, so a font can link
+  // against a voicepack's wavs and a common import can link against fonts.
+  // Manifests are written by recomputeCommonContentHash and may lag an edit
+  // until its dirty flag resolves - safe, because findExisting re-hashes any
+  // candidate before handing it out as a link target.
+  const commonsDir = path.join(fhRoot, 'commons');
+  let commonFiles = [];
+  try { commonFiles = fs.readdirSync(commonsDir).filter(f => f.endsWith('.json')); } catch {}
+  for (const f of commonFiles) {
+    const uuid = f.replace(/\.json$/, '');
+    const root = path.join(soundFontsRoot(userData), 'common', uuid, 'files');
+    if (!fs.existsSync(root)) continue;
+    _addManifestRecords(byHash, path.join(commonsDir, f), root);
+  }
+
   const pool = ensurePoolIndex(userData);
   const pRoot = poolRoot(userData);
   for (const h of Object.keys(pool.files)) {

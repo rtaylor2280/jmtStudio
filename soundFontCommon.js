@@ -318,69 +318,121 @@ function writeCommonReadme(userData, uuid, destDir) {
   }
 }
 
-// Returns { ok: true, uuid, name } on success, { ok: false, error } on failure.
-async function importCommonFromFolder(userData, folderPath, name) {
-  if (!folderPath || !fs.existsSync(folderPath)) {
-    return { ok: false, error: 'Source folder not found' };
+// ── Source-backed common import ([B-327], 2026-09-07) ─────────────────────
+// A common is the same two-layer pair a font is: an immutable SOURCE stored
+// like any other import (dedup at the door, provenance, cross-linked against
+// the library), with an editable working copy on top in common/<uuid>/files/.
+// "Just because they get marked to live on the side car and use common folder
+// controls, doesn't mean they have to be truly different than any other
+// source." The working copy's files are hardlinks into the source tree, so a
+// fresh common costs only what the library does not already hold.
+//
+// ⚠️ ORDER IS LOAD-BEARING ([B-334]): the source is deduped BEFORE the working
+// copy links to it, so the links land on canonical names nothing rewrites.
+//
+// The shared body behind both routes. `sourcePath` is the picked folder OR the
+// picked zip; importSource treats either as a source. Returns
+// { ok, uuid, name, sourceUuid, savings } where savings carries what the
+// close-out sentence needs (archiveBytes / contentBytes / crossLinked).
+async function _importCommonAsSource(userData, sourcePath, name) {
+  if (!sourcePath || !fs.existsSync(sourcePath)) {
+    return { ok: false, error: 'Source not found' };
   }
   const cleanName = String(name || '').trim();
   if (!cleanName) return { ok: false, error: 'Name is required' };
   if (nameInUse(userData, cleanName)) {
     return { ok: false, error: `A common folder named "${cleanName}" already exists` };
   }
-  const sourceDir = _findCommonSubfolder(folderPath) || folderPath;
-  // Sanity check: at least one .wav has to exist somewhere in the chosen
-  // source dir, otherwise this isn't a sound asset folder at all.
-  if (!_hasAnyWav(sourceDir)) {
-    return { ok: false, error: 'No .wav files found in the picked folder' };
+  const S = require('./soundFontSources');
+  const imp = await S.importSource({
+    userData, sourcePath, originalName: path.basename(sourcePath), metadata: {},
+  });
+  if (!imp || !imp.ok) return { ok: false, error: (imp && imp.error) || 'Source import failed' };
+  const sourceUuid = imp.uuid;
+  // A duplicate archive is not an error here: the same zip may already be in
+  // the library (even as a font source). Commons and fonts sharing one source
+  // is the point of the model - reuse it and only build the working copy.
+  let dedupSaved = 0;
+  if (!imp.isDuplicate) {
+    // [B-334]: canonicalize the source BEFORE anything links to it.
+    try {
+      await S.ensureSourceManifest(userData, sourceUuid, () => {});
+      const dd = await S.dedupeSource(userData, sourceUuid, () => {});
+      if (dd && dd.deduped && dd.savedBytes) dedupSaved = dd.savedBytes;
+    } catch {}
   }
+  // Find the common content INSIDE the stored source tree (the same
+  // common-subfolder detection the old import ran on the picked folder), and
+  // require at least one wav, or this was never a sound asset import.
+  const srcObj = S.openSource(userData, sourceUuid);
+  if (!srcObj) return { ok: false, error: 'Stored source could not be opened' };
+  const treeRoot = path.join(sourcesRoot_(userData), sourceUuid, 'source');
+  const contentDir = _findCommonSubfolder(treeRoot) || treeRoot;
+  if (!_hasAnyWav(contentDir)) {
+    // A fresh source with no wavs is useless - reclaim it rather than leaving
+    // an orphan for the sweep. A REUSED (duplicate) source is someone else's
+    // and is left alone.
+    if (!imp.isDuplicate) { try { S.deleteSource(userData, sourceUuid); } catch {} }
+    return { ok: false, error: 'No .wav files found in the picked source' };
+  }
+  const subPath = path.relative(treeRoot, contentDir).replace(/\\/g, '/');
   ensureCommonRoot(userData);
   const uuid = crypto.randomUUID();
   const uuidDir = path.join(commonRoot(userData), uuid);
   const filesDir = path.join(uuidDir, 'files');
   try {
     fs.mkdirSync(filesDir, { recursive: true });
-    _copyDirRecursive(sourceDir, filesDir);
+    // POINTERS, NOT A SECOND COPY: the working copy hardlinks into the
+    // (already canonical) source tree. Rename or delete a name here and the
+    // source keeps its own; edit paths replace files, never write in place,
+    // so the pool is never written through.
+    await srcObj.extractTo(subPath, filesDir, null, { link: true });
     const meta = {
       schemaVersion: 1,
       uuid,
       name: cleanName,
       createdAt: new Date().toISOString(),
-      importedFrom: path.basename(folderPath),
+      importedFrom: path.basename(sourcePath),
+      // The tie that keeps the source alive: cleanupOrphanSources counts
+      // common references the same way it counts library entries. ([B-327])
+      sourceUuid,
+      // Where in the source tree this working copy came from, so a future
+      // compare/reset knows its baseline.
+      sourceSubPath: subPath,
     };
     fs.writeFileSync(path.join(uuidDir, 'meta.json'), JSON.stringify(meta, null, 2));
-    // Stamp content hash at creation so surveyMerge / exportBackup
-    // skip the per-item walk for this common on future calls.
     try { recomputeCommonContentHash(userData, uuid); } catch {}
-    return { ok: true, uuid, name: cleanName };
+    return {
+      ok: true, uuid, name: cleanName, sourceUuid,
+      savings: {
+        archiveBytes: imp.archiveBytes || 0,
+        contentBytes: imp.contentBytes || 0,
+        crossLinked: imp.crossLinked || null,
+        dedupSaved,
+        reusedSource: !!imp.isDuplicate,
+      },
+    };
   } catch (err) {
     _cleanupPartial(uuidDir);
     return { ok: false, error: `Import failed: ${err.message}` };
   }
 }
+// The sources root without importing soundFontSources at module load (the two
+// modules require each other lazily).
+function sourcesRoot_(userData) {
+  return path.join(userData, 'soundFonts', 'sources');
+}
 
-// Import a common folder from a zip file. Extracts to a temp dir first,
-// then defers to importCommonFromFolder so the same common-subfolder
-// detection + wav presence checks apply.
+// Returns { ok: true, uuid, name } on success, { ok: false, error } on failure.
+async function importCommonFromFolder(userData, folderPath, name) {
+  return await _importCommonAsSource(userData, folderPath, name);
+}
+
+// Import a common folder from a zip file. The zip IS the source now - its
+// bytes are the provenance identity, so no temp extraction happens outside
+// the source pipeline.
 async function importCommonFromZip(userData, zipPath, name) {
-  if (!zipPath || !fs.existsSync(zipPath)) {
-    return { ok: false, error: 'Source zip not found' };
-  }
-  const os = require('os');
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jmt-common-import-'));
-  try {
-    const zip = new StreamZip.async({ file: zipPath, skipEntryNameValidation: true });
-    try {
-      await zip.extract(null, tmpDir);
-    } finally {
-      try { await zip.close(); } catch {}
-    }
-    return await importCommonFromFolder(userData, tmpDir, name);
-  } catch (err) {
-    return { ok: false, error: `Could not read zip: ${err.message}` };
-  } finally {
-    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
-  }
+  return await _importCommonAsSource(userData, zipPath, name);
 }
 
 function getCommon(userData, uuid) {
@@ -493,7 +545,11 @@ function duplicateCommon(userData, sourceUuid, newName) {
   const newDir = path.join(commonRoot(userData), newUuid);
   try {
     fs.mkdirSync(newDir, { recursive: true });
-    _copyDirRecursive(path.join(srcDir, 'files'), path.join(newDir, 'files'));
+    // POINTERS, NOT A SECOND COPY ([B-327]): the duplicate's names hardlink
+    // the original's files. Duplicating a 20 MB voicepack costs directory
+    // entries; edits on either side replace files (never write in place), so
+    // the two diverge safely from that moment.
+    _linkOrCopyDirRecursive(path.join(srcDir, 'files'), path.join(newDir, 'files'));
     const sourceMeta = _readMeta(srcDir) || {};
     const meta = {
       schemaVersion: 1,
@@ -501,6 +557,9 @@ function duplicateCommon(userData, sourceUuid, newName) {
       name: cleanName,
       createdAt: new Date().toISOString(),
       importedFrom: sourceMeta.name ? `Duplicate of ${sourceMeta.name}` : 'Duplicate',
+      // The duplicate references the same immutable source as the original,
+      // so the source survives whichever of the two is deleted first.
+      ...(sourceMeta.sourceUuid ? { sourceUuid: sourceMeta.sourceUuid, sourceSubPath: sourceMeta.sourceSubPath } : {}),
     };
     fs.writeFileSync(path.join(newDir, 'meta.json'), JSON.stringify(meta, null, 2));
     try { recomputeCommonContentHash(userData, newUuid); } catch {}
@@ -511,12 +570,34 @@ function duplicateCommon(userData, sourceUuid, newName) {
   }
 }
 
+// Link-first recursive copy: hardlink each file (same-volume, the normal
+// case), fall back to a real copy when the filesystem refuses. Used by
+// duplicateCommon; never writes through an existing name.
+function _linkOrCopyDirRecursive(srcDir, destDir) {
+  fs.mkdirSync(destDir, { recursive: true });
+  for (const e of fs.readdirSync(srcDir, { withFileTypes: true })) {
+    const s = path.join(srcDir, e.name);
+    const d = path.join(destDir, e.name);
+    if (e.isDirectory()) _linkOrCopyDirRecursive(s, d);
+    else if (e.isFile()) {
+      let linked = false;
+      try { fs.linkSync(s, d); linked = true; } catch { linked = false; }
+      if (!linked) fs.copyFileSync(s, d);
+    }
+  }
+}
+
 function deleteCommon(userData, uuid) {
   if (!uuid) return { ok: false, error: 'Missing uuid' };
   const dir = path.join(commonRoot(userData), uuid);
   if (!fs.existsSync(dir)) return { ok: true, deleted: false };
   try {
     fs.rmSync(dir, { recursive: true, force: true });
+    // The per-file manifest goes with it ([B-327]) - a manifest surviving its
+    // common is the receipt-nobody-points-at mistake the source side already
+    // fixed once. The SOURCE is deliberately left alone: cleanupOrphanSources
+    // reclaims it on the next pass if nothing else references it.
+    try { fs.rmSync(path.join(userData, 'soundFonts', '.filehashes', 'commons', `${uuid}.json`), { force: true }); } catch {}
     return { ok: true, deleted: true };
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };
@@ -644,6 +725,13 @@ function addFilesToCommon(userData, uuid, subPath, sourceFilePaths) {
   }
   const added = [];
   const failed = [];
+  // One index for the whole batch ([B-327]): each added file lands as a link
+  // when the library already holds its bytes (a wav shared with a font, or
+  // with another common), and as a copy only when genuinely novel. ingestFile
+  // writes via temp-name + rename, so nothing is ever written through an
+  // existing name. The variant-rename collision rule is unchanged.
+  let _idx = null;
+  try { _idx = require('./soundFontContentIndex').buildIndex(userData); } catch { _idx = null; }
   for (const src of sourceFilePaths) {
     try {
       if (!fs.existsSync(src) || !fs.statSync(src).isFile()) {
@@ -652,7 +740,11 @@ function addFilesToCommon(userData, uuid, subPath, sourceFilePaths) {
       }
       const finalName = _proffieVariantName(destDir, path.basename(src));
       const dest = path.join(destDir, finalName);
-      fs.copyFileSync(src, dest);
+      let done = false;
+      if (_idx) {
+        try { const r = _idx.ingest({ srcAbs: src, destAbs: dest }); done = !!(r && r.ok); } catch { done = false; }
+      }
+      if (!done) fs.copyFileSync(src, dest);
       added.push(path.basename(dest));
     } catch (err) {
       failed.push({ source: src, error: String(err && err.message || err) });
@@ -774,7 +866,12 @@ function copyCommonFiles(userData, sourceUuid, sourcePaths, destUuid, destSubPat
       }
       const finalName = _proffieVariantName(destDir, path.basename(srcAbs));
       const destPath = path.join(destDir, finalName);
-      fs.copyFileSync(srcAbs, destPath);
+      // Paste between commons is a new NAME, not new bytes ([B-327]): the
+      // source of the copy is already a library file, so link it directly and
+      // fall back to a real copy only when the filesystem refuses.
+      let linked = false;
+      try { fs.linkSync(srcAbs, destPath); linked = true; } catch { linked = false; }
+      if (!linked) fs.copyFileSync(srcAbs, destPath);
       const rel = path.relative(destFilesRoot, destPath).replace(/\\/g, '/');
       added.push(rel);
     } catch (err) {
@@ -1216,6 +1313,18 @@ function recomputeCommonContentHash(userData, uuid) {
   const { hashItemDir } = require('./soundFontFileHash');
   const hash = hashItemDir(commonDir);
   if (!hash) return null;
+  // Per-file manifest beside the sources' and entries' ([B-327]): this is what
+  // lets buildIndex offer common content as link targets, so fonts and commons
+  // pool against each other in both directions. Refreshed here because this
+  // helper already runs at creation and whenever edits resolve their dirty
+  // flag - the same lifecycle the tree hash rides. A stale row is safe:
+  // findExisting re-hashes before ever handing out a link target.
+  try {
+    const fh = require('./soundFontFileHash');
+    const recs = fh.collectFileRecords(path.join(commonDir, 'files')) || [];
+    fh.writeFileHashManifest(
+      path.join(userData, 'soundFonts', '.filehashes', 'commons', `${uuid}.json`), recs);
+  } catch {}
   const { fileCount, totalBytes } = _walkCommonContentSignals(commonDir);
   meta.contentHash = hash;
   meta.contentFileCount = fileCount;

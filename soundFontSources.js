@@ -415,6 +415,23 @@ function cleanupOrphanSources(userData) {
       } catch {}
     }
   }
+  // COMMONS ARE OWNERS TOO ([B-327]). A source-backed common references its
+  // source exactly the way an entry does; without this, every voicepack's
+  // source would read as entry-less and be swept on the next library render -
+  // the sweep taking the provenance out from under a living common.
+  const commonsRoot = path.join(userData, 'soundFonts', 'common');
+  if (fs.existsSync(commonsRoot)) {
+    let commonNames = [];
+    try { commonNames = fs.readdirSync(commonsRoot); } catch {}
+    for (const cname of commonNames) {
+      const metaPath = path.join(commonsRoot, cname, 'meta.json');
+      if (!fs.existsSync(metaPath)) continue;
+      try {
+        const m = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+        if (m && m.sourceUuid) referencedUuids.add(m.sourceUuid);
+      } catch {}
+    }
+  }
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
     const uuid = entry.name;

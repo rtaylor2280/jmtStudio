@@ -4736,7 +4736,7 @@
       <div class="sf-common-sidecar" id="sf-common-sidecar">
         <div class="sf-common-inner">
           <div class="sf-common-header">
-            <span class="sf-common-title" id="sf-common-title">Common Folders</span>
+            <span class="sf-common-title" id="sf-common-title">Common Folder</span>
             <button class="btn-neutral sf-common-import-btn" id="btn-sf-common-import" title="Import a voicepack zip or a folder of wav files">+ Import</button>
           </div>
           <div class="sf-common-list" id="sf-common-list"></div>
@@ -21295,11 +21295,14 @@ require(['vs/editor/editor.main'], function () {
         const list = document.getElementById('sf-common-list');
         if (!list) return;
         await _sfLoadCommonGroupState();
-        // Pluralize the panel title against the current count. Empty state
-        // keeps the plural ("Common Folders") since the user is about to add
-        // — singular only when exactly one exists.
+        // Pluralize the panel title against the current count: SINGULAR at
+        // zero and one, plural only from two up, flexing back down as the
+        // count moves. (2026-09-07 ruling, reversing the old "empty keeps the
+        // plural" lean: plenty of users run the whole panel on exactly one
+        // pack, and the empty state's own copy already says "No common folder
+        // yet" - the header should agree with it.)
         const titleEl = document.getElementById('sf-common-title');
-        if (titleEl) titleEl.textContent = _sfCommons.length === 1 ? 'Common Folder' : 'Common Folders';
+        if (titleEl) titleEl.textContent = _sfCommons.length <= 1 ? 'Common Folder' : 'Common Folders';
         if (_sfCommons.length === 0) {
           list.innerHTML = `<div class="sf-common-empty">No common folder yet.<br>Import a voicepack zip or a folder of wav files to get started.</div>`;
           return;
@@ -21553,6 +21556,39 @@ require(['vs/editor/editor.main'], function () {
         // The first-common auto-check happens inside _sfRefreshCommons.
         _sfSelectedCommonUuid = res.uuid;
         await _sfRefreshCommons();
+        // ── The savings sentence, common edition ([B-327] via [B-317]) ────
+        // Same shape, anchor and gate as the font close-out: JMT Studio as the
+        // actor, started anchored on the picked zip (folders anchor on
+        // content), savings mentioned only past 10% of the start AND 5 MB.
+        // Below the gate: nothing at all - the pack appearing selected in the
+        // panel is the confirmation, and restating it is noise.
+        // ⚠️ NO EM DASHES IN USER-FACING COPY.
+        const sv = res.savings || null;
+        if (sv && sv.contentBytes > 0) {
+          const _saved = ((sv.crossLinked && sv.crossLinked.savedBytes) || 0) + (sv.dedupSaved || 0);
+          const _started = sv.archiveBytes > 0 ? sv.archiveBytes : sv.contentBytes;
+          const _foot = Math.max(0, sv.contentBytes - _saved);
+          const _shown = Math.max(0, _started - _foot);
+          const _brag = _saved > 0 && _started > 0
+            && _shown >= 5 * 1024 * 1024 && (_shown / _started) >= 0.10;
+          if (_brag) {
+            const fmtB = (n) => (window._sfFormatBytes ? window._sfFormatBytes(n) : `${n} B`);
+            const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            const noun = mode === 'zip' ? 'zip' : 'folder';
+            const addedTxt = _foot > 0
+              ? `added only <strong>${fmtB(_foot)}</strong> on disk`
+              : `added nothing new on disk`;
+            await promptConfirm({
+              title: 'Added to your common folders',
+              messageHtml: `<strong>${esc(res.name || name)}</strong> was added.<br><br>`
+                + `Your ${noun} started at <strong>${fmtB(_started)}</strong>. JMT Studio saved you <strong>${fmtB(_shown)}</strong>, so this common folder ${addedTxt}. `
+                + `Identical files are stored once in your library and used in every location they appear, so nothing is missing or renamed.`,
+              confirmText: 'Done',
+              confirmKind: 'primary',
+              hideCancel: true,
+            });
+          }
+        }
       };
       // ── Common folder group actions ──────────────────────────────
       // Prompt the user for a group name and apply it to every uuid
