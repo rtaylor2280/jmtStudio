@@ -187,7 +187,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   pickFolder: () => ipcRenderer.invoke('sdcard:pickFolder'),
   scanPath: (p) => ipcRenderer.invoke('sdcard:scanPath', p),
   listSdDir: (p) => ipcRenderer.invoke('sdcard:listDir', p),
-  sdFolderHealth: (p) => ipcRenderer.invoke('sdcard:folderHealth', p),
+  // Async health walk ([B-348]): direct-file check, incremental folder
+  // badges, cancel, and the progress stream that feeds the browser footer.
+  sdFilesHealth: (params) => ipcRenderer.invoke('sdcard:filesHealth', params),
+  sdSubtreeHealth: (params) => ipcRenderer.invoke('sdcard:subtreeHealth', params),
+  sdHealthCancel: (jobId) => ipcRenderer.invoke('sdcard:healthCancel', jobId),
+  onSdHealthProgress: (cb) => {
+    const handler = (_, data) => cb(data);
+    ipcRenderer.on('sdcard:healthProgress', handler);
+    return () => ipcRenderer.removeListener('sdcard:healthProgress', handler);
+  },
   sdFolderShape: (p) => ipcRenderer.invoke('sdcard:folderShape', p),
   readSdText: (p) => ipcRenderer.invoke('sdcard:readText', p),
   readSdBytes: (p) => ipcRenderer.invoke('sdcard:readBytes', p),

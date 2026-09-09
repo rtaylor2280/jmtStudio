@@ -5007,7 +5007,53 @@ ipcMain.handle('sdcard:pickFolder', async () => {
 });
 ipcMain.handle('sdcard:scanPath', (_, p) => sdCardDetect.assessPicked(p));
 ipcMain.handle('sdcard:listDir', (_, p) => sdCardDetect.listDir(p));
-ipcMain.handle('sdcard:folderHealth', (_, p) => { try { return sdCardDetect.scanFolderHealth(p); } catch { return { files: {}, dirs: {} }; } });
+// ── Async health walk ([B-348]) ─────────────────────────
+// (The old sdcard:folderHealth handler — a fully SYNCHRONOUS whole-subtree
+// walk that blocked the main event loop for minutes on a slow card — is
+// GONE, not guarded. Its two halves live on below, async: filesHealth for
+// the current folder's direct wavs, subtreeHealth for the folder badges.)
+// The sync folderHealth above froze the app for minutes on a slow card
+// (~36ms per file OPEN × 7,307 wavs, measured 2026-09-08): a synchronous
+// walk inside an ipcMain.handle blocks the main event loop, and with it
+// every later IPC in the queue. These handlers run the same checks through
+// sdCardDetect's async walk: the event loop breathes between files, progress
+// streams to the caller, and a cancel actually abandons the work.
+// Job registry: renderer passes a jobId it minted; cancel flips the flag the
+// walk polls between files. Entries are cleaned up when the walk returns.
+const _sdHealthJobs = new Map();
+ipcMain.handle('sdcard:filesHealth', async (e, { dirPath, jobId }) => {
+  _sdHealthJobs.set(jobId, { cancelled: false });
+  try {
+    return await sdCardDetect.filesHealthAsync(dirPath, {
+      isCancelled: () => _sdHealthJobs.get(jobId)?.cancelled !== false,
+    });
+  } catch { return { files: {}, notChecked: 0 };
+  } finally { _sdHealthJobs.delete(jobId); }
+});
+ipcMain.handle('sdcard:subtreeHealth', async (e, { dirPath, dirNames, jobId }) => {
+  _sdHealthJobs.set(jobId, { cancelled: false });
+  // Progress is throttled here, not in the module: per-dir completions always
+  // go out (they carry badges), per-file ticks at most every 250ms.
+  let lastTick = 0;
+  try {
+    return await sdCardDetect.subtreeHealthAsync(dirPath, dirNames || [], {
+      isCancelled: () => _sdHealthJobs.get(jobId)?.cancelled !== false,
+      onDirDone: (p) => { try { e.sender.send('sdcard:healthProgress', { jobId, kind: 'dir', ...p }); } catch {} },
+      tick: (seen) => {
+        const now = Date.now();
+        if (now - lastTick < 250) return;
+        lastTick = now;
+        try { e.sender.send('sdcard:healthProgress', { jobId, kind: 'tick', seen }); } catch {}
+      },
+    });
+  } catch { return { dirs: {}, cancelled: false, seen: 0, notChecked: 0 };
+  } finally { _sdHealthJobs.delete(jobId); }
+});
+ipcMain.handle('sdcard:healthCancel', (_, jobId) => {
+  const j = _sdHealthJobs.get(jobId);
+  if (j) j.cancelled = true;
+  return { ok: !!j };
+});
 // What KIND of folder is this, for the browser's right-click menu. [B-280/B-281]
 //
 // ⚠️ THE FONT TEST IS soundFontBulkImport.looksLikeProffieDir, NOT A COPY OF IT.

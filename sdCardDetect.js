@@ -218,6 +218,14 @@ function classifyCard(vol) {
   }).length;
   const configFiles = files.filter(f => isProffieConfigFile(path.join(vol.mountPath, f.name), f.name)).length;
   const otherFiles = Math.max(0, files.filter(f => f.name.toLowerCase() !== SIDECAR_NAME).length - configFiles);
+  // Collection shape ([B-348]): real cards do not carry zip archives in bulk —
+  // a folder with several top-level zips is a font COLLECTION (downloads,
+  // backups), which belongs in Bulk Import (async scan, honest progress,
+  // cancel), not the card browser's health walk. Names/dirents only — this
+  // test must stay cheap enough to run before ANY file content is read, so it
+  // can never hydrate a cloud placeholder.
+  const zipFiles = files.filter(f => /\.zip$/i.test(f.name)).length;
+  const collectionShape = zipFiles >= 3;
 
   // === Family classification (flowchart order: highest-specificity first) ===
   let kind, confidence; const matched = [];
@@ -250,7 +258,8 @@ function classifyCard(vol) {
 
   return {
     kind, confidence,
-    counts: { fonts: fontFolders, configs: configFiles, otherFiles },
+    counts: { fonts: fontFolders, configs: configFiles, otherFiles, zips: zipFiles },
+    collectionShape,
     contentTypes, mixed,
     signals: { matched, namedFontDirs: namedFontDirs.length, numberedFontDirs: numberedDirs.length, nNameDirs: nNameDirs.length, provenProffieFonts },
   };
@@ -480,50 +489,124 @@ function checkWavHealth(filePath, size) {
 
 const _WAV_RX = /\.wav$/i;
 
-// Recursive corruption tally for a subtree. Depth- and count-capped so the card
-// root (dozens of fonts) can't spiral. Keeps the first reason for the tooltip.
-function _scanSubtreeCorruption(dirPath, depth, acc) {
-  if (depth > 6 || acc.count >= 50) return acc;
-  const ents = safeReaddir(dirPath);
-  if (ents.__error) return acc;
+// ── Async health walk ([B-348]) ────────────────────────
+// (The SYNC scanFolderHealth/_scanSubtreeCorruption pair is gone — removed,
+// not guarded, when the browser moved to the async walk below. Their checks
+// and caps live on in _subtreeCorruptionAsync.)
+// Same corruption checks as scanFolderHealth, rebuilt for the main process's
+// event loop: fully async (fs.promises yields on every open/read/readdir),
+// cancellable between files, and progress-reporting. Measured reality that
+// forced this shape (2026-09-08, RevantedJMT): file OPENS on a slow card run
+// ~36ms each, so 7,307 wavs cost minutes — the walk must never block, must
+// say how far it is, and must be abandonable.
+//
+// Cloud placeholders are never hydrated: a file whose on-disk allocation is
+// zero while its logical size is not (st.blocks === 0 && st.size > 0) is an
+// online-only placeholder (OneDrive / Google Drive stream). Opening one
+// triggers a hidden network download of the whole file, so it is skipped and
+// tallied as notChecked instead of read.
+const fsp = fs.promises;
+
+function _isPlaceholderStat(st) {
+  // blocks===0 alone is NOT enough: tiny files live RESIDENT in the NTFS MFT
+  // and also report zero allocation (caught by the B-348 proof fixture — the
+  // first heuristic skipped every wav under ~700 bytes as a "placeholder").
+  // Above one cluster, zero allocation with nonzero size can only be a
+  // sparse/placeholder file; below it, just read the file — even a true tiny
+  // placeholder costs a one-cluster fetch, not a hidden bulk download.
+  // (Google Drive stream defeats this signal entirely — placeholders report
+  // full allocation, verified 2026-09-08 — which is why cloud MOUNTS get a
+  // consent gate in the renderer instead of relying on per-file detection.)
+  return st.size > 4096 && st.blocks === 0;
+}
+
+async function checkWavHealthAsync(filePath, size) {
+  if (size === 0) return { corrupt: true, reason: 'This file is empty and will not play.' };
+  let fh;
+  try { fh = await fsp.open(filePath, 'r'); }
+  catch (e) { return { corrupt: true, reason: `This file could not be read (${e.code || 'error'}).` }; }
+  try {
+    const buf = Buffer.alloc(Math.min(size, 256));
+    const { bytesRead } = await fh.read(buf, 0, buf.length, 0);
+    return checkWavBuffer(bytesRead < buf.length ? buf.subarray(0, bytesRead) : buf, size);
+  } catch (e) {
+    return { corrupt: true, reason: `The audio header could not be read (${e.code || 'error'}).` };
+  } finally { try { await fh.close(); } catch {} }
+}
+
+// Health of a folder's DIRECT wav files only — the cheap, bounded check that
+// runs before the browser paints so file marks land in the same paint as the
+// list. Returns { files: {name:{corrupt,reason}}, notChecked }.
+async function filesHealthAsync(dirPath, opts = {}) {
+  const cancelled = opts.isCancelled || (() => false);
+  const out = { files: {}, notChecked: 0 };
+  let ents;
+  try { ents = await fsp.readdir(dirPath, { withFileTypes: true }); } catch { return out; }
+  const wavs = ents.filter(e => e.isFile() && !_isSdNoise(e.name) && _WAV_RX.test(e.name));
+  let done = 0;
+  for (const e of wavs) {
+    if (cancelled()) return out;
+    const full = path.join(dirPath, e.name);
+    let st = null; try { st = await fsp.stat(full); } catch {}
+    if (!st) out.files[e.name] = { corrupt: true, reason: 'This file could not be read.' };
+    else if (_isPlaceholderStat(st)) out.notChecked++;
+    else {
+      const h = await checkWavHealthAsync(full, st.size);
+      if (h.corrupt) out.files[e.name] = h;
+    }
+    done++;
+    if (opts.onProgress) { try { opts.onProgress({ done, total: wavs.length }); } catch {} }
+  }
+  return out;
+}
+
+// Recursive corruption tally, async twin of _scanSubtreeCorruption. Same
+// depth/count caps. opts.tick fires once per file OPENED (the honest unit of
+// work — a skipped placeholder does not tick).
+async function _subtreeCorruptionAsync(dirPath, depth, acc, cancelled, tick) {
+  if (depth > 6 || acc.count >= 50 || cancelled()) return acc;
+  let ents;
+  try { ents = await fsp.readdir(dirPath, { withFileTypes: true }); } catch { return acc; }
   for (const e of ents) {
+    if (cancelled()) return acc;
     if (_isSdNoise(e.name)) continue;
     const full = path.join(dirPath, e.name);
     if (e.isFile()) {
       if (!_WAV_RX.test(e.name)) continue;
-      let size = 0; try { size = fs.statSync(full).size; } catch {}
-      const h = checkWavHealth(full, size);
+      let st = null; try { st = await fsp.stat(full); } catch { continue; }
+      if (_isPlaceholderStat(st)) { acc.notChecked++; continue; }
+      const h = await checkWavHealthAsync(full, st.size);
+      acc.seen++;
+      if (tick) { try { tick(); } catch {} }
       if (h.corrupt) { acc.count++; if (!acc.first) acc.first = h.reason; }
     } else if (e.isDirectory()) {
-      _scanSubtreeCorruption(full, depth + 1, acc);
+      await _subtreeCorruptionAsync(full, depth + 1, acc, cancelled, tick);
     }
     if (acc.count >= 50) break;
   }
   return acc;
 }
 
-// Health of a folder's direct entries, for the browser marks. Per direct FILE:
-// is it a corrupt wav? Per direct SUBFOLDER: does its subtree hold any corrupt
-// wav, and how many? Returns { files: {name:{corrupt,reason}}, dirs:
-// {name:{count,reason}} }. Read-only, header-only.
-function scanFolderHealth(dirPath) {
-  const out = { files: {}, dirs: {} };
-  const ents = safeReaddir(dirPath);
-  if (ents.__error) return out;
-  for (const e of ents) {
-    if (_isSdNoise(e.name)) continue;
-    const full = path.join(dirPath, e.name);
-    if (e.isFile()) {
-      if (!_WAV_RX.test(e.name)) continue;
-      let size = 0; try { size = fs.statSync(full).size; } catch {}
-      const h = checkWavHealth(full, size);
-      if (h.corrupt) out.files[e.name] = h;
-    } else if (e.isDirectory()) {
-      const agg = _scanSubtreeCorruption(full, 0, { count: 0, first: null });
-      if (agg.count > 0) out.dirs[e.name] = { count: agg.count, reason: agg.first };
-    }
+// Walks each named subfolder of dirPath in turn — the folder-badge half of
+// scanFolderHealth, made incremental. opts.onDirDone fires as EACH subfolder
+// completes ({name, index, total, issue, seen}) so the UI can badge folders
+// one by one instead of holding the whole card's answer hostage. Returns
+// { dirs, cancelled, seen, notChecked } with the scanFolderHealth dirs shape.
+async function subtreeHealthAsync(dirPath, dirNames, opts = {}) {
+  const cancelled = opts.isCancelled || (() => false);
+  const dirs = {};
+  let seen = 0, notChecked = 0;
+  for (let i = 0; i < dirNames.length; i++) {
+    if (cancelled()) return { dirs, cancelled: true, seen, notChecked };
+    const name = dirNames[i];
+    const acc = { count: 0, first: null, seen: 0, notChecked: 0 };
+    await _subtreeCorruptionAsync(path.join(dirPath, name), 0, acc, cancelled,
+      opts.tick ? () => opts.tick(seen + acc.seen) : null);
+    seen += acc.seen; notChecked += acc.notChecked;
+    if (acc.count > 0) dirs[name] = { count: acc.count, reason: acc.first };
+    if (opts.onDirDone) { try { opts.onDirDone({ name, index: i, total: dirNames.length, issue: dirs[name] || null, seen }); } catch {} }
   }
-  return out;
+  return { dirs, cancelled: cancelled(), seen, notChecked };
 }
 
 // Find Proffie config files at the top level of a card/folder. Root-level only, to
@@ -792,4 +875,4 @@ async function analyzeFonts(dirPath) {
   return { path: dirPath, fonts };
 }
 
-module.exports = { scan, assessCard, assessPath, assessPicked, classifyCard, listDir, findConfigs, deriveFontName, nameFromReadmeText, docxToText, recoverNameFromDocx, analyzeFonts, resolveIdentity, isDegenerateVsn, formatVsn, enumerateAllVolumes, enumerateRemovableVolumes, scanFolderHealth, checkWavHealth, checkWavBuffer, scanCardFileHealth };
+module.exports = { scan, assessCard, assessPath, assessPicked, classifyCard, listDir, findConfigs, deriveFontName, nameFromReadmeText, docxToText, recoverNameFromDocx, analyzeFonts, resolveIdentity, isDegenerateVsn, formatVsn, enumerateAllVolumes, enumerateRemovableVolumes, checkWavHealth, checkWavBuffer, scanCardFileHealth, filesHealthAsync, subtreeHealthAsync, checkWavHealthAsync };

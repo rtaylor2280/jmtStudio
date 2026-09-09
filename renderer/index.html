@@ -802,6 +802,10 @@
      #e55 on dark and #b82020 on light. */
   .sf-entry-files-row.sd-corrupt .sf-entry-files-row-name { color: var(--c-danger-text); }
   .sf-entry-files-row .sd-corrupt-mark { color: var(--c-danger-text); font-size: 0.82rem; line-height: 1; flex-shrink: 0; margin-left: 3px; cursor: help; }
+  /* [B-348] the folder-badge walk's status line: honest numbers + Cancel while
+     it runs, gone the moment it finishes or is cancelled (badges stay). */
+  .sd-health-status { display: flex; align-items: center; gap: 10px; flex-shrink: 0; margin-top: 6px; font-size: 0.78rem; color: var(--c-text-muted); }
+  .sd-health-status .sd-health-cancel, .sd-health-status .sd-health-check { font-size: 0.74rem; padding: 2px 10px; }
   /* SD/guided doc viewer — reuses the SFL .sf-doc-viewer-* body styling. */
   .modal.sd-doc-modal { width: 720px; max-width: 96vw; height: min(80vh, 600px); display: flex; flex-direction: column; position: relative; padding-bottom: 16px; }
   #btn-open-empty, #btn-new-empty {
@@ -9860,7 +9864,7 @@ document.getElementById('btn-sf-import-sd-empty')?.addEventListener('click', (e)
 // detection + import + config-surfacing steps are built out next.
 // Self-contained busy overlay for the SD flow (the shared _sfDeleteProgress lives inside
 // the Sound Fonts scope and isn't reachable here). Reuses the global indeterminate-bar CSS.
-function _sdBusy(show, text) {
+function _sdBusy(show, text, opts) {
   let el = document.getElementById('sd-busy-overlay');
   if (!el && show) {
     el = document.createElement('div');
@@ -9868,17 +9872,32 @@ function _sdBusy(show, text) {
     el.style.cssText = 'position:fixed; inset:0; z-index:11000; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.55);';
     el.innerHTML = '<div style="background:var(--c-bg-raised); border:1px solid var(--c-border); border-radius:8px; padding:22px 28px; text-align:center; color:var(--c-text); min-width:250px;">'
       + '<div class="sf-import-progress-track" style="margin-bottom:12px;"><div class="sf-import-progress-bar indeterminate"></div></div>'
-      + '<div id="sd-busy-text" style="font-size:0.9rem;"></div></div>';
+      + '<div id="sd-busy-text" style="font-size:0.9rem;"></div>'
+      + '<div id="sd-busy-cancel-wrap" style="margin-top:14px; display:none;"><button class="btn-neutral" id="sd-busy-cancel">Cancel</button></div></div>';
     document.body.appendChild(el);
   }
   if (!el) return;
   if (show) {
     const t = document.getElementById('sd-busy-text');
     if (t) t.textContent = text || 'Working...';
+    // Optional cancel ([B-348]): a long operation needs a guaranteed exit.
+    // Callers may also update #sd-busy-text live while they wait.
+    const wrap = document.getElementById('sd-busy-cancel-wrap');
+    const btn = document.getElementById('sd-busy-cancel');
+    if (wrap && btn) {
+      const onCancel = opts && opts.onCancel;
+      wrap.style.display = onCancel ? '' : 'none';
+      btn.onclick = onCancel || null;
+    }
     el.style.display = 'flex';
   } else {
     el.style.display = 'none';
   }
+}
+// Live label update for a visible busy overlay (progress while waiting).
+function _sdBusyText(text) {
+  const t = document.getElementById('sd-busy-text');
+  if (t) t.textContent = text;
 }
 
 // Shared folder/drive picker: launches the OS picker, assesses the pick, and surfaces a
@@ -9899,11 +9918,140 @@ async function _pickCardOrFolder() {
     });
     return null;
   }
+  // Collection-shaped folder → OFFER the Bulk Import redirect ([B-348], his
+  // ruling: "an SD card should never take this long to pull... we need to be
+  // able to redirect to a bulk import"). Cards do not carry zip archives in
+  // bulk, so several top-level zips mean a font COLLECTION — Bulk Import's
+  // async scan, honest progress and cancel are built for that shape. An
+  // OFFER, not an auto-route: continue-anyway is preserved (the consent
+  // pattern — the user keeps the choice).
+  if (result && result.isFolder && result.classification && result.classification.collectionShape && window._sfBulkImportFromPath) {
+    const zips = (result.classification.counts && result.classification.counts.zips) || 0;
+    const label = result.mountPath || picked;
+    const goBulk = await promptConfirm({
+      title: 'This looks like a font collection',
+      message: `This folder holds ${zips} zip archives at its top level — the shape of a font collection, not a Proffie SD card. Bulk Import is built for collections: it scans with real progress and lets you choose what to import.`,
+      confirmText: 'Open in Bulk Import',
+      confirmKind: 'primary',
+      cancelText: 'Browse it here anyway',
+    });
+    if (goBulk) {
+      window._sfBulkImportFromPath(label, label.split(/[\\/]/).filter(Boolean).pop() || label, null);
+      return null;
+    }
+  }
   return result || null;
 }
 
 // ── SD report / file-browser overlay: drill into a card's folders and files ──
 const _sdReport = { cards: [], stack: [], card: null, textView: false, single: false, context: 'config', fontCtx: null, healthCache: {} };
+// ── Async folder-badge health job ([B-348]) ─────────────
+// healthCache entries are now { files, dirs, _dirsDone, _notChecked }:
+// `files` is the current folder's direct-wav marks (checked BEFORE paint, so
+// file marks still land in the same paint as the list), `dirs` fills in
+// INCREMENTALLY as the badge job walks each subfolder, and _dirsDone says the
+// dirs map is complete — the import doors require that before they trust it
+// (the corruption strip-on-import guarantee rides on this map).
+// One job runs at a time; navigation replaces it. Cancel is real: the main-
+// process walk polls the flag between files and abandons the card.
+let _sdHealthJobSeq = 0;
+function _sdRunSubtreeJob(rootPath, dirNames) {
+  const id = 'hj' + (++_sdHealthJobSeq);
+  const job = { id, path: rootPath, cancelled: false, dirDone: 0, dirTotal: dirNames.length, seen: 0, startedAt: Date.now(), listeners: new Set() };
+  job.cancel = () => {
+    if (job.cancelled) return;
+    job.cancelled = true;
+    try { window.electronAPI.sdHealthCancel(id); } catch {}
+    job.notify(); // watchers (footer, wait dialogs) react to the cancel at once
+  };
+  job.notify = () => { for (const fn of job.listeners) { try { fn(job); } catch {} } };
+  job.promise = (async () => {
+    const cache = _sdReport.healthCache[rootPath]
+      || (_sdReport.healthCache[rootPath] = { files: {}, dirs: {}, _dirsDone: false, _notChecked: 0 });
+    let r = null;
+    try { r = await window.electronAPI.sdSubtreeHealth({ dirPath: rootPath, dirNames, jobId: id }); } catch {}
+    if (r && r.dirs) Object.assign(cache.dirs, r.dirs);
+    if (r) cache._notChecked = (cache._notChecked || 0) + (r.notChecked || 0);
+    // Only a run that WALKED EVERYTHING marks the map complete. A cancelled
+    // partial stays incomplete, so the next visit (or an import door) knows
+    // to finish the work — "speaks only to proof, never to absence".
+    if (r && !r.cancelled && !job.cancelled) cache._dirsDone = true;
+    job.finished = true;
+    job.notify();
+    return cache;
+  })();
+  return job;
+}
+function _sdCancelHealthJob() {
+  const job = _sdReport._healthJob;
+  if (job) { job.cancel(); _sdReport._healthJob = null; }
+}
+// Progress events fan out to whoever is watching the CURRENT job (the browse
+// footer, or an import door's wait dialog).
+window.electronAPI.onSdHealthProgress?.((p) => {
+  const job = _sdReport._healthJob;
+  if (!job || p.jobId !== job.id) return;
+  if (p.kind === 'dir') {
+    job.dirDone = p.index + 1;
+    job.seen = p.seen;
+    const cache = _sdReport.healthCache[job.path];
+    if (cache) {
+      // _walked records which folders the walk has REACHED — dirs only holds
+      // the corrupt ones, so "clean" and "not yet checked" would otherwise be
+      // indistinguishable (the single-folder import door needs the difference).
+      (cache._walked || (cache._walked = {}))[p.name] = true;
+      if (p.issue) cache.dirs[p.name] = p.issue;
+    }
+    job.lastDir = p;
+  } else if (p.kind === 'tick') {
+    job.seen = p.seen;
+  }
+  job.notify();
+});
+// The import doors always target the card ROOT and must see a COMPLETE dirs
+// map (their corrupt flags feed the review's unchecked-by-default and the
+// strip-on-import). If the root's badge job already finished, this returns
+// instantly; if one is running, it waits on THAT job behind an honest dialog
+// (count + elapsed + Cancel); if none is running (user navigated away, which
+// cancels), it starts a fresh one. Cancelling the WAIT abandons only the
+// import-open — a still-running browse job keeps filling badges.
+async function _sdWaitForRootHealth(rootPath) {
+  const cached = _sdReport.healthCache[rootPath];
+  if (cached && cached._dirsDone) return cached;
+  let job = _sdReport._healthJob;
+  if (!job || job.path !== rootPath || job.cancelled) {
+    const lr = await window.electronAPI.listSdDir(rootPath);
+    const dirNames = ((lr && lr.entries) || []).filter(e => e.isDir).map(e => e.name);
+    if (!dirNames.length) {
+      const c = _sdReport.healthCache[rootPath] || (_sdReport.healthCache[rootPath] = { files: {}, dirs: {}, _dirsDone: false, _notChecked: 0 });
+      c._dirsDone = true;
+      return c;
+    }
+    _sdCancelHealthJob();
+    job = _sdRunSubtreeJob(rootPath, dirNames);
+    _sdReport._healthJob = job;
+  }
+  let waitCancelled = false;
+  const label = () => {
+    const secs = Math.floor((Date.now() - job.startedAt) / 1000);
+    return `Checking the card's sounds… ${job.dirDone} of ${job.dirTotal} folders · ${job.seen.toLocaleString()} sounds · ${secs}s`;
+  };
+  _sdBusy(true, label(), { onCancel: () => { waitCancelled = true; _sdBusy(false); } });
+  const tickUi = () => _sdBusyText(label());
+  job.listeners.add(tickUi);
+  const clock = setInterval(tickUi, 1000);
+  try {
+    while (!job.finished && !waitCancelled) {
+      await new Promise(r => setTimeout(r, 200));
+    }
+  } finally {
+    clearInterval(clock);
+    job.listeners.delete(tickUi);
+    _sdBusy(false);
+  }
+  if (waitCancelled) return null;
+  return _sdReport.healthCache[rootPath] || { files: {}, dirs: {}, _dirsDone: false, _notChecked: 0 };
+}
 let _sdTextToken = 0; // monotonic guard so a slow text read can't overwrite a newer click
 function _sdEsc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c])); }
 function _sdFmtGB(b) { return b == null ? '?' : (b / (1024 ** 3)).toFixed(1) + ' GB'; }
@@ -9922,7 +10070,9 @@ function _sdEnsureOverlay() {
     + '<div class="modal-btns"><button id="sd-rpt-others" class="modal-btn-cancel" style="display:none;">&#8592; Other SD cards</button><button id="sd-rpt-browse" class="modal-btn-cancel">Browse a folder or drive</button><button id="sd-rpt-close" class="modal-btn-primary">Close</button></div>'
     + '</div>';
   document.body.appendChild(ov);
-  ov.querySelector('#sd-rpt-close').onclick = () => ov.classList.remove('active');
+  // Closing the report abandons any running folder-badge walk ([B-348]) —
+  // no orphaned card reads behind a closed window.
+  ov.querySelector('#sd-rpt-close').onclick = () => { _sdCancelHealthJob(); ov.classList.remove('active'); };
   ov.querySelector('#sd-rpt-back').onclick = _sdBack;
   ov.querySelector('#sd-rpt-browse').onclick = async () => {
     const p = await _pickCardOrFolder();
@@ -10167,6 +10317,15 @@ async function _sdImportFontsFromCard() {
   const root = _sdActiveRoot();
   if (!root) return;
   if (!window._sfBulkImportFromPath) { await promptConfirm({ title: 'Importer unavailable', message: 'The font importer could not be reached.', confirmText: 'OK', confirmKind: 'primary', hideCancel: true }); return; }
+  // The review's corrupt flags (unchecked-by-default + strip-on-import) ride
+  // the root's dirs map, so it must be COMPLETE before the review opens
+  // ([B-348]). If the browse badge job already finished this is instant;
+  // if it's mid-walk we wait on that same job behind the honest dialog
+  // (folders + sounds + elapsed + Cancel); cancelling the wait just stays in
+  // the browser. This runs BEFORE stepping aside so a cancel lands back on
+  // an intact card view.
+  const _rootHealth = await _sdWaitForRootHealth(root);
+  if (!_rootHealth) return;
   // Step aside so the import modal (static HTML, lower in the DOM) isn't covered by this
   // dynamically-appended overlay, then restore the SD browser when that modal closes (whether
   // the import completed or was cancelled) so the user isn't dropped to a dead end.
@@ -10184,12 +10343,9 @@ async function _sdImportFontsFromCard() {
   // Pass the friendly card label (e.g. "PROFFIESD (J:)") so the import summary
   // shows it instead of the raw drive path.
   const label = _sdReport.card ? _sdDriveLabel(_sdReport.card) : null;
-  // Reuse the corruption scan the browser ALREADY ran for this card (cached per
-  // path) so the guided review can flag corrupted fonts without re-scanning. The
-  // root's `dirs` map is keyed by top-level font-folder name -> {count, reason}.
-  let health = _sdReport.healthCache[root];
-  if (!health) { try { health = await window.electronAPI.sdFolderHealth(root); _sdReport.healthCache[root] = health; } catch { health = null; } }
-  const corruptFonts = (health && health.dirs) || {};
+  // The root's `dirs` map (top-level font-folder name -> {count, reason}) was
+  // completed by the wait above — no re-scan, the badge job's work is reused.
+  const corruptFonts = (_rootHealth && _rootHealth.dirs) || {};
   window._sfBulkImportFromPath(root, label, corruptFonts);
 }
 function _sdRenderList() {
@@ -10214,23 +10370,26 @@ async function _sdRenderBrowse() {
   const st = _sdReport.stack, cur = st[st.length - 1];
   const body = _sdSetView('');
   _sdShowOthers(_sdReport.cards.length > 1);
-  // Keep the SAME scanning overlay (_sdBusy) up the WHOLE time we prepare this
-  // view (directory listing + corruption scan) — don't blank the body to a
-  // separate loading state. _sdSetView doesn't clear the body, so the prior view
-  // stays under the overlay until we swap in the complete view in one shot
-  // (Note: don't stop showing the progress bar until you're ready for the full thing).
+  // Navigation replaces any running folder-badge job — the walk in the main
+  // process is genuinely abandoned, not orphaned ([B-348]).
+  _sdCancelHealthJob();
+  // Keep the SAME scanning overlay (_sdBusy) up while we prepare this view —
+  // but the pre-paint work is now BOUNDED ([B-348]): the listing plus a
+  // health check of the CURRENT folder's direct wavs only (dozens of opens),
+  // so file marks still land in the same paint as the list. The recursive
+  // folder badges — the part that cost MINUTES on a slow card (~36ms/open ×
+  // 7,307 wavs, measured 2026-09-08) — fill in after the paint, with honest
+  // progress and a real Cancel, in the badge job below.
   _sdBusy(true, 'Scanning files…');
   const res = await window.electronAPI.listSdDir(cur.path);
   if (_sdReport.stack[_sdReport.stack.length - 1] !== cur) return; // navigated away while loading
-  // Fetch corruption health BEFORE rendering so the red marks appear in the
-  // SAME paint as the file list — never an unmarked list that then pops a red
-  // mark a moment later (Note: finish the scan, then render once). The "Loading"
-  // placeholder above covers this wait.
   let _health = _sdReport.healthCache[cur.path];
   if (!_health) {
-    try { _health = await window.electronAPI.sdFolderHealth(cur.path); } catch { _health = null; }
-    if (_sdReport.stack[_sdReport.stack.length - 1] !== cur) return; // navigated away during health scan
-    _sdReport.healthCache[cur.path] = _health || { files: {}, dirs: {} };
+    let fh = null;
+    try { fh = await window.electronAPI.sdFilesHealth({ dirPath: cur.path, jobId: 'fh' + (++_sdHealthJobSeq) }); } catch {}
+    if (_sdReport.stack[_sdReport.stack.length - 1] !== cur) return; // navigated away during the direct check
+    _health = { files: (fh && fh.files) || {}, dirs: {}, _dirsDone: false, _notChecked: (fh && fh.notChecked) || 0 };
+    _sdReport.healthCache[cur.path] = _health;
   }
   // Card summary + action buttons stay pinned at the top (they don't scroll);
   // the file browser below is the only scroll surface. The actions are
@@ -10303,7 +10462,7 @@ async function _sdRenderBrowse() {
       + `</span>`
     : '';
   const crumbWithActions = _sdCrumbHtml(st, null, _sdHeadActions);
-  body.innerHTML = summary + crumbWithActions + `<div class="sf-entry-files-browser">${rows ? `<div class="sf-entry-files-list">${rows}</div>` : '<div class="sf-entry-files-empty">This folder is empty.</div>'}</div>`;
+  body.innerHTML = summary + crumbWithActions + `<div class="sf-entry-files-browser">${rows ? `<div class="sf-entry-files-list">${rows}</div>` : '<div class="sf-entry-files-empty">This folder is empty.</div>'}</div><div id="sd-health-status" class="sd-health-status" style="display:none"></div>`;
   wireActions();
   _sdWireCrumb(body);
   const _pfBtn = body.querySelector('[data-sd-play="font"]');
@@ -10421,7 +10580,10 @@ async function _sdRenderBrowse() {
         // fonts import fine ALONGSIDE others — unchecked in the guided review.)
         // Offer nothing actionable, just say why — this is the pattern the three
         // cases above follow. (Ryan, 2026-09-01: "the fix first thing is the pattern.")
-        // No shape check needed: corruption is already known from the card scan.
+        // No shape check needed: corruption is known from the badge walk. Since
+        // [B-348] that walk is incremental, so this branch only fires for folders
+        // it has REACHED; a not-yet-walked folder gets its bounded check at the
+        // door instead (_sdImportFolderToLibrary).
         menu.appendChild(disabledItem('Corrupted font: fix the damaged file(s) first'));
         place();
       });
@@ -10474,6 +10636,66 @@ async function _sdRenderBrowse() {
   // scanning overlay, together. This is the only place the report is brought up.
   document.getElementById('sd-report-overlay')?.classList.add('active');
   _sdBusy(false);
+  // ── Folder badges, AFTER the paint ([B-348]) ──────────
+  // The recursive per-subfolder corruption walk used to run synchronously
+  // before render, freezing the app for minutes on a slow card. Now the list
+  // is already on screen and each folder's badge pops in as its subtree
+  // finishes, behind a status line with the honest numbers (folders done,
+  // sounds opened, elapsed on its own clock — no estimates) and a Cancel
+  // that truly abandons the walk. On completion or cancel the line simply
+  // disappears: found badges stay, and no all-clear is ever claimed —
+  // "speaks only to proof, never to absence."
+  const _dirNames = res.entries.filter(e => e.isDir).map(e => e.name);
+  const foot = body.querySelector('#sd-health-status');
+  const _startBadgeJob = () => {
+    const job = _sdRunSubtreeJob(cur.path, _dirNames);
+    _sdReport._healthJob = job;
+    const fmt = () => {
+      const secs = Math.floor((Date.now() - job.startedAt) / 1000);
+      return `Checking folders for damaged sounds… ${job.dirDone} of ${job.dirTotal} folders · ${job.seen.toLocaleString()} sounds · ${secs}s`;
+    };
+    let clock = null;
+    if (foot) {
+      foot.style.display = '';
+      foot.innerHTML = `<span class="sd-health-status-text"></span><button class="btn-neutral sd-health-cancel">Cancel</button>`;
+      foot.querySelector('.sd-health-status-text').textContent = fmt();
+      foot.querySelector('.sd-health-cancel').onclick = () => job.cancel();
+      clock = setInterval(() => { const t = foot.querySelector('.sd-health-status-text'); if (t) t.textContent = fmt(); }, 1000);
+    }
+    const onEvt = () => {
+      if (job.lastDir && job.lastDir.issue) {
+        _applyHealth({ files: {}, dirs: { [job.lastDir.name]: job.lastDir.issue } });
+        job.lastDir = null;
+      }
+      if (foot) { const t = foot.querySelector('.sd-health-status-text'); if (t) t.textContent = fmt(); }
+      if (job.finished || job.cancelled) {
+        if (clock) clearInterval(clock);
+        job.listeners.delete(onEvt);
+        if (foot) { foot.style.display = 'none'; foot.innerHTML = ''; }
+        if (_sdReport._healthJob === job) _sdReport._healthJob = null;
+      }
+    };
+    job.listeners.add(onEvt);
+    job.promise.then(onEvt);
+  };
+  if (!_health._dirsDone && _dirNames.length) {
+    // Cloud-sync mounts (Google Drive stream, OneDrive) hand out placeholder
+    // files that DOWNLOAD when opened — and DriveFS defeats per-file
+    // detection (placeholders report full allocation and Normal attributes,
+    // verified 2026-09-08). So on these mounts the walk is OFFERED, never
+    // auto-started: reading a header must not cost a hidden network fetch.
+    // The consent pattern — the user keeps the choice.
+    const _cloudMount = /[\\/](My Drive|OneDrive[^\\/]*)([\\/]|$)/i.test(cur.path);
+    if (_cloudMount) {
+      if (foot) {
+        foot.style.display = '';
+        foot.innerHTML = `<span class="sd-health-status-text">This folder is on a cloud drive, so checking for damaged sounds may download files.</span><button class="btn-neutral sd-health-check">Check anyway</button>`;
+        foot.querySelector('.sd-health-check').onclick = () => _startBadgeJob();
+      }
+    } else {
+      _startBadgeJob();
+    }
+  }
 }
 // Scoped import: scan just the picked folder (a lone font folder = one source)
 // and run it through the same import flow. Mirrors _sdImportFontsFromCard's
@@ -10519,11 +10741,38 @@ function _sdImportCommonFolder(entry) {
   }
   window._sfBulkImportFromPath(entry.path, entry.name);
 }
-function _sdImportFolderToLibrary(entry) {
+async function _sdImportFolderToLibrary(entry) {
   if (!entry || !entry.path) return;
   // A single folder is NOT a bulk import — route it through the normal
   // single-source import (folder review), not the bulk modal.
   if (!window._sfImportSourceFromPath) { promptConfirm({ title: 'Importer unavailable', message: 'The font importer could not be reached.', confirmText: 'OK', confirmKind: 'primary', hideCancel: true }); return; }
+  // [B-348] The menu's corrupt-solo suppression only knows what the badge
+  // walk has REACHED. If this folder hasn't been walked yet, check just it
+  // now — bounded to one font — behind the honest overlay, because this door
+  // routes to the single-source import, which has no review step to drop a
+  // damaged file. A running whole-card walk is cancelled first: two walkers
+  // on one slow card starve each other (measured 2026-09-08).
+  const _root = _sdActiveRoot();
+  const _name = entry.name || String(entry.path).split(/[\\/]/).pop();
+  const _cache = _sdReport.healthCache[_root];
+  const _known = _cache && (_cache._dirsDone || (_cache._walked && _cache._walked[_name]) || _cache.dirs[_name] !== undefined);
+  if (!_known) {
+    if (_sdReport._healthJob && _sdReport._healthJob.path === _root) _sdCancelHealthJob();
+    let _cancelled = false;
+    const _jobId = 'hj' + (++_sdHealthJobSeq);
+    _sdBusy(true, `Checking "${_name}" for damaged sounds…`, { onCancel: () => { _cancelled = true; try { window.electronAPI.sdHealthCancel(_jobId); } catch {} _sdBusy(false); } });
+    let _r = null;
+    try { _r = await window.electronAPI.sdSubtreeHealth({ dirPath: _root, dirNames: [_name], jobId: _jobId }); } catch {}
+    _sdBusy(false);
+    if (_cancelled || !_r || _r.cancelled) return;
+    const c = _sdReport.healthCache[_root] || (_sdReport.healthCache[_root] = { files: {}, dirs: {}, _dirsDone: false, _notChecked: 0 });
+    (c._walked || (c._walked = {}))[_name] = true;
+    if (_r.dirs && _r.dirs[_name]) {
+      c.dirs[_name] = _r.dirs[_name];
+      await promptConfirm({ title: 'Corrupted font', message: `"${_name}" contains damaged sound files, and a font can't be imported on its own with damage in it - there is no review step to leave the damaged files behind. Fix or replace the damaged file(s) first. (Corrupt fonts CAN be imported alongside others: they arrive unchecked in the review.)`, confirmText: 'OK', confirmKind: 'primary', hideCancel: true });
+      return;
+    }
+  }
   const sdOv = document.getElementById('sd-report-overlay');
   sdOv.classList.remove('active');
   // Ask the single-import flow to bring the card browser back when it FULLY
@@ -10571,6 +10820,11 @@ async function _sdImportSelected() {
     return;
   }
   if (!window._sfBulkImportFromPaths) { promptConfirm({ title: 'Importer unavailable', message: 'The font importer could not be reached.', confirmText: 'OK', confirmKind: 'primary', hideCancel: true }); return; }
+  // Same completeness rule as the whole-card door ([B-348]): the corrupt
+  // flags must come from a FINISHED dirs map, and cancelling the wait stays
+  // in the browser with nothing stepped aside.
+  const _rootHealth = await _sdWaitForRootHealth(_sdActiveRoot());
+  if (!_rootHealth) return;
   const sdOv = document.getElementById('sd-report-overlay');
   const impModal = document.getElementById('modal-sf-bulk-import');
   sdOv.classList.remove('active');
@@ -10580,8 +10834,7 @@ async function _sdImportSelected() {
     obs.observe(impModal, { attributes: true, attributeFilter: ['class'] });
   }
   const label = _sdReport.card ? _sdDriveLabel(_sdReport.card) : null;
-  const health = _sdReport.healthCache[_sdActiveRoot()];
-  const corruptFonts = (health && health.dirs) || null;
+  const corruptFonts = (_rootHealth && _rootHealth.dirs) || null;
   window._sfBulkImportFromPaths(paths, label ? `${paths.length} folders from ${label}` : `${paths.length} folders`, corruptFonts);
 }
 // Document viewer — text AND images in a popup modal that reuses the Sound
