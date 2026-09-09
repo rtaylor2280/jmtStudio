@@ -607,8 +607,20 @@ function makeLogger() {
 }
 
 // ── IPC: File operations ───────────────────────────────
+// [B-291] A remembered directory may live on a drive that isn't plugged in
+// today (USB stick, card reader). Handing that path to dialog.show*Dialog as
+// defaultPath makes WINDOWS itself demand the disk — "Please insert a disk
+// into USB Drive (J:)" — over the app. Resolve a remembered dir to itself
+// only while it exists; otherwise return null so the call site's own `||`
+// fallback (documents / downloads / home) fires, exactly as it already does
+// when nothing was ever stored. The stored value is NOT cleared: the drive
+// may come back, and forgetting it would punish unplugging a stick.
+function liveDir(dir) {
+  try { if (dir && fs.existsSync(dir)) return dir; } catch {}
+  return null;
+}
 ipcMain.handle('dialog:open', async () => {
-  const lastDir = Store.get('lastDir');
+  const lastDir = liveDir(Store.get('lastDir'));
   const { canceled, filePaths } = await dialog.showOpenDialog(win, {
     title: 'Open Config File',
     defaultPath: lastDir || app.getPath('documents'),
@@ -644,7 +656,7 @@ ipcMain.handle('file:save', async (_, { filePath, content }) => {
 });
 
 ipcMain.handle('dialog:saveAs', async (_, { defaultName, content }) => {
-  const lastDir = Store.get('lastDir');
+  const lastDir = liveDir(Store.get('lastDir'));
   const { canceled, filePath } = await dialog.showSaveDialog(win, {
     title: 'Save Config As',
     defaultPath: path.join(lastDir || app.getPath('documents'), defaultName || 'my_config.h'),
@@ -663,7 +675,7 @@ ipcMain.handle('dialog:saveAs', async (_, { defaultName, content }) => {
 });
 
 ipcMain.handle('dialog:getSavePath', async (_, { defaultName }) => {
-  const lastDir = Store.get('lastDir');
+  const lastDir = liveDir(Store.get('lastDir'));
   const { canceled, filePath } = await dialog.showSaveDialog(win, {
     title: 'Save Config As',
     defaultPath: path.join(lastDir || app.getPath('documents'), defaultName || 'my_config.h'),
@@ -1729,7 +1741,7 @@ ipcMain.handle('bulkImport:pickRoot', async () => {
     // folder. Opening BESIDE the last choice keeps the useful anchor without
     // re-answering the question on the user's behalf.
     const _storedRoot = Store.get('lastBulkImportRoot');
-    const lastDir = _storedRoot ? path.dirname(_storedRoot) : app.getPath('home');
+    const lastDir = liveDir(_storedRoot ? path.dirname(_storedRoot) : null) || app.getPath('home');
     const { canceled, filePaths } = await dialog.showOpenDialog(win, {
       title: 'Pick a folder of sound fonts to bulk import…',
       defaultPath: lastDir,
@@ -2934,7 +2946,7 @@ ipcMain.handle('sfFile:export', async (_, { kind, id, paths, suggestedName, asFi
     };
     walk(srcAbs, outRoot);
   };
-  const lastDir = Store.get('lastExportDir') || app.getPath('downloads');
+  const lastDir = liveDir(Store.get('lastExportDir')) || app.getPath('downloads');
   // Single-path mode: file → save dialog; folder → folder picker,
   // writes the folder inside the chosen parent with its original name.
   if (paths.length === 1) {
@@ -3099,7 +3111,7 @@ ipcMain.handle('sfBackup:prep', async () => {
 });
 
 ipcMain.handle('dialog:selectBackupExportPath', async () => {
-  const lastDir = Store.get('lastSfBackupDir') || Store.get('lastDir') || app.getPath('documents');
+  const lastDir = liveDir(Store.get('lastSfBackupDir')) || liveDir(Store.get('lastDir')) || app.getPath('documents');
   const defaultName = soundFontBackup.suggestedFileName();
   // On Windows the native COM save dialog always shows its own
   // overwrite-confirm and Electron has no option to suppress it
@@ -3163,7 +3175,7 @@ ipcMain.handle('sfBackup:cancel', (_, { opId } = {}) => {
 });
 
 ipcMain.handle('dialog:selectBackupImportPath', async () => {
-  const lastDir = Store.get('lastSfBackupDir') || Store.get('lastDir') || app.getPath('documents');
+  const lastDir = liveDir(Store.get('lastSfBackupDir')) || liveDir(Store.get('lastDir')) || app.getPath('documents');
   const { canceled, filePaths } = await dialog.showOpenDialog(win, {
     title: 'Import Sound Font library backup',
     defaultPath: lastDir,
@@ -3347,7 +3359,7 @@ ipcMain.handle('sources:exportToDownloads', async (event, { uuid, destDir, forma
 // last chosen dir.
 ipcMain.handle('dialog:pickExportDir', async (_, { title } = {}) => {
   try {
-    const lastDir = Store.get('lastExportDir') || app.getPath('downloads');
+    const lastDir = liveDir(Store.get('lastExportDir')) || app.getPath('downloads');
     const { canceled, filePaths } = await dialog.showOpenDialog(win, {
       title: title || 'Choose export destination…',
       defaultPath: lastDir,
@@ -4530,7 +4542,7 @@ ipcMain.handle('dialog:selectFolder', async () => {
 // on Windows and Linux the dialog has to commit to one. The renderer shows
 // two buttons so the choice is explicit.
 ipcMain.handle('dialog:selectSoundFontSource', async (_, { mode = 'folder' } = {}) => {
-  const lastDir = Store.get('lastSfSourceDir') || app.getPath('documents');
+  const lastDir = liveDir(Store.get('lastSfSourceDir')) || app.getPath('documents');
   const opts = mode === 'zip'
     ? {
         title: 'Select Sound Font Zip',

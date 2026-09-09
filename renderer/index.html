@@ -12097,6 +12097,14 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
   let currentPlan = null;
   let progressUnsub = null;
   let runInFlight = false;
+  // [B-295] What abandoning the operation costs RIGHT NOW — feeds the Cancel
+  // button's tooltip and the quit guard. null when nothing is in flight.
+  // The two phases lose different things, and saying only one would be read
+  // as applying to both:
+  //   analyze: nothing is imported yet, so cancelling loses the WHOLE pass
+  //   import:  everything already imported STAYS; what's lost is the
+  //            analysis of the fonts that haven't landed yet
+  let _bulkPhase = null;
   let guidedRows = [];       // flat list of all rows { src, idx, enriched, el, nameInput, checkbox, group }
   // Creator groups built from the analyze pass { key, vendor, rows, vendorInput,
   // websiteInput, el }. NO free/licence control: a licence belongs to a FONT, not
@@ -12133,6 +12141,9 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     if (els.cancelBtn) {
       els.cancelBtn.style.display = phase === 'summary' ? 'none' : '';
       els.cancelBtn.textContent = phase === 'progress' ? 'Cancel import' : 'Cancel';
+      // [B-295] the working phases set their own cost-naming tooltip right
+      // after calling showPhase; every other phase carries none.
+      els.cancelBtn.title = '';
     }
   };
 
@@ -12177,6 +12188,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     guidedRows = [];
     _guidedGroups = [];
     runInFlight = false;
+    _bulkPhase = null;
   };
 
   // ── Guided candidate view ──────────────────────────────────────────
@@ -13337,6 +13349,12 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     // of stepping once per source.
     showPhase('progress');
     const total = plan.sources.length;
+    // [B-295] name the cost where the hand hovers: nothing is imported
+    // during analyze, so cancelling loses the whole pass.
+    _bulkPhase = total > 0 ? { phase: 'analyze', count: total } : null;
+    if (els.cancelBtn) els.cancelBtn.title = total > 0
+      ? 'Stops the analysis. Nothing has been imported yet, so cancelling loses this whole pass.'
+      : 'Stops this check.';
     const _fmtDurA = (s) => (window._sfFormatDuration ? window._sfFormatDuration(s) : `${Math.round(s)}s`);
     const _aT0 = Date.now();
     // A tracks-only plan has no fonts to count, so "Analyzing fonts · 0 of 0" would
@@ -13414,6 +13432,11 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     }
     plan._analyzeStats = res.stats || null;
     plan._analyzed = true;
+    // The pass finished: its work is banked on the plan, so closing from the
+    // screens that follow no longer costs the ANALYZE (the prepared sources
+    // are only discarded by an explicit closeModal, which is the user
+    // choosing exactly that).
+    _bulkPhase = null;
     return true;
   };
 
@@ -13765,6 +13788,13 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     }
     runInFlight = true;
     showPhase('progress');
+    // [B-295] during the run, what's at risk is the analysis of the fonts
+    // that haven't LANDED yet — everything imported so far is safe, and the
+    // tooltip says both halves because saying one reads as both.
+    _bulkPhase = runPlan.sources.length > 0 ? { phase: 'import', count: runPlan.sources.length } : null;
+    if (els.cancelBtn) els.cancelBtn.title = runPlan.sources.length > 0
+      ? 'Fonts already imported stay. Cancelling finishes the current font, then stops and discards the analysis for the rest.'
+      : 'Stops this run. Nothing already copied is affected.';
     els.progLabel.textContent = 'Starting…';
     els.progBar.style.width = '0%';
     // Elapsed clock: independent 1s tick so the user sees motion even
@@ -13815,6 +13845,9 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         const overall = setBarFromPosition(data.sourceIdx, t, 0);
         lastOverallIdx = idx;
         lastOverallPct = overall;
+        // [B-295] the quit guard's count: sources whose analysis would be
+        // lost = the ones that haven't landed yet.
+        if (_bulkPhase) _bulkPhase.count = Math.max(0, t - (data.sourceIdx || 0));
         // Initial verb is "Inspecting" — that's what we do first (hash
         // the archive to dedup-check). Source-progress events will swap
         // to Copying / Importing / Skipping as the actual stage advances.
@@ -13926,6 +13959,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     clearInterval(bulkElapsedTicker);
     const bulkFinalElapsedSec = (Date.now() - bulkStartMs) / 1000;
     runInFlight = false;
+    _bulkPhase = null;
     if (!runRes || !runRes.ok) {
       promptError('Bulk import failed', (runRes && runRes.error) || 'unknown error');
       closeModal();
@@ -14224,6 +14258,8 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
   // secondary "Bulk import from a folder" link can start the bulk-import
   // flow without reaching into this IIFE.
   if (typeof window !== 'undefined') window._sfStartBulkImport = startScan;
+  // [B-295] the quit guard asks this before letting the window close.
+  if (typeof window !== 'undefined') window._sfBulkImportCost = () => (_bulkPhase ? { ..._bulkPhase } : null);
 })();
 document.getElementById('theme-selector').addEventListener('click', (e) => {
   const btn = e.target.closest('.theme-btn');
@@ -23304,11 +23340,19 @@ require(['vs/editor/editor.main'], function () {
             if (dd) dd.style.display = 'none';
           });
         });
+        _sfSyncSortLabel();
+      };
+      // The sort button's label derives from _sfSort wherever that state
+      // SETTLES — after the boot restore and on every change — not only
+      // inside the dropdown renderer. The markup's hardcoded "Name A–Z"
+      // otherwise stands over a grid sorted by the restored setting until
+      // the dropdown is first opened ([B-307]; same display-state-written-
+      // only-on-open shape as [B-305]'s stale filter badge).
+      const _sfSyncSortLabel = () => {
         const lbl = document.getElementById('sf-sort-label');
-        if (lbl) {
-          const d = _sfSortDef();
-          lbl.textContent = `${d.label} ${_sfSort.dir === 'asc' ? d.asc : d.desc}`;
-        }
+        if (!lbl) return;
+        const d = _sfSortDef();
+        lbl.textContent = `${d.label} ${_sfSort.dir === 'asc' ? d.asc : d.desc}`;
       };
 
       const _sfRenderTagDropdown = () => {
@@ -23877,6 +23921,7 @@ require(['vs/editor/editor.main'], function () {
         }
       };
       await _sfLoadSort();   // before the first render, so the grid opens in the saved order [B-213]
+      _sfSyncSortLabel();    // and the button SAYS that order, not the markup's default [B-307]
       const _soundFontsEnabledRaw = await window.electronAPI.getSetting('soundFontsTabEnabled', true);
       // Coerce explicitly: getSetting can return null when prefs.json is missing/corrupt
       // (Store.get's catch block returns null on read failure, and the handler treats null
@@ -38367,6 +38412,27 @@ require(['vs/editor/editor.main'], function () {
       const action = verb === 'closing' ? 'close' : 'install update';
       await promptError(`Cannot ${action}`, `Cannot ${action} while a Sound Font backup is in progress. Click Cancel on the progress dialog first. It will clean up the partial file.`);
       return false;
+    }
+    // [B-295] A bulk import in flight: PROMPT, not a hard block. The backup
+    // guard above blocks hard because closing mid-write leaves a corrupt
+    // partial zip; closing mid-import destroys NO data ([B-298] sweeps the
+    // staged sources on quit and at next launch) — what it costs is TIME,
+    // so the dialog names that cost and lets the user spend it. The count
+    // is what earns the dialog, and the second sentence tells the user who
+    // has watched fonts land that those are safe.
+    const _biCost = window._sfBulkImportCost?.();
+    if (_biCost && _biCost.count > 0) {
+      const n = _biCost.count;
+      const closeAnyway = await promptConfirm({
+        title: 'An import is running',
+        message: _biCost.phase === 'analyze'
+          ? `Closing now discards the analysis of ${n} font${n === 1 ? '' : 's'}. Nothing has been imported yet.`
+          : `Closing now discards the analysis of ${n} font${n === 1 ? '' : 's'}. Nothing already imported is affected.`,
+        confirmText: 'Close anyway',
+        confirmKind: 'danger',
+        cancelText: 'Keep importing',
+      });
+      if (!closeAnyway) return false;
     }
     if (hasUnsavedWork()) {
       const fileName = currentFilePath ? currentFilePath.split(/[\\/]/).pop() : 'config file';
