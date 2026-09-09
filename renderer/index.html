@@ -9880,6 +9880,10 @@ function _sdBusy(show, text, opts) {
   if (show) {
     const t = document.getElementById('sd-busy-text');
     if (t) t.textContent = text || 'Working...';
+    // Every open starts indeterminate; a caller with real numbers switches
+    // the bar over via _sdBusyProgress.
+    const bar = el.querySelector('.sf-import-progress-bar');
+    if (bar) { bar.classList.add('indeterminate'); bar.style.width = ''; }
     // Optional cancel ([B-348]): a long operation needs a guaranteed exit.
     // Callers may also update #sd-busy-text live while they wait.
     const wrap = document.getElementById('sd-busy-cancel-wrap');
@@ -9898,6 +9902,22 @@ function _sdBusy(show, text, opts) {
 function _sdBusyText(text) {
   const t = document.getElementById('sd-busy-text');
   if (t) t.textContent = text;
+}
+// A busy bar that KNOWS its fraction must show it (his catch, 2026-09-08:
+// "showing indeterminate when it is determinable"). null returns the bar to
+// indeterminate; _sdBusy(show) resets to indeterminate on every open so a
+// determinate wait never leaks its width into the next unrelated overlay.
+function _sdBusyProgress(pct) {
+  const el = document.getElementById('sd-busy-overlay');
+  const bar = el && el.querySelector('.sf-import-progress-bar');
+  if (!bar) return;
+  if (pct == null) {
+    bar.classList.add('indeterminate');
+    bar.style.width = '';
+  } else {
+    bar.classList.remove('indeterminate');
+    bar.style.width = `${Math.max(0, Math.min(100, pct)).toFixed(1)}%`;
+  }
 }
 
 // Shared folder/drive picker: launches the OS picker, assesses the pick, and surfaces a
@@ -10037,7 +10057,12 @@ async function _sdWaitForRootHealth(rootPath) {
     return `Checking the card's sounds… ${job.dirDone} of ${job.dirTotal} folders · ${job.seen.toLocaleString()} sounds · ${secs}s`;
   };
   _sdBusy(true, label(), { onCancel: () => { waitCancelled = true; _sdBusy(false); } });
-  const tickUi = () => _sdBusyText(label());
+  const tickUi = () => {
+    _sdBusyText(label());
+    // The job knows exactly how far it is — the bar says so.
+    _sdBusyProgress(job.dirTotal ? (job.dirDone / job.dirTotal) * 100 : null);
+  };
+  tickUi();
   job.listeners.add(tickUi);
   const clock = setInterval(tickUi, 1000);
   try {
