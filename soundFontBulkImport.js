@@ -574,13 +574,20 @@ async function runBulkImport({ plan, userData }, callbacks = {}) {
 // plus aggregate stats for the real-stats screen. This is exactly the hashing
 // quick import does, just run BEFORE the keep/prune decision — the prepared zips
 // are reused at commit (no re-hash). Emits byte progress for the existing bar.
-async function analyzeBulkImport({ plan, userData, corruptFonts }, callbacks = {}) {
+// ⚠️ `corruptFonts` IS GONE AS AN INPUT ([B-361], 2026-09-09). It used to arrive
+// as a folder-name-keyed map produced by the card browser's recursive pre-walk —
+// so the review's corrupt flags existed only for SD-card imports, and only after
+// reading the entire card a second time. Now the verdict comes from the prepare's
+// OWN read (importSource -> _selectFolderFiles header-checks every wav on the
+// walk that selects the files), so `res.strippedFiles` is the detection result.
+// Every import door gets it, including folders and zips picked from disk, which
+// were never corruption-checked at all before this.
+async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
   const onProgress = typeof callbacks.onProgress === 'function' ? callbacks.onProgress : () => {};
   const shouldCancel = typeof callbacks.shouldCancel === 'function' ? callbacks.shouldCancel : () => false;
   if (!plan || !Array.isArray(plan.sources)) return { ok: false, error: 'Invalid plan' };
   const sources = plan.sources;
   const total = sources.length;
-  const cf = corruptFonts || {};
   const results = [];
   let newCount = 0, dupCount = 0, corruptCount = 0;
   for (let i = 0; i < total; i++) {
@@ -588,23 +595,30 @@ async function analyzeBulkImport({ plan, userData, corruptFonts }, callbacks = {
     const src = sources[i];
     const label = src.cleanedName || src.rawName;
     onProgress({ stage: 'source-start', sourceIdx: i, total, label });
-    const corrupt = cf[src.rawName] || null;
-    // Corrupt fonts are prepared the SAME way as clean ones, with stripCorrupt:
-    // remove the damaged wavs FIRST, then hash the salvaged content. That clean,
-    // stable hash means a corrupt font you ALREADY have dedups up front (shows as
-    // "already in library" on the stats screen) instead of the user checking it
-    // and only discovering the duplicate after it re-processes at commit. A
-    // corrupt font that's genuinely NEW gets a prepared (stripped) zip, still
-    // flagged corrupt so review keeps it unchecked-by-default — but committing it
-    // now reuses the prepared zip (no re-strip/re-hash).
+    // Corrupt fonts are prepared the SAME way as clean ones: the damaged wavs are
+    // removed FIRST, then the salvaged content is hashed. That clean, stable hash
+    // means a corrupt font you ALREADY have dedups up front (shows as "already in
+    // library" on the stats screen) instead of the user checking it and only
+    // discovering the duplicate after it re-processes at commit. A corrupt font
+    // that's genuinely NEW gets a prepared (stripped) zip, still flagged corrupt
+    // so review keeps it unchecked-by-default — but committing it now reuses the
+    // prepared zip (no re-strip/re-hash).
     let res;
     try {
       res = await soundFontSources.importSource({
         userData, sourcePath: src.absPath, originalName: path.basename(src.absPath),
-        metadata: {}, prepareOnly: true, stripCorrupt: !!corrupt,
+        metadata: {}, prepareOnly: true,
         onProgress: (p) => onProgress({ stage: 'source-progress', sourceIdx: i, total, label, sub: p }),
       });
     } catch (e) { res = { ok: false, error: String(e && e.message || e) }; }
+    // THE VERDICT COMES FROM THE PREPARE'S OWN READ. Shape kept identical to the
+    // map it replaces ({ count, reason }) so every consumer downstream — the
+    // review's unchecked-by-default, the row's reason, the stats bucket — needs
+    // no change.
+    const _stripped = (res && res.strippedFiles) || [];
+    const corrupt = _stripped.length
+      ? { count: _stripped.length, reason: _stripped[0].reason, files: _stripped }
+      : null;
     if (res && res.ok && res.isDuplicate) {
       dupCount++;
       // `res.staged` is the zip we just wrote before discovering it was a
@@ -922,15 +936,16 @@ async function importPlannedSource({ userData, src, fromSdCard }, onSubProgress)
   } else {
     // Legacy one-shot path (no analyze phase ran): hash + copy + dedup + finalize.
     // A font the user flagged corrupt but chose to import lands here (analyze
-    // skips corrupt fonts, so they never get a _prepared zip). stripCorrupt
-    // drops the damaged wavs at zip time — salvage the good files, and the bad
-    // read never happens.
+    // skips corrupt fonts, so they never get a _prepared zip). The damaged wavs
+    // are dropped at zip time by the selection walk itself — salvage the good
+    // files, and the bad read never happens. No flag needed: the check is now
+    // unconditional, so this path detects damage even when nothing upstream
+    // knew about it ([B-361]).
     importRes = await soundFontSources.importSource({
       userData,
       sourcePath,
       originalName,
       metadata: {},
-      stripCorrupt: !!src._corrupt,
       // The user checked a row we had already marked as owned, so they mean it.
       // Without this, importSource would spot the identical hash and skip — which
       // would make the review screen the one place in the app that refuses to take

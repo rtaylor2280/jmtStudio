@@ -46,11 +46,6 @@ test('async SD health walk', async (t) => {
   setup();
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
 
-  await t.test('direct-file check flags corrupt wavs and only those', async () => {
-    const fh = await sd.filesHealthAsync(root);
-    assert.ok(fh.files['boot.wav'] && fh.files['boot.wav'].corrupt, 'boot.wav flagged');
-    assert.strictEqual(fh.files['hum.wav'], undefined, 'hum.wav clean');
-  });
 
   await t.test('tiny resident files are READ, not skipped as placeholders', async () => {
     // NTFS keeps small files resident in the MFT with zero allocated blocks —
@@ -58,8 +53,11 @@ test('async SD health walk', async (t) => {
     // skipped every wav under ~700 bytes; the size floor keeps tiny files in
     // the walk (this fixture's wavs are all ~100 bytes, so the corruption
     // findings in the other subtests only exist because they were read).
-    const fh = await sd.filesHealthAsync(root);
-    assert.ok(Object.keys(fh.files).length > 0, 'tiny corrupt wavs were read and flagged');
+    // Re-pointed at the subtree walk when filesHealthAsync went with the
+    // browse-time check ([B-361]); the size floor it guards lives in
+    // checkWavHealthAsync, which both walks share.
+    const sh = await sd.subtreeHealthAsync(root, ['BadFont'], {});
+    assert.ok(sh.dirs.BadFont && sh.dirs.BadFont.count > 0, 'tiny corrupt wavs were read and flagged');
   });
 
   await t.test('subtree walk badges corrupt folders incrementally and in order', async () => {

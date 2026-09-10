@@ -139,33 +139,47 @@ async function copyFileStreamed(srcPath, destPath, onProgress) {
 // second copy of this rule would be free to drift, and the drift would show up as
 // two imports of the same folder disagreeing about their own contents.
 //
-// When the user chose to import a font flagged as corrupt, the damaged wavs are
-// dropped BEFORE anything reads them in full. That salvages the good files — which
-// is what "import it anyway" is expected to mean — and, because the scrambled file
-// is never read through, removes the very read that can stall the pass on a failing
-// card. Header-only check, the SAME one that flagged the font, so a flagged file is
-// readable here and will not hang. Opt-in, so clean imports pay nothing and no
-// bad-sector header read happens unprompted.
-function _selectFolderFiles(srcDir, stripCorruptWavs) {
-  let files = walkFolderSorted(srcDir).filter(f => !_isNoisePath(f.relPath));
+// Damaged wavs are dropped BEFORE anything reads them in full. That salvages the
+// good files — which is what importing a damaged font is expected to mean — and,
+// because the scrambled file is never read through, it removes the very read that
+// can stall the pass on a failing card.
+//
+// ⚠️ THIS IS NO LONGER OPT-IN, AND THAT IS THE WHOLE OF [B-361]'s CORRECTION
+// (2026-09-09). It used to run only when the caller already knew the font was
+// corrupt — a fact that could only come from the card browser's recursive
+// pre-walk. So corruption was detected only for SD-card imports, and only by
+// reading the whole card a second time; a folder or zip picked from disk was
+// never checked at all. The free version (hashAndCheckFont, written 2026-07-19)
+// was never wired to a caller and had never run.
+//
+// The check now rides the walk that selects the files, which is the read the
+// import performs anyway. It is header-only (256 bytes) against a file the zip
+// is about to read in full moments later, so the "don't touch a bad sector
+// unprompted" caution the opt-in was protecting no longer applies — the full
+// read is the exposure, and it happens regardless.
+//
+// `strippedFiles` is therefore both the strip record AND the detection result:
+// non-empty means this source was damaged, and the reasons ride along for the
+// review row and the post-import summary.
+function _selectFolderFiles(srcDir) {
   const strippedFiles = [];
-  if (stripCorruptWavs) {
-    const { checkWavHealth } = require('./sdCardDetect');
-    files = files.filter(f => {
+  const { checkWavHealth } = require('./sdCardDetect');
+  const files = walkFolderSorted(srcDir)
+    .filter(f => !_isNoisePath(f.relPath))
+    .filter(f => {
       if (!/\.wav$/i.test(f.relPath)) return true;
       const h = checkWavHealth(f.absPath, f.size);
       if (h && h.corrupt) { strippedFiles.push({ relPath: f.relPath, reason: h.reason }); return false; }
       return true;
     });
-  }
   return { files, strippedFiles };
 }
 
-async function zipFolderToFile(srcDir, destZipPath, onProgress, stripCorruptWavs) {
+async function zipFolderToFile(srcDir, destZipPath, onProgress) {
   const archiver = require('archiver');
   const { Transform } = require('stream');
 
-  const { files, strippedFiles } = _selectFolderFiles(srcDir, stripCorruptWavs);
+  const { files, strippedFiles } = _selectFolderFiles(srcDir);
   const totalBytes = files.reduce((s, f) => s + f.size, 0);
   const fileCount = files.length;
 
@@ -753,7 +767,12 @@ function cleanupPartialSource(uuidDir) {
 //   { ok: false, error: <string> }
 //
 // Progress events fire in three stages: hashing, copying, done.
-async function importSource({ userData, sourcePath, originalName, metadata, onProgress, forceNewSource, prepareOnly, stripCorrupt, knownHash, deferCustomized }) {
+// `stripCorrupt` is GONE as a parameter ([B-361], 2026-09-09): damaged wavs are
+// now always detected and dropped by _selectFolderFiles, because the check rides
+// the read the import already performs. Callers no longer have to know in advance
+// that a font is damaged — which they could only learn from a full pre-walk of
+// the card, the cost this entry removed.
+async function importSource({ userData, sourcePath, originalName, metadata, onProgress, forceNewSource, prepareOnly, knownHash, deferCustomized }) {
   if (!userData) return { ok: false, error: 'Missing userData' };
   if (!sourcePath) return { ok: false, error: 'Missing sourcePath' };
   // Sweep corrupt source dirs (meta without archive, archive without
@@ -890,7 +909,7 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
   let fileSize = 0;
   let totalBytes = 0;
   let fileCount = 0;
-  let strippedFiles = []; // damaged wavs dropped when stripCorrupt is set (folder imports)
+  let strippedFiles = []; // damaged wavs, always detected and dropped (folder imports)
   // What inner-archive expansion did. Reported rather than assumed, so a bundle
   // that refused to expand is visible instead of quietly looking ordinary.
   let innerArchives = { expanded: [], left: [] };
@@ -988,7 +1007,7 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
       // ⚠️ The hash can only be taken AFTER the copy, because there is no
       // container to hash on the way past — so the dedup check below stays where
       // it is, after the write, exactly as the zip-transform needed it.
-      const sel = _selectFolderFiles(sourcePath, stripCorrupt);
+      const sel = _selectFolderFiles(sourcePath);
       strippedFiles = sel.strippedFiles;
       fs.mkdirSync(destDir, { recursive: true });
       let done = 0;
@@ -3186,6 +3205,9 @@ module.exports = {
   isNoisePath: _isNoisePath,
   zipFolderToFile,
   walkFolderSorted,
+  // exported for testing — lets a harness time the REAL selection walk rather
+  // than a reimplementation of it ([B-361] cost measurement, 2026-09-09).
+  _selectFolderFiles,
   openSourceAtPath,
   hashZipFile,
   hashFolder,

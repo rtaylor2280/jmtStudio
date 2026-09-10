@@ -1800,12 +1800,12 @@ ipcMain.handle('bulkImport:cancel', () => {
 // ANALYZE phase: stage every planned source (zip + hash + dedup, no meta yet)
 // and return real stats + per-source prepared/dup/corrupt results. Reuses the
 // same progress event + cancel token as run.
-ipcMain.handle('bulkImport:analyze', async (e, { plan, corruptFonts } = {}) => {
+ipcMain.handle('bulkImport:analyze', async (e, { plan } = {}) => {
   try {
     _bulkImportCancelToken = { cancelled: false };
     const myToken = _bulkImportCancelToken;
     const result = await soundFontBulkImport.analyzeBulkImport(
-      { plan, userData: app.getPath('userData'), corruptFonts },
+      { plan, userData: app.getPath('userData') },
       {
         onProgress: (payload) => { try { e.sender.send('bulkImport:progress', payload); } catch {} },
         shouldCancel: () => myToken.cancelled,
@@ -5019,11 +5019,12 @@ ipcMain.handle('sdcard:pickFolder', async () => {
 });
 ipcMain.handle('sdcard:scanPath', (_, p) => sdCardDetect.assessPicked(p));
 ipcMain.handle('sdcard:listDir', (_, p) => sdCardDetect.listDir(p));
-// ── Async health walk ([B-348]) ─────────────────────────
-// (The old sdcard:folderHealth handler — a fully SYNCHRONOUS whole-subtree
-// walk that blocked the main event loop for minutes on a slow card — is
-// GONE, not guarded. Its two halves live on below, async: filesHealth for
-// the current folder's direct wavs, subtreeHealth for the folder badges.)
+// ── Async health walk ([B-348], narrowed by [B-361]) ────
+// ONE caller remains: the right-click check on a SINGLE font folder. The
+// whole-card walk this was built for is gone — browsing no longer reads file
+// contents at all, and corruption is found at import, off the read the import
+// already does. The filesHealth half (the current folder's direct wavs,
+// checked before every paint) went with it.
 // The sync folderHealth above froze the app for minutes on a slow card
 // (~36ms per file OPEN × 7,307 wavs, measured 2026-09-08): a synchronous
 // walk inside an ipcMain.handle blocks the main event loop, and with it
@@ -5033,15 +5034,6 @@ ipcMain.handle('sdcard:listDir', (_, p) => sdCardDetect.listDir(p));
 // Job registry: renderer passes a jobId it minted; cancel flips the flag the
 // walk polls between files. Entries are cleaned up when the walk returns.
 const _sdHealthJobs = new Map();
-ipcMain.handle('sdcard:filesHealth', async (e, { dirPath, jobId }) => {
-  _sdHealthJobs.set(jobId, { cancelled: false });
-  try {
-    return await sdCardDetect.filesHealthAsync(dirPath, {
-      isCancelled: () => _sdHealthJobs.get(jobId)?.cancelled !== false,
-    });
-  } catch { return { files: {}, notChecked: 0 };
-  } finally { _sdHealthJobs.delete(jobId); }
-});
 ipcMain.handle('sdcard:subtreeHealth', async (e, { dirPath, dirNames, jobId }) => {
   _sdHealthJobs.set(jobId, { cancelled: false });
   // Progress is throttled here, not in the module: per-dir completions always

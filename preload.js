@@ -189,7 +189,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listSdDir: (p) => ipcRenderer.invoke('sdcard:listDir', p),
   // Async health walk ([B-348]): direct-file check, incremental folder
   // badges, cancel, and the progress stream that feeds the browser footer.
-  sdFilesHealth: (params) => ipcRenderer.invoke('sdcard:filesHealth', params),
   sdSubtreeHealth: (params) => ipcRenderer.invoke('sdcard:subtreeHealth', params),
   sdHealthCancel: (jobId) => ipcRenderer.invoke('sdcard:healthCancel', jobId),
   onSdHealthProgress: (cb) => {
