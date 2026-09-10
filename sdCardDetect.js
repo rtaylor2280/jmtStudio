@@ -385,6 +385,198 @@ function listDir(dirPath) {
 // `data` chunk claims more bytes than the file holds (audio truncated). Trailing
 // junk BEYOND a valid data chunk (e.g. zero-padding to a cluster boundary) is
 // TOLERATED — it still plays. Returns { corrupt, reason } / { corrupt:false }.
+// ── EXECUTABLES ON A SOUND-FONT CARD ([B-214]) ──────────────────────────────
+//
+// Chinese-made sabers and preloaded Proffie cards circulate with EXE files sitting
+// inside font folders, named after their own parent folder so a double-click looks
+// like opening the font (Crucible thread 8143: Worm:Win32/Nuqel.BJ at
+// G:\CalKestis\CalKestis.exe, remediation INCOMPLETE). Nothing executable has any
+// business in a font, so the import strips it rather than warning about it.
+//
+// TWO TESTS, AND THE SECOND IS THE POINT. An extension blocklist has an obvious
+// evasion: rename CalKestis.exe to CalKestis.wav and it walks straight through,
+// while the board simply fails to play it. So the extension list is the FLOOR. The
+// real test is the leading bytes, which say what a file IS whatever it is called -
+// and it is close to free, because the import already opens every one of these
+// files to hash it.
+//
+// Deliberately NOT here: shebang scripts (#!), which are unremarkable text on a
+// card that has been near a Mac, and archives, which are ordinary font delivery.
+// The list is what executes on a desktop OS if double-clicked.
+const _EXE_EXT_RX = /\.(exe|com|scr|pif|bat|cmd|msi|dll|lnk|vbs|vbe|jse|wsf|ps1|hta|cpl|jar|app)$/i;
+
+// ⚠️ NOBODY TESTS THE RAW REGEX. Windows discards trailing dots and spaces when it
+// resolves a path, so "Payload.exe " and "Payload.exe." both LAUNCH as Payload.exe
+// while failing a naive end-anchored match. That strip was written beside the first
+// caller that needed it (checkExecutableBuffer, 2026-09-09) and never reached the
+// other three: the card walk and the bulk-import walk both matched raw names, so the
+// evasion passed both. Found by his test pass 2026-09-10 - the card report said 6
+// program files when there were 7.
+// So the RULE lives here as a function and the regex is no longer exported. A caller
+// cannot reintroduce this by forgetting a step it can no longer see.
+function _stripTrailingDotsSpaces(name) { return String(name || '').replace(/[. ]+$/, ''); }
+function looksExecutableName(name) { return _EXE_EXT_RX.test(_stripTrailingDotsSpaces(name)); }
+
+// Magic numbers, checked against the first bytes of the file itself.
+//   MZ            DOS/Windows executable (PE lives behind this header too)
+//   \x7fELF       Linux/Unix executable
+//   \xFE\xED\xFA / \xCA\xFE\xBA\xBE   Mach-O and universal binaries (macOS)
+function _looksExecutable(buf) {
+  if (!buf || buf.length < 4) return false;
+  if (buf[0] === 0x4d && buf[1] === 0x5a) return true;                       // MZ
+  if (buf[0] === 0x7f && buf[1] === 0x45 && buf[2] === 0x4c && buf[3] === 0x46) return true; // ELF
+  const m = buf.readUInt32BE(0);
+  // Mach-O 32/64 both endians, plus the fat/universal wrapper.
+  if (m === 0xfeedface || m === 0xfeedfacf || m === 0xcefaedfe || m === 0xcffaedfe) return true;
+  if (m === 0xcafebabe || m === 0xbebafeca) return true;
+  return false;
+}
+
+// Public: is this file executable, by name or by content? Takes the bytes the
+// caller ALREADY read (same contract as checkWavBuffer, so one read serves both
+// predicates). Returns { blocked, reason, byContent, byName, disguised } or
+// { blocked: false }.
+//
+// The two reasons are worded differently ON PURPOSE. A file that admits what it is
+// gets a plain statement; a file whose bytes disagree with its name is the case the
+// user most needs to see, and it is stated as the mismatch it is.
+//
+// ⚠️ `disguised` IS THE ONE CONSUMERS SHOULD USE, AND IT EXISTS BECAUSE byContent
+// ALONE READ AS CONCEALMENT AND IS NOT. Every real program has executable bytes, so
+// byContent is true for an honestly named Installer.exe too - the UI called seven
+// plainly named .exe files "disguised as a sound file" when only two were disguised
+// (measured on his card, 2026-09-10). Concealment is byContent AND NOT byName.
+// Shipped as a single flag rather than two, so no screen has to remember to combine
+// them: a consumer that must AND two booleans correctly will eventually not.
+function checkExecutableBuffer(buf, relPath) {
+  const byContent = _looksExecutable(buf);
+  // The trailing dot/space strip lives in looksExecutableName, above, so every
+  // caller gets it. See the warning there for why it must not be inlined again.
+  const byName = looksExecutableName(relPath);
+  if (!byContent && !byName) return { blocked: false };
+  if (byContent && !byName) {
+    return { blocked: true, byContent: true, byName: false, disguised: true,
+      reason: 'This file is a program, despite its name. It was left out.' };
+  }
+  return { blocked: true, byContent, byName: true, disguised: false,
+    reason: 'This is a program file, which does not belong in a sound font. It was left out.' };
+}
+// Every executable-looking NAME on a card, found without opening a single file.
+//
+// This is the one card-wide walk that survives [B-361], and it survives because it
+// is a different cost class from the one that was deleted. That walk OPENED 7,307
+// files and cost minutes. This one reads directory entries only - no open, not even
+// a stat, because a name test does not care about size. MEASURED 2026-09-09 on real
+// cards: 100 ms for 1,401 folders / 7,563 files, and 61 ms for 1,012 / 6,162.
+//
+// ⚠️ NAMES ONLY, AND THAT LIMIT MUST TRAVEL WITH THE RESULT. A program renamed to
+// hum.wav is invisible here; catching that needs the leading bytes, which is what
+// the import does (checkExecutableBuffer, off the read it already performs). So a
+// clean result here means "nothing is ADMITTING to being a program", never "this
+// card is clean" - the same speak-to-proof discipline the wav sampling had.
+function scanCardExecutables(mountPath, opts) {
+  const o = opts || {};
+  const maxReport = o.maxReport == null ? 50 : o.maxReport;
+  const budgetMs = o.budgetMs == null ? 4000 : o.budgetMs;
+  const t0 = Date.now();
+  const out = { files: [], complete: true, scanned: 0, ms: 0 };
+  const stack = [{ dir: mountPath, depth: 0 }];
+  while (stack.length) {
+    if (out.files.length >= maxReport || Date.now() - t0 > budgetMs) { out.complete = false; break; }
+    const { dir, depth } = stack.pop();
+    if (depth > 8) continue;
+    let ents;
+    try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+    for (const e of ents) {
+      if (_isSdNoise(e.name)) continue;
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) {
+        if (depth === 0 && e.name.toLowerCase() === 'system volume information') continue;
+        stack.push({ dir: full, depth: depth + 1 });
+        continue;
+      }
+      out.scanned++;
+      if (looksExecutableName(e.name)) {
+        out.files.push(path.relative(mountPath, full).split(path.sep).join('/'));
+      }
+    }
+  }
+  out.ms = Date.now() - t0;
+  return out;
+}
+// ── THREE TIERS, NOT TWO ([B-214], his calls 2026-09-09) ───────────────────
+//
+// BLOCK - a program. Removed, always, from every import path. A program in a
+//   sound font is out of place by definition; that is the whole basis and it
+//   does not need a malware claim behind it.
+//
+// WARN BUT ALLOW - a macro-enabled document (.docm and friends). These DO carry
+//   a real Windows attack vector, but the common case is someone whose Word save
+//   dialog chose the format for them without their noticing. Refusing a receipt
+//   because of the letter "m" would cost a real user their proof of purchase to
+//   guard against something that is usually nothing. Say it, keep it.
+//
+// OPAQUE - an archive format we cannot open (.rar, .7z and friends). Nothing is
+//   wrong with it and nothing is claimed about it. It is reported precisely
+//   BECAUSE silence would read as "checked and clean", which is the false
+//   all-clear this feature is otherwise careful to avoid. We looked; we could
+//   not see inside; the user should know which of those happened.
+const _MACRO_EXT_RX = /\.(docm|dotm|xlsm|xltm|xlam|pptm|potm|ppam|sldm)$/i;
+const _OPAQUE_ARCHIVE_RX = /\.(rar|7z|cab|iso|dmg|tar|tgz|gz|bz2|xz)$/i;
+
+// Full verdict for one file. `kind` is one of:
+//   'program' (blocked) | 'macro' (allowed, warned) | 'opaque' (allowed, noted) | 'ok'
+// Takes bytes the caller already read, same contract as checkExecutableBuffer.
+function classifyFileBuffer(buf, relPath) {
+  const exe = checkExecutableBuffer(buf, relPath);
+  if (exe.blocked) return { kind: 'program', blocked: true, byContent: !!exe.byContent,
+    byName: !!exe.byName, disguised: !!exe.disguised, reason: exe.reason };
+  const clean = String(relPath || '').replace(/[. ]+$/, '');
+  if (_MACRO_EXT_RX.test(clean)) {
+    return { kind: 'macro', blocked: false,
+      reason: 'This document can contain macros, which are small programs. It was imported; open it with care.' };
+  }
+  if (_OPAQUE_ARCHIVE_RX.test(clean)) {
+    return { kind: 'opaque', blocked: false,
+      reason: 'This archive format cannot be opened here, so its contents were not checked.' };
+  }
+  return { kind: 'ok', blocked: false };
+}
+
+// THE ONE GUARD EVERY IMPORT PATH CALLS ([B-214]).
+//
+// Reads the head of a file on disk and runs both tiers against it: the cheap
+// name test, then the leading bytes. Exists because the app has SIX places that
+// copy user content onto the disk - sources by folder, sources by zip, common
+// folders, shared tracks, attachments, and inner archives - and a rule written
+// at one of them protects only that one. The gap is not theoretical: the folder
+// and zip routes were guarded first, and a program could still walk in as an
+// attachment or inside a common folder.
+//
+// Returns { blocked, reason, byContent } - the same shape as the buffer test,
+// so a caller can report it identically wherever it fired.
+// Same as classifyFileBuffer, for a caller holding a path rather than bytes.
+function classifyFile(absPath, relPath) {
+  const v = checkExecutableFile(absPath, relPath);
+  if (v.blocked) return { kind: 'program', blocked: true, byContent: !!v.byContent, reason: v.reason };
+  return classifyFileBuffer(null, relPath || absPath);
+}
+
+function checkExecutableFile(absPath, relPath) {
+  let head = null;
+  let fd;
+  try { fd = fs.openSync(absPath, 'r'); } catch { fd = null; }
+  if (fd != null) {
+    try {
+      const buf = Buffer.alloc(256);
+      const n = fs.readSync(fd, buf, 0, 256, 0);
+      head = n > 0 ? buf.subarray(0, n) : Buffer.alloc(0);
+    } catch { head = null; }
+    finally { try { fs.closeSync(fd); } catch {} }
+  }
+  return checkExecutableBuffer(head, relPath || absPath);
+}
+
 // Validate a WAV from an already-read header buffer + the file's total size.
 // Split out so callers that ALREADY hold the bytes (the bulk-import content-hash
 // pass reads every file) can corruption-check off the SAME read, no re-open.
@@ -785,4 +977,4 @@ async function analyzeFonts(dirPath) {
   return { path: dirPath, fonts };
 }
 
-module.exports = { scan, assessCard, assessPath, assessPicked, classifyCard, listDir, findConfigs, deriveFontName, nameFromReadmeText, docxToText, recoverNameFromDocx, analyzeFonts, resolveIdentity, isDegenerateVsn, formatVsn, enumerateAllVolumes, enumerateRemovableVolumes, checkWavHealth, checkWavBuffer, subtreeHealthAsync, checkWavHealthAsync };
+module.exports = { scan, assessCard, assessPath, assessPicked, classifyCard, listDir, findConfigs, deriveFontName, nameFromReadmeText, docxToText, recoverNameFromDocx, analyzeFonts, resolveIdentity, isDegenerateVsn, formatVsn, enumerateAllVolumes, enumerateRemovableVolumes, checkWavHealth, checkWavBuffer, checkExecutableBuffer, checkExecutableFile, classifyFileBuffer, classifyFile, scanCardExecutables, looksExecutableName, subtreeHealthAsync, checkWavHealthAsync };

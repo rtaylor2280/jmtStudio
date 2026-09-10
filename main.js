@@ -5019,6 +5019,12 @@ ipcMain.handle('sdcard:pickFolder', async () => {
 });
 ipcMain.handle('sdcard:scanPath', (_, p) => sdCardDetect.assessPicked(p));
 ipcMain.handle('sdcard:listDir', (_, p) => sdCardDetect.listDir(p));
+// Card-wide executable NAME scan ([B-214]). Directory entries only, no file is
+// opened, so it does not reintroduce what [B-361] removed. ~100ms on a full card.
+ipcMain.handle('sdcard:executables', (_, p) => {
+  try { return sdCardDetect.scanCardExecutables(p); }
+  catch { return { files: [], complete: false, scanned: 0, ms: 0 }; }
+});
 // ── Async health walk ([B-348], narrowed by [B-361]) ────
 // ONE caller remains: the right-click check on a SINGLE font folder. The
 // whole-card walk this was built for is gone — browsing no longer reads file

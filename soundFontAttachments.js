@@ -40,7 +40,25 @@ function hashFile(abs) {
 // bytes reuse the existing store dir, so nothing is duplicated on disk. An
 // optional label is the user's display name for the attachment (chips show
 // label || filename); passing one updates it even on an already-stored file.
+// ⚠️ AN ATTACHMENT IS AN IMPORT ([B-214]). Files are attached straight off the
+// same cards the fonts come from, so this door is as able to carry a program as
+// the font importer is. Refused rather than stripped, because an attachment IS
+// the one file the user asked for: there is nothing left to store if it goes.
+// Returns { ok:false, blocked } so the caller can say which file and why.
 function storeFile(userData, srcAbsPath, label) {
+  // ⚠️ THROWS rather than returning a verdict, because this function RETURNS AN ID
+  // and both callers assign it straight into one. An object here would land in the
+  // attachment list as though it were an id. Both callers already sit in a try/catch,
+  // and addAttachmentToSources turns the message into its own error string, so
+  // throwing is what actually reaches the user.
+  const _v = require('./sdCardDetect').checkExecutableFile(srcAbsPath, path.basename(srcAbsPath));
+  // Its own wording, NOT the card path's. There the file arrived uninvited among sound
+  // files; here the user picked it on purpose and the likely story is the wrong entry in
+  // a file picker. So it names what they were trying to do rather than lecturing about
+  // sound fonts, and it does not carry the card warning's weight.
+  if (_v.blocked) throw new Error(
+    'That file is a program rather than a document, so it was not attached. '
+    + 'Attachments are for receipts, manuals and notes.');
   const id = hashFile(srcAbsPath);
   const dir = path.join(attachmentsRoot(userData), id);
   const jp = path.join(dir, 'attachment.json');
@@ -94,13 +112,14 @@ function addAttachments(userData, uuid, filePaths) {
   const meta = readSourceMeta(userData, uuid);
   if (!meta) return { ok: false, error: 'source not found' };
   const ids = Array.isArray(meta.attachments) ? meta.attachments.slice() : [];
+  const refused = []; // files declined on the way in ([B-214]), reported not swallowed
   for (const fp of (filePaths || [])) {
     try { const id = storeFile(userData, fp); if (!ids.includes(id)) ids.push(id); }
-    catch { /* skip unreadable file */ }
+    catch (err) { refused.push({ name: path.basename(fp), reason: String((err && err.message) || err) }); }
   }
   meta.attachments = ids;
   writeSourceMeta(userData, uuid, meta);
-  return { ok: true, attachments: listAttachments(userData, uuid) };
+  return { ok: true, attachments: listAttachments(userData, uuid), refused };
 }
 
 function listAttachments(userData, uuid) {

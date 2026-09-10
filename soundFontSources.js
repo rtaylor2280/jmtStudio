@@ -162,24 +162,107 @@ async function copyFileStreamed(srcPath, destPath, onProgress) {
 // non-empty means this source was damaged, and the reasons ride along for the
 // review row and the post-import summary.
 function _selectFolderFiles(srcDir) {
-  const strippedFiles = [];
-  const { checkWavHealth } = require('./sdCardDetect');
+  const strippedFiles = [];   // damaged wavs, removed
+  const blockedFiles = [];    // programs, removed ([B-214])
+  const notedFiles = [];      // macro documents and un-inspectable archives, KEPT
+  const { checkWavBuffer, classifyFileBuffer } = require('./sdCardDetect');
   const files = walkFolderSorted(srcDir)
     .filter(f => !_isNoisePath(f.relPath))
     .filter(f => {
+      // ONE read, BOTH predicates. This used to call checkWavHealth, which opens the
+      // file itself - so a wav was opened twice, once for the header and again by the
+      // zip moments later. Reading the head here and passing the bytes to both checks
+      // is what hashAndCheckFont was written to do in the first place, and it is the
+      // only way the executable test is free: it needs the leading bytes of EVERY
+      // file, not just the wavs.
+      const head = _readHead(f.absPath);
+      // Executables first: a file that is a program is out whatever else it may be,
+      // and a program named .wav must never reach the wav check and be judged as
+      // merely corrupt.
+      const v = classifyFileBuffer(head, f.relPath);
+      if (v.kind === 'program') { blockedFiles.push({ relPath: f.relPath, kind: 'program', reason: v.reason, byContent: !!v.byContent, disguised: !!v.disguised }); return false; }
+      if (v.kind === 'macro') {
+        blockedFiles.push({ relPath: f.relPath, kind: 'macro',
+          reason: 'A document that can contain macros has no use on a saber card. It was left out.' });
+        return false;
+      }
+      // Kept, and said out loud anyway: an archive we cannot open is not a finding, but
+      // silence about it would read as "checked and clean", which is not what happened.
+      if (v.kind !== 'ok') notedFiles.push({ relPath: f.relPath, kind: v.kind, reason: v.reason });
       if (!/\.wav$/i.test(f.relPath)) return true;
-      const h = checkWavHealth(f.absPath, f.size);
+      const h = checkWavBuffer(head || Buffer.alloc(0), f.size);
       if (h && h.corrupt) { strippedFiles.push({ relPath: f.relPath, reason: h.reason }); return false; }
       return true;
     });
-  return { files, strippedFiles };
+  return { files, strippedFiles, blockedFiles, notedFiles };
+}
+
+// Remove every executable from an already-extracted tree, and say what went.
+//
+// The ZIP route needs this rather than a filter at extraction time, for one
+// reason worth keeping: inner archives are expanded AFTER the outer one, so a
+// program hidden inside a nested zip does not exist yet while the outer archive
+// is being read. Sweeping the finished tree covers both depths with one pass.
+//
+// ⚠️ IDENTITY IS NOT AFFECTED, and this is the fact that unblocked the whole
+// question. A picked archive is identified by the sha256 of THE FILE ON THE
+// USER'S DISK, taken before anything is written and never recomputed from what
+// we store. So dedup and provenance against the vendor's original still refer to
+// the archive they actually have; we are only declining to keep part of it, and
+// the meta records exactly which part.
+function _purgeExecutables(rootDir) {
+  const { classifyFileBuffer } = require('./sdCardDetect');
+  const blocked = [];
+  const noted = [];
+  const walk = (dir, rel) => {
+    let ents;
+    try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of ents) {
+      const abs = path.join(dir, e.name);
+      const r = rel ? rel + '/' + e.name : e.name;
+      if (e.isDirectory()) { walk(abs, r); continue; }
+      if (!e.isFile()) continue;
+      const verdict = classifyFileBuffer(_readHead(abs), r);
+      if (verdict.kind === 'macro') {
+        let msize = 0; try { msize = fs.statSync(abs).size; } catch {}
+        try { fs.unlinkSync(abs); } catch { continue; }
+        blocked.push({ relPath: r, kind: 'macro', size: msize,
+          reason: 'A document that can contain macros has no use on a saber card. It was left out.' });
+        continue;
+      }
+      if (verdict.kind !== 'program') {
+        if (verdict.kind !== 'ok') noted.push({ relPath: r, kind: verdict.kind, reason: verdict.reason });
+        continue;
+      }
+      let size = 0;
+      try { size = fs.statSync(abs).size; } catch {}
+      try { fs.unlinkSync(abs); } catch { continue; } // could not remove it: do not claim we did
+      blocked.push({ relPath: r, kind: 'program', reason: verdict.reason, byContent: !!verdict.byContent, disguised: !!verdict.disguised, size });
+    }
+  };
+  walk(rootDir, '');
+  return { blocked, noted };
+}
+
+// First 256 bytes of a file, or null if it cannot be opened. 256 is what
+// checkWavBuffer needs to walk a RIFF chunk list; the executable magic numbers
+// need 4. One size serves both so there is one read per file, not two.
+function _readHead(absPath) {
+  let fd;
+  try { fd = fs.openSync(absPath, 'r'); } catch { return null; }
+  try {
+    const buf = Buffer.alloc(256);
+    const n = fs.readSync(fd, buf, 0, 256, 0);
+    return n > 0 ? buf.subarray(0, n) : Buffer.alloc(0);
+  } catch { return null; }
+  finally { try { fs.closeSync(fd); } catch {} }
 }
 
 async function zipFolderToFile(srcDir, destZipPath, onProgress) {
   const archiver = require('archiver');
   const { Transform } = require('stream');
 
-  const { files, strippedFiles } = _selectFolderFiles(srcDir);
+  const { files, strippedFiles, blockedFiles, notedFiles } = _selectFolderFiles(srcDir);
   const totalBytes = files.reduce((s, f) => s + f.size, 0);
   const fileCount = files.length;
 
@@ -264,7 +347,7 @@ async function zipFolderToFile(srcDir, destZipPath, onProgress) {
     archive.finalize();
   });
 
-  return { hash: hasher.digest('hex'), totalBytes, fileCount, strippedFiles };
+  return { hash: hasher.digest('hex'), totalBytes, fileCount, strippedFiles, blockedFiles, notedFiles };
 }
 
 // Walk a folder tree, return an array of {relPath, absPath, size} sorted
@@ -910,6 +993,8 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
   let totalBytes = 0;
   let fileCount = 0;
   let strippedFiles = []; // damaged wavs, always detected and dropped (folder imports)
+  let blockedFiles = [];  // executables, never carried in, from either input ([B-214])
+  let notedFiles = [];    // kept, but reported: macro documents, un-inspectable archives
   // What inner-archive expansion did. Reported rather than assumed, so a bundle
   // that refused to expand is visible instead of quietly looking ordinary.
   let innerArchives = { expanded: [], left: [] };
@@ -990,6 +1075,11 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
       // reusing 'copying' gave the user two consecutive bars labelled identically
       // with the second appearing to restart for no reason. (His catch, 2026-09-04.)
       innerArchives = await _expandInnerArchives(destDir, (p) => emit('expanding', p));
+      // ⚠️ AFTER the inner expand, so a program inside a nested archive is caught too,
+      // and BEFORE the records below, so the stored totals describe what is kept.
+      const _purge = _purgeExecutables(destDir);
+      blockedFiles = _purge.blocked;
+      notedFiles = _purge.noted;
       const fhz = require('./soundFontFileHash');
       const recz = fhz.collectFileRecords(destDir) || [];
       totalBytes = recz.reduce((s, r) => s + (r.size || 0), 0);
@@ -1009,6 +1099,8 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
       // it is, after the write, exactly as the zip-transform needed it.
       const sel = _selectFolderFiles(sourcePath);
       strippedFiles = sel.strippedFiles;
+      blockedFiles = sel.blockedFiles;
+      notedFiles = sel.notedFiles;
       fs.mkdirSync(destDir, { recursive: true });
       let done = 0;
       const selTotal = sel.files.reduce((s, f) => s + f.size, 0);
@@ -1093,10 +1185,10 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
       // Curation travels with the prepared source rather than being applied
       // now: the meta this belongs on does not exist until finalize. The temp
       // dir holding the receipts stays alive until then, and finalize removes it.
-      return { ok: true, isDuplicate: false, prepared: true, uuid, uuidDir, hash, format, name, fileSize, archiveBytes: inputArchiveBytes, sourceFileDate, sourceFileMtimeMs, totalBytes, fileCount, strippedFiles, crossLinked, curation, curationTmp, curationPayloadDir };
+      return { ok: true, isDuplicate: false, prepared: true, uuid, uuidDir, hash, format, name, fileSize, archiveBytes: inputArchiveBytes, sourceFileDate, sourceFileMtimeMs, totalBytes, fileCount, strippedFiles, blockedFiles, notedFiles, crossLinked, curation, curationTmp, curationPayloadDir };
     }
 
-    const res = await _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format, name, hash, fileSize, sourceFileDate, sourceFileMtimeMs, metadata, strippedFiles, curation, curationPayloadDir, crossLinked, deferCustomized });
+    const res = await _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format, name, hash, fileSize, sourceFileDate, sourceFileMtimeMs, metadata, strippedFiles, blockedFiles, notedFiles, curation, curationPayloadDir, crossLinked, deferCustomized });
     emit('done', { isDuplicate: false });
     // Deferred customized payload: the review form now owns the decision, so
     // the strip's temp dir has to outlive this call — the commit restores the
@@ -1113,7 +1205,7 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
     // sharing. The close-out needs it to say what the font costs on disk
     // (holds minus saved), and it cannot be recovered later without
     // re-walking the tree. ([B-317], 2026-09-06.)
-    return { ...res, strippedFiles, crossLinked, contentBytes: fileSize,
+    return { ...res, strippedFiles, blockedFiles, notedFiles, crossLinked, contentBytes: fileSize,
       archiveBytes: inputArchiveBytes,
       curation: curation || null, curationApplied: res.curationApplied || null,
       // The payload's temp-dir handles ride to the caller ONLY while a deferred
@@ -1130,7 +1222,7 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
 // Shared meta writer + candidate-cache warm. Used by importSource's finalize
 // path AND finalizePreparedSource (the deferred commit of a prepareOnly source),
 // so the written meta is identical whichever way a source is committed.
-async function _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format, name, hash, fileSize, sourceFileDate, sourceFileMtimeMs, metadata, strippedFiles, curation, curationPayloadDir, crossLinked, deferCustomized }) {
+async function _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format, name, hash, fileSize, sourceFileDate, sourceFileMtimeMs, metadata, strippedFiles, blockedFiles, notedFiles, curation, curationPayloadDir, crossLinked, deferCustomized }) {
   const meta = {
     schemaVersion: 1,
     uuid,
@@ -1149,6 +1241,11 @@ async function _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format, name,
     readmePaths: [],
     // Provenance: damaged wavs that were removed on import (empty/absent when none).
     ...(strippedFiles && strippedFiles.length ? { strippedFiles } : {}),
+    // ⚠️ RECORDED ON THE ENTRY, not just announced in a dialog ([B-214]). The dialog
+    // closes; the question "what did this font arrive carrying" outlives it, and it is
+    // the one a person asks long after the import. Same shape as strippedFiles above.
+    ...(blockedFiles && blockedFiles.length ? { blockedFiles } : {}),
+    ...(notedFiles && notedFiles.length ? { notedFiles } : {}),
     // The curation this archive arrived carrying, kept whole on the source so
     // createEntry can read the per-candidate half later without the review
     // screen having to carry it through. Source-level fields are applied
@@ -1615,7 +1712,28 @@ function _createZipSource({ uuid, uuidDir, meta }) {
           phase: 'reconstruct', fileCount: p.fileCount, totalFiles: files.length,
           bytesDone: p.totalBytes, totalBytes, currentFile: p.currentFile,
         }));
-        return { destPath, format: 'folder', fileCount: r.fileCount != null ? r.fileCount : files.length, totalBytes: r.totalBytes != null ? r.totalBytes : totalBytes, folders };
+        // ⚠️ THE WAY OUT NEEDS THE SAME GUARD AS THE WAY IN ([B-214], 2026-09-10).
+        // The ZIP branch below is already safe for free: it goes through
+        // zipFolderToFile, which runs _selectFolderFiles and drops programs. This
+        // branch is a RAW extractTo, so without this it wrote the source verbatim -
+        // measured: a full-source folder export carried four planted programs onto
+        // the Desktop untouched.
+        // NOT a legacy concern (there is no released version to have legacy data).
+        // The source store is a writable folder in AppData: a worm can drop a file
+        // into it WITHOUT going through import, and this is the path that would then
+        // copy it onto a saber card and hand it to the next person.
+        const _purged = _purgeExecutables(destPath);
+        // ⚠️ REPORT WHAT LANDED, NOT WHAT WE SET OUT TO WRITE. extractTo counts
+        // before the purge runs, so the summary claimed 91 files when 86 were on
+        // disk (his catch, 2026-09-10: the numbers ARE the test here - before minus
+        // removed equals after, and it did not).
+        const _rawN = r.fileCount != null ? r.fileCount : files.length;
+        const _rawB = r.totalBytes != null ? r.totalBytes : totalBytes;
+        const _goneB = _purged.blocked.reduce((n, x) => n + (x.size || 0), 0);
+        return { destPath, format: 'folder',
+          fileCount: Math.max(0, _rawN - _purged.blocked.length),
+          totalBytes: Math.max(0, _rawB - _goneB),
+          folders, blocked: _purged.blocked, noted: _purged.noted };
       }
       const destName = /\.zip$/i.test(String(meta.originalName || '')) ? meta.originalName : `${baseName}.zip`;
       const destPath = _uniqueDestPath(destDir, destName);
@@ -1925,13 +2043,41 @@ function _createFolderSource({ uuid, uuidDir, meta }) {
           phase: 'reconstruct', fileCount: p.fileCount, totalFiles: files.length,
           bytesDone: p.totalBytes, totalBytes, currentFile: p.currentFile,
         }));
-        return { destPath, format: 'folder', fileCount: r.fileCount != null ? r.fileCount : files.length, totalBytes: r.totalBytes != null ? r.totalBytes : totalBytes, folders };
+        // ⚠️ THE WAY OUT NEEDS THE SAME GUARD AS THE WAY IN ([B-214], 2026-09-10).
+        // The ZIP branch below is already safe for free: it goes through
+        // zipFolderToFile, which runs _selectFolderFiles and drops programs. This
+        // branch is a RAW extractTo, so without this it wrote the source verbatim -
+        // measured: a full-source folder export carried four planted programs onto
+        // the Desktop untouched.
+        // NOT a legacy concern (there is no released version to have legacy data).
+        // The source store is a writable folder in AppData: a worm can drop a file
+        // into it WITHOUT going through import, and this is the path that would then
+        // copy it onto a saber card and hand it to the next person.
+        const _purged = _purgeExecutables(destPath);
+        // ⚠️ REPORT WHAT LANDED, NOT WHAT WE SET OUT TO WRITE. extractTo counts
+        // before the purge runs, so the summary claimed 91 files when 86 were on
+        // disk (his catch, 2026-09-10: the numbers ARE the test here - before minus
+        // removed equals after, and it did not).
+        const _rawN = r.fileCount != null ? r.fileCount : files.length;
+        const _rawB = r.totalBytes != null ? r.totalBytes : totalBytes;
+        const _goneB = _purged.blocked.reduce((n, x) => n + (x.size || 0), 0);
+        return { destPath, format: 'folder',
+          fileCount: Math.max(0, _rawN - _purged.blocked.length),
+          totalBytes: Math.max(0, _rawB - _goneB),
+          folders, blocked: _purged.blocked, noted: _purged.noted };
       }
       const destPath = _uniqueDestPath(destDir, `${baseName}.zip`);
-      await zipFolderToFile(folderRoot, destPath, (p) => onProgress && onProgress({
+      // zipFolderToFile runs _selectFolderFiles, so it already refused any program
+      // and its counts describe the ARCHIVE. Report those rather than the source
+      // listing, or the summary over-reports by exactly what it left out.
+      const _zr = await zipFolderToFile(folderRoot, destPath, (p) => onProgress && onProgress({
         phase: 'compress', bytesDone: p.bytesProcessed, totalBytes: p.totalBytes || totalBytes, currentFile: p.currentFile,
       }));
-      return { destPath, format: 'zip', fileCount: files.length, totalBytes, folders };
+      return { destPath, format: 'zip',
+        fileCount: (_zr && _zr.fileCount != null) ? _zr.fileCount : files.length,
+        totalBytes: (_zr && _zr.totalBytes != null) ? _zr.totalBytes : totalBytes,
+        folders,
+        blocked: (_zr && _zr.blockedFiles) || [], noted: (_zr && _zr.notedFiles) || [] };
     },
   };
 }
@@ -2100,6 +2246,15 @@ async function extractSourceFileTo(userData, uuid, subPath, destDir, finalName) 
 async function exportSourceFileTo(userData, uuid, subPath, destDir) {
   if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
   const buf = await readSourceFileBytes(userData, uuid, subPath);
+  // ⚠️ THE PER-FILE DOOR IS A DOOR ([B-214], his catch 2026-09-10). The whole-source
+  // export refuses programs, so this one-file-at-a-time route out of the SAME store
+  // has to as well - otherwise right-click > Export on the one file that matters
+  // walks past every guard we built. Free here: the bytes are already in hand.
+  {
+    const { checkExecutableBuffer } = require('./sdCardDetect');
+    const v = checkExecutableBuffer(buf.subarray(0, 256), subPath);
+    if (v.blocked) return { refused: true, reason: v.reason, relPath: String(subPath) };
+  }
   const baseName = String(subPath).split('/').pop() || `source-${uuid}.bin`;
   const destPath = _uniqueDestPath(destDir, baseName);
   await fs.promises.writeFile(destPath, buf);
@@ -2746,24 +2901,38 @@ function _virtualizeSource(physical, records) {
           phase: p.phase || 'reconstruct', fileCount: p.fileCount, totalFiles: p.totalFiles || grandFiles,
           bytesDone: p.totalBytes || 0, totalBytes: grandTotal, currentFile: p.currentFile,
         }));
-        return { destPath, format: 'folder', fileCount: grandFiles, totalBytes: grandTotal, folders, reconstructed: true };
+        // Same egress guard as the other two impls — see the note there. This one
+        // also covers reconstructBundle's refilled inner zips, because the purge
+        // sweeps the FINISHED tree rather than filtering during extraction.
+        const _purgedB = _purgeExecutables(destPath);
+        const _goneBB = _purgedB.blocked.reduce((n, x) => n + (x.size || 0), 0);
+        return { destPath, format: 'folder',
+          fileCount: Math.max(0, grandFiles - _purgedB.blocked.length),
+          totalBytes: Math.max(0, grandTotal - _goneBB),
+          folders, reconstructed: true, blocked: _purgedB.blocked, noted: _purgedB.noted };
       }
       // zip: reconstruct to a temp tree, then archive it. Two passes keep memory bounded on
       // multi-GB voicepacks (no whole-bundle buffering) and reuse the proven zipFolderToFile
       // output. Reconstruction reports real per-file progress; compression reports byte progress.
       const destPath = _uniqueDestPath(destDir, `${baseName}.zip`);
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'jmt-srcexport-'));
+      let _zres = null;
       try {
         await reconstruct(tmp, (p) => onProgress && onProgress({
           phase: p.phase || 'reconstruct', fileCount: p.fileCount, totalFiles: p.totalFiles || grandFiles,
           bytesDone: p.totalBytes || 0, totalBytes: grandTotal, currentFile: p.currentFile,
         }));
-        await zipFolderToFile(tmp, destPath, (p) => onProgress && onProgress({
+        _zres = await zipFolderToFile(tmp, destPath, (p) => onProgress && onProgress({
           phase: 'compress', bytesDone: p.bytesProcessed, totalBytes: p.totalBytes || grandTotal,
           currentFile: p.currentFile,
         }));
       } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
-      return { destPath, format: 'zip', fileCount: grandFiles, totalBytes: grandTotal, folders, reconstructed: true };
+      // Counts come from the archive writer, which already refused any program.
+      return { destPath, format: 'zip',
+        fileCount: (_zres && _zres.fileCount != null) ? _zres.fileCount : grandFiles,
+        totalBytes: (_zres && _zres.totalBytes != null) ? _zres.totalBytes : grandTotal,
+        folders, reconstructed: true,
+        blocked: (_zres && _zres.blockedFiles) || [], noted: (_zres && _zres.notedFiles) || [] };
     },
   });
 }

@@ -60,7 +60,7 @@ function copyFileWithProgress(srcPath, destPath, onBytes) {
 //   recurse       descend into subdirectories (default true; false = flat)
 //   onBytes       called with the byte length of each chunk written
 async function copyTreeWithProgress(srcDir, destDir, opts = {}) {
-  const { skipRootMeta = false, fileFilter = null, recurse = true, onBytes = null } = opts;
+  const { skipRootMeta = false, fileFilter = null, recurse = true, onBytes = null, refused = null } = opts;
   for (const item of fs.readdirSync(srcDir, { withFileTypes: true })) {
     const srcPath = path.join(srcDir, item.name);
     const destPath = path.join(destDir, item.name);
@@ -69,10 +69,19 @@ async function copyTreeWithProgress(srcDir, destDir, opts = {}) {
       fs.mkdirSync(destPath, { recursive: true });
       // skipRootMeta is intentionally not propagated — it applies at the root
       // only, matching the legacy walk that skipped meta.json solely there.
-      await copyTreeWithProgress(srcPath, destPath, { fileFilter, recurse, onBytes });
+      await copyTreeWithProgress(srcPath, destPath, { fileFilter, recurse, onBytes, refused });
     } else if (item.isFile()) {
       if (skipRootMeta && item.name === 'meta.json') continue;
       if (fileFilter && !fileFilter(item.name)) continue;
+      // ⚠️ THE WAY OUT NEEDS THE SAME GUARD AS THE WAY IN ([B-214]). Entries imported
+      // before this existed were never filtered, so the library can still hold a program
+      // from a card read months ago. Without this, exporting would put it back onto a
+      // card and pass it to the next person. Collected rather than silently dropped:
+      // an unexplained omission during an export is its own kind of dishonesty.
+      if (refused) {
+        const v = require('./sdCardDetect').checkExecutableFile(srcPath, item.name);
+        if (v.blocked) { refused.push({ name: item.name, reason: v.reason }); continue; }
+      }
       await copyFileWithProgress(srcPath, destPath, onBytes);
     }
   }

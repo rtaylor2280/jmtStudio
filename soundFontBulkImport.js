@@ -44,6 +44,9 @@ const soundFontCommon = require('./soundFontCommon');
 const soundFontSharedTracks = require('./soundFontSharedTracks');
 const soundFontFileHash = require('./soundFontFileHash');
 const { checkWavBuffer, deriveFontName, recoverNameFromDocx } = require('./sdCardDetect');
+// ONE definition of "looks like a program by name", shared with the content check
+// so the two tiers can never drift apart ([B-214]).
+const { looksExecutableName } = require('./sdCardDetect');
 
 const MAX_SCAN_DEPTH_BEFORE_HALT = 6;
 
@@ -247,6 +250,7 @@ function walkForSources(absDir, relPath, depth, ctx) {
   const _series = numberedSeriesMembers(proffieChildren.map(p => p.name));
   for (const p of proffieChildren) {
     const _nm = folderSourceName(p.absPath, p.name, _series.has(p.name));
+    const _walk = safeDirScan(p.absPath);
     ctx.results.sources.push({
       kind: 'folder-solo',
       absPath: p.absPath,
@@ -254,7 +258,9 @@ function walkForSources(absDir, relPath, depth, ctx) {
       rawName: p.name,
       cleanedName: _nm.name,
       nameSource: _nm.source,
-      sizeBytes: safeDirSize(p.absPath),
+      sizeBytes: _walk.totalBytes,
+      // Free, from the walk above. Reported before the user chooses to import.
+      execFiles: _walk.execNames,
     });
   }
   // Recurse into non-Proffie, non-common subfolders. Track per-recurse
@@ -284,8 +290,23 @@ function safeStatSize(p) {
   try { return fs.statSync(p).size; } catch { return 0; }
 }
 
-function safeDirSize(dir) {
+// Walk a candidate source once and return everything the scan needs from it.
+//
+// ⚠️ THE EXECUTABLE NAMES RIDE THIS WALK ON PURPOSE ([B-214], 2026-09-09). The
+// scan already opens every directory and stats every file to total the bytes, so
+// the filenames are in hand and testing them costs no I/O at all - measured at
+// -1.2 ms across a 5,900-file card, which is below run-to-run noise. That is what
+// makes it honest to warn BEFORE the user chooses to import.
+//
+// This tier is NAME ONLY, and the limit is worth stating plainly wherever it is
+// reported: a program renamed to hum.wav walks straight past it. Catching that
+// needs the leading bytes of every file, which is a read this walk does not do,
+// and it happens at import instead where the read is already being paid for
+// (_selectFolderFiles). So: names before you decide, contents before anything
+// is carried in.
+function safeDirScan(dir) {
   let total = 0;
+  const execNames = [];
   const stack = [dir];
   while (stack.length) {
     const cur = stack.pop();
@@ -295,12 +316,19 @@ function safeDirSize(dir) {
     for (const e of entries) {
       if (isNoiseName(e.name)) continue;
       const full = path.join(cur, e.name);
-      if (e.isDirectory()) stack.push(full);
-      else if (e.isFile()) total += safeStatSize(full);
+      if (e.isDirectory()) { stack.push(full); continue; }
+      if (!e.isFile()) continue;
+      total += safeStatSize(full);
+      if (looksExecutableName(e.name)) {
+        execNames.push(path.relative(dir, full).split(path.sep).join('/'));
+      }
     }
   }
-  return total;
+  return { totalBytes: total, execNames };
 }
+
+// Kept for the callers that only ever wanted a byte total.
+function safeDirSize(dir) { return safeDirScan(dir).totalBytes; }
 
 // Names that are just a shared prefix plus a trailing number — Bank01/Bank02,
 // Preset1/Preset2, or any prefix a given card happens to use — are slot names, not
@@ -451,6 +479,7 @@ async function runBulkImport({ plan, userData }, callbacks = {}) {
           versionsSkipped: result.versionsSkipped || 0,
           variantsEmitted: result.variantsEmitted || 0,
           strippedFiles: result.strippedFiles || [],
+          blockedFiles: result.blockedFiles || [],   // [B-214] refused, reported in the summary
           dedupSaved: result.dedupSaved || 0,
           dedupFiles: result.dedupFiles || 0,
           crossSaved: result.crossSaved || 0,
@@ -619,6 +648,17 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
     const corrupt = _stripped.length
       ? { count: _stripped.length, reason: _stripped[0].reason, files: _stripped }
       : null;
+    // ⚠️ THE DEEPER FINDING ([B-214]). The card report can only test NAMES, so a
+    // program wearing a sound's name is invisible there and is first seen HERE, off
+    // the read the prepare performs. The stats screen has to be able to report more
+    // than the browser did, or the second check is done and never spoken.
+    const _blocked = (res && res.blockedFiles) || [];
+    const blocked = _blocked.length ? { count: _blocked.length, files: _blocked } : null;
+    // Kept-but-reported: archive formats that cannot be opened here. Carried on the
+    // same path as `blocked` because a finding nobody plumbs out is a finding nobody
+    // sees, which is how the content check nearly ended up decorative.
+    const _noted = (res && res.notedFiles) || [];
+    const noted = _noted.length ? { count: _noted.length, files: _noted } : null;
     if (res && res.ok && res.isDuplicate) {
       dupCount++;
       // `res.staged` is the zip we just wrote before discovering it was a
@@ -629,13 +669,14 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
       // every duplicate's zip sat on disk until the 6h orphan sweep. One
       // re-analyze of a 12 GB card that was already imported leaked ~1.9 GB,
       // and runs inside the same 6h window stacked. (2026-08-31.)
-      results.push({ idx: i, isDuplicate: true, existingUuid: res.uuid, staged: res.staged || null, corrupt });
+      results.push({ idx: i, isDuplicate: true, existingUuid: res.uuid, staged: res.staged || null, corrupt, blocked, noted });
     } else if (res && res.ok && res.prepared) {
       if (corrupt) corruptCount++; else newCount++;
       results.push({ idx: i, prepared: {
         uuid: res.uuid, hash: res.hash, format: res.format, name: res.name,
         fileSize: res.fileSize, sourceFileDate: res.sourceFileDate, sourceFileMtimeMs: res.sourceFileMtimeMs,
         strippedFiles: res.strippedFiles || [],
+        blockedFiles: res.blockedFiles || [],
         // Carried from prepare to commit — see the finalize call below. ([B-283])
         curation: res.curation || null,
         curationTmp: res.curationTmp || null,
@@ -649,9 +690,9 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
         // sentence at all.)
         crossLinked: res.crossLinked || null,
         archiveBytes: res.archiveBytes || 0,
-      }, corrupt });
+      }, corrupt, blocked, noted });
     } else {
-      results.push({ idx: i, error: (res && res.error) || 'prepare failed', corrupt });
+      results.push({ idx: i, error: (res && res.error) || 'prepare failed', corrupt, blocked, noted });
     }
   }
   // ── OWNERSHIP, COMPUTED HERE (2026-08-31) ─────────────────────────────────
@@ -1357,6 +1398,10 @@ async function importPlannedSource({ userData, src, fromSdCard }, onSubProgress)
     variantsEmitted: variantsEmittedHere,
     strippedFiles: (importRes && importRes.strippedFiles)
       || (src._prepared && src._prepared.strippedFiles) || [],
+    // Same two sources as the stripped list: a committed prepare carries its own
+    // record, and the legacy one-shot path reports from the import result ([B-214]).
+    blockedFiles: (importRes && importRes.blockedFiles)
+      || (src._prepared && src._prepared.blockedFiles) || [],
     // TWO SEPARATE SAVINGS, kept separate here as data. The summary's copy now
     // says one outcome (2026-09-07: "Your source files started at X, JMT Studio
     // saved you Y"), but the components stay distinct in the record so the

@@ -1008,6 +1008,14 @@ function readEntryFileBytes(userData, name, subPath) {
 function exportEntryFileTo(userData, name, subPath, destDir) {
   if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
   const buf = readEntryFileBytes(userData, name, subPath);
+  // Same guard as the source per-file export ([B-214], 2026-09-10): a one-file
+  // export out of a store we manage must refuse a program exactly as the
+  // whole-entry export does. Free here - the bytes are already in hand.
+  {
+    const { checkExecutableBuffer } = require('./sdCardDetect');
+    const v = checkExecutableBuffer(buf.subarray(0, 256), subPath);
+    if (v.blocked) return { refused: true, reason: v.reason, relPath: String(subPath) };
+  }
   const baseName = String(subPath).split(/[\\/]/).pop() || `entry-${name}.bin`;
   // Mirror _uniqueDestPath from soundFontSources: bump " (1)", " (2)" until free.
   const ext = path.extname(baseName);
@@ -1172,7 +1180,8 @@ async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onB
     // the entry root is skipped (app artifact, not a font file); nested
     // meta.json files inside font subdirs are kept on the off chance a vendor
     // shipped one.
-    await copyTreeWithProgress(srcDir, targetDir, { skipRootMeta: true, onBytes });
+    const _exportRefused = [];
+    await copyTreeWithProgress(srcDir, targetDir, { skipRootMeta: true, onBytes, refused: _exportRefused });
     // Record what we just wrote, with the destination's own timestamps, so the
     // next export can tell "unchanged since we wrote it" with stat calls instead
     // of reading the folder back. Best effort: a manifest we cannot write only

@@ -616,17 +616,23 @@ function duplicateCommon(userData, sourceUuid, newName) {
 // Link-first recursive copy: hardlink each file (same-volume, the normal
 // case), fall back to a real copy when the filesystem refuses. Used by
 // duplicateCommon; never writes through an existing name.
-function _linkOrCopyDirRecursive(srcDir, destDir) {
+// Duplicating something ALREADY in the library, so the guard here is a backstop
+// rather than the front door: anything imported since [B-214] was checked on the
+// way in, but entries that predate it were not, and a duplicate should not spread
+// a program file into a second copy.
+function _linkOrCopyDirRecursive(srcDir, destDir, blocked, relBase) {
   fs.mkdirSync(destDir, { recursive: true });
   for (const e of fs.readdirSync(srcDir, { withFileTypes: true })) {
     const s = path.join(srcDir, e.name);
     const d = path.join(destDir, e.name);
-    if (e.isDirectory()) _linkOrCopyDirRecursive(s, d);
-    else if (e.isFile()) {
-      let linked = false;
-      try { fs.linkSync(s, d); linked = true; } catch { linked = false; }
-      if (!linked) fs.copyFileSync(s, d);
-    }
+    const rel = relBase ? relBase + '/' + e.name : e.name;
+    if (e.isDirectory()) { _linkOrCopyDirRecursive(s, d, blocked, rel); continue; }
+    if (!e.isFile()) continue;
+    const v = require('./sdCardDetect').checkExecutableFile(s, rel);
+    if (v.blocked) { if (blocked) blocked.push({ relPath: rel, reason: v.reason, byContent: !!v.byContent }); continue; }
+    let linked = false;
+    try { fs.linkSync(s, d); linked = true; } catch { linked = false; }
+    if (!linked) fs.copyFileSync(s, d);
   }
 }
 
@@ -781,6 +787,12 @@ function addFilesToCommon(userData, uuid, subPath, sourceFilePaths) {
         failed.push({ source: src, error: 'Not a file' });
         continue;
       }
+      // ⚠️ THIS IS AN IMPORT DOOR ([B-214]). Common folders come off the same cards
+      // the fonts do. Refused rather than stripped: the caller named this exact file,
+      // so there is nothing left to add if it is dropped, and `failed` already reaches
+      // the user with a per-file reason.
+      const _v = require('./sdCardDetect').checkExecutableFile(src, path.basename(src));
+      if (_v.blocked) { failed.push({ source: src, error: _v.reason }); continue; }
       const finalName = _proffieVariantName(destDir, path.basename(src));
       const dest = path.join(destDir, finalName);
       let done = false;
@@ -1270,7 +1282,8 @@ async function exportCommonToFolder(userData, uuid, destDir, mode = 'rename', on
     // Streamed copy with write-paced byte progress. srcDir is the common's
     // `files/` subtree (its meta.json lives one level up, outside srcDir), so
     // there's nothing to skip here — every file ships.
-    await copyTreeWithProgress(srcDir, targetDir, { onBytes });
+    const _exportRefused = [];
+    await copyTreeWithProgress(srcDir, targetDir, { onBytes, refused: _exportRefused });
     // Human-readable marker, written into the destination so the card can say
     // which voice pack it is carrying. Never written into the library copy.
     try { writeCommonReadme(userData, uuid, targetDir); } catch {}

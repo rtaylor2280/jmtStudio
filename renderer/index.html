@@ -786,6 +786,20 @@
   .sd-rpt-title { font-weight: 600; font-size: 1.05rem; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sd-rpt-body { flex: 1; min-height: 0; display: flex; flex-direction: column; margin: 4px 0 12px; text-align: left; }
   .sd-rpt-summary { flex-shrink: 0; border-bottom: 1px solid var(--c-border); padding-bottom: 10px; margin-bottom: 10px; }
+  /* Executable warning on the card report ([B-214]). Deliberately the loudest block
+     in this modal: a bordered panel rather than a line, because the finding is about
+     whether the CARD can be trusted, not about one import. */
+  /* A row holding, or being, a program file. Same idiom as the corrupt mark. */
+  .sf-entry-files-row.sd-exec { border-left: 2px solid #e5534b; }
+  .sf-entry-files-row .sd-exec-mark { color: #e5534b; font-size: 0.82rem; line-height: 1; margin-right: 3px; }
+  .sd-exec-warn { margin-top: 10px; padding: 10px 12px; border: 1px solid #e5534b; border-radius: 4px; background: rgba(229, 83, 75, 0.08); }
+  .sd-exec-warn-head { color: #e5534b; font-weight: 600; font-size: 0.86rem; }
+  .sd-exec-warn-list { margin: 6px 0; padding-left: 0; color: #e5534b; font-size: 0.78rem; list-style: none; }
+  .sd-exec-warn-list li { word-break: break-all; }
+  .sd-exec-warn-body { color: var(--c-text-sub); font-size: 0.78rem; line-height: 1.45; margin-top: 4px; }
+  /* The chooser's one-liner. Same red and weight as the full warning's head, so the
+     two screens read as the same finding rather than two different ones. */
+  .sd-exec-warn-line { color: #e5534b; font-weight: 600; font-size: 0.82rem; margin-top: 6px; }
   .sd-rpt-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; flex-shrink: 0; }
   .sd-act-btn { font-size: 0.8rem; padding: 6px 14px; }
   .sd-rpt-sub { font-size: 0.79rem; color: var(--c-text-sub); }
@@ -2838,7 +2852,7 @@
   .sf-bulk-review-breakdown .br-row + .br-row { margin-top: 4px; }
   .sf-bulk-review-breakdown .br-label { color: var(--c-text-sub); }
   .sf-bulk-review-breakdown .br-val   { color: var(--c-text); font-weight: 500; font-variant-numeric: tabular-nums; }
-  .sf-bulk-review-breakdown .br-fail-list { font-size: 0.76rem; color: var(--c-text-dim); margin-top: 8px; }
+  .sf-bulk-review-breakdown .br-fail-list { font-size: 0.76rem; color: var(--c-text-dim); margin-top: 8px; list-style: none; padding-left: 0; }
   /* Damage is stated in the same red as the detail it summarises (.g-corrupt-note),
      never a milder colour: a summary that reads calmer than the row it stands for is
      the finding painted two ways. (2026-09-01 on the card report; same call here
@@ -2846,6 +2860,7 @@
   .sf-bulk-review-breakdown .br-row.br-danger .br-label,
   .sf-bulk-review-breakdown .br-row.br-danger .br-val { color: #e5534b; }
   .sf-bulk-review-breakdown .br-fail-list li { margin-top: 2px; word-break: break-all; }
+  .sf-bulk-review-breakdown .br-exec-note { margin-top: 6px; font-size: 0.76rem; line-height: 1.45; color: var(--c-text-sub); }
   /* Failure list in the bulk-import summary phase. Two columns per row:
      source basename (left) and reason (right). Hovering reveals the full
      path. Cleaner than a bulleted list and easier to skim when many
@@ -5586,6 +5601,7 @@
         <h3>Sound fonts found <span class="sf-review-cand-count" id="sf-review-cand-count"></span></h3>
         <p class="sf-import-hint" id="sf-review-cand-hint">Pick which fonts to add to your library. Names must use letters, numbers, underscores, or hyphens (Proffie can't read spaces).</p>
         <p class="sf-import-hint" id="sf-review-dup-hint" style="display:none;color:var(--c-success-text)"></p>
+        <div class="sd-exec-warn" id="sf-review-refused" style="display:none"></div>
         <p class="sf-import-hint sf-bundle-followup" id="sf-bundle-followup" style="display:none">This is a bundle with several fonts inside. You don't have to import them all now. The source stays in your library, so you can come back and add the rest later.</p>
         <div class="sf-import-checkbox-row" id="sf-bundle-prepend-row" style="display:none;margin-bottom:10px;flex-wrap:wrap;row-gap:6px">
           <input type="checkbox" id="sf-review-prepend-bundle" checked>
@@ -6478,6 +6494,7 @@
       <p class="sf-import-hint" id="sf-bulk-import-summary-elapsed" style="color:var(--c-text-sub);margin-top:6px"></p>
       <div id="sf-bulk-import-summary-failures" class="sf-bulk-review-breakdown" style="display:none"></div>
       <div id="sf-bulk-import-summary-stripped" class="sf-bulk-review-breakdown" style="display:none"></div>
+      <div id="sf-bulk-import-summary-refused" class="sf-bulk-review-breakdown" style="display:none"></div>
     </div>
 
     <div class="modal-btns sf-import-btn-row" style="margin-top: 18px;">
@@ -9969,7 +9986,13 @@ async function _pickCardOrFolder() {
 const _sdReport = { cards: [], stack: [], card: null, textView: false, single: false, context: 'config', fontCtx: null };
 let _sdHealthJobSeq = 0; // job ids: the single-folder check is the only caller left ([B-361])
 let _sdTextToken = 0; // monotonic guard so a slow text read can't overwrite a newer click
-function _sdEsc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c])); }
+// ⚠️ BIDI CONTROLS ARE STRIPPED BEFORE ESCAPING ([B-214]). A right-to-left override
+// inside a filename makes this list display a name that is not the real one:
+// "Fake<RLO>txt.exe" renders as "Fakeexe.txt". The detector is never fooled, because it
+// tests the real string, but the PERSON reading the row would be, which defeats the
+// point of showing them the name. Display only: the bytes on disk are untouched, so
+// matching, importing and deleting still refer to the real file.
+function _sdEsc(s) { return String(s == null ? '' : s).replace(/[\u202A-\u202E\u2066-\u2069\u200E\u200F]/g, '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c])); }
 function _sdFmtGB(b) { return b == null ? '?' : (b / (1024 ** 3)).toFixed(1) + ' GB'; }
 function _sdFmtBytes(b) { if (b == null) return ''; if (b < 1024) return b + ' B'; if (b < 1048576) return Math.round(b / 1024) + ' KB'; return (b / 1048576).toFixed(1) + ' MB'; }
 function _sdPlur(n, w) { return `${n} ${w}${n === 1 ? '' : 's'}`; }
@@ -10038,7 +10061,10 @@ function _sdOpenReport(cards) {
     _sdReport.stack = [{ name: (c.isFolder ? 'Folder' : c.drive), path: c.mountPath || c.drive }];
     _sdRenderBrowse();
   } else {
-    document.getElementById('sd-report-overlay').classList.add('active'); // the list is instant, no scan
+    // The list is no longer instant (2026-09-10: it now runs the program scan for
+    // every card before painting), so it raises the overlay itself when it is done
+    // - same rule as the single-card path above. Bringing it up here would show an
+    // empty report and then scan inside it, which is what that rule exists to stop.
     _sdRenderList();
   }
 }
@@ -10145,6 +10171,75 @@ function _sdCardSummaryHtml(c, wide) {
 // Action buttons on the card summary, gated by what was found. Launch context sets the
 // hero: from Config Manager, "Open a config" leads; from the Sound Font Library, "Import
 // fonts" leads. Everything present sits as a quiet ghost button either way.
+// The loudest thing this app says about a card.
+//
+// THE CRUCIBLE SENTIMENT IS WHY THIS IS A BANNER AND NOT A ROW: people who found an
+// executable on a preloaded card did not weigh whether to import it, they stopped
+// trusting the card itself. So the finding belongs on the FIRST screen, before any
+// import is contemplated, and it is about the card rather than about the import.
+// It costs ~100ms of directory listing and opens no files.
+// Path of a listed entry relative to the card root, in the scan's own form
+// (forward slashes, no leading separator) so comparisons are string equality.
+function _sdExecRel(dirPath, name) {
+  const root = _sdActiveRoot();
+  if (!root) return '';
+  const full = dirPath.replace(/[\\/]+$/, '') + '/' + name;
+  const r = root.replace(/[\\/]+$/, '');
+  const rel = full.toLowerCase().startsWith(r.toLowerCase()) ? full.slice(r.length) : full;
+  return rel.replace(/^[\\/]+/, '').split('\\').join('/');
+}
+function _sdExecList() {
+  const sc = _sdReport.card && _sdReport.card._execScan;
+  return (sc && sc.files) || [];
+}
+function _sdExecHas(rel) {
+  if (!rel) return false;
+  const t = rel.toLowerCase();
+  return _sdExecList().some(p => p.toLowerCase() === t);
+}
+function _sdExecUnder(rel) {
+  if (!rel) return false;
+  const t = rel.toLowerCase() + '/';
+  return _sdExecList().some(p => p.toLowerCase().startsWith(t));
+}
+// "card" or "folder" — the report is reachable from a picked folder as well as a
+// mounted card, and one helper keeps the chooser's line and the full warning below
+// from naming the same thing two different ways.
+function _sdExecNoun(c) { return (c && c.isFolder) ? 'folder' : 'card'; }
+// The chooser's short form. Deliberately the SAME sentence as the full warning's
+// heading: someone who reads it here and then opens the card must meet the identical
+// claim, not a second one they have to reconcile. The file list stays on the card
+// view, where it is the thing you can act on.
+function _sdExecLineHtml(c) {
+  const scan = c && c._execScan;
+  if (!scan || !scan.files || !scan.files.length) return '';
+  const n = scan.files.length;
+  return `<div class="sd-exec-warn-line">&#9888; This ${_sdExecNoun(c)} carries `
+    + `${n === 1 ? 'a program file' : n + ' program files'}.</div>`;
+}
+function _sdExecWarningHtml(c) {
+  const scan = c && c._execScan;
+  if (!scan || !scan.files || !scan.files.length) return '';
+  const n = scan.files.length;
+  // NEVER COLLAPSE A SINGLE ITEM. "and 1 more" occupies exactly the line the
+  // filename would have, so it trades a real answer for no saving at all - and it
+  // hid the one genuine find on his card behind the six planted fixtures
+  // (2026-09-10, the moment the trailing-space fix took the count from 6 to 7).
+  const CAP = 6;
+  const limit = n <= CAP + 1 ? n : CAP;
+  const shown = scan.files.slice(0, limit).map(p => `<li>${_sdEsc(p)}</li>`).join('');
+  const more = n > limit ? `<li>and ${n - limit} more</li>` : '';
+  return `<div class="sd-exec-warn">`
+    + `<div class="sd-exec-warn-head">&#9888; This ${_sdExecNoun(c)} carries ${n === 1 ? 'a program file' : n + ' program files'}.</div>`
+    + `<ul class="sd-exec-warn-list">${shown}${more}</ul>`
+    + `<div class="sd-exec-warn-body">A program file has no reason to be on a saber card. Your saber will never `
+    + `run it, because ProffieOS does not execute files from the card. There is no way to tell from the card `
+    + `${n === 1 ? 'its intent or what it does' : 'their intent or what they do'}. Any risk is to a computer, `
+    + `and only if ${n === 1 ? 'the file is' : 'the files are'} opened.</div>`
+    + `<div class="sd-exec-warn-body">If you choose to import anyway, ${n === 1 ? 'the program file' : 'the program files'} `
+    + `will not be included.</div>`
+    + `</div>`;
+}
 function _sdActionRowHtml(c) {
   const ct = (c.classification && c.classification.counts) || {};
   const ctx = _sdReport.context || 'config';
@@ -10153,7 +10248,20 @@ function _sdActionRowHtml(c) {
   if (!canConfig && !canFonts) return '';
   const btns = [];
   if (canConfig) btns.push(`<button id="sd-act-config" class="${ctx === 'config' ? 'modal-btn-primary' : 'modal-btn-cancel'} sd-act-btn">Open a config</button>`);
-  if (canFonts) btns.push(`<button id="sd-act-import" class="${ctx === 'sfl' ? 'modal-btn-primary' : 'modal-btn-cancel'} sd-act-btn">Import fonts to library</button>`);
+  // With a program on the card, the button states what pressing it means. The action
+  // is unchanged and nothing extra is confirmed - the label carries the warning that
+  // is already on screen above it.
+  const _anyExec = !!(c && c._execScan && c._execScan.files && c._execScan.files.length);
+  const _importLabel = _anyExec ? 'Import fonts anyway' : 'Import fonts to library';
+  // The hover restates the line already above the button, on purpose (2026-09-10):
+  // "anyway" is the most consequential word in this flow, and a title costs nothing.
+  const _nExec = _anyExec ? c._execScan.files.length : 0;
+  const _importTitle = _anyExec
+    ? (_nExec === 1 ? 'The fonts import. The program file stays behind.'
+                    : `The fonts import. All ${_nExec} program files stay behind.`)
+    : '';
+  const _titleAttr = _importTitle ? ` title="${_sdEsc(_importTitle)}"` : '';
+  if (canFonts) btns.push(`<button id="sd-act-import" class="${ctx === 'sfl' ? 'modal-btn-primary' : 'modal-btn-cancel'} sd-act-btn"${_titleAttr}>${_importLabel}</button>`);
   return `<div class="sd-rpt-actions">${btns.join('')}</div>`;
 }
 function _sdActiveRoot() {
@@ -10232,15 +10340,34 @@ async function _sdImportFontsFromCard() {
   // damaged files, so the review's flags no longer depend on a completed map.
   window._sfBulkImportFromPath(root, label);
 }
-function _sdRenderList() {
+async function _sdRenderList() {
   _sdReport.textView = false;
   const cards = _sdReport.cards, n = cards.length;
   const isFolder = n === 1 && cards[0].isFolder;
   const title = isFolder ? 'Folder contents' : (n === 1 ? 'SD card found' : `Multiple SD cards found (${n})`);
+  // ⚠️ THE SAME SCAN THE CARD VIEW RUNS, RUN A SCREEN EARLIER, NOT A CHEAPER ONE.
+  // (His call 2026-09-10: "we know how many fonts there are at the chooser?")
+  // classifyCard does already read one level into every top-level folder to count
+  // fonts, so a partial answer really would be free here - and that is exactly the
+  // trap. A chooser reporting 6 beside a card view reporting 7 teaches people the
+  // number cannot be trusted, which is the one number in this app that has to be.
+  // Same function, cached on the card object, so opening the card afterwards skips
+  // it: this pays for the scan a screen earlier rather than adding one.
+  // Awaited before the paint for the reason the browse view awaits it - choosing
+  // between cards IS the decision the warning exists to inform.
+  const need = cards.filter(c => c && !c._execScan && (c.mountPath || c.drive));
+  if (need.length) {
+    _sdBusy(true, need.length === 1 ? 'Reading the card…' : 'Reading the cards…');
+    await Promise.all(need.map(async (c) => {
+      try { c._execScan = await window.electronAPI.sdExecutables(c.mountPath || c.drive); }
+      catch { c._execScan = { files: [], complete: false }; }
+    }));
+    _sdBusy(false);
+  }
   const body = _sdSetView(title);
   _sdShowOthers(false);
   body.innerHTML = `<div class="sd-rpt-scroll">` + cards.map((c, i) =>
-    `<div class="sd-rpt-card" data-idx="${i}">${_sdCardSummaryHtml(c)}<div class="sd-rpt-sub" style="color:var(--jmt-blue);margin-top:6px;">view files &rarr;</div></div>`
+    `<div class="sd-rpt-card" data-idx="${i}">${_sdCardSummaryHtml(c)}${_sdExecLineHtml(c)}<div class="sd-rpt-sub" style="color:var(--jmt-blue);margin-top:6px;">view files &rarr;</div></div>`
   ).join('') + `</div>`;
   body.querySelectorAll('.sd-rpt-card').forEach(el => el.onclick = () => {
     const c = _sdReport.cards[+el.dataset.idx];
@@ -10248,6 +10375,9 @@ function _sdRenderList() {
     _sdReport.stack = [{ name: (c.isFolder ? 'Folder' : c.drive), path: c.mountPath || c.drive }];
     _sdRenderBrowse();
   });
+  // Raised here rather than by the caller, now that this render awaits a scan.
+  // Idempotent: the back and "Other SD cards" routes arrive with it already up.
+  document.getElementById('sd-report-overlay')?.classList.add('active');
 }
 async function _sdRenderBrowse() {
   _sdReport.textView = false;
@@ -10262,12 +10392,22 @@ async function _sdRenderBrowse() {
   _sdBusy(true, 'Reading the card…');
   const res = await window.electronAPI.listSdDir(cur.path);
   if (_sdReport.stack[_sdReport.stack.length - 1] !== cur) return; // navigated away while loading
+  // ⚠️ THE ONE CARD-WIDE PASS THAT SURVIVES [B-361], and it survives because it opens
+  // NOTHING - directory entries only, measured at 81-115ms for a full card. Awaited
+  // before the first paint on purpose: the warning it produces is the reason someone
+  // would decide not to trust this card at all, so it must not arrive after they have
+  // already started reading the file list. Once per card, cached on the card object.
+  if (_sdReport.card && !_sdReport.card._execScan) {
+    try { _sdReport.card._execScan = await window.electronAPI.sdExecutables(_sdActiveRoot()); }
+    catch { _sdReport.card._execScan = { files: [], complete: false }; }
+    if (_sdReport.stack[_sdReport.stack.length - 1] !== cur) return;
+  }
   // Card summary + action buttons stay pinned at the top (they don't scroll);
   // the file browser below is the only scroll surface. The actions are
   // card-level ("open a config" / "import the card's fonts") and always target
   // the card root, so they stay visible at every browse depth — you're just
   // exploring, the card and what you can do with it don't change.
-  const summary = _sdReport.card ? `<div class="sd-rpt-summary">${_sdCardSummaryHtml(_sdReport.card, true)}${_sdActionRowHtml(_sdReport.card)}</div>` : '';
+  const summary = _sdReport.card ? `<div class="sd-rpt-summary">${_sdCardSummaryHtml(_sdReport.card, true)}${_sdExecWarningHtml(_sdReport.card)}${_sdActionRowHtml(_sdReport.card)}</div>` : '';
   const crumb = _sdCrumbHtml(st);
   const wireActions = () => {
     const bCfg = document.getElementById('sd-act-config'); if (bCfg) bCfg.onclick = _sdOpenConfigFromCard;
@@ -10289,7 +10429,18 @@ async function _sdRenderBrowse() {
     if (e.isDir) cls.push('is-dir');
     if (clickable && !e.isDir) cls.push('sd-clickable');
     const sizeTitle = (!e.isDir && e.size != null) ? ` — ${_sdFmtBytes(e.size)}` : '';
-    return `<div class="${cls.join(' ')}" data-idx="${i}" title="${_sdEsc(e.name + sizeTitle)}"><span class="sf-entry-files-row-icon">${icon}</span><span class="sf-entry-files-row-name">${_sdEsc(e.name)}</span></div>`;
+    // Executable marking, off the card scan already in hand ([B-214]). A file is
+    // marked when its path is in the scan; a FOLDER is marked when the scan holds
+    // anything beneath it, so the trail is visible from the card root down to the
+    // file rather than only in the folder that happens to contain it.
+    const _rel = _sdExecRel(cur.path, e.name);
+    const _isExec = !e.isDir && _sdExecHas(_rel);
+    const _holdsExec = e.isDir && _sdExecUnder(_rel);
+    if (_isExec || _holdsExec) cls.push('sd-exec');
+    const _execTip = _isExec ? ' — program file, never imported'
+      : _holdsExec ? ' — contains a program file' : '';
+    const _execMark = (_isExec || _holdsExec) ? '<span class="sd-exec-mark" title="Program file">&#9888;</span>' : '';
+    return `<div class="${cls.join(' ')}" data-idx="${i}" title="${_sdEsc(e.name + sizeTitle + _execTip)}"><span class="sf-entry-files-row-icon">${icon}</span>${_execMark}<span class="sf-entry-files-row-name">${_sdEsc(e.name)}</span></div>`;
   }).join('');
   // Font context: when you're inside a Proffie FONT — its root or any of its
   // subfolders (font/, hum/, clsh/, ...) — surface font + hum quick-play in the
@@ -11851,6 +12002,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     summaryElapsed: document.getElementById('sf-bulk-import-summary-elapsed'),
     summaryFailures: document.getElementById('sf-bulk-import-summary-failures'),
     summaryStripped: document.getElementById('sf-bulk-import-summary-stripped'),
+    summaryRefused:  document.getElementById('sf-bulk-import-summary-refused'),
     cancelBtn:    document.getElementById('sf-bulk-import-cancel-btn'),
     startBtn:     document.getElementById('sf-bulk-import-start-btn'),
     doneBtn:      document.getElementById('sf-bulk-import-done-btn'),
@@ -11922,7 +12074,14 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
   };
 
+  // ⚠️ BIDI CONTROLS ARE STRIPPED FIRST ([B-214]). A right-to-left override inside a
+  // filename makes this screen display a name that is not the real one: "Fake<RLO>txt.exe"
+  // renders as "Fakeexe.txt". The detector is never fooled, because it tests the real
+  // string - but the PERSON reading the row would be, which defeats the point of naming
+  // the file at all. Display only: the name on disk is untouched, so matching, importing
+  // and deleting still refer to the real file.
   const escapeHtml = (s) => String(s == null ? '' : s)
+    .replace(/[\u202A-\u202E\u2066-\u2069\u200E\u200F]/g, '')
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 
@@ -12302,6 +12461,24 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     // (the prepare's own read found and dropped the damaged wavs). The old
     // folder-name-keyed map only ever existed for SD-card imports; this reaches
     // every door, including a folder or zip picked from disk.
+    // A program or macro document was refused out of this font ([B-214]). The row
+    // stays CHECKED: the file is already gone, so unchecking would suggest a risk
+    // that no longer exists. It says what was removed and moves on.
+    const _refused = (src._blocked && src._blocked.files) || [];
+    if (_refused.length) {
+      const _prog = _refused.filter(x => (x.kind || 'program') === 'program').length;
+      const _macro = _refused.filter(x => x.kind === 'macro').length;
+      const _parts = [];
+      if (_prog) _parts.push(`${_prog} program file${_prog === 1 ? '' : 's'}`);
+      if (_macro) _parts.push(`${_macro} document${_macro === 1 ? '' : 's'} with macros`);
+      const _note = document.createElement('div');
+      _note.className = 'g-corrupt-note';
+      _note.title = _refused.map(x => x.relPath).join(', ');
+      _note.innerHTML = `&#9888; ${_parts.join(' and ')} removed from this font. `
+        + `${_refused.length === 1 ? 'It was' : 'They were'} not imported.`;
+      const _nw = row.querySelector('.g-name-wrap');
+      if (_nw) _nw.appendChild(_note);
+    }
     const _corrupt = src._corrupt;
     if (_corrupt) {
       checkbox.checked = false;
@@ -13194,6 +13371,8 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       if (r.isDuplicate) { s._duplicate = true; s._existingUuid = r.existingUuid; delete s._prepared; s._staged = (r.staged && r.staged.uuid) || null; }
       else if (r.prepared) { s._prepared = r.prepared; }
       if (r.corrupt) s._corrupt = r.corrupt;
+      if (r.blocked) s._blocked = r.blocked;   // [B-214] content-tier finding
+      if (r.noted) s._noted = r.noted;         // [B-214] kept, but not inspected
       // Ownership now arrives WITH the analysis instead of landing on the review
       // screen seconds after it opens. `_owned` means "you already have these
       // sounds" whichever test found it; `_match` carries the row's note.
@@ -13254,7 +13433,12 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     if (n) n.textContent = 'Fonts you already have are skipped, matched by their sounds rather than by name.';
   };
 
+  // Whether THIS plan turned up a program file. Declared at the top of the render so
+  // the branches that never count one still clear the stance rather than inheriting
+  // the previous card's.
+  let _execStance = false;
   const showReview = async (plan) => {
+    _execStance = false;
     currentPlan = plan;
     const total = plan.sources.length;
     // ⚠️ ANALYZE MUST RUN FOR A TRACKS-ONLY PLAN TOO. It is what hashes each track
@@ -13345,6 +13529,42 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       els.reviewSummary.innerHTML =
         `<strong>${newCount}</strong> new sound font${newCount === 1 ? '' : 's'} ready to import from ` +
         `<code>${escapeHtml(plan._displayRoot || plan.rootDir)}</code>.`;
+      // BOTH TIERS, deduped ([B-214]). `execFiles` is what the scan saw by NAME,
+      // known before any import. `_blocked` is what the prepare found by reading the
+      // bytes, which is the only way a program wearing a sound's name is ever seen.
+      // A file caught by both must appear once.
+      const _execSeen = new Set();
+      const _execAll = [];
+      const _notedAll = [];
+      for (const src of (plan.sources || [])) {
+        const font = src.cleanedName || src.rawName;
+        for (const rel of (src.execFiles || [])) {
+          const k = (font + "/" + rel).toLowerCase();
+          if (_execSeen.has(k)) continue;
+          _execSeen.add(k); _execAll.push({ font, rel });
+        }
+        for (const b of ((src._blocked && src._blocked.files) || [])) {
+          const k = (font + "/" + b.relPath).toLowerCase();
+          if (_execSeen.has(k)) continue;
+          _execSeen.add(k); _execAll.push({ font, rel: b.relPath, byContent: !!b.byContent, disguised: !!b.disguised, kind: b.kind || 'program' });
+        }
+        // Kept but reported: an archive format that cannot be opened here. Not a
+        // finding, and named anyway, because saying nothing would read as "checked".
+        for (const nfo of ((src._noted && src._noted.files) || [])) {
+          _notedAll.push({ font, rel: nfo.relPath, kind: nfo.kind });
+        }
+      }
+      // ⚠️ THREE KINDS SHARE ONE LIST AND MUST NOT SHARE ONE LABEL. A refused .docm
+      // rides in with the programs because both were removed, but calling it a
+      // "program file" would be a true count under a false name.
+      const _progAll = _execAll.filter(x => (x.kind || 'program') === 'program');
+      const _macroAll = _execAll.filter(x => x.kind === 'macro');
+      const _execCount = _progAll.length;
+      const _macroCount = _macroAll.length;
+      const _notedCount = _notedAll.length;
+      // A file the NAME tier could not have seen. Worth its own sentence: it is the
+      // case the card report is structurally blind to.
+      const _execHidden = _progAll.filter(x => x.disguised).length;
       const rows = [];
       if (st) {
         // Plain nouns. This screen has no checkboxes, so "(unchecked)" names a
@@ -13355,6 +13575,13 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         const _owned = (typeof st.owned === 'number') ? st.owned : (st.duplicate || 0);
         if (_owned)     rows.push(['Already in your library (skipped)', _owned]);
         if (st.corrupt) rows.push(['Corrupted (skipped)', st.corrupt, false, true]);
+        // ⚠️ FROM THE SCAN, NOT THE ANALYZE ([B-214]). Executables are spotted by NAME
+        // on the walk that totals the bytes, which costs nothing, so this is on screen
+        // BEFORE the user chooses to import at all. The content check (a program
+        // wearing a sound's name) needs the file read, which happens at import - so
+        // this count is a FLOOR, never a total.
+        if (_execCount) rows.push([`Program file${_execCount === 1 ? '' : 's'} (skipped)`, _execCount, false, true]);
+        if (_macroCount) rows.push([`Document${_macroCount === 1 ? '' : 's'} with macros (skipped)`, _macroCount, false, true]);
       } else {
         const byKind = {};
         for (const s of plan.sources) byKind[s.kind] = (byKind[s.kind] || 0) + 1;
@@ -13388,6 +13615,55 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       // together into a number (63) that describes nothing the user can see.
       let html = rows.map(([l, v, sub, danger]) =>
         `<div class="br-row${danger ? ' br-danger' : ''}"${sub ? ' style="opacity:.72"' : ''}><span class="br-label">${escapeHtml(l)}</span><span class="br-val">${v}</span></div>`).join('');
+      // The un-inspectable archives get a quiet line of their own. Deliberately NOT a
+      // red row: nothing is wrong with a .rar, and the only claim being made is that we
+      // did not look inside it.
+      if (_notedCount) {
+        const _nShown = _notedAll.slice(0, 3).map(x => escapeHtml(x.rel)).join(', ');
+        const _nMore = _notedCount > 3 ? `, and ${_notedCount - 3} more` : '';
+        html += `<div class="br-exec-note">${_notedCount === 1 ? 'One archive' : `${_notedCount} archives`} could not be opened here, `
+          + `so ${_notedCount === 1 ? 'its contents were' : 'their contents were'} not checked: ${_nShown}${_nMore}.</div>`;
+      }
+      if (_execCount || _macroCount) {
+        // Named, because "1 program file" is not actionable and the point is that the
+        // user can go and look at it on the card. Capped so a pathological card cannot
+        // push the buttons off screen.
+        // ⚠️ THE TWO KINDS ARE NOT THE SAME FINDING and the list has to say which is
+        // which. A file named Installer.exe is out of place. A program carrying a sound
+        // file's name is out of place AND concealed, and concealment is a choice someone
+        // made. Leaving that to a summary sentence makes the reader work out which line
+        // it refers to.
+        const _removed = _progAll.concat(_macroAll);
+        const _shown = _removed.slice(0, 5).map(x =>
+          `<li>${escapeHtml(x.font)} &middot; ${escapeHtml(x.rel)}`
+          + (x.disguised ? ` <span style="opacity:.85;">&mdash; a program disguised as a sound file</span>`
+             : x.kind === 'macro' ? ` <span style="opacity:.85;">&mdash; a document that can contain macros</span>` : '')
+          + `</li>`).join('');
+        const _more = _removed.length > 5 ? `<li>and ${_removed.length - 5} more</li>` : '';
+        html += `<ul class="br-fail-list" style="color:#e5534b;">${_shown}${_more}</ul>`;
+        const _one = _execCount === 1;
+        html += `<div class="br-exec-note">A program file has no reason to be on a saber card. Your saber `
+          + `will never run it, because ProffieOS does not execute files from the card. There is no way to `
+          + `tell from the card ${_one ? 'its intent or what it does' : 'their intent or what they do'}. `
+          + `Any risk is to a computer, and only if ${_one ? 'the file is' : 'the files are'} opened.</div>`;
+        // ⚠️ NAMED SEPARATELY WHEN THE BYTES GAVE IT AWAY ([B-214]). The card report tests
+        // NAMES only, so this is a file it could never have shown, and the reader deserves
+        // to know the check went deeper than the one they already saw.
+        if (_execHidden) {
+          // A stronger claim than the paragraph above it, and it is supportable: a program
+          // does not acquire a sound file's name by accident. Someone renamed it. That is
+          // the one place this feature is entitled to talk about intent.
+          html += `<div class="br-exec-note" style="color:#e5534b;">`
+            + `${_execHidden === 1 ? 'One of these is disguised as a sound file' : `${_execHidden} of these are disguised as sound files`}, `
+            + `found by reading the contents rather than the name. A program does not take a sound `
+            + `file's name by accident.</div>`;
+        }
+        // Cancel is still on screen and nothing has been committed yet, so leaving is a
+        // real option. Same 'if you choose' framing as the card report, which acknowledges
+        // the reader is deciding against a warning rather than being told what happens.
+        html += `<div class="br-exec-note">If you choose to import, ${_one ? 'the program file' : 'the program files'} `
+          + `will not be included. Cancel leaves this card alone.</div>`;
+      }
       if (plan.depthHalted) {
         html += `<div class="br-row" style="margin-top:8px"><span class="br-label" style="color: var(--jmt-amber)">Scan halted at depth ${6}. Pick a closer folder if you have more nested fonts.</span></div>`;
       }
@@ -13395,6 +13671,36 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       _setReviewExplainer(false, { corrupt: (st && st.corrupt) || 0 });
       // Quick import only has something to do when there are new fonts.
       els.startBtn.disabled = !!st && st.new === 0;
+      // ⚠️ A PROGRAM FILE CHANGES THE APP'S STANCE ([B-214], 2026-09-09).
+      // Quick import is the path that adds everything without the user seeing it font
+      // by font, which is the wrong affordance on a card that turned out to carry a
+      // program. It is disabled, and Cancel becomes the primary action: the default
+      // recommendation is now to stop. Review is deliberately still available, because
+      // blocking every route would only send someone to copy the files by hand, where
+      // nothing protects them at all.
+      // ⚠️ THE STANCE IS FOR PROGRAMS ONLY. A refused macro document is reported and
+      // removed, but it does not disable Quick import: the usual cause is a vendor whose
+      // Word chose the format for them, and treating that like a planted executable
+      // would cry wolf on the finding that actually matters.
+      _execStance = _execCount > 0;
+      if (_execStance) {
+        els.startBtn.disabled = true;
+        els.startBtn.title = _execCount === 1
+          ? 'Quick import is unavailable because a program file was found on this card.'
+          : 'Quick import is unavailable because program files were found on this card.';
+      } else if (els.startBtn) {
+        els.startBtn.title = '';
+      }
+    }
+    // Cancel leads when a program file was found, and goes back to being the quiet
+    // option when it was not. Set BOTH ways every time: a stance that only ever turns
+    // on would persist into the next card, which would be the app lying about a clean
+    // one. (The class swap is the same idiom the card summary uses for its actions.)
+    if (els.cancelBtn) {
+      els.cancelBtn.className = _execStance ? 'modal-btn-primary' : 'modal-btn-cancel';
+    }
+    if (els.reviewBtn) {
+      els.reviewBtn.className = _execStance ? 'modal-btn-secondary' : 'modal-btn-primary';
     }
     showPhase('review');
     // No new fonts to review -> hide the guided entry (dups/corrupt aren't "reviewable" here).
@@ -13928,6 +14234,38 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     } else {
       els.summaryStripped.innerHTML = '';
       els.summaryStripped.style.display = 'none';
+    }
+    // Refused files ([B-214]): programs, and documents with macros off a card. Its
+    // own block beside the damaged-files one, because "removed because it was broken"
+    // and "removed because it had no business here" are different facts and merging
+    // them would blur the one that matters.
+    const refusedGroups = sum.imported
+      .map(imp => ({
+        name: (String(imp.src || '').split(/[\\/]/).pop() || String(imp.src || '')),
+        files: imp.blockedFiles || [],
+      }))
+      .filter(g => g.files.length);
+    const refusedTotal = refusedGroups.reduce((n, g) => n + g.files.length, 0);
+    if (refusedTotal > 0 && els.summaryRefused) {
+      const rows = refusedGroups.flatMap(g => g.files.map(x =>
+        `<div class="sf-bulk-failure-row" title="${escapeHtml(x.reason || '')}">`
+          + `<span class="sf-bulk-failure-name">${escapeHtml(g.name)}</span>`
+          + `<span class="sf-bulk-failure-reason">${escapeHtml(x.relPath)}`
+          + (x.disguised ? ' &mdash; disguised as a sound file' : '')
+          + `</span></div>`)).join('');
+      const _p = refusedGroups.flatMap(g => g.files).filter(x => (x.kind || 'program') === 'program').length;
+      const _m = refusedTotal - _p;
+      const _what = [
+        _p ? `${_p} program file${_p === 1 ? '' : 's'}` : null,
+        _m ? `${_m} document${_m === 1 ? '' : 's'} with macros` : null,
+      ].filter(Boolean).join(' and ');
+      els.summaryRefused.innerHTML =
+        `<div class="sf-bulk-failure-head">&#9888; Left out ${_what}</div>`
+        + `<div class="sf-bulk-failure-list">${rows}</div>`;
+      els.summaryRefused.style.display = 'block';
+    } else if (els.summaryRefused) {
+      els.summaryRefused.innerHTML = '';
+      els.summaryRefused.style.display = 'none';
     }
     showPhase('summary');
     try { await window.refreshSoundFontsView?.(); } catch {}
@@ -23599,7 +23937,15 @@ require(['vs/editor/editor.main'], function () {
         }
         _sfRenderGrid();
       };
+      // ⚠️ STRIPS BIDI CONTROLS, MATCHING escapeHtml (which has always done this).
+      // A right-to-left override inside a FILENAME is an attack: "Fake<RLO>txt.exe"
+      // renders as "Fakeexe.txt", so a program advertises itself as a text file in
+      // any list that only escapes markup. Seen exactly that in the source
+      // browser and the Included Files chips (2026-09-10).
+      // This is the project's existing convention, not a new rule - escapeHtml
+      // carried it and this twin did not, which is the whole bug.
       const _sfEscape = (s) => String(s ?? '')
+        .replace(/[‪-‮⁦-⁩‎‏]/g, '')
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
@@ -24773,8 +25119,32 @@ require(['vs/editor/editor.main'], function () {
         ]);
         _sfImport.vendor = (vendorRes && vendorRes.ok) ? vendorRes : null;
         _sfImport.candidates = candidates;
-        _sfPopulateReview(sourcePath);
-        _sfShowPhase('review');
+        // ⚠️ WHAT THE IMPORT REFUSED, CARRIED TO THE SCREEN ([B-214], 2026-09-10).
+        // The backend has always returned blockedFiles; THIS door dropped it on the
+        // floor, so it stripped programs SILENTLY while the bulk and SD doors both
+        // said so. Found by importing a zip whose payload was a real program named
+        // hum2.wav: correctly removed, never mentioned.
+        // Set only on a genuine import. Re-reviewing an EXISTING source refused
+        // nothing in that moment, so those routes leave it undefined rather than
+        // re-announcing a strip that happened days ago.
+        _sfImport.blocked = (importRes && importRes.blockedFiles) || [];
+        // ⚠️ A THROW IN THE REVIEW RENDER MUST NOT LOOK LIKE A HANG (2026-09-10).
+        // The progress modal is still up at this point, and its elapsed ticker has
+        // already been cleared - so if this throws, the user is left staring at a
+        // frozen "Finding fonts…" forever with no error and no way forward but
+        // Cancel. The import itself SUCCEEDED; only the screen failed. Say so.
+        try {
+          _sfPopulateReview(sourcePath);
+          _sfShowPhase('review');
+        } catch (err) {
+          promptError('Could not show the import review',
+            `${(err && err.message) || err}
+
+`
+            + `The source was imported successfully - only this screen failed to draw. `
+            + `You can find it under Sources and add its fonts from there.`);
+          _sfShowPhase('review');
+        }
       };
 
       // staged: set on FOLDER duplicates — the finished zip is kept on disk so
@@ -25030,6 +25400,88 @@ require(['vs/editor/editor.main'], function () {
         // Reset the duplicate-recognition summary from any prior review.
         const _dupHintEl = document.getElementById('sf-review-dup-hint');
         if (_dupHintEl) { _dupHintEl.style.display = 'none'; _dupHintEl.textContent = ''; }
+        // ⚠️ SAY WHAT WAS REFUSED ([B-214]). Reset first: this panel is reused across
+        // reviews, and a stale finding here would accuse a clean source.
+        const _refEl = document.getElementById('sf-review-refused');
+        if (_refEl) {
+          _refEl.style.display = 'none';
+          _refEl.innerHTML = '';
+          const _ref = (_sfImport && _sfImport.blocked) || [];
+          if (_ref.length) {
+            const _prog = _ref.filter(x => (x.kind || 'program') === 'program');
+            const _macro = _ref.filter(x => x.kind === 'macro');
+            const _parts = [];
+            if (_prog.length) _parts.push(`${_prog.length} program file${_prog.length === 1 ? '' : 's'}`);
+            if (_macro.length) _parts.push(`${_macro.length} document${_macro.length === 1 ? '' : 's'} with macros`);
+            // Same cap rule as the card warning: never collapse a single item,
+            // because "and 1 more" costs exactly the line the filename would have.
+            const _CAP = 6;
+            const _lim = _ref.length <= _CAP + 1 ? _ref.length : _CAP;
+            // ⚠️ STRIP BIDI BEFORE DISPLAY. escapeHtml escapes markup but leaves a
+            // right-to-left override in place, which is the whole trick that name is
+            // playing - it would render "Faketxt.exe" as a .txt in this list while the
+            // card view (which uses _sdEsc) shows it honestly. Same rule, both screens.
+            const _rows = _ref.slice(0, _lim).map(x =>
+              `<li>${_sfEscape(x.relPath)}`
+              + (x.disguised ? ` <span style="opacity:.85;">&mdash; a program disguised as a sound file</span>` : '')
+              + `</li>`).join('');
+            const _more = _ref.length > _lim ? `<li>and ${_ref.length - _lim} more</li>` : '';
+            const _hidden = _prog.filter(x => x.disguised).length;
+            _refEl.innerHTML =
+              `<div class="sd-exec-warn-head">&#9888; ${_parts.join(' and ')} `
+              + `${_ref.length === 1 ? 'was' : 'were'} left out of this import.</div>`
+              + `<ul class="sd-exec-warn-list">${_rows}${_more}</ul>`
+              // The second sentence must match WHAT WAS ACTUALLY REFUSED. A macro-only
+              // refusal explaining that "a program file has no reason to be in a sound
+              // font" is a true sentence about the wrong file (caught by rendering the
+              // macro-only case, 2026-09-10).
+              + `<div class="sd-exec-warn-body">The fonts below still import, complete apart from `
+              + `${_ref.length === 1 ? 'that file' : 'those files'}. `
+              + (_prog.length
+                  ? `A program file has no reason to be in a sound font, and your saber would never run it either.`
+                  : `A document that can contain macros has no use on a saber card.`)
+              + `</div>`
+              + (_hidden
+                  ? `<div class="sd-exec-warn-body" style="color:#e5534b;">`
+                    + `${_hidden === 1 ? 'One of these was disguised as a sound file' : `${_hidden} of these were disguised as sound files`}, `
+                    + `found by reading the contents rather than the name. A program does not take a `
+                    + `sound file's name by accident.</div>`
+                  : '');
+            _refEl.style.display = '';
+          }
+          // ⚠️ WHEN SOMETHING WAS REFUSED, CANCEL BECOMES THE RECOMMENDED ACTION.
+          // HIS CALL, 2026-09-10, and it overruled mine - I argued the font is clean
+          // by this point so proceeding is safe, and he is weighing a different thing:
+          //   "one we detected points at a potential malicious intent and we don't
+          //    want to take chances. especially when it was disguised. shows what my
+          //    choice would be. and that's the right call"
+          // The reasoning that settles it: a DISGUISED program is evidence of INTENT,
+          // not an accident. Someone renamed a program to look like a sound. That is a
+          // fact about the whole source, not about one file - so the app should show
+          // which way it would lean, while still leaving the door open.
+          // It does NOT block: the confirm stays enabled and keeps its "anyway" label.
+          // Cancel already discards the source entirely (deleteSource) - that is
+          // deliberate and stays: "don't keep anything. their choice."
+          // ⚠️ NO FOCUS STEALING. There is no Enter binding on this dialog, so
+          // "default" here is purely which button reads as primary. Focusing Cancel
+          // would fight the required Creator field the user needs to type in.
+          const _confirmBtn = _sfImportEls.confirmBtn;
+          const _cancelBtn = _sfImportEls.cancelBtn;
+          if (_confirmBtn && _cancelBtn) {
+            const _warned = _ref.length > 0;
+            _confirmBtn.classList.toggle('modal-btn-primary', !_warned);
+            _confirmBtn.classList.toggle('modal-btn-cancel', _warned);
+            _cancelBtn.classList.toggle('modal-btn-primary', _warned);
+            _cancelBtn.classList.toggle('modal-btn-cancel', !_warned);
+          }
+          // EACH DOOR KEEPS ITS OWN VERB PLUS "anyway", rather than one shared string.
+          // The card view goes "Import fonts to library" -> "Import fonts anyway";
+          // this dialog's neutral label is "Add to Library", so its warned form is
+          // "Add to Library anyway". Same pattern, and each button still describes
+          // what IT does - by this point the source is already imported and what this
+          // commits is the selected fonts.
+          if (_confirmBtn) _confirmBtn.textContent = _ref.length ? 'Add to Library anyway' : 'Add to Library';
+        }
         // Bundle-name lookup (computed in backend, attached to each candidate)
         // drives the prepend checkbox visibility and label.
         const bundleName = _sfBundleNameFromCands(cands);
@@ -29305,6 +29757,49 @@ require(['vs/editor/editor.main'], function () {
         // Absent or all-false means nothing of theirs went in, and then this
         // says nothing at all - same suppression rule as [B-105]'s "0 proofs of
         // purchase". Only say it when it is true.
+        // ⚠️ SAY WHAT THE EXPORT REFUSED TO CARRY ([B-214], 2026-09-10). The purge
+        // that keeps a program out of the exported copy returns what it removed, and
+        // this is the only screen that can tell the user. Without it the strip is
+        // silent - the same defect this feature was fixing on the import side.
+        //
+        // ⚠️ IT IS NOT TIDINESS, IT IS AN INFECTION SIGNAL. Import purges the tree
+        // BEFORE storing it, so a program sitting in a managed source CANNOT have
+        // arrived by importing. Something else on the machine put it there, and this
+        // sentence is the only place the user would ever learn that.
+        // The file is named, the AppData path is not: the store is ours to know and
+        // theirs to ignore (his framing, 2026-09-10 12:58).
+        const _rem = (r.blocked || []).filter(x => (x.kind || 'program') === 'program');
+        const _remM = (r.blocked || []).filter(x => x.kind === 'macro');
+        if (_rem.length || _remM.length) {
+          const _p = [];
+          if (_rem.length) _p.push(`<strong>${_rem.length} program file${_rem.length === 1 ? '' : 's'}</strong>`);
+          if (_remM.length) _p.push(`<strong>${_remM.length} document${_remM.length === 1 ? '' : 's'} with macros</strong>`);
+          // Never collapse a single item: "and 1 more" costs exactly the characters
+          // the filename would have (same rule as the card warning, set 2026-09-10).
+          const _all = r.blocked || [];
+          const _lim = _all.length <= 5 ? _all.length : 4;
+          // QUOTED, because a filename can legitimately END IN A SPACE - that is the
+          // trailing-space evasion itself. Unquoted, "Payload.exe , readme.docm" reads
+          // as a typo; quoted, the space is visible as part of the name (2026-09-10).
+          const _names = _all.slice(0, _lim)
+            .map(x => '"' + esc(String(x.relPath).replace(/[‪-‮⁦-⁩‎‏]/g, '')) + '"')
+            .join(', ');
+          const _extra = _all.length > _lim ? ` and ${_all.length - _lim} more` : '';
+          // RED ON THE FINDING, SUBDUED ON THE EXPLANATION — the same split the card
+          // warning uses (sd-exec-warn-head vs -body). His call 2026-09-10: "should
+          // be in red... or at least part of it". The alarm is what was removed; the
+          // paragraph after it is context, and colouring that too would flatten the
+          // hierarchy and make the whole block read as one long warning.
+          lines.push(
+            `<span style="color:#e5534b;font-weight:600;">&#9888; ${_p.join(' and ')} `
+            + `${(_rem.length + _remM.length) === 1 ? 'was' : 'were'} left out: ${_names}${_extra}.</span>`
+            + (_rem.length
+                ? `<br><span style="color:var(--c-text-sub)">A program file cannot get into a font by importing one, `
+                  + `so something else on this computer put it there. The copy you just exported does not contain it, `
+                  + `but the original still does.</span>`
+                : '')
+          );
+        }
         const _c = r.curation;
         if (_c && _c.any) {
           const parts = [];
@@ -31082,6 +31577,32 @@ require(['vs/editor/editor.main'], function () {
         try {
           const bytes = await _sfAudioReadBytes({ kind, id, subPath });
           if (token !== _sfAudioOpenToken) return; // stale — user opened another
+          // ⚠️ CONTENT CHECK BEFORE THE DECODER EVER SEES IT ([B-214], 2026-09-10).
+          // The dispatcher's name test cannot catch this case by construction: a
+          // program named hum2.wav IS the disguise, so it arrives here looking like
+          // audio. decodeAudioData is a C++ media parser and feeding it
+          // attacker-controlled bytes is the classic RCE shape - it will not execute
+          // the file, but a file whose first bytes say "program" must not reach a
+          // parser at all when the answer is already knowable for free.
+          // MZ (Windows), 7F 45 4C 46 (ELF), FE ED FA / CA FE BA BE (Mach-O).
+          const _b0 = new Uint8Array(bytes.buffer, bytes.byteOffset || 0, Math.min(4, bytes.byteLength || 0));
+          const _isProgramBytes = (_b0.length >= 2 && _b0[0] === 0x4d && _b0[1] === 0x5a)
+            || (_b0.length >= 4 && _b0[0] === 0x7f && _b0[1] === 0x45 && _b0[2] === 0x4c && _b0[3] === 0x46)
+            || (_b0.length >= 4 && (
+                 (_b0[0] === 0xfe && _b0[1] === 0xed && _b0[2] === 0xfa) ||
+                 (_b0[0] === 0xca && _b0[1] === 0xfe && _b0[2] === 0xba && _b0[3] === 0xbe) ||
+                 (_b0[0] === 0xcf && _b0[1] === 0xfa && _b0[2] === 0xed && _b0[3] === 0xfe) ||
+                 (_b0[0] === 0xce && _b0[1] === 0xfa && _b0[2] === 0xed && _b0[3] === 0xfe)));
+          if (_isProgramBytes) {
+            if (loadEl) loadEl.style.display = 'none';
+            if (errEl) {
+              errEl.style.display = '';
+              errEl.textContent = 'This is a program file, not audio, despite its name. '
+                + 'It was not opened. A program cannot get into a font by importing one, '
+                + 'so something else on this computer put it there.';
+            }
+            return;
+          }
           const ctx = await _sfAudioEnsureCtx();
           const buffer = await ctx.decodeAudioData(bytes.buffer.slice(0));
           if (token !== _sfAudioOpenToken) return;
@@ -31189,17 +31710,50 @@ require(['vs/editor/editor.main'], function () {
       // .wav → audio player. Anything _sfIsTextReadable recognises →
       // doc viewer. Anything else → no-op (caller falls back to
       // selection behavior). Returns true when an opener fired.
+      // ⚠️ NAME-ONLY, AND THAT IS THE POINT ([B-214], 2026-09-10). A program wearing
+      // a .wav name is caught by CONTENT at import/export, but this is the PREVIEW
+      // door and it decides what to do from the name alone. Two problems solved here:
+      //
+      // 1. SECURITY SURFACE. decodeAudioData is a C++ media parser, and handing it
+      //    attacker-controlled bytes is a classic RCE shape. It does not execute the
+      //    file - nothing here goes near the shell - but a file we have ALREADY
+      //    classified as a program has no business reaching a decoder at all. The
+      //    check is free: the bytes come back before we decode.
+      // 2. SILENT FAILURE. Anything not wav-or-text returned false and the caller
+      //    did nothing at all, so a double-click on a .exe/.docm/.rar was a dead
+      //    click with no feedback (his catch: "these fail silently on double click").
+      //    A file we cannot open should SAY so.
+      const _sfExeNameRx = /\.(exe|com|scr|pif|bat|cmd|msi|dll|lnk|vbs|vbe|jse|wsf|ps1|hta|cpl|jar)$/i;
+      const _sfLooksProgramName = (n) =>
+        _sfExeNameRx.test(String(n || '').replace(/[. ]+$/, ''));
       const _sfTryOpenFile = ({ kind, id, subPath, size }) => {
         if (!subPath) return false;
+        const _leaf = String(subPath).split('/').pop();
+        const _shown = String(_leaf).replace(/[‪-‮⁦-⁩‎‏]/g, '');
+        if (_sfLooksProgramName(_leaf)) {
+          promptError('Not a sound',
+            `"${_shown}" is a program file, not audio, so there is nothing to play or read.
+
+`
+            + `A program cannot get into a font by importing one, so something else put it there. `
+            + `It is never copied out when you export.`);
+          return true;
+        }
         if (_sfIsWavPath(subPath)) {
-          _sfOpenAudioPlayer({ kind, id, subPath, label: subPath.split('/').pop() });
+          _sfOpenAudioPlayer({ kind, id, subPath, label: _leaf });
           return true;
         }
         if (_sfIsTextReadable(subPath)) {
           _sfOpenDocViewer({ kind, id, subPath, size });
           return true;
         }
-        return false;
+        // Everything else: say what it is instead of doing nothing.
+        promptError('Cannot open this here',
+          `"${_shown}" is not audio or text, so it cannot be previewed in the app.
+
+`
+          + `Right-click it and choose Export to save a copy you can open elsewhere.`);
+        return true;
       };
       // Kind-aware doc viewer launcher — reads the bytes from the right
       // IPC, decodes to text (stripping RTF markup when relevant), and
@@ -34772,6 +35326,25 @@ require(['vs/editor/editor.main'], function () {
               : await window.electronAPI.exportSourceDoc({ uuid: key, path: fileName });
             if (!res || !res.ok) {
               promptError('Could not save file', (res && res.error) || 'unknown error');
+              return;
+            }
+            // ⚠️ A REFUSAL IS NOT A FAILURE, AND IT IS NOT A SUCCESS ([B-214]). The
+            // per-file export declines to write a program out of a store we manage,
+            // the same as the whole-source export. Without this branch `ok:true` with
+            // no destPath renders as "Saved to Downloads as undefined" — claiming we
+            // wrote a file we deliberately did not.
+            if (res.refused) {
+              await promptConfirm({
+                title: 'Not saved',
+                message: `"${baseName}" is a program file, so it was not saved.
+
+`
+                  + `A program cannot get into a font by importing one, so something else `
+                  + `on this computer put it there.`,
+                confirmText: 'OK',
+                confirmKind: 'primary',
+                cancelText: 'Close',
+              });
               return;
             }
             const destBase = String(res.destPath || '').split(/[\\/]/).pop() || baseName;
