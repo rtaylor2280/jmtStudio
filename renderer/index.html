@@ -7046,6 +7046,8 @@ window.promptUnsaved = promptUnsaved;
 //   opts.message     — body text; newlines render as line breaks
 //   opts.confirmText — primary button label (default: 'OK')
 //   opts.confirmKind — 'danger' (default, red) | 'save' (green) | 'primary' (blue)
+//                      | 'neutral' (plain secondary, for "do it anyway" actions
+//                        that are not destructive)
 //   opts.cancelText  — secondary button label (default: 'Cancel')
 //   opts.middleText  — optional third button between Cancel and Confirm. When
 //                      provided, the function resolves with one of three
@@ -7200,8 +7202,14 @@ function promptConfirm(opts) {
         : null;
       if (cbInput.onchange) cbInput.onchange();
     }
+    // 'neutral' maps to the plain secondary the card panel and the import review
+    // already use for their "...anyway" buttons. Without it the only non-primary
+    // option was modal-btn-discard, which is RED - so a proceed-anyway button came
+    // out looking like a destructive action (2026-09-10). Proceeding is not
+    // destructive here; it is simply not the recommended choice.
     okBtn.className = confirmKind === 'primary' ? 'modal-btn-primary'
                     : confirmKind === 'save'    ? 'modal-btn-save'
+                    : confirmKind === 'neutral' ? 'modal-btn-cancel'
                     : 'modal-btn-discard';
     const cancelBtn = document.getElementById('modal-confirm-cancel');
     cancelBtn.textContent = cancelText;
@@ -22347,6 +22355,48 @@ require(['vs/editor/editor.main'], function () {
           : _cmnBase;
         const name = await _sfPromptCommonName({ title: 'Import common folder', defaultValue: defaultName });
         if (!name) return;
+        // ⚠️ WARN BEFORE ACTING, LIKE EVERY OTHER DOOR ([B-214], 2026-09-10:
+        // "the other imports stop it from importing and check then import anyway...
+        // seems inconsistent"). This used to import first and report afterwards,
+        // which is a fait accompli rather than a choice. Same contract as the card
+        // panel now: say what is there, let the user decide, and Cancel is the
+        // recommended button because a disguised program is evidence of intent.
+        // The strip inside the import is unchanged and still does the real work.
+        try {
+          const _pre = await window.electronAPI.scanIncomingCommon({ srcPath: pick.filePath });
+          const _pb = (_pre && _pre.ok && _pre.blocked) || [];
+          if (_pb.length) {
+            const _pp = _pb.filter(x => (x.kind || 'program') === 'program');
+            const _pm = _pb.filter(x => x.kind === 'macro');
+            const _parts = [];
+            if (_pp.length) _parts.push(`<strong>${_pp.length} program file${_pp.length === 1 ? '' : 's'}</strong>`);
+            if (_pm.length) _parts.push(`<strong>${_pm.length} document${_pm.length === 1 ? '' : 's'} with macros</strong>`);
+            const _lim = _pb.length <= 6 ? _pb.length : 5;
+            const _names = _pb.slice(0, _lim).map(x => `<li>${_sfEscape(x.relPath)}</li>`).join('');
+            const _more = _pb.length > _lim ? `<li>and ${_pb.length - _lim} more</li>` : '';
+            const _hid = _pp.filter(x => x.disguised).length;
+            const _go = await promptConfirm({
+              title: 'This folder carries program files',
+              messageHtml:
+                `<div style="color:#e5534b;font-weight:600;">&#9888; This folder carries ${_parts.join(' and ')}.</div>`
+                + `<ul style="color:#e5534b;font-size:0.8rem;list-style:none;padding-left:0;margin:6px 0;">${_names}${_more}</ul>`
+                + `<div style="color:var(--c-text-sub);">A program file has no reason to be in a common folder, and `
+                + `your saber would never run it either.</div>`
+                + (_hid
+                    ? `<div style="color:#e5534b;margin-top:6px;">`
+                      + `${_hid === 1 ? 'One of these is disguised as a sound file' : `${_hid} of these are disguised as sound files`}, `
+                      + `found by reading the contents rather than the name. A program does not take a sound file's name by accident.</div>`
+                    : '')
+                + `<div style="color:var(--c-text-sub);margin-top:6px;">If you choose to import anyway, `
+                + `${_pb.length === 1 ? 'it' : 'they'} will not be included. Cancel leaves this folder alone.</div>`,
+              confirmText: 'Import anyway',
+              confirmKind: 'neutral',
+              cancelText: 'Cancel',
+              cancelKind: 'primary',
+            });
+            if (!_go) return;
+          }
+        } catch { /* a scan we cannot run must not block the import */ }
         _sfDeleteProgress.show('Importing common folder', name);
         let res;
         try {
@@ -22390,7 +22440,8 @@ require(['vs/editor/editor.main'], function () {
               title: 'Added to your common folders',
               messageHtml: `<strong>${esc(res.name || name)}</strong> was added.<br><br>`
                 + `Your ${noun} started at <strong>${fmtB(_started)}</strong>. JMT Studio saved you <strong>${fmtB(_shown)}</strong>, so this common folder ${addedTxt}. `
-                + `Identical files are stored once in your library and used in every location they appear, so nothing is missing or renamed.`,
+                + `Identical files are stored once in your library and used in every location they appear, so nothing is missing or renamed.`
+,
               confirmText: 'Done',
               confirmKind: 'primary',
               hideCancel: true,

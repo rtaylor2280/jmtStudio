@@ -2450,6 +2450,13 @@ ipcMain.handle('common:classifyIncoming', (_, { folderPath } = {}) => {
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
+// What a picked common folder or zip would have refused, asked BEFORE the import
+// runs so the dialog can offer a real choice ([B-214]).
+ipcMain.handle('common:scanIncoming', async (_, { srcPath } = {}) => {
+  try { return { ok: true, ...(await soundFontCommon.scanIncomingCommon(srcPath)) }; }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
 ipcMain.handle('common:rename', (_, { uuid, newName } = {}) => {
   try { return soundFontCommon.renameCommon(app.getPath('userData'), uuid, newName); }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }

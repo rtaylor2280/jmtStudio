@@ -411,6 +411,13 @@ async function _importCommonAsSource(userData, sourcePath, name, onProgress) {
     try { recomputeCommonContentHash(userData, uuid); } catch {}
     return {
       ok: true, uuid, name: cleanName, sourceUuid,
+      // ⚠️ CARRY WHAT WAS REFUSED ([B-214], 2026-09-10). importSource already strips
+      // programs and macro documents out of a common folder - that half always
+      // worked - but this return read four fields off `imp` and not this one, so the
+      // commons door removed files and said nothing. It was the last of the five
+      // doors with a silent strip.
+      blockedFiles: imp.blockedFiles || [],
+      notedFiles: imp.notedFiles || [],
       savings: {
         archiveBytes: imp.archiveBytes || 0,
         contentBytes: imp.contentBytes || 0,
@@ -450,6 +457,67 @@ async function importCommonFromZip(userData, zipPath, name) {
 // contentHash - so an incoming folder hashes once and existing commons are a
 // manifest read. A dirty or missing manifest falls back to a live hash of
 // that common's files, so an edited pack is never judged by stale rows.
+// ── WHAT WOULD BE REFUSED, BEFORE ANYTHING IS IMPORTED ([B-214], 2026-09-10) ──
+//
+// Every other door warns BEFORE it acts: the card panel lists programs and makes
+// you press "Import fonts anyway", and the font review shows what was refused with
+// Cancel as the recommended button. The commons door imported first and reported
+// afterwards, which is a different contract - a fait accompli instead of a choice.
+// His call: "the other imports stop it from importing and check then import anyway...
+// seems inconsistent."
+//
+// So this answers the question the dialog needs BEFORE the copy happens. The strip
+// inside importSource is unchanged and still authoritative; this only decides what
+// to say up front. Reads 256 bytes per file, same as every other check.
+async function scanIncomingCommon(srcPath) {
+  const out = { blocked: [], noted: [] };
+  if (!srcPath || !fs.existsSync(srcPath)) return out;
+  const { classifyFileBuffer } = require('./sdCardDetect');
+  const take = (rel, buf) => {
+    const v = classifyFileBuffer(buf, rel);
+    if (v.kind === 'program' || v.kind === 'macro') {
+      out.blocked.push({ relPath: rel, kind: v.kind, reason: v.reason,
+        byContent: !!v.byContent, disguised: !!v.disguised });
+    } else if (v.kind !== 'ok') {
+      out.noted.push({ relPath: rel, kind: v.kind, reason: v.reason });
+    }
+  };
+  const st = fs.statSync(srcPath);
+  if (st.isDirectory()) {
+    const walk = (dir, rel) => {
+      let ents; try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+      for (const e of ents) {
+        const abs = path.join(dir, e.name);
+        const r = rel ? rel + '/' + e.name : e.name;
+        if (e.isDirectory()) { walk(abs, r); continue; }
+        if (!e.isFile()) continue;
+        let buf = Buffer.alloc(0);
+        try {
+          const fd = fs.openSync(abs, 'r');
+          try { const b = Buffer.alloc(256); const n = fs.readSync(fd, b, 0, 256, 0); buf = b.subarray(0, n); }
+          finally { fs.closeSync(fd); }
+        } catch { continue; }
+        take(r, buf);
+      }
+    };
+    walk(srcPath, '');
+    return out;
+  }
+  // A picked .zip: read each entry's leading bytes without extracting the archive.
+  const zip = new StreamZip.async({ file: srcPath });
+  try {
+    const entries = await zip.entries();
+    for (const name of Object.keys(entries)) {
+      const e = entries[name];
+      if (e.isDirectory) continue;
+      let buf = Buffer.alloc(0);
+      try { const full = await zip.entryData(name); buf = full.subarray(0, 256); } catch { continue; }
+      take(name, buf);
+    }
+  } finally { try { await zip.close(); } catch {} }
+  return out;
+}
+
 function classifyIncomingCommon(userData, folderPath) {
   const out = { ownedByContent: false, matchName: null, nameTaken: false, contentHash: null };
   if (!folderPath || !fs.existsSync(folderPath)) return out;
@@ -1458,6 +1526,7 @@ module.exports = {
   importCommonFromFolder,
   importCommonFromZip,
   classifyIncomingCommon,
+  scanIncomingCommon,
   renameCommon,
   duplicateCommon,
   deleteCommon,
