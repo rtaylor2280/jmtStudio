@@ -698,7 +698,10 @@ function _linkOrCopyDirRecursive(srcDir, destDir, blocked, relBase) {
     const rel = relBase ? relBase + '/' + e.name : e.name;
     if (e.isDirectory()) { _linkOrCopyDirRecursive(s, d, blocked, rel); continue; }
     if (!e.isFile()) continue;
-    const v = require('./sdCardDetect').checkExecutableFile(s, rel);
+    // checkCarryableFile, not the executable test: a duplicate cannot ADMIT anything
+    // new, but it would happily spread an archive or a macro document into a second
+    // copy, and neither is allowed to live here ([B-370]).
+    const v = require('./sdCardDetect').checkCarryableFile(s, rel);
     if (v.blocked) { if (blocked) blocked.push({ relPath: rel, reason: v.reason, byContent: !!v.byContent }); continue; }
     let linked = false;
     try { fs.linkSync(s, d); linked = true; } catch { linked = false; }
@@ -844,6 +847,7 @@ function addFilesToCommon(userData, uuid, subPath, sourceFilePaths) {
   }
   const added = [];
   const failed = [];
+  const refusedIn = [];
   // One index for the whole batch ([B-327]): each added file lands as a link
   // when the library already holds its bytes (a wav shared with a font, or
   // with another common), and as a copy only when genuinely novel. ingestFile
@@ -861,8 +865,18 @@ function addFilesToCommon(userData, uuid, subPath, sourceFilePaths) {
       // the fonts do. Refused rather than stripped: the caller named this exact file,
       // so there is nothing left to add if it is dropped, and `failed` already reaches
       // the user with a per-file reason.
-      const _v = require('./sdCardDetect').checkExecutableFile(src, path.basename(src));
-      if (_v.blocked) { failed.push({ source: src, error: _v.reason }); continue; }
+      // checkCarryableFile, not the executable test ([B-370]): programs were stopped
+      // here but a .rar or a macro document walked straight in.
+      const _v = require('./sdCardDetect').checkCarryableFile(src, path.basename(src));
+      // ⚠️ `refused` IS NOT `failed` ([B-370], his catch 2026-09-11: correctly blocked,
+      // but it surfaced in the generic failure dialog with a raw G:\ path). A policy
+      // refusal and a copy that broke are different facts — one is the app working, the
+      // other is the app failing — and they read completely differently to the user.
+      if (_v.blocked) {
+        refusedIn.push({ name: path.basename(src), kind: _v.kind, reason: _v.reason,
+          disguised: !!_v.disguised });
+        continue;
+      }
       const finalName = _proffieVariantName(destDir, path.basename(src));
       const dest = path.join(destDir, finalName);
       let done = false;
@@ -878,7 +892,7 @@ function addFilesToCommon(userData, uuid, subPath, sourceFilePaths) {
   if (added.length) {
     try { markCommonContentDirty(userData, uuid); } catch {}
   }
-  return { ok: true, added, failed };
+  return { ok: true, added, failed, refused: refusedIn };
 }
 
 // Rename one file inside a common. Validates the new name doesn't collide

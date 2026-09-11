@@ -23079,6 +23079,7 @@ require(['vs/editor/editor.main'], function () {
         if (res.failed?.length) {
           await _sfShowPartialFailures('Some files failed to add', res.failed);
         }
+        await _sfShowNotAdded(res.refused);
         await _sfRefreshCommons();
       };
       // Rename a folder inside a common's file tree. Uses the unified
@@ -24585,6 +24586,7 @@ require(['vs/editor/editor.main'], function () {
           const lines = res.skipped.map(s => `• ${s.src}: ${s.reason}`).join('\n');
           await promptError(`Skipped ${res.skipped.length} file(s)`, lines);
         }
+        await _sfShowNotAdded(res.refused);
         await _sfRefreshSharedTracksModal();
       };
       _sfSharedAddBtn?.addEventListener('click', (e) => {
@@ -29540,6 +29542,10 @@ require(['vs/editor/editor.main'], function () {
           await _sfDeleteProgress.hide();
         }
         if (!res || !res.ok) { promptError('Could not add that folder', (res && res.error) || 'unknown'); return; }
+        // [B-370] Whatever the folder carried that a font may not. Nothing was removed —
+        // the user's folder is untouched — so this is the not-added wording, not the
+        // export one.
+        await _sfShowNotAdded(res.refused);
         // Same landing as a duplicate: refresh, then open the new row's name for
         // editing. The folder's name is a starting point, not a decision.
         await _sfFinishEntryDuplicate(res.name || newName);
@@ -29821,38 +29827,14 @@ require(['vs/editor/editor.main'], function () {
         // sentence is the only place the user would ever learn that.
         // The file is named, the AppData path is not: the store is ours to know and
         // theirs to ignore (his framing, 2026-09-10 12:58).
-        const _rem = (r.blocked || []).filter(x => (x.kind || 'program') === 'program');
-        const _remM = (r.blocked || []).filter(x => x.kind === 'macro');
-        if (_rem.length || _remM.length) {
-          const _p = [];
-          if (_rem.length) _p.push(`<strong>${_rem.length} program file${_rem.length === 1 ? '' : 's'}</strong>`);
-          if (_remM.length) _p.push(`<strong>${_remM.length} document${_remM.length === 1 ? '' : 's'} with macros</strong>`);
-          // Never collapse a single item: "and 1 more" costs exactly the characters
-          // the filename would have (same rule as the card warning, set 2026-09-10).
-          const _all = r.blocked || [];
-          const _lim = _all.length <= 5 ? _all.length : 4;
-          // QUOTED, because a filename can legitimately END IN A SPACE - that is the
-          // trailing-space evasion itself. Unquoted, "Payload.exe , readme.docm" reads
-          // as a typo; quoted, the space is visible as part of the name (2026-09-10).
-          const _names = _all.slice(0, _lim)
-            .map(x => '"' + esc(String(x.relPath).replace(/[‪-‮⁦-⁩‎‏]/g, '')) + '"')
-            .join(', ');
-          const _extra = _all.length > _lim ? ` and ${_all.length - _lim} more` : '';
-          // RED ON THE FINDING, SUBDUED ON THE EXPLANATION — the same split the card
-          // warning uses (sd-exec-warn-head vs -body). His call 2026-09-10: "should
-          // be in red... or at least part of it". The alarm is what was removed; the
-          // paragraph after it is context, and colouring that too would flatten the
-          // hierarchy and make the whole block read as one long warning.
-          lines.push(
-            `<span style="color:#e5534b;font-weight:600;">&#9888; ${_p.join(' and ')} `
-            + `${(_rem.length + _remM.length) === 1 ? 'was' : 'were'} left out: ${_names}${_extra}.</span>`
-            + (_rem.length
-                ? `<br><span style="color:var(--c-text-sub)">A program file cannot get into a font by importing one, `
-                  + `so something else on this computer put it there. The copy you just exported does not contain it, `
-                  + `but the original still does.</span>`
-                : '')
-          );
-        }
+        // ⚠️ THE SUMMARY NO LONGER DESCRIBES THE FINDING ([B-370], his catch 2026-09-11).
+        // It used to print "the copy you just exported does not contain it, but the
+        // original still does" - which became FALSE the moment removal moved ahead of
+        // this screen. The file is already out of the library by the time this renders.
+        // The dedicated dialog below states it once, correctly, and offers the choice;
+        // saying it twice was noise even while it was still true.
+        const _found = r.blocked || [];
+
         const _c = r.curation;
         if (_c && _c.any) {
           const parts = [];
@@ -29878,25 +29860,30 @@ require(['vs/editor/editor.main'], function () {
         // convenience; deciding what happens to a program sitting in the library is the
         // question actually in front of the user, and two competing primaries would
         // bury it. On a clean export nothing changes.
-        const _hasProg = _rem.length > 0;
-        // ⚠️ REMOVED BEFORE THIS SCREEN, NOT AFTER IT. This path shows its own summary
-        // first, so leaving the removal until the user clicked Continue meant quitting
-        // at the summary left the program in the library (his catch, 2026-09-11).
-        const _impState = _hasProg ? await _sfImpoundRefusals(_rem, 'source', uuid) : null;
+        const _hasProg = _found.length > 0;
+        // ⭐ ONE WINDOW, NOT TWO (his call, 2026-09-11). When something was found, the
+        // export summary is folded INTO the findings dialog and Delete/Quarantine take
+        // the button row - there is no separate 'Export complete' to dismiss first, and
+        // the reveal button loses its slot because the decision is what matters.
+        // Removal still runs BEFORE anything renders, so quitting at this screen leaves
+        // nothing behind. A clean export is completely unchanged.
+        if (_hasProg) {
+          const _impState = await _sfImpoundRefusals(_found, 'source', uuid);
+          await _sfShowProgramRefusal({ refused: _found, kind: 'source', id: uuid,
+            state: _impState, prefixHtml: lines.join('<br><br>') });
+          return;
+        }
         const showIt = await promptConfirm({
           title: 'Export complete',
           messageHtml: lines.join('<br><br>'),
-          confirmText: _hasProg ? 'Continue' : 'Show in folder',
+          confirmText: 'Show in folder',
           confirmKind: 'primary',
           cancelText: 'Done',
           cancelKind: 'cancel',
         });
-        if (!_hasProg && showIt === true) {
+        if (showIt === true) {
           const rev = await window.electronAPI.showItemInFolder(r.destPath).catch((e) => ({ ok: false, error: String(e && e.message || e) }));
           if (!rev || rev.ok === false) promptError('Could not open the folder', (rev && rev.error) || r.destPath);
-        }
-        if (_hasProg) {
-          await _sfShowProgramRefusal({ refused: _rem, kind: 'source', id: uuid, state: _impState });
         }
       });
       // Delete source with cascade warning.
@@ -30452,6 +30439,7 @@ require(['vs/editor/editor.main'], function () {
         });
         await _sfDeleteProgress.hide();
         if (!res || !res.ok) { promptError('Add failed', (res && res.error) || 'unknown'); return; }
+        await _sfShowNotAdded(res.refused);
         if (res.failed?.length) {
           await _sfShowPartialFailures('Some files failed to add', res.failed);
         }
@@ -31835,7 +31823,50 @@ require(['vs/editor/editor.main'], function () {
         return { held, failed };
       };
 
-      const _sfShowProgramRefusal = async ({ refused, kind, id, state } = {}) => {
+      // ⚠️ THE IMPORT SIDE IS NOT THE EXPORT SIDE ([B-370]). Nothing is being removed:
+      // the file simply never arrives and the user's own copy stays where they picked
+      // it. So there is no Delete, no Quarantine, and none of the "something else on
+      // this computer put it there" framing - that belongs where we destroy something.
+      // It still has to be SAID, because a silent drop is the same dishonesty the
+      // export side was fixed for: the user picked four files and got three.
+      const _sfShowNotAdded = async (refused) => {
+        const ref = (refused || []).filter(Boolean);
+        if (!ref.length) return;
+        const leaf = (x) => String(x.name || x.relPath || '').split('/').pop()
+          .replace(/[‪-‮⁦-⁩‎‏]/g, '');
+        const one = ref.length === 1;
+        const lim = ref.length <= 5 ? ref.length : 4;
+        const names = ref.slice(0, lim).map(x => '"' + _sfEscape(leaf(x)) + '"').join(', ')
+          + (ref.length > lim ? ` and ${ref.length - lim} more` : '');
+        const nP = ref.filter(x => x.kind !== 'opaque' && x.kind !== 'macro').length;
+        const nM = ref.filter(x => x.kind === 'macro').length;
+        const nA = ref.filter(x => x.kind === 'opaque').length;
+        const parts = [];
+        if (nP) parts.push(nP === 1 ? 'a program file' : `${nP} program files`);
+        if (nM) parts.push(nM === 1 ? 'a document with macros' : `${nM} documents with macros`);
+        if (nA) parts.push(nA === 1 ? 'an archive that cannot be opened' : `${nA} archives that cannot be opened`);
+        const phrase = parts.length === 1 ? parts[0]
+          : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
+        await promptConfirm({
+          title: one ? 'One file was not added' : `${ref.length} files were not added`,
+          messageHtml:
+            `<div style="color:#e5534b;font-weight:600;">&#9888; ${names} `
+            + `${one ? 'was' : 'were'} not added.</div>`
+            + `<div style="color:var(--c-text-sub);margin-top:6px;">`
+            + `A sound font library does not carry ${phrase}. `
+            + `${one ? 'Your copy is' : 'Your copies are'} untouched where ${one ? 'it was' : 'they were'} picked from.</div>`,
+          confirmText: 'OK',
+          confirmKind: 'primary',
+          hideCancel: true,
+        });
+      };
+
+      // `prefixHtml` lets a caller that already has something to report fold it into
+      // THIS dialog instead of showing its own first ([B-370], his call 2026-09-11:
+      // "that's wrong... done and continue are to be replaced, combine into one
+      // message"). Two dialogs in a row made the user dismiss a summary to reach the
+      // decision, and the decision is the reason either of them is on screen.
+      const _sfShowProgramRefusal = async ({ refused, kind, id, state, prefixHtml } = {}) => {
         const impounded = state || await _sfImpoundRefusals(refused, kind, id);
         if (!impounded) return;
         const ref = (refused || []).filter(Boolean);
@@ -31893,65 +31924,52 @@ require(['vs/editor/editor.main'], function () {
         const extra = shown.length > lim ? ` and ${shown.length - lim} more` : '';
         const hid = held.filter(x => x.disguised).length;
         // Split for WORDING only - both kinds have already been removed by this point.
+        // ⭐ THREE KINDS, ONE VOICE — ALL THREATS (his call, 2026-09-11): "they are all
+        // threats, threats because we don't know why they are there."
+        // ⚠️ AND HIS DEFINITION IS THE LOAD-BEARING PART, because it is what keeps the
+        // copy honest: "saying they are a threat is not saying that we know they are
+        // malicious, but that it could be - that's definitionally a threat." So the
+        // dialog asserts PROVENANCE (Studio did not put this here), never intent. No
+        // sentence here claims the file is harmful, and none should be added.
+        // The earlier build gave archives a calmer tone on the grounds that a vendor
+        // might have shipped one in good faith. THE IMPORT BLOCK ERASED THAT: none of
+        // the three can come in through Studio any more, so any of them found in the
+        // store arrived some other way and is equally unexplained - which is exactly
+        // the condition that makes something a threat. The KIND is still named
+        // precisely, because calling an archive a program would be false.
         const heldArch = held.filter(x => x.kind === 'opaque');
-        const heldProg = held.filter(x => x.kind !== 'opaque');
-        const nA = heldArch.length, nP = heldProg.length;
+        const heldMac  = held.filter(x => x.kind === 'macro');
+        const heldProg = held.filter(x => x.kind !== 'opaque' && x.kind !== 'macro');
+        const nA = heldArch.length, nM = heldMac.length, nP = heldProg.length;
         const nameList = (xs, n) => xs.slice(0, n).map(x => '"' + _sfEscape(x.name) + '"').join(', ')
           + (xs.length > n ? ` and ${xs.length - n} more` : '');
+        // Same shape the import dialogs use: name each kind, join with 'and'.
+        const parts = [];
+        if (nP) parts.push(`<strong>${nP === 1 ? '1 program file' : `${nP} program files`}</strong>`);
+        if (nM) parts.push(`<strong>${nM === 1 ? '1 document with macros' : `${nM} documents with macros`}</strong>`);
+        if (nA) parts.push(`<strong>${nA === 1 ? '1 unreadable archive' : `${nA} unreadable archives`}</strong>`);
+        const nAll = held.length;
+        const phrase = parts.length === 1 ? parts[0]
+          : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
 
-        // ⚠️ THE LIST HAS TO STOP SHOWING A FILE THAT IS GONE (his catch on the dev pass,
-        // 2026-09-11: "if gone, why not refresh this page so I can't right click it
-        // again?"). Without this the row stays, a second Export hits it, and the user
-        // gets a raw "Not found in source" — the app contradicting itself about a file it
-        // just removed. Same defect the entry modal already fixed once ([B-304], 09-03:
-        // deleting a file and having to close and reopen to see it), so this follows that
-        // pattern: reload the tree from disk, then re-render.
-
-        // ⚠️ IF THE REMOVAL ITSELF FAILED, SAY SO AND STOP. Reporting "removed" over a
-        // file still sitting in the library is the one lie this feature cannot afford.
-        if (!held.length) {
-          promptError(one ? 'A program file could not be removed' : 'Program files could not be removed',
-            failed.map(f => `${f.name}: ${f.error}`).join('\n'));
-          return;
-        }
-
-        // ⚠️ THE COPY MAKES NO CLAIM ABOUT WHERE THE FILE IS. It is already out of the
-        // library and held, but the holding area is our bookkeeping and the user is
-        // never told about it ("the underworks of it... is irrelevant to the user").
-        // Saying "still in your library" would be false; saying "already removed" would
-        // make the Delete button read as a no-op. So the message reports the FINDING and
-        // the buttons carry the decision.
         const answer = await promptConfirm({
-          title: nP && nA ? 'Files were removed from your library'
-               : nP ? (nP === 1 ? 'A program file was found' : 'Program files were found')
-               : (nA === 1 ? 'An archive was removed' : 'Archives were removed'),
+          title: nAll === 1 ? 'A file was found that does not belong'
+                           : 'Files were found that do not belong',
           messageHtml:
-            // PROGRAMS get the red alarm; ARCHIVES do not. One is a threat and the other
-            // is unreadable clutter, and giving them the same colour would flatten the
-            // difference the wording is working to keep.
-            (nP
-              ? `<div style="color:#e5534b;font-weight:600;">&#9888; `
-                + `${nP === 1 ? '1 program file was' : `${nP} program files were`} `
-                + `found and removed: ${nameList(heldProg, 4)}.</div>`
-                + (hid
-                    ? `<div style="color:#e5534b;margin-top:6px;">`
-                      + `${hid === 1 ? 'One of these is disguised as a sound file' : `${hid} of these are disguised as sound files`}, `
-                      + `found by reading the contents rather than the name. A program does not take a sound file's name by accident.</div>`
-                    : '')
-                + `<div style="color:var(--c-text-sub);margin-top:6px;">`
-                + `A program cannot get into a font by importing one, so something else on this `
-                + `computer put it there.</div>`
-              : '')
-            + (nA
-                ? `<div style="color:var(--c-text);margin-top:6px;">`
-                  + `${nA === 1 ? '1 archive was' : `${nA} archives were`} `
-                  + `${nP ? 'also removed' : 'removed'}: ${nameList(heldArch, 4)}.</div>`
-                  + `<div style="color:var(--c-text-sub);margin-top:6px;">`
-                  + `That format cannot be opened here or on a saber, so it could not be `
-                  + `checked and would do nothing on a card.</div>`
+            (prefixHtml ? prefixHtml + '<br><br>' : '')
+            + `<div style="color:#e5534b;font-weight:600;">&#9888; `
+            + `${phrase} ${nAll === 1 ? 'was' : 'were'} found and removed: ${nameList(held, 4)}.</div>`
+            + (hid
+                ? `<div style="color:#e5534b;margin-top:6px;">`
+                  + `${hid === 1 ? 'One of these is disguised as a sound file' : `${hid} of these are disguised as sound files`}, `
+                  + `found by reading the contents rather than the name. A program does not take a sound file's name by accident.</div>`
                 : '')
+            // The one genuinely invisible fact, and it is now true of all three kinds.
             + `<div style="color:var(--c-text-sub);margin-top:6px;">`
-            + `Quarantine keeps a copy you can examine.</div>`
+            + `${nAll === 1 ? 'This cannot' : 'These cannot'} get into a font by importing one, `
+            + `so something else on this computer put ${nAll === 1 ? 'it' : 'them'} there.</div>`
+            + `<div style="color:var(--c-text-sub);margin-top:6px;">`
+            + `Quarantine keeps ${nAll === 1 ? 'a copy' : 'copies'} you can examine.</div>`
             + (failed.length
                 ? `<div style="color:#e5534b;margin-top:6px;">`
                   + `${failed.length} could not be removed: ${_sfEscape(failed.map(f => f.name).join(', '))}.</div>`

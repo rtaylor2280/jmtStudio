@@ -591,6 +591,17 @@ function addFilesAt({ userData, kind, id, subPath, sourceFilePaths, destNames })
   const destRoot = path.resolve(_root(userData, kind, id));
   const added = [];
   const failed = [];
+  // ⚠️ THE SAME POLICY AS EVERY OTHER WAY IN ([B-370], his catch 2026-09-11: "I just
+  // added a .exe into my library"). This module had NO checker of any kind, and this
+  // is the font detail's "+ Add" - so Studio itself would put a program in a font, and
+  // the export dialog would then tell the user something else on their computer did.
+  // His rule: these files are never allowed to come in or out.
+  // ⚠️ NOT A REMOVAL. Nothing is destroyed here - the file simply does not arrive, and
+  // the user's own copy stays where they picked it from. So this reports `refused` and
+  // the caller says what was not added; Delete and Quarantine belong to the export
+  // side, where we ARE destroying something.
+  const { checkCarryableFile } = require('./sdCardDetect');
+  const refused = [];
   // ⭐ A FILE YOU ADD IS ONLY STORED IF IT IS NOVEL ([B-315] + [B-316], 2026-09-05).
   // Every file here goes through the library-wide content index. Content we
   // already hold anywhere — a vendor source, another font, the pool — becomes a
@@ -607,6 +618,14 @@ function addFilesAt({ userData, kind, id, subPath, sourceFilePaths, destNames })
       if (!fs.existsSync(src) || !fs.statSync(src).isFile()) {
         failed.push({ source: src, error: 'Not a file' });
         continue;
+      }
+      {
+        const _n = path.basename(src);
+        const _v = checkCarryableFile(src, _n);
+        if (_v.blocked) {
+          refused.push({ name: _n, kind: _v.kind, reason: _v.reason, disguised: !!_v.disguised });
+          continue;
+        }
       }
       const desiredName = (destNames && destNames[i]) || path.basename(src);
       const finalName = _proffieVariantName(destDir, desiredName);
@@ -630,7 +649,7 @@ function addFilesAt({ userData, kind, id, subPath, sourceFilePaths, destNames })
     }
   }
   if (added.length > 0) _markLocationDirty(userData, kind, id);
-  return { ok: true, added, failed, linkedFiles, pooled };
+  return { ok: true, added, failed, refused, linkedFiles, pooled };
 }
 
 module.exports = {

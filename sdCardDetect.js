@@ -578,6 +578,20 @@ function checkCarryable(buf, relPath) {
     return { blocked: true, kind: 'program', reason: v.reason,
       byContent: !!v.byContent, disguised: !!v.disguised };
   }
+  // ⚠️ MACRO DOCUMENTS ARE ALLOWED IN EXACTLY ONE PLACE: PROOF OF PURCHASE (his policy,
+  // 2026-09-11). "There is nowhere you can import a macro-enabled file except there, so
+  // that's the only place it can leave from. If it showed up anywhere else then it got
+  // there not by us."
+  // That is the SAME argument as a program, which is why this is blocked rather than
+  // merely noted, and why its wording sits with the programs rather than with the
+  // unreadable archives.
+  // ⭐ ATTACHMENTS ARE UNAFFECTED BY CONSTRUCTION: soundFontAttachments guards with
+  // checkExecutableFile (programs only) and never calls this, so a receipt keeps its
+  // macro document on the way in and on the way back out.
+  if (v.kind === 'macro') {
+    return { blocked: true, kind: 'macro',
+      reason: 'A document that can contain macros has no use on a saber card, and is only allowed as a proof of purchase. It was left out.' };
+  }
   if (v.kind === 'opaque') {
     return { blocked: true, kind: 'opaque',
       reason: 'This archive format cannot be opened, here or on a saber, so its contents could not be checked. It was left out.' };

@@ -250,6 +250,11 @@ async function exportBackup({
   // past in the progress label tells the user nothing, so resolve each to
   // its display name the same way the chips do (label, else filename).
   const attachmentNameById = new Map();
+  // [B-369] Files the backup will not carry, and the absolute paths to skip when the
+  // archiver walks the same trees. Collected during the count pass below.
+  const { checkCarryableFile } = require('./sdCardDetect');
+  const refused = [];
+  const refusedAbs = new Set();
   for (const bucket of ['sources', 'library', 'common', 'attachments']) {
     const root = path.join(_soundFontsRoot(userData), bucket);
     if (!fs.existsSync(root)) continue;
@@ -270,8 +275,30 @@ async function exportBackup({
         try { items = fs.readdirSync(dir, { withFileTypes: true }); }
         catch { return; }
         for (const it of items) {
-          if (it.isDirectory()) walk(path.join(dir, it.name));
-          else if (it.isFile()) count++;
+          if (it.isDirectory()) { walk(path.join(dir, it.name)); continue; }
+          if (!it.isFile()) continue;
+          const fileAbs = path.join(dir, it.name);
+          // ⚠️ DECLINE HERE, WHERE THE COUNT IS MADE ([B-369]). The backup gates each
+          // top item on its entry events - `await _gateFor(topKey).promise` resolves
+          // only once `filesPerTopItem` entries have arrived - so a file filtered out
+          // of the archive WITHOUT being removed from this count hangs the export
+          // forever, mid-write. Declining in the same pass that counts keeps the two
+          // in step by construction rather than by a subtraction that can drift.
+          //
+          // ⭐ ATTACHMENTS ARE DELIBERATELY EXEMPT. Proof of purchase is the one place a
+          // macro-enabled document is allowed, in and out (his policy, 2026-09-11), and
+          // programs cannot reach it because soundFontAttachments guards on add. Running
+          // the carry test here would strip the user's receipts out of their own backup.
+          if (bucket !== 'attachments') {
+            const v = checkCarryableFile(fileAbs, it.name);
+            if (v.blocked) {
+              refused.push({ relPath: path.relative(root, fileAbs).split(path.sep).join('/'),
+                name: it.name, kind: v.kind, reason: v.reason, disguised: !!v.disguised });
+              refusedAbs.add(fileAbs);
+              continue;
+            }
+          }
+          count++;
         }
       };
       walk(abs);
@@ -304,7 +331,20 @@ async function exportBackup({
     const stRoot = path.join(_soundFontsRoot(userData), 'sharedTracks');
     if (fs.existsSync(stRoot)) {
       for (const f of fs.readdirSync(stRoot, { withFileTypes: true })) {
-        if (f.isFile() && /\.wav$/i.test(f.name)) sharedTracksItemCount++;
+        if (!f.isFile() || !/\.wav$/i.test(f.name)) continue;
+        // Same reasoning as the bucket walk: this count IS the gate for the shared
+        // tracks bucket, so a declined file has to leave the count with it. And the
+        // .wav filter above is a shape test, not a safety one - a program renamed to
+        // hum.wav passes it, which is exactly what the content check is for.
+        const fAbs = path.join(stRoot, f.name);
+        const v = checkCarryableFile(fAbs, f.name);
+        if (v.blocked) {
+          refused.push({ relPath: f.name, name: f.name, kind: v.kind,
+            reason: v.reason, disguised: !!v.disguised });
+          refusedAbs.add(fAbs);
+          continue;
+        }
+        sharedTracksItemCount++;
       }
     }
   } catch {}
@@ -678,10 +718,21 @@ async function exportBackup({
     // top-level item is added separately so the per-item label stays
     // stable on one font / folder while its files stream through, then
     // flips to the next.
+    // [B-369] archiver's data function: return false to drop an entry. The entry carries
+    // `name` (relative to the walked root) and `stats` - there is NO sourcePath, so the
+    // absolute path is rebuilt from the root. Verified against archiver 5's core.js
+    // (onGlobMatch builds entryData from match.relative + match.stat), not assumed.
+    // Only files already declined during the COUNT pass are dropped here, so the gates
+    // and the archive stay in agreement.
+    const _skipRefused = (rootAbs) => (entry) => {
+      if (!entry || !entry.name) return entry;
+      if (entry.stats && typeof entry.stats.isDirectory === 'function' && entry.stats.isDirectory()) return entry;
+      return refusedAbs.has(path.join(rootAbs, entry.name)) ? false : entry;
+    };
     if (!cancelled) {
       const srcRoot = path.join(_soundFontsRoot(userData), 'sources');
       if (fs.existsSync(srcRoot)) {
-        archive.directory(srcRoot, 'sources');
+        archive.directory(srcRoot, 'sources', _skipRefused(srcRoot));
         // Wait for the entire sources bucket to flush before starting
         // library, otherwise archiver interleaves sources entries with
         // the first library entries and the user-facing label flips
@@ -696,7 +747,7 @@ async function exportBackup({
           if (cancelled) break;
           const topKey = `library/${item.name}`;
           const expected = filesPerTopItem.get(topKey) || 0;
-          archive.directory(item.abs, topKey);
+          archive.directory(item.abs, topKey, _skipRefused(item.abs));
           // Empty dirs would never resolve via the entry handler; just
           // skip the await in that case so the loop doesn't hang.
           if (expected > 0) await _gateFor(topKey).promise;
@@ -710,7 +761,7 @@ async function exportBackup({
           if (cancelled) break;
           const topKey = `common/${item.name}`;
           const expected = filesPerTopItem.get(topKey) || 0;
-          archive.directory(item.abs, topKey);
+          archive.directory(item.abs, topKey, _skipRefused(item.abs));
           if (expected > 0) await _gateFor(topKey).promise;
         }
       }
@@ -718,7 +769,7 @@ async function exportBackup({
     if (!cancelled) {
       const stRoot = path.join(_soundFontsRoot(userData), 'sharedTracks');
       if (fs.existsSync(stRoot)) {
-        archive.directory(stRoot, 'sharedTracks');
+        archive.directory(stRoot, 'sharedTracks', _skipRefused(stRoot));
         if (archiveSharedTracks.total > 0) await sharedTracksBucketGate.promise;
       }
     }
@@ -784,7 +835,7 @@ async function exportBackup({
     try { await fs.promises.unlink(destPath); } catch {}
   }
   await fs.promises.rename(partialPath, destPath);
-  return { destPath, manifest };
+  return { destPath, manifest, refused };
 }
 
 // Read + validate a backup zip without unpacking it. Returns the manifest
@@ -792,6 +843,31 @@ async function exportBackup({
 // from the entry list, so a tampered manifest doesn't silently mismatch
 // the real contents). Errors carry a `reason` code so the renderer can
 // branch UX between "not a backup" vs "wrong schema" vs "unreadable file".
+// ⚠️ A BACKUP ZIP IS AN ARBITRARY FILE ([B-370]). People hand these to each other, and
+// restore writes straight into the library, so it is an import door like any other and
+// gets the same policy: these files are never allowed in.
+//
+// CHECKED AFTER EXTRACTION, ON PURPOSE. Reading the bytes out of the archive first would
+// mean decompressing every entry twice; extracting then screening costs one 256-byte read
+// and the file is removed before anything can use it. The progress counters are left
+// alone deliberately - they report work performed, and making them agree with what was
+// KEPT would mean touching the same gating that makes the export side fragile.
+//
+// ⭐ NEVER CALL THIS FOR attachments/. Proof of purchase is the one place a macro-enabled
+// document is allowed, so screening a restore there would strip the user's receipts out
+// of their own backup.
+function _screenRestored(target, sink) {
+  try {
+    const { checkCarryableFile } = require('./sdCardDetect');
+    const v = checkCarryableFile(target, path.basename(target));
+    if (!v.blocked) return true;
+    try { fs.unlinkSync(target); } catch {}
+    if (sink) sink.push({ name: path.basename(target), kind: v.kind, reason: v.reason,
+      disguised: !!v.disguised });
+    return false;
+  } catch { return true; }
+}
+
 async function inspectBackup(zipPath) {
   if (!zipPath) return { ok: false, reason: 'missing-path', error: 'Missing zip path' };
   if (!fs.existsSync(zipPath)) return { ok: false, reason: 'missing-file', error: 'File not found' };
@@ -892,6 +968,8 @@ async function applyReplace({
   onProgress = () => {},
   signal = null,
 }) {
+  // [B-370] Anything a restore refused to write. Reported, never silent.
+  const restoreRefused = [];
   if (!zipPath) throw new Error('Missing zipPath');
   if (!userData) throw new Error('Missing userData');
   const sfRoot = _soundFontsRoot(userData);
@@ -1306,6 +1384,8 @@ async function applyReplace({
       try {
         await zip.extract(e.name, target);
         processedBytes += (e.size || 0);
+        // attachments/ is exempt - see _screenRestored.
+        if (!normalized.startsWith('attachments/')) _screenRestored(target, restoreRefused);
         return true;
       } catch (err) {
         throw new Error(`Failed extracting ${e.name}: ${err && err.message || err}`);
@@ -1539,7 +1619,7 @@ async function applyReplace({
   // restored library's meta describes what is actually on disk.
   try { require('./soundFontAttachments').pruneDanglingLinks(userData); } catch {}
 
-  return { manifest, counts };
+  return { manifest, counts, refused: restoreRefused };
 }
 
 // Survey both the backup zip and the current library to classify every
@@ -2073,6 +2153,8 @@ async function applyMerge({
   onProgress = () => {},
   signal = null,
 }) {
+  // [B-370] Anything a restore refused to write. Reported, never silent.
+  const restoreRefused = [];
   if (!zipPath) throw new Error('Missing zipPath');
   if (!userData) throw new Error('Missing userData');
   const sfRoot = _soundFontsRoot(userData);
@@ -2258,6 +2340,9 @@ async function applyMerge({
       try {
         await zip.extract(e.name, target);
         processedBytes += (e.size || 0);
+        if (!String(e.name).replace(/\\/g, '/').startsWith('attachments/')) {
+          _screenRestored(target, restoreRefused);
+        }
         if (onFile) onFile({ fileIdx: i + 1, fileTotal: fileEntries.length, fileName: e.name });
       } catch (err) {
         throw new Error(`Failed extracting ${e.name}: ${err && err.message || err}`);
@@ -2478,6 +2563,7 @@ async function applyMerge({
         const extractTrack = async (entryName, fileName, backupRecord) => {
           const target = path.join(stRootAbs, fileName);
           await zip.extract(entryName, target);
+          if (!_screenRestored(target, restoreRefused)) return null;
           stCreated.push(target);
           const e = entries[entryName];
           if (e) processedBytes += (e.size || 0);
@@ -2655,7 +2741,7 @@ async function applyMerge({
   // files were never in it (any backup taken before 2026-09-02). Drop the
   // links rather than leave meta claiming proof that does not exist.
   try { require('./soundFontAttachments').pruneDanglingLinks(userData); } catch {}
-  return { manifest: manifestApplied, counts };
+  return { manifest: manifestApplied, counts, refused: restoreRefused };
 }
 
 module.exports = {

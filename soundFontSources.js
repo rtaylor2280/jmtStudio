@@ -2274,8 +2274,11 @@ async function exportSourceFileTo(userData, uuid, subPath, destDir) {
   // has to as well - otherwise right-click > Export on the one file that matters
   // walks past every guard we built. Free here: the bytes are already in hand.
   {
-    const { checkExecutableBuffer } = require('./sdCardDetect');
-    const v = checkExecutableBuffer(buf.subarray(0, 256), subPath);
+    // checkCarryable, not the executable test ([B-370] sweep): this is an EXPORT door,
+    // so it owes the same answer as every other one - archives and macro documents
+    // do not leave either.
+    const { checkCarryable } = require('./sdCardDetect');
+    const v = checkCarryable(buf.subarray(0, 256), subPath);
     if (v.blocked) return { refused: true, reason: v.reason, relPath: String(subPath) };
   }
   const baseName = String(subPath).split('/').pop() || `source-${uuid}.bin`;

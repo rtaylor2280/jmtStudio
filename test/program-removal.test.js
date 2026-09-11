@@ -96,6 +96,24 @@ try {
     assert.ok(fs.existsSync(rel.destPath), 'the copy-out is the only way it ever comes back');
   });
 
+  // [B-368] Macro-enabled documents are allowed in exactly one place - proof of
+  // purchase - so one found in a font or source got there some other way and leaves
+  // on the same terms. Attachments never call this module, so receipts are unaffected.
+  ok('removes a macro-enabled document found outside a proof of purchase', () => {
+    plant('entry', 'receipt.docm', Buffer.from('PK not really an office file'));
+    const imp = removal.impoundProgram(tmp, { kind: 'entry', id: 'Ani-Mation', relPath: 'receipt.docm' });
+    assert.strictEqual(imp.ok, true, imp.error);
+    assert.strictEqual(imp.kind, 'macro', 'reported as a macro document, not a program');
+    assert.ok(!fs.existsSync(path.join(roots.entry, 'receipt.docm')));
+  });
+
+  ok('leaves a plain document alone - only MACRO-ENABLED types are refused', () => {
+    plant('entry', 'notes.docx', Buffer.from('PK plain office file'));
+    const r = removal.deleteManagedFile(tmp, { kind: 'entry', id: 'Ani-Mation', relPath: 'notes.docx' });
+    assert.strictEqual(r.ok, false);
+    assert.ok(fs.existsSync(path.join(roots.entry, 'notes.docx')), 'a .docx must survive');
+  });
+
   ok('refuses a single-file removal from an archive-format source', () => {
     fs.writeFileSync(path.join(tmp, 'soundFonts', 'sources', 'src-uuid', 'meta.json'),
       JSON.stringify({ format: 'zip' }));
@@ -355,6 +373,25 @@ try {
   ok('the sweep is safe to run when nothing is held', () => {
     const r = removal.sweepImpounded(tmp);
     assert.strictEqual(r.removed, 0);
+  });
+
+  // ── [B-370] The import doors: never allowed IN either ────────────────────────
+  // Nothing is removed on this side - the file never arrives - so this asserts the
+  // store stays clean AND that the user's own copy is left alone.
+  ok('+ Add into a font refuses all three kinds and keeps the user copy', () => {
+    const ops = require('../soundFontFileOps');
+    const ext = path.join(tmp, 'picked'); fs.mkdirSync(ext, { recursive: true });
+    const mk = (n, b) => { const f = path.join(ext, n); fs.writeFileSync(f, b); return f; };
+    const srcs = [mk('ok.wav', WAV), mk('P.exe', MZ), mk('a.rar', Buffer.from('Rar!x')),
+      mk('r.docm', Buffer.from('PK x'))];
+    const r = ops.addFilesAt({ userData: tmp, kind: 'entry', id: 'Ani-Mation',
+      subPath: '', sourceFilePaths: srcs });
+    assert.strictEqual(r.ok, true, r.error);
+    assert.strictEqual(r.refused.length, 3, 'program, archive and macro all refused');
+    for (const n of ['P.exe', 'a.rar', 'r.docm']) {
+      assert.ok(!fs.existsSync(path.join(roots.entry, n)), n + ' must not land');
+    }
+    assert.strictEqual(fs.readdirSync(ext).length, 4, "the user's own files are untouched");
   });
 
   console.log(`\n${pass} passed`);

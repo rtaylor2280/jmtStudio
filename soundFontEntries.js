@@ -247,6 +247,7 @@ async function _copyFolderIntoDir(folderPath, destDir, onProgress, contentIndex)
     throw new Error('That folder contains the library, so it cannot be added to it');
   }
   let fileCount = 0, totalBytes = 0, linkedFiles = 0, linkedBytes = 0;
+  const refusedIn = [];
   const walk = (dir, relBase) => {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
       const rel = relBase ? `${relBase}/${e.name}` : e.name;
@@ -256,6 +257,21 @@ async function _copyFolderIntoDir(folderPath, destDir, onProgress, contentIndex)
         walk(abs, rel);
       } else if (e.isFile()) {
         if (rel === 'meta.json') continue;
+        // ⚠️ "Add from folder…" IS AN IMPORT DOOR ([B-370], his catch 2026-09-11: "just
+        // added a folder with known threats"). It builds a whole entry out of an
+        // arbitrary folder on disk, and this walk was the copy — unchecked. So Studio
+        // itself put programs in a font, and the export dialog would then tell the user
+        // something else on their computer had. His rule: never in, never out.
+        // Refused rather than stripped-and-reported: nothing is destroyed, the file
+        // simply does not arrive and the user's own folder is untouched.
+        {
+          const _v = require('./sdCardDetect').checkCarryableFile(abs, e.name);
+          if (_v.blocked) {
+            refusedIn.push({ name: e.name, relPath: rel, kind: _v.kind,
+              reason: _v.reason, disguised: !!_v.disguised });
+            continue;
+          }
+        }
         const dest = path.join(destDir, rel);
         let size = 0;
         try { size = fs.statSync(abs).size; } catch {}
@@ -288,7 +304,7 @@ async function _copyFolderIntoDir(folderPath, destDir, onProgress, contentIndex)
   };
   fs.mkdirSync(destDir, { recursive: true });
   walk(srcRes, '');
-  return { fileCount, totalBytes, linkedFiles, linkedBytes };
+  return { fileCount, totalBytes, linkedFiles, linkedBytes, refused: refusedIn };
 }
 
 // createEntry({ userData, sourceUuid, candidate, name?, metadata?, onProgress?, folderSource? })
@@ -538,7 +554,7 @@ async function createEntry({ userData, sourceUuid, candidate, name, metadata, on
     } catch {}
 
     emit('done', { fileCount: result.fileCount, totalBytes: result.totalBytes });
-    return { ok: true, name: entryName, meta };
+    return { ok: true, name: entryName, meta, refused: (result && result.refused) || [] };
   } catch (err) {
     // Cleanup partial entry so the library stays consistent.
     try { fs.rmSync(entryDir, { recursive: true, force: true }); } catch {}
@@ -1012,8 +1028,11 @@ function exportEntryFileTo(userData, name, subPath, destDir) {
   // export out of a store we manage must refuse a program exactly as the
   // whole-entry export does. Free here - the bytes are already in hand.
   {
-    const { checkExecutableBuffer } = require('./sdCardDetect');
-    const v = checkExecutableBuffer(buf.subarray(0, 256), subPath);
+    // checkCarryable, not the executable test ([B-370] sweep): this is an EXPORT door,
+    // so it owes the same answer as every other one - archives and macro documents
+    // do not leave either.
+    const { checkCarryable } = require('./sdCardDetect');
+    const v = checkCarryable(buf.subarray(0, 256), subPath);
     if (v.blocked) return { refused: true, reason: v.reason, relPath: String(subPath) };
   }
   const baseName = String(subPath).split(/[\\/]/).pop() || `entry-${name}.bin`;

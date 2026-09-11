@@ -94,6 +94,7 @@ function addFiles(userData, sourceFilePaths, onFileProgress) {
   const root = sharedTracksRoot(userData);
   const added = [];
   const skipped = [];
+  const refusedIn = [];
   // Tracks you ALREADY HAVE, by content. Reported separately from `skipped`,
   // which means "could not be added": having it already is a success, not a
   // failure. (2026-08-31 — [B-005] item 5.)
@@ -122,6 +123,18 @@ function addFiles(userData, sourceFilePaths, onFileProgress) {
     const src = (entry && typeof entry === 'object') ? entry.path : entry;
     const wanted = (entry && typeof entry === 'object' && entry.name) ? entry.name : null;
     if (!src || !/\.wav$/i.test(src)) { skipped.push({ src, reason: 'Not a .wav file' }); continue; }
+    // ⚠️ THE .wav TEST ABOVE IS A SHAPE TEST, NOT A SAFETY ONE ([B-370]). A program
+    // renamed hum.wav passes it, which is precisely the disguise the content tier
+    // exists for. Nothing is destroyed here - the track simply is not added, and the
+    // user's own file stays where they picked it.
+    {
+      const _v = require('./sdCardDetect').checkCarryableFile(src, path.basename(src));
+      if (_v.blocked) {
+        refusedIn.push({ name: path.basename(src), kind: _v.kind, reason: _v.reason,
+          disguised: !!_v.disguised });
+        continue;
+      }
+    }
     const base = wanted || path.basename(src);
     const safe = _safeFileName(base);
     if (!safe) { skipped.push({ src, reason: 'Invalid filename' }); continue; }
@@ -153,7 +166,7 @@ function addFiles(userData, sourceFilePaths, onFileProgress) {
       skipped.push({ src, reason: String(err && err.message || err) });
     }
   }
-  return { ok: true, added, skipped, duplicates };
+  return { ok: true, added, skipped, duplicates, refused: refusedIn };
 }
 
 function renameFile(userData, oldName, newName) {

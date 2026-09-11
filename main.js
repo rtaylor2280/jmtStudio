@@ -3292,7 +3292,7 @@ ipcMain.handle('sfBackup:export', async (event, { opId, destPath } = {}) => {
         try { event.sender.send('sfBackup:progress', { opId, ...p }); } catch {}
       },
     });
-    return { ok: true, destPath: result.destPath, manifest: result.manifest };
+    return { ok: true, destPath: result.destPath, manifest: result.manifest, refused: result.refused || [] };
   } catch (err) {
     if (err && err.cancelled) return { ok: false, cancelled: true, residualPath: err.residualPath || null };
     return { ok: false, error: String(err && err.message || err) };
