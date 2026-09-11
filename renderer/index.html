@@ -23060,6 +23060,7 @@ require(['vs/editor/editor.main'], function () {
         finally { clearInterval(tick); try { if (typeof offProg === 'function') offProg(); } catch {} }
         await _sfDeleteProgress.hide();
         if (!res || !res.ok) { promptError('Export failed', (res && res.error) || 'unknown error'); return; }
+        await _sfShowProgramRefusal({ refused: res.refused, kind: 'common', id: uuid });
       };
       const _sfAddCommonFiles = async () => {
         if (!_sfSelectedCommonUuid) return;
@@ -24549,6 +24550,7 @@ require(['vs/editor/editor.main'], function () {
             kept: r.kept || [],
           },
         });
+        await _sfShowProgramRefusal({ refused: r.refused, kind: 'sharedTracks', id: '' });
       };
       window._sfExportSharedTracks = _sfExportSharedTracks;
       document.getElementById('btn-sf-shared-tracks-export')?.addEventListener('click', (e) => {
@@ -29870,17 +29872,31 @@ require(['vs/editor/editor.main'], function () {
           lines.push(`<span style="color:var(--c-text-sub)">Includes your ${list}.</span>`);
         }
         lines.push(`<span style="opacity:.75;font-family:monospace;font-size:12px;word-break:break-all;">${esc(r.destPath)}</span>`);
+        // ⚠️ WHEN A PROGRAM WAS FOUND, THE REVEAL BUTTON LOSES ITS SLOT ([B-364], his
+        // call 2026-09-11: "the view location goes away because we need this answer.
+        // More importantly, so this overwrites that"). Browsing to the destination is a
+        // convenience; deciding what happens to a program sitting in the library is the
+        // question actually in front of the user, and two competing primaries would
+        // bury it. On a clean export nothing changes.
+        const _hasProg = _rem.length > 0;
+        // ⚠️ REMOVED BEFORE THIS SCREEN, NOT AFTER IT. This path shows its own summary
+        // first, so leaving the removal until the user clicked Continue meant quitting
+        // at the summary left the program in the library (his catch, 2026-09-11).
+        const _impState = _hasProg ? await _sfImpoundRefusals(_rem, 'source', uuid) : null;
         const showIt = await promptConfirm({
           title: 'Export complete',
           messageHtml: lines.join('<br><br>'),
-          confirmText: 'Show in folder',
+          confirmText: _hasProg ? 'Continue' : 'Show in folder',
           confirmKind: 'primary',
           cancelText: 'Done',
           cancelKind: 'cancel',
         });
-        if (showIt === true) {
+        if (!_hasProg && showIt === true) {
           const rev = await window.electronAPI.showItemInFolder(r.destPath).catch((e) => ({ ok: false, error: String(e && e.message || e) }));
           if (!rev || rev.ok === false) promptError('Could not open the folder', (rev && rev.error) || r.destPath);
+        }
+        if (_hasProg) {
+          await _sfShowProgramRefusal({ refused: _rem, kind: 'source', id: uuid, state: _impState });
         }
       });
       // Delete source with cascade warning.
@@ -31740,6 +31756,260 @@ require(['vs/editor/editor.main'], function () {
       // original names, " (N)" collision suffix). Backend handles the
       // dialog and the actual write — renderer just dispatches and
       // surfaces any per-file failures.
+      // ── [B-364] One refusal surface, used by every export door ─────────────────
+      //
+      // WHY IT IS ONE FUNCTION. Six paths out of the managed store can refuse a program
+      // (right-click export, whole-font export, whole-common export, shared tracks,
+      // the source archive close-out, and the per-file save). Six copies of this dialog
+      // would drift, and the copy here is load-bearing: it is the only place the user
+      // ever learns something was put on their machine that we did not put there.
+      //
+      // ⭐ REMOVAL IS POLICY, NOT A PREFERENCE (his scope call, 2026-09-11). "Those files
+      // are not allowed in Studio. That means that they must be removed and either way
+      // they choose they're going to be removed. The quarantine is merely kindness to
+      // let somebody like me who wants to evaluate where it came from do so."
+      // So the two buttons are not keep-vs-delete. Both remove; one keeps a copy where
+      // the user chooses.
+      //
+      // ⭐ AND WE DO NOT ENUMERATE OUR OWN STORAGE. "We don't have to tell them every
+      // location that it came out of, merely that it's been removed." A font folder is
+      // pointers, so one finding can have several names inside our store - an internal
+      // fact the user should never have to hold. The backend removes every name; the
+      // quarantine SIDECAR records them all, because that is evidence for whoever chose
+      // quarantine in order to investigate.
+      // Reload whichever file list is on screen after a removal, so a row for a file that
+      // no longer exists cannot be right-clicked into a "Not found" error. Reloads from
+      // DISK rather than filtering the rendered list: the removal takes every name for the
+      // file, which can include one in a tree this view is not showing.
+      const _sfRefreshAfterRemoval = async (kind, id) => {
+        try {
+          if (kind === 'source' && _sfSourceOriginalUuid) {
+            const r = await window.electronAPI.listSourceFiles({ uuid: _sfSourceOriginalUuid });
+            _sfSourceFilesTree = (r && r.ok && r.files) || [];
+            _sfMarkInnerZipsLazy(_sfSourceFilesTree);
+            _sfSourceFilesSelected = new Set();
+            _sfRenderSourceFiles();
+          } else if (kind === 'entry' && _sfDetailOriginalName) {
+            const r = await window.electronAPI.listEntryFiles({ name: _sfDetailOriginalName });
+            _sfEntryFilesTree = (r && r.ok && r.files) || [];
+            _sfEntryFilesSelected = new Set();
+            _sfRenderEntryFiles();
+          } else if (kind === 'sharedTracks') {
+            // The modal refresher already reloads and re-renders both halves of that
+            // view; calling it beats reproducing it here.
+            await _sfRefreshSharedTracksModal();
+          } else if (kind === 'common') {
+            await _sfRefreshCommons({ preserveSelection: true });
+          }
+          // The grid carries per-font file counts, which just moved.
+          _sfRenderGrid();
+        } catch { /* a stale list is a cosmetic problem; never fail the removal over it */ }
+      };
+
+      // ⚠️ IMPOUND IS ITS OWN STEP, AND CALLERS RUN IT THE MOMENT FINDINGS EXIST.
+      // It used to live inside the dialog function, which meant a path that showed its
+      // own summary FIRST removed nothing until the user clicked through it. Closing
+      // the app on that summary left the program in the library (his catch, 2026-09-11,
+      // exporting a source and quitting at 'Export complete'). His rule is that it is
+      // gone by the time we report it, so removal cannot sit behind any dialog.
+      const _sfImpoundRefusals = async (refused, kind, id) => {
+        const ref = (refused || []).filter(Boolean);
+        if (!ref.length) return null;
+        const held = [], failed = [];
+        _sfDeleteProgress.show(ref.length === 1 ? 'Removing 1 file' : `Removing ${ref.length} files`,
+          'Checking where else it is stored…');
+        for (const x of ref) {
+          const relPath = String(x.relPath || x.name || '');
+          if (!relPath) continue;
+          const oKind = x._kind || kind;
+          const oId   = x._id   != null ? x._id : id;
+          let r;
+          try { r = await window.electronAPI.sfProgramImpound({ kind: oKind, id: oId, relPath }); }
+          catch (err) { r = { ok: false, error: String(err && err.message || err) }; }
+          if (r && r.ok) held.push({ token: r.token, name: (String(relPath).split('/').pop() || relPath),
+            kind: r.kind || x.kind, disguised: r.disguised || x.disguised });
+          else failed.push({ name: (String(relPath).split('/').pop() || relPath), error: (r && r.error) || 'unknown error' });
+        }
+        await _sfDeleteProgress.hide();
+        if (held.length) await _sfRefreshAfterRemoval(kind, id);
+        return { held, failed };
+      };
+
+      const _sfShowProgramRefusal = async ({ refused, kind, id, state } = {}) => {
+        const impounded = state || await _sfImpoundRefusals(refused, kind, id);
+        if (!impounded) return;
+        const ref = (refused || []).filter(Boolean);
+        const leaf = (x) => String(x.relPath || x.name || '')
+          .split('/').pop().replace(/[‪-‮⁦-⁩‎‏]/g, '');
+        // Never collapse a single item: "and 1 more" costs exactly the characters the
+        // filename would have (the card-warning rule, 2026-09-10). QUOTED, because a
+        // filename can legitimately end in a space and that space IS the evasion.
+        // ⭐ REMOVE FIRST, REPORT SECOND. The findings are impounded before the dialog is
+        // built, so by the time the user reads it the files are already out of the
+        // library and held in a temp area that does not survive the session. The old
+        // order asked first and removed only on an answer, which left dismissing the
+        // dialog as a way to keep a program. There is no such path now.
+        // ⚠️ TWO KINDS SHARE ONE LIST AND MUST NOT SHARE ONE TREATMENT ([B-368]).
+        // A program is a threat and comes out of the library. An unreadable archive is
+        // NOT a threat claim — "we can't say that they ARE a problem, but we also can't
+        // read them, so we don't know" — and removal of one already in the library was
+        // never authorised. It is left out of the export, named, and left alone.
+        // ARCHIVES TAKE THE SAME ROUTE AS PROGRAMS ([B-368], his question: "if there's
+        // no way to import a rar and no way to export a rar, then why are we keeping a
+        // rar?"). It can never enter, never leave and never be read, so it is bytes the
+        // user stores for nothing. Both kinds are removed; only the REASON differs, so
+        // the counts stay split for the wording while the handling is shared.
+        const arch = ref.filter(x => x.kind === 'opaque');
+        const progs = ref;
+        const archNames = arch.length
+          ? arch.slice(0, 4).map(x => '"' + _sfEscape(leaf(x)) + '"').join(', ')
+            + (arch.length > 4 ? ` and ${arch.length - 4} more` : '')
+          : '';
+
+        if (!progs.length) {
+          await promptConfirm({
+            title: arch.length === 1 ? 'An archive was left out' : 'Archives were left out',
+            messageHtml:
+              `<div style="color:var(--c-text);">`
+              + `${arch.length === 1 ? '1 archive was' : `${arch.length} archives were`} `
+              + `left out of this export: ${archNames}.</div>`
+              + `<div style="color:var(--c-text-sub);margin-top:6px;">`
+              + `This format cannot be opened here or on a saber, so `
+              + `${arch.length === 1 ? 'it would do' : 'they would do'} nothing on the card.</div>`,
+            confirmText: 'OK',
+            confirmKind: 'primary',
+            hideCancel: true,
+          });
+          return;
+        }
+
+        const { held, failed } = impounded;
+        if (!held.length && !failed.length) return;
+
+        const shown = held.length ? held : failed;
+        const one = shown.length === 1;
+        const lim = shown.length <= 5 ? shown.length : 4;
+        const names = shown.slice(0, lim).map(x => '"' + _sfEscape(x.name) + '"').join(', ');
+        const extra = shown.length > lim ? ` and ${shown.length - lim} more` : '';
+        const hid = held.filter(x => x.disguised).length;
+        // Split for WORDING only - both kinds have already been removed by this point.
+        const heldArch = held.filter(x => x.kind === 'opaque');
+        const heldProg = held.filter(x => x.kind !== 'opaque');
+        const nA = heldArch.length, nP = heldProg.length;
+        const nameList = (xs, n) => xs.slice(0, n).map(x => '"' + _sfEscape(x.name) + '"').join(', ')
+          + (xs.length > n ? ` and ${xs.length - n} more` : '');
+
+        // ⚠️ THE LIST HAS TO STOP SHOWING A FILE THAT IS GONE (his catch on the dev pass,
+        // 2026-09-11: "if gone, why not refresh this page so I can't right click it
+        // again?"). Without this the row stays, a second Export hits it, and the user
+        // gets a raw "Not found in source" — the app contradicting itself about a file it
+        // just removed. Same defect the entry modal already fixed once ([B-304], 09-03:
+        // deleting a file and having to close and reopen to see it), so this follows that
+        // pattern: reload the tree from disk, then re-render.
+
+        // ⚠️ IF THE REMOVAL ITSELF FAILED, SAY SO AND STOP. Reporting "removed" over a
+        // file still sitting in the library is the one lie this feature cannot afford.
+        if (!held.length) {
+          promptError(one ? 'A program file could not be removed' : 'Program files could not be removed',
+            failed.map(f => `${f.name}: ${f.error}`).join('\n'));
+          return;
+        }
+
+        // ⚠️ THE COPY MAKES NO CLAIM ABOUT WHERE THE FILE IS. It is already out of the
+        // library and held, but the holding area is our bookkeeping and the user is
+        // never told about it ("the underworks of it... is irrelevant to the user").
+        // Saying "still in your library" would be false; saying "already removed" would
+        // make the Delete button read as a no-op. So the message reports the FINDING and
+        // the buttons carry the decision.
+        const answer = await promptConfirm({
+          title: nP && nA ? 'Files were removed from your library'
+               : nP ? (nP === 1 ? 'A program file was found' : 'Program files were found')
+               : (nA === 1 ? 'An archive was removed' : 'Archives were removed'),
+          messageHtml:
+            // PROGRAMS get the red alarm; ARCHIVES do not. One is a threat and the other
+            // is unreadable clutter, and giving them the same colour would flatten the
+            // difference the wording is working to keep.
+            (nP
+              ? `<div style="color:#e5534b;font-weight:600;">&#9888; `
+                + `${nP === 1 ? '1 program file was' : `${nP} program files were`} `
+                + `found and removed: ${nameList(heldProg, 4)}.</div>`
+                + (hid
+                    ? `<div style="color:#e5534b;margin-top:6px;">`
+                      + `${hid === 1 ? 'One of these is disguised as a sound file' : `${hid} of these are disguised as sound files`}, `
+                      + `found by reading the contents rather than the name. A program does not take a sound file's name by accident.</div>`
+                    : '')
+                + `<div style="color:var(--c-text-sub);margin-top:6px;">`
+                + `A program cannot get into a font by importing one, so something else on this `
+                + `computer put it there.</div>`
+              : '')
+            + (nA
+                ? `<div style="color:var(--c-text);margin-top:6px;">`
+                  + `${nA === 1 ? '1 archive was' : `${nA} archives were`} `
+                  + `${nP ? 'also removed' : 'removed'}: ${nameList(heldArch, 4)}.</div>`
+                  + `<div style="color:var(--c-text-sub);margin-top:6px;">`
+                  + `That format cannot be opened here or on a saber, so it could not be `
+                  + `checked and would do nothing on a card.</div>`
+                : '')
+            + `<div style="color:var(--c-text-sub);margin-top:6px;">`
+            + `Quarantine keeps a copy you can examine.</div>`
+            + (failed.length
+                ? `<div style="color:#e5534b;margin-top:6px;">`
+                  + `${failed.length} could not be removed: ${_sfEscape(failed.map(f => f.name).join(', '))}.</div>`
+                : ''),
+          confirmText: 'Delete',
+          confirmKind: 'primary',
+          altText: 'Quarantine…',
+          altKind: 'cancel',
+          hideCancel: true,
+        });
+
+        // ⭐ DISMISSING IS A DELETE, JUST A SLOWER ONE (his call): the file is already out
+        // of the library either way, and the sweep takes the held bytes at quit. So there
+        // is no branch here that puts anything back — only one that tidies up sooner.
+        if (answer !== 'alt') {
+          for (const h of held) {
+            try { await window.electronAPI.sfProgramDiscard({ token: h.token }); } catch {}
+          }
+          // No toast. They clicked Delete and the file is gone, which is exactly what the
+          // dialog said would happen — narrating it back adds nothing.
+          return;
+        }
+
+        // Asked ONCE for the batch — four findings must not mean four folder pickers.
+        const pick = await window.electronAPI.pickExportDir({ title: 'Choose where to keep the quarantined files…' })
+          .catch(() => null);
+        // Backing out of the picker is not a decision to keep it. The file stays out of
+        // the library and the sweep collects it, same as a dismiss.
+        if (!pick || !pick.ok || !pick.destDir) return;
+
+        // One label for the whole batch, so every file lands in the SAME folder. Local
+        // date and time, because the folder is for a human looking at it later.
+        const _d = new Date();
+        const _p2 = (n) => String(n).padStart(2, '0');
+        const batchLabel = `${_d.getFullYear()}-${_p2(_d.getMonth() + 1)}-${_p2(_d.getDate())} `
+          + `${_p2(_d.getHours())}${_p2(_d.getMinutes())}`;
+        const saved = [], saveFailed = [];
+        let savedFolder = null;
+        for (const h of held) {
+          let r;
+          try { r = await window.electronAPI.sfProgramRelease({ token: h.token, destDir: pick.destDir, batchLabel }); }
+          catch (err) { r = { ok: false, error: String(err && err.message || err) }; }
+          if (r && r.ok) { saved.push(h.name); savedFolder = r.folder || savedFolder; }
+          else if (!r || !r.canceled) saveFailed.push({ name: h.name, error: (r && r.error) || 'unknown error' });
+        }
+        // The destination is the only genuinely new fact here, so it is the only thing
+        // this says beyond the count.
+        if (saved.length) {
+          // Name the FOLDER, not the parent: it is what they will look for, and it is
+          // the thing that says what the files are.
+          showToast(`${saved.length === 1 ? 'A copy was' : saved.length + ' copies were'} quarantined to ${savedFolder || pick.destDir}.`);
+        }
+        if (saveFailed.length) {
+          promptError(saveFailed.length === 1 ? 'Could not quarantine that file' : 'Some files could not be quarantined',
+            saveFailed.map(f => `${f.name}: ${f.error}`).join('\n'));
+        }
+      };
+
       const _sfExportFiles = async ({ kind, id, subPaths, asFile }) => {
         if (!Array.isArray(subPaths) || subPaths.length === 0) return;
         let res;
@@ -31755,6 +32025,7 @@ require(['vs/editor/editor.main'], function () {
         if (res.failed?.length) {
           await _sfShowPartialFailures('Some files failed to export', res.failed);
         }
+        await _sfShowProgramRefusal({ refused: res.refused, kind, id });
       };
 
       // Unified dispatcher: pick the right opener based on extension.
@@ -34755,6 +35026,9 @@ require(['vs/editor/editor.main'], function () {
         // this grew with the size of the selection, which is exactly backwards.
         _sfDeleteProgress.show('Preparing to export', '', 0);
         const failures = [];
+        // [B-364] Programs refused across this whole run — fonts, common slots and
+        // tracks alike — raised once after the summary rather than per item.
+        const _progRefusals = [];
         const results = { copied: 0, skipped: 0, replaced: 0 };
         // What actually happened, for the export summary.
         let tracksOutcome = null;
@@ -34827,6 +35101,10 @@ require(['vs/editor/editor.main'], function () {
           _sfRenderExportProg();
           try {
             const r = await window.electronAPI.exportEntryToFolder({ name, destDir, mode });
+            // [B-364] Gathered across the WHOLE run and raised once at the end. A card
+            // export can touch a hundred fonts, and a dialog per font would be the
+            // feature making itself impossible to use.
+            for (const b of (r && r.refused) || []) _progRefusals.push({ ...b, _kind: 'entry', _id: name });
             // (3) put on a card. Arguable - you can export a whole library
             // without looking at any of it - but you have acted on it, and the
             // alternative is a font living on your saber while still flagged NEW.
@@ -34860,6 +35138,7 @@ require(['vs/editor/editor.main'], function () {
               mode: _mode,
               targetName: cs.slot,
             });
+            for (const b of (r && r.refused) || []) _progRefusals.push({ ...b, _kind: 'common', _id: cs.uuid });
             if (!r || !r.ok) failures.push({ name: cs.slot, error: (r && r.error) || 'unknown error' });
             else if (r.skipped) {
               results.skipped++;
@@ -34883,6 +35162,7 @@ require(['vs/editor/editor.main'], function () {
               mode: tracksMode,
               replace: tracksReplace,
             });
+            for (const b of (r && r.refused) || []) _progRefusals.push({ ...b, _kind: 'sharedTracks', _id: '' });
             if (!r || !r.ok) {
               failures.push({ name: 'tracks', error: (r && r.error) || 'unknown error' });
             } else {
@@ -34920,6 +35200,9 @@ require(['vs/editor/editor.main'], function () {
         if (failures.length) {
           await _sfDeleteProgress.hide();
           await _sfShowPartialFailures('Some items failed to export', failures);
+          // [B-364] Still raised on the failure path: a program found in the library is
+          // not contingent on the rest of the export having gone well.
+          await _sfShowProgramRefusal({ refused: _progRefusals });
           // Keep selection on real failures so the user can see what's still
           // in scope and retry. (Skips don't count as failures — those were
           // deliberate user choices.)
@@ -34934,6 +35217,10 @@ require(['vs/editor/editor.main'], function () {
           elapsedSec: (Date.now() - _sfExportT0) / 1000,
           closeProgress: () => _sfDeleteProgress.hide(),
         });
+        // AFTER the summary, not inside it. The summary reports the export; this is a
+        // separate question about the library, and folding it in would make the
+        // export's own close-out carry a destructive decision.
+        await _sfShowProgramRefusal({ refused: _progRefusals });
         _sfSelectedNames.clear(); _sfBulkIncludeTracks = null;   // [B-287]
         _sfRenderGrid();
         return true;
@@ -35385,16 +35672,14 @@ require(['vs/editor/editor.main'], function () {
             // no destPath renders as "Saved to Downloads as undefined" — claiming we
             // wrote a file we deliberately did not.
             if (res.refused) {
-              await promptConfirm({
-                title: 'Not saved',
-                message: `"${baseName}" is a program file, so it was not saved.
-
-`
-                  + `A program cannot get into a font by importing one, so something else `
-                  + `on this computer put it there.`,
-                confirmText: 'OK',
-                confirmKind: 'primary',
-                cancelText: 'Close',
+              // [B-364] Was a dead end with an OK button: it told the user a program was
+              // in their library and gave them nothing to do about it — an alarm with no
+              // switch, in a store they cannot even see. Routed through the shared
+              // surface so this door offers the same two actions as every other.
+              await _sfShowProgramRefusal({
+                refused: [{ relPath: res.relPath || fileName, reason: res.reason }],
+                kind: scope === 'entry' ? 'entry' : 'source',
+                id: key,
               });
               return;
             }
@@ -36316,6 +36601,7 @@ require(['vs/editor/editor.main'], function () {
             : (_identical
               ? `Exported as "${landed}". The "${fontName}" already there is identical.`
               : `Exported as "${landed}": a different "${fontName}" was already there.`));
+          await _sfShowProgramRefusal({ refused: r.refused, kind: 'entry', id: fontName });
         });
         mkItem('× Delete', { cls: 'danger' }, () => _sfDeleteFontFlow(fontName));
         // Hide submenu when hovering a sibling item that isn't the

@@ -537,7 +537,11 @@ function classifyFileBuffer(buf, relPath) {
       reason: 'This document can contain macros, which are small programs. It was imported; open it with care.' };
   }
   if (_OPAQUE_ARCHIVE_RX.test(clean)) {
-    return { kind: 'opaque', blocked: false,
+    // ⚠️ `blocked` STAYS FALSE HERE ON PURPOSE ([B-368]). This function answers "what IS
+    // this file", and an unreadable archive is not a program - conflating them would put
+    // a threat's wording on a file that is merely useless. The carry decision lives in
+    // checkCarryable below, which is what the doors call.
+    return { kind: 'opaque', blocked: false, opaque: true,
       reason: 'This archive format cannot be opened here, so its contents were not checked.' };
   }
   return { kind: 'ok', blocked: false };
@@ -555,6 +559,48 @@ function classifyFileBuffer(buf, relPath) {
 //
 // Returns { blocked, reason, byContent } - the same shape as the buffer test,
 // so a caller can report it identically wherever it fired.
+// ── May this file be carried out of the managed store? ([B-368]) ────────────────
+//
+// The EXPORT doors ask this rather than checkExecutable*, because two different things
+// must not be carried and only one of them is a program:
+//   'program' — a threat. Something put it there; it is removed.
+//   'opaque'  — an archive we cannot open. NOT a threat claim: "we can't say that they
+//               ARE a problem, but we also can't read them, so we don't know." It stays
+//               out because it does nothing on a card either way.
+// The kinds stay separate all the way to the screen, because the copy for a threat and
+// the copy for dead weight are not interchangeable.
+//
+// Macros are deliberately absent: they are readable by the user and have a legitimate
+// reason to sit beside a font.
+function checkCarryable(buf, relPath) {
+  const v = classifyFileBuffer(buf, relPath);
+  if (v.kind === 'program') {
+    return { blocked: true, kind: 'program', reason: v.reason,
+      byContent: !!v.byContent, disguised: !!v.disguised };
+  }
+  if (v.kind === 'opaque') {
+    return { blocked: true, kind: 'opaque',
+      reason: 'This archive format cannot be opened, here or on a saber, so its contents could not be checked. It was left out.' };
+  }
+  return { blocked: false };
+}
+
+// Path-holding twin of checkCarryable, for a caller that never reads the bytes.
+function checkCarryableFile(absPath, relPath) {
+  return checkCarryable(_readHead256(absPath), relPath || absPath);
+}
+
+function _readHead256(absPath) {
+  let fd;
+  try { fd = fs.openSync(absPath, 'r'); } catch { return null; }
+  try {
+    const buf = Buffer.alloc(256);
+    const n = fs.readSync(fd, buf, 0, 256, 0);
+    return n > 0 ? buf.subarray(0, n) : Buffer.alloc(0);
+  } catch { return null; }
+  finally { try { fs.closeSync(fd); } catch {} }
+}
+
 // Same as classifyFileBuffer, for a caller holding a path rather than bytes.
 function classifyFile(absPath, relPath) {
   const v = checkExecutableFile(absPath, relPath);
@@ -977,4 +1023,4 @@ async function analyzeFonts(dirPath) {
   return { path: dirPath, fonts };
 }
 
-module.exports = { scan, assessCard, assessPath, assessPicked, classifyCard, listDir, findConfigs, deriveFontName, nameFromReadmeText, docxToText, recoverNameFromDocx, analyzeFonts, resolveIdentity, isDegenerateVsn, formatVsn, enumerateAllVolumes, enumerateRemovableVolumes, checkWavHealth, checkWavBuffer, checkExecutableBuffer, checkExecutableFile, classifyFileBuffer, classifyFile, scanCardExecutables, looksExecutableName, subtreeHealthAsync, checkWavHealthAsync };
+module.exports = { scan, assessCard, assessPath, assessPicked, classifyCard, listDir, findConfigs, deriveFontName, nameFromReadmeText, docxToText, recoverNameFromDocx, analyzeFonts, resolveIdentity, isDegenerateVsn, formatVsn, enumerateAllVolumes, enumerateRemovableVolumes, checkWavHealth, checkWavBuffer, checkExecutableBuffer, checkExecutableFile, checkCarryable, checkCarryableFile, classifyFileBuffer, classifyFile, scanCardExecutables, looksExecutableName, subtreeHealthAsync, checkWavHealthAsync };

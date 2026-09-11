@@ -60,7 +60,12 @@ function copyFileWithProgress(srcPath, destPath, onBytes) {
 //   recurse       descend into subdirectories (default true; false = flat)
 //   onBytes       called with the byte length of each chunk written
 async function copyTreeWithProgress(srcDir, destDir, opts = {}) {
-  const { skipRootMeta = false, fileFilter = null, recurse = true, onBytes = null, refused = null } = opts;
+  // relBase threads the path RELATIVE TO THE STORE ROOT down the recursion. A bare
+  // basename was enough while a refusal was only ever reported ([B-214]); it is not
+  // enough now that the user can act on one ([B-364]), because removal has to resolve
+  // the finding back to a real file and "hum2.wav" does not say which folder.
+  const { skipRootMeta = false, fileFilter = null, recurse = true, onBytes = null,
+          refused = null, relBase = '' } = opts;
   for (const item of fs.readdirSync(srcDir, { withFileTypes: true })) {
     const srcPath = path.join(srcDir, item.name);
     const destPath = path.join(destDir, item.name);
@@ -69,7 +74,8 @@ async function copyTreeWithProgress(srcDir, destDir, opts = {}) {
       fs.mkdirSync(destPath, { recursive: true });
       // skipRootMeta is intentionally not propagated — it applies at the root
       // only, matching the legacy walk that skipped meta.json solely there.
-      await copyTreeWithProgress(srcPath, destPath, { fileFilter, recurse, onBytes, refused });
+      await copyTreeWithProgress(srcPath, destPath, { fileFilter, recurse, onBytes, refused,
+        relBase: relBase ? `${relBase}/${item.name}` : item.name });
     } else if (item.isFile()) {
       if (skipRootMeta && item.name === 'meta.json') continue;
       if (fileFilter && !fileFilter(item.name)) continue;
@@ -79,8 +85,19 @@ async function copyTreeWithProgress(srcDir, destDir, opts = {}) {
       // card and pass it to the next person. Collected rather than silently dropped:
       // an unexplained omission during an export is its own kind of dishonesty.
       if (refused) {
-        const v = require('./sdCardDetect').checkExecutableFile(srcPath, item.name);
-        if (v.blocked) { refused.push({ name: item.name, reason: v.reason }); continue; }
+        // checkCarryableFile, not checkExecutableFile: two different things must not be
+        // carried out, and only one of them is a program ([B-368]).
+        const v = require('./sdCardDetect').checkCarryableFile(srcPath, item.name);
+        if (v.blocked) {
+          refused.push({
+            relPath: relBase ? `${relBase}/${item.name}` : item.name,
+            name: item.name,
+            kind: v.kind,
+            reason: v.reason,
+            disguised: !!v.disguised,
+          });
+          continue;
+        }
       }
       await copyFileWithProgress(srcPath, destPath, onBytes);
     }

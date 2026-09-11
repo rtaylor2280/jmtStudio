@@ -19,6 +19,7 @@ const soundFontReorganize = require('./soundFontReorganize');
 const soundFontVoicepack = require('./soundFontVoicepack');
 const sdCardDetect = require('./sdCardDetect');
 const soundFontSharedTracks = require('./soundFontSharedTracks');
+const soundFontRemoval = require('./soundFontRemoval');
 const soundFontAttachments = require('./soundFontAttachments');
 const soundFontLinkImport = require('./soundFontLinkImport');
 
@@ -203,6 +204,16 @@ app.whenReady().then(() => {
     const staged = soundFontSources.clearStagedSources(app.getPath('userData'));
     if (staged.removed.length) {
       console.log(`[startup] cleared ${staged.removed.length} staged source(s), ${(staged.bytes / 1048576).toFixed(1)} MB`);
+    }
+  } catch {}
+  // [B-364] Same lifecycle, same reasoning: a program pulled out of the library is held
+  // only long enough for the user to say whether they want a copy. If they said yes it
+  // was released and deleted already; if they closed the app instead, it dies here.
+  // Either way it never survives its own session.
+  try {
+    const imp = soundFontRemoval.sweepImpounded(app.getPath('userData'));
+    if (imp.removed) {
+      console.log(`[startup] cleared ${imp.removed} impounded program file(s), ${imp.bytes} bytes`);
     }
   } catch {}
 
@@ -594,6 +605,7 @@ app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) creat
 // anyway — startup will do it.
 app.on('before-quit', () => {
   try { soundFontSources.clearStagedSources(app.getPath('userData')); } catch {}
+  try { soundFontRemoval.sweepImpounded(app.getPath('userData')); } catch {}
 });
 
 // ── Log forwarder ──────────────────────────────────────
@@ -2789,6 +2801,32 @@ ipcMain.handle('sfFile:export', async (_, { kind, id, paths, suggestedName, asFi
     }
     throw new Error(`Unknown kind: ${kind}`);
   };
+  // ⚠️ THE RIGHT-CLICK DOOR IS A DOOR TOO ([B-214] follow-on, 2026-09-11: "I need to
+  // ensure that we are blocking the same way exports of individual files from right
+  // click"). Every other way out of the managed store already refuses a program - the
+  // whole-entry export, the whole-common export, the source archive export, and the
+  // save-to-Downloads per-file route (exportEntryFileTo / exportSourceFileTo). This
+  // handler had its own readBytes + writeFileSync and no check at all, so the Export
+  // item on every file context menu in the app walked past all of them. It is the
+  // WIDEST door of the set: eleven call sites across entry, source, common and
+  // sharedTracks funnel through here.
+  //
+  // PROGRAMS ONLY, matching the export convention in sfExportCopy. A macro document is
+  // refused on the way IN to a common folder; it is not stripped on the way out.
+  //
+  // COLLECTED, NEVER SILENTLY DROPPED, and returned to the caller: an unexplained
+  // omission during an export is its own kind of dishonesty. A file that is refused is
+  // skipped rather than failing the export - the rest of the selection still goes.
+  const refused = [];
+  const _note = (v, relPath) => {
+    if (!v.blocked) return false;
+    refused.push({ relPath: String(relPath), kind: v.kind, reason: v.reason, disguised: !!v.disguised });
+    return true;
+  };
+  const refuseBuf = (buf, relPath) =>
+    _note(require('./sdCardDetect').checkCarryable(buf && buf.subarray(0, 256), relPath), relPath);
+  const refusePath = (absPath, relPath) =>
+    _note(require('./sdCardDetect').checkCarryableFile(absPath, relPath), relPath);
   // Collision-safe target name inside a chosen destination folder.
   // Walks " (1)", " (2)"... until a free name is found so re-exports
   // never overwrite the user's existing copy.
@@ -2914,11 +2952,14 @@ ipcMain.handle('sfFile:export', async (_, { kind, id, paths, suggestedName, asFi
           const innerRel = insidePrefix ? innerFlat.slice(insidePrefix.length) : innerFlat;
           if (!innerRel) continue;
           const outPath = path.join(outRoot, innerRel.replace(/\//g, path.sep));
-          fs.mkdirSync(path.dirname(outPath), { recursive: true });
           // source.readFile is composite-aware — entry.fileName carries the
           // full composite path, so the inner-zip layer gets peeled by the
           // resolver automatically.
+          // Read and check BEFORE mkdir, so refusing a file does not leave an
+          // empty directory behind at the destination.
           const buf = await source.readFile(entry.fileName);
+          if (refuseBuf(buf, entry.fileName)) continue;
+          fs.mkdirSync(path.dirname(outPath), { recursive: true });
           fs.writeFileSync(outPath, buf);
         }
         return;
@@ -2932,8 +2973,9 @@ ipcMain.handle('sfFile:export', async (_, { kind, id, paths, suggestedName, asFi
         const innerRel = entry.fileName.slice(prefix.length);
         if (!innerRel) continue;
         const outPath = path.join(outRoot, innerRel.replace(/\//g, path.sep));
-        fs.mkdirSync(path.dirname(outPath), { recursive: true });
         const buf = await source.readFile(entry.fileName);
+        if (refuseBuf(buf, entry.fileName)) continue;
+        fs.mkdirSync(path.dirname(outPath), { recursive: true });
         fs.writeFileSync(outPath, buf);
       }
       return;
@@ -2948,7 +2990,9 @@ ipcMain.handle('sfFile:export', async (_, { kind, id, paths, suggestedName, asFi
         const s = path.join(sd, ent.name);
         const d = path.join(dd, ent.name);
         if (ent.isDirectory()) walk(s, d);
-        else if (ent.isFile()) fs.copyFileSync(s, d);
+        // Path-based check here: this branch copies straight off disk and never
+        // holds the bytes, so checkExecutableFile does the 256-byte head read.
+        else if (ent.isFile() && !refusePath(s, ent.name)) fs.copyFileSync(s, d);
       }
     };
     walk(srcAbs, outRoot);
@@ -2985,12 +3029,23 @@ ipcMain.handle('sfFile:export', async (_, { kind, id, paths, suggestedName, asFi
         const outRoot = path.join(parent, finalName);
         await writeDirTo(subPath, outRoot);
         Store.set('lastExportDir', parent);
-        return { ok: true, written: [outRoot] };
+        return { ok: true, written: [outRoot], refused };
       } catch (err) {
         return { ok: false, error: String(err && err.message || err) };
       }
     }
     const ext = path.extname(baseName).replace(/^\./, '') || '*';
+    // ⚠️ THE PICKER OPENS FIRST, AND THE CHECK WAITS FOR IT (2026-09-11). Checking
+    // before the dialog would avoid asking where to put a file we then refuse, which
+    // is the warn-before-acting shape the common import uses. It is the wrong trade
+    // HERE, for two reasons that are both about the common case:
+    //   - A CLICK MUST REACT INSTANTLY. Any work between the click and the dialog is
+    //     perceptible as nothing-happening, and users respond by clicking again. No
+    //     amount of correctness downstream pays for that.
+    //   - A program in the library is vanishingly rare. Optimising the click for the
+    //     case that essentially never fires, at the cost of every ordinary export,
+    //     is backwards.
+    // So the near-certain path stays instant and the rare one pays an extra dialog.
     const { canceled, filePath } = await dialog.showSaveDialog(win, {
       title: 'Export file',
       defaultPath: path.join(lastDir, baseName),
@@ -3001,9 +3056,10 @@ ipcMain.handle('sfFile:export', async (_, { kind, id, paths, suggestedName, asFi
     if (canceled || !filePath) return { ok: false, canceled: true };
     try {
       const buf = await readBytes(subPath);
+      if (refuseBuf(buf, subPath)) return { ok: true, written: [], refused };
       fs.writeFileSync(filePath, buf);
       Store.set('lastExportDir', path.dirname(filePath));
-      return { ok: true, written: [filePath] };
+      return { ok: true, written: [filePath], refused };
     } catch (err) {
       return { ok: false, error: String(err && err.message || err) };
     }
@@ -3036,6 +3092,7 @@ ipcMain.handle('sfFile:export', async (_, { kind, id, paths, suggestedName, asFi
         written.push(outRoot);
       } else {
         const buf = await readBytes(subPath);
+        if (refuseBuf(buf, subPath)) continue;
         const out = uniqueIn(destDir, baseName);
         fs.writeFileSync(out, buf);
         written.push(out);
@@ -3045,7 +3102,77 @@ ipcMain.handle('sfFile:export', async (_, { kind, id, paths, suggestedName, asFi
     }
   }
   Store.set('lastExportDir', destDir);
-  return { ok: true, written, failed };
+  return { ok: true, written, failed, refused };
+});
+
+// ── [B-364] Acting on a program found in the managed store ──────────────────
+//
+// Reached from the refusal message an export produces, and ONLY from there: the
+// app never sweeps the library looking for these ("I don't want to be constantly
+// checking the library... this is a very rare case", 2026-09-11). Export is the
+// one moment we already look, so it is the one moment we can offer to act.
+//
+// Both verbs re-verify the file is a program before touching it — see
+// soundFontRemoval._confirmProgram. The renderer names the file; the bytes
+// justify the removal.
+// Impound: remove it from the store NOW and hold the bytes. Called as soon as an export
+// reports a finding, before the user is asked anything — the report is a statement, not
+// a request for permission.
+ipcMain.handle('sfProgram:impound', async (_, { kind, id, relPath } = {}) =>
+  soundFontRemoval.impoundProgram(app.getPath('userData'), { kind, id, relPath }));
+
+// The user wants a copy. Asks once for a destination unless the renderer already has one
+// for the batch, then releases and drops the holding entry immediately.
+ipcMain.handle('sfProgram:release', async (_, { token, destDir, batchLabel } = {}) => {
+  let target = destDir;
+  if (!target) {
+    const lastDir = liveDir(Store.get('lastExportDir')) || app.getPath('downloads');
+    const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+      title: 'Choose where to keep a copy',
+      defaultPath: lastDir,
+      properties: ['openDirectory', 'createDirectory'],
+      buttonLabel: 'Save Copy Here',
+    });
+    if (canceled || !filePaths?.length) return { ok: false, canceled: true };
+    target = filePaths[0];
+  }
+  const res = soundFontRemoval.releaseImpounded(app.getPath('userData'), { token, destDir: target, batchLabel });
+  if (res.ok) Store.set('lastExportDir', target);
+  return res;
+});
+
+// The user chose Delete. Nothing about the holding area reaches them; from their side
+// they picked delete and the file is gone.
+ipcMain.handle('sfProgram:discard', async (_, { token } = {}) =>
+  soundFontRemoval.discardImpounded(app.getPath('userData'), { token }));
+
+ipcMain.handle('sfProgram:delete', async (_, { kind, id, relPath } = {}) =>
+  soundFontRemoval.deleteManagedFile(app.getPath('userData'), { kind, id, relPath }));
+
+// Quarantine asks WHERE, every time — his rule: "if they choose quarantine, they
+// have to tell us where to put it." No default location and no silent destination:
+// the user is choosing where to keep a file they may want to analyse, and that is
+// not a choice the app should make on their behalf.
+// destDir is optional: the renderer asks ONCE for a batch and passes it in, so
+// quarantining four findings does not open four folder pickers. Called without one
+// (a single finding) it asks here.
+ipcMain.handle('sfProgram:quarantine', async (_, { kind, id, relPath, destDir } = {}) => {
+  let target = destDir;
+  if (!target) {
+    const lastDir = liveDir(Store.get('lastExportDir')) || app.getPath('downloads');
+    const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+      title: 'Choose where to keep the quarantined file',
+      defaultPath: lastDir,
+      properties: ['openDirectory', 'createDirectory'],
+      buttonLabel: 'Quarantine Here',
+    });
+    if (canceled || !filePaths?.length) return { ok: false, canceled: true };
+    target = filePaths[0];
+  }
+  const res = soundFontRemoval.quarantineManagedFile(app.getPath('userData'),
+    { kind, id, relPath, destDir: target });
+  if (res.ok) Store.set('lastExportDir', target);
+  return res;
 });
 
 // Batched sha256 hashing of a set of files for one (kind, id). The

@@ -186,8 +186,18 @@ function _selectFolderFiles(srcDir) {
           reason: 'A document that can contain macros has no use on a saber card. It was left out.' });
         return false;
       }
-      // Kept, and said out loud anyway: an archive we cannot open is not a finding, but
-      // silence about it would read as "checked and clean", which is not what happened.
+      // ⚠️ AN ARCHIVE WE CANNOT OPEN IS NOW REFUSED HERE TOO ([B-368], 2026-09-11). This
+      // was missed when opaque became a blocking verdict: the purge and the carry
+      // predicate were both updated and THIS selector was not, so a source exported as a
+      // zip still carried the rar out. Exactly the failure the standing rule names - a
+      // rule written beside one caller never reaches the others - and the tell was a
+      // clean close-out on an export that had one sitting in it.
+      if (v.kind === 'opaque') {
+        blockedFiles.push({ relPath: f.relPath, kind: 'opaque', reason: v.reason });
+        return false;
+      }
+      // Kept, and said out loud anyway: anything else we cannot fully judge is not a
+      // finding, but silence would read as "checked and clean", which is not what happened.
       if (v.kind !== 'ok') notedFiles.push({ relPath: f.relPath, kind: v.kind, reason: v.reason });
       if (!/\.wav$/i.test(f.relPath)) return true;
       const h = checkWavBuffer(head || Buffer.alloc(0), f.size);
@@ -228,6 +238,19 @@ function _purgeExecutables(rootDir) {
         try { fs.unlinkSync(abs); } catch { continue; }
         blocked.push({ relPath: r, kind: 'macro', size: msize,
           reason: 'A document that can contain macros has no use on a saber card. It was left out.' });
+        continue;
+      }
+      // ⚠️ AN ARCHIVE WE CANNOT OPEN DOES NOT COME IN ([B-368], his call 2026-09-11).
+      // Not a threat claim - we genuinely cannot say what is inside. The argument is
+      // simpler than safety: "they have no business being on a card, because Proffie
+      // can't read it and JMT Studio can't read it, so it doesn't do any good for them."
+      // MEASURED before deciding: 332 zip against 3 rar across his whole font archive,
+      // and no 7z anywhere. Zip stays the readable case - we expand it and recurse.
+      if (verdict.kind === 'opaque') {
+        let osize = 0; try { osize = fs.statSync(abs).size; } catch {}
+        try { fs.unlinkSync(abs); } catch { continue; }
+        blocked.push({ relPath: r, kind: 'opaque', size: osize,
+          reason: 'This archive format cannot be opened, here or on a saber, so its contents could not be checked. It was left out.' });
         continue;
       }
       if (verdict.kind !== 'program') {

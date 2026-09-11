@@ -475,7 +475,9 @@ async function scanIncomingCommon(srcPath) {
   const { classifyFileBuffer } = require('./sdCardDetect');
   const take = (rel, buf) => {
     const v = classifyFileBuffer(buf, rel);
-    if (v.kind === 'program' || v.kind === 'macro') {
+    // 'opaque' joins the blocked set ([B-368]): an archive we cannot open cannot be
+    // checked, and cannot be read by a saber either, so it does not come in.
+    if (v.kind === 'program' || v.kind === 'macro' || v.kind === 'opaque') {
       out.blocked.push({ relPath: rel, kind: v.kind, reason: v.reason,
         byContent: !!v.byContent, disguised: !!v.disguised });
     } else if (v.kind !== 'ok') {
@@ -1270,6 +1272,7 @@ async function exportCommonAsZip(userData, uuid, destPath, onBytes = null) {
   // .partial and rename on success, so the user's chosen path is never a
   // half-written zip a sync agent can pick up.
   const partialPath = destPath + '.partial';
+  const refused = [];
   return await new Promise((resolve) => {
     let settled = false;
     const done = (r) => { if (!settled) { settled = true; resolve(r); } };
@@ -1301,10 +1304,33 @@ async function exportCommonAsZip(userData, uuid, destPath, onBytes = null) {
         try { fs.unlinkSync(partialPath); } catch {}
         return done({ ok: false, error: `Cannot finalise: ${err.message}` });
       }
-      done({ ok: true, path: destPath, name: packName });
+      done({ ok: true, path: destPath, name: packName, refused });
     });
     archive.pipe(ws);
-    archive.directory(srcDir, 'common');
+    // ⚠️ THE ZIP IS A WAY OUT TOO ([B-364]/[B-368]). Export-to-folder refuses a program;
+    // this writer used a bare archive.directory() and carried everything. Filtering via
+    // archiver's data function is safe HERE specifically because this writer has no
+    // entry-count gating - progress comes from archiver's own fs.processedBytes, which
+    // simply reports less when a file is skipped. (The backup writer is NOT like this:
+    // it awaits an expected entry count per item and a filtered file deadlocks it. See
+    // [B-369].)
+    const { checkCarryableFile } = require('./sdCardDetect');
+    // ⚠️ THE ENTRY CARRIES `name` (RELATIVE) AND `stats` — THERE IS NO sourcePath.
+    // Guarding on a field that does not exist made the filter a no-op that still looked
+    // right: every file was included and nothing was reported. Verified against
+    // archiver 5's core.js rather than assumed (onGlobMatch builds entryData from
+    // match.relative + match.stat), and proved by zipping a folder with a planted
+    // program and reading the archive back.
+    archive.directory(srcDir, 'common', (entry) => {
+      if (!entry || !entry.name) return entry;
+      if (entry.stats && typeof entry.stats.isDirectory === 'function' && entry.stats.isDirectory()) return entry;
+      const abs = path.join(srcDir, entry.name);
+      const v = checkCarryableFile(abs, path.basename(entry.name));
+      if (!v.blocked) return entry;
+      refused.push({ relPath: String(entry.name), name: path.basename(entry.name),
+        kind: v.kind, reason: v.reason, disguised: !!v.disguised });
+      return false;
+    });
     archive.finalize();
   });
 }
@@ -1372,7 +1398,8 @@ async function exportCommonToFolder(userData, uuid, destDir, mode = 'rename', on
         require('./sfSyncManifest').mergeItem(destDir, targetName, observed);
       }
     } catch {}
-    return { ok: true, destPath: targetDir };
+    // ⚠️ RETURNED, NOT DROPPED ([B-364]) - same defect and same fix as the entry export.
+    return { ok: true, destPath: targetDir, refused: _exportRefused };
   } catch (err) {
     // Best-effort cleanup of a partial copy so the user doesn't end up with
     // half a common folder mixed in with their other content.

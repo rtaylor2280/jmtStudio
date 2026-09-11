@@ -333,13 +333,26 @@ async function exportToFolderAdditive(userData, destDir, opts = {}) {
 
   const replaceSet = new Set(replace);
   const added = [], replaced = [], kept = [];
+  // ⚠️ THE LAST UNGUARDED WAY OUT ([B-364], 2026-09-11). Every other export refuses a
+  // program; this one copied straight through. The .wav filter on the legacy path below
+  // is not a substitute - a program renamed to hum.wav passes an extension test and is
+  // exactly the case content-checking exists for. Free here: the check reads 256 bytes
+  // and this path already touches every file it copies.
+  const refused = [];
   const copy = async (name) => {
-    await copyFileWithProgress(path.join(srcDir, name), path.join(targetDir, name), onBytes);
+    const src = path.join(srcDir, name);
+    const v = require('./sdCardDetect').checkCarryableFile(src, name);
+    if (v.blocked) {
+      refused.push({ relPath: name, name, kind: v.kind, reason: v.reason, disguised: !!v.disguised });
+      return false;
+    }
+    await copyFileWithProgress(src, path.join(targetDir, name), onBytes);
+    return true;
   };
   try {
-    for (const name of plan.toAdd) { await copy(name); added.push(name); }
+    for (const name of plan.toAdd) { if (await copy(name)) added.push(name); }
     for (const name of plan.differing) {
-      if (replaceSet.has(name)) { await copy(name); replaced.push(name); }
+      if (replaceSet.has(name)) { if (await copy(name)) replaced.push(name); }
       else kept.push(name);
     }
   } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
@@ -368,7 +381,7 @@ async function exportToFolderAdditive(userData, destDir, opts = {}) {
     }
     sync.mergeItem(destDir, 'tracks', observed);
   } catch {}
-  return { ok: true, destPath: targetDir, added, replaced, kept, unchanged: plan.unchanged };
+  return { ok: true, destPath: targetDir, added, replaced, kept, unchanged: plan.unchanged, refused };
 }
 
 // Copy the singleton sharedTracks folder into destDir/tracks/. Mirrors
@@ -415,12 +428,16 @@ async function exportToFolder(userData, destDir, mode = 'rename', onBytes = null
     // Flat folder — only .wav files at the top level (matches listFiles
     // contract). The .jmt-hashes.json sidecar stays in userData and never
     // ships to the SD card. Streamed copy with write-paced byte progress.
+    // ⚠️ The .wav fileFilter is a SHAPE test, not a safety one - a program renamed to
+    // hum.wav passes it. `refused` is what reads the bytes ([B-364]).
+    const _refused = [];
     await copyTreeWithProgress(srcDir, targetDir, {
       recurse: false,
       fileFilter: (name) => /\.wav$/i.test(name),
       onBytes,
+      refused: _refused,
     });
-    return { ok: true, destPath: targetDir };
+    return { ok: true, destPath: targetDir, refused: _refused };
   } catch (err) {
     try { fs.rmSync(targetDir, { recursive: true, force: true }); } catch {}
     return { ok: false, error: String(err && err.message || err) };

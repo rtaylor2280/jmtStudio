@@ -1207,7 +1207,11 @@ async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onB
         require('./sfSyncManifest').mergeItem(destDir, targetName, observed);
       }
     } catch {}
-    return { ok: true, destPath: targetDir };
+    // ⚠️ RETURNED, NOT DROPPED ([B-364]). This list was collected and then thrown away,
+    // so a font whose export silently came up one file short said nothing at all - the
+    // exact silent strip the feature exists to prevent. It is also what the removal
+    // buttons hang off: no list reaching the renderer means no way to act.
+    return { ok: true, destPath: targetDir, refused: _exportRefused };
   } catch (err) {
     // Best-effort cleanup of a partial copy on failure so the user doesn't
     // end up with half a font folder mixed in with their other content.

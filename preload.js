@@ -364,6 +364,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   reorganizeRenumber:    (params)     => ipcRenderer.invoke('reorganize:renumber', params),
   hashFiles:             (params)     => ipcRenderer.invoke('hash:files', params),
   sfExportFiles:         (params)     => ipcRenderer.invoke('sfFile:export', params),
+  // [B-364] Acting on a program the export refused to carry. Both re-verify the
+  // bytes in the main process before removing anything.
+  sfProgramImpound:      (params)     => ipcRenderer.invoke('sfProgram:impound', params),
+  sfProgramRelease:      (params)     => ipcRenderer.invoke('sfProgram:release', params),
+  sfProgramDiscard:      (params)     => ipcRenderer.invoke('sfProgram:discard', params),
+  sfProgramDelete:       (params)     => ipcRenderer.invoke('sfProgram:delete', params),
+  sfProgramQuarantine:   (params)     => ipcRenderer.invoke('sfProgram:quarantine', params),
   fileOpsCopy:           (params)     => ipcRenderer.invoke('fileOps:copy', params),
   fileOpsMove:           (params)     => ipcRenderer.invoke('fileOps:move', params),
   fileOpsDelete:         (params)     => ipcRenderer.invoke('fileOps:delete', params),
