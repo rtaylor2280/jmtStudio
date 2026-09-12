@@ -8072,6 +8072,104 @@ window.checkVoicepackDeclared = async function () {
   return true;
 };
 
+// ── Blade style count preflight (compile gate) ─────────
+// A preset is POSITIONAL: { font, track, style1..styleN, "Name" }. Leave a style
+// out and the name slides into the last style slot, so gcc reports
+//     cannot convert 'const char*' to 'StyleFactory*' in initialization
+// pointing at the preset NAME - the only token actually of the wrong type. It
+// cannot point at the missing style, because nothing is there to underline, and
+// the line it names sits inside a 600-character template expansion. That is why
+// this is worth catching here: the compiler's answer is correct and unusable.
+// (2026-09-10: a four-blade config where every preset but the first had three
+// styles produced five of these, reported as pointing at "like 114... totally
+// wrong".)
+//
+// The comparison is not new. The preset list already renders "Styles (X/Y
+// blades)" from exactly this data, and the OVER-count case already has a red
+// header and a repair tool. Only the UNDER-count case had nowhere to surface at
+// compile time, so this is the same question asked at the gate. [B-365]
+//
+// Scope, deliberately: UNDER-count only. An over-count preset also fails to
+// compile, but it already shows a red "4/2 BLADES" header and offers a repair,
+// so the user is not flying blind into the same unreadable error. Widening this
+// to both is one branch here plus a second sentence in the dialog.
+//
+// COMPILE ONLY, same reasoning as the voicepack gate: the flash path can restore
+// a cached build that never passed through here, and a build that does not exist
+// cannot be flashed anyway.
+window.checkBladeStyleCounts = async function () {
+  const text = editor ? editor.getValue() : '';
+  if (!text) return true;
+
+  let parsed;
+  try { parsed = presetParser.parsePresets(text); } catch { return true; }
+  const expected = parsed && parsed.bladeCount;
+  if (!(expected > 0)) return true;          // no NUM_BLADES to compare against
+
+  // Commented-out presets are skipped by the parser, which is what we want here:
+  // a disabled preset is not compiled, so it cannot fail to compile. (Verified
+  // against block comments and line comments, not assumed - the over-count
+  // repair DOES walk disabled blocks, for the opposite reason: those come back.)
+  // A preset the parser could not read is skipped too. Its style list is empty
+  // by construction, so counting it would report "0 of 4" about a preset whose
+  // real problem is something else entirely.
+  const short = [];
+  for (const arr of (parsed.arrays || [])) {
+    for (const p of (arr.presets || [])) {
+      if (p.parseError) continue;
+      const actual = (p.styles || []).length;
+      if (actual < expected) {
+        short.push({
+          name: (p.displayName || '').trim() || `Preset ${p.index}`,
+          actual,
+          array: arr.name,
+        });
+      }
+    }
+  }
+  if (!short.length) return true;
+
+  const one = short.length === 1;
+  const counts = [...new Set(short.map(s => s.actual))];
+  // "have 3 of 4 blade styles" when they agree, which is the common case (a
+  // config grows a blade and every preset is one short). Mixed counts get the
+  // weaker sentence rather than a per-preset breakdown nobody needs.
+  const countPhrase = counts.length === 1
+    ? `${counts[0]} of ${expected} blade style${expected === 1 ? '' : 's'}`
+    : `fewer than ${expected} blade styles`;
+
+  // Names, not line numbers. The line the compiler would name is wrong (see
+  // above) and the line WE would name is the preset's first line, which is not
+  // where anything is missing either - nothing is missing anywhere, that is the
+  // whole shape of the fault. The preset is the thing that can be pointed at.
+  const shown = short.slice(0, 8).map(s => _vpkEsc(s.name)).join(', ');
+  const more = short.length > 8 ? `, and ${short.length - 8} more` : '';
+
+  // Named only when there is more than one bank, since most configs have one and
+  // the name is noise there.
+  const banks = [...new Set(short.map(s => s.array).filter(Boolean))];
+  const bankLine = (parsed.arrays || []).length > 1 && banks.length
+    ? `<br><br>${banks.length === 1 ? 'All in' : 'Across'} <code>${banks.map(b => _vpkEsc(b)).join('</code>, <code>')}</code>.`
+    : '';
+
+  const res = await promptConfirm({
+    title: one ? 'A Preset Is Missing a Blade Style' : 'Presets Are Missing Blade Styles',
+    messageHtml:
+      `Your config has <strong>${expected}</strong> blade${expected === 1 ? '' : 's'}, and ` +
+      `${one ? '<strong>1</strong> preset has' : `<strong>${short.length}</strong> presets have`} ` +
+      `${countPhrase}:<br><br><strong>${shown}</strong>${more}.${bankLine}<br><br>` +
+      `Every preset needs one style per blade, so this cannot compile. Open ` +
+      `${one ? 'that preset' : 'each preset'} in Presets and fill the empty slot in the ` +
+      `Styles row.`,
+    confirmText: 'OK',
+    confirmKind: 'save',
+    middleText:  'Compile anyway',
+    hideCancel:  true,
+  });
+
+  return res === 'middle';
+};
+
 // ── Window title ───────────────────────────────────────
 function updateWindowTitle() {
   if (!isElectron) return;
