@@ -1,9 +1,14 @@
 /**
- * Voicepack preflight — unit tests for the pure logic.
+ * Voicepack check — unit tests for the pure logic.
  *
- * The functions live in the inline <script> of renderer/index.html, so rather
- * than copy them (a copy proves nothing) this extracts the real source text and
- * evaluates it. If someone edits the implementation, these tests see the edit.
+ * ⚠️ THIS SUITE USED TO EXTRACT ITS SUBJECT OUT OF renderer/index.html BY MARKER.
+ * As of 2026-09-12 the check is a registered entry in preflight-checks.js [B-224],
+ * so it is simply required — which is the whole point of the registry: a check is
+ * data, reads a context, and never touches the DOM. Every assertion below is
+ * unchanged; only where the code lives changed.
+ *
+ * Section 6 still extracts from the HTML, because the new-preset chooser it tests
+ * genuinely still lives there.
  *
  * Covers the three things most likely to break it:
  *   1. comment stripping, where a //***** banner must NOT swallow real code
@@ -21,8 +26,10 @@ const vm = require('vm');
 const ROOT = path.join(__dirname, '..');
 const html = fs.readFileSync(path.join(ROOT, 'renderer', 'index.html'), 'utf8');
 const presetParser = require(path.join(ROOT, 'renderer', 'presetParser.js'));
+const preflight    = require(path.join(ROOT, 'renderer', 'preflight.js'));
+const checks       = require(path.join(ROOT, 'renderer', 'preflight-checks.js'));
 
-// ── extract the implementation out of index.html ────────────────────────
+// ── extract from index.html (section 6 only, now) ───────────────────────
 function extract(startMarker, endMarker) {
   const a = html.indexOf(startMarker);
   const b = html.indexOf(endMarker, a);
@@ -30,23 +37,20 @@ function extract(startMarker, endMarker) {
   return html.slice(a, b);
 }
 
-// `const` declarations in a vm script stay lexical and never appear on the
-// context object, so the extracted source gets an explicit export line appended.
-const EXPORTS = ['_vpkStripComments', '_vpkLiveText', '_VPK_INIT_RE', '_vpkConfigDefines',
-                 '_vpkPropIncludes', '_vpkScanPresets', '_vpkEsc'];
-
-const src = extract('function _vpkStripComments(src) {', 'const _vpkEsc =')
-          + extract('const _vpkEsc =', '// Compile gate.')
-          + `\n;globalThis.__vpk = { ${EXPORTS.join(', ')} };\n`;
-
-// `window` because the extracted block exposes the prop check on it for the
-// Sound Fonts view, which lives in a different IIFE.
-const ctx = { presetParser, console, module: {}, window: {}, document: { getElementById: () => null } };
-vm.createContext(ctx);
-vm.runInContext(src, ctx, { filename: 'index.html:voicepack-preflight' });
-
-const { _vpkStripComments, _vpkLiveText, _VPK_INIT_RE, _vpkConfigDefines,
-        _vpkPropIncludes, _vpkScanPresets } = ctx.__vpk;
+// The old local names, bound to their new homes, so the assertions below read
+// exactly as they did and a diff of this file shows only the move.
+const _vpkStripComments = preflight.stripComments;
+const _vpkConfigDefines = preflight.configDefines;
+const _vpkLiveText      = checks.vpkLiveText;
+const _vpkPropIncludes  = checks.vpkPropIncludes;
+const _VPK_INIT_RE      = checks.VPK_INIT_RE;
+// The check works from the shared parse; these tests hand it text, exactly as the
+// three remaining callers in index.html do.
+const _vpkScanPresets   = (text) => {
+  let parsed = null;
+  try { parsed = presetParser.parsePresets(text); } catch { parsed = null; }
+  return parsed ? checks.vpkScanPresets(parsed) : { missing: [], sharedNames: [] };
+};
 
 // ── tiny harness ────────────────────────────────────────────────────────
 let failures = 0;

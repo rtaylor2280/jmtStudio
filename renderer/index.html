@@ -7692,208 +7692,52 @@ window.checkMassStorageSafety = async function (usbMode, stage) {
   return false;
 };
 
-// ── Voicepack preflight (compile gate) ─────────────────
-// ProffieOS 8 added a voicepack VERSION REQUIREMENT that the user never opts
-// into. Traced against 7.15 and 8.10 source on 2026-07-30:
+// ── Voicepack requirement (asked from three places) ────
 //
-//   * The PROP registers it, not the OS core and not the config. Every call
-//     site lives in props/: prop_base.h (when MENU_SPEC_TEMPLATE IS defined),
-//     saber_fett263_buttons.h and saber_BC_buttons.h (when it is NOT), and
-//     blaster_BC_buttons.h (unconditionally). Both branches of that #ifndef
-//     lead to require_version, so on fett263 and BC there is no configuration
-//     that avoids it. 7.15 has none of this machinery at all, so moving a
-//     config from 7.15 to 8.10 gains the requirement with nothing in the
-//     config having changed.
-//   * CheckVersion() then re-runs on EVERY font directory change and searches
-//     ONLY that preset's font path. So the failure is PER PRESET: one whose
-//     path reaches a voicepack is quiet, one that does not announces "voice
-//     pack not found" every time you switch to it. The message means "this
-//     preset cannot see a voicepack", not "this saber has none".
+// ⚠️ THE CHECK ITSELF MOVED TO preflight-checks.js ON 2026-09-12 [B-224]. What
+// stays here is the three exports the Sound Fonts view calls, because it asks the
+// same question when deciding what a NEWLY added preset should carry. They
+// delegate rather than reimplement: two walks of the prop include chain would
+// drift, and the one in the registry is the one under test.
 //
-// Scope, deliberately small (cut twice on 2026-07-30, both correctly):
-//   * CONFIG ONLY. We never inspect the SD card or the sound font library. At
-//     compile time we cannot see the card, and an unverifiable warning is noise.
-//     The card reminder is a courtesy line INSIDE this dialog, never its own check.
-//   * No "remember my choice", no expiry, no Settings undo. There is exactly one
-//     legitimate reason to ignore (the voicepack lives inside the font folder),
-//     it is rare, and that person knows why they are clicking Ignore.
-//   * Never match the literal string "common". A shared folder can be named
-//     anything; 4 configs in a 245-config wild sample use "MC".
-
-// Comment stripper with a real state machine. A regex pass gets this wrong on
-// decorative banners like //*********, whose "/*" substring reads as a comment
-// open and blanks every real line up to the next "*/". That exact bug cost a
-// night of false positives in the lint harness.
-function _vpkStripComments(src) {
-  let out = '', i = 0; const n = src.length;
-  while (i < n) {
-    const c = src[i], d = src[i + 1];
-    if (c === '/' && d === '/') { while (i < n && src[i] !== '\n') i++; continue; }
-    if (c === '/' && d === '*') {
-      i += 2;
-      while (i < n && !(src[i] === '*' && src[i + 1] === '/')) { if (src[i] === '\n') out += '\n'; i++; }
-      i += 2; continue;
-    }
-    if (c === '"' || c === "'") {
-      const q = c; out += src[i++];
-      while (i < n && src[i] !== q) { if (src[i] === '\\' && i + 1 < n) out += src[i++]; out += src[i++]; }
-      if (i < n) out += src[i++];
-      continue;
-    }
-    out += src[i++];
-  }
-  return out;
-}
-
-// Keep only the lines a preprocessor would keep, evaluating ONLY the symbols we
-// can read from the config. Any other condition keeps BOTH branches live, so an
-// init behind an unknown #if still counts. Conservative on purpose: a missed
-// requirement is a saber that talks at you, a spurious one is a dismissible dialog.
-function _vpkLiveText(src, defines) {
-  const KNOWN = new Set(['MENU_SPEC_TEMPLATE', 'MOUNT_SD_SETTING']);
-  const stack = [];
-  const live = () => stack.every(f => f.live);
-  const out = [];
-  for (const raw of _vpkStripComments(src).split('\n')) {
-    const m = raw.match(/^\s*#\s*(ifdef|ifndef|if|else|elif|endif)\b\s*([A-Za-z_]\w*)?/);
-    if (m) {
-      const kw = m[1], sym = m[2];
-      if (kw === 'ifdef' || kw === 'ifndef' || kw === 'if') {
-        let known = false, val = true;
-        if ((kw === 'ifdef' || kw === 'ifndef') && sym && KNOWN.has(sym)) {
-          known = true;
-          val = (kw === 'ifdef') ? defines.has(sym) : !defines.has(sym);
-        }
-        stack.push({ live: val, known });
-      } else if (kw === 'else') {
-        const f = stack[stack.length - 1];
-        if (f) f.live = f.known ? !f.live : true;
-      } else if (kw === 'elif') {
-        const f = stack[stack.length - 1];
-        if (f) { f.live = true; f.known = false; }
-      } else if (kw === 'endif') {
-        stack.pop();
-      }
-      continue;
-    }
-    if (live()) out.push(raw);
-  }
-  return out.join('\n');
-}
-
-// The three spellings of "register a voicepack requirement". The macro form
-// (sound_library_v2.init) is the one a symbol search for SoundLibrary::init
-// misses — that miss cost a whole investigation on 2026-07-30.
-const _VPK_INIT_RE = /(?:sound_library_v2|sound_library_)\s*\.\s*init\s*\(\s*\)|SoundLibrary\s*::\s*init\s*\(\s*\)/;
-
-function _vpkConfigDefines(text) {
-  const set = new Set();
-  for (const m of _vpkStripComments(text).matchAll(/^[ \t]*#[ \t]*define[ \t]+([A-Za-z_]\w*)/gm)) set.add(m[1]);
-  return set;
-}
-
-// The prop headers named inside #ifdef CONFIG_PROP.
-function _vpkPropIncludes(text) {
-  const src = _vpkStripComments(text);
-  const out = [];
-  const blocks = /#\s*ifdef\s+CONFIG_PROP([\s\S]*?)#\s*endif/g;
-  let b;
-  while ((b = blocks.exec(src))) {
-    for (const i of b[1].matchAll(/#\s*include\s+"([^"]+)"/g)) out.push(i[1]);
-  }
-  return out;
-}
-
-// Does the prop this config selects register a voicepack requirement?
-// Returns true / false / null (could not tell — stay silent).
-// We follow the include chain rather than matching prop NAMES, because a user
-// can derive their own prop: the JMT fett263 wrapper extends
-// SaberFett263Buttons and chains Setup(), so a name list would miss his own config.
-// Known limit, accepted: a derived prop that overrides Setup() WITHOUT chaining
-// would escape this, and text alone cannot tell.
-async function _vpkPropRequirement(text) {
-  const versionName = document.getElementById('input-version')?.value?.trim() || '';
-  if (!versionName) return null;
+// The traced mechanism, the 7.15-vs-8.10 history and the per-preset reasoning all
+// live with the check now. Read it there.
+//
+// ⚠️ An alias MUST NOT reuse a function's own name: a top-level declaration is
+// already a property of window, so `window.X = t => X(t)` overwrites it and the
+// arrow then calls itself forever. (Shipped that exact bug for four minutes on
+// 2026-07-30.)
+function _vpkCtxFor(text) {
+  let vn = document.getElementById('input-version')?.value?.trim() || '';
   // The select carries a placeholder when nothing is chosen; treat it as unknown
-  // rather than trying to read files out of a version that does not exist.
-  try { if (typeof isVersionSentinel === 'function' && isVersionSentinel(versionName)) return null; } catch {}
-  let queue = _vpkPropIncludes(text).map(p => p.split('/').pop()).filter(Boolean);
-  // A config with no prop include still HAS a prop: ProffieOS.ino falls back to
-  // props/saber.h (ino:681). Returning null here made a default-prop config with
-  // MENU_SPEC_TEMPLATE invisible - on hardware, PropBase's constructor registers a
-  // V2 requirement (prop_base.h:76) whatever the prop is, while every surface of
-  // ours stayed silent. Seeding the fallback closes it, and costs nothing for a
-  // default-prop config WITHOUT the menu spec: the walk strips prop_base's #ifdef
-  // and reports not-required exactly as before. (2026-09-06, [B-003].)
-  if (!queue.length) queue = ['saber.h'];
-  const defines = _vpkConfigDefines(text);
-  const seen = new Set();
-  while (queue.length && seen.size < 16) {
-    const file = queue.shift();
-    if (!file || seen.has(file)) continue;
-    seen.add(file);
-    let res = null;
-    try { res = await window.electronAPI?.readVersionFile?.(versionName, `ProffieOS/props/${file}`); } catch {}
-    if (!res || !res.ok || !res.content) continue;
-    const liveSrc = _vpkLiveText(res.content, defines);
-    const hit = liveSrc.match(_VPK_INIT_RE);
-    if (hit) {
-      // WHICH spelling is live IS the version, straight from the source:
-      // sound_library_ is SoundLibrary (SoundLibraryVersion = 1) and
-      // sound_library_v2 is SoundLibraryV2 (= 2), while SoundLibrary::init()
-      // goes through a menu spec, and every spec in the tree typedefs
-      // SoundLibraryV2 (modes/default_spec.h:20, saber_BC_buttons.h:1419).
-      // The preprocessor above has already resolved MENU_SPEC_TEMPLATE and
-      // MOUNT_SD_SETTING, so the surviving call is the one that runs.
-      //
-      // Only the V2 requirement can ever FAIL: require_version(1) is satisfied
-      // by any pack, including one with no ini at all, since a missing ini reads
-      // as version 1. So this is binary, not a version number to compare.
-      // (2026-07-31: "there is NO V1 requirement ever".)
-      const isV1 = /sound_library_\s*\.\s*init/.test(hit[0]);
-      // WHERE the registration lives is the attribution: a hit in the prop's own
-      // file means the prop demands it; a hit in prop_base.h means the USER's
-      // MENU_SPEC_TEMPLATE brought it in, and blaming "your prop" there is wrong -
-      // sa22c asks for nothing. (2026-09-06.)
-      return { requires: true, v2: !isV1, via: file === 'prop_base.h' ? 'menuspec' : 'prop' };
-    }
-    // Only chase further headers inside props/ — every init call site lives there,
-    // and it keeps the walk bounded.
-    for (const i of liveSrc.matchAll(/#\s*include\s+"([^"]+)"/g)) {
-      const inc = i[1];
-      if (!inc.includes('/') || /(^|\/)props\//.test(inc)) queue.push(inc.split('/').pop());
-    }
-  }
-  return { requires: false, v2: false };
+  // rather than trying to read files out of a version that does not exist. The
+  // check turns an empty version into "cannot tell" on its own.
+  try { if (typeof isVersionSentinel === 'function' && isVersionSentinel(vn)) vn = ''; } catch {}
+  return window.preflight.buildContext({
+    text,
+    versionName: vn,
+    readVersionFile: async (v, rel) => {
+      try { return await window.electronAPI?.readVersionFile?.(v, rel); } catch { return null; }
+    },
+  });
 }
 
-// Exposed because the Sound Fonts view lives in a different IIFE and needs the
-// same determination when deciding what a NEWLY added preset should carry.
-// The alias MUST NOT reuse the function's own name: a top-level function
-// declaration is already a property of window, so `window.X = t => X(t)`
-// overwrites the declaration and the arrow then calls itself forever.
-// (Shipped that exact bug for four minutes on 2026-07-30.)
-// Historically two questions, one walk. Since 2026-09-06 both exports return the
-// SAME answer on purpose - if a pack is required at all it must in practice be a
-// V2 (see local/voicepack-requirement.md) - and the second name is kept only so
-// its call sites still say what they are asking.
+// Historically two questions, one walk. Since 2026-09-06 both return the SAME
+// answer on purpose — if a pack is required at all it must in practice be a V2
+// (see local/voicepack-requirement.md) — and the second name is kept only so its
+// call sites still say what they are asking.
 window.__vpkRequiresVoicepack = async (text) => {
-  const r = await _vpkPropRequirement(text);
+  const r = await window.preflightChecks.vpkPropRequirement(_vpkCtxFor(text));
   return r === null ? null : r.requires;
 };
-// If a voice pack is required at all, it must in practice be a V2. A pack with no
-// voicepack.ini fails CheckVersion on hardware whatever the numeric requirement,
-// and real V1 packs predate the ini - so the which-init-spelling distinction that
-// r.v2 draws is real in the source and does not survive contact with the SD card.
-// Settled on hardware; mechanism closed 2026-09-06 evening. See [B-003].
 window.__vpkRequiresV2 = async (text) => {
-  const r = await _vpkPropRequirement(text);
+  const r = await window.preflightChecks.vpkPropRequirement(_vpkCtxFor(text));
   return r === null ? null : r.requires;
 };
 // 'prop' | 'menuspec' | null (not required / unknown) - so messages can attribute
 // the requirement to the thing that actually registered it.
 window.__vpkRequirementVia = async (text) => {
-  const r = await _vpkPropRequirement(text);
+  const r = await window.preflightChecks.vpkPropRequirement(_vpkCtxFor(text));
   return r && r.requires === true ? (r.via || 'prop') : null;
 };
 
@@ -7915,18 +7759,15 @@ window.__vpkRequirementVia = async (text) => {
 // ⚠️ Empties are preserved at index 0 on purpose: ";common" means "no font yet,
 // plus the shared folder", and that is a different state from having no shared
 // folder at all. Callers that want a real name use the filtered accessors.
-function _sfFontPathParts(fontValue) {
-  return String(fontValue ?? '').split(';').map(s => s.trim());
-}
-// The font directory. '' when the value leads with ';' (declared shared folder,
-// no font chosen yet).
-function _sfFontDir(fontValue) {
-  return _sfFontPathParts(fontValue)[0] || '';
-}
-// Every shared directory this preset declares, in order. Empty array = none.
-function _sfSharedDirs(fontValue) {
-  return _sfFontPathParts(fontValue).slice(1).filter(Boolean);
-}
+// ⚠️ THE MODEL LIVES IN preflight.js NOW, and these three are delegations rather
+// than a second copy. A preflight check needs the same parsing and may not touch
+// the DOM, so the definition moved to where both can reach it. The whole reason
+// [B-326] exists is that this test used to be written out separately in a dozen
+// places; two copies would be the same mistake with a better excuse.
+// The names and behaviour are unchanged, so all 20 call sites here are untouched.
+function _sfFontPathParts(fontValue) { return window.preflight.fontPathParts(fontValue); }
+function _sfFontDir(fontValue)       { return window.preflight.fontDir(fontValue); }
+function _sfSharedDirs(fontValue)    { return window.preflight.sharedDirs(fontValue); }
 window._sfFontPathParts = _sfFontPathParts;
 window._sfFontDir       = _sfFontDir;
 window._sfSharedDirs    = _sfSharedDirs;
@@ -7964,118 +7805,30 @@ function _sfConfigSlotNames(text) {
 }
 window._sfConfigSlotNames = _sfConfigSlotNames;
 
+// Presets that declare no shared folder. THE SCAN ITSELF MOVED TO
+// preflight-checks.js [B-224]; this wrapper stays because three callers here hand
+// it raw TEXT while the check works from the shared parse. One implementation,
+// two entry points — not two implementations.
 function _vpkScanPresets(text) {
-  const missing = [], sharedNames = new Set();
-  try {
-    const result = presetParser.parsePresets(text);
-    for (const arr of (result?.arrays || [])) {
-      for (const p of (arr.presets || [])) {
-        const font = String(p?.font ?? '').trim();
-        // No font at all is a different (bigger) problem than a missing shared folder,
-        // and "add ;common" would not be a repair for it. This also covers a freshly
-        // added preset seeded as ";common" — it has the folder, it just has no font yet.
-        if (!_sfFontDir(font)) continue;
-        const shared = _sfSharedDirs(font);
-        shared.forEach(n => sharedNames.add(n));
-        if (!shared.length) {
-          missing.push({
-            index: p.index,
-            font: _sfFontDir(font) || font,
-            label: p.displayName || '',
-            range: p.fontRange,
-            line: p.startLine,
-          });
-        }
-      }
-    }
-  } catch {}
-  return { missing, sharedNames: [...sharedNames] };
+  let parsed = null;
+  try { parsed = presetParser.parsePresets(text); } catch { parsed = null; }
+  if (!parsed) return { missing: [], sharedNames: [] };
+  return window.preflightChecks.vpkScanPresets(parsed);
 }
 
-const _vpkEsc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-
-// Compile gate. Returns true (proceed) or false (cancel), matching the SD guard.
-// COMPILE ONLY, deliberately. The flash path is a second door (a cache-restored
-// build can reach doFlash without passing through doCompile), and the SD guard
-// covers both because its failure mode corrupts a card. This one's failure mode
-// is a saber that says "voice pack not found" — annoying, not damaging — and
-// repairing at flash time would mean a recompile chain for no proportionate gain.
-// If that trade ever changes, doFlash in buildPanel.js is where the second gate goes.
-window.checkVoicepackDeclared = async function () {
-  const text = editor ? editor.getValue() : '';
-  if (!text) return true;
-
-  // Cheap synchronous scan first; only touch the filesystem if something is missing.
-  const { missing, sharedNames } = _vpkScanPresets(text);
-  if (!missing.length) return true;
-
-  const req = await _vpkPropRequirement(text);
-  const requires = req === null ? null : req.requires;
-  if (requires !== true) return true;                   // no requirement, or unknown
-
-  // Repair uses a name the config already uses when that is unambiguous, so a
-  // card organised around "MC" does not get a stray ";common" bolted on.
-  const repairName = sharedNames.length === 1 ? sharedNames[0] : 'common';
-
-  const shown = missing.slice(0, 8).map(p => {
-    const label = p.label ? ` &mdash; ${_vpkEsc(p.label)}` : '';
-    return `<li>Preset ${p.index}${label} &nbsp;<code>${_vpkEsc(p.font)}</code></li>`;
-  }).join('');
-  const more = missing.length > 8 ? `<li>…and ${missing.length - 8} more</li>` : '';
-
-  const one = missing.length === 1;
-
-  // The card reminder is a courtesy, not a check — we cannot see the card from
-  // here. Word it from the names the config already uses so it stays correct for
-  // a "MC" card or a per-preset dark/light split.
-  const cardLine = sharedNames.length
-    ? `Your other presets use ${sharedNames.map(n => `<code>${_vpkEsc(n)}</code>`).join(' and ')}. ` +
-      `${sharedNames.length > 1 ? 'Those folders' : 'That folder'} must exist at the root of your SD card.`
-    : `A <code>${_vpkEsc(repairName)}</code> folder must exist at the root of your SD card.`;
-
-  // The button names the action on the thing we control (the config). The exact
-  // string we will write is stated here instead, so nothing is hidden and no
-  // button implies we are creating something on the card.
-  const fixLine = `Fixing ${one ? 'it' : 'them'} adds <code>;${_vpkEsc(repairName)}</code> to ` +
-                  `${one ? 'that preset' : 'those presets'}.`;
-
-  const res = await promptConfirm({
-    title: 'Voicepack Folder Not Listed',
-    messageHtml:
-      `${req.via === 'menuspec'
-        ? "Your config's OS8 menu system (MENU_SPEC_TEMPLATE) requires a voicepack"
-        : 'Your prop requires a voicepack on ProffieOS 8'}, and ${one ? 'this preset does' : `${missing.length} presets do`} ` +
-      `not list a shared folder:<br><ul style="margin:8px 0 8px 18px">${shown}${more}</ul>` +
-      `Unless ${one ? 'that font contains' : 'those fonts contain'} their own copy of the voicepack, the saber will ` +
-      `announce <strong>&ldquo;voice pack not found&rdquo;</strong> every time you switch to ${one ? 'it' : 'them'}.<br><br>` +
-      `${fixLine} ${cardLine}`,
-    confirmText: one ? 'Fix 1 preset' : `Fix ${missing.length} presets`,
-    confirmKind: 'save',
-    middleText:  'Ignore',
-    cancelText:  'Cancel',
-  });
-
-  if (res === 'cancel') return false;
-  if (res === 'middle') return true;                    // the font-carries-its-own case
-
-  // Repair as ONE batch rather than a loop of _commitFieldEdit calls. Monaco
-  // applies a multi-edit batch against the pre-edit coordinate space, so no
-  // range goes stale and no reverse-ordering is needed — and the whole repair
-  // is a single undo step, which matters when it rewrites 58 presets at once.
-  // Ranges are 1-based lines / 0-based columns from the parser, and cover the
-  // quotes, which is why the replacement text re-adds them.
-  const edits = missing.filter(p => p.range).map(p => ({
-    range: {
-      startLineNumber: p.range.startLine, startColumn: p.range.startCol + 1,
-      endLineNumber:   p.range.endLine,   endColumn:   p.range.endCol + 1,
-    },
-    text: `"${p.font};${repairName}"`,
-  }));
-  if (edits.length) {
-    try { window._atomicEdit(editor, 'voicepack-repair', edits); } catch {}
-  }
-  return true;
-};
+// ⚠️ window.checkVoicepackDeclared IS GONE (2026-09-12). It was a bespoke compile
+// gate with its own dialog and its own Ignore; it is now a registered check in
+// preflight-checks.js, reported through the one preflight dialog alongside
+// everything else that fired. doCompile calls window.runPreflight() and nothing
+// else. [B-224]
+//
+// Two things the rehousing changed on purpose, and both are improvements rather
+// than side effects:
+//   * Its Ignore became the dialog's single "Compile anyway", so a config that
+//     trips this AND something else is one decision instead of two.
+//   * "No OS version selected" used to return true — silently indistinguishable
+//     from "nothing is wrong". It is now `unsure`, which reads the same to the
+//     user and is visible to us.
 
 // ── Preflight (compile gate) ───────────────────────────
 //

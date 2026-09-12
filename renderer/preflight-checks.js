@@ -135,4 +135,226 @@
     },
   });
 
+  // ── Voicepack declared ───────────────────────────────────────────────────
+  //
+  // ProffieOS 8 added a voicepack VERSION REQUIREMENT that the user never opts
+  // into. Traced against 7.15 and 8.10 source on 2026-07-30:
+  //
+  //   * The PROP registers it, not the OS core and not the config. Every call site
+  //     lives in props/: prop_base.h (when MENU_SPEC_TEMPLATE IS defined),
+  //     saber_fett263_buttons.h and saber_BC_buttons.h (when it is NOT), and
+  //     blaster_BC_buttons.h (unconditionally). Both branches of that #ifndef lead
+  //     to require_version, so on fett263 and BC there is no configuration that
+  //     avoids it. 7.15 has none of this machinery, so moving a config from 7.15 to
+  //     8.10 gains the requirement with nothing in the config having changed.
+  //   * CheckVersion() re-runs on EVERY font directory change and searches ONLY
+  //     that preset's font path. The failure is PER PRESET: one whose path reaches
+  //     a voicepack is quiet, one that does not announces "voice pack not found"
+  //     every time you switch to it. The message means "this preset cannot see a
+  //     voicepack", not "this saber has none".
+  //
+  // ⭐ THIS IS THE REGISTRY'S DESIGN TEST. If the mechanism could not carry this
+  // check — its per-preset list, its repair, and its courtesy line about the card —
+  // the mechanism would be wrong and building three more checks on it would be
+  // building them on sand. Rehoused 2026-09-12, behaviour unchanged.
+  //
+  // SEVERITY IS `warn`, AND THAT IS NOT A DEMOTION. The config compiles and flashes;
+  // what breaks is the saber talking at you afterwards. That makes it the EXPENSIVE
+  // class by the registry's own reasoning — found after flashing, with the saber
+  // closed up, with nothing in the world to mention it.
+
+  const VPK_INIT_RE = /(?:sound_library_v2|sound_library_)\s*\.\s*init\s*\(\s*\)|SoundLibrary\s*::\s*init\s*\(\s*\)/;
+
+  // Keep only the lines a preprocessor would keep, evaluating ONLY the symbols we
+  // can read from the config. Any other condition keeps BOTH branches live, so an
+  // init behind an unknown #if still counts. Conservative on purpose: a missed
+  // requirement is a saber that talks at you, a spurious one is a dismissible row.
+  function vpkLiveText(src, defines) {
+    const KNOWN = new Set(['MENU_SPEC_TEMPLATE', 'MOUNT_SD_SETTING']);
+    const stack = [];
+    const live = () => stack.every(f => f.live);
+    const out = [];
+    for (const raw of preflight.stripComments(src).split('\n')) {
+      const m = raw.match(/^\s*#\s*(ifdef|ifndef|if|else|elif|endif)\b\s*([A-Za-z_]\w*)?/);
+      if (m) {
+        const kw = m[1], sym = m[2];
+        if (kw === 'ifdef' || kw === 'ifndef' || kw === 'if') {
+          let known = false, val = true;
+          if ((kw === 'ifdef' || kw === 'ifndef') && sym && KNOWN.has(sym)) {
+            known = true;
+            val = (kw === 'ifdef') ? defines.has(sym) : !defines.has(sym);
+          }
+          stack.push({ live: val, known });
+        } else if (kw === 'else') {
+          const f = stack[stack.length - 1];
+          if (f) f.live = f.known ? !f.live : true;
+        } else if (kw === 'elif') {
+          const f = stack[stack.length - 1];
+          if (f) { f.live = true; f.known = false; }
+        } else if (kw === 'endif') {
+          stack.pop();
+        }
+        continue;
+      }
+      if (live()) out.push(raw);
+    }
+    return out.join('\n');
+  }
+
+  // The prop headers named inside #ifdef CONFIG_PROP.
+  function vpkPropIncludes(text) {
+    const src = preflight.stripComments(text);
+    const out = [];
+    const blocks = /#\s*ifdef\s+CONFIG_PROP([\s\S]*?)#\s*endif/g;
+    let b;
+    while ((b = blocks.exec(src))) {
+      for (const i of b[1].matchAll(/#\s*include\s+"([^"]+)"/g)) out.push(i[1]);
+    }
+    return out;
+  }
+
+  // Does the prop this config selects register a voicepack requirement?
+  // Returns { requires, v2, via } or null when we cannot tell.
+  //
+  // Follows the include chain rather than matching prop NAMES, because a user can
+  // derive their own prop: the JMT wrapper extends SaberFett263Buttons and chains
+  // Setup(), so a name list would miss his own config. Known limit, accepted: a
+  // derived prop that overrides Setup() WITHOUT chaining escapes this, and text
+  // alone cannot tell.
+  async function vpkPropRequirement(ctx) {
+    if (!ctx.versionName) return null;          // nothing chosen — cannot tell
+    let queue = vpkPropIncludes(ctx.text).map(p => p.split('/').pop()).filter(Boolean);
+    // A config with no prop include still HAS a prop: ProffieOS.ino falls back to
+    // props/saber.h (ino:681). Returning null here made a default-prop config with
+    // MENU_SPEC_TEMPLATE invisible — on hardware PropBase's constructor registers a
+    // V2 requirement (prop_base.h:76) whatever the prop is, while every surface of
+    // ours stayed silent. ([B-003], 2026-09-06.)
+    if (!queue.length) queue = ['saber.h'];
+    const seen = new Set();
+    while (queue.length && seen.size < 16) {
+      const file = queue.shift();
+      if (!file || seen.has(file)) continue;
+      seen.add(file);
+      let res = null;
+      try { res = await ctx.readVersionFile(ctx.versionName, `ProffieOS/props/${file}`); } catch {}
+      if (!res || !res.ok || !res.content) continue;
+      const liveSrc = vpkLiveText(res.content, ctx.defines);
+      const hit = liveSrc.match(VPK_INIT_RE);
+      if (hit) {
+        // WHICH spelling is live IS the version, straight from the source, and only
+        // the V2 requirement can ever FAIL: require_version(1) is satisfied by any
+        // pack, including one with no ini at all, since a missing ini reads as
+        // version 1. So this is binary, not a number to compare.
+        const isV1 = /sound_library_\s*\.\s*init/.test(hit[0]);
+        // WHERE the registration lives is the attribution: a hit in the prop's own
+        // file means the prop demands it; a hit in prop_base.h means the USER's
+        // MENU_SPEC_TEMPLATE brought it in, and blaming "your prop" there is wrong —
+        // sa22c asks for nothing. (2026-09-06.)
+        return { requires: true, v2: !isV1, via: file === 'prop_base.h' ? 'menuspec' : 'prop' };
+      }
+      // Only chase further headers inside props/ — every init call site lives there,
+      // and it keeps the walk bounded.
+      for (const i of liveSrc.matchAll(/#\s*include\s+"([^"]+)"/g)) {
+        const inc = i[1];
+        if (!inc.includes('/') || /(^|\/)props\//.test(inc)) queue.push(inc.split('/').pop());
+      }
+    }
+    return { requires: false, v2: false };
+  }
+
+  // Presets that declare no shared folder at all. Name-agnostic and count-agnostic,
+  // so it holds for "MC", for a nested "balvenos/common", and for a per-preset
+  // dark/light split.
+  function vpkScanPresets(parsed) {
+    const missing = [], sharedNames = new Set();
+    for (const arr of (parsed?.arrays || [])) {
+      for (const p of (arr.presets || [])) {
+        const font = String(p?.font ?? '').trim();
+        // No font at all is a different (bigger) problem than a missing shared
+        // folder, and "add ;common" would not be a repair for it. This also covers
+        // a freshly added preset seeded as ";common" — it has the folder, it just
+        // has no font yet.
+        if (!preflight.fontDir(font)) continue;
+        const shared = preflight.sharedDirs(font);
+        shared.forEach(n => sharedNames.add(n));
+        if (!shared.length) {
+          missing.push({
+            index: p.index,
+            font: preflight.fontDir(font) || font,
+            label: p.displayName || '',
+            range: p.fontRange,
+          });
+        }
+      }
+    }
+    return { missing, sharedNames: [...sharedNames] };
+  }
+
+  preflight.register({
+    id: 'voicepack-declared',
+    severity: 'warn',
+    title: 'Voicepack folder not listed',
+    async run(ctx) {
+      if (!ctx.parsed) return null;
+      // Cheap synchronous scan first; only touch the filesystem if something is
+      // actually missing.
+      const { missing, sharedNames } = vpkScanPresets(ctx.parsed);
+      if (!missing.length) return null;
+
+      const req = await vpkPropRequirement(ctx);
+      // ⚠️ null means we could not read the prop tree — no version selected, or the
+      // files were unreadable. That is exactly the case the registry added a third
+      // answer for: we have found presets with no shared folder but we do not know
+      // whether anything requires one, and guessing in either direction is wrong.
+      if (req === null) return { unsure: 'the selected OS version could not be read' };
+      if (req.requires !== true) return null;
+
+      // Repair uses a name the config already uses when that is unambiguous, so a
+      // card organised around "MC" does not get a stray ";common" bolted on.
+      const repairName = sharedNames.length === 1 ? sharedNames[0] : 'common';
+      const one = missing.length === 1;
+
+      // The card line is a COURTESY, not a check — we cannot see the card from here,
+      // and an unverifiable warning is noise. Worded from the names the config
+      // already uses so it stays correct for an "MC" card.
+      const cardLine = sharedNames.length
+        ? `Your other presets use ${sharedNames.join(' and ')}. `
+          + `${sharedNames.length > 1 ? 'Those folders' : 'That folder'} must exist at the root of your SD card.`
+        : `A ${repairName} folder must exist at the root of your SD card.`;
+
+      return {
+        findings: [{
+          title: `${req.via === 'menuspec'
+            ? "Your config's OS8 menu system (MENU_SPEC_TEMPLATE) requires a voicepack"
+            : 'Your prop requires a voicepack on ProffieOS 8'}, and `
+            + `${one ? 'this preset does' : `${missing.length} presets do`} not list a shared folder.`,
+          detail: `Unless ${one ? 'that font contains' : 'those fonts contain'} their own copy of the `
+            + `voicepack, the saber will announce "voice pack not found" every time you switch to `
+            + `${one ? 'it' : 'them'}. ${cardLine}`,
+          items: missing.map(p => p.label ? `${p.font} (${p.label})` : p.font),
+          fix: {
+            label: one ? `Add ;${repairName} to 1 preset` : `Add ;${repairName} to ${missing.length} presets`,
+            // Returns edits; the caller batches every accepted fix into ONE atomic
+            // write. Ranges are 1-based lines / 0-based columns from the parser and
+            // cover the quotes, which is why the replacement re-adds them.
+            plan() {
+              return missing.filter(p => p.range).map(p => ({
+                startLine: p.range.startLine, startCol: p.range.startCol,
+                endLine:   p.range.endLine,   endCol:   p.range.endCol,
+                text: `"${p.font};${repairName}"`,
+              }));
+            },
+          },
+        }],
+      };
+    },
+  });
+
+  // Exposed for index.html, whose Sound Fonts view asks the same question when
+  // deciding what a NEWLY added preset should carry. One walk, one answer — the
+  // alternative is a second implementation that drifts.
+  const api = { vpkLiveText, vpkPropIncludes, vpkPropRequirement, vpkScanPresets, VPK_INIT_RE };
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+  else root.preflightChecks = api;
+
 }(typeof globalThis !== 'undefined' ? globalThis : this));

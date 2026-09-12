@@ -535,17 +535,6 @@ async function doCompile() {
     : true;
   if (!_sdCompile) return; // Cancel from the SD guard
 
-  // Voicepack preflight: on OS8 the prop can require a voicepack with no user
-  // opt-in, and a preset that lists no shared folder announces "voice pack not
-  // found" on every switch to it. Config-only check; see the block above
-  // window.checkVoicepackDeclared in index.html for the traced mechanism.
-  // Sits here for the same reason the SD guard does — "Add ;common" edits the
-  // config, so it must run before the dirty check to be offered for saving.
-  const _vpkCompile = window.checkVoicepackDeclared
-    ? await window.checkVoicepackDeclared()
-    : true;
-  if (!_vpkCompile) return; // Cancel from the voicepack gate
-
   // Preflight registry: every config-truth check we have, run once, reported in
   // ONE dialog. Adding a check is adding an entry to preflight-checks.js — not an
   // edit here. This call site should not need to change again. [B-224]

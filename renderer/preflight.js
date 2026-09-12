@@ -150,6 +150,32 @@
     return set;
   }
 
+  // ── The font path model ──────────────────────────────────────────────────
+  //
+  // A preset's font value is a ProffieOS SEARCH PATH, not a name. Segment 0 is the
+  // font directory; every segment after it is another directory searched in order.
+  // So a SHARED folder is identified by POSITION, never by being spelled "common" —
+  // a card organised around "MC" is exactly as valid.
+  //
+  // This lives here because a check needs it and a check may not touch the DOM.
+  // index.html delegates to these rather than keeping its own copy: the literal
+  // -string test was once written out separately in a dozen places and each copy
+  // failed differently — a `;MC` config read as though its fonts were missing, the
+  // checkbox beside it read unticked, ticking it appended a folder that did not
+  // exist, and swapping a font silently DROPPED the shared segment. One model,
+  // consumed everywhere. [B-326]
+  //
+  // ⚠️ Empties are preserved at index 0 on purpose: ";common" means "no font yet,
+  // plus the shared folder", which is a different state from having no shared
+  // folder at all. Callers wanting a real name use the filtered accessors.
+  function fontPathParts(fontValue) {
+    return String(fontValue ?? '').split(';').map(s => s.trim());
+  }
+  // The font directory. '' when the value leads with ';'.
+  function fontDir(fontValue) { return fontPathParts(fontValue)[0] || ''; }
+  // Every shared directory this preset declares, in order. Empty array = none.
+  function sharedDirs(fontValue) { return fontPathParts(fontValue).slice(1).filter(Boolean); }
+
   // ── The registry ─────────────────────────────────────────────────────────
   const CHECKS = [];
 
@@ -221,7 +247,12 @@
     };
   }
 
-  const api = { buildContext, register, checks, run, stripComments, _resetForTests };
+  const api = {
+    buildContext, register, checks, run,
+    stripComments, configDefines: _configDefines,
+    fontPathParts, fontDir, sharedDirs,
+    _resetForTests,
+  };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.preflight = api;
