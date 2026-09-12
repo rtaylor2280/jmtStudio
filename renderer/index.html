@@ -7851,7 +7851,19 @@ function _vpkScanPresets(text) {
 // check, and an unrecoverable wrong answer is the one failure mode we cannot let
 // the user absorb. "I really don't ever want to be wrong" is the bar; the hatch is
 // what stops being wrong from being expensive while we find out.
-function _preflightEsc(s) { return _vpkEsc(s); }
+// ⚠️ THIS USED TO DELEGATE TO _vpkEsc, WHICH THE VOICEPACK MIGRATION DELETED OUT
+// FROM UNDER IT (2026-09-12). Everything compiled, every suite stayed green, and
+// the dialog threw ReferenceError the first time a check fired — so a config with
+// no shared folder failed SILENTLY at the gate instead of being told about it.
+// Nothing that runs outside the app can reach this line, which is exactly why the
+// dialog is dev-test territory and why this now owns its escaping outright rather
+// than borrowing a name from a neighbour that can move.
+// Findings carry preset names and folder names straight out of the user's config,
+// so escaping is not optional here.
+function _preflightEsc(s) {
+  return String(s ?? '').replace(/[&<>"]/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
 
 window.runPreflight = async function () {
   const text = editor ? editor.getValue() : '';
