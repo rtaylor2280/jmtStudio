@@ -1,7 +1,7 @@
 /**
  * PREFLIGHT CHECK REGISTRY  [B-224]
  *
- * His thesis, 2026-08-24, and it is not decoration: "a preflight check is cheap and
+ * The thesis, 2026-08-24, and it is not decoration: "a preflight check is cheap and
  * a compile fail costs our users time and potential confusion. the more we can help
  * guide before a compile check the better our messaging gets and we become more
  * helpful when it matters."
@@ -35,7 +35,7 @@
  *     { findings: [...] }      these things are wrong.
  *     { unsure: 'reason' }     I cannot tell, so say nothing.
  *
- *   ⭐ "I CANNOT TELL" IS A FIRST-CLASS ANSWER (his call, 2026-09-12: "I really
+ *   ⭐ "I CANNOT TELL" IS A FIRST-CLASS ANSWER (settled 2026-09-12: "I really
  *   don't ever want to be wrong"). A check that is only mostly right is worse than
  *   no check: one false positive costs the user time AND teaches them the gate is
  *   noise, after which it stops working even when it is right. Measured precedent,
@@ -48,8 +48,8 @@
  *     { title, detail, items, fix }
  *
  *   ⭐ THE ROW IS THE FINDING, NOT THE ITEM. One finding may cover 58 presets; it
- *   is still one row with one fix. Splitting it per item turns his real
- *   58-preset voicepack case into 58 clicks.
+ *   is still one row with one fix. Splitting it per item turns a real 58-preset
+ *   voicepack case into 58 clicks.
  *
  *   fix is optional: { label, plan(ctx) -> [edits] }. Remediation lives WITH its
  *   finding, in the row — never as a button at the bottom of the dialog. Two
