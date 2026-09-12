@@ -121,6 +121,13 @@
       readVersionFile: typeof o.readVersionFile === 'function'
         ? o.readVersionFile
         : async () => null,
+      // searchVersionFiles(versionName, query) -> Promise<{ok, results:[{path,...}]}|null>
+      // Lets a check DERIVE a fact from the selected OS instead of carrying a list
+      // that goes stale. Absent is normal and must read as "cannot tell".
+      searchVersionFiles: typeof o.searchVersionFiles === 'function'
+        ? o.searchVersionFiles
+        : async () => null,
+
       defines: _configDefines(text),
     };
   }

@@ -454,6 +454,282 @@
     },
   });
 
+  // ── A style factory name that does not exist ─────────────────────────────
+  //
+  // [B-324]. A misspelled wrapper — `StyleRainBowPtr` with a capital B — is a hard
+  // compile error that costs a full build to discover. ⭐ AND PROFFIEOS'S OWN
+  // DOCUMENTATION CONTAINS THAT EXACT TYPO: config/common_presets.h line 16 reads
+  // `//   StyleRainBowPtr<out millis, in millis>()`. Anyone copying that comment
+  // out of the OS source gets a config that cannot compile, from the most
+  // trustworthy place they could have got it.
+  //
+  // ⚠️ THE LIST IS DERIVED, NEVER REMEMBERED, and that is the whole design. [B-321]
+  // deliberately deleted a hardcoded list of style NAMES because preserving the
+  // user's text with a stale list rewrites valid code. Validating with a stale list
+  // is worse: it calls working code broken, which is the false positive that
+  // teaches people to ignore every check we have.
+  // ⭐ MEASURED 2026-09-12, AND IT CORRECTED THE ENTRY ON FIRST RUN: the eight
+  // factories are stable across 7.x and 8.x, but ProffieOS 6.9 has SEVEN — no
+  // ChargingStylePtr. A hardcoded eight would have told a 6.9 user their config was
+  // fine when it genuinely will not build.
+  //
+  // ⚠️ SCOPE IS THE OUTERMOST FACTORY ONLY. `StylePtr<InOutHelper<Red>>()` is
+  // checked as `StylePtr`; InOutHelper and everything under it is NOT, because
+  // there is no authoritative dictionary for style classes and inventing one is
+  // exactly what [B-321] removed. A check without a dictionary is [B-012]'s
+  // problem, deliberately solved a different way.
+  //
+  // ⚠️ AND THE USER'S OWN SIDE COUNTS. A config or the Style Library can define its
+  // own StyleAllocator factory; warning on someone's own helper is the same false
+  // positive wearing a different hat. Both sources, one union.
+
+  // A function DEFINITION at column zero. The variable declarations in the same
+  // headers (`  StyleAllocator style_allocator;`, `    StyleAllocator allocator =
+  // nullptr;`) are indented and have no `(`, so they never match — verified
+  // against the real trees rather than assumed.
+  const STYLE_FACTORY_RE = /^StyleAllocator\s+([A-Za-z_]\w*)\s*\(/gm;
+
+  function factoriesIn(text) {
+    const out = new Set();
+    if (!text) return out;
+    STYLE_FACTORY_RE.lastIndex = 0;
+    let m;
+    while ((m = STYLE_FACTORY_RE.exec(text)) !== null) out.add(m[1]);
+    return out;
+  }
+
+  // ⚠️ DERIVED EVERY COMPILE, NOT CACHED, AND THAT IS DELIBERATE.
+  //
+  // A per-session cache was written first and removed the same hour. It bought
+  // 117 ms — measured against the real 8.10 tree, 398 files walked — on an action
+  // whose next step takes minutes. Against that it introduced a staleness window
+  // where adding a factory to an OS tree with the app open would have the check
+  // flagging a brand-new, perfectly valid name until a restart. That is precisely
+  // the false positive this check exists to avoid, reintroduced by the
+  // optimisation. Editing an OS tree is not hypothetical here; the JMT wrapper
+  // lives in one.
+  //
+  // Guarding a stale read would have been the wrong answer to a problem that can
+  // simply not exist.
+  async function osFactories(ctx) {
+    if (!ctx.versionName) return null;
+
+    let found = null;
+    try {
+      const hits = await ctx.searchVersionFiles(ctx.versionName, 'StyleAllocator');
+      if (hits && hits.ok && Array.isArray(hits.results)) {
+        const names = new Set();
+        for (const r of hits.results) {
+          // ⚠️ NOT JUST .h. Measured against the real 8.10 tree: 11 files mention
+          // StyleAllocator and only 5 are headers — the rest are ProffieOS.ino and
+          // four tests.cpp. None of them DEFINES a factory today, so a .h-only
+          // filter would have worked and the assumption would have been invisible.
+          // It fails in the expensive direction though: an OS that ever defines one
+          // elsewhere would have us calling a valid name unknown. Six extra reads,
+          // once per version, buys the assumption away.
+          if (r.type !== 'file' || !/\.(h|hpp|ino|cpp|cc|c)$/i.test(r.path || '')) continue;
+          const f = await ctx.readVersionFile(ctx.versionName, r.path);
+          if (f && f.ok && f.content) for (const n of factoriesIn(f.content)) names.add(n);
+        }
+        // ⚠️ THE DERIVATION HAS TO PROVE ITSELF, because a PARTIAL read is the way
+        // this check turns into a liar. An empty result is obviously a failed read.
+        // A result missing most of the tree is not obvious at all, and would have us
+        // calling perfectly good names unknown.
+        //
+        // ⭐ StylePtr IS THE SENTINEL, and it is a fact rather than a threshold.
+        // Every ProffieOS that has ever existed defines StylePtr — it is the one
+        // every config uses. Verified across all seven installed trees, 6.9 through
+        // 8.10. So a derivation that does not contain it did not read the tree,
+        // whatever else it found, and a count-based floor would have been an
+        // arbitrary number pretending to be a rule.
+        //
+        // This is what makes the check maintainable without a list to keep current:
+        // if a future OS declares factories some other way, we do not silently start
+        // flagging valid names — we go quiet and say we cannot tell.
+        if (names.size && names.has('StylePtr')) found = names;
+      }
+    } catch { found = null; }
+
+    return found;
+  }
+
+  // presetParser is a global in the app and a module under node.
+  function _parser() {
+    if (root.presetParser) return root.presetParser;
+    return require('./presetParser.js');
+  }
+
+  // A preset's raw text starts at some point in the document; the parser gives us
+  // its START LINE but offsets within it are entry-relative. Find the entry's own
+  // offset by searching from the start of its line, then convert.
+  // ⚠️ Returns null rather than a guess when the entry cannot be located — a fix
+  // that writes to the wrong place is worse than no fix at all.
+  function _lineColOf(fullText, preset, offsetInRaw) {
+    const lines = String(fullText).split('\n');
+    if (!(preset.startLine >= 1) || preset.startLine > lines.length) return null;
+    let base = 0;
+    for (let i = 0; i < preset.startLine - 1; i++) base += lines[i].length + 1;
+    const at = fullText.indexOf(preset.raw, base);
+    if (at < 0) return null;
+    const abs = at + offsetInRaw;
+    let line = 1, col = 0, seen = 0;
+    for (let i = 0; i < lines.length; i++) {
+      if (seen + lines[i].length >= abs) { line = i + 1; col = abs - seen; break; }
+      seen += lines[i].length + 1;
+    }
+    return { line, col };
+  }
+
+  // Levenshtein, capped. Only used to SUGGEST, never to decide.
+  function _distance(a, b) {
+    const m = a.length, n = b.length;
+    if (Math.abs(m - n) > 3) return 99;
+    let prev = Array.from({ length: n + 1 }, (_, i) => i);
+    for (let i = 1; i <= m; i++) {
+      const cur = [i];
+      for (let j = 1; j <= n; j++) {
+        cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      }
+      prev = cur;
+    }
+    return prev[n];
+  }
+
+  preflight.register({
+    id: 'unknown-style-factory',
+    severity: 'block',
+    title: 'Unknown style factory',
+    async run(ctx) {
+      if (!ctx.parsed) return null;
+
+      // What the config actually uses: the leading identifier of each style slot.
+      // Read from the slot boundaries the parser already found, so there is one
+      // definition of "where a style expression is" rather than two.
+      const used = new Map();               // name -> [preset labels]
+      for (const arr of (ctx.parsed.arrays || [])) {
+        for (const p of (arr.presets || [])) {
+          if (p.parseError || !p.raw) continue;
+          let slots = [];
+          try { slots = root.presetParser ? root.presetParser.extractStyleSlots(p.raw) : []; }
+          catch { slots = []; }
+          if (!slots.length && typeof require === 'function') {
+            try { slots = require('./presetParser.js').extractStyleSlots(p.raw); } catch { slots = []; }
+          }
+          for (const s of slots) {
+            const txt = p.raw.slice(s.startOffset, s.endOffset).trim();
+            // `&style_name` is a reference to a style declared elsewhere, not a
+            // factory call. Different thing, no dictionary, not ours.
+            const name = (txt.match(/^([A-Za-z_]\w*)\s*[<(]/) || [])[1];
+            if (!name) continue;
+            const label = (p.displayName || '').trim() || `Preset ${p.index}`;
+            if (!used.has(name)) used.set(name, []);
+            if (!used.get(name).includes(label)) used.get(name).push(label);
+          }
+        }
+      }
+      if (!used.size) return null;
+
+      const fromOs = await osFactories(ctx);
+      if (!fromOs) {
+        // No version selected, or its tree could not be read. We have no dictionary,
+        // so every name here is unjudgeable — exactly what the third answer is for.
+        return { unsure: 'the selected ProffieOS version could not be read' };
+      }
+
+      // ⚠️ THE OS IS THE ONLY SOURCE, AND A CONFIG CANNOT ADD TO IT.
+      //
+      // An earlier build also read factories out of the config and the Style
+      // Library, on the entry's reasoning that a user "can define its own
+      // StyleAllocator factory" and warning on their own helper would be a false
+      // positive. That is wrong, and the correction is a ProffieOS fact rather
+      // than a preference (2026-09-12): **a config cannot carry a function
+      // definition at all.** ProffieOS.ino `#include`s the config SEVEN times
+      // under different CONFIG_* guards — and CONFIG_PROP twice — so a
+      // `StyleAllocator Foo() {…}` anywhere in it is a redefinition error. The
+      // Style Library cannot either: it holds `using X = …` type aliases, which
+      // are types and can never be a factory. Measured: 0 of 173 real configs
+      // define one, and a 3,176-line real Style Library has 141 aliases and none.
+      //
+      // ⭐ AND THE OLD BEHAVIOUR WAS NOT MERELY DEAD, IT WAS A SUPPRESSION PATH.
+      // Reading a name out of a config that has one would accept a factory
+      // defined by text that itself cannot build — so we would go SILENT on a
+      // broken config, which is the opposite of protecting anyone. Defensive code
+      // for an impossible input defends nothing and hides something.
+      const valid = fromOs;
+
+      const findings = [];
+      for (const [name, presets] of used) {
+        if (valid.has(name)) continue;
+        let best = null, bestD = 99;
+        for (const v of valid) {
+          const d = _distance(name, v);
+          if (d < bestD) { bestD = d; best = v; }
+        }
+        // A suggestion is only offered when it is close enough to be a typo rather
+        // than a different word. Two edits on a name this long is still a typo;
+        // three is a guess.
+        const suggestion = (best && bestD <= 2) ? best : null;
+        const one = presets.length === 1;
+
+        // ⭐ A FIX IS OFFERED ONLY ON A SINGLE-CHARACTER MISS, and that narrowness is
+        // the whole justification. This is the one check with an AUTHORITATIVE
+        // dictionary — the names came out of the OS the user selected — so a rename
+        // to a name one edit away is about as safe as the voicepack's `;common`.
+        // Two edits away is still worth SUGGESTING in words and not worth doing to
+        // someone's config on their behalf; that is a guess wearing a button.
+        // (A first build offered no fix at all, on the grounds that a rename is a
+        // decision. The better read: it is only a decision while we are unsure,
+        // and at distance 1 against an authoritative list we are not.)
+        const fixable = suggestion && bestD === 1;
+
+        findings.push({
+          title: `There is no style called ${name}.`,
+          detail: (suggestion ? `Did you mean ${suggestion}? ` : '')
+                + `${one ? 'This preset uses' : `${presets.length} presets use`} it, and the build `
+                + `will stop on it.`
+                + (suggestion === null
+                    ? ` Your ProffieOS version provides: ${[...fromOs].sort().join(', ')}.`
+                    : ''),
+          items: presets,
+          fix: fixable ? {
+            label: `Change to ${suggestion}`,
+            // Rewrites the NAME only, never the template arguments or the call, and
+            // only where it appears as a style factory. Computed against the
+            // document as it is now, and applied as one atomic edit — the caller
+            // re-derives everything afterwards, so nothing here can go stale.
+            plan(c) {
+              const edits = [];
+              for (const arr of (c.parsed?.arrays || [])) {
+                for (const p of (arr.presets || [])) {
+                  if (p.parseError || !p.raw || !p.startLine) continue;
+                  let slots = [];
+                  try { slots = _parser().extractStyleSlots(p.raw); } catch { slots = []; }
+                  for (const s of slots) {
+                    const txt = p.raw.slice(s.startOffset, s.endOffset);
+                    const lead = txt.match(/^(\s*)([A-Za-z_]\w*)/);
+                    if (!lead || lead[2] !== name) continue;
+                    // Offsets are relative to the preset entry, whose own start we
+                    // know in document coordinates; converting once here keeps the
+                    // parser's boundaries as the single source of truth.
+                    const abs = _lineColOf(c.text, p, s.startOffset + lead[1].length);
+                    if (!abs) continue;
+                    edits.push({
+                      startLine: abs.line, startCol: abs.col,
+                      endLine:   abs.line, endCol:   abs.col + name.length,
+                      text: suggestion,
+                    });
+                  }
+                }
+              }
+              return edits;
+            },
+          } : null,
+        });
+      }
+      return findings.length ? { findings } : null;
+    },
+  });
+
   // Exposed for index.html, whose Sound Fonts view asks the same question when
   // deciding what a NEWLY added preset should carry. One walk, one answer — the
   // alternative is a second implementation that drifts.

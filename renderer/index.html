@@ -7877,10 +7877,15 @@ window.runPreflight = async function () {
     // optional chaining would have made it return '' forever while LOOKING wired.
     // When a check needs the board, expose it from buildPanel.js and fill this in.
     board: '',
-    // Injected rather than reached for, so a check that walks prop headers can be
-    // tested against a fake tree instead of a real ProffieOS install.
+    // Injected rather than reached for, so a check that walks prop headers or
+    // derives a list from the OS tree can be tested against a FAKE tree instead of
+    // a real ProffieOS install. That is what lets the whole check set run in node.
     readVersionFile: async (versionName, relPath) => {
       try { return await window.electronAPI?.readVersionFile?.(versionName, relPath); }
+      catch { return null; }
+    },
+    searchVersionFiles: async (versionName, query) => {
+      try { return await window.electronAPI?.searchVersionFiles?.(versionName, query); }
       catch { return null; }
     },
   });
@@ -7917,7 +7922,7 @@ window.runPreflight = async function () {
   const modal   = document.getElementById('modal-confirm');
   const msgEl   = document.getElementById('modal-confirm-msg');
   const titleEl = document.getElementById('modal-confirm-title');
-  const okBtn   = document.getElementById('modal-confirm-ok');
+  const cancelBtn = document.getElementById('modal-confirm-cancel');
 
   const rowsHtml = (findings) => findings.map((f, i) => {
     const items = (f.items || []).slice(0, 8).map(_preflightEsc).join(', ');
@@ -7934,12 +7939,25 @@ window.runPreflight = async function () {
       + `</li>`;
   }).join('');
 
+  // ⚠️ THE BUTTON SLOTS ARE NOT INTERCHANGEABLE, AND GETTING THAT WRONG COST A
+  // FAILED TEST THAT WAS NOT A BUG. The row renders Cancel · Middle · Alt · OK,
+  // left to right. A first build hid the real cancel slot and put "Cancel Compile"
+  // on the rightmost OK button, so the dialog read
+  //     [Compile anyway] [Cancel Compile]
+  // with cancel on the RIGHT — backwards from every other dialog in the app, and
+  // from the convention everywhere else. He pressed what he expected to be Compile
+  // anyway, got a cancel, and reported the compile silently doing nothing.
+  // (2026-09-12: "the fact that cancel is on the right is throwing me off. it
+  // should be on the left but as the default button... like cancel always is.")
+  // So: the cancel ACTION lives in the cancel SLOT. It is also the styled default,
+  // because stopping is the safe answer here and the risky one should not be the
+  // thing your hand goes to.
   const paint = () => {
     const one = res.findings.length === 1;
     titleEl.textContent = res.blocking
       ? (one ? 'This Config Cannot Compile' : 'This Config Cannot Compile Yet')
       : 'Before You Compile';
-    okBtn.textContent = res.blocking ? 'Cancel Compile' : 'Cancel';
+    cancelBtn.textContent = res.blocking ? 'Cancel Compile' : 'Cancel';
     msgEl.innerHTML = `<ul style="margin:8px 0 0 18px;padding:0">${rowsHtml(res.findings)}</ul>`;
   };
 
@@ -7971,7 +7989,7 @@ window.runPreflight = async function () {
     if (!res.findings.length) {
       // Nothing left to decide. Resolve the dialog as "proceed" through its own
       // button rather than reaching into promptConfirm's internals.
-      document.getElementById('modal-confirm-middle')?.click();
+      document.getElementById('modal-confirm-ok')?.click();
       return;
     }
     paint();
@@ -7985,18 +8003,26 @@ window.runPreflight = async function () {
     answer = await promptConfirm({
       title: titleEl.textContent,
       messageHtml: msgEl.innerHTML,
-      confirmText: okBtn.textContent,
-      confirmKind: 'save',
-      middleText:  'Compile anyway',
-      hideCancel:  true,
+      // Rightmost, and deliberately the PLAIN secondary. 'neutral' is the style
+      // the card panel and the import review already use for their "...anyway"
+      // buttons; without it the only non-primary option is red, and proceeding
+      // here is not destructive, just not recommended.
+      confirmText: 'Compile anyway',
+      confirmKind: 'neutral',
+      // Leftmost, where cancel lives in every other dialog, and styled as the
+      // default because stopping is the safe answer.
+      cancelText:  cancelBtn.textContent,
+      cancelKind:  'save',
     });
   } finally {
     modal.removeEventListener('click', onFixClick);
   }
 
-  // Every remaining finding was seen and waved through, or the last one was
-  // fixed and this resolved itself.
-  return answer === 'middle';
+  // Two buttons, so promptConfirm is in its plain boolean mode: true = the
+  // rightmost "Compile anyway", false = cancel. The auto-close path above clicks
+  // that same OK button, so a run whose last finding gets fixed proceeds by
+  // exactly the route a deliberate click takes.
+  return answer === true;
 };
 
 // preflight.js may be absent in a stripped build; never let that stop a compile.
