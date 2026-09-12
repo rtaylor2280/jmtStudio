@@ -8113,18 +8113,46 @@ window.checkBladeStyleCounts = async function () {
   // A preset the parser could not read is skipped too. Its style list is empty
   // by construction, so counting it would report "0 of 4" about a preset whose
   // real problem is something else entirely.
+  // ⚠️ THE PARSER'S COUNT IS NOT CORROBORATION OF ITSELF, AND THAT COST THREE
+  // FALSE POSITIVES. Measured 2026-09-12 across 173 configs (the wild corpus plus
+  // the examples): 14 would have been blocked and 3 of those compile fine, because
+  // presetParser under-counts styles on certain real configs and reports no
+  // parseError while doing it. A gate that stops a working compile is worse than
+  // the error it replaces, and one false positive teaches people the gate is noise
+  // — after which it stops working even when it is right. [B-224]
+  //
+  // So the parse gets a second opinion from a different instrument: count style
+  // factories in the entry's own text, comments stripped. This is deliberately
+  // NOT a parser — it only has to disagree. More tokens than parsed slots means we
+  // cannot account for the difference, and "cannot account for it" is silence, not
+  // a finding. Over-counting costs a missed case, which is cheap; the other
+  // direction is not.
+  const _stripForCount = s => String(s || '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n').map(l => l.replace(/\/\/.*$/, '')).join('\n');
+  const _styleTokens = raw => {
+    const c = _stripForCount(raw);
+    // Style*Ptr<…> covers StylePtr, StyleNormalPtr, StyleFirePtr and the rest;
+    // &name covers a reference to a style declared elsewhere in the config.
+    return (c.match(/\bStyle\w*Ptr\s*</g) || []).length + (c.match(/&\w+/g) || []).length;
+  };
+
   const short = [];
   for (const arr of (parsed.arrays || [])) {
     for (const p of (arr.presets || [])) {
       if (p.parseError) continue;
       const actual = (p.styles || []).length;
-      if (actual < expected) {
-        short.push({
-          name: (p.displayName || '').trim() || `Preset ${p.index}`,
-          actual,
-          array: arr.name,
-        });
-      }
+      if (actual >= expected) continue;
+      if (_styleTokens(p.raw) > actual) continue;   // the two readings disagree
+
+      // A preset with no styles parsed has no trustworthy name either: with
+      // nothing between the strings, the parser takes the LAST one, which is the
+      // track. Naming a preset after its own wav reads as a different fault.
+      const nameRaw = (p.displayName || '').trim();
+      const name = (!nameRaw || nameRaw === (p.track || '').trim())
+        ? `Preset ${p.index}`
+        : nameRaw;
+      short.push({ name, actual, array: arr.name });
     }
   }
   if (!short.length) return true;

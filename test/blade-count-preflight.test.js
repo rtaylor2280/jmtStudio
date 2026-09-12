@@ -227,27 +227,110 @@ BladeConfig blades[] = {{ 0, WS281XBladePtr<100, bladePin>(), CONFIGARRAY(bankA)
        /compile/i.test(r.dialog.confirmText), r.dialog.confirmText);
   }
 
-  // ── 7. no false positives on the real example configs ─────────────────
+  // ── 7. the parser is not corroboration of itself ──────────────────────
   {
-    const dirs = ['local/ConfigExamples', 'local/b226-test-configs', 'local/test-configs'];
-    const files = [];
-    for (const d of dirs) {
-      try {
-        for (const f of fs.readdirSync(path.join(ROOT, d))) {
-          if (f.endsWith('.h')) files.push(path.join(ROOT, d, f));
-        }
-      } catch { /* corpus is optional; it is not in the repo on every machine */ }
-    }
-    if (!files.length) {
-      console.log('SKIP  no example configs on this machine');
-    } else {
+    // 3438_2.h from the wild corpus: one real StylePtr, parsed as zero styles,
+    // no parseError. Blocking it would stop a config that compiles.
+    const r = await check(`
+#define NUM_BLADES 1
+Preset presets[] = {
+  { "apocalypse;common", "tracks/cantina.wav",
+    StylePtr<Layers<
+  //an alternate, commented out
+  HumpFlicker<Red,Rgb<125,0,0>,40>>>()},
+};
+BladeConfig blades[] = {{ 0, WS281XBladePtr<100, bladePin>(), CONFIGARRAY(presets) }};
+`);
+    ok('a preset whose styles the parser missed is NOT blocked',
+       r.proceed === true && !r.dialog, r.body);
+  }
+  {
+    // ⚠️ A KNOWN GAP, ASSERTED SO IT IS VISIBLE RATHER THAN FORGOTTEN. [B-372]
+    // presetParser counts a COMMENTED-OUT style as a real slot (both // and /* */),
+    // so this preset reads as 2 of 2 and the gate never sees a shortfall. The same
+    // miscount makes the preset panel show it as complete, which is the worse half.
+    // This is a parser fault, not a gate fault, and the gate must not paper over it
+    // by second-guessing a count it was given.
+    // ⭐ WHEN [B-372] IS FIXED THIS ASSERTION FLIPS AND THIS TEST WILL FAIL. That is
+    // the point: change it to expect a block, and delete this note.
+    const r = await check(`
+#define NUM_BLADES 2
+Preset presets[] = {
+  { "font", "track.wav",
+    StylePtr<Red>(),
+    //StylePtr<Blue>(),
+    "Real" },
+};
+BladeConfig blades[] = {{ 0, WS281XBladePtr<100, bladePin>(), CONFIGARRAY(presets) }};
+`);
+    ok('KNOWN GAP [B-372]: a commented-out style is counted as a slot, so this is silent',
+       r.proceed === true && !r.dialog, r.body);
+  }
+  {
+    // 6680_5.h shape: { font, track } with nothing else. The parser takes the
+    // last string as the name, so the name IS the track - naming a preset after
+    // its own wav describes a different fault.
+    const r = await check(`
+#define NUM_BLADES 2
+Preset presets[] = {
+    { "TeensySF", "boot.wav" }
+};
+BladeConfig blades[] = {{ 0, WS281XBladePtr<100, bladePin>(), CONFIGARRAY(presets) }};
+`);
+    ok('a preset named after its own track falls back to position',
+       r.proceed === false && /Preset 1/.test(r.body) && !/boot\.wav/.test(r.body), r.body);
+  }
+
+  // ── 8. the corpus, which is the only check that cannot be rigged ───────
+  //
+  // "What did it do across the corpus" is B-224's stated bar for any new check,
+  // and it is the one measurement here that my own fixtures cannot flatter: these
+  // are other people's configs, written without knowing this gate exists.
+  const readDir = d => {
+    try {
+      return fs.readdirSync(path.join(ROOT, d))
+        .filter(f => f.endsWith('.h'))
+        .map(f => path.join(ROOT, d, f));
+    } catch { return []; }   // corpora are gitignored; absent on a fresh machine
+  };
+
+  {
+    // Configs known to be VALID. Zero of these may be blocked, ever.
+    const files = ['local/ConfigExamples', 'local/b226-test-configs', 'local/test-configs']
+      .flatMap(readDir);
+    if (!files.length) console.log('SKIP  no example configs on this machine');
+    else {
       const blocked = [];
       for (const f of files) {
-        const r = await check(fs.readFileSync(f, 'utf8'));
-        if (r.proceed === false) blocked.push(path.basename(f));
+        if ((await check(fs.readFileSync(f, 'utf8'))).proceed === false) blocked.push(path.basename(f));
       }
-      ok(`none of the ${files.length} example configs are blocked`,
+      ok(`none of the ${files.length} known-good configs are blocked`,
          blocked.length === 0, blocked.join(', '));
+    }
+  }
+
+  {
+    // The wild corpus is scraped from real configs and MANY ARE GENUINELY BROKEN,
+    // so blocking is the correct outcome for most of it. What is asserted is the
+    // three that are not: measured 2026-09-12, each has styles the parser does not
+    // see, and each compiles. They are the reason the corroboration guard exists.
+    const files = ['local/nightly/error-exp/wild/configs',
+                   'local/nightly/error-exp/wild/configs2'].flatMap(readDir);
+    if (!files.length) console.log('SKIP  wild corpus not on this machine');
+    else {
+      const MUST_STAY_SILENT = ['3438_2.h', '557_17.h', '7230_1.h'];
+      const wrongly = [];
+      let blocked = 0;
+      for (const f of files) {
+        const proceed = (await check(fs.readFileSync(f, 'utf8'))).proceed;
+        if (proceed === false) {
+          blocked++;
+          if (MUST_STAY_SILENT.includes(path.basename(f))) wrongly.push(path.basename(f));
+        }
+      }
+      ok(`the ${MUST_STAY_SILENT.length} known false positives stay silent across ${files.length} wild configs`,
+         wrongly.length === 0, `wrongly blocked: ${wrongly.join(', ')}`);
+      console.log(`      (${blocked} wild configs blocked — most of that corpus is genuinely broken)`);
     }
   }
 
