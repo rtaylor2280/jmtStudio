@@ -187,7 +187,26 @@ BladeConfig blades[] = {{ 0, WS281XBladePtr<100, bladePin>(), CONFIGARRAY(bankA)
     ok('the clean bank is not named', !/bankB/.test(r.body), r.body);
   }
 
-  // ── 5. the escape hatch ───────────────────────────────────────────────
+  // ── 5. slot vs slots ──────────────────────────────────────────────────
+  {
+    // Short by one: one empty slot to fill.
+    const r = await check(mk(4, [{ n: 3, name: 'Short' }]));
+    ok('short by one says "slot"', /empty slot in the Styles row/.test(r.body), r.body);
+  }
+  {
+    // The real 2026-09-12 case: 34 presets at 1 of 3, each missing TWO slots.
+    // "the empty slot" there describes a screen the user is not looking at.
+    const r = await check(mk(3, Array.from({ length: 34 }, (_, i) => ({ n: 1, name: 'P' + (i + 1) }))));
+    ok('short by two says "slots"', /empty slots in the Styles row/.test(r.body), r.body);
+  }
+  {
+    // Mixed: one preset short by one, another by two. Any preset short by more
+    // than one makes it plural.
+    const r = await check(mk(4, [{ n: 3, name: 'ByOne' }, { n: 2, name: 'ByTwo' }]));
+    ok('mixed shortfalls say "slots"', /empty slots in the Styles row/.test(r.body), r.body);
+  }
+
+  // ── 6. the buttons ────────────────────────────────────────────────────
   {
     // The gate can only be as right as the parser. "Compile anyway" exists for
     // the case where we are wrong, not because a short preset might build.
@@ -196,10 +215,19 @@ BladeConfig blades[] = {{ 0, WS281XBladePtr<100, bladePin>(), CONFIGARRAY(bankA)
   }
   {
     const r = await check(mk(4, [{ n: 3, name: 'Short' }]), 'confirm');
-    ok('OK blocks', r.proceed === false);
+    ok('the other button blocks', r.proceed === false);
+    // ⚠️ "OK" sat here until 2026-09-12 and was ambiguous against "Compile
+    // anyway" - it reads as "OK, go ahead", which is the one direction this
+    // dialog cannot afford. Both buttons must name their action.
+    ok('neither button is an unlabelled acknowledgement',
+       !/^(OK|Okay|Close|Done)$/i.test(r.dialog.confirmText)
+       && !/^(OK|Okay|Close|Done)$/i.test(r.dialog.middleText),
+       `confirm="${r.dialog.confirmText}" middle="${r.dialog.middleText}"`);
+    ok('the blocking button names the compile',
+       /compile/i.test(r.dialog.confirmText), r.dialog.confirmText);
   }
 
-  // ── 6. no false positives on the real example configs ─────────────────
+  // ── 7. no false positives on the real example configs ─────────────────
   {
     const dirs = ['local/ConfigExamples', 'local/b226-test-configs', 'local/test-configs'];
     const files = [];

@@ -8152,6 +8152,12 @@ window.checkBladeStyleCounts = async function () {
     ? `<br><br>${banks.length === 1 ? 'All in' : 'Across'} <code>${banks.map(b => _vpkEsc(b)).join('</code>, <code>')}</code>.`
     : '';
 
+  // A preset can be short by more than one, and usually is when a config gains a
+  // blade: 34 presets at "1 of 3" are each missing TWO slots, and telling that
+  // user to fill "the empty slot" describes a screen they are not looking at.
+  // Plural the moment any preset is short by more than one.
+  const slotWord = short.every(s => expected - s.actual === 1) ? 'slot' : 'slots';
+
   const res = await promptConfirm({
     title: one ? 'A Preset Is Missing a Blade Style' : 'Presets Are Missing Blade Styles',
     messageHtml:
@@ -8159,9 +8165,11 @@ window.checkBladeStyleCounts = async function () {
       `${one ? '<strong>1</strong> preset has' : `<strong>${short.length}</strong> presets have`} ` +
       `${countPhrase}:<br><br><strong>${shown}</strong>${more}.${bankLine}<br><br>` +
       `Every preset needs one style per blade, so this cannot compile. Open ` +
-      `${one ? 'that preset' : 'each preset'} in Presets and fill the empty slot in the ` +
+      `${one ? 'that preset' : 'each preset'} in Presets and fill the empty ${slotWord} in the ` +
       `Styles row.`,
-    confirmText: 'OK',
+    // "OK" beside "Compile anyway" reads as "OK, go ahead" - the one direction
+    // this dialog cannot afford to be ambiguous in. The button says what it does.
+    confirmText: 'Cancel Compile',
     confirmKind: 'save',
     middleText:  'Compile anyway',
     hideCancel:  true,
