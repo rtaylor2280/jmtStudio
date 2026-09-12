@@ -7866,18 +7866,16 @@ function _preflightEsc(s) {
 }
 
 window.runPreflight = async function () {
-  const text = editor ? editor.getValue() : '';
-  if (!text || !root_preflight()) return true;
+  if (!editor || !root_preflight()) return true;
 
-  const ctx = window.preflight.buildContext({
-    text,
+  const makeCtx = () => window.preflight.buildContext({
+    text: editor.getValue(),
     versionName: document.getElementById('input-version')?.value?.trim() || '',
     // ⚠️ NOT WIRED, DELIBERATELY LEFT EMPTY. No check reads the board yet, and
     // `selectedFqbn` is module-local to buildPanel.js with no accessor. A first
     // draft here called a window.getSelectedBoardLabel() that does not exist —
-    // optional chaining would have made it return '' forever while LOOKING wired,
-    // which is the shape of defect this whole session kept finding. When a check
-    // needs the board, expose it from buildPanel.js and fill this in then.
+    // optional chaining would have made it return '' forever while LOOKING wired.
+    // When a check needs the board, expose it from buildPanel.js and fill this in.
     board: '',
     // Injected rather than reached for, so a check that walks prop headers can be
     // tested against a fake tree instead of a real ProffieOS install.
@@ -7887,7 +7885,8 @@ window.runPreflight = async function () {
     },
   });
 
-  const res = await window.preflight.run(ctx);
+  let ctx = makeCtx();
+  let res = await window.preflight.run(ctx);
 
   // A check that threw is a check that said nothing. It must never take the
   // compile with it — the user asked to build, and our inability to read their
@@ -7896,10 +7895,31 @@ window.runPreflight = async function () {
 
   if (!res.findings.length) return true;
 
-  // Each finding is a row: what is wrong, what to do about it, and its own fix
-  // affordance when it has one. The items list is capped because a 58-preset
-  // finding is still one row and must not become a page.
-  const rows = res.findings.map((f, i) => {
+  // ── A FIX APPLIES WHEN YOU CLICK IT, AND THE LIST RE-DERIVES ──────────────
+  //
+  // ⚠️ IT USED TO SAY "Will be fixed" AND DEFER THE WRITE TO THE END, and that was
+  // a lie about a thing that had already happened (2026-09-12: "will be fixed...
+  // when? it did fix... so will be fixed is a lie"). The deferral existed to keep
+  // several fixes in ONE atomic batch, because edits computed against the old
+  // document go stale the moment another edit lands.
+  //
+  // ⭐ RE-RUNNING DISSOLVES THAT PROBLEM INSTEAD OF MANAGING IT. Each fix is
+  // applied on its own, then the context is rebuilt from the document as it NOW
+  // is and every check runs again. Nothing can be stale, because nothing is
+  // carried across a write. It is also more honest: a row disappears because the
+  // check no longer finds anything, not because we crossed it off a list — and if
+  // the repair did not work, it stays, which a batched "will be fixed" could never
+  // tell you.
+  //
+  // And when the last finding clears, the dialog closes and the build proceeds.
+  // Being made to press a button to confirm an empty list is the app asking about
+  // something it has already resolved.
+  const modal   = document.getElementById('modal-confirm');
+  const msgEl   = document.getElementById('modal-confirm-msg');
+  const titleEl = document.getElementById('modal-confirm-title');
+  const okBtn   = document.getElementById('modal-confirm-ok');
+
+  const rowsHtml = (findings) => findings.map((f, i) => {
     const items = (f.items || []).slice(0, 8).map(_preflightEsc).join(', ');
     const more  = (f.items || []).length > 8 ? `, and ${f.items.length - 8} more` : '';
     const fixBtn = f.fix
@@ -7914,62 +7934,69 @@ window.runPreflight = async function () {
       + `</li>`;
   }).join('');
 
-  const one = res.findings.length === 1;
-  const title = res.blocking
-    ? (one ? 'This Config Cannot Compile' : 'This Config Cannot Compile Yet')
-    : 'Before You Compile';
-
-  // Fixes are collected, not applied one at a time. Every accepted fix goes out as
-  // ONE atomic batch below: edits are computed against the document as it is now,
-  // so applying one makes the next one's coordinates stale. That is not a
-  // theoretical concern — it is [B-371], which corrupted a config from a single
-  // writer on 2026-09-12.
-  const accepted = new Set();
-  const onFixClick = (e) => {
-    const btn = e.target.closest('.preflight-fix');
-    if (!btn) return;
-    e.preventDefault();
-    const idx = Number(btn.dataset.fix);
-    accepted.add(idx);
-    btn.disabled = true;
-    btn.textContent = 'Will be fixed';
+  const paint = () => {
+    const one = res.findings.length === 1;
+    titleEl.textContent = res.blocking
+      ? (one ? 'This Config Cannot Compile' : 'This Config Cannot Compile Yet')
+      : 'Before You Compile';
+    okBtn.textContent = res.blocking ? 'Cancel Compile' : 'Cancel';
+    msgEl.innerHTML = `<ul style="margin:8px 0 0 18px;padding:0">${rowsHtml(res.findings)}</ul>`;
   };
-  const msgEl = document.getElementById('modal-confirm-msg');
-  msgEl.addEventListener('click', onFixClick);
 
-  let res2;
+  let busy = false;
+  const onFixClick = async (e) => {
+    const btn = e.target.closest('.preflight-fix');
+    if (!btn || busy) return;
+    e.preventDefault();
+    busy = true;
+    btn.disabled = true;
+    btn.textContent = 'Fixing…';
+    try {
+      const finding = res.findings[Number(btn.dataset.fix)];
+      const edits = (finding.fix.plan(ctx) || []).map(x => ({
+        range: {
+          startLineNumber: x.startLine, startColumn: x.startCol + 1,
+          endLineNumber:   x.endLine,   endColumn:   x.endCol + 1,
+        },
+        text: x.text,
+      }));
+      // One atomic edit per fix, so a multi-preset repair is a single undo step.
+      if (edits.length) window._atomicEdit(editor, 'preflight-fix', edits);
+      ctx = makeCtx();
+      res = await window.preflight.run(ctx);
+    } catch (err) {
+      console.warn('[preflight] fix failed:', err);
+    }
+    busy = false;
+    if (!res.findings.length) {
+      // Nothing left to decide. Resolve the dialog as "proceed" through its own
+      // button rather than reaching into promptConfirm's internals.
+      document.getElementById('modal-confirm-middle')?.click();
+      return;
+    }
+    paint();
+  };
+
+  paint();
+  modal.addEventListener('click', onFixClick);
+
+  let answer;
   try {
-    res2 = await promptConfirm({
-      title,
-      messageHtml: `<ul style="margin:8px 0 0 18px;padding:0">${rows}</ul>`,
-      confirmText: res.blocking ? 'Cancel Compile' : 'Cancel',
+    answer = await promptConfirm({
+      title: titleEl.textContent,
+      messageHtml: msgEl.innerHTML,
+      confirmText: okBtn.textContent,
       confirmKind: 'save',
       middleText:  'Compile anyway',
       hideCancel:  true,
     });
   } finally {
-    msgEl.removeEventListener('click', onFixClick);
+    modal.removeEventListener('click', onFixClick);
   }
 
-  if (accepted.size) {
-    const edits = [];
-    for (const i of accepted) {
-      try { edits.push(...(res.findings[i].fix.plan(ctx) || [])); } catch {}
-    }
-    if (edits.length) {
-      try {
-        window._atomicEdit(editor, 'preflight-fix', edits.map(e => ({
-          range: {
-            startLineNumber: e.startLine, startColumn: e.startCol + 1,
-            endLineNumber:   e.endLine,   endColumn:   e.endCol + 1,
-          },
-          text: e.text,
-        })));
-      } catch {}
-    }
-  }
-
-  return res2 === 'middle';
+  // Every remaining finding was seen and waved through, or the last one was
+  // fixed and this resolved itself.
+  return answer === 'middle';
 };
 
 // preflight.js may be absent in a stripped build; never let that stop a compile.
