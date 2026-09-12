@@ -350,6 +350,110 @@
     },
   });
 
+  // ── Prop defines with no prop at all ─────────────────────────────────────
+  //
+  // [B-089]. The fault is Afrojedi's 2026-06-15 Crucible config: a full set of
+  // FETT263_QUICK_SELECT_ON_BOOT / FETT263_TWIST_ON / FETT263_EDIT_MODE_MENU in
+  // CONFIG_TOP and no prop include at all. ProffieOS fell back to the default
+  // saber prop, every one of those defines became dead code, and the board booted
+  // with NO WAY TO NAVIGATE THE SABER.
+  //
+  // ⭐ IT COMPILES CLEANLY. There is no compiler diagnostic to translate, no error
+  // to look up, and nothing anywhere in the world that mentions it — the saber
+  // simply does not behave as configured, and it is found after flashing with the
+  // hilt closed up. That is the expensive class, which is exactly why `warn` here
+  // does not mean "minor".
+  //
+  // ⚠️ THE RULE IS PORTED, NOT RE-DERIVED. It was built and measured in the
+  // research harness (local/nightly/error-exp/lint_precompile.js, R12) at 0 false
+  // positives over 164 configs, with one genuine fault found in the wild. The
+  // entry sat open for weeks on "where does a config lint LIVE" — this registry is
+  // that answer, and this is its first `warn` consumer.
+  //
+  // ⚠️⚠️ ITS FIRST DRAFT MATCHED ON PROP HEADER FILENAMES AND SCORED 6 FALSE
+  // POSITIVES ON RYAN'S OWN 8 KNOWN-GOOD CONFIGS, all of which include
+  // `../props/jmt_fett_prop.h` — a JMT prop outside the stock props/ directory.
+  // The lesson is NOT "add that filename": any allowlist of prop filenames is a
+  // wolf-crier by construction, because anyone may rename a prop or write their
+  // own and the rule would then call a working config broken. Filenames are not
+  // evidence about behaviour. So this asks the ONE question it can answer with
+  // certainty — is there a prop include at all? — and abstains everywhere else.
+  //
+  // NO FIX IS OFFERED, deliberately. A repair would have to choose WHICH prop the
+  // user meant, and the header named below is the likely one rather than the known
+  // one. Writing a guess into someone's config is the one outcome worse than
+  // telling them what is wrong.
+
+  // Derived by scanning the real props/ directory (ProffieOS 8.x, 2026-08-22), not
+  // written from memory. Two results a remembered list would have got wrong:
+  // FETT263_ has TWO valid homes because JMT's own wrapper defines that surface
+  // too, and there is NO SHTOK_ prefix at all — saber_shtok_buttons.h carries only
+  // DISABLE_* defines, so guessing would have added a rule that can never fire.
+  // Generic prefixes shared across props (DISABLE_, ENABLE_, BUTTON_, BLADE_,
+  // SAVE_, MENU_, MOUNT_, GESTURE_, DYNAMIC_) are deliberately absent: they say
+  // nothing about WHICH prop is wanted.
+  const PROP_DEFINE_OWNERS = [
+    { prefix: 'FETT263',    headers: ['saber_fett263_buttons.h', 'jmt_fett263_wrapper.h'] },
+    { prefix: 'SA22C',      headers: ['saber_sa22c_buttons.h'] },
+    { prefix: 'BC',         headers: ['saber_BC_buttons.h', 'blaster_BC_buttons.h'] },
+    { prefix: 'CAIWYN',     headers: ['saber_caiwyn_buttons.h'] },
+    { prefix: 'SABERSENSE', headers: ['saber_sabersense_buttons.h'] },
+  ];
+
+  preflight.register({
+    id: 'prop-defines-without-prop',
+    severity: 'warn',
+    title: 'Prop defines with no prop',
+    run(ctx) {
+      const clean = ctx.cleanText;
+      if (!clean) return null;
+
+      const present = [];
+      for (const { prefix, headers } of PROP_DEFINE_OWNERS) {
+        const re = new RegExp('^\\s*#\\s*define\\s+(' + prefix + '_[A-Z0-9_]+)', 'gm');
+        const hits = [];
+        let m;
+        while ((m = re.exec(clean)) !== null) hits.push(m[1]);
+        if (hits.length) present.push({ prefix, headers, hits });
+      }
+      if (!present.length) return null;
+
+      // ABSTAIN ON A FRAGMENT. Seven of thirteen wild "findings" turned out to be
+      // forum pastes of a CONFIG_TOP block alone — no presets, no prop section,
+      // not a config anyone could flash. The rule was right about the text in
+      // front of it and wrong about what the text WAS. Costs nothing in the app,
+      // where a saved config always has presets.
+      if (!preflight.sectionBody(clean, 'CONFIG_PRESETS')) {
+        return { unsure: 'this looks like a config fragment, not a whole config' };
+      }
+
+      // Read from CONFIG_PROP specifically. A prop include sitting in the wrong
+      // section is a DIFFERENT fault, and reporting it here would name the wrong
+      // root cause — worse than giving no answer.
+      const propBody = preflight.sectionBody(clean, 'CONFIG_PROP');
+      const propIncludes = propBody ? (propBody.match(/#\s*include\s*[<"][^">]+[">]/g) || []) : [];
+      if (propIncludes.length) {
+        // Something is handling the prop and its name alone cannot tell us what.
+        // A custom or renamed prop is legitimate and common.
+        return { unsure: 'a prop is included and we cannot judge it by its filename' };
+      }
+
+      // Aggregated to ONE finding per prefix. Afrojedi's config would otherwise
+      // produce two dozen identical rows, and attention is the scarce thing.
+      return {
+        findings: present.map(({ prefix, headers, hits }) => ({
+          title: `Your config sets ${hits.length} ${prefix}_ option${hits.length === 1 ? '' : 's'}, `
+               + `but no prop is included.`,
+          detail: `Without a prop, ProffieOS uses its default and every one of these does nothing — `
+                + `the saber will boot, and none of the controls you set up will work. Add the prop `
+                + `to the CONFIG_PROP section; for these options that is usually ${headers[0]}.`,
+          items: hits.slice(0, 3),
+          fix: null,
+        })),
+      };
+    },
+  });
+
   // Exposed for index.html, whose Sound Fonts view asks the same question when
   // deciding what a NEWLY added preset should carry. One walk, one answer — the
   // alternative is a second implementation that drifts.

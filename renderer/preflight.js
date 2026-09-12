@@ -103,6 +103,13 @@
 
     return {
       text,
+      // Comment-stripped once, for every check that reasons about what the
+      // PREPROCESSOR sees rather than what the file says. Doing this per check
+      // is the cost the shared context exists to avoid.
+      // ⚠️ Fine on config text, which has no JS regex literals — the one shape
+      // this stripper mis-reads. Do not point it at our own source; see
+      // test/reference-integrity.test.js for what that costs.
+      cleanText: stripComments(text),
       parsed,
       bladeCount: (parsed && parsed.bladeCount) || 0,
       // The selected OS version and board, for checks whose answer depends on
@@ -148,6 +155,24 @@
     const set = new Set();
     for (const m of stripComments(text).matchAll(/^[ \t]*#[ \t]*define[ \t]+([A-Za-z_]\w*)/gm)) set.add(m[1]);
     return set;
+  }
+
+  // The body of a `#ifdef NAME ... #endif` section, or null when there is none.
+  // Nested #if/#ifdef/#ifndef are counted so an inner block cannot end the outer
+  // one early. Give it COMMENT-STRIPPED text: a commented-out #endif would
+  // otherwise close a section that is still open.
+  function sectionBody(src, name) {
+    const m = String(src || '').match(new RegExp('#ifdef\\s+' + name + '\\b'));
+    if (!m) return null;
+    const rest = String(src).slice(m.index + m[0].length);
+    let depth = 1;
+    const acc = [];
+    for (const line of rest.split('\n')) {
+      if (/^\s*#\s*(if|ifdef|ifndef)\b/.test(line)) depth++;
+      else if (/^\s*#\s*endif\b/.test(line)) { depth--; if (depth === 0) break; }
+      acc.push(line);
+    }
+    return acc.join('\n');
   }
 
   // ── The font path model ──────────────────────────────────────────────────
@@ -249,7 +274,7 @@
 
   const api = {
     buildContext, register, checks, run,
-    stripComments, configDefines: _configDefines,
+    stripComments, configDefines: _configDefines, sectionBody,
     fontPathParts, fontDir, sharedDirs,
     _resetForTests,
   };
