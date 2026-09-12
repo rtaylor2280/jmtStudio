@@ -546,16 +546,16 @@ async function doCompile() {
     : true;
   if (!_vpkCompile) return; // Cancel from the voicepack gate
 
-  // Blade style count preflight: a preset with fewer styles than NUM_BLADES
-  // cannot compile, and gcc's answer for it points at the preset NAME inside a
-  // template expansion, which is unreadable. See window.checkBladeStyleCounts.
-  // Unlike the two gates above this one edits nothing, so its position relative
-  // to the dirty check does not matter - it sits here to keep all three
-  // config-truth checks together and ahead of any file writing. [B-365]
-  const _bladeCompile = window.checkBladeStyleCounts
-    ? await window.checkBladeStyleCounts()
+  // Preflight registry: every config-truth check we have, run once, reported in
+  // ONE dialog. Adding a check is adding an entry to preflight-checks.js — not an
+  // edit here. This call site should not need to change again. [B-224]
+  //
+  // Sits ahead of the dirty check for the same reason the two gates above do: a
+  // fix a check offers edits the config, so it must be offered for saving.
+  const _preflight = window.runPreflight
+    ? await window.runPreflight()
     : true;
-  if (!_bladeCompile) return; // Cancel from the blade count gate
+  if (!_preflight) return; // Cancel from the preflight gate
 
   // Dirty checks — prompt the user instead of auto-saving. Config first (Save As is
   // offered since the user may want to compile a copy at a new path), then Style

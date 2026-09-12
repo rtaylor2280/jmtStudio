@@ -1,87 +1,55 @@
 /**
- * Blade style count preflight — unit tests for the compile gate. [B-365]
+ * The blade style count check.  [B-365], rehoused onto the registry [B-224]
  *
- * Same approach as voicepack-preflight.test.js: the gate lives in the inline
- * <script> of renderer/index.html, so this extracts the real source text and
- * evaluates it rather than copying it. A copy would prove nothing, and an edit
- * to the implementation has to be visible here.
+ * It used to live in the inline <script> of index.html and this suite extracted it
+ * from the HTML. Since 2026-09-12 it is a registered check in preflight-checks.js,
+ * so it is just required — which is the point of the registry: a check is data,
+ * reads a context, returns findings, and never touches the DOM.
+ *
+ * ⚠️ WHAT THIS SUITE CANNOT SEE. The dialog is assembled in index.html and is not
+ * exercised here — button labels, row layout and the fix affordance are dev-test
+ * territory. Do not read a green run as "the gate works"; read it as "the check
+ * decides correctly". Those are different claims, and conflating them is how three
+ * changes passed every test on 2026-09-03 while none of them reached the screen.
  *
  * What matters most, in order:
- *   1. It does not fire on a valid config. A gate that blocks a compile that
- *      would have worked is worse than the bug it was written for.
- *   2. It does not count presets the compiler never sees (commented out), or
- *      presets the parser could not read (their style list is empty by
- *      construction, so counting them reports "0 of 4" about a different fault).
- *   3. It names PRESETS, not lines. The line gcc reports is the preset's name,
- *      which is the only token of the wrong type once a missing style lets the
- *      name slide into the last style slot — correct, and unusable.
- *   4. Over-count is deliberately out of scope: it already has a red header and
- *      a repair tool, so it must stay silent here.
+ *   1. It does not fire on a valid config. A gate that blocks a compile that would
+ *      have worked is worse than the bug it was written for.
+ *   2. It does not count presets the compiler never sees, or presets the parser
+ *      could not read.
+ *   3. It names PRESETS, not lines.
+ *   4. Over-count is deliberately out of scope — it already has a red header and a
+ *      repair tool. That is [B-223].
  *
  * Run: node test/blade-count-preflight.test.js
  */
 const fs = require('fs');
 const path = require('path');
-const vm = require('vm');
 
 const ROOT = path.join(__dirname, '..');
-const html = fs.readFileSync(path.join(ROOT, 'renderer', 'index.html'), 'utf8');
-const presetParser = require(path.join(ROOT, 'renderer', 'presetParser.js'));
+const preflight = require(path.join(ROOT, 'renderer', 'preflight.js'));
+require(path.join(ROOT, 'renderer', 'preflight-checks.js'));
 
-function extract(startMarker, endMarker) {
-  const a = html.indexOf(startMarker);
-  const b = html.indexOf(endMarker, a);
-  if (a < 0 || b < 0) throw new Error(`could not extract ${startMarker.slice(0, 40)}…`);
-  return html.slice(a, b);
-}
-
-// _vpkEsc is a one-line arrow the gate reuses for escaping; take its whole line.
-const escLine = html.split('\n').find(l => l.includes('const _vpkEsc ='));
-if (!escLine) throw new Error('could not find _vpkEsc');
-
-const src = escLine + '\n'
-          + extract('window.checkBladeStyleCounts = async function () {', '// ── Window title');
-
-let lastDialog = null;
-let answer = 'confirm';
-const ctx = {
-  presetParser,
-  console,
-  window: {},
-  editor: null,
-  promptConfirm: async (opts) => { lastDialog = opts; return answer; },
-};
-vm.createContext(ctx);
-vm.runInContext(src, ctx, { filename: 'index.html:blade-count-preflight' });
-
-const gate = ctx.window.checkBladeStyleCounts;
-if (typeof gate !== 'function') throw new Error('checkBladeStyleCounts did not attach to window');
-
-// ── tiny harness ────────────────────────────────────────────────────────
 let failures = 0;
 function ok(name, cond, extra) {
-  if (cond) { console.log('PASS ', name); }
+  if (cond) console.log('PASS ', name);
   else { failures++; console.log('FAIL ', name, extra === undefined ? '' : `\n      ${extra}`); }
 }
 
-// Tags become a space so adjacent words never fuse, then whitespace before
-// punctuation is closed up — otherwise "<strong>P8</strong>, and" reads as
-// "P8 , and" and every assertion has to know where the markup was.
-const strip = s => String(s == null ? '' : s)
-  .replace(/<[^>]+>/g, ' ')
-  .replace(/\s+/g, ' ')
-  .replace(/\s+([,.;:])/g, '$1')
-  .trim();
-
-async function check(config, reply = 'confirm') {
-  ctx.editor = { getValue: () => config };
-  answer = reply;
-  lastDialog = null;
-  const proceed = await gate();
-  return { proceed, dialog: lastDialog, body: strip(lastDialog && lastDialog.messageHtml) };
+// One finding per run here by construction — this check returns at most one.
+async function check(config) {
+  const res = await preflight.run(preflight.buildContext({ text: config }));
+  const f = res.findings.find(x => x.checkId === 'blade-style-count') || null;
+  return {
+    blocked: !!f,
+    finding: f,
+    // The text a reader would see, with the item list folded in the way the dialog
+    // folds it, so assertions read like the sentence on screen.
+    body: f ? `${f.title} ${(f.items || []).join(', ')}. ${f.detail}` : '',
+    unsure: res.unsure.some(u => u.id === 'blade-style-count'),
+  };
 }
 
-// Build a config with `presets` = [{ n: styleCount, name }].
 const mk = (numBlades, presets, bank = 'testbank') => `
 #define NUM_BLADES ${numBlades}
 Preset ${bank}[] = {
@@ -95,40 +63,36 @@ BladeConfig blades[] = {{ 0, WS281XBladePtr<100, bladePin>(), CONFIGARRAY(${bank
 (async () => {
   // ── 1. the case it was written for ────────────────────────────────────
   {
-    // NUM_BLADES 4, first preset complete, the rest one style short. This is the
-    // shape of the config that produced five unreadable gcc errors on 09-10.
     const r = await check(mk(4, [
       { n: 4, name: 'Graflex' }, { n: 3, name: 'Graflex3' }, { n: 3, name: 'Luke' },
       { n: 3, name: 'GL9' }, { n: 3, name: 'Graflex8' },
     ]));
-    ok('four short presets block the compile', r.proceed === false);
+    ok('four short presets block the compile', r.blocked && r.finding.severity === 'block');
     ok('the count is stated as "3 of 4"', /4 presets have 3 of 4 blade styles/.test(r.body), r.body);
-    ok('every short preset is named', /Graflex3, Luke, GL9, Graflex8/.test(r.body), r.body);
-    ok('the COMPLETE preset is not named',
-       !/\bGraflex,/.test(r.body) && !/\bGraflex\b(?!\d)/.test(r.body.replace(/Graflex3|Graflex8/g, '')), r.body);
+    ok('every short preset is named',
+       r.finding.items.join(',') === 'Graflex3,Luke,GL9,Graflex8', r.finding.items.join(','));
+    ok('the COMPLETE preset is not named', !r.finding.items.includes('Graflex'));
     ok('no line number is offered', !/line \d|:\d+/i.test(r.body), r.body);
+    ok('it offers no fix, because filling a slot is a decision not a repair',
+       r.finding.fix === null);
   }
 
   // ── 2. silence on anything that compiles ──────────────────────────────
   {
-    const r = await check(mk(4, [{ n: 4, name: 'A' }, { n: 4, name: 'B' }]));
-    ok('a correct config is silent and proceeds', r.proceed === true && !r.dialog);
+    ok('a correct config is silent', !(await check(mk(4, [{ n: 4, name: 'A' }, { n: 4, name: 'B' }]))).blocked);
   }
   {
-    // Over-count also fails to compile, but it already shows a red "4/2 BLADES"
-    // header and offers a repair. Out of scope here, on purpose.
-    const r = await check(mk(2, [{ n: 4, name: 'TooMany' }]));
-    ok('over-count stays silent (out of scope)', r.proceed === true && !r.dialog);
+    ok('over-count stays silent (out of scope, see B-223)',
+       !(await check(mk(2, [{ n: 4, name: 'TooMany' }]))).blocked);
   }
   {
     const r = await check(`Preset testbank[] = {
   { "font", "track.wav", StylePtr<A>(), "One" },
 };`);
-    ok('no knowable blade count means no claim', r.proceed === true && !r.dialog);
+    ok('no knowable blade count means no claim', !r.blocked);
   }
   {
-    ctx.editor = { getValue: () => '' };
-    ok('an empty editor never blocks', (await gate()) === true);
+    ok('an empty config never blocks', !(await check('')).blocked);
   }
 
   // ── 3. presets the compiler never sees ────────────────────────────────
@@ -144,33 +108,36 @@ Preset testbank[] = {
 };
 BladeConfig blades[] = {{ 0, WS281XBladePtr<100, bladePin>(), CONFIGARRAY(testbank) }};
 `);
-    ok('commented-out short presets are not counted', r.proceed === true && !r.dialog,
-       r.body);
+    ok('commented-out short presets are not counted', !r.blocked, r.body);
   }
 
   // ── 4. wording ────────────────────────────────────────────────────────
   {
     const r = await check(mk(2, [{ n: 2, name: 'Fine' }, { n: 1, name: 'Lonely' }]));
-    ok('one short preset reads as singular in the title',
-       /^A Preset Is Missing/.test(r.dialog.title), r.dialog.title);
-    ok('one short preset reads as singular in the body',
+    ok('one short preset reads as singular',
        /1 preset has 1 of 2 blade styles/.test(r.body) && /that preset/.test(r.body), r.body);
   }
   {
-    // Different shortfalls cannot share one "N of M" phrase, and a per-preset
-    // breakdown is more than anyone needs to go and fix them.
     const r = await check(mk(4, [{ n: 3, name: 'Three' }, { n: 2, name: 'Two' }]));
-    ok('mixed shortfalls fall back to "fewer than"',
-       /fewer than 4 blade styles/.test(r.body), r.body);
+    ok('mixed shortfalls fall back to "fewer than"', /fewer than 4 blade styles/.test(r.body), r.body);
   }
   {
     const r = await check(mk(3, [{ n: 2, name: '' }]));
-    ok('an unnamed preset is pointed at by position', /Preset 1/.test(r.body), r.body);
+    ok('an unnamed preset is pointed at by position', r.finding.items.includes('Preset 1'));
   }
   {
-    const r = await check(mk(4, Array.from({ length: 12 }, (_, i) => ({ n: 3, name: 'P' + (i + 1) }))));
-    ok('a long list truncates and says how many are left',
-       /P8, and 4 more/.test(r.body), r.body);
+    const r = await check(mk(4, [{ n: 3, name: 'Short' }]));
+    ok('short by one says "slot"', /empty slot in the Styles row/.test(r.body), r.body);
+  }
+  {
+    const r = await check(mk(3, Array.from({ length: 34 }, (_, i) => ({ n: 1, name: 'P' + (i + 1) }))));
+    ok('short by two says "slots"', /empty slots in the Styles row/.test(r.body), r.body);
+    ok('all 34 are named in the finding, and folding is the dialog\'s job not the check\'s',
+       r.finding.items.length === 34, String(r.finding.items.length));
+  }
+  {
+    const r = await check(mk(4, [{ n: 3, name: 'ByOne' }, { n: 2, name: 'ByTwo' }]));
+    ok('mixed shortfalls say "slots"', /empty slots in the Styles row/.test(r.body), r.body);
   }
   {
     const r = await check(`
@@ -187,50 +154,10 @@ BladeConfig blades[] = {{ 0, WS281XBladePtr<100, bladePin>(), CONFIGARRAY(bankA)
     ok('the clean bank is not named', !/bankB/.test(r.body), r.body);
   }
 
-  // ── 5. slot vs slots ──────────────────────────────────────────────────
+  // ── 5. the parser is not corroboration of itself ──────────────────────
   {
-    // Short by one: one empty slot to fill.
-    const r = await check(mk(4, [{ n: 3, name: 'Short' }]));
-    ok('short by one says "slot"', /empty slot in the Styles row/.test(r.body), r.body);
-  }
-  {
-    // The real 2026-09-12 case: 34 presets at 1 of 3, each missing TWO slots.
-    // "the empty slot" there describes a screen the user is not looking at.
-    const r = await check(mk(3, Array.from({ length: 34 }, (_, i) => ({ n: 1, name: 'P' + (i + 1) }))));
-    ok('short by two says "slots"', /empty slots in the Styles row/.test(r.body), r.body);
-  }
-  {
-    // Mixed: one preset short by one, another by two. Any preset short by more
-    // than one makes it plural.
-    const r = await check(mk(4, [{ n: 3, name: 'ByOne' }, { n: 2, name: 'ByTwo' }]));
-    ok('mixed shortfalls say "slots"', /empty slots in the Styles row/.test(r.body), r.body);
-  }
-
-  // ── 6. the buttons ────────────────────────────────────────────────────
-  {
-    // The gate can only be as right as the parser. "Compile anyway" exists for
-    // the case where we are wrong, not because a short preset might build.
-    const r = await check(mk(4, [{ n: 3, name: 'Short' }]), 'middle');
-    ok('Compile anyway proceeds', r.proceed === true);
-  }
-  {
-    const r = await check(mk(4, [{ n: 3, name: 'Short' }]), 'confirm');
-    ok('the other button blocks', r.proceed === false);
-    // ⚠️ "OK" sat here until 2026-09-12 and was ambiguous against "Compile
-    // anyway" - it reads as "OK, go ahead", which is the one direction this
-    // dialog cannot afford. Both buttons must name their action.
-    ok('neither button is an unlabelled acknowledgement',
-       !/^(OK|Okay|Close|Done)$/i.test(r.dialog.confirmText)
-       && !/^(OK|Okay|Close|Done)$/i.test(r.dialog.middleText),
-       `confirm="${r.dialog.confirmText}" middle="${r.dialog.middleText}"`);
-    ok('the blocking button names the compile',
-       /compile/i.test(r.dialog.confirmText), r.dialog.confirmText);
-  }
-
-  // ── 7. the parser is not corroboration of itself ──────────────────────
-  {
-    // 3438_2.h from the wild corpus: one real StylePtr, parsed as zero styles,
-    // no parseError. Blocking it would stop a config that compiles.
+    // 3438_2.h from the wild corpus: one real StylePtr, parsed as zero styles, no
+    // parseError. Blocking it would stop a config whose presets are valid.
     const r = await check(`
 #define NUM_BLADES 1
 Preset presets[] = {
@@ -241,18 +168,16 @@ Preset presets[] = {
 };
 BladeConfig blades[] = {{ 0, WS281XBladePtr<100, bladePin>(), CONFIGARRAY(presets) }};
 `);
-    ok('a preset whose styles the parser missed is NOT blocked',
-       r.proceed === true && !r.dialog, r.body);
+    ok('a preset whose styles the parser missed is NOT blocked', !r.blocked, r.body);
   }
   {
     // ⚠️ A KNOWN GAP, ASSERTED SO IT IS VISIBLE RATHER THAN FORGOTTEN. [B-372]
-    // presetParser counts a COMMENTED-OUT style as a real slot (both // and /* */),
-    // so this preset reads as 2 of 2 and the gate never sees a shortfall. The same
-    // miscount makes the preset panel show it as complete, which is the worse half.
-    // This is a parser fault, not a gate fault, and the gate must not paper over it
-    // by second-guessing a count it was given.
-    // ⭐ WHEN [B-372] IS FIXED THIS ASSERTION FLIPS AND THIS TEST WILL FAIL. That is
-    // the point: change it to expect a block, and delete this note.
+    // presetParser counts a COMMENTED-OUT style as a real slot, so this reads as
+    // 2 of 2 and the check never sees a shortfall. The same miscount makes the
+    // preset panel show it as complete, which is the worse half. The fix belongs
+    // in the parser, not here.
+    // ⭐ WHEN [B-372] IS FIXED THIS ASSERTION FLIPS AND THIS TEST WILL FAIL. That
+    // is the point: change it to expect a block, and delete this note.
     const r = await check(`
 #define NUM_BLADES 2
 Preset presets[] = {
@@ -264,12 +189,9 @@ Preset presets[] = {
 BladeConfig blades[] = {{ 0, WS281XBladePtr<100, bladePin>(), CONFIGARRAY(presets) }};
 `);
     ok('KNOWN GAP [B-372]: a commented-out style is counted as a slot, so this is silent',
-       r.proceed === true && !r.dialog, r.body);
+       !r.blocked, r.body);
   }
   {
-    // 6680_5.h shape: { font, track } with nothing else. The parser takes the
-    // last string as the name, so the name IS the track - naming a preset after
-    // its own wav describes a different fault.
     const r = await check(`
 #define NUM_BLADES 2
 Preset presets[] = {
@@ -278,42 +200,39 @@ Preset presets[] = {
 BladeConfig blades[] = {{ 0, WS281XBladePtr<100, bladePin>(), CONFIGARRAY(presets) }};
 `);
     ok('a preset named after its own track falls back to position',
-       r.proceed === false && /Preset 1/.test(r.body) && !/boot\.wav/.test(r.body), r.body);
+       r.blocked && r.finding.items.includes('Preset 1') && !r.finding.items.includes('boot.wav'),
+       JSON.stringify(r.finding && r.finding.items));
   }
 
-  // ── 8. the corpus, which is the only check that cannot be rigged ───────
+  // ── 6. the corpus, which is the only check that cannot be rigged ───────
   //
   // "What did it do across the corpus" is B-224's stated bar for any new check,
-  // and it is the one measurement here that my own fixtures cannot flatter: these
-  // are other people's configs, written without knowing this gate exists.
+  // and it is the one measurement my own fixtures cannot flatter: these are other
+  // people's configs, written without knowing this check exists.
   const readDir = d => {
     try {
-      return fs.readdirSync(path.join(ROOT, d))
-        .filter(f => f.endsWith('.h'))
+      return fs.readdirSync(path.join(ROOT, d)).filter(f => f.endsWith('.h'))
         .map(f => path.join(ROOT, d, f));
     } catch { return []; }   // corpora are gitignored; absent on a fresh machine
   };
 
   {
-    // Configs known to be VALID. Zero of these may be blocked, ever.
-    const files = ['local/ConfigExamples', 'local/b226-test-configs', 'local/test-configs']
-      .flatMap(readDir);
+    const files = ['local/ConfigExamples', 'local/b226-test-configs', 'local/test-configs'].flatMap(readDir);
     if (!files.length) console.log('SKIP  no example configs on this machine');
     else {
       const blocked = [];
       for (const f of files) {
-        if ((await check(fs.readFileSync(f, 'utf8'))).proceed === false) blocked.push(path.basename(f));
+        if ((await check(fs.readFileSync(f, 'utf8'))).blocked) blocked.push(path.basename(f));
       }
-      ok(`none of the ${files.length} known-good configs are blocked`,
-         blocked.length === 0, blocked.join(', '));
+      ok(`none of the ${files.length} known-good configs are blocked`, blocked.length === 0, blocked.join(', '));
     }
   }
 
   {
     // The wild corpus is scraped from real configs and MANY ARE GENUINELY BROKEN,
-    // so blocking is the correct outcome for most of it. What is asserted is the
-    // three that are not: measured 2026-09-12, each has styles the parser does not
-    // see, and each compiles. They are the reason the corroboration guard exists.
+    // so blocking is correct for most of it. What is asserted is the three that
+    // are not: measured 2026-09-12, each has styles the parser does not see, and
+    // each compiles. They are why the second reading exists.
     const files = ['local/nightly/error-exp/wild/configs',
                    'local/nightly/error-exp/wild/configs2'].flatMap(readDir);
     if (!files.length) console.log('SKIP  wild corpus not on this machine');
@@ -322,8 +241,7 @@ BladeConfig blades[] = {{ 0, WS281XBladePtr<100, bladePin>(), CONFIGARRAY(preset
       const wrongly = [];
       let blocked = 0;
       for (const f of files) {
-        const proceed = (await check(fs.readFileSync(f, 'utf8'))).proceed;
-        if (proceed === false) {
+        if ((await check(fs.readFileSync(f, 'utf8'))).blocked) {
           blocked++;
           if (MUST_STAY_SILENT.includes(path.basename(f))) wrongly.push(path.basename(f));
         }
@@ -334,6 +252,6 @@ BladeConfig blades[] = {{ 0, WS281XBladePtr<100, bladePin>(), CONFIGARRAY(preset
     }
   }
 
-  console.log(failures ? `\n${failures} FAILURE(S)` : '\nall blade-count preflight tests passed');
+  console.log(failures ? `\n${failures} FAILURE(S)` : '\nall blade-count check tests passed');
   process.exit(failures ? 1 : 0);
 })();

@@ -6902,6 +6902,11 @@
 
 <script src="./effect-keywords.js"></script>
 <script src="./presetParser.js"></script>
+<!-- Preflight registry, then the checks. Order matters: preflight-checks.js
+     registers into the registry at load, so it must come second. presetParser
+     must precede both — the shared context parses the config once. [B-224] -->
+<script src="./preflight.js"></script>
+<script src="./preflight-checks.js"></script>
 <script src="./glow-swatch.js"></script>
 <script src="./effect-args.js"></script>
 <script src="./styleArgResolver.js"></script>
@@ -8072,139 +8077,140 @@ window.checkVoicepackDeclared = async function () {
   return true;
 };
 
-// ── Blade style count preflight (compile gate) ─────────
-// A preset is POSITIONAL: { font, track, style1..styleN, "Name" }. Leave a style
-// out and the name slides into the last style slot, so gcc reports
-//     cannot convert 'const char*' to 'StyleFactory*' in initialization
-// pointing at the preset NAME - the only token actually of the wrong type. It
-// cannot point at the missing style, because nothing is there to underline, and
-// the line it names sits inside a 600-character template expansion. That is why
-// this is worth catching here: the compiler's answer is correct and unusable.
-// (2026-09-10: a four-blade config where every preset but the first had three
-// styles produced five of these, reported as pointing at "like 114... totally
-// wrong".)
+// ── Preflight (compile gate) ───────────────────────────
 //
-// The comparison is not new. The preset list already renders "Styles (X/Y
-// blades)" from exactly this data, and the OVER-count case already has a red
-// header and a repair tool. Only the UNDER-count case had nowhere to surface at
-// compile time, so this is the same question asked at the gate. [B-365]
+// The registry and the checks live in preflight.js / preflight-checks.js, which
+// know nothing about the DOM. This is the only part that has to: build the
+// context from the app's state, render ONE dialog for everything that fired, and
+// apply whatever fixes the user accepted. [B-224]
 //
-// Scope, deliberately: UNDER-count only. An over-count preset also fails to
-// compile, but it already shows a red "4/2 BLADES" header and offers a repair,
-// so the user is not flying blind into the same unreadable error. Widening this
-// to both is one branch here plus a second sentence in the dialog.
+// ⭐ TWO BUTTONS, ALWAYS, HOWEVER MANY CHECKS FIRED (his call, 2026-09-12).
+// Remediation lives with its finding, in the row; the bottom of the dialog only
+// ever answers "proceed or not". The moment a fix becomes a bottom button, two
+// checks that both offer one are fighting over it, and the shape stops scaling at
+// exactly three checks.
 //
-// COMPILE ONLY, same reasoning as the voicepack gate: the flash path can restore
-// a cached build that never passed through here, and a build that does not exist
-// cannot be flashed anyway.
-window.checkBladeStyleCounts = async function () {
+// ⭐ AND "Compile anyway" SURVIVES ON `block`, WHICH THE ENTRY ORIGINALLY SAID IT
+// SHOULD NOT. His reasoning, and it is better than the original: the hatch is not
+// there so a user can shrug off a real fault, it is there because WE CAN BE WRONG.
+// That stopped being hypothetical on 2026-09-12, when the blade-count rule blocked
+// 3 of 173 real configs that compile fine. A check we are confident in is still a
+// check, and an unrecoverable wrong answer is the one failure mode we cannot let
+// the user absorb. "I really don't ever want to be wrong" is the bar; the hatch is
+// what stops being wrong from being expensive while we find out.
+function _preflightEsc(s) { return _vpkEsc(s); }
+
+window.runPreflight = async function () {
   const text = editor ? editor.getValue() : '';
-  if (!text) return true;
+  if (!text || !root_preflight()) return true;
 
-  let parsed;
-  try { parsed = presetParser.parsePresets(text); } catch { return true; }
-  const expected = parsed && parsed.bladeCount;
-  if (!(expected > 0)) return true;          // no NUM_BLADES to compare against
-
-  // Commented-out presets are skipped by the parser, which is what we want here:
-  // a disabled preset is not compiled, so it cannot fail to compile. (Verified
-  // against block comments and line comments, not assumed - the over-count
-  // repair DOES walk disabled blocks, for the opposite reason: those come back.)
-  // A preset the parser could not read is skipped too. Its style list is empty
-  // by construction, so counting it would report "0 of 4" about a preset whose
-  // real problem is something else entirely.
-  // ⚠️ THE PARSER'S COUNT IS NOT CORROBORATION OF ITSELF, AND THAT COST THREE
-  // FALSE POSITIVES. Measured 2026-09-12 across 173 configs (the wild corpus plus
-  // the examples): 14 would have been blocked and 3 of those compile fine, because
-  // presetParser under-counts styles on certain real configs and reports no
-  // parseError while doing it. A gate that stops a working compile is worse than
-  // the error it replaces, and one false positive teaches people the gate is noise
-  // — after which it stops working even when it is right. [B-224]
-  //
-  // So the parse gets a second opinion from a different instrument: count style
-  // factories in the entry's own text, comments stripped. This is deliberately
-  // NOT a parser — it only has to disagree. More tokens than parsed slots means we
-  // cannot account for the difference, and "cannot account for it" is silence, not
-  // a finding. Over-counting costs a missed case, which is cheap; the other
-  // direction is not.
-  const _stripForCount = s => String(s || '')
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .split('\n').map(l => l.replace(/\/\/.*$/, '')).join('\n');
-  const _styleTokens = raw => {
-    const c = _stripForCount(raw);
-    // Style*Ptr<…> covers StylePtr, StyleNormalPtr, StyleFirePtr and the rest;
-    // &name covers a reference to a style declared elsewhere in the config.
-    return (c.match(/\bStyle\w*Ptr\s*</g) || []).length + (c.match(/&\w+/g) || []).length;
-  };
-
-  const short = [];
-  for (const arr of (parsed.arrays || [])) {
-    for (const p of (arr.presets || [])) {
-      if (p.parseError) continue;
-      const actual = (p.styles || []).length;
-      if (actual >= expected) continue;
-      if (_styleTokens(p.raw) > actual) continue;   // the two readings disagree
-
-      // A preset with no styles parsed has no trustworthy name either: with
-      // nothing between the strings, the parser takes the LAST one, which is the
-      // track. Naming a preset after its own wav reads as a different fault.
-      const nameRaw = (p.displayName || '').trim();
-      const name = (!nameRaw || nameRaw === (p.track || '').trim())
-        ? `Preset ${p.index}`
-        : nameRaw;
-      short.push({ name, actual, array: arr.name });
-    }
-  }
-  if (!short.length) return true;
-
-  const one = short.length === 1;
-  const counts = [...new Set(short.map(s => s.actual))];
-  // "have 3 of 4 blade styles" when they agree, which is the common case (a
-  // config grows a blade and every preset is one short). Mixed counts get the
-  // weaker sentence rather than a per-preset breakdown nobody needs.
-  const countPhrase = counts.length === 1
-    ? `${counts[0]} of ${expected} blade style${expected === 1 ? '' : 's'}`
-    : `fewer than ${expected} blade styles`;
-
-  // Names, not line numbers. The line the compiler would name is wrong (see
-  // above) and the line WE would name is the preset's first line, which is not
-  // where anything is missing either - nothing is missing anywhere, that is the
-  // whole shape of the fault. The preset is the thing that can be pointed at.
-  const shown = short.slice(0, 8).map(s => _vpkEsc(s.name)).join(', ');
-  const more = short.length > 8 ? `, and ${short.length - 8} more` : '';
-
-  // Named only when there is more than one bank, since most configs have one and
-  // the name is noise there.
-  const banks = [...new Set(short.map(s => s.array).filter(Boolean))];
-  const bankLine = (parsed.arrays || []).length > 1 && banks.length
-    ? `<br><br>${banks.length === 1 ? 'All in' : 'Across'} <code>${banks.map(b => _vpkEsc(b)).join('</code>, <code>')}</code>.`
-    : '';
-
-  // A preset can be short by more than one, and usually is when a config gains a
-  // blade: 34 presets at "1 of 3" are each missing TWO slots, and telling that
-  // user to fill "the empty slot" describes a screen they are not looking at.
-  // Plural the moment any preset is short by more than one.
-  const slotWord = short.every(s => expected - s.actual === 1) ? 'slot' : 'slots';
-
-  const res = await promptConfirm({
-    title: one ? 'A Preset Is Missing a Blade Style' : 'Presets Are Missing Blade Styles',
-    messageHtml:
-      `Your config has <strong>${expected}</strong> blade${expected === 1 ? '' : 's'}, and ` +
-      `${one ? '<strong>1</strong> preset has' : `<strong>${short.length}</strong> presets have`} ` +
-      `${countPhrase}:<br><br><strong>${shown}</strong>${more}.${bankLine}<br><br>` +
-      `Every preset needs one style per blade, so this cannot compile. Open ` +
-      `${one ? 'that preset' : 'each preset'} in Presets and fill the empty ${slotWord} in the ` +
-      `Styles row.`,
-    // "OK" beside "Compile anyway" reads as "OK, go ahead" - the one direction
-    // this dialog cannot afford to be ambiguous in. The button says what it does.
-    confirmText: 'Cancel Compile',
-    confirmKind: 'save',
-    middleText:  'Compile anyway',
-    hideCancel:  true,
+  const ctx = window.preflight.buildContext({
+    text,
+    versionName: document.getElementById('input-version')?.value?.trim() || '',
+    // ⚠️ NOT WIRED, DELIBERATELY LEFT EMPTY. No check reads the board yet, and
+    // `selectedFqbn` is module-local to buildPanel.js with no accessor. A first
+    // draft here called a window.getSelectedBoardLabel() that does not exist —
+    // optional chaining would have made it return '' forever while LOOKING wired,
+    // which is the shape of defect this whole session kept finding. When a check
+    // needs the board, expose it from buildPanel.js and fill this in then.
+    board: '',
+    // Injected rather than reached for, so a check that walks prop headers can be
+    // tested against a fake tree instead of a real ProffieOS install.
+    readVersionFile: async (versionName, relPath) => {
+      try { return await window.electronAPI?.readVersionFile?.(versionName, relPath); }
+      catch { return null; }
+    },
   });
 
-  return res === 'middle';
+  const res = await window.preflight.run(ctx);
+
+  // A check that threw is a check that said nothing. It must never take the
+  // compile with it — the user asked to build, and our inability to read their
+  // config is our problem. Logged so it is debuggable rather than invisible.
+  for (const e of (res.errors || [])) console.warn(`[preflight] ${e.id} failed:`, e.error);
+
+  if (!res.findings.length) return true;
+
+  // Each finding is a row: what is wrong, what to do about it, and its own fix
+  // affordance when it has one. The items list is capped because a 58-preset
+  // finding is still one row and must not become a page.
+  const rows = res.findings.map((f, i) => {
+    const items = (f.items || []).slice(0, 8).map(_preflightEsc).join(', ');
+    const more  = (f.items || []).length > 8 ? `, and ${f.items.length - 8} more` : '';
+    const fixBtn = f.fix
+      ? `<div style="margin-top:6px"><button type="button" class="modal-btn-save preflight-fix" `
+        + `data-fix="${i}" style="padding:3px 10px;font-size:12px">${_preflightEsc(f.fix.label)}</button></div>`
+      : '';
+    return `<li style="margin-bottom:10px">`
+      + `<strong>${_preflightEsc(f.title)}</strong>`
+      + (items ? `<br><strong>${items}</strong>${more}.` : '')
+      + (f.detail ? `<br>${_preflightEsc(f.detail)}` : '')
+      + fixBtn
+      + `</li>`;
+  }).join('');
+
+  const one = res.findings.length === 1;
+  const title = res.blocking
+    ? (one ? 'This Config Cannot Compile' : 'This Config Cannot Compile Yet')
+    : 'Before You Compile';
+
+  // Fixes are collected, not applied one at a time. Every accepted fix goes out as
+  // ONE atomic batch below: edits are computed against the document as it is now,
+  // so applying one makes the next one's coordinates stale. That is not a
+  // theoretical concern — it is [B-371], which corrupted a config from a single
+  // writer on 2026-09-12.
+  const accepted = new Set();
+  const onFixClick = (e) => {
+    const btn = e.target.closest('.preflight-fix');
+    if (!btn) return;
+    e.preventDefault();
+    const idx = Number(btn.dataset.fix);
+    accepted.add(idx);
+    btn.disabled = true;
+    btn.textContent = 'Will be fixed';
+  };
+  const msgEl = document.getElementById('modal-confirm-msg');
+  msgEl.addEventListener('click', onFixClick);
+
+  let res2;
+  try {
+    res2 = await promptConfirm({
+      title,
+      messageHtml: `<ul style="margin:8px 0 0 18px;padding:0">${rows}</ul>`,
+      confirmText: res.blocking ? 'Cancel Compile' : 'Cancel',
+      confirmKind: 'save',
+      middleText:  'Compile anyway',
+      hideCancel:  true,
+    });
+  } finally {
+    msgEl.removeEventListener('click', onFixClick);
+  }
+
+  if (accepted.size) {
+    const edits = [];
+    for (const i of accepted) {
+      try { edits.push(...(res.findings[i].fix.plan(ctx) || [])); } catch {}
+    }
+    if (edits.length) {
+      try {
+        window._atomicEdit(editor, 'preflight-fix', edits.map(e => ({
+          range: {
+            startLineNumber: e.startLine, startColumn: e.startCol + 1,
+            endLineNumber:   e.endLine,   endColumn:   e.endCol + 1,
+          },
+          text: e.text,
+        })));
+      } catch {}
+    }
+  }
+
+  return res2 === 'middle';
 };
+
+// preflight.js may be absent in a stripped build; never let that stop a compile.
+function root_preflight() {
+  return !!(window.preflight && typeof window.preflight.run === 'function');
+}
 
 // ── Window title ───────────────────────────────────────
 function updateWindowTitle() {
