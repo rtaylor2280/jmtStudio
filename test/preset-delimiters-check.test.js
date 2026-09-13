@@ -57,6 +57,35 @@ const run = (text) => {
        /further down, often in a different preset/.test(r.findings[0].detail),
        r.findings[0] && r.findings[0].detail);
     ok('it blocks — this cannot compile', check.severity === 'block');
+    // ⭐ THE SAFEST FIX IN THE WHOLE SET: nothing is being guessed. The separator
+    // goes directly after the track string, that position is known exactly, and a
+    // comma is the only thing that can legally sit there.
+    ok('it offers to add the comma', !!r.findings[0].fix
+       && /Add the comma/.test(r.findings[0].fix.label), r.findings[0].fix && r.findings[0].fix.label);
+  }
+  {
+    const text = wrap('  { "Font1", "tracks/track1.wav" StylePtr<Black>(), "One" },');
+    const ctx = preflight.buildContext({ text });
+    const edits = check.run(ctx).findings[0].fix.plan(ctx);
+    ok('the fix is a zero-width insertion, touching nothing else',
+       edits.length === 1 && edits[0].text === ','
+       && edits[0].startLine === edits[0].endLine && edits[0].startCol === edits[0].endCol,
+       JSON.stringify(edits));
+
+    const lines = text.split('\n');
+    const e = edits[0];
+    lines[e.startLine - 1] = lines[e.startLine - 1].slice(0, e.startCol) + e.text
+                           + lines[e.startLine - 1].slice(e.endCol);
+    const out = lines.join('\n');
+    ok('it lands directly after the track string',
+       /"tracks\/track1\.wav", StylePtr<Black>\(\)/.test(out), lines[e.startLine - 1]);
+    ok('the repaired preset is clean on a re-run', !run(out).fired);
+  }
+  {
+    // ⚠️ THE OTHER DELIMITER FAULTS GET NO FIX, deliberately: an unbalanced brace
+    // could be repaired in several places and only the author knows which was meant.
+    const r = run(wrap('  { "f", "t.wav", StylePtr<Red>(, "A" },'));
+    ok('an unbalanced pair offers no fix', r.findings[0].fix === null);
   }
 
   // ── (a) an array that never closes ────────────────────────────────────

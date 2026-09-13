@@ -857,13 +857,38 @@
             const next = after.replace(/^\s+/, '')[0];
             if (next && next !== ',' && next !== '}') {
               const name = (p.displayName || '').trim() || `Preset ${p.index}`;
+              // ⭐ THIS ONE GETS A FIX, and it is the safest in the whole set: we are
+              // not guessing WHAT is missing or WHERE. The separator goes directly
+              // after the track string, that position is known exactly, and a comma
+              // is the only thing that can legally sit there. (2026-09-13: "if we
+              // know we're missing a comma we should offer to add it".)
+              // The other delimiter faults deliberately have none — an unbalanced
+              // brace could be repaired in several places and only the author knows
+              // which was meant.
+              const insertAt = strs[1].index + strs[1][0].length;
               findings.push({
                 title: `Preset ${name} is missing a comma after its track.`,
                 detail: 'Every part of a preset is separated by a comma. Without one the compiler '
                       + 'reads the next line as part of this one and reports the error somewhere '
                       + 'further down, often in a different preset entirely.',
                 items: [name],
-                fix: null,
+                fix: {
+                  label: 'Add the comma',
+                  plan(c) {
+                    // Re-locate the preset in the CURRENT document rather than
+                    // trusting the offsets this finding was built from: the caller
+                    // re-derives after every fix, but a plan must still be correct
+                    // against the text as it is when it runs.
+                    const at = String(c.text).indexOf(p.raw);
+                    if (at < 0) return [];
+                    const abs = at + insertAt;
+                    const before = String(c.text).slice(0, abs);
+                    const line = before.split('\n').length;
+                    const col = abs - (before.lastIndexOf('\n') + 1);
+                    // A zero-width range: an insertion, touching nothing else.
+                    return [{ startLine: line, startCol: col, endLine: line, endCol: col, text: ',' }];
+                  },
+                },
               });
               continue;            // one finding per preset; the first is the honest one
             }
