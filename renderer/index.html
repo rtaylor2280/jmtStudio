@@ -43007,61 +43007,15 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
         let _colorIsDefault = false;
         let _hardcodedInfo = null; // { matchStr, matchIndex } when color is hardcoded in expr
 
-        if (slot.colorArg) {
-          // Expression-aware: prefer BASE_COLOR_ARG as the primary color, falling
-          // back to the first RgbArg when the style doesn't define BASE. Without
-          // the name-preference, styles whose first RgbArg in text-order is e.g.
-          // SWING_COLOR_ARG display the swing default in the slot card instead of
-          // the user's actual primary blade color.
-          const _resolved = styleArgResolver.resolveStyleArgs(slot.expr || '', slot.colorArg);
-          const _rgbEntry = _resolved.find(a => a.kind === 'RgbArg' && a.name === 'BASE_COLOR_ARG')
-                         || _resolved.find(a => a.kind === 'RgbArg');
-          if (_rgbEntry && _rgbEntry.values.length >= 3) {
-            _rgb16 = _rgbEntry.values.slice(0, 3).map(v => v || 0);
-          }
-          if (!_rgb16) {
-            // Legacy fallback: treat first three CSV values as R,G,B
-            const _p = slot.colorArg.split(',').map(s => parseInt(s.trim(), 10));
-            if (_p.length >= 3 && _p.slice(0,3).every(n => Number.isFinite(n))) _rgb16 = _p.slice(0,3);
-          }
-        }
-        if (!_rgb16 && window.proffieArgs) {
-          // Registry default for named helper styles. Same BASE-preferred lookup
-          // as the parens-aware branch above.
-          const _baseName = slot.expr ? (slot.expr.match(/^(\w+)/) || [])[1] : null;
-          const _regArgs  = _baseName ? _getHelperRegistryArgs(_baseName) : [];
-          const _cr = _regArgs.find(a => a.kind === 'RgbArg' && a.name === 'BASE_COLOR_ARG')
-                   || _regArgs.find(a => a.kind === 'RgbArg');
-          if (_cr) _rgb16 = window.proffieArgs.resolveColorDefault(_cr.defaultExpr || '');
-        }
-        if (!_rgb16 && window.proffieArgs) {
-          // Library definition hardcoded color: walk down through any wrapper INNER
-          // params to the leaf style, then scan ITS definition for the earliest
-          // color. Without leaf resolution, `PixelSwitchWrapper<MyPurpleStyle>`
-          // scans PixelSwitchWrapper's body and picks up a White literal deep in
-          // its TransitionEffect machinery, masking the user-visible purple from
-          // MyPurpleStyle. The wrapper just delegates color to its inner.
-          const _leafName = _resolveLeafStyleName(slot.expr);
-          if (_leafName) {
-            const _hit = _earliestColorInText(_getHelperDefinitionText(_leafName));
-            if (_hit) _rgb16 = _hit.rgb16;
-          }
-        }
-        if (!_rgb16 && window.proffieArgs) {
-          // Inline expressions: prefer BASE_COLOR_ARG default, fall back to first RgbArg.
-          const _inlineArgs = styleArgResolver.findArgs(slot.expr || '');
-          const _firstRgb   = _inlineArgs.find(a => a.kind === 'RgbArg' && a.name === 'BASE_COLOR_ARG')
-                           || _inlineArgs.find(a => a.kind === 'RgbArg');
-          if (_firstRgb) _rgb16 = window.proffieArgs.resolveColorDefault(_firstRgb.defaultExpr || '');
-        }
-        if (!_rgb16 && window.proffieArgs) {
-          // Hardcoded color in the slot expression itself — same earliest-match logic.
-          const _hit = _earliestColorInText(slot.expr || '');
-          if (_hit) {
-            _rgb16 = _hit.rgb16;
-            _hardcodedInfo = { matchStr: _hit.matchStr, matchIndex: _hit.matchIndex };
-            _colorIsDefault = true;
-          }
+        // [B-060] ONE LADDER, SHARED WITH _resolveSlotColor. This path used to carry
+        // its own copy, which is exactly how the card and the detail view ended up
+        // disagreeing about the same slot. See _pickSlotPrimary for the priority order
+        // and why the first-RgbArg guess is now last rather than third.
+        {
+          const _pick = _pickSlotPrimary(slot);
+          _rgb16          = _pick.rgb16;
+          _hardcodedInfo  = _pick.hardcodedInfo;
+          _colorIsDefault = _pick.colorIsDefault;
         }
 
         if (_rgb16) {
@@ -43372,48 +43326,100 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
     // expression. Returns null if no color can be determined. Shared by the slot
     // tile's swatch render and the "Match B1" affordance in the expanded slot
     // editor.
+    // ── [B-060] WHAT COLOUR IS THIS SLOT, ANSWERED ONCE ────────────────────────
+    //
+    // THE FAULT: a style that defines no BASE_COLOR_ARG and paints its blade from a
+    // hardcoded `Rgb<...>` literal — very common in Fett263 library entries, e.g.
+    // GreyscaleFontsSkotos using `AudioFlicker<RotateColorsX<Variation,Rgb<135,0,255>>,...>`
+    // — fell through to the FIRST RgbArg's default. That is usually an EFFECT arg
+    // (LOCKUP_COLOR_ARG → White, SWING_COLOR_ARG, …), which is not the blade colour
+    // anyone sees. The inner detail view resolved it correctly via the helper body, so
+    // the card and the detail disagreed on screen.
+    //
+    // ⭐ THE ORDER IS THE FIX: an explicit BASE beats everything; a colour written INTO
+    // the style beats a DEFAULT for an argument nobody set; the first-RgbArg guess is a
+    // last resort rather than a third preference.
+    //
+    //   1-3  BASE_COLOR_ARG  — from the slot's own parens, the registry, then inline
+    //   4    hardcoded colour in the library definition (leaf-resolved)
+    //   5    hardcoded colour in the slot expression itself
+    //   6-8  first RgbArg of any name — parens, registry, inline
+    //
+    // ⚠️ ONE IMPLEMENTATION, TWO RENDER PATHS. The slot card and _resolveSlotColor each
+    // carried their own copy of this ladder, which is why the detail view could be
+    // right while the card was wrong. Splitting each "BASE or first" lookup into two
+    // separate rungs is only safe if both callers move together.
+    //
+    // Returns { rgb16, hardcodedInfo, colorIsDefault, source }. `source` names the rung
+    // that answered, so a surprising card can be explained without re-deriving it.
+    function _pickSlotPrimary(slot) {
+      const out = { rgb16: null, hardcodedInfo: null, colorIsDefault: false, source: null };
+      if (!slot) return out;
+      const pa = window.proffieArgs;
+      const take = (rgb, source) => {
+        if (!rgb) return false;
+        out.rgb16 = rgb; out.source = source; return true;
+      };
+
+      const resolved = slot.colorArg
+        ? styleArgResolver.resolveStyleArgs(slot.expr || '', slot.colorArg) : [];
+      const baseName = slot.expr ? (slot.expr.match(/^(\w+)/) || [])[1] : null;
+      const regArgs  = baseName ? _getHelperRegistryArgs(baseName) : [];
+      const inline   = styleArgResolver.findArgs(slot.expr || '');
+
+      const isBase   = (a) => a.kind === 'RgbArg' && a.name === 'BASE_COLOR_ARG';
+      const isAnyRgb = (a) => a.kind === 'RgbArg';
+      const valuesOf = (e) => (e && e.values && e.values.length >= 3)
+        ? e.values.slice(0, 3).map(v => v || 0) : null;
+      const defaultOf = (e) => (e && pa) ? pa.resolveColorDefault(e.defaultExpr || '') : null;
+
+      // 1 — BASE_COLOR_ARG actually set on this slot.
+      if (take(valuesOf(resolved.find(isBase)), 'base-arg')) return out;
+      // 1b — the slot's parens as a bare "r,g,b". Same source as rung 1, just written
+      // without an arg name, so it stays with it rather than dropping to the fallbacks.
+      if (slot.colorArg) {
+        const p = slot.colorArg.split(',').map(s => parseInt(s.trim(), 10));
+        if (p.length >= 3 && p.slice(0, 3).every(n => Number.isFinite(n))
+            && take(p.slice(0, 3), 'colorarg-csv')) return out;
+      }
+      // 2 — BASE_COLOR_ARG's default from the helper registry.
+      if (pa && take(defaultOf(regArgs.find(isBase)), 'base-registry')) return out;
+      // 3 — BASE_COLOR_ARG's default written inline in the expression.
+      if (pa && take(defaultOf(inline.find(isBase)), 'base-inline')) return out;
+
+      // 4 — A colour hardcoded in the LIBRARY DEFINITION. Leaf-resolved through wrapper
+      // INNER params, or `PixelSwitchWrapper<MyPurpleStyle>` scans the wrapper's own
+      // body and picks up a White literal deep in its TransitionEffect machinery,
+      // masking the purple the user actually sees. The wrapper delegates colour inward.
+      if (pa) {
+        const leaf = _resolveLeafStyleName(slot.expr);
+        if (leaf) {
+          const hit = _earliestColorInText(_getHelperDefinitionText(leaf));
+          if (hit && take(hit.rgb16, 'helper-hardcoded')) return out;
+        }
+      }
+      // 5 — A colour hardcoded in the slot expression itself.
+      if (pa) {
+        const hit = _earliestColorInText(slot.expr || '');
+        if (hit && take(hit.rgb16, 'expr-hardcoded')) {
+          out.hardcodedInfo  = { matchStr: hit.matchStr, matchIndex: hit.matchIndex };
+          out.colorIsDefault = true;
+          return out;
+        }
+      }
+
+      // 6-8 — LAST RESORT: the first RgbArg of any name. This is the rung that used to
+      // sit at 4 and steal the answer; an effect colour is a guess, and a guess should
+      // lose to anything written down.
+      if (take(valuesOf(resolved.find(isAnyRgb)), 'first-arg')) return out;
+      if (pa && take(defaultOf(regArgs.find(isAnyRgb)), 'first-registry')) return out;
+      if (pa && take(defaultOf(inline.find(isAnyRgb)), 'first-inline')) return out;
+      return out;
+    }
+
     function _resolveSlotColor(slot) {
       if (!slot) return null;
-      let rgb16 = null;
-      if (slot.colorArg) {
-        const _resolved = styleArgResolver.resolveStyleArgs(slot.expr || '', slot.colorArg);
-        const _rgbEntry = _resolved.find(a => a.kind === 'RgbArg' && a.name === 'BASE_COLOR_ARG')
-                       || _resolved.find(a => a.kind === 'RgbArg');
-        if (_rgbEntry && _rgbEntry.values.length >= 3) {
-          rgb16 = _rgbEntry.values.slice(0, 3).map(v => v || 0);
-        }
-        if (!rgb16) {
-          const _p = slot.colorArg.split(',').map(s => parseInt(s.trim(), 10));
-          if (_p.length >= 3 && _p.slice(0, 3).every(n => Number.isFinite(n))) rgb16 = _p.slice(0, 3);
-        }
-      }
-      if (!rgb16 && window.proffieArgs) {
-        const _baseName = slot.expr ? (slot.expr.match(/^(\w+)/) || [])[1] : null;
-        const _regArgs  = _baseName ? _getHelperRegistryArgs(_baseName) : [];
-        const _cr = _regArgs.find(a => a.kind === 'RgbArg' && a.name === 'BASE_COLOR_ARG')
-                 || _regArgs.find(a => a.kind === 'RgbArg');
-        if (_cr) rgb16 = window.proffieArgs.resolveColorDefault(_cr.defaultExpr || '');
-      }
-      if (!rgb16 && window.proffieArgs) {
-        // Leaf-resolve through wrapper INNER params so `Wrapper<RealStyle>`
-        // detects RealStyle's color (parallel to the inline tile renderer above).
-        const _leafName = _resolveLeafStyleName(slot.expr);
-        if (_leafName) {
-          const _hit = _earliestColorInText(_getHelperDefinitionText(_leafName));
-          if (_hit) rgb16 = _hit.rgb16;
-        }
-      }
-      if (!rgb16 && window.proffieArgs) {
-        const _inlineArgs = styleArgResolver.findArgs(slot.expr || '');
-        const _firstRgb   = _inlineArgs.find(a => a.kind === 'RgbArg' && a.name === 'BASE_COLOR_ARG')
-                         || _inlineArgs.find(a => a.kind === 'RgbArg');
-        if (_firstRgb) rgb16 = window.proffieArgs.resolveColorDefault(_firstRgb.defaultExpr || '');
-      }
-      if (!rgb16 && window.proffieArgs) {
-        const _hit = _earliestColorInText(slot.expr || '');
-        if (_hit) rgb16 = _hit.rgb16;
-      }
-      return rgb16;
+      return _pickSlotPrimary(slot).rgb16;
     }
 
     // ── Field editing ──────────────────────────────────────────────────────────
