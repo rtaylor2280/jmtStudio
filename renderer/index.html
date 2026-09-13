@@ -13173,12 +13173,26 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         // An exact-archive duplicate has no `_match` — analyze knew it was owned
         // from the hash alone and never ran the content comparison. It still needs
         // to say so on the row, because it is now shown like everything else.
-        if (!m && !src._duplicate) return;
+        if (!m && !src._duplicate && !src._sameInBatch) return;
         let note = row.el.querySelector('.g-dup-note');
         if (!note) {
           note = document.createElement('div');
           note.className = 'g-dup-note';
           row.el.querySelector('.g-name-wrap')?.appendChild(note);
+        }
+        // ⭐ [B-314] A DIFFERENT STATEMENT FROM "already in your library", and it is
+        // checked FIRST because a source can be both — the library note would then be
+        // the less useful of the two, since the row it names is on this very screen.
+        //
+        // Left CHECKED and enabled on purpose: unlike a library duplicate there IS a
+        // staged copy to import, and importing both is a legitimate choice (the same
+        // font under two names on a card is often deliberate). His 2026-08-31 ruling
+        // stands — a row the user ticks despite a marker is a row they meant.
+        if (src._sameInBatch) {
+          note.textContent = `Same font as ${src._sameInBatch.label} in this import.`;
+          note.classList.add('variant');
+          note.classList.remove('have-it');
+          return;
         }
         if (src._duplicate) {
           // "(as X)" when the library's name differs from the one we are proposing.
@@ -13419,6 +13433,11 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       if (r.corrupt) s._corrupt = r.corrupt;
       if (r.blocked) s._blocked = r.blocked;   // [B-214] content-tier finding
       if (r.noted) s._noted = r.noted;         // [B-214] kept, but not inspected
+      // [B-314] Same bytes as another source in THIS run. Kept separate from
+      // `_duplicate`/`_owned`, which both mean "already in your library" — telling
+      // someone their card is already imported when it is not would be worse than the
+      // miss this fixes.
+      if (r.sameInBatch) s._sameInBatch = r.sameInBatch;
       // Ownership now arrives WITH the analysis instead of landing on the review
       // screen seconds after it opens. `_owned` means "you already have these
       // sounds" whichever test found it; `_match` carries the row's note.
@@ -13645,6 +13664,9 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         // same screen.
         rows.push(['New sound fonts', Math.max(0, st.new - _emptyCount)]);
         if (_emptyCount) rows.push(['No sound font inside (skipped)', _emptyCount, false, true]);
+        // [B-314] Its own line. Folding it into "already in your library" would state
+        // something false about the card.
+        if (st.sameInBatch) rows.push(['Same font twice in this import', st.sameInBatch, false, true]);
         const _owned = (typeof st.owned === 'number') ? st.owned : (st.duplicate || 0);
         if (_owned)     rows.push(['Already in your library (skipped)', _owned]);
         if (st.corrupt) rows.push(['Corrupted (skipped)', st.corrupt, false, true]);

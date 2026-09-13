@@ -619,6 +619,28 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
   const total = sources.length;
   const results = [];
   let newCount = 0, dupCount = 0, corruptCount = 0;
+  // ── [B-314] TWO IDENTICAL FONTS IN ONE BATCH USED TO BE INVISIBLE TO EACH OTHER ──
+  //
+  // `FoRed` and `RVJ`, same content hash, imported 17 seconds apart from one SD bulk
+  // import: "but it didnt de dup".
+  //
+  // CAUSE: the prepare runs findByHash, which walks listSources — and listSources only
+  // returns directories with a readable meta.json. A staged source has `.preparing` and
+  // no meta yet. So every font in a batch was dedup-checked against the library AS IT
+  // WAS BEFORE THE BATCH, and two identical fonts inside the same run never saw each
+  // other. finalizePreparedSource's own comment says the tree is "dedup-cleared" —
+  // true when it was staged, no longer true by the time it commits.
+  //
+  // ⭐ SURFACED, NOT SILENTLY SKIPPED. Catching this at COMMIT would make the review
+  // lie: it would say "importing 40" and import 39. Caught here, the row can say which
+  // other row it matches and he decides — the app's normal shape, and it matches the
+  // 2026-08-31 ruling that a row ticked despite an owned marker is a row they meant.
+  //
+  // ⚠️ NOT THE SAME STATEMENT AS "already in your library". One is about the library,
+  // the other is about this card. Sharing a phrase would tell someone their card is
+  // already imported when it is not.
+  const _batchHashes = new Map();   // content hash -> the first source in this run that staged it
+  let batchDupCount = 0;
   for (let i = 0; i < total; i++) {
     if (shouldCancel()) return { ok: true, cancelled: true, results };
     const src = sources[i];
@@ -671,8 +693,21 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
       // and runs inside the same 6h window stacked. (2026-08-31.)
       results.push({ idx: i, isDuplicate: true, existingUuid: res.uuid, staged: res.staged || null, corrupt, blocked, noted });
     } else if (res && res.ok && res.prepared) {
-      if (corrupt) corruptCount++; else newCount++;
-      results.push({ idx: i, prepared: {
+      // [B-314] Match against what THIS run has already staged, as well as the library.
+      const _h = res.hash || null;
+      const _twin = _h ? _batchHashes.get(_h) : null;
+      if (_twin) batchDupCount++;
+      else if (_h) _batchHashes.set(_h, { idx: i, label });
+      // A twin is not new — counting it would put the review's number back above what
+      // the import will produce, which is the whole complaint.
+      if (corrupt) corruptCount++; else if (!_twin) newCount++;
+      results.push({ idx: i,
+        // ⚠️ The prepared object is kept INTACT for a twin, deliberately: its uuid is
+        // how "import anyway" finalizes without re-extracting. The library-duplicate
+        // branch above learned this the hard way — dropping its `staged` field leaked
+        // ~1.9 GB per re-analyze of a 12 GB card.
+        sameInBatch: _twin ? { idx: _twin.idx, label: _twin.label } : null,
+        prepared: {
         uuid: res.uuid, hash: res.hash, format: res.format, name: res.name,
         fileSize: res.fileSize, sourceFileDate: res.sourceFileDate, sourceFileMtimeMs: res.sourceFileMtimeMs,
         strippedFiles: res.strippedFiles || [],
@@ -899,7 +934,9 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
   // `duplicate` is kept for callers that still distinguish the archive-hash hit;
   // `owned` is the number the user is shown, because the distinction between the
   // two tests is ours, not theirs.
-  return { ok: true, results, stats: { total, new: newCount, owned: ownedCount, duplicate: dupCount, corrupt: corruptCount, tracks } };
+  // [B-314] `sameInBatch` is its own bucket, never folded into `duplicate` — that one
+  // means "already in your library", and these are not.
+  return { ok: true, results, stats: { total, new: newCount, owned: ownedCount, duplicate: dupCount, corrupt: corruptCount, sameInBatch: batchDupCount, tracks } };
 }
 
 // Discard prepared-but-not-committed sources (user pruned them or cancelled).
