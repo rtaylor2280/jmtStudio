@@ -730,6 +730,178 @@
     },
   });
 
+  // ── Delimiters that do not balance ───────────────────────────────────────
+  //
+  // [B-030] lint 3. A missing comma or an unclosed brace in a preset, which the
+  // compiler reports somewhere else entirely. The case that produced this:
+  // LiamSaber.h, 2026-07-24 — gcc said `expected '}' before 'StylePtr'` and the
+  // real fault was a missing `,` on the PREVIOUS line. A 1,249-view Crucible
+  // thread has NoSloppy diagnosing the same family by eye: "Your first preset is
+  // missing a closing brace }".
+  //
+  // ⭐ THE FIRST COMPILER ERROR IS THE HONEST ONE. Everything after it is the
+  // parser guessing once it has lost its place, which is why those threads are
+  // full of people reading the LAST error and chasing the wrong thing. A check
+  // that runs before the compiler avoids the whole class.
+  //
+  // ⚠️⚠️ THIS WAS BUILT ONCE AND LOST. `scratchpad/balance-check.js`, written
+  // 2026-07-24 into a session temp directory and swept; FOUR documents went on
+  // citing it as a completed asset. The spec survived in crucible/error-corpus.md
+  // and is what this is rebuilt from. It lives in the repo now.
+  //
+  // ⚠️ SCOPE IS THE PRESET ARRAY, NOT THE FILE. A config is C++ and can legally
+  // contain all sorts of bracket shapes we do not model — but a `Preset x[] = {…}`
+  // body is ours, the parser already finds it, and an imbalance inside it is a
+  // certain compile failure. Checking the whole file would mean answering for
+  // every construct anyone ever writes.
+
+  // Strip strings and comments so a brace inside "text" or a `//` note cannot
+  // affect the count. Config-specific: no regex literals to worry about.
+  function _balanceStrip(src) {
+    let out = '', i = 0; const n = src.length;
+    while (i < n) {
+      const c = src[i], d = src[i + 1];
+      if (c === '/' && d === '/') { while (i < n && src[i] !== '\n') i++; continue; }
+      if (c === '/' && d === '*') {
+        i += 2;
+        while (i < n && !(src[i] === '*' && src[i + 1] === '/')) { if (src[i] === '\n') out += '\n'; i++; }
+        i += 2; continue;
+      }
+      if (c === '"' || c === "'") {
+        const q = c; i++;
+        while (i < n && src[i] !== q) { if (src[i] === '\\') i++; i++; }
+        i++;
+        out += '""';            // keep a token so structure survives
+        continue;
+      }
+      out += src[i++];
+    }
+    return out;
+  }
+
+  preflight.register({
+    id: 'preset-delimiters',
+    severity: 'block',
+    title: 'Preset delimiters do not balance',
+    run(ctx) {
+      if (!ctx.parsed) return null;
+      const findings = [];
+
+      // ── (a) AN ARRAY WHOSE BRACES NEVER CLOSE ─────────────────────────────
+      // NoSloppy's "your first preset is missing a closing brace", invisible to a
+      // per-preset check because there ARE no presets — the parser cannot read the
+      // array at all.
+      //
+      // ⚠️ A FIRST BUILD INFERRED THIS FROM A COUNT MISMATCH — more `Preset x[] = {`
+      // in the text than parsed arrays — and that was an inference wearing the
+      // clothes of an observation. It fired on 11 wild configs, and the first one
+      // examined (7230_1.h) turned out to be a forum paste: a bare
+      // `Preset presets[] = {` at line 1 followed by a real config at line 65. Two
+      // declarations, one parsed, mismatch, wrong story. A mismatch has several
+      // causes and "missing closing brace" is only one of them.
+      //
+      // So walk the braces and SEE whether the group closes. That is observable,
+      // names the line, and cannot be confused with a declaration the parser
+      // skipped for some other reason.
+      {
+        const clean = _balanceStrip(ctx.text);
+        const re = /\bPreset\s+[\w-]*\s*\[\s*\]\s*=\s*\{/g;
+        let m;
+        while ((m = re.exec(clean)) !== null) {
+          let depth = 0, closed = false;
+          for (let i = m.index + m[0].length - 1; i < clean.length; i++) {
+            const ch = clean[i];
+            if (ch === '{') depth++;
+            else if (ch === '}') { depth--; if (depth === 0) { closed = true; break; } }
+          }
+          if (closed) continue;
+          const line = clean.slice(0, m.index).split('\n').length;
+          findings.push({
+            title: `The preset list starting on line ${line} never closes.`,
+            detail: 'Everything after it reads as part of it, so the compiler will report the '
+                  + 'problem a long way from the real mistake — usually inside a later preset. '
+                  + 'Check that every preset ends with }, and that the list itself ends with };',
+            items: [],
+            fix: null,
+          });
+        }
+        // With an array unreadable there is nothing trustworthy to say about the
+        // presets inside it, so stop rather than pile guesses on top.
+        if (findings.length) return { findings };
+      }
+
+      if (!(ctx.parsed.arrays || []).length) return null;
+      for (const arr of ctx.parsed.arrays) {
+        // The parser hands back the array body it already located. If it could not
+        // read the array at all there is nothing to count, and guessing at the
+        // boundaries ourselves would be a second definition of where a preset
+        // array lives.
+        const presets = arr.presets || [];
+        if (!presets.length) continue;
+
+        for (const p of presets) {
+          if (!p.raw) continue;
+
+          // ── (b) THE MISSING COMMA, WHICH IS THE HEADLINE CASE ───────────────
+          // LiamSaber.h, 2026-07-24: a missing `,` after the track string, and gcc
+          // said `expected '}' before 'StylePtr'` — a different line, in a different
+          // preset. ⚠️ THE PARSER IS BLIND TO IT: it reads font, track and styles
+          // happily without the separator, so this cannot be inferred from the parse
+          // and has to be read off the text.
+          // A preset is { font, track, styles…, name }, so whatever follows the
+          // SECOND string must be a comma. `}` is excluded because a two-element
+          // preset is a different fault (the blade-count check names it).
+          const strs = [...p.raw.matchAll(/"(?:[^"\\]|\\.)*"/g)];
+          if (strs.length >= 2) {
+            const after = p.raw.slice(strs[1].index + strs[1][0].length);
+            const next = after.replace(/^\s+/, '')[0];
+            if (next && next !== ',' && next !== '}') {
+              const name = (p.displayName || '').trim() || `Preset ${p.index}`;
+              findings.push({
+                title: `Preset ${name} is missing a comma after its track.`,
+                detail: 'Every part of a preset is separated by a comma. Without one the compiler '
+                      + 'reads the next line as part of this one and reports the error somewhere '
+                      + 'further down, often in a different preset entirely.',
+                items: [name],
+                fix: null,
+              });
+              continue;            // one finding per preset; the first is the honest one
+            }
+          }
+
+          const body = _balanceStrip(p.raw);
+          const pairs = [['{', '}'], ['(', ')'], ['[', ']'], ['<', '>']];
+          for (const [open, close] of pairs) {
+            // ⚠️ ANGLE BRACKETS ARE NOT RELIABLE and are counted only for a REPORT,
+            // never alone: `Int<-1>` and comparisons put stray `<` and `>` in valid
+            // code. Braces, parens and square brackets are structural in a preset
+            // and can be trusted.
+            if (open === '<') continue;
+            let depth = 0, bad = false;
+            for (const ch of body) {
+              if (ch === open) depth++;
+              else if (ch === close) { depth--; if (depth < 0) { bad = true; break; } }
+            }
+            if (bad || depth !== 0) {
+              const name = (p.displayName || '').trim() || `Preset ${p.index}`;
+              findings.push({
+                title: `Preset ${name} has unbalanced ${open}${close}.`,
+                detail: `There is ${depth > 0 ? `no closing ${close}` : `an extra ${close}`} `
+                      + `inside this preset. The compiler will report this somewhere further down `
+                      + `the file, often in a different preset, because it keeps reading past the `
+                      + `real mistake. Check this preset's ${open}${close} pairs.`,
+                items: [name],
+                fix: null,
+              });
+              break;                 // one finding per preset; the first is the honest one
+            }
+          }
+        }
+      }
+      return findings.length ? { findings } : null;
+    },
+  });
+
   // ── A prop the selected OS version does not have ─────────────────────────
   //
   // [B-185]. A config's `#include "../props/<file>.h"` names a prop that is not in
