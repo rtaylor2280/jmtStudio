@@ -7942,6 +7942,10 @@ window.runPreflight = async function () {
     // optional chaining would have made it return '' forever while LOOKING wired.
     // When a check needs the board, expose it from buildPanel.js and fill this in.
     board: '',
+    // [B-170] And that is exactly what was done for the USB type: buildPanel.js now
+    // exports getSelectedUsb, so this reads a real value rather than a name that is
+    // not there. Empty stays "cannot tell".
+    usbType: (typeof window.getSelectedUsb === 'function' ? window.getSelectedUsb() : '') || '',
     // Injected rather than reached for, so a check that walks prop headers or
     // derives a list from the OS tree can be tested against a FAKE tree instead of
     // a real ProffieOS install. That is what lets the whole check set run in node.

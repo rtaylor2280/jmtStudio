@@ -123,6 +123,13 @@
       // default.
       versionName: o.versionName || '',
       board:       o.board || '',
+      // [B-170] The selected USB type, e.g. 'cdc_webusb' or 'cdc_msc'. A BUILD
+      // setting, not the SD card — this does not breach the config-only rule, which
+      // exists because the card cannot be seen at compile time. The USB type can.
+      // ⚠️ Empty is normal (nothing selected yet, or a caller that does not know) and
+      // must read as "cannot tell", never as a default. Guessing 'cdc_webusb' here
+      // would make a check fire on a config nobody has chosen a USB type for.
+      usbType:     o.usbType || '',
       // readVersionFile(versionName, relPath) -> Promise<{ok, content}|null>
       readVersionFile: typeof o.readVersionFile === 'function'
         ? o.readVersionFile

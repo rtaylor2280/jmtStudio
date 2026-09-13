@@ -3564,6 +3564,12 @@ window.claimCacheForCurrentConfig = claimCacheForCurrentConfig;
 window.checkCacheForConfig      = checkCacheForConfig;
 window.updateUsbChangedIndicator  = updateUsbChangedIndicator;
 window.updatePortChangedIndicator = updatePortChangedIndicator;
+// [B-170] EXPOSED BECAUSE A CHECK NEEDS IT, and exposed BEFORE it is read.
+// `selectedUsb` is module-local, and the preflight context's own note records what
+// happens otherwise: a first draft of that context called a getSelectedBoardLabel()
+// that did not exist, and optional chaining would have returned '' forever while
+// looking wired. So the accessor lands first and the context reads a real value.
+window.getSelectedUsb      = () => selectedUsb;
 window.setSelectedUsb      = (usb) => {
   if (!usb) return;
   selectedUsb = usb;
