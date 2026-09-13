@@ -34,10 +34,22 @@
   // Rehoused from the bespoke gate in index.html, 2026-09-12. Behaviour is
   // unchanged and its QA cases (section 188) still describe it exactly.
   //
-  // SCOPE IS UNDER-COUNT. Over-count also fails to compile, but it already carries
-  // a red "n/m BLADES" header and a repair tool, so nobody falls into the same
-  // unreadable error blind. Widening it lives with [B-223], which is this same
-  // rule filed first and covers both directions.
+  // BOTH DIRECTIONS, as of 2026-09-13 — this closes [B-223], which filed the same
+  // rule first and always covered both. It shipped under-count only, on the
+  // argument that over-count already carries a red "n/m BLADES" header and a
+  // repair tool. ⭐ THAT ARGUMENT DOES NOT SURVIVE BEING SAID OUT LOUD: the
+  // sidecar paints MISSING slots red too, so it would have killed the under-count
+  // check equally. A badge does not stop a compile — and a compile here has run as
+  // long as 19 minutes for a failure that was knowable before it started.
+  //
+  // Over-count is the same hard failure, not a lesser one. `Preset` in
+  // common/preset.h holds exactly NUM_BLADES style members plus the name, so an
+  // extra style is one initializer more than the struct has room for.
+  // ⚠️ AND IT IS NOT A TYPO CASE — it is what a config BECOMES. Lower NUM_BLADES
+  // without touching the presets and every preset is over (the B226 fixtures are
+  // built from exactly that), and [B-219]'s follower-delete cascade deliberately
+  // leaves an OVERRIDDEN preset holding its slot rather than destroying the user's
+  // own text. The app manufactures this state itself.
   //
   // NO FIX OFFERED, and that is not an omission. Filling the slot means choosing a
   // style, which is a decision, not a repair — and choosing it ONCE and applying it
@@ -66,6 +78,7 @@
       if (!ctx.parsed) return { unsure: 'the config could not be parsed' };
 
       const short = [];
+      const over  = [];
       for (const arr of (ctx.parsed.arrays || [])) {
         for (const p of (arr.presets || [])) {
           // A preset the parser could not read has an empty style list by
@@ -78,7 +91,7 @@
           // (The over-count repair DOES walk disabled blocks, for the opposite
           // reason — those come back.)
           const actual = (p.styles || []).length;
-          if (actual >= expected) continue;
+          if (actual === expected) continue;
 
           // ⚠️ THE PARSER IS NOT CORROBORATION OF ITSELF, and that cost three false
           // positives before it was measured. Across 173 real configs the rule
@@ -87,7 +100,16 @@
           // doing it. More tokens than parsed slots means we cannot account for the
           // difference, and that is silence. Over-counting costs a missed case,
           // which is cheap; the other direction blocks a working build.
-          if (_styleTokens(p.raw) > actual) continue;
+          const tokens = _styleTokens(p.raw);
+          if (actual < expected && tokens > actual) continue;
+
+          // ⭐ THE SAME INSTRUMENT AIMED THE OTHER WAY, AND IT ABSTAINS ON THE
+          // OPPOSITE DISAGREEMENT. An under-counting parser cannot INVENT a slot,
+          // so it can never manufacture an over-count: 3 parsed against 2 expected
+          // is still too many even if the truth is 5. What WOULD be a false
+          // positive is the parser claiming more slots than the text can show, so
+          // that is the direction to go quiet on.
+          if (actual > expected && tokens < actual) continue;
 
           // A preset with no styles parsed has no trustworthy name either: with
           // nothing between the strings the parser takes the LAST one, which is the
@@ -96,42 +118,81 @@
           const name = (!nameRaw || nameRaw === (p.track || '').trim())
             ? `Preset ${p.index}`
             : nameRaw;
-          short.push({ name, actual, array: arr.name });
+          (actual < expected ? short : over).push({ name, actual, array: arr.name });
         }
       }
-      if (!short.length) return null;
+      if (!short.length && !over.length) return null;
 
-      const one    = short.length === 1;
-      const counts = [...new Set(short.map(s => s.actual))];
-      // "have 3 of 4 blade styles" when they agree, which is the common case (a
-      // config grows a blade and every preset is one short). Mixed counts get the
-      // weaker sentence rather than a per-preset breakdown nobody needs.
-      const countPhrase = counts.length === 1
-        ? `${counts[0]} of ${expected} blade style${expected === 1 ? '' : 's'}`
-        : `fewer than ${expected} blade styles`;
-
-      // A preset short by more than one has more than one empty slot, and usually
-      // is when a config gains a blade: 34 presets at "1 of 3" are each missing TWO.
-      const slotWord = short.every(s => expected - s.actual === 1) ? 'slot' : 'slots';
+      const blades = `${expected} blade${expected === 1 ? '' : 's'}`;
 
       // Named only when there is more than one bank, since most configs have one
       // and the name is noise there.
-      const banks = [...new Set(short.map(s => s.array).filter(Boolean))];
-      const bankNote = (ctx.parsed.arrays || []).length > 1 && banks.length
-        ? `${banks.length === 1 ? 'All in' : 'Across'} ${banks.join(', ')}.`
-        : '';
+      const bankNote = (list) => {
+        const banks = [...new Set(list.map(s => s.array).filter(Boolean))];
+        return (ctx.parsed.arrays || []).length > 1 && banks.length
+          ? `${banks.length === 1 ? 'All in' : 'Across'} ${banks.join(', ')}. `
+          : '';
+      };
 
-      return {
-        findings: [{
-          title: `Your config has ${expected} blade${expected === 1 ? '' : 's'}, and `
+      const findings = [];
+
+      if (short.length) {
+        const one    = short.length === 1;
+        const counts = [...new Set(short.map(s => s.actual))];
+        // "have 3 of 4 blade styles" when they agree, which is the common case (a
+        // config grows a blade and every preset is one short). Mixed counts get the
+        // weaker sentence rather than a per-preset breakdown nobody needs.
+        const countPhrase = counts.length === 1
+          ? `${counts[0]} of ${expected} blade style${expected === 1 ? '' : 's'}`
+          : `fewer than ${expected} blade styles`;
+
+        // A preset short by more than one has more than one empty slot, and usually
+        // is when a config gains a blade: 34 presets at "1 of 3" are each missing TWO.
+        const slotWord = short.every(s => expected - s.actual === 1) ? 'slot' : 'slots';
+
+        findings.push({
+          title: `Your config has ${blades}, and `
                + `${one ? '1 preset has' : `${short.length} presets have`} ${countPhrase}.`,
-          detail: `${bankNote ? bankNote + ' ' : ''}Every preset needs one style per blade, so this `
+          detail: `${bankNote(short)}Every preset needs one style per blade, so this `
                 + `cannot compile. Open ${one ? 'that preset' : 'each preset'} in Presets and fill `
                 + `the empty ${slotWord} in the Styles row.`,
           items: short.map(s => s.name),
           fix: null,
-        }],
-      };
+          kind: 'under',
+        });
+      }
+
+      // ── THE OTHER DIRECTION [B-223] ──────────────────────────────────────
+      // Too many styles is the same build failure, not a lesser one: `Preset` in
+      // common/preset.h carries exactly NUM_BLADES style members plus the name, so
+      // an extra style is one initializer more than the struct has room for.
+      // ⚠️ AND THE APP MAKES THIS CASE ITSELF. [B-219]'s follower-delete cascade
+      // deliberately leaves an OVERRIDDEN preset holding its slot, because that
+      // text is the user's own work and must not vanish silently. Those leftovers
+      // arrive here.
+      // NO FIX, for the same reason the short side has none: WHICH style to drop
+      // is a decision only the author can make.
+      if (over.length) {
+        const one    = over.length === 1;
+        const counts = [...new Set(over.map(s => s.actual))];
+        const countPhrase = counts.length === 1
+          ? `${counts[0]} blade styles`
+          : `more than ${expected} blade styles`;
+        const extraWord = over.every(s => s.actual - expected === 1) ? 'style' : 'styles';
+
+        findings.push({
+          title: `Your config has ${blades}, and `
+               + `${one ? '1 preset has' : `${over.length} presets have`} ${countPhrase}.`,
+          detail: `${bankNote(over)}Every preset needs one style per blade and no more, so this `
+                + `cannot compile. Open ${one ? 'that preset' : 'each preset'} in Presets and `
+                + `remove the extra ${extraWord} from the Styles row.`,
+          items: over.map(s => s.name),
+          fix: null,
+          kind: 'over',
+        });
+      }
+
+      return { findings };
     },
   });
 
@@ -371,7 +432,7 @@
   // that answer, and this is its first `warn` consumer.
   //
   // ⚠️⚠️ ITS FIRST DRAFT MATCHED ON PROP HEADER FILENAMES AND SCORED 6 FALSE
-  // POSITIVES ON RYAN'S OWN 8 KNOWN-GOOD CONFIGS, all of which include
+  // POSITIVES ACROSS THE 8 KNOWN-GOOD CONFIGS, all of which include
   // `../props/jmt_fett_prop.h` — a JMT prop outside the stock props/ directory.
   // The lesson is NOT "add that filename": any allowlist of prop filenames is a
   // wolf-crier by construction, because anyone may rename a prop or write their

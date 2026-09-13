@@ -45,7 +45,13 @@
  *
  * A finding is:
  *
- *     { title, detail, items, fix }
+ *     { title, detail, items, fix, kind? }
+ *
+ *   kind is an OPTIONAL machine-readable tag for a check that emits more than one
+ *   row — 'under' / 'over' on the blade-count check, say. It is never shown. It
+ *   exists so that tests and any future UI can tell two rows of the same check
+ *   apart WITHOUT matching on their wording, which [B-375] is about to rewrite
+ *   wholesale. A test that greps the copy is a test that breaks on a copy pass.
  *
  *   ⭐ THE ROW IS THE FINDING, NOT THE ITEM. One finding may cover 58 presets; it
  *   is still one row with one fix. Splitting it per item turns a real 58-preset
@@ -267,6 +273,7 @@
           detail:   f.detail || '',
           items:    f.items || [],
           fix:      f.fix || null,
+          kind:     f.kind || null,
         });
       }
     }

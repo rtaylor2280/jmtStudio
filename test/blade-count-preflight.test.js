@@ -36,13 +36,21 @@ function ok(name, cond, extra) {
   else { failures++; console.log('FAIL ', name, extra === undefined ? '' : `\n      ${extra}`); }
 }
 
-// One finding per run here by construction — this check returns at most one.
+// TWO findings are possible since 2026-09-13 [B-223]: a config can be short on one
+// preset and over on another, and they are separate rows because the remedy differs
+// (fill a slot vs remove one). `finding`/`body` stay pointed at the first so the
+// under-count assertions written before that read unchanged; `under` and `over` pick
+// by the finding's own `kind` rather than by sniffing its wording.
 async function check(config) {
   const res = await preflight.run(preflight.buildContext({ text: config }));
-  const f = res.findings.find(x => x.checkId === 'blade-style-count') || null;
+  const all = res.findings.filter(x => x.checkId === 'blade-style-count');
+  const f = all[0] || null;
   return {
     blocked: !!f,
     finding: f,
+    all,
+    under: all.find(x => x.kind === 'under') || null,
+    over:  all.find(x => x.kind === 'over')  || null,
     // The text a reader would see, with the item list folded in the way the dialog
     // folds it, so assertions read like the sentence on screen.
     body: f ? `${f.title} ${(f.items || []).join(', ')}. ${f.detail}` : '',
@@ -82,8 +90,44 @@ BladeConfig blades[] = {{ 0, WS281XBladePtr<100, bladePin>(), CONFIGARRAY(${bank
     ok('a correct config is silent', !(await check(mk(4, [{ n: 4, name: 'A' }, { n: 4, name: 'B' }]))).blocked);
   }
   {
-    ok('over-count stays silent (out of scope, see B-223)',
-       !(await check(mk(2, [{ n: 4, name: 'TooMany' }]))).blocked);
+    // ── THE OTHER DIRECTION, added 2026-09-13 [B-223] ───────────────────
+    // This assertion used to read "over-count stays silent (out of scope)".
+    const r = await check(mk(2, [{ n: 4, name: 'TooMany' }]));
+    ok('over-count blocks too', r.blocked && r.finding.severity === 'block');
+    ok('it is tagged as the over-count row', !!r.over && !r.under);
+    ok('the count is stated plainly', /1 preset has 4 blade styles/.test(r.body), r.body);
+    ok('it names the preset', r.over.items.join(',') === 'TooMany', r.over.items.join(','));
+    ok('it says to REMOVE, not to fill', /remove the extra styles/.test(r.over.detail)
+       && !/fill/.test(r.over.detail), r.over.detail);
+    // Same reason the short side offers none: WHICH style to drop is the author's
+    // call, and an app that picks for them deletes work it cannot judge.
+    ok('it offers no fix', r.over.fix === null);
+  }
+  {
+    // A config short on one preset and over on another is TWO rows, because one
+    // says fill and the other says remove. Folding them into a single sentence
+    // would produce a remedy that fits neither.
+    const r = await check(mk(2, [{ n: 1, name: 'Short' }, { n: 4, name: 'Long' }]));
+    ok('both directions at once give two rows', r.all.length === 2, `${r.all.length}`);
+    ok('the short row names only the short preset',
+       r.under.items.join(',') === 'Short', r.under.items.join(','));
+    ok('the over row names only the over preset',
+       r.over.items.join(',') === 'Long', r.over.items.join(','));
+  }
+  {
+    // ⚠️ THE ABSTAIN, AIMED THE OTHER WAY. The under-count side goes quiet when the
+    // crude token count EXCEEDS the parsed slots (the parser under-counts, and that
+    // would block a working build). Over-count cannot be manufactured that way — an
+    // under-counting parser cannot invent a slot — so it abstains on the opposite
+    // disagreement: fewer tokens than parsed slots means we cannot show the text
+    // that would justify the claim.
+    const text = `#define NUM_BLADES 2
+Preset testbank[] = {
+  { "font", "track.wav", one, two, three, "Bare" },
+};
+BladeConfig blades[] = {{ 0, WS281XBladePtr<100, bladePin>(), CONFIGARRAY(testbank) }};`;
+    const r = await check(text);
+    ok('an over-count the text cannot corroborate is silent', !r.over, r.body);
   }
   {
     const r = await check(`Preset testbank[] = {
@@ -217,7 +261,13 @@ BladeConfig blades[] = {{ 0, WS281XBladePtr<100, bladePin>(), CONFIGARRAY(preset
   };
 
   {
-    const files = ['local/ConfigExamples', 'local/b226-test-configs', 'local/test-configs'].flatMap(readDir);
+    // ⚠️ b226-test-configs WAS IN THIS LIST UNTIL 2026-09-13 and did not belong.
+    // Those four files are DELIBERATE over-count fixtures — their own headers say
+    // "Presets carry FOUR style slots while NUM_BLADES is 2" — and they sat in the
+    // known-good corpus only because the check ignored over-count entirely. The
+    // moment [B-223] widened it they read as four false positives. They are the
+    // opposite: they are the only real-shaped configs that SHOULD fire.
+    const files = ['local/ConfigExamples', 'local/test-configs'].flatMap(readDir);
     if (!files.length) console.log('SKIP  no example configs on this machine');
     else {
       const blocked = [];
@@ -225,6 +275,33 @@ BladeConfig blades[] = {{ 0, WS281XBladePtr<100, bladePin>(), CONFIGARRAY(preset
         if ((await check(fs.readFileSync(f, 'utf8'))).blocked) blocked.push(path.basename(f));
       }
       ok(`none of the ${files.length} known-good configs are blocked`, blocked.length === 0, blocked.join(', '));
+    }
+  }
+
+  {
+    // THE POSITIVE HALF, and it is worth more than a synthetic case: these are full
+    // configs derived from a real one, carrying banks, disabled presets and a
+    // correctly-counted preset alongside the broken ones.
+    const files = readDir('local/b226-test-configs');
+    if (!files.length) console.log('SKIP  no B226 fixtures on this machine');
+    else {
+      const missed = [];
+      for (const f of files) {
+        if (!(await check(fs.readFileSync(f, 'utf8'))).over) missed.push(path.basename(f));
+      }
+      ok(`all ${files.length} deliberate over-count fixtures are caught`,
+         missed.length === 0, missed.join(', '));
+
+      // A fixture header states the answer, so assert against IT rather than
+      // against whatever the check happens to say: three over-count presets, with
+      // the correctly-counted one and the DISABLED one both left out.
+      const a = await check(fs.readFileSync(path.join(ROOT, 'local/b226-test-configs/B226_Test_A.h'), 'utf8'));
+      ok('Test_A names exactly its three over-count presets',
+         a.over && a.over.items.length === 3, a.over && a.over.items.join(', '));
+      ok('the correctly-counted preset is not named',
+         a.over && !a.over.items.some(n => /Father/i.test(n)), a.over && a.over.items.join(', '));
+      ok('the DISABLED over-count preset is not named — it does not compile either way',
+         a.over && !a.over.items.some(n => /Dark_?Ani/i.test(n)), a.over && a.over.items.join(', '));
     }
   }
 
