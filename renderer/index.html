@@ -3931,6 +3931,26 @@
   .styles-tag-dropdown-empty { padding: 8px 12px; font-size: 0.72rem; color: var(--c-text-faint); }
   .styles-active-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 6px 20px; background: var(--c-bg); border-bottom: 1px solid var(--c-border); flex-shrink: 0; }
   .styles-active-filters-label { font-size: 0.7rem; color: var(--c-text-faint); margin-right: 2px; }
+  /* ── [B-305] THE GROUPING IS THE FIX, NOT DECORATION ──────────────────────────
+     Eight flat chips in one row read as one conjunction no matter what the code does
+     underneath. A faint hairline around each facet plus its own joiner between the
+     chips is what makes "(A or B) and (C and D)" visible. The joiner words are
+     rendered as ::before on every chip after the first, so a group of one shows no
+     joiner at all and needs no special case. */
+  .sf-filter-group { display: inline-flex; align-items: center; gap: 4px; padding: 1px 5px;
+                     border: 1px solid var(--c-border-faint); border-radius: 4px; }
+  .sf-filter-group-label { font-size: 0.62rem; color: var(--c-text-faint); text-transform: uppercase;
+                           letter-spacing: 0.04em; }
+  .sf-filter-group-chips { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+  .sf-filter-group-chips > .styles-active-filter-chip + .styles-active-filter-chip::before {
+    content: attr(data-join); }
+  /* attr() cannot reach a parent, so the joiner text is carried down to each chip. */
+  .sf-filter-group-chips[data-join="or"]  > .styles-active-filter-chip + .styles-active-filter-chip::before { content: 'or'; }
+  .sf-filter-group-chips[data-join="and"] > .styles-active-filter-chip + .styles-active-filter-chip::before { content: 'and'; }
+  .sf-filter-group-chips > .styles-active-filter-chip + .styles-active-filter-chip::before {
+    color: var(--c-text-faint); font-size: 0.62rem; margin-right: 2px; }
+  .sf-filter-join { font-size: 0.62rem; color: var(--c-text-faint); text-transform: uppercase;
+                    letter-spacing: 0.04em; }
   .styles-active-filter-chip { display: inline-flex; align-items: center; gap: 2px; background: rgba(0,130,255,0.1); color: var(--jmt-blue); border: 1px solid rgba(0,130,255,0.35); border-radius: 3px; padding: 1px 4px 1px 6px; font-size: 0.7rem; }
   .styles-active-filter-remove { background: transparent; border: none; color: var(--jmt-blue); font-size: 0.7rem; cursor: pointer; padding: 0 2px; line-height: 1; }
   .styles-active-filter-remove:hover { color: #ff6464; }
@@ -21042,9 +21062,41 @@ require(['vs/editor/editor.main'], function () {
         _sfInUseFilter = '';
         _sfRenderGrid();
       };
+      // ── [B-305] THE BADGE IS A FUNCTION OF FILTER STATE, SO IT IS DRIVEN FROM ONE
+      // PLACE THAT EVERY PATH ALREADY CALLS.
+      //
+      // It used to be written ONLY inside each dropdown's renderer, which runs on OPEN.
+      // Filter state also changes from outside the dropdown — a chip's ✕, and "Clear
+      // all" — and those update the grid and the chip row and never touched the
+      // buttons. So Effects sat showing "5" over an unfiltered 220-font grid until you
+      // opened it again.
+      //
+      // ⚠️ Deliberately NOT a third copy inside the renderers: they call this instead,
+      // so there is one definition of what the badge says.
+      const _sfSyncFilterBadges = () => {
+        const pairs = [
+          ['sf-creator-filter-badge', 'btn-sf-creator-filter', _sfActiveFilterCreators.size],
+          ['sf-effects-filter-badge', 'btn-sf-effects-filter',
+            _sfActiveFilterEffects.size + _sfActiveFilterEffectsMissing.size],
+        ];
+        for (const [badgeId, btnId, n] of pairs) {
+          const badge = document.getElementById(badgeId);
+          const btn   = document.getElementById(btnId);
+          if (badge) {
+            if (n > 0) { badge.textContent = String(n); badge.style.display = ''; }
+            else badge.style.display = 'none';
+          }
+          if (btn) btn.classList.toggle('has-active', n > 0);
+        }
+      };
+
       const _sfRenderGrid = () => {
         const list = document.getElementById('sf-cards');
         const countEl = document.getElementById('sf-search-count');
+        // [B-305] Every path that changes a filter reaches here — the chip ✕ and Clear
+        // all included — so this is where the buttons learn about it. Before the grid
+        // returns early, since the badges are about state rather than about the grid.
+        _sfSyncFilterBadges();
         if (!list) return;
         const q = (_sfSearchQuery || '').toLowerCase();
         const sorted = _sfAllEntries.slice().sort(_sfCompareEntries);   // [B-213]
@@ -23822,7 +23874,46 @@ require(['vs/editor/editor.main'], function () {
         const clearAll = total >= 2
           ? `<button class="styles-active-filter-clear" id="sf-clear-all-filters">Clear all</button>`
           : '';
-        strip.innerHTML = `<span class="styles-active-filters-label">Filtering by:</span>${searchChip}${tagChips}${creatorChips}${effectChips}${needsReviewChip}${newChip}${inUseChip}${clearAll}`;
+        // ⭐⭐ [B-305] HIS CATCH, AND IT WAS THE HEADLINE: "this implies filtered to all
+        // of these... that's the issue." Eight flat chips in one row read as ONE
+        // conjunction whatever sits underneath them. The real logic is
+        //     (JMT Sabers or BKSaberSounds or Kyberphonic) and (bgndrag and bgnlb)
+        // and flattening any grouping into a single row reads as AND no matter what.
+        //
+        // So the row groups by FACET and each group carries its own joiner, taken from
+        // _SF_FACET_JOIN below — which is read by nothing else, but sits beside a note
+        // pointing at the predicate it must agree with. ⚠️ If a predicate's joiner
+        // changes, change it here in the same commit: a row that states the wrong
+        // joiner is the bug this fixes, pointed the other way.
+        const _group = (label, chipsHtml, count, joiner) => {
+          if (!count) return '';
+          return `<span class="sf-filter-group" data-facet="${label}">`
+               + `<span class="sf-filter-group-label">${label}</span>`
+               + `<span class="sf-filter-group-chips" data-join="${joiner}">${chipsHtml}</span>`
+               + `</span>`;
+        };
+        const groups = [
+          _group('search',  searchChip,   searchActive,                        'or'),
+          // Tags AND today: matchesTagFilter requires EVERY selected tag. ⏭ His ruling
+          // 2026-09-03 is that this should become OR, together with reverting the
+          // tag self-apply — still open on [B-305], so the row states what runs.
+          _group('tag',     tagChips,     _sfActiveFilterTags.size,            'and'),
+          // Creators OR, and it is FORCED: meta.author is a single string, so ANDing
+          // two creators asks for a font by two people and is always zero. Do not
+          // "fix" this into consistency with tags.
+          _group('creator', creatorChips, _sfActiveFilterCreators.size,        'or'),
+          // Effects AND today (present must all be there, absent must all be gone).
+          // ⏭ Also slated to become OR for the present set by the same ruling.
+          _group('effect',  effectChips,
+                 _sfActiveFilterEffects.size + _sfActiveFilterEffectsMissing.size, 'and'),
+        ].filter(Boolean);
+        // The boolean facets have no internal structure, so they are plain chips that
+        // AND with everything else — which is what the gaps between groups already say.
+        const flags = `${needsReviewChip}${newChip}${inUseChip}`;
+        strip.innerHTML = `<span class="styles-active-filters-label">Filtering by:</span>`
+                        + groups.join('<span class="sf-filter-join">and</span>')
+                        + (groups.length && flags ? '<span class="sf-filter-join">and</span>' : '')
+                        + flags + clearAll;
       };
       const _sfToggleFilterTag = (tag) => {
         if (!tag) return;
