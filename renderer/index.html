@@ -4218,6 +4218,13 @@
   /* Submenu indicator + spacing for items that open a nested menu. The
      ▸ glyph sits flush right, matching OS-native cascade menus. The
      submenu DOM is a sibling .preset-ctx-menu positioned at runtime. */
+  /* [B-376] A menu item that cannot act says so and explains why on hover, rather
+     than looking live and doing nothing. Opacity + not-allowed matches the existing
+     .disabled convention (.sf-libpick-row, .sf-review-candidate-row, the voicepack
+     toggle); the :hover override is what stops it reading as clickable. */
+  .preset-ctx-item.disabled { opacity: 0.45; cursor: not-allowed; }
+  .preset-ctx-item.disabled:hover { background: transparent; color: var(--c-text-sub); }
+  .preset-ctx-item.disabled.has-submenu::after { color: var(--c-text-muted); }
   .preset-ctx-item.has-submenu { padding-right: 28px; position: relative; }
   .preset-ctx-item.has-submenu::after { content: '\25B8'; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 0.72rem; color: var(--c-text-muted); }
   .preset-ctx-item.has-submenu:hover::after { color: var(--c-text); }
@@ -36189,18 +36196,32 @@ require(['vs/editor/editor.main'], function () {
         // (they handle scaffolding correctly across all source shapes),
         // then patch the newly-created preset's font + name on the next
         // tick once the parse refreshes.
+        // ⚠️ [B-376] THESE TWO WERE UNREACHABLE AND SILENT. They used to test
+        // `typeof _addFirstPreset === 'function'` against names defined INSIDE
+        // presetSidecarModule (an IIFE spanning ~39210-47800) while this function sits
+        // outside it at ~36176. A function declared inside an IIFE is invisible outside
+        // it, so both tests were false every time: the user clicked "Add to config" on a
+        // config with no presets, got no preset and no message, and nothing threw.
+        //
+        // The module now publishes both (see the bridge beside _firePresetAutoPlay), and
+        // a MISSING bridge is reported rather than swallowed — if this ever silently
+        // stops working again it should be loud, because the silence is what cost years.
+        const _addFirst   = window._addFirstPreset;
+        const _insertInto = window._insertFirstEntryIntoArray;
+        if (typeof _addFirst !== 'function' || typeof _insertInto !== 'function') {
+          console.error('[B-376] preset sidecar bridges are missing; "Add to config" cannot '
+                      + 'scaffold an empty config.');
+          if (typeof showToast === 'function') showToast('Could not add the preset to this config.');
+          return;
+        }
         if (!arr) {
-          if (typeof _addFirstPreset === 'function') {
-            _addFirstPreset(result.bladeCount || 1);
-            setTimeout(() => _sfPatchFreshPresetFont(0, 0, fontName), 80);
-          }
+          await _addFirst(result.bladeCount || 1);
+          setTimeout(() => _sfPatchFreshPresetFont(0, 0, fontName), 80);
           return;
         }
         if (!arr.presets.length) {
-          if (typeof _insertFirstEntryIntoArray === 'function') {
-            _insertFirstEntryIntoArray(arr, activeIdx, result.bladeCount || 1);
-            setTimeout(() => _sfPatchFreshPresetFont(activeIdx, 0, fontName), 80);
-          }
+          await _insertInto(arr, activeIdx, result.bladeCount || 1);
+          setTimeout(() => _sfPatchFreshPresetFont(activeIdx, 0, fontName), 80);
           return;
         }
         // Common path: append to the existing array.
@@ -36434,6 +36455,17 @@ require(['vs/editor/editor.main'], function () {
         const mkItem = (text, opts, fn) => {
           const d = document.createElement('div');
           d.className = 'preset-ctx-item' + (opts && opts.cls ? ' ' + opts.cls : '');
+          if (opts && opts.disabledReason) {
+            // [B-376] Greyed and explained, not hidden. An item that vanishes leaves
+            // the user wondering whether the feature exists; one that is visible and
+            // says why teaches what it needs. This branch never binds a handler, so a
+            // disabled item cannot act even if something else styles it live.
+            d.classList.add('disabled');
+            d.title = opts.disabledReason;
+            menu.appendChild(d);
+            d.textContent = text;
+            return d;
+          }
           d.textContent = text;
           if (fn) d.addEventListener('mousedown', (ev) => {
             ev.stopPropagation();
@@ -36443,12 +36475,43 @@ require(['vs/editor/editor.main'], function () {
           menu.appendChild(d);
           return d;
         };
-        // Item 1: add this font as a new preset in the open config.
-        // Explicit "to config" framing per Deliberate call — being explicit
-        // beats assuming the user knows what we're operating on.
-        mkItem(`+ Add to config`, null, () => _sfAddPresetWithFont(fontName));
+
+        // ⭐ [B-376] WITH NO CONFIG OPEN, NONE OF THIS IS OFFERED AT ALL. His call:
+        // grey-with-a-reason when a config is open but cannot take the action (there is
+        // something to teach), HIDE when no config is open (there is nothing to explain
+        // yet — the answer is "open a config", which is the empty state's whole job).
+        // ⚠️ `fileIsOpen`, NOT `currentFilePath`. A brand-new unsaved config has no path
+        // and is absolutely open — testing the path would hide these items on exactly
+        // the config someone is most likely to be building up from nothing.
+        // setFileOpen() is the one writer, and .no-config on <body> is the same signal
+        // the CSS uses, so this agrees with what is on screen.
+        const _cfgOpen = !!(typeof editor !== 'undefined' && editor
+                            && typeof fileIsOpen !== 'undefined' && fileIsOpen);
+        let _presetCount = 0;
+        if (_cfgOpen) {
+          try {
+            const _r = presetParser.parsePresets(editor.getValue());
+            _presetCount = (_r.arrays || []).reduce((n, a) => n + ((a.presets || []).length), 0);
+          } catch { _presetCount = 0; }
+        }
+
+        if (_cfgOpen) {
+          // Item 1: add this font as a new preset in the open config.
+          // Explicit "to config" framing per Deliberate call — being explicit
+          // beats assuming the user knows what we're operating on.
+          // Always enabled: with no presets it SCAFFOLDS one, which is exactly the path
+          // that used to fail silently.
+          mkItem(`+ Add to config`, null, () => _sfAddPresetWithFont(fontName));
+        }
         // Item 2: swap this font into an existing preset (submenu of presets).
-        const replaceItem = mkItem(`Replace in config preset…`, { cls: 'has-submenu' }, null);
+        // ⚠️ Nothing to replace IN when the config has no presets — that submenu built
+        // itself empty and the item still looked live.
+        const replaceItem = !_cfgOpen ? null : mkItem(
+          `Replace in config preset…`,
+          _presetCount === 0
+            ? { cls: 'has-submenu', disabledReason: 'This config has no presets yet. Use "Add to config" to create one.' }
+            : { cls: 'has-submenu' },
+          null);
         const buildSubmenu = () => {
           const sub = _sfPresetCtxSubmenu();
           sub.innerHTML = '';
@@ -36538,13 +36601,17 @@ require(['vs/editor/editor.main'], function () {
             }
           });
         };
-        replaceItem.addEventListener('mouseenter', buildSubmenu);
-        replaceItem.addEventListener('mousedown', (ev) => {
-          // Click on the parent item also opens the submenu, in case the
-          // user is on a touchscreen / arrived via keyboard.
-          ev.stopPropagation();
-          buildSubmenu();
-        });
+        // [B-376] Absent with no config open, and inert when the config has no presets:
+        // a submenu that can only ever build itself empty should not open at all.
+        if (replaceItem && !replaceItem.classList.contains('disabled')) {
+          replaceItem.addEventListener('mouseenter', buildSubmenu);
+          replaceItem.addEventListener('mousedown', (ev) => {
+            // Click on the parent item also opens the submenu, in case the
+            // user is on a touchscreen / arrived via keyboard.
+            ev.stopPropagation();
+            buildSubmenu();
+          });
+        }
         // Duplicate this one font (the card that was right-clicked). Shares
         // the original's source, auto-numbered with a _N suffix. Same silent
         // "duplicate from source" operation, surfaced directly on the card so
@@ -47777,6 +47844,24 @@ function _getFreshFieldRange(fieldName) {
     // they could call it directly, but keeping it on window keeps the
     // wiring style consistent with the other quick-play bridges.
     window._firePresetAutoPlay = _firePresetAutoPlay;
+
+    // ⭐ [B-376] THE COLD PATHS OF "Add to config" LIVE OUT HERE AND ITS CALLER DOES
+    // NOT. `_sfAddPresetWithFont` (~36176) sits OUTSIDE this module and guarded both
+    // of these with `typeof X === 'function'`, which is unsatisfiable from that scope —
+    // so adding a font to a config with no presets did nothing at all, silently, and
+    // had never once worked.
+    //
+    // ⚠️ THE GUARD IS WHAT HID IT. Without the typeof the call would have thrown on
+    // first use and been fixed years ago; with it, an unreachable branch reads as
+    // defensive programming and turns a crash into a silence, which nobody reports.
+    //
+    // Published rather than moved: both depend on _newPresetFontSeed, _navigateToLine,
+    // _rebuildSidecar and _renderDetail, all module-private, so hoisting them to top
+    // level would drag four more functions out with them. Same bridge pattern as
+    // _firePresetAutoPlay directly above, and as the 2026-08-16 move that fixed the
+    // identical scope bug in Copy Style.
+    window._addFirstPreset            = _addFirstPreset;
+    window._insertFirstEntryIntoArray = _insertFirstEntryIntoArray;
     // Initial visibility check — SFL entries are loaded lazily after
     // boot, so retry briefly until the cache populates.
     (function _initAutoPlayVisibility() {
