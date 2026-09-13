@@ -1364,7 +1364,10 @@ function onBuildDone({ type, ok, error, aborted, retriable, needsDfuDriver, sour
       _currentBuildKey = null;
       setFlashEnabled(false);
       finishBuildModal(false, '✗ Compile Failed', error);
-      if (error) appendLog(`\n⚠ ${error}`, true);
+      // [B-373] Our own summary line, so it carries the user's filename too — a log
+      // that said my_config.h beside a dialog that said LGT1Button32.h would be worse
+      // than either alone. The toolchain's streamed lines above it are untouched.
+      if (error) appendLog(`\n⚠ ${_withUserConfigName(error)}`, true);
     }
   }
   if (type === 'flash') {
@@ -1662,13 +1665,49 @@ function _setStatusTiered(elm, msg) {
   }
 }
 
+// ── [B-373] SAY THE USER'S FILENAME, NOT THE STAGING COPY'S ──────────────────
+//
+// `stageConfig` writes the editor's content to a FIXED path inside the selected OS
+// version's tree — `.../ProffieOS/config/my_config.h` — and arduino-cli compiles that
+// copy. gcc reports against the file it was handed, so a failure while working on
+// LGT1Button32.h reads
+//     my_config.h:37 — cannot convert 'const char*' to 'StyleFactory*' in initialization
+// and nothing on screen connects the two. The compile log's opening line does say
+// "Config staged to: ...\my_config.h", which is correct and is not where anyone looks
+// while reading an error.
+//
+// ⭐ THE LINE NUMBERS ARE RIGHT, WHICH IS WHY THIS IS A FIX AND NOT AN EXPLANATION.
+// The staged copy is byte-identical to the buffer, so line 37 IS line 37 of what they
+// are looking at. Only the filename token is wrong, so this is a substitution with
+// nothing to map and no way to point somewhere wrong.
+//
+// ⚠️ OURS ONLY. This rewrites the SUMMARY we render — the Compile Failed dialog and the
+// ⚠ line we append. The toolchain's streamed output in Build Output is never touched:
+// that is what gets pasted into a forum thread and it has to match what the toolchain
+// actually said.
+const _STAGED_CONFIG_BASENAME = 'my_config.h';   // must match CONFIG_FILENAME in proffieos.js
+
+function _withUserConfigName(text) {
+  if (!text) return text;
+  const el = document.getElementById('input-filename');
+  const base = (el && el.value.trim()) || '';
+  // No name yet means the staging basename IS the name the user would recognise, so
+  // there is nothing to substitute — the default in the filename field is my_config.
+  if (!base) return text;
+  const own = base.toLowerCase().endsWith('.h') ? base : `${base}.h`;
+  if (own === _STAGED_CONFIG_BASENAME) return text;
+  return text.split(_STAGED_CONFIG_BASENAME).join(own);
+}
+
 function finishBuildModal(success, title, statusMsg, { retriable = false, isFlash = false } = {}) {
   stopCompileHints();
   stopPortWatch();
   stopCompileTimer();
   stopFlashTimer();
   setBuildTitle(title, { color: success ? 'var(--c-success-text)' : 'var(--c-danger-text)' });
-  _setStatusTiered(document.getElementById('bm-status'), statusMsg || '');
+  // [B-373] One substitution point, so it covers every error signature at once rather
+  // than being repeated per translation.
+  _setStatusTiered(document.getElementById('bm-status'), _withUserConfigName(statusMsg || ''));
   document.getElementById('bm-abort').style.display = 'none';
   document.getElementById('bm-dfu-setup').style.display = 'none';
   document.getElementById('bm-manual-row').style.display = 'none';
