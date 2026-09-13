@@ -40357,6 +40357,40 @@ require(['vs/editor/editor.main'], function () {
       _renderDetail();
     }
 
+    // [B-374] THE DELETE KEY WORKS WHEREVER THE DELETE BUTTON SHOWS.
+    //
+    // Select several presets in the sidecar, press Delete, and nothing happened — the
+    // only way out was right-click → Delete, which he found by looking for it.
+    //
+    // ⭐ NOT A NEW DECISION. [B-336] settled this rule for the Sound Font Library on
+    // 2026-09-07 (commit c67e252): Delete AND Backspace both fire the same path as the
+    // visible control. This is that rule reaching a surface it did not cover, so the
+    // guards are COPIED from there rather than re-derived — the tab is active, there is
+    // a selection, no modal sits above, and no text surface has focus.
+    //
+    // ⚠️ THE FOCUS GUARD IS THE WHOLE RISK HERE, more than in the font grid. This
+    // sidecar sits beside preset name fields, font and track combos and the inline
+    // style editor — and Monaco itself, whose focused element is a hidden TEXTAREA, so
+    // the same check that protects the search box also stops this eating a Backspace
+    // mid-edit in the config.
+    //
+    // ⚠️ NO CONFIRM, deliberately, and that is the rule rather than an omission: the
+    // key is an alias for the button, and the right-click Delete does not confirm
+    // either. Adding a gate to one and not the other is how two doors drift apart.
+    // _batchDelete is a single _atomicEdit, so Ctrl+Z takes it back in one step.
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+      if (_activeTab !== 'config' || !fileIsOpen) return;
+      if (!_sidecarOpen) return;
+      if (_selectedLive.size === 0 && _selectedDisabled.size === 0) return;
+      if (document.querySelector('.modal-overlay.active')) return;
+      const ae = document.activeElement;
+      if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT'
+                 || ae.isContentEditable)) return;
+      e.preventDefault();
+      _batchDelete();
+    });
+
     function _showPresetContextMenu(e) {
       e.preventDefault();
       const menu          = document.getElementById('preset-ctx-menu');
