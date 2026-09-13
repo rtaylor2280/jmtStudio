@@ -20316,10 +20316,18 @@ async function refreshEmptyStateFavs() {
         // Deriving both halves from the same fresh read means nothing is snapshotted,
         // so nothing can be stale — the same move as re-deriving slot coordinates in
         // [B-371] rather than tracking them.
+        // ⚠️ READ THE SOURCE BEFORE THE AWAIT. `dragend` fires on the source card as
+        // part of the drop sequence and sets dragSrcPath back to null; awaiting the
+        // fetch below yields long enough for that to happen, so reading the shared
+        // variable afterwards gives null, findIndex returns -1, and the guard below
+        // swallows every drop silently. That is what "the reorder does not take" was:
+        // not a failed write, a write that was never attempted. Introduced by this
+        // entry's own fix, which moved the index lookup to the far side of a fetch.
+        const srcPath = dragSrcPath;
         const allItems = await window.electronAPI.getFavorites();
         const live = allItems.filter(i => i.exists);
 
-        const srcIdx = live.findIndex(p => p.filePath === dragSrcPath);
+        const srcIdx = live.findIndex(p => p.filePath === srcPath);
         const tgtIdx = live.findIndex(p => p.filePath === filePath);
         // ⚠️ Either card may have been removed since this handler was bound. Writing a
         // whole list when we cannot place one of its members is how the resurrection
