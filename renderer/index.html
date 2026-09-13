@@ -3530,6 +3530,15 @@
   .sf-save-conflict-list::-webkit-scrollbar { width: 6px; }
   .sf-save-conflict-list::-webkit-scrollbar-track { background: transparent; }
   .sf-save-conflict-list::-webkit-scrollbar-thumb { background: var(--c-border-strong); border-radius: 3px; }
+  /* [B-357] Section headers only appear when a review carries more than one KIND.
+     One export, one decision, but a common folder replaces as a unit while tracks
+     replace per file - so each kind keeps its own sentence above its own rows. */
+  .sf-save-conflict-section { margin: 10px 0 2px; }
+  .sf-save-conflict-section:first-child { margin-top: 0; }
+  .sf-save-conflict-section-title { font-size: 0.74rem; color: var(--c-text); font-weight: 600;
+                                    text-transform: uppercase; letter-spacing: 0.04em; }
+  .sf-save-conflict-section-intro { font-size: 0.72rem; color: var(--c-text-muted); margin-top: 2px;
+                                    line-height: 1.45; }
   .sf-save-conflict-row { display: flex; align-items: center; gap: 12px; padding: 6px 10px; background: var(--c-bg-inset); border: 1px solid var(--c-border-faint); border-radius: 4px; font-size: 0.82rem; }
   .sf-save-conflict-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--c-text); font-weight: 600; }
   .sf-save-conflict-choices { display: flex; gap: 10px; flex-shrink: 0; }
@@ -34446,14 +34455,49 @@ require(['vs/editor/editor.main'], function () {
           const v = opts.defaultModeFor ? opts.defaultModeFor(n) : opts.defaultMode;
           return v === 'replace' ? 'replace' : 'skip';
         };
-        list.innerHTML = conflictNames.map(n => `
-          <div class="sf-save-conflict-row" data-conflict-row="${_sfEscape(n)}">
-            <span class="sf-save-conflict-name" title="${_sfEscape(opts.titleFor ? opts.titleFor(n) : n)}">${_sfEscape(opts.labelFor ? opts.labelFor(n) : n)}${(opts.subLabelFor ? [].concat(opts.subLabelFor(n) || []) : []).filter(Boolean).map(l => `<span class="sf-save-conflict-sub">${_sfEscape(l)}</span>`).join('')}</span>
+        // ── [B-357] ONE REVIEW, SECTIONS PER KIND ──────────────────────
+        //
+        // "two screens rather than one..." — exporting a font + tracks + common to a
+        // destination with conflicts produced the SAME dialog skeleton twice in a row,
+        // and the font keep/replace screen is a third sibling. The user's decision
+        // context, "what am I overwriting at this destination", is ONE moment.
+        //
+        // ⚠️ THE CONSOLIDATION IS OF THE DIALOG, NOT THE SEMANTICS. The per-kind
+        // differences are real and survive as section intros: a common folder replaces
+        // as a UNIT, tracks replace per FILE and leave the rest alone, and the two
+        // defaults differ (folders Skip, tracks Replace). Flattening those into one
+        // list with one default would be a behaviour change wearing a layout change.
+        //
+        // ⚠️⚠️ RADIO NAMES ARE SECTION-SCOPED, and this is not cosmetic. The groups were
+        // named `conflict-<name>`; a font and a track that happen to share a name would
+        // land in the SAME radio group once merged, so answering one would silently
+        // un-answer the other. The section key is what keeps them apart.
+        const _sections = Array.isArray(opts.sections) && opts.sections.length
+          ? opts.sections
+          : [{ key: 's', names: conflictNames, defaultMode: opts.defaultMode,
+               defaultModeFor: opts.defaultModeFor, labelFor: opts.labelFor,
+               titleFor: opts.titleFor, subLabelFor: opts.subLabelFor }];
+        const _secDflt = (sec, n) => {
+          const v = sec.defaultModeFor ? sec.defaultModeFor(n)
+                  : (sec.defaultMode !== undefined ? sec.defaultMode : opts.defaultMode);
+          return v === 'replace' ? 'replace' : 'skip';
+        };
+        const _rowsFor = (sec) => sec.names.map(n => `
+          <div class="sf-save-conflict-row" data-conflict-row="${_sfEscape(n)}" data-conflict-sec="${_sfEscape(sec.key)}">
+            <span class="sf-save-conflict-name" title="${_sfEscape(sec.titleFor ? sec.titleFor(n) : n)}">${_sfEscape(sec.labelFor ? sec.labelFor(n) : n)}${(sec.subLabelFor ? [].concat(sec.subLabelFor(n) || []) : []).filter(Boolean).map(l => `<span class="sf-save-conflict-sub">${_sfEscape(l)}</span>`).join('')}</span>
             <span class="sf-save-conflict-choices">
-              <label><input type="radio" name="conflict-${_sfEscape(n)}" value="skip"${_dfltFor(n) === 'skip' ? ' checked' : ''}>Skip</label>
-              <label><input type="radio" name="conflict-${_sfEscape(n)}" value="replace"${_dfltFor(n) === 'replace' ? ' checked' : ''}>Replace</label>
+              <label><input type="radio" name="conflict-${_sfEscape(sec.key)}-${_sfEscape(n)}" value="skip"${_secDflt(sec, n) === 'skip' ? ' checked' : ''}>Skip</label>
+              <label><input type="radio" name="conflict-${_sfEscape(sec.key)}-${_sfEscape(n)}" value="replace"${_secDflt(sec, n) === 'replace' ? ' checked' : ''}>Replace</label>
             </span>
           </div>
+        `).join('');
+        const _multi = _sections.length > 1;
+        list.innerHTML = _sections.filter(sec => sec.names && sec.names.length).map(sec => `
+          ${_multi && sec.heading ? `<div class="sf-save-conflict-section">
+            <div class="sf-save-conflict-section-title">${_sfEscape(sec.heading)}</div>
+            ${sec.intro ? `<div class="sf-save-conflict-section-intro">${_sfEscape(sec.intro)}</div>` : ''}
+          </div>` : ''}
+          ${_rowsFor(sec)}
         `).join('');
         return new Promise(resolve => {
           const onBulk = (e) => {
@@ -34465,13 +34509,19 @@ require(['vs/editor/editor.main'], function () {
             syncCaution();
           };
           const onApply = () => {
-            const choices = new Map();
-            for (const name of conflictNames) {
-              const checked = list.querySelector(`input[name="conflict-${CSS.escape(name)}"]:checked`);
-              choices.set(name, checked?.value || _dfltFor(name));
-            }
+            // One Map per section, in section order. The single-section case still
+            // resolves to a bare Map so every existing caller reads unchanged.
+            const maps = _sections.map(sec => {
+              const m = new Map();
+              for (const name of (sec.names || [])) {
+                const checked = list.querySelector(
+                  `input[name="conflict-${CSS.escape(sec.key)}-${CSS.escape(name)}"]:checked`);
+                m.set(name, checked?.value || _secDflt(sec, name));
+              }
+              return m;
+            });
             cleanup();
-            resolve(choices);
+            resolve(Array.isArray(opts.sections) && opts.sections.length ? maps : maps[0]);
           };
           const onCancel = () => { cleanup(); resolve(null); };
           const onBackdrop = (e) => { if (e.target === modal) onCancel(); };
@@ -35212,7 +35262,12 @@ require(['vs/editor/editor.main'], function () {
         // to authorise, so there is no question to ask. What DID happen is
         // reported afterwards instead.
         let modeByName = new Map(); // name -> 'skip' | 'replace'
-        if (conflicts.length > 0) {
+        // [B-357] ONE REVIEW FOR THE WHOLE EXPORT. Folders and tracks used to be two
+        // dialogs in a row with the same skeleton; the question "what am I overwriting
+        // at this destination" is one moment, so it is now one screen with a section
+        // per kind. The semantics are untouched - see the section intros below.
+        let tracksReplace = [];
+        if (conflicts.length > 0 || tracksDiffering.length > 0) {
           // DEFAULT IS REPLACE, for fonts and for the common folder alike.
           // 2026-07-31, and it follows from what the app is for: people
           // are taught to modify their sound fonts HERE, in the library, and to
@@ -35256,10 +35311,59 @@ require(['vs/editor/editor.main'], function () {
           ].filter(Boolean).join(' ');
           // Started, not awaited: _sfPromptSaveConflicts adds .active
           // synchronously, so the dialog is on screen before the scan closes.
-          const choicesPromise = _sfPromptSaveConflicts(conflicts, {
+          const _sectioned = conflicts.length > 0 && tracksDiffering.length > 0;
+          // ⚠️ TRACKS-ONLY STILL HAS TO BE HANDED THE TRACK NAMES. With no folder
+          // conflicts, passing `conflicts` renders an empty dialog and answers nothing.
+          const _flatNames = conflicts.length > 0 ? conflicts : tracksDiffering;
+          const _tracksOnly = conflicts.length === 0 && tracksDiffering.length > 0;
+          const _tn = tracksDiffering.length;
+          const choicesPromise = _sfPromptSaveConflicts(_flatNames, {
             defaultMode: 'replace',
-            title: _cTitle,
-            description: _cBody,
+            // With both kinds present the headline covers the whole destination and
+            // each section says its own piece; with one kind the existing per-kind
+            // wording is still exactly right, so it is left alone.
+            title: _sectioned ? 'Some things at the destination are different'
+                 : _tracksOnly ? (_tn === 1 ? 'One track differs from your library'
+                                            : `${_tn} tracks differ from your library`)
+                 : _cTitle,
+            description: _sectioned
+              ? 'These already exist there with different contents. Choose what to do with each.'
+              : _tracksOnly
+                ? 'These tracks exist at the destination with different contents. Replace them with your library version, or keep what is already there. Anything else there is left alone.'
+                : _cBody,
+            // [B-357] Sections only when there is more than one kind to review. With a
+            // single kind this stays undefined and the flat path renders exactly as
+            // before, so nothing changes for the common single-kind export.
+            sections: !_sectioned ? undefined : [
+              {
+                key: 'folders',
+                names: conflicts,
+                defaultMode: 'replace',
+                heading: _cFonts && _cCommon ? 'Fonts and common folder'
+                       : _cFonts ? (_cFonts === 1 ? 'Font' : 'Fonts') : 'Common folder',
+                // The per-kind sentence the entry said must survive the consolidation.
+                intro: 'Each folder is treated as a unit, so old and new files are never mixed.',
+                labelFor: (n) => (_isSlotKey(n) ? n.slice(5) : n),
+                titleFor: (n) => {
+                  if (!_isSlotKey(n)) return n;
+                  const _s = n.slice(5);
+                  const _cs = commonSlots.find(c => c.slot === _s);
+                  const _pk = (_cs && _cs.packName) || commonMineName;
+                  return `The ${_s} folder at the destination${_pk ? `, receiving ${_pk}` : ''}`;
+                },
+              },
+              {
+                key: 'tracks',
+                names: tracksDiffering,
+                // ⚠️ TRACKS KEEP THEIR OWN DEFAULT. The library is the curated source
+                // for them, so a difference nearly always means the user updated their
+                // copy and expects it on the card. Folding them into the folders'
+                // default would be a behaviour change wearing a layout change.
+                defaultMode: 'replace',
+                heading: tracksDiffering.length === 1 ? 'Track' : 'Tracks',
+                intro: 'Tracks are replaced one file at a time. Anything else at the destination is left alone.',
+              },
+            ],
             labelFor: (n) => (_isSlotKey(n) ? n.slice(5) : n),
             // Row keys for slots are internal; the folder name is what follows the
             // prefix. Say the name that will actually be written, or the dialog
@@ -35286,19 +35390,20 @@ require(['vs/editor/editor.main'], function () {
           });
           await _sfDeleteProgress.hide();
           const choices = await choicesPromise;
-          if (!choices) return false; // user cancelled
-          modeByName = choices;
-        }
-        // Tracks resolve separately, and only for files that genuinely differ.
-        // Their own dialog, because they are individual files with a different
-        // default (Replace) rather than folders treated as a unit.
-        let tracksReplace = [];
-        if (tracksDiffering.length) {
-          const chosenPromise = _sfResolveTrackConflicts(tracksDiffering);
-          await _sfDeleteProgress.hide();   // no-op if already hidden
-          const chosen = await chosenPromise;
-          if (chosen === null) return false; // user cancelled the save
-          tracksReplace = chosen;
+          if (!choices) return false; // user cancelled the whole export, both kinds
+          if (_sectioned) {
+            // [B-357] One cancel, one Continue, both kinds answered together. The
+            // sectioned call resolves to one Map per section, in the order declared.
+            modeByName = choices[0] || new Map();
+            const _tMap = choices[1] || new Map();
+            tracksReplace = tracksDiffering.filter(n => (_tMap.get(n) || 'replace') === 'replace');
+          } else if (conflicts.length > 0) {
+            modeByName = choices;
+          } else {
+            // Tracks only: the flat path was given the track names, so its single Map
+            // is the tracks answer.
+            tracksReplace = tracksDiffering.filter(n => (choices.get(n) || 'replace') === 'replace');
+          }
         }
         // Combined progress count — only items that will actually be written.
         // Items the user chose to skip in the conflict modal don't count
