@@ -730,6 +730,92 @@
     },
   });
 
+  // ── A prop the selected OS version does not have ─────────────────────────
+  //
+  // [B-185]. A config's `#include "../props/<file>.h"` names a prop that is not in
+  // the ProffieOS version this config builds with — usually because the user
+  // switched version, or was handed a config written against a different tree.
+  // Today the only feedback is arduino-cli's raw "No such file or directory",
+  // pointing at a path the user never typed.
+  //
+  // ⭐ THE ERROR-TRANSLATION THESIS IN MINIATURE: an ordinary mistake answered with
+  // a preprocessor path. We already know exactly what is wrong and can say it in a
+  // sentence before the compile is spent.
+  //
+  // ⚠️ THE SHAPE GATE IS WHAT MAKES THIS SAFE, and the entry is explicit about it:
+  // a prop can legitimately live somewhere other than props/, and a user may have
+  // hand-edited an include we do not model. So this only speaks when the include
+  // matches OUR props/ shape — `props/x.h`, optionally one directory up — and the
+  // file is absent from that exact folder. Anything else is silence.
+  //
+  // ⚠️ NO PROP AT ALL IS NOT AN ERROR. ProffieOS falls back to saber.h, and that
+  // rule was settled for Link Prop and must stay true. The consequence of having no
+  // prop while setting prop options is a different check entirely (B-089).
+  //
+  // ⚠️ SEVERITY IS `block`, WHICH IS A DELIBERATE DEPARTURE FROM THE ENTRY'S LEAN.
+  // It says "warn-and-continue is probably right, or refuse only when the path
+  // matches our own props/ shape and the file is absent" — and the second clause is
+  // exactly the condition built here, so the refusal is the narrow one it allows.
+  // With the shape gate in front, an absent file is a CERTAIN compile failure, and
+  // a warning in front of a guaranteed failure is just a slower failure. One word
+  // to change if that trade ever reads differently.
+  //
+  // The wording is lifted from the Link Prop refusal rather than invented, so the
+  // app says the same thing about the same fact in both places.
+
+  // A prop this app models: a .h sitting directly in a tree's props/ folder,
+  // optionally reached with one leading directory (`../props/x.h`). Mirrors
+  // window._LINKABLE_PROP_RE, kept here because a check may not touch the DOM.
+  const PROPS_PATH_RE = /^(?:[^/]+\/)?props\/([^/]+\.h)$/i;
+
+  preflight.register({
+    id: 'prop-missing-from-version',
+    severity: 'block',
+    title: 'Prop not in this ProffieOS version',
+    async run(ctx) {
+      if (!ctx.versionName) return { unsure: 'no ProffieOS version is selected' };
+
+      const includes = vpkPropIncludes(ctx.text)
+        .map(p => String(p).replace(/\\/g, '/'))
+        .filter(p => PROPS_PATH_RE.test(p));
+      if (!includes.length) return null;   // no prop, or one we do not model
+
+      const findings = [];
+      for (const inc of includes) {
+        const fileName = inc.match(PROPS_PATH_RE)[1];
+        // Look in the SAME folder the include names, inside the selected version.
+        // Deriving it from the include keeps this correct without hardcoding the
+        // tree root, exactly as the Link Prop check does.
+        const dir = inc.includes('/') ? inc.slice(0, inc.lastIndexOf('/')) : 'props';
+        const subPath = dir.startsWith('ProffieOS/') ? dir : `ProffieOS/${dir.replace(/^\.\.\//, '')}`;
+
+        let res = null;
+        try { res = await ctx.listVersionDir(ctx.versionName, subPath); } catch { res = null; }
+        // ⚠️ A FAILED LISTING IS NOT AN ABSENT FILE. If the folder cannot be read we
+        // know nothing about what is in it, and saying "your prop is missing"
+        // because our own lookup broke is the worst answer available.
+        if (!res || !res.ok || !Array.isArray(res.entries)) {
+          return { unsure: `the props folder of ${ctx.versionName} could not be read` };
+        }
+        const present = res.entries.some(e => e.type === 'file' && e.name === fileName);
+        if (present) continue;
+
+        findings.push({
+          title: `${fileName} is not in ${ctx.versionName}.`,
+          detail: `This config builds with ${ctx.versionName}, and its props folder does not have `
+                + `that file, so the build will stop on it. Switch this config to a version that `
+                + `has the prop, or link a prop that exists in ${ctx.versionName}.`,
+          items: [inc],
+          // No fix: choosing a different prop or a different OS version is a
+          // decision about what the saber does, and we cannot know which one was
+          // meant. The Link Prop flow is where that choice already lives.
+          fix: null,
+        });
+      }
+      return findings.length ? { findings } : null;
+    },
+  });
+
   // ── A shared folder name that is the odd one out ─────────────────────────
   //
   // [B-012]. One preset saying `;comn` beside fifty saying `;common`. It COMPILES
@@ -804,7 +890,7 @@
       // ⭐ A NUMBERED VARIANT IS DELIBERATE, HOWEVER FEW PRESETS USE IT (his catch,
       // 2026-09-12, after watching `common2` used several times stay silent:
       // "given it wouldn't work as a one off... shouldn't the number be another
-      // exception to frequency?"). He is right, and the reasoning is mechanical
+      // exception to frequency?"). That is right, and the reasoning is mechanical
       // rather than statistical: NOBODY FAT-FINGERS A DIGIT ONTO THE END OF A WORD.
       // `common2` beside `common` is somebody making a second shared folder, and a
       // lone one is the ORDINARY case of that — you add the folder, then move one

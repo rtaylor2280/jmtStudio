@@ -7888,6 +7888,10 @@ window.runPreflight = async function () {
       try { return await window.electronAPI?.searchVersionFiles?.(versionName, query); }
       catch { return null; }
     },
+    listVersionDir: async (versionName, subPath) => {
+      try { return await window.electronAPI?.listVersionDir?.(versionName, subPath); }
+      catch { return null; }
+    },
   });
 
   let ctx = makeCtx();

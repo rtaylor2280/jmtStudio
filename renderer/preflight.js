@@ -127,6 +127,11 @@
       searchVersionFiles: typeof o.searchVersionFiles === 'function'
         ? o.searchVersionFiles
         : async () => null,
+      // listVersionDir(versionName, subPath) -> Promise<{ok, entries:[{name,type}]}|null>
+      // Cheaper than a search when a check knows exactly which folder to look in.
+      listVersionDir: typeof o.listVersionDir === 'function'
+        ? o.listVersionDir
+        : async () => null,
 
       defines: _configDefines(text),
     };
