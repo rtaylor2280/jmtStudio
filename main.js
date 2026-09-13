@@ -40,6 +40,25 @@ const Store = {
     try { data = JSON.parse(fs.readFileSync(this._path, 'utf8')); } catch {}
     data[key] = val;
     fs.writeFileSync(this._path, JSON.stringify(data), 'utf8');
+  },
+  // ⚠️ [B-299] THIS WAS MISSING, AND TWO CALLERS USED IT. Both threw. The one in
+  // the plugin `end:` hook meant the pending-install marker was never taken down
+  // after a SUCCESSFUL install — so a standing marker stopped meaning "interrupted"
+  // and started meaning "the last install finished and could not say so".
+  //
+  // ⭐⭐ ADDING THIS ALONE WOULD HAVE BEEN A DATA-LOSS BUG. The recovery path below
+  // called Store.delete and then cancelCoreInstall(pending), which removes the whole
+  // versioned tree. It never ran only because this line threw first. Measured on the
+  // dev profile 2026-09-02 and STILL TRUE 2026-09-13: pendingPluginInstall = "3.6.0"
+  // with a complete, in-use 802 MB core sitting under that version. The naive
+  // one-line fix eats it on the next launch. Read _recoverInterruptedInstall before
+  // touching any of this.
+  delete(key) {
+    let data = {};
+    try { data = JSON.parse(fs.readFileSync(this._path, 'utf8')); } catch { return; }
+    if (!(key in data)) return;
+    delete data[key];
+    fs.writeFileSync(this._path, JSON.stringify(data), 'utf8');
   }
 };
 
@@ -340,18 +359,53 @@ function _forgetPlugin(version) {
 // keeping. (2026-08-15)
 const PENDING_INSTALL_KEY = 'pendingPluginInstall';
 
+// ⭐⭐ VERIFY FIRST, AND NEVER AUTO-DELETE. [B-299], his ruling 2026-09-13.
+//
+// The version above deleted the marker and then removed the whole versioned tree, on
+// the reasoning that a standing marker means an interrupted install. That reasoning
+// was sound and its PREMISE was broken: `Store.delete` did not exist, so the `end:`
+// hook threw and the marker was never taken down after a SUCCESSFUL install either.
+// A standing marker therefore does not distinguish "interrupted" from "finished fine".
+//
+// The only thing that ever stopped it deleting a working 802 MB toolchain was the
+// missing function throwing one line earlier. Making Store.delete work without this
+// rewrite would have armed it.
+//
+// So: ask the disk. A complete core means the install finished and only the bookkeeping
+// failed — take the marker down and say nothing. An incomplete one is NOT cleaned
+// automatically, because "half-installed" is our inference and the tree is the user's
+// 800 MB; the marker comes down so this does not re-fire every launch, and the state is
+// reported for the OS Versions panel to offer a reinstall.
 async function _recoverInterruptedInstall() {
   const pending = Store.get(PENDING_INSTALL_KEY);
   if (!pending) return;
-  Store.delete(PENDING_INSTALL_KEY);
+
+  let complete = false;
   try {
-    const res = await toolchain.cancelCoreInstall(pending);
-    if (res && res.removed) {
-      console.log(`[core] cleaned a partial ${pending} install left by a previous session`);
-    }
+    // getCoreTreePath, not a hand-built join: it adopts the legacy pre-1.8 tree when
+    // that already holds the version, so a user who upgraded in place is not read as
+    // having an empty versioned directory.
+    complete = coreVersions.isVersionInstalled(toolchain.getCoreTreePath(pending), pending);
   } catch (e) {
-    console.warn('[core] could not clean a partial install:', e.message);
+    // ⚠️ A verify that FAILED is not a verify that said "incomplete". If we cannot
+    // read the disk we know nothing, and the safe answer to knowing nothing is to
+    // leave everything exactly as it is — marker included, so the question is asked
+    // again next launch rather than silently settled.
+    console.warn('[core] could not check the pending plugin install; leaving it alone:', e.message);
+    return;
   }
+
+  Store.delete(PENDING_INSTALL_KEY);
+  if (complete) {
+    console.log(`[core] plugin ${pending} is present and complete; clearing a stale pending marker`);
+    return;
+  }
+  // Deliberately no removal. Nothing here is destroyed on the app's own initiative.
+  // ⏭ The console warning is the ONLY record of this today. Surfacing it in the OS
+  // Versions panel is [B-380] — deliberately not done here, because adding UI was not
+  // what was asked for and the destructive behaviour is what had to go tonight.
+  console.warn(`[core] plugin ${pending} was marked as installing and is not fully present. `
+             + 'Leaving it in place — reinstall it from OS Versions if builds fail.');
 }
 
 toolchain.setPluginHooks({
