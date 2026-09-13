@@ -24998,9 +24998,21 @@ require(['vs/editor/editor.main'], function () {
               ? 'One of these fonts is already in your library.'
               : `${owned === total ? 'All' : owned} of these fonts are already in your library.`);
           }
-          parts.push(owned === 1
-            ? `Checking ${total === 1 ? 'this font' : 'it'} imports a second copy. To customize a font you already own, open it in your library and duplicate it there.`
-            : 'Checking any of them imports a second copy. To customize a font you already own, open it in your library and duplicate it there.');
+          // ⭐ [B-363] THIS USED TO INVITE AN ACTION THE DIALOG THEN REFUSED. It read
+          // "Checking this imports a second copy", but checking an owned row makes the
+          // name validator fire ("A library entry with this name already exists") and
+          // DISABLES Add to Library. His ruling 2026-09-13: match the SD-card path,
+          // which stopped re-importing in favour of adopting the existing entry — so
+          // the sentence stops offering a second copy and names the door that works.
+          // ⚠️ The count sentence above is DROPPED when total === 1, so this one has to
+          // stand on its own there — "It is not imported again" with no antecedent is
+          // how a single-row review ends up reading like a fragment.
+          parts.push(
+            total === 1
+              ? 'This font is already in your library and is not imported again. To customize it, open it in your library and duplicate it there.'
+              : owned === 1
+                ? 'It is not imported again. To customize a font you already own, open it in your library and duplicate it there.'
+                : 'They are not imported again. To customize a font you already own, open it in your library and duplicate it there.');
         }
         if (flagged > 0) {
           parts.push(total === 1
@@ -25889,6 +25901,25 @@ require(['vs/editor/editor.main'], function () {
                   check.checked = false;
                   row.classList.add('disabled');
                   changedAny = true;
+                }
+                // ⭐ [B-363] AND THE BOX IS NOW INERT, NOT MERELY UNCHECKED.
+                //
+                // This SUPERSEDES the 2026-07-23 call that left it clickable
+                // ("information, not force"). That freedom was already illusory: the
+                // name validator refuses a name the library holds, so re-checking an
+                // owned row set an error and DISABLED "Add to Library". The summary
+                // said "checking this imports a second copy" and the dialog then would
+                // not let you — an invitation the UI refuses.
+                //
+                // His ruling 2026-09-13: match the SD-card path, which stopped blunt
+                // re-importing in favour of adopting the existing entry. We do not want
+                // a second copy from this door. Duplicate-in-library is the supported
+                // way to get one, and it is what the hint now points at.
+                if (check) {
+                  check.disabled = true;
+                  check.title = hit.matchName
+                    ? `Already in your library as ${hit.matchName}. To customize it, open it there and duplicate it.`
+                    : 'Already in your library. To customize it, open it there and duplicate it.';
                 }
               }
             });
