@@ -18,8 +18,11 @@
  *   2. It does not count presets the compiler never sees, or presets the parser
  *      could not read.
  *   3. It names PRESETS, not lines.
- *   4. Over-count is deliberately out of scope — it already has a red header and a
- *      repair tool. That is [B-223].
+ *   4. BOTH DIRECTIONS block, since 2026-09-13 [B-223]. Over-count was out of scope
+ *      until then, on the argument that it already had a red header and a repair tool
+ *      — which does not survive being said out loud, since the sidecar paints MISSING
+ *      slots red too. A badge does not stop a compile. The two directions are separate
+ *      rows because the remedy differs: fill a slot vs remove one.
  *
  * Run: node test/blade-count-preflight.test.js
  */
@@ -249,6 +252,24 @@ BladeConfig blades[] = {{ 0, WS281XBladePtr<100, bladePin>(), CONFIGARRAY(preset
     ok('a preset named after its own track falls back to position',
        r.blocked && r.finding.items.includes('Preset 1') && !r.finding.items.includes('boot.wav'),
        JSON.stringify(r.finding && r.finding.items));
+  }
+
+  {
+    // [B-379] The crude token count must see all SEVEN wrapper names. It used to
+    // anchor `Style\w*Ptr`, which misses ChargingStylePtr - the one name whose
+    // variant sits at the FRONT - so every charge-detect preset read one style short.
+    // This counter exists to DISAGREE with the parser; one blind in the same direction
+    // as the thing it checks is not a second opinion.
+    const P = (styles) => `#define NUM_BLADES 2
+Preset testbank[] = {
+  { "ChargeFont;common", "", ${styles}, "Charge" },
+};
+BladeConfig blades[] = {{ 0, WS281XBladePtr<100, bladePin>(), CONFIGARRAY(testbank) }};`;
+    ok('ChargingStylePtr counts as a style',
+       !(await check(P('ChargingStylePtr<BatteryBladeStyle>(), StylePtr<Black>()'))).blocked,
+       'a charge preset at the right count must not be reported');
+    ok('a charge preset genuinely one short is still caught',
+       (await check(P('ChargingStylePtr<BatteryBladeStyle>()'))).blocked);
   }
 
   // ── 6. the corpus, which is the only check that cannot be rigged ───────
