@@ -40,6 +40,24 @@ let cacheCheckPending   = false;   // true while cache check is in flight
 let _currentBuildDir    = null;
 // The entry a cache hit came from, so we can stamp it as used at the moment it is actually used.
 let _currentBuildKey    = null;   // { configHash, buildPkgHash, configId }
+// ── [B-028] WHICH BUILD IS ACTUALLY ON THE BOARD ────────────────────────────
+//
+// The repro, app left open ~9h overnight: compiled+flashed (9:22 PM), disconnected the
+// board, ran a second compile purely to warm the cache (9:55 PM), left it. In the
+// morning the chips read "Compile restored from cache" + "Flash successful" together,
+// which says "the current file is on the board" — false twice over. The flash predates
+// the current build, and there was no board attached at all.
+//
+// ⭐ THE FLASH CHIP WAS A SESSION FLAG, NOT A FACT ABOUT A BUILD. It said a flash had
+// succeeded at some point, never WHICH build it put there. Stamping the build identity
+// at flash time is what turns it back into a claim that can be checked.
+let _flashedBuildKey    = null;   // { configHash, buildPkgHash, configId, at } of what we FLASHED
+// ⚠️ AND THE MISLABEL HAD ITS OWN TRIGGER, pinned the same morning: clicking CLOSE on
+// the still-open build modal re-runs the content-hash cache check, which HITS — that
+// compile just populated the cache — and relabels this session's own build "restored
+// from cache". The check could not tell "this hit IS the build I just made" from
+// "restored a build from a previous session". So the session records what it built.
+const _sessionBuiltHashes = new Set();   // configHash values THIS session compiled for real
 let _cacheCheckSeq      = 0;       // only the newest checkCacheForConfig run may write state
 // Carried from a failed flash into the Bootloader Mode modal, which clears its own log on open.
 // Set only when the port the user picked was never identified as a Proffieboard.
@@ -617,6 +635,12 @@ async function doCompile() {
     if (result.cacheSaveError) _pendingFlashHint = 'Build not stored. This config will need a recompile next time.';
     if (!isDfuMode) setFlashEnabled(!!selectedPort); // DFU mode: onBuildDone sets flash state
     updateCompileButton();
+    // [B-028] Record what this session actually BUILT. The compile result does not carry
+    // the content hash, and the cache check is the one place that learns it — so this
+    // asks for it once, with `afterCompile` so the hit is filed as ours rather than as a
+    // restore. Without this, the very next check (the build modal's Close button re-runs
+    // one) relabels this build "restored from cache".
+    try { await checkCacheForConfig(false, { afterCompile: true }); } catch {}
   }
 }
 
@@ -1299,10 +1323,75 @@ function onBuildStatus({ type, ok, needsProffieOS, message, coreVersion, running
     if (ok === null) {
       setStatus('flash', 'pending', message);
     } else {
+      if (ok) {
+        // [B-028] STAMP WHAT WENT ON THE BOARD, not merely that something did.
+        // `_currentBuildKey` is set by the cache check that follows every compile, so by
+        // flash time it carries this build's identity. A null hash means we genuinely do
+        // not know which build this was — and that must read as unknown later, never as
+        // a match.
+        _flashedBuildKey = {
+          configHash:   (_currentBuildKey && _currentBuildKey.configHash) || null,
+          buildPkgHash: (_currentBuildKey && _currentBuildKey.buildPkgHash) || null,
+          configId:     (_currentBuildKey && _currentBuildKey.configId) || null,
+          at: Date.now(),
+        };
+      }
       setStatus('flash', ok ? 'ok' : 'error', ok ? 'Flash successful' : 'Flash error');
+      if (ok) _decorateFlashChip();
       if (!ok) openLog();
     }
   }
+}
+
+// ── [B-028] THE FLASH CHIP, RE-READ AGAINST THE CURRENT CONFIG ───────────────
+//
+// "Flash successful" beside "Compile restored from cache" says the current file is on
+// the board. Overnight that was false twice: the flash predated the current build, and
+// no board was attached. The chip was a session flag; these two make it a claim about a
+// specific build, checked against what is in the editor now.
+function _flashTimeLabel(at) {
+  if (!at) return '';
+  try {
+    return new Date(at).toLocaleString(undefined,
+      { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  } catch { return ''; }
+}
+
+// Hover provenance, so even a CURRENT flash says when it happened. Aged status reading
+// as history is the whole point; a chip with no timestamp cannot do that.
+function _decorateFlashChip() {
+  const text = el('bp-status-flash-text');
+  if (!text || !_flashedBuildKey) return;
+  const when = _flashTimeLabel(_flashedBuildKey.at);
+  if (when) text.title = `${text.textContent} — flashed ${when}`;
+}
+
+// Called when the cache check learns the CURRENT config's hash. Degrades rather than
+// clears: the board really does have something on it, and saying so with a date is more
+// use than going blank.
+// ⚠️ ONLY EVER DOWNGRADES. It must not resurrect a success the flash path never set,
+// and it must not fire when no flash has happened this session.
+function _refreshFlashProvenance(currentConfigHash) {
+  if (!_flashedBuildKey) return;                 // nothing flashed this session
+  const text = el('bp-status-flash-text');
+  const dot  = el('bp-status-flash-dot');
+  if (!text || !dot) return;
+  if (!/^Flash/.test(text.textContent || '')) return;   // someone else owns the chip now
+  const when = _flashTimeLabel(_flashedBuildKey.at);
+  // Unknown on either side is NOT a mismatch. Claiming the board is stale because we
+  // failed to identify a build would be the same class of lie, pointed the other way.
+  if (!currentConfigHash || !_flashedBuildKey.configHash) return;
+  if (currentConfigHash === _flashedBuildKey.configHash) {
+    if (text.textContent !== 'Flash successful') {
+      setStatus('flash', 'ok', 'Flash successful');
+    }
+    _decorateFlashChip();
+    return;
+  }
+  setStatus('flash', 'warn', when ? `Board has an older build (${when})` : 'Board has an older build');
+  text.title = when
+    ? `The board was flashed ${when}, from a different version of this config. Flash again to update it.`
+    : 'The board was flashed from a different version of this config. Flash again to update it.';
 }
 
 function onBuildDone({ type, ok, error, aborted, retriable, needsDfuDriver, sourceChanged, coreVersion, osVersion, compiledFqbn, compiledUsb }) {
@@ -2699,7 +2788,7 @@ function setStatus(type, state, message) {
 
 // ── Cache check ────────────────────────────────────────
 // missStatus: message to show on miss; false = don't update status on miss
-async function checkCacheForConfig(missStatus) {
+async function checkCacheForConfig(missStatus, opts) {
   // Only the NEWEST check may write. Opening or switching a config fires several of these in a
   // row - board change, USB change, OS version change, and the debounced content change - each
   // awaiting its own IPC round trip. Two problems came from letting them all write:
@@ -2783,7 +2872,19 @@ async function checkCacheForConfig(missStatus) {
                          configId: result.configId || null };
     setFlashEnabled(isDfuMode ? compileSuccess : !!selectedPort);
     updateCompileButton();
-    setStatus('compile', 'ok', 'Compile restored from cache');
+    // [B-028] A HIT ON OUR OWN BUILD IS NOT A RESTORE. Clicking Close on the still-open
+    // build modal re-runs this check, which hits - that compile just populated the cache -
+    // and used to relabel this session's own build "restored from cache". The check could
+    // not tell "this hit IS the build I just made" from "restored a prior build on open",
+    // so the session records the hashes it genuinely compiled and asks.
+    if (opts && opts.afterCompile && result.configHash) _sessionBuiltHashes.add(result.configHash);
+    setStatus('compile', 'ok',
+      (result.configHash && _sessionBuiltHashes.has(result.configHash))
+        ? 'Compile successful'
+        : 'Compile restored from cache');
+    // [B-028] And the FLASH chip is re-evaluated here, because this is the moment we
+    // learn what the current config hashes to. See _refreshFlashProvenance.
+    _refreshFlashProvenance(result.configHash);
     // Carry the core through on a restore too. The cached entry records which
     // core produced it, so the config's marker stays truthful rather than
     // inheriting whatever core happens to be selected now.
@@ -3522,9 +3623,15 @@ window.resetBuildStatusForFileLoad = () => {
   compileSuccess = false;
   _currentBuildDir = null;
   _currentBuildKey = null;
+  // [B-028] The flash stamp belongs to the file being left. Carrying it across would
+  // let _refreshFlashProvenance compare a NEW config's hash against an OLD file's flash
+  // and announce "Board has an older build" about something unrelated — the same lie
+  // this entry is about, wearing the new wording.
+  _flashedBuildKey = null;
   setFlashEnabled(false);
   setStatus('compile', '', 'Not compiled');
   setStatus('flash',   '', 'Not flashed');
+  const _ft = el('bp-status-flash-text'); if (_ft) _ft.title = 'Not flashed';
   updateCompileButton();
 };
 window.getToolchainReady        = () => toolchainReady;
