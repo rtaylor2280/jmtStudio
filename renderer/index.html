@@ -16869,12 +16869,31 @@ let _styleErrDecorations = [];        // Monaco decoration IDs
 
 // Finds the first unmatched < or > in a using statement's expression.
 // Returns { offsetInCode, message } or null if balanced.
+// ⚠️ [B-378] A LEADING COMMENT USED TO TURN THIS CHECK OFF, SILENTLY.
+//
+// The anchor below is `^using`, with no `m` flag, so the `using` had to be the very
+// first thing in the string. Put ANY comment above it — `/* My style */`, a credit
+// line, a date — and the match failed, the function returned null, and null means
+// "no bracket error". So a style that could not be READ reported as CLEAN.
+//
+// ⭐ THE USER IT HURT IS THE CAREFUL ONE. Someone who comments their styles got no
+// bracket checking at all, and no sign that it had stopped. Verified 2026-09-12:
+// `using L = Layers<Black,Red;` is caught with no header and NOT caught with one.
+//
+// Comments are skipped BEFORE the anchor rather than stripped from the whole string,
+// so every offset below still refers to the original text and the Monaco marker lands
+// on the right character. The stack walk further down does its own comment handling.
 function _findBracketError(usingCode) {
   const { code } = _splitTemplatePrefix(usingCode);
   usingCode = code || usingCode;
-  const m = usingCode.match(/^using\s+\w+\s*=\s*([\s\S]+?)\s*;?\s*$/);
+  // Leading /* */ blocks and // lines, in any number and any order, plus the
+  // whitespace between them. Counted, not removed — `lead` is an offset.
+  const lead = usingCode.match(/^(?:\s*(?:\/\*[\s\S]*?\*\/|\/\/[^\n]*(?:\n|$)))*\s*/);
+  const skip = lead ? lead[0].length : 0;
+  const body = usingCode.slice(skip);
+  const m = body.match(/^using\s+\w+\s*=\s*([\s\S]+?)\s*;?\s*$/);
   if (!m) return null;
-  const exprOffset = usingCode.indexOf(m[1]);
+  const exprOffset = skip + body.indexOf(m[1]);
   // Strip // line comments and /* */ block comments before bracket scanning
   const expr = m[1]
     .replace(/\/\*[\s\S]*?\*\//g, s => ' '.repeat(s.length))
