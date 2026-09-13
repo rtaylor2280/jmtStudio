@@ -801,11 +801,30 @@
       const established = [...counts].filter(([, c]) => c >= SHARED_ESTABLISHED_MIN).map(([n]) => n);
       if (!established.length) return null;
 
+      // ⭐ A NUMBERED VARIANT IS DELIBERATE, HOWEVER FEW PRESETS USE IT (his catch,
+      // 2026-09-12, after watching `common2` used several times stay silent:
+      // "given it wouldn't work as a one off... shouldn't the number be another
+      // exception to frequency?"). He is right, and the reasoning is mechanical
+      // rather than statistical: NOBODY FAT-FINGERS A DIGIT ONTO THE END OF A WORD.
+      // `common2` beside `common` is somebody making a second shared folder, and a
+      // lone one is the ORDINARY case of that — you add the folder, then move one
+      // preset onto it first. Frequency cannot see the difference; the trailing
+      // digit can.
+      // ⚠️ Deliberately TRAILING digits only. A suppression rule that is too broad
+      // hides real typos, and `M C` vs `MC` must still fire.
+      const _numberedVariant = (a, b) => {
+        const strip = x => x.replace(/\d+$/, '');
+        return strip(a) !== a || strip(b) !== b
+          ? strip(a).toLowerCase() === strip(b).toLowerCase()
+          : false;
+      };
+
       const findings = [];
       for (const [name, used] of counts) {
         if (used !== 1) continue;        // a LONE outlier, never merely the smaller of two
         let best = null, bestD = 99;
         for (const e of established) {
+          if (_numberedVariant(name, e)) { best = null; bestD = 99; break; }
           const d = _distance(name.toLowerCase(), e.toLowerCase());
           if (d > 0 && d < bestD) { bestD = d; best = e; }
         }

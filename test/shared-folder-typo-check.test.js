@@ -98,6 +98,33 @@ const run = (text) => {
        r.findings.map(f => f.title).join(' '));
   }
   {
+    // ⭐ A NUMBERED VARIANT IS DELIBERATE HOWEVER FEW PRESETS USE IT, and this is
+    // the case frequency cannot see. `common2` is ONE edit from `common`, so
+    // without this exception a lone one fires — and a lone one is the ORDINARY
+    // way a second shared folder starts: you make it, then move one preset onto
+    // it first. Nobody fat-fingers a digit onto the end of a word.
+    const r = run(cfg(...many(5, 'common'), 'Oddball;common2'));
+    ok('a lone NUMBERED variant is left alone', !r.fired,
+       r.findings.map(f => f.title).join(' '));
+  }
+  {
+    const r = run(cfg(...many(5, 'MC'), 'Oddball;MC2'));
+    ok('...and it is not about the word "common"', !r.fired,
+       r.findings.map(f => f.title).join(' '));
+  }
+  {
+    const r = run(cfg(...many(5, 'common2'), 'Oddball;common3'));
+    ok('...nor about the number being 2', !r.fired,
+       r.findings.map(f => f.title).join(' '));
+  }
+  {
+    // ⚠️ THE EXCEPTION MUST STAY NARROW. A suppression rule that is too broad hides
+    // real typos, so it is TRAILING digits only and nothing else about the name.
+    const r = run(cfg(...many(5, 'MC'), 'Oddball;M C'));
+    ok('the exception does not swallow a real typo in a short name', r.fired,
+       'M C should still fire');
+  }
+  {
     const r = run(cfg('Only;common'));
     ok('a single shared name and nothing else is silent', !r.fired);
   }
