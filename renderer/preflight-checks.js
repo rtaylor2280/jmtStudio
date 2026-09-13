@@ -218,7 +218,7 @@
   //
   // Follows the include chain rather than matching prop NAMES, because a user can
   // derive their own prop: the JMT wrapper extends SaberFett263Buttons and chains
-  // Setup(), so a name list would miss his own config. Known limit, accepted: a
+  // Setup(), so a name list would miss the JMT config too. Known limit, accepted: a
   // derived prop that overrides Setup() WITHOUT chaining escapes this, and text
   // alone cannot tell.
   async function vpkPropRequirement(ctx) {
@@ -724,6 +724,125 @@
               return edits;
             },
           } : null,
+        });
+      }
+      return findings.length ? { findings } : null;
+    },
+  });
+
+  // ── A shared folder name that is the odd one out ─────────────────────────
+  //
+  // [B-012]. One preset saying `;comn` beside fifty saying `;common`. It COMPILES
+  // AND FLASHES FINE — the failure is on the saber, as "font directory not found",
+  // because the scanner raises FDNF on any path ELEMENT that does not exist
+  // regardless of whether anything was needed from it. That error is the single
+  // most-searched pain on the Crucible, 51 threads.
+  //
+  // ⚠️⚠️ THIS CLOSES A LIVE REGRESSION, not a gap. [B-326] shipped 2026-09-06 and
+  // made a shared folder recognised by POSITION rather than by being spelled
+  // "common" — correct, and the whole point of it. But before that, an unrecognised
+  // name made the preset paint red as a missing font: the wrong reason, and a real
+  // signal. B-326 removed it and this was never built, so between 09-06 and now a
+  // misspelled shared folder has been completely silent. B-012 said "ship them
+  // together" in writing. They did not.
+  //
+  // ⭐ FREQUENCY, NOT SPELLING — and then CLOSENESS, which the entry did not have.
+  // The entry's rule was lopsidedness alone: one preset using a name, many using
+  // another. Measured 2026-09-12 against 173 configs, that over-fires on the only
+  // real case available: 7957_9.h runs `common` x11 plus `BalVenos/common` x1 and
+  // `Nano Guantletcommons` x1, and BOTH of those are legitimate — a nested path and
+  // what reads as a real folder for a particular hilt. So an outlier must ALSO be a
+  // near-miss of an established name before we say anything.
+  //
+  // ⚠️ THE DISTANCE IS AGAINST THE CONFIG'S OWN NAMES, NEVER A WORD LIST, and that
+  // distinction is the entry's and is load-bearing. A dictionary of
+  // misspellings-of-"common" cannot see `MC` typed as `M C` — and an MC config is
+  // exactly what he runs. Comparing against whatever the config uses 3+ times keeps
+  // that property: `M C` is one edit from `MC`, whatever the words are.
+  //
+  // ⚠️ MULTIPLE SHARED FOLDERS ARE LEGITIMATE AND ABOUT TO GET COMMONER. commonSith
+  // and commonJedi used evenly is a real design, and B-326 is what made arbitrary
+  // names usable at all — so the corpus predates the feature that will produce more
+  // of them. The check must never read "more than one name exists" as a fault: it
+  // needs a LONE outlier against an ESTABLISHED convention.
+  //
+  // Measured with all of that in: 0 fires across 173 real configs, while still
+  // catching `comn` beside fifty `common` and `M C` beside five `MC`.
+
+  const SHARED_ESTABLISHED_MIN = 3;   // below this there is no convention to be odd against
+  const SHARED_MAX_EDITS       = 2;
+
+  preflight.register({
+    id: 'shared-folder-odd-one-out',
+    severity: 'warn',
+    title: 'Shared folder name looks like a typo',
+    run(ctx) {
+      if (!ctx.parsed) return null;
+
+      const counts = new Map();          // name -> times used
+      const firstPreset = new Map();     // name -> a preset to point at
+      for (const arr of (ctx.parsed.arrays || [])) {
+        for (const p of (arr.presets || [])) {
+          if (p.parseError) continue;
+          const font = String(p.font || '').trim();
+          // No font at all is a different problem, and a freshly seeded ";common"
+          // has the folder and simply no font yet.
+          if (!preflight.fontDir(font)) continue;
+          for (const s of preflight.sharedDirs(font)) {
+            counts.set(s, (counts.get(s) || 0) + 1);
+            if (!firstPreset.has(s)) {
+              firstPreset.set(s, (p.displayName || '').trim() || `Preset ${p.index}`);
+            }
+          }
+        }
+      }
+      if (counts.size < 2) return null;  // nothing to be the odd one out of
+
+      const established = [...counts].filter(([, c]) => c >= SHARED_ESTABLISHED_MIN).map(([n]) => n);
+      if (!established.length) return null;
+
+      const findings = [];
+      for (const [name, used] of counts) {
+        if (used !== 1) continue;        // a LONE outlier, never merely the smaller of two
+        let best = null, bestD = 99;
+        for (const e of established) {
+          const d = _distance(name.toLowerCase(), e.toLowerCase());
+          if (d > 0 && d < bestD) { bestD = d; best = e; }
+        }
+        if (!best || bestD > SHARED_MAX_EDITS) continue;
+
+        const preset = firstPreset.get(name);
+        findings.push({
+          title: `One preset uses ${name} where the rest of your config uses ${best}.`,
+          detail: `This looks like a typo. It will compile and flash, and then the saber will say `
+                + `"font directory not found" on that preset, because ProffieOS looks for every `
+                + `folder a preset names.`,
+          items: [preset],
+          // The correct spelling is the user's OWN convention, used at least three
+          // times in this same config — stronger evidence than any external list,
+          // which is why a rename is offered here at two edits where [B-324] stops
+          // at one.
+          fix: {
+            label: `Change ${name} to ${best}`,
+            plan(c) {
+              const edits = [];
+              for (const arr of (c.parsed?.arrays || [])) {
+                for (const p of (arr.presets || [])) {
+                  if (p.parseError || !p.fontRange) continue;
+                  const font = String(p.font || '').trim();
+                  const parts = preflight.fontPathParts(font);
+                  if (!parts.includes(name)) continue;
+                  const rebuilt = parts.map(x => (x === name ? best : x)).join(';');
+                  edits.push({
+                    startLine: p.fontRange.startLine, startCol: p.fontRange.startCol,
+                    endLine:   p.fontRange.endLine,   endCol:   p.fontRange.endCol,
+                    text: `"${rebuilt}"`,
+                  });
+                }
+              }
+              return edits;
+            },
+          },
         });
       }
       return findings.length ? { findings } : null;
