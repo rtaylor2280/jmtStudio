@@ -18,6 +18,49 @@
 
   // ── Low-level readers ──────────────────────────────────────────────────────
 
+  /**
+   * Blank out comments while preserving EVERY offset. [B-372]
+   *
+   * Returns a string the same length as the input, with comment characters replaced by
+   * spaces and newlines kept, so any index into the result is also a valid index into
+   * the original. That is the whole point: this parser hands back document coordinates,
+   * and a stripper that shortens the text would move every slot in the file.
+   *
+   * ⚠️ STRING-AWARE, AND THAT IS NOT OPTIONAL. A naive `//` rule eats the rest of the
+   * line on a track path like "sounds//hum.wav" — and the cost of getting THAT wrong is
+   * a live style silently vanishing from the parse, which is worse than the bug this
+   * fixes. (Same trap as the 2026-09-12 scanner whose comment stripper ate a real
+   * function through a URL.)
+   */
+  function maskComments(src) {
+    const out = src.split('');
+    let i = 0; const n = src.length;
+    while (i < n) {
+      const c = src[i], d = src[i + 1];
+      if (c === '/' && d === '/') {
+        while (i < n && src[i] !== '\n') { out[i] = ' '; i++; }
+        continue;
+      }
+      if (c === '/' && d === '*') {
+        while (i < n && !(src[i] === '*' && src[i + 1] === '/')) {
+          if (src[i] !== '\n') out[i] = ' ';
+          i++;
+        }
+        if (i < n) { out[i] = ' '; out[i + 1] = ' '; i += 2; }
+        continue;
+      }
+      if (c === '"' || c === "'") {
+        const q = c;
+        i++;
+        while (i < n && src[i] !== q) { if (src[i] === '\\') i++; i++; }
+        i++;
+        continue;
+      }
+      i++;
+    }
+    return out.join('');
+  }
+
   /** Skip whitespace and C/C++ comments. Returns new position. */
   function skipWS(text, pos) {
     while (pos < text.length) {
@@ -254,18 +297,34 @@
   function extractStyleSlots(text) {
     const results = [];
 
+    // ⭐ [B-372] SCAN THE TEXT THE COMPILER WOULD SEE. A commented-out style used to
+    // parse as a real slot:
+    //     StylePtr<Red>(),  //StylePtr<Blue>(),     -> 2 slots
+    //     StylePtr<Red>(),  /*StylePtr<Blue>(),*/   -> 2 slots
+    // so with NUM_BLADES 2 that preset rendered "Styles (2/2 blades)" with no red
+    // header and no empty tile — the app stating a preset is COMPLETE when it has one
+    // real style and cannot compile. Commenting a style out to test something is an
+    // ordinary thing to do in this editor, and the screen that exists to show blade
+    // coverage was the screen getting it wrong.
+    //
+    // ⚠️ MASKED, NOT STRIPPED. Every offset this function returns is a document
+    // coordinate, so the scan text must stay the same LENGTH as the original. Content
+    // is still sliced from `text`, so an inline comment inside a live expression
+    // survives in `expr` exactly as before.
+    const scan = maskComments(text);
+
     // Pass 1: any Style*Ptr wrapper (see the note above on the two name shapes)
     const re = /\b\w*Style\w*Ptr\w*\s*</g;
     let m;
-    while ((m = re.exec(text)) !== null) {
+    while ((m = re.exec(scan)) !== null) {
       const openAngle = m.index + m[0].length - 1;
-      const angleGroup = readAngleGroup(text, openAngle);
+      const angleGroup = readAngleGroup(scan, openAngle);
       if (!angleGroup) continue;
 
-      const parenStart = skipWS(text, angleGroup.end);
-      if (text[parenStart] !== '(') continue;
+      const parenStart = skipWS(scan, angleGroup.end);
+      if (scan[parenStart] !== '(') continue;
 
-      const parenGroup = readParenGroup(text, parenStart);
+      const parenGroup = readParenGroup(scan, parenStart);
       if (!parenGroup) continue;
 
       // Extract color arg string from parens if present
@@ -280,7 +339,10 @@
 
       results.push({
         type:        'styleptr',
-        expr:        angleGroup.inner.trim(),
+        // Sliced from the ORIGINAL text, not the masked scan: the offsets are
+        // identical, and an inline comment inside a live expression is part of what
+        // the user wrote. Masking is for deciding what EXISTS, not for rewriting it.
+        expr:        text.slice(openAngle + 1, angleGroup.end - 1).trim(),
         colorArg,
         startOffset: m.index,
         endOffset:   parenGroup.end,
@@ -289,9 +351,10 @@
     }
 
     // Pass 2: &style_identifier  (raw pointer, e.g. &style_pov, &style_charging)
+    // Same masked scan — a commented-out `&style_pov` is not a slot either.
     const refRe = /&(\w+)/g;
     let rm;
-    while ((rm = refRe.exec(text)) !== null) {
+    while ((rm = refRe.exec(scan)) !== null) {
       const name = rm[1];
       // Skip if this offset is already inside a StylePtr span
       if (results.some(r => rm.index >= r.startOffset && rm.index < r.endOffset)) continue;

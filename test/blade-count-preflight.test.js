@@ -215,13 +215,16 @@ BladeConfig blades[] = {{ 0, WS281XBladePtr<100, bladePin>(), CONFIGARRAY(preset
     ok('a preset whose styles the parser missed is NOT blocked', !r.blocked, r.body);
   }
   {
-    // ⚠️ A KNOWN GAP, ASSERTED SO IT IS VISIBLE RATHER THAN FORGOTTEN. [B-372]
-    // presetParser counts a COMMENTED-OUT style as a real slot, so this reads as
-    // 2 of 2 and the check never sees a shortfall. The same miscount makes the
-    // preset panel show it as complete, which is the worse half. The fix belongs
-    // in the parser, not here.
-    // ⭐ WHEN [B-372] IS FIXED THIS ASSERTION FLIPS AND THIS TEST WILL FAIL. That
-    // is the point: change it to expect a block, and delete this note.
+    // ✅ THE GAP CLOSED 2026-09-13 [B-372], AND THIS ASSERTION FLIPPED ON PURPOSE.
+    // It used to read "KNOWN GAP: a commented-out style is counted as a slot, so this
+    // is silent" and asserted `!r.blocked`. presetParser now masks comments before
+    // scanning, so a commented-out style is not a slot, the preset is genuinely one
+    // short, and the check says so.
+    //
+    // ⭐ THE FIX WENT IN THE PARSER, NOT HERE. Every reader benefits — the preset panel
+    // was the worse half of that bug, rendering "Styles (2/2 blades)" over a preset
+    // holding one real style. A gate that second-guessed the count it was given would
+    // have papered over the panel still being wrong.
     const r = await check(`
 #define NUM_BLADES 2
 Preset presets[] = {
@@ -232,8 +235,8 @@ Preset presets[] = {
 };
 BladeConfig blades[] = {{ 0, WS281XBladePtr<100, bladePin>(), CONFIGARRAY(presets) }};
 `);
-    ok('KNOWN GAP [B-372]: a commented-out style is counted as a slot, so this is silent',
-       !r.blocked, r.body);
+    ok('a commented-out style is NOT a slot, so the shortfall is caught', r.blocked, r.body);
+    ok('and it is named as 1 of 2', /1 preset has 1 of 2 blade styles/.test(r.body), r.body);
   }
   {
     const r = await check(`
