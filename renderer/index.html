@@ -2789,20 +2789,24 @@
      uuids (sources bucket) or deep paths. Names are intentionally
      allowed to flash by — the value isn't reading every one, it's
      seeing the work move. */
-  /* !important everywhere here because .modal p (line ~1314) is a
-     more-specific selector that fights this class on margin / font /
-     color, and the global .sf-import-progress-detail rule sets
-     word-break: break-all which would force wrap. Belt-and-suspenders
-     so the file-path line can never expand the modal vertically. */
+  /* !important everywhere here because .modal p is a more-specific selector (0,1,1 vs
+     0,1,0) that fights this class on margin / font / color.
+     ⚠️ CORRECTED 2026-09-13 [B-293]: this used to add "and the global
+     .sf-import-progress-detail rule sets word-break: break-all which would force wrap."
+     It does not and never did — that property is not on the class. The real wrap cause
+     was `text-wrap: balance` on `.modal p` resetting the `text-wrap-mode` longhand that
+     `white-space: nowrap` sets; see the clamp beside .sf-import-progress-detail. The
+     specificity half of this note was right, the word-break half was invented. */
   /* display intentionally NOT !important — p is block by default and
      the cancel handler sets style.display='none' inline to collapse
      this row during rollback. An !important on display here would
      fight that. Other properties stay !important to win over the
      global .modal p / .sf-import-progress-detail rules. */
   #modal-sf-backup-progress .sf-backup-progress-item-name { font-size: 0.78rem !important; color: var(--c-text-sub) !important; margin: 0 0 20px 0 !important; white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important; min-height: 1em !important; max-height: 1.4em !important; width: 100% !important; max-width: 100% !important; box-sizing: border-box !important; word-break: keep-all !important; overflow-wrap: normal !important; }
-  /* And clamp the detail line below the bar to one line as well —
-     same word-break-all problem from the shared detail class. */
-  #modal-sf-backup-progress .sf-import-progress-detail { white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important; word-break: keep-all !important; max-width: 100% !important; }
+  /* ✅ [B-293] The per-modal clamp that used to sit here is DELETED. It was five
+     !importants doing what `.modal p.sf-import-progress-detail` now does for every
+     progress modal at once, and the bulk modal had the same disease without the same
+     treatment. Two modals needed this; a third would have. One rule, no !important. */
   /* Defense-in-depth: also clamp the modal body so children can't
      push width past the modal's max. Without this, an absolutely-
      positioned child or one with min-content could force a horizontal
@@ -2840,6 +2844,26 @@
   /* The detail line under every determinate progress bar is ONE line that
      TRUNCATES with an ellipsis — it never wraps or grows the modal (2026-07-23; supersedes the 07-22 fixed two-line variant). */
   .sf-import-progress-detail { font-size: 0.72rem; color: var(--c-text-dim); margin: 4px 0 0 0; font-variant-numeric: tabular-nums; min-height: 1em; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* ⭐⭐ [B-360/B-293] THE CAUSE, FOUND 2026-09-13, AND IT IS NOT WHAT THE OLD COMMENT
+     SAID. The rule above carries `white-space: nowrap` and still wrapped, which reads
+     as impossible until you look at what these properties are shorthands FOR:
+
+       .modal p                      -> text-wrap: balance   => text-wrap-mode: wrap
+       .sf-import-progress-detail    -> white-space: nowrap  => text-wrap-mode: nowrap
+
+     `white-space` and `text-wrap` are BOTH shorthands that set `text-wrap-mode`, and
+     `.modal p` (0,1,1) is more specific than a bare class (0,1,0). So the more specific
+     rule won the longhand and put wrapping back on. Nothing was missing — two shorthands
+     were fighting over one longhand, invisibly, because neither name mentions it.
+
+     ⚠️ THE PREVIOUS EXPLANATION IS WRONG AND IS BEING REMOVED WITH THE OVERRIDE IT
+     JUSTIFIED: it blamed `word-break: break-all` on the global class. That property is
+     not there and was not then.
+
+     Matching the element as well as the class (0,2,1) beats `.modal p` honestly, so the
+     backup modal's five `!important`s are deleted rather than a third copy being added.
+     One clamp, every progress detail line. */
+  .modal p.sf-import-progress-detail { white-space: nowrap; text-wrap: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
   /* Stable single-line height even while empty, so the modal never shifts. */
   #sf-bulk-progress-detail { line-height: 1.25; min-height: 1.25em; max-height: 1.25em; overflow: hidden; }
   #sf-create-progress-detail { line-height: 1.25; min-height: 1.25em; max-height: 1.25em; overflow: hidden; }
