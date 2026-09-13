@@ -4506,6 +4506,10 @@
   .preset-slot-unlinked-label { font-size: 0.62rem; color: #e44; font-style: italic; opacity: 0.85; }
   .preset-slot-color { display: inline-flex; align-items: center; gap: 4px; font-size: 0.68rem; color: var(--c-text-muted); }
   .preset-slot-color-swatch { flex-shrink: 0; }
+  /* [B-078] A fact about the numbers, not a warning about them — nothing is wrong with
+     a 16-bit colour. Fainter and smaller than the colour label it qualifies. */
+  .preset-slot-color-scale { font-size: 0.58rem; color: var(--c-text-faint); border: 1px solid var(--c-border-faint);
+                             border-radius: 3px; padding: 0 3px; line-height: 1.5; flex-shrink: 0; }
 
   .preset-slot-actions { position: absolute; top: 3px; right: 3px; display: flex; gap: 2px; opacity: 0.3; transition: opacity 0.1s; }
   /* OPACITY MULTIPLIES, so a followed tile at .55 turned the 0.3 above into ~0.17 and all but
@@ -43006,6 +43010,7 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
         let _colorText = '';
         let _colorIsDefault = false;
         let _hardcodedInfo = null; // { matchStr, matchIndex } when color is hardcoded in expr
+        let _colorScale = null;    // [B-078] '8' | '16' | null when not knowable
 
         // [B-060] ONE LADDER, SHARED WITH _resolveSlotColor. This path used to carry
         // its own copy, which is exactly how the card and the detail view ended up
@@ -43016,6 +43021,7 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
           _rgb16          = _pick.rgb16;
           _hardcodedInfo  = _pick.hardcodedInfo;
           _colorIsDefault = _pick.colorIsDefault;
+          _colorScale     = _pick.scale;
         }
 
         if (_rgb16) {
@@ -43061,6 +43067,39 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
           }
           colorRow.appendChild(_swWrap);
           colorRow.appendChild(document.createTextNode(window.proffieArgs ? window.proffieArgs.colorLabel(_rgb16[0], _rgb16[1], _rgb16[2]) : `Rgb<${_rgb8.join(',')}>`));
+          // ── [B-078] SAY WHICH SCALE THE NUMBERS ARE IN ─────────────────────────
+          //
+          // His ruling settles the TEXT: editing one colour rewrites only that colour,
+          // and a foreign Rgb16 the user never touched is left alone. Normalising the
+          // whole slot would churn their config and produce diff noise in lines they
+          // never edited.
+          //
+          // ⭐ BUT LEAVING THE TEXT ALONE DOES NOT ADDRESS THE COST, which is not the
+          // mixing itself: advice in this community is given in 8-bit, and "try around
+          // 100" dropped into a 16-bit slot is 100/65535 — black. The user cannot tell
+          // which scale they are looking at from the number alone, and the app itself
+          // writes three forms (Rgb, Rgb16, and a named colour like Green).
+          //
+          // So the file is untouched and the SCALE is made visible. Only when it is
+          // knowable: a named colour has no scale, and CSV values under 256 could be
+          // either, so both stay silent rather than guess.
+          // ⚠️ THE RESOLVED COLOUR'S SCALE IS NOT ENOUGH, and this entry's own repro is
+          // why. After picking green, the slot read
+          //     AudioFlicker<Green, Rgb16<30000,0,0>>
+          // where the colour that RESOLVES is a name with no scale at all — while a
+          // 16-bit literal sits in plain sight beside it. Mixed scales in one
+          // expression is the reported fault, so the tag follows what is VISIBLE in the
+          // slot, not only what the ladder happened to answer with.
+          const _has16 = _colorScale === '16' || /\bRgb16\s*</.test(slot.expr || '');
+          if (_has16) {
+            const _scaleTag = document.createElement('span');
+            _scaleTag.className = 'preset-slot-color-scale';
+            _scaleTag.textContent = '16-bit';
+            _scaleTag.title = 'Some numbers in this slot are written in 16-bit (0–65535). '
+                            + 'Advice you find online is usually 8-bit (0–255) — the same '
+                            + 'number means a much darker colour here.';
+            colorRow.appendChild(_scaleTag);
+          }
           body.appendChild(colorRow);
         }
       }
@@ -43220,12 +43259,12 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
       const pMin = Math.min(p16, p8, namedPos);
       if (pMin === Infinity) return null;
       if (pMin === p16) {
-        return { rgb16: [parseInt(m16[1],10), parseInt(m16[2],10), parseInt(m16[3],10)], matchStr: m16[0], matchIndex: m16.index };
+        return { rgb16: [parseInt(m16[1],10), parseInt(m16[2],10), parseInt(m16[3],10)], matchStr: m16[0], matchIndex: m16.index, scale: '16' };
       }
       if (pMin === p8) {
-        return { rgb16: window.proffieArgs.resolveColorDefault(`Rgb<${m8[1]},${m8[2]},${m8[3]}>`), matchStr: m8[0], matchIndex: m8.index };
+        return { rgb16: window.proffieArgs.resolveColorDefault(`Rgb<${m8[1]},${m8[2]},${m8[3]}>`), matchStr: m8[0], matchIndex: m8.index, scale: '8' };
       }
-      return { rgb16: namedRgb16, matchStr: namedStr, matchIndex: namedPos };
+      return { rgb16: namedRgb16, matchStr: namedStr, matchIndex: namedPos, scale: null };
     }
 
     // Wrapper-vs-inner color mismatch. When a slot is a wrapper template with a
@@ -43353,7 +43392,11 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
     // Returns { rgb16, hardcodedInfo, colorIsDefault, source }. `source` names the rung
     // that answered, so a surprising card can be explained without re-deriving it.
     function _pickSlotPrimary(slot) {
-      const out = { rgb16: null, hardcodedInfo: null, colorIsDefault: false, source: null };
+      // [B-078] `scale` says which NUMBER SPACE the colour was written in ('8' | '16' |
+      // null for a named colour). Advice in this community is given in 8-bit - "try
+      // around 100" - and 100 in a 16-bit slot is 100/65535, which is black. The user
+      // cannot tell from the number alone, and the app itself writes three forms.
+      const out = { rgb16: null, hardcodedInfo: null, colorIsDefault: false, source: null, scale: null };
       if (!slot) return out;
       const pa = window.proffieArgs;
       const take = (rgb, source) => {
@@ -43380,7 +43423,15 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
       if (slot.colorArg) {
         const p = slot.colorArg.split(',').map(s => parseInt(s.trim(), 10));
         if (p.length >= 3 && p.slice(0, 3).every(n => Number.isFinite(n))
-            && take(p.slice(0, 3), 'colorarg-csv')) return out;
+            && take(p.slice(0, 3), 'colorarg-csv')) {
+          // [B-078] A SECOND SURFACE THE PICKER CANNOT REACH: 16-bit values inside a
+          // quoted CSV argument, e.g. ("0,25700,65535"). No swatch edits that, so a fix
+          // scoped to the colour picker misses it entirely.
+          // Only claim 16-bit when a value COULD NOT be 8-bit - below 256 the two
+          // scales are indistinguishable, and guessing is worse than saying nothing.
+          out.scale = p.slice(0, 3).some(n => n > 255) ? '16' : null;
+          return out;
+        }
       }
       // 2 — BASE_COLOR_ARG's default from the helper registry.
       if (pa && take(defaultOf(regArgs.find(isBase)), 'base-registry')) return out;
@@ -43395,7 +43446,7 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
         const leaf = _resolveLeafStyleName(slot.expr);
         if (leaf) {
           const hit = _earliestColorInText(_getHelperDefinitionText(leaf));
-          if (hit && take(hit.rgb16, 'helper-hardcoded')) return out;
+          if (hit && take(hit.rgb16, 'helper-hardcoded')) { out.scale = hit.scale; return out; }
         }
       }
       // 5 — A colour hardcoded in the slot expression itself.
@@ -43404,6 +43455,7 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
         if (hit && take(hit.rgb16, 'expr-hardcoded')) {
           out.hardcodedInfo  = { matchStr: hit.matchStr, matchIndex: hit.matchIndex };
           out.colorIsDefault = true;
+          out.scale          = hit.scale;
           return out;
         }
       }
