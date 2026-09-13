@@ -20049,9 +20049,13 @@ async function refreshEmptyStateFavs() {
     card.addEventListener('click', async (e) => {
       if (xBtn.contains(e.target)) {
         await window.electronAPI.removeFavorite(filePath);
-        favoritePaths.delete(filePath);
-        card.remove();
-        if (!container.querySelector('.fav-card')) container.style.display = 'none';
+        // [B-377] This used to patch the DOM by hand — remove the card, drop the path
+        // from the Set, hide the container if it emptied — and leave `present` (the
+        // array this closure was built from) still holding the deleted favourite. The
+        // drop handler below then wrote that array back as a COMPLETE list, which is
+        // not a reorder at all: it is a restore. Re-render instead; the refresh
+        // re-fetches, rebuilds favoritePaths and owns the empty-state display.
+        await refreshEmptyStateFavs();
         return;
       }
       if (exists) openFavorite(filePath);
@@ -20084,15 +20088,30 @@ async function refreshEmptyStateFavs() {
         if (!dragSrcPath || dragSrcPath === filePath) return;
         card.classList.remove('drag-over');
 
-        const srcIdx = present.findIndex(p => p.filePath === dragSrcPath);
-        const tgtIdx = present.findIndex(p => p.filePath === filePath);
-        if (srcIdx === -1 || tgtIdx === -1) return;
+        // ⭐ [B-377] THE DRAG IS THE INTENT; THE STORE IS THE CONTENTS. This used to
+        // build its new order from `present` — the array captured when the grid was
+        // last drawn — while fetching getFavorites() only for the missing paths. So it
+        // read current truth for one half of a list it wrote whole, and stale truth for
+        // the other. A favourite deleted since the last render was still in `present`,
+        // and reorderFavorites takes a COMPLETE list, so the next drag put it back.
+        //
+        // Deriving both halves from the same fresh read means nothing is snapshotted,
+        // so nothing can be stale — the same move as re-deriving slot coordinates in
+        // [B-371] rather than tracking them.
+        const allItems = await window.electronAPI.getFavorites();
+        const live = allItems.filter(i => i.exists);
 
-        const reordered = [...present];
+        const srcIdx = live.findIndex(p => p.filePath === dragSrcPath);
+        const tgtIdx = live.findIndex(p => p.filePath === filePath);
+        // ⚠️ Either card may have been removed since this handler was bound. Writing a
+        // whole list when we cannot place one of its members is how the resurrection
+        // happened; refuse and re-render instead.
+        if (srcIdx === -1 || tgtIdx === -1) { await refreshEmptyStateFavs(); return; }
+
+        const reordered = [...live];
         const [moved] = reordered.splice(srcIdx, 1);
         reordered.splice(tgtIdx, 0, moved);
 
-        const allItems = await window.electronAPI.getFavorites();
         const missingPaths = allItems.filter(i => !i.exists).map(i => i.filePath);
         await window.electronAPI.reorderFavorites([
           ...reordered.map(p => p.filePath),
