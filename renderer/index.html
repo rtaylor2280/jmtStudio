@@ -13294,35 +13294,66 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       if (els.progElapsed) els.progElapsed.textContent = `${_fmtDurA((Date.now() - _aT0) / 1000)} elapsed`;
     }, 1000);
     let _aIdx = 0, _aLabel = '';
+    // ── [B-360] ONE DENOMINATOR ACROSS ALL THREE ANALYZE PASSES ──────────────
+    //
+    // "the progress bar would go up, then back down and work it's way up..."
+    //
+    // The analyze is three sequential passes over the same sources — Analyzing fonts,
+    // Checking your library, Reading creators and previews — and each one used to
+    // restart the bar at its own sourceIdx/total. That was a deliberate 2026-08-31 call
+    // to stop a bar parked at 100% reading as hung. Right diagnosis, wrong cure: the
+    // answer to parked-at-100% is a BIGGER DENOMINATOR, not a rewind.
+    //
+    // So position is (pass × total + idx) out of (3 × total). The labels still change
+    // exactly as they do now — the user is told which pass is running; the bar just
+    // stops lying about how much is left.
+    const _A_PASSES = 3;
+    let _aPass = 0;
+    // ⚠️ THE CLAMP IS A BACKSTOP, NOT THE FIX. A bar that can only be clamped forward
+    // is a bar whose arithmetic is still wrong, and a clamped-but-stalled bar hides the
+    // regression instead of showing it. It is here for rounding and out-of-order events
+    // only; if it is ever doing real work, the denominator above is broken.
+    let _aFloor = 0;
+    const _aSetBar = (pass, idx, within = 0) => {
+      if (!els.progBar) return;
+      if (!total) { els.progBar.style.width = '0%'; return; }
+      const pos = (pass * total) + Math.min(idx + within, total);
+      const pct = Math.max(0, Math.min(100, (pos / (_A_PASSES * total)) * 100));
+      _aFloor = Math.max(_aFloor, pct);
+      els.progBar.style.width = `${_aFloor.toFixed(1)}%`;
+    };
     const unsub = window.electronAPI.onBulkImportProgress((data) => {
       if (!data) return;
       if (data.stage === 'source-start' && data.sourceIdx != null) {
-        _aIdx = data.sourceIdx;
+        _aIdx = data.sourceIdx; _aPass = 0;
         _aLabel = data.label || '';
-        if (els.progBar) els.progBar.style.width = `${total ? (((_aIdx) / total) * 100).toFixed(1) : 0}%`;
+        _aSetBar(0, _aIdx);
         if (els.progLabel) els.progLabel.textContent = `Analyzing fonts · ${_aIdx + 1} of ${total}`;
         if (els.progDetail) els.progDetail.textContent = _aLabel;
       } else if (data.stage === 'match-start' && data.sourceIdx != null) {
-        // Second pass, its own label and its own bar. Without this the analyze bar
-        // sat at "59 of 59" and 100% while the library match was still running,
-        // which reads as finished-but-hung. (2026-08-31.)
-        _aIdx = data.sourceIdx;
-        if (els.progBar) els.progBar.style.width = `${total ? (((_aIdx) / total) * 100).toFixed(1) : 0}%`;
+        // Second pass. It keeps its own label — the 2026-08-31 finding that a bar with
+        // no changing label reads as hung still holds — but no longer its own bar.
+        _aIdx = data.sourceIdx; _aPass = 1;
+        _aSetBar(1, _aIdx);
         if (els.progLabel) els.progLabel.textContent = `Checking your library · ${_aIdx + 1} of ${total}`;
         if (els.progDetail) els.progDetail.textContent = data.label || '';
       } else if (data.stage === 'enrich-start' && data.sourceIdx != null) {
-        _aIdx = data.sourceIdx;
-        if (els.progBar) els.progBar.style.width = `${total ? (((_aIdx) / total) * 100).toFixed(1) : 0}%`;
+        _aIdx = data.sourceIdx; _aPass = 2;
+        _aSetBar(2, _aIdx);
         if (els.progLabel) els.progLabel.textContent = `Reading creators and previews · ${_aIdx + 1} of ${total}`;
         if (els.progDetail) els.progDetail.textContent = data.label || '';
       } else if (data.stage === 'tracks-check') {
+        // A separate phase with its own denominator, so it owns the bar outright and
+        // the font-pass floor is released rather than clamping it to wherever the
+        // fonts finished.
+        _aFloor = 0;
         if (els.progLabel) els.progLabel.textContent = 'Checking your shared tracks';
         if (els.progDetail) els.progDetail.textContent = data.label || '';
         if (els.progBar && data.total) els.progBar.style.width = `${((data.done || 0) / data.total * 100).toFixed(1)}%`;
       } else if (data.stage === 'source-progress' && data.sub) {
-        if (data.sub.percent != null && els.progBar) {
+        if (data.sub.percent != null) {
           const within = Math.max(0, Math.min(100, data.sub.percent)) / 100;
-          els.progBar.style.width = `${total ? (((_aIdx + within) / total) * 100).toFixed(1) : 0}%`;
+          _aSetBar(_aPass, _aIdx, within);
         }
         if (els.progDetail) {
           els.progDetail.textContent = data.sub.currentFile ? `${_aLabel} · ${data.sub.currentFile}` : _aLabel;
@@ -13888,15 +13919,48 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     // Bar position is computed as: (completed sources + current source
     // sub-percent) / total. That way it advances smoothly during the
     // hash/copy/extract phases of a single source instead of jumping
-    // only at source-start ticks. Phase transitions cause small
-    // discontinuities within the per-source slice but never exceed it.
-    const setBarFromPosition = (sourceIdx, total, subPct) => {
+    // only at source-start ticks.
+    //
+    // ── [B-360] EACH STAGE OWNS A SUB-RANGE OF THE SOURCE'S SLICE ────────────
+    //
+    // The comment here used to end "Phase transitions cause small discontinuities
+    // within the per-source slice but never exceed it" — which is an accurate
+    // description of a bar that moves BACKWARD. Every stage reported its own 0-100%,
+    // so finishing the hash at 100% and starting the copy at 0% dropped the bar by a
+    // whole slice, three times per source.
+    //
+    // Now hashing/copying/extracting/optimizing each map onto a band, so a stage
+    // completing hands the next one a higher floor rather than resetting it. The
+    // numbers are a shape, not a measurement — the ordering is what matters, and any
+    // later re-weighting only changes where the seams fall.
+    const _STAGE_BAND = {
+      hashing:    [0,  30],
+      copying:    [30, 75],
+      extracting: [75, 93],
+      optimizing: [93, 100],
+      skipped:    [100, 100],
+    };
+    // ⚠️ BACKSTOP ONLY. Same rule as the analyze bar: if this clamp is doing real
+    // work, the band arithmetic above is wrong and should be fixed there instead. It
+    // exists for rounding and for stages that report no percent at all.
+    let _runFloor = 0;
+    const setBarFromPosition = (sourceIdx, total, subPct, stage) => {
       const t = Math.max(1, total);
       const completed = sourceIdx || 0;
-      const within = Math.max(0, Math.min(100, subPct || 0)) / 100;
+      const band = _STAGE_BAND[stage];
+      let within;
+      if (band) {
+        // A stage with no percent (extract reports a running file count, not a total)
+        // sits at its band's start rather than jumping to zero.
+        const p = Math.max(0, Math.min(100, subPct == null ? 0 : subPct)) / 100;
+        within = (band[0] + (band[1] - band[0]) * p) / 100;
+      } else {
+        within = Math.max(0, Math.min(100, subPct || 0)) / 100;
+      }
       const overall = Math.min(100, ((completed + within) / t) * 100);
-      els.progBar.style.width = `${overall.toFixed(1)}%`;
-      return overall;
+      _runFloor = Math.max(_runFloor, overall);
+      els.progBar.style.width = `${_runFloor.toFixed(1)}%`;
+      return _runFloor;
     };
     progressUnsub = window.electronAPI.onBulkImportProgress((data) => {
       if (!data) return;
@@ -13964,7 +14028,9 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
           if (data.sub.percent != null) {
             const idx = (data.sourceIdx || 0) + 1;
             const t = data.total || total;
-            const overall = setBarFromPosition(data.sourceIdx, t, data.sub.percent);
+            // [B-360] The stage is what picks the band, so it has to travel with the
+            // percent — without it every stage lands on the same 0-100 scale again.
+            const overall = setBarFromPosition(data.sourceIdx, t, data.sub.percent, data.sub.stage);
             lastOverallIdx = idx;
             lastOverallPct = overall;
           }
