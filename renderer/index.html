@@ -39280,6 +39280,53 @@ require(['vs/editor/editor.main'], function () {
       return slot.startLine;
     }
 
+    // ── STALE SLOT COORDINATES [B-371] ─────────────────────────────────────────
+    //
+    // A slot object carries the line/column it occupied WHEN ITS TILE WAS BUILT.
+    // Any write to the document moves everything after it, so a handler still
+    // holding that object is holding coordinates that no longer describe it.
+    //
+    // WHAT IT COST: pick a style from the Style Library into a slot, then press the
+    // slot's x without closing the panel. The library expression is longer than what
+    // it replaced, so the cached end column now falls INSIDE it; the reset writes a
+    // shorter string over a stale range and the tail of the old expression survives:
+    //     StylePtr<Black>()65535,0,0"),
+    // The stray `"` ended the preset array early and the panel read "No presets
+    // found" (2026-09-12, on LGT1Button32).
+    //
+    // ⭐ THE ANSWER IS TO ASK AGAIN, NOT TO TRACK. `_collapseBladeSlot` already
+    // re-parses for exactly this reason and finds its slot by POSITION. This does the
+    // same for every other writer, so there is ONE definition of "where is this slot
+    // now" instead of each caller remembering to re-derive.
+    //
+    // ⚠️ IT REFUSES RATHER THAN GUESSING. If the position cannot be located in the
+    // current text — the preset was deleted, the array moved, the parse failed — it
+    // returns null and the caller must NOT write. Falling back to the cached object
+    // would reintroduce the exact bug this exists to remove.
+    function _stampSlotPosition(slot, presetIdx, slotIdx) {
+      if (slot && typeof slot === 'object') {
+        slot._presetIdx = presetIdx;
+        slot._slotIdx   = slotIdx;
+      }
+      return slot;
+    }
+
+    function _liveSlot(slot) {
+      if (!editor || !slot || typeof slot !== 'object') return null;
+      const pi = slot._presetIdx, si = slot._slotIdx;
+      // An unstamped slot cannot be re-derived, and pretending otherwise is how the
+      // cached object creeps back in. Say so loudly in dev rather than writing blind.
+      if (!Number.isInteger(pi) || !Number.isInteger(si)) return null;
+      let parsed;
+      try { parsed = presetParser.parsePresets(editor.getModel().getValue()); }
+      catch { return null; }
+      const arr    = parsed?.arrays?.[_activeArrayIndex];
+      const preset = arr?.presets?.[pi];
+      const fresh  = preset?.styles?.[si];
+      if (!fresh || !fresh.startLine) return null;
+      return _stampSlotPosition(fresh, pi, si);
+    }
+
     // Returns the full text for a slot from the Monaco editor, including any
     // immediately-preceding /* ... */ comment block (e.g. Fett263 copyright headers).
     function _getFullSlotTextFromEditor(slot) {
@@ -42377,6 +42424,10 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
     }
 
     function _buildSlotTile(preset, slot, slotIdx, isMissing, isExcess, abbr, fullLabel, presetIdx) {
+      // [B-371] The tile's handlers outlive the parse that produced this slot. Stamp
+      // its POSITION on it so any writer can ask where it is NOW instead of trusting
+      // coordinates captured here. See _liveSlot.
+      _stampSlotPosition(slot, presetIdx, slotIdx);
       const tile = document.createElement('div');
       tile.className = 'preset-slot-tile';
       tile.dataset.slotIdx = slotIdx;
@@ -43935,11 +43986,15 @@ function _getFreshFieldRange(fieldName) {
       function commitTemplateArgs() {
         const newExpr = composeHelperExpr();
         if (!newExpr || !editor || !slot.startLine) return;
+        // [B-371] This panel stays open across writes, so its slot can be stale by the
+        // time the user commits template args. Re-derive or refuse.
+        const live = _liveSlot(slot) || slot;
+        if (!live.startLine) return;
         const parens = slot.colorArg ? `("${slot.colorArg}")` : '()';
         _atomicEdit(editor,'preset-tp-edit', [{
           range: {
-            startLineNumber: slot.startLine, startColumn: slot.startCol + 1,
-            endLineNumber:   slot.endLine,   endColumn:   slot.endCol + 1,
+            startLineNumber: live.startLine, startColumn: live.startCol + 1,
+            endLineNumber:   live.endLine,   endColumn:   live.endCol + 1,
           },
           text: `${originalWrapper}<${newExpr}>${parens}`,
         }]);
@@ -44549,17 +44604,23 @@ function _getFreshFieldRange(fieldName) {
                 _hcSwatch.title = window.proffieArgs ? window.proffieArgs.colorLabel(newVals[0]||0, newVals[1]||0, newVals[2]||0) : `Rgb<${_nr8},${_ng8},${_nb8}>`;
                 const _model = editor?.getModel();
                 if (!_model) return;
-                const _freshText = _model.getValueInRange({
-                  startLineNumber: slot.startLine, startColumn: slot.startCol + 1,
-                  endLineNumber:   slot.endLine,   endColumn:   slot.endCol + 1,
-                });
+                // [B-371] It already re-READ the text before replacing, which was half
+                // the protection — but it read from the CACHED range, so a stale slot
+                // meant reading and then writing the wrong region. Locate the slot
+                // first; the indexOf guard below then means what it appears to mean.
+                const _live = _liveSlot(slot) || slot;
+                if (!_live.startLine) return;
+                const _slotRangeNow = {
+                  startLineNumber: _live.startLine, startColumn: _live.startCol + 1,
+                  endLineNumber:   _live.endLine,   endColumn:   _live.endCol + 1,
+                };
+                const _freshText = _model.getValueInRange(_slotRangeNow);
                 if (_freshText.indexOf(_matchStr2) < 0) return;
                 const _newFull = _matchStr2.includes('<')
                   ? _freshText.split(_matchStr2).join(_tok)
                   : _freshText.replace(new RegExp('\\b' + _matchStr2.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'g'), _tok);
                 _atomicEdit(editor,'preset-slot-edit', [{
-                  range: { startLineNumber: slot.startLine, startColumn: slot.startCol + 1,
-                           endLineNumber: slot.endLine, endColumn: slot.endCol + 1 },
+                  range: _slotRangeNow,
                   text: _newFull,
                 }]);
                 editor.focus();
@@ -45222,6 +45283,10 @@ function _getFreshFieldRange(fieldName) {
 
     function _modifySlotParens(slot, newParensStr) {
       if (!editor || !slot.startLine) return;
+      // [B-371] Every offset below is computed from the slot's start, so a stale start
+      // relocates the whole edit. Re-derive before any of it is measured.
+      slot = _liveSlot(slot) || slot;
+      if (!slot.startLine) return;
       const model = editor.getModel();
       const searchEnd = Math.min(model.getLineCount(), slot.endLine || (slot.startLine + 6));
       const slotStart = { lineNumber: slot.startLine, column: slot.startCol + 1 };
@@ -45268,15 +45333,22 @@ function _getFreshFieldRange(fieldName) {
 
     function _resetSlot(slot) {
       if (!editor || !slot.startLine) return;
+      // ⚠️ [B-371] THE WHOLE BUG WAS THIS LINE MISSING. Picking a library style writes
+      // to the document and moves everything after it, so the coordinates on `slot`
+      // stopped describing this slot the moment that landed. Re-derive, and refuse if
+      // the slot cannot be found rather than writing over whatever is there now.
+      // `_followEdits` takes the same object and had the identical defect.
+      const live = _liveSlot(slot);
+      if (!live) return;
       // A reset is a write like any other, so it carries to the followers that were still
       // matching. Leaving it out would mean resetting a blade quietly orphans everything below it.
       _atomicEdit(editor,'slot-reset', [{
         range: {
-          startLineNumber: slot.startLine, startColumn: slot.startCol + 1,
-          endLineNumber:   slot.endLine,   endColumn:   slot.endCol + 1,
+          startLineNumber: live.startLine, startColumn: live.startCol + 1,
+          endLineNumber:   live.endLine,   endColumn:   live.endCol + 1,
         },
         text: 'StylePtr<Black>()',
-      }, ..._followEdits(slot, 'StylePtr<Black>()')]);
+      }, ..._followEdits(live, 'StylePtr<Black>()')]);
       _pendingSlotCommit = null;   // slot deliberately replaced; do not re-commit
       _closeSlotArgEdit();
       // Defer focus past the current click event. A synchronous editor.focus()
@@ -45699,30 +45771,37 @@ function _getFreshFieldRange(fieldName) {
 
     function _commitSlotEdit(slot, newExpr, leadingComment) {
       if (!editor) return;
+      // [B-371] Same re-derivation as _resetSlot: this is reached from panel handlers
+      // that may have been built before an earlier write moved the document. An
+      // unstamped slot (a caller outside the tile path) keeps the old behaviour rather
+      // than being refused, because those callers write immediately after their own
+      // parse and blocking them would break working paths.
+      const live = _liveSlot(slot) || slot;
+      if (!live.startLine) return;
       const exprText = _jmtStyleSlotExpr(newExpr);
 
       // Followers receive the EXPRESSION only, never the leading comment block. That matches what
       // changing a style by hand already does in this app - the comment above a slot is left where
       // it is - and a Fett263 header copied into every follower of every preset would bury the
       // file the user has to read.
-      const followEdits = _followEdits(slot, exprText);
+      const followEdits = _followEdits(live, exprText);
 
       if (leadingComment) {
         // Replace any existing comment above the slot together with the slot itself,
         // inserting the new comment followed by the expression at the slot's indent.
-        const indent = ' '.repeat(slot.startCol);
+        const indent = ' '.repeat(live.startCol);
         _atomicEdit(editor,'preset-slot-edit', [{
           range: {
-            startLineNumber: _slotCommentStartLine(slot), startColumn: 1,
-            endLineNumber:   slot.endLine,                endColumn:   slot.endCol + 1,
+            startLineNumber: _slotCommentStartLine(live), startColumn: 1,
+            endLineNumber:   live.endLine,                endColumn:   live.endCol + 1,
           },
           text: leadingComment + '\n' + indent + exprText,
         }, ...followEdits]);
       } else {
         _atomicEdit(editor,'preset-slot-edit', [{
           range: {
-            startLineNumber: slot.startLine, startColumn: slot.startCol + 1,
-            endLineNumber:   slot.endLine,   endColumn:   slot.endCol + 1,
+            startLineNumber: live.startLine, startColumn: live.startCol + 1,
+            endLineNumber:   live.endLine,   endColumn:   live.endCol + 1,
           },
           text: exprText,
         }, ...followEdits]);
