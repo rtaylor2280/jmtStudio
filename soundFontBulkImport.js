@@ -1457,6 +1457,21 @@ async function enrichSourceForGuided(src) {
     purchasedDefault: true, fontWav: null, humWav: null, textFiles: [],
     wavCount: 0,
     suggestedName: null, nameSource: null, // set only when late docx naming upgrades a fallback
+    // ⭐ [B-296] HOW MANY FONTS ARE ACTUALLY IN HERE, answered during ANALYZE.
+    //
+    // "136 new sound fonts ready to import" → Import → FORTY-SEVEN MINUTES LATER →
+    // "135 sources imported (191 fonts), 1 failed - tr.zip - No fonts found in source."
+    // The refusal was correct: tr.zip holds 17 short effect wavs and a readme, no hum,
+    // no swing, no Proffie shape. Nothing should have imported it.
+    //
+    // THE BUG IS WHEN THE ANSWER ARRIVES. "This archive contains no sound font" was
+    // knowable here and was instead discovered at the far end of the import, so the
+    // number the user clicked Import against was not the number that imported.
+    //
+    // null means the question was not asked (detection threw, or an unreadable
+    // source); 0 means it WAS asked and the answer is none. Those must not collapse —
+    // reporting "no fonts" because our own read failed is the wolf-cry version.
+    fontCount: null,
     error: null,
   };
   try {
@@ -1471,6 +1486,18 @@ async function enrichSourceForGuided(src) {
       if (vendorRes.purchasedDefault === false) out.purchasedDefault = false;
     }
     if (out.purchasedDefault && /\bfree\b/i.test(src.rawName || '')) out.purchasedDefault = false;
+    // [B-296] Same detection the commit will run, asked here instead. Cheap: it is a
+    // listAll plus a walk over names, and this pass already has the source open.
+    // ⚠️ Deliberately the SAME function the commit uses, not a second "does this look
+    // like a font" rule — two definitions of that would drift and the review would
+    // start disagreeing with the import it is previewing.
+    try {
+      const cres = await soundFontCandidates.detectCandidates(source);
+      const all = (cres && cres.candidates) || [];
+      // Alternate versions are filtered the same way the commit filters them, or a
+      // source holding only an older V1 would read as importable and then refuse.
+      out.fontCount = all.filter(c => !c.alternateVersion).length;
+    } catch { out.fontCount = null; }
     const entries = await source.listAll();
     const isFolder = source.format === 'folder';
     const toRef = (fileName) => fileName == null ? null : {

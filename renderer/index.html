@@ -2871,6 +2871,10 @@
   #sf-bulk-progress-detail .sf-exp-size { display: block; color: var(--c-text-sub); }
   /* Slightly wider than the default modal so long font paths rarely truncate. */
   #modal-sf-bulk-progress .modal { max-width: 460px; }
+  /* [B-296] Sits inline after the headline count, dimmed: it qualifies the number
+     rather than competing with it. Same muted tone the breakdown's own skip rows use —
+     this is information about what will NOT happen, not a warning. */
+  .sf-review-empty-note { color: var(--c-text-dim); }
   .sf-bulk-review-breakdown { margin: 12px 0 0 0; padding: 10px 12px; background: var(--c-bg-inset); border-radius: 4px; font-size: 0.82rem; line-height: 1.55; max-height: 280px; overflow-y: auto; }
   .sf-bulk-review-breakdown .br-row { display: flex; justify-content: space-between; gap: 12px; }
   .sf-bulk-review-breakdown .br-row + .br-row { margin-top: 4px; }
@@ -13493,6 +13497,12 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       if (!ok) return; // failed/cancelled — closeModal already ran
     }
     const st = plan._analyzeStats;
+    // [B-296] Hoisted: the headline count, the breakdown row and the Import gate all
+    // need it, and computing it three times is how they start disagreeing.
+    // ⚠️ `=== 0` ONLY — null means the enrich pass could not ask, and "no fonts in it"
+    // because OUR read failed is a false accusation about the user's archive.
+    const _emptySources = (plan.sources || []).filter(s => s && s.enrich && s.enrich.fontCount === 0);
+    const _emptyCount   = _emptySources.length;
     // Common-folder rows are computed ONCE, up front, and appended in EVERY
     // branch that can carry commons ([B-350], 2026-09-08): the fonts branch had
     // them, the tracks-only branch did not — Ryan selected tracks + common and
@@ -13567,10 +13577,27 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       els.reviewBreakdown.innerHTML = '';
       els.startBtn.disabled = true;
     } else {
-      const newCount = st ? st.new : total;
+      // ⭐ [B-296] A SOURCE WITH NOTHING IN IT IS NOT "READY TO IMPORT".
+      //
+      // "136 new sound fonts ready to import" → Import → 47 minutes later → "135
+      // sources imported, 1 failed - tr.zip - No fonts found in source." The refusal
+      // was right; the TIMING was the bug. The number the user clicks Import against
+      // has to be the number that actually imports, or the failure list at the end
+      // stops being about things that went wrong and starts being about things that
+      // were never going to work.
+      //
+      // ⚠️ `fontCount === 0` ONLY. null means the enrich pass could not ask (an
+      // unreadable source, or detection threw), and reporting "no fonts in it" because
+      // OUR read failed is the wolf-cry version of this check.
+      const newCount = Math.max(0, (st ? st.new : total) - _emptyCount);
       els.reviewSummary.innerHTML =
         `<strong>${newCount}</strong> new sound font${newCount === 1 ? '' : 's'} ready to import from ` +
-        `<code>${escapeHtml(plan._displayRoot || plan.rootDir)}</code>.`;
+        `<code>${escapeHtml(plan._displayRoot || plan.rootDir)}</code>.`
+        + (_emptyCount
+            ? ` <span class="sf-review-empty-note">${_emptyCount} `
+              + `archive${_emptyCount === 1 ? '' : 's'} with no sound font in ${_emptyCount === 1 ? 'it' : 'them'} `
+              + `will be skipped.</span>`
+            : '');
       // BOTH TIERS, deduped ([B-214]). `execFiles` is what the scan saw by NAME,
       // known before any import. `_blocked` is what the prepare found by reading the
       // bytes, which is the only way a program wearing a sound's name is ever seen.
@@ -13613,7 +13640,11 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         // concept the reader cannot see yet — that belongs on the review screen.
         // One "already in your library" line: the split between the archive-hash
         // test and the content test is ours, not the user's. (2026-08-31.)
-        rows.push(['New sound fonts', st.new]);
+        // [B-296] The headline count already has the empties taken out, so the
+        // breakdown has to agree with it or the two lines contradict each other on the
+        // same screen.
+        rows.push(['New sound fonts', Math.max(0, st.new - _emptyCount)]);
+        if (_emptyCount) rows.push(['No sound font inside (skipped)', _emptyCount, false, true]);
         const _owned = (typeof st.owned === 'number') ? st.owned : (st.duplicate || 0);
         if (_owned)     rows.push(['Already in your library (skipped)', _owned]);
         if (st.corrupt) rows.push(['Corrupted (skipped)', st.corrupt, false, true]);
@@ -13712,7 +13743,9 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       els.reviewBreakdown.innerHTML = html;
       _setReviewExplainer(false, { corrupt: (st && st.corrupt) || 0 });
       // Quick import only has something to do when there are new fonts.
-      els.startBtn.disabled = !!st && st.new === 0;
+      // [B-296] An import whose every source is empty has nothing to do, so the
+      // button says so rather than starting a run that can only fail.
+      els.startBtn.disabled = !!st && Math.max(0, st.new - _emptyCount) === 0;
       // ⚠️ A PROGRAM FILE CHANGES THE APP'S STANCE ([B-214], 2026-09-09).
       // Quick import is the path that adds everything without the user seeing it font
       // by font, which is the wrong affordance on a card that turned out to carry a
