@@ -8223,6 +8223,17 @@ function _boardBuildMoved() {
 // which owns the USB control and its indicator.
 window.getCompiledUsb = () => metaCompiledUsb;
 
+// [B-385] The config was compiled at SOME point, formatted for display, or null.
+// Exposed so a field can tell the difference between "the build matches" and "there
+// is no record of what the build used" — `@jmt:compiled_usb`, `compiled_board` and
+// `compiled_os` arrived 2026-08-15, so any config last built before that date carries
+// a compile TIMESTAMP and none of the settings. Measured over 88 real configs on
+// 2026-09-14: 58 carry the timestamp, 12 carry the trio. Without this, absence of a
+// build record renders identically to agreement with it.
+// ⚠️ Formatted here rather than handing out the raw ISO: fmtTimestamp is the one
+// definition of how a timestamp reads in this app and it lives in this file.
+window.getCompiledAtLabel = () => (metaCompiled ? fmtTimestamp(metaCompiled) : null);
+
 function _buildTargetMoved() {
   const name = document.getElementById('input-version')?.value;
   // No selection means there is no build target, and a target that does not
@@ -8549,14 +8560,18 @@ function updateChangedIndicators() {
   // compile sets a baseline. Reuses the existing field-changed visual. (Visual cue
   // only; the "Insert Board Include?" prompt stays reactive to the user's pick.)
   const noBoard = fileIsOpen && !boardSel.value;
-  const boardChanged = baselineBoard !== null && boardSel.value !== baselineBoard;
-  // Same rule as the OS Version field, and the same defect before it: baselineBoard
-  // resets on save, so a config stored as a V3 whose binary was built for a V2
-  // looked settled. Compared by FQBN because that is what the build actually used
-  // and what @jmt:compiled_board records - the dropdown label is a display name.
-  // (2026-08-15)
+  // ⭐⭐ [B-385] ONE QUESTION ONLY: does the current selection match the LAST COMPILED
+  // version? Settled 2026-09-14. The save comparison (`baselineBoard`) used to sit
+  // here too and was the defect — it resets on Save, so saving cleared a red that
+  // means "recompile before flashing", which saving does nothing about. The dirty
+  // marker already answers "differs from the file on disk"; this field must not.
+  // Compared by FQBN because that is what the build actually used and what
+  // @jmt:compiled_board records - the dropdown label is a display name.
   const boardBuildMoved = _boardBuildMoved();
-  boardSel.classList.toggle('field-changed', noBoard || boardChanged || boardBuildMoved);
+  // Compiled at some point, but that build recorded no board, so the question cannot
+  // be answered. NOT red - nothing is known to have moved.
+  const boardBuildUnknown = !!(metaCompiled && !metaCompiledFqbn);
+  boardSel.classList.toggle('field-changed', noBoard || boardBuildMoved);
   boardSel.title = noBoard
     ? 'No board detected in this config. Select your Proffieboard to compile.'
     : !boardSel.value
@@ -8565,8 +8580,8 @@ function updateChangedIndicators() {
         // Names the board that actually produced the binary, from the build
         // record, so this survives a save and travels with a shared config.
         ? `Last built for ${_boardNameForFqbn(metaCompiledFqbn) || metaCompiledFqbn} — recompile before flashing`
-    : boardChanged
-        ? `Board changed since last compile (was: ${baselineBoard}) — recompile before flashing`
+    : boardBuildUnknown
+        ? `Last compiled ${window.getCompiledAtLabel?.() || 'previously'}, but that build did not record which board it used — recompile to start checking it`
       : '';
 
   // A ProffieOS version and a Proffieboard Plugin are ONE build target, not two.

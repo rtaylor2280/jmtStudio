@@ -1011,23 +1011,37 @@ const USB_LABELS = {
   none:        'No USB',
 };
 
+// ⭐⭐ [B-385] THIS FIELD ANSWERS ONE QUESTION: does the current selection match the
+// LAST COMPILED VERSION? Settled 2026-09-14: "it's job is to show if the current
+// selection matches the last compiled version. that's it."
+//
+// ⚠️ IT USED TO COMPARE AGAINST THE SAVED FILE TOO, and that was the whole defect.
+// `baselineUsb` resets on Save, so saving cleared the red — and the red means
+// "recompile before flashing", which saving does nothing about. The message said
+// "since last compile" while the test it came from was "differs from the file on
+// disk" — reported as a lie, correctly. Those are different questions, the dirty
+// marker already answers the second one, and a build-readiness signal must never be
+// cleared by an action that builds nothing.
+//
+// ⚠️ THE FIRST FIX REWORDED THE SAVE BRANCH INSTEAD OF REMOVING IT. Better words on
+// the wrong comparison is still the wrong comparison. The correction: "looking at
+// the wrong field... it's supposed to compare compiled not saved."
 function updateUsbChangedIndicator() {
-  const baseline = window.getBaselineUsb ? window.getBaselineUsb() : null;
-  const changed  = baseline !== null && selectedUsb !== baseline;
-  // Same rule as Board and OS Version. `baseline` resets on save, so it answers
-  // "matches the file on disk"; the build record answers "matches the binary".
-  // This is the one where being wrong is worst: a config saved with Mass Storage
-  // that was never built that way reads, to anyone helping, as a board running
-  // Mass Storage - and Mass Storage without MOUNT_SD_SETTING is what corrupts
-  // SD cards. (2026-08-15)
   const builtUsb   = window.getCompiledUsb ? window.getCompiledUsb() : null;
   const buildMoved = !!(builtUsb && selectedUsb && builtUsb !== selectedUsb);
-  const usbEl    = el('bp-usb-select');
-  usbEl.classList.toggle('field-changed', changed || buildMoved);
+  // Compiled at some point, but that build recorded no USB mode, so the question
+  // cannot be answered. NOT red — nothing is known to have moved.
+  // `@jmt:compiled_usb` arrived 2026-08-15; every config built before that date
+  // lands here until its next compile. Measured over 88 real configs on 2026-09-14:
+  // 58 carry a compile timestamp, 12 carry the setting.
+  const compiledAt   = window.getCompiledAtLabel ? window.getCompiledAtLabel() : null;
+  const buildUnknown = !!(compiledAt && !builtUsb);
+  const usbEl = el('bp-usb-select');
+  usbEl.classList.toggle('field-changed', buildMoved);
   usbEl.title = buildMoved
     ? `Last built with ${USB_LABELS[builtUsb] || builtUsb} — recompile before flashing`
-    : changed
-      ? `USB mode changed since last compile (was: ${USB_LABELS[baseline] || baseline}) — recompile before flashing`
+    : buildUnknown
+      ? `Last compiled ${compiledAt}, but that build did not record its USB mode — recompile to start checking it`
       : '';
 }
 
