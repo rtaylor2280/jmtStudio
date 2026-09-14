@@ -99,6 +99,46 @@ function ok(name, cond, extra) {
 
 // ── the module publishes them ──────────────────────────────────────────────
 {
+  // ⭐⭐ THE ASSERTION THIS FILE WAS MISSING, AND A DEV TEST FOUND WHAT IT COULD NOT.
+  // The suite checked the two SCAFFOLD bridges and passed, while the FONT-PATCH bridge
+  // was absent: `_commitPresetFont` lives inside presetSidecarModule and the caller sits
+  // outside it, so "Add to config" created a preset and then threw on the font write.
+  // A bare `catch {}` swallowed it. The preset appeared with its seed font, silently —
+  // the exact failure this entry is named for, in a third place.
+  //
+  // So: every module-private helper the SF view calls must be published, not just the
+  // ones we happened to think of. Checked by name because there are only three.
+  for (const fn of ['_addFirstPreset', '_insertFirstEntryIntoArray', '_commitPresetFont']) {
+    ok(`${fn} is bridged across the IIFE boundary`,
+       new RegExp(`window\\.${fn}\\s*=\\s*${fn};`).test(html),
+       'the SF view calls it from outside presetSidecarModule');
+  }
+  // ⚠️ AND THE GUARD MUST NAME THE FUNCTION IT GUARDS. The original line tested
+  // `window._commitFieldEdit` and then called `_commitPresetFont` — a guard that can
+  // only ever pass, in front of a call that can only ever throw.
+  {
+    const patchAt = html.indexOf('const _sfPatchFreshPresetFont');
+    const patchRaw = html.slice(patchAt, patchAt + 2600);
+    // ⚠️⚠️ STRIP COMMENTS BEFORE AN ABSENCE CHECK. The first version of this assertion
+    // failed against the CORRECT fix, because the comment directly above the code quotes
+    // the old broken line to explain it. Identical to the trap in
+    // favorites-reorder-freshness.test.js, walked into an hour after fixing it there:
+    // an assertion over source text reads prose unless you take the prose out.
+    // `[^\r\n]*`, not `.*$` — this file is CRLF and `.` will not cross `\r`.
+    const patch = patchRaw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\r\n]*/g, '');
+    ok('the font write guards the name it calls',
+       !/window\._commitFieldEdit\) _commitPresetFont\(/.test(patch),
+       'guarding one name and calling another is a guard that cannot fail');
+    // ⚠️ ANCHORED ON THE `catch`, not measured from the top of the function — adding four
+    // lines of comment above it pushed this out of a fixed window and failed against
+    // correct code. Fourth time in one day; the rule is finally applied rather than
+    // written: find the construct, then read from it.
+    const catchAt = html.indexOf('} catch (e) {', patchAt);
+    const catchBlock = html.slice(catchAt, catchAt + 700);
+    ok('and the patch failure is reported to the developer',
+       catchAt > patchAt && /console\.error\('\[B-376\] could not apply the font/.test(catchBlock),
+       'a bare catch {} here is what hid this for a day');
+  }
   ok('_addFirstPreset is published', /window\._addFirstPreset\s*=\s*_addFirstPreset;/.test(html));
   ok('_insertFirstEntryIntoArray is published',
      /window\._insertFirstEntryIntoArray\s*=\s*_insertFirstEntryIntoArray;/.test(html));

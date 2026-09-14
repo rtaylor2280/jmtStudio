@@ -36879,9 +36879,30 @@ require(['vs/editor/editor.main'], function () {
           const fontPath = (shared && !already) ? `${fontName};${shared}` : fontName;
           // window._commitFieldEdit because this runs in the SF view's
           // IIFE and _commitFieldEdit is scoped to the Config Manager's.
-          if (p.fontRange && window._commitFieldEdit) _commitPresetFont(p.fontRange, fontPath);
-          if (p.displayNameRange && window._commitFieldEdit) window._commitFieldEdit(p.displayNameRange, fontName);
-        } catch {}
+          // ⚠️ [B-376] GUARD THE NAME YOU ARE ABOUT TO CALL. This used to read
+          // `if (p.fontRange && window._commitFieldEdit) _commitPresetFont(...)` — it
+          // tested a published name and then called an UNPUBLISHED one, so the guard
+          // always passed and the call always threw. Both are bridged now, and each
+          // line checks its own.
+          //
+          // Display name FIRST, font second: both are single-line replacements, but the
+          // font sits earlier in the document, so writing it first is the shape that
+          // would invalidate the other range if either ever spans lines. Ordering costs
+          // nothing and removes the class. (Same lesson as [B-371].)
+          // ⚠️ ONE `const` PER LINE, not a comma-separated pair: the reference-integrity
+          // scanner reads the first declarator and cannot see the second, so the second
+          // name looks like a call to a helper that does not exist. Splitting is also
+          // simply clearer than widening a scanner whose whole value is its suspicion.
+          const _commitName = window._commitFieldEdit;
+          const _commitFont = window._commitPresetFont;
+          if (p.displayNameRange && typeof _commitName === 'function') _commitName(p.displayNameRange, fontName);
+          if (p.fontRange && typeof _commitFont === 'function') _commitFont(p.fontRange, fontPath);
+        } catch (e) {
+          // ⚠️ THE BARE `catch {}` HERE IS WHAT HID THE BUG ABOVE FOR A DAY. Developer
+          // console only — a user can neither cause nor fix a scope error, and this is
+          // a right-click menu item. Same call as the missing-bridge guard.
+          console.error('[B-376] could not apply the font to the new preset:', e);
+        }
       };
       // Replace the font field on a specific preset, preserving the
       // ;common toggle. After the swap, prompt to rename the preset if
@@ -43839,6 +43860,14 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
     // IIFE and can't reach this function-declaration directly. Same
     // pattern the quick-play surface uses to bridge scope boundaries.
     window._commitFieldEdit = _commitFieldEdit;
+    // ⚠️ [B-376] AND _commitPresetFont, WHICH WAS MISSED WHEN THIS BRIDGE WAS WRITTEN.
+    // The comment above already names _sfPatchFreshPresetFont as a caller across the
+    // boundary, and that caller needs BOTH: it writes the font field through this one
+    // and the display name through _commitFieldEdit. Only the second was published, so
+    // "Add to config" scaffolded a preset and then threw on the font write — which the
+    // caller's bare `catch {}` swallowed, so the preset appeared with its seed font and
+    // nothing said anything. Found by dev test 2026-09-14, after the suite passed.
+    window._commitPresetFont = _commitPresetFont;
 
     // After Add Preset / Add Bank, the new entry's Name input opens automatically with
     // the default "Preset N" pre-selected so the user can immediately type-replace it.
