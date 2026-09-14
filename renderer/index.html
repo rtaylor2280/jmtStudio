@@ -36760,9 +36760,16 @@ require(['vs/editor/editor.main'], function () {
         const _addFirst   = window._addFirstPreset;
         const _insertInto = window._insertFirstEntryIntoArray;
         if (typeof _addFirst !== 'function' || typeof _insertInto !== 'function') {
+          // ⚠️ CONSOLE ONLY, AND DELIBERATELY NO TOAST. A missing bridge is OUR defect,
+          // not a user action — nobody caused it and nobody can act on it, so a toast
+          // would blame the wrong party and offer no way forward. It also cannot reach a
+          // release: test/sound-font-card-menu.test.js asserts the publication statement
+          // and the call site, so deleting a bridge turns the suite red before a build
+          // exists. This line is a developer signal for the moment between the mistake
+          // and the test run, which is the only window in which it can be true.
+          // (A toast shipped here on 2026-09-13 and came out 2026-09-14.)
           console.error('[B-376] preset sidecar bridges are missing; "Add to config" cannot '
                       + 'scaffold an empty config.');
-          if (typeof showToast === 'function') showToast('Could not add the preset to this config.');
           return;
         }
         if (!arr) {

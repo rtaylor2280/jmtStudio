@@ -47,7 +47,22 @@ function ok(name, cond, extra) {
   const defInsert = html.indexOf('async function _insertFirstEntryIntoArray');
   ok('and both helpers really are inside it', defAdd > iifeStart && defInsert > iifeStart);
 
-  const body = html.slice(addFn, addFn + 3000);
+  // ⚠️⚠️ ANCHOR ON THE CONSTRUCT, NEVER ON A SLAB OF SOURCE. Two failures on one day
+  // taught this file the same thing from both directions:
+  //   * at a fixed 3000 chars the window cut off `await _insertInto(` the moment a
+  //     comment was added above it, and reported unchanged, correct code as broken;
+  //   * "slice to the end of the function" then overshot to 168 KB and swept in three
+  //     unrelated, perfectly legitimate showToast calls, breaking an absence check.
+  // Too small hides the subject; too large invents one. So each assertion below is
+  // anchored to the thing it is about. (Third instance of this shape on 2026-09-14 —
+  // see also favorites-reorder-freshness and compile-vs-save-indicators.)
+  const guardAt = html.indexOf("if (typeof _addFirst !== 'function'", addFn);
+  ok('the bridge guard was located', guardAt > addFn, `addFn ${addFn}, guard ${guardAt}`);
+  // The guard block itself: from the `if` to the `}` that closes it.
+  const guard = html.slice(guardAt, html.indexOf('\n        }', guardAt) + 10);
+  // The cold paths sit immediately after the guard; a few hundred lines is ample and
+  // cannot reach another function.
+  const body  = html.slice(addFn, guardAt + 4000);
   // ⭐ THE ASSERTION THAT MATTERS. A bare `typeof _addFirstPreset` here can only ever
   // be false — if it comes back, the cold paths go silent again.
   //
@@ -63,9 +78,21 @@ function ok(name, cond, extra) {
 
   ok('it calls through the published bridges',
      /window\._addFirstPreset/.test(body) && /window\._insertFirstEntryIntoArray/.test(body));
-  ok('a missing bridge is REPORTED, not swallowed',
-     /console\.error\('\[B-376\]/.test(body) && /showToast\(/.test(body),
-     'the whole cost of this bug was that nothing said anything');
+  ok('a missing bridge is reported to the DEVELOPER',
+     /console\.error\('\[B-376\]/.test(body),
+     'the whole cost of the original bug was that nothing said anything');
+  // ⭐⭐ AND IT MUST NOT BE REPORTED TO THE USER. A missing bridge is our defect: the
+  // user did not cause it and cannot act on it, so a toast blames the wrong party and
+  // offers no way out. It also cannot reach a release — the publication assertions
+  // below turn this suite red before a build exists — so the toast was defence for an
+  // impossible state, wearing a message that implied the user had done something.
+  // Shipped 2026-09-13, removed 2026-09-14.
+  // ⚠️ SCOPED TO THE GUARD BLOCK, not the function — this file raises legitimate toasts
+  // elsewhere (export, duplicate, remove-duplicates) and an absence check over the whole
+  // body would fail on those, which is how the too-wide window was caught.
+  ok('⭐ and NOT to the user — no toast on a development fault',
+     !/showToast\(/.test(guard),
+     'a toast here says "your action failed" about something the user neither caused nor can fix');
   ok('the cold paths await the scaffold',
      /await _addFirst\(/.test(body) && /await _insertInto\(/.test(body));
 }
