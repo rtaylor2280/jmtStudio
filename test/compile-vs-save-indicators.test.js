@@ -134,12 +134,75 @@ const USB_LABELS = { cdc_msc: 'Serial + Mass Storage', cdc_webusb: 'Serial + Web
      && /window\.getCompiledAtLabel = \(\) =>/.test(html));
   ok('the timestamp is formatted by the one formatter, not re-implemented',
      /getCompiledAtLabel = \(\) => \(metaCompiled \? fmtTimestamp\(metaCompiled\) : null\)/.test(html));
-  // ⚠️ OS Version was deliberately NOT swept in this pass — it still uses
-  // `versionChanged` (the save test) alongside `_buildTargetMoved()`, and that is an
-  // an open call rather than an oversight. Asserted so the inconsistency is
-  // visible and deliberate; delete this once it is ruled on.
-  ok('OS Version still carries the save comparison — KNOWN, not swept',
-     /const versionChanged = baselineVersion !== null/.test(html));
+  ok('⭐⭐ OS Version dropped the save comparison too — all three now match',
+     /versionEl\.classList\.toggle\('field-changed', _buildTargetMoved\(\)\);/.test(html)
+     && !/const versionChanged = baselineVersion !== null/.test(html),
+     'it was the last of the three still clearing a build warning on save');
+}
+
+// ── the pre-1.8 backfill ───────────────────────────────────────────────────
+// Without this, every config an existing user owns goes dark on Board and USB:
+// compiled_os / compiled_board / compiled_usb arrived 2026-08-15, eleven days
+// AFTER v1.7.2 shipped, so none of their configs carry them.
+{
+  const at = html.indexOf('PRE-1.8 CONFIGS CARRY A COMPILE TIMESTAMP');
+  ok('the backfill exists', at > 0);
+  const blk = html.slice(at, at + 2200);
+
+  ok('⭐ it is gated on a compile having happened',
+     /if \(metaCompiled\) \{/.test(blk),
+     'a config that was never built has no build to describe and must stay silent');
+  ok('it fills USB from the saved value',      /if \(!metaCompiledUsb\s+&& usb\)/.test(blk), blk.slice(0, 200));
+  ok('it fills the OS from the RESOLVED version, not the requested one',
+     /if \(!metaCompiledOs\s+&& resolvedVersion\)/.test(blk),
+     '_buildTargetMoved compares against the dropdown, which holds the resolved name');
+  ok('it converts the board NAME to an FQBN rather than copying it',
+     /metaCompiledFqbn = _fqbnForBoardName\(board\)/.test(blk),
+     '@jmt:board is a display name; @jmt:compiled_board is an FQBN');
+  ok('⚠️ core is NOT backfilled', !/metaCore\s*=/.test(blk),
+     'no saved field corresponds to a plugin version, so the plugin half must stay quiet');
+
+  // ⚠️ THE TIMING IS THE WHOLE SAFETY ARGUMENT. At load the saved values are
+  // untouched; inside a save they are whatever the user just changed the field TO,
+  // which would record a build that never happened.
+  const inject = html.slice(html.indexOf('function injectMetadata'),
+                            html.indexOf('function injectMetadata') + 3000);
+  ok('⭐⭐ and it does NOT happen on save',
+     !/metaCompiledUsb\s*=|metaCompiledFqbn\s*=|metaCompiledOs\s*=/.test(inject),
+     'backfilling during a save captures the change the user just made');
+
+  ok('the name-to-FQBN lookup reads the options, not the selection',
+     /function _fqbnForBoardName\([\s\S]{0,260}?options \|\| \[\]/.test(html),
+     'so it cannot depend on load ordering');
+}
+
+// ── the repaint reaches the screen, and reaches it LATE ENOUGH ──────────────
+// Found by reopening a config whose USB no longer matched its build: Board and OS
+// Version went red, USB stayed quiet. The expression was right; it was evaluated
+// before metaCompiledUsb existed. An expression test cannot catch that, so these
+// two assert the WIRING and the ORDER instead.
+{
+  // 5600, not 4200: the repaint sits at offset ~5202, past the end of the window the
+  // first version of this test used — which passed for the Board assertions above and
+  // silently could not see the line it was written to guard.
+  const uci = html.slice(html.indexOf('function updateChangedIndicators'),
+                         html.indexOf('function updateChangedIndicators') + 5600);
+  ok('⭐⭐ updateChangedIndicators repaints the USB field too',
+     /window\.updateUsbChangedIndicator\?\.\(\);/.test(uci),
+     'one repaint entry point, so the three fields cannot drift apart again');
+
+  // The load path must assign the build record BEFORE the repaint runs. setSelectedUsb
+  // paints early in the load and cannot be the only painter.
+  const metaAt   = html.indexOf('metaCompiledUsb     = compiledUsb');
+  const repaintAt = html.indexOf('updateChangedIndicators();', metaAt);
+  ok('⭐⭐ the load path assigns the build record BEFORE it repaints',
+     metaAt > 0 && repaintAt > metaAt && (repaintAt - metaAt) < 3000,
+     `metaCompiledUsb at ${metaAt}, next updateChangedIndicators() at ${repaintAt}`);
+
+  const setSel = html.indexOf('window.setSelectedUsb(usb ||');
+  ok('setSelectedUsb still runs early, and is no longer the only painter',
+     setSel > 0 && setSel < metaAt,
+     'this ordering is why the early paint was stale — it is fine now only because of the repaint above');
 }
 
 console.log(failures ? `\n${failures} FAILURE(S)` : '\nall build-comparison indicator tests passed');

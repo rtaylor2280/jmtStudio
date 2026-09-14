@@ -8212,6 +8212,17 @@ function _boardNameForFqbn(fqbn) {
   return null;
 }
 
+// The same lookup pointed the other way, for the pre-1.8 backfill below:
+// `@jmt:board` stores a DISPLAY NAME and `@jmt:compiled_board` stores an FQBN, so
+// one cannot be copied into the other without this. Reads the options rather than
+// the current selection, so it does not depend on load ordering.
+function _fqbnForBoardName(name) {
+  if (!name) return null;
+  const opts = document.getElementById('input-board')?.options || [];
+  for (const o of opts) if (o.value === name) return (o.dataset && o.dataset.fqbn) || null;
+  return null;
+}
+
 // Was the last build made for a different board? Compared by FQBN, never by the
 // dropdown label, because the FQBN is what arduino-cli was handed.
 function _boardBuildMoved() {
@@ -8599,14 +8610,14 @@ function updateChangedIndicators() {
   // naming the build target could never state it; now it reads
   // "ProffieOS 8.10 +JMT on Proffieboard Plugin 4.6.0", which is the whole
   // answer. (2026-08-15)
-  // Two independent reasons, deliberately OR'd rather than one replacing the
-  // other. `versionChanged` is the pre-existing unsaved-edit signal and keeps
-  // its behaviour exactly. `_buildTargetMoved()` is the new one, and it is what
-  // survives a save: a config stored as 8.10 whose binary came from 7.15 has a
-  // baseline of 8.10 and looked settled, because the only test was against the
-  // file on disk. (2026-08-15)
-  const versionChanged = baselineVersion !== null && versionEl.value !== baselineVersion;
-  versionEl.classList.toggle('field-changed', versionChanged || _buildTargetMoved());
+  // ⭐⭐ [B-385] ONE QUESTION, same as Board and USB: does the current selection
+  // match the LAST COMPILED version? This carried a second test, `versionChanged`,
+  // which resets on Save — so saving cleared a red that means "recompile before
+  // flashing", and saving builds nothing. It was the last of the three still doing
+  // it. `_buildTargetMoved()` reads the build record and survives a save, and with
+  // the pre-1.8 backfill above it now has something to read on old configs too,
+  // which is what made removing the save half safe rather than a capability loss.
+  versionEl.classList.toggle('field-changed', _buildTargetMoved());
   // NOTE: this function does NOT write versionEl.title. applyOSVersionSignal in
   // buildPanel.js owns that property and composes it from several sources; two
   // writers meant whichever ran last won, and since that one runs after an await
@@ -8614,6 +8625,20 @@ function updateChangedIndicators() {
   // losing that race all along. Contribute through getVersionTargetLine below
   // instead, and ask the owner to repaint. (2026-08-15)
   window.applyOSVersionSignal?.();
+  // ⭐⭐ [B-385] THE USB FIELD REPAINTS HERE TOO, and it must, because all three now
+  // answer the same question from the same build record. It used to be painted only
+  // by setSelectedUsb, which runs EARLY in the load path - before metaCompiledUsb is
+  // assigned - so on reopening a config whose USB no longer matches its build, USB
+  // stayed quiet while Board and OS Version correctly went red. Three fields, one
+  // question, and one of them was reading state that had not arrived yet.
+  //
+  // ⚠️ IT WAS INVISIBLE UNTIL TODAY. The old save comparison is always false on a
+  // fresh load (nothing is unsaved yet), so painting early gave the right answer for
+  // the wrong reason. Moving to the build comparison made the early paint wrong.
+  //
+  // One repaint entry point rather than a second call added beside every existing
+  // one: a field added later cannot be forgotten, and the three cannot drift apart.
+  window.updateUsbChangedIndicator?.();
 }
 
 /**
@@ -9146,6 +9171,36 @@ function loadContent(rawContent, filePath) {
   metaBoardSN  = boardSn  || null;
   metaPort     = port     || null;
   metaConfigId = configId || null;
+
+  // ⭐⭐ [B-385] PRE-1.8 CONFIGS CARRY A COMPILE TIMESTAMP AND NO BUILD SETTINGS.
+  // `@jmt:core`, `compiled_os`, `compiled_board` and `compiled_usb` arrived
+  // 2026-08-15 — ELEVEN DAYS AFTER v1.7.2 SHIPPED — so no config any existing user
+  // owns has them. Without this the Board and USB fields go dark on every one of
+  // their configs until its next compile, which is a capability they had in 1.7.
+  //
+  // THE ASSUMPTION, and it is the best one available: a config that HAS been
+  // compiled was compiled with the settings it was saved with.
+  //
+  // ⚠️ GATED ON `@jmt:compiled`, WHICH HAS EXISTED SINCE 2026-04-09. A config that
+  // was never built has no build to describe and must stay silent rather than claim
+  // one — that case is unchanged by this, in every version.
+  //
+  // ⚠️ AT LOAD, NEVER AT SAVE. At load the saved values are untouched. Backfilling
+  // inside a save would capture whatever the field was just changed TO, recording a
+  // build that never happened — precisely what this comparison exists to catch.
+  //
+  // Strictly better than 1.7 and never worse: 1.7 knew nothing about builds and
+  // cleared its marker on save, so the one case this gets wrong (changed and saved
+  // under 1.7 without recompiling) is a case 1.7 was already silent about.
+  //
+  // `core` is deliberately NOT backfilled — no saved field corresponds to a plugin
+  // version, so the plugin half of _buildTargetMoved stays honestly quiet.
+  if (metaCompiled) {
+    if (!metaCompiledUsb  && usb)             metaCompiledUsb  = usb;
+    if (!metaCompiledOs   && resolvedVersion) metaCompiledOs   = resolvedVersion;
+    if (!metaCompiledFqbn && board)           metaCompiledFqbn = _fqbnForBoardName(board);
+  }
+
   baselineBoard   = board           || null;
   baselineVersion = resolvedVersion || null;
   baselineUsb     = usb     || null;
