@@ -105,8 +105,29 @@ function ok(name, cond, extra) {
   const reorderAt = html.indexOf('electronAPI.reorderFavorites');
   ok('the favourites drop handler was located', reorderAt > 0);
   const drop = html.slice(Math.max(0, reorderAt - 1800), reorderAt + 400);
+
+  // ⚠️⚠️ AN ORDERING ASSERTION MUST READ CODE, NOT COMMENTARY, AND THIS ONE DID NOT.
+  // It compared indexOf('getFavorites()') against indexOf('findIndex') over the raw
+  // slice. The `6a1d59c` fix added a comment explaining the race — "...gives null,
+  // findIndex returns -1, and the guard below..." — and that sentence sits ABOVE the
+  // fetch. So indexOf found the word in the prose, concluded the call came first, and
+  // the entry's own suite went red against correct code. The commit that fixed the bug
+  // broke its own test by explaining itself.
+  //
+  // Same family as the anchor warning above: a static test is only as good as the text
+  // it selects, and comments are text. Strip them before asking about order.
+  // ⚠️ `[^\r\n]*`, NOT `.*$`. index.html is CRLF, and `.` does not match `\r` while an
+  // unanchored-by-`m` `$` demands end of STRING — so `/\/\/.*$/` matched nothing at all
+  // on a line ending in `\r`, and the first version of this stripper silently stripped
+  // no line comments whatsoever. A comment-remover that removes no comments looks
+  // exactly like one that works, right up until the assertion it feeds reads prose.
+  const codeOnly = (src) => src
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/[^\r\n]*/g, '');
+  const dropCode = codeOnly(drop);
   ok('the drop fetches before computing indices',
-     drop.indexOf('getFavorites()') < drop.indexOf('findIndex'),
+     dropCode.indexOf('getFavorites()') >= 0
+     && dropCode.indexOf('getFavorites()') < dropCode.indexOf('findIndex'),
      'getFavorites must come first — it is the list being written');
   ok('the drop derives its order from the fetch, not the snapshot',
      /const live = allItems\.filter/.test(drop) && /\[\.\.\.live\]/.test(drop), drop.slice(0, 200));
