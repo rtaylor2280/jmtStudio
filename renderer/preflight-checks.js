@@ -1224,84 +1224,38 @@
     },
   });
 
-  // ── MOUNT_SD_SETTING with no mass storage ────────────────────────────────
+  // ── WHY THERE IS NO MOUNT_SD_SETTING CHECK HERE ──────────────────────────
   //
-  // FOUND IN USE: typed `sd 1` at the serial monitor, got `Whut? :sd`. The config had
-  // MOUNT_SD_SETTING; the board had no such command.
+  // There was one, briefly: MOUNT_SD_SETTING with a USB type that has no mass storage.
+  // ProffieOS.ino undefines the setting when USB_CLASS_MSC is absent, so the define is
+  // written, accepted, compiled away, and the only evidence is that the `sd` serial
+  // command does not exist. Removed 2026-09-14, and the reason is a rule about this
+  // file rather than a judgement about that case.
   //
-  // WHY. ProffieOS.ino undefines it when USB_CLASS_MSC is absent:
-  //     #if !defined(USB_CLASS_MSC)
-  //     #undef MOUNT_SD_SETTING
-  //     #endif
-  // USB_CLASS_MSC comes from the USB type, and the app defaults to cdc_webusb — Serial
-  // + WebUSB, no mass storage. So the define is written, accepted, compiled away, and
-  // the only evidence is a serial command that does not exist. Clean compile, no
-  // warning, symptom surfaces somewhere unrelated much later.
+  // ⭐⭐ PREFLIGHT IS FOR WHAT BREAKS A COMPILE OR THE SABER. NEVER FOR CONVENIENCE.
+  // Every other check here catches something that fails to build or misbehaves on the
+  // board. That one caught a define doing nothing — real, and wasted code, but it can
+  // never cause an error in either place. It was the only convenience-only entry in
+  // the registry, and one gate that stops a build to report a harmless condition is
+  // what teaches people to click past the gates that matter.
   //
-  // ⭐ THE ASYMMETRY IS THE ACTUAL BUG. The DANGEROUS direction is already guarded at
-  // four touchpoints (a86ef85): mass storage WITHOUT MOUNT_SD_SETTING auto-mounts and
-  // corrupts the card. The inverse is harmless to the card and simply does not work —
-  // and was unguarded. A guard that only fires one way teaches the user the pairing is
-  // enforced, which makes the unguarded direction MORE confusing, not less.
+  // ⚠️ IT ALSO SHIPPED WITH BAD ADVICE, WHICH IS WHAT SURFACED THE RULE. The message
+  // ended "Change the USB type to one that includes Mass Storage if you want it" and
+  // the check never read ctx.versionName. Below OS8 MOUNT_SD_SETTING is inert whatever
+  // the USB type (see _preOs8Why in index.html), so on a pre-OS8 config that advice
+  // gives you no `sd` command AND mass storage with no working protection — the exact
+  // state the four-touchpoint guard at buildPanel.js:545 exists to prevent. Measured on
+  // 88 real configs: it fired on 10, and 8 of those 10 were pre-OS8.
   //
-  // ⚠️⚠️ WARN ONLY, AND IT OFFERS NOTHING. HIS RULING 2026-09-13. The entry proposed
-  // offering to switch the USB type; switching TO mass storage is the exact direction
-  // the four-touchpoint guard exists to prevent, so a convenience here could quietly
-  // undo a card-safety feature. Telling the truth and leaving the choice alone is the
-  // whole fix.
-  const _MOUNT_SD_RE = /^[ \t]*#[ \t]*define[ \t]+MOUNT_SD_SETTING\b/m;
-  const _ENABLE_ALL_RE = /^[ \t]*#[ \t]*define[ \t]+ENABLE_ALL_EDIT_OPTIONS\b/m;
-
-  preflight.register({
-    id: 'mount-sd-without-mass-storage',
-    severity: 'warn',
-    title: 'SD mount setting',
-    run(ctx) {
-      // Empty means nothing was selected, or a caller that does not know. Either way
-      // we cannot tell, and a guess would fire on configs nobody has chosen for.
-      if (!ctx.usbType) return { unsure: 'no USB type is selected' };
-      // Only mass-storage USB types define USB_CLASS_MSC. `msc` is the substring every
-      // one of them carries (cdc_msc, cdc_msc_hid, cdc_msc_dap) and no other does.
-      if (/msc/i.test(ctx.usbType)) return null;
-
-      // cleanText, so a commented-out define is ignored — which is what the compiler
-      // does, and the same rule the existing SD guard uses.
-      //
-      // ⭐⭐ THE DIRECT DEFINE ONLY, AND THE MEASUREMENT IS WHY. The entry said to catch
-      // it "directly or via ENABLE_ALL_EDIT_OPTIONS". Measured across 156 wild configs
-      // on 2026-09-13:
-      //     direct MOUNT_SD_SETTING : 0
-      //     ENABLE_ALL_EDIT_OPTIONS : 61   (39% of the corpus)
-      // Every single hit came from the blanket flag. ENABLE_ALL_EDIT_OPTIONS means
-      // "turn on every edit-mode option", not "I want SD mount" — so warning about one
-      // sub-option being compiled away would fire on two configs in five and teach
-      // people to ignore the gate. That is the cost B-224 exists to avoid.
-      //
-      // ⚠️ HIS OWN CASE WAS THE DIRECT DEFINE: he typed `sd 1` because he had asked for
-      // that setting specifically and it was not there. That is the config this serves.
-      // ENABLE_ALL is deliberately silent — a missed case, which is the cheap direction.
-      if (!_MOUNT_SD_RE.test(ctx.cleanText)) return null;
-      const via = 'MOUNT_SD_SETTING';
-      return {
-        findings: [{
-          // ⚠️ STATES THE CONSEQUENCE, NOT THE MECHANISM. Nobody needs to know about
-          // USB_CLASS_MSC; they need to know the command will not be there.
-          title: `Your config asks for the SD mount setting, but the USB type cannot provide it.`,
-          detail: `${via} is in your config, and the selected USB type has no mass storage, so `
-                + `ProffieOS removes the setting while compiling. The saber will build and run `
-                + `normally — but the "sd" command will not exist on the board, and the SD mount `
-                + `option will be missing from the menu. Change the USB type to one that includes `
-                + `Mass Storage if you want it.`,
-          items: [],
-          // ⚠️ NO FIX BUTTON, DELIBERATELY. Switching to mass storage is the direction
-          // that can corrupt a card, and it already has its own guarded flow. This
-          // check informs; it does not reach for that switch.
-          fix: null,
-          kind: 'mount-sd',
-        }],
-      };
-    },
-  });
+  // ⭐ WHERE THE IDEA GOES INSTEAD. Turning mass storage ON already offers to add or
+  // uncomment the define (offerMountSdSettingOnSelect, index.html:7601). The symmetric
+  // move is to offer the reverse when mass storage is turned OFF, at the dropdown,
+  // where the user is actually making that choice. Not built.
+  //
+  // ⚠️ KEEP THIS MEASUREMENT — it is why any future version must not read the blanket
+  // flag. Across the 156-config wild corpus: direct MOUNT_SD_SETTING 0,
+  // ENABLE_ALL_EDIT_OPTIONS 61 (39%). ENABLE_ALL means "turn on every edit-mode
+  // option", not "I want SD mount", so keying off it would fire on two configs in five.
 
   // Exposed for index.html, whose Sound Fonts view asks the same question when
   // deciding what a NEWLY added preset should carry. One walk, one answer — the
