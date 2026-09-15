@@ -54,12 +54,16 @@ ok('the shared summary builder was lifted', typeof summary === 'function');
 // ── the invitation is gone ─────────────────────────────────────────────────
 {
   const all = [summary(1, 0, 1), summary(1, 0, 5), summary(3, 0, 5), summary(5, 0, 5)];
-  ok('no wording offers a second copy',
-     all.every(t => !/second copy/i.test(t)), all.find(t => /second copy/i.test(t)));
-  ok('no wording tells the user to check the box',
-     all.every(t => !/\bchecking\b/i.test(t)), all.find(t => /\bchecking\b/i.test(t)));
-  ok('every variant names the door that DOES work',
-     all.every(t => /duplicate it there/.test(t)));
+  ok('⭐ every variant says the row is SKIPPED, not refused',
+     all.every(t => /skipped by default/.test(t)), all.find(t => !/skipped by default/.test(t)));
+  ok('⭐ and every variant says they may take one anyway',
+     all.every(t => /Tick (it|one) to import a second copy under a new name\./.test(t)),
+     all.find(t => !/Tick (it|one) to import/.test(t)));
+  ok('no variant sends them somewhere else to do it',
+     all.every(t => !/duplicate it there/.test(t)),
+     'the box is live; there is no longer another door to point at');
+  ok('and none presumes they wanted to customise',
+     all.every(t => !/customize/i.test(t)));
 }
 
 // ── it still reads as English in each shape ────────────────────────────────
@@ -69,15 +73,15 @@ ok('the shared summary builder was lifted', typeof summary === 'function');
   const one = summary(1, 0, 1);
   ok('a single-row review does not open with a dangling pronoun',
      /^This font is already in your library/.test(one), one);
-  ok('and it still says what happens', /is not imported again/.test(one), one);
+  ok('and it still says what happens', /skipped by default/.test(one), one);
 
   const someOfMany = summary(1, 0, 5);
   ok('one-of-many keeps its count sentence',
      /^One of these fonts is already in your library\./.test(someOfMany), someOfMany);
-  ok('and follows with a matching singular', / It is not imported again\./.test(someOfMany), someOfMany);
+  ok('and follows with a matching singular', / It is skipped by default\./.test(someOfMany), someOfMany);
 
   const manyOfMany = summary(3, 0, 5);
-  ok('several-of-many uses the plural', / They are not imported again\./.test(manyOfMany), manyOfMany);
+  ok('several-of-many uses the plural', / They are skipped by default\./.test(manyOfMany), manyOfMany);
 
   ok('all-of-them reads "All"', /^All of these fonts/.test(summary(5, 0, 5)), summary(5, 0, 5));
 }
@@ -89,12 +93,20 @@ ok('the shared summary builder was lifted', typeof summary === 'function');
   ok('a review with nothing to say says nothing', summary(0, 0, 3) === '');
 }
 
-// ── the box cannot be clicked into the dead end ────────────────────────────
+// ── the box stays live ─────────────────────────────────────────────────────
 {
-  const block = html.slice(html.indexOf('[B-363] AND THE BOX IS NOW INERT'),
-                           html.indexOf('[B-363] AND THE BOX IS NOW INERT') + 1800);
-  ok('the owned row disables its checkbox', /check\.disabled = true;/.test(block));
-  ok('and says why on hover', /check\.title =/.test(block) && /duplicate it/.test(block), block.slice(0, 400));
+  const at = html.indexOf('[B-363] UNCHECKED, NEVER INERT');
+  ok('the owned-row block was located', at > 0);
+  // ⚠️ Start BEFORE the marker: the `checked = false` this block is about sits a few
+  // lines ABOVE the comment explaining it, so a slice anchored at the comment could
+  // not see its own subject.
+  const block = html.slice(Math.max(0, at - 700), at + 2400);
+  ok('⭐⭐ the owned row does NOT disable its checkbox',
+     !/check\.disabled\s*=\s*true/.test(block),
+     'a disabled box shipped here 2026-09-13 and was rejected on dev test');
+  ok('it still unchecks by default', /check\.checked = false;/.test(block));
+  ok('and the hover says how to take it anyway',
+     /check\.title =/.test(block) && /new name/.test(block), block.slice(0, 500));
   ok('the reason names the existing entry when we know it',
      /Already in your library as \$\{hit\.matchName\}/.test(block));
 

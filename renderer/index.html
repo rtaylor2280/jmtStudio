@@ -25370,21 +25370,24 @@ require(['vs/editor/editor.main'], function () {
               ? 'One of these fonts is already in your library.'
               : `${owned === total ? 'All' : owned} of these fonts are already in your library.`);
           }
-          // ⭐ [B-363] THIS USED TO INVITE AN ACTION THE DIALOG THEN REFUSED. It read
-          // "Checking this imports a second copy", but checking an owned row makes the
-          // name validator fire ("A library entry with this name already exists") and
-          // DISABLES Add to Library. His ruling 2026-09-13: match the SD-card path,
-          // which stopped re-importing in favour of adopting the existing entry — so
-          // the sentence stops offering a second copy and names the door that works.
-          // ⚠️ The count sentence above is DROPPED when total === 1, so this one has to
-          // stand on its own there — "It is not imported again" with no antecedent is
-          // how a single-row review ends up reading like a fragment.
+          // ⭐⭐ [B-363] SAY WHAT IS SKIPPED, AND THAT THEY MAY OVERRIDE IT. Two earlier
+          // versions of this sentence were both wrong in opposite directions:
+          //   2026-07-23  "Checking this imports a second copy" — invited an action the
+          //               name validator then refused. A genuine dead end.
+          //   2026-09-13  "...open it in your library and duplicate it there" — closed
+          //               the door instead of fixing the lock, and pointed at a vague
+          //               manoeuvre rather than the labelled button that exists.
+          // Settled 2026-09-14: the box is live again, so the sentence says what is
+          // skipped BY DEFAULT and that taking one anyway needs a different name. It
+          // presumes no intent — plenty of people are re-importing and want nothing.
+          // ⚠️ The count sentence above is DROPPED when total === 1, so that branch has to
+          // name its subject or it reads as a fragment.
           parts.push(
             total === 1
-              ? 'This font is already in your library and is not imported again. To customize it, open it in your library and duplicate it there.'
+              ? 'This font is already in your library, so it is skipped by default. Tick it to import a second copy under a new name.'
               : owned === 1
-                ? 'It is not imported again. To customize a font you already own, open it in your library and duplicate it there.'
-                : 'They are not imported again. To customize a font you already own, open it in your library and duplicate it there.');
+                ? 'It is skipped by default. Tick it to import a second copy under a new name.'
+                : 'They are skipped by default. Tick one to import a second copy under a new name.');
         }
         if (flagged > 0) {
           parts.push(total === 1
@@ -26274,24 +26277,32 @@ require(['vs/editor/editor.main'], function () {
                   row.classList.add('disabled');
                   changedAny = true;
                 }
-                // ⭐ [B-363] AND THE BOX IS NOW INERT, NOT MERELY UNCHECKED.
+                // ⭐⭐ [B-363] UNCHECKED, NEVER INERT. Settled 2026-09-14 by dev test:
+                // "so good to leave as unchecked... already in your library for maul...
+                // but don't block them. they want to they can. will potentially need a
+                // new name but that's ok."
                 //
-                // This SUPERSEDES the 2026-07-23 call that left it clickable
-                // ("information, not force"). That freedom was already illusory: the
-                // name validator refuses a name the library holds, so re-checking an
-                // owned row set an error and DISABLED "Add to Library". The summary
-                // said "checking this imports a second copy" and the dialog then would
-                // not let you — an invitation the UI refuses.
+                // ⚠️ A DISABLED BOX SHIPPED HERE ON 2026-09-13 AND WAS WRONG. The
+                // diagnosis behind it was right - the old summary invited a second copy
+                // the name validator then refused - but it took the wrong door out. It
+                // removed the INVITATION when the fix was to make the NAME FIXABLE.
                 //
-                // His ruling 2026-09-13: match the SD-card path, which stopped blunt
-                // re-importing in favour of adopting the existing entry. We do not want
-                // a second copy from this door. Duplicate-in-library is the supported
-                // way to get one, and it is what the hint now points at.
+                // ⭐ AND THIS APP ALREADY DOES THAT, three clicks away: on "+ Add more
+                // fonts from source" an owned row is unchecked, labelled, and STILL
+                // CHECKABLE - tick it and the name field says "A library entry with this
+                // name already exists" inline; rename and it imports. Blocking here made
+                // two doors onto the same act disagree, and sent him round five steps to
+                // reach a checkbox that was already on screen and greyed.
+                // Settled precedent: [B-217] auto-number, never refuse. [B-343] the
+                // first copy is _2.
+                //
+                // So: no `disabled`. The row carries its label, the box stays live, and
+                // the existing name validator - already wired to both the checkbox and
+                // the name input above - surfaces the collision the moment it matters.
                 if (check) {
-                  check.disabled = true;
                   check.title = hit.matchName
-                    ? `Already in your library as ${hit.matchName}. To customize it, open it there and duplicate it.`
-                    : 'Already in your library. To customize it, open it there and duplicate it.';
+                    ? `Already in your library as ${hit.matchName}. Tick it to import a second copy under a new name.`
+                    : 'Already in your library. Tick it to import a second copy under a new name.';
                 }
               }
             });
