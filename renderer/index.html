@@ -24688,18 +24688,32 @@ require(['vs/editor/editor.main'], function () {
           const one = matched.length === 1;
           const esc = (s) => String(s == null ? '' : s)
             .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+          // ⚠️ SAY NOTHING ABOUT IT BEING "A DIFFERENT DOWNLOAD" (his call,
+          // 2026-09-14). That fact is OUR plumbing — it explains why the
+          // source-level duplicate prompt didn't fire, which is a question the
+          // user never asked. Naming the match already answers the only one
+          // they will ("but I never imported this").
+          const names = (m) => ({
+            from: String(m.name || '').trim(),
+            to:   String(m.matchName || '').trim(),
+          });
+          const renamed = (n) => !!n.to && n.from.toLowerCase() !== n.to.toLowerCase();
+          // List form stays short — the second name in parentheses, not a
+          // clause. Used only when there are several.
           const pair = (m) => {
-            const from = String(m.name || '').trim();
-            const to   = String(m.matchName || '').trim();
-            return (to && from.toLowerCase() !== to.toLowerCase())
-              ? `<strong>${esc(from)}</strong> — you have it as <strong>${esc(to)}</strong>`
-              : `<strong>${esc(from)}</strong>`;
+            const n = names(m);
+            return renamed(n)
+              ? `<strong>${esc(n.from)}</strong> (you have it as <strong>${esc(n.to)}</strong>)`
+              : `<strong>${esc(n.from)}</strong>`;
           };
           if (els.title) els.title.textContent = one ? 'Font already in your library' : 'These fonts are already in your library';
           if (els.body) {
+            const n = one ? names(matched[0]) : null;
             els.body.innerHTML = one
-              ? `This is a different download, but the sounds match a font you already have: ${pair(matched[0])}.`
-              : `This is a different download, but all ${matched.length} of its fonts match sounds you already have:`
+              ? (renamed(n)
+                  ? `The sounds in <strong>${esc(n.from)}</strong> match a font you already have, <strong>${esc(n.to)}</strong>.`
+                  : `The sounds in <strong>${esc(n.from)}</strong> match a font you already have.`)
+              : `All ${matched.length} of these fonts match sounds you already have:`
                 + `<ul class="sf-dupfont-list">${matched.map(m => `<li>${pair(m)}</li>`).join('')}</ul>`;
           }
           // Only offer to open the match when there IS one to open. With

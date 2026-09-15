@@ -205,16 +205,38 @@ const cands   = (...names)        => names.map(n => ({ name: n, path: `/p/${n}` 
   ok('⭐ the copy names what arrived AND what it matched',
      dlg.includes('m.matchName') && dlg.includes('m.name')
        && /you have it as/.test(dlg)
-       && /from\.toLowerCase\(\) !== to\.toLowerCase\(\)/.test(dlg),
+       && /n\.from\.toLowerCase\(\) !== n\.to\.toLowerCase\(\)/.test(dlg),
      'both names, and a live comparison deciding whether to show the second');
-  ok('identical names collapse to one, rather than saying "X — you have it as X"',
-     /return \(to && from\.toLowerCase\(\) !== to\.toLowerCase\(\)\)/.test(dlg),
-     'the ternary must still be GATED on that comparison, not on a constant');
+  ok('identical names collapse to one, rather than saying "X (you have it as X)"',
+     /const renamed = \(n\) => !!n\.to && n\.from\.toLowerCase\(\) !== n\.to\.toLowerCase\(\)/.test(dlg)
+       && (dlg.match(/renamed\(n\)/g) || []).length === 2,
+     'the gate must be live, and BOTH the one-font sentence and the list must consult it');
+  // ⭐ His call, 2026-09-14: "do we need to tell them its a different download".
+  // No — that fact explains why the SOURCE-level duplicate prompt stayed quiet,
+  // which is our plumbing, not their question.
+  ok('⭐ the copy does not explain our own plumbing',
+     !/different download/i.test(dlg.replace(/\/\/[^\n]*/g, '')),
+     'the user never asked why the source check missed it');
+  // No em dash in anything the user reads (his call the same day). Comments keep
+  // theirs — this checks the strings only.
+  {
+    const strings = (dlg.match(/`[^`]*`/g) || []).join(' ');
+    ok('⭐ no em dash in the displayed copy', !strings.includes('—'),
+       strings.split(' ').filter(w => w.includes('—')).join(' '));
+  }
   // ⚠️ Font names come off a downloaded archive: they are untrusted text going
   // into innerHTML.
-  ok('⭐ names are escaped before they reach innerHTML',
-     /replace\(\/&\/g, '&amp;'\)/.test(dlg) && /esc\(from\)/.test(dlg) && /esc\(to\)/.test(dlg),
-     'a folder named with a < in it must not be able to write markup');
+  // ⚠️ Anchored on "every name interpolation goes through esc()" rather than on
+  // two spellings of the variables — the spellings changed once already (the
+  // 2026-09-14 copy rewrite) and took this assertion red with nothing wrong.
+  {
+    const hasEsc = /replace\(\/&\/g, '&amp;'\)/.test(dlg);
+    const interps = dlg.match(/\$\{[^}]*\}/g) || [];
+    const nameInterps = interps.filter(s => /\bn\.(from|to)\b|\bm\.(name|matchName)\b/.test(s));
+    ok('⭐ names are escaped before they reach innerHTML',
+       hasEsc && nameInterps.length > 0 && nameInterps.every(s => s.includes('esc(')),
+       `unescaped: ${nameInterps.filter(s => !s.includes('esc(')).join(' ') || '(none)'}`);
+  }
 
   ok('the import modal is stashed, not stacked on',
      /importModal\?\.classList\.contains\('active'\)/.test(dlg)
