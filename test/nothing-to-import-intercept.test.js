@@ -117,6 +117,72 @@ const cands   = (...names)        => names.map(n => ({ name: n, path: `/p/${n}` 
   ok('no import in flight → no intercept', nothingLeft({ ok: true, results: [] }) === null);
 }
 
+// ── the fuller source of a font you already have ───────────────────────────
+//
+// ⭐ HIS QUESTION, 2026-09-14: "what would happen if they had Maul - just the
+// Proffie version - and now trying to import a more complete source of it?
+// same font... but more files."
+//
+// This is the case where a wrong interception costs the most: the fonts ARE the
+// same font, the names match, and a naive "do we have this font" check says yes
+// — while the download in hand carries sounds the library has never seen. Steal
+// that import and those sounds are simply lost, with no route back to them.
+//
+// It works because isFullyOwned is DIRECTIONAL (soundFontCompare, 2026-07-23):
+// it counts what the INCOMING copy has that the library lacks, across BOTH
+// buckets, and m.exact cannot shortcut it. So this drives the real comparison
+// rather than hand-made verdicts — the predicate under test is only half the
+// answer, and the half that makes it right lives in the other module.
+{
+  const cmpLib = require(path.join(ROOT, 'soundFontCompare.js'));
+  const set = (pre, n) => new Set(Array.from({ length: n }, (_, i) => pre + i));
+  // shared/sharedCust: how much of the CARD's content the library already holds.
+  const run = (libCore, libCust, cardCore, cardCust, shared, sharedCust) => {
+    const card = { core: set('c', cardCore), customizable: set('u', cardCust) };
+    const lib  = { core: new Set(), customizable: new Set() };
+    for (let i = 0; i < shared; i++)   lib.core.add('c' + i);
+    for (let i = shared; i < libCore; i++) lib.core.add('x' + i);
+    for (let i = 0; i < sharedCust; i++)   lib.customizable.add('u' + i);
+    for (let i = sharedCust; i < libCust; i++) lib.customizable.add('y' + i);
+    const cmp = cmpLib.compareSets(card, lib);
+    const m = Object.assign({}, cmp, cmpLib.classifyVerdict(cmp),
+                            { bestMatch: 'Maul', cardCustCount: card.customizable.size });
+    // Mirror the backend's own filter: a low-containment variant is dropped from
+    // the result set entirely (main.js `continue`s when verdictLabel is null).
+    const label = (m.verdict === 'variant' && m.coreContainment < cmpLib.VARIANT_DISPLAY_MIN)
+      ? null : cmpLib.verdictLabel(m);
+    setImport({ candidates: [{ name: 'Maul', path: '/p/Maul' }] });
+    const results = label
+      ? [{ name: 'Maul', path: '/p/Maul', fullyOwned: cmpLib.isFullyOwned(m), matchName: 'Maul' }]
+      : [];
+    return { intercepted: !!nothingLeft({ ok: true, results }), verdict: m.verdict, label };
+  };
+
+  const a = run(40, 0, 60, 0, 40, 0);
+  ok('⭐ the Proffie cut in the library, a fuller source incoming → NOT intercepted',
+     !a.intercepted, `verdict ${a.verdict}`);
+
+  // ⚠️ THE SHARPEST ONE. Character sounds identical, so containment is 1.00 and
+  // the verdict is have_it — every "is this the same font" test says yes. Only
+  // the customizable bucket disagrees, and it is right: 12 tracks would be lost.
+  const b = run(40, 0, 40, 12, 40, 0);
+  ok('⭐⭐ identical sounds but 12 tracks/quotes the library lacks → NOT intercepted',
+     !b.intercepted && b.verdict === 'have_it',
+     `verdict ${b.verdict}, label: ${b.label}`);
+  ok('and the row says what would be lost, in plain words',
+     /12 quote or track files yours is missing/.test(b.label || ''), b.label);
+
+  const d = run(40, 0, 42, 0, 40, 0);
+  ok('⭐ even 2 extra character sounds keep the import reachable', !d.intercepted,
+     `verdict ${d.verdict}, label: ${d.label}`);
+
+  // The interception still has to FIRE when the library genuinely holds it all,
+  // or this whole block is just proving the feature is switched off.
+  const c2 = run(40, 12, 40, 12, 40, 12);
+  ok('⭐ but a true full copy, both buckets, IS intercepted', c2.intercepted,
+     `verdict ${c2.verdict}, label: ${c2.label}`);
+}
+
 // ── the interception sits on the FRESH path, and only there ────────────────
 //
 // ⚠️ Add-more and duplicate mode reach _sfPopulateReview by their own routes
