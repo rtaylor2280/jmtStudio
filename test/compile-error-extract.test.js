@@ -96,7 +96,7 @@ const WITH_DIAG = [
 
 check('a real diagnostic beats the arduino-cli summary line',
   extractCompileError(WITH_DIAG),
-  'my_config.h:41 — \'Blakc\' was not declared in this scope');
+  'Line 41 — \'Blakc\' was not declared in this scope');
 
 // ── flash overflow: the linker says neither "error" nor "warning" ──────────
 //
@@ -190,9 +190,18 @@ const SRC_DIAG = [
   "C:\\Users\\Ryan\\config\\my_config.h:431:1: error: expected ',' or ';' before 'BladeConfig'",
 ].join('\n');
 
-check('a source path keeps its file and line',
+// ⭐ NO FILENAME, settled 2026-09-14: "I don't want to see <the config>... def don't
+// want my config. that's only because of what we insert our config into the file to
+// achieve our magic. but we don't need to specify a file name at all."
+// One config is open and it is on screen, so naming it adds nothing - and `my_config.h`
+// named the STAGING COPY, a file the user has never seen. [B-373] substituted their own
+// name instead, which was better and still the wrong idea.
+// ⭐ Dropping the name also makes the LINE true: the @jmt block is stripped from the
+// editor (18 lines on a real config), so a FILE reference was off by the header's
+// length, while the number was always right for the buffer that actually got compiled.
+check('a source path keeps its LINE, and names no file',
   extractCompileError(SRC_DIAG),
-  "my_config.h:431 — expected ',' or ';' before 'BladeConfig'");
+  "Line 431 — expected ',' or ';' before 'BladeConfig'");
 
 // ── RAM overflow (B-032) ───────────────────────────────────────────────────
 //

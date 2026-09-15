@@ -255,11 +255,27 @@ function extractCompileError(raw, ctx) {
     if (!m) {
       return line.length > MAX_MSG ? line.slice(0, MAX_MSG) + '…' : line;
     }
-    const file = m[1];
+    // ⭐⭐ NO FILENAME. Settled 2026-09-14: "I don't want to see <the config>... def
+    // don't want my config. that's only because of what we insert our config into the
+    // file to achieve our magic. but we don't need to specify a file name at all."
+    //
+    // There is exactly ONE config in play and it is open on screen, so naming it adds
+    // nothing. `my_config.h` was worse than nothing - it names the staging copy, a file
+    // the user has never seen. [B-373] substituted their own filename instead, which was
+    // an improvement and still the wrong idea.
+    //
+    // ⭐ AND DROPPING IT MAKES THE LINE NUMBER TRUE. The @jmt block is stripped from the
+    // editor on load and re-injected on save - 18 lines on a real config - so
+    // a `<config>.h:102` reference was a claim about a FILE whose line 102 is something else
+    // entirely. The staged copy is the EDITOR's content, so the number has always been
+    // correct for the buffer. Name no file and it means what it says.
+    //
+    // ⚠️ The raw toolchain output in Build Output is untouched and still says my_config.h:
+    // that is what arduino-cli printed and what gets pasted into a forum thread.
     const ln   = m[2];
     let msg    = m[3];
     if (msg.length > MAX_MSG) msg = msg.slice(0, MAX_MSG) + '…';
-    return `${file}:${ln} — ${msg}`;
+    return `Line ${ln} — ${msg}`;
   };
   const summary = errorLines.slice(0, 3).map(summarize).join('\n');
   const moreCount = errorLines.length - 3;
