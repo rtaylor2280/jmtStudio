@@ -277,8 +277,28 @@ function extractCompileError(raw, ctx) {
     if (msg.length > MAX_MSG) msg = msg.slice(0, MAX_MSG) + '…';
     return `Line ${ln} — ${msg}`;
   };
-  const summary = errorLines.slice(0, 3).map(summarize).join('\n');
-  const moreCount = errorLines.length - 3;
+  // ⚠️ DEDUPE **AFTER** SUMMARISING, NOT BEFORE. summarize() drops the column, so two
+  // diagnostics that gcc distinguishes only by column - 103:5 and 103:22 - become the
+  // same sentence and were printed twice in a four-line dialog. Deduping the RAW lines
+  // would not have caught it, because the raw lines genuinely differ.
+  //
+  // The count has to come from the deduped list too, or "…and 2 more" describes rows
+  // nobody is being shown.
+  //
+  // ⚠️ THIS IS COSMETIC, AND THE REAL PROBLEM IS ONE LEVEL UP: five errors here are ONE
+  // missing comma. Collapsing a cascade to its cause belongs to the matrix ([B-268]
+  // position-before-specificity, [B-266] translate to structure), not to this formatter.
+  // All this does is stop the same sentence appearing twice.
+  const seen = new Set();
+  const summarised = [];
+  for (const line of errorLines) {
+    const s = summarize(line);
+    if (seen.has(s)) continue;
+    seen.add(s);
+    summarised.push(s);
+  }
+  const summary = summarised.slice(0, 3).join('\n');
+  const moreCount = summarised.length - 3;
   return moreCount > 0
     ? `${summary}\n…and ${moreCount} more (full output in Build Output panel)`
     : summary;
