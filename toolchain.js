@@ -2131,12 +2131,12 @@ async function flash(port, fqbn, onLog, expectedSN, sourceDir) {
     }
     let msg;
     if (resetResult.cause === 'port-locked') {
-      msg = 'Flash stopped — free the port and click Retry Flash.';
+      msg = 'Flash stopped. Free the port and click Retry Flash.';
     } else if (already.everPresent) {
       msg = 'The board is in bootloader mode but Windows will not let us open it yet. '
           + 'Give it a moment and click Retry Flash; if it persists, check the DFU driver.';
     } else if (resetResult.cause === 'driver') {
-      msg = 'Touch reset didn\'t complete. Sometimes a different USB cable or port is enough — worth trying before pressing reset on the board.';
+      msg = 'Touch reset did not complete. Sometimes a different USB cable or port is enough. Try that before pressing reset on the board.';
     } else {
       msg = 'Touch reset failed. Try pressing the reset button manually.';
     }
