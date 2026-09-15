@@ -85,6 +85,38 @@ const BROKEN = 'using L = Layers<Black,Red;';
      _findBracketError('template<int d = 0>\nusing L = Layers<Black,Int<d>>;') === null);
   ok('and a broken templated style is still caught',
      !!_findBracketError('template<int d = 0>\nusing L = Layers<Black,Int<d>;'));
+
+  // ⭐⭐⭐ A HEADER **ABOVE A TEMPLATE PREFIX**, WHICH IS THE CASE THIS FILE MISSED.
+  // Comments were covered. Templates were covered. The COMBINATION never was, and
+  // that is precisely the shape a wrapper entry takes: a `/*---*/` header from the
+  // source library, then `template<...>`, then `using`. His own BootAccelSpin.
+  //
+  // The first fix ran _splitTemplatePrefix BEFORE skipping comments, and that
+  // function anchors on `^template` — so with a comment in front it matched nothing,
+  // returned the text unchanged, and the `^using` test then failed on the template
+  // line and returned null. Silently, which is the fault this entry is named for.
+  // Found by dev test 2026-09-14, after this suite was green.
+  //
+  // ⚠️ Two features each tested alone and never together is how a gap like this
+  // survives a passing suite. When two independent prefixes can both appear, the
+  // case that matters is BOTH.
+  const TMPL = 'template< int START_MS, int W = 8000 >';
+  ok('⭐ a comment above a TEMPLATE prefix does not hide a fault',
+     !!_findBracketError(`/*TEST*/\n${TMPL}\nusing L = Layers<Black,Int<START_MS>;`),
+     'comment + template + using — the shape a library wrapper actually has');
+  ok('a // line above a template prefix does not hide it either',
+     !!_findBracketError(`// note\n${TMPL}\nusing L = Layers<Black,Int<START_MS>;`));
+  ok('and that combination stays silent when the style is GOOD',
+     _findBracketError(`/*TEST*/\n${TMPL}\nusing L = Layers<Black,Int<START_MS>>;`) === null);
+  // The offset is what puts the squiggle on the right character: both skips are
+  // counted, never deleted, so it must still index into the ORIGINAL string.
+  {
+    const src = `/*TEST*/\n${TMPL}\nusing L = Layers<Black,Int<START_MS>;`;
+    const e = _findBracketError(src);
+    ok('the offset still points at the real "<" past both prefixes',
+       !!e && src[e.offsetInCode] === '<',
+       e ? `offset ${e.offsetInCode} -> ${JSON.stringify(src.slice(e.offsetInCode, e.offsetInCode + 12))}` : 'no error');
+  }
   // ⚠️ Angle brackets inside the expression's own comments must not count — that was
   // the 2026-07-13 false positive (`/* >>> INNER-START >>> */` underflowing the stack).
   ok('brackets inside an inline comment do not count',
@@ -111,9 +143,22 @@ const BROKEN = 'using L = Layers<Black,Red;';
 {
   const calls = (html.match(/_findBracketError\(/g) || []).length;
   ok('every caller still routes through the one checker', calls >= 6, `${calls} references`);
-  ok('the anchor is no longer applied to the raw string',
-     /const body = usingCode\.slice\(skip\);/.test(html),
-     'the match must run on the text AFTER the leading comments');
+  // ⚠️ THIS USED TO PIN AN EXACT LINE (`const body = usingCode.slice(skip);`) and
+  // failed the moment the function was restructured to fix a real bug — a test that
+  // asserts a spelling rather than a property. Asserting the ORDER instead, which is
+  // what actually broke: comments must be skipped BEFORE the template prefix is split.
+  const fn = html.slice(html.indexOf('function _findBracketError('),
+                        html.indexOf('function _findBracketError(') + 1400);
+  const skipAt  = fn.indexOf('usingCode.slice(skip)');
+  const splitAt = fn.indexOf('_splitTemplatePrefix(');
+  ok('the leading-comment skip runs on the raw input', skipAt > 0, fn.slice(0, 160));
+  ok('⭐ and it runs BEFORE the template prefix is split',
+     skipAt > 0 && splitAt > skipAt,
+     '_splitTemplatePrefix anchors on ^template, so a comment in front of it defeats '
+     + 'the split and the ^using match then fails on the template line');
+  ok('the template split is handed the comment-skipped text, never the raw string',
+     /_splitTemplatePrefix\(afterComments\)/.test(fn),
+     'passing the raw string is the 2026-09-14 bug');
 }
 
 console.log(failures ? `\n${failures} FAILURE(S)` : '\nall bracket header-comment tests passed');

@@ -17146,16 +17146,27 @@ let _styleErrDecorations = [];        // Monaco decoration IDs
 // so every offset below still refers to the original text and the Monaco marker lands
 // on the right character. The stack walk further down does its own comment handling.
 function _findBracketError(usingCode) {
-  const { code } = _splitTemplatePrefix(usingCode);
-  usingCode = code || usingCode;
-  // Leading /* */ blocks and // lines, in any number and any order, plus the
-  // whitespace between them. Counted, not removed — `lead` is an offset.
+  // ⚠️⚠️ ORDER MATTERS AND THE FIRST FIX GOT IT WRONG. Leading comments are skipped
+  // BEFORE the template prefix is split, because _splitTemplatePrefix anchors on
+  // `^template` — hand it text beginning with a comment and it matches nothing,
+  // returns the input unchanged, and the `^using` test below then fails on the
+  // `template<...>` line and returns null. Silently.
+  //
+  // A comment alone was handled; a comment ABOVE A TEMPLATE PREFIX was not, and a
+  // templated style with a header is an ordinary shape - it is what a wrapper entry
+  // looks like. Found by dev test 2026-09-14 on BootAccelSpin, which carries both.
+  //
+  // Both skips are OFFSETS, never deletions, so every position reported below still
+  // refers to the original text and the Monaco marker lands on the real bracket.
   const lead = usingCode.match(/^(?:\s*(?:\/\*[\s\S]*?\*\/|\/\/[^\n]*(?:\n|$)))*\s*/);
   const skip = lead ? lead[0].length : 0;
-  const body = usingCode.slice(skip);
+  const afterComments = usingCode.slice(skip);
+  const { prefix, code } = _splitTemplatePrefix(afterComments);
+  const body     = prefix ? code : afterComments;
+  const tmplSkip = prefix ? afterComments.length - body.length : 0;
   const m = body.match(/^using\s+\w+\s*=\s*([\s\S]+?)\s*;?\s*$/);
   if (!m) return null;
-  const exprOffset = skip + body.indexOf(m[1]);
+  const exprOffset = skip + tmplSkip + body.indexOf(m[1]);
   // Strip // line comments and /* */ block comments before bracket scanning
   const expr = m[1]
     .replace(/\/\*[\s\S]*?\*\//g, s => ' '.repeat(s.length))
