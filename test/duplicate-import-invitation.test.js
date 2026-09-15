@@ -57,8 +57,8 @@ ok('the shared summary builder was lifted', typeof summary === 'function');
   ok('⭐ every variant says the row is SKIPPED, not refused',
      all.every(t => /skipped by default/.test(t)), all.find(t => !/skipped by default/.test(t)));
   ok('⭐ and every variant says they may take one anyway',
-     all.every(t => /Tick (it|one) to import a second copy under a new name\./.test(t)),
-     all.find(t => !/Tick (it|one) to import/.test(t)));
+     all.every(t => /Check (it|one) to import a second copy under a new name\./.test(t)),
+     all.find(t => !/Check (it|one) to import/.test(t)));
   ok('no variant sends them somewhere else to do it',
      all.every(t => !/duplicate it there/.test(t)),
      'the box is live; there is no longer another door to point at');

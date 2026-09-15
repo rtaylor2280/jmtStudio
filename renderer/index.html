@@ -3255,6 +3255,13 @@
   .sf-import-btn-row { display: flex; gap: 8px; justify-content: flex-end; flex-shrink: 0; }
   .sf-dup-btn-stack { display: flex; flex-direction: column; gap: 8px; margin-top: 18px; }
   .sf-dup-btn-stack button { width: 100%; padding: 8px 14px; font-size: 0.85rem; }
+  /* [B-363] The matched-fonts list in "already in your library". Follows the
+     in-modal list convention (.sd-exec-warn-list, .br-fail-list): no marker,
+     no indent, dimmed. Scrolls rather than growing the modal past the screen
+     when a bundle's whole contents are already owned. */
+  .sf-dupfont-list { list-style: none; padding-left: 0; margin: 8px 0 0;
+    font-size: 0.8rem; color: var(--c-text-dim); max-height: 220px; overflow-y: auto; }
+  .sf-dupfont-list li { padding: 2px 0; }
   #modal-sf-entry-detail .modal { width: 820px; max-width: 96vw; height: min(90vh, 800px); display: flex; flex-direction: column; padding-bottom: 16px; }
   .sf-entry-detail-header { padding-right: 32px; flex-shrink: 0; }
   .sf-entry-detail-header h2 { margin: 0 0 4px 0; }
@@ -6672,6 +6679,31 @@
       <button class="modal-btn-primary" id="sf-dup-keep">Open existing</button>
       <button class="modal-btn-cancel"  id="sf-dup-reimport">Re-import as a new source</button>
       <button class="modal-btn-cancel"  id="sf-dup-cancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── [B-363] Every font in this source is already in the library ──────────
+     The SOURCE did not match (that case is handled one dialog up, by
+     #modal-sf-duplicate-source) but every font inside it does, by content.
+     A different download, possibly under different names, of fonts already
+     owned.
+     ⚠️ SHAPE COPIED DELIBERATELY from the source dialog above rather than
+     invented: state the fact, name what it matched, offer the real doors,
+     ask for nothing. The import review's whole form - website, link,
+     acquisition date, notes, proof of purchase - could never produce an
+     import here, and a user could fill all of it in before finding out.
+     (Settled 2026-09-14: "if there's nothing to import at all... then it
+     shouldn't even get to the import screen.") -->
+<div class="modal-overlay" id="modal-sf-duplicate-font">
+  <div class="modal">
+    <h2 id="sf-dupfont-title">Font already in your library</h2>
+    <p id="sf-dupfont-body">…</p>
+    <p>What would you like to do?</p>
+    <div class="sf-dup-btn-stack">
+      <button class="modal-btn-primary" id="sf-dupfont-open">Open existing</button>
+      <button class="modal-btn-cancel"  id="sf-dupfont-import">Import anyway under a new name</button>
+      <button class="modal-btn-cancel"  id="sf-dupfont-cancel">Cancel</button>
     </div>
   </div>
 </div>
@@ -24583,6 +24615,133 @@ require(['vs/editor/editor.main'], function () {
         reimportBtn: document.getElementById('sf-dup-reimport'),
         cancelBtn:   document.getElementById('sf-dup-cancel'),
       };
+      // [B-363] The font-level twin of the dialog above. The source is NEW
+      // (different bytes, different download) but its fonts are not.
+      const _sfDupFontEls = {
+        modal:      document.getElementById('modal-sf-duplicate-font'),
+        title:      document.getElementById('sf-dupfont-title'),
+        body:       document.getElementById('sf-dupfont-body'),
+        openBtn:    document.getElementById('sf-dupfont-open'),
+        importBtn:  document.getElementById('sf-dupfont-import'),
+        cancelBtn:  document.getElementById('sf-dupfont-cancel'),
+      };
+
+      // ── [B-363] Match this import's fonts against the library, ONCE ────────
+      // Two callers now want this answer: the pre-review interception below,
+      // and the review screen's per-row duplicate notes. Same uuid, same
+      // candidates, same answer — so it is computed once per import run and
+      // handed to whoever asks second.
+      //
+      // ⚠️ Cached on `_sfImport` and keyed by `runId`, NOT in a module-level
+      // Map: the answer is a property OF THIS IMPORT RUN and dies with it.
+      // Cancel the import, pick the same folder again, and the second run gets
+      // a fresh look — which matters, because the first run may have put those
+      // very fonts in the library.
+      async function _sfMatchCandidatesOnce() {
+        if (!_sfImport || !_sfImport.uuid) return null;
+        const cands = _sfImport.candidates || [];
+        if (!cands.length) return null;
+        if (_sfImport._matchRes && _sfImport._matchRunId === _sfImport.runId) return _sfImport._matchRes;
+        let r = null;
+        try {
+          r = await window.electronAPI.matchSourceCandidates({
+            uuid: _sfImport.uuid,
+            candidates: cands.map(c => ({ name: c.name, path: c.path || '' })),
+          });
+        } catch (e) {
+          console.error('[sf] candidate match failed', e);
+          return null;
+        }
+        _sfImport._matchRes   = r;
+        _sfImport._matchRunId = _sfImport.runId;
+        return r;
+      }
+
+      // Returns the matched rows when EVERY font in this import is already in
+      // the library by content, else null. Null is the "carry on to the review"
+      // answer, and every uncertainty returns it: a failed match, a short
+      // result set, one unmatched candidate. The interception must only fire
+      // when there is genuinely nothing to import — being wrong in that
+      // direction takes away a real import, so it errs toward showing the form.
+      function _sfNothingLeftToImport(matchRes) {
+        const cands = (_sfImport && _sfImport.candidates) || [];
+        if (!cands.length) return null;
+        if (!matchRes || !matchRes.ok || !Array.isArray(matchRes.results)) return null;
+        if (matchRes.results.length !== cands.length) return null;
+        if (!matchRes.results.every(x => x && x.fullyOwned)) return null;
+        return matchRes.results;
+      }
+
+      // The answer that replaces the import review when nothing can be
+      // imported. Resolves once the user has picked a door; `true` means they
+      // chose to go to the review anyway, `false` means the import is over.
+      //
+      // ⭐ NAME THE MATCH, BOTH SIDES. The whole reason this is not a bare
+      // "already imported" is that the names can differ — a second vendor's
+      // download of the same font, or the same one renamed. Saying only "you
+      // have this" invites the reply "no I don't, mine is called something
+      // else". So: what arrived, and what it matched.
+      function _sfShowDuplicateFont(matched) {
+        return new Promise((resolve) => {
+          const els = _sfDupFontEls;
+          if (!els.modal) { resolve(true); return; }  // markup missing — never trap the import
+          const one = matched.length === 1;
+          const esc = (s) => String(s == null ? '' : s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+          const pair = (m) => {
+            const from = String(m.name || '').trim();
+            const to   = String(m.matchName || '').trim();
+            return (to && from.toLowerCase() !== to.toLowerCase())
+              ? `<strong>${esc(from)}</strong> — you have it as <strong>${esc(to)}</strong>`
+              : `<strong>${esc(from)}</strong>`;
+          };
+          if (els.title) els.title.textContent = one ? 'Font already in your library' : 'These fonts are already in your library';
+          if (els.body) {
+            els.body.innerHTML = one
+              ? `This is a different download, but the sounds match a font you already have: ${pair(matched[0])}.`
+              : `This is a different download, but all ${matched.length} of its fonts match sounds you already have:`
+                + `<ul class="sf-dupfont-list">${matched.map(m => `<li>${pair(m)}</li>`).join('')}</ul>`;
+          }
+          // Only offer to open the match when there IS one to open. With
+          // several, the button would have to pick one arbitrarily, so it
+          // becomes the honest version: back to the library.
+          if (els.openBtn) els.openBtn.textContent = one ? 'Open existing' : 'Back to my library';
+          // Stash the import modal rather than stacking on its 100% progress
+          // phase — same handling as the source-duplicate prompt above.
+          const importModal = _sfImportEls.modal;
+          const importWasActive = !!importModal?.classList.contains('active');
+          if (importWasActive) importModal.classList.remove('active');
+          els.modal.classList.add('active');
+          const cleanup = () => {
+            els.modal.classList.remove('active');
+            if (importWasActive) importModal.classList.add('active');
+            els.openBtn?.removeEventListener('click', onOpen);
+            els.importBtn?.removeEventListener('click', onImport);
+            els.cancelBtn?.removeEventListener('click', onCancel);
+          };
+          const onOpen = async () => {
+            // Landing on the matched font, not the card grid — so clear the
+            // SD-return flag the same way "Open existing" does one dialog up.
+            window._sfReturnToSdBrowser = false;
+            const target = one ? String(matched[0].matchName || '').trim() : '';
+            cleanup();
+            _sfCloseImport();            // drops the orphan source: nothing was imported
+            await window.refreshSoundFontsView();
+            if (target) await _sfOpenEntryDetail(target);
+            resolve(false);
+          };
+          const onCancel = () => { cleanup(); _sfCloseImport(); resolve(false); };
+          // ⭐ THE DOOR THAT MUST STAY OPEN ([B-363], settled by dev test
+          // 2026-09-14): "don't block them. they want to they can. will
+          // potentially need a new name but that's ok." The review's rows
+          // arrive unchecked with their green have-it notes, so checking one
+          // is a deliberate act and the name field is right there.
+          const onImport = () => { cleanup(); resolve(true); };
+          els.openBtn?.addEventListener('click', onOpen);
+          els.importBtn?.addEventListener('click', onImport);
+          els.cancelBtn?.addEventListener('click', onCancel);
+        });
+      }
       // Known-vendor list for the datalist hint and website auto-fill.
       const _sfKnownVendors = [
         { name: 'JMT Sabers',      website: 'https://jmtsabers.com' },
@@ -25384,10 +25543,10 @@ require(['vs/editor/editor.main'], function () {
           // name its subject or it reads as a fragment.
           parts.push(
             total === 1
-              ? 'This font is already in your library, so it is skipped by default. Tick it to import a second copy under a new name.'
+              ? 'This font is already in your library, so it is skipped by default. Check it to import a second copy under a new name.'
               : owned === 1
-                ? 'It is skipped by default. Tick it to import a second copy under a new name.'
-                : 'They are skipped by default. Tick one to import a second copy under a new name.');
+                ? 'It is skipped by default. Check it to import a second copy under a new name.'
+                : 'They are skipped by default. Check one to import a second copy under a new name.');
         }
         if (flagged > 0) {
           parts.push(total === 1
@@ -25577,6 +25736,29 @@ require(['vs/editor/editor.main'], function () {
         // nothing in that moment, so those routes leave it undefined rather than
         // re-announcing a strip that happened days ago.
         _sfImport.blocked = (importRes && importRes.blockedFiles) || [];
+        // ── [B-363] Don't open a form that cannot produce an import ──────────
+        // Every font in this download is already in the library by content.
+        // The review screen would ask for the vendor, the website, the link,
+        // the acquisition date, the notes and the proof of purchase — and then
+        // have nothing checked to import at the end of it. Answer the question
+        // here instead, while the progress bar is still the thing on screen.
+        //
+        // ⚠️ RUNS ONLY ON THE FRESH-IMPORT PATH. Add-more and duplicate mode
+        // reach _sfPopulateReview by their own routes further down, and both
+        // EXPECT to be looking at fonts the library already holds — an
+        // interception there would break their whole purpose.
+        //
+        // The cancellation guard is re-checked after the await like every
+        // other await in this function: the user can still hit Cancel while
+        // the match runs.
+        const _preMatch = await _sfMatchCandidatesOnce();
+        if (!_sfImport || _sfImport.runId !== myRun) return;
+        const _allOwned = _sfNothingLeftToImport(_preMatch);
+        if (_allOwned) {
+          const goAnyway = await _sfShowDuplicateFont(_allOwned);
+          if (!goAnyway) return;                       // closed by the dialog
+          if (!_sfImport || _sfImport.runId !== myRun) return;
+        }
         // ⚠️ A THROW IN THE REVIEW RENDER MUST NOT LOOK LIKE A HANG (2026-09-10).
         // The progress modal is still up at this point, and its elapsed ticker has
         // already been cleared - so if this throws, the user is left staring at a
@@ -26223,10 +26405,12 @@ require(['vs/editor/editor.main'], function () {
         // step's cataloging pass.
         if (!isAddMore && !isDuplicate && _sfImport && _sfImport.uuid && cands.length) {
           const matchRun = _sfImport.runId;
-          window.electronAPI.matchSourceCandidates({
-            uuid: _sfImport.uuid,
-            candidates: cands.map(c => ({ name: c.name, path: c.path || '' })),
-          }).then((r) => {
+          // Goes through _sfMatchCandidatesOnce so the fresh-import path's
+          // pre-review check ([B-363]) and these per-row notes share ONE
+          // answer. On that path the result is already in hand and this
+          // resolves without a second IPC; on every other route it is the
+          // first and only call, exactly as before.
+          _sfMatchCandidatesOnce().then((r) => {
             if (!r || !r.ok || !Array.isArray(r.results) || !r.results.length) return;
             if (!_sfImport || _sfImport.runId !== matchRun) return; // user moved on
             const byPath = new Map(r.results.map(x => [String(x.path || ''), x]));
@@ -26301,8 +26485,8 @@ require(['vs/editor/editor.main'], function () {
                 // the name input above - surfaces the collision the moment it matters.
                 if (check) {
                   check.title = hit.matchName
-                    ? `Already in your library as ${hit.matchName}. Tick it to import a second copy under a new name.`
-                    : 'Already in your library. Tick it to import a second copy under a new name.';
+                    ? `Already in your library as ${hit.matchName}. Check it to import a second copy under a new name.`
+                    : 'Already in your library. Check it to import a second copy under a new name.';
                 }
               }
             });
