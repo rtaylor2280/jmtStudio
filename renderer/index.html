@@ -21058,9 +21058,36 @@ require(['vs/editor/editor.main'], function () {
       // Inverse polarity of the Effects filter — entries that match
       // these are EXCLUDED from results. Lets the user say "fonts with
       // melt but missing preon" with one combined facet. Both sets are
-      // toggled via the same dropdown via the 3-state cycle in
-      // _sfToggleFilterEffect: off → present → absent → off.
+      // ⚠️ THIS COMMENT WAS WRONG UNTIL 2026-09-16 and it described a feature that does
+      // not exist: "the 3-state cycle in _sfToggleFilterEffect: off -> present -> absent
+      // -> off". There is no cycle. LEFT-CLICK toggles PRESENT; RIGHT-CLICK toggles
+      // ABSENT (_sfRightToggleFilterEffect), and setting either clears the other.
+      // ⭐ Ryan could not find the absent polarity in his own app - "thought we had not in
+      // the effects... how do I get that?" - which is the discoverability problem the
+      // wrong comment was hiding from anyone reading the source for the answer.
       let _sfActiveFilterEffectsMissing = new Set();
+      // ── [B-390] AN EXPLICIT SET OF ENTRY NAMES ─────────────────────────────
+      // Not a facet the user composes from a dropdown — a RESULT SET handed to the
+      // library by something that already knows the answer. Today the only producer
+      // is the already-have-it dialog's "Show in library": it names N fonts you
+      // cannot otherwise go and look at, so the button lands you on exactly those.
+      // ⚠️ IT NARROWS LIKE SEARCH, NOT LIKE A TOGGLE. The toggle filters are
+      // overridden by selection (keeping selected cards visible is the useful
+      // "keep this" behaviour), but this one is an answer to a question the user
+      // just asked — a stale selection must not smuggle extra cards into it.
+      let _sfActiveFilterNames = new Set();
+      let _sfActiveFilterNamesLabel = '';
+      // ⚠️⚠️ ONE PREDICATE, FIVE CONSUMERS. The grid is not the only thing that filters
+      // entries: the toggle badge counts and all three facet dropdowns build their own
+      // scopes. Shipping this to the grid alone left the Effects dropdown advertising
+      // "font 150, hum 148" over a grid reading 4 of 150 — his catch, 2026-09-16.
+      // The name scope belongs everywhere SEARCH belongs, which is every one of them:
+      // both are global narrowings rather than a facet a dropdown might self-apply.
+      // Written as a shared function rather than copied, so the next filter added here
+      // is one edit and not five.
+      const _sfInNameScope = (f) =>
+        _sfActiveFilterNames.size === 0 || _sfActiveFilterNames.has(f.name);
+
       let _sfNeedsReviewFilterOn = false;
       // NEW = never SEEN. Absent seenAt means never opened and never used. [B-213]
       let _sfNewFilterOn = false;
@@ -21308,16 +21335,134 @@ require(['vs/editor/editor.main'], function () {
         if (entry.meta && entry.meta.purchased === false) tags.unshift('free');
         return tags;
       };
+
+      // ⚠️ DEFINED HERE, BELOW _sfEntryAllTags AND _SF_NO_CREATOR_KEY, ON PURPOSE. Both
+      // are `const`, so a predicate placed above them is a TDZ throw waiting for someone
+      // to call it one line earlier. Safe today by call order only, which is exactly the
+      // kind of "works by accident" this file has been bitten by before.
+      // ⚠️⚠️ [B-382] ONE DEFINITION PER FACET. These were INLINED in five places - the
+      // grid, and the tag / creator / effects dropdown matchSets - so changing tags and
+      // present-effects from AND to OR in the grid alone left every dropdown computing
+      // the old semantics. With three tags ORed the grid showed 7 fonts while the
+      // dropdowns intersected to ZERO, which is what he saw: "why no creators?" and a
+      // wall of effects all reading 0.
+      // ⭐ The dropdowns still choose WHICH scopes to apply - each deliberately skips
+      // its own dimension so multi-select works - but none of them owns a COPY of what
+      // a scope means.
+      const _sfEntryEffectSet = (f) => {
+        const out = new Set();
+        const known   = Array.isArray(f.meta && f.meta.effects) ? f.meta.effects : [];
+        const unknown = Array.isArray(f.meta && f.meta.unknownEffects) ? f.meta.unknownEffects : [];
+        for (const e of known)   out.add(String(e).toLowerCase());
+        for (const e of unknown) out.add(String(e).toLowerCase());
+        return out;
+      };
+      // TAGS ARE OR. Measured on his library: 79% of 44 tags are mutually-exclusive
+      // bundle names and only 9 of 220 entries carry two, so AND returned nothing.
+      // ── [B-382] A FACET DROPDOWN'S ROWS ARE FROZEN WHILE IT IS OPEN ──────────
+      //
+      // These dropdowns no longer close on pick (ui-conventions.md:1803 - multi-select
+      // stays open), which means the list is now live under the user's cursor. Two
+      // things follow, and the second is the one that bites:
+      //   * the COUNTS must refresh after each pick or they state a population that no
+      //     longer exists;
+      //   * but if the ROW SET or ORDER refreshes too, rows appear, vanish and re-sort
+      //     mid-gesture - the item you meant to click second has moved, and the one you
+      //     just picked jumps to the top.
+      //
+      // ⭐ SO COUNTS ARE LIVE AND THE ROWS ARE NOT. Same rule the grid already runs on:
+      // "the filtered view is the answer to a question you asked, not a live query that
+      // rewrites itself as you work." Close and reopen to re-evaluate.
+      //
+      // ⭐ HIDE-ZERO IS APPLIED ONCE, AT FREEZE TIME, AND IT HAS ONE EXCEPTION. A row at
+      // count 0 is a dead option - picking it empties the grid - so it is dropped. But a
+      // row is 0 PRECISELY BECAUSE YOU EXCLUDED IT in the absent polarity, and hiding
+      // that one would leave no way to cycle it back off without clearing everything.
+      // His two zeros, from the same screenshot: `bgndrag ✗ 0` must stay, `ccchange 0`
+      // must go. Anything actively set is kept regardless of count.
+      let _sfFrozenFacetRows = { tag: null, creator: null, effect: null };
+      const _sfUnfreezeFacetRows = (facet) => { _sfFrozenFacetRows[facet] = null; };
+      // Re-render an OPEN dropdown after a pick so its counts are current, without
+      // losing the user's place in a long list. The container and the list element both
+      // survive the innerHTML swap, so their scroll offsets can be restored directly.
+      const _sfRefreshOpenFacet = (dropdown, listId, render) => {
+        if (!dropdown || dropdown.style.display === 'none') return;
+        const list = document.getElementById(listId);
+        const dTop = dropdown.scrollTop, lTop = list ? list.scrollTop : 0;
+        render();
+        dropdown.scrollTop = dTop;
+        const after = document.getElementById(listId);
+        if (after) after.scrollTop = lTop;
+      };
+      const _sfFreezeFacetRows = (facet, sortedEntries, isActive) => {
+        const frozen = _sfFrozenFacetRows[facet];
+        if (frozen) {
+          const byKey = new Map(sortedEntries);
+          // Frozen order, CURRENT counts. A key that vanished from the data entirely is
+          // dropped rather than rendered against stale info.
+          return frozen.filter(k => byKey.has(k)).map(k => [k, byKey.get(k)]);
+        }
+        const visible = sortedEntries.filter(([k, info]) => isActive(k) || (info.count || 0) > 0);
+        _sfFrozenFacetRows[facet] = visible.map(([k]) => k);
+        return visible;
+      };
+
+      const _sfInTagScope = (f) => {
+        if (_sfActiveFilterTags.size === 0) return true;
+        const t = new Set(_sfEntryAllTags(f).map(x => x.toLowerCase()));
+        for (const ft of _sfActiveFilterTags) if (t.has(String(ft).toLowerCase())) return true;
+        return false;
+      };
+      // CREATORS ARE OR AND IT IS FORCED: meta.author is a single string, so ANDing two
+      // asks for a font by two people and is always zero. Do not "fix" for consistency.
+      const _sfInCreatorScope = (f) => {
+        if (_sfActiveFilterCreators.size === 0) return true;
+        const lower = Array.from(_sfActiveFilterCreators).map(c => String(c).toLowerCase());
+        const a = ((f.meta && f.meta.author) || '').toLowerCase();
+        if (!a) return lower.includes(_SF_NO_CREATOR_KEY);
+        return lower.includes(a);
+      };
+      // PRESENT effects OR; ABSENT effects AND-NOT. The asymmetry is deliberate -
+      // exclusions are conjunctive, OR is for choosing among things you want.
+      const _sfInEffectScope = (f) => {
+        if (_sfActiveFilterEffects.size === 0 && _sfActiveFilterEffectsMissing.size === 0) return true;
+        const eff = _sfEntryEffectSet(f);
+        if (_sfActiveFilterEffects.size) {
+          let anyPresent = false;
+          for (const e of _sfActiveFilterEffects) if (eff.has(String(e).toLowerCase())) { anyPresent = true; break; }
+          if (!anyPresent) return false;
+        }
+        for (const e of _sfActiveFilterEffectsMissing) if (eff.has(String(e).toLowerCase())) return false;
+        return true;
+      };
       // One-shot flag: delete paths set this true so the NEXT render, if it
       // lands filtered-empty on a still-non-empty library, auto-clears the
       // filters instead of showing a confusing "No fonts match." A typed
       // search that matches nothing does NOT set this, so it stays put.
       // Consumed on the next render regardless of outcome.
       let _sfAutoClearOnEmpty = false;
+      // ── [B-390] THE ONLY PRODUCER OF THE NAME FILTER ───────────────────────
+      // Hand it a list of entry names and a label for its chip, and the grid shows
+      // exactly those. On window because its caller (the already-have-it dialog)
+      // lives in a different scope, which is the same reason the rest of the
+      // cross-scope calls here are window.*.
+      // ⚠️ IT REPLACES RATHER THAN ADDS. Two "Show in library" clicks in a row show
+      // the second answer, not the union of two — a set that accumulated would drift
+      // away from the question that produced it with nothing on screen saying so.
+      // ⚠️ AND IT CLEARS THE REST. Landing on six named fonts while a stale tag
+      // filter quietly removes two of them would make the button a liar; the whole
+      // promise is "these are the ones".
+      window._sfShowNamesInLibrary = (names, label) => {
+        const list = Array.isArray(names) ? names : Array.from(names || []);
+        _sfClearAllFilters({ silent: true });
+        _sfActiveFilterNames = new Set(list.filter(Boolean).map(String));
+        _sfActiveFilterNamesLabel = String(label || '').trim();
+        _sfRenderGrid();
+      };
       // Clear EVERY filter — search included, since search is just another
       // filter — then re-render. Shared by the Clear-all control, the
       // no-match "Clear filters" button, and the auto-clear-on-delete path.
-      const _sfClearAllFilters = () => {
+      const _sfClearAllFilters = (opts) => {
         _sfSearchQuery = '';
         const _si = document.getElementById('sf-search');
         if (_si) _si.value = '';
@@ -21327,12 +21472,17 @@ require(['vs/editor/editor.main'], function () {
         _sfActiveFilterCreators = new Set();
         _sfActiveFilterEffects = new Set();
         _sfActiveFilterEffectsMissing = new Set();
+        _sfActiveFilterNames = new Set();       // [B-390]
+        _sfActiveFilterNamesLabel = '';
         _sfNeedsReviewFilterOn = false;
         _sfNewFilterOn = false;
         _sfNewHeld = new Set();
         _sfNeedsReviewHeld = new Set();
         _sfInUseFilter = '';
-        _sfRenderGrid();
+        // [B-390] `silent` is for the one caller that clears in order to set something
+        // else in the same breath. Rendering the empty state first would flash the
+        // whole library for a frame on the way to six cards.
+        if (!opts || !opts.silent) _sfRenderGrid();
       };
       // ── [B-305] THE BADGE IS A FUNCTION OF FILTER STATE, SO IT IS DRIVEN FROM ONE
       // PLACE THAT EVERY PATH ALREADY CALLS.
@@ -21377,19 +21527,22 @@ require(['vs/editor/editor.main'], function () {
           if (!q) return true;
           return _sfEntrySearchBlob(f).includes(q);
         };
-        const matchesTagFilter = (f) => {
-          if (filterTagsLower.length === 0) return true;
-          const entryTags = new Set(_sfEntryAllTags(f).map(t => t.toLowerCase()));
-          for (const t of filterTagsLower) if (!entryTags.has(t)) return false;
-          return true;
-        };
+        // ── [B-382] TAGS ARE OR ───────────────────────────────────────────────
+        // His ruling 2026-09-03, and the model has no exceptions:
+        //     TAGS(a or b) and CREATORS(a or b) and EFFECTS(a or b) and NEW
+        // Two reasons, and the second is the one measurement cannot reach.
+        // MEASURED on his library: 44 distinct tags, 35 of them (79%) SOURCE or
+        // BUNDLE names — mutually exclusive by nature, avg 0.51 tags per entry, only
+        // 9 of 220 carrying two. ESB_Graflex + Emperor + Fallen_Order_CAL_Bundle
+        // ANDed = 0 of 220, three bundle names each advertising a healthy count. AND
+        // was answering a question the data cannot have an answer to.
+        // AND HIS SECOND CASE, which the numbers do not cover: "multi tags is good
+        // too... like Vador and Anikin". Descriptive tags are ADDITIVE — picking one
+        // more should widen, not demand a font be both. Under AND the richer a
+        // font's tagging, the harder it is to reach.
+        const matchesTagFilter = _sfInTagScope;        // [B-382] one definition
         const filterCreatorsLower = Array.from(_sfActiveFilterCreators).map(c => c.toLowerCase());
-        const matchesCreatorFilter = (f) => {
-          if (filterCreatorsLower.length === 0) return true;
-          const a = (f.meta && f.meta.author || '').toLowerCase();
-          if (!a) return filterCreatorsLower.includes(_SF_NO_CREATOR_KEY);
-          return filterCreatorsLower.includes(a);
-        };
+        const matchesCreatorFilter = _sfInCreatorScope;  // [B-382] one definition
         // Effects filter: bidirectional. Present-set requires the entry
         // to carry every listed effect (AND); absent-set requires the
         // entry to LACK every listed effect (AND). Across both,
@@ -21399,17 +21552,7 @@ require(['vs/editor/editor.main'], function () {
         // in either polarity.
         const filterEffectsLower = Array.from(_sfActiveFilterEffects).map(e => e.toLowerCase());
         const filterEffectsMissingLower = Array.from(_sfActiveFilterEffectsMissing).map(e => e.toLowerCase());
-        const matchesEffectsFilter = (f) => {
-          if (filterEffectsLower.length === 0 && filterEffectsMissingLower.length === 0) return true;
-          const effSet = new Set();
-          const known = Array.isArray(f.meta && f.meta.effects) ? f.meta.effects : [];
-          const unknown = Array.isArray(f.meta && f.meta.unknownEffects) ? f.meta.unknownEffects : [];
-          for (const e of known) effSet.add(String(e).toLowerCase());
-          for (const e of unknown) effSet.add(String(e).toLowerCase());
-          for (const e of filterEffectsLower) if (!effSet.has(e)) return false;
-          for (const e of filterEffectsMissingLower) if (effSet.has(e)) return false;
-          return true;
-        };
+        const matchesEffectsFilter = _sfInEffectScope;   // [B-382] one definition
         // ⚠️ WHILE A FILTER IS ON, ITEMS MAY JOIN THE VIEW BUT MAY NOT LEAVE IT.
         // Acting on a card from inside a filtered view used to remove it under the
         // cursor: open the third NEW font and the two behind it jump left, so the
@@ -21452,12 +21595,15 @@ require(['vs/editor/editor.main'], function () {
         // useful "keep this" behavior. Clearing the selection lets the
         // toggle filters take over again. But selection does NOT override
         // the search box — you type to narrow, so narrow it does.
+        // [B-390] Sits beside search, OUTSIDE the selection override, for the reason
+        // given where it is declared: it is the answer to a question just asked.
+        const matchesNameFilter = _sfInNameScope;   // [B-390] one definition, five callers
         const matching = sorted.filter(f =>
-          matchesSearch(f) &&
+          matchesSearch(f) && matchesNameFilter(f) &&
           (_sfSelectedNames.has(f.name) ||
             (matchesTagFilter(f) && matchesCreatorFilter(f) && matchesEffectsFilter(f) && matchesNeedsReviewFilter(f) && matchesInUseFilter(f) && matchesNewFilter(f)))
         );
-        const isFiltering = !!q || _sfActiveFilterTags.size > 0 || _sfActiveFilterCreators.size > 0 || _sfActiveFilterEffects.size > 0 || _sfActiveFilterEffectsMissing.size > 0 || _sfNeedsReviewFilterOn || !!_sfInUseFilter || _sfNewFilterOn;
+        const isFiltering = !!q || _sfActiveFilterTags.size > 0 || _sfActiveFilterCreators.size > 0 || _sfActiveFilterEffects.size > 0 || _sfActiveFilterEffectsMissing.size > 0 || _sfActiveFilterNames.size > 0 || _sfNeedsReviewFilterOn || !!_sfInUseFilter || _sfNewFilterOn;
         // Needs Review filter button: visible only when at least one entry
         // has the flag. Badge shows the count; button gets the active style
         // when the filter is on.
@@ -21467,7 +21613,7 @@ require(['vs/editor/editor.main'], function () {
         // A chip promising 2 and yielding 0 is worse than no chip: the count IS
         // the promise, and the "hide when zero" rule below then works by itself.
         const _sfCountWith = (pred, exclude) => sorted.filter(f =>
-          matchesSearch(f)
+          matchesSearch(f) && _sfInNameScope(f)   // [B-390]
           && matchesTagFilter(f) && matchesCreatorFilter(f) && matchesEffectsFilter(f)
           && (exclude === 'nr'  || matchesNeedsReviewFilter(f))
           && (exclude === 'use' || matchesInUseFilter(f))
@@ -24050,23 +24196,9 @@ require(['vs/editor/editor.main'], function () {
         const filterEffectsMissingLower = Array.from(_sfActiveFilterEffectsMissing).map(e => e.toLowerCase());
         const matchSet = _sfAllEntries.filter(f => {
           if (q && !_sfEntrySearchBlob(f).includes(q)) return false;
-          if (filterCreatorsLower.length) {
-            const a = ((f.meta && f.meta.author) || '').toLowerCase();
-            if (!a) {
-              if (!filterCreatorsLower.includes(_SF_NO_CREATOR_KEY)) return false;
-            } else if (!filterCreatorsLower.includes(a)) {
-              return false;
-            }
-          }
-          if (filterEffectsLower.length || filterEffectsMissingLower.length) {
-            const effSet = new Set();
-            const known = Array.isArray(f.meta && f.meta.effects) ? f.meta.effects : [];
-            const unknown = Array.isArray(f.meta && f.meta.unknownEffects) ? f.meta.unknownEffects : [];
-            for (const e of known) effSet.add(String(e).toLowerCase());
-            for (const e of unknown) effSet.add(String(e).toLowerCase());
-            for (const e of filterEffectsLower) if (!effSet.has(e)) return false;
-            for (const e of filterEffectsMissingLower) if (effSet.has(e)) return false;
-          }
+          if (!_sfInNameScope(f)) return false;   // [B-390] same scope as search
+          if (!_sfInCreatorScope(f)) return false;  // [B-382] OR, and forced
+          if (!_sfInEffectScope(f)) return false;   // [B-382] present OR, absent AND-NOT
           return true;
         });
         // Bucket counts per tag across the matching set.
@@ -24080,10 +24212,11 @@ require(['vs/editor/editor.main'], function () {
             else counts.set(key, { display: tag, count: 1 });
           }
         }
-        const entries = Array.from(counts.entries())
+        const _tagActive = (k) => Array.from(_sfActiveFilterTags).some(t => t.toLowerCase() === k);
+        const entries = _sfFreezeFacetRows('tag', Array.from(counts.entries())
           .sort((a, b) => _facetSortCompare(   // [B-285]
             a[1].display, a[1].count, _sfActiveFilterTags.has(a[1].display),
-            b[1].display, b[1].count, _sfActiveFilterTags.has(b[1].display)));
+            b[1].display, b[1].count, _sfActiveFilterTags.has(b[1].display))), _tagActive);
         if (entries.length === 0) {
           list.innerHTML = '<div class="styles-tag-dropdown-empty">No tags on current results.</div>';
           return;
@@ -24105,7 +24238,17 @@ require(['vs/editor/editor.main'], function () {
         const inUseActive = _sfInUseFilter ? 1 : 0;
         const newActive = _sfNewFilterOn ? 1 : 0;
         const searchActive = (_sfSearchQuery && _sfSearchQuery.trim()) ? 1 : 0;
-        const total = searchActive + _sfActiveFilterTags.size + _sfActiveFilterCreators.size + _sfActiveFilterEffects.size + _sfActiveFilterEffectsMissing.size + needsReviewActive + inUseActive + newActive;
+        // ⚠️⚠️ [B-390] EVERY FILTER MUST BE COUNTED HERE, NOT JUST RENDERED BELOW.
+        // This total is the GATE: at 0 the strip hides and returns before any chip is
+        // built. Adding the name filter to the predicate and to `isFiltering` but not
+        // to this line filtered the grid correctly and left the user with no way to
+        // undo it — 4 of 150 on screen and no chip row. His report: "this filter
+        // doesn't show properly and can't clear it."
+        // ⭐ THE SET COUNTS AS ONE, matching its single chip. Counting its members
+        // would push `total` past the >= 2 threshold below and show "Clear all" beside
+        // a single chip.
+        const namesActive = _sfActiveFilterNames.size ? 1 : 0;
+        const total = searchActive + _sfActiveFilterTags.size + _sfActiveFilterCreators.size + _sfActiveFilterEffects.size + _sfActiveFilterEffectsMissing.size + namesActive + needsReviewActive + inUseActive + newActive;
         if (total === 0) {
           strip.style.display = 'none';
           strip.innerHTML = '';
@@ -24129,10 +24272,18 @@ require(['vs/editor/editor.main'], function () {
         const creatorChips = Array.from(_sfActiveFilterCreators).map(c =>
           `<span class="styles-active-filter-chip" data-creator="${_sfEscape(c)}">${_sfEscape(c)}<button class="styles-active-filter-remove" data-filter-remove-creator="${_sfEscape(c)}" title="Remove">&#10005;</button></span>`
         ).join('');
+        // ⚠️ [B-382] THE TWO POLARITIES ARE NOW TWO GROUPS, and they had to be.
+        // Present effects OR; absent effects AND-NOT. They used to render as ONE
+        // group carrying ONE joiner, and no single word can describe a mixed set —
+        // "swingh or melt and no preon" is exactly the flattening this row exists to
+        // stop, just one level down. Two groups, each stating its own true joiner.
+        // The absent chips drop their "no " prefix because the group label carries it
+        // now; data-effect and the remove button are untouched.
         const effectChips = Array.from(_sfActiveFilterEffects).map(e =>
           `<span class="styles-active-filter-chip" data-effect="${_sfEscape(e)}">${_sfEscape(e)}<button class="styles-active-filter-remove" data-filter-remove-effect="${_sfEscape(e)}" title="Remove">&#10005;</button></span>`
-        ).join('') + Array.from(_sfActiveFilterEffectsMissing).map(e =>
-          `<span class="styles-active-filter-chip sf-active-filter-effect-missing" data-effect="${_sfEscape(e)}">no ${_sfEscape(e)}<button class="styles-active-filter-remove" data-filter-remove-effect="${_sfEscape(e)}" title="Remove">&#10005;</button></span>`
+        ).join('');
+        const effectMissingChips = Array.from(_sfActiveFilterEffectsMissing).map(e =>
+          `<span class="styles-active-filter-chip sf-active-filter-effect-missing" data-effect="${_sfEscape(e)}">${_sfEscape(e)}<button class="styles-active-filter-remove" data-filter-remove-effect="${_sfEscape(e)}" title="Remove">&#10005;</button></span>`
         ).join('');
         const needsReviewChip = _sfNeedsReviewFilterOn
           ? `<span class="styles-active-filter-chip sf-active-filter-needs-review" data-needs-review="1">Needs review<button class="styles-active-filter-remove" data-filter-remove-needs-review="1" title="Remove">&#10005;</button></span>`
@@ -24142,6 +24293,12 @@ require(['vs/editor/editor.main'], function () {
           : '';
         const inUseChip = _sfInUseFilter
           ? `<span class="styles-active-filter-chip sf-active-filter-in-use" data-in-use="1">${_sfInUseFilter === 'not' ? 'Not in use' : 'In use'}<button class="styles-active-filter-remove" data-filter-remove-in-use="1" title="Remove">&#10005;</button></span>`
+          : '';
+        // [B-390] One chip for the whole set, never one per name — six chips reading
+        // out font names would bury the facets beside them, and the set is not
+        // composable anyway: you take it or you drop it.
+        const namesChip = _sfActiveFilterNames.size
+          ? `<span class="styles-active-filter-chip sf-active-filter-names" data-names="1">${_sfEscape(_sfActiveFilterNamesLabel || `${_sfActiveFilterNames.size} fonts`)}<button class="styles-active-filter-remove" data-filter-remove-names="1" title="Remove">&#10005;</button></span>`
           : '';
         const clearAll = total >= 2
           ? `<button class="styles-active-filter-clear" id="sf-clear-all-filters">Clear all</button>`
@@ -24166,22 +24323,20 @@ require(['vs/editor/editor.main'], function () {
         };
         const groups = [
           _group('search',  searchChip,   searchActive,                        'or'),
-          // Tags AND today: matchesTagFilter requires EVERY selected tag. ⏭ His ruling
-          // 2026-09-03 is that this should become OR, together with reverting the
-          // tag self-apply — still open on [B-305], so the row states what runs.
-          _group('tag',     tagChips,     _sfActiveFilterTags.size,            'and'),
+          // [B-382] Tags are OR: matchesTagFilter returns true on ANY selected tag.
+          _group('tag',     tagChips,     _sfActiveFilterTags.size,            'or'),
           // Creators OR, and it is FORCED: meta.author is a single string, so ANDing
           // two creators asks for a font by two people and is always zero. Do not
           // "fix" this into consistency with tags.
           _group('creator', creatorChips, _sfActiveFilterCreators.size,        'or'),
-          // Effects AND today (present must all be there, absent must all be gone).
-          // ⏭ Also slated to become OR for the present set by the same ruling.
-          _group('effect',  effectChips,
-                 _sfActiveFilterEffects.size + _sfActiveFilterEffectsMissing.size, 'and'),
+          // [B-382] Present effects OR. Absent effects are their own group and stay
+          // AND-NOT — "no preon and no melt" means neither, never either.
+          _group('effect',  effectChips,        _sfActiveFilterEffects.size,        'or'),
+          _group('without', effectMissingChips, _sfActiveFilterEffectsMissing.size, 'and'),
         ].filter(Boolean);
         // The boolean facets have no internal structure, so they are plain chips that
         // AND with everything else — which is what the gaps between groups already say.
-        const flags = `${needsReviewChip}${newChip}${inUseChip}`;
+        const flags = `${namesChip}${needsReviewChip}${newChip}${inUseChip}`;
         strip.innerHTML = `<span class="styles-active-filters-label">Filtering by:</span>`
                         + groups.join('<span class="sf-filter-join">and</span>')
                         + (groups.length && flags ? '<span class="sf-filter-join">and</span>' : '')
@@ -24271,19 +24426,9 @@ require(['vs/editor/editor.main'], function () {
         // across dimensions.
         const matchSet = _sfAllEntries.filter(f => {
           if (q && !_sfEntrySearchBlob(f).includes(q)) return false;
-          if (filterTagsLower.length) {
-            const t = new Set(_sfEntryAllTags(f).map(x => x.toLowerCase()));
-            for (const ft of filterTagsLower) if (!t.has(ft)) return false;
-          }
-          if (filterEffectsLower.length || filterEffectsMissingLower.length) {
-            const effSet = new Set();
-            const known = Array.isArray(f.meta && f.meta.effects) ? f.meta.effects : [];
-            const unknown = Array.isArray(f.meta && f.meta.unknownEffects) ? f.meta.unknownEffects : [];
-            for (const e of known) effSet.add(String(e).toLowerCase());
-            for (const e of unknown) effSet.add(String(e).toLowerCase());
-            for (const e of filterEffectsLower) if (!effSet.has(e)) return false;
-            for (const e of filterEffectsMissingLower) if (effSet.has(e)) return false;
-          }
+          if (!_sfInNameScope(f)) return false;   // [B-390] same scope as search
+          if (!_sfInTagScope(f)) return false;      // [B-382] OR, one definition
+          if (!_sfInEffectScope(f)) return false;   // [B-382] present OR, absent AND-NOT
           return true;
         });
         const counts = new Map();
@@ -24296,10 +24441,11 @@ require(['vs/editor/editor.main'], function () {
           if (ent) ent.count++;
           else counts.set(key, { display: a, count: 1 });
         }
-        const entries = Array.from(counts.entries())
+        const _creActive = (k) => Array.from(_sfActiveFilterCreators).some(c => c.toLowerCase() === k);
+        const entries = _sfFreezeFacetRows('creator', Array.from(counts.entries())
           .sort((a, b) => _facetSortCompare(   // [B-285]
             a[1].display, a[1].count, _sfActiveFilterCreators.has(a[1].display),
-            b[1].display, b[1].count, _sfActiveFilterCreators.has(b[1].display)));
+            b[1].display, b[1].count, _sfActiveFilterCreators.has(b[1].display))), _creActive);
         // Append the "(no creator)" pseudo-row when ANY entry in the library
         // is missing a creator. Showing it even when filtered down to zero
         // empties in the current matchSet would be confusing (the count
@@ -24378,27 +24524,10 @@ require(['vs/editor/editor.main'], function () {
         // filters first.
         const matchSet = _sfAllEntries.filter(f => {
           if (q && !_sfEntrySearchBlob(f).includes(q)) return false;
-          if (filterTagsLower.length) {
-            const t = new Set(_sfEntryAllTags(f).map(x => x.toLowerCase()));
-            for (const ft of filterTagsLower) if (!t.has(ft)) return false;
-          }
-          if (filterCreatorsLower.length) {
-            const a = ((f.meta && f.meta.author) || '').toLowerCase();
-            if (!a) {
-              if (!filterCreatorsLower.includes(_SF_NO_CREATOR_KEY)) return false;
-            } else if (!filterCreatorsLower.includes(a)) {
-              return false;
-            }
-          }
-          if (filterEffectsLower.length || filterEffectsMissingLower.length) {
-            const effSet = new Set();
-            const known = Array.isArray(f.meta && f.meta.effects) ? f.meta.effects : [];
-            const unknown = Array.isArray(f.meta && f.meta.unknownEffects) ? f.meta.unknownEffects : [];
-            for (const e of known) effSet.add(String(e).toLowerCase());
-            for (const e of unknown) effSet.add(String(e).toLowerCase());
-            for (const e of filterEffectsLower) if (!effSet.has(e)) return false;
-            for (const e of filterEffectsMissingLower) if (effSet.has(e)) return false;
-          }
+          if (!_sfInNameScope(f)) return false;   // [B-390] same scope as search
+          if (!_sfInTagScope(f)) return false;      // [B-382] OR, one definition
+          if (!_sfInCreatorScope(f)) return false;  // [B-382] OR, and forced
+          if (!_sfInEffectScope(f)) return false;   // [B-382] present OR, absent AND-NOT
           return true;
         });
         // Seed counts at 0 for every effect that appears anywhere in
@@ -24441,11 +24570,12 @@ require(['vs/editor/editor.main'], function () {
         }
         const presentSet = new Set(Array.from(_sfActiveFilterEffects).map(e => e.toLowerCase()));
         const absentSet = new Set(Array.from(_sfActiveFilterEffectsMissing).map(e => e.toLowerCase()));
-        const entries = Array.from(counts.entries())
+        const _effActive = (k) => presentSet.has(k) || absentSet.has(k);
+        const entries = _sfFreezeFacetRows('effect', Array.from(counts.entries())
           // Effects are tri-state, so "selected" is present OR absent. [B-285]
           .sort((a, b) => _facetSortCompare(
             a[1].display, a[1].count, presentSet.has(a[0]) || absentSet.has(a[0]),
-            b[1].display, b[1].count, presentSet.has(b[0]) || absentSet.has(b[0])));
+            b[1].display, b[1].count, presentSet.has(b[0]) || absentSet.has(b[0]))), _effActive);
         if (entries.length === 0) {
           list.innerHTML = '<div class="styles-tag-dropdown-empty">No effects on current results.</div>';
           return;
@@ -24840,6 +24970,33 @@ require(['vs/editor/editor.main'], function () {
               ? `<strong>${esc(n.from)}</strong> (you have it as <strong>${esc(n.to)}</strong>)`
               : `<strong>${esc(n.from)}</strong>`;
           };
+          // ⭐ [B-390] ONE HOISTED COUNT, because two numbers on one screen is how they
+          // start contradicting each other. Six matched SOURCES can be four library
+          // FONTS — a renamed row resolves onto an entry already in the list — and he
+          // met that as a question: "why are there 4 but we said there were 6?"
+          // The body now says both when they differ, so the mapping the list is already
+          // showing gets a total. Same value feeds the filter behind "Show in library".
+          // ⭐ GROUPED BY THE FONT YOU OWN, his call: "if true then we'd want to group
+          // it in the original message so it was 4 and will show 4". Two matched
+          // sources can resolve to ONE library entry — a renamed row is exactly that —
+          // so a per-source list counts 6 and the filter behind "Show in library"
+          // shows 4. Grouping makes the message's number the ANSWER's number, instead
+          // of stating two true counts and leaving him to work out the relationship.
+          // Key is the library name; the value holds only the incoming names that
+          // DIFFER, because repeating a name back as its own alias says nothing.
+          const groups = new Map();
+          for (const m of matched) {
+            const from = String(m.name || '').trim();
+            const to   = String(m.matchName || '').trim() || from;
+            if (!to) continue;
+            if (!groups.has(to)) groups.set(to, new Set());
+            if (from && from.toLowerCase() !== to.toLowerCase()) groups.get(to).add(from);
+          }
+          const ownedUnique = Array.from(groups.keys());
+          const groupLi = (lib, alts) =>
+            `<li><strong>${esc(lib)}</strong>`
+            + (alts.size ? ` (matching ${Array.from(alts).map(a => `<strong>${esc(a)}</strong>`).join(', ')})` : '')
+            + `</li>`;
           if (els.title) els.title.textContent = one ? 'Font already in your library' : 'These fonts are already in your library';
           if (els.body) {
             const n = one ? names(matched[0]) : null;
@@ -24847,13 +25004,40 @@ require(['vs/editor/editor.main'], function () {
               ? (renamed(n)
                   ? `The sounds in <strong>${esc(n.from)}</strong> match a font you already have, <strong>${esc(n.to)}</strong>.`
                   : `The sounds in <strong>${esc(n.from)}</strong> match a font you already have.`)
-              : `All ${matched.length} of these fonts match sounds you already have:`
-                + `<ul class="sf-dupfont-list">${matched.map(m => `<li>${pair(m)}</li>`).join('')}</ul>`;
+              // ⚠️ THE LIST IS ownedUnique.length, NOT matched.length. There is no
+              // honest way to show six rows when six sources are four fonts — his
+              // words: "we can't make up 2 more to show so have to match 4 not 6".
+              //
+              // ⭐ BUT THE GAP GETS ACCOUNTED FOR, his follow-up: "so what happened to
+              // the other 2?... that's ok but should be stated." Grouping alone made
+              // the number honest and left two of his six unexplained. One sentence
+              // names both populations, so the arithmetic closes on screen.
+              // ⚠️ IT SAYS "MATCH", NOT "ARE DUPLICATES OF EACH OTHER". This dialog
+              // only knows what each source matched IN THE LIBRARY. Whether two
+              // sources are identical to ONE ANOTHER is [B-314]'s question and its
+              // data, and claiming it from a shared matchName would be asserting
+              // identity from a match — two different versions can both match one
+              // library font without being the same as each other.
+              : (ownedUnique.length !== matched.length
+                  ? `The ${matched.length} fonts you picked match <strong>${ownedUnique.length}</strong> already in your library:`
+                  : `All ${ownedUnique.length} of these fonts match sounds you already have:`)
+                + `<ul class="sf-dupfont-list">${Array.from(groups, ([lib, alts]) => groupLi(lib, alts)).join('')}</ul>`;
           }
-          // Only offer to open the match when there IS one to open. With
-          // several, the button would have to pick one arbitrarily, so it
-          // becomes the honest version: back to the library.
-          if (els.openBtn) els.openBtn.textContent = one ? 'Open existing' : 'Back to my library';
+          // ── [B-390] THE PRIMARY BUTTON IS A DESTINATION, NOT A LABEL ───────
+          // It used to read "Back to my library" when there were several matches,
+          // and it ran the same close-and-return as Cancel. He caught it on sight:
+          // "what is the blue option supposed to be saying here?" - it could not
+          // say what it did, because it did not do anything Cancel did not.
+          //
+          // ⭐ HIS FIX, 2026-09-16, and it is better than dropping the button:
+          // "oh library filtered to those. that's the way. much better. and then
+          // it becomes show in library." The dialog NAMES N fonts the user has no
+          // other way to go and look at, so landing on exactly those is a real
+          // destination and the blue slot earns its colour.
+          //
+          // The single-match case keeps "Open existing" - opening the one font you
+          // already have is more specific than filtering to a set of one.
+          if (els.openBtn) els.openBtn.textContent = one ? 'Open existing' : 'Show in library';
           // Stash the import modal rather than stacking on its 100% progress
           // phase — same handling as the source-duplicate prompt above.
           const importModal = _sfImportEls.modal;
@@ -24872,10 +25056,26 @@ require(['vs/editor/editor.main'], function () {
             // SD-return flag the same way "Open existing" does one dialog up.
             window._sfReturnToSdBrowser = false;
             const target = one ? String(matched[0].matchName || '').trim() : '';
+            // [B-390] The names to show are the LIBRARY's names, not the card's —
+            // matchName is what the user actually has. Half of them are renamed
+            // (that is what the "you have it as" line in the body is saying), so
+            // filtering on the incoming names would return nothing at all.
+            // ⚠️ DEDUPE, or the label lies. Two cards can match the SAME library
+            // entry — that is what the renamed rows are: "RVJ (you have it as FoRed)"
+            // and "Lightsaber_Of_The_Bells (you have it as RgueCmdr)" both resolve to
+            // entries already in this list. Six matched sources, four library fonts.
+            // Labelling it "6" over a grid reading "4 of 150" is a number the screen
+            // contradicts.
+            const shown = one ? [] : ownedUnique;   // the same count the body stated
             cleanup();
             _sfCloseImport();            // drops the orphan source: nothing was imported
             await window.refreshSoundFontsView();
             if (target) await _sfOpenEntryDetail(target);
+            // ⚠️ AFTER the refresh, never before — refreshSoundFontsView re-renders
+            // the grid, so a filter set ahead of it is painted over immediately.
+            else if (shown.length) {
+              window._sfShowNamesInLibrary?.(shown, `${shown.length} you already have`);
+            }
             resolve(false);
           };
           const onCancel = () => { cleanup(); _sfCloseImport(); resolve(false); };
@@ -37658,7 +37858,7 @@ require(['vs/editor/editor.main'], function () {
         if (_sfCreatorDropdown) _sfCreatorDropdown.style.display = 'none';
         if (_sfEffectsDropdown) _sfEffectsDropdown.style.display = 'none';
         _sfTagDropdown.style.display = opening ? '' : 'none';
-        if (opening) _sfRenderTagDropdown();
+        if (opening) { _sfUnfreezeFacetRows('tag'); _sfRenderTagDropdown(); }
       });
       // Needs Review filter is a plain toggle (no dropdown — it's a
       // single boolean, not a multi-select). Re-render flips the badge
@@ -37700,13 +37900,25 @@ require(['vs/editor/editor.main'], function () {
         e.stopPropagation();
         const tag = item.dataset.tag;
         if (tag) _sfToggleFilterTag(tag);
+        _sfRefreshOpenFacet(_sfTagDropdown, 'sf-tag-dropdown-list', _sfRenderTagDropdown);
         // ⚠️ CLOSES ON PICK, AND THAT IS KNOWN TO BE WRONG - LEFT AS-IS ON PURPOSE.
         // This is a multi-select filter, so by the rule in ui-conventions.md it
         // should stay open. It is not being fixed piecemeal because the whole
         // filter model is being rebuilt as one piece in [B-305]: every facet ORs
         // internally, facets AND together, search becomes a facet, and the chip
         // row shows the grouping. Half-applying that here would fight the rebuild.
-        if (_sfTagDropdown) _sfTagDropdown.style.display = 'none';
+        // ⭐ [B-305/B-382] STAYS OPEN. Multi-select dropdowns do not close on pick -
+        // ui-conventions.md:1803, his rule: "the difference is that when it's one choice
+        // not multi select, it must close after selection." The test is not whether one
+        // click finishes the gesture, it is whether a second pick is likely, and on a
+        // facet filter it always is.
+        // ⚠️ THIS WAS A KNOWN, DATED EXCEPTION WITH AN OWNER, NOT AN OVERSIGHT. On
+        // 2026-09-03 only the sort fix shipped - "we'll handle all this in the entry when
+        // we get to it" - because half-applying the rule would have fought the filter
+        // rebuild. This IS that entry, so the exception closes here.
+        // ⚠️ And the close was arguing with the dropdown's own renderer, which computes
+        // its options with every filter EXCEPT its own dimension precisely so you can add
+        // a second one. Code fighting its own comment.
       });
       _sfCreatorFilterBtn?.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -37715,7 +37927,7 @@ require(['vs/editor/editor.main'], function () {
         if (_sfTagDropdown) _sfTagDropdown.style.display = 'none';
         if (_sfEffectsDropdown) _sfEffectsDropdown.style.display = 'none';
         _sfCreatorDropdown.style.display = opening ? '' : 'none';
-        if (opening) _sfRenderCreatorDropdown();
+        if (opening) { _sfUnfreezeFacetRows('creator'); _sfRenderCreatorDropdown(); }
       });
       _sfCreatorDropdown?.addEventListener('click', (e) => {
         const item = e.target.closest('.styles-tag-dropdown-item');
@@ -37723,7 +37935,8 @@ require(['vs/editor/editor.main'], function () {
         e.stopPropagation();
         const creator = item.dataset.creator;
         if (creator) _sfToggleFilterCreator(creator);
-        if (_sfCreatorDropdown) _sfCreatorDropdown.style.display = 'none';  // see the tag handler: [B-305]
+        _sfRefreshOpenFacet(_sfCreatorDropdown, 'sf-creator-dropdown-list', _sfRenderCreatorDropdown);
+        // [B-305/B-382] stays open - multi-select. See the tag handler above.
       });
       _sfEffectsFilterBtn?.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -37732,7 +37945,7 @@ require(['vs/editor/editor.main'], function () {
         if (_sfTagDropdown) _sfTagDropdown.style.display = 'none';
         if (_sfCreatorDropdown) _sfCreatorDropdown.style.display = 'none';
         _sfEffectsDropdown.style.display = opening ? '' : 'none';
-        if (opening) _sfRenderEffectsDropdown();
+        if (opening) { _sfUnfreezeFacetRows('effect'); _sfRenderEffectsDropdown(); }
       });
       _sfEffectsDropdown?.addEventListener('click', (e) => {
         const item = e.target.closest('.styles-tag-dropdown-item');
@@ -37740,9 +37953,11 @@ require(['vs/editor/editor.main'], function () {
         e.stopPropagation();
         const effect = item.dataset.effect;
         if (effect) _sfToggleFilterEffect(effect);
-        // Each gesture is a one-shot selection (no cycling), so close
-        // after the click matching the Tags/Creators dropdown behavior.
-        if (_sfEffectsDropdown) _sfEffectsDropdown.style.display = 'none';  // see the tag handler: [B-305]
+        _sfRefreshOpenFacet(_sfEffectsDropdown, 'sf-effects-dropdown-list', _sfRenderEffectsDropdown);
+        // ⚠️ The old justification here was "each gesture is a one-shot selection (no
+        // cycling), so close after the click" - true of the CLICK and the wrong test.
+        // One-shot describes the gesture; it says nothing about wanting a second pick.
+        // [B-305/B-382] stays open - multi-select. See the tag handler above.
       });
       // Right-click on a row → toggle the absent polarity. Suppresses
       // the browser context menu and closes the dropdown on completion.
@@ -37753,7 +37968,9 @@ require(['vs/editor/editor.main'], function () {
         e.stopPropagation();
         const effect = item.dataset.effect;
         if (effect) _sfRightToggleFilterEffect(effect);
-        if (_sfEffectsDropdown) _sfEffectsDropdown.style.display = 'none';
+        _sfRefreshOpenFacet(_sfEffectsDropdown, 'sf-effects-dropdown-list', _sfRenderEffectsDropdown);
+        // [B-305/B-382] stays open, same as left-click - setting an absent polarity is
+        // if anything MORE likely to be followed by another one.
       });
       // Backup menu — Export / Import live inside a dropdown so they share
       // one toolbar slot and deemphasize an action the user rarely runs.
@@ -37812,6 +38029,16 @@ require(['vs/editor/editor.main'], function () {
           // Use the dedicated remove (not the cycle toggle) so X clears
           // either polarity to off in one click.
           if (ef) _sfRemoveEffectFilter(ef);
+          return;
+        }
+        // [B-390] The name set drops whole — there is no per-name ✕ because there is
+        // no per-name chip. Same reason the chip is singular: it is one answer.
+        const namesRemove = e.target.closest('[data-filter-remove-names]');
+        if (namesRemove) {
+          e.stopPropagation();
+          _sfActiveFilterNames = new Set();
+          _sfActiveFilterNamesLabel = '';
+          _sfRenderGrid();
           return;
         }
         const nrRemove = e.target.closest('[data-filter-remove-needs-review]');
