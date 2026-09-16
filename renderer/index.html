@@ -12335,6 +12335,39 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
   let _guidedGroups = [];
   let enrichUnsub = null;
 
+  // ⚠️⚠️ A CLICK BESIDE THIS MODAL NEVER DISMISSES IT, IN ANY PHASE ([B-396]).
+  //
+  // ⭐ HIS CONVENTION, STATED 2026-09-16 AND IT IS THE PROJECT DEFAULT, NOT A RULE FOR THIS
+  // DIALOG: "from a UI convention, the default is that modals can't be dismissed by clicking
+  // outside them. we have several in app that are allowed and those are fine... but the
+  // entire import process from first analyze to completion don't just get dismissed by
+  // clicking to the side of it."
+  // Dismiss-on-backdrop is the EXCEPTION a modal has to earn; the existing ones keep it.
+  //
+  // ⚠️ THE COST HERE IS NOT A DIALOG, IT IS THE ANALYZE. His 136-source folder was measured
+  // mid-run at 8 sources in 1m 51s — about half an hour of work — and a click on the grid
+  // behind the modal discarded all of it, silently, with no way back.
+  //
+  // The guard already existed and was scoped to `runInFlight`, which covers only the IMPORT.
+  // ⚠️ MY FIRST FIX WAS ALSO TOO NARROW: it re-opened scan and summary on the reasoning that
+  // a modal clinging when nothing is at stake is its own annoyance. He corrected it — the
+  // flow is ONE process end to end, and a user does not track which phase they are in before
+  // deciding where to click. A rule with per-phase exceptions is a rule you have to think
+  // about; this one you do not.
+  //
+  // ⚠️ AND NEITHER DOES ESCAPE. Checked against the siblings rather than reasoned from
+  // scratch: `modal-sf-import` — the single-source import — has NO backdrop handler and NO
+  // Esc handler at all, and this modal's Esc listener was the only one any import flow had.
+  // So the settled convention is "an import modal closes by its own button, and by nothing
+  // else", and bulk import was simply the one that never inherited it. ⭐ His words:
+  // "the other import flows already correctly follow this convention."
+  //
+  // ⭐ A SECOND DESIGN OF MINE DIED HERE AND THE REASON IS WORTH KEEPING. I first blocked
+  // only the expensive phases, then kept Esc as a "deliberate" exception on the cheap ones.
+  // Both were me re-deriving a rule that already existed twenty thousand lines away. Reading
+  // the sibling first would have produced this in one step and with less code.
+  //
+  // Cancel is present in every phase and the summary has Done, so nothing is trapped.
   const showPhase = (phase) => {
     if (els.phaseScan)    els.phaseScan.style.display    = phase === 'scan'    ? '' : 'none';
     if (els.phaseReview)  els.phaseReview.style.display  = phase === 'review'  ? '' : 'none';
@@ -14818,22 +14851,11 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       commonPicked: _pickedCommons.length ? _pickedCommons : null,
     });
   });
-  // Backdrop click + Esc are silently blocked while an import is in
-  // flight so the user can't accidentally dismiss the modal mid-run
-  // and lose progress visibility (the import keeps running in main
-  // even if the modal closes, but the user has no way to see when it
-  // finishes). The Cancel button stays the single explicit escape.
-  els.modal?.addEventListener('click', (e) => {
-    if (e.target !== els.modal) return;
-    if (runInFlight) return;
-    closeModal();
-  });
-  document.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape') return;
-    if (!els.modal?.classList.contains('active')) return;
-    if (runInFlight) return;
-    closeModal();
-  });
+  // ⭐ NEITHER THE BACKDROP NOR ESCAPE CLOSES THIS MODAL. Both listeners are gone rather
+  // than made conditional: a condition here is a condition to get wrong later, and the two
+  // previous versions of this guard were each wrong in a different direction. The sibling
+  // import modals have no such listeners either — see the convention above.
+  // Cancel (every phase) and Done (summary) are the ways out.
   // Expose so the empty-state link and the single-source picker modal's
   // secondary "Bulk import from a folder" link can start the bulk-import
   // flow without reaching into this IIFE.
