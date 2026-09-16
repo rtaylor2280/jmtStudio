@@ -43463,7 +43463,6 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
         let _colorText = '';
         let _colorIsDefault = false;
         let _hardcodedInfo = null; // { matchStr, matchIndex } when color is hardcoded in expr
-        let _colorScale = null;    // [B-078] '8' | '16' | null when not knowable
 
         // [B-060] ONE LADDER, SHARED WITH _resolveSlotColor. This path used to carry
         // its own copy, which is exactly how the card and the detail view ended up
@@ -43474,7 +43473,6 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
           _rgb16          = _pick.rgb16;
           _hardcodedInfo  = _pick.hardcodedInfo;
           _colorIsDefault = _pick.colorIsDefault;
-          _colorScale     = _pick.scale;
         }
 
         if (_rgb16) {
@@ -43527,32 +43525,18 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
           // whole slot would churn their config and produce diff noise in lines they
           // never edited.
           //
-          // ⭐ BUT LEAVING THE TEXT ALONE DOES NOT ADDRESS THE COST, which is not the
-          // mixing itself: advice in this community is given in 8-bit, and "try around
-          // 100" dropped into a 16-bit slot is 100/65535 — black. The user cannot tell
-          // which scale they are looking at from the number alone, and the app itself
-          // writes three forms (Rgb, Rgb16, and a named colour like Green).
-          //
-          // So the file is untouched and the SCALE is made visible. Only when it is
-          // knowable: a named colour has no scale, and CSV values under 256 could be
-          // either, so both stay silent rather than guess.
-          // ⚠️ THE RESOLVED COLOUR'S SCALE IS NOT ENOUGH, and this entry's own repro is
-          // why. After picking green, the slot read
-          //     AudioFlicker<Green, Rgb16<30000,0,0>>
-          // where the colour that RESOLVES is a name with no scale at all — while a
-          // 16-bit literal sits in plain sight beside it. Mixed scales in one
-          // expression is the reported fault, so the tag follows what is VISIBLE in the
-          // slot, not only what the ladder happened to answer with.
-          const _has16 = _colorScale === '16' || /\bRgb16\s*</.test(slot.expr || '');
-          if (_has16) {
-            const _scaleTag = document.createElement('span');
-            _scaleTag.className = 'preset-slot-color-scale';
-            _scaleTag.textContent = '16-bit';
-            _scaleTag.title = 'Some numbers in this slot are written in 16-bit (0–65535). '
-                            + 'Advice you find online is usually 8-bit (0–255) — the same '
-                            + 'number means a much darker colour here.';
-            colorRow.appendChild(_scaleTag);
-          }
+          // ⚠️ THE "16-bit" SCALE TAG WAS REMOVED 2026-09-15, UNBUILT RATHER THAN RETUNED.
+          // It rendered next to the colour name on every slot whose value came from a
+          // colour ARGUMENT - and colour arguments in ProffieOS must be 16-bit to work at
+          // all. So on that surface the tag stated a constant: always true, never
+          // informative, and sitting where it read as a property of the colour ("Green
+          // 16-bit") rather than of the numbers.
+          // It also made this entry's "second surface" claim false: a CSV argument cannot
+          // carry MIXED scales, because it only has one. Mixing is possible only in the
+          // expression BODY, where a hand-written Rgb16 can sit beside an Rgb the picker
+          // wrote - which is the 2026-08-17 repro and involves no argument.
+          // ⭐ And it was never asked for. It was this entry's own proposed third option,
+          // written up as the settled answer. See [B-078].
           body.appendChild(colorRow);
         }
       }
@@ -45705,12 +45689,27 @@ function _getFreshFieldRange(fieldName) {
             if (sw._gsCtrl && _c) sw._gsCtrl.setColor(_c);
             else sw.style.background = _colorArgToCSS(currentColorArg);
           };
+          // [B-078] THE SAME LABEL THE FIRST RENDER USED. This path wrote the raw CSV
+          // ("0,65535,0") while the initial render writes colorLabel() ("Green"), so the
+          // slot showed a friendly name until this updater ran and then showed numbers -
+          // reported as "some were showing the rgb value rather than the word green". Two
+          // render paths disagreeing about one slot, which is the same fault [B-060] fixed
+          // for the colour itself. (2026-09-15)
+          const _argLabel = (() => {
+            const p = String(currentColorArg).split(',').map(s => parseInt(s.trim(), 10));
+            return (p.length === 3 && p.every(Number.isFinite) && window.proffieArgs)
+              ? window.proffieArgs.colorLabel(p[0], p[1], p[2])
+              : currentColorArg;
+          })();
           if (colorRow) {
             const sw = colorRow.querySelector('.preset-slot-color-swatch');
             if (sw) _updateTileSwatch(sw);
-            const tn = colorRow.lastChild;
-            if (tn && tn.nodeType === Node.TEXT_NODE) tn.textContent = currentColorArg;
-            else colorRow.appendChild(document.createTextNode(currentColorArg));
+            // ⚠️ FIND THE TEXT NODE, do not assume it is last. While the 16-bit tag existed
+            // lastChild was that span, so this fell to the else and APPENDED - painting
+            // "Green 16-bit 0,65535,0" in one row instead of replacing the label.
+            const tn = Array.from(colorRow.childNodes).find(n => n.nodeType === Node.TEXT_NODE);
+            if (tn) tn.textContent = _argLabel;
+            else colorRow.appendChild(document.createTextNode(_argLabel));
             colorRow.style.display = '';
           } else {
             const newRow = document.createElement('span');
@@ -45719,7 +45718,7 @@ function _getFreshFieldRange(fieldName) {
             sw.className = 'preset-slot-color-swatch';
             sw.style.background = _colorArgToCSS(currentColorArg);
             newRow.appendChild(sw);
-            newRow.appendChild(document.createTextNode(currentColorArg));
+            newRow.appendChild(document.createTextNode(_argLabel));
             const bodyEl = tile.querySelector('.preset-slot-body');
             const exprEl = tile.querySelector('.preset-slot-expr');
             if (bodyEl && exprEl) exprEl.after(newRow);
