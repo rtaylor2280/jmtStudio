@@ -2782,7 +2782,22 @@
   .sf-voicepack-fallback { font-size: 0.72rem; color: var(--c-text-sub); margin-top: 6px; line-height: 1.5; }
   .sf-voicepack-fallback a { color: var(--jmt-blue); text-decoration: underline; }
   .sf-voicepack-fallback a:hover { color: #036bb8; }
-  .sf-import-progress-label { font-size: 0.85rem; color: var(--c-text); margin: 8px 0; }
+  /* ⭐ [B-293] A PROGRESS LABEL NEVER WRAPS EITHER. Same rule as the detail line
+     beneath it: "a line that is supposed to show files flying by... shouldn't be
+     possible and always truncate." The plain form truncates whole. */
+  .sf-import-progress-label { font-size: 0.85rem; color: var(--c-text); margin: 8px 0;
+     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* ⚠️ BUT TRUNCATING THE WHOLE LINE EATS THE WRONG END. Four of these labels put the
+     count or the byte metric AFTER the name - "Copying <name> · 3 of 8" - so a plain
+     ellipsis loses exactly the part the user needs. The parts form lets ONLY the name
+     shrink: fixed segments hold their width, the name takes the ellipsis.
+     `min-width: 0` on the name is load-bearing; without it a flex item refuses to
+     shrink below its content and the whole row overflows instead. */
+  .sf-import-progress-label.has-parts { display: flex; align-items: baseline; min-width: 0;
+     text-overflow: clip; }
+  .sf-import-progress-label.has-parts > .sf-prog-label-fixed { flex: 0 0 auto; white-space: pre; }
+  .sf-import-progress-label.has-parts > .sf-prog-label-name  { flex: 0 1 auto; min-width: 0;
+     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* Item-name line lives between the label and the bar in the backup
      progress modal. white-space:nowrap + overflow:hidden + ellipsis
      keeps the modal width stable even when names flash through long
@@ -2802,7 +2817,14 @@
      this row during rollback. An !important on display here would
      fight that. Other properties stay !important to win over the
      global .modal p / .sf-import-progress-detail rules. */
-  #modal-sf-backup-progress .sf-backup-progress-item-name { font-size: 0.78rem !important; color: var(--c-text-sub) !important; margin: 0 0 20px 0 !important; white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important; min-height: 1em !important; max-height: 1.4em !important; width: 100% !important; max-width: 100% !important; box-sizing: border-box !important; word-break: keep-all !important; overflow-wrap: normal !important; }
+  /* ⭐ [B-293] LAYOUT ONLY. The wrap half of this rule - white-space, overflow,
+     text-overflow, word-break, overflow-wrap - was five !importants doing what the
+     shared progress-line component already does, and the element now carries that
+     class. What is left is genuinely local: a smaller face, its own margin, and a
+     single-line height pin. ⚠️ These stay !important because `.modal p` outranks a
+     bare class on font/colour/margin; the WRAP guarantee needs no !important because
+     `.modal p.sf-import-progress-detail` beats it honestly. */
+  #modal-sf-backup-progress .sf-backup-progress-item-name { font-size: 0.78rem !important; color: var(--c-text-sub) !important; margin: 0 0 20px 0 !important; min-height: 1em !important; max-height: 1.4em !important; width: 100% !important; max-width: 100% !important; box-sizing: border-box !important; }
   /* ✅ [B-293] The per-modal clamp that used to sit here is DELETED. It was five
      !importants doing what `.modal p.sf-import-progress-detail` now does for every
      progress modal at once, and the bulk modal had the same disease without the same
@@ -2867,8 +2889,6 @@
   /* Stable single-line height even while empty, so the modal never shifts. */
   #sf-bulk-progress-detail { line-height: 1.25; min-height: 1.25em; max-height: 1.25em; overflow: hidden; }
   #sf-create-progress-detail { line-height: 1.25; min-height: 1.25em; max-height: 1.25em; overflow: hidden; }
-  #sf-bulk-progress-detail .sf-exp-file { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  #sf-bulk-progress-detail .sf-exp-size { display: block; color: var(--c-text-sub); }
   /* Slightly wider than the default modal so long font paths rarely truncate. */
   #modal-sf-bulk-progress .modal { max-width: 460px; }
   /* [B-296] Sits inline after the headline count, dimmed: it qualifies the number
@@ -2929,10 +2949,16 @@
     font-size: 0.74rem; color: var(--c-text-sub); line-height: 1.4;
   }
   .sf-needs-review-reasons li { margin-top: 2px; }
-  /* Backup export/restore stream long zip-entry paths through the detail
-     line; without a stable 2-line allotment the modal pumps up and down on
-     every wrap/unwrap. Fixed line-clamped box keeps the chrome still. */
-  #sf-backup-progress-detail { min-height: 2.4em; line-height: 1.2; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  /* ⭐ [B-293] ONE LINE, LIKE EVERY OTHER PROGRESS DETAIL. His rule, 2026-09-16:
+     "I don't understand why we'd ever wrap to two lines. all should be one lines."
+     This used to reserve a 2-line clamped box, and its reasoning was real but solved
+     the wrong problem: backup streams long zip-entry paths, and without a stable
+     allotment the modal pumped up and down on every wrap. A TRUNCATED one-liner has a
+     fixed height too - so one line stops the pumping AND stops this modal being the
+     one that behaves differently.
+     ⚠️ The ID rule is gone entirely rather than rewritten: `.modal p.sf-import-progress-detail`
+     already governs every progress detail line, and this element carries that class.
+     Re-adding an ID rule here is how the two diverge again. */
   /* Merge-plan conflict list — one row per conflicting item, grouped by
      category. Each row shows name + current/backup info + 2-or-3 way
      radio. Bulk "set all" buttons per category sit at the group header. */
@@ -6659,7 +6685,7 @@
          elapsed time so the user reads one cohesive status line
          instead of two separate stats. -->
     <p class="sf-import-progress-label" id="sf-backup-progress-label">Preparing…</p>
-    <p class="sf-backup-progress-item-name" id="sf-backup-progress-item-name">&nbsp;</p>
+    <p class="sf-import-progress-detail sf-backup-progress-item-name" id="sf-backup-progress-item-name">&nbsp;</p>
     <div class="sf-import-progress-track">
       <div class="sf-import-progress-bar" id="sf-backup-progress-bar" style="width:0%"></div>
     </div>
@@ -10197,6 +10223,36 @@ async function _pickCardOrFolder() {
 //
 // Rule lives in local/ui-conventions.md, "A bar always reaches 100% before it moves
 // on". [B-389] audits every other progress surface against it.
+// ── [B-293] A PROGRESS LABEL IS FIXED TEXT + A NAME + FIXED TEXT ───────────
+//
+// Only the NAME may truncate. "Copying <90 characters of font name> · 3 of 8" must lose
+// the name, never the count - the count is why the line is being read.
+//
+// ⚠️ BUILT WITH DOM NODES, NOT innerHTML. The name is user data (a font or folder name
+// off a card), and a template string into innerHTML is an injection waiting for someone
+// to name a font with a bracket in it. textContent on each span escapes by construction.
+function setProgLabel(el, before, name, after) {
+  if (!el) return;
+  const mk = (text, cls) => {
+    const s = document.createElement('span');
+    s.className = cls;
+    s.textContent = text;
+    return s;
+  };
+  el.textContent = '';
+  el.classList.add('has-parts');
+  if (before) el.appendChild(mk(before, 'sf-prog-label-fixed'));
+  el.appendChild(mk(name == null ? '' : String(name), 'sf-prog-label-name'));
+  if (after) el.appendChild(mk(after, 'sf-prog-label-fixed'));
+}
+// A label with no name in it goes back to the plain form, or the flex class lingers and
+// the next plain assignment renders as a single unshrinkable item.
+function setProgLabelPlain(el, text) {
+  if (!el) return;
+  el.classList.remove('has-parts');
+  el.textContent = text;
+}
+
 function makeBarPhaser(getEl, holdMs = 260) {
   let held = false, pending = null, timer = null;
   const paint = (w) => { const el = getEl(); if (el) el.style.width = w; };
@@ -13566,9 +13622,12 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     const _aT0 = Date.now();
     // A tracks-only plan has no fonts to count, so "Analyzing fonts · 0 of 0" would
     // be both wrong and alarming. [B-281]
-    if (els.progLabel) els.progLabel.textContent = total === 0
+    // ⚠️ [B-293] Through the helper, not textContent: this element also takes the PARTS
+    // form later in the run, and a raw write would leave `has-parts` on it - a flex row
+    // holding one unshrinkable item.
+    setProgLabelPlain(els.progLabel, total === 0
       ? 'Checking these tracks against your library'
-      : `Analyzing fonts · 0 of ${total}`;
+      : `Analyzing fonts · 0 of ${total}`);
     if (els.progBar) els.progBar.style.width = '0%';
     if (els.progDetail) els.progDetail.textContent = '';
     if (els.progElapsed) els.progElapsed.textContent = `${_fmtDurA(0)} elapsed`;
@@ -13618,19 +13677,19 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         _aIdx = data.sourceIdx; _aPass = 0;
         _aLabel = data.label || '';
         _aSetBar(0, _aIdx);
-        if (els.progLabel) els.progLabel.textContent = `Analyzing fonts · ${_aIdx + 1} of ${total}`;
+        if (els.progLabel) setProgLabelPlain(els.progLabel, `Analyzing fonts · ${_aIdx + 1} of ${total}`);
         if (els.progDetail) els.progDetail.textContent = _aLabel;
       } else if (data.stage === 'match-start' && data.sourceIdx != null) {
         // Second pass. It keeps its own label — the 2026-08-31 finding that a bar with
         // no changing label reads as hung still holds — but no longer its own bar.
         _aIdx = data.sourceIdx; _aPass = 1;
         _aSetBar(1, _aIdx);
-        if (els.progLabel) els.progLabel.textContent = `Checking your library · ${_aIdx + 1} of ${total}`;
+        if (els.progLabel) setProgLabelPlain(els.progLabel, `Checking your library · ${_aIdx + 1} of ${total}`);
         if (els.progDetail) els.progDetail.textContent = data.label || '';
       } else if (data.stage === 'enrich-start' && data.sourceIdx != null) {
         _aIdx = data.sourceIdx; _aPass = 2;
         _aSetBar(2, _aIdx);
-        if (els.progLabel) els.progLabel.textContent = `Reading creators and previews · ${_aIdx + 1} of ${total}`;
+        if (els.progLabel) setProgLabelPlain(els.progLabel, `Reading creators and previews · ${_aIdx + 1} of ${total}`);
         if (els.progDetail) els.progDetail.textContent = data.label || '';
       } else if (data.stage === 'tracks-check') {
         // A separate phase with its own denominator, so it owns the bar outright and
@@ -13642,7 +13701,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         // because this branch fires on every tracks tick, not just the first.
         if (!_aHandedOver) { _aHandedOver = true; _aBar.handover(); }
         _aFloor = 0;
-        if (els.progLabel) els.progLabel.textContent = 'Checking your shared tracks';
+        if (els.progLabel) setProgLabelPlain(els.progLabel, 'Checking your shared tracks');
         if (els.progDetail) els.progDetail.textContent = data.label || '';
         if (els.progBar && data.total) _aBar.write(`${((data.done || 0) / data.total * 100).toFixed(1)}%`);
       } else if (data.stage === 'source-progress' && data.sub) {
@@ -14222,7 +14281,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     if (els.cancelBtn) els.cancelBtn.title = runPlan.sources.length > 0
       ? 'Fonts already imported stay. Cancelling finishes the current font, then stops and discards the analysis for the rest.'
       : 'Stops this run. Nothing already copied is affected.';
-    els.progLabel.textContent = 'Starting…';
+    setProgLabelPlain(els.progLabel, 'Starting…');
     els.progBar.style.width = '0%';
     // Elapsed clock: independent 1s tick so the user sees motion even
     // during a phase that doesn't emit progress events (a giant single
@@ -14324,7 +14383,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         // Initial verb is "Inspecting" — that's what we do first (hash
         // the archive to dedup-check). Source-progress events will swap
         // to Copying / Importing / Skipping as the actual stage advances.
-        els.progLabel.textContent = `Inspecting ${data.label || ''}`;
+        setProgLabel(els.progLabel, 'Inspecting ', data.label || '', '');
         renderOverallLine();
       } else if (data.stage === 'source-progress') {
         if (data.sub) {
@@ -14363,11 +14422,11 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
             metricStr = `${Math.floor(data.sub.percent)}%`;
           }
           if (data.sub.stage === 'skipped') {
-            els.progLabel.textContent = `${verb} ${data.label || ''} (Already in library)`;
+            setProgLabel(els.progLabel, `${verb} `, data.label || '', ' (Already in library)');
           } else if (metricStr) {
-            els.progLabel.textContent = `${verb} ${data.label || ''} · ${metricStr}`;
+            setProgLabel(els.progLabel, `${verb} `, data.label || '', ` · ${metricStr}`);
           } else {
-            els.progLabel.textContent = `${verb} ${data.label || ''}`;
+            setProgLabel(els.progLabel, `${verb} `, data.label || '', '');
           }
           // Bar only advances when we have a within-source percent
           // (hash/copy phases). Extract phase holds the bar where copy
@@ -14395,7 +14454,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         if (_runSawSources && !_runHandedToCommons) { _runHandedToCommons = true; _runBar.handover(); }
         _runSawCommons = true;
         _runBar.write(`${(((data.commonIdx || 0) / nC) * 100).toFixed(1)}%`);
-        els.progLabel.textContent = `Importing common folder ${data.label || ''}${nC > 1 ? ` · ${(data.commonIdx || 0) + 1} of ${nC}` : ''}`;
+        setProgLabel(els.progLabel, 'Importing common folder ', data.label || '', nC > 1 ? ` · ${(data.commonIdx || 0) + 1} of ${nC}` : '');
       } else if (data.stage === 'common-progress' && data.sub) {
         // Within-common byte progress from the source pipeline ([B-352]).
         const nC = Math.max(1, data.totalCommons || 1);
@@ -14407,7 +14466,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         const verb = verbs[data.sub.stage] || 'Importing';
         const metric = (data.sub.bytes != null && data.sub.totalBytes)
           ? ` · ${_fmtB(data.sub.bytes)} / ${_fmtB(data.sub.totalBytes)}` : '';
-        els.progLabel.textContent = `${verb} common folder ${data.label || ''}${metric}`;
+        setProgLabel(els.progLabel, `${verb} common folder `, data.label || '', metric);
       } else if (data.stage === 'tracks-start') {
         // Tracks are copied AFTER every font source, so on a mixed card the bar is
         // already at 100% of the font work by now. On a tracks-only import there
@@ -14419,7 +14478,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         if ((_runSawSources || _runSawCommons) && !_runHandedToTracks) {
           _runHandedToTracks = true; _runBar.handover();
         }
-        els.progLabel.textContent = 'Copying shared tracks…';
+        setProgLabelPlain(els.progLabel, 'Copying shared tracks…');
       } else if (data.stage === 'tracks-progress') {
         const t = Math.max(1, data.total || 1);
         const pct = Math.min(100, ((data.done || 0) / t) * 100);
@@ -14428,13 +14487,13 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         }
         _runBar.write(`${pct.toFixed(1)}%`);
         lastOverallPct = pct;
-        els.progLabel.textContent = `Copying ${data.label || 'shared tracks'} · ${data.done} of ${t}`;
+        setProgLabel(els.progLabel, 'Copying ', data.label || 'shared tracks', ` · ${data.done} of ${t}`);
         renderOverallLine();
       } else if (data.stage === 'done') {
         _runBar.write('100%');
         lastOverallIdx = total;
         lastOverallPct = 100;
-        els.progLabel.textContent = 'Done';
+        setProgLabelPlain(els.progLabel, 'Done');
         renderOverallLine();
       }
     });
@@ -14679,7 +14738,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
   els.cancelBtn?.addEventListener('click', () => {
     if (runInFlight) {
       window.electronAPI.bulkImportCancel?.();
-      els.progLabel.textContent = 'Cancelling… (finishing current source)';
+      setProgLabelPlain(els.progLabel, 'Cancelling… (finishing current source)');
       return;
     }
     // Cancel abandons the import and returns to the card browser (the step-aside
