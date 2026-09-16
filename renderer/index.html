@@ -7084,6 +7084,10 @@ function setFileOpen(open) {
   // Save/Compare/Close, config banner) so only the ways into a config + live
   // board/toolchain info remain. CSS does the hiding via .js-config-only.
   document.body.classList.toggle('no-config', !open);
+  // The SN indicator compares the connected board against the OPEN CONFIG's flash, so opening
+  // or closing a file changes its answer. Re-read here, next to the one writer of that state,
+  // or a mismatch flagged for the previous config stays red over an empty editor. (2026-09-15)
+  updateSnIndicator();
   document.getElementById('empty-state').classList.toggle('visible', !open);
   // Only show the config editor row when the user is actually on the
   // config tab. If they've switched away to Style Library / Sound Fonts
@@ -8729,15 +8733,27 @@ window.updateChangedIndicators = updateChangedIndicators;
 // the current board, not during file-load transitions where metaBoardSN is mid-update.
 function updateSnIndicator() {
   const snDisplay      = document.getElementById('bp-board-display');
-  const rawConnectedSN = (snDisplay?.value || '').replace(/^SN:\s*/i, '');
+  if (!snDisplay) return;
+
+  // ⚠️ WITH NO CONFIG OPEN THERE IS NOTHING TO COMPARE AGAINST, so this must say nothing.
+  // `getLastFlashedSN()` is SESSION state and outlives the config that produced it, so after
+  // closing a file the field went red and hovered "Last flashed X, connected Y" over an empty
+  // editor - a mismatch between a board and no config at all. The question this indicator
+  // answers is "is the connected board the one THIS CONFIG was flashed to", and with no config
+  // there is no question. `.no-config` on <body> is the existing single signal for that, set by
+  // setFileOpen. (2026-09-15)
+  if (document.body.classList.contains('no-config')) {
+    snDisplay.classList.remove('field-changed');
+    snDisplay.removeAttribute('title');
+    return;
+  }
+
+  const rawConnectedSN = (snDisplay.value || '').replace(/^SN:\s*/i, '');
   const lastFlashedSN  = window.getLastFlashedSN?.() || window.getMetaBoardSN?.() || null;
   const snMismatch = lastFlashedSN && rawConnectedSN && rawConnectedSN !== lastFlashedSN;
-  if (snDisplay) {
-    snDisplay.classList.toggle('field-changed', !!snMismatch);
-    snDisplay.title = snMismatch
-      ? `Last flashed: SN: ${lastFlashedSN} — connected: SN: ${rawConnectedSN}`
-      : '';
-  }
+  snDisplay.classList.toggle('field-changed', !!snMismatch);
+  if (snMismatch) snDisplay.title = `Last flashed SN: ${lastFlashedSN}, connected SN: ${rawConnectedSN}`;
+  else snDisplay.removeAttribute('title');
 }
 window.updateSnIndicator = updateSnIndicator;
 
