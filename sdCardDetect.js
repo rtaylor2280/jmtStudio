@@ -561,17 +561,24 @@ function classifyFileBuffer(buf, relPath) {
 // so a caller can report it identically wherever it fired.
 // ── May this file be carried out of the managed store? ([B-368]) ────────────────
 //
-// The EXPORT doors ask this rather than checkExecutable*, because two different things
+// The EXPORT doors ask this rather than checkExecutable*, because THREE different things
 // must not be carried and only one of them is a program:
 //   'program' — a threat. Something put it there; it is removed.
+//   'macro'   — a document that can carry macros. Allowed in exactly one place, proof of
+//               purchase, so anywhere else it "got there not by us" — the same argument
+//               as a program, which is why it is blocked and not merely noted.
 //   'opaque'  — an archive we cannot open. NOT a threat claim: "we can't say that they
 //               ARE a problem, but we also can't read them, so we don't know." It stays
 //               out because it does nothing on a card either way.
 // The kinds stay separate all the way to the screen, because the copy for a threat and
 // the copy for dead weight are not interchangeable.
 //
-// Macros are deliberately absent: they are readable by the user and have a legitimate
-// reason to sit beside a font.
+// ⚠️ THIS PARAGRAPH USED TO SAY MACROS WERE "DELIBERATELY ABSENT" HERE. That was true
+// until his policy landed on 2026-09-11 and the `macro` branch below was added, and the
+// stale sentence outlived it — long enough to send a reader (me, 2026-09-16, building
+// export fixtures) looking for a bug in a predicate that was behaving correctly. The list
+// above and the branches below have to be read as one thing; if a kind is added, it
+// belongs in both.
 function checkCarryable(buf, relPath) {
   const v = classifyFileBuffer(buf, relPath);
   if (v.kind === 'program') {

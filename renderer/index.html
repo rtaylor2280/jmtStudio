@@ -32863,15 +32863,27 @@ require(['vs/editor/editor.main'], function () {
         _sfDeleteProgress.show(ref.length === 1 ? 'Removing 1 file' : `Removing ${ref.length} files`,
           'Checking where else it is stored…');
         for (const x of ref) {
-          const relPath = String(x.relPath || x.name || '');
+          // ⚠️ [B-394] `_itemRel` wins when present. A backup's refusal records a path
+          // relative to the BUCKET so the report can say where it came from, but the
+          // removal module addresses files relative to the ITEM's own root. Same override
+          // shape as _kind/_id below - the batch carries what the store needs.
+          const relPath = String(x._itemRel || x.relPath || x.name || '');
           if (!relPath) continue;
           const oKind = x._kind || kind;
           const oId   = x._id   != null ? x._id : id;
           let r;
           try { r = await window.electronAPI.sfProgramImpound({ kind: oKind, id: oId, relPath }); }
           catch (err) { r = { ok: false, error: String(err && err.message || err) }; }
-          if (r && r.ok) held.push({ token: r.token, name: (String(relPath).split('/').pop() || relPath),
-            kind: r.kind || x.kind, disguised: r.disguised || x.disguised });
+          // ⚠️ ONE TOKEN IS ONE FINDING, however many names it wore ([B-394]). A hardlinked
+          // file refused once per bucket resolves to a single impound, and the second record
+          // comes back `alreadyImpounded` against the SAME token. Pushing it twice would copy
+          // one file into the quarantine folder twice and count one program as two.
+          if (r && r.ok) {
+            if (!held.some(h => h.token === r.token)) {
+              held.push({ token: r.token, name: (String(relPath).split('/').pop() || relPath),
+                kind: r.kind || x.kind, disguised: r.disguised || x.disguised });
+            }
+          }
           else failed.push({ name: (String(relPath).split('/').pop() || relPath), error: (r && r.error) || 'unknown error' });
         }
         await _sfDeleteProgress.hide();
@@ -38970,8 +38982,12 @@ require(['vs/editor/editor.main'], function () {
         // user can verify what was actually packaged matched what was
         // promised), and the total wall-clock time. Pulls counts from
         // the survey captured at prep time; elapsed from the local
-        // startMs marker set at the top of this function.
-        const finalElapsedSec = (Date.now() - startMs) / 1000;
+        // ⚠️ [B-395] `state.startMs`, NOT a bare `startMs`. This function has no such
+        // variable - the clock lives on the state object shared with the 1s tick. The
+        // bare read threw a ReferenceError at the END of a SUCCESSFUL export, so the
+        // completion dialog never rendered and nothing after it ran. Four sibling sites
+        // declare `const startMs` locally; this one alone did not.
+        const finalElapsedSec = (Date.now() - state.startMs) / 1000;
         const cs = survey && survey.counts;
         const totalSize = _sfFormatBytesShort(survey ? survey.totalBytes : 0);
         const summaryLine = cs
@@ -38983,6 +38999,27 @@ require(['vs/editor/editor.main'], function () {
           summaryLine,
           elapsedLine,
         ].filter(Boolean).join('\n\n');
+        // ⚠️⚠️ [B-394] A BACKUP THAT REFUSES A FILE MUST ACT ON IT, NOT WALK AWAY.
+        // exportBackup has always RETURNED `refused`; this path read only ok/error and
+        // dropped it, so a program in the library was silently left out of the archive
+        // and the user was told nothing. Every other door - right-click export, whole-
+        // font export, common, shared tracks, source close-out - already impounds and
+        // reports ([B-364]). Backup was simply never wired up, and it is the ONLY path
+        // that walks the entire managed store, so it is also the only full sweep there
+        // is: a library predating the guards can hold findings no per-operation door
+        // ever tested.
+        // ⭐ FOLD THE COMPLETION INTO THAT DIALOG rather than showing two ([B-370], his
+        // call: "done and continue are to be replaced, combine into one message"). The
+        // refusal dialog removes FIRST and reports second, so there is no answer - not
+        // even closing the app - that leaves one in the library.
+        const _bkRefused = (result && result.refused) || [];
+        if (_bkRefused.length) {
+          await _sfShowProgramRefusal({
+            refused: _bkRefused,
+            prefixHtml: `<div>${_sfEscape(completionMessage).replace(/\n/g, '<br>')}</div>`,
+          });
+          return true;
+        }
         await promptConfirm({
           title: 'Export complete',
           message: completionMessage,

@@ -262,13 +262,62 @@ function holdingRoot(userData) {
   return path.join(userData, 'soundFonts', '_impound');
 }
 
+// ⚠️⚠️ A SECOND NAME FOR A FILE WE ALREADY SWEPT IS NOT A FAILURE ([B-394], his export
+// 2026-09-16). The content-addressed store HARDLINKS one file into several buckets, and
+// `_unlinkAndSweep` deliberately removes EVERY name `_findAllNames` can reach — leaving one
+// behind would leave the program in the library. So a batch that refused the same file once
+// per bucket arrives here a second time pointing at a path the FIRST call already removed,
+// `resolveManagedFile` says "File not found", and the honest outcome gets reported as
+// "1 could not be removed".
+//
+// ⭐ THAT IS THE WORST POSSIBLE DIRECTION FOR THIS LIE. It tells the user a program survived
+// in their library — the one outcome we can actually prove did not happen. His dialog said
+// exactly that about "8.21打印.rar" while BOTH of its names were already gone: one quarantine
+// file, two paths in its `Found in:`, and a clean store.
+//
+// Answered from the holding area rather than from a caller-side "already swept" set, because
+// the hardlink knowledge lives HERE. A renderer batch cannot know two records share an inode,
+// and the import path has no bucket to compute a comparable path from.
+function _alreadyImpounded(userData, kind, id, relPath) {
+  const root = _managedRoot(userData, kind, id);
+  if (!root) return null;
+  const sfRoot = path.resolve(path.join(userData, 'soundFonts'));
+  const want = path.relative(sfRoot,
+    path.resolve(path.join(root, String(relPath).replace(/\//g, path.sep))))
+    .split(path.sep).join('/');
+  const hold = holdingRoot(userData);
+  let tokens;
+  try { tokens = fs.readdirSync(hold, { withFileTypes: true }); } catch { return null; }
+  for (const t of tokens) {
+    if (!t.isDirectory()) continue;
+    let f;
+    try { f = JSON.parse(fs.readFileSync(path.join(hold, t.name, 'finding.json'), 'utf8')); }
+    catch { continue; }
+    if (Array.isArray(f.foundAt) && f.foundAt.includes(want)) return { token: t.name, finding: f };
+  }
+  return null;
+}
+
 // Remove a program from the store and park its bytes. Returns a token the caller hands
 // back if the user decides to keep a copy.
 function impoundProgram(userData, { kind, id, relPath } = {}) {
   const zr = _zipFormatRefusal(userData, kind, id);
   if (zr) return zr;
   const r = resolveManagedFile(userData, kind, id, relPath);
-  if (!r.ok) return r;
+  if (!r.ok) {
+    // Only "File not found" can be a prior sweep. An escaping path or an unknown kind is a
+    // real error and still has to surface as one.
+    const prior = r.error === 'File not found' && _alreadyImpounded(userData, kind, id, relPath);
+    if (prior) {
+      const f = prior.finding || {};
+      // nameCount 0: this call removed nothing. The sweep that DID is already counted.
+      return { ok: true, impounded: true, alreadyImpounded: true, token: prior.token,
+        relPath: String(relPath), name: String(relPath).split('/').pop(),
+        sha256: f.sha256, size: f.size, nameCount: 0,
+        disguised: f.disguised, kind: f.kind };
+    }
+    return r;
+  }
   const c = _confirmProgram(r.absPath, relPath);
   if (!c.ok) return c;
 

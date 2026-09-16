@@ -292,7 +292,24 @@ async function exportBackup({
           if (bucket !== 'attachments') {
             const v = checkCarryableFile(fileAbs, it.name);
             if (v.blocked) {
-              refused.push({ relPath: path.relative(root, fileAbs).split(path.sep).join('/'),
+              // ⚠️⚠️ [B-394] CARRY THE MANAGED IDENTITY, or this finding can only be
+              // reported and never acted on. soundFontRemoval addresses a file as
+              // (kind, id, relPath) against its OWN root, and those roots are not the
+              // bucket root this relPath is relative to:
+              //     entry  -> library/<id>          common -> common/<id>/files
+              //     source -> sources/<id>/source   sharedTracks -> sharedTracks
+              // So strip the top-level segment, and for source/common the store's own
+              // subdirectory too. _sfImpoundRefusals already honours a per-record
+              // _kind/_id, so a whole-library batch needs nothing new on the renderer.
+              const _relFromRoot = path.relative(root, fileAbs).split(path.sep).join('/');
+              const _segs = _relFromRoot.split('/');
+              const _topId = _segs.shift();
+              if ((bucket === 'sources' && _segs[0] === 'source')
+                  || (bucket === 'common' && _segs[0] === 'files')) _segs.shift();
+              const _kind = bucket === 'library' ? 'entry'
+                          : bucket === 'sources' ? 'source'
+                          : bucket === 'common'  ? 'common' : null;
+              refused.push({ relPath: _relFromRoot, _kind, _id: _topId, _itemRel: _segs.join('/'),
                 name: it.name, kind: v.kind, reason: v.reason, disguised: !!v.disguised });
               refusedAbs.add(fileAbs);
               continue;
@@ -339,7 +356,7 @@ async function exportBackup({
         const fAbs = path.join(stRoot, f.name);
         const v = checkCarryableFile(fAbs, f.name);
         if (v.blocked) {
-          refused.push({ relPath: f.name, name: f.name, kind: v.kind,
+          refused.push({ _kind: 'sharedTracks', _id: '', _itemRel: f.name, relPath: f.name, name: f.name, kind: v.kind,
             reason: v.reason, disguised: !!v.disguised });
           refusedAbs.add(fAbs);
           continue;
@@ -366,7 +383,35 @@ async function exportBackup({
   const sfEntriesMod = require('./soundFontEntries');
   const sfCommonMod = require('./soundFontCommon');
   const sfSourcesMod = require('./soundFontSources');
+  // ⚠️⚠️ [B-394] THE HASH MUST DESCRIBE WHAT THE ARCHIVE CARRIES, NOT WHAT IS ON DISK.
+  //
+  // The cached per-item hashes below are computed over the WHOLE tree. The count pass
+  // above DECLINES blocked files (checkCarryableFile) and they never reach the zip. So
+  // for any item holding a refused file the cached hash described a SUPERSET of the
+  // archive - permanently, for that backup - and every later import reported a phantom
+  // conflict on an item whose files are byte-identical. Found 2026-09-16 when a Replace
+  // still read "2 differ" against a library it had just written itself.
+  //
+  // ⭐ ONLY ITEMS THAT ACTUALLY LOST A FILE PAY FOR IT. With nothing declined the whole
+  // tree IS the archive, so the cached hash is already correct and the fast path stands.
+  // ⚠️ refusedAbs is complete before this runs: the decline loop is synchronous and ends
+  // at the top of exportBackup; hashPhaseBucket is awaited long after it.
+  const _refusedUnder = (abs) => {
+    const prefix = abs.endsWith(path.sep) ? abs : abs + path.sep;
+    for (const r of refusedAbs) if (r.startsWith(prefix)) return true;
+    return false;
+  };
+  // Hash the CARRIED set through the SAME canonical serialization as the cached path -
+  // identical records in, identical digest out - so a clean item hashes the same either
+  // way and only a refusal changes the answer.
+  const _carriedHash = (abs) => {
+    const { collectFileRecords, hashRecords } = require('./soundFontFileHash');
+    const keep = (rel) => !refusedAbs.has(path.join(abs, rel.split('/').join(path.sep)));
+    const records = collectFileRecords(abs, null, keep);
+    return records === null ? null : hashRecords(records);
+  };
   const hashForItem = (bucket, name, abs) => {
+    if (bucket !== 'attachments' && _refusedUnder(abs)) return _carriedHash(abs);
     if (bucket === 'library') return sfEntriesMod.getEntryContentHash(userData, name);
     if (bucket === 'common')  return sfCommonMod.getCommonContentHash(userData, name);
     // Sources are uuid-keyed on disk and effectively immutable post-
