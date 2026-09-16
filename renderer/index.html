@@ -13591,10 +13591,17 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
           note.classList.add('have-it');
           if (row.checkbox) {
             row.checkbox.checked = false;
-            // Disabled, not merely unchecked. There is no staged copy to import:
-            // the archive hashed identical to one already in the library, so
-            // analyze deduped it rather than preparing a zip. Offering a box that
-            // cannot do anything would be worse than not offering one.
+            // ⚠️ A SUPERSEDED PARAGRAPH USED TO SIT HERE and it said the OPPOSITE of the
+            // one below — "Disabled, not merely unchecked... offering a box that cannot do
+            // anything would be worse than not offering one." That was the behaviour before
+            // his 2026-08-31 ruling; the replacement was written underneath it and the old
+            // text was never deleted, so the file argued both sides over a single line of
+            // code. Removed 2026-09-16 when he asked "thought we didn't let them check
+            // identical" and the answer depended on which half you read.
+            // ⭐ THE CODE HAS ONLY EVER DONE `checked = false`, so the paragraph below is
+            // the one describing reality. Same class as the stale `checkCarryable` comment
+            // fixed earlier today: a comment that outlives its behaviour costs a reader more
+            // than no comment would.
             // Unchecked, NOT disabled. Single import already offers "Re-import as
             // new" on an exact match (forceNewSource — a parallel copy with its own
             // number), so refusing here would make the review screen the one place
@@ -14092,7 +14099,28 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         // [B-314] Its own line. Folding it into "already in your library" would state
         // something false about the card.
         if (st.sameInBatch) rows.push(['Same font twice in this import', st.sameInBatch, false, true]);
-        const _owned = (typeof st.owned === 'number') ? st.owned : (st.duplicate || 0);
+        // ⚠️⚠️ [B-397] A REGRESSION FROM edac3cd (2026-08-31), found by him 2026-09-16 on BOTH
+        // bulk import and SD card import — they share this modal, so one line broke two doors.
+        // What this replaced, and it worked:
+        //     if (st.duplicate) rows.push(['Already in your library (skipped)', st.duplicate]);
+        //
+        // ⭐ `st.duplicate` is counted UNCONDITIONALLY in the main analyze loop (dupCount++ on
+        // the archive-hash dedup). `st.owned` is only ever incremented inside
+        // `try { buildLibraryIndex(); if (index.length) { ... } } catch {}` — and that loop also
+        // breaks on shouldCancel(). A throw, an empty index, or a cancel leaves it 0 while
+        // `duplicate` is still right.
+        //
+        // ⚠️ AND THE FALLBACK WRITTEN FOR EXACTLY THAT WAS UNREACHABLE: `stats` always returns
+        // `owned: ownedCount`, a number, so `typeof st.owned === 'number'` was always true and
+        // the `st.duplicate` branch could never run. A guard that cannot fail over is not a
+        // guard — it is a comment with syntax.
+        //
+        // ⭐ MAX, NOT `||`. The two counters OVERLAP rather than partition: an exact-archive
+        // duplicate is counted in dupCount AND again in ownedCount, which also adds
+        // content-matched fully-owned sources. So owned ⊇ duplicate whenever the pass ran, and
+        // duplicate is the floor when it did not. Summing them would double-count every
+        // duplicate; `||` would take a real 0 over a real count.
+        const _owned = Math.max(st.owned || 0, st.duplicate || 0);
         if (_owned)     rows.push(['Already in your library (skipped)', _owned]);
         if (st.corrupt) rows.push(['Corrupted (skipped)', st.corrupt, false, true]);
         // ⚠️ FROM THE SCAN, NOT THE ANALYZE ([B-214]). Executables are spotted by NAME
