@@ -7547,6 +7547,33 @@ function _commentInertDefineOnKeep() {
     showToast('MOUNT_SD_SETTING has no effect before OS8, so it was commented out.');
   }
 }
+// ── [B-170] THE MIRROR: LEAVING MASS STORAGE COMMENTS THE DEFINE OUT ────────
+//
+// Turning Mass Storage ON already offers to add or uncomment MOUNT_SD_SETTING
+// (offerMountSdSettingOnSelect). This is the same job in the other direction, and
+// his reason is about what the file TELLS ITS OWNER rather than about dead code:
+// "commenting it out so that it's not there when you don't need it and not giving
+// anybody the impression that they still have it when they don't."
+//
+// ⚠️ NO DIALOG, AND THAT IS THE CONVENTION RATHER THAN AN EXCEPTION. Confirm when it
+// destroys, toast when it does not (ui-conventions.md). Commenting a line loses
+// nothing — the line is still there and it is one Monaco undo away — so a toast is
+// the honest weight. The ON direction asks because THAT direction can corrupt a card.
+//
+// ⚠️ BUFFER ONLY. _commentOutMountSdSetting is an _atomicEdit plus setDirty; nothing
+// writes to disk. Deliberate: it keeps this clear of the unruled 09-14 finding where
+// an SD fix could write a config the user had not saved.
+//
+// This lives beside _commentInertDefineOnKeep rather than reimplementing it — same
+// edit, same flash, different sentence, because the REASON differs and the reason is
+// the only part the user reads.
+window.commentMountSdSettingOnLeave = function () {
+  if (!editor) return;
+  if (!_configHasMountSdSetting(editor.getValue())) return;   // nothing active to comment
+  if (_commentOutMountSdSetting()) {
+    showToast('MOUNT_SD_SETTING does nothing without Mass Storage, so it was commented out.');
+  }
+};
 // Enables MOUNT_SD_SETTING as one undoable Monaco edit: uncomments an existing
 // commented-out copy in place if there is one; otherwise inserts a fresh define.
 // Fresh-insert placement, best to worst: directly under an active #define

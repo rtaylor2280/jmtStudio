@@ -429,6 +429,16 @@ async function initBuildPanel() {
       window._notePreMassStorageMode?.(prevUsb); // remember what to revert to
       window.offerMountSdSettingOnSelect?.(selectedUsb);
     }
+    // [B-170] The mirror, and the point of the whole entry: leaving Mass Storage
+    // makes MOUNT_SD_SETTING dead, and a dead define reads to its owner as SD
+    // protection they do not have. Comment it out here, at the control where the
+    // choice was actually made, rather than in front of a build later.
+    // ⚠️ Same guard shape as above — only on the TRANSITION out, never on every
+    // change, or re-picking a non-MSC mode would fire it again on an already
+    // commented define.
+    if (!/msc/i.test(selectedUsb) && /msc/i.test(prevUsb || '')) {
+      window.commentMountSdSettingOnLeave?.();
+    }
     if (compileSuccess) {
       compileSuccess = false;
       _currentBuildDir = null;
