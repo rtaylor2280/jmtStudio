@@ -247,6 +247,15 @@
     return count > 0 ? count : null;
   }
 
+  // ⭐ THE ONE PLACE THAT KNOWS WHAT A STYLE WRAPPER IS CALLED. Preflight's blade-count
+  // check reads the same text as a crude second opinion and used to carry its own copy of
+  // this pattern; two hardcoded copies that must independently stay right is how they
+  // drift. It imports this instead, so the two readings differ in METHOD, not vocabulary.
+  // ⚠️ A FACTORY, NOT A SHARED REGEX OBJECT: /g carries lastIndex, and handing the same
+  // object to two consumers means one silently resumes where the other stopped.
+  const STYLE_PTR_OPEN_SRC = '\\b\\w*Style\\w*Ptr\\w*\\s*<';
+  const stylePtrOpenRe = () => new RegExp(STYLE_PTR_OPEN_SRC, 'g');
+
   // ── StylePtr extraction ────────────────────────────────────────────────────
 
   /**
@@ -314,7 +323,7 @@
     const scan = maskComments(text);
 
     // Pass 1: any Style*Ptr wrapper (see the note above on the two name shapes)
-    const re = /\b\w*Style\w*Ptr\w*\s*</g;
+    const re = stylePtrOpenRe();
     let m;
     while ((m = re.exec(scan)) !== null) {
       const openAngle = m.index + m[0].length - 1;
@@ -853,9 +862,9 @@
   // ── Export ─────────────────────────────────────────────────────────────────
 
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { parsePresets, planFollowWrites, sameExpr, extractStyleSlots, planBladeReorder, planBladeDelete, renumberLabels, renumberFollows };
+    module.exports = { parsePresets, STYLE_PTR_OPEN_SRC, stylePtrOpenRe, planFollowWrites, sameExpr, extractStyleSlots, planBladeReorder, planBladeDelete, renumberLabels, renumberFollows };
   } else {
-    root.presetParser = { parsePresets, planFollowWrites, sameExpr, extractStyleSlots, planBladeReorder, planBladeDelete, renumberLabels, renumberFollows };
+    root.presetParser = { parsePresets, STYLE_PTR_OPEN_SRC, stylePtrOpenRe, planFollowWrites, sameExpr, extractStyleSlots, planBladeReorder, planBladeDelete, renumberLabels, renumberFollows };
   }
 
 }(typeof globalThis !== 'undefined' ? globalThis : this));

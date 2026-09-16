@@ -60,24 +60,12 @@
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .split('\n').map(l => l.replace(/\/\/.*$/, '')).join('\n');
 
-  // A SECOND, CRUDER READING OF THE SAME TEXT. Deliberately not a parser — it only
-  // has to disagree. Style*Ptr<…> covers StylePtr, StyleNormalPtr, StyleFirePtr and
-  // the rest; &name covers a reference to a style declared elsewhere.
-  //
-  // ⚠️ [B-379] THE PATTERN IS `\b\w*Style\w*Ptr`, NOT `\bStyle\w*Ptr`. The variant sits
-  // in the MIDDLE for six of the seven wrapper names and at the FRONT for the seventh:
-  // `ChargingStylePtr` has no word boundary before `Style`, so the old pattern scored
-  // every charge-detect preset one style short. Measured 2026-09-13 over 1134 presets
-  // in 173 configs: 8 presets read low, every one a ChargeFont preset.
-  //
-  // ⭐ THE IMPACT WAS ZERO AND THE FIX IS STILL RIGHT. All 8 sat at a CORRECT slot
-  // count, so neither abstain moved (2 and 2, before and after). But this count exists
-  // to DISAGREE with the parser, and a counter blind in the same direction as the thing
-  // it checks is not a second opinion. Aligned with presetParser's own canonical
-  // pattern so the two readings differ in method, not in vocabulary.
+  // The crude second opinion against the parser. It reads the same text a DIFFERENT way,
+  // which is the whole value - so it borrows the parser's vocabulary rather than keeping
+  // its own copy of what a style wrapper is called. [B-379]
   const _styleTokens = raw => {
     const c = _stripForCount(raw);
-    return (c.match(/\b\w*Style\w*Ptr\w*\s*</g) || []).length + (c.match(/&\w+/g) || []).length;
+    return (c.match(_parser().stylePtrOpenRe()) || []).length + (c.match(/&\w+/g) || []).length;
   };
 
   preflight.register({

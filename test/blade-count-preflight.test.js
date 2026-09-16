@@ -353,6 +353,44 @@ BladeConfig blades[] = {{ 0, WS281XBladePtr<100, bladePin>(), CONFIGARRAY(testba
     }
   }
 
-  console.log(failures ? `\n${failures} FAILURE(S)` : '\nall blade-count check tests passed');
+  
+// ── [B-379] ONE DEFINITION OF WHAT A STYLE WRAPPER IS CALLED ───────────────
+//
+// His ruling, 2026-09-16: "it must do that. I don't want two places using their own
+// pattern and a hardcoded copy is always the worse option."
+//
+// The token count is a SECOND OPINION against the parser - it reads the same text a
+// different way, and that difference is its entire value. But differing in METHOD is
+// not the same as differing in VOCABULARY, and preflight was carrying a byte-identical
+// copy of the parser's pattern. Two copies that must independently stay right is how
+// they drift.
+{
+  const pf = fs.readFileSync(path.join(ROOT, 'renderer', 'preflight-checks.js'), 'utf8');
+  const pp = fs.readFileSync(path.join(ROOT, 'renderer', 'presetParser.js'), 'utf8');
+
+  ok('the parser owns the pattern',
+     /const STYLE_PTR_OPEN_SRC = /.test(pp) && /const stylePtrOpenRe = \(\) => new RegExp/.test(pp));
+  ok('and exports it both ways (module and global)',
+     (pp.match(/STYLE_PTR_OPEN_SRC, stylePtrOpenRe,/g) || []).length === 2);
+
+  ok('preflight uses it instead of a literal',
+     /_parser\(\)\.stylePtrOpenRe\(\)/.test(pf));
+  ok('preflight holds NO style-wrapper pattern of its own',
+     !/Style\\w\*Ptr/.test(pf),
+     'a hardcoded copy is the worse option even when it is currently identical');
+
+  // A /g regex carries lastIndex, so handing one object to two consumers means the
+  // second silently resumes where the first stopped. The factory is not decoration.
+  const parser = require(path.join(ROOT, 'renderer', 'presetParser.js'));
+  ok('the factory returns a FRESH regex each call',
+     parser.stylePtrOpenRe() !== parser.stylePtrOpenRe());
+  ok('and it still matches all seven wrapper names',
+     ['StylePtr', 'StyleNormalPtr', 'StyleFirePtr', 'StyleStrobePtr',
+      'StyleRainbowPtr', 'StyleRainBowPtr', 'ChargingStylePtr']
+       .every(n => parser.stylePtrOpenRe().test(n + '<')),
+     'six put the variant in the middle; ChargingStylePtr puts it at the front');
+}
+
+console.log(failures ? `\n${failures} FAILURE(S)` : '\nall blade-count check tests passed');
   process.exit(failures ? 1 : 0);
 })();
