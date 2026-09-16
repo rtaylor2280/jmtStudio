@@ -10179,6 +10179,48 @@ async function _pickCardOrFolder() {
   return result || null;
 }
 
+// ── [B-360] PHASE HANDOVER: A BAR ALWAYS FILLS BEFORE THE NEXT PHASE STARTS ──
+//
+// His rule, 2026-09-16, stated as a general one: "it should always flow to 100%.
+// That unresolved bar is not good UI/UX." His model is pitchers, not one picture —
+// a new phase MAY start at zero and the label says so, but no phase hands over
+// unfinished. Filling fast at the end is fine; stopping at 96% is not.
+//
+// ⚠️ WHY THIS NEEDS A TIMER AND IS NOT TWO ASSIGNMENTS. Painting 100% and then
+// immediately painting the next phase's position happens in one task, so only the
+// second one is ever rendered and the fill is invisible. handover() paints the full
+// bar and HOLDS it, buffering any write that lands during the hold and applying the
+// most recent one on release. Nothing is dropped, nothing flickers.
+//
+// ⚠️ CALL cancel() WHEN THE MODAL CLOSES, or a held bar keeps a timer alive past the
+// element it paints.
+//
+// Rule lives in local/ui-conventions.md, "A bar always reaches 100% before it moves
+// on". [B-389] audits every other progress surface against it.
+function makeBarPhaser(getEl, holdMs = 260) {
+  let held = false, pending = null, timer = null;
+  const paint = (w) => { const el = getEl(); if (el) el.style.width = w; };
+  return {
+    write(widthStr) {
+      if (held) { pending = widthStr; return; }
+      paint(widthStr);
+    },
+    handover() {
+      if (held) return;                 // already filling; a second call is a no-op
+      held = true; pending = null;
+      paint('100%');
+      timer = setTimeout(() => {
+        held = false; timer = null;
+        if (pending != null) { paint(pending); pending = null; }
+      }, holdMs);
+    },
+    cancel() {
+      if (timer) { clearTimeout(timer); timer = null; }
+      held = false; pending = null;
+    },
+  };
+}
+
 // ── SD report / file-browser overlay: drill into a card's folders and files ──
 const _sdReport = { cards: [], stack: [], card: null, textView: false, single: false, context: 'config', fontCtx: null };
 let _sdHealthJobSeq = 0; // job ids: the single-folder check is the only caller left ([B-361])
@@ -13554,13 +13596,21 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     // regression instead of showing it. It is here for rounding and out-of-order events
     // only; if it is ever doing real work, the denominator above is broken.
     let _aFloor = 0;
+    // ⚠️ [B-360] THE FONT PASSES CANNOT REACH 100% ON THEIR OWN ARITHMETIC. The third
+    // pass (enrich) reports only `enrich-start` per source and never a percent within
+    // one (soundFontBulkImport.js:836), so `within` is always 0 there and the final
+    // source lands at (3T-1)/(3T). At 136 sources that is 99.75% and invisible; at 8
+    // it is 95.8% and obvious. The bar then dropped to 0 for the tracks phase, so the
+    // analyze pitcher never filled. The phaser fills it at the handover.
+    const _aBar = makeBarPhaser(() => els.progBar);
+    let _aHandedOver = false;
     const _aSetBar = (pass, idx, within = 0) => {
       if (!els.progBar) return;
-      if (!total) { els.progBar.style.width = '0%'; return; }
+      if (!total) { _aBar.write('0%'); return; }
       const pos = (pass * total) + Math.min(idx + within, total);
       const pct = Math.max(0, Math.min(100, (pos / (_A_PASSES * total)) * 100));
       _aFloor = Math.max(_aFloor, pct);
-      els.progBar.style.width = `${_aFloor.toFixed(1)}%`;
+      _aBar.write(`${_aFloor.toFixed(1)}%`);
     };
     const unsub = window.electronAPI.onBulkImportProgress((data) => {
       if (!data) return;
@@ -13586,10 +13636,15 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         // A separate phase with its own denominator, so it owns the bar outright and
         // the font-pass floor is released rather than clamping it to wherever the
         // fonts finished.
+        // ⚠️ [B-360] BUT THE FONT PASSES FILL FIRST. The handover paints 100% and holds
+        // it; the tracks writes below land in the phaser's buffer and are applied when
+        // the hold lifts, so the new phase never loses its position. Guarded by a flag
+        // because this branch fires on every tracks tick, not just the first.
+        if (!_aHandedOver) { _aHandedOver = true; _aBar.handover(); }
         _aFloor = 0;
         if (els.progLabel) els.progLabel.textContent = 'Checking your shared tracks';
         if (els.progDetail) els.progDetail.textContent = data.label || '';
-        if (els.progBar && data.total) els.progBar.style.width = `${((data.done || 0) / data.total * 100).toFixed(1)}%`;
+        if (els.progBar && data.total) _aBar.write(`${((data.done || 0) / data.total * 100).toFixed(1)}%`);
       } else if (data.stage === 'source-progress' && data.sub) {
         if (data.sub.percent != null) {
           const within = Math.max(0, Math.min(100, data.sub.percent)) / 100;
@@ -13599,13 +13654,16 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
           els.progDetail.textContent = data.sub.currentFile ? `${_aLabel} · ${data.sub.currentFile}` : _aLabel;
         }
       } else if (data.stage === 'done' && els.progBar) {
-        els.progBar.style.width = '100%';
+        // Covers the no-shared-tracks run too: with no tracks phase the font passes
+        // still end a hair short, and this is where that pitcher fills.
+        _aBar.write('100%');
       }
     });
     let res;
     try { res = await window.electronAPI.bulkImportAnalyze({ plan }); }
     catch (e) { res = { ok: false, error: String(e && e.message || e) }; }
     clearInterval(_aTick);
+    _aBar.cancel();          // a held bar must not outlive the element it paints
     if (unsub) { try { unsub(); } catch {} }
     if (!res || !res.ok) { promptError('Analyze failed', (res && res.error) || 'unknown error'); closeModal(); return false; }
     if (res.cancelled) { closeModal(); return false; }
@@ -14221,6 +14279,18 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     // work, the band arithmetic above is wrong and should be fixed there instead. It
     // exists for rounding and for stages that report no percent at all.
     let _runFloor = 0;
+    // ── [B-360] THE RUN HAS THREE PHASE HANDOVERS, NOT ONE ───────────────────
+    // sources -> commons -> shared tracks -> done. Each later phase writes its own
+    // denominator straight onto the bar (the house one-section-per-metric rule), so
+    // the phase before it handed over at whatever it happened to reach. The sources
+    // phase only lands on 100% if the LAST source's final tick is `optimizing` at
+    // 100 — an `extracting` tail tops out at 93% of that slice.
+    // ⚠️ A TRACKS-ONLY IMPORT HAS NO PRECEDING PHASE and the bar is legitimately at
+    // zero, so the handover is gated on having actually seen one. Filling a bar that
+    // never ran would be its own lie.
+    const _runBar = makeBarPhaser(() => els.progBar);
+    let _runSawSources = false, _runSawCommons = false;
+    let _runHandedToCommons = false, _runHandedToTracks = false;
     const setBarFromPosition = (sourceIdx, total, subPct, stage) => {
       const t = Math.max(1, total);
       const completed = sourceIdx || 0;
@@ -14236,7 +14306,8 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       }
       const overall = Math.min(100, ((completed + within) / t) * 100);
       _runFloor = Math.max(_runFloor, overall);
-      els.progBar.style.width = `${_runFloor.toFixed(1)}%`;
+      _runSawSources = true;
+      _runBar.write(`${_runFloor.toFixed(1)}%`);
       return _runFloor;
     };
     progressUnsub = window.electronAPI.onBulkImportProgress((data) => {
@@ -14320,13 +14391,17 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         // a stale label and a bar stuck at 0 — exactly Ryan's fontless run.
         // ([B-352])
         const nC = Math.max(1, data.totalCommons || 1);
-        els.progBar.style.width = `${(((data.commonIdx || 0) / nC) * 100).toFixed(1)}%`;
+        // [B-360] Fill the sources pitcher before the commons pitcher starts.
+        if (_runSawSources && !_runHandedToCommons) { _runHandedToCommons = true; _runBar.handover(); }
+        _runSawCommons = true;
+        _runBar.write(`${(((data.commonIdx || 0) / nC) * 100).toFixed(1)}%`);
         els.progLabel.textContent = `Importing common folder ${data.label || ''}${nC > 1 ? ` · ${(data.commonIdx || 0) + 1} of ${nC}` : ''}`;
       } else if (data.stage === 'common-progress' && data.sub) {
         // Within-common byte progress from the source pipeline ([B-352]).
         const nC = Math.max(1, data.totalCommons || 1);
         const within = Math.max(0, Math.min(100, data.sub.percent || 0)) / 100;
-        els.progBar.style.width = `${((((data.commonIdx || 0) + within) / nC) * 100).toFixed(1)}%`;
+        _runSawCommons = true;
+        _runBar.write(`${((((data.commonIdx || 0) + within) / nC) * 100).toFixed(1)}%`);
         const _fmtB = (n) => (window._sfFormatBytes ? window._sfFormatBytes(n) : `${n} B`);
         const verbs = { hashing: 'Inspecting', copying: 'Copying', expanding: 'Unpacking', deduping: 'Optimizing', checking: 'Cataloging' };
         const verb = verbs[data.sub.stage] || 'Importing';
@@ -14338,16 +14413,25 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         // already at 100% of the font work by now. On a tracks-only import there
         // were no font events at all and it is still sitting at 0. Either way the
         // track copy owns the bar from here. [B-281]
+        // [B-360] Fill whichever pitcher ran before this one — commons if there were
+        // any, otherwise sources. On a tracks-only import neither ran and the bar
+        // stays at zero, which is the honest state.
+        if ((_runSawSources || _runSawCommons) && !_runHandedToTracks) {
+          _runHandedToTracks = true; _runBar.handover();
+        }
         els.progLabel.textContent = 'Copying shared tracks…';
       } else if (data.stage === 'tracks-progress') {
         const t = Math.max(1, data.total || 1);
         const pct = Math.min(100, ((data.done || 0) / t) * 100);
-        els.progBar.style.width = `${pct.toFixed(1)}%`;
+        if ((_runSawSources || _runSawCommons) && !_runHandedToTracks) {
+          _runHandedToTracks = true; _runBar.handover();   // no tracks-start arrived
+        }
+        _runBar.write(`${pct.toFixed(1)}%`);
         lastOverallPct = pct;
         els.progLabel.textContent = `Copying ${data.label || 'shared tracks'} · ${data.done} of ${t}`;
         renderOverallLine();
       } else if (data.stage === 'done') {
-        els.progBar.style.width = '100%';
+        _runBar.write('100%');
         lastOverallIdx = total;
         lastOverallPct = 100;
         els.progLabel.textContent = 'Done';
@@ -14355,6 +14439,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       }
     });
     const runRes = await window.electronAPI.bulkImportRun({ plan: runPlan });
+    _runBar.cancel();        // a held bar must not outlive the element it paints
     if (progressUnsub) { try { progressUnsub(); } catch {} progressUnsub = null; }
     // Stop the elapsed-clock interval and capture the final wall-clock
     // duration for the summary stamp. Cleared regardless of outcome

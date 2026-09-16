@@ -62,7 +62,19 @@ function ok(name, cond, extra) {
   ok('three full passes never produce a decrease', drops === 0, `${drops} decreases`);
   ok('pass 1 starts where pass 0 ended', Math.abs(pos(1, 0, 0, total) - pos(0, total - 1, 1, total)) < 1e-9,
      `${pos(1, 0, 0, total)} vs ${pos(0, total - 1, 1, total)}`);
-  ok('the last pass ends at 100%', Math.abs(pos(2, total - 1, 1, total) - 100) < 1e-9);
+  // ⚠️⚠️ THIS ASSERTION WAS GREEN OVER A LIVE DEFECT AND IS KEPT ONLY WITH ITS LIMIT
+  // NAMED (2026-09-16). It passes `within = 1`, and the REAL enrich pass never supplies
+  // a within at all — soundFontBulkImport.js emits `enrich-start` per source and no
+  // sub-percent inside one, so pass 2 only ever runs with within = 0. The arithmetic
+  // CAN reach 100%; the event stream never asks it to. A test that feeds an input the
+  // app cannot produce is testing arithmetic, not behaviour.
+  ok('the arithmetic CAN reach 100% (not that it does — see the next block)',
+     Math.abs(pos(2, total - 1, 1, total) - 100) < 1e-9);
+  ok('⭐ and with the REAL pass-2 input it does NOT: this is the bug',
+     Math.abs(pos(2, total - 1, 0, total) - 100) > 1e-9,
+     `pass 2 with within=0 lands at ${pos(2, total - 1, 0, total).toFixed(2)}% — ` +
+     'if this ever equals 100 the enrich pass started reporting a percent and the ' +
+     'handover below may no longer be needed');
   // ⭐ THE 2026-08-31 SYMPTOM MUST NOT COME BACK EITHER: pass 0 finishing should read
   // as a third done, not as finished.
   ok('finishing the first pass reads as 33%, not 100%',
@@ -140,6 +152,53 @@ function ok(name, cond, extra) {
   ok('the tracks-check phase releases the analyze floor',
      /_aFloor = 0;/.test(html),
      'it owns the bar with its own denominator; clamping to the font passes would stick it');
+}
+
+// ── 4. every phase FILLS before the next one starts  (2026-09-16) ──────────
+//
+// His rule: "it should always flow to 100%. That unresolved bar is not good UI/UX."
+// Pitchers, not one picture — a phase may start at zero, but none hands over unfinished.
+// Monotonic was already true here and did NOT catch this: the analyze bar never went
+// backward, it just never arrived.
+{
+  ok('the phaser exists', /function makeBarPhaser\(getEl, holdMs = \d+\)/.test(html));
+  ok('handover paints a full bar', /handover\(\) \{[\s\S]{0,200}paint\('100%'\);/.test(html));
+  ok('⭐ and HOLDS it, because two writes in one task only paint the last',
+     /held = true;[\s\S]{0,120}setTimeout\(/.test(html),
+     'without the hold the fill is computed and never rendered');
+  ok('writes during the hold are buffered, not dropped',
+     /if \(held\) \{ pending = widthStr; return; \}/.test(html)
+     && /if \(pending != null\) \{ paint\(pending\); pending = null; \}/.test(html),
+     'a dropped write would leave the next phase showing a stale position');
+
+  // The analyze: one handover, at the font->tracks seam, and only once.
+  ok('the analyze hands over before the tracks phase',
+     /if \(!_aHandedOver\) \{ _aHandedOver = true; _aBar\.handover\(\); \}/.test(html));
+  ok('and the tracks branch still releases the floor after it',
+     html.indexOf('_aHandedOver = true; _aBar.handover();') < html.indexOf('_aFloor = 0;\n        if (els.progLabel) els.progLabel.textContent = \'Checking your shared tracks\'')
+     || /_aBar\.handover\(\); \}\s*\n\s*_aFloor = 0;/.test(html),
+     'the fill has to happen before the reset, not after it');
+
+  // The run: three seams, and the tracks-only case must NOT fill a bar that never ran.
+  ok('the run gates the commons handover on sources having run',
+     /if \(_runSawSources && !_runHandedToCommons\)/.test(html));
+  ok('⭐ and the tracks handover on SOMETHING having run',
+     /if \(\(_runSawSources \|\| _runSawCommons\) && !_runHandedToTracks\)/.test(html),
+     'a tracks-only import has no preceding phase; filling to 100% there would be a lie');
+  ok('both bars are cancelled so a held timer cannot outlive the element',
+     /_aBar\.cancel\(\);/.test(html) && /_runBar\.cancel\(\);/.test(html));
+
+  // ⚠️ THE FACT THE WHOLE FIX RESTS ON, asserted against the BACKEND rather than
+  // trusted: the enrich pass reports only that a source STARTED. If that ever changes,
+  // the arithmetic can reach 100% on its own and this handover becomes redundant —
+  // which is worth finding out from a failing test rather than by reading.
+  const bulk = fs.readFileSync(path.join(ROOT, 'soundFontBulkImport.js'), 'utf8');
+  const enrichIdx = bulk.indexOf("stage: 'enrich-start'");
+  ok('the backend does emit enrich-start', enrichIdx > 0);
+  const enrichBlock = bulk.slice(enrichIdx, enrichIdx + 600);
+  ok('⭐ and emits NO sub-percent inside an enrich item',
+     !/stage: 'source-progress'/.test(enrichBlock),
+     'if enrich started reporting progress, pass 2 could fill on its own — revisit the handover');
 }
 
 console.log(failures ? `\n${failures} FAILURE(S)` : '\nall bulk progress tests passed');
