@@ -12335,6 +12335,20 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
   let _guidedGroups = [];
   let enrichUnsub = null;
 
+  // ⭐⭐ [B-296] ONE DEFINITION OF "THIS SOURCE HOLDS NO FONT", because four screens ask it
+  // and the entry's own warning is that computing it repeatedly is how they start
+  // disagreeing: the pre-import summary, the review's headline sentence, the review ROW,
+  // and Quick import's commit filter.
+  //
+  // ⚠️ `_enrich` WITH THE UNDERSCORE. The analyze stream stamps `s._enrich = r.enrich`.
+  // The summary read `s.enrich` for three days, matched nothing, and the whole feature was
+  // dead while its test suite stayed green.
+  //
+  // ⚠️ `=== 0` ONLY. null means the enrich pass could not ASK (unreadable source, detection
+  // threw) and the archive is not accused; 0 means it was asked and the answer is none.
+  // Collapsing them tells a user their archive is empty because OUR read failed.
+  const _srcHasNoFont = (s) => !!(s && s._enrich && s._enrich.fontCount === 0);
+
   // ⚠️⚠️ A CLICK BESIDE THIS MODAL NEVER DISMISSES IT, IN ANY PHASE ([B-396]).
   //
   // ⭐ HIS CONVENTION, STATED 2026-09-16 AND IT IS THE PROJECT DEFAULT, NOT A RULE FOR THIS
@@ -13467,6 +13481,15 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     // They come in unchecked, with their reason on the row, like everything else.
     const _guidedSources = currentPlan.sources.slice();
     const _gTotal = _guidedSources.length;
+    // ⭐⭐ [B-296] A ROW IS NOT ALWAYS A FONT. `_gTotal` counts SOURCES, which is right for
+    // the rows (every source earns a row and says its own piece) and wrong for the sentence
+    // above them: an archive holding no sound font is not one of the fonts being reviewed.
+    // Counted separately and named separately, which is what the entry asked for —
+    // "135 ready, 1 archive with no sound font in it".
+    // ⚠️ `_enrich`, with the underscore. The summary screen's copy of this read `s.enrich`
+    // for three days and silently matched nothing.
+    const _gNoFont = _guidedSources.filter(_srcHasNoFont).length;
+    const _gFonts  = Math.max(0, _gTotal - _gNoFont);
     guidedRows = _guidedSources.map((src, idx) => _buildGuidedRow(src, idx));
     // Duplicate recognition for the guided rows (async): edited/partial copies
     // dodge the whole-source dedup but their CONTENT still matches — label
@@ -13489,15 +13512,55 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         const row = guidedRows[idx];
         if (!row || !row.el) return;
         const m = src._match;
+        // ⭐⭐ [B-296] AN ARCHIVE WITH NO FONT IN IT IS A REASON TO BE ON THIS SCREEN.
+        // The count fix landed on the summary and never reached the screen the user acts
+        // on: rows are built one-per-SOURCE and consulted nothing, so `tr.zip` arrived with
+        // a checkbox, pre-checked, indistinguishable from a real font — and the user learned
+        // otherwise from a failure list at the far end of the import. His 2026-09-02 run:
+        // "136 new sound fonts ready to import", then 47 minutes, then "1 failed".
+        // ⚠️ `=== 0` ONLY, same rule as the summary: null means we could not ask.
+        const _noFont = _srcHasNoFont(src);
         // An exact-archive duplicate has no `_match` — analyze knew it was owned
         // from the hash alone and never ran the content comparison. It still needs
         // to say so on the row, because it is now shown like everything else.
-        if (!m && !src._duplicate && !src._sameInBatch) return;
+        if (!m && !src._duplicate && !src._sameInBatch && !_noFont) return;
         let note = row.el.querySelector('.g-dup-note');
         if (!note) {
           note = document.createElement('div');
           note.className = 'g-dup-note';
           row.el.querySelector('.g-name-wrap')?.appendChild(note);
+        }
+        // ⭐⭐ [B-296] CHECKED BEFORE EVERY OTHER NOTE, by the same "most useful statement
+        // wins" rule the B-314 comment below sets out. The others describe a row the user
+        // could still choose to import; this one describes a row that CANNOT import, whatever
+        // they do. "Already in your library" on an archive holding no font would be true and
+        // useless.
+        //
+        // ⭐ IT NAMES WHAT WAS FOUND, which is the second half of the entry and the part that
+        // makes it fair to the file: an archive of 17 wavs IS something. "No fonts found in
+        // source" is accurate and tells the user nothing about what they have or what to do
+        // with it. `tr.zip` is the Training Remote sound set for Fett263's ANH mini-game —
+        // real, wanted content that simply is not a standalone font, and the old wording
+        // called it a failure.
+        // ⚠️ wavCount can be absent (nested zip we could not walk); the sentence still has to
+        // read, so it degrades to the plain statement rather than printing "undefined .wav".
+        if (_noFont) {
+          const _wc = src._enrich && src._enrich.wavCount;
+          note.textContent = _wc
+            ? `${_wc} .wav file${_wc === 1 ? '' : 's'}, but no sound font. Nothing here to import.`
+            : 'No sound font in this archive. Nothing here to import.';
+          note.classList.add('have-it');
+          note.classList.remove('variant');
+          if (row.checkbox) {
+            // Disabled, not merely unchecked — the same reasoning as the exact-archive
+            // duplicate below. There is nothing to import, so a box that can be ticked
+            // would be a box that promises something the import cannot deliver.
+            row.checkbox.checked = false;
+            row.checkbox.disabled = true;
+            row.checkbox.title = 'There is no sound font inside this archive.';
+          }
+          row.el.classList.add('excluded');
+          return;
         }
         // ⭐ [B-314] A DIFFERENT STATEMENT FROM "already in your library", and it is
         // checked FIRST because a source can be both — the library note would then be
@@ -13598,7 +13661,9 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     // field and its importer accepts none), so the bar hides on ANY fontless
     // review, not just tracks-only. [B-281]/[B-351]
     const _commonsIncluded = !!(currentPlan && currentPlan.commonFolders && currentPlan.commonFolders.length);
-    const _fontless = _gTotal === 0;
+    // ⚠️ Fontless means no FONTS, not no rows — a folder of nothing but empty archives has
+    // rows to show and still has no font apparatus worth rendering.
+    const _fontless = _gFonts === 0;
     const _tagbar = document.getElementById('sf-bulk-guided-tagbar');
     if (_tagbar) _tagbar.style.display = _fontless ? 'none' : '';
     let _summaryHtml;
@@ -13611,9 +13676,16 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       _summaryHtml = `Reviewing the common folder${_nC === 1 ? '' : 's'} from <strong>${escapeHtml(currentPlan._displayRoot || 'this folder')}</strong>. `
         + `Rename ${_nC === 1 ? 'it' : 'them'} if you like, or uncheck ${_nC === 1 ? 'it' : 'any'}, then <strong>Import</strong>.`;
     } else {
-      _summaryHtml = `Reviewing <strong>${_gTotal}</strong> font${_gTotal === 1 ? '' : 's'}. Skipped items are unchecked. `
+      _summaryHtml = `Reviewing <strong>${_gFonts}</strong> font${_gFonts === 1 ? '' : 's'}. Skipped items are unchecked. `
         + `Check or uncheck any, fix names or creators, preview the sound, then <strong>Import</strong>. `
         + `Each becomes its own source.`
+        // ⭐ Said HERE as well as on the row, because the row is only found by scrolling to
+        // it. The count the user checks against the button is the one in this sentence.
+        + (_gNoFont
+            ? ` <strong>${_gNoFont}</strong> archive${_gNoFont === 1 ? '' : 's'} `
+              + `${_gNoFont === 1 ? 'has' : 'have'} no sound font inside and cannot be imported; `
+              + `${_gNoFont === 1 ? 'it is' : 'they are'} listed below.`
+            : '')
         + (_tracksIncluded
             ? ` Shared tracks from this card are included, <button type="button" id="sf-guided-tracks-jump" class="g-tracks-jump">listed below the fonts</button>.`
             : '');
@@ -13858,7 +13930,22 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     // need it, and computing it three times is how they start disagreeing.
     // ⚠️ `=== 0` ONLY — null means the enrich pass could not ask, and "no fonts in it"
     // because OUR read failed is a false accusation about the user's archive.
-    const _emptySources = (plan.sources || []).filter(s => s && s.enrich && s.enrich.fontCount === 0);
+    //
+    // ⚠️⚠️ `_enrich`, WITH THE UNDERSCORE. This read was `s.enrich` for three days and that
+    // field does not exist: the analyze stream stamps `s._enrich = r.enrich` (see the enrich
+    // handler below). So `_emptySources` was ALWAYS empty, `_emptyCount` ALWAYS 0, and none
+    // of this — headline, breakdown row, Import gate — has ever done anything.
+    //
+    // ⭐ IT LOOKED RIGHT IN HIS 2026-09-16 TEST BY COINCIDENCE: three sources, one of them a
+    // library duplicate, so "2 new sound fonts ready" was the correct number arrived at
+    // without ever subtracting the empty archive. A wrong mechanism agreeing with the right
+    // answer on one input is the hardest kind of broken to see.
+    //
+    // ⚠️ AND THE SUITE PASSED THROUGHOUT, because it asserts the SHAPE of this code —
+    // `=== 0`, the hoist, null-vs-zero — by matching source text. No textual assertion can
+    // see a misspelled property. test/empty-source-review.test.js now pins the reader to the
+    // writer for exactly this reason.
+    const _emptySources = (plan.sources || []).filter(_srcHasNoFont);
     const _emptyCount   = _emptySources.length;
     // Common-folder rows are computed ONCE, up front, and appended in EVERY
     // branch that can carry commons ([B-350], 2026-09-08): the fonts branch had
@@ -14295,7 +14382,12 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       // the user already has is skipped here instead of being imported and then
       // stamped `needsReview` after the fact — which is what made quick produce 56
       // entries where review produced 54 from the same card.
-      const fresh = runPlan.sources.filter(s => s._prepared && !s._corrupt && !s._owned);
+      // ⭐⭐ [B-296] AND NOT AN ARCHIVE WITH NO FONT IN IT. Analyze zips every source before it
+      // can know what is inside, so an empty archive IS `_prepared`, is not `_corrupt` and is
+      // not `_owned` — it passed all three tests and got swept in, to fail at the far end of
+      // the run. The invariant in the note above is the whole argument: quick commits exactly
+      // what review would show CHECKED, and review now shows this row disabled.
+      const fresh = runPlan.sources.filter(s => s._prepared && !s._corrupt && !s._owned && !_srcHasNoFont(s));
       // ⚠️ NO FRESH FONTS IS NOT NOTHING TO DO. A tracks-only plan has zero sources
       // by definition, so this closed the modal and returned — quick import looked
       // like it silently did nothing. Commons are in the same position. Only bail
