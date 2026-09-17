@@ -1239,8 +1239,10 @@ function commonMatchesAt(userData, uuid, destDir, targetName = 'common') {
     refreshed.set(rec.relPath, [st.size, mtime, destHash]);
     if (destHash !== rec.fileHash) identical = false;
   }
-  try { sync.mergeItem(destDir, item, refreshed); } catch {}
-  return { ok: true, exists: true, identical, reason: identical ? null : 'hash' };
+  // [B-402] Returned, not written — see the twin in soundFontEntries.entryMatchesAt. A compare
+  // is a question, and the answer is handed back for the export to record once.
+  return { ok: true, exists: true, identical, reason: identical ? null : 'hash',
+           observed: [...refreshed] };
 }
 
 // Copy a common's files/ contents into destDir/<targetName>/. Mirrors
@@ -1353,7 +1355,9 @@ async function exportCommonAsZip(userData, uuid, destPath, onBytes = null) {
 // (commonFolderExistsAt, readCommonMarkerAt, commonMatchesAt) have taken this
 // parameter all along; only the write hardcoded the name, so a config organised
 // around "MC" was checked against MC and then written as common. [B-326]
-async function exportCommonToFolder(userData, uuid, destDir, mode = 'rename', onBytes = null, targetName = 'common') {
+async function exportCommonToFolder(userData, uuid, destDir, mode = 'rename', onBytes = null, targetName = 'common', opts = {}) {
+  // [B-402] What this export learned, handed back for the caller's single terminal write.
+  let _observedOut = null, _observedItem = null;
   if (!uuid) return { ok: false, error: 'Missing uuid' };
   if (!destDir) return { ok: false, error: 'Missing destDir' };
   const srcDir = path.join(commonRoot(userData), uuid, 'files');
@@ -1401,6 +1405,8 @@ async function exportCommonToFolder(userData, uuid, destDir, mode = 'rename', on
       const { collectFileRecords } = require('./soundFontFileHash');
       const recs = collectFileRecords(srcDir);
       if (recs) {
+        // [B-402] Returned, not written — see the twin in soundFontEntries. One writer, at the
+        // end of the whole operation.
         const observed = new Map();
         for (const r of recs) {
           if (!r || r.fileHash === '<empty>') continue;
@@ -1409,11 +1415,13 @@ async function exportCommonToFolder(userData, uuid, destDir, mode = 'rename', on
             observed.set(r.relPath, [st.size, Math.round(st.mtimeMs), r.fileHash]);
           } catch {}
         }
-        require('./sfSyncManifest').mergeItem(destDir, targetName, observed);
+        _observedOut = [...observed];
+        _observedItem = targetName;
       }
     } catch {}
     // ⚠️ RETURNED, NOT DROPPED ([B-364]) - same defect and same fix as the entry export.
-    return { ok: true, destPath: targetDir, refused: _exportRefused };
+    return { ok: true, destPath: targetDir, refused: _exportRefused,
+             observedItem: _observedItem, observed: _observedOut };
   } catch (err) {
     // Best-effort cleanup of a partial copy so the user doesn't end up with
     // half a common folder mixed in with their other content.

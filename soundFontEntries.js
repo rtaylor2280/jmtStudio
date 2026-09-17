@@ -1151,12 +1151,25 @@ function entryMatchesAt(userData, name, destDir, opts = {}) {
   // question, and the manifest followed the question, not the copy).
   // writeCache:false makes the question truly side-effect-free; the conflict
   // scans keep the default and their speed.
-  if (opts.writeCache !== false) { try { sync.mergeItem(destDir, name, refreshed); } catch {} }
-
-  return { ok: true, exists: true, identical, reason: identical ? null : 'hash', reused, hashed };
+  // [B-402] RETURNED, NOT WRITTEN. A compare answers a question, and a question must not mutate
+  // the thing it is asking about. [B-358] found this in 2026-09-08 and fixed it with the
+  // `writeCache:false` flag at ONE call site, leaving the note that "the conflict scans keep the
+  // default and their speed" — so the principle was set and then applied once.
+  //
+  // ⭐ The flag is gone because the choice it forced is gone. It made you pick between a
+  // side-effect-free question and a warm cache next time; handing the observations back gives both
+  // — the caller writes them ONCE at the end of a real export, and a question the user abandons
+  // leaves nothing behind.
+  //
+  // ⚠️ AS AN ARRAY, not a Map: this return crosses the IPC boundary and a Map does not survive
+  // structured cloning intact for our purposes. The export side rebuilds it.
+  return { ok: true, exists: true, identical, reason: identical ? null : 'hash', reused, hashed,
+           observed: [...refreshed] };
 }
 
 async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onBytes = null, opts = {}) {
+  // [B-402] What this export learned, handed back for the caller's single terminal write.
+  let _observedOut = null, _observedItem = null;
   if (!name) return { ok: false, error: 'Missing name' };
   if (!destDir) return { ok: false, error: 'Missing destDir' };
   const srcDir = path.join(entriesRoot(userData), name);
@@ -1215,6 +1228,11 @@ async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onB
       const { collectFileRecords } = require('./soundFontFileHash');
       const recs = collectFileRecords(srcDir);
       if (recs) {
+        // [B-402] RETURNED, NOT WRITTEN — the CALLER commits everything the operation learned in
+        // one write at the end. Writing here meant one write per exported item, and it silently
+        // skipped any item the operation looked at but did not export (a font already identical
+        // at the destination), so its hashes were thrown away and re-read on every later export.
+        // These hashes are the library's and already in memory; nothing here reads the card.
         const observed = new Map();
         for (const r of recs) {
           if (!r || r.fileHash === '<empty>') continue;
@@ -1223,14 +1241,16 @@ async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onB
             observed.set(r.relPath, [st.size, Math.round(st.mtimeMs), r.fileHash]);
           } catch {}
         }
-        require('./sfSyncManifest').mergeItem(destDir, targetName, observed);
+        _observedOut = [...observed];
+        _observedItem = targetName;
       }
     } catch {}
     // ⚠️ RETURNED, NOT DROPPED ([B-364]). This list was collected and then thrown away,
     // so a font whose export silently came up one file short said nothing at all - the
     // exact silent strip the feature exists to prevent. It is also what the removal
     // buttons hang off: no list reaching the renderer means no way to act.
-    return { ok: true, destPath: targetDir, refused: _exportRefused };
+    return { ok: true, destPath: targetDir, refused: _exportRefused,
+             observedItem: _observedItem, observed: _observedOut };
   } catch (err) {
     // Best-effort cleanup of a partial copy on failure so the user doesn't
     // end up with half a font folder mixed in with their other content.

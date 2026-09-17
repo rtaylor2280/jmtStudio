@@ -308,11 +308,20 @@ function planExport(userData, destDir, onFile = null) {
   }
   if (onFile) { try { onFile('', names.length, names.length); } catch {} }
 
-  // Persist what we learned, merged over what was already recorded, so entries
-  // for files we did not look at this time survive untouched.
-  try { sync.mergeItem(destDir, 'tracks', refreshed); } catch {}
-
-  return { ok: true, toAdd, unchanged, differing };
+  // [B-402] RETURNED, NOT WRITTEN. A compare answers a question, and a question must not
+  // mutate the thing it is asking about - the same principle the mass-storage guard is built
+  // on, and the one he set at [B-358] for a different caller ('a read-only question can seed
+  // jmt-studio-manifest.json at the destination').
+  //
+  // ⭐ NOTHING IS LOST BY DEFERRING IT. Everything here was computed as a side effect of work
+  // the compare had to do anyway, so handing it back costs nothing and the caller writes it
+  // ONCE, at the end, together with whatever the copies added. A standalone compare - the
+  // user only asking - writes nothing at all, and re-asking simply re-hashes.
+  //
+  // ⚠ The old code wrote here AND again after copying, so one export touched the manifest
+  // twice, seconds apart, the first describing a state that existed only until the copies
+  // landed.
+  return { ok: true, toAdd, unchanged, differing, observed: refreshed };
 }
 
 // ADDITIVE export. Deliberate call 2026-07-31: "always additive not replacing. so
@@ -380,11 +389,26 @@ async function exportToFolderAdditive(userData, destDir, opts = {}) {
   // Refresh entries for the files we just wrote, and only those. Their content
   // is the library's, so the hash is the library's — already known, nothing to
   // re-read. Anything else recorded for this folder is left alone.
+  // [B-402] THE ONE WRITE, AND IT CARRIES EVERYTHING LEARNED ALONG THE WAY. His design:
+  // "we gather all the information and at the very end we drop a single manifest update based
+  // on what we learned along the way." Two sources feed it and neither costs a read:
+  //   • the COMPARE already hashed every file that was at the destination, because comparing
+  //     them is its job - `plan.observed`.
+  //   • the COPIES know the library hash of what they just wrote, already in memory, so the
+  //     card is never re-read to learn what we put on it.
+  // ⚠ ORDER MATTERS: the copies go in SECOND so a file we just replaced overwrites the
+  // compare's record of the old version, not the other way round.
+  //
+  // ⚠⚠ NO SEPARATE PASS, EVER. Building the manifest as its own task would re-read the card
+  // to learn what it already told us - adding cost to reduce cost.
+  // ⚠️ RETURNED, NOT WRITTEN. The CALLER commits everything the operation learned in ONE write at
+  // the end, so an item that was only LOOKED at still gets recorded. Writing per item here dropped
+  // exactly those, and a card kept in sync is mostly items that need no copying.
+  let _observed = null;
   try {
-    const sync = require('./sfSyncManifest');
     const { hashFile } = require('./soundFontFileHash');
     const libHashes = hashIndex.resolveHashes(userData);
-    const observed = new Map();
+    const observed = new Map(plan.observed || []);
     for (const name of [...added, ...replaced]) {
       try {
         const st = fs.statSync(path.join(targetDir, name));
@@ -392,9 +416,10 @@ async function exportToFolderAdditive(userData, destDir, opts = {}) {
         if (h) observed.set(name, [st.size, Math.round(st.mtimeMs), h]);
       } catch {}
     }
-    sync.mergeItem(destDir, 'tracks', observed);
+    _observed = [...observed];
   } catch {}
-  return { ok: true, destPath: targetDir, added, replaced, kept, unchanged: plan.unchanged, refused };
+  return { ok: true, destPath: targetDir, added, replaced, kept, unchanged: plan.unchanged, refused,
+           observedItem: 'tracks', observed: _observed };
 }
 
 // Copy the singleton sharedTracks folder into destDir/tracks/. Mirrors

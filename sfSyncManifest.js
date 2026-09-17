@@ -161,6 +161,56 @@ function cacheFor(destDir, itemName) {
 // did not look at this time survive untouched: a comparison only ever consults
 // the files the library is writing, so it has no business discarding knowledge
 // about anything else. `observed` is a Map of relPath -> [size, mtimeMs, hash].
+// [B-402] ⭐⭐ COMMIT EVERYTHING THE OPERATION LEARNED, IN ONE WRITE.
+//
+// His design: "we gather all the information and at the very end we drop a SINGLE manifest
+// update based on what we learned along the way." The first cut wrote per exported item, which
+// is several writes AND silently drops any item the operation looked at but did not export — a
+// font already identical at the destination was hashed by the compare and then never recorded,
+// so a card kept in sync re-hashed every matching font on every future export. That is exactly
+// the cost the manifest exists to avoid, reintroduced while removing a different one.
+//
+// `items` is { itemName: Map|Array of [relPath, [size, mtime, hash]] }. Every item merges over
+// what is already recorded, then ONE write. Items the operation never touched keep their
+// records untouched.
+//
+// ⚠️ ALL-OR-NOTHING ON PURPOSE. The per-item write existed so an interrupted export left the
+// card's manifest matching what was on it. A single terminal write means an interrupted export
+// records nothing — which is CORRECT rather than merely simpler: the entries it would have
+// written describe files that may not have finished copying, and a missing record self-heals
+// into a re-read while a wrong one does not.
+function mergeItems(destDir, items) {
+  if (!destDir || !items) return false;
+  const names = Object.keys(items);
+  if (!names.length) return false;
+  const { manifest, state } = readState(destDir);
+  if (state === 'unreadable') return false;
+  const m = manifest || { version: MANIFEST_VERSION, items: {} };
+  const before = manifest ? JSON.stringify(m.items) : null;
+  let touched = false;
+  for (const itemName of names) {
+    const observed = items[itemName] instanceof Map ? items[itemName] : new Map(items[itemName] || []);
+    if (!observed.size) continue;
+    const existing = new Map();
+    const rec = m.items[itemName];
+    if (rec && Array.isArray(rec.files)) {
+      for (const f of rec.files) {
+        if (Array.isArray(f) && f.length >= 4) existing.set(f[0], [f[1], f[2], f[3]]);
+      }
+    }
+    for (const [rel, v] of observed) existing.set(rel, v);
+    const files = [];
+    for (const [rel, [size, mtime, hash]] of existing) files.push([rel, size, mtime, hash]);
+    files.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+    m.items[itemName] = { files };
+    touched = true;
+  }
+  if (!touched) return false;
+  // Same no-op guard as below, applied to the WHOLE manifest rather than one item.
+  if (before !== null && before === JSON.stringify(m.items)) return true;
+  return write(destDir, m);
+}
+
 function mergeItem(destDir, itemName, observed) {
   if (!destDir || !itemName || !observed || observed.size === 0) return false;
   const { manifest, state } = readState(destDir);
@@ -181,6 +231,22 @@ function mergeItem(destDir, itemName, observed) {
   for (const [rel, [size, mtime, hash]] of existing) files.push([rel, size, mtime, hash]);
   files.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
   m.items[itemName] = { files };
+  // [B-402] ⭐ A WRITE THAT CHANGES NOTHING IS STILL A WRITE. Every caller merged its
+  // observations over what was already recorded and then wrote unconditionally, so a run
+  // where every file was a cache hit spent a temp file and a rename recording what was
+  // already there. On a destination reached through the board's mass storage that is a write
+  // cycle bought with no information.
+  //
+  // ⚠ The comparison is on the SERIALISED form because that is exactly what write() would
+  // put on disk. `files` is rebuilt sorted on every merge, so an unchanged item serialises
+  // identically - key order cannot drift and produce a false difference.
+  // ⚠ Returns TRUE when it skips: the caller asked for the manifest to say this, and it does.
+  // Reporting false would read as a failure to record.
+  if (manifest) {
+    try {
+      if (JSON.stringify(m.items[itemName]) === JSON.stringify(rec)) return true;
+    } catch {}
+  }
   return write(destDir, m);
 }
 
@@ -195,6 +261,7 @@ module.exports = {
   MANIFEST_NAME,
   MANIFEST_VERSION,
   MTIME_TOLERANCE_MS,
+  mergeItems,
   manifestPath,
   cacheFor,
   read,

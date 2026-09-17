@@ -194,6 +194,12 @@ const TRACKS = {
 
   // -- the manifest, per file and self-healing ------------------------------
 
+  // ⚠️⚠️ [B-402] THE COMPARE NO LONGER WRITES. It returns what it learned and the EXPORT writes
+  // once, at the end, carrying it forward. His rule: "we gather all the information and at the very
+  // end we drop a single manifest update based on what we learned along the way" — a question must
+  // not mutate the thing it is asking about, which is the same principle the mass-storage guard is
+  // built on. [B-358] set it in 2026-09-08 for one caller with a `writeCache:false` flag; this is
+  // the same rule everywhere it was not applied.
   {
     const { userData, dest } = setup(TRACKS, TRACKS);
     const sync = require('../sfSyncManifest');
@@ -201,8 +207,34 @@ const TRACKS = {
     check('first pass classifies everything as unchanged',
       { unchanged: p1.unchanged.length, differing: p1.differing.length },
       { unchanged: 3, differing: 0 });
+    check('⭐⭐ and it wrote NOTHING to the destination',
+      { manifest: sync.read(dest) === null || sync.read(dest) === undefined }, { manifest: true });
+    check('⭐ but it handed back what it hashed, so nothing is re-read later',
+      { n: p1.observed instanceof Map ? p1.observed.size : -1 }, { n: 3 });
+  }
+
+  {
+    // ⭐⭐ NOT EVEN THE EXPORT WRITES. It returns what the whole operation learned — the
+    // compare's findings merged with the copies — and the CALLER commits once at the end.
+    //
+    // ⚠️⚠️ THE FIRST CUT WROTE PER EXPORTED ITEM AND SILENTLY DROPPED ANYTHING IT DID NOT COPY.
+    // His dev test found it: 25 fonts exported, 24 written, "1 already identical" — and that one
+    // was scanned, matched, and then absent from the manifest, so its hashes were re-read on
+    // every later export. On a card kept in sync that is most of the card.
+    const { userData, dest } = setup(TRACKS, TRACKS);
+    const sync = require('../sfSyncManifest');
+    const r = await st.exportToFolderAdditive(userData, dest);
+    check('the export succeeded', { ok: !!r.ok }, { ok: true });
+    check('⭐⭐ and it still wrote nothing itself',
+      { manifest: !sync.read(dest) }, { manifest: true });
+    check('⭐ it handed back one item of observations instead',
+      { item: r.observedItem, n: Array.isArray(r.observed) ? r.observed.length : -1 },
+      { item: 'tracks', n: 3 });
+
+    // The caller's single commit is what puts it on disk.
+    sync.mergeItems(dest, { [r.observedItem]: r.observed });
     const m = sync.read(dest);
-    check('and it recorded an entry per file',
+    check('⭐⭐ the manifest appears only after the CALLER commits, with an entry per file',
       { n: m && m.items.tracks.files.length }, { n: 3 });
   }
 
@@ -230,6 +262,31 @@ const TRACKS = {
     check('a file only the card has does not make anything differ',
       { differing: p2.differing.length, unchanged: p2.unchanged.length, toAdd: p2.toAdd.length },
       { differing: 0, unchanged: 3, toAdd: 0 });
+  }
+
+  // ⭐⭐ [B-402] A WRITE THAT CHANGES NOTHING IS STILL A WRITE, and on a card reached through
+  // the board's mass storage it is a cycle bought with no information. mergeItem used to merge
+  // and then write unconditionally, so a run where every file was a cache hit re-recorded what
+  // was already there.
+  // ⚠ Asserted on the FILE, not the return value: it returns true either way, because the
+  // caller asked for the manifest to say this and it does.
+  {
+    const { dest } = setup(TRACKS, TRACKS);
+    const sync = require('../sfSyncManifest');
+    const obs = new Map([['a.wav', [10, 1000, 'h1']], ['b.wav', [20, 2000, 'h2']]]);
+    sync.mergeItem(dest, 'tracks', obs);
+    const mp = path.join(dest, 'jmt-studio-manifest.json');
+    const before = fs.readFileSync(mp, 'utf8');
+    const mtime = fs.statSync(mp).mtimeMs;
+    sync.mergeItem(dest, 'tracks', new Map(obs));
+    check('⭐⭐ re-recording identical data does not touch the file',
+      { same: fs.readFileSync(mp, 'utf8') === before && fs.statSync(mp).mtimeMs === mtime },
+      { same: true });
+    sync.mergeItem(dest, 'tracks', new Map([['a.wav', [10, 1000, 'CHANGED']]]));
+    const after = fs.readFileSync(mp, 'utf8');
+    check('⚠️ but a real change still writes, and keeps the untouched sibling',
+      { wrote: after !== before, kept: after.includes('b.wav') },
+      { wrote: true, kept: true });
   }
 
   {

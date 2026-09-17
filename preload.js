@@ -187,6 +187,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   pickFolder: () => ipcRenderer.invoke('sdcard:pickFolder'),
   scanPath: (p) => ipcRenderer.invoke('sdcard:scanPath', p),
   listSdDir: (p) => ipcRenderer.invoke('sdcard:listDir', p),
+  volumeInfo: (p) => ipcRenderer.invoke('sdcard:volumeInfo', p),
   // Async health walk ([B-348]): direct-file check, incremental folder
   // badges, cancel, and the progress stream that feeds the browser footer.
   sdSubtreeHealth: (params) => ipcRenderer.invoke('sdcard:subtreeHealth', params),
@@ -381,6 +382,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readEntryDocBytes:     (params)     => ipcRenderer.invoke('entries:readDocBytes', params),
   exportEntryDoc:        (params)     => ipcRenderer.invoke('entries:exportDoc', params),
   exportEntryToFolder:   (params)     => ipcRenderer.invoke('entries:exportToFolder', params),
+  // [B-402] One manifest write per operation, called at the very end. See main.js.
+  syncManifestCommit:    (params)     => ipcRenderer.invoke('syncManifest:commit', params),
   entryFolderExistsAt:   (params)     => ipcRenderer.invoke('entries:existsAt', params),
   resolveEntryContentDirty: (params)  => ipcRenderer.invoke('entries:resolveContentDirty', params),
   selectSaveDestination: ()           => ipcRenderer.invoke('dialog:selectSaveDestination'),

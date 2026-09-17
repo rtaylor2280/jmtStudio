@@ -2451,11 +2451,15 @@ function _sfExportProgressEmitter(event) {
   };
 }
 
-ipcMain.handle('entries:exportToFolder', async (event, { name, destDir, mode, syncManifest } = {}) => {
+// [B-402] `priorObserved` carries what the conflict scan already hashed for THIS destination in
+// THIS operation, so the export can write the manifest once instead of the scan writing it and the
+// export writing it again seconds later. It is an array of [relPath, [size, mtime, hash]] because
+// it crosses the IPC boundary; the module rebuilds the Map.
+ipcMain.handle('entries:exportToFolder', async (event, { name, destDir, mode, syncManifest, priorObserved } = {}) => {
   try {
     const emit = _sfExportProgressEmitter(event);
     const r = await soundFontEntries.exportEntryToFolder(app.getPath('userData'), name, destDir, mode, emit.onBytes,
-      { syncManifest: syncManifest !== false });
+      { syncManifest: syncManifest !== false, priorObserved });
     emit.flush();
     return r;
   } catch (err) {
@@ -2657,10 +2661,11 @@ ipcMain.handle('common:exportAsZip', async (event, { uuid, destPath } = {}) => {
   } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
-ipcMain.handle('common:exportToFolder', async (event, { uuid, destDir, mode, targetName } = {}) => {
+ipcMain.handle('common:exportToFolder', async (event, { uuid, destDir, mode, targetName, priorObserved } = {}) => {
   try {
     const emit = _sfExportProgressEmitter(event);
-    const r = await soundFontCommon.exportCommonToFolder(app.getPath('userData'), uuid, destDir, mode, emit.onBytes, targetName);
+    const r = await soundFontCommon.exportCommonToFolder(app.getPath('userData'), uuid, destDir, mode, emit.onBytes,
+      targetName, { priorObserved });
     emit.flush();
     return r;
   } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
@@ -2744,10 +2749,27 @@ ipcMain.handle('sharedTracks:existsAt', (_, { destDir } = {}) => {
 // Read-only: what would an export add, leave alone, or have to ask about.
 // Top-level folder names at an export destination. Used by the save summary to
 // answer "what else is on this card" without pulling in a full SD scan.
-ipcMain.handle('soundFonts:entryMatchesAt', (_, { name, destDir, writeCache } = {}) => {
-  try { return soundFontEntries.entryMatchesAt(app.getPath('userData'), name, destDir, { writeCache: writeCache !== false }); }
+// [B-402] `writeCache` is accepted and ignored — the compare no longer writes at all, for any
+// caller, so the flag [B-358] added has nothing left to switch off. Kept in the signature so an
+// older renderer passing it cannot throw; drop it once nothing sends it.
+ipcMain.handle('soundFonts:entryMatchesAt', (_, { name, destDir } = {}) => {
+  try { return soundFontEntries.entryMatchesAt(app.getPath('userData'), name, destDir); }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
+// [B-402] THE ONE WRITER. Every compare and every export now RETURNS what it learned; the
+// renderer accumulates it across the whole operation and commits here, once, at the end.
+// ⚠️ `items` is { itemName: [[relPath,[size,mtime,hash]], ...] } because Maps do not survive IPC.
+// ⚠️ A cancelled operation simply never calls this, which is the whole point: a question leaves
+// nothing behind, and a completed operation records everything it saw — including items it only
+// LOOKED at, which the per-item write used to drop.
+ipcMain.handle('syncManifest:commit', (_, { destDir, items } = {}) => {
+  try {
+    if (!destDir || !items) return { ok: false, error: 'Missing destDir or items' };
+    const wrote = require('./sfSyncManifest').mergeItems(destDir, items);
+    return { ok: true, wrote: !!wrote };
+  } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
 ipcMain.handle('soundFonts:listDestFolders', (_, { destDir } = {}) => {
   try {
     if (!destDir || !fs.existsSync(destDir)) return { ok: true, folders: [] };
@@ -5207,6 +5229,20 @@ ipcMain.handle('sdcard:pickFolder', async () => {
 });
 ipcMain.handle('sdcard:scanPath', (_, p) => sdCardDetect.assessPicked(p));
 ipcMain.handle('sdcard:listDir', (_, p) => sdCardDetect.listDir(p));
+// The volume a path sits on, for naming it on screen. A bare drive root reads as
+// "K:\\" in a sentence, which is the shortest and least identifiable thing we could
+// print about a card the user physically holds and has probably labelled. [B-403]
+// Read-only, and returns null rather than throwing on every platform but Windows.
+ipcMain.handle('sdcard:volumeInfo', async (_, p) => {
+  try {
+    const m = /^([A-Za-z]):/.exec(String(p || ''));
+    if (!m) return null;
+    const want = (m[1] + ':').toUpperCase();
+    const vols = await sdCardDetect.enumerateAllVolumes();
+    const v = (vols || []).find(x => String(x.drive || '').toUpperCase() === want);
+    return v ? { drive: v.drive, label: v.label || null, driveType: v.driveType } : null;
+  } catch { return null; }
+});
 // Card-wide executable NAME scan ([B-214]). Directory entries only, no file is
 // opened, so it does not reintroduce what [B-361] removed. ~100ms on a full card.
 ipcMain.handle('sdcard:executables', (_, p) => {

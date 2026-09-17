@@ -10413,6 +10413,67 @@ function _sdDriveLabel(c) {
   const name = c.label && String(c.label).trim();
   return name ? `${name} (${c.drive})` : `Removable Disk (${c.drive})`;
 }
+// ── Naming a destination, as opposed to spelling it ──────────────────────── [B-403]
+// A card root prints as "K:\" — the shortest and least identifiable thing we could say
+// about a card the user is physically holding, which probably has a name written on it.
+// His, 2026-09-17: "it shows K:/ which is really short and hard to read. I think in SD
+// card read we solved this by naming it..." It did — _sdDriveLabel, directly above, and
+// both surfaces were on his screen at the moment the export summary said "Saved to K:\".
+// This lives HERE, beside that builder, because it is the same concern.
+//
+// ⭐⭐ PRIMED AT THE FOLDER PICKER, CONSUMED AT THE SUMMARY, and that is the whole design.
+// The query spawns PowerShell and MEASURED 2666ms on his machine. The first attempt raced
+// it against a 2500ms timeout at summary-build time and lost by 166ms, so the card silently
+// kept its bare letter and the feature looked broken while every unit test passed. Waiting
+// longer at the summary is the wrong fix — it parks the user on the overlay after the work
+// is already done. Started at the picker, it resolves alongside the scan-and-copy it now
+// overlaps, and costs nothing.
+// ⚠️⚠️ DELIBERATELY NOT CACHED ACROSS OPERATIONS. Keyed by drive letter, a swapped card
+// would wear the previous card's name — and swapping cards between exports is exactly what
+// testing does. One lookup per export, thrown away after.
+let _sfVolPrime = null;
+function _sfPrimeVolume(dir) {
+  const raw = String(dir || '');
+  if (!/^[A-Za-z]:[\\/]?$/.test(raw)) { _sfVolPrime = null; return; }
+  // Started, not awaited. A rejection here must never surface as an unhandled rejection.
+  _sfVolPrime = {
+    dir: raw,
+    p: Promise.resolve()
+      .then(() => window.electronAPI.volumeInfo(raw))
+      .catch(() => null),
+  };
+}
+// ⚠️ ONLY A DRIVE ROOT IS SUBSTITUTED. A deeper path already ends in a folder name that
+// means something, and swapping its prefix would invent a hybrid that is neither a name
+// nor a path you could type.
+// ⚠️⚠️ AND IT CANNOT BLOCK THE SUMMARY. [B-204] is the precedent for what a summary that
+// never appears costs: the scan overlay has no cancel, so the only exit was killing the
+// app. Slow, hung or failed all fall back to the raw path.
+async function _sfDestDisplay(destDir) {
+  const raw = String(destDir || '');
+  if (!/^[A-Za-z]:[\\/]?$/.test(raw)) return raw;
+  const primed = _sfVolPrime && _sfVolPrime.dir === raw ? _sfVolPrime.p : null;
+  let v = null;
+  try {
+    v = await Promise.race([
+      primed || window.electronAPI.volumeInfo(raw),
+      // Generous when primed (it has been running since the picker, so this should never
+      // fire); short when not, so an unprimed caller cannot hold the dialog.
+      new Promise(r => setTimeout(() => r(null), primed ? 8000 : 2500)),
+    ]);
+  } catch {}
+  if (!v) return raw;
+  // ⚠️⚠️ ONE BUILDER, NOT A SECOND COPY OF ITS WORDING. _sdDriveLabel owns how a volume is
+  // named on screen. Restating that sentence here would be [B-357]'s per-kind strings all
+  // over again: two spellings that agree today and drift the first time one is reworded.
+  // His question, which is the right one to ask of any two surfaces that agree: "do they
+  // agree because written the same or because it's one shared builder?"
+  // ⚠️ THE CALL IS GATED, because the fallback is not universally true. "Removable Disk" is
+  // a lie about a fixed drive, so an unnamed non-removable volume keeps its raw path.
+  const named = v.label && String(v.label).trim();
+  if (named || v.driveType === 2) return _sdDriveLabel({ drive: v.drive, label: v.label });
+  return raw;
+}
 // SFL-style breadcrumb (Files: <root> › folder › subfolder). Root crumb is the
 // descriptive card label; deeper crumbs are folder names. data-depth drives
 // _sdWireCrumb navigation. An optional trailing leaf (a file name) renders as
@@ -25683,6 +25744,7 @@ require(['vs/editor/editor.main'], function () {
         catch (err) { promptError('Could not open folder picker', err && err.message || err); return; }
         if (!pick || !pick.ok) return;
         const destDir = pick.dirPath;
+        _sfPrimeVolume(destDir);   // [B-403] start the volume lookup now; the summary consumes it
         let replace = [];
         // [B-357] PREPARE WITH A BAR, THEN PRESENT PAINTED — the convention, applied to the
         // one path that never had it. Comparing every track against the destination ran in
@@ -25730,6 +25792,16 @@ require(['vs/editor/editor.main'], function () {
           await _sfDeleteProgress.hide();
           promptError('Export failed', (r && r.error) || 'unknown error');
           return;
+        }
+        // [B-402] The one write for THIS operation, at its end. The compare's findings ride
+        // inside the export's result — it was handed `plan.observed` and merged the copies over
+        // it — so this single item carries both halves. A cancel earlier returned before here.
+        if (r.observedItem && Array.isArray(r.observed) && r.observed.length) {
+          try {
+            await window.electronAPI.syncManifestCommit({
+              destDir, items: { [r.observedItem]: r.observed },
+            });
+          } catch {}
         }
         await _sfShowExportSummary({
           destDir,
@@ -35702,6 +35774,7 @@ require(['vs/editor/editor.main'], function () {
           if (tracksOutcome.added) tb.push(`${n(tracksOutcome.added)} added`);
           if (tracksOutcome.replaced) tb.push(`${n(tracksOutcome.replaced)} replaced`);
           const total = (tracksOutcome.unchanged || 0) + (tracksOutcome.added || 0) + (tracksOutcome.replaced || 0);
+          const kept = tracksOutcome.kept || [];
           if (tb.length) {
             // 'setting' and 'run' deliberately say NOTHING. Both are cases where
             // the user already knows why tracks shipped - they set the preference,
@@ -35713,21 +35786,30 @@ require(['vs/editor/editor.main'], function () {
                 ? ' This card already had a tracks folder.'
                 : '';
             lines.push(`Shared tracks: ${tb.join(', ')}.${why}`);
+          } else if (kept.length) {
+            // ⚠ "All N were already there" is TRUE about presence and FALSE about content once
+            // something was kept. Say what matched, then what did not and why.
+            lines.push(`${n(total)} of ${n(total + kept.length)} shared ${plural(total + kept.length, 'track')} already matched.`);
           } else {
             lines.push(`All ${n(total)} shared ${plural(total, 'track')} were already there.`);
           }
-          const kept = tracksOutcome.kept || [];
           if (kept.length) {
-            const shown = esc(kept.slice(0, 6).join(', '));
-            const more = kept.length > 6 ? `, and ${kept.length - 6} more` : '';
-            lines.push(`${n(kept.length)} ${plural(kept.length, 'track')} kept as ${kept.length === 1 ? 'it is' : 'they are'}: ${shown}${more}.`);
+            // ⚠⚠ NO LIST OF NAMES. The user ticked Skip on those exact rows a moment ago, so
+            // naming them back is a receipt for their own input — the class of sentence cut from
+            // the conflict dialog for [B-357]. What is NOT already known is the CARD'S STATE: it
+            // holds tracks that do not match the library, and that outlives the decision.
+            // ⭐ And it is attributed, so it reads as a state they chose rather than a defect.
+            // Subject is the person, not a process (his rule from the savings copy, 09-05).
+            const one = kept.length === 1;
+            lines.push(`You kept the other ${one ? 'one' : n(kept.length)}, so ${one ? 'it' : 'they'} still ${one ? 'differs' : 'differ'} from your library.`);
           }
         }
 
         // The destination is a link, matching the import close-out screen: the
         // path is the useful thing, so it is the clickable thing, rather than a
         // button competing with Done for the primary slot.
-        const destLink = `<a href="#" id="sf-export-summary-path" style="color:var(--jmt-blue);text-decoration:underline;cursor:pointer">${esc(destDir)}</a>`;
+        // ⚠️ The LINK still opens destDir - only the text it wears changes.
+        const destLink = `<a href="#" id="sf-export-summary-path" style="color:var(--jmt-blue);text-decoration:underline;cursor:pointer">${esc(await _sfDestDisplay(destDir))}</a>`;
         // "Saved to" is a lie when nothing was written, which is exactly the
         // no-write case this summary now also serves.
         const wroteSomething = written > 0
@@ -36009,6 +36091,7 @@ require(['vs/editor/editor.main'], function () {
         catch (err) { promptError('Could not open folder picker', err && err.message || err); return false; }
         if (!pick || !pick.ok) return false;
         const destDir = pick.dirPath;
+        _sfPrimeVolume(destDir);   // [B-403] start the volume lookup now; the summary consumes it
         // The one remaining ask, and only where there is real evidence to act
         // on: this destination already has a tracks/ folder while the setting
         // says don't include. That mismatch is evidence this person does use
@@ -36140,6 +36223,9 @@ require(['vs/editor/editor.main'], function () {
         // parks on "shared tracks" through the longest part of the scan and
         // reads as frozen. Names go past instead, which is what every other long
         // read in this app does.
+        // [B-402] What the conflict scan hashed, keyed by manifest item, so the export can
+        // write it once at the end. Lives for one export attempt and is thrown away with it.
+        const _scanObserved = new Map();
         const _scanTick = (file, sub) => {
           const secs = Math.floor((Date.now() - _scanT0) / 1000);
           const dur = window._sfFormatDuration ? window._sfFormatDuration(secs) : `${secs}s`;
@@ -36175,6 +36261,12 @@ require(['vs/editor/editor.main'], function () {
               if (m.identical) unchangedFonts.push(name);
               else conflicts.push(name);
             }
+            // [B-402] KEEP WHAT THE SCAN LEARNED. The compare hashed these files because
+            // comparing them is its job, and it no longer writes them itself — a question must
+            // not mutate what it is asking about. Holding them here lets the EXPORT write the
+            // manifest once, at the end, for this destination. If the user cancels, nothing was
+            // written and nothing is owed.
+            if (m && Array.isArray(m.observed) && m.observed.length) _scanObserved.set(name, m.observed);
           } catch {}
           _scanDone++;
           _scanTick(name);
@@ -36210,6 +36302,9 @@ require(['vs/editor/editor.main'], function () {
               if (_nm && !commonCardName) commonCardName = _nm;
             } catch {}
             const r = await window.electronAPI.commonMatchesAt({ uuid: cs.uuid, destDir, targetName: cs.slot });
+            // [B-402] Same as the fonts above — keyed by the SLOT, because that is the folder
+            // name the export will write under and therefore the manifest item it belongs to.
+            if (r && Array.isArray(r.observed) && r.observed.length) _scanObserved.set(cs.slot, r.observed);
             if (r && r.ok && r.exists) {
               // Decided on CONTENT, not on the marker. A marker states what we
               // wrote last time; the folder can have been edited by hand since,
@@ -36483,7 +36578,15 @@ require(['vs/editor/editor.main'], function () {
           const fontsSkipped = names.filter(n =>
             modeByName.get(n) === 'skip' && !unchangedFonts.includes(n)).length;
           const commonSkipped = commonSlots.filter(cs => _slotMode(cs) === 'skip').length;
-          const skippedByChoice = fontsSkipped + commonSkipped;
+          // ⚠⚠ TRACKS COUNT TOO, and leaving them out cost more than a word. Reaching this
+          // branch with tracks kept means every differing track was set to Skip — that is how
+          // willWriteTracks became 0 — so the card is deliberately NOT in sync. Counting only
+          // fonts and slots made skippedByChoice 0, which titled it "Already up to date" (false)
+          // and then took the clear-the-selection branch below on the grounds that a finished
+          // job has nothing to revisit. It is not finished; he chose to leave it. [B-402]
+          const tracksKept = includeTracks
+            ? tracksDiffering.filter(t => !tracksReplace.includes(t)) : [];
+          const skippedByChoice = fontsSkipped + commonSkipped + tracksKept.length;
           const commonNames = { name: commonMineName, cardName: commonCardName, reason: commonReason };
           await _sfShowExportSummary({
             destDir, names, modeByName, unchangedFonts, commonMissing,
@@ -36509,12 +36612,17 @@ require(['vs/editor/editor.main'], function () {
               ...commonSlots.filter(cs => _slotMode(cs) === 'skip').map(cs => ({
                 state: 'kept', ...commonNames, slot: cs.slot, name: cs.packName || commonMineName })),
             ],
+            // ⚠ `kept: []` here was the same defect as the written path's: a track the user
+            // chose to keep is not unchanged, and hard-coding the list empty made the summary
+            // say "All N shared tracks were already there" about a card holding tracks that
+            // differ. Two sites, one bug — if a third appears, this belongs in a helper.
             tracksOutcome: includeTracks
               ? {
                   reason: tracksReason,
                   added: 0, replaced: 0,
-                  unchanged: (window._sfSharedTracksFiles || []).length,
-                  kept: [],
+                  unchanged: Math.max(0,
+                    (window._sfSharedTracksFiles || []).length - tracksKept.length),
+                  kept: tracksKept,
                 }
               : null,
           });
@@ -36619,6 +36727,8 @@ require(['vs/editor/editor.main'], function () {
           _sfRenderExportProg();
           try {
             const r = await window.electronAPI.exportEntryToFolder({ name, destDir, mode });
+            // [B-402] Accumulate; nothing is written until the whole operation finishes.
+            if (r && r.observedItem && Array.isArray(r.observed)) _scanObserved.set(r.observedItem, r.observed);
             // [B-364] Gathered across the WHOLE run and raised once at the end. A card
             // export can touch a hundred fonts, and a dialog per font would be the
             // feature making itself impossible to use.
@@ -36656,6 +36766,8 @@ require(['vs/editor/editor.main'], function () {
               mode: _mode,
               targetName: cs.slot,
             });
+            // [B-402] Accumulate; the single commit at the end of the export writes it.
+            if (r && r.observedItem && Array.isArray(r.observed)) _scanObserved.set(r.observedItem, r.observed);
             for (const b of (r && r.refused) || []) _progRefusals.push({ ...b, _kind: 'common', _id: cs.uuid });
             if (!r || !r.ok) failures.push({ name: cs.slot, error: (r && r.error) || 'unknown error' });
             else if (r.skipped) {
@@ -36681,6 +36793,8 @@ require(['vs/editor/editor.main'], function () {
               replace: tracksReplace,
             });
             for (const b of (r && r.refused) || []) _progRefusals.push({ ...b, _kind: 'sharedTracks', _id: '' });
+            // [B-402] Accumulate; the single commit below writes it.
+            if (r && r.observedItem && Array.isArray(r.observed)) _scanObserved.set(r.observedItem, r.observed);
             if (!r || !r.ok) {
               failures.push({ name: 'tracks', error: (r && r.error) || 'unknown error' });
             } else {
@@ -36700,16 +36814,46 @@ require(['vs/editor/editor.main'], function () {
             failures.push({ name: 'tracks', error: String(err && err.message || err) });
           }
         } else if (includeTracks) {
-          // Included, but the card already had every track. Worth saying: silence
-          // here reads as "tracks did not ship".
+          // Included, but nothing needed writing. Worth saying: silence here reads as
+          // "tracks did not ship".
+          // ⚠⚠ AND SOME OF THEM MAY HAVE BEEN DELIBERATELY KEPT. `willWriteTracks` is false when
+          // the user skipped EVERY differing track, so this branch runs for a run that did make
+          // real choices - and it used to hard-code `kept: []`, discarding them before the summary
+          // could say so. The card then read as fully in sync while two files still differed.
+          // Found on his dev pass 2026-09-17: "All 57 shared tracks were already there", with two
+          // he had just chosen to keep.
+          const _keptNow = tracksDiffering.filter(t => !tracksReplace.includes(t));
           tracksOutcome = {
             reason: tracksReason,
             added: 0, replaced: 0,
-            unchanged: (window._sfSharedTracksFiles || []).length,
-            kept: [],
+            // ⚠ A kept track is NOT unchanged - it differs, and the user said leave it. Counting
+            // it as unchanged is what let the sentence below claim everything matched.
+            unchanged: Math.max(0, (window._sfSharedTracksFiles || []).length - _keptNow.length),
+            kept: _keptNow,
           };
         }
         _offExportProg();
+        // [B-402] ⭐⭐ THE ONE MANIFEST WRITE, HERE, AT THE END OF THE WHOLE OPERATION.
+        //
+        // His design: "we gather all the information and at the very end we drop a single manifest
+        // update based on what we learned along the way." `_scanObserved` holds everything this
+        // operation learned - what the CONFLICT SCAN hashed at the destination, and what each
+        // export wrote - and none of it cost a read the operation was not already making.
+        //
+        // ⚠⚠ IT MUST COVER ITEMS THAT WERE ONLY LOOKED AT. The first cut wrote per exported
+        // item, so a font already identical at the destination - scanned, matched, never copied -
+        // had its hashes thrown away and re-read on every later export. On a card kept in sync
+        // that is most of the card.
+        //
+        // ⚠ A CANCELLED OPERATION NEVER REACHES THIS LINE, which is the whole point: asking what
+        // would change leaves nothing behind.
+        if (_scanObserved.size) {
+          try {
+            await window.electronAPI.syncManifestCommit({
+              destDir, items: Object.fromEntries(_scanObserved),
+            });
+          } catch {}
+        }
         // Snap to a full bar so the operation visibly completes, absorbing any
         // small drift between the meta byte totals and the bytes actually
         // copied (e.g. an entry whose contentTotalBytes wasn't stamped yet).
