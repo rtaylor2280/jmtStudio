@@ -702,6 +702,10 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
       // the import will produce, which is the whole complaint.
       if (corrupt) corruptCount++; else if (!_twin) newCount++;
       results.push({ idx: i,
+        // [B-314] The row's own display label, carried so the back-fill pass below can
+        // name THIS row on its partner's note without re-deriving it from a different
+        // field and drifting out of step with what the screen actually shows.
+        label,
         // ⚠️ The prepared object is kept INTACT for a twin, deliberately: its uuid is
         // how "import anyway" finalizes without re-extracting. The library-duplicate
         // branch above learned this the hard way — dropping its `staged` field leaked
@@ -929,6 +933,41 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
       tracks = { total: wavs.length, new: tNew, owned: tOwned, libOwned: tLibOwned, batchDup: tBatchDup, items };
     }
   } catch {}
+
+  // [B-314] BACK-FILL THE PARTNER, so the fact is stated on BOTH rows.
+  //
+  // ⭐⭐ THE RELATIONSHIP IS SYMMETRIC AND THE LOOP ABOVE CANNOT SEE THAT. FoRed is the
+  // same font as RVJ exactly as much as RVJ is the same font as FoRed; the only reason
+  // the second one carried the marker is that it was scanned second. Marking one side is
+  // an artifact of walk order dressed up as a statement about the font.
+  //
+  // ⚠️ AND IT IS WHAT MAKES THE CHECKBOXES SAFE TO LEAVE ALONE. His, 2026-09-16: "shouldn't
+  // they trade places if you reverse the selection? should they both state this if both
+  // selected? we don't want to toggle between them if we're going to allow direct
+  // duplication... but we shouldn't be quiet about it either." Labelling both, always,
+  // answers all of it at once — nothing moves when a box is ticked, both boxes stay
+  // independent, and the note can never go quiet, because it was never conditional on a
+  // selection in the first place. The alternative is logic that has to decide when to
+  // speak, and that is where a marker learns to disappear at the wrong moment.
+  //
+  // ⚠️ Only the DEFAULT tick is decided by order (the renderer leaves the earlier row
+  // checked and unchecks the later one). That is a default, not a claim, and the claim is
+  // on both rows either way.
+  {
+    const _byIdx = new Map();
+    for (const r of results) _byIdx.set(r.idx, r);
+    for (const r of results) {
+      if (!r.sameInBatch) continue;
+      const first = _byIdx.get(r.sameInBatch.idx);
+      // The first twin has no marker yet; give it one pointing back. A third copy of the
+      // same font points at the SAME first row, so the first keeps one partner reference
+      // rather than accumulating a list — the row it names is still on screen and still
+      // the one it is identical to.
+      if (first && !first.sameInBatch) {
+        first.sameInBatch = { idx: r.idx, label: r.label != null ? r.label : (r.prepared && r.prepared.name) || '' };
+      }
+    }
+  }
 
   onProgress({ stage: 'done', total });
   // `duplicate` is kept for callers that still distinguish the archive-hash hit;

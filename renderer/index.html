@@ -12349,6 +12349,25 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
   // Collapsing them tells a user their archive is empty because OUR read failed.
   const _srcHasNoFont = (s) => !!(s && s._enrich && s._enrich.fontCount === 0);
 
+  // ⭐⭐ [B-314] THE SECOND COPY OF A FONT THAT IS ALREADY IN THIS IMPORT. Hoisted for the
+  // same reason `_srcHasNoFont` above is: the review screen and QUICK IMPORT are two doors
+  // onto one decision, and the standing invariant is that quick commits exactly what review
+  // would show CHECKED. A skip reason that lives in only one of them breaks that invariant
+  // silently — review looks right and quick imports the row anyway.
+  //
+  // ⚠️ THAT IS EXACTLY WHAT HAPPENED, 2026-09-16, on his dev test of the untick: "correctly
+  // unchecked and would have been skipped on review but went al and did quick import am both
+  // came in." Review showed Import (5) and Quick imported 6. I added the untick to the row
+  // and left the quick filter alone — the same miss [B-296] had to fix here for empty
+  // archives, four hours earlier, in this same function.
+  //
+  // ⚠️ `_idx > partner.idx` is the SAME test the row uses to decide which copy keeps its
+  // tick. Two spellings of "which one is the later twin" would drift, and the drift would
+  // show up as quick and review disagreeing about a single font.
+  const _isLaterTwin = (s) => !!(s && s._sameInBatch
+    && typeof s._idx === 'number' && typeof s._sameInBatch.idx === 'number'
+    && s._idx > s._sameInBatch.idx);
+
   // ⚠️⚠️ A CLICK BESIDE THIS MODAL NEVER DISMISSES IT, IN ANY PHASE ([B-396]).
   //
   // ⭐ HIS CONVENTION, STATED 2026-09-16 AND IT IS THE PROJECT DEFAULT, NOT A RULE FOR THIS
@@ -13566,14 +13585,44 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         // checked FIRST because a source can be both — the library note would then be
         // the less useful of the two, since the row it names is on this very screen.
         //
-        // Left CHECKED and enabled on purpose: unlike a library duplicate there IS a
-        // staged copy to import, and importing both is a legitimate choice (the same
-        // font under two names on a card is often deliberate). His 2026-08-31 ruling
-        // stands — a row the user ticks despite a marker is a row they meant.
+        // ⭐⭐ BOTH ROWS CARRY THE NOTE, and only the LATER one starts unticked. His dev
+        // test 2026-09-16 found both twins ticked: "if those are the byte identical then
+        // this didn't work. they are both selected..." He was right, and for a reason the
+        // original design missed — eight lines below, a LIBRARY duplicate unticks itself.
+        // Two duplicates in one list with opposite defaults, and the ticked one reproduces
+        // the exact complaint the entry exists for ("but it didnt de dup"): press Import
+        // and both copies land, same as before, just announced first.
+        //
+        // ⚠️ THE NOTE IS NOT CONDITIONAL ON THE TICK, DELIBERATELY. His questions:
+        // "shouldn't they trade places if you reverse the selection? should they both
+        // state this if both selected? we don't want to toggle between them if we're
+        // going to allow direct duplication... but we shouldn't be quiet about it either."
+        // Stating it on both rows permanently answers every one at once — nothing moves
+        // when a box is ticked, the two boxes stay independent so importing both is still
+        // one click, and the marker can never go quiet because it never depended on a
+        // selection. Logic that decides WHEN to speak is how a marker learns to vanish at
+        // the wrong moment.
+        //
+        // ⭐ WALK ORDER DECIDES ONLY THE DEFAULT. `sameInBatch.idx` is the partner's row
+        // index, so a row is the later twin exactly when its own index is the larger one.
+        // That picks which copy starts ticked; it makes no claim about either font, and
+        // both rows say the same thing either way.
         if (src._sameInBatch) {
           note.textContent = `Same font as ${src._sameInBatch.label} in this import.`;
           note.classList.add('variant');
           note.classList.remove('have-it');
+          // ⭐ ONE DEFINITION, shared with quick import — see `_isLaterTwin` where it is
+          // hoisted. Spelling this test out inline here is how review and quick came to
+          // disagree about the same font in the first place.
+          const _isLater = _isLaterTwin(src);
+          if (_isLater && row.checkbox) {
+            // ⚠️ Unchecked, NOT disabled — the same shape as the library-duplicate branch
+            // below. The same font under two names on a card is sometimes deliberate, so
+            // the second copy stays one click away; it just is not the default.
+            row.checkbox.checked = false;
+            row.checkbox.title = 'The same font is already in this import. Check it to import a second copy.';
+            row.el.classList.add('excluded');
+          }
           return;
         }
         if (src._duplicate) {
@@ -13854,7 +13903,12 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       // `_duplicate`/`_owned`, which both mean "already in your library" — telling
       // someone their card is already imported when it is not would be worse than the
       // miss this fixes.
-      if (r.sameInBatch) s._sameInBatch = r.sameInBatch;
+      // ⚠️ `_idx` IS STAMPED BECAUSE THE REVIEW LIST IS FILTERED. Rows are built from
+      // `_guidedSources`, so a row's position there is not its position in plan.sources,
+      // and `sameInBatch.idx` addresses the latter. Without this the "am I the later
+      // twin?" test would compare two different numbering schemes and pick the wrong row
+      // to untick — silently, and only when the list happened to be filtered.
+      if (r.sameInBatch) { s._sameInBatch = r.sameInBatch; s._idx = r.idx; }
       // Ownership now arrives WITH the analysis instead of landing on the review
       // screen seconds after it opens. `_owned` means "you already have these
       // sounds" whichever test found it; `_match` carries the row's note.
@@ -14098,7 +14152,11 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         if (_emptyCount) rows.push(['No sound font inside (skipped)', _emptyCount, false, true]);
         // [B-314] Its own line. Folding it into "already in your library" would state
         // something false about the card.
-        if (st.sameInBatch) rows.push(['Same font twice in this import', st.sameInBatch, false, true]);
+        // ⭐ "(skipped)" EARNED ITS WORD 2026-09-16 when the second copy stopped being
+        // ticked by default. His: "we ddin't say it was skipped... we should have." The
+        // number needs no adjusting to match — `new` never counted a twin, so this line
+        // and the one above already partition correctly: 5 will import, 1 is held back.
+        if (st.sameInBatch) rows.push(['Same font twice in this import (skipped)', st.sameInBatch, false, true]);
         // ⚠️⚠️ [B-397] A REGRESSION FROM edac3cd (2026-08-31), found by him 2026-09-16 on BOTH
         // bulk import and SD card import — they share this modal, so one line broke two doors.
         // What this replaced, and it worked:
@@ -14415,7 +14473,14 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       // not `_owned` — it passed all three tests and got swept in, to fail at the far end of
       // the run. The invariant in the note above is the whole argument: quick commits exactly
       // what review would show CHECKED, and review now shows this row disabled.
-      const fresh = runPlan.sources.filter(s => s._prepared && !s._corrupt && !s._owned && !_srcHasNoFont(s));
+      // ⭐⭐ [B-314] AND NOT THE SECOND COPY OF A FONT ALREADY IN THIS RUN. Same argument as
+      // the line above, and the same failure: a twin IS `_prepared`, is not `_corrupt` and is
+      // not `_owned` (it is not in the library — it is in this import), so it passed every
+      // test here and quick swept it in while review had it unticked. His: "correctly
+      // unchecked and would have been skipped on review but went al and did quick import am
+      // both came in."
+      const fresh = runPlan.sources.filter(s => s._prepared && !s._corrupt && !s._owned
+        && !_srcHasNoFont(s) && !_isLaterTwin(s));
       // ⚠️ NO FRESH FONTS IS NOT NOTHING TO DO. A tracks-only plan has zero sources
       // by definition, so this closed the modal and returned — quick import looked
       // like it silently did nothing. Commons are in the same position. Only bail

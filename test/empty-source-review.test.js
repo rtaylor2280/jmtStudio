@@ -134,8 +134,13 @@ function ok(name, cond, extra) {
      /const _gNoFont = _guidedSources\.filter\(_srcHasNoFont\)\.length;/.test(html));
   ok('the review row calls it',
      /const _noFont = _srcHasNoFont\(src\);/.test(html));
+  // ⚠️ MATCHES THE CLAUSE, NOT THE WHOLE FILTER LINE. The first cut pinned the four tests
+  // in one exact sequence and broke the moment [B-314] added a fifth and wrapped the line —
+  // a red suite over a change that ADDED a skip reason rather than removing one. What this
+  // must guarantee is that quick import consults the predicate, not that the filter has
+  // exactly the shape it had on the day this was written.
   ok('⭐⭐ and QUICK IMPORT calls it',
-     /s\._prepared && !s\._corrupt && !s\._owned && !_srcHasNoFont\(s\)/.test(html),
+     /runPlan\.sources\.filter\(s => s\._prepared[\s\S]{0,300}?!_srcHasNoFont\(s\)/.test(html),
      'quick must commit exactly what review would show checked');
   ok('⚠️ no consumer still spells the test out inline',
      !/_enrich && \w+\._enrich\.fontCount === 0/.test(html.replace(/const _srcHasNoFont[^;]+;/, '')),
