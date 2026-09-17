@@ -119,5 +119,164 @@ function ok(name, cond, extra) {
   ok('and their intros do too', /\.sf-save-conflict-section-intro \{/.test(html));
 }
 
+// ── ⚠⚠ THE CAUTION IS PER KIND, because the two kinds overwrite different amounts ──
+//
+// ⭐ HIS, on the dev test 2026-09-17, looking at the tracks-only dialog: the amber line said
+// "Replace overwrites the whole FOLDER at the destination" two paragraphs under a body saying
+// tracks are replaced one file at a time and anything else is left alone. Both on one screen;
+// only one true of the rows underneath.
+//
+// ⚠ IT PREDATES THIS ENTRY — the card/SD track flow calls the same modal and has shown the
+// folder wording over track lists all along. What the sectioned dialog changed is that it became
+// unfixable in place: one sentence cannot be right for two semantics at once.
+{
+  ok('⭐⭐ there are two caution texts, not one',
+     /_CAUTION_FOLDERS\s+= /.test(html) && /_CAUTION_TRACKS\s+= /.test(html));
+  ok('⚠️ the folder one still names the FOLDER as the blast radius',
+     /_CAUTION_FOLDERS\s+= 'Replace overwrites the whole folder/.test(html));
+  ok('⚠⚠ and the track one does NOT claim a folder is overwritten',
+     /_CAUTION_TRACKS\s+= 'Replace overwrites these files[^']*'/.test(html)
+     && !/_CAUTION_TRACKS\s+= '[^']*whole folder/.test(html),
+     'this is the sentence he caught');
+  // ⚠ REWRITTEN 2026-09-17 on his read. "back it up first" was advice the reader cannot
+  // take — the dialog is modal, so backing anything up means cancelling, and the sentence
+  // named an action they could not perform while not naming the button that would let them.
+  // The consequence is now stated in the word people actually fear.
+  ok('⭐ both still name the CONSEQUENCE, not just the mechanism',
+     /_CAUTION_FOLDERS\s+= '[^']*is lost\./.test(html)
+     && /_CAUTION_TRACKS\s+= '[^']*is lost\./.test(html),
+     'overwrites-the-folder describes what the code does; lost is what happens to them');
+  ok('⚠️ and neither repeats what the intro above it already says',
+     !/_CAUTION_TRACKS\s+= '[^']*left alone/.test(html),
+     'the tracks intro, the body and the caution all said it — one fact, three times, one screen');
+
+  ok('each section carries its own caution',
+     /caution: _CAUTION_FOLDERS,/.test(html) && /caution: _CAUTION_TRACKS,/.test(html));
+  ok('⚠️ the LEGACY tracks-only caller got it too',
+     /defaultMode: 'replace',[\s\S]{0,400}?caution: _CAUTION_TRACKS,/.test(html),
+     'the card/SD export calls this modal and had the same contradiction');
+  ok('the flat path takes its caution from the CALLER',
+     /cautionEl\.textContent = opts\.caution \|\| _CAUTION_FOLDERS/.test(html),
+     'defaulting to the folder text keeps every pre-existing caller unchanged');
+
+  // ⭐⭐ SHOW/HIDE IS PER SECTION TOO. Setting the folders to Skip must take the folder
+  // warning away even while every track is still Replace — a warning that outlives the choice
+  // it described is how a real one stops being read.
+  ok('⭐⭐ the sectioned dialog hides the flat caution entirely',
+     /if \(_multi\) \{[\s\S]{0,200}?cautionEl\.style\.display = 'none';/.test(html));
+  ok('⭐⭐ and shows each section caution only when THAT section has a replace',
+     /data-caution-sec/.test(html)
+     && /getAttribute\('data-conflict-sec'\) === k/.test(html),
+     'a dialog-wide check would leave the folder warning up over an all-Skip folder list');
+  ok('the per-section caution has a style rule',
+     /\.sf-save-conflict-section-caution \{/.test(html));
+}
+
+// ── ⭐⭐ EVERY PER-KIND STRING BRANCHES TOGETHER, OR THE SCREEN CONTRADICTS ITSELF ──
+//
+// ⚠⚠ CAUGHT BY HIM ON THE 2026-09-17 DEV TEST, from two screenshots side by side: the same
+// title, "2 tracks differ from your library", with two DIFFERENT warnings underneath. One door
+// had the track wording and the other still claimed a whole folder would be overwritten.
+// Cause: `title` and `description` both had a `_tracksOnly` arm and `caution` had none, so it
+// fell through to the folder default. Three strings describe the kind; two of three were wired.
+//
+// ⭐ Same shape as [B-314]'s quick-import miss the night before, and [B-296]'s before that: a
+// per-kind behaviour added to some of its call sites. The assertion is therefore structural -
+// count the arms, do not eyeball the wording.
+{
+  const call = html.slice(html.indexOf('const choicesPromise = _sfPromptSaveConflicts('),
+                          html.indexOf('const choicesPromise = _sfPromptSaveConflicts(') + 3000);
+  // ⚠️ `\s*` because one of the three wraps its `?` onto the next line. A regex that
+  // assumes formatting counts two arms out of three and reports the bug as still present.
+  const arms = (call.match(/_tracksOnly\s*\?/g) || []).length;
+  ok('⭐⭐ title, description AND caution each have a tracks-only arm', arms === 3,
+     `found ${arms} of 3 — a per-kind string with no arm silently shows the folder default`);
+  ok('⚠️ and the caution arm is one of them',
+     /caution: _tracksOnly \? _CAUTION_TRACKS : _CAUTION_FOLDERS,/.test(call),
+     'this is the line his screenshots caught missing');
+}
+
+// ── ⚠ THE TITLE NAMES WHAT THE COMPARISON IS AGAINST ──────────────────
+//
+// His: "is this clear that it's different content but same name?" The body said so; the TITLE
+// said only "are different" — a comparative with no referent, read first, above a row that is
+// just a name and two radio buttons. ⭐ Tracks had always named it ("differ from your library")
+// and folders never had, and the sectioned dialog is where both appear at once.
+{
+  ok('⭐ the folders title names the library',
+     /_cTitle = `\$\{_subject\} at the destination \$\{_isPlural \? 'differ' : 'differs'\} from your library`/.test(html));
+  ok('⭐ the sectioned title does too, and carries a COUNT like every single-kind title',
+     /\$\{conflicts\.length \+ tracksDiffering\.length\} things at the destination differ from your library/.test(html),
+     '"Some" was the only headline in this dialog that did not say how many');
+  ok('⚠️ and no title still says only "are different"',
+     !/at the destination \$\{_isPlural \? 'are' : 'is'\} different/.test(html)
+     && !/'Some things at the destination are different'/.test(html));
+  ok('tracks keep the wording they always had',
+     /tracks differ from your library/.test(html));
+}
+
+// ── ⭐ TITLE STATES THE SITUATION, BODY STATES THE DECISION ────────────
+//
+// His, 2026-09-17: "the title and the line under it seem repetative. and isn't it just about an
+// export conflict and they have to make a decision?" Every variant opened by saying they differ
+// and then immediately said it again in other words.
+{
+  ok('⭐⭐ the sectioned body says only what to DO',
+     /_sectioned\s*\?\s*'Choose whether to replace each with your library version, or keep what is there\.'/.test(html));
+  ok('⚠️ and no body restates "exist there with different contents"',
+     !/'These already exist there with different contents/.test(html)
+     && !/'These tracks exist at the destination with different contents/.test(html)
+     && !/already \$\{_isPlural \? 'exist' : 'exists'\} there with different contents/.test(html),
+     'that clause was the restatement in all three variants');
+  ok('⭐ the facts that are NOT in the title survive',
+     /Each folder is treated as a unit, so old and new files are never mixed/.test(html)
+     && /Anything else at the destination is left alone/.test(html)
+     && /fonts that already match/.test(html),
+     'cutting the repetition must not cut the things the title never said');
+}
+
+// ── ⭐⭐ THE REVIEW IS IN FRONT OF THE SCAN, NOT BEHIND IT ────────────
+//
+// ⚠⚠ HIS, 2026-09-17, with a screenshot: "the dialog opened before the scan finished." It had
+// — it opened UNDERNEATH. Both surfaces are plain .modal-overlay at z-index 10000, so DOM order
+// decided, and #modal-sf-bulk-progress is declared LATER in the document. A finished
+// "Checking the destination" bar sat on top of the decision it had just produced.
+//
+// ⭐ THE OVERLAP IS DELIBERATE AND MUST STAY. Closing the scan before the next surface opens
+// leaves a frame with no backdrop, which reads as a full-screen flash (found 2026-07-31). The
+// design is open-next-then-close-previous; it just requires the next one to be in FRONT.
+{
+  ok('⭐⭐ the conflict review is stacked above the progress overlay',
+     /#modal-sf-save-conflict \{ z-index: 10010; \}/.test(html),
+     'equal z-index meant DOM order won, and the progress overlay is declared later');
+  ok('⚠️ and still below the confirm modal',
+     /#modal-confirm \{ z-index: 10015; \}/.test(html),
+     'a confirm summoned from inside the review has to clear it');
+
+  ok('⭐⭐ the scan closes SYNCHRONOUSLY, before the review opens',
+     /_sfDeleteProgress\.hideNow\(\);/.test(html)
+     && html.indexOf('_sfDeleteProgress.hideNow();') < html.indexOf('const choicesPromise = _sfPromptSaveConflicts('),
+     'scan then dialog — his order, and the one the first comment always stated');
+  ok('⚠️ hideNow takes no minimum display time',
+     /hideNow\(\) \{[\s\S]{0,40}?this\.modal\(\)\?\.classList\.remove\('active'\);/.test(html),
+     'the 200ms floor is what held a finished bar over the question that replaced it');
+  ok('⚠️ the floor still exists for every other caller',
+     /async hide\(minMs = 200\)/.test(html),
+     'it earns its place where nothing follows the overlay');
+
+  // ⚠⚠ ONE FRAME IS THE WHOLE POINT. An await between the close and the open yields to the
+  // event loop, the browser paints the gap, and the backdrop-less flash comes back.
+  ok('⭐⭐ nothing awaits between the close and the open',
+     !/hideNow\(\);[\s\S]{0,900}?await[\s\S]{0,60}?_sfPromptSaveConflicts/.test(html),
+     'they have to land in the same synchronous block or one of the two constraints breaks');
+  ok('⚠️ and the scan is no longer hidden AFTER the review opens',
+     !/await _sfDeleteProgress\.hide\(0?\);[\s\S]{0,60}?const choices = await choicesPromise;/.test(html),
+     'that ordering is what put a progress bar on top of a decision');
+
+  // Defence in depth: if they ever do coexist, the decision must be the one in front.
+  ok('the review still outranks the progress overlay in z-index',
+     /#modal-sf-save-conflict \{ z-index: 10010; \}/.test(html));
+}
+
 console.log(failures ? `\n${failures} FAILURE(S)` : '\nall export conflict dialog tests passed');
 process.exit(failures ? 1 : 0);

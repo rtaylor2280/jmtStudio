@@ -1381,6 +1381,16 @@
      at 10020 so clicking outside the menu still closes it. */
   #modal-unsaved { z-index: 10015; }
   #modal-confirm { z-index: 10015; }
+  /* [B-357] THE CONFLICT REVIEW OUTRANKS THE PROGRESS OVERLAY, and this is a stacking bug
+     rather than a timing one. Both are plain .modal-overlay at 10000, so DOM order decided
+     it — and #modal-sf-bulk-progress is declared LATER in the document, which put a finished
+     "Checking the destination…" bar on top of the decision it had just produced.
+     He caught it 2026-09-17: "the dialog opened before the scan finished." It had; it opened
+     UNDERNEATH. The export deliberately opens the next surface before closing the scan so
+     there is never a backdrop-less frame (the 2026-07-31 flash), and that only works if the
+     next surface is actually in front. 10010 is the same step the detail-view modals already
+     use, and stays below the confirm at 10015. */
+  #modal-sf-save-conflict { z-index: 10010; }
   /* Confirm modal can carry longer explanatory copy and up to four action
      buttons (the SD-card guard), so give it more room than the 380px default so
      the text does not wrap into cramped lines. */
@@ -3572,6 +3582,12 @@
                                     text-transform: uppercase; letter-spacing: 0.04em; }
   .sf-save-conflict-section-intro { font-size: 0.72rem; color: var(--c-text-muted); margin-top: 2px;
                                     line-height: 1.45; }
+  /* [B-357] The amber caution, per section. Same idiom and colour as the flat one above,
+     one step smaller because it sits inside a section rather than heading the dialog.
+     It is per-section because the two kinds overwrite different amounts: a folder goes
+     whole, a track goes one file. One sentence covering both was true of neither. */
+  .sf-save-conflict-section-caution { font-size: 0.72rem; color: #d97706; margin-top: 3px;
+                                      line-height: 1.45; }
   .sf-save-conflict-row { display: flex; align-items: center; gap: 12px; padding: 6px 10px; background: var(--c-bg-inset); border: 1px solid var(--c-border-faint); border-radius: 4px; font-size: 0.82rem; }
   .sf-save-conflict-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--c-text); font-weight: 600; }
   .sf-save-conflict-choices { display: flex; gap: 10px; flex-shrink: 0; }
@@ -25668,14 +25684,42 @@ require(['vs/editor/editor.main'], function () {
         if (!pick || !pick.ok) return;
         const destDir = pick.dirPath;
         let replace = [];
+        // [B-357] PREPARE WITH A BAR, THEN PRESENT PAINTED — the convention, applied to the
+        // one path that never had it. Comparing every track against the destination ran in
+        // total silence right after the folder picker; on a real library that is 57 files and
+        // over a gigabyte, which is exactly the silent pause the destination check a few
+        // hundred lines up was already fixed for. His, 2026-09-17: "there seemed to be no scan
+        // at all on the tracks export."
+        // ⭐ The plumbing already existed — the combined export drives its bar off this same
+        // channel. This path simply never subscribed.
+        let _planned = false;
+        const _offTrkPlan = window.electronAPI.onSharedTracksPlanProgress(({ file, done, total } = {}) => {
+          _planned = true;
+          _sfDeleteProgress.setPhase(
+            total ? `Comparing with your library · ${Math.min(done + 1, total)} of ${total}` : 'Comparing with your library',
+            total ? done / total : 0, file || '', '');
+        });
+        // Indeterminate until the first tick says how many there are: the count is not known
+        // before the plan starts, and a bar sitting at a fixed fraction reads as a hang.
+        _sfDeleteProgress.show('Checking the destination…', 'Comparing with your library…');
         try {
           const plan = await window.electronAPI.sharedTracksPlanExport({ destDir });
+          if (_planned) _sfDeleteProgress.setProgress(1);
           if (plan && plan.ok && plan.differing && plan.differing.length) {
+            // ⚠ Close synchronously, THEN open the review — same frame, no await between
+            // them. Awaiting here paints a bare backdrop; opening first leaves a finished bar
+            // on top of the question.
+            _sfDeleteProgress.hideNow();
             const chosen = await _sfResolveTrackConflicts(plan.differing);
             if (chosen === null) return; // cancelled
             replace = chosen;
+          } else {
+            // No review to open, so nothing follows this overlay — the minimum display time
+            // earns its place here and stops a fast check flashing for two frames.
+            await _sfDeleteProgress.hide();
           }
-        } catch {}
+        } catch { await _sfDeleteProgress.hide(); }
+        finally { try { _offTrkPlan && _offTrkPlan(); } catch {} }
         const _tracksT0 = Date.now();
         _sfDeleteProgress.show('Exporting tracks', '', 0);
         let r;
@@ -34929,6 +34973,15 @@ require(['vs/editor/editor.main'], function () {
           if (d) d.textContent = file || '';
           if (e) { e.style.display = ''; e.textContent = elapsedText || ''; }
         },
+        // [B-357] Synchronous close, for a transition that opens its successor in the SAME
+        // frame. hide()'s minimum display time exists so a fast operation does not flash a
+        // modal for two frames — but when another surface is going up immediately, that floor
+        // holds a finished progress bar over the thing that replaced it. No await, so the
+        // caller can pair this with an open and have the browser paint them together.
+        hideNow() {
+          this.modal()?.classList.remove('active');
+          this.startTs = 0;
+        },
         async hide(minMs = 200) {
           const elapsed = Date.now() - this.startTs;
           if (elapsed < minMs) {
@@ -35341,6 +35394,22 @@ require(['vs/editor/editor.main'], function () {
           modal.classList.add('active');
         });
       };
+      // [B-357] THE CAUTION IS PER KIND, because the two kinds do different things.
+      //
+      // ⚠️ One shared sentence used to sit above every list saying Replace overwrites the
+      // whole FOLDER — on a tracks list, two paragraphs under a body that says tracks are
+      // replaced one file at a time and anything else is left alone. Both statements on one
+      // screen, and only one of them true of the rows underneath. It predates this entry
+      // (the card/SD track flow calls the same modal), but the sectioned dialog is where it
+      // became unfixable in place: one caution cannot be right for two semantics at once,
+      // and nothing told the reader which rows it applied to.
+      //
+      // ⭐ THE WARNING ITSELF IS WORTH KEEPING for both — the risk it names is "you edited
+      // this at the destination and Replace will lose that". What differs is the BLAST
+      // RADIUS, so that is the only part the wording changes.
+      const _CAUTION_FOLDERS = 'Replace overwrites the whole folder. Anything you added or changed there is lost.';
+      const _CAUTION_TRACKS  = 'Replace overwrites these files. Anything you changed there is lost.';
+
       const _sfPromptSaveConflicts = (conflictNames, opts = {}) => {
         const modal = document.getElementById('modal-sf-save-conflict');
         const list = document.getElementById('sf-save-conflict-list');
@@ -35351,7 +35420,7 @@ require(['vs/editor/editor.main'], function () {
         if (!modal || !list) return Promise.resolve(null);
         // Default copy is the bulk-fonts case; common-only export passes
         // overrides so the modal language matches the action.
-        if (titleEl) titleEl.textContent = opts.title || 'Some fonts on the card are different';
+        if (titleEl) titleEl.textContent = opts.title || 'Some fonts on the card differ from your library';
         if (descEl) descEl.textContent = opts.description || 'These already exist on the card with different contents. For each one, choose whether to replace it with your library version or keep what is on the card. Fonts that already match your library are not listed and were left alone. Each font is treated as a unit, so old and new files are never mixed.';
         // Render one row per conflict; both options shown. Which one is
         // pre-selected is the caller's call. Font folders default to Skip
@@ -35402,10 +35471,17 @@ require(['vs/editor/editor.main'], function () {
           </div>
         `).join('');
         const _multi = _sections.length > 1;
+        // [B-357] ⚠️ THE FLAT CASE KEEPS THE CAUTION WHERE IT HAS ALWAYS BEEN — above the
+        // Set-all buttons, in the static markup — and only its TEXT comes from the caller.
+        // Moving it into the list would put it BELOW those buttons, which is a visible
+        // layout change to the single-kind export that this entry is not supposed to touch.
+        // Sectioned is the only case where it moves, because that is the only case where one
+        // sentence cannot be true of every row.
         list.innerHTML = _sections.filter(sec => sec.names && sec.names.length).map(sec => `
           ${_multi && sec.heading ? `<div class="sf-save-conflict-section">
             <div class="sf-save-conflict-section-title">${_sfEscape(sec.heading)}</div>
             ${sec.intro ? `<div class="sf-save-conflict-section-intro">${_sfEscape(sec.intro)}</div>` : ''}
+            <div class="sf-save-conflict-section-caution" data-caution-sec="${_sfEscape(sec.key)}">${_sfEscape(sec.caution || _CAUTION_FOLDERS)}</div>
           </div>` : ''}
           ${_rowsFor(sec)}
         `).join('');
@@ -35441,7 +35517,26 @@ require(['vs/editor/editor.main'], function () {
           // overwritten. With every row set to Skip it is noise, and noise here
           // costs us the warning that matters later.
           const cautionEl = document.getElementById('sf-save-conflict-caution');
+          // [B-357] The flat caution carries the CALLER's wording now, so a tracks-only
+          // dialog stops claiming a whole folder gets overwritten. Default is the folder
+          // text, which is what every pre-existing caller means.
+          if (cautionEl && !_multi) cautionEl.textContent = opts.caution || _CAUTION_FOLDERS;
           const syncCaution = () => {
+            // ⭐ PER SECTION, for the same reason the text is: with two kinds on screen,
+            // "something would be overwritten" is two separate questions. Setting the
+            // folders to Skip must take the folder warning away even while every track is
+            // still set to Replace — a warning that outlives the choice it described is
+            // how a real one stops being read.
+            if (_multi) {
+              if (cautionEl) cautionEl.style.display = 'none';
+              for (const el of list.querySelectorAll('[data-caution-sec]')) {
+                const k = el.getAttribute('data-caution-sec');
+                const anyHere = [...list.querySelectorAll('input[type="radio"][value="replace"]:checked')]
+                  .some(r => r.closest('[data-conflict-sec]')?.getAttribute('data-conflict-sec') === k);
+                el.style.display = anyHere ? '' : 'none';
+              }
+              return;
+            }
             if (!cautionEl) return;
             const anyReplace = !!list.querySelector('input[type="radio"][value="replace"]:checked');
             cautionEl.style.display = anyReplace ? '' : 'none';
@@ -35484,8 +35579,12 @@ require(['vs/editor/editor.main'], function () {
         const n = differing.length;
         const choices = await _sfPromptSaveConflicts(differing, {
           title: n === 1 ? 'One track differs from your library' : `${n} tracks differ from your library`,
-          description: 'These tracks exist at the destination with different contents. Replace them with your library version, or keep what is already there. Anything else there is left alone.',
+          // The title already says they differ from the library; this says only what to do.
+          description: 'Replace them with your library version, or keep what is already there. Anything else at the destination is left alone.',
           defaultMode: 'replace',
+          // [B-357] Track semantics, not folder semantics. This path predates the sectioned
+          // dialog and has been showing the whole-folder caution over a track list all along.
+          caution: _CAUTION_TRACKS,
         });
         if (!choices) return null;
         return differing.filter(name => (choices.get(name) || 'replace') === 'replace');
@@ -36160,11 +36259,20 @@ require(['vs/editor/editor.main'], function () {
         // Everything that had to be read has been read. Close the scan before
         // any decision opens, so the two never overlap on screen.
         clearInterval(_scanElapsedTicker);
-        // NOTE: the scan is deliberately NOT hidden here. Removing this overlay
-        // before the next one is up leaves a paint with no backdrop, which reads
-        // as a full-screen flash. Each transition below opens the next surface
-        // first and closes this one behind it. (Spotted the flash
-        // 2026-07-31.)
+        // [B-357] ⚠️⚠️ A SUPERSEDED NOTE USED TO SIT HERE SAYING THE OPPOSITE of the line
+        // above — "the scan is deliberately NOT hidden here", because closing it before the
+        // next surface is up leaves a paint with no backdrop (the flash found 2026-07-31).
+        // Both were in the file at once, two lines apart, and the implementation followed the
+        // second one: the review opened while a finished progress bar was still on screen.
+        //
+        // ⭐ HE CAUGHT IT 2026-09-17 — "the dialog opened before the scan finished" — and then
+        // refused the explanation: "scan then dialog. you said dialog first by design... that's
+        // wrong." He is right, and the flash argument never required the overlap. It only bites
+        // if you close, let the browser PAINT, and then open. Closing and opening in the same
+        // synchronous block swaps them in one frame: no bare backdrop, no two surfaces at once.
+        //
+        // ⚠️ So the rule is the first comment, and the ORDER below is load-bearing: hide
+        // synchronously, then open, with no await between them.
         // Tracks deliberately do NOT enter the conflict list any more. That list
         // asks keep-or-replace, which is a destructive choice, and the tracks
         // export is now additive: nothing at the destination is deleted, and a
@@ -36209,9 +36317,9 @@ require(['vs/editor/editor.main'], function () {
               ? (_cFonts === 1 ? 'One font' : 'Some fonts')
               : 'The common folder';
           const _isPlural = _cFonts > 1 || (_cFonts >= 1 && _cCommon);
-          const _cTitle = `${_subject} at the destination ${_isPlural ? 'are' : 'is'} different`;
+          const _cTitle = `${_subject} at the destination ${_isPlural ? 'differ' : 'differs'} from your library`;
           const _cBody = [
-            `${_isPlural ? 'These' : 'This'} already ${_isPlural ? 'exist' : 'exists'} there with different contents.`,
+            // The title already said they differ; this line is the decision, not a restatement.
             `Choose whether to replace ${_isPlural ? 'each' : 'it'} with your library version or keep what is there.`,
             // Only claim things were left alone when some actually were.
             (unchangedFonts.length
@@ -36219,8 +36327,17 @@ require(['vs/editor/editor.main'], function () {
               : ''),
             `Each folder is treated as a unit, so old and new files are never mixed.`,
           ].filter(Boolean).join(' ');
-          // Started, not awaited: _sfPromptSaveConflicts adds .active
-          // synchronously, so the dialog is on screen before the scan closes.
+          // [B-357] ⭐⭐ THE SWAP HAPPENS IN ONE FRAME. `hideNow()` drops the scan's .active
+          // and `_sfPromptSaveConflicts` adds the review's, both synchronously with no await
+          // between them, so the browser paints once — review up, scan gone. That is what
+          // satisfies BOTH constraints at once: never two surfaces on screen together, and
+          // never a frame with a backdrop and nothing in it.
+          // ⚠️ DO NOT put an await between these two lines. An await yields to the event loop,
+          // the browser paints the gap, and whichever of the two constraints you were not
+          // thinking about breaks.
+          _sfDeleteProgress.hideNow();
+          // Started, not awaited: the review resolves when the user answers, and the code
+          // below has to finish setting up before we block on it.
           const _sectioned = conflicts.length > 0 && tracksDiffering.length > 0;
           // ⚠️ TRACKS-ONLY STILL HAS TO BE HANDED THE TRACK NAMES. With no folder
           // conflicts, passing `conflicts` renders an empty dialog and answers nothing.
@@ -36232,15 +36349,26 @@ require(['vs/editor/editor.main'], function () {
             // With both kinds present the headline covers the whole destination and
             // each section says its own piece; with one kind the existing per-kind
             // wording is still exactly right, so it is left alone.
-            title: _sectioned ? 'Some things at the destination are different'
+            title: _sectioned ? `${conflicts.length + tracksDiffering.length} things at the destination differ from your library`
                  : _tracksOnly ? (_tn === 1 ? 'One track differs from your library'
                                             : `${_tn} tracks differ from your library`)
                  : _cTitle,
+            // [B-357] ⚠ THE TITLE STATES THE SITUATION; THE BODY STATES ONLY THE DECISION.
+            // His, 2026-09-17: "the title and the line under it seem repetative. and isn't it
+            // just about an export conflict and they have to make a decision?" It was saying
+            // "differ from your library" and then "exist there with different contents" back to
+            // back — one fact, twice, in the two lines a reader takes in first.
             description: _sectioned
-              ? 'These already exist there with different contents. Choose what to do with each.'
+              ? 'Choose whether to replace each with your library version, or keep what is there.'
               : _tracksOnly
-                ? 'These tracks exist at the destination with different contents. Replace them with your library version, or keep what is already there. Anything else there is left alone.'
+                ? 'Replace them with your library version, or keep what is already there. Anything else at the destination is left alone.'
                 : _cBody,
+            // ⚠️⚠️ THE CAUTION BRANCHES WITH THEM, and it did not on the first cut — his dev
+            // test caught two screens carrying the same title and different warnings, because
+            // this line was missing while `title` and `description` above both had their
+            // tracks-only arm. THREE things describe the kind here and all three have to
+            // switch together; two out of three is how a screen ends up contradicting itself.
+            caution: _tracksOnly ? _CAUTION_TRACKS : _CAUTION_FOLDERS,
             // [B-357] Sections only when there is more than one kind to review. With a
             // single kind this stays undefined and the flat path renders exactly as
             // before, so nothing changes for the common single-kind export.
@@ -36253,6 +36381,7 @@ require(['vs/editor/editor.main'], function () {
                        : _cFonts ? (_cFonts === 1 ? 'Font' : 'Fonts') : 'Common folder',
                 // The per-kind sentence the entry said must survive the consolidation.
                 intro: 'Each folder is treated as a unit, so old and new files are never mixed.',
+                caution: _CAUTION_FOLDERS,
                 labelFor: (n) => (_isSlotKey(n) ? n.slice(5) : n),
                 titleFor: (n) => {
                   if (!_isSlotKey(n)) return n;
@@ -36272,6 +36401,7 @@ require(['vs/editor/editor.main'], function () {
                 defaultMode: 'replace',
                 heading: tracksDiffering.length === 1 ? 'Track' : 'Tracks',
                 intro: 'Tracks are replaced one file at a time. Anything else at the destination is left alone.',
+                caution: _CAUTION_TRACKS,
               },
             ],
             labelFor: (n) => (_isSlotKey(n) ? n.slice(5) : n),
@@ -36298,7 +36428,6 @@ require(['vs/editor/editor.main'], function () {
               return out;
             },
           });
-          await _sfDeleteProgress.hide();
           const choices = await choicesPromise;
           if (!choices) return false; // user cancelled the whole export, both kinds
           if (_sectioned) {
