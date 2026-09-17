@@ -20,6 +20,27 @@ const soundFontEntries = require('./soundFontEntries');
 const SCHEMA_VERSION = 1;
 const BACKUP_TYPE = 'jmt-soundfontlibrary';
 
+// The per-file hash records, kept OUTSIDE the item folders so they can never leak onto an
+// SD card through an export path:
+//     soundFonts/.filehashes/entries/<entryUuid>.json
+//     soundFonts/.filehashes/sources/<sourceUuid>.json
+//     soundFonts/.filehashes/commons/<commonUuid>.json
+//
+// ⭐⭐ WHY BACKUP CARES  [B-399]. soundFontCompare.buildLibraryIndex reads the ENTRIES
+// records and has NO fallback: a font with no record is counted unmatchable and skipped, so
+// the whole "do I already own this?" answer disappears for it. The sources and commons
+// records do fall back to a live walk, which makes them a speed cache — the entries ones are
+// correctness. A restore rmSyncs the entire soundFonts root before unpacking, so before this
+// was carried a restore did not merely fail to bring the index back, it DELETED a working
+// one. Found 2026-09-16 as the cause of [B-397]: 151 fonts on disk, zero records, and the
+// "Already in your library (skipped)" row gone from both importers.
+//
+// ⚠️ The subdirectory names are NOT uniform and that is not a typo — the on-disk bucket is
+// `library` but its records live under `entries`, and `common` maps to `commons`. Those
+// spellings are load-bearing; a wrong one silently empties an index instead of erroring.
+const FILEHASH_DIR = '.filehashes';
+const FILEHASH_SUBDIR = { library: 'entries', sources: 'sources', common: 'commons' };
+
 // Side-effect call into soundFontEntries: its _readEntryMeta backfills
 // entryUuid into any legacy meta.json that doesn't have one. Running
 // listEntries here means the backup's downstream disk reads (export
@@ -825,6 +846,27 @@ async function exportBackup({
         if (attachmentsFilesExpected > 0) await attachmentsBucketGate.promise;
       }
     }
+    // [B-399] The per-file hash manifests, LAST and deliberately quiet.
+    //
+    // ⚠️ NO GATE, AND THAT IS SAFE ONLY BECAUSE IT IS LAST. The gates above exist to stop
+    // archiver interleaving two buckets and flipping the on-screen label mid-item; nothing
+    // follows this, and archive.finalize() does not resolve until every queued entry has
+    // been written. Adding a bucket AFTER this one without giving this one a gate would
+    // reintroduce exactly the interleaving the gates were built to prevent.
+    //
+    // ⭐ NOT COUNTED IN survey.totalBytes, on purpose. That number is the size of the
+    // user's LIBRARY — their fonts — and it drives both the estimate and the bar. These
+    // manifests are derived data measured in hundreds of KB against multi-GB of audio (540
+    // KB for 19 commons on the library this was found on), so folding them in would make
+    // the reported library size subtly wrong in exchange for no perceptible accuracy. The
+    // bar stays honest because the work here is not perceptible, not because it is hidden.
+    //
+    // ⚠️ NOT CARRY-SCREENED EITHER. Every file here is JSON this app wrote itself, keyed by
+    // uuid, never user content — the refusal machinery has nothing to decide about them.
+    if (!cancelled) {
+      const fhRoot = path.join(_soundFontsRoot(userData), FILEHASH_DIR);
+      if (fs.existsSync(fhRoot)) archive.directory(fhRoot, FILEHASH_DIR);
+    }
 
     if (!cancelled) await archive.finalize();
     await done.catch(() => {}); // swallow during cancel; race handles exits
@@ -1411,6 +1453,11 @@ async function applyReplace({
     // added to exportBackup must be added here too or it round-trips into
     // the zip and out of existence.
     const bucketFiles = { sources: [], library: [], common: [], sharedTracks: [], attachments: [] };
+    // [B-399] The hash records are collected SEPARATELY rather than added to the allowlist
+    // above, because every consumer of that object attaches per-item labels, counters and
+    // grammar to its keys. They have no place in "Restoring Ahsoka (45 of 451 files)" —
+    // they restore as one quiet aggregate step at the end.
+    const hashManifestFiles = [];
     for (const key of Object.keys(entries)) {
       const e = entries[key];
       if (e.isDirectory) continue;
@@ -1418,6 +1465,7 @@ async function applyReplace({
       if (isSkipped(e.name)) continue;
       const parts = e.name.split('/');
       const bucket = parts[0] || '';
+      if (bucket === FILEHASH_DIR) { hashManifestFiles.push(e); continue; }
       if (bucketFiles[bucket]) bucketFiles[bucket].push(e);
     }
 
@@ -1611,6 +1659,40 @@ async function applyReplace({
       }
     }
 
+    // --- QUIET: the per-file hash manifests ---  [B-399]
+    // ⭐ THE ORIGINAL BUG WAS THAT THIS STEP DID NOT EXIST. Backup archived five buckets
+    // and .filehashes was not one of them, so a restore returned the fonts and silently
+    // dropped the data that makes them COMPARABLE — and because the full-replace path
+    // rmSyncs the whole soundFonts root first, restoring into a HEALTHY library actively
+    // deleted a working index rather than merely failing to bring one back.
+    // ⚠️ One label for the whole set. They are uuid-keyed json; a name flying past here
+    // would tell the user nothing they could act on.
+    if (!cancelled && hashManifestFiles.length > 0) {
+      onProgress({
+        processedBytes, totalBytes,
+        currentItem: 'Restoring file hashes…',
+        topItemName: 'File hashes',
+        topItemFilesProcessed: 0,
+        topItemFilesTotal: hashManifestFiles.length,
+      });
+      let n = 0;
+      for (const e of hashManifestFiles) {
+        if (cancelled) break;
+        const ok = await extractFile(e);
+        if (!ok) continue;
+        n++;
+        if (n === hashManifestFiles.length || (n % 25) === 0) {
+          onProgress({
+            processedBytes, totalBytes,
+            currentItem: 'Restoring file hashes…',
+            topItemName: 'File Hashes',
+            topItemFilesProcessed: n,
+            topItemFilesTotal: hashManifestFiles.length,
+          });
+        }
+      }
+    }
+
     if (cancelled) {
       throw Object.assign(new Error('Cancelled'), { cancelled: true });
     }
@@ -1667,30 +1749,6 @@ async function applyReplace({
   return { manifest, counts, refused: restoreRefused };
 }
 
-// Survey both the backup zip and the current library to classify every
-// item into one of four buckets per category:
-//   identical  — content match, no prompt, no write
-//   conflict   — same identity, content or curated meta differs, needs choice
-//   add        — in backup, not in current; added silently on merge apply
-//   currentOnly — in current, not in backup; Replace would wipe, Merge keeps
-//
-// Identity per category — what makes two items "the same item":
-//   sources — uuid (the dir name under sources/)
-//   library — entryUuid (primary) or sourceUuid+candidatePath (legacy fallback)
-//   common  — uuid (the dir name under common/)
-//
-// Content match per category uses the canonical-tree hash from
-// manifest.contentHashes against the live on-disk hash via
-// getXContentHash. The live side reads stored meta.contentHash when the
-// cheap-signal safety net (contentFileCount + contentTotalBytes) passes,
-// so most items short-circuit without re-walking the tree. Both sides
-// exclude the item-root meta.json so a pure rename/tag-edit doesn't
-// register as a content diff.
-//
-// sharedTracks aren't classified per-item (flat bucket of audio files,
-// no curated meta) but the survey returns counts on both sides so the
-// renderer's "Library matches backup" detection can see a delta there
-// even when the three named buckets are all-identical.
 async function surveyMerge({ userData, zipPath }) {
   if (!zipPath) throw new Error('Missing zipPath');
   if (!userData) throw new Error('Missing userData');
@@ -2399,6 +2457,46 @@ async function applyMerge({
   // onFile per extracted file. The mode-specific snapshot/rename
   // logic stays in place; only the progress emit shape moves to the
   // caller.
+  // [B-399] Carry the per-file hash record for ONE merged item.
+  //
+  // ⭐⭐ WHY MERGE NEEDS ITS OWN, instead of unpacking the archive's whole .filehashes/
+  // folder the way a full restore does: a merge takes SOME items and leaves the rest, so
+  // unpacking all of them would plant records keyed to ids this library never received —
+  // orphan rows describing content that is not here, which is a worse lie than the missing
+  // rows this entry is about. Per item, by identity, or not at all.
+  //
+  // ⚠️ AND WITHOUT IT, A MERGED FONT IS PERMANENTLY INVISIBLE TO OWNERSHIP. Merge
+  // materialises items by raw zip extraction — no entry creation, no hash recompute — so
+  // nothing on this path would ever write one, and nothing anywhere rebuilds them. This is
+  // the one part of [B-399] that reaches a user who never restored anything.
+  //
+  // The key differs by bucket: sources and commons are uuid-keyed on disk so the id IS the
+  // key, but a library entry is keyed by the entryUuid inside its own meta.json — which is
+  // why this reads the meta that just landed rather than trusting the directory name. That
+  // also makes it correct for the "keep both" mode, where the item lands under a different
+  // directory name but keeps its identity.
+  //
+  // Best-effort: an archive taken before records were carried simply has none, and a font
+  // without one degrades exactly as it does today.
+  const carryHashRecord = async (bucket, id, targetDir) => {
+    const sub = FILEHASH_SUBDIR[bucket];
+    if (!sub) return;
+    let key = id;
+    if (bucket === 'library') {
+      try { key = JSON.parse(fs.readFileSync(path.join(targetDir, 'meta.json'), 'utf8')).entryUuid; }
+      catch { key = null; }
+      if (!key) return;
+    }
+    const zipName = `${FILEHASH_DIR}/${sub}/${key}.json`;
+    if (!entries[zipName]) return;
+    const dest = path.join(sfRoot, FILEHASH_DIR, sub, `${key}.json`);
+    try {
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      await zip.extract(zipName, dest);
+      rollbackLog.push(() => { try { fs.rmSync(dest, { force: true }); } catch {} });
+    } catch {}
+  };
+
   const processWorkItem = async (w, onFile) => {
     const bucketRoot = path.join(sfRoot, w.bucket);
     if (w.mode === 'install') {
@@ -2406,6 +2504,7 @@ async function applyMerge({
       if (fs.existsSync(target)) return;
       await extractPrefix(`${w.bucket}/${w.id}/`, target, onFile);
       rollbackLog.push(() => { try { fs.rmSync(target, { recursive: true, force: true }); } catch {} });
+      await carryHashRecord(w.bucket, w.id, target);
       if (counts[w.bucket]) counts[w.bucket].added++;
     } else if (w.mode === 'replace') {
       const currentDir = path.join(bucketRoot, w.currentName);
@@ -2425,6 +2524,7 @@ async function applyMerge({
         try { fs.rmSync(snap, { recursive: true, force: true }); } catch {}
       }
       rollbackLog[rollbackLog.length - 1] = () => {};
+      await carryHashRecord(w.bucket, w.id, target);
       if (counts[w.bucket]) counts[w.bucket].replaced++;
     } else if (w.mode === 'both') {
       // Library only — keep the current alongside the backup version.
@@ -2456,6 +2556,7 @@ async function applyMerge({
           fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
         } catch {}
       }
+      await carryHashRecord(w.bucket, w.id, target);
       if (counts[w.bucket]) counts[w.bucket].keptBoth++;
     }
   };
@@ -2786,6 +2887,7 @@ async function applyMerge({
   // files were never in it (any backup taken before 2026-09-02). Drop the
   // links rather than leave meta claiming proof that does not exist.
   try { require('./soundFontAttachments').pruneDanglingLinks(userData); } catch {}
+
   return { manifest: manifestApplied, counts, refused: restoreRefused };
 }
 

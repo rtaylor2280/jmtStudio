@@ -135,7 +135,12 @@ function ok(name, cond, extra) {
 
 // ── 3. the export REPORTS it, which is what it never did ───────────────────
 {
-  ok('exportBackup still returns its refusals', /return \{ destPath, manifest, refused \}/.test(backup));
+  // ⚠️ MATCHES THE FIELD, NOT THE WHOLE RETURN SHAPE. The first cut of this pinned the
+  // literal `return { destPath, manifest, refused }` and broke the day [B-399] added a
+  // fourth field beside it — a red suite over a change that could not possibly have
+  // dropped the refusals. An assertion should fail for the reason it is named after.
+  ok('exportBackup still returns its refusals',
+     /return \{ destPath, manifest, refused[,\s}]/.test(backup));
   ok('⭐⭐ and the export path now consumes them',
      /const _bkRefused = \(result && result\.refused\) \|\| \[\];/.test(html)
      && /_sfShowProgramRefusal\(\{\s*\n?\s*refused: _bkRefused/.test(html),
