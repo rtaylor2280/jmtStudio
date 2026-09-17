@@ -3435,7 +3435,13 @@ ipcMain.handle('sfBackup:applyMerge', async (event, { opId, zipPath, plan } = {}
     // Merge doesn't auto-apply starredCommon — the user keeping their
     // current library implies keeping their current default. (Replace
     // does apply it; that path is for "wipe and restore exactly.")
-    return { ok: true, manifest: result.manifest, counts: result.counts };
+    // [B-401] `refused` is what the restore DECLINED to write. The backend has always
+    // collected it ([B-370]); both restore handlers used to drop it at the door, so the
+    // renderer could never report it and a library restored with a program stripped out
+    // said it restored cleanly. The export handler always passed it through - this was an
+    // asymmetry, not a design.
+    return { ok: true, manifest: result.manifest, counts: result.counts,
+             refused: (result && result.refused) || [] };
   } catch (err) {
     if (err && err.cancelled) return { ok: false, cancelled: true };
     return { ok: false, error: String(err && err.message || err) };
@@ -3464,7 +3470,10 @@ ipcMain.handle('sfBackup:applyReplace', async (event, { opId, zipPath } = {}) =>
     if (m && m.settings && typeof m.settings.starredCommon === 'string') {
       Store.set('settings.soundFontStarredCommon', m.settings.starredCommon);
     }
-    return { ok: true, manifest: m, counts: result && result.counts };
+    // [B-401] Same pass-through as applyMerge. BOTH doors, deliberately - fixing only the
+    // one that was read first is the exact shape this entry was found by.
+    return { ok: true, manifest: m, counts: result && result.counts,
+             refused: (result && result.refused) || [] };
   } catch (err) {
     if (err && err.cancelled) return { ok: false, cancelled: true };
     return { ok: false, error: String(err && err.message || err) };

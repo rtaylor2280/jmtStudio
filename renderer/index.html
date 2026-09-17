@@ -33220,7 +33220,12 @@ require(['vs/editor/editor.main'], function () {
       // this computer put it there" framing - that belongs where we destroy something.
       // It still has to be SAID, because a silent drop is the same dishonesty the
       // export side was fixed for: the user picked four files and got three.
-      const _sfShowNotAdded = async (refused) => {
+      // `prefixHtml` is the same folding affordance _sfShowProgramRefusal carries, and it is
+      // here for the same reason ([B-370], his call: "done and continue are to be replaced,
+      // combine into one message"). A RESTORE has a completion summary to show AND may have
+      // declined a file; two dialogs in a row makes the user dismiss a summary to reach the
+      // thing that actually needed saying. [B-401]
+      const _sfShowNotAdded = async (refused, prefixHtml) => {
         const ref = (refused || []).filter(Boolean);
         if (!ref.length) return;
         const leaf = (x) => String(x.name || x.relPath || '').split('/').pop()
@@ -33241,7 +33246,8 @@ require(['vs/editor/editor.main'], function () {
         await promptConfirm({
           title: one ? 'One file was not added' : `${ref.length} files were not added`,
           messageHtml:
-            `<div style="color:#e5534b;font-weight:600;">&#9888; ${names} `
+            (prefixHtml ? `${prefixHtml}<div style="height:10px"></div>` : '')
+            + `<div style="color:#e5534b;font-weight:600;">&#9888; ${names} `
             + `${one ? 'was' : 'were'} not added.</div>`
             + `<div style="color:var(--c-text-sub);margin-top:6px;">`
             + `A sound font library does not carry ${phrase}. `
@@ -40196,9 +40202,20 @@ require(['vs/editor/editor.main'], function () {
         // backends. Built as separate lines so each category reads clean
         // and the elapsed-time stamp always lands on its own line at the
         // bottom (same shape as the bulk import "Took Xm Ys." stamp).
+        // [B-401] A restore that declined a file must SAY SO, and it must say so in the
+        // dialog that also reports the result - not in a second one behind it.
+        // ⚠️⚠️ NOT _sfShowProgramRefusal, WHICH THE ENTRY PRESCRIBED. That dialog IMPOUNDS
+        // first, and impounding assumes the file is in the library to be taken out of it.
+        // A restore never let it in: _screenRestored unlinks the extracted file on the way
+        // past, and the user's archive is untouched. Calling it here would fire an impound
+        // per finding against paths that do not exist, and report the failures as the news.
+        // _sfShowNotAdded is the dialog built for exactly this direction ([B-370]).
+        const _mergeRefused = (result && result.refused) || [];
+        const _mergeMsg = _sfBuildMergeCompleteMessage(result.counts, finalElapsedSec);
+        if (_mergeRefused.length) { await _sfShowNotAdded(_mergeRefused, _mergeMsg); return; }
         await promptConfirm({
           title: 'Merge complete',
-          messageHtml: _sfBuildMergeCompleteMessage(result.counts, finalElapsedSec),
+          messageHtml: _mergeMsg,
           confirmText: 'OK',
           confirmKind: 'primary',
           hideCancel: true,
@@ -40306,9 +40323,14 @@ require(['vs/editor/editor.main'], function () {
         // any stale in-memory selection / pivot the prior library left
         // behind happens inside refreshSoundFontsView.
         try { await window.refreshSoundFontsView(); } catch {}
+        // [B-401] BOTH DOORS. The entry was found because only one had ever been walked
+        // through; fixing one and not the other reproduces it exactly.
+        const _replRefused = (result && result.refused) || [];
+        const _replMsg = _sfBuildReplaceCompleteMessage(result.counts || observed.counts, finalElapsedSec);
+        if (_replRefused.length) { await _sfShowNotAdded(_replRefused, _replMsg); return; }
         await promptConfirm({
           title: 'Import complete',
-          messageHtml: _sfBuildReplaceCompleteMessage(result.counts || observed.counts, finalElapsedSec),
+          messageHtml: _replMsg,
           confirmText: 'OK',
           confirmKind: 'primary',
           hideCancel: true,
