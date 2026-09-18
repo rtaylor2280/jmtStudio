@@ -14,6 +14,8 @@ const soundFontEntries = require('./soundFontEntries');
 const soundFontCommon = require('./soundFontCommon');
 const soundFontBackup = require('./soundFontBackup');
 const soundFontBulkImport = require('./soundFontBulkImport');
+// [B-398] Main-thread stall probe. Inert unless userData/.stall-probe exists.
+const stallProbe = require('./stallProbe');
 const soundFontFileOps = require('./soundFontFileOps');
 const soundFontReorganize = require('./soundFontReorganize');
 const soundFontVoicepack = require('./soundFontVoicepack');
@@ -207,6 +209,21 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // [B-398] Arm the stall probe before any work can happen, so a freeze during the very first
+  // import is still measured. Returns false and costs nothing when the flag file is absent.
+  try {
+    if (stallProbe.init(app.getPath('userData'))) {
+      console.log('[stall-probe] armed ->', stallProbe.logPath(app.getPath('userData')));
+      // [B-398] Record the STACK of a main-process crash, then re-raise the same visible
+      // failure so behaviour is unchanged - the diagnostic must not turn a crash into a
+      // non-crash.
+      stallProbe.captureCrashes((err) => {
+        try { dialog.showErrorBox('A JavaScript error occurred in the main process',
+          'Uncaught Exception:' + String.fromCharCode(10) + String((err && err.stack) || err)); } catch {}
+        app.quit();
+      });
+    }
+  } catch {}
   // Evict stale cache entries before window opens
   try { cacheManager.startupEviction(); } catch {}
 
@@ -1867,6 +1884,9 @@ ipcMain.handle('bulkImport:cancel', () => {
 // and return real stats + per-source prepared/dup/corrupt results. Reuses the
 // same progress event + cancel token as run.
 ipcMain.handle('bulkImport:analyze', async (e, { plan } = {}) => {
+  // [B-398] The freeze he screenshotted was during ANALYZE. Flush on the way out so the log
+  // exists even if the run is cancelled or fails.
+  stallProbe.begin('bulkImport:analyze');
   try {
     _bulkImportCancelToken = { cancelled: false };
     const myToken = _bulkImportCancelToken;
@@ -1882,6 +1902,8 @@ ipcMain.handle('bulkImport:analyze', async (e, { plan } = {}) => {
     return { ok: false, error: String(err && err.message || err) };
   } finally {
     _bulkImportCancelToken = null;
+    stallProbe.end('bulkImport:analyze');
+    stallProbe.flush('bulk import analyze');
   }
 });
 

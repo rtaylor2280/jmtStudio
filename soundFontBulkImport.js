@@ -658,13 +658,21 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
     // so review keeps it unchecked-by-default — but committing it now reuses the
     // prepared zip (no re-strip/re-hash).
     let res;
+    // [B-398] Name the source, so the log says WHICH one held the loop and for how long.
+    // ⚠️ Declared ABOVE the try: a `const` inside it is out of scope in the `finally`, which is a
+    // ReferenceError at runtime that `node --check` passes happily. Same shape as the two invented
+    // helpers on 09-17 — the checker proves a file parses, not that an identifier resolves.
+    const _probe = require('./stallProbe');
+    const _probeLabel = 'importSource:' + path.basename(String(src && src.absPath || '?'));
     try {
+      _probe.begin(_probeLabel);
       res = await soundFontSources.importSource({
         userData, sourcePath: src.absPath, originalName: path.basename(src.absPath),
         metadata: {}, prepareOnly: true,
         onProgress: (p) => onProgress({ stage: 'source-progress', sourceIdx: i, total, label, sub: p }),
       });
     } catch (e) { res = { ok: false, error: String(e && e.message || e) }; }
+    finally { _probe.end(_probeLabel); }
     // THE VERDICT COMES FROM THE PREPARE'S OWN READ. Shape kept identical to the
     // map it replaces ({ count, reason }) so every consumer downstream — the
     // review's unchecked-by-default, the row's reason, the stats bucket — needs
