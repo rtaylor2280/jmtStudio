@@ -13987,6 +13987,14 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     clearInterval(_aTick);
     _aBar.cancel();          // a held bar must not outlive the element it paints
     if (unsub) { try { unsub(); } catch {} }
+    // ⚠️ REFUSED IS NOT FAILED. [B-413] Starting a second import while one is live is declined on
+    // purpose — nothing broke, nothing was lost, and "Analyze failed" would tell them their import
+    // is damaged when it is simply still running. Say what is true and what to do about it.
+    if (res && res.alreadyRunning) {
+      promptError('An import is already running',
+        'Wait for the current import to finish, then start this one.');
+      closeModal(); return false;
+    }
     if (!res || !res.ok) { promptError('Analyze failed', (res && res.error) || 'unknown error'); closeModal(); return false; }
     if (res.cancelled) { closeModal(); return false; }
     for (const r of (res.results || [])) {

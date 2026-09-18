@@ -1853,11 +1853,38 @@ ipcMain.handle('bulkImport:scan', async (_, { rootDir } = {}) => {
 // against the library, copies and detects candidates, creates entries
 // with needsReview when fields couldn't be auto-filled. Streams progress
 // via the bulkImport:progress event.
-let _bulkImportCancelToken = null;
+// ⚠️⚠️ A SET OF LIVE TOKENS, NOT ONE POINTER. [B-413]
+//
+// This was `let _bulkImportCancelToken = null`, reassigned at the top of every run, while each
+// running import kept checking the token IT captured. Two defects fell out of that, and they
+// disarm each other's runs in opposite directions:
+//
+//   1. A NEW run overwrote the pointer, so `bulkImport:cancel` only ever reached the LATEST run.
+//      Any earlier one still going became permanently un-cancellable - clicking Cancel set a flag
+//      nothing was reading.
+//   2. The `finally` set the pointer to null. So when the OLD run finally ended it wiped the
+//      pointer belonging to the NEW one, disarming that too.
+//
+// Observed 2026-09-18: he cancelled a 136-source import and the probe kept naming new sources for
+// eight more minutes, marching alphabetically past the cancel point, while the modal was gone and
+// the library was being written. He could see nothing at all.
+//
+// Cancel now means cancel EVERYTHING in flight, and each run removes only its own token.
+// ⚠️ THE GATE LIVES IN ITS OWN MODULE so it can be tested (test/bulk-import-gate.test.js).
+// Ten lines of state that went wrong twice while being written is exactly the thing that should
+// not be sitting untestable inside main.js.
+const _bulkGate = require('./bulkImportGate').createGate();
+
 ipcMain.handle('bulkImport:run', async (e, { plan } = {}) => {
+  // ⭐ ONE AT A TIME. Two concurrent imports both write the managed library, the content pool and
+  // the hash index - and [B-407]'s "no duplicates ever" was never designed against two writers.
+  // This is not a race worth supporting; it is one worth refusing.
+  const myToken = _bulkGate.begin();
+  if (!myToken) {
+    return { ok: false, alreadyRunning: true,
+             error: 'An import is already running. Wait for it to finish before starting another.' };
+  }
   try {
-    _bulkImportCancelToken = { cancelled: false };
-    const myToken = _bulkImportCancelToken;
     const result = await soundFontBulkImport.runBulkImport(
       { plan, userData: app.getPath('userData') },
       {
@@ -1871,13 +1898,14 @@ ipcMain.handle('bulkImport:run', async (e, { plan } = {}) => {
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };
   } finally {
-    _bulkImportCancelToken = null;
+    _bulkGate.end(myToken);   // only OUR token — never a blanket reset
   }
 });
 
+// ⚠️ Cancels EVERY live run, not just the most recent. If a previous run is somehow still going,
+// the user's click should reach it too — that is the whole failure this replaces. [B-413]
 ipcMain.handle('bulkImport:cancel', () => {
-  if (_bulkImportCancelToken) _bulkImportCancelToken.cancelled = true;
-  return { ok: true };
+  return { ok: true, cancelled: _bulkGate.cancelAll() };
 });
 
 // ANALYZE phase: stage every planned source (zip + hash + dedup, no meta yet)
@@ -1886,10 +1914,20 @@ ipcMain.handle('bulkImport:cancel', () => {
 ipcMain.handle('bulkImport:analyze', async (e, { plan } = {}) => {
   // [B-398] The freeze he screenshotted was during ANALYZE. Flush on the way out so the log
   // exists even if the run is cancelled or fails.
+  // [B-413] Same guard as run: analyze stages and hashes into the store, so two at once is two
+  // writers. This is the one he actually hit — a cancelled analyze that never stopped, then a
+  // second analyze started on top of it.
+  const _analyzeToken = _bulkGate.begin();
+  if (!_analyzeToken) {
+    return { ok: false, alreadyRunning: true,
+             error: 'An import is already running. Wait for it to finish before starting another.' };
+  }
   stallProbe.begin('bulkImport:analyze');
+  // ⚠️ DECLARED ABOVE THE try, so the finally can reach it. A `const` inside the try is out of
+  // scope there — a runtime ReferenceError that `node --check` passes happily. Same trap the
+  // analyze loop in soundFontBulkImport already carries a warning about.
   try {
-    _bulkImportCancelToken = { cancelled: false };
-    const myToken = _bulkImportCancelToken;
+    const myToken = _analyzeToken;
     const result = await soundFontBulkImport.analyzeBulkImport(
       { plan, userData: app.getPath('userData') },
       {
@@ -1901,7 +1939,9 @@ ipcMain.handle('bulkImport:analyze', async (e, { plan } = {}) => {
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };
   } finally {
-    _bulkImportCancelToken = null;
+    // ⚠️ ONLY OUR TOKEN. A blanket clear here would be the original bug wearing new clothes: it
+    // would disarm any other live run exactly the way `= null` used to. [B-413]
+    _bulkGate.end(_analyzeToken);
     stallProbe.end('bulkImport:analyze');
     stallProbe.flush('bulk import analyze');
   }
