@@ -1250,8 +1250,13 @@ async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onB
     // there. (The gate stops NEW writes; a manifest an earlier export already
     // left at a destination is data and stays until the user removes it.)
     if (opts.syncManifest !== false) try {
-      const { collectFileRecords } = require('./soundFontFileHash');
-      const recs = collectFileRecords(srcDir);
+      // [B-398] MEASURED HERE, NOT GUESSED: with the export path marked, a font export stalled
+      // 1496ms inside copy:font while compare:font — the pass everyone assumed was the expensive
+      // one — ran 229ms and never stalled. The copy itself already streams and yields; THIS was
+      // the blocker. A synchronous hash of the whole font, after the copy, to record what was
+      // written.
+      const { collectFileRecordsAsync, breathe } = require('./soundFontFileHash');
+      const recs = await collectFileRecordsAsync(srcDir);
       if (recs) {
         // [B-402] RETURNED, NOT WRITTEN — the CALLER commits everything the operation learned in
         // one write at the end. Writing here meant one write per exported item, and it silently
@@ -1259,8 +1264,12 @@ async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onB
         // at the destination), so its hashes were thrown away and re-read on every later export.
         // These hashes are the library's and already in memory; nothing here reads the card.
         const observed = new Map();
+        // ⚠️ statSync is cheap on local disk and NOT cheap against a card over USB — this stats
+        // every file of the font at the DESTINATION. Cheap-per-call times hundreds of calls with
+        // nothing yielding is the same shape as the hash above, just less obvious. [B-398]
         for (const r of recs) {
           if (!r || r.fileHash === '<empty>') continue;
+          await breathe();
           try {
             const st = fs.statSync(path.join(targetDir, r.relPath));
             observed.set(r.relPath, [st.size, Math.round(st.mtimeMs), r.fileHash]);

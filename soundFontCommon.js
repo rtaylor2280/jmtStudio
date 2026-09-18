@@ -1439,14 +1439,18 @@ async function exportCommonToFolder(userData, uuid, destDir, mode = 'rename', on
     // Recorded AFTER the marker is written, so the signature includes it and a
     // later scan does not see the marker as an unexplained change.
     try {
-      const { collectFileRecords } = require('./soundFontFileHash');
-      const recs = collectFileRecords(srcDir);
+      // [B-398] Same blocker as the entry export, and worse here: a ProffieOS voicepack common is
+      // 214-225 files against a font's 110. Synchronous hash of the whole tree, then a statSync
+      // per file against the CARD, with nothing yielding in between.
+      const { collectFileRecordsAsync, breathe } = require('./soundFontFileHash');
+      const recs = await collectFileRecordsAsync(srcDir);
       if (recs) {
         // [B-402] Returned, not written — see the twin in soundFontEntries. One writer, at the
         // end of the whole operation.
         const observed = new Map();
         for (const r of recs) {
           if (!r || r.fileHash === '<empty>') continue;
+          await breathe();
           try {
             const st = fs.statSync(path.join(targetDir, r.relPath));
             observed.set(r.relPath, [st.size, Math.round(st.mtimeMs), r.fileHash]);
