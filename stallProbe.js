@@ -109,6 +109,33 @@ async function around(label, fn) {
   try { return await fn(); } finally { end(label); }
 }
 
+// ⭐ MARK A WHOLE FUNCTION WITHOUT EDITING ITS BODY. [B-398]
+//
+// Every stall outside the import path reads as "(idle - nothing marked)", which is enough to know
+// something blocked and useless for knowing WHAT. Editing each function to add begin/try/finally
+// means touching working logic in five modules purely to measure it; wrapping at the export site
+// costs nothing and cannot change what the function does.
+//
+// ⚠️ TWO VARIANTS ON PURPOSE. Wrapping a synchronous function in an async one would change its
+// contract for every caller — the exact signature change that broke four callers when addFiles
+// went async. mark() stays sync, markAsync() awaits.
+// ⚠️ When the probe is off, both return the ORIGINAL function, so a disabled build carries no
+// wrapper at all.
+function mark(label, fn) {
+  if (!enabled) return fn;
+  return function (...args) {
+    begin(label);
+    try { return fn.apply(this, args); } finally { end(label); }
+  };
+}
+function markAsync(label, fn) {
+  if (!enabled) return fn;
+  return async function (...args) {
+    begin(label);
+    try { return await fn.apply(this, args); } finally { end(label); }
+  };
+}
+
 // Write what was collected and clear it. Safe to call when disabled (no-op).
 function flush(note) {
   if (!enabled || !userDataDir) return null;
@@ -231,5 +258,5 @@ function captureCrashes(onFatal) {
 }
 function stack_summary() { return stack.map(f => f.label + '  (' + (Date.now() - f.at) + 'ms in)'); }
 
-module.exports = { init, begin, end, around, flush, logPath, flagPath, captureCrashes,
+module.exports = { init, begin, end, around, mark, markAsync, flush, logPath, flagPath, captureCrashes,
   isEnabled: () => enabled };

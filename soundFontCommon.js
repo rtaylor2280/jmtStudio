@@ -1602,6 +1602,8 @@ function getCommonContentHash(userData, uuid) {
   return recomputeCommonContentHash(userData, uuid);
 }
 
+// [B-398] Measurement only: markAsync/mark return the ORIGINAL function when the probe is off.
+const _sp = require('./stallProbe');
 module.exports = {
   commonRoot,
   ensureCommonRoot,
@@ -1625,15 +1627,15 @@ module.exports = {
   renameCommonFile,
   deleteCommonFile,
   createCommonSubfolder,
-  copyCommonFiles,
+  copyCommonFiles: _sp.mark('copyCommonFiles', copyCommonFiles),
   moveCommonFiles,
   readCommonFileBytes,
   commonFolderExistsAt,
   exportCommonAsZip,
-  exportCommonToFolder,
+  exportCommonToFolder: _sp.markAsync('copy:common', exportCommonToFolder),
   writeCommonReadme,
   readCommonMarkerAt,
-  commonMatchesAt,
+  commonMatchesAt: _sp.markAsync('compare:common', commonMatchesAt),
   recomputeCommonContentHash,
   getCommonContentHash,
   markCommonContentDirty,

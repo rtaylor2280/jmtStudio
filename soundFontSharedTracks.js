@@ -629,6 +629,8 @@ function readFileBytes(userData, name) {
   catch { return null; }
 }
 
+// [B-398] Measurement only: markAsync/mark return the ORIGINAL function when the probe is off.
+const _sp = require('./stallProbe');
 module.exports = {
   sharedTracksRoot,
   exists,
@@ -640,7 +642,7 @@ module.exports = {
   deleteAll,
   folderExistsAt,
   existsAt,
-  planExport,
+  planExport: _sp.mark('tracks:planExport', planExport),
   exportToFolder,
   exportToFolderAdditive,
   readFileBytes,

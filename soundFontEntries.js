@@ -1813,6 +1813,8 @@ function getEntryContentHash(userData, entryName) {
   return recomputeEntryContentHash(userData, entryName);
 }
 
+// [B-398] Measurement only: markAsync/mark return the ORIGINAL function when the probe is off.
+const _sp = require('./stallProbe');
 module.exports = {
   entriesRoot,
   ensureEntriesRoot,
@@ -1826,8 +1828,8 @@ module.exports = {
   listEntryDocs,
   readEntryFileBytes,
   exportEntryFileTo,
-  entryMatchesAt,
-  exportEntryToFolder,
+  entryMatchesAt: _sp.markAsync('compare:font', entryMatchesAt),
+  exportEntryToFolder: _sp.markAsync('copy:font', exportEntryToFolder),
   entryFolderExistsAt,
   listEntryFiles,
   migrateSourceLevelFields,
