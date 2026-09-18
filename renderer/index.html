@@ -17719,7 +17719,28 @@ function _findBracketError(usingCode) {
   const body     = prefix ? code : afterComments;
   const tmplSkip = prefix ? afterComments.length - body.length : 0;
   const m = body.match(/^using\s+\w+\s*=\s*([\s\S]+?)\s*;?\s*$/);
-  if (!m) return null;
+  // ⚠️⚠️ "I COULD NOT READ THIS" IS ITS OWN ANSWER, NOT "no error". [B-381]
+  //
+  // This returned null here, which is the SAME value it returns when the brackets genuinely
+  // balance. Two callers coerce the result to a boolean (`!!err`), so unparseable text read as
+  // clean and whatever the check gated went ahead. Delete the `using Name =` from a style in the
+  // detail editor, break a bracket, and it saved without a word.
+  //
+  // ⭐ HIS RULE, 2026-09-18, and it is simpler than the one this entry was filed under: "shouldn't
+  // even be able to get rid of the using and still save." The bracket state is beside the point —
+  // a style that is not a `using` declaration is not a style.
+  //
+  // THE ASYMMETRY IS THE ARGUMENT: a false "there is an error" costs an annoyed user who can see
+  // their style is fine. A false "no error" costs a compile, and it is the answer that LOOKS like
+  // the check ran. [B-378] proved that class can hide for months.
+  //
+  // ⚠️ CALLERS THAT RENDER A MARKER MUST TEST `unreadable` FIRST — there is no offsetInCode to
+  // point at, because nothing parsed. Matches the preflight registry's three-answer contract
+  // (null / findings / unsure), where "I cannot tell" is first-class for exactly this reason.
+  if (!m) {
+    return { unreadable: true,
+             message: 'A style must be written as `using Name = …;`' };
+  }
   const exprOffset = skip + tmplSkip + body.indexOf(m[1]);
   // Strip // line comments and /* */ block comments before bracket scanning
   const expr = m[1]
@@ -17753,7 +17774,11 @@ function _updateStyleErrorDecorations() {
 
   for (const e of entries) {
     const err = _findBracketError(e.usingCode);
-    if (!err) continue;
+    // ⚠️ `unreadable` cannot arise here — _parseStyleEntries only recognises blocks that START
+    // with `using NAME =`, so every entry it yields parses. Guarded anyway because the guard is
+    // free and the alternative is a decoration loop reading offsetInCode off an object that has
+    // none, which would place a marker at position NaN rather than fail loudly. [B-381]
+    if (!err || err.unreadable) continue;
     _errorStyleNames.add(e.name);
 
     // Line background decorations for the whole using block
@@ -18579,6 +18604,19 @@ function _updateDetailErrorMarkers(revealError = false) {
   const err = _findBracketError(compact)
     || (_detailEntry ? _findBracketError(_detailEntry.usingCode) : null);
 
+  // ⭐ UNREADABLE IS HANDLED FIRST AND SEPARATELY. [B-381] There is no offsetInCode to point at —
+  // nothing parsed — so the bracket path below would call getPositionAt(undefined) and place a
+  // marker nowhere. The banner says what is actually wrong instead of guessing at a bracket.
+  //
+  // ⚠️ THE `||` FALLBACK ON THE LINE ABOVE IS WHY THIS HID. With `unreadable` returning null, a
+  // mangled editor fell THROUGH to the saved entry's usingCode — which is still a valid
+  // declaration — and reported clean. The user's broken text was never the thing being judged.
+  if (err && err.unreadable) {
+    monaco.editor.setModelMarkers(model, 'proffie-style', []);
+    banner.textContent = `✕ ${err.message} Fix before saving`;
+    banner.style.display = 'block';
+    return true;
+  }
   if (err) {
     // Re-run on non-compacted editor content for accurate Monaco line/column
     const formattedErr = _findBracketError(code) || err;
@@ -19466,6 +19504,12 @@ function _updateHelperBodyValidation() {
     prefixLen = hasUsing ? 0 : PREFIX.length;
     const compact = _compactStyleCode(bracketCheckContent);
     bracketErr = compact ? _findBracketError(compact) : null;
+    // ⚠️ `unreadable` cannot reach here: bracketCheckContent always carries a `using` — either the
+    // user's own or the synthesised `using _check_ = ` prefix above — so it always parses. Dropped
+    // rather than rendered because the marker path below needs an offsetInCode this answer has
+    // none of, and because THIS surface deliberately accepts a bare expression: Add Style wraps
+    // the declaration for you once a name exists. [B-381]
+    if (bracketErr && bracketErr.unreadable) bracketErr = null;
   }
 
   // ── Monaco bracket marker (clear-or-set) ──
