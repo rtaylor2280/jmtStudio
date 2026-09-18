@@ -87,18 +87,28 @@ function _hashFile(absPath) {
 // skip it (and, for a dir, not descend). Used to drop non-content noise
 // (AppleDouble ._*, .DS_Store, __MACOSX, Thumbs.db) so the per-file hash set
 // represents only the real font content — matching what the import zips.
-function _collectRecords(itemRoot, onFile, filter) {
-  const records = [];
-  // Walk relative to itemRoot so the captured paths are stable across
-  // different on-disk locations (backup snapshot vs live tree etc.).
-  const walk = (absDir, relDir) => {
+// ⚠️⚠️ ONE WALK, ONE SET OF RULES, TWO DRAINS. [B-398]
+//
+// This is a GENERATOR rather than a plain function so the synchronous collector and the async one
+// can share it verbatim. The async twin exists because hashing a whole source tree in one
+// uninterrupted pass blocks the main thread — measured 2026-09-18 at 4955ms inside a single
+// importSource, which is within 45ms of the ~5s at which Windows greys the window and offers to
+// kill the app. Yielding lets the loop pump between files.
+//
+// ⚠️ THE ALTERNATIVE WAS A SECOND WALKER, AND IT WAS THE WRONG ANSWER. The exclusion rules here
+// are load-bearing and fiddly — root-only meta.json, the empty-dir marker, the
+// only-child-was-excluded edge case, the streaming threshold — and a copy of them would agree on
+// the day it was written and silently diverge afterwards. Duplicating rules and then testing that
+// the copies match is an assertion that passes hardest exactly when the duplication is worst.
+// So: the rules live here once, and callers differ only in how they drain.
+function* _walkRecords(absDir, relDir, onFile, filter) {
     let entries;
     try { entries = fs.readdirSync(absDir, { withFileTypes: true }); }
     catch { return; }
     // If this directory has zero children, record it as empty (only
     // when it's NOT the item root itself — the root is implicit).
     if (entries.length === 0 && relDir !== '') {
-      records.push({ relPath: relDir, size: 0, fileHash: '<empty>' });
+      yield { relPath: relDir, size: 0, fileHash: '<empty>' };
       return;
     }
     let sawAnything = false;
@@ -108,7 +118,7 @@ function _collectRecords(itemRoot, onFile, filter) {
       if (filter && !filter(relChild)) continue; // excluded (noise) — not content
       if (e.isDirectory()) {
         sawAnything = true;
-        walk(absChild, relChild);
+        yield* _walkRecords(absChild, relChild, onFile, filter);
         continue;
       }
       if (!e.isFile()) continue; // skip symlinks, sockets, etc. — irrelevant for SF
@@ -130,16 +140,37 @@ function _collectRecords(itemRoot, onFile, filter) {
         fileHash = _hashFile(absChild);
       }
       if (typeof onFile === 'function') { try { onFile(relChild, buf, size); } catch {} }
-      records.push({ relPath: relChild, size, fileHash });
+      yield { relPath: relChild, size, fileHash };
     }
     // Edge case: a directory whose only children are the excluded
     // root meta.json. Treat it as empty so the hash stays consistent
     // whether or not the user has only meta.json at the root.
     if (relDir !== '' && !sawAnything) {
-      records.push({ relPath: relDir, size: 0, fileHash: '<empty>' });
+      yield { relPath: relDir, size: 0, fileHash: '<empty>' };
     }
-  };
-  walk(itemRoot, '');
+}
+
+// Drain it all at once. Byte-for-byte the behaviour every existing caller already had.
+function _collectRecords(itemRoot, onFile, filter) {
+  return [..._walkRecords(itemRoot, '', onFile, filter)];
+}
+
+// Drain it with a breath between files, so the main thread can pump messages. [B-398]
+//
+// ⚠️ setImmediate, NOT setTimeout(0) and NOT await null. `await null` resolves on the microtask
+// queue, which runs to exhaustion BEFORE the loop ever gets to I/O or timers — so it would yield
+// to nothing and the window would stay just as frozen while looking like it had been fixed.
+// setImmediate lands in the check phase, after the loop has had its turn.
+//
+// ⚠️ EVERY file, not every Nth. A breath costs microseconds against a hash that costs
+// milliseconds, and "every Nth" reintroduces exactly the thing being fixed — a window of N files
+// with no yield in it — whose worst case is set by the largest N files in the tree, not by N.
+async function _collectRecordsAsync(itemRoot, onFile, filter) {
+  const records = [];
+  for (const rec of _walkRecords(itemRoot, '', onFile, filter)) {
+    records.push(rec);
+    await new Promise(res => setImmediate(res));
+  }
   return records;
 }
 
@@ -153,15 +184,35 @@ function _collectRecords(itemRoot, onFile, filter) {
 // read. This is the same walk hashItemDir folds into a digest — exposed so
 // the compare tool can build per-file hash sets without re-walking or
 // re-hashing. Same meta.json-at-root exclusion and big-file streaming.
-function collectFileRecords(itemRoot, onFile, filter) {
-  if (!itemRoot || !fs.existsSync(itemRoot)) return null;
+// Shared by the sync and async collectors, for the same reason _walkRecords is shared: "is this
+// path collectable at all" is a rule, and a second copy of a rule is a future disagreement.
+function _collectable(itemRoot) {
+  if (!itemRoot || !fs.existsSync(itemRoot)) return false;
   let stat;
-  try { stat = fs.statSync(itemRoot); } catch { return null; }
-  if (!stat.isDirectory()) return null;
-  const records = _collectRecords(itemRoot, onFile, filter);
-  // Stable order. Forward-slash paths sort consistently across platforms.
+  try { stat = fs.statSync(itemRoot); } catch { return false; }
+  return stat.isDirectory();
+}
+
+// Stable order. Forward-slash paths sort consistently across platforms.
+function _sortRecords(records) {
   records.sort((a, b) => (a.relPath < b.relPath ? -1 : a.relPath > b.relPath ? 1 : 0));
   return records;
+}
+
+function collectFileRecords(itemRoot, onFile, filter) {
+  if (!_collectable(itemRoot)) return null;
+  return _sortRecords(_collectRecords(itemRoot, onFile, filter));
+}
+
+// Async twin. IDENTICAL OUTPUT — same records, same order, same null contract — differing only in
+// that it yields to the event loop between files so the window keeps answering Windows. [B-398]
+//
+// ⚠️ NOT A DROP-IN FOR THE 27 SYNC CALL SITES, and deliberately not offered as one. Converting
+// them would be a rewrite across the whole sound-font surface for a benefit only the long-running
+// import passes actually need. Callers that finish in milliseconds should stay synchronous.
+async function collectFileRecordsAsync(itemRoot, onFile, filter) {
+  if (!_collectable(itemRoot)) return null;
+  return _sortRecords(await _collectRecordsAsync(itemRoot, onFile, filter));
 }
 
 // Fold a sorted record list into the canonical digest. Split out so the
@@ -245,5 +296,5 @@ function hashBucketChildren(bucketRoot) {
   return out;
 }
 
-module.exports = { hashItemDir, hashBucketChildren, collectFileRecords, hashRecords, hashFile: _hashFile,
-  writeFileHashManifest, readFileHashManifest };
+module.exports = { hashItemDir, hashBucketChildren, collectFileRecords, collectFileRecordsAsync,
+  hashRecords, hashFile: _hashFile, writeFileHashManifest, readFileHashManifest };

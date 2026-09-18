@@ -1104,7 +1104,10 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
       blockedFiles = _purge.blocked;
       notedFiles = _purge.noted;
       const fhz = require('./soundFontFileHash');
-      const recz = fhz.collectFileRecords(destDir) || [];
+      // [B-398] Async twin: identical records, but it yields between files so the window keeps
+      // answering Windows. The zip route's EXTRACT was already async — this hash pass was not,
+      // which is why a zip source still stalled (899ms measured on 1.1-Energy.zip).
+      const recz = (await fhz.collectFileRecordsAsync(destDir)) || [];
       totalBytes = recz.reduce((s, r) => s + (r.size || 0), 0);
       fileCount = recz.length;
       fileSize = totalBytes;
@@ -1127,10 +1130,16 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
       fs.mkdirSync(destDir, { recursive: true });
       let done = 0;
       const selTotal = sel.files.reduce((s, f) => s + f.size, 0);
+      // ⚠️⚠️ AWAITED COPY, NOT copyFileSync. [B-398] This loop was the single worst offender
+      // measured on his machine: 4955ms of unbroken main-thread work inside one folder source
+      // (importSource:Techno), against the ~5s at which Windows greys the window and offers to
+      // kill the app mid-write. A folder of several hundred wavs copied with no yield anywhere.
+      // ⭐ The ZIP route never had this problem because _extractZipSubtree already awaited —
+      // which is why the bug looked intermittent: it depended on whether the source was a folder.
       for (const f of sel.files) {
         const abs = path.join(destDir, f.relPath.replace(/\//g, path.sep));
         fs.mkdirSync(path.dirname(abs), { recursive: true });
-        fs.copyFileSync(f.absPath, abs);
+        await fs.promises.copyFile(f.absPath, abs);
         done += f.size;
         // Copying, not hashing — the old zip-transform hashed as it wrote, this
         // does not, and the label followed the code rather than the truth.
@@ -1144,7 +1153,8 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
       // "Reading source" while the app is actually unpacking archives.
       innerArchives = await _expandInnerArchives(destDir, (p) => emit('expanding', p));
       const fhm = require('./soundFontFileHash');
-      const recs = fhm.collectFileRecords(destDir) || [];
+      // [B-398] Async twin — see the zip route above for why.
+      const recs = (await fhm.collectFileRecordsAsync(destDir)) || [];
       hash = fhm.hashRecords(recs);
       totalBytes = recs.reduce((s, r) => s + (r.size || 0), 0);
       fileCount = recs.length;
