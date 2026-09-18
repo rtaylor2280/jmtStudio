@@ -169,10 +169,16 @@ async function _collectRecordsAsync(itemRoot, onFile, filter) {
   const records = [];
   for (const rec of _walkRecords(itemRoot, '', onFile, filter)) {
     records.push(rec);
-    await new Promise(res => setImmediate(res));
+    await breathe();
   }
   return records;
 }
+
+// ⭐ THE ONE YIELD, shared by every per-file loop that had to stop blocking the main thread.
+// [B-398] has five doors and they must all yield the SAME way; five inline copies of this would be
+// five chances to write the microtask version by accident, and that version passes every test
+// except the one that matters. Exported so the compare and copy paths use this exact definition.
+function breathe() { return new Promise(res => setImmediate(res)); }
 
 // Public: hash one top-level item rooted at `itemRoot`. Returns the
 // sha256 hex digest of the canonical serialization, or null when the
@@ -297,4 +303,4 @@ function hashBucketChildren(bucketRoot) {
 }
 
 module.exports = { hashItemDir, hashBucketChildren, collectFileRecords, collectFileRecordsAsync,
-  hashRecords, hashFile: _hashFile, writeFileHashManifest, readFileHashManifest };
+  hashRecords, hashFile: _hashFile, writeFileHashManifest, readFileHashManifest, breathe };

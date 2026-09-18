@@ -2661,12 +2661,15 @@ ipcMain.handle('common:folderExistsAt', (_, { destDir, targetName } = {}) => {
 });
 
 // Byte-comparison of the destination's common folder against a library common.
-// Reads content; the marker is not consulted. Sync inside a handler because the
-// cheap file-count/byte pre-check short-circuits the expensive path in exactly
-// the case that would be slow (a genuinely different folder).
-ipcMain.handle('common:matchesAt', (_, { uuid, destDir, targetName } = {}) => {
+// Reads content; the marker is not consulted.
+// ⚠️ ASYNC SINCE [B-398]. This used to be sync "because the cheap file-count/byte pre-check
+// short-circuits the expensive path" — but the case that does NOT short-circuit is a genuinely
+// different folder, which is exactly when it hashes 200+ files off the card and greys the window.
+// ⚠️ THE `await` IS LOAD-BEARING, not cosmetic: without it the promise escapes this try/catch and
+// a rejection becomes an unhandled one instead of the { ok:false } contract the renderer expects.
+ipcMain.handle('common:matchesAt', async (_, { uuid, destDir, targetName } = {}) => {
   try {
-    return soundFontCommon.commonMatchesAt(app.getPath('userData'), uuid, destDir, targetName);
+    return await soundFontCommon.commonMatchesAt(app.getPath('userData'), uuid, destDir, targetName);
   }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
@@ -2826,13 +2829,17 @@ ipcMain.handle('sharedTracks:existsAt', (_, { destDir } = {}) => {
 // [B-402] `writeCache` is accepted and ignored — the compare no longer writes at all, for any
 // caller, so the flag [B-358] added has nothing left to switch off. Kept in the signature so an
 // older renderer passing it cannot throw; drop it once nothing sends it.
-ipcMain.handle('soundFonts:entryMatchesAt', (event, { name, destDir, reportProgress } = {}) => {
+ipcMain.handle('soundFonts:entryMatchesAt', async (event, { name, destDir, reportProgress } = {}) => {
   // [B-400] The destination-side hashing is the expensive half of this question and ran silent
   // behind a right-click Export. Opt-in: the bulk conflict scan drives its own bar already and
   // must not have a second one fighting it.
+  // ⚠️⚠️ AWAIT, NOT FIRE-AND-RETURN. [B-398] made entryMatchesAt async, and without the await here
+  // emit.flush() would run BEFORE any progress had been gathered — flushing an empty buffer and
+  // leaving the bar dead for the whole compare. Electron would still resolve the returned promise,
+  // so the result would look right while the progress reporting this handler exists for was gone.
   try {
     const emit = reportProgress ? _sfByteProgressEmitter(event) : null;
-    const r = soundFontEntries.entryMatchesAt(app.getPath('userData'), name, destDir,
+    const r = await soundFontEntries.entryMatchesAt(app.getPath('userData'), name, destDir,
       emit ? { onBytes: emit.onBytes } : {});
     if (emit) emit.flush();
     return r;

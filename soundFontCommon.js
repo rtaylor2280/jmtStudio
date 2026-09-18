@@ -1221,7 +1221,7 @@ function _dirSignals(root, excludeFn) {
 // totals PROVE a difference (prompt, nothing read). Matching ones prove
 // nothing, since a same-size swap defeats them, so they gate INTO the hash
 // and never past it.
-function commonMatchesAt(userData, uuid, destDir, targetName = 'common') {
+async function commonMatchesAt(userData, uuid, destDir, targetName = 'common') {
   if (!uuid || !destDir) return { ok: false, error: 'Missing uuid or destDir' };
   const libDir  = path.join(commonRoot(userData), uuid, 'files');
   const cardDir = path.join(destDir, targetName || 'common');
@@ -1255,6 +1255,12 @@ function commonMatchesAt(userData, uuid, destDir, targetName = 'common') {
   const refreshed = new Map();
   let identical = true;
 
+  // [B-398] door 2. This loop hashes every file of a common folder AND READS THE CARD, so it was
+  // the same main-thread block as the import - on slower storage. His ProffieOS voicepack commons
+  // are 214-225 files each. Yield between files so the window keeps answering Windows.
+  // ⚠️ The breath is shared from soundFontFileHash on purpose: it must be setImmediate, never a
+  // microtask, or it yields to nothing while looking fixed.
+  const { breathe } = require('./soundFontFileHash');
   for (const rec of libRecords) {
     if (!rec || rec.fileHash === '<empty>') continue;
     const abs = path.join(cardDir, rec.relPath);
@@ -1268,6 +1274,7 @@ function commonMatchesAt(userData, uuid, destDir, targetName = 'common') {
     const destHash = valid ? ent[2] : hashFile(abs);
     refreshed.set(rec.relPath, [st.size, mtime, destHash]);
     if (destHash !== rec.fileHash) identical = false;
+    await breathe();
   }
   // [B-402] Returned, not written — see the twin in soundFontEntries.entryMatchesAt. A compare
   // is a question, and the answer is handed back for the export to record once.

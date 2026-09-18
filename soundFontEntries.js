@@ -1091,7 +1091,7 @@ function entryFolderExistsAt(name, destDir) {
 // [B-400] `opts.onBytes` reports the DESTINATION-side hashing, which is the expensive half of
 // this question and used to run in total silence behind a right-click Export. A font is hundreds
 // of files; on a card this is seconds of nothing happening.
-function entryMatchesAt(userData, name, destDir, opts = {}) {
+async function entryMatchesAt(userData, name, destDir, opts = {}) {
   if (!name || !destDir) return { ok: false, error: 'Missing name or destDir' };
   const srcDir  = path.join(entriesRoot(userData), name);
   const destFont = path.join(destDir, name);
@@ -1144,8 +1144,13 @@ function entryMatchesAt(userData, name, destDir, opts = {}) {
     }
     try { _onBytes({ done: 0, total: _bTotal, name: '' }); } catch {}
   }
+  // [B-398] door 2. Hashes every file of a font AND READS THE CARD - the same main-thread block as
+  // the import, on slower storage. Yield between files so the window keeps answering Windows.
+  // ⚠️ Shared breath, setImmediate not a microtask - see soundFontFileHash.breathe.
+  const { breathe: _breathe } = require('./soundFontFileHash');
   for (const rec of libRecords) {
     if (!rec || rec.fileHash === '<empty>') continue;   // empty-dir marker
+    await _breathe();
     const abs = path.join(destFont, rec.relPath);
     let st = null;
     try { st = fs.statSync(abs); } catch { st = null; }

@@ -161,14 +161,31 @@ async function copyFileStreamed(srcPath, destPath, onProgress) {
 // `strippedFiles` is therefore both the strip record AND the detection result:
 // non-empty means this source was damaged, and the reasons ride along for the
 // review row and the post-import summary.
-function _selectFolderFiles(srcDir) {
+// ⚠️⚠️ ASYNC SINCE [B-398], AND IT IS THE THIRD PASS PER SOURCE, NOT THE FIRST.
+//
+// The first fix for B-398 caught the copy loop and the hash pass and I reported the bug closed.
+// His own probe log said otherwise: a 9347ms stall inside importSource on a build that already had
+// both — WORSE than the 4955ms that opened the entry. This pass is why. It reads the leading bytes
+// of EVERY file (see the one-read comment below) before a single byte is copied, so a folder of
+// several hundred wavs is several hundred synchronous opens with nothing yielding between them.
+//
+// ⭐ THE LESSON, WORTH MORE THAN THE FIX: "I found A blocking pass" is not "I found THE blocking
+// passes". Counting them is cheap and the instrument was already running — I claimed the win off
+// his "Yes! now it's fixed" instead of reading the log that was sitting right there.
+//
+// ⚠️ The .filter() callback could not await, so this is an explicit loop. The predicate body below
+// is UNCHANGED - only `return false` became `continue` and `return true` became a push.
+async function _selectFolderFiles(srcDir) {
   const strippedFiles = [];   // damaged wavs, removed
   const blockedFiles = [];    // programs, removed ([B-214])
   const notedFiles = [];      // macro documents and un-inspectable archives, KEPT
   const { checkWavBuffer, classifyFileBuffer } = require('./sdCardDetect');
-  const files = walkFolderSorted(srcDir)
-    .filter(f => !_isNoisePath(f.relPath))
-    .filter(f => {
+  const { breathe } = require('./soundFontFileHash');
+  const files = [];
+  for (const f of walkFolderSorted(srcDir)) {
+    if (_isNoisePath(f.relPath)) continue;
+    await breathe();
+    {
       // ONE read, BOTH predicates. This used to call checkWavHealth, which opens the
       // file itself - so a wav was opened twice, once for the header and again by the
       // zip moments later. Reading the head here and passing the bytes to both checks
@@ -180,11 +197,11 @@ function _selectFolderFiles(srcDir) {
       // and a program named .wav must never reach the wav check and be judged as
       // merely corrupt.
       const v = classifyFileBuffer(head, f.relPath);
-      if (v.kind === 'program') { blockedFiles.push({ relPath: f.relPath, kind: 'program', reason: v.reason, byContent: !!v.byContent, disguised: !!v.disguised }); return false; }
+      if (v.kind === 'program') { blockedFiles.push({ relPath: f.relPath, kind: 'program', reason: v.reason, byContent: !!v.byContent, disguised: !!v.disguised }); continue; }
       if (v.kind === 'macro') {
         blockedFiles.push({ relPath: f.relPath, kind: 'macro',
           reason: 'A document that can contain macros has no use on a saber card. It was left out.' });
-        return false;
+        continue;
       }
       // ⚠️ AN ARCHIVE WE CANNOT OPEN IS NOW REFUSED HERE TOO ([B-368], 2026-09-11). This
       // was missed when opaque became a blocking verdict: the purge and the carry
@@ -194,16 +211,17 @@ function _selectFolderFiles(srcDir) {
       // clean close-out on an export that had one sitting in it.
       if (v.kind === 'opaque') {
         blockedFiles.push({ relPath: f.relPath, kind: 'opaque', reason: v.reason });
-        return false;
+        continue;
       }
       // Kept, and said out loud anyway: anything else we cannot fully judge is not a
       // finding, but silence would read as "checked and clean", which is not what happened.
       if (v.kind !== 'ok') notedFiles.push({ relPath: f.relPath, kind: v.kind, reason: v.reason });
-      if (!/\.wav$/i.test(f.relPath)) return true;
+      if (!/\.wav$/i.test(f.relPath)) { files.push(f); continue; }
       const h = checkWavBuffer(head || Buffer.alloc(0), f.size);
-      if (h && h.corrupt) { strippedFiles.push({ relPath: f.relPath, reason: h.reason }); return false; }
-      return true;
-    });
+      if (h && h.corrupt) { strippedFiles.push({ relPath: f.relPath, reason: h.reason }); continue; }
+      files.push(f);
+    }
+  }
   return { files, strippedFiles, blockedFiles, notedFiles };
 }
 
@@ -220,18 +238,24 @@ function _selectFolderFiles(srcDir) {
 // we store. So dedup and provenance against the vendor's original still refer to
 // the archive they actually have; we are only declining to keep part of it, and
 // the meta records exactly which part.
-function _purgeExecutables(rootDir) {
+// ⚠️⚠️ ONE WALK, TWO DRAINS - the same split as soundFontFileHash._walkRecords, for the same
+// reason. [B-398] needs the IMPORT path to yield between files, but three other callers
+// (_createZipSource, _createFolderSource, _virtualizeSource) are synchronous functions, and making
+// THEM async cascades outward for no benefit - they run once over a tree that is already in hand.
+// So the rules live here once and callers differ only in how they drain. A second copy of the
+// program/macro/opaque verdicts is a future disagreement about what is safe to keep.
+// ⚠️ It YIELDS BEFORE the read, so the breath lands between files rather than after the work.
+function* _purgeWalk(rootDir, blocked, noted) {
   const { classifyFileBuffer } = require('./sdCardDetect');
-  const blocked = [];
-  const noted = [];
-  const walk = (dir, rel) => {
+  const walk = function* (dir, rel) {
     let ents;
     try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
     for (const e of ents) {
       const abs = path.join(dir, e.name);
       const r = rel ? rel + '/' + e.name : e.name;
-      if (e.isDirectory()) { walk(abs, r); continue; }
+      if (e.isDirectory()) { yield* walk(abs, r); continue; }
       if (!e.isFile()) continue;
+      yield;
       const verdict = classifyFileBuffer(_readHead(abs), r);
       if (verdict.kind === 'macro') {
         let msize = 0; try { msize = fs.statSync(abs).size; } catch {}
@@ -263,7 +287,21 @@ function _purgeExecutables(rootDir) {
       blocked.push({ relPath: r, kind: 'program', reason: verdict.reason, byContent: !!verdict.byContent, disguised: !!verdict.disguised, size });
     }
   };
-  walk(rootDir, '');
+  yield* walk(rootDir, '');
+}
+
+// Drain it all at once. Byte-for-byte what the three synchronous callers already had.
+function _purgeExecutables(rootDir) {
+  const blocked = [], noted = [];
+  for (const _ of _purgeWalk(rootDir, blocked, noted)) { /* drain */ }
+  return { blocked, noted };
+}
+
+// Drain it with a breath between files, for the import path. [B-398]
+async function _purgeExecutablesAsync(rootDir) {
+  const blocked = [], noted = [];
+  const { breathe } = require('./soundFontFileHash');
+  for (const _ of _purgeWalk(rootDir, blocked, noted)) await breathe();
   return { blocked, noted };
 }
 
@@ -285,7 +323,7 @@ async function zipFolderToFile(srcDir, destZipPath, onProgress) {
   const archiver = require('archiver');
   const { Transform } = require('stream');
 
-  const { files, strippedFiles, blockedFiles, notedFiles } = _selectFolderFiles(srcDir);
+  const { files, strippedFiles, blockedFiles, notedFiles } = await _selectFolderFiles(srcDir);
   const totalBytes = files.reduce((s, f) => s + f.size, 0);
   const fileCount = files.length;
 
@@ -1100,7 +1138,7 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
       innerArchives = await _expandInnerArchives(destDir, (p) => emit('expanding', p));
       // ⚠️ AFTER the inner expand, so a program inside a nested archive is caught too,
       // and BEFORE the records below, so the stored totals describe what is kept.
-      const _purge = _purgeExecutables(destDir);
+      const _purge = await _purgeExecutablesAsync(destDir);
       blockedFiles = _purge.blocked;
       notedFiles = _purge.noted;
       const fhz = require('./soundFontFileHash');
@@ -1123,7 +1161,7 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
       // ⚠️ The hash can only be taken AFTER the copy, because there is no
       // container to hash on the way past — so the dedup check below stays where
       // it is, after the write, exactly as the zip-transform needed it.
-      const sel = _selectFolderFiles(sourcePath);
+      const sel = await _selectFolderFiles(sourcePath);
       strippedFiles = sel.strippedFiles;
       blockedFiles = sel.blockedFiles;
       notedFiles = sel.notedFiles;
