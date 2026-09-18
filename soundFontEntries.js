@@ -1147,7 +1147,7 @@ async function entryMatchesAt(userData, name, destDir, opts = {}) {
   // [B-398] door 2. Hashes every file of a font AND READS THE CARD - the same main-thread block as
   // the import, on slower storage. Yield between files so the window keeps answering Windows.
   // ⚠️ Shared breath, setImmediate not a microtask - see soundFontFileHash.breathe.
-  const { breathe: _breathe } = require('./soundFontFileHash');
+  const { breathe: _breathe, hashFileAsync } = require('./soundFontFileHash');
   for (const rec of libRecords) {
     if (!rec || rec.fileHash === '<empty>') continue;   // empty-dir marker
     await _breathe();
@@ -1159,7 +1159,10 @@ async function entryMatchesAt(userData, name, destDir, opts = {}) {
     const ent = cache.get(rec.relPath);
     const valid = ent && ent[0] === st.size
       && Math.abs((ent[1] || 0) - mtime) <= sync.MTIME_TOLERANCE_MS;
-    const destHash = valid ? (reused++, ent[2]) : (hashed++, hashFile(abs));
+    // ⚠️ AWAITED STREAM HASH. [B-398] A breath between files does not help when ONE file is the
+    // block: measured 2526ms inside compare:font with the per-file yield already in place. A
+    // font's tracks are megabytes each and hashFile reads one whole file synchronously.
+    const destHash = valid ? (reused++, ent[2]) : (hashed++, await hashFileAsync(abs));
     refreshed.set(rec.relPath, [st.size, mtime, destHash]);
     if (destHash !== rec.fileHash) identical = false;
     if (_onBytes) {

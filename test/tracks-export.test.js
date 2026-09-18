@@ -117,7 +117,7 @@ const TRACKS = {
     delete changed['duel.wav'];
     const { userData, dest, cardDir } = setup(TRACKS, changed);
     const before = fs.readdirSync(cardDir).sort().join(',');
-    const p = st.planExport(userData, dest);
+    const p = await st.planExport(userData, dest);
     check('plan reports add / differ / unchanged',
       { ok: p.ok, toAdd: p.toAdd, differing: p.differing, unchanged: p.unchanged },
       { ok: true, toAdd: ['duel.wav'], differing: ['mars.wav'], unchanged: ['venus.wav'] });
@@ -203,7 +203,7 @@ const TRACKS = {
   {
     const { userData, dest } = setup(TRACKS, TRACKS);
     const sync = require('../sfSyncManifest');
-    const p1 = st.planExport(userData, dest);
+    const p1 = await st.planExport(userData, dest);
     check('first pass classifies everything as unchanged',
       { unchanged: p1.unchanged.length, differing: p1.differing.length },
       { unchanged: 3, differing: 0 });
@@ -241,12 +241,12 @@ const TRACKS = {
   {
     // Only the invalidated file is re-read; the rest resolve from their entry.
     const { userData, dest, cardDir } = setup(TRACKS, TRACKS);
-    st.planExport(userData, dest);
+    await st.planExport(userData, dest);
     const f = path.join(cardDir, 'mars.wav');
     fs.writeFileSync(f, 'ZZZZ-changed');
     const future = (Date.now() + 60000) / 1000;
     fs.utimesSync(f, future, future);
-    const p2 = st.planExport(userData, dest);
+    const p2 = await st.planExport(userData, dest);
     check('an invalidated entry is caught as differing',
       { differing: p2.differing.join(','), unchanged: p2.unchanged.length },
       { differing: 'mars.wav', unchanged: 2 });
@@ -256,9 +256,9 @@ const TRACKS = {
     // Files the library is not writing are none of the comparison's business,
     // even when the manifest knows about them.
     const { userData, dest, cardDir } = setup(TRACKS, TRACKS);
-    st.planExport(userData, dest);
+    await st.planExport(userData, dest);
     fs.writeFileSync(path.join(cardDir, 'stranger.wav'), 'not ours');
-    const p2 = st.planExport(userData, dest);
+    const p2 = await st.planExport(userData, dest);
     check('a file only the card has does not make anything differ',
       { differing: p2.differing.length, unchanged: p2.unchanged.length, toAdd: p2.toAdd.length },
       { differing: 0, unchanged: 3, toAdd: 0 });
@@ -293,9 +293,9 @@ const TRACKS = {
     // Entries for files we did not look at survive a later pass.
     const { userData, dest } = setup(TRACKS, TRACKS);
     const sync = require('../sfSyncManifest');
-    st.planExport(userData, dest);
+    await st.planExport(userData, dest);
     sync.mergeItem(dest, 'tracks', new Map([['keepme.wav', [1, 2, 'abc']]]));
-    st.planExport(userData, dest);
+    await st.planExport(userData, dest);
     const names = sync.read(dest).items.tracks.files.map(f => f[0]);
     check('an untouched entry is not discarded',
       { has: names.includes('keepme.wav') }, { has: true });

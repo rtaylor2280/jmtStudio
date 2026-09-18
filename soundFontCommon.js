@@ -1260,7 +1260,7 @@ async function commonMatchesAt(userData, uuid, destDir, targetName = 'common') {
   // are 214-225 files each. Yield between files so the window keeps answering Windows.
   // ⚠️ The breath is shared from soundFontFileHash on purpose: it must be setImmediate, never a
   // microtask, or it yields to nothing while looking fixed.
-  const { breathe } = require('./soundFontFileHash');
+  const { breathe, hashFileAsync } = require('./soundFontFileHash');
   for (const rec of libRecords) {
     if (!rec || rec.fileHash === '<empty>') continue;
     const abs = path.join(cardDir, rec.relPath);
@@ -1271,7 +1271,8 @@ async function commonMatchesAt(userData, uuid, destDir, targetName = 'common') {
     const ent = cache.get(rec.relPath);
     const valid = ent && ent[0] === st.size
       && Math.abs((ent[1] || 0) - mtime) <= sync.MTIME_TOLERANCE_MS;
-    const destHash = valid ? ent[2] : hashFile(abs);
+    // ⚠️ AWAITED STREAM HASH — see the twin in soundFontEntries. [B-398]
+    const destHash = valid ? ent[2] : await hashFileAsync(abs);
     refreshed.set(rec.relPath, [st.size, mtime, destHash]);
     if (destHash !== rec.fileHash) identical = false;
     await breathe();

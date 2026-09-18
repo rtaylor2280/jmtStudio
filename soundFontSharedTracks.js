@@ -388,7 +388,10 @@ function existsAt(destDir) {
 // per folder, so without this the scan sits on "shared tracks" while hashing a
 // hundred-plus wavs and reads as frozen. The app's convention for a long read is
 // filenames going past, not a stalled bar.
-function planExport(userData, destDir, onFile = null) {
+// ⚠️ ASYNC SINCE [B-398]. Every file here is a music track - megabytes each - and this hashes
+// TWO of them per track. Measured 623ms stalled inside tracks:planExport with a per-file yield
+// already in place, because the block is inside ONE hash, not between them.
+async function planExport(userData, destDir, onFile = null) {
   if (!destDir) return { ok: false, error: 'Missing destDir' };
   const srcDir = sharedTracksRoot(userData);
   if (!fs.existsSync(srcDir)) return { ok: false, error: 'Shared tracks folder not found' };
@@ -437,10 +440,12 @@ function planExport(userData, destDir, onFile = null) {
       && entry[0] === st.size
       && Math.abs((entry[1] || 0) - mtime) <= sync.MTIME_TOLERANCE_MS;
 
-    let destHash = valid ? entry[2] : hashFile(dst);
+    const { breathe, hashFileAsync } = require('./soundFontFileHash');
+    await breathe();
+    let destHash = valid ? entry[2] : await hashFileAsync(dst);
     refreshed.set(name, [st.size, mtime, destHash]);
 
-    const libHash = libHashes.get(name) || hashFile(path.join(srcDir, name));
+    const libHash = libHashes.get(name) || await hashFileAsync(path.join(srcDir, name));
     (destHash && libHash && destHash === libHash ? unchanged : differing).push(name);
   }
   if (onFile) { try { onFile('', names.length, names.length); } catch {} }
@@ -483,7 +488,7 @@ function planExport(userData, destDir, onFile = null) {
 // Update prompt contradict itself. So it asks, per file, defaulting to Replace.
 async function exportToFolderAdditive(userData, destDir, opts = {}) {
   const { replace = [], onBytes = null } = opts;
-  const plan = planExport(userData, destDir);
+  const plan = await planExport(userData, destDir);
   if (!plan.ok) return plan;
   const srcDir = sharedTracksRoot(userData);
   const targetDir = path.join(destDir, 'tracks');
@@ -645,7 +650,7 @@ module.exports = {
   deleteAll,
   folderExistsAt,
   existsAt,
-  planExport: _sp.mark('tracks:planExport', planExport),
+  planExport: _sp.markAsync('tracks:planExport', planExport),
   exportToFolder,
   exportToFolderAdditive,
   readFileBytes,

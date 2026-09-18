@@ -2921,7 +2921,7 @@ ipcMain.handle('soundFonts:listDestFolders', (_, { destDir } = {}) => {
     return { ok: true, folders };
   } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
-ipcMain.handle('sharedTracks:planExport', (event, { destDir } = {}) => {
+ipcMain.handle('sharedTracks:planExport', async (event, { destDir } = {}) => {
   try {
     // Per-file ticks so the renderer can show names going past. Throttled: a
     // hundred-plus IPC sends in a tight loop would cost more than the hashing.
@@ -2932,7 +2932,7 @@ ipcMain.handle('sharedTracks:planExport', (event, { destDir } = {}) => {
       last = now;
       try { event.sender.send('sharedTracks:planProgress', { file, done, total }); } catch {}
     };
-    return soundFontSharedTracks.planExport(app.getPath('userData'), destDir, onFile);
+    return await soundFontSharedTracks.planExport(app.getPath('userData'), destDir, onFile);
   }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });

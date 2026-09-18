@@ -174,6 +174,36 @@ async function _collectRecordsAsync(itemRoot, onFile, filter) {
   return records;
 }
 
+// ⚠️⚠️ A YIELD BETWEEN FILES DOES NOT HELP WHEN ONE FILE IS THE PROBLEM. [B-398]
+//
+// Measured 2026-09-18, after the per-file breath was already in place: compare:font stalled 2526ms
+// and tracks:planExport 623ms. Both loops yield between every file — so the block was INSIDE a
+// single file. _hashFile reads and hashes a whole file in one synchronous go, and a sound font's
+// tracks are megabytes each.
+//
+// ⭐ THAT IS A DIFFERENT DEFECT FROM EVERYTHING ELSE IN THIS ENTRY. The rest were "many small
+// operations with no yield between them". This is "one operation too big to be atomic", and no
+// amount of yielding around it helps.
+//
+// Streams in 64 KiB chunks, so each chunk is its own turn of the event loop no matter how large
+// the file is. ⚠️ Byte-identical to _hashFile — both are sha256 over the same bytes — which is
+// load-bearing: these hashes decide what counts as the same content.
+// ⚠️ Resolves null on error rather than throwing, matching hashFileAsync in
+// soundFontSharedTracksHash, because a caller that cannot read a file must treat it as "unknown"
+// and go read it, never as "matches".
+function hashFileAsync(absPath) {
+  return new Promise((resolve) => {
+    let h;
+    try { h = crypto.createHash('sha256'); } catch { resolve(null); return; }
+    let stream;
+    try { stream = fs.createReadStream(absPath, { highWaterMark: 64 * 1024 }); }
+    catch { resolve(null); return; }
+    stream.on('data', (chunk) => h.update(chunk));
+    stream.on('error', () => { try { stream.destroy(); } catch {} resolve(null); });
+    stream.on('end', () => { try { resolve(h.digest('hex')); } catch { resolve(null); } });
+  });
+}
+
 // ⭐ THE ONE YIELD, shared by every per-file loop that had to stop blocking the main thread.
 // [B-398] has five doors and they must all yield the SAME way; five inline copies of this would be
 // five chances to write the microtask version by accident, and that version passes every test
@@ -303,4 +333,4 @@ function hashBucketChildren(bucketRoot) {
 }
 
 module.exports = { hashItemDir, hashBucketChildren, collectFileRecords, collectFileRecordsAsync,
-  hashRecords, hashFile: _hashFile, writeFileHashManifest, readFileHashManifest, breathe };
+  hashRecords, hashFile: _hashFile, hashFileAsync, writeFileHashManifest, readFileHashManifest, breathe };
