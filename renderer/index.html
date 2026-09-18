@@ -4770,11 +4770,23 @@
       <div class="tab-btns" id="tab-btns-soundfonts">
         <button id="btn-sf-select-all" class="btn-neutral" style="display:none" title="Select every font currently visible">Select all</button>
         <button id="btn-sf-select-in-use" class="btn-neutral" style="display:none" title="Select fonts referenced by the open config's presets">Select in-use</button>
+        <!-- [B-297] ⭐ PLACEMENT WAS THE WHOLE FIX, settled on sight 2026-09-13. This lived in the
+             CHIP ROW beside the New filter, where he said it "looks like a filter" and would not
+             pass it - correct, because a row of filters is where you go to CHANGE THE VIEW, not to
+             change your data. Actions belong in the action bar, where its own selection-scoped twin
+             already sat. One control in the chip row and its sibling up here was the real defect.
+             ⚠️ ALWAYS-VISIBLE GROUP, not the selection cluster: it acts on the whole library, so it
+             must not appear only when something is selected. It sits with Select all / Select
+             in-use, which are scoped the same way and already carry a count that is not a selection.
+             ⚠️ LABEL REFERENCES THE BADGE, not the mechanism. "seen" is not a clear opposite of
+             "NEW" - the badge says NEW, so the action says New. His own report of the gap used the
+             natural verb: "no way to clear the new tag". seenAt stays the field name in code. -->
+        <button id="btn-sf-mark-all-seen" class="btn-neutral" style="display:none">Clear all New</button>
         <button id="btn-sf-clear-selection" class="btn-neutral" style="display:none" title="Deselect all">Clear selection</button>
         <button id="btn-sf-bulk-tag" class="btn-neutral" style="display:none" title="Edit tags shared across the selected fonts">Tags</button>
         <!-- [B-297] The narrow half of "clear NEW in bulk": these twelve, not all 191.
              The chip beside the New filter handles the other half. -->
-        <button id="btn-sf-bulk-mark-seen" class="btn-neutral" style="display:none" title="Clear the New badge on the selected fonts">Mark seen</button>
+        <button id="btn-sf-bulk-mark-seen" class="btn-neutral" style="display:none" title="Clear the New badge on the selected fonts">Clear New</button>
         <button id="btn-sf-bulk-duplicate" class="btn-neutral" style="display:none" title="Duplicate the selected fonts. Each copy shares its source and is numbered (_1, _2, ...) so it doesn't collide with the original">&#10697; Duplicate</button>
         <!-- The tracks choice sits INSIDE the Export control, not beside it: a
              separate chip did not make it clear the setting belonged to that
@@ -4995,7 +5007,7 @@
                feature was correct and its EXIT was missing.
                It sits beside the count because that is where you are looking when you
                want it, and a <button> may not nest another, so it is a sibling. -->
-          <button id="btn-sf-mark-all-seen" class="styles-tag-filter-btn" style="display:none">Mark all seen</button>
+
         </div>
         <div id="sf-active-filters" class="styles-active-filters" style="display:none"></div>
         <div class="sf-grid-scroll">
@@ -22089,7 +22101,7 @@ require(['vs/editor/editor.main'], function () {
         const markAllBtn = document.getElementById('btn-sf-mark-all-seen');
         if (markAllBtn) {
           markAllBtn.style.display = newCount > 0 ? '' : 'none';
-          markAllBtn.textContent = `Mark all seen (${newCount})`;
+          markAllBtn.textContent = `Clear all New (${newCount})`;
           markAllBtn.title = `Clear the New badge on all ${newCount} font${newCount === 1 ? '' : 's'}`;
         }
         // In-use filter button: visible only when at least one entry is
@@ -24472,7 +24484,7 @@ require(['vs/editor/editor.main'], function () {
               return e && !(e.meta && e.meta.seenAt);
             }).length;
             seenBtn.style.display = newInSel > 0 ? '' : 'none';
-            seenBtn.textContent = `Mark seen (${newInSel})`;
+            seenBtn.textContent = `Clear New (${newInSel})`;
           }
           if (dupBtn) {
             dupBtn.style.display = '';
@@ -38590,6 +38602,28 @@ require(['vs/editor/editor.main'], function () {
             // user is on a touchscreen / arrived via keyboard.
             ev.stopPropagation();
             buildSubmenu();
+          });
+        }
+        // [B-297] ⭐ ONE LINE, CHOSEN BY THE FONT'S CURRENT STATE — never both. A New font offers
+        // "Clear New"; a font already seen offers "Mark as New". This entry's own rule is that no
+        // control offers to do nothing, the same rule that hides the chip at zero.
+        // ⚠️ The pair references the BADGE, not the field: "Clear New" / "Mark as New" are obvious
+        // opposites — same noun, opposite verbs. "seen" is the mechanism's word and stays in code.
+        // ⚠️ This is the ONLY place the reverse exists. Bulk was proposed and refused: "don't need
+        // a button for mark new. I'm ok with right click, but not bulk."
+        {
+          const _entry = (_sfAllEntries || []).find(x => x.name === fontName);
+          const _isNew = !!(_entry && !(_entry.meta && _entry.meta.seenAt));
+          mkItem(_isNew ? 'Clear New' : 'Mark as New', null, async () => {
+            try {
+              if (_isNew) await window.electronAPI.markEntrySeen({ name: fontName });
+              else        await window.electronAPI.markEntryNew({ name: fontName });
+            } catch (err) {
+              promptError(_isNew ? 'Could not clear New' : 'Could not mark as New',
+                String(err && err.message || err));
+              return;
+            }
+            try { await window.refreshSoundFontsView(); } catch {}
           });
         }
         // Duplicate this one font (the card that was right-clicked). Shares

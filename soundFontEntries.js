@@ -1469,6 +1469,36 @@ function markEntrySeen(userData, entryName, whenIso) {
   return true;
 }
 
+// ⭐ THE REVERSE, AND IT IS markEntrySeen's SIBLING ON PURPOSE. [B-297]
+//
+// Until now NEW could only ever be SPENT, never restored: the four stamp paths are all side
+// effects of doing something else, so a badge cleared by accident was gone for good. His call
+// looking at the card menu 2026-09-13: "this should have mark as seen and mark as new".
+//
+// ⚠️ ONE CARD, BY RIGHT-CLICK, AND NOWHERE ELSE. Symmetry was PROPOSED AND REFUSED — "don't need
+// a button for mark new. I'm ok with right click, but not bulk." A library-wide "mark all new"
+// would light up every font at once, which is exactly the state the backfill exists to prevent.
+// The forward direction is the everyday one; the reverse is a per-font correction, and a
+// right-click is the right weight for it.
+//
+// ⚠️ Same single write path as its twin rather than a direct meta write, so the "first wins"
+// rule and the read-modify-write live in one place and cannot drift apart.
+// Returns true only when something actually changed, matching markEntrySeen's contract — the
+// caller uses that to avoid claiming work it did not do.
+function markEntryNew(userData, entryName) {
+  const root = entriesRoot(userData);
+  const metaPath = path.join(root, entryName, 'meta.json');
+  if (!fs.existsSync(metaPath)) return false;
+  let meta;
+  try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); }
+  catch { return false; }
+  if (!meta.seenAt) return false;                // already New — nothing to undo
+  delete meta.seenAt;
+  try { fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2)); }
+  catch { return false; }
+  return true;
+}
+
 // One-time backfill, and it MUST run in the same build that ships the badge.
 // Absent seenAt means never seen, so without this every entry already in the
 // library lights up NEW at once - wrong, useless, and it would train the user to
@@ -1478,6 +1508,37 @@ function markEntrySeen(userData, entryName, whenIso) {
 // Stamped with the entry's own createdAt where it has one, rather than "now":
 // pretending the whole library was seen at upgrade-time is a lie that a later
 // "recently seen" sort would read back as fact.
+// ⚠️⚠️ THE MARKER LIVES WITH THE DATA IT GUARDS. [B-297]
+//
+// It used to be `seenBackfillDone` in prefs.json while `seenAt` is a field on each entry's
+// meta.json in the library. Two stores, so they desync BOTH ways:
+//   * prefs lost, library kept    -> the backfill re-runs and stamps the real NEW set as seen.
+//     FOUND EXACTLY THIS WAY while staging QA TC-3136 (rename prefs.json away and launch): 109
+//     entries that had genuinely never been opened were stamped, all now carrying
+//     seenAt == createdAt. Measured, not inferred.
+//   * prefs kept, library restored from backup -> flagged done, so restored entries that were
+//     never stamped all light up NEW at once. That is precisely the state the backfill exists to
+//     prevent, and it is the MORE likely direction because the app ships backup and restore.
+//
+// A marker in the library root travels with the library, so a restored library carries its own
+// migration state and prefs.json stops being load-bearing for something it does not own.
+//
+// ⚠️ MOVE THE FLAG, NEVER DROP IT. The persisted flag is deliberately what stops this being "a
+// nightly eraser" ([B-213]): without it, importing a font and restarting silently empties NEW.
+function _backfillMarkerPath(userData) {
+  return path.join(entriesRoot(userData), '.seen-backfill-done');
+}
+function seenBackfillDone(userData) {
+  try { return fs.existsSync(_backfillMarkerPath(userData)); } catch { return false; }
+}
+function markSeenBackfillDone(userData) {
+  try {
+    fs.mkdirSync(entriesRoot(userData), { recursive: true });
+    fs.writeFileSync(_backfillMarkerPath(userData), new Date().toISOString());
+    return true;
+  } catch { return false; }
+}
+
 function backfillSeenAt(userData) {
   const root = entriesRoot(userData);
   if (!fs.existsSync(root)) return { ok: true, stamped: 0 };
@@ -1856,6 +1917,9 @@ module.exports = {
   getEntryCustomization,
   markEntryContentDirty,
   markEntrySeen,
+  markEntryNew,
+  seenBackfillDone,
+  markSeenBackfillDone,
   backfillSeenAt,
   resolveEntryContentDirty,
   computeEntryEffects,

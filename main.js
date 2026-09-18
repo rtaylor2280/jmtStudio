@@ -2149,11 +2149,25 @@ ipcMain.handle('entries:list', () => {
       // seen the next time the app opened. Import, restart, and NEW silently
       // empties. The persisted flag is what makes this a one-time upgrade step
       // rather than a nightly eraser. [B-213]
+      // ⚠️ THE MARKER MOVED INTO THE LIBRARY. [B-297] It was a prefs.json key guarding a field that
+      // lives on each entry's meta.json — two stores, desyncing both ways. Losing prefs re-ran the
+      // backfill and stamped 109 genuinely-new entries as seen; restoring a library with prefs
+      // intact would light every restored font up as NEW at once.
+      // ⚠️ ONE-TIME ADOPTION, so an existing install does not re-run the backfill just because the
+      // marker moved: if the old prefs key says done, write the new marker and stop. Without this
+      // every current user's NEW set would be stamped once on upgrade — the exact bug, shipped as
+      // the fix for it.
       try {
-        if (!Store.get('seenBackfillDone')) {
-          const r = soundFontEntries.backfillSeenAt(app.getPath('userData'));
-          Store.set('seenBackfillDone', true);
-          console.log(`[seen] one-time backfill stamped ${r.stamped} entries`);
+        const _ud = app.getPath('userData');
+        if (!soundFontEntries.seenBackfillDone(_ud)) {
+          if (Store.get('seenBackfillDone')) {
+            soundFontEntries.markSeenBackfillDone(_ud);
+            console.log('[seen] backfill marker adopted from prefs into the library');
+          } else {
+            const r = soundFontEntries.backfillSeenAt(_ud);
+            soundFontEntries.markSeenBackfillDone(_ud);
+            console.log(`[seen] one-time backfill stamped ${r.stamped} entries`);
+          }
         }
       } catch {}
     }
@@ -2179,6 +2193,13 @@ ipcMain.handle('sources:inspectFolder', async (_, { folderPath } = {}) => {
 ipcMain.handle('entries:markSeen', (_, { name } = {}) => {
   if (!name) return { ok: false, error: 'Missing name' };
   try { return { ok: true, stamped: soundFontEntries.markEntrySeen(app.getPath('userData'), name) }; }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+// [B-297] The reverse. One card at a time, from the right-click menu only - never bulk.
+ipcMain.handle('entries:markNew', (_, { name } = {}) => {
+  if (!name) return { ok: false, error: 'Missing name' };
+  try { return { ok: true, cleared: soundFontEntries.markEntryNew(app.getPath('userData'), name) }; }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 

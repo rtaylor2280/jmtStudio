@@ -337,6 +337,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   updateEntryMeta:       (params)     => ipcRenderer.invoke('entries:updateMeta', params),
   deleteEntry:           (params)     => ipcRenderer.invoke('entries:delete', params),
   markEntrySeen:         (params)     => ipcRenderer.invoke('entries:markSeen', params),
+  markEntryNew:          (params)     => ipcRenderer.invoke('entries:markNew', params),
   listEntriesBySource:   (params)     => ipcRenderer.invoke('entries:listBySource', params),
   listSourceDocs:        (params)     => ipcRenderer.invoke('sources:listDocs', params),
   readSourceDocBytes:    (params)     => ipcRenderer.invoke('sources:readDocBytes', params),
