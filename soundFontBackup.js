@@ -943,6 +943,56 @@ async function exportBackup({
 // ⭐ NEVER CALL THIS FOR attachments/. Proof of purchase is the one place a macro-enabled
 // document is allowed, so screening a restore there would strip the user's receipts out
 // of their own backup.
+// ── No duplicates, whichever door ──────────────────────────────────── [B-407]
+//
+// ⭐⭐ HIS RULE, 2026-09-17, and it is absolute: "When we backup/import/merge it can't duplicate a
+// file. No duplicates ever." His scenario is what this has to pass: back up, delete a track, add
+// that same track to a FONT instead, then merge the backup back in. Those bytes are already in the
+// library — inside the font — so the restore must recognise them and link, never write a copy.
+//
+// ⚠️⚠️ THIS MODULE HAD ZERO CONTENT-INDEX REFERENCES. [B-399]'s entry described the mechanism
+// without naming it as a problem: merge "materialises items by raw extraction". Raw extraction
+// cannot know what the library already holds.
+//
+// ⭐ AND THE SECOND HALF IS THE BIGGER WIN. Measured on his own backup: 18,465 wav entries, 5,649
+// distinct, so 4.24 GB of a 6.80 GB archive is the SAME audio stored again — hardlinks do not
+// survive a zip, so every name became its own entry. Recording each novel file as it lands means
+// the archive's internal duplication COLLAPSES on the way in rather than being faithfully rebuilt.
+//
+// Returns a function, or null when the index is unavailable. Every failure path degrades to the
+// plain extraction this always did: at worst a duplicate survives, never a lost file.
+function _makeContentDeduper(userData) {
+  let CI, index, hashFile;
+  try {
+    CI = require('./soundFontContentIndex');
+    index = CI.buildIndex(userData);
+    hashFile = require('./soundFontFileHash').hashFile;
+  } catch { return null; }
+  if (!CI || !index || !hashFile) return null;
+  return function dedupeExtracted(target) {
+    let h = null;
+    try {
+      if (!fs.existsSync(target) || !fs.statSync(target).isFile()) return;
+      h = hashFile(target);
+    } catch { return; }
+    if (!h) return;
+    try {
+      const existing = CI.findExisting(index, h);
+      if (existing && path.resolve(existing) !== path.resolve(target)) {
+        // ⚠️ Temp-name-then-rename so an interruption leaves either the extracted file or the
+        // link, never a hole where the file should be. Same shape ingestFile uses.
+        const tmp = `${target}.dedupe-tmp`;
+        try { fs.rmSync(tmp, { force: true }); } catch {}
+        fs.linkSync(existing, tmp);
+        fs.renameSync(tmp, target);
+        return;
+      }
+    } catch { /* cross-volume or failed link: keep the extracted copy */ }
+    // Novel content: this file is the canonical copy for anything identical later in the zip.
+    try { CI.recordContent(index, h, target); } catch {}
+  };
+}
+
 function _screenRestored(target, sink) {
   try {
     const { checkCarryableFile } = require('./sdCardDetect');
@@ -1112,6 +1162,15 @@ async function applyReplace({
     }
     throw new Error(`Could not create library directory: ${err.message}`);
   }
+
+  // [B-407] ⚠️⚠️ BUILT *AFTER* THE SNAPSHOT RENAME, AND THE TIMING IS THE WHOLE POINT. Replace has
+  // just moved the old library aside, so this index starts EMPTY and accumulates only what the
+  // archive lands. That is deliberate: linking new files to content inside the snapshot — which is
+  // deleted on success — would be reasoning about storage that is on its way out.
+  // ⭐ What it still buys is the big one: the archive's OWN duplication collapses on the way in.
+  // Measured on his backup, 4.24 GB of 6.80 GB is the same audio stored again, because hardlinks
+  // do not survive a zip. Without this, a restore faithfully rebuilds every one of those copies.
+  const _dedupeExtracted = _makeContentDeduper(userData) || (() => {});
 
   const StreamZip = require('node-stream-zip');
   let zip;
@@ -1478,7 +1537,13 @@ async function applyReplace({
         await zip.extract(e.name, target);
         processedBytes += (e.size || 0);
         // attachments/ is exempt - see _screenRestored.
-        if (!normalized.startsWith('attachments/')) _screenRestored(target, restoreRefused);
+        // [B-407] ⚠️ Dedupe AFTER screening: a refused file is deleted there, and linking
+        // something about to be removed would leave a link to content we just refused.
+        if (!normalized.startsWith('attachments/')) {
+          if (_screenRestored(target, restoreRefused)) _dedupeExtracted(target);
+        } else {
+          _dedupeExtracted(target);
+        }
         return true;
       } catch (err) {
         throw new Error(`Failed extracting ${e.name}: ${err && err.message || err}`);
@@ -2414,6 +2479,11 @@ async function applyMerge({
     if (id) zipAttachmentIds.add(id);
   }
 
+  // [B-407] One deduper for this whole merge - built ONCE, above every extraction point.
+  // Per-file index building was the mistake made and caught the same evening in
+  // soundFontSharedTracks, where it would have cost ten seconds on a 62-file add.
+  const _dedupeExtracted = _makeContentDeduper(userData) || (() => {});
+
   // Extract every file under a zip prefix into a target dir on disk.
   // Validates path-escape per entry. The onFile callback fires per
   // extracted file so the caller can emit bucket-specific progress
@@ -2444,7 +2514,11 @@ async function applyMerge({
         await zip.extract(e.name, target);
         processedBytes += (e.size || 0);
         if (!String(e.name).replace(/\\/g, '/').startsWith('attachments/')) {
-          _screenRestored(target, restoreRefused);
+          // ⚠️ Screening first: a refused file is deleted here, and linking something we are
+          // about to remove would leave a link to content we just refused.
+          if (_screenRestored(target, restoreRefused)) _dedupeExtracted(target);
+        } else {
+          _dedupeExtracted(target);
         }
         if (onFile) onFile({ fileIdx: i + 1, fileTotal: fileEntries.length, fileName: e.name });
       } catch (err) {
@@ -2492,6 +2566,9 @@ async function applyMerge({
     const dest = path.join(sfRoot, FILEHASH_DIR, sub, `${key}.json`);
     try {
       fs.mkdirSync(path.dirname(dest), { recursive: true });
+      // [B-407] NOT deduped, deliberately: these are the tiny per-file hash manifests, not audio.
+      // Linking JSON saves nothing and would entangle the hash store with the content index it
+      // describes.
       await zip.extract(zipName, dest);
       rollbackLog.push(() => { try { fs.rmSync(dest, { force: true }); } catch {} });
     } catch {}
@@ -2710,6 +2787,13 @@ async function applyMerge({
           const target = path.join(stRootAbs, fileName);
           await zip.extract(entryName, target);
           if (!_screenRestored(target, restoreRefused)) return null;
+          // [B-407] ⚠️⚠️ TRACKS DO NOT GO THROUGH extractPrefix — they have their own extractor,
+          // so deduping only there would have missed the exact case he specified: back up, delete
+          // a track, add it to a FONT instead, merge the backup. The track's bytes are in the
+          // library (inside the font) and must be linked, not written again. Enumerate by what
+          // WRITES, not by what looks like the main path — the lesson [B-370] taught and this
+          // week has repeated five times.
+          _dedupeExtracted(target);
           stCreated.push(target);
           const e = entries[entryName];
           if (e) processedBytes += (e.size || 0);
@@ -2844,6 +2928,11 @@ async function applyMerge({
               if (!rel || rel.includes('/') || rel.includes('\\')) continue;
               const target = path.join(destDir, rel);
               fs.mkdirSync(destDir, { recursive: true });
+              // [B-407] NOT deduped, deliberately: attachments are proof-of-purchase documents
+              // with their own REFCOUNTED unlink (deleteSource unlinks by count). Hardlinking
+              // them into the content pool would give those bytes a second owner the refcount
+              // knows nothing about. Different lifecycle, different rules — revisit only with
+              // that refcount in hand.
               await zip.extract(key, target);
               processedBytes += (e.size || 0);
             }

@@ -40075,7 +40075,18 @@ require(['vs/editor/editor.main'], function () {
           Object.values(plan.sources).filter(isActionable).length +
           Object.values(plan.library).filter(isActionable).length +
           Object.values(plan.common).filter(isActionable).length;
-        if (totalActions === 0) {
+        // ⚠️⚠️ SHARED TRACKS ARE WORK TOO, AND LEAVING THEM OUT OF THIS COUNT SILENTLY DROPPED
+        // THEM. His, 2026-09-17: he deleted one track, added it to a font, merged, set the one
+        // font conflict to "Keep yours" — and got "Nothing to merge" with the track never
+        // restored. It is not a conflict, so no choice covers it; the dialog even promises
+        // "shared tracks merge silently: any tracks from the backup that you don't already have
+        // are added". A decision about a FONT cancelled work on TRACKS.
+        // ⭐ THE UPFRONT CHECK ALREADY GOT THIS RIGHT — `allIdentical` includes `stDelta`. The
+        // same question is asked twice in this flow and only the second copy forgot. Reuse the
+        // same signal rather than inventing a second notion of "tracks need attention".
+        const stPending = !!(survey && survey.sharedTracks
+          && survey.sharedTracks.backup !== survey.sharedTracks.current);
+        if (totalActions === 0 && !stPending) {
           await promptConfirm({
             title: 'Nothing to merge',
             message: 'You set every conflicting item to Keep yours, so no changes were written.',
