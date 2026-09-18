@@ -21672,6 +21672,66 @@ require(['vs/editor/editor.main'], function () {
           _sfPasteCommonClipboard(_sfSelectedCommonUuid, destSubPath);
         }
       });
+      // ── Delete key ───────────────────────────────────────────────────── [B-405]
+      // His, 2026-09-17: "also can't use delete/backspace in tracks. thought I could before but
+      // maybe not. probably not just tracks. thought we had fixed that." Right on both halves —
+      // it was never just tracks, and it was never fixed. `Delete` was bound NOWHERE in the
+      // renderer; `Backspace` IS bound, three times, and all three are UP-ONE-LEVEL navigation in
+      // the file browsers. The key was wired, to a different job. That is the memory.
+      //
+      // ⚠️ DELETE ONLY, NOT BACKSPACE — his call, and the reason outlives the preference:
+      // Backspace already means "up one level" here, so binding it to destroy on some surfaces
+      // and navigate on others is one finger with two irreversible-feeling outcomes decided by
+      // which panel has focus.
+      //
+      // ⭐ SAFE BY CONSTRUCTION: every branch below opens the SAME confirm dialog the menus and
+      // buttons open. The key is a shortcut to the QUESTION, never to the answer. Nothing here
+      // deletes anything on its own.
+      //
+      // ⭐⭐ ONE HANDLER, FOUR SURFACES. Four handlers would be four chances to drift, which is
+      // the defect this week has hit five times. The guards are lifted from the Ctrl+C/V handler
+      // directly above and from the shared-tracks one: never while typing, and a modal surface
+      // only acts when it is the TOPMOST overlay (otherwise a confirm stacked above it would eat
+      // the key and delete behind the user's back).
+      document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Delete') return;
+        if (e.ctrlKey || e.metaKey || e.altKey) return;   // leave Ctrl+Delete etc. alone
+        const ae = document.activeElement;
+        if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA'
+                   || ae.tagName === 'SELECT' || ae.isContentEditable)) return;
+        const sfView = document.getElementById('soundfonts-view');
+        if (!sfView || !sfView.classList.contains('active')) return;
+
+        const overlays = [...document.querySelectorAll('.modal-overlay.active')];
+        const topMost = overlays.length ? overlays[overlays.length - 1] : null;
+
+        if (topMost) {
+          // A modal owns the key while it is up, and only if it is the one on top.
+          if (topMost.id === 'modal-sf-shared-tracks') {
+            if (_sfSharedTracksSelected.size === 0) return;
+            e.preventDefault(); _sfDeleteSharedTracksPrompt();
+          } else if (topMost.id === 'modal-sf-entry-detail') {
+            if (_sfEntryFilesSelected.size === 0) return;
+            e.preventDefault(); _sfDeleteEntryFilesPrompt();
+          }
+          return;   // any other modal: not ours, do nothing
+        }
+
+        // ⚠️⚠️ THE FONT GRID IS DELIBERATELY NOT HERE. It has had its own Delete/Backspace
+        // handler all along (further down this file, calling _sfBulkDelete), and so has the
+        // config preset sidecar. Adding a second branch for the grid would have opened TWO
+        // confirm dialogs on one keypress.
+        // ⭐ HE CAUGHT THIS: "you already made delete and backspace work in the fonts that were
+        // selected." He was right. My search for existing bindings was truncated at 20 lines and
+        // cut off the two that existed, and I wrote "bound nowhere" into the entry from that
+        // truncated list. A search whose output is cut is not a search — it is a sample.
+        //
+        // So only the three surfaces with NO binding are handled here: shared tracks, entry
+        // files, and common folder files.
+        if (_sfSelectedCommonUuid && _sfCommonFilesSelected.size > 0) {
+          e.preventDefault(); _sfDeleteCommonFilesPrompt();
+        }
+      });
       // Build a search blob that covers everything the user might type to find
       // an entry: the entry's own name/author/description/notes/tags plus the
       // backing source's bundle name, original filename, vendor info, and
@@ -41004,7 +41064,14 @@ require(['vs/editor/editor.main'], function () {
       // editable surface has focus - the search box is right there, and Delete
       // while typing must edit text, never pop the dialog.
       document.addEventListener('keydown', async (e) => {
-        if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+        // [B-405] DELETE ONLY. Backspace was deliberate here ([B-336], then [B-374] on 09-14)
+        // and correct at the time: these surfaces have no navigation, so the two keys could
+        // mean one thing. The FILE BROWSERS broke that - Backspace is up-one-level there - so
+        // Backspace can never be the universal delete key, and a key that deletes in some
+        // places and navigates in others is worse than one that only ever navigates.
+        // His call, 2026-09-17: 'we can remove the backspace from the others'. Nothing had
+        // shipped - v1.7.2 predates both bindings - so no learned behaviour is being taken away.
+        if (e.key !== 'Delete') return;
         const sfView = document.getElementById('soundfonts-view');
         if (!sfView || !sfView.classList.contains('active')) return;
         if (_sfSelectedNames.size === 0) return;
@@ -42355,7 +42422,10 @@ require(['vs/editor/editor.main'], function () {
     // either. Adding a gate to one and not the other is how two doors drift apart.
     // _batchDelete is a single _atomicEdit, so Ctrl+Z takes it back in one step.
     document.addEventListener('keydown', (e) => {
-      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+      // [B-405] DELETE ONLY - see the note on the Sound Fonts handler. Backspace is
+      // up-one-level in the file browsers, so it cannot also be the delete key; one rule
+      // everywhere beats a key whose meaning depends on which panel has focus.
+      if (e.key !== 'Delete') return;
       if (_activeTab !== 'config' || !fileIsOpen) return;
       if (!_sidecarOpen) return;
       if (_selectedLive.size === 0 && _selectedDisabled.size === 0) return;

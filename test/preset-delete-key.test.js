@@ -44,8 +44,16 @@ const sidecar = (() => {
   return h < 0 || end < 0 ? '' : html.slice(h, end + 8);
 })();
 const fontGrid = (() => {
+  // ⚠️⚠️ SLICE TO THE HANDLER'S END, NOT A CHAR COUNT — the same lesson the sidecar slice above
+  // already carries, learned again the hard way. This was `i + 1600`, and adding a few comment
+  // lines to the handler pushed its focus guard past the window, so "the font grid uses the same
+  // focus guard" went red against code that had not changed. A fixed-width window is a fixture
+  // that breaks on comments.
   const i = html.indexOf('[B-336] Delete and Backspace are ALIASES');
-  return i < 0 ? '' : html.slice(i, i + 1600);
+  if (i < 0) return '';
+  const h = html.indexOf("document.addEventListener('keydown'", i);
+  const end = html.indexOf('\n      });', h);
+  return h < 0 || end < 0 ? '' : html.slice(h, end + 10);
 })();
 
 ok('the sidecar binding exists', sidecar.length > 0);
@@ -53,9 +61,20 @@ ok('the B-336 font-grid binding is still there to match against', fontGrid.lengt
 
 // ── both keys, per his ruling on B-336 ─────────────────────────────────────
 {
-  const bothKeys = /e\.key !== 'Delete' && e\.key !== 'Backspace'/;
-  ok('the sidecar takes BOTH Delete and Backspace', bothKeys.test(sidecar));
-  ok('and so does the font grid, unchanged', bothKeys.test(fontGrid));
+  // ⚠️⚠️ THIS USED TO REQUIRE BOTH KEYS, and it was right until the file browsers entered the
+  // picture. Backspace is up-one-level there ([B-405]), so it can never also be the delete key —
+  // a key whose meaning depends on which panel has focus is worse than one that only navigates.
+  // His call 2026-09-17: "we can remove the backspace from the others". Nothing had shipped:
+  // v1.7.2 predates both bindings, and he confirmed it — "Nope it didn't work there in 1.7".
+  const deleteOnly = /if \(e\.key !== 'Delete'\) return;/;
+  ok('the sidecar takes Delete', deleteOnly.test(sidecar));
+  ok('and so does the font grid', deleteOnly.test(fontGrid));
+  // ⚠️⚠️ THE GUARD AGAINST IT COMING BACK. Backspace was added deliberately twice ([B-336], then
+  // [B-374]), so a later pass could reasonably re-add it without knowing why it went.
+  const backspaceDeletes = /e\.key !== 'Delete' && e\.key !== 'Backspace'/;
+  ok('⚠️ Backspace no longer deletes on either surface',
+     !backspaceDeletes.test(sidecar) && !backspaceDeletes.test(fontGrid),
+     'Backspace means up-one-level in the file browsers; it cannot also delete');
 }
 
 // ── the guards, copied not re-derived ──────────────────────────────────────
