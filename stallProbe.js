@@ -169,7 +169,20 @@ function flush(note) {
   try { fs.appendFileSync(logPath(userDataDir), text + '\n'); } catch {}
   records.length = 0;
   phaseTotals.clear();
+  // ⚠️⚠️ RE-SEED THE STILL-OPEN PHASES INSTEAD OF CLEARING THEM AWAY. [B-398]
+  //
+  // Clearing the timeline outright was a real defect, found 2026-09-18 on his first captured run:
+  // a phase that began BEFORE an auto-flush and was still running after it lost its 'begin' event,
+  // so every later stall inside it resolved to "(idle - nothing marked)" — while the log's own
+  // phase list showed a 37-second bulkImport:analyze wrapped around those exact stalls. The
+  // instrument reported "nothing was happening" during the busiest part of the run.
+  //
+  // Same failure as the original attribution bug this file already carries a warning about, one
+  // flush later: the record of what was open has to survive as long as the phase itself does.
+  // Their real start time is kept, so durations and midpoint attribution stay honest rather than
+  // being re-dated to the flush.
   timeline.length = 0;
+  for (const f of stack) timeline.push({ t: f.at, type: 'begin', label: f.label });
   return text;
 }
 
