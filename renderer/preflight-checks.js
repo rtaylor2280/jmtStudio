@@ -151,7 +151,12 @@
         const slotWord = short.every(s => expected - s.actual === 1) ? 'slot' : 'slots';
 
         findings.push({
-          title: `Your config has ${blades}, and `
+          // ⭐ "but", NOT "and". [B-375] His catch 2026-09-16, and it is a rule not a typo:
+          // "and" joins two compatible facts, and this sentence exists precisely because the two
+          // halves CANNOT both be right. The conjunction was doing the opposite of the message's
+          // job. Any finding whose title states the expectation AND the violation in one sentence
+          // is an adversative and wants "but".
+          title: `Your config has ${blades}, but `
                + `${one ? '1 preset has' : `${short.length} presets have`} ${countPhrase}.`,
           detail: `${bankNote(short)}Every preset needs one style per blade, so this `
                 + `cannot compile. Open ${one ? 'that preset' : 'each preset'} in Presets and fill `
@@ -181,7 +186,12 @@
         const extraWord = over.every(s => s.actual - expected === 1) ? 'style' : 'styles';
 
         findings.push({
-          title: `Your config has ${blades}, and `
+          // ⭐ "but", NOT "and". [B-375] His catch 2026-09-16, and it is a rule not a typo:
+          // "and" joins two compatible facts, and this sentence exists precisely because the two
+          // halves CANNOT both be right. The conjunction was doing the opposite of the message's
+          // job. Any finding whose title states the expectation AND the violation in one sentence
+          // is an adversative and wants "but".
+          title: `Your config has ${blades}, but `
                + `${one ? '1 preset has' : `${over.length} presets have`} ${countPhrase}.`,
           detail: `${bankNote(over)}Every preset needs one style per blade and no more, so this `
                 + `cannot compile. Open ${one ? 'that preset' : 'each preset'} in Presets and `
@@ -387,7 +397,12 @@
         findings: [{
           title: `${req.via === 'menuspec'
             ? "Your config's OS8 menu system (MENU_SPEC_TEMPLATE) requires a voicepack"
-            : 'Your prop requires a voicepack on ProffieOS 8'}, and `
+            : 'Your prop requires a voicepack on ProffieOS 8'}, but `
+            // ⭐ "but", same rule as the blade-count titles. [B-375] The requirement and its
+            // violation in one sentence is an adversative. The voicepack title carried the
+            // identical construction and was found by sweeping for the SHAPE rather than the
+            // phrase - which is what the entry asked for. The 'no prop is included' title below
+            // already said "but", so the house style was right in one place and not the others.
             + `${one ? 'this preset does' : `${missing.length} presets do`} not list a shared folder.`,
           detail: `Unless ${one ? 'that font contains' : 'those fonts contain'} their own copy of the `
             + `voicepack, the saber will announce "voice pack not found" every time you switch to `
