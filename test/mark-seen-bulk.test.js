@@ -37,15 +37,23 @@ function ok(name, cond, extra) {
 {
   ok('the chip-side control exists', /id="btn-sf-mark-all-seen"/.test(html));
   ok('the selection-side control exists', /id="btn-sf-bulk-mark-seen"/.test(html));
-  // ⚠️ Anchor on the MARKUP spelling. `btn-sf-new-filter` appears in the stylesheet
-  // thousands of lines earlier, so a bare indexOf measures the distance from a CSS rule
-  // to a button and reports a correct layout as wrong.
-  const newFilterAt   = html.indexOf('<button id="btn-sf-new-filter"');
+  // ⚠️⚠️ THIS ASSERTION WAS INVERTED ON 2026-09-18 AND THE INVERSION IS THE POINT. [B-297]
+  // It used to require the control to sit BESIDE THE NEW FILTER, in the chip row. He looked at
+  // that live and would not pass it: it "looks like a filter". A row of filters is where you go
+  // to change the VIEW, not your data, so an action there reads as a view toggle no matter how it
+  // is styled. Placement was the whole fix; the old test had encoded the rejected design.
+  // ⚠️ Anchor on the MARKUP spelling. `btn-sf-select-in-use` appears in the stylesheet thousands
+  // of lines earlier, so a bare indexOf measures the distance from a CSS rule to a button and
+  // reports a correct layout as wrong.
+  const selectInUseAt = html.indexOf('<button id="btn-sf-select-in-use"');
   const markAllAt     = html.indexOf('<button id="btn-sf-mark-all-seen"');
-  ok('both buttons were found in the markup', newFilterAt > 0 && markAllAt > 0);
-  ok('the chip control sits beside the New filter',
-     markAllAt > newFilterAt && markAllAt - newFilterAt < 900,
-     `${markAllAt - newFilterAt} chars apart — it belongs where the count is`);
+  ok('both buttons were found in the markup', selectInUseAt > 0 && markAllAt > 0);
+  ok('the control sits in the always-visible action group, not the chip row',
+     markAllAt > selectInUseAt && markAllAt - selectInUseAt < 1400,
+     `${markAllAt - selectInUseAt} chars from Select in-use — it belongs with the library-scoped actions`);
+  ok('and it is NOT back in the filter chip row',
+     html.indexOf('<button id="btn-sf-mark-all-seen" class="styles-tag-filter-btn"') === -1,
+     'the filter-chip class is back on it — that is the placement he rejected');
   ok('the selection control sits with the other bulk actions',
      Math.abs(html.indexOf('id="btn-sf-bulk-mark-seen"') - html.indexOf('id="btn-sf-bulk-tag"')) < 600);
 }
@@ -56,7 +64,10 @@ function ok(name, cond, extra) {
                           html.indexOf("const markAllBtn = document.getElementById('btn-sf-mark-all-seen')") + 600);
   ok('the chip control hides when nothing is New',
      /markAllBtn\.style\.display = newCount > 0 \? '' : 'none';/.test(chip), chip);
-  ok('and it names the count', /Mark all seen \(\$\{newCount\}\)/.test(chip), chip);
+  // ⚠️ The label references the BADGE, not the mechanism. "seen" is not a clear opposite of
+  // "NEW" and quietly claims the user looked at something. His own words for the gap:
+  // "no way to clear the new tag". seenAt stays the field name in code. [B-297]
+  ok('and it names the count, referencing the badge', /Clear all New \(\$\{newCount\}\)/.test(chip), chip);
 
   const sel = html.slice(html.indexOf("const seenBtn = document.getElementById('btn-sf-bulk-mark-seen')"),
                          html.indexOf("const seenBtn = document.getElementById('btn-sf-bulk-mark-seen')") + 700);
@@ -65,7 +76,7 @@ function ok(name, cond, extra) {
   ok('and hides when none of the selection is New',
      /seenBtn\.style\.display = newInSel > 0 \? '' : 'none';/.test(sel), sel);
   ok('its label is the count that will CHANGE, not the selection size',
-     /Mark seen \(\$\{newInSel\}\)/.test(sel), sel);
+     /Clear New \(\$\{newInSel\}\)/.test(sel), sel);   // [B-297] names the badge, not the mechanism
   ok('it is hidden again when the selection empties',
      /getElementById\('btn-sf-bulk-mark-seen'\); if \(sb\) sb\.style\.display = 'none';/.test(html));
 }
