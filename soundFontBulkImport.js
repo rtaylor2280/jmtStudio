@@ -575,7 +575,10 @@ async function runBulkImport({ plan, userData }, callbacks = {}) {
       try {
         // Per-FILE progress. `tracks-start` alone is folder-level, which is one
         // unit of work on a tracks-only import - the bar cannot move. [B-281]
-        const result = soundFontSharedTracks.addFiles(userData, wavPaths, (p) => {
+        // [B-400] addFiles is async now - the await is not cosmetic. Without it `result` is a
+        // Promise, `result.ok` is undefined, and every track lands in tracksFailed while the
+        // files themselves copy perfectly. A silent miscount, not a crash.
+        const result = await soundFontSharedTracks.addFiles(userData, wavPaths, (p) => {
           onProgress({ stage: 'tracks-progress', done: p.done, total: p.total, label: p.name });
         });
         if (result && result.ok) {

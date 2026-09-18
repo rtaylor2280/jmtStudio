@@ -2330,8 +2330,17 @@ ipcMain.handle('fileOps:createSubfolder', (_, { kind, id, parentSubPath, name } 
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
-ipcMain.handle('fileOps:addFiles', (_, { kind, id, subPath, sourceFilePaths, destNames } = {}) => {
-  try { return soundFontFileOps.addFilesAt({ userData: app.getPath('userData'), kind, id, subPath, sourceFilePaths, destNames }); }
+ipcMain.handle('fileOps:addFiles', async (event, { kind, id, subPath, sourceFilePaths, destNames } = {}) => {
+  // [B-400] `event`, not `_` - same missing channel the tracks door had.
+  try {
+    const emit = _sfByteProgressEmitter(event);
+    const r = await soundFontFileOps.addFilesAt({
+      userData: app.getPath('userData'), kind, id, subPath, sourceFilePaths, destNames,
+      onBytes: emit.onBytes,
+    });
+    emit.flush();
+    return r;
+  }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
@@ -2433,6 +2442,33 @@ ipcMain.handle('dialog:selectSaveDestination', async () => {
 // more often than every ~80ms so a multi-GB export doesn't flood IPC. The
 // renderer sums the deltas; flush() sends whatever's left so the sum stays
 // exact (every byte copied is accounted for, no drift).
+// [B-400] Progress for the +Add doors. ONE emitter and ONE channel for all three (tracks, font,
+// common) - his rule from ui-conventions.md 2026-09-16: "if they all use the same style then it
+// doesn't rely on us remembering to follow the rule but rather implement the pattern." Three
+// hand-rolled bars would be three chances to drift.
+//
+// ⚠️ ABSOLUTE {done,total}, NOT A DELTA, unlike the export emitter below. The backends stream a
+// hash in 64 KB chunks, so a large add produces thousands of ticks; throttling MUST drop most of
+// them. A dropped delta is lost bytes and a bar that ends short, while a dropped absolute pair is
+// simply a frame the user never saw. Self-correcting by construction.
+// ⚠️⚠️ AND THE LAST ONE ALWAYS GOES. Throttling that can swallow the final tick is exactly the
+// [B-389] defect - a bar that hands over before it reaches 100%.
+function _sfByteProgressEmitter(event) {
+  let last = 0;
+  let pending = null;
+  const send = (p) => {
+    if (!p) return;
+    try { event.sender.send('soundFonts:byteProgress', p); } catch {}
+  };
+  return {
+    onBytes: (p) => {
+      pending = p;
+      const now = Date.now();
+      if (now - last >= 80) { last = now; send(pending); pending = null; }
+    },
+    flush: () => { send(pending); pending = null; },
+  };
+}
 function _sfExportProgressEmitter(event) {
   let acc = 0;
   let last = 0;
@@ -2547,8 +2583,15 @@ ipcMain.handle('common:listFiles', (_, { uuid } = {}) => {
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
-ipcMain.handle('common:addFiles', (_, { uuid, subPath, sourceFilePaths } = {}) => {
-  try { return soundFontCommon.addFilesToCommon(app.getPath('userData'), uuid, subPath, sourceFilePaths); }
+ipcMain.handle('common:addFiles', async (event, { uuid, subPath, sourceFilePaths } = {}) => {
+  // [B-400] `event`, not `_` - the third door with no channel to report on.
+  try {
+    const emit = _sfByteProgressEmitter(event);
+    const r = await soundFontCommon.addFilesToCommon(
+      app.getPath('userData'), uuid, subPath, sourceFilePaths, emit.onBytes);
+    emit.flush();
+    return r;
+  }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
@@ -2722,8 +2765,17 @@ ipcMain.handle('sharedTracks:listFiles', () => {
   try { return { ok: true, files: soundFontSharedTracks.listFiles(app.getPath('userData')) }; }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
-ipcMain.handle('sharedTracks:addFiles', (_, { sourceFilePaths } = {}) => {
-  try { return soundFontSharedTracks.addFiles(app.getPath('userData'), sourceFilePaths); }
+ipcMain.handle('sharedTracks:addFiles', async (event, { sourceFilePaths } = {}) => {
+  // [B-400] `event`, not `_`. The handler took no event at all, so there was no channel to
+  // report on - the producer inside addFiles had existed since [B-281] and nothing here could
+  // ever have used it.
+  try {
+    const emit = _sfByteProgressEmitter(event);
+    const r = await soundFontSharedTracks.addFiles(
+      app.getPath('userData'), sourceFilePaths, null, emit.onBytes);
+    emit.flush();
+    return r;
+  }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 ipcMain.handle('sharedTracks:renameFile', (_, { oldName, newName } = {}) => {
@@ -2752,8 +2804,17 @@ ipcMain.handle('sharedTracks:existsAt', (_, { destDir } = {}) => {
 // [B-402] `writeCache` is accepted and ignored — the compare no longer writes at all, for any
 // caller, so the flag [B-358] added has nothing left to switch off. Kept in the signature so an
 // older renderer passing it cannot throw; drop it once nothing sends it.
-ipcMain.handle('soundFonts:entryMatchesAt', (_, { name, destDir } = {}) => {
-  try { return soundFontEntries.entryMatchesAt(app.getPath('userData'), name, destDir); }
+ipcMain.handle('soundFonts:entryMatchesAt', (event, { name, destDir, reportProgress } = {}) => {
+  // [B-400] The destination-side hashing is the expensive half of this question and ran silent
+  // behind a right-click Export. Opt-in: the bulk conflict scan drives its own bar already and
+  // must not have a second one fighting it.
+  try {
+    const emit = reportProgress ? _sfByteProgressEmitter(event) : null;
+    const r = soundFontEntries.entryMatchesAt(app.getPath('userData'), name, destDir,
+      emit ? { onBytes: emit.onBytes } : {});
+    if (emit) emit.flush();
+    return r;
+  }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 // [B-402] THE ONE WRITER. Every compare and every export now RETURNS what it learned; the

@@ -423,6 +423,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sharedTracksCreate:    ()           => ipcRenderer.invoke('sharedTracks:create'),
   sharedTracksListFiles: ()           => ipcRenderer.invoke('sharedTracks:listFiles'),
   sharedTracksAddFiles:  (params)     => ipcRenderer.invoke('sharedTracks:addFiles', params),
+  // [B-400] One subscription for every +Add door; the payload is {done,total,name} in BYTES.
+  onSoundFontByteProgress: (cb) => {
+    const handler = (_, d) => cb(d);
+    ipcRenderer.on('soundFonts:byteProgress', handler);
+    return () => ipcRenderer.removeListener('soundFonts:byteProgress', handler);
+  },
   sharedTracksRenameFile:(params)     => ipcRenderer.invoke('sharedTracks:renameFile', params),
   sharedTracksDeleteFile:(params)     => ipcRenderer.invoke('sharedTracks:deleteFile', params),
   sharedTracksDelete:    ()           => ipcRenderer.invoke('sharedTracks:delete'),

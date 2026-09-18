@@ -29,7 +29,19 @@ const WAV = (() => {
 })();
 
 let pass = 0;
-const ok = (label, fn) => { fn(); pass++; console.log('  ok  ' + label); };
+// ⚠️⚠️ ASYNC-AWARE, AND THE AWARENESS IS LOAD-BEARING. [B-400] made addFilesAt async, so one
+// case below is async too. The old one-liner called fn() and dropped the result: a rejected
+// promise would have become an unhandled rejection AFTER this printed "ok" and counted a pass.
+// A test that reports success over a failed assertion is worse than no test.
+// An async case returns a promise here and MUST be awaited at its call site.
+const ok = (label, fn) => {
+  const r = fn();
+  if (r && typeof r.then === 'function') {
+    return r.then(() => { pass++; console.log('  ok  ' + label); });
+  }
+  pass++; console.log('  ok  ' + label);
+  return undefined;
+};
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'jmt-removal-'));
 const dest = path.join(tmp, 'quarantine-dest');
@@ -47,6 +59,9 @@ fs.writeFileSync(path.join(tmp, 'soundFonts', 'sources', 'src-uuid', 'meta.json'
 
 const plant = (kind, name, buf) => fs.writeFileSync(path.join(roots[kind], name), buf);
 
+// [B-400] Wrapped so the one async case can be awaited. CJS has no top-level await, and
+// leaving it unawaited is the false-green described above.
+(async () => {
 try {
   // ── Resolution reaches every kind ────────────────────────────────────────────
   ok('resolves a file in all four managed stores', () => {
@@ -378,13 +393,13 @@ try {
   // ── [B-370] The import doors: never allowed IN either ────────────────────────
   // Nothing is removed on this side - the file never arrives - so this asserts the
   // store stays clean AND that the user's own copy is left alone.
-  ok('+ Add into a font refuses all three kinds and keeps the user copy', () => {
+  await ok('+ Add into a font refuses all three kinds and keeps the user copy', async () => {
     const ops = require('../soundFontFileOps');
     const ext = path.join(tmp, 'picked'); fs.mkdirSync(ext, { recursive: true });
     const mk = (n, b) => { const f = path.join(ext, n); fs.writeFileSync(f, b); return f; };
     const srcs = [mk('ok.wav', WAV), mk('P.exe', MZ), mk('a.rar', Buffer.from('Rar!x')),
       mk('r.docm', Buffer.from('PK x'))];
-    const r = ops.addFilesAt({ userData: tmp, kind: 'entry', id: 'Ani-Mation',
+    const r = await ops.addFilesAt({ userData: tmp, kind: 'entry', id: 'Ani-Mation',
       subPath: '', sourceFilePaths: srcs });
     assert.strictEqual(r.ok, true, r.error);
     assert.strictEqual(r.refused.length, 3, 'program, archive and macro all refused');
@@ -398,3 +413,4 @@ try {
 } finally {
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
 }
+})();

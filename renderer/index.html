@@ -1395,6 +1395,31 @@
      buttons (the SD-card guard), so give it more room than the 380px default so
      the text does not wrap into cramped lines. */
   #modal-confirm .modal { max-width: 520px; }
+  /* [B-404] A DIALOG MUST NEVER BE TALLER THAN THE WINDOW IT IS IN.
+     His, 2026-09-17, deleting tracks to clear space: "it can overflow making button unavailable."
+     The delete confirm lists every selected name, ~58 of them, and the box simply grew until its
+     own button row was off-screen.
+     ⚠️⚠️ THAT IS A TRAP, NOT A COSMETIC BUG. promptConfirm has no Escape handler and no
+     backdrop-click dismissal — the buttons are the ONLY exit — so an unreachable button row means
+     the dialog cannot be answered at all. Same class as [B-204], where killing the app was the
+     only way out.
+     ⭐ FIXED AT THE CONTAINER, NOT PER CALLER. Two callers can produce an unbounded body today and
+     there will be more; capping each list is a guard that the next caller forgets. Cap the box,
+     let the MESSAGE scroll, and the title and buttons stay pinned no matter what is put in it.
+     The flex column is what pins them: without it the <p> cannot shrink and the overflow moves
+     back onto the modal as a whole. min-height:0 is required for the same reason — a flex item's
+     default min-height:auto refuses to shrink below its content.
+     promptError delegates to promptConfirm, so this covers both. */
+  #modal-confirm .modal {
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+  }
+  #modal-confirm-msg {
+    overflow-y: auto;
+    min-height: 0;
+    overscroll-behavior: contain;
+  }
   /* Turn off the base .modal p's text-wrap: balance (it makes stubby even lines
      and odd breaks). Plain wrapping + a tuned width gives clean, predictable
      line breaks for this static copy. */
@@ -24051,13 +24076,14 @@ require(['vs/editor/editor.main'], function () {
         try { pick = await window.electronAPI.selectCommonFiles(); }
         catch (err) { promptError('Could not open picker', err && err.message || err); return; }
         if (!pick || !pick.ok || !pick.filePaths?.length) return;
-        _sfDeleteProgress.show('Adding files', `${pick.filePaths.length} file${pick.filePaths.length === 1 ? '' : 's'}`);
-        const res = await window.electronAPI.addCommonFiles({
-          uuid: _sfSelectedCommonUuid,
-          subPath: '',
-          sourceFilePaths: pick.filePaths,
-        });
-        await _sfDeleteProgress.hide();
+        // [B-400] Was an indeterminate bar with a file count — honest, moving, and silent about
+        // how far along it is. Byte-accurate now, through the runner every +Add door shares.
+        const res = await _sfRunWithByteProgress('Adding files', () =>
+          window.electronAPI.addCommonFiles({
+            uuid: _sfSelectedCommonUuid,
+            subPath: '',
+            sourceFilePaths: pick.filePaths,
+          }));
         if (!res || !res.ok) { promptError('Add failed', (res && res.error) || 'unknown error'); return; }
         if (res.failed?.length) {
           await _sfShowPartialFailures('Some files failed to add', res.failed);
@@ -25845,16 +25871,71 @@ require(['vs/editor/editor.main'], function () {
       const _sfSharedAddBrowse = async () => {
         const picked = await window.electronAPI.selectAudioFiles({ title: 'Add tracks to Shared Tracks folder' });
         if (!picked || !picked.ok || !Array.isArray(picked.filePaths) || picked.filePaths.length === 0) return;
-        const res = await window.electronAPI.sharedTracksAddFiles({ sourceFilePaths: picked.filePaths });
+        // [B-400] This door showed NOTHING - not even the indeterminate bar the font and common
+        // doors had. The producer inside addFiles has existed since [B-281]; the handler took no
+        // `event`, so nothing could ever subscribe to it.
+        const res = await _sfRunWithByteProgress('Adding tracks',
+          () => window.electronAPI.sharedTracksAddFiles({ sourceFilePaths: picked.filePaths }));
         if (!res || !res.ok) {
           promptError('Failed to add files', res?.error || 'unknown error');
           return;
         }
-        if (res.skipped && res.skipped.length > 0) {
-          const lines = res.skipped.map(s => `• ${s.src}: ${s.reason}`).join('\n');
-          await promptError(`Skipped ${res.skipped.length} file(s)`, lines);
+        // [B-400] SAY WHAT HAPPENED, and say it once.
+        // ⚠️⚠️ HIS, 2026-09-17: "tried adding the same file over and over and it acts successful
+        // but nothing happens. correct it didn't add... but still." The dedup was right and
+        // SILENT — `duplicates` has always come back from addFiles and this caller dropped it,
+        // exactly as [B-401]'s handlers dropped `refused` and this handler dropped
+        // `onFileProgress`. Three instances of one shape in a day: the backend does the work,
+        // the caller throws the answer away at the door.
+        // ⭐ An operation that correctly does nothing still has to SAY it did nothing. Silence
+        // reads as success, and the user's next move is to try the same thing again.
+        const _added = (res.added || []).length;
+        const _dupes = (res.duplicates || []).length;
+        const _skips = res.skipped || [];
+        const _n = (x) => x.toLocaleString();
+        const _trk = (x) => (x === 1 ? 'track' : 'tracks');
+        const _lines = [];
+        if (_added) _lines.push(`<strong>${_n(_added)}</strong> ${_trk(_added)} added.`);
+        if (_dupes) {
+          // ⚠️ "Already had" is the honest frame, not "skipped" — having it already is a success.
+          // Same distinction addFiles makes internally between `duplicates` and `skipped`.
+          _lines.push(_added
+            ? `You already had <strong>${_n(_dupes)}</strong>.`
+            : (_dupes === 1
+                ? 'Nothing was added — you already have that track.'
+                : `Nothing was added — you already have all <strong>${_n(_dupes)}</strong> of those ${_trk(_dupes)}.`));
         }
-        await _sfShowNotAdded(res.refused);
+        if (_skips.length) {
+          // ⚠️ CAPPED, and basenames rather than full paths. The old line printed every source
+          // path in full: noise, and the overflow [B-404] is filed for.
+          const _names = _skips.slice(0, 4)
+            .map(x => '"' + _sfEscape(String(x.src || '').split(/[\\/]/).pop()) + '"').join(', ');
+          const _more = _skips.length > 4 ? `, and ${_skips.length - 4} more` : '';
+          _lines.push(`<span style="color:#e5534b"><strong>${_n(_skips.length)}</strong> `
+            + `could not be added: ${_names}${_more}.</span>`);
+        }
+        const _outcome = _lines.join('<br>');
+        // ⭐ ONE DIALOG, NOT THREE. Skipped used its own promptError and refused its own dialog,
+        // so a bad pick could stack both. [B-370]'s rule, his words: "done and continue are to be
+        // replaced, combine into one message." _sfShowNotAdded gained prefixHtml in [B-401] for
+        // exactly this.
+        // ⚠️⚠️ THE GATE IS "WAS ANYTHING WITHHELD", NOT "IS THERE TEXT". A clean add produces the
+        // line "5 tracks added." — non-empty, and worth NOTHING, because the refreshed list behind
+        // the dialog already says it. My first draft gated on `_outcome` being non-empty and so
+        // popped a dialog on every successful add, which is the exact thing the comment below
+        // argues against. Caught by exercising the builder, not by reading it.
+        const _withheld = _dupes > 0 || _skips.length > 0;
+        if ((res.refused || []).length) {
+          await _sfShowNotAdded(res.refused, _outcome || undefined);
+        } else if (_withheld) {
+          await promptConfirm({
+            title: _added ? 'Tracks added' : 'Nothing to add',
+            messageHtml: _outcome,
+            confirmText: 'OK', confirmKind: 'primary', hideCancel: true,
+          });
+        }
+        // ⚠️ A CLEAN ADD STAYS SILENT. The refreshed list IS the report, and a dialog that only
+        // says "it worked" is the kind that trains people to dismiss the one that matters.
         await _sfRefreshSharedTracksModal();
       };
       _sfSharedAddBtn?.addEventListener('click', (e) => {
@@ -26061,7 +26142,14 @@ require(['vs/editor/editor.main'], function () {
           title: names.length === 1 ? 'Delete track' : `Delete ${names.length} tracks`,
           message: names.length === 1
             ? `Delete "${names[0]}"?`
-            : `Delete these ${names.length} tracks?\n${names.map(n => ` • ${n}`).join('\n')}`,
+            // [B-404] CAPPED. The container now scrolls, so this can no longer put its own
+            // buttons out of reach — but a scrollable wall of 58 names still says nothing the
+            // count does not. Same shape as every other list in the app (the card-warning rule,
+            // 2026-09-10): a few names, then "and N more".
+            // ⚠️ Never collapse a single item — "and 1 more" costs the characters the name would.
+            : `Delete these ${names.length} tracks?\n`
+              + names.slice(0, 6).map(n => ` • ${n}`).join('\n')
+              + (names.length > 6 ? `\n • and ${names.length - 6} more` : ''),
           confirmText: 'Delete',
           confirmKind: 'danger',
         });
@@ -31810,14 +31898,22 @@ require(['vs/editor/editor.main'], function () {
         const incomingNames = pick.filePaths.map(p => p.replace(/\\/g, '/').split('/').pop());
         const destNames = await _sfResolvePasteRenames(incomingNames, _sfEntryFilesPath);
         if (destNames === null) return; // cancelled
-        _sfDeleteProgress.show('Adding files', `${pick.filePaths.length} file${pick.filePaths.length === 1 ? '' : 's'}`);
-        const res = await window.electronAPI.fileOpsAddFiles({
-          kind: 'entry', id: _sfDetailOriginalName,
-          subPath: _sfEntryFilesPath, sourceFilePaths: pick.filePaths,
-          destNames: destNames.length ? destNames : undefined,
-        });
-        await _sfDeleteProgress.hide();
+        // [B-400] This door DID show a bar, but an INDETERMINATE one — `show()` with no fraction,
+        // which the component deliberately renders as a knight-rider rather than a static half.
+        // Honest, moving, and silent about how far along it is: fine for three files, poor for
+        // forty. Now byte-accurate, through the same runner every +Add door uses.
+        const res = await _sfRunWithByteProgress('Adding files', () =>
+          window.electronAPI.fileOpsAddFiles({
+            kind: 'entry', id: _sfDetailOriginalName,
+            subPath: _sfEntryFilesPath, sourceFilePaths: pick.filePaths,
+            destNames: destNames.length ? destNames : undefined,
+          }));
         if (!res || !res.ok) { promptError('Add failed', (res && res.error) || 'unknown'); return; }
+        // ⚠️ NO "you already had it" LINE HERE, and that is not an oversight. A font file belongs
+        // at a PATH, so identical content in two places is legitimate structure, not a duplicate —
+        // this door ADDS it and hardlinks it into the content pool ([B-315]/[B-316]). There is
+        // nothing withheld to report. Tracks is the only door with a flat global namespace, which
+        // is why it alone refuses duplicates and has to say so.
         await _sfShowNotAdded(res.refused);
         if (res.failed?.length) {
           await _sfShowPartialFailures('Some files failed to add', res.failed);
@@ -33433,6 +33529,17 @@ require(['vs/editor/editor.main'], function () {
           // exports the raw bytes at the path. Used by "Export ZIP…" on
           // inner-zip folder nodes so the .zip ships out as a standalone
           // file rather than its contents extracted.
+          // [B-400] ⚠️⚠️ DELIBERATELY STILL SILENT, AND THIS IS THE FIFTH DOOR'S WHOLE STORY.
+          // A progress bar cannot go here yet: sfFile:export opens its OWN showOpenDialog /
+          // showSaveDialog partway through, so any modal raised around this call sits at zero
+          // BEHIND a native picker for as long as the user is choosing — which reads as a hang.
+          // That is the note already carried by _sfExportSourceToDownloads: "a bar that appears
+          // behind a file dialog sits at zero and reads as a hang."
+          // ⭐ THE FIX IS A RESTRUCTURE, NOT A WRAPPER: hoist the picker into the renderer so the
+          // destination is known before any work starts, the way every other export door does it.
+          // Then this gets the same treatment as the other four.
+          // ⚠️ It is also the door where silence costs least — a hand-picked selection of files,
+          // usually a handful — which is why it is last rather than skipped.
           res = await window.electronAPI.sfExportFiles({ kind, id, paths: subPaths, asFile });
         } catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
         if (!res || res.canceled) return;
@@ -35068,6 +35175,80 @@ require(['vs/editor/editor.main'], function () {
           this.modal()?.classList.remove('active');
           this.startTs = 0;
         },
+      };
+      // [B-400] ONE runner for every +Add door. His rule, ui-conventions.md 2026-09-16: "if they
+      // all use the same style then it doesn't rely on us remembering to follow the rule but
+      // rather implement the pattern." Three doors hand-rolling this would be three chances to
+      // drift, and drift across near-identical surfaces is the defect we have hit four times
+      // this week ([B-357], [B-314], [B-296], [B-394]).
+      //
+      // ⚠️⚠️ SHOWN BEFORE ANY WORK, INCLUDING FOR ONE FILE. Standing rule, ui-conventions.md 'A
+      // click always acts instantly' (2026-08-14): "must always act instantly on a click.
+      // Otherwise it feels like the click didn't work." I proposed delay-show to dodge a 200ms
+      // flash and he refused it: "cannot delay giving a bar just because it's quick right?"
+      // ⭐ And the stronger reason: 'quick' is not knowable in advance. One 400 MB wav, or any
+      // file on a slow USB stick, is not quick - so delay-show bets on a prediction we cannot
+      // make and loses precisely where the feedback matters most.
+      //
+      // ⚠️ BYTES, NOT FILE COUNT (his): a file-count bar sits at 99/100 with a third of the data
+      // still to move. Elapsed only - no estimate we cannot back up.
+      // ⚠️ `opts` exists because an EXPORT is two phases with two different progress protocols:
+      // the compare reports ABSOLUTE {done,total} on the byte channel, the copy reports DELTAS on
+      // soundFonts:exportProgress. Rather than a second near-identical runner (the drift this
+      // entry is about), a caller runs this twice - keepOpen on the first, alreadyOpen on the
+      // second - so one modal spans both and the label says which phase is running.
+      //   opts.deltas     subscribe to the export delta channel and accumulate
+      //   opts.total      starting total, for a phase whose size the caller knows up front
+      //   opts.keepOpen   leave the modal up for the next phase
+      //   opts.alreadyOpen  the modal is already up; do not re-show it
+      const _sfRunWithByteProgress = async (title, work, opts = {}) => {
+        const t0 = Date.now();
+        const fmtB   = window._sfFormatBytes || ((n) => `${n} B`);
+        const fmtDur = (sec) => (window._sfFormatDuration ? window._sfFormatDuration(sec) : `${Math.round(sec)}s`);
+        let done = 0, total = opts.total || 0, currentFile = '';
+        const render = () => {
+          const secs = Math.floor((Date.now() - t0) / 1000);
+          const frac = total ? Math.max(0, Math.min(1, done / total)) : 0;
+          // ⚠️ THE METRIC LINE IS BYTES ONLY. The first draft prefixed it with `title`, which
+          // the modal heading directly above already says — "Adding tracks" then "Adding tracks ·
+          // 303.9 MB of 2.31 GB", stacked. He caught it in his own screenshot. The heading names
+          // the operation; this line carries the only thing it does not already say.
+          // Empty for the first frame only: the backend emits its budget before any work, so
+          // `total` arrives immediately.
+          const info = total ? `${fmtB(done)} of ${fmtB(total)}` : '';
+          _sfDeleteProgress.setPhase(info, frac, currentFile, `${fmtDur(secs)} elapsed`);
+        };
+        const off = window.electronAPI.onSoundFontByteProgress((p) => {
+          if (!p) return;
+          if (typeof p.done  === 'number') done  = p.done;
+          if (typeof p.total === 'number') total = p.total;
+          if (p.name) currentFile = p.name;
+          render();
+        });
+        // ⚠️ DELTAS ACCUMULATE, absolutes overwrite. Mixing the two on one phase would double
+        // count, which is why only one is ever subscribed for a given phase.
+        const offD = opts.deltas
+          ? window.electronAPI.onSoundFontExportProgress(({ delta } = {}) => {
+              if (typeof delta === 'number') { done += delta; render(); }
+            })
+          : null;
+        // ⚠️ Subscribe BEFORE the first paint and before the work starts: a tick that arrives
+        // between show() and the listener being attached is a tick nobody sees.
+        if (!opts.alreadyOpen) _sfDeleteProgress.show(title, '', 0);
+        render();
+        // The clock advances on its own, so a long single file still looks alive between ticks.
+        const tick = setInterval(render, 250);
+        try {
+          return await work();
+        } finally {
+          clearInterval(tick);
+          try { off && off(); } catch {}
+          try { offD && offD(); } catch {}
+          // [B-389]'s rule: a bar always reaches 100% before it moves on - including when this
+          // phase is handing over to another one rather than to the finished screen.
+          if (total) { done = total; render(); }
+          if (!opts.keepOpen) await _sfDeleteProgress.hide();
+        }
       };
       // Convenience for the export+delete sequence — picks the right title
       // based on whether the user opted to save a copy first, transitions
@@ -38342,13 +38523,30 @@ require(['vs/editor/editor.main'], function () {
             // writeCache:false — the toast's question must not seed the sync
             // manifest at the destination ([B-358], his catch: the manifest
             // followed the QUESTION, not the copy).
-            const m = await window.electronAPI.entryMatchesAt({ name: fontName, destDir: pick.destDir, writeCache: false });
+            // [B-400] TWO EXPENSIVE PASSES, BOTH SILENT until now: this hashes the whole font
+            // against the destination, and the export below copies it. On The_Sorcerer that is
+            // 899.8 MB of each, straight after the folder picker, with nothing on screen.
+            // ⚠️ keepOpen: the modal spans both phases; the export phase re-uses it.
+            const m = await _sfRunWithByteProgress('Checking the destination', () =>
+              window.electronAPI.entryMatchesAt({
+                name: fontName, destDir: pick.destDir, writeCache: false, reportProgress: true,
+              }), { keepOpen: true });
             _identical = !!(m && m.ok && m.exists && m.identical);
           } catch {}
           let r;
           // syncManifest:false — a quick export is a plain copy, and must not
           // seed card-sync bookkeeping (jmt-sync.json) at an arbitrary folder.
-          try { r = await window.electronAPI.exportEntryToFolder({ name: fontName, destDir: pick.destDir, mode: 'rename', syncManifest: false }); }
+          // ⚠️ deltas + a caller-supplied total: the export channel reports bytes written as
+          // increments, and the font's size is already on its meta, so the bar is determinate
+          // from the first frame instead of waiting for a total to arrive.
+          try { r = await _sfRunWithByteProgress(`Exporting ${fontName}`, () =>
+                  window.electronAPI.exportEntryToFolder({ name: fontName, destDir: pick.destDir, mode: 'rename', syncManifest: false }),
+                  // ⚠️ INLINED, NOT _sfEntryBytes: that helper is declared inside the bulk-export
+                  // function and is not in scope here. Calling it would have been a runtime
+                  // ReferenceError that `node --check` cannot see — the same shape that got
+                  // through this morning on exportCommonToFolder's missing `opts`.
+                  { alreadyOpen: true, deltas: true,
+                    total: (((_sfAllEntries || []).find(x => x && x.name === fontName) || {}).meta || {}).contentTotalBytes || 0 }); }
           catch (err) { r = { ok: false, error: String(err && err.message || err) }; }
           if (!r || !r.ok) { promptError('Export failed', (r && r.error) || 'unknown error'); return; }
           const landed = (r.destPath || '').split(/[\\/]/).pop() || fontName;

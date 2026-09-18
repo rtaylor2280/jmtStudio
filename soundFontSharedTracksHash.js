@@ -55,6 +55,39 @@ function hashFile(absPath) {
   }
 }
 
+// [B-400] The streaming twin, and it exists for two reasons rather than one.
+//
+// ⚠️⚠️ THE BLOCKING ONE: the sync version above holds the main process for the whole read, so
+// nothing queued behind it — including the progress events describing this very work — can be
+// flushed until it returns. That is the mechanism [B-398] measured, and it is why wiring a
+// progress callback into a synchronous add would produce a bar that sits at zero and jumps to
+// 100. An `await` per chunk is what lets the event loop breathe.
+//
+// ⚠️ THE ONE IT WAS NOT FILED FOR: `readFileSync` pulls the ENTIRE file into memory. A long
+// .wav is hundreds of MB, and "+Add can actually bring in many files" (his, 2026-09-17) makes
+// that a spike per file rather than a one-off. Streaming holds one 64 KB chunk.
+//
+// ⚠️ THE SYNC VERSION STAYS. It has callers that are not in an async context, and converting
+// them is not this entry's job. Same null-on-failure contract, so the two are interchangeable
+// wherever the caller can await.
+// `onChunk(bytes)` reports real read progress, so a single huge file still moves the bar
+// instead of being one silent unit of work.
+function hashFileAsync(absPath, onChunk) {
+  return new Promise((resolve) => {
+    let h;
+    try { h = crypto.createHash('sha256'); } catch { resolve(null); return; }
+    let stream;
+    try { stream = fs.createReadStream(absPath, { highWaterMark: 64 * 1024 }); }
+    catch { resolve(null); return; }
+    stream.on('data', (chunk) => {
+      h.update(chunk);
+      if (typeof onChunk === 'function') { try { onChunk(chunk.length); } catch {} }
+    });
+    stream.on('error', () => { try { stream.destroy(); } catch {} resolve(null); });
+    stream.on('end', () => { try { resolve(h.digest('hex')); } catch { resolve(null); } });
+  });
+}
+
 function readIndex(userData) {
   const p = _indexPath(userData);
   if (!fs.existsSync(p)) return _emptyIndex();
@@ -256,6 +289,7 @@ function recordDelete(userData, name) {
 module.exports = {
   INDEX_VERSION,
   hashFile,
+  hashFileAsync,
   resolveHashes,
   readIndex,
   writeIndex,

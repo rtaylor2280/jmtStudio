@@ -103,7 +103,7 @@ async function setup() {
     const t = await setup();
     const outside = path.join(tmp('add'), 'custom.wav');
     fs.writeFileSync(outside, wav('MY-OWN-SOUND'));
-    const r = fileOps.addFilesAt({
+    const r = await fileOps.addFilesAt({
       userData: t.userData, kind: 'entry', id: t.entryName,
       subPath: '', sourceFilePaths: [outside],
     });
@@ -180,7 +180,7 @@ async function setup() {
       userData: t.userData, sourceUuid: t.sourceUuid, candidate: { path: 'Ahsoka' }, name: 'Ahsoka2',
     });
     for (const id of [t.entryName, second.name]) {
-      fileOps.addFilesAt({ userData: t.userData, kind: 'entry', id, subPath: '', sourceFilePaths: [outside] });
+      await fileOps.addFilesAt({ userData: t.userData, kind: 'entry', id, subPath: '', sourceFilePaths: [outside] });
     }
     const pool = () => fs.readdirSync(CI.poolRoot(t.userData)).filter(f => !f.startsWith('.'));
     check('one sound, added twice, is stored once', pool().length === 1, JSON.stringify(pool()));
@@ -224,7 +224,7 @@ async function setup() {
     const srcBytes = fs.readFileSync(t2.srcFile('hum.wav'));
     const outside = path.join(tmp('add2'), 'hum.wav');           // SAME name as a pointer
     fs.writeFileSync(outside, wav('COLLIDING-NAME'));
-    fileOps.addFilesAt({
+    await fileOps.addFilesAt({
       userData: t2.userData, kind: 'entry', id: t2.entryName,
       subPath: '', sourceFilePaths: [outside],
     });

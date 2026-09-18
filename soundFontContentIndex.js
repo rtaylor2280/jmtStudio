@@ -287,6 +287,36 @@ function buildIndex(userData) {
     _addManifestRecords(byHash, path.join(commonsDir, f), root);
   }
 
+  // Shared tracks ([B-406]): the FOURTH bucket, and the last one outside the index.
+  //
+  // ⚠️⚠️ WHY IT WAS MISSING, because it was not a decision: every other bucket publishes per-file
+  // records under .filehashes/{sources,entries,commons} in one shape, and this loop reads that
+  // shape. Shared tracks keeps its hashes in its OWN sidecar — sharedTracks/.jmt-hashes.json,
+  // keyed by a per-track UUID for backup-merge identity — so there was nothing here to pick up.
+  // A format mismatch, not an exclusion. That is exactly why nobody noticed: the code looks
+  // complete if you only read this function.
+  //
+  // ⭐ HIS, 2026-09-17, on being shown the duplication: "that's not how it's supposed to work.
+  // shouldn't matter where it is in the library, if it already exists it uses that instead of new
+  // bytes." The contract was already written down at the top of addFilesAt — "content we already
+  // hold ANYWHERE ... becomes a second NAME for it" — and held for three of four buckets.
+  //
+  // ⚠️ A STALE SIDECAR IS SAFE, for the same reason [B-327] gave when commons joined: findExisting
+  // re-hashes any candidate before handing it out as a link target, so a record that has drifted
+  // costs one wasted check and never a wrong link.
+  const stRoot = path.join(soundFontsRoot(userData), 'sharedTracks');
+  try {
+    const raw = JSON.parse(fs.readFileSync(path.join(stRoot, '.jmt-hashes.json'), 'utf8'));
+    for (const uuid of Object.keys((raw && raw.tracks) || {})) {
+      const rec = raw.tracks[uuid];
+      if (!rec || !rec.hash || !rec.name) continue;
+      const abs = path.join(stRoot, rec.name);
+      let list = byHash.get(rec.hash);
+      if (!list) { list = []; byHash.set(rec.hash, list); }
+      if (!list.includes(abs)) list.push(abs);
+    }
+  } catch {}
+
   const pool = ensurePoolIndex(userData);
   const pRoot = poolRoot(userData);
   for (const h of Object.keys(pool.files)) {

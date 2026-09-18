@@ -1088,6 +1088,9 @@ function entryFolderExistsAt(name, destDir) {
 // (differing counts prove difference; matching counts prove nothing), content
 // read before claiming sameness, and anything unreadable comes back
 // not-identical so the caller asks rather than assuming.
+// [B-400] `opts.onBytes` reports the DESTINATION-side hashing, which is the expensive half of
+// this question and used to run in total silence behind a right-click Export. A font is hundreds
+// of files; on a card this is seconds of nothing happening.
 function entryMatchesAt(userData, name, destDir, opts = {}) {
   if (!name || !destDir) return { ok: false, error: 'Missing name or destDir' };
   const srcDir  = path.join(entriesRoot(userData), name);
@@ -1131,6 +1134,16 @@ function entryMatchesAt(userData, name, destDir, opts = {}) {
   const refreshed = new Map();
   let identical = true, hashed = 0, reused = 0;
 
+  // Byte budget for the compare: what the library says each file weighs. Derived from the
+  // records we already hold, so it costs no extra reads.
+  const _onBytes = typeof opts.onBytes === 'function' ? opts.onBytes : null;
+  let _bTotal = 0, _bDone = 0;
+  if (_onBytes) {
+    for (const r of libRecords) {
+      if (r && r.fileHash !== '<empty>') _bTotal += (r.size || r.bytes || 0);
+    }
+    try { _onBytes({ done: 0, total: _bTotal, name: '' }); } catch {}
+  }
   for (const rec of libRecords) {
     if (!rec || rec.fileHash === '<empty>') continue;   // empty-dir marker
     const abs = path.join(destFont, rec.relPath);
@@ -1144,7 +1157,14 @@ function entryMatchesAt(userData, name, destDir, opts = {}) {
     const destHash = valid ? (reused++, ent[2]) : (hashed++, hashFile(abs));
     refreshed.set(rec.relPath, [st.size, mtime, destHash]);
     if (destHash !== rec.fileHash) identical = false;
+    if (_onBytes) {
+      _bDone += (rec.size || rec.bytes || st.size || 0);
+      try { _onBytes({ done: _bDone, total: _bTotal, name: String(rec.relPath || '').split('/').pop() }); } catch {}
+    }
   }
+  // ⭐ Land on 100%: files that are missing at the destination `continue` above without paying
+  // their budget, and a library-only file is the common case here. [B-389].
+  if (_onBytes) { try { _onBytes({ done: _bTotal, total: _bTotal, name: '' }); } catch {} }
   // ⚠️ THE CHECK'S CACHE IS THE SYNC MANIFEST, so a read-only question can
   // seed jmt-studio-manifest.json at the destination ([B-358], his second
   // catch 2026-09-08 14:49: the quick export's TOAST wording asks this

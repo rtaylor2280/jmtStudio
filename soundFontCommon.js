@@ -833,7 +833,13 @@ function listCommonFiles(userData, uuid) {
 // (default: root of files/). Files are copied; sources are left in place.
 // Returns counts of added vs failed. Collisions are renamed with " (N)"
 // suffix so an Add never silently overwrites an existing wav.
-function addFilesToCommon(userData, uuid, subPath, sourceFilePaths) {
+// [B-400] Async, byte-weighted per file — the same treatment as addFilesAt and for the same
+// reason: a common folder is many small files, so crediting each as it lands is smooth, while
+// streaming inside a file would mean changing the shared content index four other callers use.
+// ⚠️ The `await` per iteration is load-bearing: ingest resolves to a hardlink and never touches
+// fsp, so without an explicit yield the loop runs to completion synchronously and every tick
+// flushes after the work is already done.
+async function addFilesToCommon(userData, uuid, subPath, sourceFilePaths, onBytes) {
   if (!uuid) return { ok: false, error: 'Missing uuid' };
   if (!Array.isArray(sourceFilePaths) || sourceFilePaths.length === 0) {
     return { ok: false, error: 'No source files provided' };
@@ -855,7 +861,25 @@ function addFilesToCommon(userData, uuid, subPath, sourceFilePaths) {
   // existing name. The variant-rename collision rule is unchanged.
   let _idx = null;
   try { _idx = require('./soundFontContentIndex').buildIndex(userData); } catch { _idx = null; }
+  // Byte budget, stat'd up front so the bar is determinate from its first frame.
+  const _sizes = new Map();
+  let _bytesTotal = 0;
+  for (const sp of sourceFilePaths) {
+    let sz = 0;
+    try { sz = fs.statSync(sp).size; } catch {}
+    _sizes.set(sp, sz);
+    _bytesTotal += sz;
+  }
+  let _bytesDone = 0;
+  const _emit = (name) => {
+    if (typeof onBytes !== 'function') return;
+    try { onBytes({ done: _bytesDone, total: _bytesTotal, name: name || '' }); } catch {}
+  };
+  _emit('');
   for (const src of sourceFilePaths) {
+    // Name first, so the label names what is being worked on rather than what just finished.
+    _emit(path.basename(String(src || '')));
+    await new Promise(r => setImmediate(r));
     try {
       if (!fs.existsSync(src) || !fs.statSync(src).isFile()) {
         failed.push({ source: src, error: 'Not a file' });
@@ -888,7 +912,13 @@ function addFilesToCommon(userData, uuid, subPath, sourceFilePaths) {
     } catch (err) {
       failed.push({ source: src, error: String(err && err.message || err) });
     }
+    _bytesDone += (_sizes.get(src) || 0);
+    _emit(path.basename(String(src || '')));
   }
+  // ⭐ Land on 100% whatever route the files took — added, not-a-file, refused, or a thrown
+  // copy. Crediting at each exit is a guard the next exit will forget. [B-389].
+  _bytesDone = _bytesTotal;
+  _emit('');
   if (added.length) {
     try { markCommonContentDirty(userData, uuid); } catch {}
   }

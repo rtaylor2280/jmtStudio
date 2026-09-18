@@ -107,10 +107,17 @@ function handlerBody(channel) {
      /\(prefixHtml \? `\$\{prefixHtml\}<div style="height:10px"><\/div>` : ''\)/.test(html),
      'accepting a parameter and ignoring it is the vacuous version of this fix');
 
-  // ⚠️ The four pre-existing callers pass one argument; the new parameter must be optional.
-  ok('⚠️ the existing import callers still work unchanged',
-     (html.match(/await _sfShowNotAdded\(res\.refused\);/g) || []).length === 4,
-     'a required second parameter would have silently changed four other surfaces');
+  // ⚠️ The pre-existing callers pass ONE argument; the new parameter must stay optional.
+  // ⚠️⚠️ THIS ASSERTION USED TO PIN THE COUNT AT EXACTLY 4 AND WENT RED THE SAME DAY — [B-400]
+  // converted the tracks +Add caller to the folding two-arg form, which is a correct change the
+  // test had no business blocking. A count is a proxy for the property; the property is that a
+  // one-argument call still works. Assert the property.
+  const oneArg = (html.match(/await _sfShowNotAdded\(res\.refused\);/g) || []).length;
+  ok('⚠️ single-argument callers still exist, so the parameter is optional', oneArg >= 1,
+     'a required second parameter would silently change every other surface');
+  ok('⚠️ and the folding form is in use where a caller has something to fold',
+     /_sfShowNotAdded\([^)]+, [^)]+\)/.test(html),
+     'prefixHtml exists so a caller with its own report does not show a second dialog first');
 }
 
 console.log(failures ? `\n${failures} FAILURE(S)` : '\nall restore refusal tests passed');

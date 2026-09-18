@@ -7,6 +7,7 @@
 // library entry.
 
 const fs = require('fs');
+const fsp = require('fs').promises;   // [B-400] async copy, so the loop can yield
 const path = require('path');
 const { copyTreeWithProgress, copyFileWithProgress } = require('./sfExportCopy');
 const hashIndex = require('./soundFontSharedTracksHash');
@@ -83,7 +84,28 @@ function _uniqueName(root, desired) {
 // import means one unit of work: the bar sits at 0 and jumps to done, so a real
 // copy of hundreds of megabytes looks like nothing is happening. (Ryan spotted it
 // 2026-09-01: "might be doing the whole folder level rather than the files".)
-function addFiles(userData, sourceFilePaths, onFileProgress) {
+// [B-400] ASYNC, and the async is the fix rather than a refactor that came with it.
+//
+// ⚠️⚠️ A SYNCHRONOUS LOOP CANNOT REPORT ON ITSELF. copyFileSync plus a readFileSync hash held the
+// main process for the whole add, so every progress event describing this work queued behind the
+// work and flushed after it finished. Wiring a callback into the old loop would have produced a
+// bar that sat at zero and jumped to 100 - passing a three-file test and failing the case he
+// reported. `await` per file is what lets the event loop breathe. Same mechanism [B-398] measured.
+//
+// ⭐ BYTES, NOT FILE COUNT, and that is his correctness point not a polish one: "if the user
+// selects 100 long wav files... that's real bytes that need to be tracked for sure." A file-count
+// bar sits at 99/100 with a third of the data still to move.
+//
+// ⚠️ WHY `onBytes` REPORTS {done, total} AND NOT A DELTA, unlike _sfExportProgressEmitter: a
+// dropped or coalesced delta loses those bytes permanently and the bar ends short. An absolute
+// pair self-corrects on the next message. The backend already knows the total here, so there is
+// nothing to reconstruct.
+//
+// ⚠️⚠️ THE TOTAL COUNTS EACH FILE TWICE WHEN DEDUP IS ON, because each file IS read twice - once
+// to hash for the duplicate check, once to copy. Counting the copy alone would run the bar at half
+// speed and then jump. A duplicate is never copied, so its copy half is CREDITED the moment it is
+// found - otherwise a duplicate-heavy add would stop short of 100%.
+async function addFiles(userData, sourceFilePaths, onFileProgress, onBytes) {
   if (!Array.isArray(sourceFilePaths) || sourceFilePaths.length === 0) {
     return { ok: false, error: 'No files supplied' };
   }
@@ -106,9 +128,37 @@ function addFiles(userData, sourceFilePaths, onFileProgress) {
   // never called from here. Filename is not identity; content is.
   let _index = null;
   try { _index = hashIndex.ensureIndex(userData); } catch {}
+  // [B-406] The library-wide content index, built ONCE for the whole batch — same as addFilesAt.
+  // This is what lets a track link against bytes a font or source already holds instead of being
+  // written fresh. Null on failure, and every use is guarded, so a broken index degrades to the
+  // plain copy this always did.
+  let _CI = null, _ciIndex = null;
+  try { _CI = require('./soundFontContentIndex'); _ciIndex = _CI.buildIndex(userData); }
+  catch { _CI = null; _ciIndex = null; }
   const duplicates = [];
   const _total = sourceFilePaths.length;
   let _done = 0;
+  // Byte budget, stat'd up front. N stats against a copy of the same N files is noise, and it is
+  // the only way the bar can be determinate from the first frame - which rule 6 requires, because
+  // the modal is already on screen before this is called.
+  const _srcOf = (e) => ((e && typeof e === 'object') ? e.path : e);
+  const _sizes = new Map();
+  let _bytesTotal = 0;
+  const _hashing = !!_index;
+  for (const e of sourceFilePaths) {
+    const sp = _srcOf(e);
+    let sz = 0;
+    try { sz = fs.statSync(sp).size; } catch {}
+    _sizes.set(sp, sz);
+    _bytesTotal += _hashing ? sz * 2 : sz;
+  }
+  let _bytesDone = 0;
+  const _emit = (name) => {
+    if (typeof onBytes !== 'function') return;
+    try { onBytes({ done: _bytesDone, total: _bytesTotal, name: name || '' }); } catch {}
+  };
+  const _credit = (n, name) => { _bytesDone += (n || 0); _emit(name); };
+  _emit('');
   for (const entry of sourceFilePaths) {
     _done++;
     if (typeof onFileProgress === 'function') {
@@ -141,20 +191,86 @@ function addFiles(userData, sourceFilePaths, onFileProgress) {
     // Content check BEFORE the copy, so an identical track is never written and
     // never renamed. A hashing failure falls through to copying: not being able to
     // read a file is not evidence that we already have it.
+    const _sz = _sizes.get(src) || 0;
+    const _label = path.basename(String(src || ''));
     if (_index) {
+      let _hashed = 0;
       try {
         // ⚠️ findByHash returns an ARRAY of matches and `[]` when there are none.
         // An empty array is truthy, so a bare `if (hit)` reports every track as a
         // duplicate against an empty library — which is exactly what it did until
         // the test caught it. Check the length.
-        const h = hashIndex.hashFile(src);
+        // [B-400] Streamed, so a single 400 MB wav moves the bar while it is read rather than
+        // being one silent unit - and so it is not pulled into memory whole.
+        const h = await hashIndex.hashFileAsync(src, (n) => { _hashed += n; _credit(n, _label); });
         const hits = h ? hashIndex.findByHash(_index, h) : null;
-        if (hits && hits.length) { duplicates.push({ src, have: hits[0].name || '' }); continue; }
+        if (hits && hits.length) {
+          duplicates.push({ src, have: hits[0].name || '' });
+          // ⚠️ CREDIT THE COPY THAT WILL NEVER HAPPEN. The budget charged this file twice;
+          // a duplicate is not copied, so without this the bar stops short by one file's
+          // size for every duplicate - and re-adding a card the user already has is ALL
+          // duplicates, which is the most common way this path is used.
+          _credit(_sz, _label);
+          continue;
+        }
       } catch {}
+      // A hash that failed part-way still charged the budget for what it read; settle the
+      // rest of the read half so the bar does not drift on an unreadable file.
+      if (_hashed < _sz) _credit(_sz - _hashed, _label);
     }
     const dest = _uniqueName(root, safe);
     try {
-      fs.copyFileSync(src, path.join(root, dest));
+      // [B-400] fsp.copyFile, not copyFileSync: the await is what yields the event loop so the
+      // ticks emitted above can actually reach the renderer while the add is still running.
+      //
+      // [B-406] ⭐⭐ AND IT GOES THROUGH THE LIBRARY-WIDE POOL FIRST. His framing, and it is the
+      // one that settles this: "tracks is just a font source under a different name" — for
+      // STORAGE purposes it is a folder of wavs like any other, so "we never store the same bytes
+      // twice" has to hold here too. A plain copy meant a track matching a wav already in a font
+      // was written fresh, in the direction opposite to the one he found.
+      //
+      // ⚠️⚠️ THE SIDECAR STAYS, AND DOING ONLY ONE OF ITS JOBS IS THE POINT. sharedTracksHash was
+      // doing TWO things: per-track UUID IDENTITY (so a renamed track survives a backup merge —
+      // real, and genuinely specific to tracks) and CONTENT DEDUPE (a hash lookup — not specific
+      // at all, and duplicated what the content index does for every other bucket). Conflating
+      // them is what opted tracks out of the library-wide system. Identity stays here; bytes go
+      // to the pool.
+      //
+      // ⚠️ ingest falls back to a copy on any failure, so this can only ever save writes, never
+      // lose a file. And it re-hashes a candidate before linking, so a stale record costs one
+      // wasted check rather than a wrong file.
+      // ⚠️⚠️ THE INDEX IS BUILT ONCE, ABOVE THE LOOP. The first draft of this built it per file —
+      // measured at 165ms on his store, so a 62-file add would have spent TEN SECONDS rebuilding
+      // the same index 62 times. addFilesAt already does it correctly; copying the shape rather
+      // than the idea is what avoids this.
+      // ⚠️⚠️ `ingest` ALONE — NOT storeInPool FIRST, and the difference is the whole point.
+      // His model, 2026-09-17: "I just assumed that tracks was its own pool because it's the only
+      // dynamic source. so when I add a track, that is its home." He is right, and it is the
+      // ORIGINAL design: [B-315] and [B-316] both say the content pool was MODELLED on
+      // sharedTracksHash — "exactly like sharedTracks, which is already this pattern and proves it
+      // works." Tracks was always a pool. Routing it through storeInPool layered a second pool on
+      // top of the first and gave every novel track a redundant name.
+      //
+      // ⭐ THE RULE THIS MAKES VISIBLE, and it is worth stating because it was never written down:
+      //     a bucket that IS a home            -> ingest alone   (commons, tracks)
+      //     content with no home of its own    -> storeInPool first, then ingest   (font + Add)
+      // A font file picked off the desktop has nowhere to live, so the pool gives it somewhere.
+      // A track has the tracks folder. So novel audio simply stays here, and ingest still links
+      // when the library already holds those bytes anywhere.
+      //
+      // ⚠️ The survival argument does not apply either: hardlinks keep bytes alive while ANY name
+      // points at them, so a font linking straight to a track does not need a pool copy to
+      // outlive a deleted track.
+      const _destAbs = path.join(root, dest);
+      let _linked = false;
+      try {
+        if (_CI && _ciIndex) {
+          const r = _CI.ingestFile({ index: _ciIndex, srcAbs: src, destAbs: _destAbs });
+          _linked = !!(r && r.ok);
+        }
+      } catch { _linked = false; }
+      if (!_linked) await fsp.copyFile(src, _destAbs);
+      _credit(_sz, _label);
       // Hash + record. Failure here doesn't abort the add — the file
       // is on disk and ensureIndex will backfill it on next read.
       try { hashIndex.recordAdd(userData, dest); } catch {}
@@ -166,6 +282,14 @@ function addFiles(userData, sourceFilePaths, onFileProgress) {
       skipped.push({ src, reason: String(err && err.message || err) });
     }
   }
+  // ⭐⭐ LAND ON 100%, ALWAYS. Files leave this loop by SIX routes - copied, duplicate, not a
+  // .wav, refused, unsafe name, copy error - and only the first two settle their own budget.
+  // Crediting at every skip point would work until the seventh route is added and silently
+  // stops the bar at 94%. One terminal emit is honest (the work IS finished) and cannot be
+  // outgrown. [B-400] - and [B-389]'s rule is exactly this: a bar always reaches 100% before
+  // it moves on.
+  _bytesDone = _bytesTotal;
+  _emit('');
   return { ok: true, added, skipped, duplicates, refused: refusedIn };
 }
 
@@ -197,6 +321,15 @@ function deleteFile(userData, name) {
   try {
     fs.unlinkSync(file);
     try { hashIndex.recordDelete(userData, name); } catch {}
+    // [B-406] ⚠️⚠️ A DEFECT THIS ENTRY ITSELF INTRODUCED, caught before it shipped. Tracks now
+    // store their bytes in the pool and hold a link, so removing the track's name is no longer
+    // the same as freeing its space — the pool copy is left at nlink 1 and nothing reclaimed it.
+    // Deleting tracks to free space is EXACTLY what he was doing the day this was written, so the
+    // change would have quietly defeated the thing it was next to.
+    // ⚠️ The sweep only removes pool files whose link count has fallen to 1, so a file any other
+    // font, common or track still names is never touched. deleteEntry, deleteFiles and removal all
+    // already call it; tracks was the fourth door and had never needed it before today.
+    try { require('./soundFontContentIndex').releasePoolOrphans(userData); } catch {}
     return { ok: true };
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };
@@ -209,6 +342,10 @@ function deleteAll(userData) {
   if (!fs.existsSync(root)) return { ok: true };
   try {
     fs.rmSync(root, { recursive: true, force: true });
+    // [B-406] Same sweep as deleteFile, and this is the case where it matters most: deleting the
+    // WHOLE folder drops every track name at once, so without this the pool keeps a copy of every
+    // track that nothing else names — the entire folder's worth of bytes, invisibly.
+    try { require('./soundFontContentIndex').releasePoolOrphans(userData); } catch {}
     return { ok: true };
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };

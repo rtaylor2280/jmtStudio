@@ -576,7 +576,23 @@ function createSubfolderAt({ userData, kind, id, parentSubPath, name }) {
 // the given subPath. Used by the "+ Add" affordance in both common
 // folders and entries — picks files from disk, copies them in with
 // Proffie-style variant naming on collision.
-function addFilesAt({ userData, kind, id, subPath, sourceFilePaths, destNames }) {
+// [B-400] Async, with a byte-weighted progress budget.
+//
+// ⚠️⚠️ DELIBERATELY PER-FILE, NOT PER-CHUNK, AND THAT IS NOT LAZINESS — IT IS THE SHAPE OF THE
+// DATA. Shared tracks are a handful of ENORMOUS files, so its bar has to move WITHIN a file or it
+// sits at zero for thirty seconds; that is why addFiles streams its hash. A font's files are the
+// opposite: a couple of hundred small effect sounds. Crediting each one as it lands, WEIGHTED BY
+// ITS SIZE, gives a smooth honest bar without touching soundFontContentIndex — whose hashing and
+// pooling are shared with createEntry and three other callers. Streaming here would ripple through
+// all of them to fix a case (one huge file added to a font) that barely occurs.
+// ⚠️ THE HONEST LIMIT, WRITTEN DOWN SO IT IS NOT A SURPRISE: adding a single very large file to a
+// font still blocks for its hash. If that ever becomes a real complaint the fix is an async
+// storeInPool, not a patch here.
+//
+// ⚠️ THE `await` PER ITERATION IS LOAD-BEARING. Pooling resolves to a hardlink and never touches
+// fsp, so without an explicit yield the loop would run to completion synchronously and every tick
+// would flush after the work finished — the exact defect this entry exists for.
+async function addFilesAt({ userData, kind, id, subPath, sourceFilePaths, destNames, onBytes }) {
   if (!kind || !id) return { ok: false, error: 'Missing location' };
   if (!Array.isArray(sourceFilePaths) || sourceFilePaths.length === 0) {
     return { ok: false, error: 'No source paths' };
@@ -612,8 +628,28 @@ function addFilesAt({ userData, kind, id, subPath, sourceFilePaths, destNames })
   const CI = require('./soundFontContentIndex');
   const index = CI.buildIndex(userData);
   let linkedFiles = 0, pooled = 0;
+  // Byte budget, stat'd up front so the bar is determinate from its first frame.
+  const _sizes = new Map();
+  let _bytesTotal = 0;
+  for (const sp of sourceFilePaths) {
+    let sz = 0;
+    try { sz = fs.statSync(sp).size; } catch {}
+    _sizes.set(sp, sz);
+    _bytesTotal += sz;
+  }
+  let _bytesDone = 0;
+  const _emit = (name) => {
+    if (typeof onBytes !== 'function') return;
+    try { onBytes({ done: _bytesDone, total: _bytesTotal, name: name || '' }); } catch {}
+  };
+  _emit('');
   for (let i = 0; i < sourceFilePaths.length; i++) {
     const src = sourceFilePaths[i];
+    // Name first, so the label names what is being worked on rather than what just finished.
+    _emit(path.basename(String(src || '')));
+    // Yield BEFORE the work, so the tick above reaches the renderer while this file is in
+    // flight rather than after it.
+    await new Promise(r => setImmediate(r));
     try {
       if (!fs.existsSync(src) || !fs.statSync(src).isFile()) {
         failed.push({ source: src, error: 'Not a file' });
@@ -647,7 +683,14 @@ function addFilesAt({ userData, kind, id, subPath, sourceFilePaths, destNames })
     } catch (err) {
       failed.push({ source: src, error: String(err && err.message || err) });
     }
+    _bytesDone += (_sizes.get(src) || 0);
+    _emit(path.basename(String(src || '')));
   }
+  // ⭐ Land on 100% whatever route the files took. Files leave this loop four ways — added,
+  // not-a-file, refused, or a thrown copy — and crediting at each exit is a guard the fifth exit
+  // will forget. [B-389]: a bar always reaches 100% before it moves on.
+  _bytesDone = _bytesTotal;
+  _emit('');
   if (added.length > 0) _markLocationDirty(userData, kind, id);
   return { ok: true, added, failed, refused, linkedFiles, pooled };
 }

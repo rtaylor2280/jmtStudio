@@ -71,7 +71,7 @@ async function setup() {
     // satisfied by both fonts already pointing at the same source file.
     const outside = path.join(tmp('add'), 'mine.wav');
     fs.writeFileSync(outside, wav('MY-OWN-SOUND'));
-    fileOps.addFilesAt({ userData: t.userData, kind: 'entry', id: t.a, subPath: '', sourceFilePaths: [outside] });
+    await fileOps.addFilesAt({ userData: t.userData, kind: 'entry', id: t.a, subPath: '', sourceFilePaths: [outside] });
 
     const r = await fileOps.copyAcrossLocations({
       userData: t.userData,
@@ -143,7 +143,7 @@ async function setup() {
     const t = await setup();
     const outside = path.join(tmp('add'), 'mine.wav');
     fs.writeFileSync(outside, wav('MY-OWN-SOUND'));
-    fileOps.addFilesAt({ userData: t.userData, kind: 'entry', id: t.a, subPath: '', sourceFilePaths: [outside] });
+    await fileOps.addFilesAt({ userData: t.userData, kind: 'entry', id: t.a, subPath: '', sourceFilePaths: [outside] });
     await fileOps.copyAcrossLocations({
       userData: t.userData, src: { kind: 'entry', id: t.a }, srcPaths: ['mine.wav'],
       dest: { kind: 'entry', id: t.b, subPath: '' } });
