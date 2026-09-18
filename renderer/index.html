@@ -33600,7 +33600,30 @@ require(['vs/editor/editor.main'], function () {
           // Then this gets the same treatment as the other four.
           // ⚠️ It is also the door where silence costs least — a hand-picked selection of files,
           // usually a handful — which is why it is last rather than skipped.
-          res = await window.electronAPI.sfExportFiles({ kind, id, paths: subPaths, asFile });
+          // [B-408] THE PICKER MOVED, AND THAT IS THE FIX. This door ran silent because
+          // sfFile:export opened its own dialog partway through its own work — a bar raised
+          // around it sat at zero BEHIND a native picker while the user chose a folder, which
+          // reads as a hang. No wrapper could solve that; the ORDER had to change.
+          //
+          // ⚠️⚠️ ONLY THE MULTI-PATH CASE IS HOISTED, and that is a deliberate line rather than
+          // half a job. The single-path branches choose between a SAVE dialog and a FOLDER dialog
+          // based on whether the path is a directory — which the renderer cannot know without a
+          // probe, and probing before opening a picker is exactly the delay-before-the-dialog the
+          // "a click always acts instantly" rule forbids. Multi-path is always a folder picker,
+          // decidable here from paths.length alone, and it is the only case with enough files for
+          // a bar to be worth anything.
+          if (subPaths.length > 1) {
+            let pick = null;
+            try { pick = await window.electronAPI.pickExportDir({ title: 'Export to folder' }); } catch {}
+            if (!pick || !pick.ok || !pick.destDir) return;   // cancelled at the picker
+            res = await _sfRunWithByteProgress('Exporting files', () =>
+              window.electronAPI.sfExportFiles({
+                kind, id, paths: subPaths, asFile, destDir: pick.destDir,
+              }));
+          } else {
+            // One item: the handler still asks, and the click stays instant.
+            res = await window.electronAPI.sfExportFiles({ kind, id, paths: subPaths, asFile });
+          }
         } catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
         if (!res || res.canceled) return;
         if (!res.ok) { promptError('Export failed', res.error || 'unknown'); return; }
@@ -35205,6 +35228,17 @@ require(['vs/editor/editor.main'], function () {
           }
           if (d && detail != null) d.textContent = detail;
         },
+        // [B-408] Same layout as setPhase, but for work whose SIZE IS UNKNOWN. An operation that
+        // cannot be sized must not be drawn as a determinate bar pinned at zero — that reads as a
+        // hang, and a fabricated fraction would be worse still. The bar animates, the filename and
+        // the clock still move, and nothing claims to know how far along it is.
+        setIndeterminate(labelText, file, elapsedText) {
+          const l = this.labelEl(), b = this.barEl(), d = this.detailEl(), e = this.elapsedEl();
+          if (l) { l.style.display = ''; l.textContent = labelText || ''; }
+          if (b) { b.classList.add('indeterminate'); b.style.width = ''; }
+          if (d) d.textContent = file || '';
+          if (e) { e.style.display = ''; e.textContent = elapsedText || ''; }
+        },
         // Import-convention phase display (2026-07-23): section + metric
         // ABOVE the bar, the current file below it, subdued elapsed line last —
         // the same reading order as the import modal's optimize phases.
@@ -35276,6 +35310,13 @@ require(['vs/editor/editor.main'], function () {
           // Empty for the first frame only: the backend emits its budget before any work, so
           // `total` arrives immediately.
           const info = total ? `${fmtB(done)} of ${fmtB(total)}` : '';
+          // ⚠️ [B-408] NO TOTAL MEANS NO FRACTION. Some work cannot be sized up front — source
+          // content lives inside an archive, and a partial total is worse than none because the
+          // bar would reach 100% with files still to write. Show motion without a claim.
+          if (!total) {
+            _sfDeleteProgress.setIndeterminate('', currentFile, `${fmtDur(secs)} elapsed`);
+            return;
+          }
           _sfDeleteProgress.setPhase(info, frac, currentFile, `${fmtDur(secs)} elapsed`);
         };
         const off = window.electronAPI.onSoundFontByteProgress((p) => {

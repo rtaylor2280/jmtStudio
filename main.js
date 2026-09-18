@@ -2910,7 +2910,17 @@ ipcMain.handle('voicepack:install', async (_, { id } = {}) => {
 // mode pops a folder picker and writes each file at the chosen folder
 // with its original name, walking collisions through a " (N)" tail so
 // nothing gets silently overwritten. Returns the list of written paths.
-ipcMain.handle('sfFile:export', async (_, { kind, id, paths, suggestedName, asFile } = {}) => {
+ipcMain.handle('sfFile:export', async (event, { kind, id, paths, suggestedName, asFile, destDir: preDest } = {}) => {
+  // [B-408] ⚠⚠ THE PICKER USED TO OPEN PARTWAY THROUGH THIS CALL, and that is why this door was
+  // the one export with no progress at all. A bar raised around it would sit at zero BEHIND a
+  // native dialog for as long as the user was choosing a folder - which reads as a hang, the
+  // exact failure _sfExportSourceToDownloads already warns about. A wrapper could not fix that;
+  // the ORDER had to change.
+  // ⭐ preDest lets the renderer ask FIRST, so the destination is known before any work starts
+  // and a bar can be honest from its first frame. Only the MULTI-PATH branch takes it, because
+  // that is the only branch the renderer can identify without probing whether a path is a
+  // directory - and it is the only one where progress is worth anything. The single-file and
+  // single-folder branches keep their own pickers and their instant click.
   // sharedTracks is the singleton flat folder — no id required. Every
   // other kind needs one.
   if (!kind || !Array.isArray(paths) || paths.length === 0) {
@@ -3204,18 +3214,70 @@ ipcMain.handle('sfFile:export', async (_, { kind, id, paths, suggestedName, asFi
   // Multi-path → pick a destination folder. Files write with their
   // original names + " (N)" collision suffix. Folders write as named
   // subfolders inside the chosen destination, recursively.
-  const { canceled, filePaths } = await dialog.showOpenDialog(win, {
-    title: 'Export to folder',
-    defaultPath: lastDir,
-    properties: ['openDirectory', 'createDirectory'],
-  });
-  if (canceled || !filePaths?.length) return { ok: false, canceled: true };
-  const destDir = filePaths[0];
+  // [B-408] Ask only if the renderer has not already. Same dialog, same defaults - the only
+  // difference is WHEN it opens.
+  let destDir = preDest || null;
+  if (!destDir) {
+    const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+      title: 'Export to folder',
+      defaultPath: lastDir,
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    if (canceled || !filePaths?.length) return { ok: false, canceled: true };
+    destDir = filePaths[0];
+  }
   const written = [];
   const failed = [];
+  // [B-408] Byte-weighted progress, now that the destination is known before any work starts.
+  // ⚠️ Emitted only when the renderer supplied the destination — the older callers that let this
+  // handler open its own picker have no bar to drive, and sending to a listener that is not there
+  // is harmless but pointless.
+  const _emit = preDest ? _sfByteProgressEmitter(event) : null;
+  let _bDone = 0, _bTotal = 0;
+  if (_emit) {
+    // ⚠️ Size the batch up front. A folder in the selection is walked for its total; a file is one
+    // stat. Both are cheap against the copy that follows, and without a total the bar cannot be
+    // determinate from the first frame.
+    // ⚠️⚠️ SIZE ONLY WHAT CAN BE SIZED CHEAPLY, AND SAY SO WHEN IT CANNOT. entry / common /
+    // sharedTracks live on disk, so a stat or a walk is exact and nearly free. `source` content
+    // lives inside an archive, and composite inner-zip paths make an exact size real work — more
+    // than this door is worth. If ANY path cannot be sized the total is INCOMPLETE, and an
+    // incomplete total is worse than none: the bar would sail to 100% with files still to write.
+    // So it reports total 0, and the renderer shows an indeterminate bar instead of a false one.
+    const onDiskRoot = kind === 'entry'  ? path.join(userData, 'soundFonts', 'library', id)
+                     : kind === 'common' ? path.join(userData, 'soundFonts', 'common', id, 'files')
+                     : kind === 'sharedTracks' ? path.join(userData, 'soundFonts', 'sharedTracks')
+                     : null;
+    const sizeOnDisk = (abs) => {
+      let st; try { st = fs.statSync(abs); } catch { return null; }
+      if (st.isFile()) return st.size;
+      if (!st.isDirectory()) return null;
+      let total = 0;
+      const walk = (d) => {
+        for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+          const p = path.join(d, e.name);
+          if (e.isDirectory()) walk(p);
+          else { try { total += fs.statSync(p).size; } catch {} }
+        }
+      };
+      try { walk(abs); } catch { return null; }
+      return total;
+    };
+    let sizable = !!onDiskRoot;
+    if (sizable) {
+      for (const sp of paths) {
+        const n = sizeOnDisk(path.join(onDiskRoot, sp.split('/').join(path.sep)));
+        if (n === null) { sizable = false; break; }
+        _bTotal += n;
+      }
+    }
+    if (!sizable) _bTotal = 0;
+    _emit.onBytes({ done: 0, total: _bTotal, name: '' });
+  }
   for (const subPath of paths) {
     try {
       const baseName = subPath.split('/').pop() || 'untitled';
+      if (_emit) _emit.onBytes({ done: _bDone, total: _bTotal, name: baseName });
       const isDir = await isDirAtPath(subPath);
       if (isDir) {
         let finalName = baseName;
@@ -3227,17 +3289,29 @@ ipcMain.handle('sfFile:export', async (_, { kind, id, paths, suggestedName, asFi
         const outRoot = path.join(destDir, finalName);
         await writeDirTo(subPath, outRoot);
         written.push(outRoot);
+        // ⚠️ Credit the folder by what actually landed at the destination — the source side may
+        // not be stat-able (a zip), but what we just wrote always is.
+        if (_emit) { try { let n = 0;
+          const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+            const p = path.join(d, e.name);
+            if (e.isDirectory()) walk(p); else { try { n += fs.statSync(p).size; } catch {} } } };
+          walk(outRoot); _bDone += n;
+        } catch {} }
       } else {
         const buf = await readBytes(subPath);
         if (refuseBuf(buf, subPath)) continue;
         const out = uniqueIn(destDir, baseName);
         fs.writeFileSync(out, buf);
         written.push(out);
+        if (_emit) _bDone += (buf ? buf.length : 0);
       }
+      if (_emit) _emit.onBytes({ done: _bDone, total: _bTotal, name: baseName });
     } catch (err) {
       failed.push({ source: subPath, error: String(err && err.message || err) });
     }
   }
+  // ⭐ Land on 100% whatever route each item took — refused, failed, or written. [B-389].
+  if (_emit) { _emit.onBytes({ done: _bTotal, total: _bTotal, name: '' }); _emit.flush(); }
   Store.set('lastExportDir', destDir);
   return { ok: true, written, failed, refused };
 });
