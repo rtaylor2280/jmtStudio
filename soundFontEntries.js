@@ -1214,7 +1214,13 @@ async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onB
       return { ok: true, skipped: true, destPath: path.join(destDir, targetName) };
     }
     if (mode === 'replace') {
-      try { fs.rmSync(path.join(destDir, targetName), { recursive: true, force: true }); }
+      // ⚠️⚠️ AWAITED, NOT rmSync. [B-398] This is a RECURSIVE DELETE OF AN ENTIRE FONT FOLDER ON
+      // THE CARD — 110 files for his biggest — and rmSync does the whole tree without yielding
+      // once. Measured 1321ms in one burst, and it survived two earlier fixes to this function
+      // because deleting does not look like work: the eye goes to the copy and the hashing.
+      // ⭐ It only fires when the destination already exists, which is why re-exporting the same
+      // font is the reproduction and a first export looks clean.
+      try { await fs.promises.rm(path.join(destDir, targetName), { recursive: true, force: true }); }
       catch (err) { return { ok: false, error: `Cannot remove existing folder: ${err.message}` }; }
     } else {
       // 'rename' (default) — fall through to "<name>_N" until free.

@@ -1410,7 +1410,10 @@ async function exportCommonToFolder(userData, uuid, destDir, mode = 'rename', on
       return { ok: true, skipped: true, destPath: path.join(destDir, targetName) };
     }
     if (mode === 'replace') {
-      try { fs.rmSync(path.join(destDir, targetName), { recursive: true, force: true }); }
+      // ⚠️ AWAITED — recursive delete of a whole item on the CARD, no yielding. [B-398]
+      // Same defect and same fix as soundFontEntries.exportEntryToFolder; it only fires when the
+      // destination already exists, so re-exporting is the reproduction.
+      try { await fs.promises.rm(path.join(destDir, targetName), { recursive: true, force: true }); }
       catch (err) { return { ok: false, error: `Cannot remove existing folder: ${err.message}` }; }
     } else {
       // Underscore (not parens) — folder names on SD ride the same
