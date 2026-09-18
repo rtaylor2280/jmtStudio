@@ -119,18 +119,27 @@ async function around(label, fn) {
 // ⚠️ TWO VARIANTS ON PURPOSE. Wrapping a synchronous function in an async one would change its
 // contract for every caller — the exact signature change that broke four callers when addFiles
 // went async. mark() stays sync, markAsync() awaits.
-// ⚠️ When the probe is off, both return the ORIGINAL function, so a disabled build carries no
-// wrapper at all.
+// ⚠️⚠️ THE `enabled` CHECK IS INSIDE THE WRAPPER, NOT OUTSIDE IT, AND THE FIRST CUT GOT THIS
+// WRONG. It read `if (!enabled) return fn;` at wrap time — which reads like a free optimisation
+// and is actually a dead instrument. These wrappers are applied where a module builds its
+// module.exports, and that runs when main.js REQUIRES the module: before app.whenReady() calls
+// init(), so `enabled` is still false and every wrapper hands back the unwrapped original.
+//
+// The symptom was not an error. It was a run where six freshly marked functions produced a log
+// full of "(idle - nothing marked)" — an instrument reporting nothing while the thing it measures
+// happens right in front of it. Exactly the class this file already carries two warnings about.
+//
+// The cost of checking per call is one boolean against work measured in hundreds of milliseconds.
 function mark(label, fn) {
-  if (!enabled) return fn;
   return function (...args) {
+    if (!enabled) return fn.apply(this, args);
     begin(label);
     try { return fn.apply(this, args); } finally { end(label); }
   };
 }
 function markAsync(label, fn) {
-  if (!enabled) return fn;
   return async function (...args) {
+    if (!enabled) return fn.apply(this, args);
     begin(label);
     try { return await fn.apply(this, args); } finally { end(label); }
   };

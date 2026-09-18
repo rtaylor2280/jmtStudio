@@ -25,6 +25,19 @@ const ud = fs.mkdtempSync(path.join(os.tmpdir(), 'jmt-probe-'));
 fs.writeFileSync(path.join(ud, '.stall-probe'), '');   // arm it
 
 const probe = require('../stallProbe');
+
+// ⚠️⚠️ WRAP BEFORE init(), DELIBERATELY — this is the real load order and it is where the first
+// cut failed. mark()/markAsync() are applied while a module builds its module.exports, which runs
+// when main.js REQUIRES it, and that is BEFORE app.whenReady() calls init(). The first version
+// checked `enabled` at wrap time, so every wrapper handed back the unwrapped original and six
+// freshly marked functions produced a log full of "(idle - nothing marked)".
+// Wrapping here, before init, is what makes this test able to catch that.
+const wrappedEarly = probe.mark('markedBeforeInit', () => {
+  const end = Date.now() + 900;
+  while (Date.now() < end) { /* spin */ }
+  return 'result-preserved';
+});
+
 check('probe arms when the flag file exists', probe.init(ud) === true);
 
 function blockFor(ms) {                       // a real synchronous block, not a fake one
@@ -78,6 +91,16 @@ function waitForHeartbeat() {                 // let the timer fire and notice t
   check('a closed phase is not blamed for a later stall',
     blameOnly.length > 0 && !blameOnly.includes('alreadyFinished'),
     'a phase that had already ended was named as the culprit:\n' + blameOnly.trim());
+
+  // ⭐ THE REGRESSION: a function wrapped BEFORE init() must still be attributed.
+  const ret = wrappedEarly();
+  await waitForHeartbeat();
+  const t3 = probe.flush('fourth flush');
+  check('mark() applied before init() still returns the right value', ret === 'result-preserved');
+  check('a function wrapped BEFORE init() is still attributed',
+    t3.includes('markedBeforeInit'),
+    'the wrapper was a no-op because enabled was false at wrap time — the instrument is dead:\n'
+      + String(t3).split('\n').slice(0, 10).join('\n'));
 
   console.log(failures === 0 ? '\nOK' : '\n' + failures + ' FAILED');
   process.exit(failures === 0 ? 0 : 1);
