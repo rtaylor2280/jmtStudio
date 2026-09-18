@@ -1958,11 +1958,24 @@ ipcMain.handle('bulkImport:discardPrepared', async (_, { uuids } = {}) => {
 // only when the user opens the guided review, so quick import stays fast.
 // Read-only: no hashing, no copy, no library writes. Streams progress via
 // the bulkImport:enrichProgress event.
-let _bulkEnrichCancelToken = null;
+// ⚠️ THE SECOND ONE WITH THE SAME DEFECT. [B-413] He asked "is that the only cancel that was
+// broken?" and the honest answer was no: this held `let _bulkEnrichCancelToken = null`, reassigned
+// per run and nulled in the finally — the identical shared-pointer bug as bulk import, where a new
+// run disarms an older one and an ending run disarms a newer one.
+//
+// ⭐ Three OTHER cancels in this file were already correct and keyed per operation: sfBackup by
+// opId (with its own "Op already running" refusal), sdcard health by jobId, core install by
+// coreVersion. The codebase already knew the right answer; these two used a single variable.
+// A rule applied in three places and missed in two is the standing failure this project keeps
+// finding — the fix is not knowing better, it is sweeping for the shape.
+const _enrichGate = require('./bulkImportGate').createGate();
 ipcMain.handle('bulkImport:enrichGuided', async (e, { plan } = {}) => {
+  const myToken = _enrichGate.begin();
+  if (!myToken) {
+    return { ok: false, alreadyRunning: true,
+             error: 'A guided review is already being prepared. Wait for it to finish.' };
+  }
   try {
-    _bulkEnrichCancelToken = { cancelled: false };
-    const myToken = _bulkEnrichCancelToken;
     return await soundFontBulkImport.enrichPlanForGuided(
       { plan },
       {
@@ -1975,13 +1988,12 @@ ipcMain.handle('bulkImport:enrichGuided', async (e, { plan } = {}) => {
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };
   } finally {
-    _bulkEnrichCancelToken = null;
+    _enrichGate.end(myToken);
   }
 });
 
 ipcMain.handle('bulkImport:enrichCancel', () => {
-  if (_bulkEnrichCancelToken) _bulkEnrichCancelToken.cancelled = true;
-  return { ok: true };
+  return { ok: true, cancelled: _enrichGate.cancelAll() };
 });
 
 // Read one file out of an in-place (not-yet-imported) source — folder OR
