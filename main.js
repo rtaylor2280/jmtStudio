@@ -4453,13 +4453,33 @@ function _broadcastSerial(channel, payload) {
   });
 }
 
+// ⚠️⚠️ THIS KILLED THE APP. Observed 2026-09-19 while sending `sd 1` from the Serial
+// Monitor: "A JavaScript error occurred in the main process - Error: Writing to COM port
+// (GetOverlappedResult): Operation aborted", and the app went down.
+//
+// The sequence: removeAllListeners() stripped the port's 'error' handler, and close() was
+// called immediately after. A write still in flight is aborted by that close and the port
+// emits 'error' - with nothing listening. An unhandled 'error' on an EventEmitter is not a
+// swallowed warning, it is an uncaught exception, and in the main process that is fatal.
+//
+// The trap is that the code LOOKS defensive: every call is wrapped in try/catch. But those
+// catch synchronous throws, and this error arrives asynchronously on an event, so not one
+// of them could ever have caught it.
+//
+// So: drop the listeners that would talk to a renderer about a port we are deliberately
+// discarding, and keep a sink on 'error' until the port is actually shut. The sink outlives
+// this function because the abort can arrive after it returns.
 function _closeSerialMonitor() {
   if (!_serialMonitorPort) return;
-  try { _serialMonitorPort.removeAllListeners(); } catch {}
-  try {
-    if (_serialMonitorPort.isOpen) _serialMonitorPort.close();
-  } catch {}
+  const sp = _serialMonitorPort;
   _serialMonitorPort = null;
+  try { sp.removeAllListeners('data'); } catch {}
+  try { sp.removeAllListeners('close'); } catch {}
+  try { sp.removeAllListeners('error'); } catch {}
+  // Deliberately anonymous and never removed: this port is being thrown away, and its only
+  // remaining job is to not take the process with it.
+  try { sp.on('error', () => {}); } catch {}
+  try { if (sp.isOpen) sp.close(() => {}); } catch {}
 }
 
 ipcMain.handle('serial:open', async (_, { port, baudRate }) => {
@@ -4506,10 +4526,18 @@ ipcMain.handle('serial:write', async (_, { text }) => {
     return { ok: false, error: 'Port not open' };
   }
   return await new Promise(resolve => {
-    _serialMonitorPort.write(text, err => {
-      if (err) return resolve({ ok: false, error: err.message });
-      resolve({ ok: true });
-    });
+    // ⚠️ write() can THROW synchronously when the port went away between the isOpen check
+    // above and this line - a board unplugged mid-command is exactly that window. Without
+    // this, the throw escapes the Promise executor and becomes another uncaught exception
+    // in the main process, which is the same fatal shape as the aborted-write event.
+    try {
+      _serialMonitorPort.write(text, err => {
+        if (err) return resolve({ ok: false, error: err.message });
+        resolve({ ok: true });
+      });
+    } catch (e) {
+      resolve({ ok: false, error: String((e && e.message) || e) });
+    }
   });
 });
 
@@ -4662,11 +4690,20 @@ ipcMain.handle('serial:probeVersion', async (_, { port } = {}) => {
   // Resolves only once the port is genuinely released. Closing is asynchronous,
   // so an abort that did not wait for this would hand a still-open port to
   // whatever asked us to get out of the way.
+  // ⚠️⚠️ SAME CRASH AS _closeSerialMonitor, AND THIS PATH IS MORE EXPOSED. It writes
+  // `\nversion\n` and then closes, and it runs on its own whenever a board is detected -
+  // so every probe is a write followed by a close, which is precisely the ordering that
+  // aborts an in-flight write. Stripping the 'error' listener first leaves that abort
+  // unhandled, and an unhandled 'error' event in the main process is fatal.
+  // The try/catch around close() cannot help: the abort arrives asynchronously on an event.
   const shut = () => {
     if (!sp) return Promise.resolve();
     const p = sp;
     sp = null;
-    try { p.removeAllListeners(); } catch {}
+    try { p.removeAllListeners('data'); } catch {}
+    try { p.removeAllListeners('close'); } catch {}
+    try { p.removeAllListeners('error'); } catch {}
+    try { p.on('error', () => {}); } catch {}   // sink: outlives this call on purpose
     return new Promise(res => {
       try { p.isOpen ? p.close(() => res()) : res(); } catch { res(); }
     });
