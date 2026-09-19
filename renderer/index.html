@@ -6696,6 +6696,19 @@
       <div class="sf-import-progress-track"><div class="sf-import-progress-bar" id="sf-bulk-import-prog-bar"></div></div>
       <p class="sf-import-progress-detail" id="sf-bulk-import-prog-detail"></p>
       <p class="sf-import-progress-detail" id="sf-bulk-import-prog-elapsed" style="color:var(--c-text-sub);font-size:0.78rem;margin-top:4px"></p>
+      <!-- ⭐⭐ [B-294] THE MID-FLIGHT HALF, AND IT IS THE ONE HE ASKED FOR. His words, 29 minutes
+           into importing 136 fonts: "for really long imports you can't start it and walk away...
+           almost need a checkbox during the analyze to go straight to quick import on completion."
+           ⚠️ OFFERING IT IN BOTH PLACES IS NOT REDUNDANCY, IT IS TWO DIFFERENT MOMENTS. Some people
+           know up front they are not going to review 136 fonts; some only decide to walk away once
+           they have watched the clock for four minutes. The up-front one on the explain screen
+           cannot serve the second person, because by then the screen is gone.
+           ⚠️ ANALYZE ONLY. Shown while the plan is being read, hidden once the import itself is
+           running - by then there is no review left to skip and the offer would be a lie. -->
+      <label class="sf-bulk-explain-auto" id="sf-bulk-prog-auto-wrap" style="display:none">
+        <input type="checkbox" id="sf-bulk-prog-auto">
+        <span>When this finishes, import everything without stopping to ask me</span>
+      </label>
     </div>
 
     <div class="sf-import-phase" id="sf-bulk-import-phase-summary" style="display:none">
@@ -12473,6 +12486,8 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     modal:        document.getElementById('modal-sf-bulk-import'),
     title:        document.getElementById('sf-bulk-import-title'),
     phaseExplain: document.getElementById('sf-bulk-import-phase-explain'),
+    progAuto:     document.getElementById('sf-bulk-prog-auto'),
+    progAutoWrap: document.getElementById('sf-bulk-prog-auto-wrap'),
     explainPickBtn: document.getElementById('sf-bulk-explain-pick-btn'),
     explainAuto:  document.getElementById('sf-bulk-explain-auto'),
     phaseScan:    document.getElementById('sf-bulk-import-phase-scan'),
@@ -13961,6 +13976,10 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     // advances WITHIN each source via the analyze pass's sub-progress instead
     // of stepping once per source.
     showPhase('progress');
+    // [B-294] The mid-flight offer, seeded from the explain screen so a box already ticked stays
+    // ticked rather than silently resetting the decision they already made.
+    if (els.progAutoWrap) els.progAutoWrap.style.display = '';
+    if (els.progAuto) els.progAuto.checked = !!_bulkAutoContinue;
     const total = plan.sources.length;
     // [B-295] name the cost where the hand hovers: nothing is imported
     // during analyze, so cancelling loses the whole pass.
@@ -14699,6 +14718,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     // "it is just too fast to see" — he was right, it was never on screen.)
     els.modal?.classList.add('active');
     showPhase('progress');
+    if (els.progAutoWrap) els.progAutoWrap.style.display = 'none';
     await showReview({
       rootDir: absPath,
       _displayRoot: name,
@@ -14754,6 +14774,9 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     }
     runInFlight = true;
     showPhase('progress');
+    // [B-294] Gone once the import is actually running: there is no review left to skip, so the
+    // offer would be describing a choice that no longer exists.
+    if (els.progAutoWrap) els.progAutoWrap.style.display = 'none';
     // [B-295] during the run, what's at risk is the analysis of the fonts
     // that haven't LANDED yet — everything imported so far is safe, and the
     // tooltip says both halves because saying one reads as both.
@@ -15311,6 +15334,11 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
   // drag-drop path arrive with a folder ALREADY chosen, so an explain screen there would be
   // explaining a decision the user has already made.
   if (els.explainPickBtn) els.explainPickBtn.addEventListener('click', () => { startScan(); });
+  // [B-294] Live, because the whole point is deciding PARTWAY THROUGH. Writing it on change means
+  // the flag is already right whenever analyze happens to finish, with no read-at-the-end race.
+  if (els.progAuto) els.progAuto.addEventListener('change', () => {
+    _bulkAutoContinue = !!els.progAuto.checked;
+  });
   if (typeof window !== 'undefined') window._sfStartBulkImport = showExplain;
   // [B-295] the quit guard asks this before letting the window close.
   if (typeof window !== 'undefined') window._sfBulkImportCost = () => (_bulkPhase ? { ..._bulkPhase } : null);

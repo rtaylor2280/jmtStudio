@@ -80,6 +80,35 @@ function ok(label, cond, detail) {
   ok('it is not written to settings', !/setSetting\([^)]*[Aa]utoContinue/.test(html));
 }
 
+// ── [B-294] the MID-FLIGHT half, which is the one he actually asked for ────
+{
+  // ⭐ His words, 29 minutes into importing 136 fonts: "almost need a checkbox during the analyze
+  // to go straight to quick import on completion." Offering it in both places is not redundancy —
+  // some people know up front they will not review 136 fonts, and some only decide to walk away
+  // after watching the clock. The explain-screen copy cannot serve the second person, because by
+  // then that screen is gone.
+  ok('the analyze phase carries its own checkbox', /id="sf-bulk-prog-auto"/.test(html));
+
+  ok('it is shown when analyze starts',
+     /if \(els\.progAutoWrap\) els\.progAutoWrap\.style\.display = '';/.test(html));
+
+  // ⚠️ Seeded from the explain screen, so a box already ticked stays ticked. Resetting it would
+  // silently undo a decision the user already made one screen earlier.
+  ok('it is seeded from the up-front choice',
+     /if \(els\.progAuto\) els\.progAuto\.checked = !!_bulkAutoContinue;/.test(html));
+
+  // ⚠️⚠️ AND IT MUST DISAPPEAR ONCE THE IMPORT IS RUNNING. At that point there is no review left
+  // to skip, so the offer would describe a choice that no longer exists.
+  const runAt = html.indexOf('runInFlight = true;');
+  const runWin = html.slice(runAt, runAt + 500);
+  ok('it is hidden once the real import starts',
+     /els\.progAutoWrap\.style\.display = 'none';/.test(runWin), runWin);
+
+  // Live, because the entire point is deciding PARTWAY THROUGH.
+  ok('ticking it mid-analyze updates the flag immediately',
+     /els\.progAuto\.addEventListener\('change'/.test(html));
+}
+
 // ── the SD pointer: a pointer, not a warning ───────────────────────────────
 {
   ok('the card view points at bulk import when originals exist',
