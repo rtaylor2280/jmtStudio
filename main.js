@@ -4572,9 +4572,52 @@ function parseBoardVersion(buf) {
   // Still deliberately narrow: a bare decimal followed by anything is NOT a version.
   // "3.85 / volts" and "2.0 / EVENT: Clash" must keep failing, which is the whole
   // reason a follower is required at all.
-  const reply = buf.match(/^[ \t]*v?(\d+\.\d+[\w.\-]*)[ \t]*\r?\n[ \t]*(?:\S*\.h|Installed:)[ \t\S]*\r?$/m);
+  //
+  // CASE-INSENSITIVE ON THE FOLLOWER, and the source is why: ProffieOS prints
+  // `installed: ` in lower case (ProffieOS.ino, the `version` command) on 7.7,
+  // 7.15 and 8.10. Only 6.9 carries the capitalised form this pattern was written
+  // against. A capital-only test therefore rejected the follower on every modern
+  // board, leaving the CONFIG_FILE `.h` line as the sole path that worked.
+  const reply = buf.match(/^[ \t]*v?(\d+\.\d+[\w.\-]*)[ \t]*\r?\n[ \t]*(?:\S*\.h|installed:)[ \t\S]*\r?$/mi);
   if (reply) return 'v' + trim(reply[1]);
   return null;
+}
+
+// True when the buffer holds ProffieOS's answer to `version`, WHATEVER the first
+// line says. The reply has a recognisable shape even when the version string
+// itself is unreadable: CONFIG_FILE, then `prop:`, then `buttons:`, then
+// `installed:`. Ordinary board chatter does not emit `prop:` and `buttons:` on
+// their own lines, so requiring both keeps this as narrow as parseBoardVersion.
+//
+// ⚠️⚠️ THIS EXISTS BECAUSE "NO VERSION" AND "NO ANSWER" ARE DIFFERENT FACTS AND
+// THE APP REPORTED THEM AS ONE. Measured on a real board 2026-09-19: factory
+// firmware built Mar 2023 answers `version` with
+//     $Id: ce12a06a1e236b5101ec60c950530a9a4719a74d $
+//     config/default_proffieboard_config.h
+//     prop: Saber
+//     buttons: 2
+//     installed: Mar 30 2023 03:03:48
+// No ProffieOS RELEASE does this - all thirteen trees on this machine define
+// `const char version[] = "vX.Y"` - so it is a build made from a git checkout
+// with ident expansion, which is what a manufacturer's QC flash looks like.
+// parseBoardVersion is RIGHT to return null: there is no version there. The bug
+// was downstream, where a null turned into a 2.5s timeout and the UI said "The
+// board did not answer" about a board that had answered immediately. That sent
+// the user to close the Serial Monitor and re-plug a working board.
+//
+// ⚠️ SCOPE: recognises the 7.x/8.x reply shape, which is the one observed. A
+// 6.9-shaped reply (version + `Installed:` only, no prop/buttons) with an
+// unreadable version has never been seen and is deliberately not guessed at.
+function parseBoardReplied(buf) {
+  return /^[ \t]*prop:[ \t]*\S/mi.test(buf) && /^[ \t]*buttons:[ \t]*\d/mi.test(buf);
+}
+
+// The line the board gave where a version belongs - the one immediately before
+// CONFIG_FILE. Shown to the user so "not recognised" names what was actually
+// received instead of asking them to go and look themselves.
+function parseBoardVersionRaw(buf) {
+  const m = buf.match(/^[ \t]*(\S[^\r\n]*?)[ \t]*\r?\n[ \t]*\S*\.h[ \t]*\r?$/mi);
+  return m ? m[1].slice(0, 120) : null;
 }
 
 // When the firmware was flashed, as the board reports it:
@@ -4585,8 +4628,26 @@ function parseBoardVersion(buf) {
 // is for DISPLAY and loose comparison against @jmt:flashed — never exact equality.
 // Separate from parseBoardVersion on purpose: two facts, two absences. A board
 // that reports a version and no install date must not look like a failed probe.
+//
+// ⚠️ CASE-INSENSITIVE, AND IT WAS NOT. ProffieOS prints `installed: ` in lower
+// case on 7.7, 7.15 and 8.10; only 6.9 prints `Installed:`. A capital-only match
+// therefore returned null for EVERY modern board, so the build date silently
+// never appeared - the one case the comment above says must not look like a
+// failed probe. It survived because test/board-version-parse.test.js is
+// synthetic by its own description and covers parseBoardVersion only; nothing
+// exercised this function at all. (Read off the ProffieOS sources 2026-09-19.)
+// ⚠️⚠️ A TERMINATED LINE IS REQUIRED, AND `$` IS NOT ENOUGH. Serial arrives in
+// chunks and the probe runs this on every one, so a chunk boundary landing inside
+// the date is an ordinary event. Under /m, `$` matches end-of-STRING as well as
+// end-of-line, so a half-received line matched happily and returned a truncated
+// date - the probe then finished on it, because a truthy install date ends the
+// wait. Measured: a buffer cut after "Sep 19 2026 10:3" returned exactly that.
+// Seen on his board 2026-09-19 as "built Sep 19 2026 10." in the tooltip.
+// Demanding \n means a partial line yields null, the 250ms grace window runs, and
+// the finished line is read instead. ProffieOS always terminates it ("\n" after
+// install_time), so nothing legitimate is lost.
 function parseBoardInstalled(buf) {
-  const m = buf.match(/^[ \t]*Installed:[ \t]*(\S.*?)\s*$/m);
+  const m = buf.match(/^[ \t]*installed:[ \t]*(\S[^\r\n]*?)[ \t]*\r?\n/mi);
   return m ? m[1] : null;
 }
 
@@ -4656,8 +4717,34 @@ ipcMain.handle('serial:probeVersion', async (_, { port } = {}) => {
         }
         return;
       }
+      // The board ANSWERED, but its version line is not one we can read. Finish on
+      // that fact rather than letting the 2.5s timer call it silence: "did not
+      // answer" sends the user after the port (close the monitor, re-plug the
+      // board) when the port was never the problem.
+      //
+      // ⚠️⚠️ SAME GRACE WINDOW AS THE VERSION PATH, AND IT IS NOT OPTIONAL HERE.
+      // parseBoardReplied goes true at `buttons:`, but `installed:` is the LAST line
+      // of the reply and parseBoardInstalled now requires its terminating newline -
+      // which routinely arrives in the NEXT chunk. Finishing immediately therefore
+      // dropped the build date entirely, in the one state where it is the only
+      // identifying fact the firmware has. Observed on his board 2026-09-19: the
+      // date was present before the newline requirement went in and absent after.
+      // Waiting the same 250ms lets the line complete.
+      if (parseBoardReplied(buf)) {
+        const unrecognised = () => finish({
+          ok: false,
+          reason: 'unrecognised',
+          raw: parseBoardVersionRaw(buf),
+          installed: parseBoardInstalled(buf),
+        });
+        if (parseBoardInstalled(buf)) return unrecognised();
+        if (!graceTimer) graceTimer = setTimeout(unrecognised, 250);
+        return;
+      }
       // A flooding board (charge-detect chatter, a serial-print loop) would grow
       // this without bound. Keep a tail large enough to hold a whole reply.
+      // ⚠️ Trimming must not cut a reply in half before the two tests above have
+      // seen it, which is why it stays AFTER them rather than at the top.
       if (buf.length > 64 * 1024) buf = buf.slice(-8192);
     });
     sp.on('error', e => finish({ ok: false, reason: 'error', error: e.message }));

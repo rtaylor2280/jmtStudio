@@ -3655,6 +3655,11 @@ let _boardInstalled  = null;
 // rendered as an agreeing one. null = never asked (transient, say nothing);
 // otherwise the probe's own reason.
 let _boardOSReason   = null;
+// What the board put where a version belongs, when it answered with something we
+// cannot read (e.g. `$Id: <sha> $` from a source-built firmware). Only ever set
+// alongside reason 'unrecognised'. Kept so the message can QUOTE the board rather
+// than making the user open the Serial Monitor to find out what it said.
+let _boardOSRaw      = null;
 let _probedSN        = null;   // board we already asked; don't re-probe per poll
 
 // Whether the open config declared a version lives on window, not here: this
@@ -3681,8 +3686,13 @@ async function probeBoardOSVersion(port) {
   try {
     const r = await window.electronAPI?.probeBoardVersion?.(port.path);
     _boardOSVersion = r?.ok ? r.version : null;
-    _boardInstalled = r?.ok ? (r.installed || null) : null;
+    // The install date is NOT conditional on ok. An 'unrecognised' reply is a real
+    // reply and carries `installed:` like any other, so a board with a source-built
+    // firmware can still report when it was built - which is the only identifying
+    // fact available for one.
+    _boardInstalled = (r?.ok || r?.reason === 'unrecognised') ? (r?.installed || null) : null;
     _boardOSReason  = r?.ok ? null : (r?.reason || 'error');
+    _boardOSRaw     = r?.reason === 'unrecognised' ? (r?.raw || null) : null;
     // "The port was busy" is not "the board won't answer." Clear the marker so
     // the next detection tries again, once the monitor or the flash is done.
     // A timeout or a failed open does mean the board is not talking, and that
@@ -3696,7 +3706,7 @@ async function probeBoardOSVersion(port) {
     if (['monitor-open', 'aborted', 'timeout', 'open-failed', 'error'].includes(r?.reason)) {
       _probedSN = null;
     }
-  } catch { _boardOSVersion = null; _boardInstalled = null; _boardOSReason = 'error'; _probedSN = null; }
+  } catch { _boardOSVersion = null; _boardInstalled = null; _boardOSReason = 'error'; _boardOSRaw = null; _probedSN = null; }
   applyOSVersionSignal();
 }
 
@@ -3704,6 +3714,7 @@ function forgetBoardOSVersion() {
   _boardOSVersion = null;
   _boardInstalled = null;
   _boardOSReason  = null;   // "not asked", not "asked and failed"
+  _boardOSRaw     = null;
   _probedSN       = null;
   applyOSVersionSignal();
 }
@@ -3773,13 +3784,45 @@ function applyOSVersionSignal() {
     const why = {
       'monitor-open': `${CANT} The Serial Monitor has the port. Close it and the check runs again.`,
       'timeout':      `${CANT} The board did not answer. ${RETRY}`,
+      // The board replied; its version line just is not one we read. Say that,
+      // and quote what it sent - otherwise this reads as a fault the user should
+      // go and fix, when the firmware is simply built from source rather than
+      // from a release. Nothing here needs retrying, so no RETRY line.
+      //
+      // ⚠️⚠️ THE BUILD DATE BELONGS HERE MORE THAN ANYWHERE ELSE, and the first cut
+      // of this fix left it out. _boardInstalled had exactly ONE reader, inside the
+      // branch below that requires _boardOSVersion - which is null by definition in
+      // this state. So the date was captured, stored, and rendered nowhere, in the
+      // one case where it is the ONLY identifying fact the firmware offers. Same
+      // shape as every other value wired into one of the two screens that report it.
+      //
+      // ⚠️ SAYS WHAT IS TRUE, AND STOPS. The first draft read "That firmware was
+      // built from source rather than from a release, so there is no version to
+      // compare against" - an X-rather-than-Y inversion plus a because-clause, in a
+      // shipped string, and it asserted a CAUSE the backlog entry itself records as
+      // an inference. Nobody has asked a manufacturer how that board was built.
+      // Quoting what arrived and stating the consequence are both checkable; the
+      // story about where it came from is not, and it is not the user's problem.
+      'unrecognised': (_boardOSRaw
+        ? `The board answered with "${_boardOSRaw}" where a version number belongs. There is no version to compare against.`
+        : 'The board answered without a version number. There is no version to compare against.')
+        + (_boardInstalled ? ` Its firmware was built ${_boardInstalled}.` : ''),
       'open-failed':  `${CANT} Another program may have the port. ${RETRY}`,
       'write-failed': `${CANT} ${RETRY}`,
       'no-port':      `${CANT} ${RETRY}`,
     }[_boardOSReason] || `${CANT} ${RETRY}`;
     notes.push(why);
   }
-  if (mismatch || (_boardOSVersion && !tree)) {
+  // ⭐ WHENEVER THE BOARD TOLD US SOMETHING, NOT ONLY WHEN IT DISAGREES. This was
+  // `mismatch || (_boardOSVersion && !tree)`, so a board AGREEING with the selected
+  // tree printed nothing about itself at all - the most common state was the least
+  // informative, and the build date disappeared exactly when everything was fine.
+  // The date is the half a version can never supply: several configs build against
+  // one ProffieOS, so "v8.10" identifies the firmware family and "built Sep 19 2026
+  // 10:39:12" identifies THIS flash. Agreement is information. (2026-09-19, his
+  // call: "I guess we decided not to show this valuable information when on the
+  // same flashed version??")
+  if (_boardOSVersion) {
     // BUILT, not "installed" and not "flashed". The board prints `Installed:`, but
     // ProffieOS defines it as `const char install_time[] = __DATE__ " " __TIME__`
     // (common/common.h:19) — COMPILE-time macros. It is the build timestamp of the
@@ -3813,7 +3856,12 @@ function applyOSVersionSignal() {
     // Guarded on the map EXISTING, not just on it having matches: when the load
     // failed it is null, and "no installed version is v7.15" would then be a
     // confident claim about something unread. No map means no sentence.
-    if (_osVersionMap) {
+    // ⚠️ THE REMEDY STAYS MISMATCH-ONLY. Everything below answers "how do I get onto
+    // the board's version", which is a question nobody is asking when the selected
+    // tree already IS that version - there, "You have v8.10 installed as: ..." would
+    // list the tree the user is looking at. Widening the gate above must not widen
+    // this: one is a fact about the board, the other is a way out of a disagreement.
+    if ((mismatch || !tree) && _osVersionMap) {
       const matches = Object.keys(_osVersionMap)
         .filter(folder => _osVersionMap[folder] === _boardOSVersion);
       if (matches.length) {
