@@ -12669,6 +12669,28 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
   const closeModal = () => {
     if (progressUnsub) { try { progressUnsub(); } catch {} progressUnsub = null; }
     if (enrichUnsub) { try { enrichUnsub(); } catch {} enrichUnsub = null; }
+    // ⭐⭐⭐ CANCEL THE ANALYZE. [B-398 door 6] THIS LINE IS THE MORNING'S RUNAWAY, IN ONE PLACE.
+    //
+    // bulkImportCancel was called in exactly ONE spot — the cancel handler's `if (runInFlight)`
+    // branch — and runInFlight is only true during the RUN phase. So Cancel during ANALYZE took
+    // the other branch, called closeModal(), and closeModal told the backend NOTHING. The modal
+    // vanished and the analyze carried on: measured 2026-09-18 at eight minutes and twenty-three
+    // further sources past the cancel point, staging into the store the whole way.
+    //
+    // ⚠️ AND THE ONE CANCEL THIS FUNCTION DID SEND IS DEAD CODE. bulkImportEnrichCancel targets
+    // the guided enrich, which nothing has invoked since ownership moved into analyze ([B-380]).
+    // So closeModal has been faithfully cancelling a thing that never runs, while ignoring the
+    // one that does.
+    //
+    // ⭐ HIS TEST FOUND IT, and only because [B-413]'s guard existed to refuse the second import:
+    // "it was in analyze, I clicked cancel, then I started another bulk and then I got that
+    // message." Before that guard the second import simply started, and the two ran concurrently.
+    // ⚠️ So [B-413] repaired the machinery that delivers a signal nobody was sending. The token
+    // fix was necessary and could never have worked alone.
+    //
+    // closeModal is the right home: it is the abandon-everything path, so this also covers the X,
+    // Esc and any future dismissal rather than living in one button's handler.
+    try { window.electronAPI.bulkImportCancel?.(); } catch {}
     try { window.electronAPI.bulkImportEnrichCancel?.(); } catch {}
     // Discard any analyzed-but-not-imported prepared sources. Safe: the backend
     // only deletes ones that were never finalized (committed sources have meta
