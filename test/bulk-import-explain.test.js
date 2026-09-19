@@ -80,7 +80,7 @@ function ok(label, cond, detail) {
   // more sharing there is to find - and a screen asking for a folder of original downloads is the
   // exact moment that worry lands.
   ok('it carries the keep-everything thesis line',
-     /Keep everything: JMT Studio saves the space and your files stay exactly as they came/.test(copy)
+     /Keep everything\. JMT Studio saves you space by storing identical sounds only once, while maintaining the original file structure/.test(copy)
      // ⚠️ FULL BRANDING. His ruling 2026-09-19: the bare "Studio" was inconsistent with
      // the savings sentence elsewhere, which already says "JMT Studio saved you X".
      && !/(?<!JMT )Studio saves/.test(copy));
