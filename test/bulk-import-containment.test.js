@@ -170,29 +170,30 @@ const H = (n, p) => Array.from({ length: n }, (_, i) => (p || 'h') + i);
 
   // ⭐⭐ AND IT COMES OUT OF `new`. The twin check decrements inline because it decides DURING
   // the loop; this ranking decides after it, so the row was already counted as new. He hit exactly
-  // this: the summary still read "8 new sound fonts" on a run where the ranking HAD fired and only
-  // 6 would import - indistinguishable, from the outside, from the feature not working at all.
-  // ⚠️ THE INVARIANT THE SUMMARY RELIES ON: `new` counts only what will actually import. Two
-  // lines on one screen that do not partition is the [B-296] failure.
+  // this: the summary read "8 new sound fonts" on a run where the ranking HAD fired and only 6
+  // would import - indistinguishable, from the outside, from the feature not working at all.
   ok('⭐⭐ a contained source is taken out of the new count',
      /if \(newCount > 0\) newCount--;/.test(bulk),
      'leaving it counted makes the summary contradict the import');
 
-  ok('⚠️ the summary shows the held-back count on its own line',
-     /rows\.push\(\['Also inside a fuller source in this import \(skipped\)', st\.containedInBatch/.test(html));
+  // ⭐⭐ AND IT IS NOT A SECOND CATEGORY. His call 2026-09-19, on the separate line I had added:
+  // "isn't it the same category as whatever our wording was for duplicate on source? don't need to
+  // tell about fuller - that was what informed our choice... but we still only kept 1."
+  // Fullness decides WHICH copy survives. It is not a second thing that happened to the user, so
+  // it sets `sameInBatch` and inherits the note, the untick, the filter and the count.
+  ok('⭐⭐ containment routes through the existing twin field',
+     /row\.sameInBatch = \{ idx: info\.container, label: _kLabel, keeps: false \};/.test(bulk));
 
-  // ⚠⚠ NEVER folded into the library line - the font is not in the library, it is in this import.
-  {
-    const _r = html.indexOf("'Also inside a fuller source in this import (skipped)'");
-    const line = html.slice(_r, _r + 140);
-    ok('⚠⚠ it does not claim the library owns it', !/already in your library/i.test(line), line);
-  }
+  ok('⚠️ the claim lands on the keeper too, as [B-314] does it',
+     /if \(!keeper\.sameInBatch\) keeper\.sameInBatch = \{ idx: lostIdx, label: _lLabel, keeps: true \};/.test(bulk));
 
-  ok('the count is its own bucket, not folded into the others',
-     /containedInBatch: batchContainedCount/.test(bulk)
-       && !/duplicate: [^,]*batchContainedCount/.test(bulk));
+  ok('it counts into the one bucket', /batchDupCount\+\+;/.test(bulk));
+
+  // ⚠⚠ NO PARALLEL TRACK LEFT ANYWHERE. A second flag, a second note or a second summary line is
+  // how review and quick import came to disagree twice already ([B-296], [B-314]).
+  ok('⚠⚠ no second flag survives in the backend', !/containedIn/.test(bulk), 'parallel track left behind');
+  ok('⚠⚠ no second flag survives in the renderer', !/_containedIn|containedInBatch/.test(html));
 }
-
 // ── the renderer: both doors, and the message ─────────────────────────────
 {
   // ⭐⭐ ONE PREDICATE, BOTH DOORS. [B-296] then [B-314] were the same bug twice — a second
@@ -202,8 +203,12 @@ const H = (n, p) => Array.from({ length: n }, (_, i) => (p || 'h') + i);
   ok('the held-back decision is still ONE hoisted predicate', !!_expr);
   if (_expr) {
     const decide = new Function('s', `return (${_expr});`);
-    ok('⭐⭐ a contained row is held back', decide({ _containedIn: { idx: 0 } }) === true);
-    ok('⭐⭐ and an exact twin still is', decide({ _sameInBatch: { keeps: false } }) === true);
+    // ⭐⭐ ONE TEST COVERS BOTH NOW, and that is the point of the change rather than a gap in it:
+    // a contained row and an exact twin both arrive carrying `sameInBatch` with keeps:false, so
+    // there is no second shape to check. The earlier version asked about a `_containedIn` flag
+    // that no longer exists — a parallel track for something that was never parallel.
+    ok('⭐⭐ a row the ranking did not keep is held back',
+       decide({ _sameInBatch: { keeps: false } }) === true);
     ok('⚠️ the keeper of a twin pair is not', decide({ _sameInBatch: { keeps: true } }) === false);
     ok('⚠️ an ordinary row is not', decide({ _idx: 3 }) === false);
   }
@@ -213,34 +218,28 @@ const H = (n, p) => Array.from({ length: n }, (_, i) => (p || 'h') + i);
   const _q = html.indexOf('const fresh = runPlan.sources.filter(');
   ok('quick import still filters through it', /!_isLaterTwin\(s\)/.test(html.slice(_q, _q + 240)));
 
-  ok('the flag is carried onto the row', /if \(r\.containedIn\) \{ s\._containedIn = r\.containedIn;/.test(html));
-
-  const _c = html.indexOf('if (src._containedIn) {');
-  const branch = html.slice(_c, html.indexOf('if (src._sameInBatch) {', _c));
-  ok('the contained row gets its own note', _c > 0);
-
-  // ⚠️ Comments stripped and joins collapsed FIRST. Asserting about WORDS means looking at words,
-  // not at a window that also contains prose about the words.
-  // ⚠️⚠️ AND THIS IS THE EIGHTH TIME THAT TRAP HAS BITTEN IN TWO DAYS. The assertion below ran
-  // against the raw branch and FAILED — because the COMMENT forbidding "already in your library"
-  // contains the phrase "already in your library". The test was right about the code and wrong
-  // about where to look, which is the same root every single time. Strip first, then assert.
+  // ⭐ The row note is the EXISTING twin note, unchanged, because this is the same statement:
+  // the same font is in this import twice and one copy was kept.
+  const _n = html.indexOf('if (src._sameInBatch) {');
+  const branch = html.slice(_n, html.indexOf('if (src._duplicate) {', _n));
   const copy = branch.split(/\r?\n/).filter(l => !/^\s*\/\//.test(l)).join('\n')
                      .replace(/'\s*\+\s*'/g, '');
 
-  // ⚠️⚠️ IT MUST NOT SAY "ALREADY IN YOUR LIBRARY". It is not in the library — it is in THIS
-  // import, and saying otherwise sends the user looking for something that is not there.
-  ok('⚠️⚠️ it never claims the font is already in the library',
+  ok('it reuses the twin note', /Same font as \$\{src\._sameInBatch\.label\} in this import/.test(copy), copy);
+
+  // ⚠⚠ AND IT NEVER SAYS "ALREADY IN YOUR LIBRARY". It is not in the library - it is in THIS
+  // import, and the wrong sentence sends someone looking for something that is not there.
+  ok('⚠⚠ it never claims the library already has it',
      !/already in your library/i.test(copy), copy);
-  ok('it says what is actually true — the other one has more',
-     /Everything here is also in \$\{src\._containedIn\.label\}, which includes more/.test(copy), copy);
+
+  // ⚠️ The word "fuller" is deliberately absent from the UI. It is our reasoning for which copy
+  // won, not a fact the reader needs.
+  ok('⚠️ the UI does not explain fullness', !/fuller/i.test(copy), copy);
 
   // ⚠️ Unticked, NOT disabled. Wanting the single font separate from the full package is a real
-  // choice, and the same shape every other held-back row uses.
+  // choice, and it is one click away.
   ok('⚠️ unticked, never disabled', /row\.checkbox\.checked = false;/.test(branch)
      && !/disabled = true/.test(branch));
-  ok('the tooltip says how to take it anyway', /Check it to import this copy on its own as well/.test(branch));
 }
-
 console.log(failures === 0 ? '\nOK' : '\n' + failures + ' FAILED');
 process.exit(failures === 0 ? 0 : 1);

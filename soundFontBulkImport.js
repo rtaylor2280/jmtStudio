@@ -646,8 +646,6 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
   // [B-415] One entry per prepared source, for the containment ranking below.
   const _batchFiles = [];
   let batchDupCount = 0;
-  // [B-415] Sources held back because a fuller copy of the same content is in this batch.
-  let batchContainedCount = 0;
   for (let i = 0; i < total; i++) {
     if (shouldCancel()) return { ok: true, cancelled: true, results };
     const src = sources[i];
@@ -1054,20 +1052,26 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
         const row = _byIdx.get(lostIdx);
         const keeper = _byIdx.get(info.container);
         if (!row || !keeper) continue;
-        // ⚠️ A row already settled as an exact twin is left alone. It is the same claim reached
-        // by a stricter test, and overwriting it would replace a precise note with a vaguer one.
+        // ⚠️ A row already settled as an exact twin is left alone - same claim, stricter test.
         if (row.sameInBatch) continue;
-        row.containedIn = {
-          idx: info.container,
-          label: keeper.label != null ? keeper.label : (keeper.prepared && keeper.prepared.name) || '',
-          contained: info.contained, of: info.of,
-        };
-        batchContainedCount++;
-        // ⚠⚠ AND IT COMES OUT OF `new`. The twin check decrements inline because it decides
-        // DURING the loop; this ranking can only decide after it, so the row was already counted.
-        // Leaving it counted makes the summary say "8 new" while 6 import - the two lines on one
-        // screen would contradict each other, which is the [B-296] failure exactly.
-        // ⭐ The invariant the summary relies on: `new` counts only what will actually import.
+        const _kLabel = keeper.label != null ? keeper.label : (keeper.prepared && keeper.prepared.name) || '';
+        const _lLabel = row.label != null ? row.label : (row.prepared && row.prepared.name) || '';
+        // ⭐⭐ THE SAME CATEGORY AS AN EXACT TWIN, SO IT USES THE SAME FIELD. His call 2026-09-19:
+        // "isn't it the same category as whatever our wording was for duplicate on source? don't
+        // need to tell about fuller - that was what informed our choice... but we still only kept 1."
+        // Fullness decided WHICH copy survives; it is not a second thing that happened to the user.
+        // ⚠⚠ SO THERE IS NO SECOND NOTE, NO SECOND PREDICATE ARM AND NO SECOND SUMMARY LINE. Routing
+        // it through `sameInBatch` means the untick, the quick-import filter, the row note and the
+        // count all already work - the parallel track I built for this was the mistake.
+        row.sameInBatch = { idx: info.container, label: _kLabel, keeps: false };
+        // The claim sits on BOTH rows, exactly as [B-314] does it: each is a true statement about
+        // the batch, and the keeper is the one that stays ticked.
+        if (!keeper.sameInBatch) keeper.sameInBatch = { idx: lostIdx, label: _lLabel, keeps: true };
+        batchDupCount++;
+        // ⚠⚠ AND IT COMES OUT OF `new`. The twin check decrements inline because it decides DURING
+        // the loop; this ranking can only decide after it, so the row was already counted. Leaving
+        // it counted made the summary read "8 new" on a run where 6 imported - indistinguishable,
+        // from the outside, from the feature not working at all. He hit exactly that.
         if (newCount > 0) newCount--;
       }
     }
@@ -1079,7 +1083,7 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
   // two tests is ours, not theirs.
   // [B-314] `sameInBatch` is its own bucket, never folded into `duplicate` — that one
   // means "already in your library", and these are not.
-  return { ok: true, results, stats: { total, new: newCount, owned: ownedCount, duplicate: dupCount, corrupt: corruptCount, sameInBatch: batchDupCount, containedInBatch: batchContainedCount, tracks } };
+  return { ok: true, results, stats: { total, new: newCount, owned: ownedCount, duplicate: dupCount, corrupt: corruptCount, sameInBatch: batchDupCount, tracks } };
 }
 
 // Discard prepared-but-not-committed sources (user pruned them or cancelled).
