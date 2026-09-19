@@ -46,10 +46,13 @@ function ok(label, cond, detail) {
   ok('it states the COST before the picker opens',
      /7 seconds per font/.test(fn) && /minutes/.test(fn), fn.slice(fn.indexOf('cost'), 400));
 
+  // ⚠️ CASE-INSENSITIVE ON PURPOSE. These broke when a clause became a sentence and 'roughly'
+  // became 'Roughly'. The assertion cares that the RATE is stated and the TRADE is explained, not
+  // about capitalisation - anchoring on case makes an ordinary copy edit look like a regression.
   // ⚠️ A RATE, NOT A PROMISE. Their folder is not his folder. A flat "this takes 18 minutes"
   // would be a number we cannot stand behind on someone else's disk.
   ok('the cost is expressed as a rate, not a fixed total',
-     /roughly 7 seconds per font/.test(fn) && !/will take \d+ minutes/.test(fn));
+     /roughly 7 seconds per font/i.test(fn) && !/will take \d+ minutes/.test(fn));
 
   ok('it says the library is not touched until they agree',
      /nothing is added to your library until you say so/.test(fn));
@@ -95,7 +98,7 @@ function ok(label, cond, detail) {
   // as 'If you still have the ' + 'original downloads, ...' so the full phrase never appears
   // contiguously in source — asserting on it failed against copy that reads correctly on screen.
   ok('it explains the trade rather than scolding',
-     /If you still have the /.test(note) && /you keep the full originals/.test(note)
+     /if you still have the /i.test(note) && /you keep the full originals/i.test(note)
        && !/should have/i.test(note), note);
 
   ok('the note is styled muted, not as a warning',

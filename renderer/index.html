@@ -10731,7 +10731,7 @@ function _sdActionRowHtml(c) {
   const _srcNote = canFonts
     ? '<p class="sd-rpt-src-note">These come in as they sit on the card. If you still have the '
       + 'original downloads, <a href="#" id="sd-act-bulk-instead">bulk import from that folder</a> '
-      + 'instead — you keep the full originals and can export a complete copy of any font later.</p>'
+      + 'instead. You keep the full originals and can export a complete copy of any font later.</p>'
     : '';
   return `<div class="sd-rpt-actions">${btns.join('')}</div>${_srcNote}`;
 }
@@ -14566,20 +14566,20 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     const cost = document.getElementById('sf-bulk-explain-cost');
     const autoLbl = document.getElementById('sf-bulk-explain-auto-label');
     if (lede) lede.textContent =
-      'Point this at a folder of fonts you already own — zips, folders, or a mix. '
+      'Point this at a folder of fonts you already own: zips, folders, or a mix. '
       + 'Everything comes in with its original files kept, so you can export a full copy of any '
       + 'font later.';
     if (steps) steps.innerHTML = [
       'You choose a folder. Anything font-shaped inside it is found, however deep.',
       'Each one is read to see what it holds and whether you already have it.',
-      'Then either Quick import, or Review — where you set creators, rename, and untick anything '
+      'Then either Quick import, or Review, where you set creators, rename, and untick anything '
         + 'you would rather not keep.',
     ].map(t => `<li>${escapeHtml(t)}</li>`).join('');
     // ⚠️ A RATE, NOT A PROMISE. Their folder is not his folder and their disk is not his disk, so
     // this states what was measured and lets them do the arithmetic on their own pile. A single
     // "this will take N minutes" would be a number we cannot stand behind.
     if (cost) cost.textContent =
-      'This takes a while — roughly 7 seconds per font, so a folder of 100 is around 12 minutes. '
+      'This takes a while. Roughly 7 seconds per font, so a folder of 100 is around 12 minutes. '
       + 'You can cancel at any point, and nothing is added to your library until you say so.';
     if (autoLbl) autoLbl.textContent =
       'When it finishes, import everything without stopping to ask me';
