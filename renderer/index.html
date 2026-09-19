@@ -6635,11 +6635,6 @@
          case and not the card one — reading a card is about where the fonts LIVE, not how many. -->
     <div class="sf-import-phase" id="sf-bulk-import-phase-explain" style="display:none">
       <p class="sf-import-hint" id="sf-bulk-explain-lede"></p>
-      <!-- ⭐ THE REASSURANCE GETS ITS OWN LINE, not a clause on the instruction. The standing goal
-           (local/ui-conventions.md, value-prop session 2026-09-07) is teaching people it is OK to
-           KEEP EVERYTHING, and a screen that asks for a folder of original downloads is the exact
-           moment someone wonders whether handing over full zips is wasteful. -->
-      <p class="sf-import-hint" id="sf-bulk-explain-keep"></p>
       <ol class="sf-bulk-explain-steps" id="sf-bulk-explain-steps"></ol>
       <p class="sf-import-hint" id="sf-bulk-explain-cost"></p>
       <label class="sf-bulk-explain-auto" id="sf-bulk-explain-auto-wrap">
@@ -6712,7 +6707,7 @@
            running - by then there is no review left to skip and the offer would be a lie. -->
       <label class="sf-bulk-explain-auto" id="sf-bulk-prog-auto-wrap" style="display:none">
         <input type="checkbox" id="sf-bulk-prog-auto">
-        <span>Continue to Quick import automatically</span>
+        <span>Continue to quick import without review</span>
       </label>
     </div>
 
@@ -14604,20 +14599,17 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       // ⚠️ "cost" IS BANNED in savings copy: it conflates money with storage for an audience that
       // pays money for fonts. No figures here either - the close-out states the real numbers once
       // the work is done and they can be checked.
+      // ⭐ ONE PARAGRAPH, HIS CALL 2026-09-19: "I know why you broke these up, but might be better
+      // shorter... like one paragraph?" Splitting instruction from reassurance was defensible and
+      // wrong here - the reassurance IS part of the instruction. Someone deciding what to put in
+      // the folder needs "keep everything" in the same breath as "choose a folder", not as a
+      // separate statement two lines down that reads like marketing.
+      // ⚠️ The mechanism is SUBORDINATE now ("because..."), which is its correct weight: it exists
+      // only to answer the question the thesis raises, and a co-equal sentence overstated it.
       'Choose a folder of fonts you already own. The original zip files as you downloaded them '
-      + 'from the creator are ideal, but unzipped folders work too, and a mix is fine.';
-    // ⭐⭐ HIS STANDING GOAL, restated 2026-09-19: "helping people realize it's ok to keep the whole
-    // source because of how we do it." The thesis sentence is verbatim from the convention doc;
-    // the second sentence is the ONE allowed mechanism line, and it is here rather than at the
-    // close-out because the worry lands BEFORE they hand over a folder of full downloads.
-    // ⚠️ 'space'/'room', never 'cost' - that word is banned in savings copy, conflating money with
-    // storage for people who pay money for fonts. And no figures: the close-out owns the numbers,
-    // where they can be checked against what was actually imported.
-    const keep = document.getElementById('sf-bulk-explain-keep');
-    if (keep) keep.textContent =
-      'Keep everything: Studio saves the space, and your files stay exactly as they came. '
-      + 'Identical sounds are stored once and used everywhere they appear, so your library takes '
-      + 'far less room than the downloads that built it.';
+      + 'from the creator are ideal, but unzipped folders work too. Keep everything: Studio saves '
+      + 'the space and your files stay exactly as they came, because identical sounds are stored '
+      + 'once and used everywhere they appear.';
     // ⚠️ VOCABULARY MATCHES THE REVIEW SCREEN, deliberately. That screen already says "Quick
     // import adds the discovered sound fonts and folders with the names and creators as detected"
     // and "Review import lets you rename, set creators, add a demo link". Two different
@@ -14635,16 +14627,22 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     // drive, a busy machine - so 'roughly 7 seconds per font' was the same false precision one
     // step removed. Say the shape of the cost, not a figure we cannot stand behind on hardware
     // we have never seen.
-    // ⚠️ 'until you confirm', not 'until you say so'. His call the same night: the casual register
-    // does not belong in an app dialog.
+    // ⚠️⚠️ THE "NOTHING IS ADDED UNTIL YOU CONFIRM" CLAUSE IS GONE, AND IT HAD TO BE. His call
+    // 2026-09-19: "might not be true and could probably just be dropped honestly. less is more."
+    // He is right on both counts, and the truth half is the serious one: with the auto-continue
+    // checkbox ticked there IS no confirm step, so the sentence would be contradicted by the very
+    // next screen. It also over-claimed for analyze, which stages prepared sources before anyone
+    // has agreed to anything.
+    // ⭐ A reassurance that is only sometimes true is worse than no reassurance: it spends trust
+    // on a promise the app will visibly break.
     if (cost) cost.textContent =
       'This can take a while, depending on how many font sources your folder contains. '
-      + 'You can cancel at any time, and nothing is added to your library until you confirm.';
+      + 'You can cancel at any time.';
     // ⚠️ NAMES THE BUTTON, not the behaviour. His call 2026-09-19: "maybe the checkbox is
     // 'Continue to quick import automatically' or something closer to that". The first cut
     // described what would happen in the first person; "Quick import" is a control they will
     // actually meet on the next screen, so the checkbox and the button teach each other.
-    if (autoLbl) autoLbl.textContent = 'Continue to Quick import automatically';
+    if (autoLbl) autoLbl.textContent = 'Continue to quick import without review';
     if (els.explainAuto) els.explainAuto.checked = false;
     showPhase('explain');
     els.modal?.classList.add('active');

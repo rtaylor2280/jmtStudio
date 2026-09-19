@@ -49,6 +49,13 @@ function ok(label, cond, detail) {
   const _end   = html.indexOf('const startScan = async () => {', _start);
   const _raw = html.slice(_start, _end > _start ? _end : _start + 6000);
   const fn = _raw.split(/\r?\n/).filter(l => !/^\s*\/\//.test(l)).join('\n');
+  // ⭐⭐ THE COPY, RECONSTRUCTED AS THE USER WILL SEE IT. Long sentences are built by concatenating
+  // string literals, so a phrase that reads contiguously ON SCREEN is split by ' + ' IN SOURCE and
+  // never matches. That bit twice tonight — once on the SD pointer, once on the savings thesis —
+  // so collapse the joins ONCE here and assert against this rather than against `fn`.
+  // ⚠️ Six anchoring slips today, every one the same root: asserting about WORDS while looking at
+  // something that is not the words. This is the fix for the class, not for the instance.
+  const copy = fn.replace(/'\s*\+\s*'/g, '');
 
   ok('it states the steps as a sequence', /sf-bulk-explain-steps/.test(html)
      && /map\(t => `<li>/.test(fn));
@@ -56,7 +63,7 @@ function ok(label, cond, detail) {
   // ⭐⭐ THE COST IS THE HALF THAT COST HIM AN AFTERNOON. A screen that teaches what the feature
   // is while still ambushing him with how long it takes has fixed the smaller problem.
   ok('it warns that this is a long operation, before the picker opens',
-     /can take a while/i.test(fn), fn.slice(fn.indexOf('cost'), 400));
+     /can take a while/i.test(copy), fn.slice(fn.indexOf('cost'), 400));
 
   // ⚠️⚠️ AND IT MUST NOT CARRY A FIGURE. This assertion is INVERTED from its first version, which
   // required 'roughly 7 seconds per font'. His call 2026-09-19: "a bit nervous about being so
@@ -73,7 +80,7 @@ function ok(label, cond, detail) {
   // more sharing there is to find - and a screen asking for a folder of original downloads is the
   // exact moment that worry lands.
   ok('it carries the keep-everything thesis line',
-     /Keep everything: Studio saves the space, and your files stay exactly as they came/.test(fn));
+     /Keep everything: Studio saves the space and your files stay exactly as they came/.test(copy));
 
   // ⚠️ NO COINED TERM. That session ruled against an Apple-style 'Optimized Storage' noun: the
   // branding is one sentence SHAPE repeated wherever savings appear.
@@ -91,13 +98,19 @@ function ok(label, cond, detail) {
 
   // ⭐ And it names the ideal input, not just the accepted one. His call 2026-09-19.
   ok('it names the original zips as ideal',
-     /original zip files as you downloaded them/i.test(fn) && /ideal/i.test(fn));
+     /original zip files as you downloaded them from the creator are ideal/i.test(copy));
 
   // ⚠️ Register: an app dialog, not a chat. 'until you say so' was his catch the same night.
-  ok('it uses app register, not casual', /until you confirm/i.test(fn) && !/say so/i.test(fn));
+  ok('it uses app register, not casual', !/say so/i.test(copy));
 
-  ok('it says the library is not touched until they agree',
-     /nothing is added to your library until you confirm/i.test(fn));
+  // ⭐⭐ INVERTED, and this one is about TRUTH rather than taste. The screen used to promise
+  // "nothing is added to your library until you confirm". With the auto-continue checkbox ticked
+  // there IS no confirm step, so the very next screen would contradict it. His call: "might not be
+  // true and could probably just be dropped honestly. less is more."
+  // A reassurance that is only sometimes true is worse than none - it spends trust on a promise
+  // the app will visibly break.
+  ok('it makes no confirm-before-import promise it cannot keep',
+     !/until you confirm/i.test(copy) && !/nothing is added/i.test(copy));
 }
 
 // ── [B-294] auto-continue, and the cases it must NOT swallow ───────────────
