@@ -2736,7 +2736,30 @@
   .sf-import-phase::-webkit-scrollbar { width: 6px; }
   .sf-import-phase::-webkit-scrollbar-track { background: transparent; }
   .sf-import-phase::-webkit-scrollbar-thumb { background: var(--c-border-strong); border-radius: 3px; }
+  /* [B-292] The source-note under the card actions. Muted and small: it is a pointer to a better
+     road, not a warning about the road taken, and warning weight would make a legitimate choice
+     feel like a mistake. */
+  .sd-rpt-src-note { font-size: 0.72rem; color: var(--c-text-muted); line-height: 1.45;
+                     margin: 8px 0 0 0; }
+  .sd-rpt-src-note a { color: var(--c-accent, #4a9eff); }
   .sf-import-hint { font-size: 0.78rem; color: var(--c-text-sub); margin: 0 0 12px 0; line-height: 1.45; }
+  /* [B-292] The explain screen. Numbered because the three steps ARE a sequence — the
+     ordering carries information the reader needs, which is the test for whether a
+     numbered list is structure or decoration. */
+  .sf-bulk-explain-steps { font-size: 0.78rem; color: var(--c-text-sub); line-height: 1.5;
+                           margin: 0 0 12px 0; padding-left: 20px; }
+  .sf-bulk-explain-steps li { margin: 0 0 6px 0; }
+  .sf-bulk-explain-steps li:last-child { margin-bottom: 0; }
+  /* The cost line carries more weight than the steps: it is the half of [B-292] that
+     actually cost him an afternoon, so it must not read as more hint text. */
+  #sf-bulk-explain-cost { color: var(--c-text); }
+  /* [B-294] Matches .sf-export-tracks — the established "small opt-in beside an action"
+     idiom in this app — rather than inventing a second one. Not blue: blue means active
+     filter elsewhere, and this is neither a filter nor a state. */
+  .sf-bulk-explain-auto { display: inline-flex; align-items: center; gap: 6px;
+                          font-size: 0.75rem; color: var(--c-text-muted);
+                          cursor: pointer; user-select: none; margin: 0; }
+  .sf-bulk-explain-auto:hover { color: var(--c-text); }
   /* The secondary ways in (bulk folder, SD card) sit as ONE block so a second
      line costs one line of height and nothing else. They used to be two loose
      <p>s, which in the empty state meant each one also collected the card's
@@ -6598,6 +6621,28 @@
   <div class="modal sf-import-modal">
     <h2 id="sf-bulk-import-title">Bulk import sound fonts</h2>
 
+    <!-- ⭐⭐ EXPLAIN BEFORE THE FOLDER PICKER. [B-292] His, 2026-09-02, opening it for the first
+         time in months: "what is bulk import? not remembering." He WROTE the feature and could not
+         recall what it did from the link that launches it.
+         ⚠️ THE COST IS THE HALF THAT MATTERED. Measured on his own originals folder the same day:
+         136 fonts, ~7.3s each, review screen reached at ~18 MINUTES — a commitment that began the
+         moment he clicked OK on a folder dialog that had told him nothing. An explanation that
+         teaches what the feature is while still ambushing him with what it takes has fixed the
+         smaller half, so the number is stated up front.
+         ⚠️ Deliberately NOT a chooser between folder and card. Collapsing the two entry links into
+         one was considered and rejected 2026-09-18: they already segment by SITUATION ("many fonts
+         to add" vs "already on a card") and a merged line phrased around quantity fits the folder
+         case and not the card one — reading a card is about where the fonts LIVE, not how many. -->
+    <div class="sf-import-phase" id="sf-bulk-import-phase-explain" style="display:none">
+      <p class="sf-import-hint" id="sf-bulk-explain-lede"></p>
+      <ol class="sf-bulk-explain-steps" id="sf-bulk-explain-steps"></ol>
+      <p class="sf-import-hint" id="sf-bulk-explain-cost"></p>
+      <label class="sf-bulk-explain-auto" id="sf-bulk-explain-auto-wrap">
+        <input type="checkbox" id="sf-bulk-explain-auto">
+        <span id="sf-bulk-explain-auto-label"></span>
+      </label>
+    </div>
+
     <div class="sf-import-phase" id="sf-bulk-import-phase-scan">
       <p class="sf-import-progress-label">Scanning folder…</p>
       <div class="sf-import-progress-track"><div class="sf-import-progress-bar indeterminate"></div></div>
@@ -6667,6 +6712,9 @@
       <button class="modal-btn-secondary" id="sf-bulk-import-start-btn" style="display:none">Quick import</button>
       <button class="modal-btn-primary" id="sf-bulk-import-review-btn" style="display:none">Review Import</button>
       <button class="modal-btn-primary" id="sf-bulk-guided-import-btn" style="display:none">Import</button>
+      <!-- [B-292] The explain phase's only forward action. Named for what it DOES next rather than
+           "Continue", so the OS folder dialog that follows is expected instead of sprung. -->
+      <button class="modal-btn-primary" id="sf-bulk-explain-pick-btn" style="display:none">Choose folder…</button>
       <button class="modal-btn-primary" id="sf-bulk-import-done-btn" style="display:none">Done</button>
     </div>
   </div>
@@ -10671,7 +10719,21 @@ function _sdActionRowHtml(c) {
     : '';
   const _titleAttr = _importTitle ? ` title="${_sdEsc(_importTitle)}"` : '';
   if (canFonts) btns.push(`<button id="sd-act-import" class="${ctx === 'sfl' ? 'modal-btn-primary' : 'modal-btn-cancel'} sd-act-btn"${_titleAttr}>${_importLabel}</button>`);
-  return `<div class="sd-rpt-actions">${btns.join('')}</div>`;
+  // ⭐ [B-292] A POINTER, NOT A WARNING, and the distinction is the whole rule here. A card holds
+  // what a saber was left with — the font as installed, not the creator's original .zip. So a card
+  // import gets you a lot of fonts quickly and costs you the source you could have re-exported.
+  // His framing, 2026-09-18: importing as you go is best; bulk from your originals is the next
+  // best; the card is "a bunch of fonts quickly from their latest build but they aren't the true
+  // source files, which is a bummer".
+  // ⚠️ IT MUST NOT READ AS "YOU DID THE WRONG THING". The card path is legitimate and is often the
+  // only road left — the originals are gone, or were never kept. This says there is a better road
+  // IF they have it, and says nothing at all when they do not.
+  const _srcNote = canFonts
+    ? '<p class="sd-rpt-src-note">These come in as they sit on the card. If you still have the '
+      + 'original downloads, <a href="#" id="sd-act-bulk-instead">bulk import from that folder</a> '
+      + 'instead — you keep the full originals and can export a complete copy of any font later.</p>'
+    : '';
+  return `<div class="sd-rpt-actions">${btns.join('')}</div>${_srcNote}`;
 }
 function _sdActiveRoot() {
   return (_sdReport.stack[0] && _sdReport.stack[0].path) || (_sdReport.card && (_sdReport.card.mountPath || _sdReport.card.drive)) || '';
@@ -10821,6 +10883,14 @@ async function _sdRenderBrowse() {
   const wireActions = () => {
     const bCfg = document.getElementById('sd-act-config'); if (bCfg) bCfg.onclick = _sdOpenConfigFromCard;
     const bImp = document.getElementById('sd-act-import'); if (bImp) bImp.onclick = _sdImportFontsFromCard;
+    // [B-292] The pointer to the better road. Closes the card view first, for the same reason
+    // every other cross-door link does: the bulk modal must not open on top of it.
+    const bBulk = document.getElementById('sd-act-bulk-instead');
+    if (bBulk) bBulk.onclick = (e) => {
+      e.preventDefault();
+      document.getElementById('sd-report-overlay')?.classList.remove('active');
+      if (window._sfStartBulkImport) window._sfStartBulkImport();
+    };
   };
   if (res.error) {
     body.innerHTML = summary + crumb + `<div class="sf-entry-files-browser"><div class="sf-entry-files-empty">Couldn't read this folder: ${_sdEsc(res.error)}</div></div>`;
@@ -12402,6 +12472,9 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
   const els = {
     modal:        document.getElementById('modal-sf-bulk-import'),
     title:        document.getElementById('sf-bulk-import-title'),
+    phaseExplain: document.getElementById('sf-bulk-import-phase-explain'),
+    explainPickBtn: document.getElementById('sf-bulk-explain-pick-btn'),
+    explainAuto:  document.getElementById('sf-bulk-explain-auto'),
     phaseScan:    document.getElementById('sf-bulk-import-phase-scan'),
     phaseReview:  document.getElementById('sf-bulk-import-phase-review'),
     phaseProg:    document.getElementById('sf-bulk-import-phase-progress'),
@@ -12516,6 +12589,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
   //
   // Cancel is present in every phase and the summary has Done, so nothing is trapped.
   const showPhase = (phase) => {
+    if (els.phaseExplain) els.phaseExplain.style.display = phase === 'explain' ? '' : 'none';
     if (els.phaseScan)    els.phaseScan.style.display    = phase === 'scan'    ? '' : 'none';
     if (els.phaseReview)  els.phaseReview.style.display  = phase === 'review'  ? '' : 'none';
     if (els.phaseGuided)  els.phaseGuided.style.display  = phase === 'guided'  ? '' : 'none';
@@ -12528,6 +12602,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       if (inner) inner.classList.toggle('wide', phase === 'guided');
     }
     // Button visibility
+    if (els.explainPickBtn) els.explainPickBtn.style.display = phase === 'explain' ? '' : 'none';
     if (els.startBtn)  els.startBtn.style.display  = phase === 'review' ? '' : 'none';
     if (els.reviewBtn) els.reviewBtn.style.display = phase === 'review' ? '' : 'none';
     // No Back on the guided view: you've already passed the stats/fork and the
@@ -14095,6 +14170,11 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
   // the branches that never count one still clear the stance rather than inheriting
   // the previous card's.
   let _execStance = false;
+  // [B-294] Set from the explain screen's checkbox, consumed once by showReview. A module-level
+  // flag rather than a stored preference ON PURPOSE: "walk away from THIS import" is a decision
+  // about one folder and one evening, not a standing choice about how the app behaves.
+  let _bulkAutoContinue = false;
+
   const showReview = async (plan) => {
     _execStance = false;
     currentPlan = plan;
@@ -14433,6 +14513,26 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       els.reviewBtn.className = _execStance ? 'modal-btn-secondary' : 'modal-btn-primary';
     }
     showPhase('review');
+    // ⭐⭐ [B-294] AUTO-CONTINUE, the up-front half. His, 29 minutes into importing 136 fonts:
+    // "for really long imports you can't start it and walk away... almost need a checkbox during
+    // the analyze to go straight to quick import on completion."
+    //
+    // The problem is a HUMAN one, not a performance one: analyze runs unattended for eighteen
+    // minutes and then STOPS, waiting for a click. Two long phases with a person gated in the
+    // middle is the worst possible arrangement of them.
+    //
+    // ⚠️⚠️ IT MUST STILL STOP WHERE THERE IS A DECISION OR A PROBLEM. Auto-continuing past
+    // "nothing new here" or past a plan the Import gate has DISABLED would be the checkbox making
+    // a choice the user did not delegate — they agreed to skip the review, not to have failures
+    // swallowed. So this rides the same disabled flag the Quick import button does, and a plan
+    // with nothing to import falls through to the normal screen.
+    // ⚠️ Deliberately AFTER showPhase, so if anything below throws the user is left on a real
+    // screen rather than a half-painted one.
+    if (_bulkAutoContinue && els.startBtn && !els.startBtn.disabled) {
+      _bulkAutoContinue = false;   // one run only; never a standing preference
+      runImport();
+      return;
+    }
     // No new fonts to review -> hide the guided entry (dups/corrupt aren't "reviewable" here).
     // ⚠️ `total === 0` ALSO MEANT "tracks-only", which hid Review on the one screen
     // whose whole point is reviewing tracks. A tracks-only plan is reviewable
@@ -14449,7 +14549,47 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     }
   };
 
+  // ⭐⭐ [B-292] EXPLAIN FIRST. The link used to go STRAIGHT to the OS folder picker, so every
+  // capability was invisible until after you had committed to a folder — and so was the cost.
+  //
+  // ⚠️ THE COST IS NOT DECORATION. Measured 2026-09-02 on his own originals folder: 136 fonts at
+  // ~7.3s each, review screen reached at ~18 minutes. That commitment began the moment he clicked
+  // OK on a dialog that had told him nothing. Stating the rate here is the half of this entry that
+  // actually cost him an afternoon.
+  //
+  // ⚠️ HIS HIERARCHY, 2026-09-18, and the screen teaches it rather than just listing steps:
+  // importing as you go is BEST, bulk is the next best if you have been at this a while, and an
+  // SD card is fast but gives you what a saber was left holding rather than the true sources.
+  const showExplain = () => {
+    const lede = document.getElementById('sf-bulk-explain-lede');
+    const steps = document.getElementById('sf-bulk-explain-steps');
+    const cost = document.getElementById('sf-bulk-explain-cost');
+    const autoLbl = document.getElementById('sf-bulk-explain-auto-label');
+    if (lede) lede.textContent =
+      'Point this at a folder of fonts you already own — zips, folders, or a mix. '
+      + 'Everything comes in with its original files kept, so you can export a full copy of any '
+      + 'font later.';
+    if (steps) steps.innerHTML = [
+      'You choose a folder. Anything font-shaped inside it is found, however deep.',
+      'Each one is read to see what it holds and whether you already have it.',
+      'Then either Quick import, or Review — where you set creators, rename, and untick anything '
+        + 'you would rather not keep.',
+    ].map(t => `<li>${escapeHtml(t)}</li>`).join('');
+    // ⚠️ A RATE, NOT A PROMISE. Their folder is not his folder and their disk is not his disk, so
+    // this states what was measured and lets them do the arithmetic on their own pile. A single
+    // "this will take N minutes" would be a number we cannot stand behind.
+    if (cost) cost.textContent =
+      'This takes a while — roughly 7 seconds per font, so a folder of 100 is around 12 minutes. '
+      + 'You can cancel at any point, and nothing is added to your library until you say so.';
+    if (autoLbl) autoLbl.textContent =
+      'When it finishes, import everything without stopping to ask me';
+    if (els.explainAuto) els.explainAuto.checked = false;
+    showPhase('explain');
+    els.modal?.classList.add('active');
+  };
+
   const startScan = async () => {
+    _bulkAutoContinue = !!(els.explainAuto && els.explainAuto.checked);
     // [B-328] The modal opens AFTER the picker resolves, not before. It used to
     // go up in scan dress behind the OS dialog, bar and all, which read as
     // work already happening on a folder nobody had chosen yet. Until a folder
@@ -15166,7 +15306,12 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
   // Expose so the empty-state link and the single-source picker modal's
   // secondary "Bulk import from a folder" link can start the bulk-import
   // flow without reaching into this IIFE.
-  if (typeof window !== 'undefined') window._sfStartBulkImport = startScan;
+  // [B-292] The link opens the EXPLAIN screen; startScan (the picker) is what its button calls.
+  // ⚠️ startScanWithRoot / startScanWithPaths are untouched: the SD-card browser and the
+  // drag-drop path arrive with a folder ALREADY chosen, so an explain screen there would be
+  // explaining a decision the user has already made.
+  if (els.explainPickBtn) els.explainPickBtn.addEventListener('click', () => { startScan(); });
+  if (typeof window !== 'undefined') window._sfStartBulkImport = showExplain;
   // [B-295] the quit guard asks this before letting the window close.
   if (typeof window !== 'undefined') window._sfBulkImportCost = () => (_bulkPhase ? { ..._bulkPhase } : null);
 })();
