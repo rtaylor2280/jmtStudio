@@ -35,27 +35,69 @@ function ok(label, cond, detail) {
 
 // ── the screen carries what the entry was actually about ───────────────────
 {
-  const fn = html.slice(html.indexOf('const showExplain = () => {'),
-                        html.indexOf('const showExplain = () => {') + 2600);
+  // ⚠️⚠️ COMMENTS STRIPPED FIRST, AND THIS IS THE FOURTH TIME TODAY THE SAME TRAP HAS BITTEN.
+  // Every one was a window that contained PROSE ABOUT the code as well as the code: an ordering
+  // check that matched 'offsetInCode' inside its own explanatory comment, and a no-number check
+  // that matched '7 seconds per font' inside the comment explaining why the number was removed.
+  // A test asserting on source has to look at source only.
+  // ⚠️⚠️ BOUNDED BY THE NEXT DECLARATION, NOT BY A CHARACTER COUNT. A fixed +N window silently
+  // truncates the moment the function grows, and every assertion past the cut then fails against
+  // correct code. That happened here the same evening: comments pushed the cost line out of a
+  // 3400-char slice and four assertions went red at once. A window that can rot is a test that
+  // will lie later.
+  const _start = html.indexOf('const showExplain = () => {');
+  const _end   = html.indexOf('const startScan = async () => {', _start);
+  const _raw = html.slice(_start, _end > _start ? _end : _start + 6000);
+  const fn = _raw.split(/\r?\n/).filter(l => !/^\s*\/\//.test(l)).join('\n');
 
   ok('it states the steps as a sequence', /sf-bulk-explain-steps/.test(html)
      && /map\(t => `<li>/.test(fn));
 
   // ⭐⭐ THE COST IS THE HALF THAT COST HIM AN AFTERNOON. A screen that teaches what the feature
   // is while still ambushing him with how long it takes has fixed the smaller problem.
-  ok('it states the COST before the picker opens',
-     /7 seconds per font/.test(fn) && /minutes/.test(fn), fn.slice(fn.indexOf('cost'), 400));
+  ok('it warns that this is a long operation, before the picker opens',
+     /can take a while/i.test(fn), fn.slice(fn.indexOf('cost'), 400));
 
-  // ⚠️ CASE-INSENSITIVE ON PURPOSE. These broke when a clause became a sentence and 'roughly'
-  // became 'Roughly'. The assertion cares that the RATE is stated and the TRADE is explained, not
-  // about capitalisation - anchoring on case makes an ordinary copy edit look like a regression.
-  // ⚠️ A RATE, NOT A PROMISE. Their folder is not his folder. A flat "this takes 18 minutes"
-  // would be a number we cannot stand behind on someone else's disk.
-  ok('the cost is expressed as a rate, not a fixed total',
-     /roughly 7 seconds per font/i.test(fn) && !/will take \d+ minutes/.test(fn));
+  // ⚠️⚠️ AND IT MUST NOT CARRY A FIGURE. This assertion is INVERTED from its first version, which
+  // required 'roughly 7 seconds per font'. His call 2026-09-19: "a bit nervous about being so
+  // specific in the estimate... could be different on different devices." A per-font rate is
+  // device-dependent exactly as a total is - slow disk, network drive, busy machine - so it was
+  // the same false precision one step removed. Any number here is a promise about hardware we
+  // have never seen.
+  ok('it states NO per-font rate and NO minute figure',
+     !/\d+\s*seconds? per font/i.test(fn) && !/\d+\s*minutes?/i.test(fn),
+     fn.slice(fn.indexOf('cost'), 400));
+
+  // ⭐⭐ THE SAVINGS THESIS, verbatim from local/ui-conventions.md (value-prop session 2026-09-07).
+  // The standing goal is teaching people it is OK to KEEP EVERYTHING - the more they keep, the
+  // more sharing there is to find - and a screen asking for a folder of original downloads is the
+  // exact moment that worry lands.
+  ok('it carries the keep-everything thesis line',
+     /Keep everything: Studio saves the space, and your files stay exactly as they came/.test(fn));
+
+  // ⚠️ NO COINED TERM. That session ruled against an Apple-style 'Optimized Storage' noun: the
+  // branding is one sentence SHAPE repeated wherever savings appear.
+  ok('it coins no storage-brand noun',
+     !/Optimi[sz]ed Storage|Smart Storage|Space Saver/i.test(fn));
+
+  // ⚠️ "cost" is BANNED in savings copy - it conflates money with storage for an audience
+  // that pays money for fonts.
+  // ⚠️⚠️ TESTED AGAINST THE COPY STRINGS ONLY, not the function body. The element id is
+  // sf-bulk-explain-cost and the local is `cost`, so scanning the source would fail forever on
+  // code that is perfectly correct. FIFTH anchoring slip of the day, same root every time:
+  // asserting about WORDS while looking at something that is not only words.
+  const _copy = (fn.match(/'[^']*'/g) || []).join(' ');
+  ok('it never says "cost" about storage', !/costs?/i.test(_copy), _copy.slice(0, 200));
+
+  // ⭐ And it names the ideal input, not just the accepted one. His call 2026-09-19.
+  ok('it names the original zips as ideal',
+     /original zip files as you downloaded them/i.test(fn) && /ideal/i.test(fn));
+
+  // ⚠️ Register: an app dialog, not a chat. 'until you say so' was his catch the same night.
+  ok('it uses app register, not casual', /until you confirm/i.test(fn) && !/say so/i.test(fn));
 
   ok('it says the library is not touched until they agree',
-     /nothing is added to your library until you say so/.test(fn));
+     /nothing is added to your library until you confirm/i.test(fn));
 }
 
 // ── [B-294] auto-continue, and the cases it must NOT swallow ───────────────

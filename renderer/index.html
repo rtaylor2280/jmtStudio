@@ -6635,6 +6635,11 @@
          case and not the card one — reading a card is about where the fonts LIVE, not how many. -->
     <div class="sf-import-phase" id="sf-bulk-import-phase-explain" style="display:none">
       <p class="sf-import-hint" id="sf-bulk-explain-lede"></p>
+      <!-- ⭐ THE REASSURANCE GETS ITS OWN LINE, not a clause on the instruction. The standing goal
+           (local/ui-conventions.md, value-prop session 2026-09-07) is teaching people it is OK to
+           KEEP EVERYTHING, and a screen that asks for a folder of original downloads is the exact
+           moment someone wonders whether handing over full zips is wasteful. -->
+      <p class="sf-import-hint" id="sf-bulk-explain-keep"></p>
       <ol class="sf-bulk-explain-steps" id="sf-bulk-explain-steps"></ol>
       <p class="sf-import-hint" id="sf-bulk-explain-cost"></p>
       <label class="sf-bulk-explain-auto" id="sf-bulk-explain-auto-wrap">
@@ -6707,7 +6712,7 @@
            running - by then there is no review left to skip and the offer would be a lie. -->
       <label class="sf-bulk-explain-auto" id="sf-bulk-prog-auto-wrap" style="display:none">
         <input type="checkbox" id="sf-bulk-prog-auto">
-        <span>When this finishes, import everything without stopping to ask me</span>
+        <span>Continue to Quick import automatically</span>
       </label>
     </div>
 
@@ -14585,23 +14590,61 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     const cost = document.getElementById('sf-bulk-explain-cost');
     const autoLbl = document.getElementById('sf-bulk-explain-auto-label');
     if (lede) lede.textContent =
-      'Point this at a folder of fonts you already own: zips, folders, or a mix. '
-      + 'Everything comes in with its original files kept, so you can export a full copy of any '
-      + 'font later.';
+      // ⭐⭐ THE IDEAL SHAPE IS STATED, not just the accepted one. His call 2026-09-19: "this is an
+      // opportunity to state that the ideal folder contains the original zip files downloaded from
+      // the font creator". Zips and folders both work, but the original download is the best thing
+      // to hand us - it is the most complete copy of what the creator shipped.
+      //
+      // ⭐ AND THE THESIS LINE GOES HERE, verbatim from local/ui-conventions.md (value-prop
+      // session, 2026-09-07): "Keep everything. Studio saves the space and your files stay exactly
+      // as they came." That is the standing-surface sentence for savings, and a screen about
+      // pointing at a folder full of downloads is exactly where it earns its place.
+      // ⚠️ NO COINED TERM. That session ruled against an Apple-style "Optimized Storage" label -
+      // the branding is ONE SENTENCE SHAPE repeated wherever savings appear, not a noun.
+      // ⚠️ "cost" IS BANNED in savings copy: it conflates money with storage for an audience that
+      // pays money for fonts. No figures here either - the close-out states the real numbers once
+      // the work is done and they can be checked.
+      'Choose a folder of fonts you already own. The original zip files as you downloaded them '
+      + 'from the creator are ideal, but unzipped folders work too, and a mix is fine.';
+    // ⭐⭐ HIS STANDING GOAL, restated 2026-09-19: "helping people realize it's ok to keep the whole
+    // source because of how we do it." The thesis sentence is verbatim from the convention doc;
+    // the second sentence is the ONE allowed mechanism line, and it is here rather than at the
+    // close-out because the worry lands BEFORE they hand over a folder of full downloads.
+    // ⚠️ 'space'/'room', never 'cost' - that word is banned in savings copy, conflating money with
+    // storage for people who pay money for fonts. And no figures: the close-out owns the numbers,
+    // where they can be checked against what was actually imported.
+    const keep = document.getElementById('sf-bulk-explain-keep');
+    if (keep) keep.textContent =
+      'Keep everything: Studio saves the space, and your files stay exactly as they came. '
+      + 'Identical sounds are stored once and used everywhere they appear, so your library takes '
+      + 'far less room than the downloads that built it.';
+    // ⚠️ VOCABULARY MATCHES THE REVIEW SCREEN, deliberately. That screen already says "Quick
+    // import adds the discovered sound fonts and folders with the names and creators as detected"
+    // and "Review import lets you rename, set creators, add a demo link". Two different
+    // descriptions of one fork is how someone ends up unsure they are the same thing.
     if (steps) steps.innerHTML = [
-      'You choose a folder. Anything font-shaped inside it is found, however deep.',
-      'Each one is read to see what it holds and whether you already have it.',
-      'Then either Quick import, or Review, where you set creators, rename, and untick anything '
-        + 'you would rather not keep.',
+      'Choose a folder. Every sound font inside it is found, including ones in subfolders or zips.',
+      'Each font is checked to see what it contains and whether it is already in your library.',
+      'Quick import adds them as detected, or Review lets you set creators, rename fonts, and '
+        + 'choose what to include.',
     ].map(t => `<li>${escapeHtml(t)}</li>`).join('');
-    // ⚠️ A RATE, NOT A PROMISE. Their folder is not his folder and their disk is not his disk, so
-    // this states what was measured and lets them do the arithmetic on their own pile. A single
-    // "this will take N minutes" would be a number we cannot stand behind.
+    // ⚠️⚠️ NO NUMBER. His call 2026-09-19: "a bit nervous about being so specific in the
+    // estimate... could be different on different devices." He is right, and the first cut had
+    // already half-learned this: it gave a RATE rather than a total, on the grounds that their
+    // folder is not his folder. But the rate is device-dependent too - a slow disk, a network
+    // drive, a busy machine - so 'roughly 7 seconds per font' was the same false precision one
+    // step removed. Say the shape of the cost, not a figure we cannot stand behind on hardware
+    // we have never seen.
+    // ⚠️ 'until you confirm', not 'until you say so'. His call the same night: the casual register
+    // does not belong in an app dialog.
     if (cost) cost.textContent =
-      'This takes a while. Roughly 7 seconds per font, so a folder of 100 is around 12 minutes. '
-      + 'You can cancel at any point, and nothing is added to your library until you say so.';
-    if (autoLbl) autoLbl.textContent =
-      'When it finishes, import everything without stopping to ask me';
+      'This can take a while, depending on how many font sources your folder contains. '
+      + 'You can cancel at any time, and nothing is added to your library until you confirm.';
+    // ⚠️ NAMES THE BUTTON, not the behaviour. His call 2026-09-19: "maybe the checkbox is
+    // 'Continue to quick import automatically' or something closer to that". The first cut
+    // described what would happen in the first person; "Quick import" is a control they will
+    // actually meet on the next screen, so the checkbox and the button teach each other.
+    if (autoLbl) autoLbl.textContent = 'Continue to Quick import automatically';
     if (els.explainAuto) els.explainAuto.checked = false;
     showPhase('explain');
     els.modal?.classList.add('active');
