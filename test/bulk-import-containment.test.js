@@ -75,6 +75,68 @@ const H = (n, p) => Array.from({ length: n }, (_, i) => (p || 'h') + i);
   ok('a universally shared file does not drive the comparison', MAX_POSTINGS > 0 && MAX_POSTINGS <= 1000);
 }
 
+// ── ⚠⚠ THE MAPPING, AGAINST RECORDS NOBODY IN THIS FILE AUTHORED ──────────────
+//
+// ⭐⭐ THIS IS THE CASE THAT WAS MISSING, AND ITS ABSENCE SHIPPED A DEAD FEATURE. uniqueFileHashes
+// read `r.hash`; the field collectFileRecords actually writes is `r.fileHash`. So it returned an
+// EMPTY ARRAY for every source, _batchFiles stayed empty, and the containment ranking silently
+// never ran. Nothing threw. No count was wrong. Every test in this file still passed.
+//
+// ⚠⚠ THEY PASSED BECAUSE THEY ALL BUILT THEIR OWN INPUT - `{hash}` objects and bare hash strings
+// handed straight to rankByContainment, which skips this function entirely. The algorithm was
+// tested thoroughly and the ADAPTER between it and the app was tested not at all. He found it by
+// running the app: "nope, didn't work... why?"
+// ⭐ THE RULE: when a function reads fields off a structure some OTHER module produces, the test
+// has to get that structure from that module. A fixture you authored tests your fixture.
+{
+  const os = require('os');
+  const fhm = require('../soundFontFileHash');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'b415-'));
+  try {
+    // The shape of his real case in miniature: `sub` is the font, and the tree around it holds
+    // that font plus extras — the other board flavors and the readme it shipped with.
+    // ⚠️ THE EXTRAS MUST BE OUTSIDE `sub`, and the first cut of this got it wrong: with every
+    // distinct byte-string present in both, the two were an exact TWIN and the ranker declined to
+    // decide — correctly. The fixture was broken, not the code. A containment fixture has to make
+    // the container genuinely fuller or it silently tests the case next door.
+    fs.mkdirSync(path.join(tmp, 'sub'));
+    fs.writeFileSync(path.join(tmp, 'sub', 'b.wav'), 'bbb');
+    fs.writeFileSync(path.join(tmp, 'sub', 'c.wav'), 'ccc');
+    fs.writeFileSync(path.join(tmp, 'a.wav'), 'aaa');          // an extra `sub` does not have
+    fs.writeFileSync(path.join(tmp, 'dupe.wav'), 'bbb');       // and a duplicate, on purpose
+
+    const recs = fhm.collectFileRecords(tmp);
+    ok('the fixture produced real records', recs.length === 4, JSON.stringify(recs));
+
+    // ⚠⚠ THE ASSERTION THAT WOULD HAVE CAUGHT IT. Non-empty is the whole point.
+    const hashes = fhm.uniqueFileHashes(recs);
+    ok('⭐⭐ uniqueFileHashes returns hashes for REAL records',
+       hashes.length > 0,
+       'reading the wrong field name returns [] and the ranking silently never runs');
+
+    // ⚠️ De-duplicated: two identical files are ONE hash, so a source cannot inflate its own size
+    // and win a containment comparison it should have lost.
+    ok('⚠️ identical files collapse to one hash', hashes.length === 3,
+       JSON.stringify(hashes));
+
+    // ⚠️ Pinned explicitly so a rename of the record field fails HERE, loudly, instead of
+    // turning the feature off without a word.
+    ok('⚠️ the record field is still named fileHash',
+       Object.prototype.hasOwnProperty.call(recs[0], 'fileHash'),
+       'if this moved, uniqueFileHashes must move with it: ' + Object.keys(recs[0]).join(','));
+
+    // ⭐ And the whole chain, so the adapter and the algorithm are proven TOGETHER: a real subset
+    // relationship built from real records must actually rank.
+    const sub = fhm.collectFileRecords(path.join(tmp, 'sub'));
+    const r = rankByContainment([{ idx: 0, hashes: fhm.uniqueFileHashes(recs) },
+                                 { idx: 1, hashes: fhm.uniqueFileHashes(sub) }]);
+    ok('⭐⭐ real records rank end to end', r.has(1) && r.get(1).container === 0,
+       JSON.stringify([...r]));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
 // ── it costs no new I/O, which is the whole reason it is allowed to exist ──
 {
   // ⚠️⚠️ [B-398] SPENT A DAY making the import pass yield so the window would stop freezing —

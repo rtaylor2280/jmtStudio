@@ -341,7 +341,15 @@ function hashBucketChildren(bucketRoot) {
 // ⚠️ DE-DUPLICATED, so repeated files inside one source cannot inflate it - a set, not a list.
 function uniqueFileHashes(records) {
   const out = new Set();
-  for (const r of (records || [])) if (r && r.hash) out.add(String(r.hash).slice(0, 16));
+  // ⚠⚠ THE FIELD IS `fileHash`, NOT `hash`. Reading `r.hash` here returned undefined for every
+  // record, so this produced an EMPTY ARRAY and the containment ranking silently never ran - it
+  // shipped that way and his test looked identical to no fix at all. Nothing threw, no count was
+  // wrong, no test failed: the batch simply had nothing to compare.
+  // ⭐ IT SURVIVED THE TESTS BECAUSE THE TESTS BUILT THEIR OWN RECORDS. Every case fed either
+  // `{hash}` objects or bare hash strings straight to rankByContainment, so this function was
+  // never once run against a record collectFileRecords actually produces. Verifying a mapping
+  // with a fixture you also authored tests the fixture.
+  for (const r of (records || [])) if (r && r.fileHash) out.add(String(r.fileHash).slice(0, 16));
   return Array.from(out);
 }
 
