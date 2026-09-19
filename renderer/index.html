@@ -12576,9 +12576,21 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
   // ⚠️ `_idx > partner.idx` is the SAME test the row uses to decide which copy keeps its
   // tick. Two spellings of "which one is the later twin" would drift, and the drift would
   // show up as quick and review disagreeing about a single font.
-  const _isLaterTwin = (s) => !!(s && s._sameInBatch
-    && typeof s._idx === 'number' && typeof s._sameInBatch.idx === 'number'
-    && s._idx > s._sameInBatch.idx);
+  // ⭐⭐ [B-415] THE LOSER IS THE ONE THE RANKING DID NOT KEEP, not the one that came second.
+  // `keeps` is set in soundFontBulkImport by fullest-source-wins - his rule, 2026-09-19: "it's
+  // really the full source wins. duplicate font but one has more stuff around it... that wins."
+  // ⚠️ THE OLD TEST WAS `s._idx > s._sameInBatch.idx` - pure walk order, so which copy survived
+  // depended on how the folder happened to be listed. Do not restore it as a fallback: a row from
+  // an older analyze has no `keeps`, and treating that as "not a twin" leaves it TICKED, which is
+  // the safe failure. Silently unticking by filename order is not.
+  // ⭐⭐ TWO WAYS TO LOSE, ONE PREDICATE. [B-415]
+  //   _sameInBatch.keeps === false - an EXACT twin the ranking did not keep.
+  //   _containedIn              - every file of this source is inside a fuller one in this batch.
+  // ⚠⚠ BOTH LIVE HERE BECAUSE BOTH DOORS READ THIS. Review unticks by it and quick import
+  // filters by it, and [B-296] then [B-314] were both the same bug twice: a second spelling of
+  // "should this be held back" that one door knew about and the other did not. A new way to lose
+  // gets added to this function or it silently does not apply to quick import.
+  const _isLaterTwin = (s) => !!(s && ((s._sameInBatch && s._sameInBatch.keeps === false) || s._containedIn));
 
   // ⚠️⚠️ A CLICK BESIDE THIS MODAL NEVER DISMISSES IT, IN ANY PHASE ([B-396]).
   //
@@ -13843,6 +13855,25 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         // index, so a row is the later twin exactly when its own index is the larger one.
         // That picks which copy starts ticked; it makes no claim about either font, and
         // both rows say the same thing either way.
+        // ⭐⭐ [B-415] A FULLER COPY OF THIS ONE IS IN THE BATCH. Checked BEFORE the exact-twin
+        // branch: a row can only carry one of the two, but if that ever stops being true this is
+        // the more specific statement and the one worth showing.
+        if (src._containedIn) {
+          // ⚠️ IT MUST NOT SAY "already in your library". It is not - it is in THIS import, and
+          // saying otherwise sends the user looking for something that is not there. That wrong
+          // message on an in-batch match was raised separately and is the same mistake.
+          note.textContent = `Everything here is also in ${src._containedIn.label}, which includes more.`;
+          note.classList.add('variant');
+          note.classList.remove('have-it');
+          if (row.checkbox) {
+            // ⚠️ Unticked, never disabled - the same shape as every other held-back row. Wanting
+            // the single font on its own, separate from the full package, is a real choice.
+            row.checkbox.checked = false;
+            row.checkbox.title = `${src._containedIn.label} already includes this font and more. Check it to import this copy on its own as well.`;
+            row.el.classList.add('excluded');
+          }
+          return;
+        }
         if (src._sameInBatch) {
           note.textContent = `Same font as ${src._sameInBatch.label} in this import.`;
           note.classList.add('variant');
@@ -14157,6 +14188,10 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       // twin?" test would compare two different numbering schemes and pick the wrong row
       // to untick — silently, and only when the list happened to be filtered.
       if (r.sameInBatch) { s._sameInBatch = r.sameInBatch; s._idx = r.idx; }
+      // [B-415] The other way to lose: this source's content is wholly inside a fuller one in
+      // the same batch. Carried separately from _sameInBatch because the NOTE differs - these
+      // are not the same font twice, they are a font and the package it came out of.
+      if (r.containedIn) { s._containedIn = r.containedIn; s._idx = r.idx; }
       // Ownership now arrives WITH the analysis instead of landing on the review
       // screen seconds after it opens. `_owned` means "you already have these
       // sounds" whichever test found it; `_match` carries the row's note.

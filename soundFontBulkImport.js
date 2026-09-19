@@ -642,8 +642,12 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
   // ⚠️ NOT THE SAME STATEMENT AS "already in your library". One is about the library,
   // the other is about this card. Sharing a phrase would tell someone their card is
   // already imported when it is not.
-  const _batchHashes = new Map();   // content hash -> the first source in this run that staged it
+  const _batchHashes = new Map();
+  // [B-415] One entry per prepared source, for the containment ranking below.
+  const _batchFiles = [];
   let batchDupCount = 0;
+  // [B-415] Sources held back because a fuller copy of the same content is in this batch.
+  let batchContainedCount = 0;
   for (let i = 0; i < total; i++) {
     if (shouldCancel()) return { ok: true, cancelled: true, results };
     const src = sources[i];
@@ -705,10 +709,56 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
       results.push({ idx: i, isDuplicate: true, existingUuid: res.uuid, staged: res.staged || null, corrupt, blocked, noted });
     } else if (res && res.ok && res.prepared) {
       // [B-314] Match against what THIS run has already staged, as well as the library.
-      const _h = res.hash || null;
+      //
+      // ⭐⭐ KEYED ON CONTENT, NOT ON SOURCE IDENTITY. [B-415] `res.hash` identifies the ARTIFACT:
+      // for a zip it is the sha256 of the archive on disk, for a folder it is the content digest.
+      // So a zip and its own extracted copy of the SAME FONT carried two different numbers, never
+      // collided here, and both imported - his find 2026-09-19, Energy / Energy_2 byte-identical.
+      // ⚠️ [B-314] was not wrong; its fixture was two twins of the SAME SHAPE, which do collide.
+      // ⚠️ Falls back to res.hash so a source that somehow yields no content digest still gets
+      // the old same-shape protection rather than none.
+      const _h = res.contentHash || res.hash || null;
       const _twin = _h ? _batchHashes.get(_h) : null;
-      if (_twin) batchDupCount++;
-      else if (_h) _batchHashes.set(_h, { idx: i, label });
+      // ⭐⭐ THE ZIP WINS, WHATEVER THE WALK ORDER. His ruling 2026-09-19: "take the zip over the
+      // extracted... so extracted is skipped." The zip is what the creator shipped - it carries
+      // the extras, and every provenance and savings claim is anchored to it.
+      // ⚠⚠ WITHOUT THIS, WHICH COPY SURVIVES IS AN ACCIDENT OF FILENAME ORDER. His zips happened
+      // to be named "1.1-Energy.zip", and "1" sorts before "E", so the folders became the later
+      // twin. Rename the folder and the ZIP would have been the one skipped. Shape decides, not
+      // the alphabet.
+      // ⭐⭐ THE RULE IS THE FULLEST SOURCE WINS. His wording 2026-09-19: "it's really the full
+      // source wins. duplicate font but one has more stuff around it... that wins." The keeper is
+      // the copy carrying the most AROUND the font - the extras used to build a customized version,
+      // or the exports for another board - because that is the material that cannot be recovered
+      // from the other copy.
+      // ⚠️ ZIP-VS-FOLDER IS NOT THE RULE and must not be re-introduced as one. It was my first
+      // draft and it is only a PROXY: a zip straight from the creator usually carries the extras
+      // and a hand-extracted folder is often a trimmed subset. Proxy, not principle - so rank on
+      // the measurement and let shape break ties.
+      // ⚠⚠ AND FOR AN EXACT TWIN THE RANKING IS ALWAYS A TIE, by definition: contentHash covers
+      // the WHOLE staged tree, extras included, so two sources that collide here hold byte-identical
+      // material and neither is fuller. Measured on his own pair - Energy/Energy_2, 55 files and one
+      // digest on both. The comparison is written anyway because it states the intended rule at the
+      // point the decision is made, and because the SUBSET case it really targets is a different
+      // check that does not exist yet (see [B-415]: different content, so no collision, so both
+      // import silently). Do not read this branch as covering that case.
+      const _isZip = (res.format || '').toLowerCase() === 'zip';
+      const _full = { files: res.fileCount || 0, bytes: res.totalBytes || res.fileSize || 0 };
+      // [B-415] Kept for the containment pass after the loop - see bulkImportContainment.js.
+      if (Array.isArray(res.fileHashes) && res.fileHashes.length) _batchFiles.push({ idx: i, hashes: res.fileHashes });
+      if (_twin) {
+        batchDupCount++;
+        // Fuller wins; on a tie the creator's own artifact wins; failing that the earlier row,
+        // so the outcome never depends on the order the folder happened to be walked in.
+        const _fuller = (_full.files !== _twin.full.files)
+          ? _full.files > _twin.full.files
+          : (_full.bytes !== _twin.full.bytes)
+            ? _full.bytes > _twin.full.bytes
+            : (_isZip && !_twin.isZip);
+        if (_fuller) _batchHashes.set(_h, { idx: i, label, isZip: _isZip, full: _full });
+      } else if (_h) {
+        _batchHashes.set(_h, { idx: i, label, isZip: _isZip, full: _full });
+      }
       // A twin is not new — counting it would put the review's number back above what
       // the import will produce, which is the whole complaint.
       if (corrupt) corruptCount++; else if (!_twin) newCount++;
@@ -721,7 +771,11 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
         // how "import anyway" finalizes without re-extracting. The library-duplicate
         // branch above learned this the hard way — dropping its `staged` field leaked
         // ~1.9 GB per re-analyze of a 12 GB card.
-        sameInBatch: _twin ? { idx: _twin.idx, label: _twin.label } : null,
+        // [B-415] `isZip` is THIS row's shape; `partnerIsZip` is the other one's. The renderer
+        // needs both to prefer the zip without re-deriving anything.
+        // [B-415] `keeps: false` means THIS row lost the ranking above, so the renderer unticks
+        // it rather than unticking whichever row came second in the walk.
+        sameInBatch: _twin ? { idx: _twin.idx, label: _twin.label, keeps: _batchHashes.get(_h).idx === i } : null,
         prepared: {
         uuid: res.uuid, hash: res.hash, format: res.format, name: res.name,
         fileSize: res.fileSize, sourceFileDate: res.sourceFileDate, sourceFileMtimeMs: res.sourceFileMtimeMs,
@@ -961,9 +1015,10 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
   // selection in the first place. The alternative is logic that has to decide when to
   // speak, and that is where a marker learns to disappear at the wrong moment.
   //
-  // ⚠️ Only the DEFAULT tick is decided by order (the renderer leaves the earlier row
-  // checked and unchecks the later one). That is a default, not a claim, and the claim is
-  // on both rows either way.
+  // ⚠️ Only the DEFAULT tick is decided here, never the claim - the yellow note is on BOTH
+  // rows either way, because both are equally true statements about the batch.
+  // ⭐ [B-415] WHICH row is unticked is `keeps`, ranked by fullest-source-wins above. It used to
+  // be "the later index", i.e. whichever order the folder happened to be walked in.
   {
     const _byIdx = new Map();
     for (const r of results) _byIdx.set(r.idx, r);
@@ -975,7 +1030,39 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
       // rather than accumulating a list — the row it names is still on screen and still
       // the one it is identical to.
       if (first && !first.sameInBatch) {
-        first.sameInBatch = { idx: r.idx, label: r.label != null ? r.label : (r.prepared && r.prepared.name) || '' };
+        // [B-415] The first row starts as the keeper and is demoted if any partner claims it.
+        // Three copies all point HERE, so this has to survive being visited more than once.
+        first.sameInBatch = { idx: r.idx, label: r.label != null ? r.label : (r.prepared && r.prepared.name) || '', keeps: true };
+      }
+      if (first && first.sameInBatch && r.sameInBatch.keeps) first.sameInBatch.keeps = false;
+    }
+  }
+
+  // ⭐⭐ [B-415] THE FULL SOURCE WINS - the half that equality cannot reach.
+  // Two sources can hold the SAME FONT while one carries five other board flavors around it, and
+  // their contentHashes then share nothing at all, so the twin check above never fires and both
+  // import. His words: "those would both import and be called identical fonts."
+  // ⚠️ RUNS AFTER the twin back-fill, never instead of it: exact twins are [B-314]'s and are
+  // deliberately left undecided by the ranker, so the two mechanisms cannot disagree about a row.
+  {
+    const { rankByContainment } = require('./bulkImportContainment');
+    const ranked = rankByContainment(_batchFiles);
+    if (ranked.size) {
+      const _byIdx = new Map();
+      for (const r of results) _byIdx.set(r.idx, r);
+      for (const [lostIdx, info] of ranked) {
+        const row = _byIdx.get(lostIdx);
+        const keeper = _byIdx.get(info.container);
+        if (!row || !keeper) continue;
+        // ⚠️ A row already settled as an exact twin is left alone. It is the same claim reached
+        // by a stricter test, and overwriting it would replace a precise note with a vaguer one.
+        if (row.sameInBatch) continue;
+        row.containedIn = {
+          idx: info.container,
+          label: keeper.label != null ? keeper.label : (keeper.prepared && keeper.prepared.name) || '',
+          contained: info.contained, of: info.of,
+        };
+        batchContainedCount++;
       }
     }
   }
@@ -986,7 +1073,7 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
   // two tests is ours, not theirs.
   // [B-314] `sameInBatch` is its own bucket, never folded into `duplicate` — that one
   // means "already in your library", and these are not.
-  return { ok: true, results, stats: { total, new: newCount, owned: ownedCount, duplicate: dupCount, corrupt: corruptCount, sameInBatch: batchDupCount, tracks } };
+  return { ok: true, results, stats: { total, new: newCount, owned: ownedCount, duplicate: dupCount, corrupt: corruptCount, sameInBatch: batchDupCount, containedInBatch: batchContainedCount, tracks } };
 }
 
 // Discard prepared-but-not-committed sources (user pruned them or cancelled).

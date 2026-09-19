@@ -1050,6 +1050,12 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
   emit('hashing', { percent: 0 });
 
   let hash;
+  // [B-415] The digest of what the font CONTAINS, as opposed to `hash` which identifies the
+  // source artifact. Equal for a folder; different for a zip. The intra-batch twin check reads
+  // this one, so a zip and its extracted copy can recognise each other.
+  let contentHash;
+  // [B-415] Unique per-file digests of the staged tree, for the batch containment check.
+  let fileHashes = [];
   let fileSize = 0;
   let totalBytes = 0;
   let fileCount = 0;
@@ -1146,6 +1152,24 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
       // answering Windows. The zip route's EXTRACT was already async — this hash pass was not,
       // which is why a zip source still stalled (899ms measured on 1.1-Energy.zip).
       const recz = (await fhz.collectFileRecordsAsync(destDir)) || [];
+      // ⭐⭐ THE CONTENT DIGEST, SEPARATE FROM `hash`. [B-415] `hash` for a zip is the sha256 of
+      // the ARCHIVE FILE on the user's disk, and it must stay that way: provenance and the
+      // savings anchor are both written against what the creator actually shipped. But that
+      // means a zip and its own extracted folder carry DIFFERENT hashes for identical fonts,
+      // so the intra-batch twin check ([B-314]) could never see them as the same thing.
+      // ⚠️ Costs nothing: recz is already in hand. The folder branch below has always had this
+      // digest — it just happens to BE its `hash`, which is why the asymmetry went unnoticed.
+      contentHash = fhz.hashRecords(recz);
+      // ⭐⭐ [B-415] THE PER-FILE HASHES, carried out so the batch can ask CONTAINMENT and not
+      // just equality. Measured on his own pair 2026-09-19: the full "1.2-lightsaber of the bells"
+      // package is 213 files across six board folders; the copy on his desktop is 32 files that
+      // are the CONTENTS of its proffie folder - and every one of that copy's 29 distinct hashes
+      // is present in the original, 100% contained, nothing unique to it. Their contentHashes
+      // share nothing, so equality can never see the relationship.
+      // ⚠️ COSTS NO NEW I/O. These records are already in hand for contentHash - this is the cheap
+      // path [B-415] said to look for before building the expensive one. A second hashing pass
+      // over extracted content is exactly what [B-398] spent a day making yield; do not add one.
+      fileHashes = fhz.uniqueFileHashes(recz);
       totalBytes = recz.reduce((s, r) => s + (r.size || 0), 0);
       fileCount = recz.length;
       fileSize = totalBytes;
@@ -1194,6 +1218,12 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
       // [B-398] Async twin — see the zip route above for why.
       const recs = (await fhm.collectFileRecordsAsync(destDir)) || [];
       hash = fhm.hashRecords(recs);
+      // [B-415] Same value, stated under the name the twin check reads. A folder has no
+      // archive, so its identity and its content digest are one number - but the CHECK must
+      // not have to know that.
+      contentHash = hash;
+      // [B-415] Same as the zip route above - see there for why containment needs these.
+      fileHashes = fhm.uniqueFileHashes(recs);
       totalBytes = recs.reduce((s, r) => s + (r.size || 0), 0);
       fileCount = recs.length;
       fileSize = totalBytes;
@@ -1256,7 +1286,7 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
       // Curation travels with the prepared source rather than being applied
       // now: the meta this belongs on does not exist until finalize. The temp
       // dir holding the receipts stays alive until then, and finalize removes it.
-      return { ok: true, isDuplicate: false, prepared: true, uuid, uuidDir, hash, format, name, fileSize, archiveBytes: inputArchiveBytes, sourceFileDate, sourceFileMtimeMs, totalBytes, fileCount, strippedFiles, blockedFiles, notedFiles, crossLinked, curation, curationTmp, curationPayloadDir };
+      return { ok: true, isDuplicate: false, prepared: true, uuid, uuidDir, hash, contentHash, fileHashes, format, name, fileSize, archiveBytes: inputArchiveBytes, sourceFileDate, sourceFileMtimeMs, totalBytes, fileCount, strippedFiles, blockedFiles, notedFiles, crossLinked, curation, curationTmp, curationPayloadDir };
     }
 
     const res = await _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format, name, hash, fileSize, sourceFileDate, sourceFileMtimeMs, metadata, strippedFiles, blockedFiles, notedFiles, curation, curationPayloadDir, crossLinked, deferCustomized });

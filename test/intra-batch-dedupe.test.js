@@ -40,14 +40,34 @@ function ok(name, cond, extra) {
 // ── the analyze remembers what it staged ───────────────────────────────────
 {
   ok('the run keeps its own hash set', /const _batchHashes = new Map\(\);/.test(bulk));
-  ok('it is seeded from the prepare hash', /_batchHashes\.set\(_h, \{ idx: i, label \}\)/.test(bulk));
+  // ⚠️ KEYED ON CONTENT SINCE [B-415]: `res.contentHash || res.hash`. A zip is identified by
+  // its archive sha256 and a folder by its content digest, so before this the same font in two
+  // shapes carried two keys, never collided, and both imported. The set entry also carries
+  // isZip now, because the zip outranks the folder whatever the walk order.
+  ok('it is seeded from the CONTENT hash, not the artifact hash',
+     /const _h = res\.contentHash \|\| res\.hash \|\| null;/.test(bulk));
+  // ⭐ [B-415] The entry records what the ranking needs: the shape, and how FULL the source is.
+  // Fullness is the rule (his: "the full source wins"); shape only breaks an exact tie.
+  ok('and the set entry records what the ranking needs',
+     /_batchHashes\.set\(_h, \{ idx: i, label, isZip: _isZip, full: _full \}\)/.test(bulk));
+  ok('fullness is measured from the whole staged tree, not the wavs alone',
+     /_full = \{ files: res\.fileCount \|\| 0, bytes: res\.totalBytes \|\| res\.fileSize \|\| 0 \}/.test(bulk));
   ok('and consulted before a source is called new', /_batchHashes\.get\(_h\)/.test(bulk));
 
-  const branch = bulk.slice(bulk.indexOf('} else if (res && res.ok && res.prepared) {'),
-                            bulk.indexOf('} else if (res && res.ok && res.prepared) {') + 1600);
+  // ⚠⚠ BOUNDED BY THE NEXT BRANCH, NOT BY A CHARACTER COUNT. A fixed +1600 window silently
+  // truncated the moment [B-415] added comments here, and two assertions below went red against
+  // code that was perfectly correct. A window that can rot is a test that will lie later.
+  const _bStart = bulk.indexOf('} else if (res && res.ok && res.prepared) {');
+  const _bEnd   = bulk.indexOf('results.push({ idx: i,', _bStart);
+  const branch  = bulk.slice(_bStart, _bEnd > _bStart ? _bEnd + 1200 : _bStart + 4000);
   ok('a twin is not counted as new', /else if \(!_twin\) newCount\+\+;/.test(branch),
      'counting it would put the review number back above what the import produces');
-  ok('a twin still carries its prepared object', /sameInBatch: _twin \? \{ idx: _twin\.idx, label: _twin\.label \} : null,[\s\S]{0,80}prepared: \{/.test(branch),
+  // ⚠️ MATCHED LOOSELY ON PURPOSE. The first version pinned the object literal field-for-field
+  // and broke the moment [B-415] added `keeps` to it - against code that was more correct than
+  // before. What this case actually protects is that a twin still carries `prepared`, so "import
+  // anyway" can finalize from the staged copy instead of extracting a second time.
+  ok('a twin still carries its prepared object',
+     /sameInBatch: _twin \?[\s\S]{0,160}?prepared: \{/.test(branch),
      'the uuid is how "import anyway" finalizes without re-extracting');
 }
 
@@ -118,22 +138,40 @@ function ok(name, cond, extra) {
      'inline copies are how review and quick import came to disagree');
   if (_expr) {
     const decide = new Function('s', `return (${_expr});`);
-    ok('⭐⭐ the row scanned SECOND is the one held back',
-       decide({ _idx: 5, _sameInBatch: { idx: 2 } }) === true);
-    ok('⭐⭐ and the row scanned FIRST keeps its tick',
-       decide({ _idx: 2, _sameInBatch: { idx: 5 } }) === false,
+    // ⭐⭐ [B-415] THE RULE IS NO LONGER "SECOND LOSES". His wording 2026-09-19: "it's really the
+    // full source wins. duplicate font but one has more stuff around it... that wins." The ranking
+    // happens in soundFontBulkImport and arrives as `keeps`; the renderer only obeys it.
+    ok('⭐⭐ the row the ranking did not keep is held back',
+       decide({ _idx: 5, _sameInBatch: { idx: 2, keeps: false } }) === true);
+    ok('⭐⭐ and the keeper stays ticked', 
+       decide({ _idx: 2, _sameInBatch: { idx: 5, keeps: true } }) === false,
        'inverting this holds back the wrong copy, and nothing on screen would say so');
+
+    // ⚠⚠ AND THE EARLIER ROW CAN NOW LOSE, which is the entire change. Under the old predicate
+    // this case was unreachable: idx 2 vs idx 5 meant idx 2 always survived, so a fuller copy
+    // sitting later in the walk was discarded in favour of a trimmed one that happened to be
+    // named first. Pinned as its own case because it is the behaviour nobody would notice.
+    ok('⭐⭐ a LOWER index loses when it is not the fuller source',
+       decide({ _idx: 2, _sameInBatch: { idx: 5, keeps: false } }) === true,
+       'if this is false the ranking is being overridden by walk order again');
+
     ok('⚠️ a row with no twin is never held back', decide({ _idx: 2 }) === false);
-    ok('⚠️ a missing index decides nothing rather than guessing',
+    // ⚠⚠ NO `keeps` MEANS KEEP IT. A row from an analyze that predates this field must stay
+    // TICKED - that is the safe direction. Unticking on a fact we could not establish silently
+    // drops a font the user asked for.
+    ok('⚠️ an unranked row is kept rather than guessed at',
        decide({ _sameInBatch: { idx: 5 } }) === false &&
-       decide({ _idx: 2, _sameInBatch: {} }) === false,
-       'defaulting to "later" would hold back a row for a fact we could not establish');
+       decide({ _idx: 2, _sameInBatch: {} }) === false);
   }
 
-  ok('⚠️ and "later" is decided by the PLAN index, not by row order',
-     /s\._idx > s\._sameInBatch\.idx/.test(html),
-     'a row position in the FILTERED review list is a different number entirely');
-
+  // ⚠⚠ ASSERTED ON THE PREDICATE, NOT ON THE FILE. The previous version grepped the whole of
+  // index.html for `s._idx > s._sameInBatch.idx` - and it went on PASSING after that comparison
+  // was deleted, because the comment explaining why it was deleted still contained the string.
+  // A test that greps a 44k-line file for a fragment of code will eventually match prose about
+  // the code. Ask the predicate instead.
+  ok('⚠️ walk order no longer decides anything',
+     !!_expr && !/_idx\s*>\s*s\._sameInBatch\.idx/.test(_expr),
+     'the ranking is upstream now; comparing indices here re-introduces the bug');
   // ⭐⭐ QUICK IMPORT HONOURS IT TOO — the door that was missed.
   //
   // His dev test of the untick, 2026-09-16: "correctly unchecked and would have been

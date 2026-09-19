@@ -332,5 +332,19 @@ function hashBucketChildren(bucketRoot) {
   return out;
 }
 
-module.exports = { hashItemDir, hashBucketChildren, collectFileRecords, collectFileRecordsAsync,
+
+// ⭐ [B-415] The DISTINCT file digests of a staged tree, for asking whether one source's
+// content is CONTAINED in another's rather than equal to it.
+// ⚠️ Truncated to 16 hex chars deliberately. A batch can hold thousands of files across
+// hundreds of sources and these sets are held in memory for the whole analyze; 64 bits is far
+// past collision risk at that scale, and the full digest is still on the record if ever needed.
+// ⚠️ DE-DUPLICATED, so repeated files inside one source cannot inflate it - a set, not a list.
+function uniqueFileHashes(records) {
+  const out = new Set();
+  for (const r of (records || [])) if (r && r.hash) out.add(String(r.hash).slice(0, 16));
+  return Array.from(out);
+}
+
+module.exports = {
+  uniqueFileHashes, hashItemDir, hashBucketChildren, collectFileRecords, collectFileRecordsAsync,
   hashRecords, hashFile: _hashFile, hashFileAsync, writeFileHashManifest, readFileHashManifest, breathe };
