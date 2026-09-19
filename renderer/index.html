@@ -14445,6 +14445,13 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         // number needs no adjusting to match — `new` never counted a twin, so this line
         // and the one above already partition correctly: 5 will import, 1 is held back.
         if (st.sameInBatch) rows.push(['Same font twice in this import (skipped)', st.sameInBatch, false, true]);
+        // ⭐⭐ [B-415] ITS OWN LINE, for the same reason the twin line has one: this is not
+        // "already in your library" and must never be folded into it. The font is in THIS import,
+        // inside a fuller copy of the same package - a full download plus the one font somebody
+        // pulled out of it to use. His rule: "the full source wins."
+        // ⚠️ `new` has already had these taken out upstream, so this line and the headline
+        // partition: 6 will import, 2 are held back.
+        if (st.containedInBatch) rows.push(['Also inside a fuller source in this import (skipped)', st.containedInBatch, false, true]);
         // ⚠️⚠️ [B-397] A REGRESSION FROM edac3cd (2026-08-31), found by him 2026-09-16 on BOTH
         // bulk import and SD card import — they share this modal, so one line broke two doors.
         // What this replaced, and it worked:

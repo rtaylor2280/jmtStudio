@@ -168,6 +168,26 @@ const H = (n, p) => Array.from({ length: n }, (_, i) => (p || 'h') + i);
   ok('⚠️ a row already settled as an exact twin is left alone',
      /if \(row\.sameInBatch\) continue;/.test(bulk));
 
+  // ⭐⭐ AND IT COMES OUT OF `new`. The twin check decrements inline because it decides DURING
+  // the loop; this ranking decides after it, so the row was already counted as new. He hit exactly
+  // this: the summary still read "8 new sound fonts" on a run where the ranking HAD fired and only
+  // 6 would import - indistinguishable, from the outside, from the feature not working at all.
+  // ⚠️ THE INVARIANT THE SUMMARY RELIES ON: `new` counts only what will actually import. Two
+  // lines on one screen that do not partition is the [B-296] failure.
+  ok('⭐⭐ a contained source is taken out of the new count',
+     /if \(newCount > 0\) newCount--;/.test(bulk),
+     'leaving it counted makes the summary contradict the import');
+
+  ok('⚠️ the summary shows the held-back count on its own line',
+     /rows\.push\(\['Also inside a fuller source in this import \(skipped\)', st\.containedInBatch/.test(html));
+
+  // ⚠⚠ NEVER folded into the library line - the font is not in the library, it is in this import.
+  {
+    const _r = html.indexOf("'Also inside a fuller source in this import (skipped)'");
+    const line = html.slice(_r, _r + 140);
+    ok('⚠⚠ it does not claim the library owns it', !/already in your library/i.test(line), line);
+  }
+
   ok('the count is its own bucket, not folded into the others',
      /containedInBatch: batchContainedCount/.test(bulk)
        && !/duplicate: [^,]*batchContainedCount/.test(bulk));

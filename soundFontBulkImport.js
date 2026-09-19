@@ -1063,6 +1063,12 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
           contained: info.contained, of: info.of,
         };
         batchContainedCount++;
+        // ⚠⚠ AND IT COMES OUT OF `new`. The twin check decrements inline because it decides
+        // DURING the loop; this ranking can only decide after it, so the row was already counted.
+        // Leaving it counted makes the summary say "8 new" while 6 import - the two lines on one
+        // screen would contradict each other, which is the [B-296] failure exactly.
+        // ⭐ The invariant the summary relies on: `new` counts only what will actually import.
+        if (newCount > 0) newCount--;
       }
     }
   }
