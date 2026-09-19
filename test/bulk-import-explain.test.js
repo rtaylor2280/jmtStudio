@@ -173,7 +173,11 @@ function ok(label, cond, detail) {
   // lands mid-statement and everything before it falls outside the window. Third anchoring slip of
   // the day; the pattern is always the same, an anchor that is not where I pictured it.
   const noteAt = html.indexOf('const _srcNote = canFonts');
-  const note = html.slice(noteAt, noteAt + 900);
+  // ⚠️ Comments stripped and joins collapsed, same as the explain screen above. Asserting on
+  // copy means looking at copy, not at a window that also contains prose about the copy.
+  const _noteRaw = html.slice(noteAt, noteAt + 1600);
+  const note = _noteRaw.split(/\r?\n/).filter(l => !/^\s*\/\//.test(l)).join('\n')
+                       .replace(/'\s*\+\s*'/g, '');
   ok('it is conditional on there being fonts to import', noteAt > 0, 'declaration not found');
 
   // ⭐ It must read as "there is a better road if you have it", never "you did the wrong thing".
@@ -181,9 +185,16 @@ function ok(label, cond, detail) {
   // ⚠️ Match a fragment that is NOT split across concatenated literals. The sentence is built
   // as 'If you still have the ' + 'original downloads, ...' so the full phrase never appears
   // contiguously in source — asserting on it failed against copy that reads correctly on screen.
+  // ⭐ HIS WORDING 2026-09-19: the originals get a USE, not a vague future export. The extras
+  // are what a customized version is built from, and a card copy does not carry them.
   ok('it explains the trade rather than scolding',
-     /if you still have the /i.test(note) && /you keep the full originals/i.test(note)
+     /if you have the original downloads/i.test(note)
+       && /extras to create customized versions/i.test(note)
        && !/should have/i.test(note), note);
+
+  // ⚠️ "sit" was wrong for files - his catch. The scene-setting sentence is gone entirely and
+  // the actionable half leads.
+  ok('it does not say the files "sit" on the card', !/as they sit on the card/i.test(note));
 
   ok('the note is styled muted, not as a warning',
      /\.sd-rpt-src-note \{[^}]*--c-text-muted/.test(html));

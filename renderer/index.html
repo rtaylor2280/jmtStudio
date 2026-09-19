@@ -10742,9 +10742,19 @@ function _sdActionRowHtml(c) {
   // only road left — the originals are gone, or were never kept. This says there is a better road
   // IF they have it, and says nothing at all when they do not.
   const _srcNote = canFonts
-    ? '<p class="sd-rpt-src-note">These come in as they sit on the card. If you still have the '
-      + 'original downloads, <a href="#" id="sd-act-bulk-instead">bulk import from that folder</a> '
-      + 'instead. You keep the full originals and can export a complete copy of any font later.</p>'
+    // ⭐ HIS WORDING, 2026-09-19, and the improvement is that it gives the originals a USE. Mine
+    // said you "can export a complete copy of any font later" — true, vague, and a benefit nobody
+    // feels. His names what the extras are FOR: creators ship alternates and variants that a card
+    // copy simply does not carry, and those are what a customized version is built from.
+    // ⚠️ "as they sit on the card" is gone — his call, and he is right that "sit" is wrong for
+    // files. That sentence was scene-setting; the actionable half leads now.
+    // ⚠️ THE LINK IS TWO WORDS ON PURPOSE. It read "bulk import from that folder", which wrapped
+    // mid-phrase and split the link across two lines. A short link cannot break awkwardly however
+    // the paragraph reflows.
+    ? '<p class="sd-rpt-src-note">If you have the original downloads, '
+      + '<a href="#" id="sd-act-bulk-instead">bulk import</a> from that folder or zip instead. '
+      + 'You keep the full originals and extras to create customized versions, or attach directly '
+      + 'from one you have already customized.</p>'
     : '';
   return `<div class="sd-rpt-actions">${btns.join('')}</div>${_srcNote}`;
 }
@@ -14606,10 +14616,17 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       // separate statement two lines down that reads like marketing.
       // ⚠️ The mechanism is SUBORDINATE now ("because..."), which is its correct weight: it exists
       // only to answer the question the thesis raises, and a co-equal sentence overstated it.
+      // ⭐ WHY THE ORIGINALS ARE IDEAL, his call 2026-09-19: "the customized versions probably
+      // belongs in the same wording for the bulk explanation too." The screen called original zips
+      // "ideal" and never said why, which is an assertion rather than a reason. The extras are the
+      // why: creators ship alternates and variants a card copy does not carry, and those are what a
+      // customized version is built from. Same sentence now appears on the SD card note, so both
+      // doors teach the same thing.
       'Choose a folder of fonts you already own. The original zip files as you downloaded them '
-      + 'from the creator are ideal, but unzipped folders work too. Keep everything: Studio saves '
-      + 'the space and your files stay exactly as they came, because identical sounds are stored '
-      + 'once and used everywhere they appear.';
+      + 'from the creator are ideal, since they include the extras used to create customized '
+      + 'versions or to export for a different board later. Unzipped folders work too. '
+      + 'Keep everything: Studio saves the space and your files stay exactly as they came, '
+      + 'because identical sounds are stored once.';
     // ⚠️ VOCABULARY MATCHES THE REVIEW SCREEN, deliberately. That screen already says "Quick
     // import adds the discovered sound fonts and folders with the names and creators as detected"
     // and "Review import lets you rename, set creators, add a demo link". Two different
