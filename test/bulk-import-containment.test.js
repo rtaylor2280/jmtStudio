@@ -165,8 +165,11 @@ const H = (n, p) => Array.from({ length: n }, (_, i) => (p || 'h') + i);
   ok('⚠️ it runs after the exact-twin pass', backfillAt > 0 && rankAt > backfillAt,
      'running first would let the vaguer claim overwrite the precise one');
 
-  ok('⚠️ a row already settled as an exact twin is left alone',
-     /if \(row\.sameInBatch\) continue;/.test(bulk));
+  // ⚠️ Pinned as the NARROW form. The broad `if (row.sameInBatch) continue` also shielded a
+  // twin keeper from the containment pass - see the three-copy case above, which is where that
+  // cost a survivor.
+  ok('⚠️ a row already held back is left alone',
+     /if \(row\.sameInBatch && row\.sameInBatch\.keeps === false\) continue;/.test(bulk));
 
   // ⭐⭐ AND IT COMES OUT OF `new`. The twin check decrements inline because it decides DURING
   // the loop; this ranking decides after it, so the row was already counted as new. He hit exactly
@@ -184,8 +187,36 @@ const H = (n, p) => Array.from({ length: n }, (_, i) => (p || 'h') + i);
   ok('⭐⭐ containment routes through the existing twin field',
      /row\.sameInBatch = \{ idx: info\.container, label: _kLabel, keeps: false \};/.test(bulk));
 
+  // ⭐⭐ THREE COPIES, AND THE GUARD THAT NEARLY BROKE IT. His question 2026-09-19: "what if it
+  // were in there 3 times?" Reproduced with pkg + bare1 + bare2, where the two bare copies are
+  // byte-identical and both sit inside pkg. bare1 and bare2 pair off as exact twins FIRST, bare1
+  // wins that contest and is marked a keeper - and the original guard, `if (row.sameInBatch)
+  // continue`, then shielded it from the containment pass. Result: pkg AND bare1 both imported.
+  // ⭐ WINNING ONE CONTEST IS NOT IMMUNITY FROM THE NEXT. Only a row already HELD BACK is skipped.
+  ok('⭐⭐ a twin keeper can still lose to a fuller source',
+     /if \(row\.sameInBatch && row\.sameInBatch\.keeps === false\) continue;/.test(bulk),
+     'the broad guard leaves two survivors when the same font appears three times');
+
+  // ⚠⚠ AND THE ROWS THAT NAMED IT HAVE TO BE RE-POINTED. bare2's note named bare1 as the copy
+  // being kept; bare1 has just been held back itself, so the note would name a row that is not
+  // importing either - a sentence true of nothing on screen.
+  ok('⚠⚠ rows pointing at a demoted keeper are re-pointed',
+     /other\.sameInBatch = \{ idx: info\.container, label: _kLabel, keeps: false \};/.test(bulk));
+
+  // ⭐⭐ THE ROW SAYS WHICH WAY THE CHOICE WENT. His call: "don't we know that it was more complete
+  // so message can say ... and then add 'This one is more complete'". Without it both rows read
+  // identically - same sentence on the ticked one and the unticked one - so the screen states that
+  // a choice was made and withholds which way.
+  ok('⭐⭐ the winner is marked as the fuller copy', /keeps: true, fuller: true \}/.test(bulk));
+
+  // ⚠⚠ EXACT TWINS MUST NOT INHERIT IT. They are equal, so "more complete" would be false.
+  {
+    const twinSet = bulk.slice(bulk.indexOf('sameInBatch: _twin ?'), bulk.indexOf('sameInBatch: _twin ?') + 260);
+    ok('⚠⚠ an exact twin makes no completeness claim', !/fuller/.test(twinSet), twinSet);
+  }
+
   ok('⚠️ the claim lands on the keeper too, as [B-314] does it',
-     /if \(!keeper\.sameInBatch\) keeper\.sameInBatch = \{ idx: lostIdx, label: _lLabel, keeps: true \};/.test(bulk));
+     /if \(!keeper\.sameInBatch\) keeper\.sameInBatch = \{ idx: lostIdx, label: _lLabel, keeps: true, fuller: true \};/.test(bulk));
 
   ok('it counts into the one bucket', /batchDupCount\+\+;/.test(bulk));
 
@@ -232,9 +263,22 @@ const H = (n, p) => Array.from({ length: n }, (_, i) => (p || 'h') + i);
   ok('⚠⚠ it never claims the library already has it',
      !/already in your library/i.test(copy), copy);
 
-  // ⚠️ The word "fuller" is deliberately absent from the UI. It is our reasoning for which copy
-  // won, not a fact the reader needs.
-  ok('⚠️ the UI does not explain fullness', !/fuller/i.test(copy), copy);
+  // ⭐⭐ INVERTED, on his call 2026-09-19: "don't we know that it was more complete so message
+  // can say ... and then add 'This one is more complete'". The earlier version of this case
+  // asserted the opposite - that the screen stays silent about why - and that left BOTH rows
+  // reading identically, stating a choice was made while withholding which way it went.
+  ok('⭐⭐ the winning row says it is the more complete copy',
+     /This one is more complete\./.test(copy), copy);
+
+  // ⚠️ ASSERTED ON THE STRING LITERALS, not the function body - `fuller` is a PROPERTY NAME in
+  // this branch, so scanning the source would fail forever on code that is perfectly correct.
+  // Same anchoring trap as every other one this week: asserting about words while looking at
+  // something that is not only words.
+  {
+    const _lit = (copy.match(/'[^']*'/g) || []).join(' ') + ' ' + (copy.match(/`[^`]*`/g) || []).join(' ');
+    ok('⚠️ and says it in plain words, not our vocabulary',
+       !/fuller/i.test(_lit) && !/contain(ed|ment)/i.test(_lit), _lit.slice(0, 200));
+  }
 
   // ⚠️ Unticked, NOT disabled. Wanting the single font separate from the full package is a real
   // choice, and it is one click away.

@@ -1052,22 +1052,46 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
         const row = _byIdx.get(lostIdx);
         const keeper = _byIdx.get(info.container);
         if (!row || !keeper) continue;
-        // ⚠️ A row already settled as an exact twin is left alone - same claim, stricter test.
-        if (row.sameInBatch) continue;
+        // ⚠⚠ ONLY SKIP A ROW THAT IS ALREADY HELD BACK. The first cut skipped any row carrying
+        // `sameInBatch` at all, and that quietly left TWO survivors when the same font appeared
+        // three times - his question, and it took about a minute to reproduce:
+        //     pkg (font + cfx + readme) | bare1 | bare2   ->   pkg AND bare1 both imported
+        // bare1 and bare2 pair off as exact twins, bare1 wins THAT contest and is marked a keeper,
+        // and the keeper mark then shielded it from the containment pass that should have put it
+        // inside pkg. ⭐ WINNING ONE CONTEST IS NOT IMMUNITY FROM THE NEXT.
+        if (row.sameInBatch && row.sameInBatch.keeps === false) continue;
+        const _wasKeeper = !!row.sameInBatch;
         const _kLabel = keeper.label != null ? keeper.label : (keeper.prepared && keeper.prepared.name) || '';
         const _lLabel = row.label != null ? row.label : (row.prepared && row.prepared.name) || '';
         // ⭐⭐ THE SAME CATEGORY AS AN EXACT TWIN, SO IT USES THE SAME FIELD. His call 2026-09-19:
         // "isn't it the same category as whatever our wording was for duplicate on source? don't
         // need to tell about fuller - that was what informed our choice... but we still only kept 1."
         // Fullness decided WHICH copy survives; it is not a second thing that happened to the user.
-        // ⚠⚠ SO THERE IS NO SECOND NOTE, NO SECOND PREDICATE ARM AND NO SECOND SUMMARY LINE. Routing
-        // it through `sameInBatch` means the untick, the quick-import filter, the row note and the
-        // count all already work - the parallel track I built for this was the mistake.
+        // ⚠⚠ SO THERE IS NO SECOND NOTE, NO SECOND PREDICATE ARM AND NO SECOND SUMMARY LINE.
         row.sameInBatch = { idx: info.container, label: _kLabel, keeps: false };
-        // The claim sits on BOTH rows, exactly as [B-314] does it: each is a true statement about
-        // the batch, and the keeper is the one that stays ticked.
-        if (!keeper.sameInBatch) keeper.sameInBatch = { idx: lostIdx, label: _lLabel, keeps: true };
-        batchDupCount++;
+        // ⭐⭐ `fuller` IS WHY THIS ONE WON, AND THE ROW IS ALLOWED TO SAY SO. His call 2026-09-19:
+        // "don't we know that it was more complete so message can say 'Same font as G-Grievous in
+        // this import.' and then add 'This one is more complete'".
+        // ⚠⚠ WITHOUT IT BOTH ROWS READ IDENTICALLY - the same sentence on the ticked one and the
+        // unticked one - so the screen states that a choice was made and then withholds which way.
+        // ⚠️ SET ONLY WHEN FULLNESS DECIDED IT. Exact twins are equal, so there is nothing truthful
+        // to say about either being more complete, and they must NOT inherit this.
+        if (!keeper.sameInBatch) keeper.sameInBatch = { idx: lostIdx, label: _lLabel, keeps: true, fuller: true };
+        else keeper.sameInBatch.fuller = true;
+        // ⚠⚠ AND ANYONE WHO WAS POINTING AT THIS ROW HAS TO BE RE-POINTED. bare2's note named
+        // bare1 as the copy being kept; bare1 has just been held back itself, so the note would
+        // name a row that is not importing either - true of nothing the user can see.
+        if (_wasKeeper) {
+          for (const other of results) {
+            if (other === row || !other.sameInBatch) continue;
+            if (other.sameInBatch.idx === lostIdx && other.sameInBatch.keeps === false) {
+              other.sameInBatch = { idx: info.container, label: _kLabel, keeps: false };
+            }
+          }
+        } else {
+          // Already counted as a duplicate when it lost the twin contest; do not count it twice.
+          batchDupCount++;
+        }
         // ⚠⚠ AND IT COMES OUT OF `new`. The twin check decrements inline because it decides DURING
         // the loop; this ranking can only decide after it, so the row was already counted. Leaving
         // it counted made the summary read "8 new" on a run where 6 imported - indistinguishable,

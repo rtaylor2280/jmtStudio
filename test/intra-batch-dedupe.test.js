@@ -88,7 +88,7 @@ function ok(name, cond, extra) {
   ok('⚠️ and so is its plan index, because the list is filtered',
      /s\._sameInBatch = r\.sameInBatch; s\._idx = r\.idx;/.test(html));
   ok('the breakdown gives it its own line, and says it is SKIPPED',
-     /'Same font twice in this import \(skipped\)', st\.sameInBatch/.test(html),
+     /'Same font already in this import \(skipped\)', st\.sameInBatch/.test(html),
      'it stopped importing by default on 2026-09-16, so the row had to say so');
 
   // ⚠⚠ BOUNDED BY THE BRANCH, NOT BY A CHARACTER COUNT. The first cut of this sliced a
