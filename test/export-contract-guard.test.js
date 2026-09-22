@@ -92,6 +92,73 @@ ok('the stopped notice independently filters leftovers',
    /const _namedLeftovers = \(leftovers \|\| \[\]\)\.filter\(/.test(H),
    'the notice is reachable from callers that never touched the runner');
 
+// ── A DOOR THAT DECLARES A SUMMARY MUST ACTUALLY DRAW ONE ────────────
+//
+// ⭐⭐ `ending: 'summary'` IS A DECLARATION, NOT A RENDERER. `_sfExportOutcome` does not draw a
+// summary — it calls the door's `onCompleted` and lets the door draw its own ending. So a door
+// can resolve to 'summary' and then show a toast, and nothing anywhere objects.
+//
+// ⚠️⚠️ THIS HAS NOW HAPPENED TWICE, IN THE SAME POSITION, ON CONSECUTIVE DAYS:
+//   2026-09-21  common-as-zip declared a summary and drew nothing. His report: "there was also
+//               no summary on it..."
+//   2026-09-22  the font card declared a summary and drew a TOAST. His report: "on first test of
+//               it, it came through as a toast".
+//
+// The runner already guards the first shape - a declared summary with no `onCompleted` degrades
+// to a toast rather than to silence. That guard cannot see the second shape, because the
+// `onCompleted` exists; it just draws the wrong thing. This check closes that.
+//
+// ⭐ His rule, 2026-09-21, is what decides which doors are in scope: "2,5,7,9 toast and all
+// others summary. so the rule is file selection right click." The funnel doors carry
+// `kind: 'files'`, which `_sfExportEnding` maps to a toast. Everything else owes a summary.
+{
+  // Brace-match each call so a door is never mis-measured by a fixed-width window.
+  const doorCalls = [];
+  const re = /await _sfRunExport\(\{/g;
+  let m;
+  while ((m = re.exec(H))) {
+    let i = m.index + m[0].length - 1, depth = 0;
+    do {
+      if (H[i] === '{') depth++;
+      else if (H[i] === '}') depth--;
+      i++;
+    } while (i < H.length && depth > 0);
+    const body = H.slice(m.index, i);
+    const kind = (body.match(/endState:\s*\{\s*kind:\s*'([^']+)'/) || [])[1] || 'tree';
+    const override = (body.match(/\n\s*ending:\s*'([^']+)'/) || [])[1] || null;
+    // ⚠️ THE DOOR'S OWN TITLE IS THE FIRST ONE, WHICHEVER QUOTE IT USES. Trying single quotes
+    // across the whole body first picked up `title: 'Export complete'` from the
+    // `_sfCompletionNotice` call NESTED INSIDE the door - so two different doors both reported
+    // as "Export complete" and a failure would have named the wrong one. Order by position.
+    const _t = [/title:\s*'([^']*)'/, /title:\s*`([^`]*)`/]
+      .map((rx) => body.match(rx))
+      .filter(Boolean)
+      .sort((a, b) => a.index - b.index)[0];
+    const title = (_t && _t[1]) || '(untitled)';
+    doorCalls.push({ title, kind, override, body,
+                     line: H.slice(0, m.index).split('\n').length });
+  }
+  ok('door call sites were located', doorCalls.length >= 3,
+     `found ${doorCalls.length}; re-check the brace matcher if this dropped`);
+
+  for (const d of doorCalls) {
+    const ending = d.override || (d.kind === 'files' ? 'toast' : 'summary');
+    if (ending !== 'summary') continue;
+    ok(`"${d.title}" (index.html:${d.line}) draws the summary it declares`,
+       /_sfCompletionNotice\(/.test(d.body),
+       'its ending resolves to `summary`, but `_sfExportOutcome` only calls onCompleted - the '
+       + 'door has to draw it. Without _sfCompletionNotice this door shows a toast, or nothing, '
+       + 'while reporting itself as a summary door (and suppressing the eject row with it)');
+    // ⚠️ AND THE EJECT ROW GOES WITH IT. A summary door that omits `summaryHasEject` gets a
+    // SECOND eject offer as a toast, which is the parallel surface he ruled out: "the eject
+    // shouldn't be its own modal. It should take place on the summary screen."
+    ok(`  and declares summaryHasEject so the eject is not offered twice`,
+       /summaryHasEject:\s*true/.test(d.body),
+       'the during-export checkbox clicks the summary row; without this flag a toast eject '
+       + 'fires as well');
+  }
+}
+
 // ── ⚠️⚠️ THE TEST PROVES ITSELF ─────────────────────────────────────
 //
 // A guard test that reports green is indistinguishable from a guard test that cannot see. Every

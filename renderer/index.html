@@ -25234,6 +25234,129 @@ require(['vs/editor/editor.main'], function () {
           },
         });
       };
+      // ── Export a common AS A FOLDER, the card shape ──────────── [2026-09-22]
+      //
+      // The sibling above writes a portable ZIP named for the pack. This writes what ProffieOS
+      // actually reads: a folder literally named `common`, alongside the font folders on a card.
+      // Until now there was no door for it at all, which is the hole he found: "should have
+      // another option under that to Export common folder which isn't a zip but a folder called
+      // common with all those files".
+      //
+      // ⚠️ THE PACK NAME IS NOT IN THE RESULT, and that is correct rather than a limitation. The
+      // card layout hardcodes `common`; a folder named for the pack would be invisible to the
+      // saber. This is exactly why the 2026-08-31 pass removed the folder behaviour from the
+      // single "Export…" item: it silently did this when someone wanted a portable copy. Two
+      // named items is the fix, and the summary says which folder was written.
+      //
+      // ⚠️ IDENTITY-BEARING, SO NO NUMBERING. `common_2` on a card is read by nothing. Same rule
+      // as the font folder: when ProffieOS resolves it by name, a collision is a question rather
+      // than something to absorb with a suffix, and Skip is the default answer.
+      const _sfExportCommonFolderPrompt = async (uuid) => {
+        const c = _sfCommons.find(x => x.uuid === uuid);
+        if (!c) return;
+        const label = (c.meta && c.meta.name) || 'common folder';
+        const TARGET = 'common';
+        // PICK FIRST, THEN show progress - the dialog is the user browsing, and a bar sitting at
+        // zero while they look for a folder reports progress on a job that has not started.
+        const pick = await window.electronAPI.pickExportDir({
+          title: `Choose where to write the common folder for "${label}"…`,
+        });
+        if (!pick || !pick.ok) return;
+
+        let r = null;
+        let _outcome = 'wrote';          // 'wrote' | 'identical' | 'kept'
+        const _t0 = Date.now();
+        const _run = await _sfRunExport({
+          label: 'files',
+          title: `Exporting ${label}`,
+          destDir: pick.destDir,
+          endState: { kind: 'tree' },
+          summaryHasEject: true,
+          deltas: true,
+          onCancel: _sfExportCancelOpt.onCancel,
+          plan: async () => ({
+            items: [],
+            totalBytes: (c && c.totalBytes) || 0,
+            fileCount: (c && c.fileCount) || 0,
+          }),
+          compare: async () => {
+            let m = null;
+            try {
+              const _up = (() => {
+                try {
+                  const el = document.getElementById('modal-sf-bulk-progress');
+                  return !!(el && el.classList.contains('active'));
+                } catch { return false; }
+              })();
+              m = await _sfRunWithByteProgress('Checking the destination', () =>
+                window.electronAPI.commonMatchesAt({
+                  uuid, destDir: pick.destDir, targetName: TARGET,
+                }), { alreadyOpen: _up, keepOpen: true });
+            } catch {}
+            if (!(m && m.ok && m.exists)) { _outcome = 'wrote'; return { mode: 'replace' }; }
+            if (m.identical) { _outcome = 'identical'; return { mode: 'skip' }; }
+            // ⚠️ A common folder replaces as a UNIT, which is the shared prompt's own wording for
+            // this kind. Per-file merging would mix one pack's sounds with another's.
+            const picked = await _sfPromptSaveConflicts([TARGET], {
+              title: 'A common folder is at the destination',
+              description: 'The common folder at the destination is different from this one. '
+                + 'Replacing it overwrites the whole folder.',
+              defaultMode: 'skip',
+            });
+            if (picked === null) return null;
+            const mode = (picked && typeof picked.get === 'function' && picked.get(TARGET))
+              || 'skip';
+            _outcome = mode === 'replace' ? 'wrote' : 'kept';
+            return { mode };
+          },
+          produce: async ({ decisions, boardCard }) => {
+            const mode = (decisions && decisions.mode) || 'replace';
+            try {
+              r = await window.electronAPI.exportCommonToFolder({
+                uuid, destDir: pick.destDir, mode, targetName: TARGET, boardCard,
+              });
+            } catch (err) {
+              r = { ok: false, error: String(err && err.message || err) };
+            }
+            return r;
+          },
+          onCompleted: async () => {
+            const fmt = window._sfFormatBytesShort || window._sfFormatBytes || ((n) => n + ' B');
+            const size = (c && c.totalBytes) || 0;
+            const files = (c && c.fileCount) || 0;
+            if (_outcome === 'identical' || _outcome === 'kept') {
+              await _sfCompletionNotice({
+                title: 'Nothing exported',
+                message: (_outcome === 'identical'
+                  ? `The common folder at the destination matches ${label}.`
+                  : `The common folder at the destination was kept.`)
+                  + `\n\n${pick.destDir}`,
+                destDir: pick.destDir,
+              });
+              return;
+            }
+            const amount = files > 0
+              ? `${files} file${files === 1 ? '' : 's'} · ${fmt(size)}`
+              : fmt(size);
+            // ⭐ Names BOTH: what was written (`common`, the folder ProffieOS reads) and which
+            // pack it came from. Saying only one of the two is the question this door invites.
+            const lines = [`Exported ${label} as common: ${amount}.`];
+            lines.push(`${pick.destDir}\\${TARGET}`);
+            const secs = (Date.now() - _t0) / 1000;
+            lines.push(window._sfFormatDuration
+              ? `Took ${window._sfFormatDuration(secs)}.`
+              : `Took ${Math.round(secs)}s.`);
+            await _sfCompletionNotice({
+              title: 'Export complete',
+              message: lines.join('\n\n'),
+              destDir: pick.destDir,
+            });
+          },
+        });
+        if (!_run || !_run.ok || _run.canceled) return;
+        await _sfShowProgramRefusal({ refused: (r && r.refused), kind: 'common', id: label });
+      };
+
       const _sfAddCommonFiles = async () => {
         if (!_sfSelectedCommonUuid) return;
         let pick;
@@ -41420,85 +41543,203 @@ require(['vs/editor/editor.main'], function () {
           // progress call below was already reading it for its determinate bar.
           const _fontBytes = (((_sfAllEntries || []).find(x => x && x.name === fontName) || {})
             .meta || {}).contentTotalBytes || 0;
-          // ⭐ ONE PREFLIGHT. [B-005 item 4] Was a fit check and a slow-write warning in two
-          // blocks, the second re-reading the same entry's meta to get numbers the first
-          // already had.
-          let _fontBoardCard = false;
-          let _fontRemovable = null;     // null = not established; the runner will look it up
-          {
-            const _m = (((_sfAllEntries || []).find(x => x && x.name === fontName) || {}).meta) || {};
-            const _fontPf = await _sfPreflightDestination({
-              destDir: pick.destDir,
+          // ── DOOR 1 ON THE SHARED RUNNER ──────────────────────── [B-420, 2026-09-22]
+          //
+          // ⭐ WHAT THIS DOOR GAVE UP, and it is the same six things doors 8 and 10 gave up: the
+          // progress modal, the destination preflight, the Cancel wiring, the progress tick, the
+          // fit refusal and the slow-write warning. `test/export-runner-ratchet.test.js` asserts
+          // each one per door, so the migration is checkable rather than eyeballed.
+          //
+          // ⭐ AND IT DELETED A REAL DUPLICATION, not just indentation: this door was passing
+          // `ejectDest` and `ejectRemovable` by hand, and carrying `boardCard` out of its own
+          // preflight in a local so the export could receive it. The runner already holds both
+          // from the one preflight it runs, and hands them to `produce`.
+          const _m = (((_sfAllEntries || []).find(x => x && x.name === fontName) || {}).meta) || {};
+          let r = null;
+          // What actually happened, decided in `compare` and read by the summary:
+          //   'wrote'      the font was written (fresh, or Replace was chosen)
+          //   'identical'  it is already there and matches, so nothing was done
+          //   'kept'       it differs and Skip was chosen, so nothing was done
+          let _outcome = 'wrote';
+          const _t0 = Date.now();
+          const _run = await _sfRunExport({
+            label: 'files',
+            title: `Exporting ${fontName}`,
+            destDir: pick.destDir,
+            // A folder export, not an archive - which is what decides the byte counter's
+            // behaviour and the tail label inside the runner.
+            endState: { kind: 'tree' },
+            // ⚠️ NO `ending` OVERRIDE. The derived value is the correct one, and his rule is why:
+            // "2,5,7,9 toast and all others summary. so the rule is file selection right click."
+            // (2026-09-21). Doors 2/5/7/9 are the file-selection funnel and carry `kind: 'files'`,
+            // which is exactly what `_sfExportEnding` maps to a toast - so the derivation already
+            // encodes the rule and this door must not opt out of it.
+            //
+            // ⚠️⚠️ THE OLD TOAST WAS THE THING BEING CHANGED, not a behaviour to preserve. This
+            // door used to pass no `ending` at all and take `_sfExportOutcome`'s 'toast' default.
+            // Reading that as "what it has always done, so keep it" got the migration backwards:
+            // his spec had already ruled it a summary. A settled design decision is the authority;
+            // re-deriving it from the code it predates is how you arrive confidently at the
+            // opposite answer.
+            // ⭐ `summaryHasEject` because the summary below carries the eject ROW - which is what
+            // the during-export checkbox clicks. Without it the row would be missing and a toast
+            // eject would fire instead, inventing the second surface he ruled out.
+            summaryHasEject: true,
+            // The export channel reports bytes WRITTEN as increments, and the font's size is
+            // already on its meta, so the bar is determinate from the first frame.
+            deltas: true,
+            onCancel: _sfExportCancelOpt.onCancel,
+            // ⭐ No work to do: the size is on the entry's own meta. A door that cannot size
+            // itself returns 0, which the preflight reads as "cannot measure" - never as empty.
+            plan: async () => ({
+              items: [],
               totalBytes: _fontBytes || _m.contentTotalBytes || 0,
               fileCount: _m.contentFileCount || 0,
-            });
-            if (!_fontPf.proceed) return;
-            // ⭐ CARRIED INTO THE EXPORT so the cancel-cleanup rule can read it without
-            // paying for a second ~1,900 ms device lookup at the worst possible moment.
-            _fontBoardCard = _fontPf.boardCard;
-            _fontRemovable = _fontPf.removable;
-          }
-          // ⚠️ AN EXPLICIT EXPORT ALWAYS EXPORTS (Ryan, 2026-09-08: "thought we
-          // were doing it anyway since they asked and numbering?"). The first
-          // build refused when an identical copy was already there — logic
-          // borrowed from the conflict dialog, where it stops QUESTIONS about
-          // non-conflicts. Refusing an ACTION the user chose is a different
-          // thing: they clicked Export, numbering absorbs the collision, and
-          // identical folders on disk can still diverge afterwards. The
-          // identical check survives only to word the toast honestly.
-          let _identical = false;
-          try {
-            // writeCache:false — the toast's question must not seed the sync
-            // manifest at the destination ([B-358], his catch: the manifest
-            // followed the QUESTION, not the copy).
-            // [B-400] TWO EXPENSIVE PASSES, BOTH SILENT until now: this hashes the whole font
-            // against the destination, and the export below copies it. On The_Sorcerer that is
-            // 899.8 MB of each, straight after the folder picker, with nothing on screen.
-            // ⚠️ keepOpen: the modal spans both phases; the export phase re-uses it.
-            const m = await _sfRunWithByteProgress('Checking the destination', () =>
-              window.electronAPI.entryMatchesAt({
-                name: fontName, destDir: pick.destDir, writeCache: false, reportProgress: true,
-              }), { keepOpen: true });
-            _identical = !!(m && m.ok && m.exists && m.identical);
-          } catch {}
-          let r;
-          // syncManifest:false — a quick export is a plain copy, and must not
-          // seed card-sync bookkeeping (jmt-sync.json) at an arbitrary folder.
-          // ⚠️ deltas + a caller-supplied total: the export channel reports bytes written as
-          // increments, and the font's size is already on its meta, so the bar is determinate
-          // from the first frame instead of waiting for a total to arrive.
-          try { r = await _sfRunWithByteProgress(`Exporting ${fontName}`, () =>
-                  window.electronAPI.exportEntryToFolder({ name: fontName, destDir: pick.destDir, mode: 'rename',
-                                                           syncManifest: false, boardCard: _fontBoardCard }),
-                  // ⚠️ INLINED, NOT _sfEntryBytes: that helper is declared inside the bulk-export
-                  // function and is not in scope here. Calling it would have been a runtime
-                  // ReferenceError that `node --check` cannot see — the same shape that got
-                  // through this morning on exportCommonToFolder's missing `opts`.
-                  { alreadyOpen: true, deltas: true, ..._sfExportCancelOpt,   // [B-005 item 4]
-                    // ⭐ Arms the "eject when finished" checkbox. The preflight above already
-                    // established `removable` when it classified, so pass it rather than
-                    // paying for a second lookup.
-                    ejectDest: pick.destDir, ejectRemovable: _fontRemovable,
-                    total: (((_sfAllEntries || []).find(x => x && x.name === fontName) || {}).meta || {}).contentTotalBytes || 0 }); }
-          catch (err) { r = { ok: false, error: String(err && err.message || err) }; }
-          // ⭐ THROUGH THE SHARED ENDING. [B-005 item 4] This door is where the cancel-reported-
-          // as-success bug was found - it tested only `ok`, and a cancel returns ok:true. It now
-          // shares one implementation with every other door rather than keeping its own copy,
-          // which is what let it drift in the first place.
-          const _done = await _sfExportOutcome(r, {
-            what: 'files',
-            destDir: pick.destDir,
+            }),
+            // ⚠️⚠️ NO NUMBERING ON THIS DOOR. [2026-09-22, his call]
+            //
+            // This used to pass `mode: 'rename'`, so a name collision silently produced
+            // `<name>_2`. His objection: "if you're exporting a font as a font folder... you
+            // don't want the name to change at all. meaning you shouldn't be exporting it. it's
+            // already there."
+            //
+            // ⭐ AND HE IS RIGHT FOR A STRUCTURAL REASON: ProffieOS resolves a font BY FOLDER
+            // NAME. A preset points at `Ahsoka`; nothing points at `Ahsoka_2`. So on a card the
+            // numbered folder is not a second copy, it is dead weight no saber can reach. The
+            // same reasoning is already written into soundFontCommon.js, which calls its own
+            // rename mode "really staging, since Proffie only matches the literal common folder".
+            //
+            // ⭐ THE RULE, and it is about what is being written rather than which door: when
+            // ProffieOS resolves it by NAME (font folder, common folder, tracks folder),
+            // numbering breaks it. Loose files and archives are unaffected, so the file-selection
+            // funnel (2,5,7,9) and the archive doors keep numbering exactly as they are.
+            //
+            // ⚠️ THE 2026-09-08 RULING ("an explicit export always exports... numbering?") IS NOT
+            // OVERRULED HERE, it is narrower than it looked: it was about not refusing an action
+            // someone chose, decided before this consequence was on the table. Nothing is refused
+            // below - the user is asked, and Skip is their answer rather than ours.
+            //
+            // ⭐⭐ AND IT ASKS THROUGH THE EXPORT'S EXISTING CONFLICT REVIEW, NOT A NEW DIALOG.
+            // The primary export has resolved this exact question since [B-357]: same two
+            // answers, per-kind sections, one review per export. Building a second prompt here
+            // would be the parallel mechanism this whole migration exists to remove.
+            //
+            // ⚠️ `defaultMode: 'skip'` is his ruling, and it matches what the shared prompt
+            // already defaults folders to. Skip is the safe answer on a card: Replace overwrites
+            // a folder the user may have edited at the destination.
+            compare: async () => {
+              let m = null;
+              try {
+                // writeCache:false — this question must not seed the sync manifest at the
+                // destination ([B-358]: the manifest followed the QUESTION, not the copy).
+                // ⭐ The hash is only paid when something IS there: entryMatchesAt short-circuits
+                // on a cheap file-count/byte pre-check, so the ordinary export costs nothing
+                // extra, and the expensive case is the one where the answer decides an overwrite.
+                // ⚠️ ASK THE DOM whether a modal is up rather than assuming the runner left one.
+                const _up = (() => {
+                  try {
+                    const el = document.getElementById('modal-sf-bulk-progress');
+                    return !!(el && el.classList.contains('active'));
+                  } catch { return false; }
+                })();
+                m = await _sfRunWithByteProgress('Checking the destination', () =>
+                  window.electronAPI.entryMatchesAt({
+                    name: fontName, destDir: pick.destDir, writeCache: false, reportProgress: true,
+                  }), { alreadyOpen: _up, keepOpen: true });
+              } catch {}
+
+              // Nothing there. Write it under its own name; 'rename' only suffixes on a
+              // collision, and there is none.
+              if (!(m && m.ok && m.exists)) { _outcome = 'wrote'; return { mode: 'rename' }; }
+
+              // ⭐ Identical needs no question and no work. The shared prompt says the same
+              // thing in its own copy: "Fonts that already match your library are not listed
+              // and were left alone."
+              if (m.identical) { _outcome = 'identical'; return { mode: 'skip' }; }
+
+              const picked = await _sfPromptSaveConflicts([fontName], {
+                title: `"${fontName}" is at the destination`,
+                description: 'The copy at the destination is different from your library. '
+                  + 'Choose whether to replace it or keep it.',
+                defaultMode: 'skip',
+              });
+              // ⚠️ null is the user backing out. The runner reads it as exactly that and
+              // abandons the export, which is correct: they answered the question with Cancel.
+              if (picked === null) return null;
+              const mode = (picked && typeof picked.get === 'function' && picked.get(fontName))
+                || 'skip';
+              _outcome = mode === 'replace' ? 'wrote' : 'kept';
+              return { mode };
+            },
+            // syncManifest:false — a quick export is a plain copy, and must not seed card-sync
+            // bookkeeping (jmt-sync.json) at an arbitrary folder.
+            // ⭐ `boardCard` arrives from the runner's preflight instead of a second lookup, and
+            // `mode` from the answer above rather than a hardcoded 'rename'. All three modes were
+            // always supported by the handler; this door simply never asked.
+            produce: async ({ decisions, boardCard }) => {
+              const mode = (decisions && decisions.mode) || 'rename';
+              try {
+                r = await window.electronAPI.exportEntryToFolder({
+                  name: fontName, destDir: pick.destDir, mode,
+                  syncManifest: false, boardCard,
+                });
+              } catch (err) {
+                r = { ok: false, error: String(err && err.message || err) };
+              }
+              return r;
+            },
+            // ── The completion summary ──────────────────────────────────
+            //
+            // ⭐ FOLLOWS THE HOUSE PATTERN, which was already written down and which my first cut
+            // ignored: running prose, one subject per line, an elapsed line last, no label/value
+            // block. "Exported to:" plus a bare name line was a label block, and it said the name
+            // twice. Each fact appears once, and the path is an ADDRESS rather than a restatement.
+            // ⚠️ No em dashes, and nothing saying "already" beside a past tense that already
+            // carries it.
             onCompleted: async () => {
-              const landed = (r.destPath || '').split(/[\\/]/).pop() || fontName;
-              showToast(landed === fontName
-                ? `"${fontName}" exported.`
-                : (_identical
-                  ? `Exported as "${landed}". The "${fontName}" already there is identical.`
-                  : `Exported as "${landed}": a different "${fontName}" was already there.`));
+              const dest = (r && r.destPath) || '';
+              const landed = dest.split(/[\\/]/).pop() || fontName;
+              const fmt = window._sfFormatBytesShort || window._sfFormatBytes || ((n) => n + ' B');
+              const size = _fontBytes || _m.contentTotalBytes || 0;
+              const files = _m.contentFileCount || 0;
+
+              // Nothing was written. Saying "Export complete" over that would be the same kind of
+              // contradiction he caught in the old collision wording.
+              if (_outcome === 'identical' || _outcome === 'kept') {
+                await _sfCompletionNotice({
+                  title: 'Nothing exported',
+                  message: _outcome === 'identical'
+                    ? `${fontName} at the destination matches your library.\n\n${pick.destDir}`
+                    : `${fontName} at the destination was kept.\n\n${pick.destDir}`,
+                  destDir: pick.destDir,
+                });
+                return;
+              }
+
+              const amount = files > 0
+                ? `${files} file${files === 1 ? '' : 's'} · ${fmt(size)}`
+                : fmt(size);
+              const lines = [`Exported ${landed}: ${amount}.`];
+              if (_outcome === 'wrote' && landed === fontName && r && r.replaced) {
+                lines.push(`Replaced the copy at the destination.`);
+              }
+              lines.push(dest || pick.destDir);
+              const secs = (Date.now() - _t0) / 1000;
+              lines.push(window._sfFormatDuration
+                ? `Took ${window._sfFormatDuration(secs)}.`
+                : `Took ${Math.round(secs)}s.`);
+              await _sfCompletionNotice({
+                title: 'Export complete',
+                message: lines.join('\n\n'),
+                destDir: pick.destDir,
+              });
             },
           });
-          if (!_done) return;
-          await _sfShowProgramRefusal({ refused: r.refused, kind: 'entry', id: fontName });
+          // ⚠️ The refusal screen is a SEPARATE question from the export's own ending, and it
+          // only makes sense when the export actually ran to completion - a cancelled export has
+          // no refusal list worth showing.
+          if (!_run || !_run.ok || _run.canceled) return;
+          await _sfShowProgramRefusal({ refused: (r && r.refused), kind: 'entry', id: fontName });
         });
         mkItem('× Delete', { cls: 'danger' }, () => _sfDeleteFontFlow(fontName));
         // Hide submenu when hovering a sibling item that isn't the
@@ -42188,7 +42429,25 @@ require(['vs/editor/editor.main'], function () {
 
           mkItem('Rename…', '', () => _sfRenameCommon(uuid));
           mkItem('Duplicate…', '', () => _sfDuplicateCommon(uuid));
-          mkItem('Export…', '', () => _sfExportCommonPrompt(uuid));
+          // ⭐ TWO EXPORTS, NAMED FOR WHAT THEY PRODUCE. [2026-09-22, his call]
+          //
+          // "Export…" alone was a hole: it only ever made a zip, so there was no way to put a
+          // common on a card from here at all. His words: "should have another option under that
+          // to Export common folder which isn't a zip but a folder called common with all those
+          // files".
+          //
+          // ⚠️ THE NAMING IS THE FIX FOR THE 2026-08-31 DEFECT, not a reopening of it. That day
+          // the single "Export…" called the CARD exporter, so a right-click with nothing to do
+          // with a card lost the pack's name, wrote a sync manifest into the chosen folder and
+          // asked an SD conflict question. The answer then was to make it a zip. The answer now
+          // is that these are two different jobs and each says which it is - so the card-shaped
+          // one can behave like the card path without ambushing someone who wanted a portable
+          // copy.
+          // ⚠️ The folder is literally named `common`, because that is what ProffieOS looks for.
+          // The pack's own name is not in the result, which is why the menu item says "common
+          // folder" rather than the pack name.
+          mkItem('Export as archive…', '', () => _sfExportCommonPrompt(uuid));
+          mkItem('Export common folder…', '', () => _sfExportCommonFolderPrompt(uuid));
           mkSep();
           mkItem('× Delete', 'danger', () => _sfDeleteCommonPrompt(uuid));
         }

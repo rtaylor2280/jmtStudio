@@ -42,11 +42,17 @@ const insideRunner = (idx) => idx > rs && idx < re;
 //
 // ⚠️ MIGRATED must not fall and UNMIGRATED must not rise. Update both together, in one commit,
 // when a door moves. If you are here because the numbers disagree: that is the point.
-const MIGRATED_MIN   = 2;   // backup, common-as-zip          (2026-09-21)
-// ⚠️ 5, not 6. The count from a plain grep is 6 because it includes the runner's OWN call. The
-// ceiling is deliberately the measured truth with no slack: slack is room for one more door to be
-// added the old way without anything going red.
-const UNMIGRATED_MAX = 5;   // tracks, source, primary-early, bulk, font   (2026-09-21)
+// ⚠️⚠️ THESE NUMBERS MUST MOVE WHEN A DOOR LANDS, AND THE SELF-PROOF IS WHAT FORCES IT.
+// Door 1 (font card) migrated 2026-09-22 and every headline check still passed at the old
+// numbers - 3 doors clears a floor of 2 comfortably. What failed was mutation (c): it removes
+// one `_sfRunExport` and asserts the count drops BELOW the floor, which stops being true the
+// moment there is slack. **A ratchet with slack cannot detect the regression it exists for**, so
+// the self-proof failing is the file telling us to tighten, not a broken test.
+const MIGRATED_MIN   = 4;   // backup, common-as-zip, font card, common-as-folder (2026-09-22)
+// ⚠️ The runner's OWN preflight call is filtered out below, so this counts doors only. The
+// ceiling is deliberately the measured truth with NO slack: slack is room for one more door to
+// be added the old way without anything going red.
+const UNMIGRATED_MAX = 4;   // tracks, source, primary-early, bulk        (2026-09-22)
 {
   const onRunner = (H.match(/await _sfRunExport\(\{/g) || []).length;
   ok(`⭐ doors on the shared runner: ${onRunner} (floor ${MIGRATED_MIN})`,
@@ -72,7 +78,7 @@ const UNMIGRATED_MAX = 5;   // tracks, source, primary-early, bulk, font   (2026
   ok(`the runner calls the shared ending (${calls.length - outside} inside it)`,
      calls.length - outside >= 1);
   // ⚠️ Ceiling, not zero: the unmigrated doors legitimately still call it. It must only fall.
-  const OUTSIDE_MAX = 3;
+  const OUTSIDE_MAX = 2;   // tightened 2026-09-22 when door 1 landed
   ok(`⭐ endings drawn outside the runner: ${outside} (ceiling ${OUTSIDE_MAX})`,
      outside <= OUTSIDE_MAX,
      'a door bypassing the runner\'s ending also bypasses the contract guard, which is what '
@@ -89,9 +95,25 @@ const UNMIGRATED_MAX = 5;   // tracks, source, primary-early, bulk, font   (2026
     { name: 'backup (door 10)',
       start: 'const _sfRunExportBackup = async (destPath, survey)',
       end:   '// Merge-import run' },
+    // ⚠️⚠️ RE-ANCHORED 2026-09-22. This ended at `_sfAddCommonFiles`, and the new
+    // common-as-folder door was then inserted BETWEEN the two - so door 8's body silently
+    // grew to include a different door's code. It still passed, which is the dangerous part:
+    // an anchor that has drifted reports on the wrong region without failing, so the door it
+    // names stops being the door it checks.
     { name: 'common-as-zip (door 8)',
       start: 'const _sfExportCommonPrompt = async (uuid)',
+      end:   'const _sfExportCommonFolderPrompt = async (uuid)' },
+    { name: 'common-as-folder (new, 2026-09-22)',
+      start: 'const _sfExportCommonFolderPrompt = async (uuid)',
       end:   'const _sfAddCommonFiles = async' },
+    // ⚠️ ADDED WHEN DOOR 1 LANDED (2026-09-22). Raising the count floor is only half a
+    // migration: without an entry here the door is counted as migrated and then never checked
+    // for regrowing the machinery, which is the drift this section exists to catch. A door on
+    // the runner that nobody named is exactly the "covered handler reachable from an unguarded
+    // call site" shape in exportDestination.js's header.
+    { name: 'font card (door 1)',
+      start: "mkItem('↗ Export font folder…'",
+      end:   "mkItem('× Delete'" },
   ];
   // What the runner owns. A migrated door touching any of these is the regression.
   const FORBIDDEN = [

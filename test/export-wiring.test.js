@@ -101,9 +101,25 @@ ok('⚠️⚠️ and a door PASSES it to the module that decides cleanup',
 ok('⚠️⚠️ and the module READS it to choose rename-vs-delete',
    /opts\.boardCard && _ed\.isSlowWriteJob/.test(read('soundFontEntries.js')),
    'without a reader, the whole board-card cleanup rule is decoration');
-ok('the renderer SENDS boardCard from its preflight',
-   /boardCard: _fontBoardCard/.test(H),
-   'main cannot know it without re-measuring, which is banned at cancel time');
+// ⚠️ THIS ASSERTED A VARIABLE NAME (`boardCard: _fontBoardCard`) AND THE NAME WAS THE WRONG
+// THING TO HOLD ON TO. When door 1 moved onto the shared runner the local disappeared - the
+// runner runs the one preflight now and hands `boardCard` to `produce` - so the check failed
+// while the behaviour it guards was not merely intact but better. A test pinned to an
+// identifier fails on a rename and passes on a deletion elsewhere.
+//
+// ⭐ The intent is what to assert: NO caller may invoke exportEntryToFolder without sending
+// boardCard, whatever it happens to be called at that call site. Main cannot re-measure it -
+// that is a ~1,900 ms device lookup, banned at cancel time.
+{
+  const calls = [...H.matchAll(/exportEntryToFolder\(\{[\s\S]{0,400}?\}\)/g)].map((m) => m[0]);
+  ok('exportEntryToFolder call sites were located', calls.length >= 2,
+     `found ${calls.length}; re-check the matcher if this dropped`);
+  const missing = calls.filter((c) => !/\bboardCard\b/.test(c));
+  ok('every renderer call SENDS boardCard from a preflight',
+     missing.length === 0,
+     'main cannot know it without re-measuring, which is banned at cancel time. Missing in: '
+     + missing.map((c) => c.slice(0, 70).replace(/\s+/g, ' ')).join(' | '));
+}
 
 // ── The running tally the cleanup decision reads ─────────────────────
 ok('the tree walk increments the file tally', /wrote\.files = \(wrote\.files \|\| 0\) \+ 1/.test(copy));

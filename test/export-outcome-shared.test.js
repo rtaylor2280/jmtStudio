@@ -93,8 +93,32 @@ ok('it treats a cancel as its own outcome, before any success path',
 }
 
 // ── The three doors that were broken now go through it ───────────────
-ok('the font-card quick export uses the shared ending',
-   /_sfExportOutcome\(r, \{\s*\n\s*what: 'files',\s*\n\s*destDir: pick\.destDir/.test(H),
+// ⚠️ RE-ANCHORED 2026-09-22 [B-420], exactly as common-as-zip was the day before: this door
+// migrated onto the shared runner, so it no longer calls `_sfExportOutcome` itself — the runner
+// does, for every door, behind the contract guard. That is a stronger guarantee than this door
+// remembering to. The rule under test is unchanged: this is the door that said
+// Exported as "Techno_2" on a cancel, and a cancel here must never read as a success.
+ok('the font-card quick export reaches the shared ending through the runner',
+   // ⚠️⚠️ A CHARACTER WINDOW IS THE WRONG INSTRUMENT AND IT FAILED TWICE IN ONE AFTERNOON:
+   // first at 3000, then at 6000, each time on a door that was correctly migrated and had simply
+   // grown a comment between the two anchors. Tuning the number a third time would just move the
+   // next failure. Bound the search to the door's own call instead, by brace-matching from
+   // `_sfRunExport({` — the same technique the contract guard and the ratchet both use, for the
+   // same reason: a fixed-width slice over this file has silently stopped covering its target
+   // three times before today.
+   (() => {
+     const i = H.indexOf('title: `Exporting ${fontName}`');
+     if (i < 0) return false;
+     const start = H.lastIndexOf('await _sfRunExport({', i);
+     if (start < 0) return false;
+     let k = H.indexOf('{', start), depth = 0;
+     do {
+       if (H[k] === '{') depth++;
+       else if (H[k] === '}') depth--;
+       k++;
+     } while (k < H.length && depth > 0);
+     return /exportEntryToFolder/.test(H.slice(start, k));
+   })(),
    'this is the door that said Exported as "Techno_2" on a cancel');
 // ⚠️ RE-ANCHORED 2026-09-21 [B-420]: this door migrated onto the shared runner, so it no longer
 // calls `_sfExportOutcome` itself — `_sfRunExport` does, for every door, which is a stronger
