@@ -48,11 +48,11 @@ const insideRunner = (idx) => idx > rs && idx < re;
 // one `_sfRunExport` and asserts the count drops BELOW the floor, which stops being true the
 // moment there is slack. **A ratchet with slack cannot detect the regression it exists for**, so
 // the self-proof failing is the file telling us to tighten, not a broken test.
-const MIGRATED_MIN   = 4;   // backup, common-as-zip, font card, common-as-folder (2026-09-22)
+const MIGRATED_MIN   = 5;   // + tracks (door 6)                        (2026-09-22)
 // ⚠️ The runner's OWN preflight call is filtered out below, so this counts doors only. The
 // ceiling is deliberately the measured truth with NO slack: slack is room for one more door to
 // be added the old way without anything going red.
-const UNMIGRATED_MAX = 4;   // tracks, source, primary-early, bulk        (2026-09-22)
+const UNMIGRATED_MAX = 3;   // source, primary-early, bulk               (2026-09-22)
 {
   const onRunner = (H.match(/await _sfRunExport\(\{/g) || []).length;
   ok(`⭐ doors on the shared runner: ${onRunner} (floor ${MIGRATED_MIN})`,
@@ -78,7 +78,7 @@ const UNMIGRATED_MAX = 4;   // tracks, source, primary-early, bulk        (2026-
   ok(`the runner calls the shared ending (${calls.length - outside} inside it)`,
      calls.length - outside >= 1);
   // ⚠️ Ceiling, not zero: the unmigrated doors legitimately still call it. It must only fall.
-  const OUTSIDE_MAX = 2;   // tightened 2026-09-22 when door 1 landed
+  const OUTSIDE_MAX = 1;   // tightened 2026-09-22 when tracks landed
   ok(`⭐ endings drawn outside the runner: ${outside} (ceiling ${OUTSIDE_MAX})`,
      outside <= OUTSIDE_MAX,
      'a door bypassing the runner\'s ending also bypasses the contract guard, which is what '
@@ -114,6 +114,19 @@ const UNMIGRATED_MAX = 4;   // tracks, source, primary-early, bulk        (2026-
     { name: 'font card (door 1)',
       start: "mkItem('↗ Export font folder…'",
       end:   "mkItem('× Delete'" },
+    // ⚠️⚠️ TRACKS CARRIES ONE DOCUMENTED EXEMPTION, AND IT IS NAMED RATHER THAN OMITTED.
+    // It raises its own progress bar inside `plan`, which looks exactly like the regression
+    // this section exists to catch. It is not: `plan` runs BEFORE the runner raises anything,
+    // and this door's plan is the long per-track comparison that used to run in total silence
+    // after the picker ("there seemed to be no scan at all on the tracks export"). The runner
+    // checks the DOM and will not open a second modal on top of it.
+    // ⭐ Leaving the door OFF this list instead would have been the easy move and the wrong
+    // one: it would be counted as migrated by the floor and then never checked for the other
+    // five things. An exemption that is written down can be argued with; an absence cannot.
+    { name: 'tracks (door 6)',
+      start: 'const _sfExportSharedTracks = async () => {',
+      end:   'window._sfExportSharedTracks = _sfExportSharedTracks;',
+      except: ['raises the progress modal itself'] },
   ];
   // What the runner owns. A migrated door touching any of these is the regression.
   const FORBIDDEN = [
@@ -130,6 +143,15 @@ const UNMIGRATED_MAX = 4;   // tracks, source, primary-early, bulk        (2026-
     const body = (i > 0 && j > i) ? H.slice(i, j) : '';
     ok(`${d.name} was located`, body.length > 0, 're-anchor this door');
     for (const [what, pattern] of FORBIDDEN) {
+      // ⚠️ An exemption must still be ASSERTED, not skipped. If the exempted thing stops being
+      // present, the exemption is stale and should be deleted - and a silently-skipped check
+      // would never tell us. So the expectation simply inverts.
+      if ((d.except || []).includes(what)) {
+        ok(`  ${d.name} still ${what} (documented exemption)`, pattern.test(body),
+           'the exemption in this file says this door does it deliberately. If that is no '
+           + 'longer true, remove the exemption rather than leaving a check that asserts nothing');
+        continue;
+      }
       ok(`  ${d.name} no longer ${what}`, !pattern.test(body),
          'the runner owns this now - a door doing it again is the drift this file exists to stop');
     }

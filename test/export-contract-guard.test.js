@@ -144,8 +144,13 @@ ok('the stopped notice independently filters leftovers',
   for (const d of doorCalls) {
     const ending = d.override || (d.kind === 'files' ? 'toast' : 'summary');
     if (ending !== 'summary') continue;
+    // ⚠️ TWO SUMMARY SURFACES ARE LEGITIMATE, and the first cut of this rule knew about only
+    // one. `_sfCompletionNotice` is the short one the archive and folder doors use;
+    // `_sfShowExportSummary` is the full one with per-kind counts that tracks and the primary
+    // export use. Both carry the eject row, which is what the rule actually cares about. A
+    // check that names one implementation rejects the other for no reason.
     ok(`"${d.title}" (index.html:${d.line}) draws the summary it declares`,
-       /_sfCompletionNotice\(/.test(d.body),
+       /_sfCompletionNotice\(|_sfShowExportSummary\(/.test(d.body),
        'its ending resolves to `summary`, but `_sfExportOutcome` only calls onCompleted - the '
        + 'door has to draw it. Without _sfCompletionNotice this door shows a toast, or nothing, '
        + 'while reporting itself as a summary door (and suppressing the eject row with it)');

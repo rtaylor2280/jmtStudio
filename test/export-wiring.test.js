@@ -308,8 +308,19 @@ ok('⭐ the primary export carries the eject on its summary',
    (H.match(/\.\.\.\(await _sfEjectContext\(destDir\)\)/g) || []).length >= 2,
    'it keeps its own per-item summary, which is right - and the control now sits ON that '
    + 'summary rather than in a dialog after it');
+// ⚠️ THIS ASSERTED A ONE-LINE SPELLING (`if (!canceled) _sfWireEjectRow`) and broke the moment
+// the guarded call became a block, while the guard it protects was untouched. Third instance of
+// this shape today, after `boardCard: _fontBoardCard` and `_sfResolveTrackConflicts(plan.differing)`.
+// Assert the RELATIONSHIP: every wiring of the summary's eject row is preceded by the cancel
+// guard, however the caller formats it.
 ok('⚠️ a cancelled export gets no eject offer',
-   /if \(!canceled\) _sfWireEjectRow/.test(H),
+   (() => {
+     const calls = [...H.matchAll(/_sfWireEjectRow\(\{\s*target:\s*ejectTarget/g)];
+     if (!calls.length) return false;
+     // The guard must appear between the start of the statement and the call, close enough that
+     // it is plainly governing it rather than coincidentally nearby.
+     return calls.every((m) => /if \(!canceled\)[\s\S]{0,120}$/.test(H.slice(0, m.index)));
+   })(),
    'the card is half-written; the useful next action is deciding what to do about it');
 
 // ── versions:export, the door that had nothing ───────────────────────

@@ -47,9 +47,14 @@ function ok(name, cond, extra) {
      'that was the second screen');
   // ⚠️ But the helper itself still has another caller (the card-export flow), so it must
   // NOT have been deleted.
+  // ⚠️ THIS ASSERTED THE ARGUMENT EXPRESSION (`plan.differing`) AND BROKE ON A CORRECT CHANGE.
+  // The tracks door moved onto the shared runner and now reads the list into a local before
+  // passing it, so the helper is called exactly as before and the check failed anyway. Same
+  // mistake as pinning `boardCard: _fontBoardCard`: assert that it is CALLED, not how the
+  // caller happens to spell its argument today.
   ok('_sfResolveTrackConflicts still exists for its other caller',
      /const _sfResolveTrackConflicts = async/.test(html)
-     && /await _sfResolveTrackConflicts\(plan\.differing\)/.test(html));
+     && /await _sfResolveTrackConflicts\(/.test(html));
 
   ok('one cancel abandons the whole export',
      /if \(!choices\) return false; \/\/ user cancelled the whole export, both kinds/.test(html));

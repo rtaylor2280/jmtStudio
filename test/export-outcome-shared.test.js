@@ -128,9 +128,41 @@ ok('the common-as-zip door reaches the shared ending through the runner',
    /title: 'Exporting common folder',[\s\S]{0,900}?exportCommonAsZip/.test(H)
    && /await _sfRunExport\(\{[\s\S]{0,400}?title: 'Exporting common folder'/.test(H),
    'this door said nothing at all on a cancel');
-ok('the tracks door uses it',
-   /_sfExportOutcome\(\s*\n?\s*\{ \.\.\.r, wroteCount:/.test(H),
-   'this door committed a sync manifest for a cancelled export');
+// ⚠️ RE-ANCHORED 2026-09-22 when tracks migrated, the third door to need this. It no longer
+// calls `_sfExportOutcome` itself; the runner does, behind the contract guard.
+//
+// ⭐⭐ BUT THE RULE UNDERNEATH IS THE IMPORTANT ONE AND IT IS SHARPER HERE THAN ELSEWHERE.
+// This door committed a sync manifest for a cancelled export: a record of files that were never
+// written, which the NEXT export then trusted and used to SKIP them. So what must be asserted is
+// not that it reaches the shared ending, but that the manifest commit sits where a cancel cannot
+// reach it - inside `onCompleted`, which `_sfExportOutcome` returns before on a cancel.
+ok('the tracks door reaches the shared ending through the runner',
+   /title: 'Exporting tracks'[\s\S]{0,400}?await _sfRunExport|await _sfRunExport\(\{[\s\S]{0,400}?title: 'Exporting tracks'/.test(H),
+   'this door reported a cancelled export as a success');
+ok('⚠️⚠️ and its manifest commit is inside onCompleted, where a cancel cannot reach it',
+   (() => {
+     const i = H.indexOf("title: 'Exporting tracks'");
+     if (i < 0) return false;
+     const start = H.lastIndexOf('await _sfRunExport({', i);
+     if (start < 0) return false;
+     let k = H.indexOf('{', start), depth = 0;
+     do {
+       if (H[k] === '{') depth++;
+       else if (H[k] === '}') depth--;
+       k++;
+     } while (k < H.length && depth > 0);
+     const body = H.slice(start, k);
+     const oc = body.indexOf('onCompleted:');
+     const commit = body.indexOf('syncManifestCommit');
+     return oc > 0 && commit > oc;
+   })(),
+   'a cancelled export that commits a manifest tells the NEXT export those files are already '
+   + 'there, and it skips them');
+// ⚠️ The cancel still has to report how many files LANDED, not "nothing was copied" over a
+// folder that now holds real ones.
+ok('a cancelled tracks export still reports what landed',
+   /wroteCount/.test(H),
+   'the shared notice would otherwise say nothing was copied');
 
 // ── The eject offer is only made where it makes sense ────────────────
 // ⚠️ RE-ANCHORED 2026-09-21, NOT LOOSENED. The fact still has to be `=== true`; what changed

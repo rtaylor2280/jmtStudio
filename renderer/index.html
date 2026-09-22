@@ -27051,6 +27051,22 @@ require(['vs/editor/editor.main'], function () {
       //
       // Additive, like the bulk path: nothing at the destination is deleted, and
       // a same-name file that differs is kept as it is and reported.
+      // ── DOOR 6: tracks, on the shared runner ─────────────── [B-420, 2026-09-22]
+      //
+      // ⭐ THE HARDEST OF THE FIRST FOUR, because it is the only one with a real PLAN phase:
+      // it compares every track against the destination before it can size the write. That
+      // comparison is the thing that used to run in total silence right after the picker.
+      //
+      // ⚠️⚠️ THE ORDER IS A RULING, NOT AN IMPLEMENTATION DETAIL, and he has caught it twice:
+      // both checks run BEFORE any question is asked. A refusal arriving after someone has
+      // worked through a per-track decision list wastes the decisions they just made. The
+      // runner already sequences it this way - plan, then preflight, then compare - so the
+      // ruling survives the migration by construction rather than by this door remembering it.
+      //
+      // ⚠️ THE FIT CHECK IS DELIBERATELY WORST CASE ("probably simpler if we go with worst case
+      // check and that's it"): everything missing PLUS every differing track, as though Replace
+      // were chosen on all of them. It can over-refuse. What it buys is exactly one check that
+      // always precedes the conflicts list.
       const _sfExportSharedTracks = async () => {
         let pick;
         try { pick = await window.electronAPI.selectSaveDestination(); }
@@ -27058,166 +27074,131 @@ require(['vs/editor/editor.main'], function () {
         if (!pick || !pick.ok) return;
         const destDir = pick.dirPath;
         _sfPrimeVolume(destDir);   // [B-403] start the volume lookup now; the summary consumes it
+
+        let plan = null;
         let replace = [];
-        let _sfTrkToAdd = [];   // [B-203] what the plan says is missing; sized below
-        // [B-357] PREPARE WITH A BAR, THEN PRESENT PAINTED — the convention, applied to the
-        // one path that never had it. Comparing every track against the destination ran in
-        // total silence right after the folder picker; on a real library that is 57 files and
-        // over a gigabyte, which is exactly the silent pause the destination check a few
-        // hundred lines up was already fixed for. His, 2026-09-17: "there seemed to be no scan
-        // at all on the tracks export."
-        // ⭐ The plumbing already existed — the combined export drives its bar off this same
-        // channel. This path simply never subscribed.
-        let _planned = false;
-        const _offTrkPlan = window.electronAPI.onSharedTracksPlanProgress(({ file, done, total } = {}) => {
-          _planned = true;
-          _sfDeleteProgress.setPhase(
-            total ? `Comparing with your library · ${Math.min(done + 1, total)} of ${total}` : 'Comparing with your library',
-            total ? done / total : 0, file || '', '');
-        });
-        // Indeterminate until the first tick says how many there are: the count is not known
-        // before the plan starts, and a bar sitting at a fixed fraction reads as a hang.
-        _sfDeleteProgress.show('Checking the destination…', 'Comparing with your library…');
-        try {
-          const plan = await window.electronAPI.sharedTracksPlanExport({ destDir });
-          if (_planned) _sfDeleteProgress.setProgress(1);
-          // [B-203] Kept for the fit check below. The plan names what is MISSING at the
-          // destination; `replace` names what the user chose to overwrite. Those two
-          // together are the only files this export will write, and sizing the whole
-          // tracks folder instead would refuse an export that fits comfortably.
-          if (plan && plan.ok) _sfTrkToAdd = plan.toAdd || [];
+        let r = null;
+        const _t0 = Date.now();
 
-            // ── Both checks, HERE, BEFORE ANY QUESTION IS ASKED ───────── [B-203, B-238]
-            //
-            // ⚠️⚠️ THESE RAN AFTER THE CONFLICTS DIALOG AND THAT WAS WRONG. The user resolved
-            // a per-track differences list and only THEN learned the write would not fit, or
-            // would be slow - so the decisions they had just made were wasted. It is the same
-            // ordering mistake he caught in the bulk export ("this was too far in the
-            // process"), reintroduced in a second flow. He spotted it again here: "Could be in
-            // wrong order? I didn't go all the way since no cancel option."
-            //
-            // ⚠️ `replace` is still empty at this point, so both checks see only what the plan
-            // says is MISSING. That UNDERSTATES a run where the user later chooses to
-            // overwrite differing tracks - which errs toward proceeding and toward staying
-            // quiet, the safe direction for a guard whose failure mode is nagging. The
-            // alternative, sizing the whole tracks folder, over-refuses an additive export
-            // that only copies four files.
-            try {
-              // ⭐⭐ WORST CASE: everything MISSING plus every DIFFERING track, as if the user
-              // chose Replace on all of them. His call: "probably simpler if we go with worst
-              // case check and that's it."
-              //
-              // ⚠️ THE TRADE, STATED SO IT IS NOT REDISCOVERED: this can over-refuse. If the
-              // additions alone would have fitted and the user was going to skip most of the
-              // conflicts, an export that would have worked is blocked. What it buys is that
-              // there is exactly ONE check and it always runs BEFORE the conflicts list - so a
-              // refusal can never arrive after the user has worked through a per-track
-              // decision, which is the "too far in the process" failure he has now caught
-              // twice. The earlier design checked additions first and re-checked after the
-              // dialog; correct, and it could still refuse late.
-              const _willCopy = new Set([...(_sfTrkToAdd || []),
-                                         ...((plan && plan.ok && plan.differing) || [])]);
-              const _f = (window._sfSharedTracksFiles || []).filter(f => _willCopy.has(f.name));
-              const _need = _f.reduce((sum, f) => sum + (f.size || 0), 0);
-              // ⭐ ONE PREFLIGHT. [B-005 item 4] Was a fit check and a separate slow-write
-              // warning, each with its own round trip and its own bar juggling.
-              // ⚠️ THE BAR MUST BE DOWN BEFORE EITHER DIALOG. He caught this shape once
-              // already: a dialog drawn over the door's own moving bar. hideNow before, and
-              // restore after only if we are continuing.
-              if (_need > 0 || _f.length) {
-                // ⚠️ NO hideNow() HERE ANY MORE. The bar stays up through the check so the
-                // door keeps explaining its own wait; the preflight drops it only if it is
-                // about to show a dialog, and says so via `hidForDialog`. [B-005 item 4]
-                const _trkPf = await _sfPreflightDestination({
-                  destDir, totalBytes: _need, fileCount: _f.length,
-                });
-                if (!_trkPf.proceed) return;
-                // Only rebuild the bar if a dialog actually took it down.
-                if (_trkPf.hidForDialog) _sfDeleteProgress.show('Checking the destination…', '', 1);
-              }
-            } catch (e) { console.warn('[B-203/238] tracks pre-flight did not run:', e); }
-          if (plan && plan.ok && plan.differing && plan.differing.length) {
-            // ⚠ Close synchronously, THEN open the review — same frame, no await between
-            // them. Awaiting here paints a bare backdrop; opening first leaves a finished bar
-            // on top of the question.
-            _sfDeleteProgress.hideNow();
-            const chosen = await _sfResolveTrackConflicts(plan.differing);
-            if (chosen === null) return; // cancelled
-            replace = chosen;
-          } else {
-            // No review to open, so nothing follows this overlay — the minimum display time
-            // earns its place here and stops a fast check flashing for two frames.
-            await _sfDeleteProgress.hide();
-          }
-        } catch { await _sfDeleteProgress.hide(); }
-        finally { try { _offTrkPlan && _offTrkPlan(); } catch {} }
-
-        const _tracksT0 = Date.now();
-        _sfDeleteProgress.show('Exporting tracks', '', 0);
-        _sfDeleteProgress.offerCancel(_sfExportCancelOpt.onCancel);     // [B-005 item 4]
-        let r;
-        try { r = await window.electronAPI.sharedTracksExportToFolder({ destDir, mode: 'additive', replace }); }
-        catch (err) { r = { ok: false, error: String(err && err.message || err) }; }
-        _sfDeleteProgress.setProgress(1);
-        if (!r || !r.ok) {
-          await _sfDeleteProgress.hide();
-          _sfExportFailed((r && r.error) || 'unknown error');
-          return;
-        }
-        // ⚠️⚠️ THE COMMENT HERE USED TO READ "A cancel earlier returned before here" AND IT WAS
-        // FALSE. Nothing in this function tested `canceled` - grep it - so a cancelled tracks
-        // export ran straight on to commit a sync manifest describing a write that was stopped,
-        // and then showed the ordinary success summary. The manifest half is the worse one: it
-        // records what is supposedly at the destination, so the NEXT export trusts it and skips
-        // files that never landed. [B-005 item 4]
-        //
-        // ⚠️ A comment asserting a safety property is worth nothing if nobody re-reads the code
-        // under it - the same way the 708 MB delete had a comment claiming the archive was
-        // untouched unless the rename ran, which was exactly backwards.
-        // ⭐ THROUGH THE SHARED ENDING. [B-005 item 4] This door was the worst of the three:
-        // it tested only `ok`, so a cancel fell through to commit a sync manifest describing
-        // files that were never written - a record the NEXT export would have trusted and
-        // used to skip them.
-        if (r.canceled) {
-          await _sfDeleteProgress.hide();
-          // ⚠️ wroteCount, not `written`: this door reports what landed as added + replaced,
-          // and the shared notice must say how many finished rather than "nothing was copied"
-          // over a folder that now holds real files.
-          await _sfExportOutcome(
-            { ...r, wroteCount: (r.added || []).length + (r.replaced || []).length },
-            { what: 'tracks', destDir });
-          return;
-        }
-        // [B-402] The one write for THIS operation, at its end. The compare's findings ride
-        // inside the export's result — it was handed `plan.observed` and merged the copies over
-        // it — so this single item carries both halves.
-        if (r.observedItem && Array.isArray(r.observed) && r.observed.length) {
-          try {
-            await window.electronAPI.syncManifestCommit({
-              destDir, items: { [r.observedItem]: r.observed },
-            });
-          } catch {}
-        }
-        await _sfShowExportSummary({
+        const _run = await _sfRunExport({
+          label: 'tracks',
+          title: 'Exporting tracks',
           destDir,
-          names: [],
-          modeByName: new Map(),
-          elapsedSec: (Date.now() - _tracksT0) / 1000,
-          // Closed from inside the summary, once it is ready to show.
-          closeProgress: () => _sfDeleteProgress.hide(),
-          commonOutcomes: [],
-          tracksOutcome: {
-            reason: null,
-            added: (r.added || []).length,
-            replaced: (r.replaced || []).length,
-            unchanged: (r.unchanged || []).length,
-            kept: r.kept || [],
+          endState: { kind: 'tree' },
+          // The summary below is `_sfShowExportSummary`, which carries its own eject row.
+          summaryHasEject: true,
+          deltas: true,
+          onCancel: _sfExportCancelOpt.onCancel,
+
+          // ⭐ THIS DOOR RAISES ITS OWN BAR HERE, and that is not a violation of the runner's
+          // ownership: `plan` runs BEFORE the runner raises anything, and this plan is the long
+          // silent scan he reported ("there seemed to be no scan at all on the tracks export").
+          // The runner checks the DOM and will not open a second one on top of it.
+          plan: async () => {
+            let _off = null;
+            let _planned = false;
+            _sfDeleteProgress.show('Checking the destination…', 'Comparing with your library…');
+            try {
+              // Indeterminate until the first tick says how many there are: the count is not
+              // known before the plan starts, and a bar at a fixed fraction reads as a hang.
+              _off = window.electronAPI.onSharedTracksPlanProgress(({ file, done, total } = {}) => {
+                _planned = true;
+                _sfDeleteProgress.setPhase(
+                  total ? `Comparing with your library · ${Math.min(done + 1, total)} of ${total}`
+                        : 'Comparing with your library',
+                  total ? done / total : 0, file || '', '');
+              });
+              plan = await window.electronAPI.sharedTracksPlanExport({ destDir });
+              if (_planned) _sfDeleteProgress.setProgress(1);
+            } catch (e) {
+              console.warn('[B-420] tracks plan failed:', e);
+              plan = null;
+            } finally {
+              try { _off && _off(); } catch {}
+            }
+            if (!(plan && plan.ok)) return { items: [], totalBytes: 0, fileCount: 0 };
+            // ⚠️ Worst case, as above: missing plus differing. Sizing the whole tracks folder
+            // instead would refuse an additive export that only copies four files.
+            const _willCopy = new Set([...(plan.toAdd || []), ...(plan.differing || [])]);
+            const _f = (window._sfSharedTracksFiles || []).filter(f => _willCopy.has(f.name));
+            return {
+              items: [],
+              totalBytes: _f.reduce((sum, f) => sum + (f.size || 0), 0),
+              fileCount: _f.length,
+            };
           },
-          // ⭐ Same eject control, on this summary too. [B-005 item 4] A tracks export writes
-          // to the same cards as any other door, so it ends the same way.
-          ...(await _sfEjectContext(destDir)),
+
+          // ⚠️ TRACK SEMANTICS, NOT FOLDER SEMANTICS. Tracks replace per FILE and leave the rest
+          // of the destination alone, and they default to Replace because the library is the
+          // curated source. That is the opposite default from a font or common FOLDER, which is
+          // why this goes through `_sfResolveTrackConflicts` rather than the folder wording.
+          compare: async () => {
+            const differing = (plan && plan.ok && plan.differing) || [];
+            if (!differing.length) return { replace: [] };
+            // ⚠ Close synchronously, THEN open the review - same frame, no await between them.
+            // Awaiting here paints a bare backdrop; opening first leaves a finished bar on top
+            // of the question.
+            _sfDeleteProgress.hideNow();
+            const chosen = await _sfResolveTrackConflicts(differing);
+            if (chosen === null) return null;     // cancelled: the runner abandons the export
+            replace = chosen;
+            return { replace: chosen };
+          },
+
+          produce: async () => {
+            try {
+              r = await window.electronAPI.sharedTracksExportToFolder({
+                destDir, mode: 'additive', replace,
+              });
+            } catch (err) {
+              r = { ok: false, error: String(err && err.message || err) };
+            }
+            // ⚠️ wroteCount, not `written`: on a cancel the shared notice must say how many
+            // finished rather than "nothing was copied" over a folder that now holds real files.
+            if (r && r.canceled) {
+              r.wroteCount = (r.added || []).length + (r.replaced || []).length;
+            }
+            return r;
+          },
+
+          // ⚠️⚠️ THE MANIFEST COMMIT LIVES HERE, AND ONLY HERE, BECAUSE A CANCEL MUST NEVER
+          // REACH IT. `_sfExportOutcome` returns before `onCompleted` on a cancel, which is the
+          // guarantee this depends on. The old code tested only `ok`, so a cancelled export
+          // committed a manifest describing files that were never written - and the NEXT export
+          // trusted that record and skipped them. The comment above it claimed a cancel had
+          // already returned; nothing in the function tested `canceled` at all.
+          onCompleted: async () => {
+            if (r && r.observedItem && Array.isArray(r.observed) && r.observed.length) {
+              try {
+                await window.electronAPI.syncManifestCommit({
+                  destDir, items: { [r.observedItem]: r.observed },
+                });
+              } catch {}
+            }
+            await _sfShowExportSummary({
+              destDir,
+              names: [],
+              modeByName: new Map(),
+              elapsedSec: (Date.now() - _t0) / 1000,
+              // Closed from inside the summary, once it is ready to show.
+              closeProgress: () => _sfDeleteProgress.hide(),
+              commonOutcomes: [],
+              tracksOutcome: {
+                reason: null,
+                added: ((r && r.added) || []).length,
+                replaced: ((r && r.replaced) || []).length,
+                unchanged: ((r && r.unchanged) || []).length,
+                kept: (r && r.kept) || [],
+              },
+              // ⭐ Same eject control, on this summary too. [B-005 item 4] A tracks export writes
+              // to the same cards as any other door, so it ends the same way.
+              ...(await _sfEjectContext(destDir)),
+            });
+          },
         });
-        await _sfShowProgramRefusal({ refused: r.refused, kind: 'sharedTracks', id: '' });
+
+        if (!_run || !_run.ok || _run.canceled) return;
+        await _sfShowProgramRefusal({ refused: (r && r.refused), kind: 'sharedTracks', id: '' });
       };
       window._sfExportSharedTracks = _sfExportSharedTracks;
       document.getElementById('btn-sf-shared-tracks-export')?.addEventListener('click', (e) => {
@@ -38086,6 +38067,21 @@ require(['vs/editor/editor.main'], function () {
           const onBackdrop = (e) => { if (e.target === modal) onCancel(); };
           const onKey = (e) => { if (e.key === 'Escape') onCancel(); };
           const bulkRow = modal.querySelector('.sf-save-conflict-bulk');
+          // ⭐ "Set all" EARNS ITS PLACE ONLY WHEN THERE IS MORE THAN ONE. [2026-09-22]
+          //
+          // With a single row, the two bulk buttons do exactly what the radio pair directly
+          // beneath them does - a control that says nothing the screen is not already saying.
+          // This was harmless while the dialog only ever served the primary export's multi-row
+          // case; the font-card and common-folder doors now route single items through it
+          // routinely, so the one-row shape went from rare to ordinary.
+          //
+          // ⚠️ Same principle the caution below already follows: a control that cannot help
+          // right now is removed rather than left to be read and dismissed. Hidden, not
+          // deleted, because the element is reused across calls.
+          {
+            const _rowCount = _sections.reduce((n, sec) => n + ((sec.names || []).length), 0);
+            if (bulkRow) bulkRow.style.display = _rowCount > 1 ? '' : 'none';
+          }
           // The caution only earns its place while something would actually be
           // overwritten. With every row set to Skip it is noise, and noise here
           // costs us the warning that matters later.
@@ -38318,6 +38314,44 @@ require(['vs/editor/editor.main'], function () {
              + `</div>`;
       };
 
+      // ── Put the eject row IN the button bar, not above it ────── [2026-09-22]
+      //
+      // !! HIS ASK, ORIGINALLY: "can we put this button inline with ok? still on the left?"
+      // `.modal-btns` is flex with justify-content:flex-end, so a first child carrying
+      // margin-right:auto sits hard left and pushes the primary button right, without touching
+      // the shared rule every other dialog uses.
+      //
+      // ⚠️⚠️ THIS WAS WRITTEN INLINE IN `_sfCompletionNotice` AND THE OTHER SUMMARY NEVER GOT
+      // IT. `_sfShowExportSummary` built the identical row and left it stacked above the
+      // buttons, so the same control had two layouts depending on which door you came through.
+      // His report: "eject is no longer in line with Done... seems the whole modal could be
+      // shorter and fit". One helper, both callers.
+      //
+      // ⚠️ RELOCATED, NOT DUPLICATED. The row is built inside messageHtml because that is the
+      // only injection point promptConfirm offers, then moved. A second copy in the markup
+      // would be a second button, and the whole point is that there is exactly one.
+      const _sfPlaceEjectRowInButtons = () => {
+        try {
+          const row  = document.getElementById('sf-eject-row');
+          const btns = document.querySelector('#modal-confirm .modal-btns');
+          if (!row || !btns) return;
+          row.style.marginTop   = '0';
+          row.style.marginRight = 'auto';
+          row.style.minWidth    = '0';          // let the status text shrink, not overflow
+          const st = document.getElementById('sf-eject-status');
+          if (st) { st.style.maxWidth = '300px'; st.style.lineHeight = '1.35'; }
+          btns.insertBefore(row, btns.firstChild);
+        } catch {}
+      };
+      // ⚠️⚠️ AND TAKING IT AWAY IS NOT OPTIONAL. Once relocated, the row lives in the SHARED
+      // confirm dialog's button bar rather than in the message body that dies with the dialog.
+      // Leaving it puts a stale Eject button on the next unrelated promptConfirm, wired to a
+      // finished export. Same discipline as clearCancel and clearEject on the progress modal:
+      // whatever we add to a shared surface, we take away.
+      const _sfRemoveEjectRow = () => {
+        try { document.getElementById('sf-eject-row')?.remove(); } catch {}
+      };
+
       // Wires the row up. `auto` is the checkbox having been ticked - it presses the button.
       const _sfWireEjectRow = ({ target, vocab, auto }) => {
         const btn = document.getElementById('sf-eject-btn');
@@ -38427,35 +38461,11 @@ require(['vs/editor/editor.main'], function () {
           hideCancel: true,
         });
         if (ctx.ejectTarget) {
-          // !! INLINE WITH OK, ON THE LEFT. His ask: "can we put this button inline with ok?
-          // still on the left?" `.modal-btns` is flex with justify-content:flex-end, so a
-          // first child carrying margin-right:auto sits hard left and pushes OK to the right
-          // without touching the shared rule every other dialog uses.
-          // !! RELOCATED, NOT DUPLICATED. The row is built inside messageHtml because that is
-          // the only injection point promptConfirm offers, then moved into the button row. A
-          // second copy in the markup would be a second button, and the whole point of his
-          // design is that there is exactly one.
-          try {
-            const row  = document.getElementById('sf-eject-row');
-            const btns = document.querySelector('#modal-confirm .modal-btns');
-            if (row && btns) {
-              row.style.marginTop   = '0';
-              row.style.marginRight = 'auto';
-              row.style.minWidth    = '0';          // let the status text shrink, not overflow
-              const st = document.getElementById('sf-eject-status');
-              if (st) { st.style.maxWidth = '300px'; st.style.lineHeight = '1.35'; }
-              btns.insertBefore(row, btns.firstChild);
-            }
-          } catch {}
+          _sfPlaceEjectRowInButtons();
           _sfWireEjectRow({ target: ctx.ejectTarget, vocab: ctx.ejectVocab, auto: ctx.ejectAuto });
         }
         await p;
-        // !!! REMOVE IT ON THE WAY OUT. The row now lives in the SHARED confirm dialog's button
-        // row, so leaving it there would put a stale Eject button on the next unrelated
-        // promptConfirm - a live control wired to a finished export. Same discipline as
-        // clearCancel and clearEject on the progress modal: whatever we add to a shared
-        // surface, we take away.
-        try { document.getElementById('sf-eject-row')?.remove(); } catch {}
+        _sfRemoveEjectRow();
       };
 
       const _sfShowExportSummary = async ({ destDir, names, modeByName, commonOutcomes, tracksOutcome, unchangedFonts, commonMissing, commonFolderNames, elapsedSec, closeProgress, title, destSpace, canceled, ejectTarget, ejectVocab, ejectAuto }) => {
@@ -38491,8 +38501,22 @@ require(['vs/editor/editor.main'], function () {
           lines.push(`${n(names.length)} ${plural(names.length, 'font')} selected.${bits.length ? ' ' + bits.join(', ') + '.' : ''}`);
         }
 
+        // ⚠️⚠️ SAME GUARD AS THE LINE ABOVE, AND IT WAS MISSED. [2026-09-22]
+        //
+        // The standalone tracks export calls this with no fonts at all. The "N fonts selected"
+        // line was already guarded for exactly that reason; this one was not, so a tracks export
+        // reported "37 fonts at the destination, 37 not part of this export" - a count of a
+        // subject the user did not touch, where the second half is trivially true of all of them
+        // because none of them could have been part of a tracks export.
+        //
+        // ⭐ Half a guard is the tell that the fix was applied at the line that produced the
+        // symptom rather than to the condition. Both lines answer "what about the fonts", and
+        // neither has a question to answer when no fonts were exported.
+        // ⚠️ It also costs a `listDestFolders` round trip that nothing then uses.
         try {
-          const dl = await window.electronAPI.listDestFolders({ destDir });
+          const dl = names.length
+            ? await window.electronAPI.listDestFolders({ destDir })
+            : null;
           if (dl && dl.ok && Array.isArray(dl.folders)) {
             // EVERY shared folder the config declares is reserved, not just one called
             // "common". Reserving a single hardcoded name meant an `MC` folder on the
@@ -38642,7 +38666,13 @@ require(['vs/editor/editor.main'], function () {
         // live DOM, so the eject reports into it instead of replacing it. [B-005 item 4]
         // ⚠️ A cancelled export gets no eject offer: the card is in a half-written state and
         // the useful next action is deciding what to do about it, not releasing it.
-        if (!canceled) _sfWireEjectRow({ target: ejectTarget, vocab: ejectVocab, auto: ejectAuto });
+        // ⭐ IN the button bar, same as the short completion notice. This summary used to leave
+        // the row stacked above the buttons, so the identical control had two layouts depending
+        // on which door produced it, and the modal was a row taller than it needed to be.
+        if (!canceled) {
+          _sfPlaceEjectRowInButtons();
+          _sfWireEjectRow({ target: ejectTarget, vocab: ejectVocab, auto: ejectAuto });
+        }
         const pathLink = document.getElementById('sf-export-summary-path');
         // openFolder, not showItemInFolder: the destination IS the folder, so the
         // user wants to land inside it looking at what was just written, not in
@@ -38654,6 +38684,11 @@ require(['vs/editor/editor.main'], function () {
           if (!rev || rev.ok === false) promptError('Could not open the folder', (rev && rev.error) || destDir);
         });
         await closed;
+        // ⚠️⚠️ MANDATORY NOW, AND IT WAS NOT BEFORE. While the row sat inside `messageHtml` it
+        // died with the dialog's body. Relocating it into `.modal-btns` moves it onto SHARED
+        // persistent DOM, so without this the next unrelated promptConfirm renders a stale Eject
+        // button wired to a finished export. The relocation and the removal are one change.
+        _sfRemoveEjectRow();
       };
       // Bulk save: copies each selected entry as a Proffie-shaped folder to
       // a destination the user picks (typically an SD card root). Pre-scans
