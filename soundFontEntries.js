@@ -1211,20 +1211,52 @@ async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onB
   // leftover files from the previous version (which could leave a half-old
   // half-new Frankenfont in the directory otherwise).
   let targetName = name;
+  // Set when 'replace' moves an existing font out of the way. Non-null means there is a real
+  // font of the user's parked at ORIGINAL.<name> that MUST be put back or deleted before we
+  // return - never left behind, and never lost. [B-005 item 4]
+  let asideDir = null;
+  // ⚠️⚠️ GUARDS THE OUTER CATCH, AND WITHOUT IT THIS WHOLE FEATURE DESTROYS FONTS. That
+  // handler does `rmSync(targetDir)` to clear a half-written copy on failure - correct while
+  // targetDir could only ever hold OUR partial. Once the failure path restores the user's
+  // font back to that exact path, the same line deletes the thing the restore just saved.
+  // A cleanup that was safe by construction stopped being safe when the construction changed.
+  let restoredOriginal = false;
   const exists = fs.existsSync(path.join(destDir, targetName));
   if (exists) {
     if (mode === 'skip') {
       return { ok: true, skipped: true, destPath: path.join(destDir, targetName) };
     }
     if (mode === 'replace') {
-      // ⚠️⚠️ AWAITED, NOT rmSync. [B-398] This is a RECURSIVE DELETE OF AN ENTIRE FONT FOLDER ON
-      // THE CARD — 110 files for his biggest — and rmSync does the whole tree without yielding
-      // once. Measured 1321ms in one burst, and it survived two earlier fixes to this function
-      // because deleting does not look like work: the eye goes to the copy and the hashing.
-      // ⭐ It only fires when the destination already exists, which is why re-exporting the same
-      // font is the reproduction and a first export looks clean.
-      try { await fs.promises.rm(path.join(destDir, targetName), { recursive: true, force: true }); }
-      catch (err) { return { ok: false, error: `Cannot remove existing folder: ${err.message}` }; }
+      // ⭐⭐ MOVE THE ORIGINAL ASIDE; DO NOT DELETE IT. [B-005 item 4, his design 2026-09-20]
+      //
+      // This used to `rm` the existing font tree and THEN start copying, which is the exact
+      // shape that destroyed 708 MB on 2026-09-02 and produced the standing rule: move the
+      // original aside, put the new one in place, and only then delete the original. At no
+      // instant may the destination be empty while the replacement is still a hope. A cancel
+      // or a failure mid-copy used to leave the user with neither the old font nor a whole
+      // new one.
+      //
+      // ⭐ AND ON A CARD IT IS ALSO MUCH FASTER, WHICH IS WHY IT SOLVES THE "too large to
+      // clean up" PROBLEM. A rename is one metadata write; the delete it replaces is one
+      // round trip PER FILE - 110 of them for his biggest font, across a board's USB bridge.
+      // So the restore after a cancel is O(1) and instant no matter how big the font is;
+      // only disposing of the junk afterwards is slow, and that is the part worth offering
+      // rather than doing.
+      //
+      // ⚠️ SAME DIRECTORY, SO NO EXDEV. Renaming within destDir is same-volume by
+      // construction - the second half of the 09-02 rule, and the reason this is not staged
+      // through a temp dir.
+      asideDir = path.join(destDir, `ORIGINAL.${targetName}`);
+      // ⚠️ A stale aside means a previous run died between the rename and the cleanup. Its
+      // content is the OLDER copy of a font the user has since replaced, so the live tree
+      // wins; clearing it is what makes this operation repeatable rather than jamming on the
+      // second attempt.
+      if (fs.existsSync(asideDir)) {
+        try { await fs.promises.rm(asideDir, { recursive: true, force: true }); }
+        catch (err) { return { ok: false, error: `Cannot clear a leftover ORIGINAL folder: ${err.message}` }; }
+      }
+      try { await fs.promises.rename(path.join(destDir, targetName), asideDir); }
+      catch (err) { return { ok: false, error: `Cannot set aside the existing folder: ${err.message}` }; }
     } else {
       // 'rename' (default) — fall through to "<name>_N" until free.
       // Underscore (not parens) so the resulting folder name is safe
@@ -1247,7 +1279,175 @@ async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onB
     // meta.json files inside font subdirs are kept on the off chance a vendor
     // shipped one.
     const _exportRefused = [];
-    await copyTreeWithProgress(srcDir, targetDir, { skipRootMeta: true, onBytes, refused: _exportRefused });
+    try {
+      await copyTreeWithProgress(srcDir, targetDir, { skipRootMeta: true, onBytes, refused: _exportRefused,
+        shouldStop: opts.shouldStop || null,
+        // ⭐ The tally the cancel-cleanup rule reads. Owned by the caller's token so one
+        // object counts for the whole operation, across every font in a bulk run.
+        wrote: opts.wrote || null });
+    } catch (err) {
+      // ── Cancelled: take the half-written font back off the card ───── [B-005 item 4]
+      //
+      // ⭐⭐ REMOVING THE PARTIAL IS THE SAFER ANSWER, AND IT IS SAFE TO DO HERE. `targetDir` is
+      // always a folder THIS call created a few lines above - 'rename' minted a fresh name,
+      // 'replace' deleted the old tree first, 'skip' returned long ago - so there is no case
+      // where this touches something that was already the user's.
+      //
+      // ⭐ A partial font is worse than a missing one. Half a font on a card looks installed,
+      // mounts, appears in the preset list and then fails at the moment it is played, which is
+      // the kind of failure that gets blamed on the board. A font that is simply absent tells
+      // the truth, and re-exporting it is one click.
+      //
+      // ⚠️ BEST EFFORT, AND A FAILURE HERE IS NOT AN ERROR. If the card pulls out mid-cleanup
+      // we still report the cancel honestly rather than converting it into a crash - the user
+      // asked to stop, and telling them it broke instead would be its own lie.
+      if (require('./sfExportCopy').isCancel(err)) {
+        const out = { ok: true, canceled: true, destPath: targetDir, item: targetName,
+                      partialRemoved: false, restored: false, leftovers: [] };
+        // ⭐⭐ RESTORE FIRST, DISPOSE SECOND, AND THE ORDER IS THE WHOLE POINT. Getting his
+        // font back is two metadata renames - instant even on a board card, and it must not
+        // be made to wait behind a recursive delete that costs a round trip per file. If the
+        // process dies between these two steps the user still has a complete font under
+        // ORIGINAL.<name>, which is why the aside is renamed back LAST rather than first.
+        if (asideDir) {
+          // 1. Get the half-written tree out of the way under a name that says what it is.
+          const junk = path.join(destDir, `DELETE.${targetName}`);
+          try {
+            if (fs.existsSync(junk)) await fs.promises.rm(junk, { recursive: true, force: true });
+            if (fs.existsSync(targetDir)) {
+              await fs.promises.rename(targetDir, junk);
+              out.leftovers.push(junk);
+            }
+          } catch { /* fall through - the restore below matters more than tidiness */ }
+          // 2. Put the original back where it belongs.
+          try {
+            await fs.promises.rename(asideDir, targetDir);
+            out.restored = true;
+          } catch {
+            // ⚠️ The user's font is still WHOLE, just under the wrong name. Say so rather
+            // than reporting a clean stop - they need to know a folder called ORIGINAL.<name>
+            // is their font and must not be deleted.
+            out.leftovers.push(asideDir);
+          }
+          // ⭐⭐ THE SAME OFFER THE NON-REPLACE PATH MAKES. [B-005 item 4] Found reviewing for
+          // parity 2026-09-21: cancelling a REPLACE renamed the partial to DELETE.<name> and
+          // merely MENTIONED it, while cancelling a fresh export OFFERED to clear it. Same
+          // situation, same slow delete, two different treatments - and replace is the case
+          // where the user most wants the card tidy, because they were deliberately
+          // overwriting something.
+          // ⚠️ Same condition as everywhere else: a board card, over the same thresholds.
+          // Below that the removal is cheap and simply happens.
+          {
+            const _ed0 = require('./exportDestination');
+            const _wf = (opts.wrote && opts.wrote.files) || 0;
+            const _wb = (opts.wrote && opts.wrote.bytes) || 0;
+            const junkLeft = out.leftovers.find((p) => /[\\/]DELETE\./.test(p));
+            if (junkLeft) {
+              if (opts.boardCard && _ed0.isSlowWriteJob(_wf, _wb)) {
+                // ⚠️ Moved OUT of `leftovers`: naming it and then asking about it would state
+                // the same fact twice, which is the noise this app keeps cutting.
+                out.leftovers = out.leftovers.filter((p) => p !== junkLeft);
+                out.offerCleanup = junkLeft;
+              } else {
+                try {
+                  await fs.promises.rm(junkLeft, { recursive: true, force: true });
+                  out.leftovers = out.leftovers.filter((p) => p !== junkLeft);
+                } catch { /* keep it named so the user is told it is there */ }
+              }
+            }
+          }
+          return out;
+        }
+        // ── No aside: the partial is ours alone ──
+        //
+        // ⭐ Safe by construction - targetDir was minted by THIS call ('rename' picked a fresh
+        // name, 'skip' returned long ago), so nothing here can touch something already the
+        // user's.
+        //
+        // ⭐⭐ ON A BOARD CARD WITH A LOT ALREADY WRITTEN, RENAME AND OFFER - DO NOT DELETE.
+        // [B-005 item 4, his ruling 2026-09-20] "on card specifically, we need to enable abort
+        // and offer to clean if over 60mb already... offer to cleanup because if we've already
+        // done a bunch, it will take a while to delete... and the user may want partial files
+        // rather than wait." A recursive delete across the board's USB bridge is one round
+        // trip PER FILE; the rename is a single metadata write. So the cancel COMPLETES
+        // instantly either way, and the slow part becomes a choice instead of a wait.
+        // ⚠️ Same thresholds as the slow-write warning, deliberately - it is the same question
+        // about the same destination, so it must not get a second set of numbers.
+        const _ed = require('./exportDestination');
+        const wroteFiles = (opts.wrote && opts.wrote.files) || 0;
+        const wroteBytes = (opts.wrote && opts.wrote.bytes) || 0;
+        if (opts.boardCard && _ed.isSlowWriteJob(wroteFiles, wroteBytes)) {
+          const junk = path.join(destDir, `DELETE.${targetName}`);
+          try {
+            if (fs.existsSync(junk)) await fs.promises.rm(junk, { recursive: true, force: true });
+            await fs.promises.rename(targetDir, junk);
+            out.offerCleanup = junk;      // renderer asks; nothing is deleted on our own say-so
+            out.partialRemoved = false;
+            return out;
+          } catch { /* rename failed - fall through and try the ordinary removal */ }
+        }
+
+        // ⚠️⚠️ RETRIED, BECAUSE THIS SILENTLY FAILED ON HIS CARD. He cancelled an export to a
+        // board card and the partial folder was still there afterwards. A single `rm` here
+        // looked sufficient and was not: on Windows a directory containing a file whose
+        // handle is still open cannot be removed (EBUSY/EPERM), and the write stream's handle
+        // release is asynchronous. The real fix is upstream - the copy now waits for 'close'
+        // before unlinking - but this is the second line of defence for a handle held by
+        // something else, and the failure it guards against is invisible without it.
+        // ⚠️ `removed` is REPORTED, not swallowed: the renderer tells the user a partial may
+        // still be at the destination rather than claiming a clean stop.
+        let removed = false;
+        for (let i = 0; i < 4 && !removed; i++) {
+          try { await fs.promises.rm(targetDir, { recursive: true, force: true }); removed = true; }
+          catch { await new Promise((r) => setTimeout(r, 100 * (i + 1))); }
+        }
+        out.partialRemoved = removed;
+        return out;
+      }
+      // ── A real failure, not a cancel ──
+      // ⚠️ THE ASIDE MUST BE PUT BACK HERE TOO. Without this, any mid-copy error - a full
+      // card, an unreadable source - left the user's font parked under ORIGINAL.<name> while
+      // the error message talked about something else entirely.
+      if (asideDir) {
+        try {
+          if (fs.existsSync(targetDir)) {
+            await fs.promises.rm(targetDir, { recursive: true, force: true });
+          }
+          await fs.promises.rename(asideDir, targetDir);
+          restoredOriginal = true;   // ⚠️ stops the outer catch deleting what we just restored
+        } catch { /* reported through the thrown error below */ }
+      }
+      throw err;
+    }
+    // ── The replacement landed whole: NOW the original can go ──────── [B-005 item 4]
+    //
+    // ⭐ This is the "and only then delete the original" half of the rule. Everything above
+    // this line is reversible; past it, the new font is complete at the destination and the
+    // parked copy is genuinely superseded.
+    //
+    // ⚠️ RENAMED TO DELETE.<name> BEFORE REMOVAL, NOT REMOVED DIRECTLY. On a board card the
+    // recursive delete is a round trip per file and can run to minutes; the rename is
+    // instant. So the user's replace is COMPLETE the moment the rename returns, and a
+    // disposal that fails or gets interrupted leaves something whose name says exactly what
+    // it is rather than a second copy of a font they would have to identify.
+    //
+    // ⚠️ Not fatal if it fails. The export succeeded; a leftover folder is untidy, not
+    // broken, and turning it into an error would report a successful write as a failure.
+    let replacedLeftover = null;
+    if (asideDir) {
+      const junk = path.join(destDir, `DELETE.${targetName}`);
+      try {
+        if (fs.existsSync(junk)) await fs.promises.rm(junk, { recursive: true, force: true });
+        await fs.promises.rename(asideDir, junk);
+        replacedLeftover = junk;
+        await fs.promises.rm(junk, { recursive: true, force: true });
+        replacedLeftover = null;
+      } catch {
+        // Whatever stage it reached, report what is still on disk so the caller can say so.
+        replacedLeftover = fs.existsSync(junk) ? junk
+          : (fs.existsSync(asideDir) ? asideDir : null);
+      }
+    }
     // Record what we just wrote, with the destination's own timestamps, so the
     // next export can tell "unchanged since we wrote it" with stat calls instead
     // of reading the folder back. Best effort: a manifest we cannot write only
@@ -1293,11 +1493,44 @@ async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onB
     // exact silent strip the feature exists to prevent. It is also what the removal
     // buttons hang off: no list reaching the renderer means no way to act.
     return { ok: true, destPath: targetDir, refused: _exportRefused,
-             observedItem: _observedItem, observed: _observedOut };
+             observedItem: _observedItem, observed: _observedOut,
+             // Non-null only when a replace could not dispose of the superseded copy. The
+             // export SUCCEEDED; this just names a folder still sitting at the destination.
+             replacedLeftover };
   } catch (err) {
+    // ⚠️⚠️ THE ASIDE MUST BE PUT BACK ON *EVERY* FAILURE PATH, NOT JUST THE COPY'S.
+    //
+    // Found reviewing this on 2026-09-21, and the inner catch hid it well. That one restores
+    // `ORIGINAL.<name>` and sets `restoredOriginal` - but it only wraps
+    // `copyTreeWithProgress`. Anything throwing OUTSIDE it lands here instead:
+    // `mkdirSync(targetDir)`, the sync-manifest write, the disposal of the aside itself. On
+    // any of those the user's font was left parked under a name they never chose, and the
+    // error message said nothing about it.
+    //
+    // ⭐ Not lost - but renamed and unmentioned is its own kind of loss, and it is precisely
+    // the divergence between what he believes is on disk and what is on disk that the
+    // standing rule exists to prevent. Guarded by existsSync so it cannot fight the inner
+    // restore or resurrect a disposal that already succeeded.
+    if (asideDir && !restoredOriginal) {
+      try {
+        if (fs.existsSync(asideDir)) {
+          if (fs.existsSync(targetDir)) {
+            await fs.promises.rm(targetDir, { recursive: true, force: true });
+          }
+          await fs.promises.rename(asideDir, targetDir);
+          restoredOriginal = true;
+        }
+      } catch { /* the original error is still reported below; nothing is destroyed here */ }
+    }
     // Best-effort cleanup of a partial copy on failure so the user doesn't
     // end up with half a font folder mixed in with their other content.
-    try { fs.rmSync(targetDir, { recursive: true, force: true }); } catch {}
+    // ⚠️⚠️ NEVER WHEN THE ORIGINAL HAS BEEN RESTORED. targetDir then holds the user's own
+    // font, put back by the failure path above, and this line would delete it - turning a
+    // recoverable failure into data loss. The rm is only safe while that path can only
+    // contain a partial WE wrote. [B-005 item 4]
+    if (!restoredOriginal) {
+      try { fs.rmSync(targetDir, { recursive: true, force: true }); } catch {}
+    }
     return { ok: false, error: String(err && err.message || err) };
   }
 }

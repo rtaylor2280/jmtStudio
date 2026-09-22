@@ -19,17 +19,31 @@
 // ⚠️⚠️ THE FIX'S OWN TRAP, HIT WHILE WRITING IT: a `clear()` in the finally reads as tidy and is
 // the original bug wearing new clothes — it disarms every other live run exactly as `= null` did.
 // A run may only ever retire ITS OWN token.
+// ── ALSO THE EXPORT GATE NOW ─────────────────────────────────── [B-005 item 4, 2026-09-19]
+//
+// The file is still named for the import because that is where the two bugs above happened, but
+// nothing in here is import-shaped: it is "let a user's cancel reach every run in flight, and let
+// a finishing run disarm only itself". Exports need exactly that, and a second copy of state that
+// has already gone wrong twice would be the worst possible thing to duplicate.
+//
+// ⚠️ ONE DIFFERENCE, AND IT IS OPT-IN. Import is exclusive - a second one must be refused. Export
+// is not: the progress modal already prevents two at once in practice, and REFUSING an export
+// because the gate thinks something is running would turn a cancellation bug into a "nothing
+// happens when I click export" bug. So exports pass { exclusive: false } and always get a token.
+// Import's behaviour is unchanged by default, which is what keeps its tests meaningful.
 'use strict';
 
-function createGate() {
+function createGate(opts = {}) {
+  const exclusive = opts.exclusive !== false;
   const tokens = new Set();
   let busy = false;
 
   return {
     // Returns null when something is already running. The caller must treat null as "refuse",
     // not as "carry on with no token" — a run with no token cannot be cancelled at all.
+    // ⚠️ A non-exclusive gate never returns null: every run is cancellable, always.
     begin() {
-      if (busy) return null;
+      if (exclusive && busy) return null;
       busy = true;
       const token = { cancelled: false };
       tokens.add(token);

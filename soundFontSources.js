@@ -319,7 +319,11 @@ function _readHead(absPath) {
   finally { try { fs.closeSync(fd); } catch {} }
 }
 
-async function zipFolderToFile(srcDir, destZipPath, onProgress) {
+// ⚠️ One constructor for the cancel signal so the rejecting path and the returning path cannot
+// drift into throwing two different things. [B-005 item 4]
+function _cancelErr() { return new (require('./sfExportCopy').ExportCancelled)(); }
+
+async function zipFolderToFile(srcDir, destZipPath, onProgress, opts = {}) {
   const archiver = require('archiver');
   const { Transform } = require('stream');
 
@@ -356,7 +360,24 @@ async function zipFolderToFile(srcDir, destZipPath, onProgress) {
   let filesProcessed = 0;
   let lastEmit = Date.now();
   let lastProgressMs = Date.now(); // watchdog: last time an entry actually completed
+  // ⚠️⚠️ CANCEL ABORTS HERE; IT MUST NEVER THROW HERE. [B-005 item 4] This is an EventEmitter
+  // handler, and a throw inside one is an uncaught exception in the main process - the [B-418]
+  // crash shape, where the app simply vanishes. Every other stopping point in this feature
+  // throws because it is on a normal call stack; this one aborts the archive and lets the
+  // stream machinery below settle the promise.
+  let _canceled = false;
   archive.on('entry', (entry) => {
+    if (!_canceled && opts.shouldStop && opts.shouldStop()) {
+      _canceled = true;
+      try { archive.abort(); } catch {}
+      // ⚠️⚠️ DESTROY THE SINK TOO, OR NOTHING SETTLES FOR NINETY SECONDS. abort() stops archiver
+      // feeding the stream but does not close it, so the promise below sat there until the
+      // stall watchdog gave up - and that watchdog's whole job is to say the SOURCE is damaged.
+      // His report: he cancelled during compress and eventually got "the source has a damaged
+      // or unreadable file", about a font that is perfectly fine. [B-005 item 4]
+      try { fileStream.destroy(); } catch {}
+      return;
+    }
     filesProcessed++;
     lastProgressMs = Date.now();
     if (entry.stats && entry.stats.size) bytesProcessed += entry.stats.size;
@@ -382,32 +403,80 @@ async function zipFolderToFile(srcDir, destZipPath, onProgress) {
     archive.file(f.absPath, { name: f.relPath, date: EPOCH, mode: MODE });
   }
 
+  // ⚠️ A 'finalizing' phase was briefly emitted here and REMOVED, because nothing could
+  // receive it: the common-zip door's progress travels on a delta-only channel that carries a
+  // byte count and drops every other field. Adding it would have been one more producer with
+  // no consumer - the exact thing `test/export-wiring.test.js` exists to catch, written a few
+  // hours earlier. The tail is explained renderer-side instead, where the numbers already are.
+  // See the note on `Compressing ·` in the common-zip door. [B-005 item 4]
+
+  try {
   await new Promise((resolve, reject) => {
     // Watchdog: if no entry completes for a long stretch, a file is unreadable
     // (a damaged wav on a bad sector can make the OS read hang indefinitely).
     // Abort rather than hang the whole import forever — the caller cleans up the
     // partial uuid dir and surfaces a real error instead of a frozen modal.
     const STALL_MS = 90000;
+    // ⭐⭐ 250 ms, AND THAT TICK RATE IS THE MID-ENTRY CANCEL. [B-005 item 4] This interval used
+    // to run every 5 s purely as a stall watchdog, and the cancel check lived only in the
+    // 'entry' handler - so a zip could only stop BETWEEN entries. One large entry (a 40 MB
+    // track being compressed) meant the user waited out the whole thing with Cancel already
+    // pressed, which is the original complaint arriving in a different unit.
+    //
+    // ⭐ Polling here rather than reaching into archiver: the abort works the same whether we
+    // are between entries or halfway through one, and a timer needs nothing from the library's
+    // internals. The stall test still uses its own elapsed window, so lowering the tick does
+    // not make it trigger sooner.
     const watchdog = setInterval(() => {
+      // ⚠️⚠️ A CANCEL IS NOT A STALL, AND THIS WATCHDOG ACCUSES THE SOURCE. Deliberately
+      // stopping the archive looks identical to a file that will not read: entries stop
+      // completing. Without this the user's own Cancel came back as "the source has a damaged
+      // or unreadable file" - a false accusation about his font, which is far worse than no
+      // message at all. [B-005 item 4]
+      if (!_canceled && opts.shouldStop && opts.shouldStop()) {
+        // Same teardown the 'entry' handler does, for the same reasons documented there:
+        // abort the archive AND destroy the sink, or nothing settles until the stall window.
+        _canceled = true;
+        try { archive.abort(); } catch {}
+        try { fileStream.destroy(); } catch {}
+      }
+      if (_canceled) { clearInterval(watchdog); return finish(reject, _cancelErr()); }
       if (Date.now() - lastProgressMs > STALL_MS) {
         clearInterval(watchdog);
         try { archive.abort(); } catch {}
         reject(new Error('Stalled reading a file — the source has a damaged or unreadable file. Nothing was imported.'));
       }
-    }, 5000);
+    }, 250);
     const finish = (fn, arg) => { clearInterval(watchdog); fn(arg); };
-    fileStream.on('close', () => finish(resolve));
-    fileStream.on('error', (e) => finish(reject, e));
-    archive.on('error', (e) => finish(reject, e));
+    // ⚠️ EVERY path below funnels through this. Tearing a stream down mid-write can surface as
+    // 'error', 'warning' or a plain 'close', and which one arrives is not ours to predict - so
+    // once _canceled is set, whatever turns up means the same thing.
+    const settle = (fn, arg) => finish(_canceled ? reject : fn, _canceled ? _cancelErr() : arg);
+    fileStream.on('close', () => settle(resolve));
+    fileStream.on('error', (e) => settle(reject, e));
+    archive.on('error', (e) => settle(reject, e));
     archive.on('warning', (err) => {
       // ENOENT during walk just means a file vanished between readdir
       // and read — rare but not fatal; surface anything else.
       if (err.code === 'ENOENT') return;
-      finish(reject, err);
+      settle(reject, err);
     });
     archive.finalize();
   });
+  } catch (err) {
+    // ⚠️ THE REJECTING PATH SKIPS THE CLEANUP BELOW, so it does its own. Without this a
+    // cancelled zip export left the half-built archive sitting at the destination - the one
+    // artefact most likely to be mistaken for a finished export. [B-005 item 4]
+    if (require('./sfExportCopy').isCancel(err)) { try { fs.unlinkSync(destZipPath); } catch {} }
+    throw err;
+  }
 
+  // ⚠️ Belt and braces: if 'close' won the race before _canceled was read, the rejection above
+  // never happened and we land here instead. Either way the half-written zip goes. [B-005 item 4]
+  if (_canceled) {
+    try { fs.unlinkSync(destZipPath); } catch {}
+    throw _cancelErr();
+  }
   return { hash: hasher.digest('hex'), totalBytes, fileCount, strippedFiles, blockedFiles, notedFiles };
 }
 
@@ -1783,14 +1852,14 @@ function _createZipSource({ uuid, uuidDir, meta }) {
       return await _resolveCompositeReadBytes({ readFile: _readFlat }, filePath);
     },
 
-    async extractTo(subPath, destDir, onProgress) {
-      return await _extractZipSubtree(zipPath, subPath, destDir, onProgress);
+    async extractTo(subPath, destDir, onProgress, opts = {}) {
+      return await _extractZipSubtree(zipPath, subPath, destDir, onProgress, opts.shouldStop || null);
     },
 
     // Export the source. 'zip' (default) copies the on-disk archive exactly (it IS a zip
     // already, so the copy is instant and bit-perfect); 'folder' extracts the tree. The
     // freshly written file keeps its natural "now" timestamp so it's findable.
-    async exportToDownloads(destDir, { format = 'zip', onProgress } = {}) {
+    async exportToDownloads(destDir, { format = 'zip', onProgress, shouldStop = null } = {}) {
       if (!destDir) throw new Error('exportToDownloads requires destDir');
       if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
       // ⚠️ THE EXPORT IS NAMED FROM originalName, AND THAT IS DELIBERATE.
@@ -1812,7 +1881,7 @@ function _createZipSource({ uuid, uuidDir, meta }) {
         const r = await this.extractTo('', destPath, (p) => onProgress && onProgress({
           phase: 'reconstruct', fileCount: p.fileCount, totalFiles: files.length,
           bytesDone: p.totalBytes, totalBytes, currentFile: p.currentFile,
-        }));
+        }), { shouldStop });
         // ⚠️ THE WAY OUT NEEDS THE SAME GUARD AS THE WAY IN ([B-214], 2026-09-10).
         // The ZIP branch below is already safe for free: it goes through
         // zipFolderToFile, which runs _selectFolderFiles and drops programs. This
@@ -1838,6 +1907,13 @@ function _createZipSource({ uuid, uuidDir, meta }) {
       }
       const destName = /\.zip$/i.test(String(meta.originalName || '')) ? meta.originalName : `${baseName}.zip`;
       const destPath = _uniqueDestPath(destDir, destName);
+      // ⚠️⚠️ THE ONE EXPORT A CANCEL CANNOT INTERRUPT, and it is honest rather than broken.
+      // A zip-backed source exported AS a zip is a single fs.copyFile of the whole archive -
+      // there are no file boundaries inside it to stop between. The UI's promise is "finishing
+      // current file", and here the current file is the entire archive, so the button is true
+      // to its word; it just has one very large file to wait for. Checked before starting so a
+      // cancel that arrives during the pre-flight still lands. [B-005 item 4]
+      if (shouldStop && shouldStop()) throw new (require('./sfExportCopy').ExportCancelled)();
       await fs.promises.copyFile(zipPath, destPath);
       // Windows copyFile inherits the SOURCE file's mtime, which would backdate
       // this fresh export to its import date and bury it in a date-sorted view.
@@ -1859,7 +1935,7 @@ function _createZipSource({ uuid, uuidDir, meta }) {
 // parallel path drifts from the pipeline around it, and the drift is silent.
 // Everything the original did is load-bearing and stays: noise filtering, the
 // zip-slip guard, per-file progress, and the { fileCount, totalBytes } contract.
-async function _extractZipSubtree(zipPath, subPath, destDir, onProgress) {
+async function _extractZipSubtree(zipPath, subPath, destDir, onProgress, shouldStop = null) {
   const norm = _normalizeSubPath(subPath);
   const prefix = norm ? norm + '/' : '';
   const zip = _openZip(zipPath);
@@ -1882,6 +1958,9 @@ async function _extractZipSubtree(zipPath, subPath, destDir, onProgress) {
     // and every caller stops having to invent one.
     const expectedBytes = matching.reduce((s, e) => s + (e.isDir ? 0 : (e.size || 0)), 0);
     for (const entry of matching) {
+      // ⚠️ Between entries: the file just written is complete, the next never starts. The
+      // `finally` below still closes the zip handle on the way out. [B-005 item 4]
+      if (shouldStop && shouldStop()) throw new (require('./sfExportCopy').ExportCancelled)();
       const rel = norm ? entry.fileName.slice(prefix.length) : entry.fileName;
       if (!rel) continue;
       const destPath = path.join(destDir, rel.replace(/\//g, path.sep));
@@ -2093,6 +2172,11 @@ function _createFolderSource({ uuid, uuidDir, meta }) {
     // than a second copy of them. Export leaves it off: a folder the user carries
     // away has to be independent files. ([B-309])
     async extractTo(subPath, destDir, onProgress, opts) {
+      // ⚠️⚠️ THIS CHECK USED TO BE THE WHOLE STORY AND IT WAS WORTHLESS - it ran ONCE, on the
+      // way in, so pressing Cancel a second later did nothing until the entire tree had copied.
+      // The real check is inside copyFolderRecursive's per-file callback below. Kept here only
+      // as the cheap early-out for a cancel that beat us to the door. [B-005 item 4]
+      if (opts && opts.shouldStop && opts.shouldStop()) throw new (require('./sfExportCopy').ExportCancelled)();
       const norm = _normalizeSubPath(subPath);
       const srcDir = norm ? path.join(folderRoot, norm) : folderRoot;
       if (!fs.existsSync(srcDir)) throw new Error(`Not found in source: ${norm}`);
@@ -2111,6 +2195,10 @@ function _createFolderSource({ uuid, uuidDir, meta }) {
         return { fileCount, totalBytes };
       }
       await copyFolderRecursive(srcDir, destDir, (srcFile) => {
+        // ⚠️ THE PER-FILE CHECK LIVES HERE, not at the function entry where it started - see the
+        // note up top. This callback fires once per file, which is exactly the granularity the
+        // promise on the button ("finishing current file") claims. [B-005 item 4]
+        if (opts && opts.shouldStop && opts.shouldStop()) throw new (require('./sfExportCopy').ExportCancelled)();
         fileCount++;
         try { totalBytes += fs.statSync(srcFile).size; } catch {}
         if (onProgress) onProgress({ fileCount, totalBytes, currentFile: path.relative(srcDir, srcFile) });
@@ -2121,7 +2209,7 @@ function _createFolderSource({ uuid, uuidDir, meta }) {
     // Export the source. 'zip' (default) archives the folder tree into one tidy artifact;
     // 'folder' copies the tree as-is. Both stream real per-file progress. The freshly written
     // output keeps its natural "now" timestamp so it's findable in a date-sorted view.
-    async exportToDownloads(destDir, { format = 'zip', onProgress } = {}) {
+    async exportToDownloads(destDir, { format = 'zip', onProgress, shouldStop = null } = {}) {
       if (!destDir) throw new Error('exportToDownloads requires destDir');
       if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
       // ⚠️ THE EXPORT IS NAMED FROM originalName, AND THAT IS DELIBERATE.
@@ -2143,7 +2231,7 @@ function _createFolderSource({ uuid, uuidDir, meta }) {
         const r = await this.extractTo('', destPath, (p) => onProgress && onProgress({
           phase: 'reconstruct', fileCount: p.fileCount, totalFiles: files.length,
           bytesDone: p.totalBytes, totalBytes, currentFile: p.currentFile,
-        }));
+        }), { shouldStop });
         // ⚠️ THE WAY OUT NEEDS THE SAME GUARD AS THE WAY IN ([B-214], 2026-09-10).
         // The ZIP branch below is already safe for free: it goes through
         // zipFolderToFile, which runs _selectFolderFiles and drops programs. This
@@ -2173,7 +2261,7 @@ function _createFolderSource({ uuid, uuidDir, meta }) {
       // listing, or the summary over-reports by exactly what it left out.
       const _zr = await zipFolderToFile(folderRoot, destPath, (p) => onProgress && onProgress({
         phase: 'compress', bytesDone: p.bytesProcessed, totalBytes: p.totalBytes || totalBytes, currentFile: p.currentFile,
-      }));
+      }), { shouldStop });
       return { destPath, format: 'zip',
         fileCount: (_zr && _zr.fileCount != null) ? _zr.fileCount : files.length,
         totalBytes: (_zr && _zr.totalBytes != null) ? _zr.totalBytes : totalBytes,
@@ -2817,6 +2905,10 @@ async function _extractCanonicalsToDisk(physical, canonicalByHash, opts = {}) {
   try {
     let i = 0;
     for (const canon of outer) {
+      // ⚠️ The 'reading' phase can be the long one on a pooled source - it pulls every canonical
+      // to disk before a single file reaches the destination, and with no check here a cancel
+      // pressed during it did nothing until the phase ended. [B-005 item 4]
+      if (opts.shouldStop && opts.shouldStop()) throw new (require('./sfExportCopy').ExportCancelled)();
       const buf = await physical.readFile(canon);
       verify(canon, buf);
       const dp = path.join(ws, 'o' + (i++)); fs.writeFileSync(dp, buf); canonDisk.set(canon, dp);
@@ -2904,13 +2996,15 @@ function _virtualizeSource(physical, records) {
     // Reconstruct the FULL original subtree (trimmed board formats rebuilt from canonical
     // copies) to destDir. This is the export/reconstruction path (§13.3) — every consumer that
     // extracts a deduped source gets the complete bundle back, byte-identical per file.
-    async extractTo(subPath, destDir, onProgress) {
+    async extractTo(subPath, destDir, onProgress, opts = {}) {
       const base = norm(subPath);
       const prefix = base ? base + '/' : '';
       const destResolved = path.resolve(destDir);
       if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
       let fileCount = 0, totalBytes = 0;
       for (const r of recs) {
+        // ⚠️ Between files. [B-005 item 4]
+        if (opts.shouldStop && opts.shouldStop()) throw new (require('./sfExportCopy').ExportCancelled)();
         if (base && r.relPath !== base && !r.relPath.startsWith(prefix)) continue;
         const rel = base ? r.relPath.slice(prefix.length) : r.relPath;
         if (!rel) continue;
@@ -2934,13 +3028,14 @@ function _virtualizeSource(physical, records) {
     // exploded tree. Per-leaf byte-identical; inner-zip container bytes need not
     // match. (extractTo above stays the "unwrapped tree" path for subtree/entry
     // extraction; export routes here when the source has inner zips.)
-    async reconstructBundle(destDir, onProgress) {
+    async reconstructBundle(destDir, onProgress, opts = {}) {
       if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
       // Pull every canonical to disk once (each inner zip opened a single time),
       // reporting it as the 'reading' phase so the UI isn't blind while it runs;
       // then rebuild ('reconstruct' phase) is pure file copies + one re-zip.
       const { canonDisk, cleanup } = await _extractCanonicalsToDisk(physical, canonicalByHash,
-        { phase: 'reading', onProgress: onProgress && ((p) => onProgress({ phase: 'reading', fileCount: p.fileCount, totalFiles: p.totalFiles, currentFile: p.currentFile })) });
+        { phase: 'reading', shouldStop: opts.shouldStop || null,
+          onProgress: onProgress && ((p) => onProgress({ phase: 'reading', fileCount: p.fileCount, totalFiles: p.totalFiles, currentFile: p.currentFile })) });
       try {
         const outer = [];
         const groups = new Map(); // innerZipPath -> [{ innerRel, rec }]
@@ -2957,24 +3052,50 @@ function _virtualizeSource(physical, records) {
           if (!dp) throw new Error(`reconstruct: no canonical for ${r.relPath}`);
           return dp;
         };
+        // ⭐⭐ THIS IS THE LOOP HE WATCHED IGNORE HIS CANCEL. [B-005 item 4] His words: "it's
+        // like it's finishing copying over the entire folder it's on before it will cancel...
+        // why would it do even one more file?" Two separate defects, and it needed both fixes:
+        //
+        //   1. NO CHECK AT ALL. reconstructBundle gained the `opts` parameter and nothing that
+        //      READ it, so a bundle source - the pooled kind, the "213 identical files share
+        //      one copy" storage line - reconstructed to the last file whatever he pressed.
+        //   2. copyFileSync. Even with a check, a synchronous loop never yields, so the
+        //      export:cancel IPC could not be DELIVERED to set the flag the check reads.
+        //      Third time tonight: the await IS the cancel, not just the politeness.
+        // ⭐⭐ THROUGH copyFileWithProgress, NOT fs.promises.copyFile. [B-005 item 4] A whole-file
+        // copy has no checkpoint inside it, so a cancel pressed during a large track waited out
+        // the entire write - the same defect as the tree walk had, in the reconstruction unit.
+        // The shared helper checks on every 1 MB chunk AND on every drain, and deletes its own
+        // partial, so this path inherits both without keeping a second copy of the logic.
+        const { copyFileWithProgress: _copy } = require('./sfExportCopy');
         for (const r of outer) {
+          if (opts.shouldStop && opts.shouldStop()) throw new (require('./sfExportCopy').ExportCancelled)();
           const dest = path.join(destDir, r.relPath.replace(/\//g, path.sep));
           fs.mkdirSync(path.dirname(dest), { recursive: true });
-          fs.copyFileSync(diskOf(r), dest);
+          // ⚠️ onBytes is null on purpose: this loop already reports through `emit`, and
+          // subscribing both would double-count every byte.
+          await _copy(diskOf(r), dest, null, opts.shouldStop || null);
           emit(r.relPath, r.size || 0);
         }
         for (const [iz, members] of groups) {
+          // ⚠️ Between inner zips too: refilling one is a whole archive's work, and a cancel
+          // that only lands between FILES would still build every remaining zip. [B-005 item 4]
+          if (opts.shouldStop && opts.shouldStop()) throw new (require('./sfExportCopy').ExportCancelled)();
           const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'jmt-innerbuild-'));
           try {
             for (const m of members) {
+              if (opts.shouldStop && opts.shouldStop()) throw new (require('./sfExportCopy').ExportCancelled)();
               const f = path.join(tmp, m.innerRel.replace(/\//g, path.sep));
               fs.mkdirSync(path.dirname(f), { recursive: true });
-              fs.copyFileSync(diskOf(m.rec), f);
+              // Same helper, same reasons as the outer loop above. These land in a temp dir
+              // that the `finally` removes wholesale, so the partial cleanup is belt-and-braces
+              // here - but using the same call everywhere is what stops the two drifting.
+              await _copy(diskOf(m.rec), f, null, opts.shouldStop || null);
               emit(m.rec.relPath, m.rec.size || 0);
             }
             const dest = path.join(destDir, iz.replace(/\//g, path.sep));
             fs.mkdirSync(path.dirname(dest), { recursive: true });
-            await zipFolderToFile(tmp, dest);
+            await zipFolderToFile(tmp, dest, null, { shouldStop: opts.shouldStop || null });
           } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
         }
         return { fileCount, totalBytes };
@@ -2988,7 +3109,7 @@ function _virtualizeSource(physical, records) {
     // identical to the original (its zip-container bytes need not match). The freshly written
     // file keeps its natural "now" timestamp so it's findable in a date-sorted view; the
     // acquired date lives on the entry in-app, not on the exported file.
-    async exportToDownloads(destDir, { format = 'zip', onProgress } = {}) {
+    async exportToDownloads(destDir, { format = 'zip', onProgress, shouldStop = null } = {}) {
       if (!destDir) throw new Error('exportToDownloads requires destDir');
       if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
       const meta = physical.meta || {};
@@ -2998,7 +3119,12 @@ function _virtualizeSource(physical, records) {
       const folders = _topFolders(recs);
       // Inner-zip sources rebuild their inner zips (faithful refill); folder-only
       // sources write the flat tree. Same progress shape either way.
-      const reconstruct = (dest, onProg) => hasInner ? this.reconstructBundle(dest, onProg) : this.extractTo('', dest, onProg);
+      // ⚠️ shouldStop rides both branches - a bundle that reconstructs and one that extracts are
+      // the same wait from the user's side, and a cancel that only worked on one of them would be
+      // the kind of inconsistency nobody can explain. [B-005 item 4]
+      const reconstruct = (dest, onProg) => hasInner
+        ? this.reconstructBundle(dest, onProg, { shouldStop })
+        : this.extractTo('', dest, onProg, { shouldStop });
       if (format === 'folder') {
         const destPath = _uniqueDestPath(destDir, baseName);
         await reconstruct(destPath, (p) => onProgress && onProgress({
@@ -3029,7 +3155,7 @@ function _virtualizeSource(physical, records) {
         _zres = await zipFolderToFile(tmp, destPath, (p) => onProgress && onProgress({
           phase: 'compress', bytesDone: p.bytesProcessed, totalBytes: p.totalBytes || grandTotal,
           currentFile: p.currentFile,
-        }));
+        }), { shouldStop });
       } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
       // Counts come from the archive writer, which already refused any program.
       return { destPath, format: 'zip',

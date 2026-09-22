@@ -141,12 +141,17 @@ function ok(name, cond, extra) {
   // dropped the refusals. An assertion should fail for the reason it is named after.
   ok('exportBackup still returns its refusals',
      /return \{ destPath, manifest, refused[,\s}]/.test(backup));
+  // ⚠️ RE-ANCHORED 2026-09-21 [B-420], NOT WEAKENED. The backup door moved onto the shared
+  // export runner, so the refusal handling now lives in its `onCompleted` callback and the
+  // locals were renamed (`_bkRefused` -> `refused`, `completionMessage` -> `message`). The
+  // RULE is unchanged and is the whole point of this file: the refused list must be read off
+  // the result and acted on, and the completion must fold into that one dialog.
   ok('⭐⭐ and the export path now consumes them',
-     /const _bkRefused = \(result && result\.refused\) \|\| \[\];/.test(html)
-     && /_sfShowProgramRefusal\(\{\s*\n?\s*refused: _bkRefused/.test(html),
+     /const refused = r\.refused \|\| \[\];/.test(html)
+     && /_sfShowProgramRefusal\(\{\s*\n?\s*refused,/.test(html),
      'it read only ok/error/cancelled/residualPath and dropped the list on the floor');
   ok('⭐ the completion folds INTO that dialog rather than showing two',
-     /prefixHtml: `<div>\$\{_sfEscape\(completionMessage\)/.test(html),
+     /prefixHtml: `<div>\$\{_sfEscape\(message\)/.test(html),
      'B-370: "done and continue are to be replaced, combine into one message"');
 
   // The dialog it routes into is the one that removes first and cannot be declined.
@@ -176,13 +181,39 @@ function ok(name, cond, extra) {
 // ⭐ IT ALSO EXPLAINS A SILENT ONE EARLIER THE SAME DAY: his 15GB export "finished" and
 // he never saw Export complete. The zip was written; the dialog threw.
 {
-  const fn = html.slice(html.indexOf('const _sfRunExportBackup = async'),
-                        html.indexOf('const _sfRunExportBackup = async') + 14000);
-  ok('⚠️ the export clock reads the state object',
-     /Date\.now\(\) - state\.startMs/.test(fn), 'a bare startMs is not in this scope');
-  ok('⭐ and no bare startMs survives in this function',
-     !/Date\.now\(\) - startMs/.test(fn),
-     'it throws only on the success path, which is why nothing ever caught it');
+  // ⚠️ ANCHORED ON TWO MARKERS, NOT A CHARACTER COUNT. [B-420, 2026-09-21] This sliced 14,000
+  // characters from the function's start, which happened to contain it - until the door was
+  // migrated onto the shared runner and the content shifted. A window measured in characters
+  // is a window that silently stops covering what it was written to cover.
+  const _fnStart = html.indexOf('const _sfRunExportBackup = async');
+  const _fnEnd   = html.indexOf('// Merge-import run', _fnStart);
+  const fn = (_fnStart > 0 && _fnEnd > _fnStart) ? html.slice(_fnStart, _fnEnd) : '';
+  ok('the backup door was located', fn.length > 0,
+     're-anchor this if the function or the comment after it is renamed');
+  // ⚠️⚠️ THE `state.startMs` ASSERTION THAT USED TO SIT HERE IS GONE, DELIBERATELY. It required
+  // the clock to be read off a shared `state` object, which was true of the hand-rolled door.
+  // On the shared runner the door declares its own `startMs`, so that form no longer exists -
+  // and the assertion directly contradicted its own sibling below, which had already been
+  // re-anchored. Two rules about one line, pointing opposite ways. The surviving one states
+  // what [B-395] actually violated: if you read it, you must declare it.
+  // ⚠️⚠️ RE-ANCHORED 2026-09-21 [B-420] — AND THE INVERSION IS DELIBERATE, READ THIS BEFORE
+  // "FIXING" IT. [B-395] was a ReferenceError: the function read a BARE `startMs` when the clock
+  // actually lived on the shared `state` object, and it threw on the SUCCESS path only, so the
+  // completion dialog never rendered and nothing after it ran.
+  //
+  // The old test banned the expression `Date.now() - startMs` outright, because in that structure
+  // no such variable existed. On the shared runner the door declares `let startMs` itself, so the
+  // same expression is now CORRECT. Banning it would forbid the fixed code.
+  //
+  // ⭐ So the rule is stated properly instead of by proxy: if the function reads `startMs`, it
+  // must also DECLARE it. That is what [B-395] actually violated, and it holds in any structure.
+  {
+    const readsIt   = /Date\.now\(\) - startMs/.test(fn);
+    const declaresIt = /let startMs|const startMs/.test(fn);
+    ok('⭐ startMs is declared in the same function that reads it',
+       !readsIt || declaresIt,
+       'B-395: a bare read threw on the success path, so nothing ever caught it');
+  }
 }
 
 // ── ⚠️⚠️ THE SECOND NAME IS NOT A FAILURE  [B-394] ────────────────────────

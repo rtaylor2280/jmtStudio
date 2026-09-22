@@ -62,8 +62,16 @@ function ok(name, cond, extra) {
      /ipcMain\.handle\('sdcard:volumeInfo'/.test(mainJs));
   ok('preload bridges it',
      /volumeInfo: \(p\) => ipcRenderer\.invoke\('sdcard:volumeInfo', p\)/.test(preload));
+  // ⚠️ RE-ANCHORED 2026-09-21 [B-420]. Still the same rule - go through the SD module, never
+  // spawn a second PowerShell of our own - but the call is now `volumeForLetter`, which asks
+  // about ONE drive instead of enumerating every volume on the system. That mattered: the
+  // unfiltered enumeration walked mapped network drives, and one pointing at an unreachable
+  // host blocked it for 60+ seconds against a documented ~3,100ms.
   ok('⚠️ it reuses the SD module rather than shelling out again',
-     /sdCardDetect\.enumerateAllVolumes\(\)/.test(mainJs));
+     /sdCardDetect\.volumeForLetter\(/.test(mainJs));
+  ok('⚠️ and it asks about ONE letter, not every volume',
+     !/sdCardDetect\.enumerateAllVolumes\(\)/.test(mainJs),
+     'enumerating everything to find one drive is what let a dead network share hang card detection');
 }
 
 // ── the lookup is started EARLY, not at the summary ────────────────────────

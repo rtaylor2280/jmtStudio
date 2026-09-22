@@ -257,8 +257,18 @@ function ok(name, cond, extra) {
      /_sfDeleteProgress\.hideNow\(\);/.test(html)
      && html.indexOf('_sfDeleteProgress.hideNow();') < html.indexOf('const choicesPromise = _sfPromptSaveConflicts('),
      'scan then dialog — his order, and the one the first comment always stated');
+  // ⚠️ TESTS THE PROPERTY, NOT A CHARACTER WINDOW. This was `hideNow\(\) \{[\s\S]{0,40}?` up to
+  // the classList line, and adding one line to hideNow ([B-005] item 4's clearCancel) broke it
+  // while the thing it guards was still perfectly true. A fixed-width slice is a stale test
+  // waiting to happen; what actually matters is that nothing in here can DELAY the close.
   ok('⚠️ hideNow takes no minimum display time',
-     /hideNow\(\) \{[\s\S]{0,40}?this\.modal\(\)\?\.classList\.remove\('active'\);/.test(html),
+     (() => {
+       const i = html.indexOf('hideNow() {');
+       if (i < 0) return false;
+       const body = html.slice(i, html.indexOf('},', i));
+       return /this\.modal\(\)\?\.classList\.remove\('active'\);/.test(body)
+         && !/\bawait\b|setTimeout/.test(body);
+     })(),
      'the 200ms floor is what held a finished bar over the question that replaced it');
   ok('⚠️ the floor still exists for every other caller',
      /async hide\(minMs = 200\)/.test(html),

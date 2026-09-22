@@ -487,7 +487,7 @@ async function planExport(userData, destDir, onFile = null) {
 // updated their copy and expects it to reach the card, and "keep" made the
 // Update prompt contradict itself. So it asks, per file, defaulting to Replace.
 async function exportToFolderAdditive(userData, destDir, opts = {}) {
-  const { replace = [], onBytes = null } = opts;
+  const { replace = [], onBytes = null, shouldStop = null } = opts;
   const plan = await planExport(userData, destDir);
   if (!plan.ok) return plan;
   const srcDir = sharedTracksRoot(userData);
@@ -510,16 +510,45 @@ async function exportToFolderAdditive(userData, destDir, opts = {}) {
       refused.push({ relPath: name, name, kind: v.kind, reason: v.reason, disguised: !!v.disguised });
       return false;
     }
-    await copyFileWithProgress(src, path.join(targetDir, name), onBytes);
+    await copyFileWithProgress(src, path.join(targetDir, name), onBytes, shouldStop);
     return true;
   };
+  // ── Cancelling a tracks export ────────────────────────────────── [B-005 item 4]
+  //
+  // ⭐⭐ TRACKS DO NOT GET THEIR PARTIAL REMOVED, AND THAT IS A REAL DIFFERENCE, NOT AN
+  // INCONSISTENCY. A font is a UNIT: half of one on a card mounts, lists, and then fails when a
+  // sound is called for, so the font export takes its partial back. A tracks folder is a BAG OF
+  // INDEPENDENT FILES - every track that finished copying is a complete, playable file, and the
+  // destination folder is the user's, not ours (additive never created it and never owns it).
+  // Deleting what landed would destroy finished work to tidy up something that is not broken.
+  //
+  // ⭐ AND THE RULE ABOVE SURVIVED THE MID-FILE CANCEL INTACT - it got SHARPER, not weaker.
+  // Copies are now interruptible inside a file, and the in-flight track's truncated remains
+  // are deleted by `copyFileWithProgress`. That is the same principle, not an exception to
+  // it: the argument for keeping what landed is that each one is "a complete, playable
+  // file", and a half-written track is precisely the thing that is not. Finished tracks
+  // stay; the one that never finished goes.
+  let _canceled = false;
   try {
-    for (const name of plan.toAdd) { if (await copy(name)) added.push(name); }
-    for (const name of plan.differing) {
+    for (const name of plan.toAdd) {
+      if (shouldStop && shouldStop()) { _canceled = true; break; }
+      if (await copy(name)) added.push(name);
+    }
+    if (!_canceled) for (const name of plan.differing) {
+      if (shouldStop && shouldStop()) { _canceled = true; break; }
       if (replaceSet.has(name)) { if (await copy(name)) replaced.push(name); }
       else kept.push(name);
     }
-  } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+  } catch (err) {
+    // ⚠️⚠️ A CANCEL IS AN OUTCOME, NOT A FAILURE, AND THIS CATCH IS WHERE IT WOULD HAVE
+    // BECOME ONE. Interrupting mid-file means `copy` can now THROW where before it only
+    // ever returned - and this handler stringifies anything it catches into `error`, so a
+    // user's own Cancel would have come back as a red "Export failed: Export cancelled".
+    // That is the exact failure `ExportCancelled` and `isCancel` exist to prevent, and
+    // adding a throw to a path with a catch-all is how it gets reintroduced. [B-005 item 4]
+    if (require('./sfExportCopy').isCancel(err)) { _canceled = true; }
+    else return { ok: false, error: String(err && err.message || err) };
+  }
 
   // Only record when the destination now matches the library exactly. If the
   // user kept a differing track, the folder is deliberately NOT our content, so
@@ -560,8 +589,11 @@ async function exportToFolderAdditive(userData, destDir, opts = {}) {
     }
     _observed = [...observed];
   } catch {}
-  return { ok: true, destPath: targetDir, added, replaced, kept, unchanged: plan.unchanged, refused,
-           observedItem: 'tracks', observed: _observed };
+  // ⚠️ THE MANIFEST IS STILL WRITTEN FOR WHAT LANDED. A cancelled export leaves real files at
+  // the destination, and a manifest that does not mention them is how the next run re-hashes
+  // work already done - [B-005] item 1's whole argument, which holds however an export ends.
+  return { ok: true, canceled: _canceled, destPath: targetDir, added, replaced, kept,
+           unchanged: plan.unchanged, refused, observedItem: 'tracks', observed: _observed };
 }
 
 // Copy the singleton sharedTracks folder into destDir/tracks/. Mirrors
@@ -576,7 +608,7 @@ async function exportToFolderAdditive(userData, destDir, opts = {}) {
 // Fett263's Track Player (which scans <fontdir>/tracks) will ever look there.
 // It is staging, not a usable outcome. exportToFolderAdditive above is the
 // better answer and is what the bulk flow now uses.
-async function exportToFolder(userData, destDir, mode = 'rename', onBytes = null) {
+async function exportToFolder(userData, destDir, mode = 'rename', onBytes = null, opts = {}) {
   if (!destDir) return { ok: false, error: 'Missing destDir' };
   const srcDir = sharedTracksRoot(userData);
   if (!fs.existsSync(srcDir)) return { ok: false, error: 'Shared tracks folder not found' };
@@ -614,12 +646,22 @@ async function exportToFolder(userData, destDir, mode = 'rename', onBytes = null
     // ⚠️ The .wav fileFilter is a SHAPE test, not a safety one - a program renamed to
     // hum.wav passes it. `refused` is what reads the bytes ([B-364]).
     const _refused = [];
-    await copyTreeWithProgress(srcDir, targetDir, {
-      recurse: false,
-      fileFilter: (name) => /\.wav$/i.test(name),
-      onBytes,
-      refused: _refused,
-    });
+    try {
+      await copyTreeWithProgress(srcDir, targetDir, {
+        recurse: false,
+        fileFilter: (name) => /\.wav$/i.test(name),
+        onBytes,
+        refused: _refused,
+        shouldStop: opts.shouldStop || null,
+      });
+    } catch (err) {
+      // ⚠️ Same reasoning as the additive path above: finished tracks are complete, playable
+      // files and are left where they landed. Nothing is removed. [B-005 item 4]
+      if (require('./sfExportCopy').isCancel(err)) {
+        return { ok: true, canceled: true, destPath: targetDir, refused: _refused };
+      }
+      throw err;
+    }
     return { ok: true, destPath: targetDir, refused: _refused };
   } catch (err) {
     try { fs.rmSync(targetDir, { recursive: true, force: true }); } catch {}

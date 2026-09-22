@@ -76,8 +76,12 @@ ok('the export helper was found', caller.length > 0);
   ok('⚠️ but still asks when it is not given one',
      /let destDir = preDest \|\| null;/.test(handler) && /if \(!destDir\) \{/.test(handler),
      'the older callers must keep working unchanged');
-  ok('⭐ progress is emitted only when the renderer supplied the destination',
-     /const _emit = preDest \? _sfByteProgressEmitter\(event\) : null;/.test(handler),
+  // ⚠️ TIGHTENED [B-203/238]: a PROBE also arrives with a destination and also has no bar -
+  // it runs precisely so the question can be asked before anything is raised. Emitting
+  // there would push bytes at a listener that does not exist yet and seed the real bar's
+  // first frame from a call that wrote nothing.
+  ok('⭐ progress is emitted only when the renderer supplied the destination and means to write',
+     /const _emit = \(preDest && !probe\) \? _sfByteProgressEmitter\(event\) : null;/.test(handler),
      'a caller with no bar has no listener to send to');
   ok('⚠️⚠️ the bar lands on 100% whatever route each item took',
      /_emit\.onBytes\(\{ done: _bTotal, total: _bTotal, name: '' \}\); _emit\.flush\(\);/.test(handler),

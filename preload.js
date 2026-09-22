@@ -315,6 +315,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listSourceInnerZipFiles: (params)   => ipcRenderer.invoke('sources:listInnerZipFiles', params),
   readSourceFile:        (params)     => ipcRenderer.invoke('sources:readFile', params),
   extractFromSource:     (params)     => ipcRenderer.invoke('sources:extractTo', params),
+  // [B-203] Size a source before any bar goes up, so the checks look like every other door.
+  sourceExportSize:      (params)     => ipcRenderer.invoke('sources:exportSize', params),
   exportSourceToDownloads: (params)   => ipcRenderer.invoke('sources:exportToDownloads', params),
   pickExportDir:           (params)   => ipcRenderer.invoke('dialog:pickExportDir', params),
   showItemInFolder:        (p)        => ipcRenderer.invoke('shell:showItemInFolder', p),
@@ -366,6 +368,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   reorganizeRenumber:    (params)     => ipcRenderer.invoke('reorganize:renumber', params),
   hashFiles:             (params)     => ipcRenderer.invoke('hash:files', params),
   sfExportFiles:         (params)     => ipcRenderer.invoke('sfFile:export', params),
+  // ⭐ ONE CANCEL FOR EVERY EXPORT DOOR. Takes no argument on purpose: it cancels whatever is in
+  // flight rather than a run the renderer has to identify. Aiming a cancel at one remembered run
+  // is the exact bug written up in bulkImportGate.js, where it happened twice. [B-005 item 4]
+  exportCancel:          ()           => ipcRenderer.invoke('export:cancel'),
   // [B-364] Acting on a program the export refused to carry. Both re-verify the
   // bytes in the main process before removing anything.
   sfProgramImpound:      (params)     => ipcRenderer.invoke('sfProgram:impound', params),
@@ -383,6 +389,43 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readEntryDocBytes:     (params)     => ipcRenderer.invoke('entries:readDocBytes', params),
   exportEntryDoc:        (params)     => ipcRenderer.invoke('entries:exportDoc', params),
   exportEntryToFolder:   (params)     => ipcRenderer.invoke('entries:exportToFolder', params),
+  // [B-203] Will the write fit? 0.3ms, statfs only - safe to call before any write.
+  checkExportDest:       (params)     => ipcRenderer.invoke('exportDest:check', params),
+  // [B-203] What is the destination attached to? ~1.9s (one PowerShell spawn), so start
+  // it early and read it later. Never await it between a click and the work starting.
+  // ⚠️ [B-005 item 4] Since 2026-09-21 this answers ONLY "is it a card through a
+  // Proffieboard". If all you need is removable-or-not, use identifyExportDest - it is the
+  // same fact for 1/20th of the time, and buying the walk to get it was why several doors
+  // quietly never offered a safe eject.
+  classifyExportDest:    (params)     => ipcRenderer.invoke('exportDest:classify', params),
+  // ⭐ [B-005 item 4] "What have we just been handed?" ~85ms, no PowerShell. Returns
+  // { removable, kind } or null for "cannot tell". Cheap enough to sit on a write path.
+  identifyExportDest:    (params)     => ipcRenderer.invoke('exportDest:identify', params),
+  // ⭐ [B-005 item 4] THE ONE PREFLIGHT. Fit refusal + board-card warning in a single call,
+  // and it returns `boardCard` and `removable` so the cancel-cleanup rule and the safe-eject
+  // offer reuse that answer instead of each paying for their own device lookup.
+  // ⚠️ Pass classify:true only when the answer is wanted; it is the ~1.9s spawn.
+  preflightExportDest:   (params)     => ipcRenderer.invoke('exportDest:preflight', params),
+  // ⭐ [B-005 item 4] Safe eject. Takes a DRIVE LETTER, not a path - one physical reader can
+  // hold two letters, so the eject is per-volume or it takes a sibling card with it.
+  // Resolves with one of three honest outcomes: ejected / returned / busy. Never a success
+  // it cannot verify: the shell verb is fire-and-forget, so the module watches the media go.
+  // ⚠️ [B-005 item 4] Removes ONLY a folder this app set aside - main refuses anything whose
+  // name does not start with "DELETE.". Not a general-purpose delete, deliberately.
+  removePath:            (params)     => ipcRenderer.invoke('fs:removeSetAside', params),
+  // ⚠️ Takes { destDir }, NOT a drive letter. The module resolves a destination to whatever
+  // its platform watches (E:\, /Volumes/NAME, /media/<user>/NAME), so this contract does not
+  // change when macOS and Linux are implemented behind it.
+  ejectMedia:            (params)     => ipcRenderer.invoke('media:eject', params),
+  isMediaPresent:        (params)     => ipcRenderer.invoke('media:present', params),
+  // ⭐ Per-OS words, asked for once. So a Mac build never says "Windows", and a message that
+  // describes a Windows-only BEHAVIOUR (the drive letter that stays behind) is absent rather
+  // than translated. See media:vocabulary in main.js.
+  // Returns { mountPath, label } or null. Null is the platform saying "nothing to eject here",
+  // which is how the renderer avoids owning any opinion about what a volume path looks like.
+  resolveMedia:          (params)     => ipcRenderer.invoke('media:resolve', params),
+  mediaVocabulary:       ()           => ipcRenderer.invoke('media:vocabulary'),
+  mediaNote:             (params)     => ipcRenderer.invoke('media:note', params),
   // [B-402] One manifest write per operation, called at the very end. See main.js.
   syncManifestCommit:    (params)     => ipcRenderer.invoke('syncManifest:commit', params),
   entryFolderExistsAt:   (params)     => ipcRenderer.invoke('entries:existsAt', params),

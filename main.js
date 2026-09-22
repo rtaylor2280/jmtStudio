@@ -702,6 +702,72 @@ function liveDir(dir) {
   try { if (dir && fs.existsSync(dir)) return dir; } catch {}
   return null;
 }
+
+// ── Where an export picker should OPEN ──────────────────────────── [2026-09-22]
+//
+// ⚠️⚠️ `liveDir` ABOVE IS NOT ENOUGH FOR THE EXPORT DIALOGS, AND HE FOUND OUT THE HARD WAY.
+// [B-291] guarded a remembered path we had STORED. The export pickers store nothing - they pass
+// `defaultPath: 'name.zip'`, a bare filename with no directory - and when the path carries no
+// directory, Windows falls back to ITS OWN memory of the last folder this app used. So the
+// guard had nothing to guard: the stale location lives in the shell's MRU, not in our Store.
+//
+// Twice on 2026-09-22 that reopened the picker on a card that was gone, and Save hung the
+// dialog. It is not only our dialog that stalls - a plain WMI enumeration of removable volumes
+// from a separate process hung for 90 s at the same moment, because anything listing drives
+// waits on the dead one.
+//
+// ⭐ HIS RULE, and it collapses to a single test: open the last location IF IT IS STILL LIVE,
+// otherwise open at This PC. Whether the last place was removable stops mattering - a live card
+// is a fine place to land, and a dead anything is not.
+//
+// ⚠️⚠️ AND THE LIVENESS TEST ITSELF MUST NOT BE ABLE TO HANG. `fs.existsSync` is exactly the
+// call that stalled for 90 s on the stopped reader, and it is SYNCHRONOUS - using it here would
+// move the freeze out of the dialog and into our main process, which is worse because it is
+// ours. `fs.promises.access` blocks a threadpool thread instead, so the race below can give up
+// and leave the app responsive.
+// ⚠️⚠️ "OPEN AT THIS PC" WAS TRIED, MEASURED, AND REJECTED - 2026-09-22. DO NOT RE-ATTEMPT
+// WITHOUT READING THIS. It is the obvious idea and it half-works, which is the worst kind.
+//
+// Measured with a probe (5 dialogs, including a control pointing at Downloads so "ignored
+// entirely" could be told apart from "rejected this path"):
+//
+//   defaultPath                          opened at
+//   ----------------------------------   -----------------------------
+//   ::{20D04FE0-...-08002B30309D}        This PC          ✓
+//   ::{20D04FE0-...}\probe.zip           I:\  (the MRU)   ✗
+//   shell:MyComputerFolder               This PC          ✓
+//   shell:MyComputerFolder\probe.zip     I:\  (the MRU)   ✗
+//   <downloads>\probe.zip                D:\Downloads     ✓ (control - the mechanism works)
+//
+// ⭐ SO IT IS THIS PC *OR* A SUGGESTED FILENAME, NEVER BOTH. Electron takes one string for both
+// and Windows only honours the shell path when it stands alone; add a filename and it silently
+// falls back to its own MRU - the exact behaviour this whole helper exists to escape. And with
+// the bare shell path, the CLSID itself lands in the File name box, which reads as broken.
+// There is no separate name option on Windows (`nameFieldLabel` is macOS only).
+//
+// ⭐ HIS RULING: fall back to Downloads. Correct filename, ordinary folder, and never a path
+// that can hang. The landing spot is polish; the defect - a picker opening on a card that left
+// the machine, and blocking - is fixed by the liveness test either way.
+
+async function liveDirSafe(dir, timeoutMs = 1500) {
+  if (!dir) return null;
+  try {
+    const probe = fs.promises.access(dir).then(() => true, () => false);
+    const timer = new Promise((r) => setTimeout(() => r(false), timeoutMs));
+    return (await Promise.race([probe, timer])) ? dir : null;
+  } catch { return null; }
+}
+
+// Returns what to hand `dialog.show*Dialog` as `defaultPath`.
+//
+// ⚠️ NEVER RETURN A BARE FILENAME. That is the original defect: with no directory, Windows uses
+// its own memory of the last folder this app saved into, which is how a picker opened on a card
+// that had left the machine and then blocked on Save. Always name a directory.
+async function exportDefaultPath(storedDir, fileName) {
+  const live = await liveDirSafe(storedDir);
+  const dir = live || app.getPath('downloads');
+  return fileName ? path.join(dir, fileName) : dir;
+}
 ipcMain.handle('dialog:open', async () => {
   const lastDir = liveDir(Store.get('lastDir'));
   const { canceled, filePaths } = await dialog.showOpenDialog(win, {
@@ -2088,19 +2154,34 @@ ipcMain.handle('sources:readFile', async (_, { uuid, path: filePath } = {}) => {
   }
 });
 
-ipcMain.handle('sources:extractTo', async (event, { uuid, path: subPath, destDir } = {}) => {
-  const send = (payload) => {
-    try { event.sender.send('sources:extractProgress', { uuid, ...payload }); } catch {}
-  };
-  try {
-    const source = soundFontSources.openSource(app.getPath('userData'), uuid);
-    if (!source) return { ok: false, error: `Source not found: ${uuid}` };
-    const result = await source.extractTo(subPath || '', destDir, send);
-    return { ok: true, ...result };
-  } catch (err) {
-    return { ok: false, error: String(err && err.message || err) };
-  }
-});
+// ⚠️⚠️ THIS DOOR HAD NO CANCEL UNTIL 2026-09-20, AND THE MODULE WAS READY THE WHOLE TIME.
+// `extractTo` has accepted `opts.shouldStop` and threaded it into `_extractZipSubtree` all
+// along; nothing here ever passed one. So the gap was a handler that never asked for a
+// capability that already existed, which is why no amount of reading the extraction code
+// would have revealed it.
+//
+// ⭐ IT WAS MISSED BECAUSE OF ITS NAME. Every sweep for export paths searched for "export",
+// and this one is called extractTo - the same reason it sat outside the [B-005] cancel work
+// on 09-19. Name the category by its EFFECT (it writes a user-chosen destDir) and it is
+// obviously an export door.
+ipcMain.handle('sources:extractTo', async (event, { uuid, path: subPath, destDir } = {}) =>
+  _withExportCancel(async (shouldStop) => {
+    const send = (payload) => {
+      try { event.sender.send('sources:extractProgress', { uuid, ...payload }); } catch {}
+    };
+    try {
+      const source = soundFontSources.openSource(app.getPath('userData'), uuid);
+      if (!source) return { ok: false, error: `Source not found: ${uuid}` };
+      const result = await source.extractTo(subPath || '', destDir, send, { shouldStop });
+      return { ok: true, ...result };
+    } catch (err) {
+      // ⚠️ A cancel is an outcome, not a failure - without this the user's own click comes
+      // back as a red "Export failed: Export cancelled", the exact shape `isCancel` exists
+      // to prevent and the one that bit three other doors on 09-20.
+      if (require('./sfExportCopy').isCancel(err)) return { ok: true, canceled: true };
+      return { ok: false, error: String(err && err.message || err) };
+    }
+  }));
 
 ipcMain.handle('sources:detectVendor', async (_, { uuid } = {}) => {
   try {
@@ -2524,11 +2605,16 @@ ipcMain.handle('entries:exportDoc', (_, { name, path: subPath } = {}) => {
 // card root or any folder the user wants Proffie-shaped font folders copied
 // into. createDirectory lets the user make a subfolder on the fly.
 ipcMain.handle('dialog:selectSaveDestination', async () => {
+  // Same rule as the zip picker: last place if it is still live, This PC otherwise. Passing no
+  // defaultPath at all hands the choice to Windows' own MRU, which is how a picker lands on a
+  // card that left the machine.
   const result = await dialog.showOpenDialog(win, {
     title: 'Choose destination for sound fonts',
+    defaultPath: await exportDefaultPath(Store.get('lastExportDir'), null),
     properties: ['openDirectory', 'createDirectory'],
   });
   if (result.canceled || !result.filePaths.length) return { ok: false, canceled: true };
+  try { Store.set('lastExportDir', result.filePaths[0]); } catch {}
   return { ok: true, dirPath: result.filePaths[0] };
 });
 
@@ -2582,20 +2668,89 @@ function _sfExportProgressEmitter(event) {
   };
 }
 
+// ── Cancelling an export ────────────────────────────────────── [B-005 item 4, 2026-09-19]
+//
+// ⭐⭐ THE EXIT IS THE HAZARD, NOT THE WAIT. He hit this on a real export: 109 MB to a card over
+// mass storage, sat at 32.3 MB after two minutes, and "the only way out is potentially damaging -
+// I'd have to force the app to close." Force-quitting mid-write to a FAT32 card is the precise
+// failure the whole SD guard exists to prevent, so the app was offering a long operation whose
+// only escape was the thing we spent the release preventing.
+//
+// ⭐ AND [B-238] MADE IT A PAIR. The slow-write warning now tells you before you start that this
+// export will take much longer - and then gives you no way to act on it once running. Telling
+// someone an operation is long while offering no exit is half a feature.
+//
+// ⚠️ ONE GATE FOR EVERY DOOR. Nine export doors, one cancel: a click cancels everything in flight
+// rather than whichever run a pointer happened to be aimed at. That bug is not hypothetical - it
+// is written up at the top of bulkImportGate.js, where it happened twice, which is also why this
+// reuses that tested module instead of keeping its own copy of the state.
+const _exportGate = require('./bulkImportGate').createGate({ exclusive: false });
+ipcMain.handle('export:cancel', () => ({ ok: true, cancelled: _exportGate.cancelAll() }));
+
+// ⭐ Every export handler wears the same three lines: take a token, hand `shouldStop` to the work,
+// retire only your own token. Wrapped here so no door has to remember the order - and so `end()`
+// lands in a finally, because a token left in the set makes the NEXT cancel report work it is not
+// really doing.
+// ⭐⭐ THE TOKEN CARRIES THE DESTINATION VERDICT. [B-005 item 4] The cleanup rule needs to know
+// whether this is a board card, and that answer costs a ~1,900 ms PowerShell spawn - which
+// must never be paid at the moment the user presses Cancel, since waiting is the whole
+// complaint being fixed. The preflight already established it when the export STARTED, so the
+// verdict rides here and cancel just reads it.
+//
+// ⚠️ `boardCard` DEFAULTS FALSE, AND THAT IS HIS RULING, NOT A SHORTCUT: "if we can't tell,
+// then we assume it's not card through proffie. it's only card through proffie that's the long
+// part." An unknown destination therefore gets the fast silent cleanup rather than a prompt
+// nobody needed. Same degrade-to-safe as the [B-238] warning path.
+//
+// `wrote` is the running tally the cleanup decision needs - whether enough has landed that
+// removing it would itself be slow enough to be worth offering rather than just doing.
+async function _withExportCancel(run, opts = {}) {
+  const token = _exportGate.begin();
+  token.boardCard = !!opts.boardCard;
+  token.wrote = { files: 0, bytes: 0 };
+  try {
+    return await run(() => !!(token && token.cancelled), token);
+  } finally {
+    _exportGate.end(token);
+  }
+}
+
 // [B-402] `priorObserved` carries what the conflict scan already hashed for THIS destination in
 // THIS operation, so the export can write the manifest once instead of the scan writing it and the
 // export writing it again seconds later. It is an array of [relPath, [size, mtime, hash]] because
 // it crosses the IPC boundary; the module rebuilds the Map.
-ipcMain.handle('entries:exportToFolder', async (event, { name, destDir, mode, syncManifest, priorObserved } = {}) => {
-  try {
-    const emit = _sfExportProgressEmitter(event);
-    const r = await soundFontEntries.exportEntryToFolder(app.getPath('userData'), name, destDir, mode, emit.onBytes,
-      { syncManifest: syncManifest !== false, priorObserved });
-    emit.flush();
-    return r;
-  } catch (err) {
-    return { ok: false, error: String(err && err.message || err) };
-  }
+ipcMain.handle('entries:exportToFolder', async (event, { name, destDir, mode, syncManifest, priorObserved, boardCard } = {}) => {
+  // ⚠️ THIS ONE HANDLER IS TWO OF HIS DOORS. The right-click "Export font folder…" calls it once;
+  // the REGULAR card export loops it, once per font. So cancelling here covers both, and the
+  // bulk run stops at a font boundary as well as a file boundary. [B-005 item 4]
+  //
+  // ⭐⭐ `boardCard` COMES FROM THE RENDERER'S PREFLIGHT AND IS NOT RE-MEASURED. [B-005 item 4]
+  // The cleanup rule needs to know whether this destination is a card behind a Proffieboard,
+  // and that answer costs a ~1,900 ms PowerShell spawn. It was already established before the
+  // write started; paying for it again at the moment the user presses Cancel would recreate
+  // the exact complaint this work exists to fix.
+  // ⚠️ Absent means FALSE, which is his ruling and not a shortcut: "if we can't tell, then we
+  // assume it's not card through proffie." An unknown destination gets the fast, silent
+  // cleanup rather than a prompt nobody needed.
+  return _withExportCancel(async (shouldStop, token) => {
+    try {
+      const emit = _sfExportProgressEmitter(event);
+      // The running tally decides whether a cleanup is big enough to be worth OFFERING rather
+      // than just doing. It is kept on the token so one place owns it for every door.
+      // ⚠️ onBytes takes a NUMBER - a chunk length - not a progress object. The first cut
+      // read `p.done` off it and would have left the tally permanently zero, which reads
+      // exactly like "nothing was written yet" and would have disabled the offer entirely.
+      const r = await soundFontEntries.exportEntryToFolder(app.getPath('userData'), name, destDir, mode,
+        (n) => { token.wrote.bytes += (Number(n) || 0); emit.onBytes(n); },
+        { syncManifest: syncManifest !== false, priorObserved, shouldStop,
+          boardCard: !!token.boardCard, wrote: token.wrote });
+      emit.flush();
+      return r;
+    } catch (err) {
+      if (require('./sfExportCopy').isCancel(err)) return { ok: true, canceled: true };
+      return { ok: false, error: String(err && err.message || err) };
+    }
+  }, { boardCard });
 });
 
 ipcMain.handle('entries:existsAt', (_, { name, destDir } = {}) => {
@@ -2782,34 +2937,56 @@ ipcMain.handle('common:pickExportZipPath', async (event, { uuid } = {}) => {
     // pack name; only the file on disk has to survive the filesystem.
     const safeFile = String(packName).replace(/[\/:*?"<>|]/g, '_').trim() || 'common';
     const win = BrowserWindow.fromWebContents(event.sender);
+    // ⚠️ THIS LINE WAS `defaultPath: safeFile + '.zip'` AND IT HUNG HIS APP TWICE ON 2026-09-22.
+    // A bare filename carries no directory, so Windows used its own memory of the last folder
+    // this app saved into - a card that was no longer there - and the dialog blocked on Save.
+    // [B-291]'s `liveDir` could not help: there was no stored path to validate.
     const { canceled, filePath } = await dialog.showSaveDialog(win, {
       title: 'Export common folder',
-      defaultPath: safeFile + '.zip',
+      defaultPath: await exportDefaultPath(Store.get('lastExportDir'), safeFile + '.zip'),
       filters: [{ name: 'Zip archive', extensions: ['zip'] }],
     });
     if (canceled || !filePath) return { ok: false, canceled: true };
+    // Remember it so the next export lands where the last one did - and so there IS a stored
+    // path for the liveness test to have an opinion about.
+    try { Store.set('lastExportDir', path.dirname(filePath)); } catch {}
     return { ok: true, filePath, name: packName };
   } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
 ipcMain.handle('common:exportAsZip', async (event, { uuid, destPath } = {}) => {
-  try {
-    if (!destPath) return { ok: false, error: 'Missing destPath' };
-    const emit = _sfExportProgressEmitter(event);
-    const r = await soundFontCommon.exportCommonAsZip(app.getPath('userData'), uuid, destPath, emit.onBytes);
-    emit.flush();
-    return r;
-  } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+  return _withExportCancel(async (shouldStop) => {                       // [B-005 item 4]
+    try {
+      if (!destPath) return { ok: false, error: 'Missing destPath' };
+      const emit = _sfExportProgressEmitter(event);
+      const r = await soundFontCommon.exportCommonAsZip(app.getPath('userData'), uuid, destPath, emit.onBytes,
+        { shouldStop });
+      emit.flush();
+      return r;
+    } catch (err) {
+      if (require('./sfExportCopy').isCancel(err)) return { ok: true, canceled: true };
+      return { ok: false, error: String(err && err.message || err) };
+    }
+  });
 });
 
-ipcMain.handle('common:exportToFolder', async (event, { uuid, destDir, mode, targetName, priorObserved } = {}) => {
-  try {
-    const emit = _sfExportProgressEmitter(event);
-    const r = await soundFontCommon.exportCommonToFolder(app.getPath('userData'), uuid, destDir, mode, emit.onBytes,
-      targetName, { priorObserved });
-    emit.flush();
-    return r;
-  } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+ipcMain.handle('common:exportToFolder', async (event, { uuid, destDir, mode, targetName, priorObserved, boardCard } = {}) => {
+  // ⭐ `boardCard` and the running tally ride through exactly as they do for the font export,
+  // so a cancelled voice pack gets the same offer instead of a silent per-file delete across
+  // the bridge. Established by the renderer's preflight; never re-measured here. [B-005 item 4]
+  return _withExportCancel(async (shouldStop, token) => {                // [B-005 item 4]
+    try {
+      const emit = _sfExportProgressEmitter(event);
+      const r = await soundFontCommon.exportCommonToFolder(app.getPath('userData'), uuid, destDir, mode,
+        (n) => { token.wrote.bytes += (Number(n) || 0); emit.onBytes(n); },
+        targetName, { priorObserved, shouldStop, boardCard: !!token.boardCard, wrote: token.wrote });
+      emit.flush();
+      return r;
+    } catch (err) {
+      if (require('./sfExportCopy').isCancel(err)) return { ok: true, canceled: true };
+      return { ok: false, error: String(err && err.message || err) };
+    }
+  }, { boardCard });
 });
 
 // Resolve a flagged common folder's content hash — called from the
@@ -2933,6 +3110,168 @@ ipcMain.handle('syncManifest:commit', (_, { destDir, items } = {}) => {
   } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
+// ── Export destination: will it fit, and what is it attached to? ── [B-203]
+//
+// Two handlers because the costs differ by four orders of magnitude and callers must be
+// able to choose. Measured on his machine 2026-09-19:
+//   exportDest:check     0.3 ms   statfs only, safe anywhere, including before every write
+//   exportDest:classify  1.9 ms   ...thousand. One PowerShell spawn. Never on a write path.
+//
+// ⚠️ check RUNS UNCONDITIONALLY, not only for removable media. The rule it serves was
+// "check free space on exports to removable media", but establishing removable-ness costs
+// 2.4-3.2s against 0.3ms for the fit answer itself - the gate was 12,000x the thing it
+// gated. Checking everywhere is both cheaper and more correct, since a full internal disk
+// truncates an export exactly as a full card does.
+ipcMain.handle('exportDest:check', async (_, { destDir, fileSizes, totalBytes, dirCount } = {}) => {
+  try {
+    const r = await require('./exportDestination').checkFit(destDir, { fileSizes, totalBytes, dirCount });
+    return { ok: true, result: r };
+  } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+// ── The one preflight every door runs ───────────────── [B-005 item 4, B-203, B-238]
+//
+// ⭐⭐ ONE CALL, FOUR CONSUMERS: the fit refusal, the board-card warning, the cancel-cleanup
+// rule, and the safe-eject offer. They were three questions asked in two different
+// architectures with the board-card test written out twice; this is the single entry point
+// and the reason the duplication can go.
+//
+// ⭐ `classify: true` pays the ~1,900 ms PowerShell spawn ONCE and the answer feeds all four -
+// `transport` for the warning and the cleanup rule, `removable` for the eject offer.
+// ⚠️⚠️ NEVER CALL THIS AT CANCEL TIME OR EJECT TIME. Two seconds at the moment a user presses
+// Cancel would recreate the exact complaint this work exists to fix. The verdict is captured
+// when the export STARTS and carried on the gate token.
+// ⭐ And for a small job the caller can start it CONCURRENTLY with the work rather than ahead
+// of it: the eject offer is not needed until the end, so the spawn overlaps the copy and
+// costs nothing perceptible.
+// ── Remove a partial this app set aside ─────────────────────── [B-005 item 4]
+//
+// ⚠️⚠️ THE NAME IS THE PERMISSION, AND THAT GUARD IS THE ENTIRE SAFETY ARGUMENT. A renderer
+// that can ask main to recursively delete an arbitrary path is a foot-gun that outlives the
+// feature it was added for - and this project has already paid once for a delete aimed at a
+// path it did not own (708 MB, 2026-09-02). So this refuses anything whose final segment is
+// not a folder WE minted: the `DELETE.` prefix is written by the cancel path and nowhere
+// else, so a bug that passed the wrong path simply fails instead of destroying something.
+//
+// ⭐ It also means the user can act without us. Whatever they answer to the offer, the folder
+// on the card says DELETE. in plain words, so "I'll clear it in Explorer later" is a real
+// option rather than an abandoned mess.
+ipcMain.handle('fs:removeSetAside', async (_, { target } = {}) => {
+  try {
+    const p = String(target || '');
+    const leaf = path.basename(p);
+    if (!p || !/^DELETE\./i.test(leaf)) {
+      return { ok: false, error: 'refused: not a set-aside folder' };
+    }
+    // ⚠️ Retried for the same reason the cancel path retries: on Windows a directory holding
+    // a file with an open handle cannot be removed, and a handle can outlive the write.
+    for (let i = 0; i < 4; i++) {
+      try { await fs.promises.rm(p, { recursive: true, force: true }); return { ok: true }; }
+      catch (e) {
+        if (i === 3) return { ok: false, error: String(e && e.message || e) };
+        await new Promise((r) => setTimeout(r, 150 * (i + 1)));
+      }
+    }
+    return { ok: false, error: 'unreachable' };
+  } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+// ── Safely eject removable media after an export ────────────── [B-005 item 4]
+//
+// ⭐ VERIFIES BY OBSERVATION. The shell's Eject verb is fire-and-forget, so the module polls
+// the filesystem until the media has been gone for a stable second. See safeEject.js for why
+// that instrument and not volume enumeration - measured on his bench, where enumeration would
+// have been wrong about two of three transports.
+// ⚠️ Takes a drive letter, not a path: the eject is per-VOLUME, because one physical reader
+// can hold two letters and a device-level eject would take a sibling card with it.
+// ⚠️ TAKES A DESTINATION PATH, NOT A DRIVE LETTER. The letter was the Windows shape leaking
+// into a shared contract; the module resolves a destination to whatever its platform watches
+// (`E:\`, `/Volumes/NAME`, `/media/<user>/NAME`). Changing this now, while only Windows is
+// implemented, is what makes the macOS and Linux ports additions behind an unchanged seam
+// rather than a signature change that would force the Windows paths to be retested.
+ipcMain.handle('media:eject', async (_, { destDir, timeoutMs } = {}) => {
+  try {
+    const r = await require('./safeEject').ejectVolume(destDir, { timeoutMs });
+    return { ok: true, result: r };
+  } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+// ⭐⭐ THE PER-OS VOCABULARY, ASKED FOR ONCE. His requirement: "if I build a Mac build, it
+// doesn't use the Windows language or any of that. It has its own version."
+//
+// ⚠️ AND THE DIFFERENCE IS NOT ONLY WORDING - one message must not EXIST on some platforms.
+// `lingersAfterEject` is true on Windows, where the drive letter stays listed as an empty
+// drive and the success message has to say so or it contradicts what the user can see. On
+// macOS and Linux the mount point goes away, so that same sentence would be a lie. A plain
+// string table would have shipped the Windows explanation to every platform.
+// ⚠️ THE RENDERER MUST NOT DECIDE WHAT LOOKS LIKE A VOLUME. It used to gate the eject offer on
+// `/^[A-Za-z]:/` and derive a label with `slice(0,1)` — both Windows shapes, and the gate alone
+// would have made the offer never appear on macOS, where a destination is `/Volumes/NAME`.
+// Resolution belongs to the platform table: null means "nothing here to eject", whatever the OS.
+ipcMain.handle('media:resolve', (_, { destDir } = {}) => {
+  try { return { ok: true, target: require('./safeEject').resolveTarget(destDir) }; }
+  catch { return { ok: true, target: null }; }
+});
+
+
+ipcMain.handle('media:vocabulary', () => {
+  try { return { ok: true, vocab: require('./safeEject').vocabulary() }; }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+// The OS-specific sentences themselves, resolved in main so no renderer string names an
+// operating system. Returns null when a platform has no such note - which is the signal to
+// omit the line entirely rather than substitute a generic one.
+ipcMain.handle('media:note', (_, { kind, label } = {}) => {
+  try { return { ok: true, note: require('./safeEject').noteFor(kind, label) }; }
+  catch { return { ok: true, note: null }; }
+});
+
+// Cheap enough to call freely - a stat, not a spawn. Used to decide whether an eject offer
+// still makes sense by the time an export finishes.
+ipcMain.handle('media:present', (_, { driveLetter } = {}) => {
+  try { return { ok: true, present: require('./safeEject').mediaPresent(driveLetter) }; }
+  catch { return { ok: true, present: false }; }
+});
+
+ipcMain.handle('exportDest:preflight', async (_, args = {}) => {
+  try {
+    const r = await require('./exportDestination').preflight(args.destDir, args);
+    return { ok: true, result: r };
+  } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+// Slow, and deliberately separate. Start it when a destination is chosen and read it
+// later; never await it between a user's click and the work starting.
+ipcMain.handle('exportDest:classify', async (_, { destDir } = {}) => {
+  try {
+    const r = await require('./exportDestination').describe(destDir, { classify: true });
+    return { ok: true, result: r };
+  } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+// ── "What did the user just hand us?" ─────────────────────────────── [B-005 item 4]
+//
+// ⭐⭐ THE CHEAP HALF OF `classify`, AND THE REASON IT IS A SEPARATE DOOR. Measured on his
+// machine 2026-09-21: this is ~85 ms where `exportDest:classify` is ~1,900-2,600 ms, because
+// it never starts PowerShell. Every export wants to know whether the destination is removable
+// (that is the whole safe-eject decision); almost none of them need to know whether it is a
+// board card, and those that do are gated on a size threshold.
+//
+// ⚠️ THIS IS SAFE ON A WRITE PATH, unlike its expensive neighbour. See the cost table above
+// `exportDest:check` - this belongs in the same tier as statfs, not in the classify tier.
+//
+// ⭐ His framing, which is what produced the split: "we don't have to do everything in the
+// identify... so genuinely fast and tiny logic on it."
+ipcMain.handle('exportDest:identify', async (_, { destDir } = {}) => {
+  try {
+    const k = await require('./exportDestination').driveKind(destDir);
+    // ⚠️ null is a real answer and means "cannot tell" - off Windows, or an unrecognised
+    // drive type. Callers must not read it as "fixed". [B-028]
+    return { ok: true, result: k };
+  } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
 ipcMain.handle('soundFonts:listDestFolders', (_, { destDir } = {}) => {
   try {
     if (!destDir || !fs.existsSync(destDir)) return { ok: true, folders: [] };
@@ -2958,6 +3297,7 @@ ipcMain.handle('sharedTracks:planExport', async (event, { destDir } = {}) => {
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 ipcMain.handle('sharedTracks:exportToFolder', async (event, { destDir, mode, replace } = {}) => {
+  return _withExportCancel(async (shouldStop) => {                       // [B-005 item 4]
   try {
     const emit = _sfExportProgressEmitter(event);
     // Additive is the default for the bulk flow: nothing at the destination is
@@ -2966,11 +3306,15 @@ ipcMain.handle('sharedTracks:exportToFolder', async (event, { destDir, mode, rep
     // older skip/replace/rename whole-folder modes stay reachable for callers
     // that still ask for them explicitly.
     const r = (!mode || mode === 'additive')
-      ? await soundFontSharedTracks.exportToFolderAdditive(app.getPath('userData'), destDir, { replace, onBytes: emit.onBytes })
-      : await soundFontSharedTracks.exportToFolder(app.getPath('userData'), destDir, mode, emit.onBytes);
+      ? await soundFontSharedTracks.exportToFolderAdditive(app.getPath('userData'), destDir, { replace, onBytes: emit.onBytes, shouldStop })
+      : await soundFontSharedTracks.exportToFolder(app.getPath('userData'), destDir, mode, emit.onBytes, { shouldStop });
     emit.flush();
     return r;
-  } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+  } catch (err) {
+    if (require('./sfExportCopy').isCancel(err)) return { ok: true, canceled: true };
+    return { ok: false, error: String(err && err.message || err) };
+  }
+  });
 });
 ipcMain.handle('sharedTracks:readFileBytes', (_, { name } = {}) => {
   try {
@@ -3012,7 +3356,15 @@ ipcMain.handle('voicepack:install', async (_, { id } = {}) => {
 // mode pops a folder picker and writes each file at the chosen folder
 // with its original name, walking collisions through a " (N)" tail so
 // nothing gets silently overwritten. Returns the list of written paths.
-ipcMain.handle('sfFile:export', async (event, { kind, id, paths, suggestedName, asFile, destDir: preDest } = {}) => {
+// ⚠️ A THIN REGISTRATION OVER AN IMPL FUNCTION, and the shape is the point: this handler has a
+// dozen early returns (cancelled picker, refused program, tooBig, slowWrite, probe), and a token
+// taken at the top of it would leak out of every one of them. A leaked token is not harmless -
+// it stays in the gate's set, so the NEXT cancel reports work it is not really stopping. One
+// wrapper, one finally, every exit covered. [B-005 item 4]
+ipcMain.handle('sfFile:export', async (event, args = {}) =>
+  _withExportCancel((shouldStop) => _sfFileExportImpl(event, args, shouldStop)));
+
+async function _sfFileExportImpl(event, { kind, id, paths, suggestedName, asFile, destDir: preDest, confirmSlow, probe } = {}, _shouldStop = null) {
   // [B-408] ⚠⚠ THE PICKER USED TO OPEN PARTWAY THROUGH THIS CALL, and that is why this door was
   // the one export with no progress at all. A bar raised around it would sit at zero BEHIND a
   // native dialog for as long as the user was choosing a folder - which reads as a hang, the
@@ -3196,6 +3548,7 @@ ipcMain.handle('sfFile:export', async (event, { kind, id, paths, suggestedName, 
           ? (insidePath.endsWith('/') ? insidePath : insidePath + '/')
           : '';
         for (const entry of inside) {
+          if (_shouldStop && _shouldStop()) throw new (require('./sfExportCopy').ExportCancelled)();
           if (entry.isDir) continue;
           const innerFlat = entry.fileName.slice(innerZipPath.length + 1);
           const innerRel = insidePrefix ? innerFlat.slice(insidePrefix.length) : innerFlat;
@@ -3209,7 +3562,9 @@ ipcMain.handle('sfFile:export', async (event, { kind, id, paths, suggestedName, 
           const buf = await source.readFile(entry.fileName);
           if (refuseBuf(buf, entry.fileName)) continue;
           fs.mkdirSync(path.dirname(outPath), { recursive: true });
-          fs.writeFileSync(outPath, buf);
+          // [B-005 item 4] Chunked + cancellable; writeFileSync blocked the event loop so
+          // the cancel IPC could not even be delivered while it ran.
+          await require('./sfExportCopy').writeBufferWithProgress(buf, outPath, null, _shouldStop);
         }
         return;
       }
@@ -3217,6 +3572,7 @@ ipcMain.handle('sfFile:export', async (event, { kind, id, paths, suggestedName, 
       const all = await source.listAll();
       const prefix = subPath.endsWith('/') ? subPath : subPath + '/';
       for (const entry of all) {
+        if (_shouldStop && _shouldStop()) throw new (require('./sfExportCopy').ExportCancelled)();
         if (entry.isDir) continue;
         if (!entry.fileName.startsWith(prefix)) continue;
         const innerRel = entry.fileName.slice(prefix.length);
@@ -3225,7 +3581,8 @@ ipcMain.handle('sfFile:export', async (event, { kind, id, paths, suggestedName, 
         const buf = await source.readFile(entry.fileName);
         if (refuseBuf(buf, entry.fileName)) continue;
         fs.mkdirSync(path.dirname(outPath), { recursive: true });
-        fs.writeFileSync(outPath, buf);
+        // [B-005 item 4] Chunked + cancellable - see the note on the sibling branch above.
+        await require('./sfExportCopy').writeBufferWithProgress(buf, outPath, null, _shouldStop);
       }
       return;
     }
@@ -3233,56 +3590,72 @@ ipcMain.handle('sfFile:export', async (event, { kind, id, paths, suggestedName, 
       ? path.join(userData, 'soundFonts', 'library', id)
       : path.join(userData, 'soundFonts', 'common', id, 'files');
     const srcAbs = path.join(root, subPath);
-    const walk = (sd, dd) => {
-      fs.mkdirSync(dd, { recursive: true });
-      for (const ent of fs.readdirSync(sd, { withFileTypes: true })) {
-        const s = path.join(sd, ent.name);
-        const d = path.join(dd, ent.name);
-        if (ent.isDirectory()) walk(s, d);
-        // Path-based check here: this branch copies straight off disk and never
-        // holds the bytes, so checkExecutableFile does the 256-byte head read.
-        else if (ent.isFile() && !refusePath(s, ent.name)) fs.copyFileSync(s, d);
-      }
-    };
-    walk(srcAbs, outRoot);
+    // ⚠️⚠️ A SYNCHRONOUS WALK CANNOT BE CANCELLED, AND IT FROZE THE APP. [B-005 item 4]
+    //
+    // This used to be `copyFileSync` inside a `readdirSync` loop - not one await anywhere in it.
+    // Main's event loop never yielded, so the `export:cancel` IPC could not even be DELIVERED
+    // until the export had finished. From the outside: the window went "Not Responding", the
+    // Cancel button did nothing, and the export completed anyway. His report, exactly: "right
+    // click from font selected items turned to unresponsive while attempting to cancel. export
+    // still finished."
+    //
+    // ⭐ A cancel flag is worthless if nothing can set it. The flag was fine; the loop was the
+    // bug - the same not-yielding defect as [B-398]'s rmSync, in a different function.
+    //
+    // ⭐ FIXED BY DELETING IT rather than sprinkling awaits. copyTreeWithProgress is the shared
+    // async copier that fonts and voice packs already use - it awaits a streamed copy per file,
+    // so it yields between files by construction, and it ALREADY carries the shouldStop check at
+    // the top of its loop. That is why cancelling a font export worked while this one hung.
+    const { copyTreeWithProgress } = require('./sfExportCopy');
+    const _walkRefused = [];
+    await copyTreeWithProgress(srcAbs, outRoot, {
+      // ⚠️ Same guard, same shape: copyTreeWithProgress runs checkCarryableFile itself and
+      // collects what it refuses, which is what `refusePath` was doing here by hand.
+      refused: _walkRefused,
+      shouldStop: _shouldStop,
+      relBase: subPath,
+    });
+    // ⭐ A QUIET IMPROVEMENT WORTH NOTING: the old walk recorded a refusal under `ent.name` -
+    // the bare basename. copyTreeWithProgress threads relBase, so a refusal now carries its
+    // full relative path, which is what the removal buttons need to resolve the finding back
+    // to a real file ([B-364]: "hum2.wav" does not say which folder).
+    for (const b of _walkRefused) refused.push(b);
   };
   const lastDir = liveDir(Store.get('lastExportDir')) || app.getPath('downloads');
-  // Single-path mode: file → save dialog; folder → folder picker,
-  // writes the folder inside the chosen parent with its original name.
-  if (paths.length === 1) {
+  // ⭐⭐ ONE FOLDER IS NOT A SPECIAL CASE, AND TREATING IT AS ONE LEFT IT UNGUARDED.
+  // [B-203, B-238]
+  //
+  // This branch used to own the whole single-folder export: its own picker, its own
+  // collision suffix, its own write, its own return - all of it BEFORE the sizing block,
+  // the fit check and the slow-write warning further down. So "↗ Export folder…" on a
+  // source or a font wrote through a Proffieboard with no warning and onto a full card
+  // with no refusal, while the very same folder reached by multi-selecting its files got
+  // both. He found the ordering bug on the multi-select door; this one would have been
+  // next, and it fails SILENTLY rather than in the wrong order.
+  //
+  // ⭐ The duplicate is now deleted rather than patched. The shared flow below already
+  // handles a directory in `paths` - same " (N)" collision walk, same writeDirTo - so a
+  // lone folder just falls through to it and inherits the sizing and both guards. Only the
+  // dialog TITLE was worth keeping, and it is carried down.
+  //
+  // ⚠️ IT STILL GETS NO PROGRESS BAR on the first call, and that is not an oversight. A bar
+  // needs the destination up front, and the renderer cannot supply one without first
+  // probing whether this path is a file or a folder - a delay between the click and the
+  // picker, which is the one thing this door has always refused to pay.
+  //
+  // ⚠️ A single FILE still keeps its own branch: it needs a SAVE dialog, not a folder
+  // picker, which the shared flow has no way to express.
+  const _singleIsDir = paths.length === 1 && !asFile && await isDirAtPath(paths[0]);
+  const _folderPickTitle = _singleIsDir
+    ? `Export "${suggestedName || paths[0].split('/').pop() || 'untitled'}" folder to…`
+    : null;
+  // Single-FILE mode: save dialog, written at the path the user names.
+  // asFile=true short-circuits the dir probe — used by "Export ZIP…" on an inner-zip node,
+  // where the user wants the raw .zip bytes exported as a standalone file rather than the
+  // contents extracted. Same path is conceptually both, so the caller picks the semantics.
+  if (paths.length === 1 && !_singleIsDir) {
     const subPath = paths[0];
     const baseName = suggestedName || subPath.split('/').pop() || 'untitled';
-    // asFile=true short-circuits the dir probe — used by "Export ZIP…"
-    // on an inner-zip node, where the user wants the raw .zip bytes
-    // exported as a standalone file rather than the contents extracted.
-    // Same path is conceptually both (file-of-bytes + folder-of-contents)
-    // so the caller picks which semantics with this flag.
-    const isDir = asFile ? false : await isDirAtPath(subPath);
-    if (isDir) {
-      const { canceled, filePaths } = await dialog.showOpenDialog(win, {
-        title: `Export "${baseName}" folder to…`,
-        defaultPath: lastDir,
-        properties: ['openDirectory', 'createDirectory'],
-      });
-      if (canceled || !filePaths?.length) return { ok: false, canceled: true };
-      const parent = filePaths[0];
-      try {
-        // Folder collision in chosen parent → walk " (N)" suffix
-        // (matches the copy-paste convention for dirs).
-        let finalName = baseName;
-        if (fs.existsSync(path.join(parent, finalName))) {
-          let n = 1;
-          while (fs.existsSync(path.join(parent, `${baseName} (${n})`))) n++;
-          finalName = `${baseName} (${n})`;
-        }
-        const outRoot = path.join(parent, finalName);
-        await writeDirTo(subPath, outRoot);
-        Store.set('lastExportDir', parent);
-        return { ok: true, written: [outRoot], refused };
-      } catch (err) {
-        return { ok: false, error: String(err && err.message || err) };
-      }
-    }
     const ext = path.extname(baseName).replace(/^\./, '') || '*';
     // ⚠️ THE PICKER OPENS FIRST, AND THE CHECK WAITS FOR IT (2026-09-11). Checking
     // before the dialog would avoid asking where to put a file we then refuse, which
@@ -3306,7 +3679,8 @@ ipcMain.handle('sfFile:export', async (event, { kind, id, paths, suggestedName, 
     try {
       const buf = await readBytes(subPath);
       if (refuseBuf(buf, subPath)) return { ok: true, written: [], refused };
-      fs.writeFileSync(filePath, buf);
+      // [B-005 item 4] Chunked + cancellable, and it removes its own partial on a stop.
+      await require('./sfExportCopy').writeBufferWithProgress(buf, filePath, null, _shouldStop);
       Store.set('lastExportDir', path.dirname(filePath));
       return { ok: true, written: [filePath], refused };
     } catch (err) {
@@ -3321,7 +3695,8 @@ ipcMain.handle('sfFile:export', async (event, { kind, id, paths, suggestedName, 
   let destDir = preDest || null;
   if (!destDir) {
     const { canceled, filePaths } = await dialog.showOpenDialog(win, {
-      title: 'Export to folder',
+      // ⚠️ The lone-folder title names the folder; the batch title cannot.
+      title: _folderPickTitle || 'Export to folder',
       defaultPath: lastDir,
       properties: ['openDirectory', 'createDirectory'],
     });
@@ -3334,9 +3709,19 @@ ipcMain.handle('sfFile:export', async (event, { kind, id, paths, suggestedName, 
   // ⚠️ Emitted only when the renderer supplied the destination — the older callers that let this
   // handler open its own picker have no bar to drive, and sending to a listener that is not there
   // is harmless but pointless.
-  const _emit = preDest ? _sfByteProgressEmitter(event) : null;
+  // ⚠️ A PROBE DRIVES NOTHING. There is no bar up while it runs - that is the entire point
+  // of it - so emitting would push bytes at a listener that does not exist yet and, worse,
+  // seed the real bar's first frame from a call that wrote nothing.
+  const _emit = (preDest && !probe) ? _sfByteProgressEmitter(event) : null;
   let _bDone = 0, _bTotal = 0;
-  if (_emit) {
+  // [B-238] File count matters more than bytes on a slow transport (773 ms per file
+  // measured through a board), so the threshold needs both.
+  let _bFiles = 0;
+  // ⚠️ SIZING RUNS WHETHER OR NOT THERE IS A BAR TO DRIVE. It used to be gated on `_emit`,
+  // which meant the older callers that let this handler open its own picker computed no
+  // total - and [B-203]'s fit check needs that total more than the bar does. The walk is
+  // cheap against the copy that follows, and only the EMIT is conditional now. [B-203]
+  {
     // ⚠️ Size the batch up front. A folder in the selection is walked for its total; a file is one
     // stat. Both are cheap against the copy that follows, and without a total the bar cannot be
     // determinate from the first frame.
@@ -3352,14 +3737,15 @@ ipcMain.handle('sfFile:export', async (event, { kind, id, paths, suggestedName, 
                      : null;
     const sizeOnDisk = (abs) => {
       let st; try { st = fs.statSync(abs); } catch { return null; }
-      if (st.isFile()) return st.size;
+      if (st.isFile()) { _bFiles++; return st.size; }   // [B-238] count files too
       if (!st.isDirectory()) return null;
       let total = 0;
       const walk = (d) => {
         for (const e of fs.readdirSync(d, { withFileTypes: true })) {
           const p = path.join(d, e.name);
           if (e.isDirectory()) walk(p);
-          else { try { total += fs.statSync(p).size; } catch {} }
+          // [B-238] Per-file cost dominates on a board, so the count is tracked alongside.
+          else { try { total += fs.statSync(p).size; _bFiles++; } catch {} }
         }
       };
       try { walk(abs); } catch { return null; }
@@ -3372,11 +3758,131 @@ ipcMain.handle('sfFile:export', async (event, { kind, id, paths, suggestedName, 
         if (n === null) { sizable = false; break; }
         _bTotal += n;
       }
+    } else if (kind === 'source') {
+      // ⭐⭐ SOURCE CONTENT *IS* CHEAP TO SIZE, and the note above was too pessimistic.
+      // [B-408] treated archives as unsizable because a stat cannot reach inside one - but
+      // a zip's CENTRAL DIRECTORY already carries every entry's uncompressed size, and
+      // listAll() reads exactly that (and descends into inner zips, so composite paths are
+      // covered too). No extraction, no decompression: one directory read.
+      //
+      // ⚠️⚠️ THIS IS WHY A SOURCE EXPORT RAN STRAIGHT INTO ENOSPC. `sizable` was false for
+      // kind==='source', so _bTotal stayed 0 and [B-203]'s check below skipped itself - the
+      // guard was present and silently inapplicable to a whole class of export. He found it
+      // by right-clicking a source: five files failed mid-write with raw
+      // "ENOSPC: no space left on device".
+      try {
+        const source = soundFontSources.openSource(userData, id);
+        const all = source ? await source.listAll() : null;
+        if (all && all.length) {
+          let ok = true;
+          for (const sp of paths) {
+            const pref = sp.endsWith('/') ? sp : sp + '/';
+            let n = 0, found = false;
+            for (const e of all) {
+              if (e.isDir) continue;
+              if (e.fileName === sp || e.fileName.startsWith(pref)) {
+                n += Number(e.size) || 0;
+                _bFiles++;                                  // [B-238]
+                found = true;
+              }
+            }
+            // ⚠️ A path we cannot account for makes the whole total INCOMPLETE, and an
+            // incomplete total is worse than none - it would under-report and let an export
+            // through that cannot fit. Same rule the on-disk branch above follows.
+            if (!found) { ok = false; break; }
+            _bTotal += n;
+          }
+          sizable = ok;
+        }
+      } catch { sizable = false; }
+      if (!sizable) _bTotal = 0;
     }
     if (!sizable) _bTotal = 0;
-    _emit.onBytes({ done: 0, total: _bTotal, name: '' });
+    if (_emit) _emit.onBytes({ done: 0, total: _bTotal, name: '' });
   }
+
+  // ── Will it fit? ────────────────────────────────────────────────── [B-203]
+  //
+  // ⭐ THE BUDGET IS ALREADY COMPUTED ABOVE, so this costs one statfs (0.3ms) and nothing
+  // else. That is the whole reason the check belongs HERE rather than in the renderer:
+  // sizing happens in main immediately before the write, and a check that reuses that
+  // number cannot drift out of step with the progress bar, because it IS the progress
+  // total.
+  //
+  // ⚠️ ONLY WHEN THE TOTAL IS TRUSTWORTHY. `_bTotal` is 0 both when nothing was measured
+  // and when the batch genuinely could not be sized (source content inside an archive -
+  // see the note above about an INCOMPLETE total being worse than none). Either way a 0
+  // means "we do not know", and an unknown size must not produce a refusal.
+  //
+  // ⚠️ REFUSE BY RETURNING, NOT BY THROWING. The renderer owns every dialog in this app;
+  // main hands back `tooBig` with the three numbers and the renderer shows the same
+  // sentence the bulk export already uses. Nothing is written on this path.
+  // ⭐⭐ ONE PREFLIGHT, BOTH QUESTIONS. [B-005 item 4] This was two separate blocks asking
+  // about the same destination - a `checkFit` and then a `describe({classify:true})` - with
+  // the board-card test written out here AND again in the renderer. `preflight()` asks once,
+  // and the answer it returns carries `boardCard` and `removable` so the cancel-cleanup rule
+  // and the safe-eject offer reuse this lookup instead of each paying ~1,900 ms for their own.
+  //
+  // ⚠️ TWO-PHASE STILL, BECAUSE MAIN OWNS THE SIZE AND THE RENDERER OWNS THE DIALOG. The byte
+  // and file totals were computed above; the renderer has neither and would have to guess
+  // from subPaths.length, which counts a folder as one. So main decides WHETHER to ask and
+  // returns WITHOUT writing; the renderer asks; on "Export anyway" it calls back with
+  // confirmSlow. That split is legitimate - what was not is having two implementations of
+  // the same question.
+  //
+  // ⚠️ `_bTotal` is 0 both when nothing was measured and when the batch could not be sized
+  // (source content inside an archive). Either way it means "we do not know", and an unknown
+  // size must never produce a refusal - the preflight's own size floor handles that, but the
+  // guard stays explicit here because the two zeros mean different things upstream.
+  let _pf = null;
+  try {
+    _pf = await require('./exportDestination').preflight(destDir, {
+      totalBytes: _bTotal > 0 ? _bTotal : 0,
+      fileCount: _bFiles,
+      // Only pay the device lookup when the job is big enough for the answer to change
+      // anything. Under the threshold there is no warning to give.
+      classify: !confirmSlow && require('./exportDestination').isSlowWriteJob(_bFiles, _bTotal),
+    });
+  } catch { /* never fails closed: an unmeasurable destination still exports */ }
+
+  if (_pf && _pf.tooBig) {
+    // ⚠️ REFUSE BY RETURNING, NOT BY THROWING. The renderer owns every dialog in this app;
+    // main hands back the three numbers and the renderer shows the same sentence every other
+    // door uses. Nothing has been written at this point.
+    return { ok: false, tooBig: _pf.tooBig };
+  }
+  if (!confirmSlow && _pf && _pf.slowWrite) {
+    // ⚠️ destDir RIDES ALONG so the retry does not re-open the picker. When main chose the
+    // destination itself - the lone-folder door - the renderer has no other way to name it,
+    // and asking the user to pick the same folder twice after agreeing to go ahead is its
+    // own bug.
+    return { ok: false, slowWrite: { ..._pf.slowWrite, destDir } };
+  }
+
+  // ── Probe: answer the two questions, write nothing ──────────────── [B-203, B-238]
+  //
+  // ⭐⭐ THE BAR MUST NOT BE UP WHEN WE ASK. This door was the last one still using the
+  // two-phase handshake - renderer raises a determinate bar, main sizes, main hands back
+  // slowWrite, renderer dialogs OVER its own moving bar. He caught it on a 57-file source
+  // export: "does the regular progress bar before the 'this will take a while' message."
+  // Every other door now asks before it shows anything.
+  //
+  // ⭐ A PROBE RATHER THAN A SECOND SIZING FUNCTION. The renderer cannot size this batch -
+  // a folder in the selection counts as one path, and source content lives inside an
+  // archive - and a parallel sizer in the renderer would be a second implementation to
+  // keep in step with the bar's own total forever. So the renderer calls THIS handler,
+  // which has already done the work by the time it reaches here, and it stops short of
+  // the write. Same numbers, same thresholds, one implementation.
+  //
+  // ⚠️ Both refusals above return BEFORE this line, so a probe that gets here is a yes.
+  if (probe) return { ok: true, probed: true };
+
+  // ⚠️ BETWEEN ITEMS, and an item here can be a whole folder - so the tree walk below carries
+  // shouldStop too and stops between FILES inside it. Checking only here would mean a cancel
+  // during a 2 GB folder did nothing until that folder finished. [B-005 item 4]
+  let _canceled = false;
   for (const subPath of paths) {
+    if (_shouldStop && _shouldStop()) { _canceled = true; break; }
     try {
       const baseName = subPath.split('/').pop() || 'untitled';
       if (_emit) _emit.onBytes({ done: _bDone, total: _bTotal, name: baseName });
@@ -3403,20 +3909,28 @@ ipcMain.handle('sfFile:export', async (event, { kind, id, paths, suggestedName, 
         const buf = await readBytes(subPath);
         if (refuseBuf(buf, subPath)) continue;
         const out = uniqueIn(destDir, baseName);
-        fs.writeFileSync(out, buf);
+        // [B-005 item 4] Chunked + cancellable; leaves nothing truncated behind.
+        await require('./sfExportCopy').writeBufferWithProgress(buf, out, null, _shouldStop);
         written.push(out);
         if (_emit) _bDone += (buf ? buf.length : 0);
       }
       if (_emit) _emit.onBytes({ done: _bDone, total: _bTotal, name: baseName });
     } catch (err) {
+      // ⚠️⚠️ A CANCEL IS NOT A FAILURE, and this catch would have filed it as one. The tree walk
+      // throws to stop, and landing in here would have added "Export cancelled" to the failed
+      // list - so stopping an export would have ended in a red "some files failed to export"
+      // dialog naming the user's own click as the fault. [B-005 item 4]
+      if (require('./sfExportCopy').isCancel(err)) { _canceled = true; break; }
       failed.push({ source: subPath, error: String(err && err.message || err) });
     }
   }
   // ⭐ Land on 100% whatever route each item took — refused, failed, or written. [B-389].
   if (_emit) { _emit.onBytes({ done: _bTotal, total: _bTotal, name: '' }); _emit.flush(); }
   Store.set('lastExportDir', destDir);
-  return { ok: true, written, failed, refused };
-});
+  // ⚠️ `written` STILL GOES BACK ON A CANCEL. Whole files landed; the user is owed a list of
+  // them, not a bare "cancelled". [B-005 item 4]
+  return { ok: true, canceled: _canceled, written, failed, refused };
+}
 
 // ── [B-364] Acting on a program found in the managed store ──────────────────
 //
@@ -3607,7 +4121,14 @@ ipcMain.handle('sfBackup:export', async (event, { opId, destPath } = {}) => {
     });
     return { ok: true, destPath: result.destPath, manifest: result.manifest, refused: result.refused || [] };
   } catch (err) {
-    if (err && err.cancelled) return { ok: false, cancelled: true, residualPath: err.residualPath || null };
+    // ⚠️ `teardownIncomplete` rides along. [B-420] It means the cancel deadline fired and the
+    // archiver is STILL WRITING to the destination — so the renderer must not report a clean
+    // finish and must not offer a safe eject on a card we are still holding open.
+    if (err && err.cancelled) {
+      return { ok: false, cancelled: true,
+               residualPath: err.residualPath || null,
+               teardownIncomplete: !!err.teardownIncomplete };
+    }
     return { ok: false, error: String(err && err.message || err) };
   } finally {
     _sfBackupOps.delete(opId);
@@ -3757,7 +4278,32 @@ ipcMain.handle('dialog:selectCommonSource', async (_, { mode = 'folder' } = {}) 
 // of the export, defaulting to carry, turned off only by the direct-export
 // dialog's checkbox. The delete-with-export paths never pass false — that
 // export is the last copy, so everything rides.
-ipcMain.handle('sources:exportToDownloads', async (event, { uuid, destDir, format, includeAttachments = true, includeCustomized = true } = {}) => {
+// ── How big is this source? ─────────────────────────────────────────── [B-203]
+//
+// ⭐ SO THE RENDERER CAN CHECK BEFORE IT RAISES A BAR. The source export used a two-phase
+// handshake - start, let main decline, ask, restart - which meant the progress modal was
+// already up when the dialog opened, and the question arrived on top of a bar. Every other
+// door asks with a clear screen. His catch: "i think the order is off on this one... the
+// progress bar... not like the other spots."
+//
+// ⚠️ CHEAP: a zip's central directory carries every entry's uncompressed size and listAll()
+// reads exactly that, descending into inner zips. No extraction, one directory read.
+ipcMain.handle('sources:exportSize', async (_, { uuid } = {}) => {
+  try {
+    const source = soundFontSources.openSource(app.getPath('userData'), uuid);
+    if (!source) return { ok: false, error: 'Source not found' };
+    const all = await source.listAll();
+    const flat = (all || []).filter(e => e && !e.isDir);
+    return {
+      ok: true,
+      bytes: flat.reduce((sum, e) => sum + (Number(e.size) || 0), 0),
+      files: flat.length,
+    };
+  } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+ipcMain.handle('sources:exportToDownloads', async (event, { uuid, destDir, format, includeAttachments = true, includeCustomized = true, confirmSlow } = {}) =>
+  _withExportCancel(async (shouldStop) => {                            // [B-005 item 4]
   try {
     const source = soundFontSources.openSource(app.getPath('userData'), uuid);
     if (!source) return { ok: false, error: `Source not found: ${uuid}` };
@@ -3765,6 +4311,54 @@ ipcMain.handle('sources:exportToDownloads', async (event, { uuid, destDir, forma
     // Windows (e.g. D:\Downloads) are respected; falls through to system
     // defaults on Mac/Linux.
     const target = destDir || app.getPath('downloads');
+
+    // ── Will it fit? ────────────────────────────────────────────────── [B-203]
+    //
+    // ⚠️⚠️ THIS DOOR FAILED MID-WRITE TWICE ON HIS BENCH, once as a folder and once as a
+    // zip, both with a raw Win32 string:
+    //     ENOSPC: no space left on device, mkdir 'V:\1.1-G-Grievous'
+    // "Delete source…" reaches it too, via its "Export source first" checkbox.
+    //
+    // ⭐ THE SIZE IS CHEAP AFTER ALL. A zip's central directory carries every entry's
+    // UNCOMPRESSED size and listAll() reads exactly that, descending into inner zips - no
+    // extraction, one directory read. Summing it is the whole cost.
+    //
+    // ⚠️⚠️ ZIP FORMAT INCLUDED, AND IT WAS EXCLUDED AT FIRST. The argument for leaving it
+    // out was that a zip writes COMPRESSED bytes, so an uncompressed total is only an upper
+    // bound and refusing on it could block an archive that would have fit. That is true and
+    // it is beside the point, which he made after watching a zip export try and fail: "we
+    // have a message for this already. it shouldn't have tried to go there."
+    // ⭐ THE ASYMMETRY DECIDES IT: a rare false refusal costs a retry; attempting a write we
+    // can predict will fail costs a part-written archive on a card, which is the condition
+    // this entry exists to prevent.
+    {
+      try {
+        const all = await source.listAll();
+        const flat = (all || []).filter(e => e && !e.isDir);
+        const need = flat.reduce((sum, e) => sum + (Number(e.size) || 0), 0);
+        // ⭐⭐ ONE PREFLIGHT, BOTH QUESTIONS. [B-005 item 4] Was a `checkFit` followed by a
+        // separate `describe({classify:true})`, asking about the same destination twice with
+        // the board-card test spelled out here and again in the renderer.
+        //
+        // ⚠️ Same two-phase handshake as sfFile:export and for the same reason: main has the
+        // size (just summed above) and the renderer owns dialogs. Main decides whether to ask
+        // and returns WITHOUT writing; on "Export anyway" the renderer calls back with
+        // confirmSlow.
+        //
+        // ⚠️ Sources are the biggest single items in the library - his run from 467 MB to
+        // 1,090 MB across up to 2,398 files - so this is the door where the warning matters
+        // most, and it was the last one to get it.
+        const _pf = await require('./exportDestination').preflight(target, {
+          totalBytes: need,
+          fileCount: flat.length,
+          classify: !confirmSlow && require('./exportDestination').isSlowWriteJob(flat.length, need),
+        });
+        if (_pf && _pf.tooBig) return { ok: false, tooBig: _pf.tooBig };
+        if (!confirmSlow && _pf && _pf.slowWrite) {
+          return { ok: false, slowWrite: _pf.slowWrite };
+        }
+      } catch { /* never fails closed */ }
+    }
     // Forward the export's cumulative progress snapshots (phase, bytes, current
     // file) to the renderer, throttled to ~80ms so a multi-GB reconstruction
     // doesn't flood IPC. These are snapshots, not byte deltas — send the latest.
@@ -3778,7 +4372,7 @@ ipcMain.handle('sources:exportToDownloads', async (event, { uuid, destDir, forma
         pending = null;
       }
     };
-    const result = await source.exportToDownloads(target, { format, onProgress });
+    const result = await source.exportToDownloads(target, { format, onProgress, shouldStop });
     // Curation sidecar ([B-283]): a zip export carries the hand-authored values
     // back with it, so re-importing after a delete returns the link, the style
     // link, the demo URL and the tags rather than just the audio. Zip only —
@@ -3804,9 +4398,12 @@ ipcMain.handle('sources:exportToDownloads', async (event, { uuid, destDir, forma
     if (pending) { try { event.sender.send('soundFonts:sourceExportProgress', pending); } catch {} }
     return { ok: true, ...result, curation };
   } catch (err) {
+    // ⚠️ A cancel is an outcome, not a failure. Without this the user's own click came back as
+    // a red "Export failed: Export cancelled". [B-005 item 4]
+    if (require('./sfExportCopy').isCancel(err)) return { ok: true, canceled: true };
     return { ok: false, error: String(err && err.message || err) };
   }
-});
+}));
 
 // Open a folder picker for source-export workflows. Returns the chosen
 // path without running an export, so callers that need to export many
@@ -5230,18 +5827,66 @@ ipcMain.handle('versions:export', async (_, name) => {
   const allVersions = proffie.listVersionsDetails();
   const versionInfo = allVersions.find(v => v.name === name);
   if (!versionInfo) return { ok: false, error: 'Version not found.' };
-  function cpDir(s, d) {
-    fs.mkdirSync(d, { recursive: true });
-    fs.readdirSync(s, { withFileTypes: true }).forEach(e => {
-      const sp = path.join(s, e.name), dp = path.join(d, e.name);
-      e.isDirectory() ? cpDir(sp, dp) : fs.copyFileSync(sp, dp);
-    });
-  }
+  // ⭐⭐ THIS DOOR HAD NO CHECKS OF ANY KIND UNTIL 2026-09-20. [B-005 item 4, B-203, B-238]
+  // It writes an ENTIRE ProffieOS tree to any folder the user points at - the largest
+  // multi-file export outside the Sound Fonts tab - with no fit refusal, no slow-transport
+  // warning and no cancel. Nothing stopped someone aiming it at a card.
+  //
+  // ⚠️ IT WAS EXEMPT BY OMISSION, NOT BY DECISION. It never appeared on any door list because
+  // every sweep searched for "export" in the Sound Fonts code; it surfaced only when the
+  // door-map test swept handler names across all of main. Same root cause as the two doors
+  // whose names hid them - classify by what a call WRITES TO, never by where it lives.
+  //
+  // ⚠️ The old copy was `cpDir`: recursive `readdirSync` + `copyFileSync` with no awaits. That
+  // is the shape that froze the app on him on 09-19 - a synchronous loop never yields, so even
+  // a cancel flag could not have been delivered. Replaced with the shared streamed walk, which
+  // yields, reports bytes, stops mid-file and removes its own partial.
+  const _srcRoot = versionInfo.path || versionInfo.dir || null;
+  const _sizeOf = (p) => {
+    let bytes = 0, files = 0;
+    const walk = (d) => {
+      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+        const fp = path.join(d, e.name);
+        if (e.isDirectory()) walk(fp);
+        else if (e.isFile()) { files++; try { bytes += fs.statSync(fp).size; } catch {} }
+      }
+    };
+    try { walk(p); } catch {}
+    return { bytes, files };
+  };
+  const srcRoot = _srcRoot || path.join(proffie.getUserVersionsPath(), name);
+  const { bytes: _vBytes, files: _vFiles } = _sizeOf(srcRoot);
+
+  // ── The same preflight every other door runs ──
   try {
-    cpDir(path.join(proffie.getUserVersionsPath(), name), dest);
-    shell.showItemInFolder(dest);
-    return { ok: true, dest };
-  } catch (e) { return { ok: false, error: e.message }; }
+    const _pf = await require('./exportDestination').preflight(destFolder, {
+      totalBytes: _vBytes, fileCount: _vFiles,
+      classify: require('./exportDestination').isSlowWriteJob(_vFiles, _vBytes),
+    });
+    // ⚠️ REFUSED BEFORE ANYTHING IS WRITTEN. An OS tree that does not fit used to write until
+    // the disk filled and then fail with whatever error the filesystem produced.
+    if (_pf && _pf.tooBig) return { ok: false, tooBig: _pf.tooBig };
+    if (_pf && _pf.slowWrite) return { ok: false, slowWrite: { ..._pf.slowWrite, destDir: destFolder } };
+  } catch { /* never fails closed: an unmeasurable destination still exports */ }
+
+  // ⚠️ Under the gate, so the shared Cancel button can stop it like any other export.
+  return _withExportCancel(async (shouldStop) => {
+    try {
+      const { copyTreeWithProgress } = require('./sfExportCopy');
+      fs.mkdirSync(dest, { recursive: true });
+      await copyTreeWithProgress(srcRoot, dest, { shouldStop });
+      shell.showItemInFolder(dest);
+      return { ok: true, dest };
+    } catch (e) {
+      if (require('./sfExportCopy').isCancel(e)) {
+        // The destination was minted by this call (the _N loop above guarantees a fresh
+        // name), so removing it cannot touch anything already the user's.
+        try { await fs.promises.rm(dest, { recursive: true, force: true }); } catch {}
+        return { ok: true, canceled: true };
+      }
+      return { ok: false, error: e.message };
+    }
+  });
 });
 
 // ── IPC: GitHub releases ───────────────────────────────
@@ -5591,11 +6236,16 @@ ipcMain.handle('sdcard:scan', () => sdCardDetect.scan());
 // Fallback when no card is auto-detected: let the user point at a drive or a folder
 // (e.g. a copy of an SD card) and assess it the same way. Read-only.
 ipcMain.handle('sdcard:pickFolder', async () => {
+  // ⭐ THIS PC IS THE RIGHT DEFAULT HERE EVEN WHEN NOTHING IS REMEMBERED: the user is choosing
+  // a DRIVE, not a folder, and the drive list is where that choice lives.
   const res = await dialog.showOpenDialog(win, {
     title: 'Choose a drive or SD-card folder',
+    defaultPath: await exportDefaultPath(Store.get('lastSdPickDir'), null),
     properties: ['openDirectory'],
   });
-  return (res.canceled || !res.filePaths.length) ? null : res.filePaths[0];
+  if (res.canceled || !res.filePaths.length) return null;
+  try { Store.set('lastSdPickDir', res.filePaths[0]); } catch {}
+  return res.filePaths[0];
 });
 ipcMain.handle('sdcard:scanPath', (_, p) => sdCardDetect.assessPicked(p));
 ipcMain.handle('sdcard:listDir', (_, p) => sdCardDetect.listDir(p));
@@ -5607,9 +6257,11 @@ ipcMain.handle('sdcard:volumeInfo', async (_, p) => {
   try {
     const m = /^([A-Za-z]):/.exec(String(p || ''));
     if (!m) return null;
-    const want = (m[1] + ':').toUpperCase();
-    const vols = await sdCardDetect.enumerateAllVolumes();
-    const v = (vols || []).find(x => String(x.drive || '').toUpperCase() === want);
+    // ⚠️ [B-420] ONE ROW, NOT EVERY VOLUME. This enumerated the whole system to read a label
+    // off a single drive - and an unfiltered enumeration includes mapped network drives, so a
+    // share whose host was unreachable could block it for over a minute. Naming the card the
+    // user is holding must never depend on a machine they are not using.
+    const v = await sdCardDetect.volumeForLetter(m[1]);
     return v ? { drive: v.drive, label: v.label || null, driveType: v.driveType } : null;
   } catch { return null; }
 });

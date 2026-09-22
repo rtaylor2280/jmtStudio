@@ -1312,7 +1312,7 @@ async function commonMatchesAt(userData, uuid, destDir, targetName = 'common') {
 //
 // No manifest and no conflict prompt: nothing here is syncing with a card, and
 // the destination is a single file the OS save dialog has already confirmed.
-async function exportCommonAsZip(userData, uuid, destPath, onBytes = null) {
+async function exportCommonAsZip(userData, uuid, destPath, onBytes = null, opts = {}) {
   if (!uuid) return { ok: false, error: 'Missing uuid' };
   if (!destPath) return { ok: false, error: 'Missing destPath' };
   const dir = path.join(commonRoot(userData), uuid);
@@ -1339,6 +1339,23 @@ async function exportCommonAsZip(userData, uuid, destPath, onBytes = null) {
       try { fs.unlinkSync(partialPath); } catch {}
       done({ ok: false, error: `Export failed: ${err.message}` });
     });
+    // ⚠️⚠️ THE WRITE STREAM NEEDS ITS OWN ERROR LISTENER, AND HAD NONE. archive.on('error')
+    // covers failures on the ARCHIVER side; ENOSPC happens on the DESTINATION side, which is
+    // this stream. With no listener, an 'error' event on an EventEmitter is an uncaught
+    // exception in the main process - the same shape as [B-418] - and from the renderer it
+    // looked like nothing happened at all: the progress modal appeared, showed
+    // "Compressing · 0 B of 16.3 MB", then vanished with no result and no message.
+    // (His report, 2026-09-19: "does this but then disappears like nothing happened".)
+    //
+    // ⚠️ Clean up the same way the archiver path does, so a failed export never leaves a
+    // .partial behind - it is the one artefact that would consume the space that just ran
+    // out. The backup writer already had `ws.on('error', reject)`; this writer was copied
+    // from it and lost that line. [B-203]
+    ws.on('error', (err) => {
+      try { ws.destroy(); } catch {}
+      try { fs.unlinkSync(partialPath); } catch {}
+      done({ ok: false, error: `Export failed: ${err.message}` });
+    });
     // Progress from archiver's own 'progress' event, NOT from 'data' chunks.
     // 'data' is COMPRESSED output, which cannot be measured against the pack's
     // known size on disk - the bar would run to some fraction of the total and
@@ -1349,6 +1366,32 @@ async function exportCommonAsZip(userData, uuid, destPath, onBytes = null) {
       archive.on('progress', (p) => {
         const done = (p && p.fs && p.fs.processedBytes) || 0;
         if (done > seen) { const d = done - seen; seen = done; try { onBytes(d); } catch {} }
+      });
+    }
+    // ── Cancelling a zip ──────────────────────────────────────────── [B-005 item 4]
+    //
+    // ⭐⭐ THE .partial PATTERN MAKES THIS THE CLEANEST CANCEL IN THE APP. Everything streams to a
+    // sibling file and only becomes the user's chosen path on a successful rename, so stopping
+    // here leaves the destination exactly as it was - not a truncated archive, not an empty file,
+    // nothing. A zip cannot be "partially written but fine", which is why the folder export had
+    // to clean up after itself and this one simply does not.
+    //
+    // ⚠️ A SEPARATE LISTENER FROM THE PROGRESS ONE ABOVE, because that one only exists when the
+    // caller asked for progress. Cancelling must not depend on whether anybody is watching.
+    //
+    // ⚠️ done() FIRST, THEN abort(). `settled` is what stops ws.on('close') from racing in behind
+    // the abort and reporting a successful export of a file we just deleted.
+    if (opts.shouldStop) {
+      archive.on('progress', () => {
+        if (settled || !opts.shouldStop()) return;
+        done({ ok: true, canceled: true });
+        try { archive.abort(); } catch {}
+        // ⚠️⚠️ UNLINK AFTER THE STREAM CLOSES, NOT BESIDE destroy(). Windows refuses to delete a
+        // file that is still open, so deleting here left the .partial behind on exactly the
+        // path whose comment promises it never does - and a stray .partial is what eats the
+        // space a cancelled export was trying to stop consuming. [B-005 item 4]
+        ws.once('close', () => { try { fs.unlinkSync(partialPath); } catch {} });
+        try { ws.destroy(); } catch {}
       });
     }
     ws.on('close', () => {
@@ -1436,7 +1479,53 @@ async function exportCommonToFolder(userData, uuid, destDir, mode = 'rename', on
     // `files/` subtree (its meta.json lives one level up, outside srcDir), so
     // there's nothing to skip here — every file ships.
     const _exportRefused = [];
-    await copyTreeWithProgress(srcDir, targetDir, { onBytes, refused: _exportRefused });
+    try {
+      await copyTreeWithProgress(srcDir, targetDir, { onBytes, refused: _exportRefused,
+        shouldStop: opts.shouldStop || null,
+        // ⭐ The tally the cancel-cleanup rule reads. Owned by the caller's gate token so one
+        // object counts for the whole operation. Without it the offer branch below can never
+        // fire, which is a branch that exists and does nothing. [B-005 item 4]
+        wrote: opts.wrote || null });
+    } catch (err) {
+      // ⭐ Same rule as a font ([B-005 item 4]): `targetDir` was created by this call - 'replace'
+      // removed the old tree first, 'rename' minted a new name - so the partial is ours to take
+      // back, and a half-copied voice pack on a card is worse than an absent one. It boots, it
+      // is listed, and it fails at the moment a sound is needed.
+      if (require('./sfExportCopy').isCancel(err)) {
+        const out = { ok: true, canceled: true, partialRemoved: false,
+                      destPath: targetDir, item: targetName };
+        // ⭐⭐ THE SAME RULE THE FONT EXPORT FOLLOWS. [B-005 item 4] Found reviewing for parity
+        // 2026-09-21: this door removed its partial unconditionally while the font door
+        // offered on a board card, so cancelling a voice pack could sit through a per-file
+        // delete across the bridge that cancelling a font never did. Same shape of job, same
+        // destination, same thresholds - it must get the same treatment.
+        //
+        // ⭐ Safe by construction, exactly as there: `targetDir` was minted by this call, so
+        // renaming or removing it cannot touch content that was already the user's.
+        const _ed = require('./exportDestination');
+        const _wf = (opts.wrote && opts.wrote.files) || 0;
+        const _wb = (opts.wrote && opts.wrote.bytes) || 0;
+        if (opts.boardCard && _ed.isSlowWriteJob(_wf, _wb)) {
+          const junk = path.join(path.dirname(targetDir), `DELETE.${targetName}`);
+          try {
+            if (fs.existsSync(junk)) await fs.promises.rm(junk, { recursive: true, force: true });
+            await fs.promises.rename(targetDir, junk);
+            out.offerCleanup = junk;
+            return out;
+          } catch { /* rename failed - fall through to the ordinary removal */ }
+        }
+        // ⚠️ Retried: on Windows a directory holding a file with an open handle cannot be
+        // removed, and a write stream's handle release is asynchronous.
+        let removed = false;
+        for (let i = 0; i < 4 && !removed; i++) {
+          try { await fs.promises.rm(targetDir, { recursive: true, force: true }); removed = true; }
+          catch { await new Promise((r) => setTimeout(r, 100 * (i + 1))); }
+        }
+        out.partialRemoved = removed;
+        return out;
+      }
+      throw err;
+    }
     // Human-readable marker, written into the destination so the card can say
     // which voice pack it is carrying. Never written into the library copy.
     try { writeCommonReadme(userData, uuid, targetDir); } catch {}

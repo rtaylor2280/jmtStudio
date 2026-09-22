@@ -106,7 +106,17 @@ const inlineCode = stripComments(inlineSrc);
   const defined = new Set();
   for (const re of [/function\s+([A-Za-z_$][\w$]*)/g,
                     /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=/g,
-                    /class\s+([A-Za-z_$][\w$]*)/g]) {
+                    /class\s+([A-Za-z_$][\w$]*)/g,
+                    // ⚠️ OBJECT SHORTHAND METHODS. Added 2026-09-21 with `_sfDestIdentity`,
+                    // whose `_letterOf(dir) { … }` and `_startFast(dir) { … }` are DEFINITIONS
+                    // that look character-for-character like calls: a name, an argument list,
+                    // and nothing before them but whitespace. The scanner reported both as
+                    // undefined helpers - a false failure about correct code, which this
+                    // file's own header names as the failure mode that gets a test switched
+                    // off. Their real call sites are `this._letterOf(...)`, already excluded
+                    // by the `(?<![.\w$])` lookbehind on the call side.
+                    // ⭐ Generous on definitions, strict on calls - the asymmetry above.
+                    /^\s*(?:async\s+)?([A-Za-z_$][\w$]*)\s*\([^()]*\)\s*\{\s*$/gm]) {
     for (const m of inlineSrc.matchAll(re)) defined.add(m[1]);
   }
 

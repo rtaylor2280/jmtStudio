@@ -17,7 +17,27 @@ const { execFile } = require('child_process');
 const SIDECAR_NAME = '.jmt-sd-id';
 
 // ── Platform enumeration ────────────────────────────────
-function enumerateVolumesWindows(removableOnly) {
+// ⚠️⚠️ `onlyLetter` EXISTS BECAUSE ENUMERATING EVERYTHING TO FIND ONE LETTER CAN HANG. [B-420]
+//
+// Both callers of enumerateAllVolumes walked EVERY volume on the system and then `.find()`-ed
+// the single drive they actually cared about. Without a filter, Win32_LogicalDisk includes
+// mapped network drives, and reading VolumeName off one means contacting its host. If that host
+// is unreachable, SMB does not fail fast - it waits.
+//
+// MEASURED 2026-09-21 on his machine, with A: and K: mapped to a Mac that was mid-reinstall:
+// over 60 SECONDS for an enumeration documented elsewhere at ~3,100-3,200 ms. To a user that is
+// "JMT Studio froze when I plugged in my card."
+//
+// ⚠️ NOT A DEV-ONLY CASE, which was his question. Mapped drives are ordinary - a NAS that
+// sleeps, a work share on a laptop that left the house, a VPN that dropped, a machine that is
+// simply off. And a saber card is NEVER a network share, so there is no reason to have reached
+// across the network in the first place.
+//
+// ⭐ His correction on how to handle it, when I suggested disconnecting the drives so a test
+// would run cleanly: "you can't just disconnect a drive to 'fix' an issue." Right - that hides
+// the defect and verifies nothing about the real case. The machine being in that state was the
+// opportunity, not the obstacle: a live repro we cannot normally produce on demand.
+function enumerateVolumesWindows(removableOnly, onlyLetter = null) {
   // DriveType=2 = removable media (SD readers, USB sticks). Merge HealthStatus from
   // Get-Volume, which Win32_LogicalDisk does not carry. removableOnly=false is used when
   // the user explicitly points at a drive, so its metadata can still be reported.
@@ -31,7 +51,18 @@ function enumerateVolumesWindows(removableOnly) {
   // below, which turns null into 0 and destroys the distinction. Empty slots cannot be
   // reached through partition associations, since a slot with no media has no partitions,
   // which is why the answer is taken here rather than derived downstream.
-  const filter = removableOnly ? ' -Filter "DriveType=2"' : '';
+  // ⚠️ FILTERED IN THE CIM QUERY, NOT IN JAVASCRIPT AFTERWARDS. That is the whole point: a row
+  // excluded here is never materialised, so its VolumeName is never read and no network round
+  // trip happens. Filtering the returned array would be too late - the blocking has already
+  // occurred by the time we could look at it.
+  const clauses = [];
+  if (removableOnly) clauses.push('DriveType=2');
+  if (onlyLetter) {
+    const L = String(onlyLetter).slice(0, 1).toUpperCase();
+    if (!/^[A-Z]$/.test(L)) return Promise.resolve([]);
+    clauses.push(`DeviceID='${L}:'`);
+  }
+  const filter = clauses.length ? ` -Filter "${clauses.join(' AND ')}"` : '';
   const ps = [
     '$vols = Get-CimInstance Win32_LogicalDisk' + filter,
     '$out = foreach ($v in $vols) {',
@@ -54,8 +85,17 @@ function enumerateVolumesWindows(removableOnly) {
     'ConvertTo-Json -InputObject @($out) -Depth 4',
   ].join('\n');
   return new Promise((resolve) => {
+    // 2026-09-21 [B-420] HIS RULE, AND IT IS THE GENERAL FORM OF THE FIX ABOVE: "anythign that
+    // could break based on changing drives on a system is fragile and the wrong architecture."
+    // Filtering network drives fixes one INSTANCE. The CLASS is that any volume can be slow or
+    // dead - a dying card, a stalled reader, a drive mid-format - and the app must not care what
+    // happens to be attached.
+    // ⚠️ So no volume query may block indefinitely. 10s is far outside the ~3,100-3,200 ms this
+    // is documented at, so a healthy-but-slow system still answers; a wedged one gives up.
+    // ⚠️ Degrades to [] = "we could not enumerate", which is the [B-028] rule: failing to
+    // identify something is never evidence about it, and must never be read as "no cards".
     execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps],
-      { maxBuffer: 1024 * 1024, windowsHide: true },
+      { maxBuffer: 1024 * 1024, windowsHide: true, timeout: 10000 },
       (err, stdout) => {
         if (err) { resolve([]); return; }
         try {
@@ -83,6 +123,18 @@ async function enumerateRemovableVolumes() {
 async function enumerateAllVolumes() {
   if (os.platform() === 'win32') return enumerateVolumesWindows(false);
   return [];
+}
+
+// ⭐ ONE LETTER, ONE ROW. [B-420] Use this wherever the question is "tell me about THIS drive".
+// Both former callers of enumerateAllVolumes were that question wearing an enumeration, and
+// that is what made an unrelated dead network share able to hang card detection.
+// ⚠️ If the user deliberately points at a network path, this still queries it - one row, and
+// their explicit choice. Same rule as driveKind() in exportDestination.js. What it no longer
+// does is touch a share nobody asked about.
+async function volumeForLetter(letter) {
+  if (os.platform() !== 'win32') return null;
+  const vols = await enumerateVolumesWindows(false, letter);
+  return (vols && vols[0]) || null;
 }
 
 // ── Identity (VSN is a weak key; .jmt-sd-id sidecar is primary) ──
@@ -325,8 +377,9 @@ async function assessPicked(pickedPath) {
     // Only a REMOVABLE volume is a real card (health/size/serial). Anything else - a
     // fixed drive (system or data) or a folder - is scanned as a folder: read its
     // content but make no "card" claim. Cross-platform, no system-drive special-casing.
-    const vols = await enumerateAllVolumes();
-    const match = vols.find(v => String(v.drive || '').toUpperCase() === letter);
+    // [B-420] One row for one letter - see volumeForLetter. This used to enumerate every
+    // volume on the system to find the one the user just pointed at.
+    const match = await volumeForLetter(letter);
     if (match && Number(match.driveType) === 2) return assessCard(match);
     return assessPath(norm + '\\');
   }
@@ -1044,4 +1097,4 @@ async function analyzeFonts(dirPath) {
   return { path: dirPath, fonts };
 }
 
-module.exports = { scan, assessCard, assessPath, assessPicked, classifyCard, listDir, findConfigs, deriveFontName, nameFromReadmeText, docxToText, recoverNameFromDocx, analyzeFonts, resolveIdentity, isDegenerateVsn, formatVsn, enumerateAllVolumes, enumerateRemovableVolumes, checkWavHealth, checkWavBuffer, checkExecutableBuffer, checkExecutableFile, checkCarryable, checkCarryableFile, classifyFileBuffer, classifyFile, scanCardExecutables, looksExecutableName, subtreeHealthAsync, checkWavHealthAsync };
+module.exports = { scan, assessCard, assessPath, assessPicked, classifyCard, listDir, findConfigs, deriveFontName, nameFromReadmeText, docxToText, recoverNameFromDocx, analyzeFonts, resolveIdentity, isDegenerateVsn, formatVsn, enumerateAllVolumes, enumerateRemovableVolumes, volumeForLetter, checkWavHealth, checkWavBuffer, checkExecutableBuffer, checkExecutableFile, checkCarryable, checkCarryableFile, classifyFileBuffer, classifyFile, scanCardExecutables, looksExecutableName, subtreeHealthAsync, checkWavHealthAsync };

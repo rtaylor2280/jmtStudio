@@ -517,9 +517,21 @@ async function exportBackup({
 
   // Hook cancellation. Aborting the archiver mid-stream + closing the
   // write stream lets us clean up the partial file in the finally block.
+  // Registry of deferred gates so a cancel can settle them. Declared HERE, above
+  // onAbort, because an already-aborted signal calls onAbort during setup - before the
+  // helpers below exist. A const read in its temporal dead zone throws, and node --check
+  // cannot see it. [B-420]
+  const _abortGates = [];
   let cancelled = false;
   const onAbort = () => {
     cancelled = true;
+    // *** RELEASE EVERY PENDING GATE FIRST. [B-420, 2026-09-21]
+    // The dispatch loop may be parked on a bucket gate that only the archiver can resolve,
+    // and abort() stops it resolving. Settle them BEFORE aborting or the loop never gets to
+    // see `cancelled` at all, and the cancel hangs until an outer ceiling fires. This is the
+    // line that turns a minutes-long cancel into a one-second one, and it is the real answer
+    // to his measurement: "I barely coppied anything to it... why is cancel taking so long?"
+    for (const g of _abortGates) { try { g.resolve(); } catch {} }
     try { archive.abort(); } catch {}
     try { ws.destroy(); } catch {}
   };
@@ -539,16 +551,81 @@ async function exportBackup({
   // .catch() is attached to the unlink promise BEFORE the race so a
   // rejection arriving after the wall doesn't become an unhandled
   // rejection that destabilizes the main process.
+  // ⭐⭐ WAIT FOR OUR OWN HANDLE, THEN RETRY. [B-420, 2026-09-21 — his question found this]
+  //
+  // He asked why there is a deadline at all: "if there's concern then let them abort knowing we
+  // couldn't release the card... but we already had a quick method with renaming so shouldn't
+  // be an issue." The right answer turned out to be that the deadline was guarding a race we
+  // had ALREADY FIXED ELSEWHERE, in this same codebase, THE SAME MORNING.
+  //
+  // ⚠️ THE RACE: `onAbort` calls `ws.destroy()`, which is ASYNCHRONOUS, and cleanup then tried
+  // to unlink the very file that stream was still closing. The comment above described the
+  // symptom exactly — unlink blocks at the OS level while the file is held open by "ANY
+  // process, including our own not-yet-fully-closed write stream" — and then worked around it
+  // with a 3 s wall instead of removing the cause. That stalled teardown past the 5 s cancel
+  // ceiling on slow media, which is what produced the false "Export stopped".
+  //
+  // ⭐ `sfExportCopy.dropPartial` solved this on the font path hours earlier: wait for the
+  // stream's 'close' event, then retry the unlink on EBUSY/EPERM. Same shape, same OS, same
+  // fix — it simply never got carried across. Two files, one defect, one of them already
+  // patched. That is the cost of fixing a defect rather than a defect CLASS.
+  //
+  // ⚠️ The 2 s wait is a floor on the stream, not on the unlink: once 'close' has fired the
+  // handle is gone and the unlink is immediate. The retry ladder covers the case where Windows
+  // has not caught up yet, which is exactly what it is for on the font path.
   const cleanupPartialFile = async (p) => {
-    let outcome = 'timeout';
-    await Promise.race([
-      fs.promises.unlink(p).then(
-        () => { outcome = 'ok'; },
-        (e) => { outcome = e.code || 'err'; }
-      ),
-      new Promise(r => setTimeout(r, 3000)),
-    ]);
-    return outcome === 'ok' || outcome === 'ENOENT';
+    await new Promise((r) => {
+      try {
+        if (ws.destroyed && ws.closed) return r();
+        ws.once('close', r);
+      } catch { return r(); }
+      setTimeout(r, 2000);     // never hang the cancel on a stream that will not close
+    });
+    // ⚠️⚠️ ASYNC, NEVER `unlinkSync`. [B-420] My first cut used the sync form, copied from the
+    // font path where it is fine - small files, after a confirmed close. Here the target is a
+    // multi-gigabyte archive on a card that writes at ~773 ms/file, and the comment above
+    // warns unlink can block at the OS level. A synchronous block there freezes the whole main
+    // process, which is the symptom this entire fix exists to remove. The original code used
+    // `fs.promises.unlink` for exactly this reason and I undid it.
+    //
+    // ⚠️ Each attempt is still raced, so even a blocking unlink cannot trap us - but note the
+    // difference from the code this replaced: the race is now a SAFETY NET on a call that
+    // should already be instant (the handle is closed above), not the mechanism we rely on.
+    const tryOnce = (fn) => new Promise((resolve) => {
+      let done = false;
+      const finish = (v) => { if (!done) { done = true; resolve(v); } };
+      fn().then(() => finish('ok'), (e) => finish((e && e.code) || 'err'));
+      setTimeout(() => finish('timeout'), 3000);
+    });
+    for (let i = 0; i < 5; i++) {
+      const r = await tryOnce(() => fs.promises.unlink(p));
+      if (r === 'ok' || r === 'ENOENT') return { removed: true, residual: null };
+      if (r !== 'EBUSY' && r !== 'EPERM') break;   // timeout or a real error - stop retrying
+      await new Promise((r2) => setTimeout(r2, 50 * (i + 1)));
+    }
+    // ⭐⭐ IF WE CANNOT DELETE IT, NAME IT. His design, and it is the same convention as the
+    // font path: "so essentially we want to delete it... but if we can't, then at least it's
+    // named DELETE.Ahsoka etc..."
+    //
+    // A `.partial` left behind is already inert, but it is OUR word for it — `DELETE.` is a
+    // word the user reads without being taught, on a card they are looking at in Explorer.
+    // ⚠️ And his other rule holds: no product name in it. "don't blame us for this by putting
+    // our name int it. juswt mark it for delete... human readable."
+    //
+    // ⚠️ A rename can fail too — Windows refuses it while a handle is open without
+    // FILE_SHARE_DELETE — so this is a better fallback, never a guarantee. Whatever the file
+    // ends up called is what gets reported, so the message names the file that is actually
+    // there rather than the one we hoped to leave.
+    // ⚠️ Async and raced for the same reason as the unlink above - a rename against a held
+    // handle can block too, and a sync one would block the main process with it.
+    try {
+      const marked = path.join(path.dirname(p), `DELETE.${path.basename(p)}`);
+      await tryOnce(() => fs.promises.unlink(marked));      // a previous attempt's marker
+      if (await tryOnce(() => fs.promises.rename(p, marked)) === 'ok') {
+        return { removed: false, residual: marked };
+      }
+    } catch {}
+    return { removed: false, residual: p };
   };
   // Hard outer ceiling on cancel response. If anything inside the main
   // flow hangs past this point after abort (archive.finalize stuck on
@@ -559,16 +636,81 @@ async function exportBackup({
   // deadlineTimer is cleared in the finally if work wins the race, so
   // the deadline promise never rejects and there's no late unhandled
   // rejection floating in the loop.
+  // ⚠️⚠️ THE CEILING WAS 5 SECONDS AND IT WAS REPORTING A LIE. [B-420, his catch 2026-09-21]
+  //
+  // On a card mounted through a Proffieboard a write is ~773 ms per file, so archive teardown
+  // routinely takes longer than 5 s. The deadline fired, the renderer was told the export had
+  // STOPPED, and the archiver kept streaming to the card in the background. What he saw next:
+  // starting another backup appeared to lock the app up, because `dialog.showSaveDialog` was
+  // queued behind work that was supposedly finished. His read of it was exactly right - "we
+  // said it was done but it wasn't."
+  //
+  // ⭐⭐ AND HE NAMED THE CONSEQUENCE THAT MATTERS MORE THAN THE LOCKUP: "if they then wanted
+  // to safe eject the board they couldn't." A false "stopped" on a board card means the eject
+  // fails with files still open - or worse, someone who has been told it stopped pulls the
+  // card. Safe eject is one of the four requirements this entry exists to deliver; reporting a
+  // clean finish we cannot vouch for defeats it.
+  //
+  // ⭐ SO THE DEADLINE NO LONGER REPORTS COMPLETION. Two changes:
+  //   • 120 s instead of 5 s - a true last-resort ceiling, not a routine path. Slow media now
+  //     finishes inside it, and the UI stays honestly on "Cancelling… (finishing current
+  //     file)" while it does, which is the state the user should see.
+  //   • if it DOES fire, the error is marked `teardownIncomplete` so nothing downstream claims
+  //     the card is safe. We stop saying "done" when what we mean is "we stopped waiting."
+  //
+  // ⚠️ The original 5 s existed for a real reason - do not trap the renderer in an endless
+  // "Cleaning up…" if our own teardown deadlocks - and that reason still holds. What changes is
+  // that the escape hatch now tells the truth instead of dressing a timeout up as success.
+  // ⭐⭐ HIS RULING, AND IT REPLACES THE CLOCK ENTIRELY: "only reason to abort and tell them
+  // it's unknown is if the drive stops communicating..."
+  //
+  // That is exactly right, and it is a better condition than elapsed time in both directions.
+  // A slow board card is not an error - it is slow, and the honest response is to keep waiting
+  // with the UI saying so. A drive that has been yanked is not slow - it is gone, and no amount
+  // of waiting will resolve it. A timer cannot tell those apart; presence can.
+  //
+  // ⚠️ SO THE ABORT CONDITION IS MEDIA PRESENCE, NOT A DEADLINE. Polled every 500 ms once a
+  // cancel is requested, using the same `existsSync`-on-the-mount-point instrument built for
+  // safe eject this morning - measured then across a board card, a USB reader and a built-in
+  // slot, all three reading false the moment the media went.
+  //
+  // ⚠️ THE LONG BACKSTOP IS KEPT AND I AM FLAGGING IT RATHER THAN HIDING IT. Strictly, his rule
+  // says only drive loss earns "unknown", and a genuine deadlock with the drive still present
+  // would now hang forever. Ten minutes is far outside any real teardown (the known cause - our
+  // own unlink racing an unclosed handle - is fixed above), so it should never fire; it exists
+  // so a future deadlock cannot leave the app unclosable. It reports the SAME honest "we
+  // stopped waiting" state, never a clean finish.
+  const _volumeRoot = (() => {
+    try {
+      const m = /^([A-Za-z]):/.exec(path.resolve(partialPath));
+      if (m) return `${m[1].toUpperCase()}:\\`;
+      return path.parse(path.resolve(partialPath)).root || null;
+    } catch { return null; }
+  })();
   let deadlineTimer = null;
+  let presencePoll = null;
   const cancelDeadline = new Promise((_, reject) => {
     if (!signal) return;
+    const bail = (why) => {
+      const e = new Error('Cancelled');
+      e.cancelled = true;
+      e.residualPath = partialPath;
+      // ⚠️ Work is still in flight. Nothing downstream may tell the user the destination is
+      // finished with - no completion notice, and above all no safe-eject offer on a card we
+      // are still holding open. [B-420]
+      e.teardownIncomplete = true;
+      e.mediaGone = (why === 'media-gone');
+      reject(e);
+    };
     const onAbortDeadline = () => {
-      deadlineTimer = setTimeout(() => {
-        const e = new Error('Cancelled');
-        e.cancelled = true;
-        e.residualPath = partialPath;
-        reject(e);
-      }, 5000);
+      if (_volumeRoot) {
+        presencePoll = setInterval(() => {
+          let there = true;
+          try { there = fs.existsSync(_volumeRoot); } catch { there = true; }
+          if (!there) bail('media-gone');
+        }, 500);
+      }
+      deadlineTimer = setTimeout(() => bail('backstop'), 600000);
     };
     if (signal.aborted) onAbortDeadline();
     else signal.addEventListener('abort', onAbortDeadline, { once: true });
@@ -600,20 +742,46 @@ async function exportBackup({
   const attachmentsFilesExpected = bucketTops.attachments.reduce(
     (sum, it) => sum + (filesPerTopItem.get(`attachments/${it.name}`) || 0), 0
   );
-  const sourcesBucketGate = (() => {
+  // ⭐⭐ EVERY GATE MUST BE ABLE TO SETTLE ON ABORT. [B-420, 2026-09-21 — his measurement]
+  //
+  // ⚠️⚠️ THIS IS WHY CANCEL TOOK MINUTES REGARDLESS OF HOW LITTLE WAS WRITTEN. His report:
+  // "I barely coppied anything to it... why is cancel taking so long? it might ahve been like
+  // a couple mb." It was never I/O. The dispatch loop does
+  //
+  //     archive.directory(...);  if (expected > 0) await gate.promise;
+  //
+  // and a gate resolves when the archiver has emitted that bucket's expected entry count.
+  // `archive.abort()` stops it emitting - so the gate NEVER RESOLVES and the loop parks on a
+  // promise that cannot settle. Every `if (cancelled) break` sits BEFORE an await, so the flag
+  // has no way to reach a loop already suspended.
+  //
+  // ⭐ Registering the resolvers lets `onAbort` settle them all at once. The loop then unwinds
+  // immediately, `archive.finalize()` is skipped by the `if (!cancelled)` guards, `done`
+  // settles, and teardown finishes in the time it takes to close a stream.
+  //
+  // ⚠️ AND THIS IS WHAT THE OLD 5-SECOND DEADLINE WAS REALLY HIDING. It was not covering a
+  // slow drive; it was escaping this deadlock - by reporting a clean cancel that had not
+  // happened. Removing the lie without fixing the hang made the wait honest and much longer,
+  // which is what he hit at 1m58s. The lesson is the one from this morning, again: a timeout
+  // standing in for a diagnosis buries the defect instead of removing it.
+  const _gate = () => {
     let resolve;
     const promise = new Promise(r => { resolve = r; });
-    return { promise, resolve };
+    const g = { promise, resolve };
+    _abortGates.push(g);
+    return g;
+  };
+  const sourcesBucketGate = (() => {
+    const g = _gate();
+    return g;
   })();
   const sharedTracksBucketGate = (() => {
-    let resolve;
-    const promise = new Promise(r => { resolve = r; });
-    return { promise, resolve };
+    const g = _gate();
+    return g;
   })();
   const attachmentsBucketGate = (() => {
-    let resolve;
-    const promise = new Promise(r => { resolve = r; });
-    return { promise, resolve };
+    const g = _gate();
+    return g;
   })();
   const archiveLibFile = new Map();   // fontName -> filesEmittedSoFar
   const archiveComFile = new Map();   // folderName -> filesEmittedSoFar
@@ -629,9 +797,7 @@ async function exportBackup({
   const itemDoneGates = new Map(); // topKey -> { promise, resolve }
   const _gateFor = (topKey) => {
     if (!itemDoneGates.has(topKey)) {
-      let resolve;
-      const promise = new Promise(r => { resolve = r; });
-      itemDoneGates.set(topKey, { promise, resolve });
+      itemDoneGates.set(topKey, _gate());
     }
     return itemDoneGates.get(topKey);
   };
@@ -877,17 +1043,23 @@ async function exportBackup({
   } catch (err) {
     // Cancel deadline fired OR work threw. Either way, attempt cleanup
     // of the .partial (best effort) and rethrow with the right shape.
+    // [B-420] Returns { removed, residual }: residual is null when it was deleted, the
+    // DELETE.-marked path when it could only be renamed, and the raw partial when even
+    // that failed. Reporting whatever it ACTUALLY ended up as is the point.
     const cleaned = await cleanupPartialFile(partialPath);
     if (err && err.cancelled) {
       const e = new Error('Cancelled');
       e.cancelled = true;
-      e.residualPath = cleaned ? null : partialPath;
+      e.residualPath = cleaned.residual;
+      // ⚠️ Carried through, or the honest signal is lost one frame after it was created.
+      // [B-420] Only the DEADLINE path sets this; a cancel that tore down cleanly does not.
+      if (err.teardownIncomplete) e.teardownIncomplete = true;
       throw e;
     }
     if (cancelled) {
       const e = new Error('Cancelled');
       e.cancelled = true;
-      e.residualPath = cleaned ? null : partialPath;
+      e.residualPath = cleaned.residual;
       throw e;
     }
     throw err;
@@ -896,6 +1068,11 @@ async function exportBackup({
       try { signal.removeEventListener('abort', onAbort); } catch {}
     }
     if (deadlineTimer) { clearTimeout(deadlineTimer); deadlineTimer = null; }
+    // ⚠️ AND THE PRESENCE POLL. [B-420] Added it and did not tear it down - a 500 ms
+    // `existsSync` against the destination volume, running forever after the export settled,
+    // on a card we may be trying to eject. Found by checking rather than assuming, one minute
+    // after writing it.
+    if (presencePoll) { clearInterval(presencePoll); presencePoll = null; }
     // Belt-and-suspenders: if cancelDeadline is still pending here
     // (work won the race or threw early), attach a no-op catch so a
     // late-arriving rejection can't become an unhandled rejection.
@@ -906,10 +1083,13 @@ async function exportBackup({
   }
 
   if (cancelled) {
+    // [B-420] Returns { removed, residual }: residual is null when it was deleted, the
+    // DELETE.-marked path when it could only be renamed, and the raw partial when even
+    // that failed. Reporting whatever it ACTUALLY ended up as is the point.
     const cleaned = await cleanupPartialFile(partialPath);
     const e = new Error('Cancelled');
     e.cancelled = true;
-    e.residualPath = cleaned ? null : partialPath;
+    e.residualPath = cleaned.residual;
     throw e;
   }
 
