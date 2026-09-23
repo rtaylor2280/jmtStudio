@@ -25183,6 +25183,10 @@ require(['vs/editor/editor.main'], function () {
         // ⚠️ `title` overrides the runner's default so the modal still says what it always said.
         // Captured so onCompleted can report what the exporter actually wrote. [B-420]
         let _zipRes = null;
+        // Elapsed is part of the completion pattern, not an extra: every other summary in the
+        // app ends with it, and its absence here was the gap reported as "the summary doesn't
+        // say how long it took".
+        const _zipT0 = Date.now();
         await _sfRunExport({
           label: 'files',
           title: 'Exporting common folder',
@@ -25217,12 +25221,35 @@ require(['vs/editor/editor.main'], function () {
           // !! Says WHERE and HOW BIG, in that order. The path is what someone needs to go
           // and find the file; the size is how they know it is the whole pack. Same two
           // facts backup leads with, so the two archive doors read alike.
+          // ── The completion summary ──────────────────────────────────
+          //
+          // ⚠️ BROUGHT ONTO THE HOUSE PATTERN [2026-09-22]. This said "Exported to:" above a bare
+          // path and then the pack name and size on a line of its own - a label/value block the
+          // house style explicitly rejects, and it named the pack twice counting the filename in
+          // the path. His verdict on it: "even the wording on 8 looked odd... I'm talking about
+          // the pattern."
+          //
+          // ⭐ The pattern, already written down beside `_sfShowExportSummary`: running prose, one
+          // subject per line, an elapsed line LAST. Each fact once; the path is an address rather
+          // than a restatement. "as a Zip archive" earns its place here where it would not on a
+          // folder export, because a zip is a different shape from the thing you exported.
           onCompleted: async () => {
             const r = _zipRes || {};
             const written = (r.totalBytes != null) ? r.totalBytes : ((c && c.totalBytes) || 0);
+            const files = (c && c.fileCount) || 0;
             const fmt = window._sfFormatBytesShort || window._sfFormatBytes || ((n) => n + " B");
-            const lines = [`Exported to:\n${r.destPath || pick.filePath}`];
-            if (written > 0) lines.push(`${label} - ${fmt(written)}.`);
+            const amount = files > 0
+              ? `${files} file${files === 1 ? '' : 's'} · ${fmt(written)}`
+              : fmt(written);
+            const lines = [];
+            lines.push(written > 0
+              ? `Exported ${label} as a Zip archive: ${amount}.`
+              : `Exported ${label} as a Zip archive.`);
+            lines.push(r.destPath || pick.filePath);
+            const secs = (Date.now() - _zipT0) / 1000;
+            lines.push(window._sfFormatDuration
+              ? `Took ${window._sfFormatDuration(secs)}.`
+              : `Took ${Math.round(secs)}s.`);
             // [B-420] Through the shared notice so the summary CARRIES the eject button, which is what
             // the during-export checkbox presses. A plain promptConfirm had no button, so the
             // checkbox had nothing to click and a toast appeared instead.

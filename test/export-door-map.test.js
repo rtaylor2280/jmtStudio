@@ -145,13 +145,29 @@ for (const h of Object.keys(NOT_DOORS)) {
 // table row in the document and reported 29 - the capability matrix and the out-of-tab table
 // both have numbered rows. An instrument that sweeps a whole file to answer a question about
 // one section is measuring something adjacent to the question.
-const sfTable = mapText.slice(
-  mapText.indexOf('### The eleven, as a person meets them'),
-  mapText.indexOf('### Three more, found by the check'));
-const rows = (sfTable.match(/^\|\s*\d+\s*\|/gm) || []).length;
-ok(`the Sound Fonts tab lists 11 user-facing doors (found ${rows})`, rows === 11,
-   'Eleven were enumerated from the screen on 2026-09-20; if the UI gained or lost one, ' +
-   'update the map AND this number together');
+// ⚠️⚠️ AND THE END ANCHOR HAS TO BE THE END OF THE TABLE, NOT THE NEXT HEADING THAT HAPPENS TO
+// FOLLOW IT. On 2026-09-22 a section was added between this table and "Three more", and its own
+// table rows were swept into the count - 17 where the door table holds 12. The instrument was
+// still measuring "everything between two landmarks" rather than the table itself, which is the
+// same shape as the bug the comment above already describes, one landmark further out.
+// ⭐ So: stop at the first blank line after the table starts. A markdown table cannot contain one.
+const sfSection = mapText.slice(mapText.indexOf('### The eleven, as a person meets them'));
+const sfTable = (() => {
+  const firstRow = sfSection.indexOf('\n|');
+  if (firstRow < 0) return '';
+  const end = sfSection.indexOf('\n\n', firstRow);
+  return sfSection.slice(firstRow, end < 0 ? undefined : end);
+})();
+const rows = (sfTable.match(/^\|\s*\d+[a-z]?\s*\|/gm) || []).length;
+// ⚠️ 12, not 11: "Export common folder…" (8b) was added 2026-09-22. There was no way to write a
+// common onto a card before it — the one Export item only ever produced a zip.
+// ⚠️ The row id pattern allows a letter suffix, because 8b sits beside 8 rather than renumbering
+// nine rows and every reference to them in the code and the commit history.
+ok(`the Sound Fonts tab lists 12 user-facing doors (found ${rows})`, rows === 12,
+   'Eleven were enumerated from the screen on 2026-09-20 and 8b was added 2026-09-22; if the UI ' +
+   'gained or lost one, update the map AND this number together. ⚠️ The funnel is reached from ' +
+   'ten call sites and the map records that as an OPEN question — if those become doors, this ' +
+   'number moves again and it moves by his ruling, not by a grep');
 
 // ── 4. The stale-number trap must not come back ──────────────────────
 //

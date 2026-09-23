@@ -3875,6 +3875,15 @@ async function _sfFileExportImpl(event, { kind, id, paths, suggestedName, asFile
   // the write. Same numbers, same thresholds, one implementation.
   //
   // ⚠️ Both refusals above return BEFORE this line, so a probe that gets here is a yes.
+  //
+  // ⏭ WHEN THIS DOOR IS MIGRATED, THE PROBE HAS TO REPORT ITS MEASUREMENT. [noted 2026-09-22]
+  // The runner sizes its own preflight from what `plan()` returns, and zero bytes is read as
+  // "cannot measure", which deliberately does not refuse. So a migration that leaves this
+  // returning no numbers silently disables the fit refusal and the slow-write warning on this
+  // door while looking like a pure refactor. The numbers are already here as `_bTotal` and
+  // `_bFiles` - the same pair this handler hands its own preflight above.
+  // ⚠️ And they must ride on the REFUSAL returns too, or the refused case is exactly the one
+  // that reaches the runner unmeasured.
   if (probe) return { ok: true, probed: true };
 
   // ⚠️ BETWEEN ITEMS, and an item here can be a whole folder - so the tree walk below carries
