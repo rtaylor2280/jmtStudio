@@ -28,6 +28,8 @@ const path = require('path');
 const ROOT = path.join(__dirname, '..');
 const html   = fs.readFileSync(path.join(ROOT, 'renderer', 'index.html'), 'utf8');
 const mainJs = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
+// The shared copier, so the chunk-carries-its-filename rule can be asserted where it lives.
+const copyJs = fs.readFileSync(path.join(ROOT, 'sfExportCopy.js'), 'utf8');
 
 let failures = 0;
 function ok(name, cond, extra) {
@@ -50,17 +52,31 @@ ok('the export helper was found', caller.length > 0);
   ok('⭐⭐ a multi-file export picks the destination BEFORE any work',
      /subPaths\.length > 1/.test(caller) && /pickExportDir/.test(caller),
      'the whole fix is the order; a bar in front of the old flow sat behind a native dialog');
+  // ⚠️ RE-ANCHORED 2026-09-22 when the funnel migrated. This asserted the door called
+  // `_sfRunWithByteProgress` ITSELF, which was "the shared runner" at the time this was written.
+  // The runner now wraps produce in that call for every door, so the door naming it directly is
+  // the OLD shape - the assertion had quietly inverted: passing meant unmigrated.
   ok('⭐ and runs through the shared runner rather than a fourth hand-rolled bar',
-     /_sfRunWithByteProgress\('Exporting files'/.test(caller));
+     /await _sfRunExport\(\{[\s\S]{0,600}?title: 'Exporting files'/.test(caller)
+     && !/_sfRunWithByteProgress\('Exporting files'/.test(caller),
+     'the runner owns the bar now; a door raising its own is the drift the ratchet exists to stop');
   ok('⚠️ the destination is handed to the backend',
      /destDir: pick\.destDir/.test(caller));
   ok('⚠️ cancelling at the picker does nothing at all',
      /if \(!pick \|\| !pick\.ok \|\| !pick\.destDir\) return;/.test(caller),
      'no modal, no work, no error — the user changed their mind');
-  // ⚠️ The single-item path MUST keep its instant click.
-  ok('⚠️⚠️ a single item still lets the backend ask, so the click stays instant',
-     /} else \{[\s\S]{0,400}sfExportFiles\(\{ kind, id, paths: subPaths, asFile \}\)/.test(caller),
-     'probing whether one path is a directory before opening a picker is the delay the rule forbids');
+  // ⚠️⚠️ RE-ANCHORED 2026-09-22, AND THE REASONING BEHIND IT WAS THE THING THAT WAS WRONG.
+  // This asserted the single-item path let the BACKEND open the picker, on the grounds that the
+  // renderer could not know directory-from-file without a probe, and probing before a dialog is
+  // the delay the click-acts-instantly rule forbids. The premise was false: the CALL SITES knew
+  // all along - "Export folder…" passes a directory and says so in its own label. The fact just
+  // was not travelling.
+  // ⭐ So the click is still instant AND the renderer owns the picker: no probe, one property.
+  ok('⚠️⚠️ a single item needs no probe to choose its picker',
+     /const _wantFolder = !!isDir && !asFile;/.test(caller)
+     && /pickExportFilePath/.test(caller)
+     && /pickExportDir/.test(caller),
+     'the caller supplies isDir, so no work happens between the click and the dialog');
 }
 
 // ── the backend honours a pre-picked destination ───────────────────────────
@@ -80,9 +96,54 @@ ok('the export helper was found', caller.length > 0);
   // it runs precisely so the question can be asked before anything is raised. Emitting
   // there would push bytes at a listener that does not exist yet and seed the real bar's
   // first frame from a call that wrote nothing.
-  ok('⭐ progress is emitted only when the renderer supplied the destination and means to write',
-     /const _emit = \(preDest && !probe\) \? _sfByteProgressEmitter\(event\) : null;/.test(handler),
-     'a caller with no bar has no listener to send to');
+  // ⚠️⚠️ THIS ASSERTION INVERTED ON 2026-09-23 AND WAS PINNING THE BUG IN PLACE. It required
+  // the gate to read `preDest` ALONE - the destination FOLDER - and a single-file export
+  // supplies `preFile` instead. So the renderer had chosen a destination, was showing a bar and
+  // waiting for ticks, and this gate decided nobody was listening. Passing meant silent.
+  // ⭐ The question the gate asks is "did the renderer choose the destination, and is therefore
+  // driving a bar?" Either field answers it; neither alone does. `!probe` is untouched and is
+  // still the point of the original tightening: a probe has no bar by design.
+  ok('⭐ progress is emitted whenever the renderer chose the destination and means to write',
+     /const _emit = \(\(preDest \|\| preFile\) && !probe\) \? _sfByteProgressEmitter\(event\) : null;/.test(handler),
+     'a folder destination and a file destination are both destinations; gating on one of them '
+     + 'left every single-file export with a bar nobody fed');
+  // ── ⚠️⚠️ TRUE BYTES, NOT A LUMP WHEN THE FILE CLOSES ───────────── [B-420, 2026-09-23]
+  //
+  // ⭐ HIS REPORT, and the scenario is what made it legible: one large wav and three small ones.
+  // "it sits at 0 for like a min... then goes to the top." The bar was on bytes, but bytes were
+  // credited only once a whole file had been written - so the large file WAS the flat minute and
+  // the three small ones were the jump. `writeBufferWithProgress` takes a per-chunk callback and
+  // every call site passed `null` to it. A function named withProgress, handed no progress.
+  //
+  // ⭐ So the rule is: no export write may pass a null sink. Asserted as a COUNT of remaining
+  // nulls rather than by inspecting one call, because there were four write sites across three
+  // branches and checking the one I was looking at is how the other three stayed silent.
+  {
+    const nulls = [...handler.matchAll(/writeBufferWithProgress\([^)]*?,\s*null\s*,/g)].length;
+    ok('⚠️⚠️ no export write is handed a null progress sink', nulls === 0,
+       `${nulls} call site(s) still pass null - that write reports nothing while it runs`);
+    ok('the single-file write reports its own bytes and name',
+       /writeBufferWithProgress\(buf, filePath, \(n\) => \{[\s\S]{0,200}?_bDone \+= n;/.test(handler),
+       'his rule: "it shouldn\'t matter if 1 or multiple"');
+    ok('the multi-path file write reports its own bytes and name',
+       /writeBufferWithProgress\(buf, out, \(n\) => \{[\s\S]{0,200}?_bDone \+= n;/.test(handler));
+    ok('the folder write is given a chunk sink too',
+       /await writeDirTo\(subPath, outRoot, \(n, rel\) => \{/.test(handler),
+       'a whole font folder landing in one lump is the same defect with a bigger gap');
+  }
+  // ⚠️⚠️ AND THE OLD PER-FILE CREDIT MUST BE GONE, NOT KEPT AS A BELT-AND-BRACES. Crediting
+  // `buf.length` as well as every chunk counts each file twice, and the bar reaches 100% at the
+  // halfway mark - which looks like a FASTER export rather than a broken one, so nobody reports
+  // it. One source of truth for `_bDone`.
+  ok('⚠️⚠️ bytes are credited once, not twice',
+     !/_bDone \+= \(buf \? buf\.length : 0\)/.test(handler),
+     'the per-file lump and the per-chunk sink cannot both be live');
+  // The name travels with the bytes: nowhere upstream can recover it, because by the time the
+  // chunk arrives the walk has moved on to the next file. [his: "we need to show which file"]
+  ok('the tree copier tells its caller which file each chunk came from',
+     /onBytes \? \(\(n\) => onBytes\(n, _rel\)\) : null/.test(copyJs),
+     'a bar that knows how much moved and not what moved is half an answer');
+
   ok('⚠️⚠️ the bar lands on 100% whatever route each item took',
      /_emit\.onBytes\(\{ done: _bTotal, total: _bTotal, name: '' \}\); _emit\.flush\(\);/.test(handler),
      '[B-389]: refused, failed or written, it still reaches the end');

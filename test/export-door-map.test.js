@@ -108,6 +108,7 @@ const NOT_DOORS = {
   'sources:exportSize':             'sizes a source for the fit check; read-only',
   'common:pickExportZipPath':       'opens a save dialog and returns a path',
   'dialog:pickExportDir':           'opens a folder dialog and returns a path',
+  'dialog:pickExportFilePath':      'opens a save dialog and returns a path; the single-FILE twin of pickExportDir, added so the renderer owns that picker and the runner can own the rest',
   'dialog:selectBackupExportPath':  'opens a save dialog and returns a path',
   'dialog:selectBackupImportPath':  'opens an open dialog and returns a path',
 };
@@ -159,11 +160,15 @@ const sfTable = (() => {
   return sfSection.slice(firstRow, end < 0 ? undefined : end);
 })();
 const rows = (sfTable.match(/^\|\s*\d+[a-z]?\s*\|/gm) || []).length;
-// ⚠️ 12, not 11: "Export common folder…" (8b) was added 2026-09-22. There was no way to write a
+// ⚠️ 14: eleven enumerated off the screen 2026-09-20, plus 8b ("Export common folder…", added
+// 2026-09-22), plus doors 12 and 13 - the two export-before-delete paths, which the RUNNER had been
+// naming by number since 09-21 while this table left them out. His correction: "technically 14...
+// the two delete paths. delete last source with export and delete source."
+// ⚠️ Superseded note: "Export common folder…" (8b) was added because there was no way to write a
 // common onto a card before it — the one Export item only ever produced a zip.
 // ⚠️ The row id pattern allows a letter suffix, because 8b sits beside 8 rather than renumbering
 // nine rows and every reference to them in the code and the commit history.
-ok(`the Sound Fonts tab lists 12 user-facing doors (found ${rows})`, rows === 12,
+ok(`the Sound Fonts tab lists 14 user-facing doors (found ${rows})`, rows === 14,
    'Eleven were enumerated from the screen on 2026-09-20 and 8b was added 2026-09-22; if the UI ' +
    'gained or lost one, update the map AND this number together. ⚠️ The funnel is reached from ' +
    'ten call sites and the map records that as an OPEN question — if those become doors, this ' +

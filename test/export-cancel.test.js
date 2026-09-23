@@ -103,8 +103,13 @@ ok('the token carries the board-card verdict so cancel never re-measures',
      'stopping at the top level while subtrees run on is a cancel in name only');
 
   // ── The new half: the file copy itself stops and cleans up ──
+  // ⚠️ RE-ANCHORED 2026-09-23. This pinned the exact argument list, and the third argument
+  // changed when the chunk sink began carrying the file's name - so it failed on a change that
+  // left its own subject untouched. The rule is that shouldStop REACHES the copy, whatever is
+  // handed in beside it; this file already carries the lesson that a test pinned to an
+  // identifier fails on a rename and passes on a deletion elsewhere.
   ok('⚠️⚠️ the tree walk hands shouldStop DOWN to the file copy',
-     /await copyFileWithProgress\(srcPath, destPath, onBytes, shouldStop\)/.test(copy),
+     /await copyFileWithProgress\(srcPath, destPath,[\s\S]{0,140}?,\s*shouldStop\)/.test(copy),
      'without this the walk stops between files and the current write runs to completion');
 
   const fn = decomment(copy.slice(copy.indexOf('function copyFileWithProgress'),
@@ -188,15 +193,28 @@ ok('the multi-file loop does not file a cancel as a failed file',
 // export-outcome-shared.test.js. Demanding the old inline shape here would push the code back
 // toward the per-door copies this work removed.
 {
-  const i = html.indexOf('if (res.tooBig) {');
+  // ⚠️⚠️ ANCHORED ON THE FUNCTION, NOT ON THE LINE THIS TEST WAS ABOUT.
+  // It used to slice from `if (res.tooBig) {` - the very code the migration DELETED - so the
+  // segment silently became an empty string and every assertion over it passed or failed for
+  // reasons unrelated to the door. An anchor that is itself the subject of the change cannot
+  // survive the change.
+  const i = html.indexOf('const _sfExportFiles = async');
   const j = html.indexOf('// Unified dispatcher', i);
   const seg = (i > 0 && j > i) ? html.slice(i, j) : '';
-  ok('the funnel still refuses tooBig before anything else',
-     /if \(res\.tooBig\) \{[\s\S]{0,200}?_sfRefuseNotEnoughRoom/.test(seg),
-     'nothing has been written at that point - it is a refusal, not a recovery');
-  ok('⭐ and hands every other ending to the shared handler',
-     /_sfExportOutcome\(/.test(seg) && !/_sfExportFailed\(res\.error/.test(seg),
-     'four of his eleven doors run through this funnel - one ending for all of them');
+  // ⚠️⚠️ RE-ANCHORED 2026-09-22. Both assertions described the funnel owning its own
+  // refusal and its own ending. Both branches now run through the shared runner, which owns the
+  // refusal and the ending for every door - so the old checks would pass only on an UNMIGRATED
+  // door. The rules they protect are unchanged and now hold for fourteen doors instead of four.
+  ok('the funnel hands its refusal and its ending to the runner',
+     /await _sfRunExport\(\{/.test(seg)
+     && !/_sfRefuseNotEnoughRoom/.test(seg)
+     && !/_sfExportOutcome\(/.test(seg),
+     'a door keeping either one back also keeps the bug they were built for: a tooBig recovery '
+     + 'that writes first, and a cancel reported as a success');
+  ok('⭐ and both of its branches go through it',
+     (seg.match(/await _sfRunExport\(\{/g) || []).length >= 2,
+     'multi-path is doors 2/5/7/9 and single-path is the right-click items; one migrated and '
+     + 'one left behind is how this function had two personalities in the first place');
 }
 
 // ── 6. Partial cleanup follows what the thing IS ──

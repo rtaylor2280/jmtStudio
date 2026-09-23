@@ -74,24 +74,50 @@ ok('the old refuse+warn pair is gone from every door',
    !/_sfRefuseNotEnoughRoom\(_d\)/.test(H) && !/await _sfWarnSlowWrite\(\{/.test(H),
    'two implementations of one decision is what this replaced');
 
-// ⚠️⚠️ EVERY DESTINATION CALL WEARS THE SAME BUSY BAR, AND THE NEW ONE DID NOT.
+// ⚠️⚠️ A DESTINATION CALL MUST HAPPEN UNDER AN EXPLANATION - AND WHERE THAT COMES FROM CHANGED.
 //
-// `_sfPreflightBusy` puts a 150 ms-delayed "Checking the destination…" overlay on every call
-// that talks to a destination - its own note says "Same label on all three on purpose: from
-// the user's side it is one wait." The new preflight helper called the IPC directly and
-// skipped it, so six migrated doors lost their bar in one stroke.
+// ⭐ THESE TWO ASSERTIONS INVERTED ON 2026-09-23. They required every destination call to be
+// wrapped in `_sfPreflightBusy` - a 150 ms-delayed overlay - which was right while most doors
+// had no progress surface. Once the runner began supplying a modal to every door, that wrapper
+// became a SECOND surface for one wait: the funnel's multi-select export showed the small
+// overlay for the probe, then the runner's modal for the free-space check. His call was to
+// delete the overlay rather than guard it, so passing these meant the bug was still wired in.
 //
-// ⭐ HIS REPORT, and it is the shape to remember: "a different delay on the space check for
-// tracks export and tracks selection export", then "same delay without the indeterminate bar
-// on common folders." The WAIT was unchanged; only the explanation of it disappeared. A
-// regression that adds no time at all is still a regression, and it is only visible by using
-// the app - no test of the preflight's RESULT could have caught it.
-ok('⚠️⚠️ the preflight goes through the shared busy bar',
-   /_sfPreflightBusy\(_sfDestBusyLabel, \(\) =>\s*\n?\s*window\.electronAPI\.preflightExportDest/.test(H),
-   'an unwrapped ~1.9s device lookup shows nothing and reads as a hang');
-ok('every destination-talking call is wrapped, none call their IPC bare',
-   !/await window\.electronAPI\.(checkExportDest|classifyExportDest|preflightExportDest)\(/.test(H),
-   'a bare call is one that forgot the bar');
+// ⚠️ THE INTENT IS UNCHANGED AND IS WHAT IS ASSERTED NOW: nobody waits on a destination with
+// nothing on screen. What supplies the explanation is the runner's own modal, which means the
+// test is POSITIONAL - the raise has to precede both the plan and the preflight, and it sat
+// below the plan until today, which is exactly how two surfaces appeared in sequence.
+{
+  const runner = H.slice(H.indexOf('const _sfRunExport = async'),
+                         H.indexOf('const _sfRunExportBackup = async'));
+  ok('the runner body was located', runner.length > 500,
+     'anchor moved - re-find it before trusting the positions below');
+  const raiseAt = runner.indexOf("_sfDeleteProgress.show('Checking the destination…'");
+  const planAt = runner.indexOf('await door.plan()');
+  const preflightAt = runner.indexOf('_sfPreflightDestination({');
+  ok('the runner raises its modal, plans, then preflights - in that order',
+     raiseAt > -1 && planAt > -1 && preflightAt > -1
+       && raiseAt < planAt && planAt < preflightAt,
+     `raise@${raiseAt} plan@${planAt} preflight@${preflightAt} - a raise AFTER the plan leaves a `
+     + 'slow plan explaining itself with nothing, which is what the deleted overlay was covering');
+  // A raise that is never taken back down strands an explanation over an operation that ended.
+  ok('and it drops the modal again when the plan refuses or is cancelled',
+     /_dropRaised\(\);\s*\n?\s*return out;/.test(runner) || /await _dropRaised\(\)/.test(runner),
+     'both early exits out of plan() have to put back what the raise took');
+}
+// ⚠️⚠️ DELIBERATELY RED WHILE A DIAGNOSTIC IS IN THE TREE. [2026-09-23] A temporary
+// `[bp]` console probe was added to the byte-progress runner to separate "no events arrive"
+// from "events arrive and done stays 0", which reading could not. It must not be committed.
+// ⭐ This is a guard, not a bug: if the suite is failing ONLY on this line, the probe is still
+// in and the fix is to take it out - twice today something was left behind because removing it
+// depended on someone remembering.
+ok('no temporary [bp] diagnostic is left in the renderer',
+   !/\[bp\]/.test(H),
+   'REMOVE THE TEMPORARY DIAGNOSTIC from _sfRunWithByteProgress before committing');
+
+ok('the deleted overlay has no callers left on the export path',
+   !/_sfPreflightBusy\(/.test(H.replace(/\/\/[^\n]*/g, '')),
+   'a live call to a deleted helper is a ReferenceError at the worst moment');
 
 // ── boardCard: set AND read ──────────────────────────────────────────
 ok('the gate token is given boardCard', /token\.boardCard = !!opts\.boardCard/.test(main));
@@ -123,8 +149,12 @@ ok('⚠️⚠️ and the module READS it to choose rename-vs-delete',
 
 // ── The running tally the cleanup decision reads ─────────────────────
 ok('the tree walk increments the file tally', /wrote\.files = \(wrote\.files \|\| 0\) \+ 1/.test(copy));
+// ⚠️ RE-ANCHORED 2026-09-23, same reason as its twin in export-cancel: it pinned the exact
+// argument list, and the third argument changed when the chunk sink began carrying the file's
+// name. The ORDERING is the rule - the tally increments after the copy resolves - and that is
+// what is asserted now, whatever is passed alongside it.
 ok('⚠️ and counts AFTER the await, so an interrupted file is not counted',
-   /await copyFileWithProgress\(srcPath, destPath, onBytes, shouldStop\);\s*\n[\s\S]{0,400}?wrote\.files/.test(copy),
+   /await copyFileWithProgress\(srcPath, destPath,[\s\S]{0,140}?,\s*shouldStop\);\s*\n[\s\S]{0,400}?wrote\.files/.test(copy),
    'its partial is deleted, so counting it would inflate the tally by a file that is gone');
 ok('a door threads the tally in', /wrote: token\.wrote/.test(main));
 
@@ -142,8 +172,13 @@ ok('a door threads the tally in', /wrote: token\.wrote/.test(main));
   const common = read('soundFontCommon.js');
   ok('the voice-pack door has the offer branch',
      /opts\.boardCard && _ed\.isSlowWriteJob/.test(common));
+  // ⚠️ WINDOW WIDENED 2026-09-23, and the reason is worth keeping: this failed on a COMMENT.
+  // Three explanatory lines were added between the call and its arguments and pushed
+  // `boardCard` past a 400-character window, so a test about wiring went red over prose. The
+  // fact it asserts was never touched. A distance-bounded match is a fine way to keep an
+  // assertion near its subject and a bad way to pin one, because the gap is not the rule.
   ok('⚠️⚠️ and its handler actually passes boardCard',
-     /soundFontCommon\.exportCommonToFolder[\s\S]{0,400}?boardCard: !!token\.boardCard/.test(main),
+     /soundFontCommon\.exportCommonToFolder[\s\S]{0,900}?boardCard: !!token\.boardCard/.test(main),
      'without it the branch is unreachable and the parity is cosmetic');
   ok('⚠️⚠️ and the module threads the tally into the copy',
      /wrote: opts\.wrote \|\| null/.test(common),

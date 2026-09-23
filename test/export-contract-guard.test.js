@@ -84,13 +84,27 @@ for (const [name, re, why] of RULES) ok(name, re.test(runner), why);
 }
 
 // ── ⚠️ AND THE GUARD MUST NOT BE THE ONLY COPY OF THE RULE ──────────
-// `_sfExportStoppedNotice` also decides modal-vs-toast from `leftovers`. It filters to named
-// leftovers itself, deliberately: the guard protects doors that go through the runner, and this
-// protects the notice from any caller that does not. Two independent checks of one rule is
-// correct here — the failure mode is a false all-clear, and belt-and-braces is cheap.
-ok('the stopped notice independently filters leftovers',
-   /const _namedLeftovers = \(leftovers \|\| \[\]\)\.filter\(/.test(H),
-   'the notice is reachable from callers that never touched the runner');
+// `_sfExportStoppedNotice` is reachable from callers that never touched the runner, so it has to
+// recognise a named leftover on its own. Two independent checks of one rule is correct here — the
+// failure mode is a false all-clear, and belt-and-braces is cheap.
+//
+// ⚠️ RE-ANCHORED 2026-09-23. This asserted `_namedLeftovers`, a local that existed only to decide
+// modal-vs-toast — and that decision was DELETED when he ruled the dialog should show every time
+// ("I prefer this dialog every time"). The rule the assertion exists for was never the toast; it
+// is that an ORIGINAL. or DELETE. leftover gets NAMED to the user, because a restored original
+// sitting under a name they did not choose is the one thing they must not tidy away. That lives
+// in the message loop, which is where this now points.
+{
+  const notice = H.slice(H.indexOf('async function _sfExportStoppedNotice'),
+                         H.indexOf('window._sfExportStoppedNotice'));
+  ok('the stopped notice was located', notice.length > 200);
+  ok('the stopped notice independently recognises named leftovers',
+     /\^ORIGINAL\\\./.test(notice) && /\^DELETE\\\./.test(notice),
+     'the notice is reachable from callers that never touched the runner');
+  ok('and it tells the user not to delete a restored original',
+     /do not delete it/i.test(notice),
+     'naming the folder without saying that is the half that loses data');
+}
 
 // ── A DOOR THAT DECLARES A SUMMARY MUST ACTUALLY DRAW ONE ────────────
 //

@@ -268,7 +268,20 @@ async function copyTreeWithProgress(srcDir, destDir, opts = {}) {
           continue;
         }
       }
-      await copyFileWithProgress(srcPath, destPath, onBytes, shouldStop);
+      // ⭐⭐ THE CHUNK CARRIES THE FILE IT CAME FROM. [B-420, 2026-09-23 — his requirement:
+      // "we need to show which file we're working on"]
+      //
+      // `onBytes` was called with a bare chunk length, so a caller driving a progress bar knew
+      // how much had moved and never what was moving. The name is free here - the walk is
+      // already holding it for the refusal list - and nowhere upstream can recover it, because
+      // by the time the bytes arrive the loop has moved on.
+      //
+      // ⚠️ SECOND ARGUMENT, NOT A NEW CALLBACK. Every existing caller takes `(n)` and ignores
+      // extra arguments, so this cannot break one; a parallel `onFile` channel would be a
+      // second thing to keep in step with the first forever.
+      const _rel = relBase ? `${relBase}/${item.name}` : item.name;
+      await copyFileWithProgress(srcPath, destPath,
+        onBytes ? ((n) => onBytes(n, _rel)) : null, shouldStop);
       // ⚠️ COUNTED AFTER THE AWAIT, so a file interrupted mid-write is not counted as landed.
       // Its partial is deleted by the copy itself, so counting it would inflate the tally the
       // cleanup decision reads - by exactly the file that no longer exists.

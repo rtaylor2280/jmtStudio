@@ -319,6 +319,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sourceExportSize:      (params)     => ipcRenderer.invoke('sources:exportSize', params),
   exportSourceToDownloads: (params)   => ipcRenderer.invoke('sources:exportToDownloads', params),
   pickExportDir:           (params)   => ipcRenderer.invoke('dialog:pickExportDir', params),
+  // [B-420] The single-FILE twin, so the renderer owns that picker too and the shared runner
+  // can own everything after it. Returns { ok, destFile } or { ok:false, canceled }.
+  pickExportFilePath:      (params)   => ipcRenderer.invoke('dialog:pickExportFilePath', params),
   showItemInFolder:        (p)        => ipcRenderer.invoke('shell:showItemInFolder', p),
   openFolder:              (p)        => ipcRenderer.invoke('shell:openFolder', p),
   onFileOpsCopyProgress: (cb) => {

@@ -781,10 +781,42 @@
      is the only scroll surface. File list reuses the SFL .sf-entry-files-*
      language (breadcrumb pills, 140px rows, yellow folder icons). */
   .modal.sd-report-modal { width: 880px; max-width: 94vw; height: min(84vh, 640px); display: flex; flex-direction: column; }
+  /* ⭐⭐ GROW WHEN THE PROGRAM-FILE WARNING IS UP. [2026-09-23, his call: "we need to allow the
+     overall window to grow when we have that huge red banner. that will make it easier to read
+     the files when that's the case."]
+     The banner is ~200px of fixed copy at the top of a fixed-height modal, so on a card that has
+     one the file list was squeezed to about two rows - the list being the thing you actually came
+     to read. The height is otherwise deliberately fixed (it has been since the SD feature landed)
+     and this does not undo that: it raises the ceiling only for the case that needs it.
+     ⚠️ DECLARATIVE ON PURPOSE. A class toggled in JS would have to be set wherever the report is
+     rendered and cleared wherever it is re-rendered, and the second half is what gets forgotten -
+     the modal would keep the taller size on the next card that has no warning. `:has()` cannot
+     drift because it asks the DOM the same question every time. Chromium 122 here (Electron 29),
+     and three other rules in this file already use it.
+     ⚠️ Still CAPPED, not content-sized: 92vh keeps it inside the window on a short screen.
+     ⚠️⚠️ `:has()` DOES NOT CARE WHETHER THE ELEMENT IS VISIBLE. There is already a
+     `.sd-exec-warn` in the bulk-import review that ships `display:none` (`#sf-review-refused`) -
+     harmless here only because it lives in a different modal. If a hidden one is ever added
+     INSIDE the card report, this modal will silently grow on every card. Scope any new
+     `.sd-exec-warn` to where it renders, or test for a visible one instead. */
+  .modal.sd-report-modal:has(.sd-exec-warn) { height: min(92vh, 820px); }
   .sd-rpt-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; flex-shrink: 0; }
   .sd-rpt-back { background: none; border: none; color: var(--jmt-blue); cursor: pointer; font-size: 0.82rem; padding: 2px; }
   .sd-rpt-title { font-weight: 600; font-size: 1.05rem; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .sd-rpt-body { flex: 1; min-height: 0; display: flex; flex-direction: column; margin: 4px 0 12px; text-align: left; }
+  /* ⚠️⚠️ `overflow: hidden` PLUS A BROWSER THAT CAN ACTUALLY YIELD. [2026-09-23, second attempt]
+     His report was the selection bar painting OVER the Browse / Close footer. My first fix gave
+     `.sd-sel-bar` a `flex-shrink: 0` it was genuinely missing - and it was not the cause, which
+     his re-test proved immediately.
+     ⭐ MEASURED OFF HIS SCREENSHOT rather than guessed again: the modal is 640px and the file
+     list renders at ~95px, which is its own `min-height: 100px` floor. Every other child of this
+     column is flex-shrink:0, so with a tall card report above (the program-files warning plus the
+     import copy) the column cannot fit - and this body had no `overflow`, so the last child
+     simply painted outside it.
+     ⚠️ TWO PARTS, because either alone still fails: the browser must be able to give up its last
+     pixels (scoped `min-height: 0` - the class is used 19 times elsewhere and keeps its floor
+     there), and this body must never paint outside itself whatever happens above it. */
+  .sd-rpt-body { flex: 1; min-height: 0; display: flex; flex-direction: column; margin: 4px 0 12px; text-align: left; overflow: hidden; }
+  .sd-rpt-body .sf-entry-files-browser { min-height: 0; }
   .sd-rpt-summary { flex-shrink: 0; border-bottom: 1px solid var(--c-border); padding-bottom: 10px; margin-bottom: 10px; }
   /* Executable warning on the card report ([B-214]). Deliberately the loudest block
      in this modal: a bordered panel rather than a line, because the finding is about
@@ -3136,7 +3168,14 @@
 
   /* ── SD browser folder multi-select (Ctrl/Cmd or Shift+click) ── */
   .sf-entry-files-row.sd-selected { background: rgba(0, 130, 255, 0.16); box-shadow: inset 0 0 0 1px rgba(0, 130, 255, 0.45); border-radius: 3px; }
-  .sd-sel-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 10px; margin: 8px 0; background: var(--c-bg-raised); border: 1px solid var(--jmt-blue); border-radius: 5px; }
+  /* ⚠️⚠️ `flex-shrink: 0` IS THE WHOLE FIX. [2026-09-23, his report: "UI issue"]
+     `.sd-rpt-body` is a flex column of a fixed height, and the file browser inside it is the
+     one flexible child (`flex: 1`). Every other block in that column already declares
+     flex-shrink:0 - `.sd-rpt-head`, `.sd-rpt-summary` - and this bar was appended later and
+     did not. With a tall card report above it (the program-files warning, the import copy) the
+     bar was squeezed out of the body's box and painted OVER the Browse / Close footer.
+     ⭐ The browser absorbs the shrink; nothing else in the column may. */
+  .sd-sel-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 10px; margin: 8px 0; background: var(--c-bg-raised); border: 1px solid var(--jmt-blue); border-radius: 5px; flex-shrink: 0; }
   .sd-sel-count { font-size: 0.82rem; color: var(--c-text); font-weight: 500; }
   .sd-sel-actions { display: flex; gap: 8px; flex-shrink: 0; }
   .sd-sel-bar .modal-btn-primary, .sd-sel-bar .btn-neutral { padding: 5px 12px; font-size: 0.8rem; }
@@ -6645,13 +6684,25 @@
          rather than delaying the start. An export to an internal disk never shows it.
          ⚠️ DEFAULT OFF: ejecting is something you do when FINISHED, not hygiene on every
          export, and the card does not come back without physically reconnecting it. -->
-    <label id="sf-bulk-progress-eject-wrap"
-           style="display:none; margin-top:12px; font-size:13px; color:var(--c-text-sub);
-                  align-items:center; gap:8px; cursor:pointer;">
-      <input type="checkbox" id="sf-bulk-progress-eject">
-      <span>Eject the card when this finishes</span>
-    </label>
-    <div class="modal-actions" id="sf-bulk-progress-actions" style="display:none; margin-top:14px;">
+    <!-- ⭐⭐ ONE ROW: CHECKBOX HARD LEFT, BUTTON HARD RIGHT. [2026-09-23, his call: "cancel
+         should be on the right. and the check box on eject should be inline with the cancel
+         button."]
+         ⚠️ THIS IS THE PATTERN THAT ALREADY EXISTED, not a new one. `_sfPlaceEjectRowInButtons`
+         does exactly this for the two SUMMARY dialogs, from his ask on 2026-09-22 ("can we put
+         this button inline with ok? still on the left?"). The mechanism is the shared
+         `.modal-btns` rule - flex, justify-content:flex-end - with the first child carrying
+         `margin-right:auto` so it sits hard left and pushes the button right.
+         ⚠️⚠️ WHY THIS MODAL MISSED IT: it used `.modal-actions`, which is declared NOWHERE in
+         the stylesheet and appeared exactly once in the app - so it had no layout at all and the
+         button fell to the left by default. The same control had two layouts depending on which
+         door you came through, which is the third time that has been true of this one row. -->
+    <div class="modal-btns" id="sf-bulk-progress-actions" style="display:none; margin-top:14px;">
+      <label id="sf-bulk-progress-eject-wrap"
+             style="display:none; margin-right:auto; align-items:center; gap:8px;
+                    font-size:13px; color:var(--c-text-sub); cursor:pointer;">
+        <input type="checkbox" id="sf-bulk-progress-eject">
+        <span>Eject after completion</span>
+      </label>
       <button class="modal-btn-cancel" id="sf-bulk-progress-cancel">Cancel</button>
     </div>
   </div>
@@ -6749,10 +6800,6 @@
            cannot serve the second person, because by then the screen is gone.
            ⚠️ ANALYZE ONLY. Shown while the plan is being read, hidden once the import itself is
            running - by then there is no review left to skip and the offer would be a lie. -->
-      <label class="sf-bulk-explain-auto" id="sf-bulk-prog-auto-wrap" style="display:none">
-        <input type="checkbox" id="sf-bulk-prog-auto">
-        <span>Continue to quick import without review</span>
-      </label>
     </div>
 
     <div class="sf-import-phase" id="sf-bulk-import-phase-summary" style="display:none">
@@ -6763,7 +6810,29 @@
       <div id="sf-bulk-import-summary-refused" class="sf-bulk-review-breakdown" style="display:none"></div>
     </div>
 
-    <div class="modal-btns sf-import-btn-row" style="margin-top: 18px;">
+    <!-- ⚠️ 18px → 10px. [2026-09-23, his report: "there is an extra space now we don't need"]
+         The checkbox used to sit in the phase body directly above this row, so 18px separated two
+         things. It is now INSIDE the row, and the same 18px reads as a gap.
+         ⚠️⚠️ THIS ROW IS SHARED BY EVERY PHASE of the bulk modal - explain, counts, progress,
+         review, guided, summary - so this tightens all of them, not only the one he was looking
+         at. Worth a glance at the others rather than assuming it is neutral. -->
+    <div class="modal-btns sf-import-btn-row" style="margin-top: 10px;">
+      <!-- ⭐⭐ IN THE BUTTON ROW, HARD LEFT. [2026-09-23, his call: "the check box should have
+           been inline with the cancel"] It sat stacked above the row, in the progress phase's
+           body, which is the same shape the eject checkbox had before 2026-09-22.
+           ⚠️⚠️ THIRD INSTANCE OF ONE PATTERN, so it reuses the one already documented in
+           `local/ui-components.md` rather than inventing a fourth: first child of `.modal-btns`
+           carrying `margin-right:auto` sits left and pushes the buttons right, with no change to
+           the shared rule 42 other dialogs use.
+           ⚠️ MOVED, NOT COPIED. Its visibility is driven by id (`progAutoWrap`) and not by the
+           phase container, so relocating it does not change WHEN it appears - analyze only,
+           hidden once the import itself is running, because by then there is no review to skip
+           and the offer would be a lie. -->
+      <label class="sf-bulk-explain-auto" id="sf-bulk-prog-auto-wrap"
+             style="display:none; margin-right:auto;">
+        <input type="checkbox" id="sf-bulk-prog-auto">
+        <span>Continue to quick import without review</span>
+      </label>
       <button class="modal-btn-cancel" id="sf-bulk-import-cancel-btn">Cancel</button>
       <button class="modal-btn-cancel" id="sf-bulk-guided-back-btn" style="display:none">&#8249; Back</button>
       <button class="modal-btn-secondary" id="sf-bulk-import-start-btn" style="display:none">Quick import</button>
@@ -7670,7 +7739,7 @@ window._sfShowPartialFailures = _sfShowPartialFailures;
 // only HIDES the button on hideCancel; a null label left a real, clickable button with
 // nothing drawn in it, which he found by clicking a button that was not there.
 async function _sfRefuseNotEnoughRoom(fit) {
-  const fb = (n) => String((window._sfFormatBytes || ((v) => `${v} B`))(n)).replace(' ', ' ');
+  const fb = (n) => String((window._sfFormatBytes || ((v) => `${v} B`))(n)).replace(' ', '\u00A0');
   await promptConfirm({
     title: 'Not enough room',
     message: `This export needs ${fb(fit && fit.needBytes)} `
@@ -7720,7 +7789,7 @@ const SF_SLOW_WRITE_MIN_BYTES = 60 * 1024 * 1024;
 // FILE axis while none exceeds 28 MB. A bytes-only sentence would leave someone staring at
 // "28.5 MB" wondering why that is slow; "217 files" is the actual reason.
 async function _sfSlowWriteDialog({ bytes = 0, files = 0 } = {}) {
-  const fb = (n) => String((window._sfFormatBytes || ((v) => `${v} B`))(n)).replace(' ', ' ');
+  const fb = (n) => String((window._sfFormatBytes || ((v) => `${v} B`))(n)).replace(' ', '\u00A0');
   const bits = [];
   if (files > 0) bits.push(`${files} file${files === 1 ? '' : 's'}`);
   if (bytes > 0) bits.push(`(${fb(bytes)})`);
@@ -7743,88 +7812,45 @@ async function _sfSlowWriteDialog({ bytes = 0, files = 0 } = {}) {
 }
 window._sfSlowWriteDialog = _sfSlowWriteDialog;
 
-// ⭐⭐ A PRE-FLIGHT THAT TAKES TIME MUST SHOW SOMETHING. [B-203, B-238]
+// ⭐⭐ THE SMALL OVERLAY IS GONE FROM THE EXPORT PATH. [B-420, 2026-09-23 — his call]
 //
-// Moving the checks ahead of the export removed the "dialog on top of a bar" problem and
-// created a new one: a gap of apparent nothing between the folder picker and the first
-// thing on screen. His catch: "there is enough of a delay to be noticeable and you can even
-// start clicking things... might be worth the small indeterminate bar... and not just on
-// this one but shouldn't that just be a thing for this modal?"
+// WHAT WAS HERE: `_sfPreflightBusy`, a 150 ms-delayed `_sdBusy` overlay wrapped around every
+// destination call, so that a door with no progress surface of its own still explained its
+// wait. It was the RIGHT answer while most doors had no modal.
 //
-// ⭐⭐ THE BAR BELONGS ON THE CALL, NOT ON THE DOOR. His words: "seems like anything that
-// needs to make the call can share that bar..." - and that is the version that cannot be
-// missed. My first cut wrapped the two places I knew were slow and left the five fit checks
-// bare, because I had measured the fit check at 0.3 ms.
+// ⚠️⚠️ IT STOPPED BEING THE ANSWER WHEN THE RUNNER STARTED SUPPLYING A MODAL TO EVERY DOOR,
+// AND NOBODY TOOK IT OUT. The new surface was INSERTED, not swapped in - his word for it, and
+// the right one. The proof came off the funnel's multi-select export: the small overlay for the
+// probe, then the runner's modal for the free-space check, one after the other, both saying
+// "Checking the destination…". Two surfaces for one wait, and a comment three screens down
+// claiming `_sdBusy` had "left the export path entirely" - an intention of mine, never a fact.
 //
-// ⚠️⚠️ THAT MEASUREMENT WAS TAKEN ON THE WRONG TRANSPORT. 0.3 ms was an internal disk and a
-// USB card reader. A statfs against a card mounted THROUGH a Proffieboard crosses the same
-// bridge that costs 773 ms per file, and nothing in the 0.3 ms figure says a word about it.
-// The fit check is only "instant" on the destinations that never needed a bar.
+// ⭐ HIS RULING, AND IT IS THE DEV-BUILD ARGUMENT RATHER THAN THE PRODUCT ONE: delete it now
+// and let an un-migrated door sit SILENT until it lands on the runner. Silence is a better
+// test instrument than a borrowed bar - a door that explains nothing is visibly not done,
+// where one wearing the old overlay looks finished from the outside.
 //
-// ⭐ So every one of these three calls goes through here, and a door reaches them ONLY through
-// the wrappers below - enforced by test/preflight-busy.test.js, because enumerating export
-// doors by reading the file has now missed one three separate times and he has found each of
-// them by clicking.
+// ⚠️ SO THIS IS A KNOWN, TEMPORARY REGRESSION WITH A NAMED END: doors 3, 4, 11, 12 and 13 have
+// no progress surface during their destination checks until they are migrated. That is the
+// whole remaining OFF list, and when it is empty the regression is gone with it.
 //
-// ⚠️ REUSING _sdBusy RATHER THAN BUILDING A SECOND OVERLAY. Its name says SD but it is a
-// generic centred busy overlay with an indeterminate bar, and its backdrop also swallows
-// clicks, which is the other half of what he reported. A parallel implementation would be
-// one more thing to keep in agreement forever.
-async function _sfPreflightBusy(label, fn) {
-  let shown = false;
-  // ⚠️ THE DELAY IS WHAT MAKES THIS SAFE TO PUT ON EVERY CALL. A fast destination answers
-  // inside the timer and shows nothing at all, so wrapping the cheap calls costs nothing;
-  // a slow one raises the bar and keeps its own clicks. Without it, a 0.3 ms reply would
-  // flash an overlay for a couple of frames, which reads as a glitch.
-  // ⚠️⚠️ NOT WHEN A DOOR IS ALREADY SAYING IT. [B-005 item 4, 2026-09-21] He caught this on
-  // the primary export to a full volume: the door raises its OWN progress modal reading
-  // "Checking the destination… / Looking for a…", and this overlay then drew a SECOND bar
-  // saying the same words directly on top of it. His question is the whole diagnosis - "is
-  // not the checking happening in the first modal under the small one over?" It is.
-  //
-  // ⭐ CAUSE, AND IT WAS AN OVERCORRECTION OF MINE THE SAME MORNING. The new shared preflight
-  // called its IPC bare, so doors WITHOUT a modal lost their explanation - his "same delay
-  // without the indeterminate bar on common folders". Routing it through here fixed those and
-  // broke the ones that already had a bar of their own.
-  //
-  // ⭐⭐ THE RULE THAT COVERS BOTH: this overlay exists to explain a wait that nothing else is
-  // explaining. If the shared progress modal is already on screen, it is already explaining
-  // it, and a second surface is noise - the same "what does this say that is not already
-  // visible right here?" test that deleted eight sentences on 2026-08-27.
-  const _alreadyExplained = () => {
-    try {
-      const m = document.getElementById('modal-sf-bulk-progress');
-      return !!(m && m.classList.contains('active'));
-    } catch { return false; }
-  };
-  const timer = setTimeout(() => {
-    if (_alreadyExplained()) return;
-    shown = true;
-    try { _sdBusy(true, label); } catch {}
-  }, 150);
-  try { return await fn(); }
-  finally {
-    clearTimeout(timer);
-    if (shown) { try { _sdBusy(false); } catch {} }
-  }
-}
-window._sfPreflightBusy = _sfPreflightBusy;
+// ⭐ WHAT IS DELIBERATELY KEPT: the four named helpers below. The overlay was one thing they
+// did; being the ONLY way a door may ask a destination anything is the other, and that half is
+// what stops a door written next year asking the bridge bare. test/preflight-busy.test.js
+// enforces it, and now also enforces that none of this reaches `_sdBusy` again.
+//
+// ⚠️ `_sdBusy` itself stays - the SD card read, the config scan and the health check are its
+// real callers. It is the EXPORT path that must never reach it.
 
-// ── The only three ways a door talks to a destination ───────────── [B-203, B-238]
-// Same label on all three on purpose: from the user's side it is one wait, and which IPC is
-// in flight is our business, not theirs.
-const _sfDestBusyLabel = 'Checking the destination…';
-const _sfCheckFit = (args) => _sfPreflightBusy(_sfDestBusyLabel,
-  () => window.electronAPI.checkExportDest(args));
-const _sfClassifyDest = (args) => _sfPreflightBusy(_sfDestBusyLabel,
-  () => window.electronAPI.classifyExportDest(args));
-const _sfSourceExportSize = (args) => _sfPreflightBusy(_sfDestBusyLabel,
-  () => window.electronAPI.sourceExportSize(args));
+// ── The only four ways a door talks to a destination ───────────── [B-203, B-238]
+const _sfCheckFit = (args) => window.electronAPI.checkExportDest(args);
+const _sfClassifyDest = (args) => window.electronAPI.classifyExportDest(args);
+const _sfSourceExportSize = (args) => window.electronAPI.sourceExportSize(args);
 // ⚠️ THE PROBE IS A DESTINATION CALL TOO, and the slowest of the lot: it walks the selection
-// AND spawns the device lookup. It wears the same bar, and `probe: true` appears nowhere else
-// in the renderer - a bare one would be a write.
-const _sfProbeExport = (args) => _sfPreflightBusy(_sfDestBusyLabel,
-  () => window.electronAPI.sfExportFiles({ ...args, probe: true })).catch(() => null);
+// AND spawns the device lookup. `probe: true` appears nowhere else in the renderer - a bare
+// one would be a write.
+const _sfProbeExport = (args) =>
+  window.electronAPI.sfExportFiles({ ...args, probe: true }).catch(() => null);
 window._sfProbeExport = _sfProbeExport;
 window._sfCheckFit = _sfCheckFit;
 window._sfClassifyDest = _sfClassifyDest;
@@ -7916,36 +7942,47 @@ async function _sfExportStoppedNotice({ wrote = 0, removedPartial = false, what 
   // and ok from there do the same thing." It had been wrong since 2026-09-19 and looked
   // perfectly plausible in the source.
   //
-  // ⭐ AND IT ONLY APPEARS WHEN IT HAS SOMETHING TO SAY. A modal announcing "Export stopped"
-  // after the user pressed Cancel tells them what they just did. The test that applies is the
-  // one that killed eight sentences on 2026-08-27: what does this say that is not already on
-  // screen? A restored original, files left behind, or a partial we could not remove are all
-  // genuinely invisible - so those get a modal. A clean stop that left nothing gets a toast.
-  // ⚠️⚠️ COUNT ONLY THE LEFTOVERS THAT PRODUCE A LINE. [B-420, 2026-09-21]
+  // ⚠️⚠️ THE MODAL-VS-TOAST RULE THAT WAS DOCUMENTED HERE IS GONE. [2026-09-23]
   //
-  // The rule is right - a modal when something is left at the destination for you to act on, a
-  // toast when it cleaned up after itself - but `leftovers.length` was the wrong test. The loop
-  // above only renders names beginning ORIGINAL. or DELETE.; any other path contributes nothing
-  // to the message yet still forced a modal. So a door passing a temp-file path got a modal
-  // that said exactly what the toast would have said, and the same gesture reported two
-  // different ways depending on what the backend happened to name.
+  // It read: a modal when something is left at the destination to act on, a toast when the
+  // export cleaned up after itself - the 2026-08-27 test, "what does this say that is not
+  // already on screen?" It was argued twice and refined once ([B-420], 2026-09-21, when
+  // `leftovers.length` turned out to count paths that rendered no line).
   //
-  // ⭐ So the condition now matches the message: it is worth a modal only if there is something
-  // to READ. A leftover nobody is told about is not a reason to stop them.
-  const _namedLeftovers = (leftovers || []).filter((p) => {
-    const leaf = String(p).split(/[\\/]/).pop();
-    return /^ORIGINAL\./i.test(leaf) || /^DELETE\./i.test(leaf);
-  });
-  const _worthAModal = restored || _namedLeftovers.length > 0 || removedPartial === false;
-  if (!_worthAModal) {
-    showToast(wrote > 0
-      ? `Export stopped. ${wrote} ${wrote === 1 ? what.replace(/s$/, '') : what} already copied.`
-      : 'Export stopped. Nothing was copied.');
-    return;
+  // ⭐ HE OVERRULED IT, and the reason is better than the rule: "I know you said that if someone
+  // cancels that a toast is more appropriate... but I prefer this dialog every time." A cancel is
+  // the one gesture where the user wants the app to stop and account for itself, a toast can be
+  // missed, and what was left at the destination cannot be recovered from the screen afterwards.
+  // The notice is unconditional now, and the paragraphs below are what varies.
+  //
+  // ⭐⭐ ALWAYS THE DIALOG. HIS RULING, 2026-09-23: "I know you said that if someone cancels that
+  // a toast is more appropriate... but I prefer this dialog every time."
+  //
+  // ⚠️⚠️ THE TOAST BRANCH IS DELETED RATHER THAN CONDITIONED, and the whole `_worthAModal`
+  // computation with it. The argument for it was mine and it was the 2026-08-27 test - what does
+  // this say that is not already on screen? - which is a good test and reached the wrong answer
+  // here. A cancel is the one moment the user genuinely wants the app to stop and confirm what
+  // it did; a toast can be missed, and what was left at the destination is not recoverable from
+  // the screen afterwards.
+  //
+  // ⭐ It also ends a real inconsistency rather than adding one: the SAME gesture reported two
+  // different ways depending on what the backend happened to leave behind, which is the shape
+  // that has been corrected across this whole migration. One gesture, one ending.
+  // ⚠️ ONE PARAGRAPH, NOT ONE PER SENTENCE. [2026-09-23, his call: "better as one paragraph
+  // rather than 2."] These are two or three short sentences about a single event, and a blank
+  // line between each made a two-line message look like a list of separate problems.
+  // ⭐ The ACTION lines keep their own paragraph, and that is the distinction rather than an
+  // exception to it: "rename it back — do not delete it" is a thing the user must go and DO, and
+  // burying it mid-paragraph with the narration is how the rename-aside design loses the font it
+  // exists to protect. Narration runs together; an instruction gets its own block.
+  const _narration = [];
+  const _actions = [];
+  for (const l of lines) {
+    (/do not delete it|safe to delete/i.test(l) ? _actions : _narration).push(l);
   }
   await promptConfirm({
     title: 'Export stopped',
-    message: lines.join('\n\n'),
+    message: [_narration.join(' '), ..._actions].filter(Boolean).join('\n\n'),
     confirmText: 'OK',
     confirmKind: 'cancel',
     hideCancel: true,
@@ -7954,26 +7991,24 @@ async function _sfExportStoppedNotice({ wrote = 0, removedPartial = false, what 
 window._sfExportStoppedNotice = _sfExportStoppedNotice;
 
 
-async function _sfWarnSlowWrite({ destDir, bytes = 0, files = 0 }) {
-  try {
-    if (!destDir) return false;
-    // ⚠️ The threshold test runs BEFORE any call: a job under the limits needs no device
-    // lookup at all, so it must not raise an overlay for a question we are not asking.
-    if (!(files >= SF_SLOW_WRITE_MIN_FILES || bytes >= SF_SLOW_WRITE_MIN_BYTES)) return false;
-    // ⚠️ ~1.9s: this spawns PowerShell to identify the device. It is the slowest thing in any
-    // pre-flight and the reason the overlay exists.
-    // ⭐ Through the shared cache since 2026-09-21, so when a door has already asked - and
-    // above this threshold it always has - this returns instantly instead of spawning a
-    // fourth PowerShell about the same card. [B-005 item 4]
-    const t = await _sfDestIdentity.boardCard(destDir);
-    if (!t || t.transport !== 'proffieboard') return false;
-    return await _sfSlowWriteDialog({ bytes, files });
-  } catch (e) {
-    console.warn('[B-238] slow-write warning did not run:', e);
-    return false;
-  }
-}
-window._sfWarnSlowWrite = _sfWarnSlowWrite;
+// ⚠️⚠️ `_sfWarnSlowWrite` WAS DELETED HERE. [B-420, 2026-09-23 — found by his question, "the
+// doors we already closed don't have them sitting in there as dead weight do we?"]
+//
+// It was the per-door slow-write warning: threshold test, device lookup, then
+// `_sfSlowWriteDialog`. The shared preflight below does all three - `wantsDevice` is the same
+// threshold, main returns `slowWrite`, and the dialog is raised there - so every door that
+// moved onto the runner stopped calling this. The LAST caller went with door 1 on 2026-09-22
+// and nothing removed the function.
+//
+// ⭐ IT WAS NOT MERELY UNUSED, IT WAS GUARDED. Three assertions in test/preflight-busy.test.js
+// checked its internals - that it named the threshold constant, that it made the board-card
+// call, that it did them in that order. All three passed, for a function with zero callers, and
+// would have gone on passing forever. A test can keep a corpse warm: green over dead code reads
+// exactly like green over working code.
+//
+// ⚠️ SO THE CHECK THAT REPLACED THEM IS A REACHABILITY ONE, in the same file: nothing may define
+// an export helper that nobody calls. Same rule as test/export-wiring.test.js's whole reason for
+// existing - "nothing here is allowed to exist without a caller".
 
 // ── One preflight for every renderer-driven door ───────────────── [B-005 item 4]
 //
@@ -8006,25 +8041,13 @@ async function _sfPreflightDestination({ destDir, fileSizes = null, totalBytes =
     const files = Array.isArray(fileSizes) ? fileSizes.length : (Number(fileCount) || 0);
     const wantsDevice = (files >= SF_SLOW_WRITE_MIN_FILES || bytes >= SF_SLOW_WRITE_MIN_BYTES);
 
-    // ⚠️⚠️ THROUGH `_sfPreflightBusy`, AND SKIPPING IT WAS A REAL REGRESSION. Every other
-    // destination call is wrapped in it - a 150 ms-delayed "Checking the destination…"
-    // overlay - and its own note says why: "Same label on all three on purpose: from the
-    // user's side it is one wait, and which IPC is in flight is our business, not theirs."
-    //
-    // ⭐ HIS REPORT: "a different delay on the space check for tracks export and tracks
-    // selection export." Both doors waited the same ~1,900 ms for the device lookup; the
-    // selection door goes through the funnel's probe, which IS wrapped, so it showed the
-    // overlay - and the tracks door went through this helper, which was not, so the same
-    // wait looked like a hang. Same delay, one explained and one not.
-    //
-    // ⭐ The 150 ms threshold is what makes this free: a fit-only preflight replies in
-    // fractions of a millisecond and never paints, so wrapping the cheap path costs nothing
-    // while the expensive one gets its bar.
     // ⭐⭐ IF A DOOR'S MODAL IS ALREADY UP, BORROW IT — do not add a surface, and do not leave
-    // it looking dead. [B-005 item 4, 2026-09-21] Two halves of one rule:
-    //   • `_sfPreflightBusy` suppresses its overlay when a modal is already explaining (that
-    //     fixed the double overlay on the primary export);
-    //   • and this keeps that modal's bar ALIVE while we work, which is the other half.
+    // it looking dead. [B-005 item 4, 2026-09-21]
+    //
+    // ⚠️ THIS USED TO BE HALF OF A PAIR. The other half was `_sfPreflightBusy` suppressing its
+    // own overlay whenever a modal was already explaining the wait. That overlay is gone as of
+    // 2026-09-23 (see the note above the destination helpers), so there is nothing left to
+    // suppress and borrowing is the whole mechanism rather than one side of it.
     //
     // His report on the tracks door: "the second modal text lost it's indeterminent progress
     // bar so looked odd". The tracks pre-check sets the bar indeterminate, strips it in a
@@ -8039,8 +8062,10 @@ async function _sfPreflightDestination({ destDir, fileSizes = null, totalBytes =
     // 2026-09-21] His ruling, after watching the primary export raise three things for one
     // wait: "one modal, multiple phases that are dynamic... not separate windows." So when a
     // door's modal is up, this says what it is doing on the modal's own subtitle line and
-    // adds nothing to the screen. When no modal is up - the doors with no progress surface -
-    // `_sfPreflightBusy` still raises the small overlay, which is the case it exists for.
+    // adds nothing to the screen.
+    // ⚠️ AND WHEN NO MODAL IS UP, IT NOW SAYS NOTHING AT ALL - the un-migrated doors (3, 4, 11,
+    // 12, 13) check their destination in silence until they reach the runner. Deliberate, dev-
+    // only, and tracked with the OFF list rather than here.
     let _borrowedBar = null;
     let _hadIndeterminate = false;
     try {
@@ -8082,11 +8107,10 @@ async function _sfPreflightDestination({ destDir, fileSizes = null, totalBytes =
 
     let r;
     try {
-      r = await _sfPreflightBusy(_sfDestBusyLabel, () =>
-        window.electronAPI.preflightExportDest({
-          destDir, fileSizes, totalBytes: bytes, fileCount: files, dirCount,
-          classify: wantsDevice,
-        }));
+      r = await window.electronAPI.preflightExportDest({
+        destDir, fileSizes, totalBytes: bytes, fileCount: files, dirCount,
+        classify: wantsDevice,
+      });
     } finally {
       if (_borrowedBar && !_hadIndeterminate) {
         try { _borrowedBar.classList.remove('indeterminate'); } catch {}
@@ -8108,9 +8132,10 @@ async function _sfPreflightDestination({ destDir, fileSizes = null, totalBytes =
     // tracks export: "the checking destination flashed almost unseen then the indeterminate...
     // should have been the same modal."
     //
-    // ⭐ The bar only needs to be down while a DIALOG is up. Keeping it through the check
-    // means the door keeps explaining its own wait, the busy overlay suppresses itself
-    // (see _sfPreflightBusy), and there is one surface throughout instead of three.
+    // ⭐ The bar only needs to be down while a DIALOG is up. Keeping it through the check means
+    // the door keeps explaining its own wait, and there is one surface throughout instead of
+    // three. (It used to take a suppression rule in the busy overlay to get that; with the
+    // overlay deleted there is simply nothing else that can paint.)
     // ⚠️ `hidForDialog` tells the caller it must restore its bar if it continues - which only
     // matters on the slow-write path, since a refusal ends the operation.
     const dropBar = () => {
@@ -10871,22 +10896,21 @@ function _sdBusyText(text) {
   const t = document.getElementById('sd-busy-text');
   if (t) t.textContent = text;
 }
-// A busy bar that KNOWS its fraction must show it (his catch, 2026-09-08:
-// "showing indeterminate when it is determinable"). null returns the bar to
-// indeterminate; _sdBusy(show) resets to indeterminate on every open so a
-// determinate wait never leaks its width into the next unrelated overlay.
-function _sdBusyProgress(pct) {
-  const el = document.getElementById('sd-busy-overlay');
-  const bar = el && el.querySelector('.sf-import-progress-bar');
-  if (!bar) return;
-  if (pct == null) {
-    bar.classList.add('indeterminate');
-    bar.style.width = '';
-  } else {
-    bar.classList.remove('indeterminate');
-    bar.style.width = `${Math.max(0, Math.min(100, pct)).toFixed(1)}%`;
-  }
-}
+// ⚠️⚠️ `_sdBusyProgress` WAS DELETED HERE, AND ITS ABSENCE IS THE HONEST STATE. [2026-09-23]
+//
+// It was written 2026-09-08 for his catch - "showing indeterminate when it is determinable" -
+// and it never had a caller. The determinate wait it was built for was the CARD-WIDE health
+// walk, and [B-361] removed that: the single-folder check is the only caller left, and its
+// progress stream carries `seen` with no total at all.
+//
+// ⭐ So there is no fraction to show here, and inventing one would be the exact thing the
+// export bar's own rule forbids - a partial total is worse than none, because a bar that
+// reaches 100% with work still to do is a lie rather than a gap.
+//
+// ⭐ WHAT HIS CATCH ACTUALLY NEEDED IS NOW WIRED: the check subscribes to the progress stream
+// and reports a live count of files checked on the label. That is the determinable part.
+// ⏭ A real fraction needs a total, which means counting the tree before walking it. Worth it
+// only if the count is cheap relative to the check - not assumed either way.
 
 // Shared folder/drive picker: launches the OS picker, assesses the pick, and surfaces a
 // clear warning if it was rejected (e.g. the system drive). Returns a card, or null.
@@ -11006,7 +11030,7 @@ function makeBarPhaser(getEl, holdMs = 260) {
 // ── SD report / file-browser overlay: drill into a card's folders and files ──
 const _sdReport = { cards: [], stack: [], card: null, textView: false, single: false, context: 'config', fontCtx: null };
 let _sdHealthJobSeq = 0; // job ids: the single-folder check is the only caller left ([B-361])
-let _sdTextToken = 0; // monotonic guard so a slow text read can't overwrite a newer click
+
 // ⚠️ BIDI CONTROLS ARE STRIPPED BEFORE ESCAPING ([B-214]). A right-to-left override
 // inside a filename makes this list display a name that is not the real one:
 // "Fake<RLO>txt.exe" renders as "Fakeexe.txt". The detector is never fooled, because it
@@ -11908,8 +11932,33 @@ async function _sdImportFolderToLibrary(entry) {
     let _cancelled = false;
     const _jobId = 'hj' + (++_sdHealthJobSeq);
     _sdBusy(true, `Checking "${_name}" for damaged sounds…`, { onCancel: () => { _cancelled = true; try { window.electronAPI.sdHealthCancel(_jobId); } catch {} _sdBusy(false); } });
+    // ⭐⭐ THE PROGRESS STREAM WAS BUILT END TO END AND NEVER SUBSCRIBED TO. [2026-09-23]
+    //
+    // `sdcard:subtreeHealth` emits `sdcard:healthProgress` - per-directory completions and a
+    // throttled per-file tick - and `preload.js` bridges it as `onSdHealthProgress`. The
+    // renderer had ZERO subscribers, so a check of a large folder showed one fixed sentence and
+    // an indeterminate bar for its whole duration. Producer, IPC and bridge complete; nothing
+    // connected. Found by sweeping for definitions with no callers, not by using the app.
+    //
+    // ⚠️ THE LABEL, NOT A FRACTION, AND THAT IS DELIBERATE. `tick` carries `seen` - files
+    // checked so far - with NO total, and this caller passes a single folder so `onDirDone`'s
+    // index/total is 0%-then-100%. There is no honest denominator here, and the standing rule
+    // is that no total means indeterminate rather than a bar pinned at a made-up number.
+    // ⚠️ Unsubscribed in the `finally`, or a finished check keeps repainting an overlay the
+    // next operation owns.
+    let _offHealth = null;
+    try {
+      _offHealth = window.electronAPI.onSdHealthProgress((p) => {
+        if (!p || p.jobId !== _jobId) return;          // another check's stream is not ours
+        const n = Number(p.seen);
+        if (!Number.isFinite(n) || n <= 0) return;
+        _sdBusyText(`Checking "${_name}" for damaged sounds… · ${n.toLocaleString()} checked`);
+      });
+    } catch {}
     let _r = null;
-    try { _r = await window.electronAPI.sdSubtreeHealth({ dirPath: _root, dirNames: [_name], jobId: _jobId }); } catch {}
+    try { _r = await window.electronAPI.sdSubtreeHealth({ dirPath: _root, dirNames: [_name], jobId: _jobId }); }
+    catch {}
+    finally { try { _offHealth && _offHealth(); } catch {} }
     _sdBusy(false);
     if (_cancelled || !_r || _r.cancelled) return;
     if (_r.dirs && _r.dirs[_name]) {
@@ -12059,23 +12108,13 @@ async function _sdOpenDoc(filePath, name, opts = {}) {
     action: looksConfig ? { label: 'Open in editor', onClick: () => _sdOpenConfigCopy(name, filePath) } : null,
   });
 }
-function _sdRenderText(name, content, filePath) {
-  const body = _sdSetView('');
-  _sdShowOthers(_sdReport.cards.length > 1);
-  _sdReport.textView = true;
-  const crumb = _sdCrumbHtml(_sdReport.stack, name);
-  if (content == null) { body.innerHTML = crumb + '<div class="sf-entry-files-browser"><div class="sf-entry-files-empty">Couldn\'t read this file.</div></div>'; _sdWireCrumb(body); return; }
-  // Offer to load it into the editor when the file reads like a Proffie config. Loading
-  // always goes through a saved copy (_sdOpenConfigCopy re-reads the full file) — never the card.
-  const looksConfig = !!filePath && /\.(h|hpp|txt|ino|cfg)$/i.test(name) && /(CONFIG_TOP|#include\s+"proffieboard|BladeConfig|struct Preset|Preset\s+\w+\[\])/i.test(content);
-  const openBtn = looksConfig ? `<div class="sd-rpt-actions" style="margin-top:0;margin-bottom:8px"><button id="sd-txt-open" class="modal-btn-primary sd-act-btn">Open in editor</button></div>` : '';
-  body.innerHTML = crumb + openBtn + `<div class="sd-rpt-text">${_sdEsc(content)}</div>`;
-  _sdWireCrumb(body);
-  if (looksConfig) {
-    const b = document.getElementById('sd-txt-open');
-    if (b) b.onclick = () => _sdOpenConfigCopy(name, filePath);
-  }
-}
+// ⚠️⚠️ `_sdRenderText` WAS DELETED HERE. [2026-09-23] A full second implementation of the
+// card's text viewer, superseded by `_sdShowDoc` (8 live call sites) and left behind with no
+// callers - including its OWN copy of the "is this a Proffie config?" test and its own
+// "Open in editor" button. Two implementations of one screen, free to drift, one of them
+// unreachable. `_sdTextToken`, the staleness guard that existed only for its caller, went
+// with it.
+
 function _sdBack() {
   if (_sdReport.textView) { _sdRenderBrowse(); return; }
   if (_sdReport.stack.length > 1) { _sdReport.stack.pop(); _sdRenderBrowse(); return; }
@@ -23614,7 +23653,7 @@ require(['vs/editor/editor.main'], function () {
       // (other call sites depend on them) but no longer touch persistence;
       // selection lives in the _sfSelectedCommonUuid variable for the
       // session lifetime and clears on relaunch.
-      const _sfLoadActiveCommon = async () => { _sfSelectedCommonUuid = null; };
+
       const _sfSaveActiveCommon = async () => { /* no-op — session-only */ };
 
       // Load persisted group state (display order + collapsed/open).
@@ -24623,11 +24662,10 @@ require(['vs/editor/editor.main'], function () {
         await _sfSaveCommonGroupOpen();
         await _sfRefreshCommons();
       };
-      const _sfUngroupCommon = async (uuid) => {
-        const res = await window.electronAPI.setCommonGroup({ uuid, groupName: '' });
-        if (!res || !res.ok) { promptError('Remove from group failed', (res && res.error) || 'unknown error'); return; }
-        await _sfRefreshCommons();
-      };
+      // ⚠️ `_sfUngroupCommon` WAS DELETED HERE. [2026-09-23] No callers, and superseded by
+      // `_sfApplyGroupToCommons` below - whose own comment already says an empty groupName IS
+      // ungroup. A single-uuid twin of a function that handles any number of them.
+
       // Apply a group name to many uuids at once (used by both
       // "Add to <existing group>" and "Remove from group" multi-select
       // actions; empty groupName = ungroup).
@@ -32635,20 +32673,26 @@ require(['vs/editor/editor.main'], function () {
             // point - the user is about to go and look.
             // ⚠️ OBJECT FORM. Called positionally this rendered "Confirm / Are you sure?" with
             // two identical buttons - see the note in _sfExportStoppedNotice.
-            // ⭐ A folder export genuinely leaves files behind, which is information the user
-            // does not have; a zip leaves nothing, so that case is a toast rather than a modal.
-            if (r.format === 'folder' || format === 'folder') {
-              await promptConfirm({
-                title: 'Export stopped',
-                message: 'The files that finished copying are in the folder at the destination. '
-                       + 'The rest were not written.',
-                confirmText: 'OK',
-                confirmKind: 'cancel',
-                hideCancel: true,
-              });
-            } else {
-              showToast('Export stopped. The partly-built archive was removed.');
-            }
+            // ⭐⭐ BOTH ARE A DIALOG. His ruling 2026-09-23: "I prefer this dialog every time."
+            // ⚠️ The zip case was a toast on the argument that it leaves nothing behind, so there
+            // was less to say. Same argument I made in `_sfExportStoppedNotice` and he overruled
+            // it in the same breath: a cancel is the moment to stop and confirm, and the SAME
+            // gesture must not report two different ways depending on the format chosen.
+            // ⚠️ The MESSAGES stay different, because what happened genuinely differs - a folder
+            // keeps what finished, an archive keeps nothing. One surface, honest wording in it.
+            // ⏭ THE REAL FIX IS ROUTING THIS THROUGH `_sfExportStoppedNotice` like every other
+            // door, and it waits for doors 3/4 to migrate - this is a second implementation of
+            // an ending that already has a shared one.
+            await promptConfirm({
+              title: 'Export stopped',
+              message: (r.format === 'folder' || format === 'folder')
+                ? 'The files that finished copying are in the folder at the destination. '
+                  + 'The rest were not written.'
+                : 'The partly-built archive was removed, so nothing incomplete is left behind.',
+              confirmText: 'OK',
+              confirmKind: 'cancel',
+              hideCancel: true,
+            });
           }
           return;
         }
@@ -34003,7 +34047,7 @@ require(['vs/editor/editor.main'], function () {
           item.addEventListener('mousedown', (e2) => {
             e2.stopPropagation();
             menu.style.display = 'none';
-            _sfExportFiles({ kind: t.kind, id: t.id, subPaths: [dirSub] });
+            _sfExportFiles({ kind: t.kind, id: t.id, subPaths: [dirSub], isDir: true });
           });
           menu.appendChild(item);
           const x = Math.min(e.clientX, window.innerWidth - 200);
@@ -35098,7 +35142,7 @@ require(['vs/editor/editor.main'], function () {
         return true;
       };
 
-      const _sfExportFiles = async ({ kind, id, subPaths, asFile }) => {
+      const _sfExportFiles = async ({ kind, id, subPaths, asFile, isDir }) => {
         if (!Array.isArray(subPaths) || subPaths.length === 0) return;
         let res;
         try {
@@ -35106,17 +35150,18 @@ require(['vs/editor/editor.main'], function () {
           // exports the raw bytes at the path. Used by "Export ZIP…" on
           // inner-zip folder nodes so the .zip ships out as a standalone
           // file rather than its contents extracted.
-          // [B-400] ⚠️⚠️ DELIBERATELY STILL SILENT, AND THIS IS THE FIFTH DOOR'S WHOLE STORY.
-          // A progress bar cannot go here yet: sfFile:export opens its OWN showOpenDialog /
-          // showSaveDialog partway through, so any modal raised around this call sits at zero
-          // BEHIND a native picker for as long as the user is choosing — which reads as a hang.
-          // That is the note already carried by _sfExportSourceToDownloads: "a bar that appears
-          // behind a file dialog sits at zero and reads as a hang."
-          // ⭐ THE FIX IS A RESTRUCTURE, NOT A WRAPPER: hoist the picker into the renderer so the
-          // destination is known before any work starts, the way every other export door does it.
-          // Then this gets the same treatment as the other four.
-          // ⚠️ It is also the door where silence costs least — a hand-picked selection of files,
-          // usually a handful — which is why it is last rather than skipped.
+          // ⚠️⚠️ THE [B-400] NOTE THAT SAT HERE IS DELETED, NOT KEPT AS HISTORY. [2026-09-23]
+          // It said "a progress bar cannot go here yet" and explained why - the handler opened
+          // its own picker partway through its work, so any bar raised around it sat at zero
+          // behind a native dialog. True when written, and disproved by the code immediately
+          // below it: [B-408] hoisted the picker, which is exactly the restructure that note
+          // prescribed. A stale note directly above the thing that refutes it is worse than no
+          // note, because it reads as a live constraint and the next person believes it.
+          // ⭐ ONE FUNNEL, FOURTEEN DOORS. Every right-click "Export…" in the app - on a font, a
+          // folder row, entry files, source files, shared-track files - arrives here, plus
+          // "Export folder…" and "Export ZIP…", so guarding this one function covers all of
+          // them. (The count is his, off the screen: nine handlers were eleven doors were
+          // fourteen. `local/export-doors.md` is the register.)
           // [B-408] THE PICKER MOVED, AND THAT IS THE FIX. This door ran silent because
           // sfFile:export opened its own dialog partway through its own work — a bar raised
           // around it sat at zero BEHIND a native picker while the user chose a folder, which
@@ -35133,94 +35178,139 @@ require(['vs/editor/editor.main'], function () {
             let pick = null;
             try { pick = await window.electronAPI.pickExportDir({ title: 'Export to folder' }); } catch {}
             if (!pick || !pick.ok || !pick.destDir) return;   // cancelled at the picker
-            // ── Ask before anything is on screen ──────────────── [B-203, B-238]
+
+            // ── DOORS 2 · 5 · 7 · 9 ON THE SHARED RUNNER ──────── [B-420, 2026-09-22]
             //
-            // ⭐⭐ THIS DOOR ASKED IN THE WRONG ORDER AND HE CAUGHT IT ON A 57-FILE SOURCE
-            // EXPORT: "does the regular progress bar before the 'this will take a while'
-            // message." It was the last survivor of the two-phase handshake - raise a
-            // determinate bar, let main size the job, then put a dialog over the moving bar.
-            // ⭐ The probe runs the SAME handler and stops short of the write, so the numbers
-            // in the dialog are the bar's own totals rather than a second estimate.
-            const _probe = await _sfProbeExport({
-              kind, id, paths: subPaths, asFile, destDir: pick.destDir,
-            });
-            if (_probe && _probe.tooBig)    { await _sfRefuseNotEnoughRoom(_probe.tooBig); return; }
-            if (_probe && _probe.slowWrite) { if (await _sfSlowWriteDialog(_probe.slowWrite)) return; }
-            res = await _sfRunWithByteProgress('Exporting files', () =>
-              window.electronAPI.sfExportFiles({
-                kind, id, paths: subPaths, asFile, destDir: pick.destDir,
-                // ⚠️ ONLY WHEN THE PROBE ACTUALLY ANSWERED. A probe that threw comes back
-                // null, and then the question has NOT been asked - so main must still ask,
-                // and the backstop below catches it. Hard-coding true here would silently
-                // disable the warning on exactly the runs where something already went wrong.
-                confirmSlow: !!_probe,
-              }), _sfExportCancelOpt);                                  // [B-005 item 4]
-            // [B-238] BACKSTOP, not the main path any more. Reached only when the probe
-            // failed, and it costs a dialog over a live bar - the lesser of the two evils
-            // against writing 107 MB through a board with no warning at all.
-            if (res && res.slowWrite) {
-              if (await _sfSlowWriteDialog(res && res.slowWrite)) return;
-              res = await _sfRunWithByteProgress('Exporting files', () =>
-                window.electronAPI.sfExportFiles({
+            // ⭐⭐ WHAT MADE THIS DOOR DIFFERENT, AND WHY IT WENT LAST OF THE SIMPLE ONES: its
+            // guards lived in MAIN. `sfFile:export` REFUSES - it returns `{ok:false, tooBig}`
+            // before it ever reaches its sizing return - whereas every migrated door's guards
+            // live in the runner. Moving it naively gives one of two bad outcomes: both ask, so
+            // the user answers the same question twice; or main refuses handing back no numbers,
+            // the runner reads zero bytes as "cannot measure", correctly does not refuse, and an
+            // unguarded write reaches a card.
+            //
+            // ⭐ THE RESOLUTION IS IN main.js, NOT HERE: the probe now reports the size it
+            // already measured, ON THE REFUSAL RETURNS TOO. That turns it into a pure sizer and
+            // lets the runner own both questions - one place asking, one measurement behind it.
+            //
+            // ⚠️ `confirmSlow: true` on the real write because THE RUNNER HAS ALREADY ASKED.
+            // Leaving it false would have main ask a second time over the runner's live bar,
+            // which is the two-phase handshake this door spent [B-238] escaping.
+            // ⚠️ Main's `tooBig` check stays unconditional on its side and that is deliberate:
+            // it is a backstop under the runner, not a duplicate of it.
+            let _probe = null;
+            const _run = await _sfRunExport({
+              label: 'files',
+              title: 'Exporting files',
+              destDir: pick.destDir,
+              // ⭐ `files` is what maps to a TOAST in `_sfExportEnding`, which is his rule
+              // exactly: "2,5,7,9 toast and all others summary. so the rule is file selection
+              // right click." These four ARE that rule's subject, so the derived value is right
+              // and this door must not override it.
+              endState: { kind: 'files' },
+              onCancel: _sfExportCancelOpt.onCancel,
+              // ⭐ The probe runs the SAME handler and stops short of the write, so the runner's
+              // preflight reads the bar's own totals rather than a second estimate.
+              plan: async () => {
+                _probe = await _sfProbeExport({
+                  kind, id, paths: subPaths, asFile, destDir: pick.destDir,
+                });
+                return {
+                  items: [],
+                  totalBytes: (_probe && _probe.totalBytes) || 0,
+                  fileCount:  (_probe && _probe.fileCount)  || 0,
+                };
+              },
+              produce: async () => {
+                res = await window.electronAPI.sfExportFiles({
                   kind, id, paths: subPaths, asFile, destDir: pick.destDir, confirmSlow: true,
-                }), _sfExportCancelOpt);                                // [B-005 item 4]
-            }
+                });
+                // The refusal screen downstream needs to know WHAT was refused, and only this
+                // door knows. Ride it on the result the runner hands to the shared ending.
+                return { ...res, refusedKind: kind, refusedId: id };
+              },
+            });
+            // ⚠️ RETURN HERE. The runner has already drawn the ending; falling through to the
+            // shared `_sfExportOutcome` below would draw a second one for the same export.
+            return !!(_run && _run.ok);
           } else {
-            // One item: the handler still asks, and the click stays instant.
-            res = await window.electronAPI.sfExportFiles({ kind, id, paths: subPaths, asFile });
-            // ── A lone folder can be big too ──────────────────── [B-203, B-238]
+            // ── THE SINGLE-ITEM RIGHT-CLICK EXPORTS ───────────── [B-420, 2026-09-22]
             //
-            // ⭐ THIS BRANCH USED TO DROP THE WARNING ON THE FLOOR. Main now guards the
-            // single-folder export (it stopped being a separate write path), so it can
-            // return slowWrite here - and without this, that reply fell through to the
-            // `!res.ok` line below and surfaced as "unknown error" instead of a question.
+            // ⭐⭐ THE BLOCKER WAS NEVER THE PROBE, IT WAS WHO KNEW. This branch could not move
+            // because it chooses between a SAVE dialog and a FOLDER dialog depending on whether
+            // the path is a directory - and the renderer "cannot know that without a probe",
+            // where probing before opening a picker is the delay-before-the-dialog that the
+            // click-acts-instantly rule forbids. That reasoning was sound and the conclusion was
+            // wrong, because it asked the wrong party.
             //
-            // ⚠️ NO BAR IS UP ON THIS PATH, which is why the dialog can go straight out:
-            // main opened its own picker and nothing has been raised over it.
-            if (res && res.slowWrite) {
-              if (await _sfSlowWriteDialog(res.slowWrite)) return;
-              // ⚠️ Reuse the destination main already picked - see the note on the other
-              // side of this reply. Re-opening the picker after a yes reads as the click
-              // not having registered.
-              res = await window.electronAPI.sfExportFiles({
-                kind, id, paths: subPaths, asFile,
-                destDir: res.slowWrite.destDir, confirmSlow: true,
-              });
+            // ⭐ THE CALL SITES HAVE ALWAYS KNOWN. "Export folder…" passes a directory and says
+            // so in its own label; "Export ZIP…" passes `asFile` because it wants the raw bytes.
+            // The fact existed at every call site and simply was not travelling. Marking the four
+            // directory callers costs one property each and needs no probe at all.
+            //
+            // ⚠️ `asFile` WINS OVER `isDir`. "Export ZIP…" hands over a directory path and still
+            // wants a file out of it - the zip's own bytes rather than its contents extracted -
+            // so the two are not alternatives and the order between them matters.
+            const _wantFolder = !!isDir && !asFile;
+            let _dest = null;
+            if (_wantFolder) {
+              let pick = null;
+              try { pick = await window.electronAPI.pickExportDir({ title: 'Export to folder' }); } catch {}
+              if (!pick || !pick.ok || !pick.destDir) return;   // changed their mind: no modal, no work
+              _dest = { destDir: pick.destDir };
+            } else {
+              // ⚠️ The basename comes from here because only the caller knows the path; the
+              // DEFAULT NAME and the extension filter are still decided in main, so there is one
+              // implementation of those rules rather than two copies free to drift.
+              const _leaf = String(subPaths[0] || '').split('/').pop() || 'untitled';
+              let pick = null;
+              try { pick = await window.electronAPI.pickExportFilePath({ name: _leaf }); } catch {}
+              if (!pick || !pick.ok || !pick.destFile) return;
+              _dest = { destFile: pick.destFile };
             }
+
+            const _runOne = await _sfRunExport({
+              label: 'files',
+              title: 'Exporting files',
+              // ⚠️ The runner checks a DIRECTORY, and for a single file that is the folder the
+              // file is going INTO - not the file itself.
+              destDir: _dest.destDir
+                || String(_dest.destFile || '').replace(/[\\/][^\\/]*$/, ''),
+              // ⭐ His rule, unchanged: a file-selection right-click ends in a toast.
+              endState: { kind: 'files' },
+              onCancel: _sfExportCancelOpt.onCancel,
+              plan: async () => {
+                const p = await _sfProbeExport({ kind, id, paths: subPaths, asFile, ..._dest });
+                return {
+                  items: [],
+                  totalBytes: (p && p.totalBytes) || 0,
+                  fileCount:  (p && p.fileCount)  || 0,
+                };
+              },
+              produce: async () => {
+                res = await window.electronAPI.sfExportFiles({
+                  kind, id, paths: subPaths, asFile, ..._dest, confirmSlow: true,
+                });
+                return { ...res, refusedKind: kind, refusedId: id };
+              },
+            });
+            // ⚠️ RETURN HERE. The runner drew the ending; the shared tail below would draw a
+            // second one for the same export.
+            return !!(_runOne && _runOne.ok);
           }
-        } catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
-        if (!res || res.canceled) return;
-        // ── It will not fit ──────────────────────────────────────── [B-203]
-        //
-        // ⭐ ONE FUNNEL, ELEVEN DOORS. Every right-click "Export…" in the app - on a font,
-        // a folder row, entry files, source files, shared-track files - arrives here, so
-        // guarding this one function covers all of them.
-        //
-        // ⚠️ SAME SENTENCE AS THE BULK EXPORT, DELIBERATELY. Two wordings for one condition
-        // is how a product starts sounding like two products, and this one was fought over:
-        // three numbers, no second person, no prescribed fix.
-        // ⚠️ Main refuses by RETURNING tooBig rather than writing; nothing has been written
-        // when this runs.
-        if (res.tooBig) {
-          await _sfRefuseNotEnoughRoom(res.tooBig);
-          return;
+        } catch (err) {
+          // ⚠️⚠️ THE TAIL THAT USED TO LIVE HERE IS GONE, AND IT IS GONE RATHER THAN GUARDED.
+          // [2026-09-22] Both branches above now return: each runs through the shared runner,
+          // which draws the ending. What followed - a tooBig refusal and a second call to the
+          // shared ending - had become unreachable, and unreachable code that LOOKS like a
+          // guard is worse than none: it reads as this door still refusing on its own, which is
+          // exactly what the ratchet was exempting it for. The exemptions came off with it.
+          //
+          // ⭐ The refusal and the ending are not lost, they moved: the runner owns both for
+          // every door now, behind the contract guard.
+          promptError('Export failed', String(err && err.message || err));
+          return false;
         }
-        // ⭐ THROUGH THE SHARED ENDING. [B-005 item 4] This funnel was already CORRECT - it
-        // handled cancel before the failure list, which is why doors 2/5/7/9 never had the
-        // bug the other three did. It is migrated anyway, for two reasons: one definition
-        // cannot drift from itself, and going through the shared path is what gives these
-        // four doors the eject offer and the slow-cleanup offer without wiring either of
-        // them here.
-        // ⚠️ DERIVED FROM WHERE FILES ACTUALLY LANDED, not from the picker's variable. This
-        // funnel has two branches with two different pickers, and `pick` is declared inside
-        // the multi-path one - referencing it here is a ReferenceError, not a fallback. The
-        // written paths are in scope on both branches and are also the more truthful answer:
-        // if nothing was written there is no destination to offer ejecting.
-        const _landedDir = String((res.written && res.written[0]) || '')
-          .replace(/[\\/][^\\/]*$/, '');
-        await _sfExportOutcome(
-          { ...res, refusedKind: kind, refusedId: id },
-          { what: 'files', destDir: _landedDir || null });
       };
 
       // Unified dispatcher: pick the right opener based on extension.
@@ -36001,7 +36091,7 @@ require(['vs/editor/editor.main'], function () {
           mkItem('Copy folder', '', () => {
             _sfFileClipboard = { kind: 'entry', id: _sfDetailOriginalName, paths: [dirSubPath] };
           });
-          mkItem('↗ Export folder…', '', () => _sfExportFiles({ kind: 'entry', id: _sfDetailOriginalName, subPaths: [dirSubPath] }));
+          mkItem('↗ Export folder…', '', () => _sfExportFiles({ kind: 'entry', id: _sfDetailOriginalName, subPaths: [dirSubPath], isDir: true }));
           mkSep();
           mkItem('Rename…', '', () => _sfRenameEntryFolderPrompt(dirSubPath));
           mkItem('+ New folder', '', _sfCreateEntrySubfolderPrompt);
@@ -36335,7 +36425,7 @@ require(['vs/editor/editor.main'], function () {
           mkItem('Copy folder', '', () => {
             _sfFileClipboard = { kind: 'source', id: _sfSourceOriginalUuid, paths: [dirSubPath] };
           });
-          mkItem('↗ Export folder…', '', () => _sfExportFiles({ kind: 'source', id: _sfSourceOriginalUuid, subPaths: [dirSubPath] }));
+          mkItem('↗ Export folder…', '', () => _sfExportFiles({ kind: 'source', id: _sfSourceOriginalUuid, subPaths: [dirSubPath], isDir: true }));
           if (isInnerZipNode) {
             mkItem('↗ Export ZIP…', '', () => _sfExportFiles({ kind: 'source', id: _sfSourceOriginalUuid, subPaths: [dirSubPath], asFile: true }));
           }
@@ -36861,12 +36951,26 @@ require(['vs/editor/editor.main'], function () {
         //
         // ⚠️ OPT-IN, because a button that cannot stop anything is worse than no button. Only
         // an operation that actually honours cancellation calls this.
+        // ⚠️⚠️ THE ROW NOW HOLDS TWO INDEPENDENT CONTROLS, so neither may own its visibility.
+        // [2026-09-23] The eject checkbox moved INTO the button row to sit inline with Cancel,
+        // and the row was being shown by `offerCancel` and hidden by `clearCancel` - so a door
+        // that offered eject without a cancel showed nothing, and `clearCancel` in the runner's
+        // `finally` (which fires even when the modal stays open for a later phase) would have
+        // taken a live eject checkbox down with it.
+        // ⭐ One function decides: the row is visible when either control is.
+        _syncActions() {
+          const a = this.actionsEl(), b = this.cancelEl(), w = this.ejectWrapEl();
+          if (!a) return;
+          const cancelUp = !!(b && b.style.display !== 'none' && !b.hidden && b.onclick);
+          const ejectUp  = !!(w && w.style.display !== 'none');
+          a.style.display = (cancelUp || ejectUp) ? 'flex' : 'none';
+        },
         offerCancel(onCancel) {
           const a = this.actionsEl(), b = this.cancelEl();
           if (!a || !b) return;
           b.disabled = false;
           b.textContent = 'Cancel';
-          a.style.display = '';
+          b.style.display = '';
           b.onclick = async () => {
             // ⭐⭐ THE BAR MUST STOP PRETENDING. [B-005 item 4] His report: "this may or may not
             // be hung... really not sure." It was not - it cancelled - but the modal gave him
@@ -36892,12 +36996,17 @@ require(['vs/editor/editor.main'], function () {
             b.textContent = 'Cancelling… (finishing current file)';
             try { await onCancel(); } catch (e) { console.warn('[B-005] cancel did not reach main:', e); }
           };
+          this._syncActions();
         },
         clearCancel() {
           this.cancelling = false;
-          const a = this.actionsEl(), b = this.cancelEl();
-          if (a) a.style.display = 'none';
-          if (b) { b.onclick = null; b.disabled = false; b.textContent = 'Cancel'; }
+          const b = this.cancelEl();
+          // ⚠️ THE BUTTON GOES, THE ROW ONLY IF IT IS NOW EMPTY. [2026-09-23] This hid the row
+          // outright, which was harmless while the row held nothing else - and would now take a
+          // live eject checkbox down with it, since the runner calls this in its `finally` even
+          // when the modal stays open for a following phase.
+          if (b) { b.onclick = null; b.disabled = false; b.textContent = 'Cancel'; b.style.display = 'none'; }
+          this._syncActions();
         },
 
         // ⭐ RENAME THE HEADING WITHOUT RESETTING THE RUN. [B-005 item 4]
@@ -36933,6 +37042,9 @@ require(['vs/editor/editor.main'], function () {
         offerEject() {
           const w = this.ejectWrapEl();
           if (w) w.style.display = 'flex';
+          // ⚠️ The checkbox lives INSIDE the button row now, so showing it has to bring the row
+          // with it - otherwise a door that offers eject and no cancel shows nothing at all.
+          this._syncActions();
         },
         // ⚠️ Cleared whenever the modal opens, so one export's choice never carries into the
         // next. Same discipline as clearCancel - an offer inherited from a previous run is a
@@ -36941,6 +37053,7 @@ require(['vs/editor/editor.main'], function () {
           const w = this.ejectWrapEl(), b = this.ejectBoxEl();
           if (w) w.style.display = 'none';
           if (b) b.checked = false;
+          this._syncActions();
         },
         wantsEject() {
           const b = this.ejectBoxEl();
@@ -37156,8 +37269,14 @@ require(['vs/editor/editor.main'], function () {
         });
         // ⚠️ DELTAS ACCUMULATE, absolutes overwrite. Mixing the two on one phase would double
         // count, which is why only one is ever subscribed for a given phase.
+        // ⚠️⚠️ THE NAME IS READ HERE TOO, AND ITS ABSENCE WAS THE LAST PLACE IT COULD BE LOST.
+        // [B-420, 2026-09-23] This destructured `{ delta }` alone, so even once the emitter
+        // started sending a name the bar would still have said nothing - three places in a row
+        // (copier, emitter, subscriber) each had to pass it along, and a break in any one of
+        // them looks identical from the screen: bytes moving, nothing named.
         const offD = opts.deltas
-          ? window.electronAPI.onSoundFontExportProgress(({ delta } = {}) => {
+          ? window.electronAPI.onSoundFontExportProgress(({ delta, name } = {}) => {
+              if (name) currentFile = name;
               if (typeof delta === 'number') { done += delta; render(); }
             })
           : null;
@@ -37340,15 +37459,8 @@ require(['vs/editor/editor.main'], function () {
         const out = { ok: false, canceled: false, ending, kind };
         if (!destDir) return out;
 
-        // ── 1/2: plan, then the destination ──
-        // ⚠️ PLAN FIRST because step 2b needs its total. A door that cannot size itself returns
-        // 0 bytes, which the preflight reads as "cannot measure" and correctly does not refuse -
-        // it must never be read as "it is empty". [B-203]
-        let plan = null;
-        try { plan = door.plan ? await door.plan() : null; }
-        catch (e) { console.warn('[B-420] plan failed for', door.label, e); return out; }
-        if (plan === null && door.plan) return out;   // the door refused or was cancelled
-
+        // ── 1/2: the modal, then plan, then the destination ──
+        //
         // ⭐⭐ THE RUNNER RAISES THE MODAL WHEN THE DOOR HAS NONE. [B-420, 2026-09-21]
         //
         // ⚠️ THIS IS THE GAP THAT MADE BACKUP LOOK UNMIGRATED. Of the thirteen doors only a few
@@ -37376,6 +37488,47 @@ require(['vs/editor/editor.main'], function () {
             _weRaisedModal = true;
           }
         } catch {}
+
+        // ⚠️⚠️ RAISED BEFORE `plan()`, NOT AFTER IT. [B-420, 2026-09-23] This block sat BELOW the
+        // plan step, and on any door whose plan is slow that produced TWO surfaces for one wait,
+        // one after the other: the plan ran with nothing on screen, `_sfPreflightBusy` raised its
+        // small overlay at 150 ms, that came down, and only then did this modal open and say the
+        // same words. Reported off the funnel's multi-select export, where `plan` IS the probe -
+        // the slowest destination call there is, since it walks the selection AND spawns the
+        // device lookup.
+        //
+        // ⭐ The suppression guard in `_sfPreflightBusy` was never broken. It asks whether a modal
+        // is already explaining the wait, and 150 ms into the plan there was nothing for it to
+        // find. Raising here gives it something to suppress against.
+        //
+        // ⭐ It is also what the instant-click rule above actually asks for: with the raise below
+        // the plan, clicking Export on a large selection painted nothing at all until the probe
+        // came back.
+        //
+        // ⚠️ The tracks door has been carrying the per-door version of this - it calls `show()`
+        // inside its own plan, with a comment saying it must because plan runs before the runner
+        // raises anything. That call is now a retitle onto an open modal rather than the thing
+        // that opens it.
+        //
+        // ⚠️ PLAN BEFORE THE PREFLIGHT because the preflight needs its total. A door that cannot
+        // size itself returns 0 bytes, which the preflight reads as "cannot measure" and
+        // correctly does not refuse - it must never be read as "it is empty". [B-203]
+        //
+        // ⚠️⚠️ AND BOTH EXITS HAVE TO PUT THE MODAL BACK DOWN. Harmless while the raise sat below
+        // this; with it above, a door that refuses - or a picker the user backs out of - would
+        // leave an explanation on screen for an operation that is already over.
+        const _dropRaised = async () => {
+          if (!_weRaisedModal) return;
+          try { await _sfDeleteProgress.hide(); } catch {}
+        };
+        let plan = null;
+        try { plan = door.plan ? await door.plan() : null; }
+        catch (e) {
+          console.warn('[B-420] plan failed for', door.label, e);
+          await _dropRaised();
+          return out;
+        }
+        if (plan === null && door.plan) { await _dropRaised(); return out; }   // refused or cancelled
 
         // ⚠️⚠️ AN ARCHIVE WRITES ONE FILE TO THE CARD, WHATEVER IS INSIDE IT. The slow-write
         // threshold's file limb exists because the Proffieboard's USB bridge costs ~773 ms PER
@@ -38673,7 +38826,7 @@ require(['vs/editor/editor.main'], function () {
           // a tail that already carries two other sentences, so it is the most likely of
           // all of them to land on a wrap.
           const fb = (v) => String((window._sfFormatBytes || ((x) => `${x} B`))(v))
-            .replace(' ', ' ');
+            .replace(' ', '\u00A0');
           tail.push(`${fb(destSpace.bytesFree)} free of ${fb(destSpace.bytesTotal)}.`);
         }
         // Close whatever was on screen only now, with this dialog about to go up
@@ -39806,17 +39959,14 @@ require(['vs/editor/editor.main'], function () {
         // ⚠️ AND IT NEVER FAILS CLOSED. checkFit returns fits:true whenever it could not
         // measure, so an unreadable or unusual destination still exports. The numbers are
         // an improvement on blindness, not a new gate.
-        // ⚠️ window._sfFormatBytes, NOT the _sfFmtBytes in this file's other scope - that
-        // one stops at MB and would render a card's free space as "11444.1 MB". This is
-        // the same formatter the progress line below already uses.
-        // ⚠️ NON-BREAKING SPACE BETWEEN THE NUMBER AND ITS UNIT. His catch on the first
-        // real refuse: the dialog wrapped mid-quantity, leaving "496.2" on one line and
-        // "MB more room." on the next, which reads as two different things. A quantity is
-        // one token and must never be split. _sfFormatBytes emits a normal space, so it is
-        // swapped here rather than in the formatter, which every other surface shares and
-        // where a hard space could upset text that is measured or matched.
-        const _sfFmtSpace = (n) => String((window._sfFormatBytes || ((v) => `${v} B`))(n))
-          .replace(' ', ' ');
+        // ⚠️ `_sfFmtSpace` WAS DELETED HERE. [B-420, 2026-09-23] It was this door's own
+        // non-breaking-space formatter for the "not enough room" refusal, which wrapped
+        // mid-quantity - "496.2" on one line and "MB more room." on the next. That refusal
+        // moved into `_sfRefuseNotEnoughRoom`, which carries the identical formatter, and
+        // this copy was stranded with no callers when it did. It came in on 2026-09-22 in
+        // the eject commit, so it is this work's own leftover rather than an old one.
+        // ⚠️ THE FIX IS NOT LOST, ONLY THE DUPLICATE - checked before deleting, because a
+        // dead formatter and a formatter nobody remembered to call read the same from here.
         // ⭐ ONE PREFLIGHT, AND THIS DOOR GAINS THE SLOW-WRITE WARNING IT NEVER HAD.
         // [B-005 item 4] It ran a fit check only; the board-card warning was on the other
         // doors. Going through the shared helper means the primary export - the one most
@@ -42418,7 +42568,7 @@ require(['vs/editor/editor.main'], function () {
             _sfFileClipboard = { kind: 'common', id: _sfSelectedCommonUuid, paths: [subPath] };
             _sfCommonClipboard = { sourceUuid: _sfSelectedCommonUuid, paths: [subPath] };
           });
-          mkItem('↗ Export folder…', '', () => _sfExportFiles({ kind: 'common', id: _sfSelectedCommonUuid, subPaths: [subPath] }));
+          mkItem('↗ Export folder…', '', () => _sfExportFiles({ kind: 'common', id: _sfSelectedCommonUuid, subPaths: [subPath], isDir: true }));
           mkSep();
           mkItem('Rename…', '', () => _sfRenameCommonFolderPrompt(subPath));
           mkItem('+ New folder', '', _sfCreateCommonFolderPrompt);

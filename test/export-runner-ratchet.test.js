@@ -48,7 +48,7 @@ const insideRunner = (idx) => idx > rs && idx < re;
 // one `_sfRunExport` and asserts the count drops BELOW the floor, which stops being true the
 // moment there is slack. **A ratchet with slack cannot detect the regression it exists for**, so
 // the self-proof failing is the file telling us to tighten, not a broken test.
-const MIGRATED_MIN   = 5;   // + tracks (door 6)                        (2026-09-22)
+const MIGRATED_MIN   = 7;   // + the single-item right-click exports   (2026-09-22)
 // ⚠️ The runner's OWN preflight call is filtered out below, so this counts doors only. The
 // ceiling is deliberately the measured truth with NO slack: slack is room for one more door to
 // be added the old way without anything going red.
@@ -127,6 +127,33 @@ const UNMIGRATED_MAX = 3;   // source, primary-early, bulk               (2026-0
       start: 'const _sfExportSharedTracks = async () => {',
       end:   'window._sfExportSharedTracks = _sfExportSharedTracks;',
       except: ['raises the progress modal itself'] },
+    // ⚠️⚠️ THE FUNNEL IS HALF MIGRATED ON PURPOSE, AND THE HALVES SERVE DIFFERENT DOORS.
+    //
+    // `_sfExportFiles` has two branches. The MULTI-PATH branch is doors 2, 5, 7 and 9 - the
+    // "select files → Export" items his count names - and it is on the runner as of 2026-09-22.
+    // The SINGLE-PATH branch serves menu items that are NOT in that count: single-file
+    // "Export…", "Export folder…" and "Export ZIP…" (which passes `asFile` and produces a
+    // different artifact). Those are the open question recorded in the register.
+    //
+    // ⭐ The single-path branch cannot move yet for the reason its own comment gives: it chooses
+    // between a SAVE dialog and a FOLDER dialog based on whether the path is a directory, which
+    // the renderer cannot know without probing, and probing before opening a picker is the
+    // delay-before-the-dialog the "a click always acts instantly" rule forbids. ⏭ The unlock is
+    // that the CALL SITES already know - "Export folder…" passes `dirSubPath` - so the fact just
+    // needs threading through. That is a change to ten call sites and it waits for his ruling on
+    // whether those items are doors.
+    //
+    // ⚠️ So the two exemptions below are the single-path branch, not the migrated one. They are
+    // asserted positively: if that branch stops doing these, the exemption is stale and says so.
+    { name: 'the funnel (doors 2·5·7·9)',
+      start: 'const _sfExportFiles = async ({ kind, id, subPaths, asFile, isDir })',
+      end:   '// Unified dispatcher',
+      // ⭐⭐ THE EXEMPTIONS ARE GONE, AND THE FILE IS HOW WE FOUND OUT. They were recorded on
+      // 2026-09-22 for the single-path branch, and when that branch migrated later the same day
+      // both went stale - the positive assertion failed and named itself, which is exactly what
+      // an exemption asserted positively is for. An exemption that is merely SKIPPED would have
+      // sat here forever describing a door that had moved on.
+    },
   ];
   // What the runner owns. A migrated door touching any of these is the regression.
   const FORBIDDEN = [

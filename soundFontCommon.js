@@ -1363,9 +1363,19 @@ async function exportCommonAsZip(userData, uuid, destPath, onBytes = null, opts 
     // caller already knows the total of.
     if (onBytes) {
       let seen = 0;
+      // ⚠️⚠️ ARCHIVER SPLITS THE TWO FACTS ACROSS TWO EVENTS. [B-420, 2026-09-23 — his report:
+      // "same thing on the common folder export as common and export as archive"]
+      // `progress` carries byte counts and no name; `entry` carries the name and no bytes. So a
+      // bar fed only from `progress` can say how much has moved and never what is moving, which
+      // is exactly how this door looked beside the funnel doors that name every file.
+      // ⭐ Last entry wins, which is honest here for the same reason it is on the delta channel:
+      // the bytes are a sum over a window and the only truthful label is the most recent file
+      // that window touched.
+      let entryName = '';
+      archive.on('entry', (e) => { if (e && e.name) entryName = String(e.name); });
       archive.on('progress', (p) => {
         const done = (p && p.fs && p.fs.processedBytes) || 0;
-        if (done > seen) { const d = done - seen; seen = done; try { onBytes(d); } catch {} }
+        if (done > seen) { const d = done - seen; seen = done; try { onBytes(d, entryName); } catch {} }
       });
     }
     // ── Cancelling a zip ──────────────────────────────────────────── [B-005 item 4]

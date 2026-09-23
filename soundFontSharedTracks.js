@@ -510,7 +510,13 @@ async function exportToFolderAdditive(userData, destDir, opts = {}) {
       refused.push({ relPath: name, name, kind: v.kind, reason: v.reason, disguised: !!v.disguised });
       return false;
     }
-    await copyFileWithProgress(src, path.join(targetDir, name), onBytes, shouldStop);
+    // ⚠️ THE NAME IS RIGHT HERE AND WAS BEING THROWN AWAY. [B-420, 2026-09-23]
+    // `copyFileWithProgress` reports bare chunk lengths, so handing it `onBytes` directly loses
+    // which track is copying - and this function already has the name as its own argument.
+    // Same drop as the two main.js sinks and the archive path; found by sweeping every door
+    // rather than by hitting them one at a time.
+    await copyFileWithProgress(src, path.join(targetDir, name),
+      onBytes ? ((n) => onBytes(n, name)) : null, shouldStop);
     return true;
   };
   // ── Cancelling a tracks export ────────────────────────────────── [B-005 item 4]

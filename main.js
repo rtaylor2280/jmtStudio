@@ -2605,7 +2605,7 @@ ipcMain.handle('entries:exportDoc', (_, { name, path: subPath } = {}) => {
 // card root or any folder the user wants Proffie-shaped font folders copied
 // into. createDirectory lets the user make a subfolder on the fly.
 ipcMain.handle('dialog:selectSaveDestination', async () => {
-  // Same rule as the zip picker: last place if it is still live, This PC otherwise. Passing no
+  // Same rule as the zip picker: last place if it is still live, Downloads otherwise. Passing no
   // defaultPath at all hands the choice to Windows' own MRU, which is how a picker lands on a
   // card that left the machine.
   const result = await dialog.showOpenDialog(win, {
@@ -2653,14 +2653,31 @@ function _sfByteProgressEmitter(event) {
 function _sfExportProgressEmitter(event) {
   let acc = 0;
   let last = 0;
+  // ⭐⭐ THE DELTA CHANNEL CARRIES A NAME TOO. [B-420, 2026-09-23 — his report on door 1:
+  // "do we not have file names to fly by on this?"]
+  //
+  // Two channels report export progress: `soundFonts:byteProgress` sends ABSOLUTES and has
+  // always carried a `name`, and this one sends DELTAS and had no name field at all. So the
+  // doors on this pipe - "Export font folder…" and the common-folder export - showed bytes
+  // climbing and never said what was moving, while funnel doors right beside them did.
+  //
+  // ⚠️ THE NAME WAS NOT MISSING UPSTREAM, IT WAS DROPPED HERE. `copyTreeWithProgress` hands its
+  // sink `(chunkLength, relPath)`; this emitter took `(n)` and discarded the second argument
+  // silently, which is the quietest way for a pipe to lose data.
+  //
+  // ⚠️ LAST-WRITER-WINS is the right rule for a name against an ACCUMULATED delta: the bytes are
+  // a sum over the throttle window, and the only honest label for "what is happening now" is the
+  // most recent file that window touched.
+  let name = '';
   const send = () => {
     if (acc <= 0) return;
-    try { event.sender.send('soundFonts:exportProgress', { delta: acc }); } catch {}
+    try { event.sender.send('soundFonts:exportProgress', { delta: acc, name }); } catch {}
     acc = 0;
   };
   return {
-    onBytes: (n) => {
+    onBytes: (n, rel) => {
       acc += n;
+      if (rel) name = String(rel);
       const now = Date.now();
       if (now - last >= 80) { last = now; send(); }
     },
@@ -2741,7 +2758,10 @@ ipcMain.handle('entries:exportToFolder', async (event, { name, destDir, mode, sy
       // read `p.done` off it and would have left the tally permanently zero, which reads
       // exactly like "nothing was written yet" and would have disabled the offer entirely.
       const r = await soundFontEntries.exportEntryToFolder(app.getPath('userData'), name, destDir, mode,
-        (n) => { token.wrote.bytes += (Number(n) || 0); emit.onBytes(n); },
+        // ⚠️ `rel` FORWARDED, NOT DROPPED. This wrapper sits between the copier and the emitter,
+        // so a sink written as `(n)` is exactly where the filename dies - and it died the same
+        // way at BOTH sites, which is why this is fixed as a pair. [2026-09-23]
+        (n, rel) => { token.wrote.bytes += (Number(n) || 0); emit.onBytes(n, rel); },
         { syncManifest: syncManifest !== false, priorObserved, shouldStop,
           boardCard: !!token.boardCard, wrote: token.wrote });
       emit.flush();
@@ -2978,7 +2998,10 @@ ipcMain.handle('common:exportToFolder', async (event, { uuid, destDir, mode, tar
     try {
       const emit = _sfExportProgressEmitter(event);
       const r = await soundFontCommon.exportCommonToFolder(app.getPath('userData'), uuid, destDir, mode,
-        (n) => { token.wrote.bytes += (Number(n) || 0); emit.onBytes(n); },
+        // ⚠️ `rel` FORWARDED, NOT DROPPED. This wrapper sits between the copier and the emitter,
+        // so a sink written as `(n)` is exactly where the filename dies - and it died the same
+        // way at BOTH sites, which is why this is fixed as a pair. [2026-09-23]
+        (n, rel) => { token.wrote.bytes += (Number(n) || 0); emit.onBytes(n, rel); },
         targetName, { priorObserved, shouldStop, boardCard: !!token.boardCard, wrote: token.wrote });
       emit.flush();
       return r;
@@ -3364,7 +3387,12 @@ ipcMain.handle('voicepack:install', async (_, { id } = {}) => {
 ipcMain.handle('sfFile:export', async (event, args = {}) =>
   _withExportCancel((shouldStop) => _sfFileExportImpl(event, args, shouldStop)));
 
-async function _sfFileExportImpl(event, { kind, id, paths, suggestedName, asFile, destDir: preDest, confirmSlow, probe } = {}, _shouldStop = null) {
+// ⭐ `destFile` IS THE SINGLE-FILE TWIN OF `destDir`. [2026-09-22] Both exist so the RENDERER can
+// own the picker and the runner can own everything after it. Without it the single-file branch
+// opens its own save dialog partway through its own work, and any bar raised around that call sits
+// at zero BEHIND a native dialog for as long as the user is choosing - which reads as a hang, and
+// is the reason this branch could not migrate with the multi-path one.
+async function _sfFileExportImpl(event, { kind, id, paths, suggestedName, asFile, destDir: preDest, destFile: preFile, confirmSlow, probe } = {}, _shouldStop = null) {
   // [B-408] ⚠⚠ THE PICKER USED TO OPEN PARTWAY THROUGH THIS CALL, and that is why this door was
   // the one export with no progress at all. A bar raised around it would sit at zero BEHIND a
   // native dialog for as long as the user was choosing a folder - which reads as a hang, the
@@ -3535,7 +3563,12 @@ async function _sfFileExportImpl(event, { kind, id, paths, suggestedName, asFile
   };
   // Write a whole directory (source-side or on-disk) into outRoot,
   // preserving relative structure. Composite paths walk the inner zip.
-  const writeDirTo = async (subPath, outRoot) => {
+  // ⭐ `onChunk(bytesWritten, relPath)` is optional and threaded to every write below, so a
+  // folder export reports as it copies instead of in one lump at the end. [B-420, 2026-09-23]
+  // ⚠️ All THREE branches take it - the two inner-zip walks and the on-disk tree. Wiring only
+  // the tree would leave a source-folder export looking exactly as hung as before, which is the
+  // per-caller shape this whole migration exists to stop.
+  const writeDirTo = async (subPath, outRoot, onChunk = null) => {
     if (!fs.existsSync(outRoot)) fs.mkdirSync(outRoot, { recursive: true });
     if (kind === 'source') {
       const cm = _compositeMatch(subPath);
@@ -3564,7 +3597,8 @@ async function _sfFileExportImpl(event, { kind, id, paths, suggestedName, asFile
           fs.mkdirSync(path.dirname(outPath), { recursive: true });
           // [B-005 item 4] Chunked + cancellable; writeFileSync blocked the event loop so
           // the cancel IPC could not even be delivered while it ran.
-          await require('./sfExportCopy').writeBufferWithProgress(buf, outPath, null, _shouldStop);
+          await require('./sfExportCopy').writeBufferWithProgress(buf, outPath,
+            onChunk ? ((n) => onChunk(n, innerRel)) : null, _shouldStop);
         }
         return;
       }
@@ -3582,7 +3616,8 @@ async function _sfFileExportImpl(event, { kind, id, paths, suggestedName, asFile
         if (refuseBuf(buf, entry.fileName)) continue;
         fs.mkdirSync(path.dirname(outPath), { recursive: true });
         // [B-005 item 4] Chunked + cancellable - see the note on the sibling branch above.
-        await require('./sfExportCopy').writeBufferWithProgress(buf, outPath, null, _shouldStop);
+        await require('./sfExportCopy').writeBufferWithProgress(buf, outPath,
+          onChunk ? ((n) => onChunk(n, innerRel)) : null, _shouldStop);
       }
       return;
     }
@@ -3614,6 +3649,7 @@ async function _sfFileExportImpl(event, { kind, id, paths, suggestedName, asFile
       refused: _walkRefused,
       shouldStop: _shouldStop,
       relBase: subPath,
+      onBytes: onChunk ? ((n, rel) => onChunk(n, rel)) : null,
     });
     // ⭐ A QUIET IMPROVEMENT WORTH NOTING: the old walk recorded a refusal under `ent.name` -
     // the bare basename. copyTreeWithProgress threads relBase, so a refusal now carries its
@@ -3653,7 +3689,36 @@ async function _sfFileExportImpl(event, { kind, id, paths, suggestedName, asFile
   // asFile=true short-circuits the dir probe — used by "Export ZIP…" on an inner-zip node,
   // where the user wants the raw .zip bytes exported as a standalone file rather than the
   // contents extracted. Same path is conceptually both, so the caller picks the semantics.
-  if (paths.length === 1 && !_singleIsDir) {
+  // ⚠️⚠️ `preDest || preFile` - THE GATE WAS HALF THE DESTINATIONS. [B-420, 2026-09-23]
+  //
+  // This read `preDest` alone, and `preDest` is the destination FOLDER. A single-file export
+  // supplies `preFile` instead, so the renderer had picked a destination, was showing a bar and
+  // waiting for ticks, and this decided nobody was listening. Combined with the probe defect
+  // above it is why a one-file export reported nothing at all.
+  // ⭐ The question the gate is asking is "did the renderer choose the destination, and is
+  // therefore driving a bar?" - and either field answers it. Neither alone does.
+  const _emit = ((preDest || preFile) && !probe) ? _sfByteProgressEmitter(event) : null;
+  let _bDone = 0, _bTotal = 0;
+  // [B-238] File count matters more than bytes on a slow transport (773 ms per file
+  // measured through a board), so the threshold needs both.
+  let _bFiles = 0;
+
+  // ⚠️⚠️ `!probe` IS LOAD-BEARING AND ITS ABSENCE WAS A REAL DEFECT. [B-420, 2026-09-23]
+  //
+  // This branch never looked at `probe`, and the probe return lives at the BOTTOM of the
+  // handler, past the multi-path flow - so a single-file probe fell in here and did the whole
+  // export: read, write, remember the folder, report success. The runner then called `produce`
+  // and wrote the identical file a SECOND time.
+  //
+  // ⭐ Three symptoms, one cause, all of them his: the file written twice; a bar that never
+  // moved because the probe returned no `totalBytes`, so the runner ran at `total: 0`; and a
+  // post-write "Not enough room" instead of a refusal, because the preflight reads 0 bytes as
+  // "cannot measure" and correctly declines to refuse. The fit check simply never ran.
+  //
+  // ⭐ Falling THROUGH rather than sizing here: the shared block below already sizes any
+  // `paths` for any kind, and a second sizer in this branch is how the two would drift.
+  // His rule for the whole thing: "it shouldn't matter if 1 or multiple".
+  if (paths.length === 1 && !_singleIsDir && !probe) {
     const subPath = paths[0];
     const baseName = suggestedName || subPath.split('/').pop() || 'untitled';
     const ext = path.extname(baseName).replace(/^\./, '') || '*';
@@ -3668,22 +3733,62 @@ async function _sfFileExportImpl(event, { kind, id, paths, suggestedName, asFile
     //     case that essentially never fires, at the cost of every ordinary export,
     //     is backwards.
     // So the near-certain path stays instant and the rare one pays an extra dialog.
-    const { canceled, filePath } = await dialog.showSaveDialog(win, {
-      title: 'Export file',
-      defaultPath: path.join(lastDir, baseName),
-      filters: ext === '*'
-        ? [{ name: 'All files', extensions: ['*'] }]
-        : [{ name: ext.toUpperCase(), extensions: [ext] }, { name: 'All files', extensions: ['*'] }],
-    });
-    if (canceled || !filePath) return { ok: false, canceled: true };
+    // ⚠️ ASK ONLY IF THE RENDERER HAS NOT. [2026-09-22] Same dialog, same defaults - the only
+    // difference is WHEN it opens, which is exactly the note the multi-path branch already
+    // carries. When the renderer picked, it also owns the bar, and this call is silent work
+    // behind a destination that is already known.
+    let filePath = preFile || null;
+    if (!filePath) {
+      const r = await dialog.showSaveDialog(win, {
+        title: 'Export file',
+        defaultPath: path.join(lastDir, baseName),
+        filters: ext === '*'
+          ? [{ name: 'All files', extensions: ['*'] }]
+          : [{ name: ext.toUpperCase(), extensions: [ext] }, { name: 'All files', extensions: ['*'] }],
+      });
+      if (r.canceled || !r.filePath) return { ok: false, canceled: true };
+      filePath = r.filePath;
+    }
     try {
       const buf = await readBytes(subPath);
       if (refuseBuf(buf, subPath)) return { ok: true, written: [], refused };
+      // ⭐ ONE FILE REPORTS LIKE ANY OTHER. [B-420, 2026-09-23 — "it shouldn't matter if 1 or
+      // multiple"] The sizing block never runs on this branch, so the totals are set here from
+      // what is about to be written: one file, its own length. The bar is then driven by the
+      // same per-chunk sink the multi-path branch uses.
+      _bTotal = buf ? buf.length : 0;
+      _bFiles = 1;
+      if (_emit) _emit.onBytes({ done: 0, total: _bTotal, name: baseName });
       // [B-005 item 4] Chunked + cancellable, and it removes its own partial on a stop.
-      await require('./sfExportCopy').writeBufferWithProgress(buf, filePath, null, _shouldStop);
+      await require('./sfExportCopy').writeBufferWithProgress(buf, filePath, (n) => {
+        if (!_emit) return;
+        _bDone += n;
+        _emit.onBytes({ done: _bDone, total: _bTotal, name: baseName });
+      }, _shouldStop);
+      if (_emit) { _emit.onBytes({ done: _bTotal, total: _bTotal, name: baseName }); _emit.flush(); }
       Store.set('lastExportDir', path.dirname(filePath));
       return { ok: true, written: [filePath], refused };
     } catch (err) {
+      // ⚠️⚠️ A CANCEL IS NOT A FAILURE, AND THIS BRANCH WAS THE ONE PLACE THAT SAID IT WAS.
+      // [B-420, 2026-09-23 — his screenshots, same door, two endings]
+      //
+      // Seven other catches in this file normalise a stop to `{ ok: true, canceled: true }`;
+      // this one returned `ok:false` with the cancellation as the error TEXT, so the funnel's
+      // error path rendered "Export failed / Export cancelled" with a blue primary button -
+      // an error dialog naming the user's own click as the fault. Cancel the SAME door with
+      // more than one file selected and it correctly said "Export stopped / Nothing new was
+      // copied." One gesture, two endings, decided by how many files were selected.
+      //
+      // ⭐ THE SHAPE IS THE LESSON, NOT THE LINE: a rule every door has to remember is a rule
+      // some door forgets. Found by reconciling all eight catches against each other rather
+      // than by reading this one, which looks perfectly correct on its own.
+      //
+      // ⚠️ `partialRemoved` is reported because `writeBufferWithProgress` unlinks what it had
+      // written before it rethrows - so the honest notice is "the item being written was
+      // removed", not a bare "stopped". The renderer reads exactly this field.
+      if (require('./sfExportCopy').isCancel(err)) {
+        return { ok: true, canceled: true, written: [], partialRemoved: true, refused };
+      }
       return { ok: false, error: String(err && err.message || err) };
     }
   }
@@ -3693,6 +3798,10 @@ async function _sfFileExportImpl(event, { kind, id, paths, suggestedName, asFile
   // [B-408] Ask only if the renderer has not already. Same dialog, same defaults - the only
   // difference is WHEN it opens.
   let destDir = preDest || null;
+  // ⚠️ A PROBE NEVER ASKS. It falls through here only to be sized, and the destination it
+  // reports against is the one the renderer already chose - so derive it from the file path
+  // rather than raising a picker behind a modal the user did not ask for. [B-420, 2026-09-23]
+  if (!destDir && probe && preFile) destDir = path.dirname(preFile);
   if (!destDir) {
     const { canceled, filePaths } = await dialog.showOpenDialog(win, {
       // ⚠️ The lone-folder title names the folder; the batch title cannot.
@@ -3712,11 +3821,6 @@ async function _sfFileExportImpl(event, { kind, id, paths, suggestedName, asFile
   // ⚠️ A PROBE DRIVES NOTHING. There is no bar up while it runs - that is the entire point
   // of it - so emitting would push bytes at a listener that does not exist yet and, worse,
   // seed the real bar's first frame from a call that wrote nothing.
-  const _emit = (preDest && !probe) ? _sfByteProgressEmitter(event) : null;
-  let _bDone = 0, _bTotal = 0;
-  // [B-238] File count matters more than bytes on a slow transport (773 ms per file
-  // measured through a board), so the threshold needs both.
-  let _bFiles = 0;
   // ⚠️ SIZING RUNS WHETHER OR NOT THERE IS A BAR TO DRIVE. It used to be gated on `_emit`,
   // which meant the older callers that let this handler open its own picker computed no
   // total - and [B-203]'s fit check needs that total more than the bar does. The walk is
@@ -3849,14 +3953,19 @@ async function _sfFileExportImpl(event, { kind, id, paths, suggestedName, asFile
     // ⚠️ REFUSE BY RETURNING, NOT BY THROWING. The renderer owns every dialog in this app;
     // main hands back the three numbers and the renderer shows the same sentence every other
     // door uses. Nothing has been written at this point.
-    return { ok: false, tooBig: _pf.tooBig };
+    // ⚠️ THE MEASUREMENT RIDES ON THE REFUSAL TOO. [2026-09-22] The refused case is exactly the
+    // one the runner must not receive unmeasured: it sizes its own preflight from what `plan()`
+    // returns, and zero bytes is read as "cannot measure", which deliberately does not refuse. A
+    // refusal that hands back no numbers would turn into silence one layer up.
+    return { ok: false, tooBig: _pf.tooBig, totalBytes: _bTotal, fileCount: _bFiles };
   }
   if (!confirmSlow && _pf && _pf.slowWrite) {
     // ⚠️ destDir RIDES ALONG so the retry does not re-open the picker. When main chose the
     // destination itself - the lone-folder door - the renderer has no other way to name it,
     // and asking the user to pick the same folder twice after agreeing to go ahead is its
     // own bug.
-    return { ok: false, slowWrite: { ..._pf.slowWrite, destDir } };
+    return { ok: false, slowWrite: { ..._pf.slowWrite, destDir },
+             totalBytes: _bTotal, fileCount: _bFiles };
   }
 
   // ── Probe: answer the two questions, write nothing ──────────────── [B-203, B-238]
@@ -3876,15 +3985,17 @@ async function _sfFileExportImpl(event, { kind, id, paths, suggestedName, asFile
   //
   // ⚠️ Both refusals above return BEFORE this line, so a probe that gets here is a yes.
   //
-  // ⏭ WHEN THIS DOOR IS MIGRATED, THE PROBE HAS TO REPORT ITS MEASUREMENT. [noted 2026-09-22]
+  // ⭐⭐ THE PROBE REPORTS WHAT IT MEASURED, AND THAT IS WHAT LETS THIS DOOR MIGRATE. [2026-09-22]
+  //
   // The runner sizes its own preflight from what `plan()` returns, and zero bytes is read as
-  // "cannot measure", which deliberately does not refuse. So a migration that leaves this
-  // returning no numbers silently disables the fit refusal and the slow-write warning on this
-  // door while looking like a pure refactor. The numbers are already here as `_bTotal` and
-  // `_bFiles` - the same pair this handler hands its own preflight above.
-  // ⚠️ And they must ride on the REFUSAL returns too, or the refused case is exactly the one
-  // that reaches the runner unmeasured.
-  if (probe) return { ok: true, probed: true };
+  // "cannot measure" - which deliberately does not refuse. So a migration that left this
+  // returning no numbers would have silently disabled the fit refusal and the slow-write warning
+  // on this door while looking like a pure refactor.
+  //
+  // ⭐ `_bTotal` and `_bFiles` are the same pair this handler hands its OWN preflight a few lines
+  // up, so the renderer's bar, the runner's preflight and main's own check all read one
+  // measurement rather than three estimates free to drift apart.
+  if (probe) return { ok: true, probed: true, totalBytes: _bTotal, fileCount: _bFiles };
 
   // ⚠️ BETWEEN ITEMS, and an item here can be a whole folder - so the tree walk below carries
   // shouldStop too and stops between FILES inside it. Checking only here would mean a cancel
@@ -3904,24 +4015,42 @@ async function _sfFileExportImpl(event, { kind, id, paths, suggestedName, asFile
           finalName = `${baseName} (${n})`;
         }
         const outRoot = path.join(destDir, finalName);
-        await writeDirTo(subPath, outRoot);
+        // ⭐⭐ THE FOLDER REPORTS AS IT COPIES NOW, rather than all at once at the end.
+        // [B-420, 2026-09-23] Same defect as the file branch above and a worse case: a whole
+        // font folder landed with the bar flat at 0, then jumped by its entire size.
+        // ⚠️ The post-hoc credit that used to sit here - walking `outRoot` and summing what
+        // landed - is GONE rather than kept alongside, for the same double-count reason.
+        // ⚠️ It measured the DESTINATION, which was the right call when nothing else counted:
+        // a zip source is not stat-able. Live chunks come from the write itself, so they are
+        // exact on either side, and a refused file now correctly contributes nothing.
+        await writeDirTo(subPath, outRoot, (n, rel) => {
+          if (!_emit) return;
+          _bDone += n;
+          _emit.onBytes({ done: _bDone, total: _bTotal, name: rel || baseName });
+        });
         written.push(outRoot);
-        // ⚠️ Credit the folder by what actually landed at the destination — the source side may
-        // not be stat-able (a zip), but what we just wrote always is.
-        if (_emit) { try { let n = 0;
-          const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) {
-            const p = path.join(d, e.name);
-            if (e.isDirectory()) walk(p); else { try { n += fs.statSync(p).size; } catch {} } } };
-          walk(outRoot); _bDone += n;
-        } catch {} }
       } else {
         const buf = await readBytes(subPath);
         if (refuseBuf(buf, subPath)) continue;
         const out = uniqueIn(destDir, baseName);
         // [B-005 item 4] Chunked + cancellable; leaves nothing truncated behind.
-        await require('./sfExportCopy').writeBufferWithProgress(buf, out, null, _shouldStop);
+        // ⭐⭐ LIVE BYTES, NOT A LUMP ON COMPLETION. [B-420, 2026-09-23 — his report]
+        //
+        // This passed `null` as the progress sink to a function named `writeBufferWithProgress`,
+        // so an 11 MB wav wrote eleven chunks and reported none of them. The bar only moved when
+        // the whole file closed. His scenario made it unmistakable - one large wav and three
+        // small ones - "it sits at 0 for like a min... then goes to the top", because the single
+        // large file WAS the minute and the three small ones were the jump.
+        //
+        // ⚠️ AND THE OLD CREDIT LINE HAD TO GO WITH IT, not stay as a safety net: crediting
+        // `buf.length` here as well as every chunk counts each file twice and the bar reaches
+        // 100% at the halfway point. One source of truth for `_bDone`.
+        await require('./sfExportCopy').writeBufferWithProgress(buf, out, (n) => {
+          if (!_emit) return;
+          _bDone += n;
+          _emit.onBytes({ done: _bDone, total: _bTotal, name: baseName });
+        }, _shouldStop);
         written.push(out);
-        if (_emit) _bDone += (buf ? buf.length : 0);
       }
       if (_emit) _emit.onBytes({ done: _bDone, total: _bTotal, name: baseName });
     } catch (err) {
@@ -4419,6 +4548,38 @@ ipcMain.handle('sources:exportToDownloads', async (event, { uuid, destDir, forma
 // sources to the same destination (bulk delete with "Export sources
 // first") can pick once and then drive multiple exports. Remembers the
 // last chosen dir.
+// ── The single-FILE twin of pickExportDir ───────────────────────── [B-420, 2026-09-22]
+//
+// ⭐ WHY IT EXISTS: the right-click "Export…" on one file wrote through a save dialog that
+// `sfFile:export` opened PARTWAY THROUGH ITS OWN WORK. Any progress bar raised around that call
+// sat at zero behind a native dialog for as long as the user was choosing, which reads as a hang -
+// so that branch could not join the shared runner while it owned the picker. Hoisting the dialog
+// here is the same move the multi-path branch already made.
+//
+// ⚠️ THE NAMING RULES STAY IN MAIN, deliberately. The default name and the extension filter are
+// computed the same way `_sfFileExportImpl` computes them, and duplicating that in the renderer
+// would be a second implementation to keep in agreement forever - which is the disease this whole
+// entry exists to cure. The renderer passes the basename it already has; main decides the rest.
+ipcMain.handle('dialog:pickExportFilePath', async (_, { name } = {}) => {
+  try {
+    const lastDir = liveDir(Store.get('lastExportDir')) || app.getPath('downloads');
+    const baseName = String(name || '').split(/[\\/]/).pop() || 'untitled';
+    const ext = path.extname(baseName).replace(/^\./, '') || '*';
+    const { canceled, filePath } = await dialog.showSaveDialog(win, {
+      title: 'Export file',
+      defaultPath: path.join(lastDir, baseName),
+      filters: ext === '*'
+        ? [{ name: 'All files', extensions: ['*'] }]
+        : [{ name: ext.toUpperCase(), extensions: [ext] }, { name: 'All files', extensions: ['*'] }],
+    });
+    if (canceled || !filePath) return { ok: false, canceled: true };
+    Store.set('lastExportDir', path.dirname(filePath));
+    return { ok: true, destFile: filePath };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
 ipcMain.handle('dialog:pickExportDir', async (_, { title } = {}) => {
   try {
     const lastDir = liveDir(Store.get('lastExportDir')) || app.getPath('downloads');
