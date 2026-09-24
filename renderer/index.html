@@ -33062,62 +33062,20 @@ require(['vs/editor/editor.main'], function () {
           }
           exportDir = pick.destDir;
         }
-        let _xr = null;
-        if (wantExport) {
-          _xr = await _sfExportSourceBeforeDelete(uuid, wantExport, exportDir, sourceLabel);
-          if (!_xr) {
-            await _sfDeleteProgress.hide();
-            _sfSourceDetailEls.modal?.classList.add('active');
-            return;
-          }
-        }
-        // Cascade-delete entries first, then the source.
-        const failures = [];
-        for (let i = 0; i < entries.length; i++) {
-          const e = entries[i];
-          // ⭐ Delayed, same as the single-delete door: a one-font source finishes well inside the
-          // gate and never raises a modal, while a real cascade still shows one and then keeps
-          // retitling it. showAfter is idempotent, so the loop does not re-arm the timer each pass.
-          _sfDeleteProgress.showAfter(180,
-            entries.length > 1 ? `Deleting fonts (${i + 1} of ${entries.length})` : 'Deleting fonts',
-            e.name, i / entries.length);
-          const dr = await window.electronAPI.deleteEntry({ name: e.name });
-          if (!dr || !dr.ok) failures.push({ name: e.name, error: dr && dr.error || 'unknown error' });
-        }
-        _sfDeleteProgress.showAfter(180, 'Removing source', sourceLabel);
-        const sr = await window.electronAPI.deleteSource({ uuid });
-        if (!sr || !sr.ok) failures.push({ name: sourceLabel, error: sr && sr.error || 'unknown error' });
-        // Free the candidate cache entry — uuid won't be reused.
-        else _sfSourceCandidatesCache.delete(uuid);
-        // !! HIDDEN ONLY ON THE FAILURE PATH. The success ending closes it itself, paired with
-        // opening its dialog in the same task - hiding first leaves the screen bare across the
-        // eject lookup, which is the flash he reported.
-        if (failures.length) {
-          await _sfDeleteProgress.hide();
-          await _sfShowPartialFailures('Some items failed to delete', failures);
-        }
-        // ⭐⭐ ONE SUMMARY AT THE END, COVERING BOTH HALVES. [B-420]
-        // The export ran with `ending: 'none'` on the promise that this caller would speak, and it
-        // only ever did so on cancel or failure - so a successful export-then-delete said nothing at
-        // all. His report: "delete and export when a card is selected get no summary."
-        // ⚠️ AFTER the delete, not between the two, so it states what actually happened rather than
-        // what was about to. A summary before the delete would be describing a plan.
-        // ⚠️ AND IT IS WHERE THE EJECT BELONGS when the copy went to a card - the reason the missing
-        // summary was most visible there. There is no other surface left: the detail modal closes
-        // below, and the card is the thing the user is waiting to pull.
-        // ⭐ Nothing exported (he did not ask for one) toasts instead of opening a dialog - his rule:
-        // "doesn't appear on nothing exported. it can toast instead."
-        // ⭐ THE SHARED ENDING, same as every other delete door. [B-420] This block was written out
-        // by hand first, and that second hand-written copy is what made it obvious the ending had to
-        // be shared rather than repeated - see _sfDeleteOutcome.
-        if (!failures.length) {
-          await _sfDeleteOutcome({
-            exportResult: _xr && _xr.exported ? _xr : null,
-            autoEject: _xr && _xr.wantsEject,
-            fontsDeleted: entries.length, sourcesDeleted: 1,
-            destDir: exportDir, label: sourceLabel,
-            progress: _sfDeleteProgress,
-          });
+        // ⭐⭐ ONE RUNNER. [B-420] This door used to run its own export call, its own loop over the
+        // entries, its own deleteSource and its own failure handling - the same sequence the bulk
+        // door and the single-delete door each had a copy of. It collects now; the runner deletes.
+        const _dr = await _sfRunDelete({
+          names: entries.map((e) => e.name),
+          // NAMED, not derived: deleting a source removes it whether or not other entries survive,
+          // which is a different question from "is this source now orphaned".
+          sources: [{ uuid, label: sourceLabel }],
+          wantExport, destDir: exportDir, label: sourceLabel,
+        });
+        if (_dr.aborted) {
+          // The export was refused or cancelled, so nothing was deleted and the door reopens.
+          _sfSourceDetailEls.modal?.classList.add('active');
+          return;
         }
         await _sfCloseSourceDetail();
         await window.refreshSoundFontsView();
@@ -37167,8 +37125,15 @@ require(['vs/editor/editor.main'], function () {
         // reads `canceled` and `ok` and must keep seeing exactly what it saw before.
         return res || { ok: false, error: 'export did not run' };
       };
-      const _sfExportSourceBeforeDelete = async (sourceUuid, requested, destDir, label) => {
-        if (!requested || !sourceUuid) return true;
+      // ⚠️ TAKES ONE SOURCE OR MANY, because the export side already does. [B-420] It used to take
+      // a single uuid, which is why the bulk door could not use it and grew its own copy of the
+      // same call - the split the delete runner exists to close. A bare uuid still works, so the
+      // older callers are unchanged.
+      const _sfExportSourceBeforeDelete = async (source, requested, destDir, label) => {
+        const sources = Array.isArray(source)
+          ? source.map((x) => (typeof x === 'string' ? { uuid: x, label } : x))
+          : (source ? [{ uuid: source, label }] : []);
+        if (!requested || !sources.length) return true;
         if (!destDir) return false;
         try {
           // Attachments and customized fonts always ride on a delete-first
@@ -37178,7 +37143,7 @@ require(['vs/editor/editor.main'], function () {
           // defaulted, because "the caller knows the answer" is the design.
           // ⚠️ `blockedDelete` DECLARED HERE, because this is the only place that knows the
           // export is a precondition. The door does not guess it from the label. [2026-09-23]
-          const r = await _sfRunSourceExport({ sources: [{ uuid: sourceUuid, label }], destDir,
+          const r = await _sfRunSourceExport({ sources, destDir,
                                                blockedDelete: true,
                                                includeAttachments: true, includeCustomized: true });
           // ⚠️⚠️ THE CALLER SPEAKS, BECAUSE IT DECLARED `ending: 'none'`. That option is a promise
@@ -38118,46 +38083,24 @@ require(['vs/editor/editor.main'], function () {
       // Convenience for the export+delete sequence — picks the right title
       // based on whether the user opted to save a copy first, transitions
       // titles between phases, returns true if everything succeeded.
+      // ⭐ A THIN COLLECTOR NOW. [B-420] This was the third copy of export-then-delete-then-clean-up,
+      // and both of its callers (right-click delete on a card, and entry delete inside source
+      // detail) showed NOTHING at all on success - which is how his "shouldn't matter where I
+      // delete from" turned up. The runner owns the sequence and the ending.
+      // ⚠️ `sources: null` on purpose: this door deletes ONE ENTRY and the source goes only if that
+      // entry was the last one pointing at it. That is a question the runner has to ask AFTER the
+      // delete, which is exactly what _sfDeleteEntryAndCleanup used to do inline.
       const _sfPerformSingleDelete = async (name, sourceUuid, wantExport, exportDir) => {
         const sourceLabel = (_sfAllSourcesByUuid[sourceUuid]?.meta?.bundleName)
           || (_sfAllSourcesByUuid[sourceUuid]?.meta?.originalName)
           || '';
-        // ⚠️ The export RESULT, not a boolean - the ending cannot name a destination it was never
-        // given, which is why this door was silent even after the other two learned to speak.
-        let _xr = null;
-        if (wantExport) {
-          _xr = await _sfExportSourceBeforeDelete(sourceUuid, wantExport, exportDir, sourceLabel);
-          if (!_xr) { await _sfDeleteProgress.hide(); return false; }
-        }
-        // ⭐ Delayed: deleting one font finishes well inside the gate, so no modal appears at all.
-        _sfDeleteProgress.showAfter(180, 'Deleting', name);
-        const ok = await _sfDeleteEntryAndCleanup(name);
-        // !! NOT HIDDEN HERE. The ending needs the modal still up while it resolves the eject
-        // target, or the screen goes bare for that round trip - the flash he reported. It closes
-        // the progress itself, paired with opening its dialog in the same task.
-        if (!ok) await _sfDeleteProgress.hide();
-        // ⭐ THE SHARED ENDING. [B-420] Both callers of this helper - the right-click delete and the
-        // entry delete inside source detail - showed nothing at all on success, whether or not an
-        // export had just written a file to a card. His rule: "shouldn't matter where I delete from."
-        // ⚠️ Only on success. A failure has already spoken through _sfDeleteEntryAndCleanup's own
-        // error dialog, and a second surface over it would be the double-ending this work removed.
-        if (ok) {
-          await _sfDeleteOutcome({
-            exportResult: _xr && _xr.exported ? _xr : null,
-            autoEject: _xr && _xr.wantsEject,
-            fontsDeleted: 1,
-            // The source goes only when nothing else references it; _sfDeleteEntryAndCleanup
-            // decides that, so the count is taken from what the export actually covered.
-            sourcesDeleted: (_xr && _xr.exported && _xr.exported.length) || 0,
-            destDir: exportDir, label: sourceLabel,
-            progress: _sfDeleteProgress,
-          });
-        }
-        return ok;
+        const r = await _sfRunDelete({
+          names: [name], sources: null,
+          wantExport, destDir: exportDir, label: sourceLabel,
+        });
+        return r.ok;
       };
-      // Whether deleting this entry will also drop the source archive. True
-      // when no other entries reference the same source. Used to decide
-      // whether to show the "save a copy first" checkbox on the confirm.
+
       const _sfWillSourceBeRemovedOnEntryDelete = async (name) => {
         const entry = _sfAllEntries.find(e => e.name === name);
         const sourceUuid = entry && entry.meta && entry.meta.sourceUuid;
@@ -38170,32 +38113,11 @@ require(['vs/editor/editor.main'], function () {
           return { willRemove: false, sourceUuid };
         }
       };
-      // Delete an entry and clean up its source if nothing else references
-      // it (a single-font source or the last surviving entry). Returns true
-      // on success.
-      const _sfDeleteEntryAndCleanup = async (name) => {
-        const entry = _sfAllEntries.find(e => e.name === name);
-        const sourceUuid = entry && entry.meta && entry.meta.sourceUuid;
-        const r = await window.electronAPI.deleteEntry({ name });
-        if (!r || !r.ok) {
-          promptError('Delete failed', (r && r.error) || 'unknown error');
-          return false;
-        }
-        _sfAutoClearOnEmpty = true; // a delete may empty the filtered view — let the next render auto-clear
-        // If no other entries reference the same source, the archive is now
-        // orphaned. Remove it so the library stays tight.
-        if (sourceUuid) {
-          try {
-            const er = await window.electronAPI.listEntriesBySource({ sourceUuid });
-            const remaining = (er && er.ok && er.entries) || [];
-            if (remaining.length === 0) {
-              await window.electronAPI.deleteSource({ uuid: sourceUuid });
-              _sfSourceCandidatesCache.delete(sourceUuid);
-            }
-          } catch {}
-        }
-        return true;
-      };
+      // ⚠️ `_sfDeleteEntryAndCleanup` REMOVED 2026-09-23 [B-420]. It deleted one entry and then
+      // dropped the source if nothing else referenced it - the orphan check now lives in
+      // `_sfRunDelete`, which asks it after the entries are gone for every door rather than
+      // only for the single-delete path. Deleted rather than left standing: it was orphaned BY
+      // this change, so it is this work's residue, not the deferred sweep in [B-428].
       // Bulk delete: composes the single-delete flow over the selected set.
       // Pre-computes which sources will be orphaned (all their entries are in
       // the selection) so the confirm dialog can honestly say how many source
@@ -39155,6 +39077,128 @@ require(['vs/editor/editor.main'], function () {
             .catch((e) => ({ ok: false, error: String(e && e.message || e) }));
           if (!rev || rev.ok === false) promptError('Could not open the folder', (rev && rev.error) || one.destPath);
         }
+      };
+
+      // ⭐⭐ THE ONE DELETE RUNNER. [B-420, 2026-09-23]
+      // His call, refusing a separate entry for it: *"I thought we got rid of the concept of
+      // bulk/single and it's all the same"* and *"that's just generating technical debt for
+      // something we were already doing."*
+      //
+      // ⚠️ THE EXPORT SIDE COLLAPSED AND THE DELETE SIDE NEVER DID. `_sfRunSourceExport` takes
+      // `sources: [...]` and 1 or 100 is one operation with one bar. Delete had THREE flows with
+      // THREE deleteEntry loops (renderer 33081, 38094, 40857) and THREE deleteSource calls
+      // (33085, 38107, 40869), each re-implementing delete-the-entries-then-clean-up-the-source.
+      // ⭐ The tell he spotted from outside the code: one door called its destination `exportDir`
+      // and another `bulkExportDir`, and I pasted the wrong one in while collapsing their endings.
+      // ⚠️ AND THEY WERE ALREADY DRIVING THE SAME DOM MODAL - `modal-sf-bulk-progress` - through two
+      // different helpers. The duplication was never in the markup, only in the orchestration.
+      //
+      // CONTRACT: the door COLLECTS, the runner does the rest.
+      //   names    - entry names to delete
+      //   sources  - [{ uuid, label }] to remove afterwards. NULL means "work it out": delete the
+      //              names first, then remove any source left with no entries pointing at it. That
+      //              is the single-delete behaviour, and it must stay dynamic because whether a
+      //              source is orphaned is only knowable after its last entry is gone.
+      //   export   - { want, destDir, label }. One export operation for 1 or N sources, exactly as
+      //              the export side already works.
+      // Returns { ok, failures, exportResult } and SPEAKS ONCE through _sfDeleteOutcome.
+      const _sfRunDelete = async ({ names = [], sources = null,
+                                    wantExport = false, destDir = '', label = '' } = {}) => {
+        const failures = [];
+        let exportResult = null;
+
+        // ── 1. Export first, if asked. One operation, whatever the count. ──
+        if (wantExport && destDir) {
+          const srcList = (sources && sources.length)
+            ? sources
+            : await _sfSourcesBehind(names);
+          if (srcList.length) {
+            const xr = await _sfExportSourceBeforeDelete(
+              srcList, true, destDir, label || (srcList[0] && srcList[0].label) || '');
+            // ⚠️ A refused or cancelled export ABORTS THE DELETE. That guarantee is the reason the
+            // export runs first at all, and every door claimed it separately before this.
+            if (!xr) return { ok: false, aborted: true, failures, exportResult: null };
+            exportResult = xr;
+          }
+        }
+
+        // ── 2. The entries. ──
+        for (let i = 0; i < names.length; i++) {
+          // ⭐ Delayed raise: a one-font delete finishes inside the gate and never shows a modal,
+          // while a real cascade shows one and keeps retitling it. showAfter is idempotent.
+          _sfDeleteProgress.showAfter(180,
+            names.length > 1 ? `Deleting fonts (${i + 1} of ${names.length})` : 'Deleting fonts',
+            names[i], i / names.length);
+          try {
+            const r = await window.electronAPI.deleteEntry({ name: names[i] });
+            if (!r || !r.ok) failures.push({ name: names[i], error: (r && r.error) || 'unknown error' });
+          } catch (err) {
+            failures.push({ name: names[i], error: String(err && err.message || err) });
+          }
+        }
+        if (names.length) _sfAutoClearOnEmpty = true;  // the view may now be empty; let it auto-clear
+
+        // ── 3. The sources. ──
+        // ⚠️ RESOLVED AFTER the entries are gone when the caller did not name them. A source is
+        // orphaned only once its last entry has actually been deleted, so asking earlier gets the
+        // wrong answer - which is why _sfDeleteEntryAndCleanup always checked at this point.
+        const srcs = sources !== null ? sources : await _sfOrphanedSourcesAmong(names);
+        for (let i = 0; i < srcs.length; i++) {
+          _sfDeleteProgress.showAfter(180,
+            srcs.length > 1 ? `Removing source archives (${i + 1} of ${srcs.length})` : 'Removing source',
+            srcs[i].label || '');
+          try {
+            const r = await window.electronAPI.deleteSource({ uuid: srcs[i].uuid });
+            if (!r || !r.ok) failures.push({ name: srcs[i].label || srcs[i].uuid, error: (r && r.error) || 'unknown error' });
+            else _sfSourceCandidatesCache.delete(srcs[i].uuid);
+          } catch (err) {
+            failures.push({ name: srcs[i].label || srcs[i].uuid, error: String(err && err.message || err) });
+          }
+        }
+
+        // ── 4. Say it once. ──
+        if (failures.length) {
+          await _sfDeleteProgress.hide();
+          await _sfShowPartialFailures('Some items failed to delete', failures);
+        } else {
+          await _sfDeleteOutcome({
+            exportResult: exportResult && exportResult.exported ? exportResult : null,
+            autoEject: exportResult && exportResult.wantsEject,
+            fontsDeleted: names.length,
+            sourcesDeleted: srcs.length,
+            destDir, label,
+            // The ending closes the modal itself, paired with opening its dialog in the same task -
+            // closing here first is what put a bare frame on screen.
+            progress: _sfDeleteProgress,
+          });
+        }
+        return { ok: failures.length === 0, failures, exportResult };
+      };
+
+      // Which sources sit behind this set of entry names? Used to decide what an export-first
+      // covers when the caller has not worked it out itself.
+      const _sfSourcesBehind = async (names) => {
+        const seen = new Map();
+        for (const n of names) {
+          const e = _sfAllEntries.find((x) => x.name === n);
+          const uuid = e && e.meta && e.meta.sourceUuid;
+          if (!uuid || seen.has(uuid)) continue;
+          const sm = (_sfAllSourcesByUuid[uuid] && _sfAllSourcesByUuid[uuid].meta) || {};
+          seen.set(uuid, { uuid, label: sm.bundleName || sm.originalName || uuid });
+        }
+        return Array.from(seen.values());
+      };
+
+      // Sources left with nothing pointing at them, asked AFTER the entries are gone.
+      const _sfOrphanedSourcesAmong = async (names) => {
+        const out = [];
+        for (const s of await _sfSourcesBehind(names)) {
+          try {
+            const er = await window.electronAPI.listEntriesBySource({ sourceUuid: s.uuid });
+            if ((((er && er.ok && er.entries) || []).length) === 0) out.push(s);
+          } catch { /* cannot tell — leaving the source is the safe outcome */ }
+        }
+        return out;
       };
 
       const _sfCompletionNotice = async ({ title, message, destDir }) => {
@@ -40884,182 +40928,29 @@ require(['vs/editor/editor.main'], function () {
           if (!pick || !pick.ok) return false;
           bulkExportDir = pick.destDir;
         }
-        // Bulk progress modal: one bar advancing across all the steps below
-        // (exports, entry deletes, source deletes). The copy phase is the
-        // slow one, but unifying the bar keeps the UI from flashing on/off
-        // when the user opted out of save-to-Downloads.
-        const progModal = document.getElementById('modal-sf-bulk-progress');
-        const progTitle = document.getElementById('sf-bulk-progress-title');
-        const progDetail = document.getElementById('sf-bulk-progress-detail');
-        const progBar = document.getElementById('sf-bulk-progress-bar');
-        const totalSteps = (wantExport ? sourcesToRemove.length : 0) + names.length + sourcesToRemove.length;
-        let stepIdx = 0;
-        const showProgress = (title, detail) => {
-          if (progTitle) progTitle.textContent = title;
-          if (progDetail) progDetail.textContent = detail;
-          if (progBar) progBar.style.width = totalSteps > 0
-            ? `${Math.min(100, Math.round((stepIdx / totalSteps) * 100))}%`
-            : '0%';
-        };
-        const hideProgress = () => progModal?.classList.remove('active');
-        showProgress('Working…', '');
-        progModal?.classList.add('active');
-        // Export sources first if the user opted in. If any export fails,
-        // abort the delete so the user has a chance to retry — matches the
-        // single-delete flow's "nothing was deleted" guarantee.
-        // ── ⭐⭐ ONE EXPORT OPERATION, NOT A LOOP ───────── [B-420, 2026-09-23, his design]
-        //
-        // THIS USED TO BE A `for` OVER THE SOURCES, calling the single-source export once each and
-        // feeding THIS modal's bar a step count - "Exporting sources (3 of 4)" - with the source
-        // name on the detail line. No bytes, no filenames, on the slowest operation in the app.
-        // It also meant a cancel at three of four left two finished archives at the destination
-        // while telling the user nothing was deleted: a half state they had to go and inspect.
-        //
-        // ⭐ HIS RE-SCOPE: "the caller (delete) hands over 1 or many sources to export. we do it
-        // and return back what we've exported. that gives delete the go ahead to complete." So the
-        // export is one operation with one bar over the whole job, and this flow's own modal steps
-        // aside for its duration rather than competing with it.
-        // ⚠️ AND A CANCEL IS ALL OR NOTHING NOW: main removes the archives that already landed, so
-        // the "nothing was deleted" guarantee this block always claimed is finally matched by a
-        // "nothing was copied" that is equally true.
-        let _exportResult = null;            // what landed, for the ending to report [2026-09-23]
-        if (wantExport) {
-          hideProgress();                      // the export owns the screen for its duration
-          try {
-            const er = await _sfRunSourceExport({
-              sources: sourcesToRemove.map((s2) => ({ uuid: s2.uuid, label: s2.label })),
-              destDir: bulkExportDir,
-              blockedDelete: true,             // declared: this export gates a delete
-              includeAttachments: true,        // last copy - same reason as the single-delete path
-              includeCustomized: true,         // and the edits exist nowhere else ([B-311])
-            });
-            if (er && er.canceled) {
-              // ⚠️ The space refusal already carried the sentence itself; every other way out
-              // needs the stopped notice to say it.
-              if (!er.refusedForSpace) {
-                await _sfExportStoppedNotice({
-                  wrote: 0, what: 'sources', blockedDelete: true,
-                  removedPartial: (er.rolledBack || 0) > 0,
-                  leftovers: er.leftovers || [],
-                });
-              }
-              return false;
-            }
-            if (!er || !er.ok) {
-              await promptError('Could not export the sources',
-                `${(er && er.error) || 'unknown error'}
-
-Nothing was deleted.`);
-              return false;
-            }
-            // ⚠️⚠️ THE EJECT TICK IS READ HERE OR NOT AT ALL. [B-420] `_sfDeleteProgress.show()`
-            // calls `clearEject()` every time the modal OPENS, and the delete phase below reopens
-            // it - so by the time the ending runs, the box the user ticked during the export has
-            // been reset. Correct behaviour in general (a stale tick must never eject a card the
-            // next run did not ask about); wrong for one operation that spans two opens.
-            // ⭐ Captured as INTENT on the result, so the ending asks what the user wanted rather
-            // than re-reading a control that has since been cleared.
-            _exportResult = { ...er, wantsEject: _sfDeleteProgress.wantsEject() };
-          } catch (err) {
-            await promptError('Could not export the sources',
-              `${err && err.message || err}
-
-Nothing was deleted.`);
-            return false;
-          }
-          // ⚠️ Put OUR modal back: the delete phase below drives it, and the export just took the
-          // screen away. Same discipline the destination preflight follows - whoever takes the
-          // screen gives it back.
-          showProgress('Working…', '');
-          progModal?.classList.add('active');
-          stepIdx += sourcesToRemove.length;
-        }
-        // Delete entries first, then the orphaned sources. Collect per-item
-        // failures and surface at the end so one failure doesn't abort the
-        // rest — partial cleanup is better than all-or-nothing for bulk.
-        const failures = [];
-        for (let i = 0; i < names.length; i++) {
-          const name = names[i];
-          showProgress(`Deleting fonts (${i + 1} of ${names.length})`, name);
-          try {
-            const r = await window.electronAPI.deleteEntry({ name });
-            if (!r || !r.ok) failures.push({ name, error: (r && r.error) || 'unknown error' });
-          } catch (err) {
-            failures.push({ name, error: String(err && err.message || err) });
-          }
-          stepIdx++;
-          showProgress(`Deleting fonts (${i + 1} of ${names.length})`, name);
-        }
-        for (let i = 0; i < sourcesToRemove.length; i++) {
-          const src = sourcesToRemove[i];
-          showProgress(`Removing source archives (${i + 1} of ${sourcesToRemove.length})`, src.label);
-          try {
-            const r = await window.electronAPI.deleteSource({ uuid: src.uuid });
-            if (!r || !r.ok) failures.push({ name: src.label, error: (r && r.error) || 'unknown error' });
-            else _sfSourceCandidatesCache.delete(src.uuid);
-          } catch (err) {
-            failures.push({ name: src.label, error: String(err && err.message || err) });
-          }
-          stepIdx++;
-          showProgress(`Removing source archives (${i + 1} of ${sourcesToRemove.length})`, src.label);
-        }
-        // !! NOT HIDDEN HERE ON SUCCESS. The ending resolves the eject target over IPC before its
-        // dialog can open, and closing first leaves the screen bare for that round trip - the flash
-        // he reported. It closes this modal itself, paired with the open, in the same task.
-        _sfAutoClearOnEmpty = true; // bulk delete may empty the filtered view — let the next render auto-clear
-        if (failures.length) {
-          hideProgress();
-          await _sfShowPartialFailures('Some items failed to delete', failures);
-          // Prune successfully-deleted names so retry won't fail on
-          // not-found errors; keep the actual failures selected for the
-          // user to investigate.
-          const failedNames = new Set(failures.map(f => f.name));
-          for (const n of [..._sfSelectedNames]) {
-            if (!failedNames.has(n)) _sfSelectedNames.delete(n);
-          }
+        // ⭐⭐ ONE RUNNER, AND THIS DOOR LOSES THE MOST TO IT. [B-420] It drove the SAME modal
+        // (`modal-sf-bulk-progress`) through its own private showProgress/hideProgress pair, ran its
+        // own export call, its own loop over the entries, its own loop over the sources, and its own
+        // failure handling. All of that was a second implementation of the sequence the other two
+        // doors also each had a copy of. Everything above this line is COLLECTING; the runner does
+        // the rest and speaks once.
+        // ⚠️ `sourcesToRemove` is NAMED, not derived - it was computed from the selection above,
+        // where a source qualifies because every one of its entries is in the selection. Letting the
+        // runner re-derive it would ask a subtly different question.
+        const _dr = await _sfRunDelete({
+          names, sources: sourcesToRemove,
+          wantExport, destDir: bulkExportDir,
+        });
+        if (_dr.aborted) return false;
+        if (_dr.failures.length) {
+          // Prune successfully-deleted names so a retry does not fail on not-found; keep the real
+          // failures selected for the user to look at.
+          const failedNames = new Set(_dr.failures.map((f) => f.name));
+          for (const n of [..._sfSelectedNames]) if (!failedNames.has(n)) _sfSelectedNames.delete(n);
           await window.refreshSoundFontsView();
           return true;
         }
-        // ── ⭐⭐ SAY WHAT WAS DONE. [2026-09-23, his report: "the delete didn't give a summary of
-        // what was done... should have also brought in the return from the export first results"]
-        //
-        // This flow only ever spoke on FAILURE - on success it cleared the selection and
-        // refreshed, silently. That was survivable while the export phase reported nothing worth
-        // carrying; it stopped being survivable once the export began returning WHERE each
-        // archive landed and how big it was, which is the one fact nothing else on screen can
-        // ever tell them.
-        //
-        // ⭐ HIS RULES, all three:
-        //   1. "doesn't appear on nothing exported. it can toast instead." - a plain delete is
-        //      already visible in the cards disappearing; a modal would restate the screen.
-        //   2. "show in folder is good and conditional" - it only means anything when an export
-        //      actually produced a folder to show.
-        //   3. The export's results reach here by being RETURNED to the caller, which is what
-        //      `exported[]` is for. The ending reads the artifact, never re-derives it.
-        {
-          // ⭐ THE SHARED ENDING. [B-420] This door had the summary RIGHT - it is where his three
-          // rules were first written down - and still had no eject row, so a bulk delete-and-export
-          // to a card left the ticked checkbox with nothing to press. Rather than add the row here
-          // and leave four doors each owning a copy of the same decision, the whole block moved into
-          // `_sfDeleteOutcome` and every door calls it. His rule: "shouldn't matter where I delete
-          // from." The three rules themselves now live in that function's header, with him quoted.
-          await _sfDeleteOutcome({
-            exportResult: _exportResult,
-            autoEject: _exportResult && _exportResult.wantsEject,
-            fontsDeleted: names.length,
-            sourcesDeleted: sourcesToRemove.length,
-            // ⚠️ `bulkExportDir`, NOT `exportDir` - this door names it differently, and my first cut
-            // pasted the other door's variable straight in. `node --check` passes that happily; it
-            // would have been a ReferenceError the first time anyone bulk-deleted. Same trap as the
-            // regex rewrite that clobbered the delete handler earlier today: a name that exists
-            // somewhere else in the file is not a name that exists HERE.
-            destDir: bulkExportDir,
-            // !! This door owns its OWN modal, not _sfDeleteProgress, so it hands over the two
-            // closes the ending needs. There is no minimum-display floor here, so both are the
-            // same call - the distinction only matters where hide() enforces one.
-            progress: { hide: hideProgress, hideNow: hideProgress },
-          });
-        }
+
         _sfSelectedNames.clear(); _sfBulkIncludeTracks = null;   // [B-287]
         await window.refreshSoundFontsView();
         return true;
