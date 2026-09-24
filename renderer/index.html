@@ -6872,6 +6872,21 @@
       <div class="sf-import-progress-bar indeterminate"></div>
     </div>
     <p class="sf-import-hint" style="margin-top:6px; color: var(--c-text-muted);">Backups can take a while. Don't close the app until it finishes. You can Cancel if you change your mind.</p>
+    <!-- ⭐⭐ THE AUTO-START COUNTDOWN. [B-420, 2026-09-24] Asked: "they already selected a
+         location... they don't have to respond", and the work should not be held up by a dialog
+         nobody is standing in front of.
+         ⚠️ THE PATTERN IS ONLY LEGITIMATE BECAUSE THE AUTO ACTION IS THE SAFE ONE. The destination
+         was chosen before this screen opened, so proceeding is what the user already asked for -
+         this is the macOS "will restart automatically in..." shape, not a decision being made on
+         their behalf. A countdown must never fire a destructive or irreversible action, which is
+         why this lives here and on no other dialog.
+         ⚠️ WCAG 2.2.1 Timing Adjustable is Level A and applies: a time limit has to be turn-off-able,
+         adjustable or extendable. Satisfied by TURN OFF - any interaction with this dialog stops the
+         countdown permanently and the button goes back to being an ordinary button.
+         ⚠️ aria-live="polite" and NOT on the button: announcing a label that changes every second
+         makes a screen reader unusable. The status line announces at start and once near the end. -->
+    <p class="sf-import-hint" id="sf-backup-prep-auto" role="status" aria-live="polite"
+       style="display:none; margin-top:6px; color: var(--c-text-muted);"></p>
     <div class="modal-btns" style="margin-top: 18px">
       <button class="modal-btn-cancel" id="sf-backup-prep-cancel">Cancel</button>
       <button class="modal-btn-primary" id="sf-backup-prep-start" disabled>Start export</button>
@@ -13499,6 +13514,21 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     if (els.guidedBackBtn)   els.guidedBackBtn.style.display   = 'none';
     if (els.guidedImportBtn) els.guidedImportBtn.style.display = phase === 'guided' ? '' : 'none';
     if (els.doneBtn)   els.doneBtn.style.display   = phase === 'summary' ? '' : 'none';
+    // ⭐⭐ THE OFFER BELONGS TO ONE PHASE, AND IT NOW SAYS SO HERE RATHER THAN AT THREE CALL SITES.
+    // [B-294, 2026-09-24] It was set to '' when analyze started and back to 'none' at two other
+    // places, and nothing hid it for the REVIEW screen - so "Continue to quick import without
+    // review" sat under a dialog already offering Quick import and Review Import as buttons. The
+    // report: *"you don't need continue to quick import without review when you're already on
+    // this page."* A pre-commitment to skip a question is meaningless once the question is on
+    // screen being asked.
+    // ⚠️ Every other control in this dialog was already phase-driven from here; the checkbox was
+    // the one exception, which is precisely why it was the one that leaked. A rule spread across
+    // call sites is a rule that the next phase forgets.
+    // ⚠️ `runInFlight` too, not phase alone: the import RUN reuses the 'progress' phase, and by
+    // then there is no review left to skip, so the offer would describe a choice that is gone.
+    if (els.progAutoWrap) {
+      els.progAutoWrap.style.display = (phase === 'progress' && !runInFlight) ? '' : 'none';
+    }
     // Cancel is the escape on every working phase (incl. guided, alongside Back);
     // only the summary hides it (Done takes over). On guided, Back steps to the
     // stats screen while Cancel abandons the whole operation.
@@ -14878,9 +14908,9 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     // advances WITHIN each source via the analyze pass's sub-progress instead
     // of stepping once per source.
     showPhase('progress');
-    // [B-294] The mid-flight offer, seeded from the explain screen so a box already ticked stays
-    // ticked rather than silently resetting the decision they already made.
-    if (els.progAutoWrap) els.progAutoWrap.style.display = '';
+    // [B-294] The mid-flight offer is seeded from the explain screen so a box already ticked stays
+    // ticked rather than silently resetting the decision they already made. Its VISIBILITY is
+    // showPhase's now — only the checked state is set here.
     if (els.progAuto) els.progAuto.checked = !!_bulkAutoContinue;
     const total = plan.sources.length;
     // [B-295] name the cost where the hand hovers: nothing is imported
@@ -15681,7 +15711,6 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     // "it is just too fast to see" — he was right, it was never on screen.)
     els.modal?.classList.add('active');
     showPhase('progress');
-    if (els.progAutoWrap) els.progAutoWrap.style.display = 'none';
     await showReview({
       rootDir: absPath,
       _displayRoot: name,
@@ -15735,11 +15764,10 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       if (!fresh.length && !_otherWork) { closeModal(); return; }
       runPlan = { ...runPlan, sources: fresh };
     }
+    // ⚠️ SET BEFORE showPhase, AND THAT ORDER IS NOW LOAD-BEARING: showPhase reads `runInFlight`
+    // to decide whether the quick-import offer still means anything. [B-294]
     runInFlight = true;
     showPhase('progress');
-    // [B-294] Gone once the import is actually running: there is no review left to skip, so the
-    // offer would be describing a choice that no longer exists.
-    if (els.progAutoWrap) els.progAutoWrap.style.display = 'none';
     // [B-295] during the run, what's at risk is the analysis of the fonts
     // that haven't LANDED yet — everything imported so far is safe, and the
     // tooltip says both halves because saying one reads as both.
@@ -26493,6 +26521,20 @@ require(['vs/editor/editor.main'], function () {
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
+
+      // ⭐ THE PATH-AS-LINK PATTERN, lifted from the import closeout rather than reinvented.
+      // [2026-09-24] Same markup it has used all along: JMT blue, underlined, opens the folder.
+      // ⚠️ IT IS NOT A BUTTON, and that is the point: a completion summary's primary action is
+      // "Done", revealing a folder is the occasional follow-up, and it belongs in the sentence
+      // where the path has to be printed anyway.
+      // ⚠️ DEFINED HERE, ABOVE EVERY USE. It first sat beside the delete ending and was called
+      // from the export ending six thousand lines earlier - which runs only because a click
+      // handler cannot fire before the module finishes evaluating. This project has already lost
+      // a live flash to a renderer ReferenceError no check it runs could see; ordering that is
+      // true beats ordering that merely happens to work.
+      const _sfPathLinkHtml = (p) => `<a href="#" class="sf-open-path" data-path="${_sfEscape(p)}"`
+        + ' style="color:var(--jmt-blue);text-decoration:underline;cursor:pointer;'
+        + `word-break:break-all;">${_sfEscape(p)}</a>`;
       window.refreshSoundFontsView = async () => {
         await _refreshSoundFontsToggleLock();
         const layerNoFonts = document.getElementById('sf-empty-nofonts');
@@ -32937,8 +32979,12 @@ require(['vs/editor/editor.main'], function () {
             : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
           lines.push(`<span style="color:var(--c-text-sub)">Includes your ${list}.</span>`);
         }
-        lines.push(`<span style="opacity:.75;font-family:monospace;font-size:12px;word-break:break-all;">${esc(one.destPath)}</span>`);
-        // ⚠️ WHEN A PROGRAM WAS FOUND, THE REVEAL BUTTON LOSES ITS SLOT ([B-364], his
+        // ⭐ THE PATH IS A LINK, not dead monospace beside a blue button. [2026-09-24] Same pattern
+        // the import closeout has always used, and now the delete ending too: the destination is
+        // printed anyway, so it may as well be the thing you click. That is what let the "Show in
+        // folder" button leave the row without losing the affordance.
+        lines.push(_sfPathLinkHtml(one.destPath));
+        // ⚠️ WHEN A PROGRAM WAS FOUND, THE REVEAL BUTTON LOSES ITS SLOT ([B-364], the
         // call 2026-09-11: "the view location goes away because we need this answer.
         // More importantly, so this overwrites that"). Browsing to the destination is a
         // convenience; deciding what happens to a program sitting in the library is the
@@ -32975,13 +33021,21 @@ require(['vs/editor/editor.main'], function () {
         // and silently failed on the other. main now returns destDir on each exported record.
         const _ejCtx = await _sfEjectContext(one.destDir || one.destPath).catch(() => ({}));
         const _ejRow = _ejCtx.ejectTarget ? _sfEjectRowHtml(_ejCtx.ejectTarget, _ejCtx.ejectVocab) : '';
+        // ⚠️⚠️ SAME RULING AS THE DELETE ENDING, APPLIED HERE TOO. [2026-09-24] "Show in folder" was
+        // the blue primary and Done was the quiet one. The call, on the delete dialog first and
+        // then on this one: *"def not the primary button in blue... done is."* After a completion
+        // summary the likely next act is "I am finished"; revealing a folder is the occasional
+        // follow-up, and painting it blue puts the rare choice where the eye lands.
+        // ⚠️ THIS IS THE SECOND ENDING WITH THE SAME CONVENTIONS AND THEY ARE STILL TWO FUNCTIONS.
+        // `_sfDeleteOutcome` and this one both build a completion summary, both print a path, both
+        // offer an eject. Fixing the same thing twice in one afternoon is the tell that they want
+        // to be one - worth doing deliberately rather than folding into a copy fix.
         const _showP = promptConfirm({
           title: 'Export complete',
           messageHtml: lines.join('<br><br>') + _ejRow,
-          confirmText: 'Show in folder',
+          confirmText: 'Done',
           confirmKind: 'primary',
-          cancelText: 'Done',
-          cancelKind: 'cancel',
+          hideCancel: true,
         });
         // ⭐ Wired AFTER the dialog renders, the same as every other eject row - the modal is live
         // DOM, so the eject reports INTO it rather than replacing it. Placed in the button bar so
@@ -32990,12 +33044,17 @@ require(['vs/editor/editor.main'], function () {
           _sfPlaceEjectRowInButtons();
           _sfWireEjectRow({ target: _ejCtx.ejectTarget, vocab: _ejCtx.ejectVocab, auto: _ejCtx.ejectAuto });
         }
-        const showIt = await _showP;
-        _sfRemoveEjectRow();
-        if (showIt === true) {
-          const rev = await window.electronAPI.showItemInFolder(one.destPath).catch((e) => ({ ok: false, error: String(e && e.message || e) }));
-          if (!rev || rev.ok === false) promptError('Could not open the folder', (rev && rev.error) || one.destPath);
+        // ⚠️ The confirm is "Done", so it closes and nothing else. The folder opens from the path
+        // link in the summary, wired at render. Renaming a button without following its wire is
+        // what made Done open a folder explorer on the delete dialog an hour ago.
+        for (const a of document.querySelectorAll('.sf-open-path')) {
+          a.addEventListener('click', (e) => {
+            e.preventDefault();
+            try { window.electronAPI.showItemInFolder(a.getAttribute('data-path')); } catch {}
+          });
         }
+        await _showP;
+        _sfRemoveEjectRow();
       });
       // Delete source with cascade warning.
       _sfSourceDetailEls.deleteBtn?.addEventListener('click', async () => {
@@ -35331,7 +35390,30 @@ require(['vs/editor/editor.main'], function () {
         //
         // *** So the condition is about the SURFACE now, not the word, and it is opt-IN: a door
         // that forgets keeps the eject rather than losing it. The default has to fail safe.
-        if (destDir && !summaryHasEject) await _sfOfferEjectInToast(destDir);
+        // ⚠️⚠️ A DOOR WITH NO SUMMARY MUST STILL SAY IT FINISHED. [2026-09-24]
+        // Reported: *"isn't there supposed to be a toast when completed? didn't see one on multi
+        // selected tracks right click export... same on font files right click export. so I think
+        // its the whole funnel"* - then the diagnosis in the own next line: *"only comes up when
+        // card for eject."*
+        // ⭐ THE CAUSE IS THAT THE ONLY COMPLETION FEEDBACK WAS A SIDE EFFECT OF THE EJECT OFFER.
+        // `_sfOfferEjectInToast` returns early when the destination is not ejectable, and for the
+        // four funnel doors nothing else spoke at all - so exporting to a plain folder finished in
+        // total silence while exporting to a card said "Exported to ...". The success message was
+        // riding on a feature that is conditional by definition.
+        // ⚠️ ONE SENTENCE EITHER WAY, never two toasts: the eject version is the same sentence
+        // with an action attached, so the fallback only runs when it declined to speak.
+        // ⭐ ONE SENTENCE, AND IT SAYS WHAT WENT. The follow-up after the silence was fixed:
+        // *"even on eject should have had Exported ___ files to __ ... only on eject we get the
+        // button too."* So the count is not the eject path's to add or drop - the message is the
+        // same either way and the eject only contributes the ACTION.
+        // ⚠️ Same count the cancel notice already uses, from the same fields, so a finished export
+        // and a stopped one cannot disagree about how many files there were.
+        if (destDir && !summaryHasEject) {
+          const _n = (r.written || []).length || r.wroteCount || 0;
+          const _noun = _n === 1 ? what.replace(/s$/, '') : what;
+          const _lead = _n ? `Exported ${_n} ${_noun}` : 'Exported';
+          await _sfOfferEjectInToast(destDir, _lead);
+        }
         return true;
       };
 
@@ -37003,6 +37085,12 @@ require(['vs/editor/editor.main'], function () {
           // did not happen, which is exactly the gap his rule closed. [2026-09-23]
           blockedDelete,
           onCancel: _sfExportCancelOpt.onCancel,
+          // ⚠️ THE OPENING STRETCH IS NOT IDLE AND IT IS NOT MEASURABLE. Before the first byte is
+          // written this door opens the source and reads the leading bytes of every file in it to
+          // be sure none is a disguised program. Measured ~60 ms on a 198 file source, ~520 ms on a
+          // 2,397 file one — short, and long enough to read as a stall when it is silent with a
+          // zeroed byte count under an empty bar. Same word the import side already uses.
+          startLabel: 'Cataloging files',
           // ⭐ SIZE THE WHOLE JOB. Main sizes it again for its own preflight, and that is not a
           // duplicate measurement of the same thing - this one feeds the BAR and the runner's
           // destination check, main's is the backstop for callers that never pre-flight.
@@ -37032,7 +37120,11 @@ require(['vs/editor/editor.main'], function () {
           // the granular progress".
           subscribe: (sink) => window.electronAPI.onSourceExportProgress((p) => {
             if (!p) return;
-            const PHASE = { reading: 'Reading files', reconstruct: 'Rebuilding', compress: 'Compressing',
+            // ⚠️ 'reading' WAS "Reading files" AND IS NOW "Cataloging files". [2026-09-24] The
+            // pass opens the source and inspects every file's leading bytes; "reading" described
+            // the mechanism, and the import side has called this same stage "Cataloging files"
+            // since before this door existed. One word for one thing, and it is already the.
+            const PHASE = { reading: 'Cataloging files', reconstruct: 'Rebuilding', compress: 'Compressing',
                             // ⚠️ NAMED, because an unnamed phase is why this one read as a hang.
                             // It is the tag-writing repack that runs after the archive is built.
                             // ⚠️ NOT "curation", and not two names. [2026-09-23] These passes carry the
@@ -37053,7 +37145,19 @@ require(['vs/editor/editor.main'], function () {
             // where we see the name of the font followed by the files on the same line... or can
             // put the bytes after that on that same line since we're showing more details".
             const _fb = window._sfFormatBytes || ((n) => `${n} B`);
-            const _bytes = (typeof p.bytesDone === 'number' && p.totalBytes)
+            // ⭐⭐ THE CATALOGUE PASS HAS NO BYTES, SO IT SHOWS NONE. [B-420, 2026-09-24]
+            // Before compression there is real work that cannot be measured: opening the source,
+            // and reading the first 256 bytes of every file in it to be sure none is a disguised
+            // program. It used to emit nothing at all, so the bar sat at `0 B of 805.0 MB` with no
+            // label - reported: *"this odd phase that appears like nothing... I don't get it."*
+            // ⚠️ AND NAMING IT WAS ONLY A THIRD OF THE FIX. Ruled: *"no bytes showing when there
+            // are none"* - a zeroed byte line beside a motionless bar is a measurement being
+            // claimed where there is none. The phase declares itself unsized, so the runner draws
+            // a moving bar, the filename and the clock, and no number.
+            // ⭐ "Cataloging files" is the app's OWN word for this pass - the import side has used
+            // it for the same stage since before this door existed. Reused, not invented.
+            const _unsized = p.phase === 'reading';
+            const _bytes = (!_unsized && typeof p.bytesDone === 'number' && p.totalBytes)
               ? `${_fb(p.bytesDone)} of ${_fb(p.totalBytes)}` : null;
             // ⚠️ "(1 of 2)" ONLY WHEN THERE IS MORE THAN ONE. On a single source it is noise -
             // the same suppression rule the rest of the app follows for counts of one.
@@ -37075,6 +37179,10 @@ require(['vs/editor/editor.main'], function () {
               label: parts.join(' · ') || null,
               frac: _raw == null ? null : _fracFloor,
               name: p.currentFile || '',
+              // ⚠️ Declared per tick. The moment a compress tick arrives this goes false and the
+              // determinate bar takes over — see the note on the runner's flag for why it must
+              // not latch.
+              unsized: _unsized,
             });
           }),
           produce: async () => {
@@ -37249,7 +37357,14 @@ require(['vs/editor/editor.main'], function () {
           const a = this.actionsEl(), b = this.cancelEl();
           if (!a || !b) return;
           b.disabled = false;
-          b.textContent = 'Cancel';
+          // ⚠️⚠️ `_btnIdle`, NOT `textContent =`. [2026-09-24] Setting the label alone leaves
+          // `.busy-dots` attached from a PREVIOUS cancel, so the button offered an animating
+          // "Cancel..." before anyone had clicked it - caught: *"the cancel isn't supposed to
+          // have the animated dots when it's not clicked."* The class is session-sticky, so one
+          // cancel poisoned every export after it.
+          // ⭐ `_btnBusy` has a partner and it exists for exactly this. Reaching for one without
+          // the other is how a working-state class becomes a permanent one.
+          _btnIdle(b, 'Cancel');
           b.style.display = '';
           b.onclick = async () => {
             // ⭐⭐ THE BAR MUST STOP PRETENDING. [B-005 item 4] His report: "this may or may not
@@ -37273,7 +37388,19 @@ require(['vs/editor/editor.main'], function () {
             // not a modal that vanishes while the copy is still going. Same promise bulk
             // import already makes, same words.
             b.disabled = true;
-            b.textContent = 'Cancelling… (finishing current file)';
+            // ⚠️ THIS WAS A LITERAL "Cancelling…" AND IT IS ONE OF THE ONES HE MEANT BY "we may
+            // have some missing the animation" [2026-09-24]. `.busy-dots` has existed since
+            // 2026-08-14 precisely because *"a static 'Resetting…' is indistinguishable from a
+            // frozen app"* - and a frozen app is the exact thing a user suspects at the moment
+            // they press Cancel on a long export. The one place the animation mattered most was
+            // the one place still hand-rolling the dots.
+            // ⭐ The parenthetical stays a SEPARATE line rather than riding the button: `.busy-dots`
+            // appends its dots via `::after`, so "Cancelling (finishing current file)..." would put
+            // them after the note instead of after the verb. Button carries the verb, the detail
+            // line carries the promise - which is also where every other bit of prose on this
+            // surface already lives.
+            _btnBusy(b, 'Cancelling');
+            if (_l) _l.textContent = 'Stopping… (finishing the current file)';
             try { await onCancel(); } catch (e) { console.warn('[B-005] cancel did not reach main:', e); }
           };
           this._syncActions();
@@ -37285,7 +37412,9 @@ require(['vs/editor/editor.main'], function () {
           // outright, which was harmless while the row held nothing else - and would now take a
           // live eject checkbox down with it, since the runner calls this in its `finally` even
           // when the modal stays open for a following phase.
-          if (b) { b.onclick = null; b.disabled = false; b.textContent = 'Cancel'; b.style.display = 'none'; }
+          // ⚠️ `_btnIdle` here for the same reason as in offerCancel: this is the reset path, and a
+          // reset that leaves `.busy-dots` on is not a reset. See the note there.
+          if (b) { b.onclick = null; b.disabled = false; _btnIdle(b, 'Cancel'); b.style.display = 'none'; }
           this._syncActions();
         },
 
@@ -37358,7 +37487,16 @@ require(['vs/editor/editor.main'], function () {
           // done, and a static half-full bar reads as a hang the moment the
           // work takes more than an instant. Same class the import and guided
           // bars already use, so no new CSS and no new vocabulary.
-          if (b) {
+          // ⚠️⚠️ A RETITLE MUST NOT UNDO A CANCEL. [2026-09-24] Found by RECONCILING every painter
+          // on this surface against the guard rather than by fixing the one was reported: four
+          // methods write the label or the bar, and two of them had no guard. A running export
+          // calls show() repeatedly to retitle itself ("Exporting (3 of 7)"), so on a multi-item
+          // door the very next item would repaint a determinate bar over a cancel already
+          // acknowledged - the same defect he hit on the archive tail, one method along.
+          // ⚠️ Only when the modal is ALREADY ACTIVE. An opening show() falls through to
+          // clearCancel() below, which is what correctly resets the flag for a new operation.
+          const reopening = !(m && m.classList.contains('active'));
+          if (b && !(this.cancelling && !reopening)) {
             const known = typeof frac === 'number';
             b.classList.toggle('indeterminate', !known);
             if (known) b.style.width = Math.max(0, Math.min(1, frac)) * 100 + '%';
@@ -37398,6 +37536,27 @@ require(['vs/editor/editor.main'], function () {
         // the clock still move, and nothing claims to know how far along it is.
         setIndeterminate(labelText, file, elapsedText) {
           const l = this.labelEl(), b = this.barEl(), d = this.detailEl(), e = this.elapsedEl();
+          // ⚠️⚠️ THE CANCEL GUARD WAS MISSING HERE AND THAT IS THE WHOLE DEFECT. [2026-09-24]
+          // Reported: *"clicking cancel has no visible response... when the file is actually
+          // being created."* `offerCancel` sets `cancelling`, writes "Stopping…" and switches the
+          // bar - and then this method, called by the same render loop every 250 ms, painted the
+          // ordinary label straight back over it. The acknowledgement existed for a quarter of a
+          // second at a time and was never once seen.
+          // ⭐ The ARCHIVE TAIL is exactly the reported case: `tailLabel: 'Finishing the archive…'`
+          // reaches the surface through this method and no other, so the one phase where a cancel
+          // takes longest to land was the one phase that could not report it.
+          // ⚠️⚠️ AND THIS IS THE RULE-BESIDE-ONE-CALLER SHAPE, WRITTEN DOWN IN ITS OWN COMMENT.
+          // `offerCancel` says "Putting the state HERE means setPhase and setProgress honour it for
+          // surfaces nobody has written yet" - it named the two painters that existed. This third
+          // one arrived later with [B-408] and inherited nothing. A guard is not a property of the
+          // methods that happened to be open when it was written.
+          if (this.cancelling) {
+            if (l) { l.style.display = ''; l.textContent = 'Stopping…'; }
+            if (b) { b.classList.add('indeterminate'); b.style.width = ''; }
+            if (d) d.textContent = file || '';
+            if (e) { e.style.display = ''; e.textContent = elapsedText || ''; }
+            return;
+          }
           if (l) { l.style.display = ''; l.textContent = labelText || ''; }
           if (b) { b.classList.add('indeterminate'); b.style.width = ''; }
           if (d) d.textContent = file || '';
@@ -37532,7 +37691,28 @@ require(['vs/editor/editor.main'], function () {
         let done = 0, total = opts.total || 0, currentFile = '';
         // [B-420] A multi-phase door supplies its own sentence and fraction through the sink;
         // null means 'use the byte defaults below'.
-        let labelOverride = null, fracOverride = null;
+        // ⭐ `startLabel` is the sentence for that opening stretch, because the runner cannot know
+        // what a door does before its first tick. Without one the bar moves and says nothing,
+        // which is better than a false number but still not an answer to "what is it doing".
+        let labelOverride = opts.startLabel || null, fracOverride = null;
+        // ⭐⭐ A DOOR CAN DECLARE A PHASE UNSIZED. [B-420, 2026-09-24]
+        // Ruled on the quiet stretch before compression: *"should be a separate phase... with
+        // an indeterminate bar. no bytes showing when there are none and a more appropriate
+        // label."* All three halves matter and the middle one is the honest part — that phase has
+        // no byte progress to report, so showing `0 B of 805.0 MB` under a motionless bar claims a
+        // measurement that does not exist. My first attempt only added a word to the byte line,
+        // which left the false number sitting right next to it.
+        // ⚠️ `frac: null` could not mean this: null already means "not supplied, use the byte
+        // defaults". Unsized is a positive statement about the phase, so it gets its own flag.
+        //
+        // ⚠️⚠️ IT STARTS TRUE, AND THAT IS THE HALF I MISSED FIRST TIME. The frame he kept
+        // photographing was not any door's tick - it was THIS function's opening render, drawn
+        // before a single tick has arrived. `total` is already known from the plan, so it drew
+        // `0 B of 805.0 MB` under a determinate bar pinned at zero. **A job that has not reported
+        // anything yet has nothing to claim**, so it opens unsized and the first real tick turns
+        // it determinate. Same rule as [B-408] one step earlier: an unmeasured thing is not a
+        // measured zero.
+        let unsized = true;
         const render = () => {
           const secs = Math.floor((Date.now() - t0) / 1000);
           const frac = total ? Math.max(0, Math.min(1, done / total)) : 0;
@@ -37548,6 +37728,15 @@ require(['vs/editor/editor.main'], function () {
           // bar would reach 100% with files still to write. Show motion without a claim.
           if (!total) {
             _sfDeleteProgress.setIndeterminate('', currentFile, `${fmtDur(secs)} elapsed`);
+            return;
+          }
+          // ⭐ A DECLARED-UNSIZED PHASE, even though the JOB has a total. The job's denominator is
+          // real and arrives up front; it is this PHASE that cannot be measured, so the bar moves
+          // and the sentence names the work while no number is invented for it. Same reasoning as
+          // the archive tail below, arriving at the other end of the run.
+          if (unsized) {
+            _sfDeleteProgress.setIndeterminate(labelOverride || '', currentFile,
+                                               `${fmtDur(secs)} elapsed`);
             return;
           }
           // ⭐⭐ THE ARCHIVE TAIL NEEDS A DIFFERENT SENTENCE, NOT A BETTER NUMBER. [B-420]
@@ -37581,6 +37770,10 @@ require(['vs/editor/editor.main'], function () {
           if (typeof p.done  === 'number') done  = p.done;
           if (typeof p.total === 'number') total = p.total;
           if (p.name) currentFile = p.name;
+          // ⚠️ A REAL BYTE TICK ENDS THE OPENING STRETCH. Doors on this channel never declare a
+          // phase, so without this the bar opened indeterminate and stayed that way for the whole
+          // run — the opposite failure, and a worse one.
+          unsized = false;
           render();
         });
         // ⚠️ DELTAS ACCUMULATE, absolutes overwrite. Mixing the two on one phase would double
@@ -37593,7 +37786,8 @@ require(['vs/editor/editor.main'], function () {
         const offD = opts.deltas
           ? window.electronAPI.onSoundFontExportProgress(({ delta, name } = {}) => {
               if (name) currentFile = name;
-              if (typeof delta === 'number') { done += delta; render(); }
+              // ⚠️ Same as the absolute channel: a real tick ends the opening unsized stretch.
+              if (typeof delta === 'number') { done += delta; unsized = false; render(); }
             })
           : null;
         // ⭐ A DOOR MAY BRING ITS OWN CHANNEL. [B-420, 2026-09-21] Backup does not report on
@@ -37623,6 +37817,10 @@ require(['vs/editor/editor.main'], function () {
               if (p.name) currentFile = p.name;
               if (typeof p.label === 'string') labelOverride = p.label;
               if (typeof p.frac === 'number') fracOverride = p.frac;
+              // ⚠️ SET ON EVERY TICK, NOT LATCHED. A door leaves an unsized phase by simply
+              // reporting a sized one, so this has to fall back to false the moment it does -
+              // otherwise the first quiet phase would pin the bar indeterminate for the whole run.
+              unsized = p.unsized === true;
               render();
             })
           : null;
@@ -37956,6 +38154,12 @@ require(['vs/editor/editor.main'], function () {
             // counter tracks input consumed, so it fills before the write finishes; a tree's
             // does not. One property of the kind, so no door has to remember it. [B-420]
             tailLabel: kind === 'archive' ? 'Finishing the archive…' : null,
+            // ⭐ THE SENTENCE FOR THE STRETCH BEFORE ANY TICK ARRIVES. [B-420, 2026-09-24]
+            // The runner cannot know what a door does before its first report, and the complaint
+            // was precisely about that gap: *"it shouldn't be showing bytes when it's not even
+            // working on a file."* A door that has setup work to do says so here; one that does
+            // not supplies nothing and gets a moving bar with no sentence, which is still honest.
+            startLabel: door.startLabel || null,
             subscribe: door.subscribe || null,
             onCancel: door.onCancel || null,
             ejectDest: destDir,
@@ -37975,7 +38179,13 @@ require(['vs/editor/editor.main'], function () {
             // ⭐ It also removes the eject-tick reset at the root: the delete phase now retitles an
             // already-open modal instead of opening a second one, and clearEject() only fires on an
             // open. The captured-intent fix stays as the belt to this braces.
-            keepOpen: door.blockedDelete === true,
+            // ⚠️⚠️ A DOOR THAT DRAWS A SUMMARY KEEPS THE MODAL UP, or the runner hides it here and
+            // the summary opens on a bare screen one paint later. That is the flash was reported on
+            // door 1. [2026-09-24] The surface is handed to `_sfCompletionNotice`, which closes it
+            // in the same task as it opens - see the note there.
+            // ⚠️ Belt below: the ending is followed by an unconditional hide, so a door whose
+            // `onCompleted` returns without drawing anything cannot strand the modal on screen.
+            keepOpen: door.blockedDelete === true || typeof door.onCompleted === 'function',
           });
         } catch (e) {
           console.warn('[B-420] produce failed for', door.label, e);
@@ -38077,6 +38287,12 @@ require(['vs/editor/editor.main'], function () {
             summaryHasEject: door.summaryHasEject === true,
           });
         }
+        // ⚠️ THE BELT FOR keepOpen. A summary door now leaves the progress modal up so the notice
+        // can take the surface over without a flash - which means a door whose `onCompleted`
+        // returns WITHOUT drawing anything would strand it on screen forever. Hiding here is a
+        // no-op when the notice already took it, and the difference between a one-frame gap and a
+        // modal nobody can dismiss is not a trade worth leaving to every door to remember.
+        try { await _sfDeleteProgress.hide(); } catch {}
         return out;
       };
 
@@ -38772,10 +38988,35 @@ require(['vs/editor/editor.main'], function () {
       // already supports and already gives a longer timer for.
       // ⚠️ The checkbox works the same way here: ticked means the action fires immediately
       // rather than waiting to be clicked — the automatic case IS the manual case.
-      const _sfOfferEjectInToast = async (destDir) => {
+      // ⚠️ RETURNS WHETHER IT SPOKE. [2026-09-24] The caller needs to know, because for the funnel
+      // doors this was the ONLY completion feedback there was - so a plain folder destination
+      // finished in total silence. See the note at the call site.
+      // ⚠️ THE CALLER OWNS THE SENTENCE, THIS OWNS THE BUTTON. [2026-09-24] It used to compose its
+      // own "Exported to X." AND be the only thing that spoke, so a non-ejectable destination
+      // finished in silence and an ejectable one was the only place a count could have appeared.
+      // Taking `lead` splits those: one message for every destination, the action only where there
+      // is something to eject.
+      const _sfOfferEjectInToast = async (destDir, lead = 'Exported') => {
         try {
           const ctx = await _sfEjectContext(destDir);
-          if (!ctx.ejectTarget) return;
+          if (!ctx.ejectTarget) {
+            // ⚠️ THE FULL PATH, AND AN ACTION INSTEAD OF A LINK. [2026-09-24] Asked:
+            // *"why doesn't it show as a link and a full path? don't we have the room in the
+            // toast for that?"* The room is there and the path is now whole. The LINK is not,
+            // because `showToast` renders with `textContent` by design - making it accept HTML
+            // means teaching a primitive used everywhere in the app to render markup, which is a
+            // real decision and not a detail of this door.
+            // ⭐ The affordance exists already: the toast carries one action button, which is how
+            // Eject rides on it. A removable destination offers Eject, anything else offers Show.
+            // One slot, whichever is the useful thing at that destination.
+            showToast(`${lead} to ${destDir}.`, {
+              action: {
+                label: 'Show',
+                onClick: () => { try { window.electronAPI.showItemInFolder(destDir); } catch {} },
+              },
+            });
+            return false;
+          }
           const t = ctx.ejectTarget;
           const run = async () => {
             let res = null;
@@ -38796,9 +39037,22 @@ require(['vs/editor/editor.main'], function () {
                 const nr = await window.electronAPI.mediaNote({ kind: 'lingerNote', label: res.label });
                 if (nr && nr.ok && nr.note) extra = ' ' + nr.note;
               } catch {}
+              // ⚠️⚠️ THE SAME WORDS THE EJECT ROW USES, AND NO EM DASH. [2026-09-24]
+              // Reported: *"toast after eject didn't follow the conventions on what we learned
+              // when we showed safe to remove. has the old note about might still show bla bla."*
+              // Three things were wrong and one thing was right:
+              //   • an em dash, in a string a user reads [B-375]
+              //   • "safe to unplug" where the eject row beside the button says "Safe to remove."
+              //     Two phrasings for one state, and the row's is the settled one.
+              //   • the linger note hedged: "Windows MAY keep showing ... " reads as uncertainty
+              //     about our own result, which is the tone the whole eject work exists to avoid.
+              // ⭐ AND THE PREMISE IS NOT STALE, which I checked before rewriting it. Measured an
+              // hour after he ejected I:: the letter is STILL listed, as `(no media)`. So the
+              // sentence stays - it is what stopped him reading a success as a failure ("didn't
+              // work. I see it's still connected") - it just states the fact instead of hedging.
               showToast(res.alreadyGone
                 ? `${res.label} was already released.`
-                : `${res.label} ejected — safe to unplug.${extra}`);
+                : `${res.label} ejected. Safe to remove.${extra}`);
               return;
             }
             if (res.status === 'returned') {
@@ -38815,10 +39069,12 @@ require(['vs/editor/editor.main'], function () {
             });
           };
           if (ctx.ejectAuto) { await run(); return; }
-          showToast(`Exported to ${t.label}.`, { action: { label: 'Eject', onClick: run } });
+          showToast(`${lead} to ${t.label}.`, { action: { label: 'Eject', onClick: run } });
+          return true;
         } catch (e) {
           console.warn('[B-005] toast eject offer did not run:', e);
         }
+        return false;
       };
 
       const _sfEjectRowHtml = (target, vocab) => {
@@ -39005,6 +39261,7 @@ require(['vs/editor/editor.main'], function () {
       // deliberate: hide()'s 200 ms floor exists so a fast operation does not flash a modal for two
       // frames, but when a successor goes up immediately that floor holds a finished progress bar
       // OVER the thing replacing it. A toast has no successor modal, so it still wants the floor.
+
       const _sfDeleteOutcome = async ({ exportResult, fontsDeleted = 0, sourcesDeleted = 0,
                                         destDir = '', label = '', autoEject, progress } = {}) => {
         const _closeSoft = async () => {
@@ -39031,52 +39288,60 @@ require(['vs/editor/editor.main'], function () {
         const dir = one.destDir || destDir
           || (one.destPath ? String(one.destPath).replace(/[\/\\][^\/\\]*$/, '') : '');
         const carried = exp.some((x) => x.curation && x.curation.any);
+        // ⚠️⚠️ THIS COPY WAS REWRITTEN AGAINST THE RULES ALREADY WRITTEN DOWN, not against taste.
+        // [B-375 rules, 2026-09-24] The read of the old version: *"those two em dashes are no
+        // good... the source was exported first... is only partway true... nothing about this says
+        // anything about the customized font."* Each maps to a rule this project settled already:
+        //   • **no em dashes in anything a user reads** — there were two in one sentence.
+        //   • **say what was done FOR them, not what the process did** — "The source was exported
+        //     first" describes OUR step ordering. What happened for him is that they now have a copy,
+        //     and where it is. Same correction as "Studio saved you X by Y" (2026-09-05).
+        //   • The customized font is the biggest thing in the archive and went unmentioned, while
+        //     the IMPORT closeout names it explicitly going the other way. One fact, one voice.
+        // ⚠️ The count line stays because it carries what the title does not: that the source
+        // archive went too. A line that only restated the title would earn nothing.
+        const custom = exp.reduce((n, x) => n + ((x.curation && x.curation.customized) || 0), 0);
         const lines = [
           `<strong>${_sfEscape(fonts)}${_sfEscape(srcs)}</strong> removed.`,
           (exp.length === 1
-            ? `The source was exported first${label ? ` — <strong>${_sfEscape(label)}</strong>` : ''}`
-            : `All ${exp.length} sources were exported first`)
-            + (dir ? ` to <span style="opacity:.75;font-family:monospace;font-size:12px;word-break:break-all;">${_sfEscape(dir)}</span>` : '')
-            + (bytes ? ` — ${_sfEscape(fmtB(bytes))}` : '') + '.',
-          carried
-            ? '<span style="color:var(--c-text-sub)">The copy carries your notes, tags and links, so re-importing it brings them back.</span>'
+            ? `Your copy of <strong>${_sfEscape(label || one.label || 'the source')}</strong> is saved`
+            : `Your copies of all ${exp.length} sources are saved`)
+            + (dir ? ` to ${_sfPathLinkHtml(dir)}` : '')
+            + (bytes ? ` (${_sfEscape(fmtB(bytes))})` : '') + '.',
+          // ⚠️⚠️ ONE SENTENCE, NOT TWO. [2026-09-24] My first cut added the customized-font fact as
+          // its own paragraph beside the existing one, and both ended in "so re-importing brings it
+          // back" - caught: *"why two paragraphs that talk about reimporting?"* They are not two
+          // facts, they are one list and one consequence. **I broke the restates-what-is-already-
+          // there rule inside the change that was fixing the other violations of it**, which is
+          // what adding a sentence rather than rewriting the sentence gets you.
+          (carried || custom)
+            ? '<span style="color:var(--c-text-sub)">The copy carries your notes, tags and links'
+              + (custom === 1 ? ' and the customized font'
+                 : custom > 1 ? ` and ${custom} customized fonts` : '')
+              + ', so re-importing brings it all back.</span>'
             : null,
         ].filter(Boolean);
 
         // ⭐ THE ROUND TRIP HAPPENS WHILE THE PROGRESS MODAL IS STILL UP. Resolving the eject target
         // costs a media lookup and a vocabulary lookup; doing it after the close is what left the
         // screen bare. Nothing below this line awaits anything before the dialog opens.
-        const ej = await _sfEjectContext(dir).catch(() => ({}));
-        // ⭐ Closed and reopened in the SAME task, so the browser paints them together.
-        _closeNow();
-        const p = promptConfirm({
+        // ⭐⭐ THROUGH THE ONE COMPLETION NOTICE. [B-420, 2026-09-24] This block used to build its
+        // own promptConfirm, its own eject wiring and its own path-link handler - a second copy of
+        // _sfCompletionNotice that existed only because that function could not take HTML. It can
+        // now, so the copy goes. The eject row, the button conventions and the link wiring live in
+        // exactly one place, which is what stops the next fix having to be made twice.
+        // ⚠️  carries the progress modal close INTO the notice, so the hide and the
+        // open happen in one task. Closing out here first is what leaves a bare frame on screen.
+        // ⚠️  is passed explicitly: this is a SECOND modal, so the context has already
+        // lost the during-export tick and the carried intent is the true one.
+        await _sfCompletionNotice({
           title: `Deleted ${fonts}`,
-          messageHtml: lines.join('<br><br>')
-                     + (ej.ejectTarget ? _sfEjectRowHtml(ej.ejectTarget, ej.ejectVocab) : ''),
-          // Rule 2: only offered because an export produced something to reveal.
-          confirmText: 'Show in folder',
-          confirmKind: 'primary',
-          cancelText: 'Done',
-          cancelKind: 'cancel',
+          messageHtml: lines.join('<br><br>'),
+          destDir: dir,
+          confirmText: 'Done',
+          ejectAuto: autoEject,
+          beforeOpen: _closeNow,
         });
-        // ⭐ Wired AFTER the dialog renders, like every other eject row - the modal is live DOM, so
-        // the eject reports INTO it instead of replacing it.
-        if (ej.ejectTarget) {
-          _sfPlaceEjectRowInButtons();
-          // ⭐ The carried intent wins over the context's own read. `_sfEjectContext` derives
-          // ejectAuto from `_sfDeleteProgress.wantsEject()`, which is correct for a plain export
-          // (one modal, still open) and always FALSE for a delete-with-export (second modal, tick
-          // already cleared). Falling back to it keeps the plain-export path unchanged.
-          _sfWireEjectRow({ target: ej.ejectTarget, vocab: ej.ejectVocab,
-                            auto: (autoEject === undefined ? ej.ejectAuto : autoEject) });
-        }
-        const show = await p;
-        _sfRemoveEjectRow();
-        if (show === true && one.destPath) {
-          const rev = await window.electronAPI.showItemInFolder(one.destPath)
-            .catch((e) => ({ ok: false, error: String(e && e.message || e) }));
-          if (!rev || rev.ok === false) promptError('Could not open the folder', (rev && rev.error) || one.destPath);
-        }
       };
 
       // ⭐⭐ THE ONE DELETE RUNNER. [B-420, 2026-09-23]
@@ -39157,6 +39422,20 @@ require(['vs/editor/editor.main'], function () {
         }
 
         // ── 4. Say it once. ──
+        // ⭐⭐ THE GRID UPDATES BEFORE THE ENDING SPEAKS. [B-420, 2026-09-24]
+        // Reported: *"is it deleted? I still see it in the background."* It WAS deleted - both
+        // the entry folder and the source archive were gone from disk - but every caller refreshed
+        // AFTER `_sfRunDelete` returned, and this function awaits the summary dialog. So the
+        // refresh was queued behind the user pressing Done, and the message "Deleted 1 font" was
+        // read over a grid still showing it. **A dialog that contradicts the screen behind it
+        // invites exactly the question it invites, and the honest answer was buried on disk.**
+        // ⚠️ IN THE RUNNER, NOT IN THE CALLERS. Three doors reach this and each remembered the
+        // refresh on its own - the same shape as thirteen doors each deciding what a destination
+        // check looks like. The sequence owns the ending, so it owns the state the ending is read
+        // against. Their own refreshes are now redundant rather than load-bearing.
+        // ⚠️ Awaited before either branch, so a PARTIAL failure is also read against the truth:
+        // what actually went is gone from the grid and what stayed is still on it.
+        try { await window.refreshSoundFontsView(); } catch {}
         if (failures.length) {
           await _sfDeleteProgress.hide();
           await _sfShowPartialFailures('Some items failed to delete', failures);
@@ -39201,21 +39480,91 @@ require(['vs/editor/editor.main'], function () {
         return out;
       };
 
-      const _sfCompletionNotice = async ({ title, message, destDir }) => {
+      // ⭐⭐ THE ONE COMPLETION NOTICE. [B-420, 2026-09-24]
+      //
+      // The question, and it is the entry's own premise: *"why would we have two
+      // functions doing the same job in a feature we're actively designing and building?"* We had
+      // FOUR completion surfaces - this one, the delete ending, the export-complete dialog, and
+      // the primary export's summary - and within one hour I fixed the same three things twice:
+      // Done as the primary, no second button, the path as a link instead of dead monospace.
+      // **Fixing the same thing twice is the tell, and it arrived before the second fix did.**
+      //
+      // ⚠️ WHY THEY BYPASSED IT, because the reason matters more than the count: this took
+      // `message` as plain escaped text, and both of them need HTML - a bold name, a muted line,
+      // a clickable path. So a missing parameter, not a design disagreement. Doors do not fork off
+      // a shared mechanism because they want to; they fork because it cannot say what they need.
+      // ⚠️ `ejectAuto` is an override rather than always taken from the context: a delete-with-
+      // export reaches here on a SECOND modal, by which time the during-export tick has already
+      // been cleared, so the context's own read is false and the carried intent is the true one.
+      const _sfCompletionNotice = async ({ title, message, messageHtml, destDir,
+                                           confirmText = 'OK', ejectAuto, beforeOpen } = {}) => {
         let ctx = {};
         try { ctx = (await _sfEjectContext(destDir)) || {}; } catch { ctx = {}; }
         const esc = (t) => _sfEscape(String(t == null ? '' : t)).replace(/\n/g, '<br>');
         const row = ctx.ejectTarget ? _sfEjectRowHtml(ctx.ejectTarget, ctx.ejectVocab) : '';
+        // ⭐⭐ ANY PATH IN A PLAIN MESSAGE BECOMES A LINK, HERE, FOR EVERY CALLER. [2026-09-24]
+        // Asked: *"this isn't a clickable link... make sure they all are."* Six callers
+        // pass `message` as plain text and several of them print the destination as one of its
+        // lines - so making each of them build a link would be six chances to forget, and the one
+        // that forgot is exactly the dialog he screenshotted.
+        // ⭐ The notice already knows the destination: it takes `destDir` to decide the eject row.
+        // So a line that IS that path is the thing to linkify, and nothing else is touched - no
+        // guessing at what looks path-shaped, no regex over user text.
+        // ⚠️ Escaped first, then the link is substituted into the escaped string, so the path can
+        // contain markup characters without becoming markup.
+        // ⚠️ MATCHED BY PREFIX, NOT BY EQUALITY. Door 1 prints the path it CREATED
+        // (`D:\Downloads\Yaddle`), not the directory it was given (`D:\Downloads`) - so an exact
+        // match would have linkified every dialog except the one it was looking at. A line that
+        // starts with the destination is a path under it, and that covers both shapes.
+        // ⚠️ Built from the RAW line, before escaping, so the link's `data-path` is the real path
+        // and the visible text is escaped exactly once.
+        const _bodyFromMessage = () => {
+          const raw = String(message == null ? '' : message);
+          if (!destDir) return `<div>${esc(raw)}</div>`;
+          const html = raw.split('\n').map((ln) => (
+            ln.trim() && ln.trim().startsWith(destDir)
+              ? _sfPathLinkHtml(ln.trim())
+              : esc(ln)
+          )).join('<br>');
+          return `<div>${html}</div>`;
+        };
+        const body = messageHtml != null ? messageHtml : _bodyFromMessage();
+        // ⚠️ THE CLOSE AND THE OPEN IN ONE TASK. A progress modal that hides before this opens
+        // leaves a bare frame on screen between them - the flash. Callers hand us the close so
+        // the browser paints both in the same frame instead of one after the other.
+        // ⚠️⚠️ THE PROGRESS MODAL CLOSES HERE, IN THE SAME TASK AS THIS ONE OPENS. [B-420,
+        // 2026-09-24] The report, twice: *"door 1 has a flash between the completion and the
+        // summary. we've seen that happen before. we should audit all doors with summary."*
+        // ⭐ THE AUDIT FOUND ONE BUG IN ALL OF THEM, not one per door. The runner hid the progress
+        // modal in its `finally`, and only THEN did the ending call a door's `onCompleted`, which
+        // opens this. Two paints with a bare screen between them - and the doors that did not
+        // flash were the ones that had solved it privately (`keepOpen` for export-before-delete,
+        // `_closeNow` in the delete ending). Every door that had not was still flashing.
+        // ⭐⭐ So the notice owns the handoff for everyone: closing is not the caller's to remember,
+        // it is what opening a completion surface MEANS. `hideNow` is synchronous on purpose -
+        // `hide()` has a minimum-display floor that would put the gap straight back.
+        if (typeof beforeOpen === 'function') { try { beforeOpen(); } catch {} }
+        else { try { _sfDeleteProgress.hideNow(); } catch {} }
         const p = promptConfirm({
           title,
-          messageHtml: `<div>${esc(message)}</div>${row}`,
-          confirmText: 'OK',
+          messageHtml: `${body}${row}`,
+          confirmText,
           confirmKind: 'primary',
           hideCancel: true,
         });
+        // ⭐ THE PATH LINKS ARE WIRED HERE, ONCE, for every notice that prints one. Doing it per
+        // caller is how the export-complete dialog ended up with a blue "Show in folder" button
+        // while the import closeout had a quiet link for the same job.
+        for (const a of document.querySelectorAll('.sf-open-path')) {
+          a.addEventListener('click', (e) => {
+            e.preventDefault();
+            try { window.electronAPI.showItemInFolder(a.getAttribute('data-path')); } catch {}
+          });
+        }
         if (ctx.ejectTarget) {
           _sfPlaceEjectRowInButtons();
-          _sfWireEjectRow({ target: ctx.ejectTarget, vocab: ctx.ejectVocab, auto: ctx.ejectAuto });
+          _sfWireEjectRow({ target: ctx.ejectTarget, vocab: ctx.ejectVocab,
+                            auto: (ejectAuto === undefined ? ctx.ejectAuto : ejectAuto) });
         }
         await p;
         _sfRemoveEjectRow();
@@ -43422,10 +43771,43 @@ require(['vs/editor/editor.main'], function () {
         startBtn.disabled = true;
         if (progTrack) progTrack.style.display = '';
         prepModal.classList.add('active');
+
+        // ⚠️⚠️ THE CANCEL BUTTON WAS WIRED TO NOTHING FOR THE WHOLE SURVEY. [2026-09-24]
+        // Reported: *"clicking cancel has no visible response."* The click listener was attached
+        // AFTER `sfBackupPrep` resolved, so for the entire survey of an 8.19 GB library the button
+        // sat there enabled, looking live, connected to no handler at all. Not a slow response -
+        // no response, because there was nothing on the other end of it.
+        // ⭐ A control that is visible and enabled is making a promise. Either wire it or disable it.
+        // ⚠️ THE SURVEY ITSELF CANNOT BE INTERRUPTED: `sfBackup:prep` calls `surveyLibrary`
+        // synchronously, so main is blocked until it finishes and no cancel can reach it. That is
+        // exactly why the button must not claim otherwise - it acknowledges, says what it is
+        // waiting for, and the result is discarded on arrival. Nothing has been written at this
+        // point, so discarding is a complete cancel from the user's side.
+        // ⭐⭐ CANCEL IS INSTANT HERE. Ruled 2026-09-24: *"cancel is stop analyzing... should be
+        // instant in that phase."*
+        // ⚠️ MY FIRST VERSION ACKNOWLEDGED AND THEN WAITED for the survey to finish, because
+        // `sfBackup:prep` calls `surveyLibrary` synchronously and no cancel can reach main. That
+        // reasoning is true and it was the wrong conclusion: **main finishing a read is our problem,
+        // not the user's.** The survey writes nothing, so abandoning it costs nothing - the modal
+        // closes on the click and whatever comes back is dropped on the floor.
+        // ⚠️ The same shape as the runner's cancel, one layer up: a Cancel that has to wait for
+        // something is only honest when the waiting protects the user's data. Nothing is being
+        // written at this point, so there is nothing to protect and nothing to explain.
+        let prepCancelled = false;
+        const onPrepCancel = () => {
+          prepCancelled = true;
+          prepModal.classList.remove('active');
+        };
+        cancelBtn.addEventListener('click', onPrepCancel);
+
         let prep;
         try { prep = await window.electronAPI.sfBackupPrep({ destPath }); }
         catch (err) { prep = { ok: false, error: String(err && err.message || err) }; }
+        cancelBtn.removeEventListener('click', onPrepCancel);
         if (progTrack) progTrack.style.display = 'none';
+        // ⚠️ Checked BEFORE the error branch: they already left. A survey that also failed is not
+        // news they asked for, and a red dialog over a dismissed screen is not an answer to "stop".
+        if (prepCancelled) return;
         if (!prep || !prep.ok) {
           prepModal.classList.remove('active');
           promptError('Could not prepare export', (prep && prep.error) || 'unknown error');
@@ -43439,7 +43821,62 @@ require(['vs/editor/editor.main'], function () {
           `Total ${totalSize}.`;
         startBtn.disabled = false;
         await new Promise((resolve) => {
+          // ── AUTO-START COUNTDOWN ─────────────────────────────── [B-420, 2026-09-24]
+          // See the markup note for why this door and no other. Three rules came out of the
+          // convention and all three are load-bearing:
+          //   1. The countdown starts only NOW, when the summary is readable. Running it during
+          //      the survey would spend the user's reading time before there was anything to read.
+          //   2. ANY interaction cancels it, permanently. That is the WCAG 2.2.1 "turn off" limb,
+          //      and it is also just correct: a hand on the mouse means somebody is here.
+          //   3. It does NOT pause when the window loses focus. That inverts the whole point -
+          //      the case this exists for is the user having walked away.
+          // ⚠️ 15s: long enough to read a three-clause summary, short enough not to be the thing
+          // holding up a backup. macOS uses 60 for restart, which is a far more disruptive action.
+          // ⚠️⚠️ NOTHING PAUSES THIS COUNTDOWN, AND THAT IS THE DESIGN. [2026-09-24]
+          // The first cut stopped it on any click or keypress, to satisfy the WCAG 2.2.1 "turn off
+          // the time limit" limb. What that actually produced: *"need for double cancel
+          // is odd."* Brushing the dialog put it back into waiting-forever - silently, permanently,
+          // and with no way to tell it had happened. **The pause re-created the exact problem the
+          // countdown was added to remove**, and it made Cancel a two-click affair.
+          // ⭐ 2.2.1 is about users being RUSHED INTO LOSING SOMETHING. Nothing is lost here: the
+          // destination was chosen before this screen opened, the timer only does what the user
+          // already asked for, and the export it starts is itself cancellable in one click. Cancel
+          // is visible and one click away at every single moment - that IS the escape hatch, and
+          // bolting a second one on top of it only made the first one ambiguous.
+          // ⚠️ So the rule for anywhere this pattern is reused: an auto-action is acceptable when
+          // the action is safe AND reversible in one step. If either half is untrue, the answer is
+          // not a pause - it is no countdown.
+          const autoEl = document.getElementById('sf-backup-prep-auto');
+          const START_LABEL = 'Start export';
+          let autoLeft = 15;
+          let autoTimer = null;
+          const stopAuto = () => {
+            if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+            startBtn.textContent = START_LABEL;
+            if (autoEl) autoEl.style.display = 'none';
+          };
+          const paint = () => {
+            startBtn.textContent = `${START_LABEL} (${autoLeft})`;
+            // ⚠️ Announced at the start and once near the end, never per tick - a status line that
+            // re-announces every second is what makes these dialogs unusable with a screen reader.
+            if (autoEl && (autoLeft === 15 || autoLeft === 5)) {
+              autoEl.textContent = `Starting automatically in ${autoLeft} seconds. `
+                + 'Cancel if you do not want it.';
+            }
+          };
+          if (autoEl) { autoEl.style.display = ''; }
+          paint();
+          autoTimer = setInterval(() => {
+            autoLeft -= 1;
+            if (autoLeft <= 0) { stopAuto(); onStart(); return; }
+            paint();
+          }, 1000);
+
           const cleanup = () => {
+            // ⚠️⚠️ THE TIMER DIES HERE, ON EVERY EXIT PATH. cleanup() is the single way out of this
+            // promise, which is exactly why the clear belongs in it: an interval that outlives its
+            // modal fires into a dialog that is gone and starts an export nobody asked for.
+            stopAuto('closed');
             prepModal.classList.remove('active');
             startBtn.removeEventListener('click', onStart);
             cancelBtn.removeEventListener('click', onCancel);

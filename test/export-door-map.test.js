@@ -152,7 +152,18 @@ for (const h of Object.keys(NOT_DOORS)) {
 // still measuring "everything between two landmarks" rather than the table itself, which is the
 // same shape as the bug the comment above already describes, one landmark further out.
 // ⭐ So: stop at the first blank line after the table starts. A markdown table cannot contain one.
-const sfSection = mapText.slice(mapText.indexOf('### The eleven, as a person meets them'));
+// ⚠️⚠️ THE ANCHOR IS ASSERTED BEFORE IT IS USED, AND THAT IS NOT DEFENSIVE PADDING.
+// On 2026-09-24 the heading was corrected from "The eleven" to "The fourteen" - the count in the
+// prose had been stale since 8b, 12 and 13 arrived. `indexOf` returned -1, and `slice(-1)` is not
+// an empty string, it is the LAST CHARACTER of the file: the table parsed to zero rows and the
+// failure read as "the UI lost fourteen doors" rather than "the anchor moved". A slice taken from
+// an unmatched anchor measures something real and says nothing true about it.
+const SF_ANCHOR = '### The fourteen, as a person meets them';
+const anchorAt = mapText.indexOf(SF_ANCHOR);
+ok(`the door-table anchor is present in the register (${SF_ANCHOR})`, anchorAt >= 0,
+   'The heading this test slices from was renamed or removed. Fix the anchor - do NOT read the '
+   + 'row count below as a statement about the UI until this passes.');
+const sfSection = anchorAt >= 0 ? mapText.slice(anchorAt) : '';
 const sfTable = (() => {
   const firstRow = sfSection.indexOf('\n|');
   if (firstRow < 0) return '';

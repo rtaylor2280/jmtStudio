@@ -195,8 +195,17 @@ const PLATFORMS = {
       lingersAfterEject: true,
       volumeNoun: 'drive',
       // What is still visible afterwards, and why it is not a failure.
-      lingerNote: (label) =>
-        `Windows may keep showing ${label} until you reconnect it.`,
+      // ⚠️ STATES THE FACT, DOES NOT HEDGE IT. [2026-09-24] This read "Windows may keep showing
+      // <label> until you reconnect it" - and "may" is uncertainty about OUR OWN result, in the
+      // one message whose whole job is to stop a successful eject reading as a failure.
+      // ⭐ RE-MEASURED before rewording, an hour after a real eject: the letter was still listed
+      // with `(no media)`. So it is not "may" and it is not gone - it is an EMPTY DRIVE, which is
+      // also the detail that tells him what he is looking at rather than just that it is fine.
+      // ⚠️ NO LABEL IN HERE. Its one consumer is the post-eject toast, which already opens with
+      // the label ("I: ejected. Safe to remove."), so naming it again produced "I: ... I: stays
+      // listed". The note is the SECOND half of a sentence about a thing already named.
+      lingerNote: () =>
+        'It stays listed as an empty drive until you reconnect it.',
       busyNote: (label) =>
         `Something still has ${label} open, so Windows would not release it.\n\n`
         + `Close anything using it, then try again. Unplugging it now risks damaging what is on it.`,

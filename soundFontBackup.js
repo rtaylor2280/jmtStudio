@@ -129,6 +129,68 @@ function _dirBytes(dir) {
 // folder (counts = number of .wav files, not subdirs). attachments is
 // dir-keyed like sources/common, but the dir NAME is the content sha256,
 // which is what lets the restore side dedup without hashing anything.
+// ⭐⭐ THE ASYNC TWIN, AND IT IS A UI BUG FIX RATHER THAN A PERFORMANCE ONE. [B-420, 2026-09-24]
+//
+// Reported: Cancel on the prep screen "does nothing". Instrumented rather than theorised, and the
+// console settled it — the handler WAS attached, the button WAS enabled with `pointerEvents: auto`,
+// and **no click event was ever dispatched during the 1,917 ms the survey ran**. The report:
+// *"never saw it."* The screen was never on screen.
+//
+// ⚠️⚠️ CAUSE: `surveyLibrary` is a synchronous recursive stat walk, and it runs in the MAIN process.
+// Electron coordinates both frame presentation AND input dispatch through the browser process, so
+// while main is blocked the renderer can set `active`, build its frame and attach handlers — and
+// none of it reaches the glass, while the user's clicks queue behind the walk. The modal existed in
+// the DOM for the whole survey and was never painted or clickable.
+// ⭐ That is why every renderer-side theory failed: the renderer was never the blocked process
+// (measured at 16% CPU throughout). Nothing in the renderer could have fixed this.
+//
+// ⚠️ THE SYNC VERSION STAYS. `exportBackup` calls it internally at a point where nothing is on
+// screen waiting, and rewriting that path would be a change with no symptom behind it.
+//
+// [B-398] established the pattern this follows: yield inside every per-item pass so the window
+// keeps answering Windows. Same helper, same reason.
+async function surveyLibraryAsync(userData) {
+  const { breathe } = require('./soundFontFileHash');
+  const buckets = ['sources', 'library', 'common', 'attachments'];
+  const counts = { sources: 0, library: 0, common: 0, sharedTracks: 0, attachments: 0 };
+  const totals = { sources: 0, library: 0, common: 0, sharedTracks: 0, attachments: 0 };
+  for (const b of buckets) {
+    const root = path.join(_soundFontsRoot(userData), b);
+    if (!fs.existsSync(root)) continue;
+    let names;
+    try { names = fs.readdirSync(root, { withFileTypes: true }); }
+    catch { continue; }
+    const dirs = names.filter(d => d.isDirectory());
+    counts[b] = dirs.length;
+    // ⚠️ THE BREATH IS PER TOP-LEVEL ITEM, NOT PER BUCKET. A bucket is four iterations; a single
+    // multi-GB voicepack is the thing that actually holds the loop, and yielding between buckets
+    // would leave the longest stretch exactly as blocking as it is now.
+    for (const d of dirs) {
+      await breathe();
+      totals[b] += _dirBytes(path.join(root, d.name));
+    }
+  }
+  const stRoot = path.join(_soundFontsRoot(userData), 'sharedTracks');
+  if (fs.existsSync(stRoot)) {
+    let stEntries;
+    try { stEntries = fs.readdirSync(stRoot, { withFileTypes: true }); }
+    catch { stEntries = []; }
+    let since = 0;
+    for (const e of stEntries) {
+      if (!e.isFile()) continue;
+      if (!/\.wav$/i.test(e.name)) continue;
+      // A flat folder of small files: breathing on every one of a hundred tracks costs more than
+      // it buys, so it yields in batches. The loop still never runs long enough to drop a frame.
+      if (++since >= 25) { since = 0; await breathe(); }
+      counts.sharedTracks++;
+      try { totals.sharedTracks += fs.statSync(path.join(stRoot, e.name)).size; } catch {}
+    }
+  }
+  const totalBytes = totals.sources + totals.library + totals.common + totals.sharedTracks
+    + totals.attachments;
+  return { counts, totals, totalBytes };
+}
+
 function surveyLibrary(userData) {
   const buckets = ['sources', 'library', 'common', 'attachments'];
   const counts = { sources: 0, library: 0, common: 0, sharedTracks: 0, attachments: 0 };
@@ -3164,6 +3226,7 @@ module.exports = {
   SCHEMA_VERSION,
   BACKUP_TYPE,
   surveyLibrary,
+  surveyLibraryAsync,
   benchmarkDestination,
   estimateSeconds,
   suggestedFileName,

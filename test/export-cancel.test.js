@@ -272,9 +272,17 @@ ok('it is hidden until an operation opts in',
   ok('the handler is cleared when the modal closes',
      /clearCancel\(\);\s*\n\s*this\.modal\(\)\?\.classList\.remove\('active'\)/.test(html));
 }
+// ⚠️ THIS USED TO PIN THE LITERAL STRING "Cancelling… (finishing current file)" ON THE BUTTON.
+// 2026-09-24 the acknowledgement moved to the house convention — `_btnBusy(b, 'Cancelling')`, which
+// supplies ANIMATED dots via `.busy-dots`, with the promise on the detail line — because a static
+// ellipsis is indistinguishable from the frozen app the user already suspects. The assertion was
+// pinning the typography; what matters is that the promise is made somewhere the user reads.
 ok('⚠️ it says what is still happening rather than vanishing',
-   /Cancelling… \(finishing current file\)/.test(html),
+   /finishing the current file/.test(html),
    'main stops BETWEEN files, so the modal must not disappear while a copy is still running');
+ok('⭐ and the acknowledgement animates rather than sitting still',
+   /_btnBusy\(b, 'Cancelling'\)/.test(html),
+   'a static "Cancelling…" is exactly what got reported as "no visible response"');
 
 // ── 8. The renderer-side loop stops too ──
 // Main stopping the current font is only half of it: the bulk export's loop lives here, and

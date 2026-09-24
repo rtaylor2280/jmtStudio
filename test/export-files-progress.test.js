@@ -162,9 +162,26 @@ ok('the export helper was found', caller.length > 0);
   ok('⚠️ the component owns that state rather than the call site',
      /setIndeterminate\(labelText, file, elapsedText\) \{/.test(html),
      'hand-rolling it at one call site is how the next caller gets it wrong');
+  // ⚠️⚠️ THIS WAS A FIXED-WIDTH SLICE — `[\s\S]{0,400}` after the signature — AND IT BROKE FOR THE
+  // RIGHT REASON ON 2026-09-24. `setIndeterminate` gained a cancel guard, the guard carried its
+  // explanation, and the target fell outside the 400-character window. Nothing about the feature
+  // changed. **A fixed-width window silently stops covering its target the moment the code between
+  // them grows**, and this codebase has now been bitten by that shape three times.
+  // ⭐ Bounded by the NEXT METHOD instead, so the window is the method however long it gets.
+  const siAt = html.indexOf('setIndeterminate(labelText, file, elapsedText) {');
+  const siEnd = html.indexOf('\n        setPhase(', siAt);
+  ok('the setIndeterminate body was located', siAt > 0 && siEnd > siAt,
+     're-anchor if the method or the one after it is renamed');
+  const si = (siAt > 0 && siEnd > siAt) ? html.slice(siAt, siEnd) : '';
   ok('⚠️ and it still shows the filename and the clock',
-     /setIndeterminate\(labelText, file, elapsedText\) \{[\s\S]{0,400}elapsedText \|\| ''/.test(html),
+     /elapsedText \|\| ''/.test(si) && /file \|\| ''/.test(si),
      'motion without a claim is the point — silence is what we are fixing');
+  // ⭐ AND IT SHOWS THEM ON BOTH SIDES OF THE CANCEL GUARD. The whole reason the guard is safe is
+  // that the filename and the clock keep moving while only the claim about progress is withdrawn;
+  // a guard that returned early without them would trade one silence for another.
+  ok('⭐ including once a cancel has been acknowledged',
+     (si.match(/elapsedText \|\| ''/g) || []).length >= 2,
+     'the cancelling branch must keep painting the file and the clock, or "Stopping…" freezes');
 }
 
 console.log(failures ? `\n${failures} FAILURE(S)` : '\nall export-files progress tests passed');

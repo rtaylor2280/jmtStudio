@@ -325,7 +325,7 @@ function _cancelErr() { return new (require('./sfExportCopy').ExportCancelled)()
 
 async function zipFolderToFile(srcDir, destZipPath, onProgress, opts = {}) {
   const archiver = require('archiver');
-  const { Transform } = require('stream');
+  const { Transform, Readable } = require('stream');
 
   const { files, strippedFiles, blockedFiles, notedFiles } = await _selectFolderFiles(srcDir);
   // ⚠️⚠️ THE EXTRA ENTRIES ARE IN THE ARCHIVE, SO THEY ARE IN THE TOTAL. [B-420, 2026-09-23]
@@ -376,10 +376,103 @@ async function zipFolderToFile(srcDir, destZipPath, onProgress, opts = {}) {
   const EPOCH = new Date(0);
   const MODE = 0o644;
 
-  let bytesProcessed = 0;
   let filesProcessed = 0;
   let lastEmit = Date.now();
-  let lastProgressMs = Date.now(); // watchdog: last time an entry actually completed
+  let lastProgressMs = Date.now(); // watchdog: last time the archive actually moved
+
+  // ⭐⭐ BYTES ARE COUNTED AS THEY ARE READ, NOT AS ENTRIES COMPLETE. [B-420, 2026-09-24]
+  // Reported: `Compressing · 286.7 MB of 286.7 MB` sitting still for twenty seconds at the end
+  // of an export. Two separate faults met there and this is the second one - the first was a
+  // denominator that left the curation payload out. Even with the denominator right, NOTHING was
+  // emitted while a single entry was being compressed: `onProgress` was called only from the
+  // 'entry' event, and archiver's own source says that fires *after* "the entry's input has been
+  // processed and appended". So one 300 MB file meant no bar, no byte count and no filename change
+  // for its entire duration. A progress bar whose grain is one file cannot describe a job whose
+  // files are that big.
+  //
+  // ⚠️ SUPPLYING `stats` IS WHAT KEEPS THE ARCHIVE BYTE-IDENTICAL, AND IT IS NOT OPTIONAL HERE.
+  // That hash is what dedup matches sources on, so re-hashing every export would silently stop it
+  // matching anything already in the library. `test/zip-byte-identity.test.js` asserts the
+  // relationship rather than a pinned digest, and it carries a control so it cannot pass blind.
+  // ⭐ It also makes the ordering stronger, not weaker: an entry carrying `stats` skips archiver's
+  // `_statQueue` entirely (core.js:111) and goes straight onto the ordered queue, so submission
+  // order holds BY CONSTRUCTION instead of depending on `statConcurrency: 1` staying set.
+  //
+  // ⚠️⚠️ THE STREAM MUST BE LAZY. `archive.file()` uses `lazyReadStream` internally for a reason:
+  // handing archiver a live `fs.createReadStream` per entry opens every file in the source at
+  // submission time, which on a large font is thousands of descriptors at once. The async
+  // generator below is not iterated until archiver pulls from it, so exactly one file is open.
+  let bytesStreamed = 0;      // read off disk, live
+  let bufferBytes = 0;        // buffer entries have nothing to read - counted when they land
+  let currentName = null;     // the entry actually being read right now, not the last one finished
+  // ⚠️⚠️ `objectMode: false` IS LOAD-BEARING, AND THE TEST IS HOW I FOUND OUT. `Readable.from`
+  // defaults to OBJECT MODE, which changes how the bytes are handed downstream and re-hashed every
+  // archive - the identity test went red on the first run of this change, against a hand-probe
+  // that had used `.pipe()` and said it was identical. **The probe and the production call were
+  // not the same call**, which is exactly why the assertion lives in the suite rather than in a
+  // scratch file I ran once and believed.
+  //
+  // ⚠️⚠️ EVERY STREAM THIS OPENS IS TRACKED, AND THAT IS NOT BELT-AND-BRACES. [2026-09-24]
+  // Taking ownership of the read stream is what bought chunk-resolution progress, and it also took
+  // on the lifecycle archiver used to handle. `archive.abort()` stops PULLING and drops the source
+  // WITHOUT destroying it — so an abandoned generator sits suspended at its `yield` holding an open
+  // descriptor, indefinitely.
+  // ⭐ MEASURED COST, ON A REAL LIBRARY, THE DAY IT SHIPPED: a few cancelled exports, then a delete of
+  // the entry and got `ENOTEMPTY: directory not empty`. Exactly one file was locked —
+  // `Angelic_Plazma_stereo_track.wav`, the customized payload file ta cancel of export had been
+  // reading. A leaked handle is not a slow leak here; it is a file that cannot be deleted.
+  // ⚠️ `archive.file()` never had this problem because archiver created the lazy stream and its own
+  // teardown owned it. **Taking a resource off a library takes its cleanup with it.**
+  const lazyCounted = (absPath, name) => Readable.from((async function* () {
+    const rs = fs.createReadStream(absPath);
+    try {
+      currentName = name;
+      for await (const chunk of rs) {
+        bytesStreamed += chunk.length;
+        lastProgressMs = Date.now();
+        yield chunk;
+      }
+    } finally {
+      // ⚠️ THE `finally` IS THE WHOLE RELEASE, AND I NEARLY BUILT A SECOND ONE. [2026-09-24]
+      // Taking ownership of the read stream took on the lifecycle `archive.file()` used to handle,
+      // so this must run on the ordinary end AND when a consumer destroys us mid-read. It does:
+      // both abort sites destroy the sink, that propagates back through the pipe, `for await`
+      // exits, and this fires.
+      // ⚠️ I first reasoned that `archive.abort()` drops sources WITHOUT destroying them and added
+      // a tracked Set swept at every abort site. Then a mutation test removed that sweep and the
+      // cancel test still passed — the teardown was already complete. **Defensive code for a case
+      // I could not make happen is a second mechanism to keep in agreement forever**, so it went.
+      // `test/zip-cancel-releases-files.js` cancels mid-entry and then deletes the fixture, which
+      // is the symptom rather than the mechanism.
+      try { rs.destroy(); } catch {}
+    }
+  })(), { objectMode: false });
+  // ⭐ ONE EMITTER, TWO CALLERS: an entry landing, and the watchdog tick. The tick is what makes a
+  // long single entry legible; the entry event is what keeps the count and the name honest at a
+  // boundary. Both go through here so they cannot report different things about the same moment.
+  // ⚠️ MONOTONIC BY CONSTRUCTION - `bytesStreamed` only ever grows and buffer entries only add - so
+  // nothing here can walk the bar backwards. The renderer keeps its own floor for the multi-PASS
+  // case, which is a different problem: two passes over one source are two measurements.
+  // ⚠️ DECLARED BEFORE ITS CALLERS ON PURPOSE. A `const` referenced by a handler defined above it
+  // works only because the handler cannot fire until finalize(); this project has already lost a
+  // live flash to a renderer `ReferenceError` that no check it runs could see, so the ordering is
+  // made true rather than merely safe.
+  const emit = () => {
+    if (!onProgress) return;
+    const now = Date.now();
+    if (now - lastEmit < 100 && filesProcessed !== fileCount) return;
+    lastEmit = now;
+    onProgress({
+      bytesProcessed: Math.min(bytesStreamed + bufferBytes, totalBytes),
+      totalBytes,
+      // The entry being READ, which during a long compress is the one the user is waiting on.
+      // ⚠️ It used to name `files[filesProcessed]` and fall back to the entry that just finished,
+      // so once the vendor list ran out - exactly when the curation payload starts - the display
+      // froze on a stale vendor filename for the rest of the job.
+      currentFile: currentName || (files[0] && files[0].relPath) || '',
+    });
+  };
+
   // ⚠️⚠️ CANCEL ABORTS HERE; IT MUST NEVER THROW HERE. [B-005 item 4] This is an EventEmitter
   // handler, and a throw inside one is an uncaught exception in the main process - the [B-418]
   // crash shape, where the app simply vanishes. Every other stopping point in this feature
@@ -400,24 +493,14 @@ async function zipFolderToFile(srcDir, destZipPath, onProgress, opts = {}) {
     }
     filesProcessed++;
     lastProgressMs = Date.now();
-    // ⚠️ A BUFFER ENTRY HAS NO stats, so it would be counted in the denominator above and never in
-    // the numerator - leaving the bar permanently short by the sidecar's size. Tiny here (a JSON
-    // document), but a denominator and a numerator that disagree about what they include is the
-    // exact shape of the 1.05 GB-of-336 MB defect this same change fixes, just pointed the other way.
-    if (entry.stats && entry.stats.size) bytesProcessed += entry.stats.size;
-    else bytesProcessed += (_extraBufByName.get(entry.name) || 0);
-    if (!onProgress) return;
-    const now = Date.now();
-    if (now - lastEmit > 100 || filesProcessed === fileCount) {
-      // Name the file now STARTING (submission order == completion order with
-      // statConcurrency: 1), not the one just finished — during a long compress
-      // the display shows the file actually being worked while the bar honestly
-      // holds at completed bytes, instead of a stale name on a full-looking bar.
-      const next = files[filesProcessed];
-      onProgress({ bytesProcessed, totalBytes, currentFile: (next && next.relPath) || entry.name });
-      lastEmit = now;
-    }
+    // ⚠️ A BUFFER ENTRY HAS NOTHING TO READ, so the stream tap never sees it. It is in the
+    // denominator, so it has to reach the numerator somewhere, and landing is the only moment it
+    // can. A denominator and a numerator that disagree about what they include is the exact shape
+    // of the defect this whole change exists to remove, just pointed the other way.
+    if (!(entry.stats && entry.stats.size)) bufferBytes += (_extraBufByName.get(entry.name) || 0);
+    emit();
   });
+
   // First emission up front so a section never opens blind on a huge first file.
   if (onProgress && files.length) onProgress({ bytesProcessed: 0, totalBytes, currentFile: files[0].relPath });
 
@@ -425,7 +508,12 @@ async function zipFolderToFile(srcDir, destZipPath, onProgress, opts = {}) {
   // and appends them one at a time IN this submission order, so the zip bytes are
   // deterministic (concurrent stat was reordering them and breaking dedup).
   for (const f of files) {
-    archive.file(f.absPath, { name: f.relPath, date: EPOCH, mode: MODE });
+    // ⚠️ `stats` here is the byte-identity guarantee AND the ordering guarantee - see the long
+    // note above the tap. The extra statSync is a second stat per file (walkFolderSorted already
+    // did one for size); against compressing the same file it does not register, and it buys a
+    // submission order that no longer depends on a setting.
+    archive.append(lazyCounted(f.absPath, f.relPath),
+                   { name: f.relPath, date: EPOCH, mode: MODE, stats: fs.statSync(f.absPath) });
   }
 
   // ⭐⭐ THE CURATION SIDECAR GOES IN HERE, INSIDE THE ONE COMPRESSION PASS. [B-420]
@@ -437,9 +525,17 @@ async function zipFolderToFile(srcDir, destZipPath, onProgress, opts = {}) {
   // ⚠️ Ryan, 2026-09-23: *"How can curation have after compression? It goes inside the zip…."*
   // The design predates the pooled store, when the archive itself was the stored artifact and had
   // to be rebuilt to stay byte-canonical. Nothing is stored as an archive now.
-  // ⚠️ APPENDED LAST, AFTER the sorted files, so the archive stays order-deterministic - the same
-  // reason statConcurrency is 1 above. Same EPOCH date and MODE as every other entry, or these
-  // few files would be the only ones carrying real timestamps.
+  // ⚠️⚠️ THIS USED TO SAY "APPENDED LAST, AFTER the sorted files, so the archive stays
+  // order-deterministic" AND THAT WAS TRUE OF THE SUBMISSION, NOT OF THE ARCHIVE. [2026-09-24]
+  // The vendor tree went in with `archive.file()` and the sidecar with `archive.append()`, and
+  // those use two different queues: an entry carrying stats goes straight onto the ordered queue,
+  // while a bare `file()` waits in `_statQueue` to be stat-ed first. Measured: the sidecar came
+  // out FIRST, ahead of every vendor file. Nothing caught it because the archive was valid, the
+  // entry count was right, and the only thing it contradicted was this comment.
+  // ⭐ Every entry now goes in the same way - append, with stats supplied - so submission order
+  // IS archive order, and `test/zip-byte-identity.test.js` asserts the position rather than
+  // trusting a sentence. Same EPOCH date and MODE as every other entry, or these few files would
+  // be the only ones carrying real timestamps.
   //
   // ⭐ AN ENTRY IS A NAME PLUS A SOURCE OF BYTES, and the source may be either a path on disk or a
   // buffer in memory. That is the whole reason nothing needs staging: the sidecar is JSON we just
@@ -451,7 +547,11 @@ async function zipFolderToFile(srcDir, destZipPath, onProgress, opts = {}) {
   // or appended to the archive?" The answer should be no in both cases, and now is.
   for (const e of (opts.extraEntries || [])) {
     if (e.buffer) archive.append(e.buffer, { name: e.name, date: EPOCH, mode: MODE });
-    else archive.file(e.absPath, { name: e.name, date: EPOCH, mode: MODE });
+    // ⭐ THE PAYLOAD GETS THE SAME TAP AS THE VENDOR TREE, which is the half the screenshots was
+    // about: a customized font is where the big files are, so a bar that only moves for vendor
+    // content goes quiet for exactly the stretch the user is waiting on.
+    else archive.append(lazyCounted(e.absPath, e.name),
+                        { name: e.name, date: EPOCH, mode: MODE, stats: fs.statSync(e.absPath) });
   }
 
   // ⚠️ A 'finalizing' phase was briefly emitted here and REMOVED, because nothing could
@@ -492,6 +592,15 @@ async function zipFolderToFile(srcDir, destZipPath, onProgress, opts = {}) {
         try { fileStream.destroy(); } catch {}
       }
       if (_canceled) { clearInterval(watchdog); return finish(reject, _cancelErr()); }
+      // ⭐⭐ THE TICK IS THE PROGRESS BEAT NOW, NOT JUST THE CANCEL AND STALL BEAT. [B-420]
+      // This is what makes a 300 MB entry legible: bytes read tick up four times a second while
+      // one file compresses, instead of the whole display holding still until it lands.
+      emit();
+      // ⭐ AND THE STALL WATCHDOG STOPPED LYING ABOUT BIG FILES AS A SIDE EFFECT. `lastProgressMs`
+      // used to advance only when an entry COMPLETED, so any single entry taking longer than the
+      // 90 s window was accused of being "a damaged or unreadable file" - a false accusation about
+      // a healthy font, which is the same wrong message a cancel used to produce. It now advances
+      // on every chunk, so the window means what it says: nothing has been read for 90 seconds.
       if (Date.now() - lastProgressMs > STALL_MS) {
         clearInterval(watchdog);
         try { archive.abort(); } catch {}
@@ -528,6 +637,9 @@ async function zipFolderToFile(srcDir, destZipPath, onProgress, opts = {}) {
     try { fs.unlinkSync(destZipPath); } catch {}
     throw _cancelErr();
   }
+  // ⚠️ THE SUCCESS PATH RELEASES THEM TOO. Every stream should already have ended on its own, and
+  // "should already" is exactly the assumption that left a 26.7 MB file locked on a real library. One
+  // sweep costs nothing and makes the guarantee unconditional rather than probable.
   return { hash: hasher.digest('hex'), totalBytes, fileCount, strippedFiles, blockedFiles, notedFiles };
 }
 

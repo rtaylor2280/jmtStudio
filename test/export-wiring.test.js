@@ -397,10 +397,19 @@ ok('the offer requires removable === true',
   // ⭐ Microsoft's own wording for this state is "Safe To Remove Hardware" and explains nothing
   // further, so the inline status now says just that and this note is kept short for wherever
   // it is genuinely worth saying.
+  // ⚠️ THE ASSERTION PINNED THE OLD SENTENCE, NOT THE FACT. [2026-09-24] The note was reworded:
+  // "Windows may keep showing <label>" hedged about our own result, and it repeated a label the
+  // toast had already said one clause earlier. **The behaviour it describes was RE-MEASURED before
+  // rewording** - an hour after a real eject the letter was still listed as `(no media)` - so the
+  // note stays and only its wording changed. What is worth asserting is that Windows still HAS a
+  // note and the other platforms still do not, which is the per-OS behaviour flag this guards.
   ok('⭐ Windows still has a note about the letter that stays behind',
-     /lingerNote: \(label\) =>/.test(eject) && /Windows may keep showing \$\{label\}/.test(eject),
+     /lingerNote: \(\) =>/.test(eject) && /stays listed as an empty drive/.test(eject),
      'measured: the letter lingers for board cards and USB readers, so the behaviour is real '
      + 'even though the inline status no longer explains it');
+  ok('⚠️ and it does not repeat the label the toast already said',
+     !/lingerNote: \([a-z]+\) =>[\s\S]{0,120}\$\{label\}/.test(eject),
+     'the note is the second half of a sentence about a drive already named');
   ok('⭐⭐ and the other platforms OMIT it rather than translating it',
      /lingersAfterEject: false,[\s\S]{0,200}?lingerNote: null/.test(eject),
      'null is the signal to drop the sentence - on macOS the mount point really does go away');

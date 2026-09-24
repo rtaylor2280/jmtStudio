@@ -147,20 +147,45 @@ function ok(label, cond, detail) {
   // then that screen is gone.
   ok('the analyze phase carries its own checkbox', /id="sf-bulk-prog-auto"/.test(html));
 
-  ok('it is shown when analyze starts',
-     /if \(els\.progAutoWrap\) els\.progAutoWrap\.style\.display = '';/.test(html));
+  // ⚠️⚠️ THESE TWO USED TO ASSERT CALL SITES AND THAT IS WHY THEY MISSED THE DEFECT.
+  // They checked that analyze set the checkbox visible and that the import run set it hidden -
+  // both true, both passing, while NOTHING hid it for the REVIEW screen. So "Continue to quick
+  // import without review" sat under a dialog already offering Quick import and Review Import as
+  // buttons, and it also pushed the third button onto its own line. Reported 2026-09-24:
+  // *"you don't need continue to quick import without review when you're already on this page."*
+  // ⭐ The rule moved into `showPhase`, where every other control in this dialog was already
+  // decided. A test that names the CALLER goes red when a rule is promoted to the shared layer -
+  // and the red is the test asking to be rewritten upward, not the change asking to be undone.
+  // So these now assert the RULE: one decision, phase-driven, and nowhere else.
+  ok('⭐ visibility is decided in exactly ONE place, not at call sites',
+     (html.match(/progAutoWrap\.style\.display/g) || []).length === 1,
+     'found ' + (html.match(/progAutoWrap\.style\.display/g) || []).length
+     + ' assignments; scattering this rule is what let the review phase forget it');
+
+  ok('⭐ it is shown only on the progress phase, and only before the run starts',
+     /els\.progAutoWrap\.style\.display\s*=\s*\(phase === 'progress' && !runInFlight\) \? '' : 'none';/
+       .test(html),
+     'the offer must be absent on explain/scan/review/guided/summary - on review the question is '
+     + 'already being asked by the buttons, and during the run there is no review left to skip');
 
   // ⚠️ Seeded from the explain screen, so a box already ticked stays ticked. Resetting it would
   // silently undo a decision the user already made one screen earlier.
   ok('it is seeded from the up-front choice',
      /if \(els\.progAuto\) els\.progAuto\.checked = !!_bulkAutoContinue;/.test(html));
 
-  // ⚠️⚠️ AND IT MUST DISAPPEAR ONCE THE IMPORT IS RUNNING. At that point there is no review left
-  // to skip, so the offer would describe a choice that no longer exists.
+  // ⚠️⚠️ THE ORDERING IS LOAD-BEARING NOW, so it is asserted rather than trusted to a comment.
+  // `showPhase` reads `runInFlight` to decide whether the offer still means anything, so setting
+  // the flag AFTER calling it would show the offer for the whole import run - the exact bug the
+  // rule was moved to prevent, reintroduced by a two-line reorder that nothing else would catch.
+  // ⚠️ POSITIONAL, NOT A FIXED-WIDTH SLICE. The previous version of this check read 500 characters
+  // after an anchor, which is a window that silently stops covering its target the moment the code
+  // between them grows - this file has been bitten by exactly that before.
   const runAt = html.indexOf('runInFlight = true;');
-  const runWin = html.slice(runAt, runAt + 500);
-  ok('it is hidden once the real import starts',
-     /els\.progAutoWrap\.style\.display = 'none';/.test(runWin), runWin);
+  const phaseAfter = html.indexOf("showPhase('progress')", runAt);
+  ok('⭐ the run sets runInFlight BEFORE showPhase, so the offer is gone during the import',
+     runAt > 0 && phaseAfter > runAt && (phaseAfter - runAt) < 200,
+     `runInFlight = true; at ${runAt}, next showPhase('progress') at ${phaseAfter}. `
+     + 'They must be adjacent and in that order.');
 
   // Live, because the entire point is deciding PARTWAY THROUGH.
   ok('ticking it mid-analyze updates the flag immediately',

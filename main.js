@@ -2293,9 +2293,11 @@ ipcMain.handle('entries:existsByName', (_, name) => {
   }
 });
 
-ipcMain.handle('entries:delete', (_, { name } = {}) => {
+// ⚠️ `await`, because deleteEntry became async to retry a transient lock without freezing the
+// window. A non-awaited promise would slip straight past this try/catch. [2026-09-24]
+ipcMain.handle('entries:delete', async (_, { name } = {}) => {
   try {
-    return soundFontEntries.deleteEntry(app.getPath('userData'), name);
+    return await soundFontEntries.deleteEntry(app.getPath('userData'), name);
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };
   }
@@ -4202,7 +4204,13 @@ ipcMain.handle('sfBackup:prep', async () => {
   // progress bar + elapsed time during the run is honest information.
   try {
     const userData = app.getPath('userData');
-    const survey = soundFontBackup.surveyLibrary(userData);
+    // ⚠️⚠️ THE ASYNC TWIN, AND THE await IS THE ENTIRE FIX. [B-420, 2026-09-24]
+    // The sync walk blocked this process for ~1.9 s on a real library, and Electron routes frame
+    // presentation AND input dispatch through it — so the prep modal never painted and the clicks
+    // on Cancel were never dispatched. It was reported as "cancel does nothing"; it was "the screen
+    // was never there". Confirmed by instrumenting the renderer: handler attached, button enabled,
+    // and not one click event delivered during the survey.
+    const survey = await soundFontBackup.surveyLibraryAsync(userData);
     return { ok: true, survey };
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };
@@ -4426,17 +4434,61 @@ ipcMain.handle('dialog:selectCommonSource', async (_, { mode = 'folder' } = {}) 
 //
 // ⚠️ CHEAP: a zip's central directory carries every entry's uncompressed size and listAll()
 // reads exactly that, descending into inner zips. No extraction, one directory read.
-ipcMain.handle('sources:exportSize', async (_, { uuid } = {}) => {
+// ⭐⭐ ONE INVENTORY FOR "WHAT WILL EXPORTING THIS SOURCE ACTUALLY WRITE". [B-420, 2026-09-24]
+//
+// There were FOUR places sizing the same job and three of them disagreed: this IPC (which seeds
+// the bar before any progress arrives), `exportManyToDownloads`'s `grandBytes`, and
+// `zipFolderToFile`'s own total — which was the only one right, and whose answer the others
+// discarded. the screenshots caught the seam twice: `362.9 MB of 7.7 MB` mid-export, then
+// `0 B of 80.2 MB` on the opening frame with the same export settling to `805.0 MB` a second later.
+//
+// ⚠️ THE SOURCE TREE IS NOT THE JOB. A customized font lives at a library entry's own folder, so
+// `listAll()` cannot see it — on the Decay source that is 724.9 MB of payload against an 80.2 MB tree,
+// a denominator ten times short. Any sizer that asks the SOURCE what the export will write is
+// asking the wrong object.
+//
+// ⭐ So both callers come here. Not "the two I found" — the reconciliation test below pins the
+// count, so a third sizer added later fails rather than quietly disagreeing.
+async function _sourceExportInventory(userData, uuid, opts = {}) {
+  const { includeAttachments = true, includeCustomized = true } = opts;
+  const source = soundFontSources.openSource(userData, uuid);
+  if (!source) return null;
+  const all = await source.listAll();
+  const flat = (all || []).filter((e) => e && !e.isDir);
+  const treeBytes = flat.reduce((sum, e) => sum + (Number(e.size) || 0), 0);
+
+  // ⚠️ A payload we cannot build costs zero rather than throwing. It is metadata riding along,
+  // never the goods — the same rule the export itself follows.
+  let payload = null, payloadBytes = 0, payloadFiles = 0;
   try {
-    const source = soundFontSources.openSource(app.getPath('userData'), uuid);
-    if (!source) return { ok: false, error: 'Source not found' };
-    const all = await source.listAll();
-    const flat = (all || []).filter(e => e && !e.isDir);
-    return {
-      ok: true,
-      bytes: flat.reduce((sum, e) => sum + (Number(e.size) || 0), 0),
-      files: flat.length,
-    };
+    const cur = require('./soundFontCuration');
+    payload = cur.buildForSource(userData, uuid, app.getVersion(),
+                                 { includeAttachments, includeCustomized });
+    const plan = payload ? cur.planForArchive(payload) : null;
+    if (plan) {
+      payloadBytes = Buffer.byteLength(plan.sidecarJson, 'utf8');
+      for (const e of plan.entries) {
+        payloadFiles++;
+        try { payloadBytes += fs.statSync(e.absPath).size || 0; } catch { /* skipped at write too */ }
+      }
+      payloadFiles++;   // the sidecar itself
+    }
+  } catch { payload = null; payloadBytes = 0; payloadFiles = 0; }
+
+  return { treeBytes, treeFiles: flat.length, payload, payloadBytes, payloadFiles,
+           bytes: treeBytes + payloadBytes, files: flat.length + payloadFiles };
+}
+
+ipcMain.handle('sources:exportSize', async (_, { uuid, includeAttachments = true,
+                                                 includeCustomized = true } = {}) => {
+  try {
+    const inv = await _sourceExportInventory(app.getPath('userData'), uuid,
+                                             { includeAttachments, includeCustomized });
+    if (!inv) return { ok: false, error: 'Source not found' };
+    // ⚠️ `bytes` INCLUDES THE PAYLOAD, because this number becomes the bar's denominator on the
+    // opening frame. Returning the tree here is what put `0 B of 80.2 MB` on screen for a job
+    // that was about to report 805 MB.
+    return { ok: true, bytes: inv.bytes, files: inv.files };
   } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
@@ -4471,9 +4523,18 @@ ipcMain.handle('sources:exportToDownloads', async (event, { uuid, destDir, forma
     // this entry exists to prevent.
     {
       try {
-        const all = await source.listAll();
-        const flat = (all || []).filter(e => e && !e.isDir);
-        const need = flat.reduce((sum, e) => sum + (Number(e.size) || 0), 0);
+        // ⚠️⚠️ THE PAYLOAD COUNTS TOWARDS THE FIT, AND THIS ONE HAS DATA CONSEQUENCES. [B-420,
+        // 2026-09-24] A fit check is a different QUESTION from a progress denominator — the ruling,
+        // and it holds — but it is the same QUANTITY: how many bytes are about to be written. This
+        // asked the source tree, which on the Decay source is 80.2 MB against 805.0 MB actually written.
+        // A guard that exists to stop a part-written archive reaching a card cannot be ten times
+        // short of what the archive contains.
+        // ⭐ Same inventory as the bar, so the refusal and the readout can never describe different
+        // jobs — which is how one of them came to be wrong without the other noticing.
+        const _inv = await _sourceExportInventory(app.getPath('userData'), uuid,
+                                                  { includeAttachments, includeCustomized });
+        const flat = { length: _inv ? _inv.files : 0 };
+        const need = _inv ? _inv.bytes : 0;
         // ⭐⭐ ONE PREFLIGHT, BOTH QUESTIONS. [B-005 item 4] Was a `checkFit` followed by a
         // separate `describe({classify:true})`, asking about the same destination twice with
         // the board-card test spelled out here and again in the renderer.
@@ -4619,12 +4680,15 @@ ipcMain.handle('sources:exportManyToDownloads', async (event, { items = [], dest
   let grandBytes = 0, grandFiles = 0;
   for (const it of list) {
     try {
-      const src = soundFontSources.openSource(userData, it.uuid);
-      if (!src) return { ok: false, error: `Source not found: ${it.uuid}` };
-      const all = await src.listAll();
-      const flat = (all || []).filter((e) => e && !e.isDir);
-      const bytes = flat.reduce((s, e) => s + (Number(e.size) || 0), 0);
-      // ⚠️⚠️ COUNT THE PASSES, NOT THE BYTES. [2026-09-23, his report: the bar sat at 0 for the
+      // ⭐ THE SHARED INVENTORY, so this handler and `sources:exportSize` cannot disagree about
+      // the same job. They did, and the gap was visible for a full second on a real export:
+      // the opening frame read `0 B of 80.2 MB` and the next one `91.7 MB of 805.0 MB`.
+      const _inv = await _sourceExportInventory(userData, it.uuid,
+                                                { includeAttachments, includeCustomized });
+      if (!_inv) return { ok: false, error: `Source not found: ${it.uuid}` };
+      const bytes = _inv.treeBytes;
+      const flat = { length: _inv.treeFiles };
+      // ⚠️⚠️ COUNT THE PASSES, NOT THE BYTES. [2026-09-23, reported: the bar sat at 0 for the
       // whole rebuild and then climbed, which reads as one bar per source rather than one bar]
       //
       // A space-optimized source exported AS A ZIP moves its full size TWICE - reconstructed into
@@ -4662,9 +4726,29 @@ ipcMain.handle('sources:exportManyToDownloads', async (event, { items = [], dest
       // could not fix that. There is now no pass that can begin after the export is done.
       // !! This also removes a buildForSource disk read that existed ONLY to guess a denominator.
       // [B-426 is closed by the same change]
-      sized.push({ ...it, bytes, files: flat.length, passes });
-      grandBytes += bytes * passes;
-      grandFiles += flat.length;
+      // ⭐⭐ THE CURATION PAYLOAD IS IN THE ARCHIVE, SO IT IS IN THE DENOMINATOR. [B-420, 2026-09-24]
+      //
+      // the screenshots: `Techno · Compressing · 362.9 MB of 7.7 MB`. The numerator counts what goes
+      // into the archive; this total counted `listAll()`, which is the SOURCE TREE. A customized
+      // font lives at a library entry's own folder, not inside the source, so it was structurally
+      // invisible here - and it is where the big files are. Not a rounding error: a source whose
+      // payload dwarfs its vendor tree reported a bar fifty times past its end.
+      //
+      // ⚠️ `zipFolderToFile` ALREADY COMPUTES THE RIGHT TOTAL and emits it; the renderer just never
+      // saw it, because this handler overwrote `p.totalBytes` with `grandBytes` on the way past.
+      // Fixing it at the emit would have been a third opinion about the same quantity. Fixed here,
+      // where the number is born.
+      //
+      // ⚠️ THE PAYLOAD IS BUILT ONCE, HERE, AND CARRIED. The export loop below used to build it
+      // again per source; it now takes this one. So the read [B-426] removed as "a disk read that
+      // existed ONLY to guess a denominator" does not come back - this is the read the export was
+      // already going to do, moved earlier and used twice instead of once.
+      const { payload, payloadBytes, payloadFiles } = _inv;
+      sized.push({ ...it, bytes, files: flat.length, passes, payload, payloadBytes, payloadFiles });
+      // ⚠️ The payload rides the COMPRESS pass only - it is appended to the archive, not carried
+      // through a rebuild - so it is added once regardless of `passes`.
+      grandBytes += bytes * passes + payloadBytes;
+      grandFiles += flat.length + payloadFiles;
     } catch (err) {
       return { ok: false, error: `Could not read source: ${String(err && err.message || err)}` };
     }
@@ -4745,6 +4829,18 @@ ipcMain.handle('sources:exportManyToDownloads', async (event, { items = [], dest
       currentPasses = it.passes || 1;
       phaseBase = 0;
       sawCompress = false;
+      // ⭐⭐ SAY WHAT THE QUIET STRETCH IS DOING. [B-420, 2026-09-24]
+      // Reported: *"this odd phase that appears like nothing... its short, but I don't get it."*
+      // Between the modal opening and the first compressed byte there is real work that emitted
+      // NOTHING, so the bar sat at `0 B of 805.0 MB` with no label and no filename: opening the
+      // source, and `_selectFolderFiles` reading the first 256 bytes of every file to be sure none
+      // of them is a disguised program. Measured at ~60 ms on the Decay source and ~520 ms on a 2,397
+      // file bundle - short, and long enough to read as a stall when it is silent.
+      // ⭐ NO NEW VOCABULARY. 'reading' already maps to "Reading files" in the door's phase table,
+      // beside 'reconstruct' and 'compress'; this stretch simply never emitted one. The bar keeps
+      // its own numbers, so this names the work without claiming progress it cannot measure.
+      onProgress({ phase: 'reading', bytesDone: 0 });
+      flush();
       const src = soundFontSources.openSource(userData, it.uuid);
       if (!src) throw new Error(`Source not found: ${it.uuid}`);
       // Curation sidecar rides along exactly as it does on the single export ([B-283]) - and, as
@@ -4761,12 +4857,11 @@ ipcMain.handle('sources:exportManyToDownloads', async (event, { items = [], dest
       // nothing. His call, deliberately, 2026-09-23: "it is totally fine to break the imports right
       // now since it is the next thing we are fixing after this is done. So you should do the
       // export correctly now and we will learn how to deal with the import later."
-      let curationPayload = null;
-      try {
-        curationPayload = require('./soundFontCuration')
-          .buildForSource(userData, it.uuid, app.getVersion(),
-                          { includeAttachments, includeCustomized });
-      } catch { curationPayload = null; }  // never let a payload we cannot build sink the export
+      // ⭐ TAKEN FROM THE SIZING PASS, NOT REBUILT. [B-420, 2026-09-24] It used to be built here
+      // and the denominator upstairs knew nothing about it - which is exactly how the bar came to
+      // divide archive bytes by source-tree bytes. One build, one object, used by the total and by
+      // the write, so the two cannot disagree about what is going in.
+      const curationPayload = it.payload || null;
       const result = await src.exportToDownloads(target,
         { format, onProgress, shouldStop, curationPayload });
       if (result && result.destPath) created.push(result.destPath);

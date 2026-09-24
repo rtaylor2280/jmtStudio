@@ -163,7 +163,11 @@ async function setup() {
     const pool = () => fs.existsSync(CI.poolRoot(t.userData))
       ? fs.readdirSync(CI.poolRoot(t.userData)).filter(f => !f.startsWith('.')) : [];
     check('the pool is holding the novel content', pool().length === 2, JSON.stringify(pool()));
-    E.deleteEntry(t.userData, r.name);
+    // ⚠️ AWAITED. `deleteEntry` became async on 2026-09-24 so it can retry a transient lock
+    // without freezing the main process. Unawaited, the pool check below ran before the delete
+    // finished and reported two files still held - a failure that describes the TEST, not the
+    // retention rule it is asserting.
+    await E.deleteEntry(t.userData, r.name);
     check('⭐ deleting the font takes its pooled sounds with it', pool().length === 0,
       JSON.stringify(pool()));
     check('⚠️ but the vendor source is untouched — it was never the pool\'s to free',

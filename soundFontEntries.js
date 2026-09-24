@@ -938,7 +938,7 @@ function updateEntryMeta({ userData, currentName, newName, updates }) {
 // Remove an entry from disk. Used by the rename safety guard and by the
 // source-delete cascade (Phase 3, slice 10) — deleting a source should also
 // drop every entry that referenced it.
-function deleteEntry(userData, name) {
+async function deleteEntry(userData, name) {
   if (!name) return { ok: false, error: 'Missing name' };
   const dir = path.join(entriesRoot(userData), name);
   if (!fs.existsSync(dir)) return { ok: true, deleted: false };
@@ -950,7 +950,32 @@ function deleteEntry(userData, name) {
   try { entryUuid = (JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8')) || {}).entryUuid || null; }
   catch {}
   try {
-    fs.rmSync(dir, { recursive: true, force: true });
+    // ⚠️⚠️ RETRIED, BECAUSE A HANDLE CAN OUTLIVE THE READ THAT OPENED IT. [2026-09-24]
+    // Reported: deleting a font right after exporting it gave
+    //   `ENOTEMPTY: directory not empty, rmdir '...\soundFonts\library\Decay'`
+    // Exactly one file inside was locked — the wav that export had been reading — and it had
+    // released by the time it was checked minutes later. **A transient lock, not a leak**, and a
+    // single-attempt delete turns one into a hard failure the user has to understand and redo.
+    // ⭐ THE PRECEDENT IS ALREADY IN THIS CODEBASE AND SAYS THE SAME THING. The export rollback in
+    // `sources:exportManyToDownloads` retries four times with backoff, with the note: "on Windows a
+    // path holding a file with an open handle cannot be removed, and a handle can outlive the
+    // write." The same fact governs a read, and delete was the one destructive path without it.
+    // ⚠️ Bounded, and it still FAILS if the path is genuinely held: the point is to survive a
+    // closing handle, never to mask a file something has open for real.
+    // ⚠️⚠️ AWAITED, NOT A SYNCHRONOUS SLEEP. My first cut used `Atomics.wait` to pause between
+    // attempts — which blocks the MAIN process for up to 900 ms, and that is the exact defect
+    // diagnosed hours earlier today: a synchronous walk in main left a modal in the DOM, unpainted
+    // and unclickable, because Electron routes frame presentation and input dispatch through this
+    // process. A retry that freezes the window is a worse bug than the failure it papers over.
+    let _rmErr = null;
+    for (let i = 0; i < 4; i++) {
+      try { await fs.promises.rm(dir, { recursive: true, force: true }); _rmErr = null; break; }
+      catch (e) {
+        _rmErr = e;
+        if (i < 3) await new Promise((r) => setTimeout(r, 150 * (i + 1)));
+      }
+    }
+    if (_rmErr) throw _rmErr;
     if (entryUuid) {
       try { fs.rmSync(fileHashManifestPath(userData, 'entries', entryUuid), { force: true }); } catch {}
     }
