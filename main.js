@@ -4510,29 +4510,61 @@ ipcMain.handle('sources:exportToDownloads', async (event, { uuid, destDir, forma
         pending = null;
       }
     };
-    const result = await source.exportToDownloads(target, { format, onProgress, shouldStop });
-    // Curation sidecar ([B-283]): a zip export carries the hand-authored values
-    // back with it, so re-importing after a delete returns the link, the style
-    // link, the demo URL and the tags rather than just the audio. Zip only —
-    // a folder export has no archive to strip it out of again on the way in.
-    // buildForSource returns null for an uncurated source, so an untouched
-    // export is still a byte-for-byte copy of what we hold.
-    // `curation` reports what the finished archive ACTUALLY carries, so any
-    // caller can say so without re-deriving it from the library. Null means
-    // nothing was added — an uncurated source, a folder export, or an injection
-    // that failed and left the plain archive in place. Every one of those is
-    // honestly described by "there is nothing of yours in this file".
-    let curation = null;
-    if (result && result.format === 'zip' && result.destPath) {
-      try {
-        const cur = require('./soundFontCuration');
-        const payload = cur.buildForSource(app.getPath('userData'), uuid, app.getVersion(), { includeAttachments, includeCustomized });
-        if (payload) {
-          const r = await cur.injectIntoZip(result.destPath, payload, onProgress);
-          if (r && r.injected && r.carried && r.carried.any) curation = r.carried;
-        }
-      } catch { /* the export succeeded; decorating it is best-effort */ }
-    }
+    // Curation sidecar ([B-283]): a zip export carries the hand-authored values back with it, so
+    // re-importing after a delete returns the link, the style link, the demo URL and the tags
+    // rather than just the audio. buildForSource returns null for an uncurated source, so an
+    // untouched export is still a byte-for-byte copy of what we hold.
+    //
+    // XX THE SIDECAR NOW GOES IN DURING THE EXPORT, NOT AFTER IT. [B-420, 2026-09-23]
+    // This used to call injectIntoZip on the FINISHED archive: extract the whole thing back out,
+    // write the sidecar into the tree, re-compress everything, rename into place. Ryan: "How can
+    // curation have after compression? It goes inside the zip...." and "why would we have ever
+    // packed, unpacked and packed again?" It predated the pooled store, when the archive itself
+    // was the stored artifact and had to be rebuilt to stay byte-canonical. exportToDownloads
+    // places it inline now, so there is no second pass to get stuck in and nothing to roll back.
+    //
+    // !! AN ENTIRE CLASS OF BUG WENT WITH IT. The old extract phase emitted no progress at all, so
+    // it read as a hang at 0 B; the cancel thrown through it was swallowed by a best-effort catch;
+    // the export then reported SUCCESS to a delete that went ahead and destroyed the font while
+    // leaving a half-decorated zip on the card. His report: "it would have sat there at 0 bytes
+    // forever. It is stuck." There is no longer any step between "the archive is written" and
+    // "the export is done", which is what made that sequence possible.
+    //
+    // XX BOTH FORMATS CARRY IT NOW, and that is the point of the change rather than a side effect.
+    // This was zip-only because the sidecar was injected by rebuilding an ARCHIVE, so a folder
+    // export had nothing to inject into - a limitation of the mechanism that got written down as
+    // if it were a rule. Writing into the tree works for both, so all four export doors produce
+    // the same thing. He asked what was different about the contents of the four; nothing is.
+    //
+    // XX THE INVARIANT, HIS WORDS, AND IT IS THE TEST FOR ANY DOOR ADDED LATER (2026-09-23):
+    // "The only difference between the doors is that some of them give options where you can
+    // uncheck them, but that is not an asymmetry. That is just which ones are optional and which
+    // ones are mandatory."
+    // So a door may differ in WHICH OPTIONS IT EXPOSES - includeAttachments and includeCustomized
+    // are checkboxes on some doors and fixed defaults on others. It may NOT differ in what the
+    // export then does with the payload. Placement is identical everywhere; only the build is
+    // parameterised. A door that differs in anything else is a defect, not a variant.
+    //
+    // !! THIS KNOWINGLY BREAKS FOLDER IMPORT UNTIL [B-427]. Import peeks inside ZIPS only, so a
+    // folder re-imported today stores our .jmt-curation.json as vendor content and restores
+    // nothing. Deliberate, his call, 2026-09-23: "it is totally fine to break the imports right now
+    // since it is the next thing we are fixing after this is done. So you should do the export
+    // correctly now and we will learn how to deal with the import later." And the reason it is
+    // safe: "we are not coding for some other group of people who are using this mid-flight...
+    // until we release it, it will not matter. And it is going to be all together in one shot for
+    // QA anyway." There is no released build holding sources, so no mid-flight state to protect.
+    let curationPayload = null;
+    try {
+      curationPayload = require('./soundFontCuration')
+        .buildForSource(app.getPath('userData'), uuid, app.getVersion(),
+                        { includeAttachments, includeCustomized });
+    } catch { curationPayload = null; }  // a payload we cannot build must never sink the export
+    const result = await source.exportToDownloads(target,
+      { format, onProgress, shouldStop, curationPayload });
+    // curation reports what the finished archive ACTUALLY carries, so any caller can say so without
+    // re-deriving it from the library. Null means nothing was added - an uncurated source or a
+    // folder export - and "there is nothing of yours in this file" describes both honestly.
+    const curation = (result && result.curation && result.curation.any) ? result.curation : null;
     if (pending) { try { event.sender.send('soundFonts:sourceExportProgress', pending); } catch {} }
     return { ok: true, ...result, curation };
   } catch (err) {
@@ -4541,6 +4573,247 @@ ipcMain.handle('sources:exportToDownloads', async (event, { uuid, destDir, forma
     if (require('./sfExportCopy').isCancel(err)) return { ok: true, canceled: true };
     return { ok: false, error: String(err && err.message || err) };
   }
+}));
+
+// ── Export MANY sources as ONE operation ─────────────────── [B-420, 2026-09-23, his design]
+//
+// ⭐⭐ WHY THIS EXISTS AND WHY IT IS NOT A LOOP IN THE RENDERER. The bulk delete used to call the
+// single-source export once per source, which made the export phase N operations wearing one
+// caller-drawn bar - and that bar was a STEP COUNT ("Exporting sources 3 of 4"), so the slowest
+// thing in the app reported no bytes and no filenames at all.
+//
+// ⭐ HIS RE-SCOPE, and it dissolved a question rather than answering it. I had asked whether the
+// shared export runner should grow a "the caller paints, not you" mode to accommodate that second
+// surface. His answer: "do the export of all 4... then once done it can return to delete and let
+// delete do its thing being told the export was completed for all of them. so same as 1 or many."
+// One operation means one surface, so the mode was never needed.
+//   "one bar for the bytes over all 4 showing which source it's working on and all the files
+//    flying by. so genuinely looks the same for 1 or 100 of them."
+//
+// ⚠️⚠️ CANCEL IS ALL OR NOTHING, AND THAT IS A DELIBERATE DELETION HE CONFIRMED. Stopping at
+// source 3 of 4 removes the COMPLETED exports of 1 and 2, so that "Nothing was copied. Nothing was
+// deleted." is true rather than a half-state the user has to go and inspect. An export that exists
+// to be the last copy before a delete is worth nothing half-done.
+//
+// ⚠️⚠️ THE ROLLBACK LIVES HERE, IN MAIN, AND MUST NOT MOVE TO THE RENDERER. Every path removed is
+// one THIS RUN created: `_uniqueDestPath` walks to a free name rather than overwriting, so an
+// export never lands on anything pre-existing, and `exportToDownloads` hands back the path it
+// chose. The alternative - an IPC that removes a path the renderer names - is a general
+// delete-anything surface, and the only existing destructive path IPC (`fs:removeSetAside`)
+// refuses anything it did not itself name. Same discipline, achieved by never exposing it.
+ipcMain.handle('sources:exportManyToDownloads', async (event, { items = [], destDir, format,
+                                                                includeAttachments = true,
+                                                                includeCustomized = true,
+                                                                confirmSlow } = {}) =>
+  _withExportCancel(async (shouldStop) => {                            // [B-005 item 4]
+  const userData = app.getPath('userData');
+  const target = destDir || app.getPath('downloads');
+  const list = Array.isArray(items) ? items.filter((x) => x && x.uuid) : [];
+  if (!list.length) return { ok: false, error: 'No sources to export' };
+
+  // ── 1. Size the WHOLE job, and preflight the sum ──
+  // ⚠️ One preflight for the total, not one per source. Four exports that each fit individually
+  // can still fail together, and finding that out on source three is the half-state this design
+  // exists to remove.
+  const sized = [];
+  let grandBytes = 0, grandFiles = 0;
+  for (const it of list) {
+    try {
+      const src = soundFontSources.openSource(userData, it.uuid);
+      if (!src) return { ok: false, error: `Source not found: ${it.uuid}` };
+      const all = await src.listAll();
+      const flat = (all || []).filter((e) => e && !e.isDir);
+      const bytes = flat.reduce((s, e) => s + (Number(e.size) || 0), 0);
+      // ⚠️⚠️ COUNT THE PASSES, NOT THE BYTES. [2026-09-23, his report: the bar sat at 0 for the
+      // whole rebuild and then climbed, which reads as one bar per source rather than one bar]
+      //
+      // A space-optimized source exported AS A ZIP moves its full size TWICE - reconstructed into
+      // a temp tree, then archived from it ("two passes keep memory bounded on multi-GB
+      // voicepacks"). A plain zip-backed source is a single copyFile, and a folder export is a
+      // single walk. So a denominator of raw bytes is wrong for exactly the sources that take
+      // longest, and the bar would hit 100% at the halfway mark - the same "counting the wrong
+      // side of the operation" defect as the slow-write warning that counted zip entries.
+      // ⭐ THE PREDICATE IS THE ONE `openSource` ITSELF USES to pick the virtualized
+      // implementation: deduped, and not a folder. Read rather than guessed.
+      // ⚠️ THE TOTAL THEREFORE EXCEEDS WHAT LANDS ON DISK for such a source, deliberately: it
+      // measures WORK, which is what a progress bar is for. The summary reports the artifact.
+      let passes = 1;
+      try {
+        const m = soundFontSources.readSourceMeta(
+          path.join(soundFontSources.sourcesRoot(userData), it.uuid));
+        if (format !== 'folder' && m && m.deduped && m.format !== 'folder') passes = 2;
+      } catch { /* cannot tell - one pass is the honest floor, never a guessed two */ }
+      // XX CURATION ADDS NO PASSES ANY MORE, AND THAT IS THE FIX RATHER THAN THE ACCOUNTING.
+      // [B-420, 2026-09-23] It used to add TWO, and the two corrections that forced that still
+      // stand - they are simply satisfied by construction now instead of by arithmetic: "to a user,
+      // they don't know anything about curation etc. it's all part of the export" and "is there not
+      // measurable bytes during curation? I don't understand why there wouldn't be."
+      //
+      // Writing the owner's tags in used to mean UNPACKING the finished archive and RE-ZIPPING it -
+      // real work over the whole source that the denominator denied, which is what made a
+      // finished-looking export sit at "0 B" for minutes. The sidecar now goes into the tree before
+      // compression, so its bytes flow through the ONE compress pass already counted above, named
+      // and measured like any other file.
+      //
+      // XX AND THE DEEPER PROBLEM IS GONE, NOT COUNTED. The old step ran AFTER the export
+      // considered itself finished, which put it outside the cancel-and-rollback boundary: a cancel
+      // there was discarded, nothing rolled back, and anything gated on the export - a delete - got
+      // its green light early and destroyed the font. Counting the passes made the bar honest; it
+      // could not fix that. There is now no pass that can begin after the export is done.
+      // !! This also removes a buildForSource disk read that existed ONLY to guess a denominator.
+      // [B-426 is closed by the same change]
+      sized.push({ ...it, bytes, files: flat.length, passes });
+      grandBytes += bytes * passes;
+      grandFiles += flat.length;
+    } catch (err) {
+      return { ok: false, error: `Could not read source: ${String(err && err.message || err)}` };
+    }
+  }
+  try {
+    const _ed = require('./exportDestination');
+    const _pf = await _ed.preflight(target, {
+      totalBytes: grandBytes,
+      fileCount: grandFiles,
+      classify: !confirmSlow && _ed.isSlowWriteJob(grandFiles, grandBytes),
+    });
+    if (_pf && _pf.tooBig) return { ok: false, tooBig: _pf.tooBig };
+    if (!confirmSlow && _pf && _pf.slowWrite) return { ok: false, slowWrite: _pf.slowWrite };
+  } catch { /* never fails closed - failing to measure is not evidence of a problem [B-028] */ }
+
+  // ── 2. One progress stream across the whole job ──
+  // ⚠️ Byte offsets accumulate ACROSS sources so the bar is one bar. `sourceLabel` is what makes
+  // it legible - the bytes alone cannot say which of four is being read.
+  let lastSent = 0, pending = null;
+  let baseBytes = 0, baseFiles = 0, currentLabel = '';
+  // ⚠️ A source that rebuilds contributes TWICE, so the offset advances when its phase turns to
+  // compress - otherwise the second pass would replay the first pass's bytes and the bar would
+  // stall, then repeat. `phaseBase` is that within-source offset; `baseBytes` is the across-source
+  // one. Both are needed, and conflating them is how a bar resets between sources.
+  let phaseBase = 0, currentPasses = 1, sawCompress = false, currentSourceBytes = 0;
+  let currentIndex = 0;
+  const flush = () => {
+    if (!pending) return;
+    try { event.sender.send('soundFonts:sourceExportProgress', pending); } catch {}
+    pending = null;
+  };
+  const onProgress = (p) => {
+    // XX THERE IS NO CURATION PHASE TO ACCOUNT FOR ANY MORE. [B-420, 2026-09-23]
+    // Two successive attempts lived here and both were treating a symptom. The first routed
+    // curation-unpack/curation-repack around the job accumulator as "phase-local", because those
+    // phases reported their OWN byte totals and folding them in collapsed the text to "0 B" while
+    // the monotonic floor held the bar full - two readouts each correct about a different quantity.
+    // He rejected the premise: "to a user, they don't know anything about curation etc. it's all
+    // part of the export." The second counted them as ordinary passes, which made the bar honest.
+    //
+    // ⭐ Neither was the fix. The phases existed only because the sidecar was written by rebuilding
+    // a finished archive; writing it into the tree before compression means there is nothing after
+    // the compress pass to report, to offset, or to cancel out of. The accounting problem was a
+    // shadow cast by the design, and it disappeared with it rather than being solved.
+    // ⚠️ The transition is one-way per source: once compression starts the rebuild is behind us.
+    if (currentPasses > 1 && p && p.phase === 'compress' && !sawCompress) {
+      sawCompress = true;
+      phaseBase = currentSourceBytes;
+    }
+    pending = {
+      phase: p && p.phase,
+      sourceLabel: currentLabel,
+      // ⚠️ POSITION, because bytes alone cannot answer "where am I in this". [2026-09-23, his
+      // call: "we just have to show 1 of 2 then 2 of 2 so the user knows where they are in
+      // process"] Each source runs rebuild-then-archive, so a phase word changes twice per
+      // source and the bar moves continuously - neither tells you how many are left.
+      sourceIndex: currentIndex,
+      sourceTotal: sized.length,
+      fileCount: baseFiles + ((p && p.fileCount) || 0),
+      totalFiles: grandFiles,
+      bytesDone: baseBytes + phaseBase + ((p && p.bytesDone) || 0),
+      totalBytes: grandBytes,
+      currentFile: p && p.currentFile,
+    };
+    const now = Date.now();
+    if (now - lastSent >= 80) { lastSent = now; flush(); }
+  };
+
+  // ── 3. Export each, remembering exactly what we created ──
+  const created = [];        // ⚠️ paths THIS RUN minted - the only things the rollback may touch
+  const exported = [];
+  try {
+    for (const it of sized) {
+      if (shouldStop && shouldStop()) throw new (require('./sfExportCopy').ExportCancelled)();
+      currentLabel = it.label || it.uuid;
+      currentIndex = sized.indexOf(it) + 1;
+      currentSourceBytes = it.bytes;
+      currentPasses = it.passes || 1;
+      phaseBase = 0;
+      sawCompress = false;
+      const src = soundFontSources.openSource(userData, it.uuid);
+      if (!src) throw new Error(`Source not found: ${it.uuid}`);
+      // Curation sidecar rides along exactly as it does on the single export ([B-283]) - and, as
+      // there, it is now placed DURING the export instead of being bolted onto the finished
+      // archive. [B-420] The long note at the single-source door records what that removed.
+      //
+      // XX BOTH FORMATS CARRY IT, and that is the point of the change rather than a side effect.
+      // This used to be zip-only because the sidecar was injected by rebuilding an ARCHIVE, so a
+      // folder export had nothing to inject into. Writing it into the tree works for both, so all
+      // four export doors now produce the same thing. Ryan asked what was different about the
+      // contents of the four: the answer is now nothing.
+      // !! THIS KNOWINGLY BREAKS FOLDER IMPORT UNTIL [B-427]. Import only peeks inside ZIPS, so a
+      // folder re-imported today stores our .jmt-curation.json as vendor content and restores
+      // nothing. His call, deliberately, 2026-09-23: "it is totally fine to break the imports right
+      // now since it is the next thing we are fixing after this is done. So you should do the
+      // export correctly now and we will learn how to deal with the import later."
+      let curationPayload = null;
+      try {
+        curationPayload = require('./soundFontCuration')
+          .buildForSource(userData, it.uuid, app.getVersion(),
+                          { includeAttachments, includeCustomized });
+      } catch { curationPayload = null; }  // never let a payload we cannot build sink the export
+      const result = await src.exportToDownloads(target,
+        { format, onProgress, shouldStop, curationPayload });
+      if (result && result.destPath) created.push(result.destPath);
+      const curation = (result && result.curation && result.curation.any) ? result.curation : null;
+      // ⚠️ `destDir` IS THE CHOSEN DESTINATION, NOT THE THING WE CREATED IN IT. [B-420, 2026-09-23]
+      // `destPath` is the folder or .zip this export produced; the eject offer needs the DIRECTORY
+      // it landed in, because that is what resolves to a piece of removable media. The renderer had
+      // to make do with destPath, which happens to be a directory for a folder export and is a FILE
+      // for a zip - so the eject would have worked on exactly the format he tested and silently not
+      // on the other one.
+      exported.push({ uuid: it.uuid, label: currentLabel, destDir: target, ...result, curation });
+      baseBytes += it.bytes * (it.passes || 1);
+      baseFiles += it.files;
+    }
+  } catch (err) {
+    // ⚠️⚠️ ROLL BACK EVERYTHING, INCLUDING THE SOURCES THAT FINISHED. This is the deliberate
+    // deletion: without it a cancel at three of four leaves two archives at a destination the
+    // user is about to be told nothing was copied to.
+    // ⚠️ Retried, for the same reason `fs:removeSetAside` retries: on Windows a path holding a
+    // file with an open handle cannot be removed, and a handle can outlive the write.
+    const removed = [];
+    const stubborn = [];
+    for (const p of created) {
+      let gone = false;
+      for (let i = 0; i < 4 && !gone; i++) {
+        try { await fs.promises.rm(p, { recursive: true, force: true }); gone = true; }
+        catch { if (i < 3) await new Promise((r) => setTimeout(r, 150 * (i + 1))); }
+      }
+      (gone ? removed : stubborn).push(p);
+    }
+    flush();
+    if (require('./sfExportCopy').isCancel(err)) {
+      // ⚠️ `wroteCount: 0` is the TRUE number after a rollback, and the shared ending reads it to
+      // say "Nothing new was copied." A count of what landed before the cancel would be a fact
+      // about files that no longer exist.
+      // ⚠️ `partialRemoved` IS WHAT THE SHARED ENDING READS to say the half-written thing was
+      // taken back. The rollback IS that, for 1 source or for N - so the standalone door gets
+      // the same sentence it used to hand-roll, from the one place that draws endings.
+      return { ok: true, canceled: true, wroteCount: 0, rolledBack: removed.length,
+               partialRemoved: removed.length > 0, leftovers: stubborn };
+    }
+    return { ok: false, error: String(err && err.message || err),
+             rolledBack: removed.length, leftovers: stubborn };
+  }
+  flush();
+  return { ok: true, exported, count: exported.length,
+           totalBytes: grandBytes, fileCount: grandFiles };
 }));
 
 // Open a folder picker for source-export workflows. Returns the chosen
@@ -4900,7 +5173,7 @@ const _isCurationTmpDir = (p) => {
 // renderer only round-trips the temp-dir handles it was handed, like the staged
 // folder door already does. The payload dir is dropped afterwards either way:
 // with the restore done, nothing owes it anything.
-ipcMain.handle('sources:restoreCustomized', async (_event, { uuid, curationTmp, curationPayloadDir, picks } = {}) => {
+ipcMain.handle('sources:restoreCustomized', async (event, { uuid, curationTmp, curationPayloadDir, picks } = {}) => {
   const fsr = require('fs');
   const pathR = require('path');
   try {
@@ -4915,7 +5188,12 @@ ipcMain.handle('sources:restoreCustomized', async (_event, { uuid, curationTmp, 
     const curation = meta && meta.curation;
     if (!curation) return { ok: false, error: 'Source carries no curation' };
     const r = await require('./soundFontCuration')
-      .restoreCustomizedEntries(ud, uuid, curation, curationPayloadDir, picks);
+      // XX FORWARDED ONTO THE CHANNEL THE RENDERER ALREADY HAS. [B-429] The restore reported nothing
+      // for its whole life, so the import bar fell to 0% and held there. Nothing new was needed:
+      // createEntry always accepted an onProgress and this channel always existed - the two were
+      // simply never joined, and the renderer subscribed a moment too late to hear it anyway.
+      .restoreCustomizedEntries(ud, uuid, curation, curationPayloadDir, picks,
+        (p) => { try { event.sender.send('entries:createProgress', p); } catch {} });
     return r || { ok: false, error: 'Restore returned nothing' };
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };

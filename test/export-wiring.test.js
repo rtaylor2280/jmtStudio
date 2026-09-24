@@ -111,9 +111,86 @@ ok('the old refuse+warn pair is gone from every door',
 // ⭐ This is a guard, not a bug: if the suite is failing ONLY on this line, the probe is still
 // in and the fix is to take it out - twice today something was left behind because removing it
 // depended on someone remembering.
-ok('no temporary [bp] diagnostic is left in the renderer',
-   !/\[bp\]/.test(H),
-   'REMOVE THE TEMPORARY DIAGNOSTIC from _sfRunWithByteProgress before committing');
+ok('no temporary console diagnostic is left in the renderer',
+   !/\[bp\]/.test(H) && !/\[srcprog\]/.test(H),
+   'REMOVE THE TEMPORARY DIAGNOSTIC before committing — two different probes have now needed '
+   + 'this guard in one day, which is why it checks a set rather than a single marker');
+
+// ── ⚠️⚠️ NOTHING IN AN EXPORT PATH MAY SWALLOW A CANCEL ──────────────
+//
+// ⭐⭐ HIS REASONING, 2026-09-23, and it is the instrument I should have used first: "when we
+// cancelled before it was deleting the file. As it should. And you can't return to delete until
+// export resolves. What is telling you is that there was an issue in the process."
+//
+// The delete is GATED on the export resolving successfully. So a font disappearing after a cancel
+// is only possible if the export reported success - the outcome was proof of the defect before any
+// file was examined. I went and diffed zip entries instead, trying to establish from the artifact
+// what the system's own contract had already stated.
+//
+// THE DEFECT IT ENCODES: the curation injection was wrapped in `catch { /* best-effort */ }` so a
+// curation failure could never sink a finished export. Correct intent - and it discarded the USER'S
+// OWN STOP along with it, so the export reported success and the delete went ahead.
+//
+// ⚠️ A bare `catch {}` around anything that can throw ExportCancelled is this bug. Real errors may
+// still be swallowed there; a cancel may not.
+{
+  const lines = main.split('\n');
+  const THROWERS = /injectIntoZip|copyFileWithProgress|copyTreeWithProgress|writeBufferWithProgress|exportToDownloads|zipFolderToFile/;
+  // ⚠️⚠️ THE REGION IS THE TRY BLOCK, NOT A FIXED WINDOW. [2026-09-23]
+  // The first cut read the 14 lines PRECEDING the catch and asked whether a thrower appeared in
+  // them. That is not the question. A thrower fourteen lines up may sit in a completely different
+  // statement, and it produced two standing false positives that made this check red for a day:
+  //     try { event.sender.send('soundFonts:exportProgress', ...); } catch {}
+  //     try { await fs.promises.rm(dest, { recursive: true, force: true }); } catch {}
+  // Neither guards a thrower - an IPC send and a cleanup rm cannot raise ExportCancelled - but both
+  // had one nearby. A red check with known-bogus hits gets read as "that one is always red", which
+  // is worse than no check: the day it goes red for a REAL reason, nobody looks.
+  // ⭐ So walk back to the `try {` this catch belongs to and ask whether the thrower is INSIDE it.
+  // ⚠️ AND A LINE-NUMBER EXEMPTION WOULD ALREADY HAVE ROTTED. The second site moved 6305 -> 6321
+  // during this evening's edits. Exempting by call SHAPE survives the file moving; a line number
+  // silently starts exempting whatever slid into its place. Same fixed-width-slice defect
+  // test/export-runner-ratchet.test.js warns about in its own header - third instance in one day.
+  const tryRegion = (i) => {
+    for (let j = i; j >= Math.max(0, i - 40); j--) {
+      if (/\btry\s*\{/.test(lines[j])) return lines.slice(j, i + 1).join('\n');
+    }
+    return lines.slice(Math.max(0, i - 14), i + 1).join('\n');  // no try found: keep the old window
+  };
+  const isBad = (i) => {
+    if (!/catch\s*\{\s*\/\*|catch\s*\{\s*\}/.test(lines[i])) return false;  // bare/comment-only catch
+    if (!THROWERS.test(tryRegion(i))) return false;                         // cannot receive a cancel
+    const after = lines.slice(i, Math.min(i + 10, lines.length)).join('\n');
+    return !/isCancel/.test(after);                                        // re-thrown is correct
+  };
+  const bad = [];
+  lines.forEach((_l, i) => { if (isBad(i)) bad.push(`${i + 1}: ${lines[i].trim().slice(0, 70)}`); });
+  ok('⚠️⚠️ no bare catch discards a cancel in an export path', bad.length === 0,
+     bad.join(' | ') + ' — a swallowed cancel reports success, and anything gated on that success '
+     + 'then runs. That is how a delete proceeded after the user stopped the export it depended on.');
+
+  // ── ⚠️⚠️ AND THE CHECK PROVES IT STILL CATCHES THE REAL SHAPE ──────
+  // Narrowing a matcher to kill false positives is exactly how a check quietly stops matching
+  // anything. This reconstructs the ACTUAL defect - the curation catch as it was written before
+  // [B-420] removed it - and requires that the narrowed logic still flags it.
+  {
+    const saved = lines.slice();
+    const at = lines.length;
+    lines.push(
+      '        try {',
+      '          const r = await cur.injectIntoZip(result.destPath, payload, onProgress);',
+      '          if (r && r.injected) curation = r.carried;',
+      '        } catch { /* best-effort: never sink a finished export */ }');
+    ok('⚠️⚠️ the real swallowed-cancel shape IS still caught', isBad(at + 3),
+       'the narrowed matcher no longer sees the defect it was written for, so a clean result from '
+       + 'it means nothing at all');
+    // A bare catch around something that CANNOT cancel must still pass, or the narrowing did nothing.
+    const at2 = lines.length;
+    lines.push("        try { event.sender.send('soundFonts:exportProgress', pending); } catch {}");
+    ok('and a catch guarding a non-thrower is NOT flagged', !isBad(at2),
+       'the false positives this narrowing exists to remove are still being reported');
+    lines.length = 0; lines.push(...saved);
+  }
+}
 
 ok('the deleted overlay has no callers left on the export path',
    !/_sfPreflightBusy\(/.test(H.replace(/\/\/[^\n]*/g, '')),
@@ -401,4 +478,80 @@ process.exit(failed ? 1 : 0);
   ok('⭐ and it does so BEFORE reading ok',
      norm > 0 && read > norm,
      'normalising after the read would leave out.ok false and still report a failure');
+}
+
+// ── ⚠️⚠️ EVERY "EXPORT COMPLETE" DIALOG MUST BE ABLE TO EJECT ────────
+//
+// ⭐⭐ THIS HAS NOW BEEN THE SAME BUG TWICE, WHICH IS WHY IT IS A CHECK AND NOT A NOTE.
+// The during-export eject CHECKBOX is rendered by the progress modal, from a completely different
+// code path to the summary that has to honour it. So a door can lose the eject BUTTON entirely and
+// still look correct all the way through the export - the checkbox is right there, ticked.
+//   • Backup lost it when it migrated to the shared runner. The note left beside that fix said
+//     "nobody noticed, because the during-export checkbox still appeared."
+//   • The source-export door lost it the same way, and Ryan found it on the first real export of
+//     the evening, to F:: "I'm missing the eject. I saw the check box, but not here after."
+//
+// ⭐ `_sfCompletionNotice` and `_sfShowExportSummary` both derive the row themselves, so a door that
+// goes through either is safe by construction. The defect shape is a door building its OWN summary
+// with a bare promptConfirm - which is exactly what both offenders did.
+//
+// ⚠️ ANCHORED ON THE ENCLOSING HANDLER, NOT A FIXED WINDOW. A fixed slice around the title is the
+// defect this same file was failing on earlier today (and that two other tests warn about): comments
+// get added, the window stops covering the call, and the check silently passes. The region here runs
+// from the nearest preceding handler/function anchor to the next one, so it grows with the code.
+{
+  const lines = H.split('\n');
+  const ANCHOR = /addEventListener\(|^\s*(const|async function|function)\s+[A-Za-z_$][\w$]*\s*=?\s*(async)?\s*(\(|function)/;
+  const CARRIES = /_sfEjectRowHtml|_sfWireEjectRow|_sfCompletionNotice|_sfShowExportSummary/;
+  const regionOf = (i) => {
+    let from = 0;
+    for (let j = i; j >= 0; j--) { if (ANCHOR.test(lines[j])) { from = j; break; } }
+    let to = lines.length;
+    for (let j = i + 1; j < lines.length; j++) { if (ANCHOR.test(lines[j])) { to = j; break; } }
+    return lines.slice(from, to).join('\n');
+  };
+  // ⚠️⚠️ "Export complete" WAS TOO NARROW, AND THREE DOORS PROVED IT IN ONE EVENING. [B-420]
+  // The first cut keyed on that exact title. But a door that saves a file and then reveals it does
+  // not have to be CALLED "Export complete" - the delete-and-export endings are titled "Deleted N
+  // fonts" and "Deleted, and a copy was saved", and both were missing the eject while matching
+  // nothing this check looked at.
+  // ⭐ THE REAL PREDICATE IS "did this ending put a file somewhere the user might want to unplug?",
+  // and the honest proxy for that is a handler that offers to REVEAL the destination. If it can say
+  // "Show in folder", a card could be that folder.
+  // ⚠️ `showItemInFolder` / `openFolder` deliberately, not the dialog title: the titles are user-
+  // facing copy and will keep changing, while the reveal is structural.
+  const REVEALS = /showItemInFolder\(|electronAPI\.openFolder\(/;
+  const offenders = [];
+  lines.forEach((l, i) => {
+    const isCompletion = /title:\s*'Export complete'/.test(l);
+    // A promptConfirm offering "Show in folder" is an ending about a destination.
+    const isReveal = /confirmText:\s*'Show in folder'/.test(l);
+    if (!isCompletion && !isReveal) return;
+    const region = regionOf(i);
+    if (isReveal && !REVEALS.test(region)) return;   // not actually revealing anything
+    if (!CARRIES.test(region)) offenders.push(i + 1);
+  });
+  ok('⚠️⚠️ no "Export complete" dialog is built without an eject row', offenders.length === 0,
+     `line(s) ${offenders.join(', ')} render a completion dialog whose handler never mentions an `
+     + 'eject row. The checkbox shown DURING the export comes from the progress modal, so this '
+     + 'reads as working right up until the user looks for the button it arms. Route the door '
+     + 'through _sfCompletionNotice, or build the row the way it does.');
+
+  // ⚠️⚠️ AND THE CHECK PROVES IT CAN FAIL. Narrowing by "enclosing handler" is exactly the kind of
+  // region rule that can quietly select the whole file and pass everything.
+  {
+    const saved = lines.slice();
+    lines.push("      document.getElementById('x').addEventListener('click', async () => {",
+               "        const r = await promptConfirm({",
+               "          title: 'Export complete',",
+               "          messageHtml: 'done',",
+               "        });",
+               "      });");
+    const at = lines.length - 4;   // the title line
+    ok('⭐ a completion dialog with NO eject row IS caught',
+       !CARRIES.test(regionOf(at)),
+       'the region rule is selecting too much - it found an eject mention in a handler that has '
+       + 'none, so a clean result from this check means nothing');
+    lines.length = 0; lines.push(...saved);
+  }
 }

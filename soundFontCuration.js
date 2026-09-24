@@ -358,6 +358,92 @@ function _copyEntryDirInto(srcDir, destDir) {
   } catch { return false; }
 }
 
+// ⭐ Enumerate an entry folder the way _copyEntryDirInto COPIES it - same root meta.json exclusion,
+// same all-or-nothing contract. Returns relative posix paths, or null if the walk failed at any
+// point, because a half-listed customized font must be dropped exactly like a half-copied one.
+// [B-420] The archive path needs the LIST without the copy: archiver reads these files where they
+// already sit, so copying them into a staging dir only to read them straight back is pure waste -
+// and a customized font can be a whole font.
+function _listEntryDirFiles(srcDir) {
+  try {
+    const out = [];
+    const stack = [['', true]];
+    while (stack.length) {
+      const [rel, isRoot] = stack.pop();
+      const from = rel ? path.join(srcDir, rel) : srcDir;
+      for (const d of fs.readdirSync(from, { withFileTypes: true })) {
+        if (isRoot && d.name === 'meta.json') continue;
+        const childRel = rel ? `${rel}/${d.name}` : d.name;
+        if (d.isDirectory()) { stack.push([childRel, false]); continue; }
+        if (!d.isFile()) continue;
+        out.push(childRel);
+      }
+    }
+    return out;
+  } catch { return null; }
+}
+
+// ⭐⭐ THE SIDECAR'S SHIPPING RULES, IN ONE PLACE. [B-420] Both consumers - writeIntoTree for a folder
+// export and planForArchive for a zip - need the same decisions made the same way: which customized
+// records are actually carried, which candidate paths are handed back, and what the written JSON says.
+// Two copies of this drifted apart once already (the export side grew its own inverse of the import
+// side and inherited a constraint that only applied to the other direction), so it is deliberately
+// not duplicated.
+function _cleanSidecar(payload, carriedCustomized, reclaimedPaths) {
+  return {
+    ...payload,
+    attachments: (payload.attachments || []).map(({ _abs, ...rest }) => rest),
+    customized: carriedCustomized.map(({ _absDir, ...rest }) => rest),
+    ...(reclaimedPaths.length ? {
+      importedPaths: [...(payload.importedPaths || []), ...reclaimedPaths],
+    } : {}),
+  };
+}
+
+// What this payload contributes to an ARCHIVE, with nothing staged on disk. [B-420]
+// Returns { sidecarJson, entries: [{ name, absPath }], attachmentsWritten, customizedWritten } -
+// `entries` point at files where they already live, and the sidecar never becomes a file at all:
+// archiver takes it as bytes. This is the whole difference from writeIntoTree, which has to produce
+// real files because a folder export's deliverable IS a folder of files.
+// ⚠️ A record whose folder cannot be ENUMERATED is dropped here, mirroring writeIntoTree dropping one
+// whose folder cannot be COPIED - a sidecar pointing at a folder that is not in the archive would
+// make the restore invent an empty font.
+function planForArchive(payload) {
+  if (!payload) return null;
+  const entries = [];
+  let attachmentsWritten = 0;
+  for (const a of (payload.attachments || [])) {
+    if (!a._abs) continue;
+    // Checked now rather than discovered by archiver mid-stream: a receipt that cannot be read is
+    // skipped, and it must not take the export down with it.
+    try { if (!fs.statSync(a._abs).isFile()) continue; } catch { continue; }
+    entries.push({ name: a.file, absPath: a._abs });
+    attachmentsWritten++;
+  }
+  const carriedCustomized = [];
+  const reclaimedPaths = [];
+  for (const c of (payload.customized || [])) {
+    if (!c._absDir || !c.dir) continue;
+    const rels = _listEntryDirFiles(c._absDir);
+    if (rels) {
+      for (const rel of rels) {
+        entries.push({ name: `${c.dir}/${rel}`,
+                       absPath: path.join(c._absDir, rel.split('/').join(path.sep)) });
+      }
+      carriedCustomized.push(c);
+    } else if (c.candidatePath != null) {
+      reclaimedPaths.push(c.candidatePath);
+    }
+  }
+  const clean = _cleanSidecar(payload, carriedCustomized, reclaimedPaths);
+  return {
+    sidecarJson: JSON.stringify(clean, null, 2),
+    entries,
+    attachmentsWritten,
+    customizedWritten: carriedCustomized.length,
+  };
+}
+
 // Drop the sidecar (and its payload files) into a reconstructed tree, just
 // before it is archived. The _abs / _absDir keys are stripped on the way out so
 // the written JSON carries no machine-specific paths.
@@ -398,14 +484,9 @@ function writeIntoTree(treeDir, payload) {
       if (c.candidatePath != null) reclaimedPaths.push(c.candidatePath);
     }
   }
-  const clean = {
-    ...payload,
-    attachments: (payload.attachments || []).map(({ _abs, ...rest }) => rest),
-    customized: carriedCustomized.map(({ _absDir, ...rest }) => rest),
-    ...(reclaimedPaths.length ? {
-      importedPaths: [...(payload.importedPaths || []), ...reclaimedPaths],
-    } : {}),
-  };
+  // ⭐ Shared with planForArchive - see _cleanSidecar. The folder and archive paths must describe the
+  // same shipment, or a font restored from a zip and one restored from a folder disagree.
+  const clean = _cleanSidecar(payload, carriedCustomized, reclaimedPaths);
   try {
     fs.writeFileSync(path.join(treeDir, SIDECAR_NAME), JSON.stringify(clean, null, 2));
     return { ok: true, attachmentsWritten, customizedWritten: carriedCustomized.length };
@@ -473,7 +554,18 @@ function summarize(payload, attachmentsWritten, customizedWritten) {
 // The pristine fast path stays pristine when there is nothing to carry: an
 // uncurated source never reaches this, so its exported bytes are still the
 // vendor's archive copied verbatim.
-async function injectIntoZip(zipPath, payload, onProgress) {
+// ⚠️⚠️ `shouldStop` ADDED 2026-09-23, AND IT IS NOT A NICETY. This phase ignored
+// cancellation entirely: he pressed Cancel on a board-card export and watched "Cancelling…
+// (finishing current file)" for over two minutes before killing the app - which is the
+// force-quit-mid-write scenario the whole SD guard exists to prevent. The app let him close,
+// because no quit guard covered an export either (both fixed together).
+// ⭐ `zipFolderToFile` HAS SUPPORTED `opts.shouldStop` ALL ALONG and aborts the archive on it.
+// The repack was one parameter away from being stoppable; nobody passed it.
+// ⚠️ The EXTRACT loop needs its own check - it is the other long half, and a stop signal
+// that only reached the re-zip would still sit through a full extraction of a multi-GB archive.
+async function injectIntoZip(zipPath, payload, onProgress, opts = {}) {
+  const _stop = () => !!(opts.shouldStop && opts.shouldStop());
+  let _exDone = 0, _exTotal = 0;
   if (!payload) return { ok: true, injected: false, carried: summarize(null) };
   const sources = require('./soundFontSources');
   // ⚠️ THE WORKING TREE MUST LIVE BESIDE THE DESTINATION, NOT IN os.tmpdir().
@@ -492,13 +584,24 @@ async function injectIntoZip(zipPath, payload, onProgress) {
     const entries = await zip.entries();
     const keys = Object.keys(entries).filter(k => entries[k].name
       && entries[k].name !== '/' && !entries[k].isDirectory);
+    // ⚠️ The denominator comes from the archive's own directory - `size` is the UNCOMPRESSED
+    // length, which is what the extract actually writes, so the readout matches the work done.
+    _exTotal = keys.reduce((n, k) => n + (entries[k].size || 0), 0);
     let done = 0;
     for (const k of keys) {
       const rel = entries[k].name.replace(/\\/g, '/');
       const dest = path.resolve(treeDir, rel);
       if (!dest.startsWith(path.resolve(treeDir) + path.sep)) continue;
       fs.mkdirSync(path.dirname(dest), { recursive: true });
+      if (_stop()) throw new (require('./sfExportCopy').ExportCancelled)();
       await zip.extract(entries[k].name, dest);
+      // ⚠️⚠️ REPORT THE EXTRACT, BECAUSE SILENCE READS AS STUCK. [2026-09-23] This phase emitted
+      // NOTHING - not a byte, not a filename - while unpacking the whole archive, so the display
+      // held at "0 B" for minutes and he reasonably concluded it had hung. It had not; it had no
+      // voice. A phase with no readout is indistinguishable from a phase that has died.
+      _exDone += (entries[k].size || 0);
+      if (onProgress) onProgress({ phase: 'curation-unpack', bytesDone: _exDone,
+                                   totalBytes: _exTotal, currentFile: entries[k].name });
       done++;
       if (onProgress) onProgress({ phase: 'curation-write', fileCount: done, totalFiles: keys.length });
     }
@@ -508,7 +611,7 @@ async function injectIntoZip(zipPath, payload, onProgress) {
     const outPath = path.join(tmpDir, 'out.zip');
     await sources.zipFolderToFile(treeDir, outPath, (p) => onProgress && onProgress({
       phase: 'curation-repack', bytesDone: p.bytesProcessed, totalBytes: p.totalBytes, currentFile: p.currentFile,
-    }));
+    }), { shouldStop: opts.shouldStop || null });
     // ⚠️ ORDER IS LOad-BEARING: move the ORIGINAL aside first, put the rebuilt
     // one in place, and only then delete the original. The first version of this
     // deleted the destination BEFORE the rename and lost a 708 MB export when
@@ -558,6 +661,25 @@ async function peekZip(zipPath) {
     return payload;
   } catch { return null; }
   finally { try { await zip.close(); } catch {} }
+}
+
+// The folder equivalent of peekZip: is there a sidecar at the root of this directory?
+// ⭐ EXISTS BECAUSE FOLDER EXPORTS NOW CARRY ONE. [B-427] Injection worked by rebuilding an ARCHIVE,
+// so a folder export had nothing to inject into - and that limitation got written down as though it
+// were a rule about folders. Ryan's call once the sidecar moved into the tree: "you should do the
+// export correctly now and we'll learn how to deal with the import later." This is that half.
+// ⚠️ Every acceptance rule is copied from peekZip deliberately, not approximated: a malformed sidecar
+// is ignored rather than half-applied, and a sidecar from a NEWER schema is data we cannot promise to
+// read correctly, so the font still imports and only the curation is lost. Two peeks that disagree
+// about what they accept would mean a zip and its extracted twin restore differently.
+function peekDir(dirPath) {
+  try {
+    const buf = fs.readFileSync(path.join(dirPath, SIDECAR_NAME));
+    const payload = JSON.parse(buf.toString('utf8'));
+    if (!payload || typeof payload !== 'object') return null;
+    if (typeof payload.schemaVersion !== 'number' || payload.schemaVersion > SCHEMA_VERSION) return null;
+    return payload;
+  } catch { return null; }
 }
 
 // Extract everything EXCEPT the sidecar and the files it points at, then
@@ -685,7 +807,16 @@ function applySourceCuration(userData, uuid, payload, attDir) {
 // index addresses payload.customized; name is the form's edited value, and the
 // collision suffix below still backstops it. No picks = restore everything
 // with the sidecar's names (the bulk door, which commits post-review anyway).
-async function restoreCustomizedEntries(userData, uuid, payload, payloadRootDir, picks) {
+// ⭐⭐ `onProgress` ADDED 2026-09-23 [B-429]. This reported NOTHING for its entire life, so the import
+// bar fell to 0% and sat there through the restore - Ryan: "looked like bar going backwards then
+// stayed at 0... then finished correctly."
+// ⚠️ IT WAS NEVER A MEASUREMENT PROBLEM, WHICH IS THE PART WORTH REMEMBERING. `createEntry` has always
+// taken an onProgress and main has always had an `entries:createProgress` channel; this function
+// simply never passed one down, and the renderer subscribed to that channel immediately AFTER the
+// restore instead of around it. Every piece existed and none of them were joined. His question is
+// what found it: "was this so small that all we could get was indeterminate?" No - it was not small,
+// it was unwired.
+async function restoreCustomizedEntries(userData, uuid, payload, payloadRootDir, picks, onProgress) {
   const none = { ok: true, restored: 0, names: [] };
   if (!payload || !Array.isArray(payload.customized) || payload.customized.length === 0) return none;
   if (!payloadRootDir) return none;
@@ -693,6 +824,33 @@ async function restoreCustomizedEntries(userData, uuid, payload, payloadRootDir,
   const names = [];
   const pickByIndex = Array.isArray(picks)
     ? new Map(picks.map(p => [Number(p.index), p])) : null;
+
+  // ⭐ A REAL DENOMINATOR, because createEntry reports cumulative bytes with nothing to divide by.
+  // The picked folders are already on local disk, so summing them costs a stat walk and buys a bar
+  // that means something across ALL picks rather than restarting per font.
+  // ⚠️ ONE CONTINUOUS BAR, not one per entry - the same shape he specified for multi-source export:
+  // "one bar for the bytes over all 4 showing which source it's working on and all the files flying
+  // by. so genuinely looks the same for 1 or 100 of them."
+  const _picked = [];
+  for (let ci = 0; ci < payload.customized.length; ci++) {
+    const c = payload.customized[ci];
+    if (pickByIndex && !pickByIndex.get(ci)) continue;
+    const relDir = String(c.dir || '');
+    if (!relDir.startsWith(`${PAYLOAD_DIR}/`)) continue;
+    const abs = path.join(payloadRootDir, ...relDir.split('/'));
+    const rels = _listEntryDirFiles(abs);
+    if (!rels) continue;
+    let bytes = 0;
+    for (const rel of rels) {
+      try { bytes += fs.statSync(path.join(abs, rel.split('/').join(path.sep))).size || 0; } catch {}
+    }
+    _picked.push({ ci, bytes });
+  }
+  const grandBytes = _picked.reduce((s, p) => s + p.bytes, 0);
+  const totalPicked = _picked.length;
+  let baseBytes = 0;
+  let position = 0;
+
   for (let ci = 0; ci < payload.customized.length; ci++) {
     const c = payload.customized[ci];
     const pick = pickByIndex ? pickByIndex.get(ci) : undefined;
@@ -721,6 +879,8 @@ async function restoreCustomizedEntries(userData, uuid, payload, payloadRootDir,
     const metadata = { ...(c.curation || {}) };
     delete metadata.name;
     let r = null;
+    position++;
+    const _mine = _picked.find((p) => p.ci === ci);
     try {
       r = await entriesMod.createEntry({
         userData,
@@ -729,8 +889,27 @@ async function restoreCustomizedEntries(userData, uuid, payload, payloadRootDir,
         name,
         metadata,
         folderSource: { folderPath: dirAbs },
+        // ⭐ createEntry's bytes are cumulative WITHIN one entry, so they are offset by everything
+        // already restored to make one continuous number across all picks. Position rides along
+        // because bytes alone cannot answer "where am I in this" - his call on the export bar,
+        // and the same applies here.
+        onProgress: onProgress ? (p) => {
+          try {
+            onProgress({
+              phase: 'restore-customized',
+              index: position, total: totalPicked, entryName: name,
+              bytesDone: baseBytes + (p && p.totalBytes || 0),
+              totalBytes: grandBytes,
+              currentFile: (p && p.currentFile) || '',
+            });
+          } catch { /* a progress tick must never break a restore */ }
+        } : undefined,
       });
     } catch { r = null; }
+    // ⚠️ The floor advances whether the entry succeeded or not. A failed pick still consumed its
+    // share of the plan, and leaving its bytes out would make the bar run backwards on the next one -
+    // which is the exact complaint that started this.
+    if (_mine) baseBytes += _mine.bytes;
     if (!r || !r.ok) continue;
     if (c.provenance && Object.keys(c.provenance).length) {
       try {
@@ -785,7 +964,8 @@ function entryCurationFor(payload, candidatePath) {
 module.exports = {
   SIDECAR_NAME, PAYLOAD_DIR, SCHEMA_VERSION,
   SOURCE_FIELDS, ENTRY_FIELDS,
-  buildForSource, writeIntoTree, injectIntoZip, peekZip, stripAndRepackage, summarize,
+  buildForSource, writeIntoTree, planForArchive, injectIntoZip, peekZip, peekDir,
+  stripAndRepackage, summarize,
   applySourceCuration, entryCurationFor, entryProvenanceFor, restoreCustomizedEntries,
   ENTRY_PROV_FIELDS,
 };

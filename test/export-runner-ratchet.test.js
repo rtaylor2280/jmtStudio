@@ -48,11 +48,17 @@ const insideRunner = (idx) => idx > rs && idx < re;
 // one `_sfRunExport` and asserts the count drops BELOW the floor, which stops being true the
 // moment there is slack. **A ratchet with slack cannot detect the regression it exists for**, so
 // the self-proof failing is the file telling us to tighten, not a broken test.
-const MIGRATED_MIN   = 7;   // + the single-item right-click exports   (2026-09-22)
+const MIGRATED_MIN   = 8;   // + source export, 1..N in one operation  (2026-09-23)
 // ⚠️ The runner's OWN preflight call is filtered out below, so this counts doors only. The
 // ceiling is deliberately the measured truth with NO slack: slack is room for one more door to
 // be added the old way without anything going red.
-const UNMIGRATED_MAX = 3;   // source, primary-early, bulk               (2026-09-22)
+const UNMIGRATED_MAX = 2;   // primary-early, bulk                      (2026-09-23)
+// ⭐ SOURCE EXPORT CAME OFF THIS LIST 2026-09-23. It ran its own `_sfPreflightDestination`;
+// it now goes through the runner's, which is what took the ceiling from three to two. The
+// self-proof below FAILED first and that is what forced this edit - with slack in the
+// numbers, mutation (c) could no longer push the count past a floor, so the ratchet could
+// not detect the regression it exists for. Tightening is the required response, not a
+// convenience: "a ratchet with slack cannot detect the regression it exists for".
 {
   const onRunner = (H.match(/await _sfRunExport\(\{/g) || []).length;
   ok(`⭐ doors on the shared runner: ${onRunner} (floor ${MIGRATED_MIN})`,
@@ -78,7 +84,12 @@ const UNMIGRATED_MAX = 3;   // source, primary-early, bulk               (2026-0
   ok(`the runner calls the shared ending (${calls.length - outside} inside it)`,
      calls.length - outside >= 1);
   // ⚠️ Ceiling, not zero: the unmigrated doors legitimately still call it. It must only fall.
-  const OUTSIDE_MAX = 1;   // tightened 2026-09-22 when tracks landed
+  // ⭐ ZERO AS OF 2026-09-23. The last ending outside the runner was the source door's own
+  // "Export stopped" dialog, which drew a SECOND one on top of the shared ending the moment
+  // that door migrated - he hit it on the first cancel. With it gone the runner is the only
+  // thing that ends an export, and a ceiling of zero says so rather than leaving room for
+  // one nobody is tracking.
+  const OUTSIDE_MAX = 0;   // tightened 2026-09-23 when source export landed
   ok(`⭐ endings drawn outside the runner: ${outside} (ceiling ${OUTSIDE_MAX})`,
      outside <= OUTSIDE_MAX,
      'a door bypassing the runner\'s ending also bypasses the contract guard, which is what '
@@ -145,6 +156,14 @@ const UNMIGRATED_MAX = 3;   // source, primary-early, bulk               (2026-0
     //
     // ⚠️ So the two exemptions below are the single-path branch, not the migrated one. They are
     // asserted positively: if that branch stops doing these, the exemption is stale and says so.
+    // ⚠️ ADDED WHEN SOURCE EXPORT LANDED (2026-09-23). Raising the floor is half a migration:
+    // without an entry here the door counts as migrated and is then never checked for regrowing
+    // the machinery the runner owns - the same "covered but unlisted" hole this file exists for.
+    // ⭐ This door is also where the bulk delete's SECOND surface used to live. It has no
+    // exemption: the caller-drawn step bar is gone, not tolerated.
+    { name: 'source export (doors 3·4·12·13)',
+      start: 'const _sfRunSourceExport = async ({ sources',
+      end:   'const _sfExportSourceBeforeDelete = async' },
     { name: 'the funnel (doors 2·5·7·9)',
       start: 'const _sfExportFiles = async ({ kind, id, subPaths, asFile, isDir })',
       end:   '// Unified dispatcher',

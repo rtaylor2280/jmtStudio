@@ -318,6 +318,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // [B-203] Size a source before any bar goes up, so the checks look like every other door.
   sourceExportSize:      (params)     => ipcRenderer.invoke('sources:exportSize', params),
   exportSourceToDownloads: (params)   => ipcRenderer.invoke('sources:exportToDownloads', params),
+  // Many sources as ONE operation, with an all-or-nothing rollback on cancel. [B-420, 2026-09-23]
+  // The delete flows hand over 1 or many and get back what landed; a cancel returns nothing landed
+  // because the finished ones are removed too.
+  exportManySourcesToDownloads: (params) => ipcRenderer.invoke('sources:exportManyToDownloads', params),
   pickExportDir:           (params)   => ipcRenderer.invoke('dialog:pickExportDir', params),
   // [B-420] The single-FILE twin, so the renderer owns that picker too and the shared runner
   // can own everything after it. Returns { ok, destFile } or { ok:false, canceled }.

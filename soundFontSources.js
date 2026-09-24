@@ -403,6 +403,32 @@ async function zipFolderToFile(srcDir, destZipPath, onProgress, opts = {}) {
     archive.file(f.absPath, { name: f.relPath, date: EPOCH, mode: MODE });
   }
 
+  // ⭐⭐ THE CURATION SIDECAR GOES IN HERE, INSIDE THE ONE COMPRESSION PASS. [B-420]
+  // It used to be added by `injectIntoZip`: take the archive we had just finished, extract the
+  // WHOLE thing to a temp tree, write the sidecar into it, and re-compress everything - a second
+  // full extract and a second full compress of content we wrote moments earlier, to carry a few
+  // small files. `writeIntoTree`'s own comment says "just before it is archived", which is this
+  // point; the old call site ran it after.
+  // ⚠️ Ryan, 2026-09-23: *"How can curation have after compression? It goes inside the zip…."*
+  // The design predates the pooled store, when the archive itself was the stored artifact and had
+  // to be rebuilt to stay byte-canonical. Nothing is stored as an archive now.
+  // ⚠️ APPENDED LAST, AFTER the sorted files, so the archive stays order-deterministic - the same
+  // reason statConcurrency is 1 above. Same EPOCH date and MODE as every other entry, or these
+  // few files would be the only ones carrying real timestamps.
+  //
+  // ⭐ AN ENTRY IS A NAME PLUS A SOURCE OF BYTES, and the source may be either a path on disk or a
+  // buffer in memory. That is the whole reason nothing needs staging: the sidecar is JSON we just
+  // built, so it goes straight in as bytes and never becomes a file; attachments and customized
+  // font folders are already real files, so archiver reads them where they sit.
+  // ⚠️ The first cut of this staged all of it into a temp dir so archiver could read it back - which
+  // meant COPYING a customized font (a whole font) to read it straight out again. Ryan caught the
+  // smell before it was measured: "does it get written in a temp file then either placed in the tree
+  // or appended to the archive?" The answer should be no in both cases, and now is.
+  for (const e of (opts.extraEntries || [])) {
+    if (e.buffer) archive.append(e.buffer, { name: e.name, date: EPOCH, mode: MODE });
+    else archive.file(e.absPath, { name: e.name, date: EPOCH, mode: MODE });
+  }
+
   // ⚠️ A 'finalizing' phase was briefly emitted here and REMOVED, because nothing could
   // receive it: the common-zip door's progress travels on a delta-only channel that carries a
   // byte count and drops every other field. Adding it would have been one more producer with
@@ -1052,7 +1078,7 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
   // vendor shipped it, with our additions gone. Nothing else in the pipeline
   // learns that curation exists.
   // The cost is gated: an ordinary vendor zip pays one central-directory read
-  // and moves on. Only an archive that actually carries a sidecar is repacked.
+  // and moves on. Only an archive that actually carries a sidecar does anything more.
   let curation = null;
   let curationTmp = null;
   let curationPayloadDir = null;
@@ -1066,39 +1092,45 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
   // (2026-09-08 00:44): re-importing his own export through the duplicate
   // prompt lost the restore and the checked state. Proven by headless replay
   // of both doors against his real export.
-  // The knownHash SHORTCUT below stays sound because it was computed by the
-  // scan on the SAME zip after the SAME strip, and stripAndRepackage +
-  // zipFolderToFile are deterministic — the re-strip here reproduces the
-  // exact bytes the scan hashed.
-  if (isZip) {
+  //
+  // ⭐ AND THE knownHash SHORTCUT GOT SIMPLER, NOT RISKIER. [B-427] It used to need a determinism
+  // argument: the scan hashed the STRIPPED REPACK, so the shortcut was only sound because
+  // stripAndRepackage plus zipFolderToFile reproduced the exact same bytes on a second run. Now the
+  // hash is taken from the arriving file itself, so scan and import hash literally the same bytes and
+  // there is no reproducibility claim to be wrong about. A load-bearing assumption was deleted rather
+  // than re-verified, which is the better outcome of the two.
+  // ⚠️⚠️ BOTH FORMATS PEEK NOW, and skipping the folder case is the live defect [B-427] closes.
+  // [B-420] made folder exports carry a sidecar too, but this was still `if (isZip)` - so a folder
+  // re-import stored our .jmt-curation.json and its payload INSIDE the tree as vendor content and
+  // restored nothing. That is the exact failure recorded just above for the knownHash door, arriving
+  // by a second route. Ryan accepted breaking it knowingly for a few hours: "it's totally fine to
+  // break the imports right now since it's the next thing we're fixing after this is done."
+  {
     try {
       const cur = require('./soundFontCuration');
-      curation = await cur.peekZip(sourcePath);
+      curation = isZip ? await cur.peekZip(sourcePath) : cur.peekDir(sourcePath);
       if (curation) {
-        emit('hashing', { percent: 0 });
-        // ⚠️ FORWARD A REAL PERCENT. The first version passed `percent: 0` and then
-        // spread the payload over it - which carries no percent of its own - so the
-        // bar sat empty for the entire pass while filenames streamed past and the
-        // clock ticked. An 18-second wait against a bar that never moves reads as
-        // hung. (Found on a real re-import 2026-09-02.)
+        // ⭐⭐ NOTHING IS UNPACKED HERE ANY MORE. [B-427] This used to call
+        // `stripAndRepackage`: a full extract of the archive to a temp tree, a full re-compress of
+        // it, and then `sourcePath` was pointed at the repack so the hash and the pool extraction
+        // both read from it - meaning the same content was extracted twice with a re-zip between.
         //
-        // Two phases, split evenly: extracting the archive minus our additions,
-        // then repacking it. Each drives its own half from its own counter, so the
-        // number always tracks work actually done.
-        const stripped = await cur.stripAndRepackage(sourcePath, curation, (p) => {
-          if (!onProgress) return;
-          let percent = 0;
-          if (p.phase === 'curation-strip' && p.totalFiles > 0) {
-            percent = Math.round((p.fileCount / p.totalFiles) * 50);
-          } else if (p.phase === 'curation-repack' && p.totalBytes > 0) {
-            percent = 50 + Math.round((p.bytesDone / p.totalBytes) * 50);
-          }
-          onProgress({ stage: 'hashing', ...p, percent: Math.max(0, Math.min(100, percent)) });
-        });
-        sourcePath = stripped.zipPath;
-        curationTmp = stripped.tmpDir;
-        curationPayloadDir = stripped.payloadDir;
-        try { stat = fs.statSync(sourcePath); } catch {}
+        // ⚠️ WHY THE REPACK WAS THERE, AND WHY IT NO LONGER IS. Its own comment said it outright:
+        // "The repackaged archive is what gets hashed AND STORED, so the stored source is the font
+        // as the vendor shipped it." That was the OLD storage model, where the archive itself was
+        // the stored artifact and had to be byte-canonical so two exports of one source hashed
+        // identically. The store is an unpacked content-addressed pool now - no archive is kept -
+        // so there is nothing for canonical bytes to be canonical FOR.
+        //
+        // ⭐ THE SPLIT HAPPENS DURING THE POOL EXTRACTION INSTEAD, which was always going to run:
+        // `_extractZipSubtree` takes `curationPayloadDir` and sends our files there while the
+        // vendor's go to the tree. One pass, one write per file.
+        // ⚠️ THE TEMP DIR SHAPE IS LOAD-BEARING. `_isCurationTmpDir` in main.js only accepts
+        // os.tmpdir()/jmt-curation-*, and `sources:restoreCustomized` additionally requires the
+        // payload dir to sit INSIDE it. Keep both or those IPCs refuse the restore.
+        curationTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'jmt-curation-'));
+        curationPayloadDir = path.join(curationTmp, 'payload');
+        fs.mkdirSync(curationPayloadDir, { recursive: true });
       }
     } catch {
       // A sidecar we cannot read must never block the font behind it. Import
@@ -1199,12 +1231,19 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
     if (isZip) {
       emit('copying', { percent: 0, totalBytes });
       // Percent comes from the extractor, which knows the real uncompressed total.
+      // ⭐ THE ONE EXTRACTION. [B-427] When the archive carried our sidecar, `curationPayloadDir` is
+      // set and this same pass routes our files there while the vendor's go into the pool - replacing
+      // a separate strip-and-repack that extracted everything, re-zipped it, and left this call to
+      // extract it all over again.
+      // ⚠️ shouldStop is passed through as null because this path never wired a cancel; leaving the
+      // positional gap visible rather than hiding it behind the opts object, so it stays obvious that
+      // an import staging pass is not yet cancellable.
       const result = await _extractZipSubtree(sourcePath, '', destDir, (p) => {
         emit('copying', {
           percent: p.percent, bytes: p.totalBytes, totalBytes: p.expectedBytes,
           currentFile: p.currentFile,
         });
-      });
+      }, null, { curationPayloadDir });
       // Expand before measuring, so the figures describe what we actually keep
       // rather than the archives we just threw away.
       // Its OWN stage: this is a distinct operation with its own denominator, and
@@ -1259,15 +1298,30 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
       blockedFiles = sel.blockedFiles;
       notedFiles = sel.notedFiles;
       fs.mkdirSync(destDir, { recursive: true });
+      // ⭐ OUR FILES ARE PARTITIONED OUT BEFORE THE COPY, not deleted afterwards. [B-427]
+      // The zip route does this inside _extractZipSubtree; a folder input needs the same split here,
+      // or the stored source keeps our sidecar as vendor content and the restore has nothing to read.
+      // ⚠️ THE SIDECAR ITSELF IS NOT COPIED ANYWHERE. Its contents are already in hand from the peek,
+      // so writing it out would only put a file on disk that nothing reads - same reasoning as the
+      // zip route's drop.
+      const _curMod = curation ? require('./soundFontCuration') : null;
+      const _isOurs = (rel) => !!_curMod && (rel === _curMod.SIDECAR_NAME
+        || rel === _curMod.PAYLOAD_DIR || rel.startsWith(`${_curMod.PAYLOAD_DIR}/`));
+      const vendorFiles = sel.files.filter((f) => !_isOurs(f.relPath));
+      const ourFiles = sel.files.filter((f) => _isOurs(f.relPath));
       let done = 0;
-      const selTotal = sel.files.reduce((s, f) => s + f.size, 0);
+      // ⚠️ THE DENOMINATOR COUNTS WHAT THE LOOP COPIES. The strip got this wrong in the opposite
+      // direction once - it totalled every entry while counting only content - so the bar parked short
+      // by exactly the number of receipts riding along. Invisible on a big bundle, obvious on a
+      // ten-file font with two proofs of purchase.
+      const selTotal = vendorFiles.reduce((s, f) => s + f.size, 0);
       // ⚠️⚠️ AWAITED COPY, NOT copyFileSync. [B-398] This loop was the single worst offender
       // measured on his machine: 4955ms of unbroken main-thread work inside one folder source
       // (importSource:Techno), against the ~5s at which Windows greys the window and offers to
       // kill the app mid-write. A folder of several hundred wavs copied with no yield anywhere.
       // ⭐ The ZIP route never had this problem because _extractZipSubtree already awaited —
       // which is why the bug looked intermittent: it depended on whether the source was a folder.
-      for (const f of sel.files) {
+      for (const f of vendorFiles) {
         const abs = path.join(destDir, f.relPath.replace(/\//g, path.sep));
         fs.mkdirSync(path.dirname(abs), { recursive: true });
         await fs.promises.copyFile(f.absPath, abs);
@@ -1278,6 +1332,16 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
           percent: selTotal > 0 ? Math.floor((done / selTotal) * 100) : 0,
           bytes: done, totalBytes: selTotal, currentFile: f.relPath,
         });
+      }
+      // The payload rides to the same place the zip route puts it, keeping its full relative path so
+      // restoreCustomizedEntries sees one layout regardless of which format it arrived in.
+      for (const f of ourFiles) {
+        if (f.relPath === _curMod.SIDECAR_NAME) continue;
+        const payRoot = path.resolve(curationPayloadDir);
+        const payDest = path.resolve(payRoot, f.relPath.replace(/\//g, path.sep));
+        if (payDest !== payRoot && !payDest.startsWith(payRoot + path.sep)) continue;
+        fs.mkdirSync(path.dirname(payDest), { recursive: true });
+        await fs.promises.copyFile(f.absPath, payDest);
       }
       // Expand before measuring: the tree we describe must be the tree we keep.
       // Same stage as the zip route. It emitted 'hashing' here, which renders as
@@ -1907,14 +1971,33 @@ function _createZipSource({ uuid, uuidDir, meta }) {
       }
       const destName = /\.zip$/i.test(String(meta.originalName || '')) ? meta.originalName : `${baseName}.zip`;
       const destPath = _uniqueDestPath(destDir, destName);
-      // ⚠️⚠️ THE ONE EXPORT A CANCEL CANNOT INTERRUPT, and it is honest rather than broken.
-      // A zip-backed source exported AS a zip is a single fs.copyFile of the whole archive -
-      // there are no file boundaries inside it to stop between. The UI's promise is "finishing
-      // current file", and here the current file is the entire archive, so the button is true
-      // to its word; it just has one very large file to wait for. Checked before starting so a
-      // cancel that arrives during the pre-flight still lands. [B-005 item 4]
+      // ⚠️⚠️ THIS USED TO BE AN OPAQUE `fs.copyFile` AND THE ARGUMENT FOR IT HAS EXPIRED.
+      //
+      // The note here read: "the one export a cancel cannot interrupt, and it is honest rather
+      // than broken - a zip-backed source exported AS a zip is a single fs.copyFile of the whole
+      // archive, there are no file boundaries inside it to stop between." True about file
+      // boundaries, and it quietly conceded two things that did not have to be conceded: a
+      // 235 MB copy reported NO bytes at all until it finished, and Cancel did nothing for its
+      // whole duration.
+      //
+      // ⭐ HIS CATCH, 2026-09-23: "what is it doing when sitting at 0? is there a phase not
+      // mentioned tracked correctly?" The phase was tracked correctly and emitted nothing.
+      //
+      // ⭐⭐ `copyFileWithProgress` IS THE ANSWER AND IT ALREADY EXISTED - every other copy path
+      // in the app uses it. It streams in 1 MB chunks, so it reports bytes as they move AND
+      // checks `shouldStop` between chunks, which means the cancel is real rather than a button
+      // that waits. It also deletes its own partial, so a stop leaves nothing behind.
+      // ⚠️ The file-boundary argument was never about whether bytes could be counted - it was
+      // about where a copy could be STOPPED, and a chunked stream answers both.
       if (shouldStop && shouldStop()) throw new (require('./sfExportCopy').ExportCancelled)();
-      await fs.promises.copyFile(zipPath, destPath);
+      {
+        let _done = 0;
+        await require('./sfExportCopy').copyFileWithProgress(zipPath, destPath, (n) => {
+          _done += n;
+          if (onProgress) onProgress({ phase: 'compress', bytesDone: _done, totalBytes,
+                                       currentFile: destName });
+        }, shouldStop);
+      }
       // Windows copyFile inherits the SOURCE file's mtime, which would backdate
       // this fresh export to its import date and bury it in a date-sorted view.
       // Stamp "now" so it lands under Today like any download.
@@ -1935,15 +2018,36 @@ function _createZipSource({ uuid, uuidDir, meta }) {
 // parallel path drifts from the pipeline around it, and the drift is silent.
 // Everything the original did is load-bearing and stays: noise filtering, the
 // zip-slip guard, per-file progress, and the { fileCount, totalBytes } contract.
-async function _extractZipSubtree(zipPath, subPath, destDir, onProgress, shouldStop = null) {
+// ⭐⭐ `opts.curationPayloadDir` MAKES THIS THE ONLY EXTRACTION AN IMPORT NEEDS. [B-427]
+// A zip carrying our sidecar used to be unpacked TWICE: `stripAndRepackage` extracted the whole
+// archive to a temp tree, re-zipped it, and then THIS function extracted that repack into the pool -
+// two complete extractions of identical content with a re-compress wedged between them. Ryan:
+// "unpack, extract the side car, repack, then unpack also seems dumb."
+// The repack existed because the ARCHIVE used to be the stored artifact and had to stay
+// byte-canonical. The store is an unpacked pool now, so the split can happen during the one
+// extraction that was always going to run: our files go to the payload dir, the vendor's go to the
+// tree, and neither is written twice.
+// ⚠️ ONLY WHEN EXTRACTING THE WHOLE ARCHIVE (no subPath). A subtree extraction is a different job -
+// reading one folder out of a source - and must not start second-guessing what it finds.
+async function _extractZipSubtree(zipPath, subPath, destDir, onProgress, shouldStop = null, opts = {}) {
   const norm = _normalizeSubPath(subPath);
   const prefix = norm ? norm + '/' : '';
+  const _cur = (!norm && opts.curationPayloadDir) ? require('./soundFontCuration') : null;
+  // The sidecar itself is DROPPED, not relocated: its contents already came back from peekZip as an
+  // object, so extracting it would only put a file on disk that nothing reads.
+  const _isSidecar = (rel) => !!_cur && rel === _cur.SIDECAR_NAME;
+  // The payload files (receipts, a customized font) are the POINT of carrying the sidecar, so they
+  // are extracted out of the way rather than discarded - they just must not land in the tree that
+  // becomes the stored source.
+  const _isPayload = (rel) => !!_cur
+    && (rel === _cur.PAYLOAD_DIR || rel.startsWith(`${_cur.PAYLOAD_DIR}/`));
   const zip = _openZip(zipPath);
   try {
     const entries = await _readAllZipEntries(zip);
     const matching = entries.filter(e => {
       if (norm && !e.fileName.startsWith(prefix) && e.fileName !== norm && e.fileName !== prefix) return false;
       if (_isNoisePath(e.fileName)) return false;
+      if (_isSidecar(e.fileName.replace(/\\/g, '/'))) return false;
       return true;
     });
     if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
@@ -1963,6 +2067,22 @@ async function _extractZipSubtree(zipPath, subPath, destDir, onProgress, shouldS
       if (shouldStop && shouldStop()) throw new (require('./sfExportCopy').ExportCancelled)();
       const rel = norm ? entry.fileName.slice(prefix.length) : entry.fileName;
       if (!rel) continue;
+      // ⭐ OUR FILES BRANCH OFF HERE, inside the same loop, so they cost one write like everything
+      // else. [B-427] They keep their FULL relative path under the payload dir (so it holds
+      // .jmt-curation/...), which is the layout restoreCustomizedEntries already reads.
+      // ⚠️ AND THEY ARE NOT COUNTED. fileCount and totalBytes describe the STORED SOURCE - the
+      // vendor's font - and a receipt riding along is not part of it. The strip made this mistake in
+      // the other direction once: its denominator counted payload files its counter ignored, so the
+      // bar parked short by exactly the number of receipts.
+      if (_isPayload(rel.replace(/\\/g, '/'))) {
+        if (entry.isDir) continue;
+        const payRoot = path.resolve(opts.curationPayloadDir);
+        const payDest = path.resolve(payRoot, rel.replace(/\//g, path.sep));
+        if (payDest !== payRoot && !payDest.startsWith(payRoot + path.sep)) continue;  // zip-slip
+        fs.mkdirSync(path.dirname(payDest), { recursive: true });
+        await _writeZipEntryToFile(zip, entry, payDest);
+        continue;
+      }
       const destPath = path.join(destDir, rel.replace(/\//g, path.sep));
       // Zip-slip guard: refuse any entry whose resolved destination
       // escapes destDir (e.g. "../../etc/passwd"). node-stream-zip
@@ -2209,7 +2329,7 @@ function _createFolderSource({ uuid, uuidDir, meta }) {
     // Export the source. 'zip' (default) archives the folder tree into one tidy artifact;
     // 'folder' copies the tree as-is. Both stream real per-file progress. The freshly written
     // output keeps its natural "now" timestamp so it's findable in a date-sorted view.
-    async exportToDownloads(destDir, { format = 'zip', onProgress, shouldStop = null } = {}) {
+    async exportToDownloads(destDir, { format = 'zip', onProgress, shouldStop = null, curationPayload = null } = {}) {
       if (!destDir) throw new Error('exportToDownloads requires destDir');
       if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
       // ⚠️ THE EXPORT IS NAMED FROM originalName, AND THAT IS DELIBERATE.
@@ -2243,6 +2363,20 @@ function _createFolderSource({ uuid, uuidDir, meta }) {
         // into it WITHOUT going through import, and this is the path that would then
         // copy it onto a saber card and hand it to the next person.
         const _purged = _purgeExecutables(destPath);
+        // ⭐ THE SIDECAR GOES INTO THE TREE WE JUST WROTE. [B-420] Free here, and the reason this
+        // branch never needed the unpack-and-repack the zip branch was doing: `writeIntoTree`'s own
+        // comment says "just before it is archived", and a folder export has no archive step at all.
+        // ⚠️ AFTER the purge, deliberately. The purge judges VENDOR content for planted programs;
+        // the payload is store-internal - receipts we wrote ourselves and entry folders that already
+        // passed the inbound blocklist on import - so it needs no second screening, and running it
+        // through one would only risk the purge deleting our own sidecar.
+        const _carried = curationPayload
+          ? (() => {
+              const cur = require('./soundFontCuration');
+              const w = cur.writeIntoTree(destPath, curationPayload);
+              return cur.summarize(curationPayload, w.attachmentsWritten, w.customizedWritten);
+            })()
+          : null;
         // ⚠️ REPORT WHAT LANDED, NOT WHAT WE SET OUT TO WRITE. extractTo counts
         // before the purge runs, so the summary claimed 91 files when 86 were on
         // disk (his catch, 2026-09-10: the numbers ARE the test here - before minus
@@ -2253,19 +2387,47 @@ function _createFolderSource({ uuid, uuidDir, meta }) {
         return { destPath, format: 'folder',
           fileCount: Math.max(0, _rawN - _purged.blocked.length),
           totalBytes: Math.max(0, _rawB - _goneB),
-          folders, blocked: _purged.blocked, noted: _purged.noted };
+          folders, curation: _carried, blocked: _purged.blocked, noted: _purged.noted };
       }
       const destPath = _uniqueDestPath(destDir, `${baseName}.zip`);
+      // ⭐⭐ THE SIDECAR IS STAGED AND APPENDED, NOT WRITTEN INTO THE SOURCE. [B-420]
+      // `folderRoot` below is the POOLED STORE'S OWN FOLDER, so `writeIntoTree` must NOT run against
+      // it the way the folder branch does - that would put our sidecar inside the user's stored
+      // source, permanently, and every future export would carry a stale copy of it. Staging the
+      // payload's few small files and handing them to zipFolderToFile as `extraEntries` keeps the
+      // store untouched and still costs exactly ONE compression pass.
+      // ⭐ NOTHING IS STAGED. `planForArchive` returns the sidecar as a JSON STRING and the payload
+      // files as { name, absPath } pointing at where they already live, so there is no temp dir, no
+      // copy, and no cleanup that a cancel could skip. The sidecar never becomes a file on disk at
+      // all - archiver takes it as bytes.
+      // ⚠️ THE FIRST CUT DID STAGE IT, and the cost was not theoretical: it copied a customized font
+      // into a temp dir purely so archiver could read it straight back out, which is the same
+      // write-then-read-it-again waste this change removed from the rest of the path.
+      let _extra = [], _carried = null;
+      if (curationPayload) {
+        const cur = require('./soundFontCuration');
+        const plan = cur.planForArchive(curationPayload);
+        if (plan) {
+          // ⚠️ THE SIDECAR BYPASSES _selectFolderFiles, WHICH IS WHY IT IS SAFE FROM THE NOISE FILTER.
+          // Staging it meant the filter got a vote: _isNoisePath drops __MACOSX, .DS_Store, Thumbs.db,
+          // desktop.ini and `._`-prefixed names, and '.jmt-curation.json' survived by starting '.j'
+          // rather than '._' - one character. Appending it directly removes that dependency entirely.
+          // The test still opens the finished zip, because "no sidecar" is a silent success otherwise.
+          _extra = [{ name: '.jmt-curation.json', buffer: Buffer.from(plan.sidecarJson, 'utf8') },
+                    ...plan.entries];
+          _carried = cur.summarize(curationPayload, plan.attachmentsWritten, plan.customizedWritten);
+        }
+      }
       // zipFolderToFile runs _selectFolderFiles, so it already refused any program
       // and its counts describe the ARCHIVE. Report those rather than the source
       // listing, or the summary over-reports by exactly what it left out.
       const _zr = await zipFolderToFile(folderRoot, destPath, (p) => onProgress && onProgress({
         phase: 'compress', bytesDone: p.bytesProcessed, totalBytes: p.totalBytes || totalBytes, currentFile: p.currentFile,
-      }), { shouldStop });
+      }), { shouldStop, extraEntries: _extra });
       return { destPath, format: 'zip',
         fileCount: (_zr && _zr.fileCount != null) ? _zr.fileCount : files.length,
         totalBytes: (_zr && _zr.totalBytes != null) ? _zr.totalBytes : totalBytes,
-        folders,
+        folders, curation: _carried,
         blocked: (_zr && _zr.blockedFiles) || [], noted: (_zr && _zr.notedFiles) || [] };
     },
   };
@@ -3128,6 +3290,14 @@ function _virtualizeSource(physical, records) {
       if (format === 'folder') {
         const destPath = _uniqueDestPath(destDir, baseName);
         await reconstruct(destPath, (p) => onProgress && onProgress({
+          // ⚠️⚠️ `bytesDone` ADDED 2026-09-23. This emitted file counts and NO bytes, so a caller
+          // driving a byte-denominated bar showed "0 B of 1.10 GB" for the entire rebuild - over a
+          // minute and a half on his 2-source export - and only started moving once compression
+          // began. His question was the right one: "are we not tracking export bytes but rather
+          // counting only at file completion?" We were not tracking them here at all.
+          // ⭐ The data was already there and already used one branch away: the FOLDER export maps
+          // `bytesDone: p.totalBytes` off this same `extractTo`. Only this branch dropped it.
+          bytesDone: p.totalBytes, totalBytes: p.grandBytes || undefined,
           phase: p.phase || 'reconstruct', fileCount: p.fileCount, totalFiles: p.totalFiles || grandFiles,
           bytesDone: p.totalBytes || 0, totalBytes: grandTotal, currentFile: p.currentFile,
         }));

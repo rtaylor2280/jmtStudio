@@ -2956,6 +2956,22 @@
   #dl-progress-bar.indeterminate { position: absolute; left: 0; width: 30% !important; background: var(--jmt-blue); transition: none; animation: knightrider 1.4s ease-in-out infinite; }
   /* The detail line under every determinate progress bar is ONE line that
      TRUNCATES with an ellipsis — it never wraps or grows the modal (2026-07-23; supersedes the 07-22 fixed two-line variant). */
+  /* ⭐⭐ RESERVE THE ROWS A BYTE EXPORT IS GOING TO FILL. [2026-09-23, his call: "knowing we'll be
+     putting file names under the bar, would be better to leave a space for it so the modal doesn't
+     have to expand for it"]
+     The label and elapsed lines ship `display:none` and are switched on by the first progress tick,
+     so the modal GREW two rows a moment after opening - and the filename row appears later still.
+     ⚠️ SCOPED TO A CLASS, not applied to the element. This same modal serves short flows (a delete
+     confirm, a common-folder op) that show a title and a bar and nothing else; giving every user
+     three permanent blank rows to fix one would make the quiet cases worse than the loud one.
+     ⚠️ `min-height` rather than a non-breaking space: an empty row that still occupies its line,
+     with nothing to select or copy. */
+  #modal-sf-bulk-progress.sf-prog-reserve #sf-bulk-progress-label,
+  #modal-sf-bulk-progress.sf-prog-reserve #sf-bulk-progress-detail,
+  #modal-sf-bulk-progress.sf-prog-reserve #sf-bulk-progress-elapsed {
+    display: block !important;
+    min-height: 1em;
+  }
   .sf-import-progress-detail { font-size: 0.72rem; color: var(--c-text-dim); margin: 4px 0 0 0; font-variant-numeric: tabular-nums; min-height: 1em; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   /* ⭐⭐ [B-360/B-293] THE CAUSE, FOUND 2026-09-13, AND IT IS NOT WHAT THE OLD COMMENT
      SAID. The rule above carries `white-space: nowrap` and still wrapped, which reads
@@ -7502,9 +7518,35 @@ function promptConfirm(opts) {
           cbHint.style.display = 'none';
         }
       }
-      // <label> is inline by default; force block so vertical margins apply
-      // and the row visually separates from the buttons below it.
-      cbRow.style.display = 'block';
+      // ⭐⭐ `inline: true` PUTS THE ROW IN THE BUTTON BAR. [2026-09-23, his call: with the hint
+      // line gone "we can put the checkbox on the same line as the buttons which is better anyway
+      // as we've proven a few times today"]
+      //
+      // FOURTH use of one pattern - the eject row on the summary dialogs, the eject checkbox on
+      // the progress modal, the quick-import checkbox on the bulk modal, and now this. The
+      // mechanism is the documented one: first child of `.modal-btns` carrying `margin-right:auto`
+      // sits hard left and pushes the buttons right, with no change to the shared rule.
+      // ⚠️⚠️ AND IT MUST BE PUT BACK. The row is a fixed element in this dialog's markup, so a
+      // relocated one would still be in the button bar the next time ANY promptConfirm opens -
+      // the same stale-row hazard `_sfPlaceEjectRowInButtons` carries a teardown for. Restored in
+      // the `else` branch below, which runs on every call that does not ask for a checkbox.
+      // ⚠️ Opt-in: a dialog with a HINT or a second checkbox must stay stacked, because neither
+      // fits on a button row.
+      const _cbHome = cbRow.parentNode === null ? null : cbRow.parentNode;
+      const _inline = !!checkbox.inline && !checkbox.hint && !checkbox2;
+      if (_inline) {
+        const _btns = document.querySelector('#modal-confirm .modal-btns');
+        if (_btns && cbRow.parentNode !== _btns) _btns.insertBefore(cbRow, _btns.firstChild);
+        cbRow.style.display = 'flex';
+        cbRow.style.alignItems = 'center';
+        cbRow.style.margin = '0 auto 0 0';
+      } else {
+        // <label> is inline by default; force block so vertical margins apply
+        // and the row visually separates from the buttons below it.
+        cbRow.style.display = 'block';
+        cbRow.style.alignItems = '';
+      }
+      if (!_inline) void _cbHome;
       // Two rows shown together read as one group: pull the first's bottom
       // margin in so the gap between the pair is smaller than the gap to the
       // buttons. Reset when the second row is absent (element is reused).
@@ -7512,6 +7554,18 @@ function promptConfirm(opts) {
     } else if (cbRow) {
       cbRow.style.display = 'none';
       cbRow.style.marginBottom = '';
+    }
+    // ⚠️⚠️ PUT A RELOCATED ROW BACK, ALWAYS. Whoever moves it returns it - the same rule the
+    // eject row follows. Without this, one inline checkbox would leave the row inside the button
+    // bar for every later dialog, stacked beside buttons it has nothing to do with.
+    if (cbRow) {
+      const _body = document.getElementById('modal-confirm-msg');
+      const _stacked = !(checkbox && checkbox.inline && !checkbox.hint && !checkbox2);
+      if (_stacked && _body && cbRow.parentNode && cbRow.parentNode !== _body.parentNode) {
+        try { _body.parentNode.insertBefore(cbRow, _body.nextSibling); } catch {}
+        cbRow.style.margin = '';
+        cbRow.style.alignItems = '';
+      }
     }
     // Second checkbox ([B-311]) — same contract as the first, minus
     // confirmTextChecked (an inclusion rides the operation; it does not change
@@ -7738,13 +7792,27 @@ window._sfShowPartialFailures = _sfShowPartialFailures;
 // ⚠️ hideCancel, NOT `cancelText: null`. promptConfirm defaults cancelText to 'Cancel' and
 // only HIDES the button on hideCancel; a null label left a real, clickable button with
 // nothing drawn in it, which he found by clicking a button that was not there.
-async function _sfRefuseNotEnoughRoom(fit) {
+// \u2B50 `blockedDelete` RIDES ON WHATEVER IS ALREADY SPEAKING. [B-420, 2026-09-23, his rule:
+// "append to whatever closes it out"]
+//
+// An "Export source first" export is a precondition of a delete, and there are four ways it can
+// end without completing - this refusal, backing out of the slow-write warning, main's tooBig
+// backstop, and the user pressing Cancel. All four abandon the delete, and all four said nothing
+// about it.
+// \u26A0\uFE0F THE LINE GOES WHERE A SURFACE ALREADY EXISTS rather than adding one. A refusal is already a
+// dialog, so it gains a sentence; the two paths with NO dialog of their own get it from
+// `_sfExportStoppedNotice` instead. Same sentence, one per operation, never two dialogs.
+// \u26A0\uFE0F Its own paragraph here: the refusal above is about SPACE, and "nothing was deleted" is a
+// different fact about a different operation. Running them together reads as one sentence about
+// the card.
+async function _sfRefuseNotEnoughRoom(fit, { blockedDelete = false } = {}) {
   const fb = (n) => String((window._sfFormatBytes || ((v) => `${v} B`))(n)).replace(' ', '\u00A0');
   await promptConfirm({
     title: 'Not enough room',
     message: `This export needs ${fb(fit && fit.needBytes)} `
       + `but only ${fb(fit && fit.bytesFree)} is free. `
-      + `It is ${fb(fit && fit.shortfallBytes)} short.`,
+      + `It is ${fb(fit && fit.shortfallBytes)} short.`
+      + (blockedDelete ? '\n\nNothing was deleted.' : ''),
     confirmText: 'OK',
     confirmKind: 'primary',
     hideCancel: true,
@@ -7907,8 +7975,27 @@ window._sfExportCancelOpt = _sfExportCancelOpt;
 // ⚠️ Fonts and voice packs report the partial as REMOVED because the writer takes it back - half
 // a font mounts, lists, and then fails when a sound is called for. Tracks are independent files
 // and are kept. The notice tells the truth for whichever ran rather than one hedge for both.
+// ⭐⭐ `blockedDelete` — THE SECOND CONSEQUENCE, WHICH ONLY THIS CALLER HAS. [B-420, 2026-09-23]
+//
+// An "Export source first" export is a PRECONDITION of a delete. Stopping it correctly abandons
+// the delete too - and said nothing at all, so ticking a box that means "export, then delete" and
+// cancelling one half left the other half's fate invisible.
+//
+// ⚠️ THE SILENCE WAS DELIBERATE BUT ONLY FOR THREE OF THE FOUR WAYS IN. `_sfRunSourceExport`
+// returns `{ok:false, canceled:true}` for a space refusal, for backing out of the slow-write
+// warning, for main's tooBig backstop, AND for the user pressing Cancel. The caller's note reasons
+// that a refusal dialog has already spoken so a second line answers an unasked question - true for
+// the first three, and case four inherited a silence that was never argued for it.
+//
+// ⭐ HIS RULING: one rule rather than four cases - whenever an export-before-delete does not
+// complete, say the delete did not happen, on whatever surface is already speaking. "yeah, so the
+// cancel looks the same. might just add one more thing to it in that case because it will also be
+// able to state that not deleted..."
+// ⚠️ It is a DECLARED flag, not inferred from the label or the caller: only the caller knows the
+// export was a precondition, and guessing it from a name is how the wrong doors get the sentence.
 async function _sfExportStoppedNotice({ wrote = 0, removedPartial = false, what = 'files',
-                                       restored = false, leftovers = [] } = {}) {
+                                       restored = false, leftovers = [],
+                                       blockedDelete = false } = {}) {
   const lines = [];
   // ⭐⭐ THE RESTORE GOES FIRST, BECAUSE IT IS THE THING THEY ARE WORRIED ABOUT. Cancelling a
   // REPLACE means the font that was already on the card was moved aside mid-operation. If the
@@ -7923,6 +8010,10 @@ async function _sfExportStoppedNotice({ wrote = 0, removedPartial = false, what 
     ? `${wrote} ${wrote === 1 ? what.replace(/s$/, '') : what} finished copying and ${wrote === 1 ? 'is' : 'are'} at the destination.`
     : 'Nothing new was copied.');
   if (removedPartial) lines.push('The item that was still being written was removed, so nothing incomplete is left behind.');
+  // ⚠️ AFTER the export's own narration and BEFORE any action line. It is the consequence of what
+  // was just described, and it is narration rather than an instruction - there is nothing to go
+  // and do about it, which is why it joins the paragraph instead of standing alone.
+  if (blockedDelete) lines.push('Nothing was deleted.');
   // ⚠️⚠️ NAME A LEFTOVER "ORIGINAL." FOLDER EXPLICITLY. If the restore rename failed, the
   // user's real font is intact but sitting under a name they did not choose - and the one
   // thing they must not do is tidy it away. Silence here risks the exact data loss the
@@ -8028,7 +8119,8 @@ window._sfExportStoppedNotice = _sfExportStoppedNotice;
 // Returns { proceed, boardCard, removable, destDir }. `proceed:false` means a dialog has
 // already been shown and the caller must simply stop.
 async function _sfPreflightDestination({ destDir, fileSizes = null, totalBytes = 0,
-                                         fileCount = 0, dirCount = 0 } = {}) {
+                                         fileCount = 0, dirCount = 0,
+                                         blockedDelete = false } = {}) {
   // `info` is the raw preflight result - bytesFree, blockSize, transport, boardSerial. Doors
   // that only need a go/no-go ignore it; the primary export uses it for its free-space line,
   // and handing it back is what stops that door running a SECOND measurement of its own.
@@ -8149,7 +8241,9 @@ async function _sfPreflightDestination({ destDir, fileSizes = null, totalBytes =
       // ⚠️ Nothing has been written at this point - the refusal happens BEFORE the write, not
       // as a recovery from one. That is the whole of [B-203].
       dropBar();
-      await _sfRefuseNotEnoughRoom(p.tooBig);
+      // ⚠️ `blockedDelete` rides through so the refusal can add "Nothing was deleted." His rule:
+      // the sentence goes on whatever surface is already speaking. [2026-09-23]
+      await _sfRefuseNotEnoughRoom(p.tooBig, { blockedDelete });
       out.proceed = false;
       return out;
     }
@@ -28412,9 +28506,30 @@ require(['vs/editor/editor.main'], function () {
         // opens clean instead of opening on a red error. data-idx continues
         // after the candidates so the validator's per-row bookkeeping stays
         // unique across both kinds.
+        // ⚠️⚠️ A RESTORE IS NOT A COPY, AND `_jmtNumberedName` IS A COPY-NAMER. [B-430]
+        // His report, 2026-09-23: "why does the one that was customized get the name _2 when it
+        // wasn't 2 when I exported it?" - and when I guessed the original must still be in his
+        // library, he corrected me: "no, it wasn't."
+        // ⭐ `_jmtNumberedName` NEVER returns the name it was given. Its last two lines are
+        // `let n = Math.max(max + 1, 2)` and `return root_n` - there is no not-taken branch,
+        // because it exists to mint a COPY name where you already know you need a new one
+        // ([B-343]: "the first copy is _2"). Every other caller is a genuine duplicate - duplicate
+        // font, duplicate common folder, duplicate array. This one is a RESTORE, so calling it
+        // unconditionally meant a customized font could never come back under its own name.
+        // ⚠️ THE BACKEND HAD IT RIGHT ALL ALONG, which is why this looked like a naming rule rather
+        // than a bug: `restoreCustomizedEntries` does `let name = base` and only suffixes WHILE a
+        // collision exists. The seed then overrode it, because an edited pick name outranks both
+        // the sidecar's name and the folder's. The wrong half won.
+        const _libNames = _sfAllEntries.map(e => e.name);
+        const _seedTaken = new Set(_libNames.map(n => String(n).toLowerCase()));
         const _custRowsHtml = _pendingCust.map((pc, ci) => {
-          const _libNames = _sfAllEntries.map(e => e.name);
-          const seedName = _jmtNumberedName(pc.name || 'Customized font', _libNames);
+          const _base = pc.name || 'Customized font';
+          // ⚠️ Seeded names accumulate, so two restored fonts that share a name do not both seed
+          // the same value and collide the moment the user presses Add to Library.
+          const seedName = _seedTaken.has(_base.toLowerCase())
+            ? _jmtNumberedName(_base, [..._seedTaken])
+            : _base;
+          _seedTaken.add(seedName.toLowerCase());
           return `<div class="sf-review-candidate-row" data-idx="${cands.length + ci}" data-kind="customized" data-cidx="${ci}" data-already="0">
             <div class="cand-row-main">
               <input type="checkbox" class="cand-check" checked>
@@ -28988,6 +29103,43 @@ require(['vs/editor/editor.main'], function () {
           _sfImport.customizedPayload = null; // consumed — the cancel path must not double-drop
           if (custPicks.length) {
             if (_sfImportEls.createLabel) _sfImportEls.createLabel.textContent = 'Restoring customized fonts…';
+            // ⭐⭐ REAL BYTES, NOT AN ANIMATION. [B-429, his report 2026-09-23: "looked like bar going
+            // backwards then stayed at 0... then finished correctly"]
+            // The optimize phase above clears the bar to 0% on its way out, and this phase used to
+            // report NOTHING - so the bar visibly fell to empty and held there, which is
+            // indistinguishable from a phase that has died. (The export hang he found hours earlier
+            // was the same readout with a real stall behind it.)
+            //
+            // ⚠️⚠️ I FIRST "FIXED" THIS WITH AN INDETERMINATE BAR, and his next question is what
+            // exposed that as the cheap half: "was this so small that all we could get was
+            // indeterminate?" It was not small - it was UNWIRED. `createEntry` has always accepted an
+            // onProgress, main has always had an `entries:createProgress` channel, and the renderer
+            // subscribed to that channel immediately AFTER this block. Three pieces, all built, none
+            // joined. An animation would have permanently hidden that.
+            //
+            // ⭐ ONE CONTINUOUS BAR ACROSS ALL PICKS, with position and the live filename - the shape
+            // he specified for multi-source export: "one bar for the bytes over all 4 showing which
+            // source it's working on and all the files flying by."
+            const _fmtB = window._sfFormatBytes || ((x) => `${x} B`);
+            let _restUnsub = null;
+            try {
+              _restUnsub = window.electronAPI.onEntryCreateProgress((d) => {
+                // ⚠️ Filtered on phase: this channel also carries ordinary entry-create ticks, which
+                // have no denominator and would drive the bar from a different quantity entirely.
+                if (!d || d.phase !== 'restore-customized') return;
+                const pct = d.totalBytes > 0
+                  ? Math.max(0, Math.min(100, Math.floor((d.bytesDone / d.totalBytes) * 100)))
+                  : 0;
+                if (_sfImportEls.createBar) _sfImportEls.createBar.style.width = `${pct}%`;
+                if (_sfImportEls.createLabel) {
+                  // Position only when there is more than one - "1 of 1" is noise, not orientation.
+                  const pos = d.total > 1 ? ` · ${d.index} of ${d.total}` : '';
+                  _sfImportEls.createLabel.textContent = `Restoring customized fonts${pos} · `
+                    + `${_fmtB(d.bytesDone)} of ${_fmtB(d.totalBytes)}`;
+                }
+                if (_sfImportEls.createDetail) _sfImportEls.createDetail.textContent = d.currentFile || '';
+              });
+            } catch { _restUnsub = null; }
             try {
               const rr = await window.electronAPI.restoreCustomized({
                 uuid: _sfImport.uuid,
@@ -29001,6 +29153,11 @@ require(['vs/editor/editor.main'], function () {
                   custPicks.map(p => ({ name: p.name, error: rr.error || 'unknown error' })));
               }
             } catch {}
+            // ⚠️ OUTSIDE the try, so a failed restore cannot leave a live subscription driving a bar
+            // behind whatever dialog reports the failure.
+            if (_restUnsub) { try { _restUnsub(); } catch {} }
+            if (_sfImportEls.createBar) _sfImportEls.createBar.style.width = '0%';
+            if (_sfImportEls.createDetail) _sfImportEls.createDetail.textContent = '';
           } else {
             window.electronAPI.discardCustomized({ curationTmp: _pl.curationTmp }).catch(() => {});
           }
@@ -32151,7 +32308,7 @@ require(['vs/editor/editor.main'], function () {
             messageHtml,
             confirmText: 'Delete',
             confirmKind: 'danger',
-            checkbox: willRemove ? { label: 'Export source first', hint: 'Source archive keeps its original date.', confirmTextChecked: 'Export and Delete' } : null,
+            checkbox: willRemove ? { label: 'Export source first', confirmTextChecked: 'Export and Delete', inline: true } : null,
           });
           const confirmed = willRemove ? res && res.confirmed : res;
           const wantExport = willRemove ? !!(res && res.checked) : false;
@@ -32652,7 +32809,10 @@ require(['vs/editor/editor.main'], function () {
         // 3) Export with live progress in the import-convention layout: section +
         // metric above the bar (one metric per section), current file below,
         // elapsed clock last. Sections: Reading files → Rebuilding → Compressing.
-        const r = await _sfRunSourceExport({ uuid, destDir: pick.destDir, format, label, includeAttachments, includeCustomized });
+        // ⚠️ A LIST OF ONE. The door takes 1..N now and treats them identically, which is the
+        // point - this caller is not a special case any more, it is the N=1 case. [2026-09-23]
+        const r = await _sfRunSourceExport({ sources: [{ uuid, label }], destDir: pick.destDir,
+                                             format, includeAttachments, includeCustomized });
         await _sfDeleteProgress.hide();
 
         // 4) Outcome. Errors keep the existing dialog. Success shows an in-modal
@@ -32666,49 +32826,50 @@ require(['vs/editor/editor.main'], function () {
         //     dialog; a second one would be noise on top of a message that was clear.
         //   • ok:true  + canceled — the USER pressed Cancel, and that deserves a word about
         //     what is at the destination, because a stopped folder export leaves part of one.
-        if (r && r.canceled) {
-          if (r.ok) {
-            // ⚠️ A zip leaves NOTHING: the writer streams to a temporary name and deletes it on
-            // abort. A folder export leaves the files that finished, and saying so is the whole
-            // point - the user is about to go and look.
-            // ⚠️ OBJECT FORM. Called positionally this rendered "Confirm / Are you sure?" with
-            // two identical buttons - see the note in _sfExportStoppedNotice.
-            // ⭐⭐ BOTH ARE A DIALOG. His ruling 2026-09-23: "I prefer this dialog every time."
-            // ⚠️ The zip case was a toast on the argument that it leaves nothing behind, so there
-            // was less to say. Same argument I made in `_sfExportStoppedNotice` and he overruled
-            // it in the same breath: a cancel is the moment to stop and confirm, and the SAME
-            // gesture must not report two different ways depending on the format chosen.
-            // ⚠️ The MESSAGES stay different, because what happened genuinely differs - a folder
-            // keeps what finished, an archive keeps nothing. One surface, honest wording in it.
-            // ⏭ THE REAL FIX IS ROUTING THIS THROUGH `_sfExportStoppedNotice` like every other
-            // door, and it waits for doors 3/4 to migrate - this is a second implementation of
-            // an ending that already has a shared one.
-            await promptConfirm({
-              title: 'Export stopped',
-              message: (r.format === 'folder' || format === 'folder')
-                ? 'The files that finished copying are in the folder at the destination. '
-                  + 'The rest were not written.'
-                : 'The partly-built archive was removed, so nothing incomplete is left behind.',
-              confirmText: 'OK',
-              confirmKind: 'cancel',
-              hideCancel: true,
-            });
-          }
-          return;
-        }
+        // ⚠️⚠️ THIS DOOR'S OWN CANCEL DIALOG IS DELETED. [B-420, 2026-09-23 — his report: "when
+        // canceled I got the normal cancel message and when I closed it I got another message"]
+        //
+        // It drew its own "Export stopped" with format-specific wording, which was correct while
+        // this door owned its ending. It now runs through the shared runner, which draws the
+        // ending for every door - so BOTH fired, one after the other, on a single cancel. His
+        // guess was the delete path bleeding in; it was simpler than that, and mine: an ending I
+        // left behind after migrating the door that owned it.
+        // ⭐ THE NOTE ABOVE IT PREDICTED THIS AND I DID NOT ACT ON IT. It read "the real fix is
+        // routing this through `_sfExportStoppedNotice` like every other door, and it waits for
+        // doors 3/4 to migrate". They migrated in the same session and the block stayed. Writing
+        // down what to do at the moment it becomes possible is not the same as doing it.
+        // ⚠️ THE FORMAT-SPECIFIC WORDING SURVIVES, in the place that draws endings: main reports
+        // `partialRemoved` when the rollback removed what had landed, and the shared notice says
+        // "The item that was still being written was removed…" off exactly that.
+        if (r && r.canceled) return;
         if (!r || !r.ok) {
           _sfExportFailed((r && r.error) || 'unknown error');
           return;
         }
-        const kind = r.format === 'folder' ? 'a folder' : 'a Zip archive';
+        // ⚠️⚠️ READ THE RECORD, NOT THE ROOT. [B-420, 2026-09-23 — his catch: "shows 'undefined'"]
+        //
+        // The door exports 1..N sources now and returns a LIST, so the per-export facts - where it
+        // landed, which format, what curation rode along, what was refused - live on the record
+        // rather than on the result. This block still read them off the root and got `undefined`.
+        //
+        // ⚠️ THE MISSING PATH WAS THE VISIBLE HALF AND THE LESSER HALF. `r.format` was undefined
+        // too, so `format === 'folder'` was false and a FOLDER export announced itself as "a Zip
+        // archive" - wrong information rather than missing information, and nothing on screen
+        // said so. Same seam as the `r.hash` / `r.fileHash` defect earlier today: a consumer
+        // reading fields off a structure another layer produces, after that shape changed.
+        //
+        // ⭐ Read explicitly from `exported[0]` rather than having the door flatten itself when
+        // N is 1. A result that changes shape with the count is how this bug gets written again.
+        const one = (r.exported && r.exported[0]) || {};
+        const kind = one.format === 'folder' ? 'a folder' : 'a Zip archive';
         // One summary sentence, then subdued supporting lines — same presentation
         // standard as the import close-out (grouped paragraphs, counts formatted,
         // detail de-emphasized so the verdict line leads).
         const meta = [];
-        if (r.fileCount != null) meta.push(`<strong>${Number(r.fileCount).toLocaleString()} files</strong>`);
-        if (r.totalBytes) meta.push(`<strong>${esc(fmtB(r.totalBytes))}</strong>`);
+        if (one.fileCount != null) meta.push(`<strong>${Number(one.fileCount).toLocaleString()} files</strong>`);
+        if (one.totalBytes) meta.push(`<strong>${esc(fmtB(one.totalBytes))}</strong>`);
         const lines = [
-          `Exported <strong>${esc(label)}</strong> as ${kind}${meta.length ? `: ${meta.join(' · ')}` : ''}${r.reconstructed ? ', rebuilt in full from your space-optimized source' : ''}.`,
+          `Exported <strong>${esc(label)}</strong> as ${kind}${meta.length ? `: ${meta.join(' · ')}` : ''}${one.reconstructed ? ', rebuilt in full from your space-optimized source' : ''}.`,
         ];
         // NO INVENTORY OF THE FONT CONTENT (his call, 2026-09-02). This used to
         // list every top-level folder, which was written for the multi-board
@@ -32729,7 +32890,7 @@ require(['vs/editor/editor.main'], function () {
         // the sharp edge - a tag leaking is untidy, a PDF with a real name and
         // an order number on it is a different kind of mistake.
         //
-        // ⚠️ THE FACTS COME FROM THE EXPORT, NEVER FROM THE LIBRARY. r.curation
+        // ⚠️ THE FACTS COME FROM THE EXPORT, NEVER FROM THE LIBRARY. one.curation
         // is what injectIntoZip actually wrote. The first version of this
         // sentence was assembled here by re-reading the source and calling
         // listAttachments, and it looked only at source fields - so an export
@@ -32756,9 +32917,9 @@ require(['vs/editor/editor.main'], function () {
         // this screen. The file is already out of the library by the time this renders.
         // The dedicated dialog below states it once, correctly, and offers the choice;
         // saying it twice was noise even while it was still true.
-        const _found = r.blocked || [];
+        const _found = one.blocked || [];
 
-        const _c = r.curation;
+        const _c = one.curation;
         if (_c && _c.any) {
           const parts = [];
           if (_c.notes) parts.push('notes');
@@ -32776,7 +32937,7 @@ require(['vs/editor/editor.main'], function () {
             : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
           lines.push(`<span style="color:var(--c-text-sub)">Includes your ${list}.</span>`);
         }
-        lines.push(`<span style="opacity:.75;font-family:monospace;font-size:12px;word-break:break-all;">${esc(r.destPath)}</span>`);
+        lines.push(`<span style="opacity:.75;font-family:monospace;font-size:12px;word-break:break-all;">${esc(one.destPath)}</span>`);
         // ⚠️ WHEN A PROGRAM WAS FOUND, THE REVEAL BUTTON LOSES ITS SLOT ([B-364], his
         // call 2026-09-11: "the view location goes away because we need this answer.
         // More importantly, so this overwrites that"). Browsing to the destination is a
@@ -32796,17 +32957,44 @@ require(['vs/editor/editor.main'], function () {
             state: _impState, prefixHtml: lines.join('<br><br>') });
           return;
         }
-        const showIt = await promptConfirm({
+        // ⚠️⚠️ THE EJECT ROW GOES ON THIS SUMMARY, AND FORGETTING IT IS A REPEAT. [B-420]
+        // His report, 2026-09-23, exporting a source to F:: "I'm missing the eject. I saw the check
+        // box, but not here after." The during-export checkbox rendered, the export finished, and
+        // the summary that was supposed to carry the button it arms did not have one.
+        // ⭐ THE BACKUP DOOR DID EXACTLY THIS WHEN IT MIGRATED, and the note left beside its fix
+        // predicted this one almost word for word: "Backup lost that button when it migrated and
+        // nobody noticed, because the during-export checkbox still appeared." Twice now, a door has
+        // built its OWN completion dialog with a bare promptConfirm instead of going through
+        // `_sfCompletionNotice`, which derives the row from destDir on its own.
+        // ⚠️ THE CHECKBOX IS WHY IT SURVIVES REVIEW: it appears during the export from a different
+        // code path, so the feature looks present right up until the moment it has to do something.
+        // A door-level test now asserts this rather than trusting the next migration to remember.
+        // ⚠️ THE DIRECTORY, NOT THE CREATED PATH. Every other caller passes destDir, and the first
+        // cut of this passed `one.destPath` - which is a folder for a folder export and a .zip FILE
+        // for an archive one. It would have worked on exactly the format he happened to be testing
+        // and silently failed on the other. main now returns destDir on each exported record.
+        const _ejCtx = await _sfEjectContext(one.destDir || one.destPath).catch(() => ({}));
+        const _ejRow = _ejCtx.ejectTarget ? _sfEjectRowHtml(_ejCtx.ejectTarget, _ejCtx.ejectVocab) : '';
+        const _showP = promptConfirm({
           title: 'Export complete',
-          messageHtml: lines.join('<br><br>'),
+          messageHtml: lines.join('<br><br>') + _ejRow,
           confirmText: 'Show in folder',
           confirmKind: 'primary',
           cancelText: 'Done',
           cancelKind: 'cancel',
         });
+        // ⭐ Wired AFTER the dialog renders, the same as every other eject row - the modal is live
+        // DOM, so the eject reports INTO it rather than replacing it. Placed in the button bar so
+        // the control has one layout everywhere it appears.
+        if (_ejCtx.ejectTarget) {
+          _sfPlaceEjectRowInButtons();
+          _sfWireEjectRow({ target: _ejCtx.ejectTarget, vocab: _ejCtx.ejectVocab, auto: _ejCtx.ejectAuto });
+        }
+        const showIt = await _showP;
+        _sfRemoveEjectRow();
         if (showIt === true) {
-          const rev = await window.electronAPI.showItemInFolder(r.destPath).catch((e) => ({ ok: false, error: String(e && e.message || e) }));
-          if (!rev || rev.ok === false) promptError('Could not open the folder', (rev && rev.error) || r.destPath);
+          const rev = await window.electronAPI.showItemInFolder(one.destPath).catch((e) => ({ ok: false, error: String(e && e.message || e) }));
+          if (!rev || rev.ok === false) promptError('Could not open the folder', (rev && rev.error) || one.destPath);
         }
       });
       // Delete source with cascade warning.
@@ -32852,7 +33040,7 @@ require(['vs/editor/editor.main'], function () {
           messageHtml,
           confirmText: 'Delete',
           confirmKind: 'danger',
-          checkbox: { label: 'Export source first', hint: 'Source archive keeps its original date.', confirmTextChecked: 'Export and Delete' },
+          checkbox: { label: 'Export source first', confirmTextChecked: 'Export and Delete', inline: true },
         });
         const confirmed = res && res.confirmed;
         const wantExport = !!(res && res.checked);
@@ -32874,8 +33062,10 @@ require(['vs/editor/editor.main'], function () {
           }
           exportDir = pick.destDir;
         }
+        let _xr = null;
         if (wantExport) {
-          if (!await _sfExportSourceBeforeDelete(uuid, wantExport, exportDir, sourceLabel)) {
+          _xr = await _sfExportSourceBeforeDelete(uuid, wantExport, exportDir, sourceLabel);
+          if (!_xr) {
             await _sfDeleteProgress.hide();
             _sfSourceDetailEls.modal?.classList.add('active');
             return;
@@ -32899,6 +33089,28 @@ require(['vs/editor/editor.main'], function () {
         await _sfDeleteProgress.hide();
         if (failures.length) {
           await _sfShowPartialFailures('Some items failed to delete', failures);
+        }
+        // ⭐⭐ ONE SUMMARY AT THE END, COVERING BOTH HALVES. [B-420]
+        // The export ran with `ending: 'none'` on the promise that this caller would speak, and it
+        // only ever did so on cancel or failure - so a successful export-then-delete said nothing at
+        // all. His report: "delete and export when a card is selected get no summary."
+        // ⚠️ AFTER the delete, not between the two, so it states what actually happened rather than
+        // what was about to. A summary before the delete would be describing a plan.
+        // ⚠️ AND IT IS WHERE THE EJECT BELONGS when the copy went to a card - the reason the missing
+        // summary was most visible there. There is no other surface left: the detail modal closes
+        // below, and the card is the thing the user is waiting to pull.
+        // ⭐ Nothing exported (he did not ask for one) toasts instead of opening a dialog - his rule:
+        // "doesn't appear on nothing exported. it can toast instead."
+        // ⭐ THE SHARED ENDING, same as every other delete door. [B-420] This block was written out
+        // by hand first, and that second hand-written copy is what made it obvious the ending had to
+        // be shared rather than repeated - see _sfDeleteOutcome.
+        if (!failures.length) {
+          await _sfDeleteOutcome({
+            exportResult: _xr && _xr.exported ? _xr : null,
+            autoEject: _xr && _xr.wantsEject,
+            fontsDeleted: entries.length, sourcesDeleted: 1,
+            destDir: exportDir, label: sourceLabel,
+          });
         }
         await _sfCloseSourceDetail();
         await window.refreshSoundFontsView();
@@ -35056,6 +35268,18 @@ require(['vs/editor/editor.main'], function () {
       // callback that is not a summary. Inferring would be a guess wearing a parameter's clothes.
       const _sfExportOutcome = async (r, { what = 'files', destDir = null, onCompleted = null,
                                            ending = 'toast', summaryHasEject = false } = {}) => {
+        // ⚠️⚠️ A REFUSAL IS AN ENDING, SO IT BELONGS HERE. [B-420, 2026-09-23]
+        // Main's fit check is a backstop under the runner's - it fires only when the runner's
+        // preflight could not measure at all. Before this, that reply reached `_sfExportFailed`
+        // with no `error` field and became "Export failed: unknown error", which is the exact
+        // defect [B-203] fixed for one door by giving that door its own refusal dialog.
+        // ⭐ One door handling it is how eleven doors each grew their own. The ending owns it now,
+        // so every door inherits the real sentence - and the ratchet can forbid doors from
+        // raising refusals themselves without that forbidding being a lie.
+        if (r && r.tooBig) {
+          await _sfRefuseNotEnoughRoom(r.tooBig, { blockedDelete: r.blockedDelete === true });
+          return false;
+        }
         if (!r || !r.ok) { _sfExportFailed((r && r.error) || 'unknown error'); return false; }
 
         // ⚠️⚠️ A CANCEL WE COULD NOT CONFIRM IS NOT A FINISHED CANCEL. [B-420, 2026-09-21]
@@ -35093,6 +35317,10 @@ require(['vs/editor/editor.main'], function () {
             removedPartial: r.partialRemoved === true,
             restored: r.restored === true,
             leftovers: r.leftovers || [],
+            // ⚠️ Rides on the RESULT, like refusedKind and partialRemoved, because only the door
+            // knows the export was a precondition of a delete. The runner must not infer it from
+            // a label - that is how the sentence reaches doors it is false for. [2026-09-23]
+            blockedDelete: r.blockedDelete === true,
           });
           // ⭐⭐ THE CLEANUP IS OFFERED, NOT PERFORMED, WHEN REMOVING IT WOULD ITSELF BE SLOW.
           // [B-005 item 4, his ruling] "offer to cleanup because if we've already done a
@@ -36761,145 +36989,176 @@ require(['vs/editor/editor.main'], function () {
       };
       _sfEntryDetailEls.meta?.addEventListener('click', _sfNotesToggleHandler);
       _sfEntryDetailEls.source?.addEventListener('click', _sfNotesToggleHandler);
-      // Best-effort export of a source archive to the user's Downloads folder
-      // before a delete cascade removes it. Returns true if the export ran (or
-      // wasn't requested), false if the user opted in but the export failed —
-      // in which case the caller should abort the delete so the user has a
-      // chance to retry or reconsider.
-      // THE one way to export a source. Every door goes through here — the
-      // standalone Export button and both delete paths that offer to save a
-      // copy first — so the progress wiring, the IPC shape and the report of
-      // what the archive carries are decided once instead of per caller.
+      // ── Source export: 1 or many, one operation ──────── [B-420, 2026-09-23, his design]
       //
-      // ⚠️ THIS COMMENT USED TO CLAIM THREE CALLERS AND THERE WERE ONLY TWO.
-      // Bulk delete had its own copy of the call so it could drive its own
-      // step-count modal, which is a PRESENTATION reason to fork an OPERATION —
-      // and it cost exactly what forking costs: it never got the live progress
-      // this function exists to provide, and anything added here reached two
-      // doors out of three. (Ryan, 2026-09-03: "export is export... don't want
-      // similar but separate flows.")
+      // ⭐⭐ IT TAKES A LIST NOW, AND THAT IS THE WHOLE SIMPLIFICATION. It used to export ONE
+      // source and be called in a loop by the bulk delete, which meant the export phase was N
+      // operations sharing a caller-drawn STEP counter ("Exporting sources 3 of 4") - no bytes, no
+      // filenames, on the slowest operation in the app.
       //
-      // `progress` is how that fork was closed. Pass a sink and this reports
-      // into it instead of owning the shared progress modal, so a caller with
-      // its own modal keeps its own modal and still shares everything else.
-      // Omit it and the standalone/single-delete behaviour is unchanged.
-      // `includeAttachments` is a PARAMETER of the export, not a question the
-      // export asks. Only the source modal has a user to ask; both delete paths
-      // know the answer already and pass it (see their call sites), which is the
-      // whole point of one parameterised process rather than three flows.
-      // `includeCustomized` ([B-311]) is the same kind of parameter for the
-      // same reason: the direct export has a checkbox, the delete paths pass
-      // true — that export is the last copy of edits that exist nowhere else.
-      const _sfRunSourceExport = async ({ uuid, destDir, format, label, progress, includeAttachments = true, includeCustomized = true }) => {
-        let bytesDone = 0, totalBytes = 0, fileCount = 0, totalFiles = 0, phase = '', currentFile = '';
-        const t0 = Date.now();
-        const PHASE_LABEL = { reading: 'Reading files', reconstruct: 'Rebuilding', compress: 'Compressing' };
-        const _fmtDur = (sec) => (window._sfFormatDuration ? window._sfFormatDuration(sec) : `${Math.round(sec)}s`);
-        const fmtB = window._sfFormatBytes || ((n) => `${n} B`);
-        const render = () => {
-          const secs = Math.floor((Date.now() - t0) / 1000);
-          let frac, info;
-          if (phase === 'compress') {
-            frac = totalBytes ? Math.max(0, Math.min(1, bytesDone / totalBytes)) : 0;
-            info = totalBytes ? `${fmtB(bytesDone)} of ${fmtB(totalBytes)}` : '';
-          } else {
-            frac = totalFiles ? Math.max(0, Math.min(1, fileCount / totalFiles)) : 0;
-            info = totalFiles ? `${fileCount.toLocaleString()} of ${totalFiles.toLocaleString()} files` : '';
-          }
-          const labelLine = [PHASE_LABEL[phase] || 'Exporting', info].filter(Boolean).join(' · ');
-          const elapsed = `${_fmtDur(secs)} elapsed`;
-          if (progress) progress({ labelLine, frac, currentFile, elapsed });
-          else _sfDeleteProgress.setPhase(labelLine, frac, currentFile, elapsed);
-        };
-        const offProg = window.electronAPI.onSourceExportProgress((p) => {
-          if (!p) return;
-          if (p.phase) phase = p.phase;
-          if (typeof p.fileCount === 'number') fileCount = p.fileCount;
-          if (typeof p.totalFiles === 'number') totalFiles = p.totalFiles;
-          if (typeof p.bytesDone === 'number') bytesDone = p.bytesDone;
-          if (typeof p.totalBytes === 'number') totalBytes = p.totalBytes;
-          if (p.currentFile) currentFile = p.currentFile;
-          render();
-        });
-        // Show only once the work can actually start — a bar that appears
-        // behind a file dialog sits at zero and reads as a hang. A caller with
-        // its own sink already has a modal up and owns showing and hiding it.
-        // ── Check BEFORE raising a bar ────────────────────────────── [B-203, B-238]
-        //
-        // ⚠️⚠️ THIS DOOR USED TO ASK AFTERWARDS AND IT SHOWED. It started the export, let main
-        // decline with tooBig/slowWrite, and then opened a dialog - on top of a progress bar
-        // that was already up. Hiding the bar first was a patch on the symptom; the real
-        // difference was structural, and he named it: "i think the order is off on this one...
-        // the progress bar... not like the other spots."
-        // ⭐ Sizing a source is one read of the zip's central directory, so there is no reason
-        // this door cannot look exactly like the others: size, check, ask, THEN start.
-        // ⚠️⚠️ `_asked` IS NOT BOOKKEEPING - IT IS THE FIX FOR A BUG THIS BLOCK CAUSED.
-        // Moving the checks up here left main still running its OWN slow-write check, and
-        // nothing told main the question had already been put. So a large source export to a
-        // board answered "Export anyway", started, and came straight back with
-        // { ok:false, slowWrite } - which this door has no branch for, so it fell through to
-        // the failure line and read as "Export failed / unknown error". His report: "trying to
-        // export source didn't make it far... saw the cancel button but didn't get to press it."
-        // ⭐ Whoever asks, tells. The renderer asks first now because asking after the bar is up
-        // is the thing he caught earlier tonight; main keeps its check for callers that do not
-        // pre-flight, and `confirmSlow` is how the two stay out of each other's way.
-        let _asked = false;
-        try {
-          // ⚠️ Sizing reads the archive's directory - fast on a small source, not instant on
-          // a 2,398-file one. Same overlay, same reason.
-          const _sz = await _sfSourceExportSize({ uuid });
-          if (_sz && _sz.ok && _sz.bytes > 0) {
-            // ⭐ ONE PREFLIGHT. [B-005 item 4] Was two round trips asking about the same
-            // destination, with the board-card test implemented a second time inside
-            // _sfWarnSlowWrite.
-            const _srcPf = await _sfPreflightDestination({
-              destDir, totalBytes: _sz.bytes, fileCount: _sz.files,
-            });
-            if (!_srcPf.proceed) return { ok: false, canceled: true };
-            // ⚠️ SET ONLY HERE - after BOTH checks have really run and both said go. A throw
-            // anywhere above leaves it false, main asks, and the backstop below catches the
-            // reply. Claiming the question was asked when it was not is how a warning
-            // disappears on exactly the runs where something already went wrong.
-            _asked = true;
-          }
-        } catch (e) { console.warn('[B-203/238] source pre-flight did not run:', e); }
+      // ⭐ HIS RE-SCOPE dissolved a question I had stopped to ask. I wanted the shared runner to
+      // grow a "the caller paints, not you" mode to accommodate that second surface. His answer
+      // was to remove the second surface: "the caller (delete) hands over 1 or many sources to
+      // export. we do it and return back what we've exported. that gives delete the go ahead to
+      // complete." One operation means one surface, so the mode was never needed - and the bulk
+      // path stops being an exemption.
+      //   "one bar for the bytes over all 4 showing which source it's working on and all the files
+      //    flying by. so genuinely looks the same for 1 or 100 of them."
+      //
+      // ⚠️ `blockedDelete` IS DECLARED BY THE CALLER, never inferred here. Only a caller knows the
+      // export is a precondition of a delete, and that is what earns the extra sentence when it
+      // does not complete.
+      const _sfRunSourceExport = async ({ sources, destDir, format, blockedDelete = false,
+                                          includeAttachments = true, includeCustomized = true }) => {
+        const list = (Array.isArray(sources) ? sources : [sources]).filter((s) => s && s.uuid);
+        if (!list.length) return { ok: false, error: 'No sources to export' };
+        const many = list.length > 1;
+        let res = null;
+        let _fracFloor = 0;               // the bar never goes backwards - see the note below
 
-        if (!progress) _sfDeleteProgress.show('Exporting source', label || '', 0);
-        // ⚠️ Only when WE own the modal. A caller that passed its own progress sink owns showing
-        // and hiding it, and hanging our cancel on someone else's surface would outlive the work
-        // it belongs to. [B-005 item 4]
-        if (!progress) _sfDeleteProgress.offerCancel(_sfExportCancelOpt.onCancel);
-        const tick = setInterval(render, 250);
-        let r;
-        try {
-          r = await window.electronAPI.exportSourceToDownloads(
-            format ? { uuid, destDir, format, includeAttachments, includeCustomized, confirmSlow: _asked }
-                   : { uuid, destDir, includeAttachments, includeCustomized, confirmSlow: _asked });
-          // ⚠️ BACKSTOP for the case the pre-flight could not run. Main asked instead, and this
-          // door must answer rather than treat the question as a failure - which is precisely
-          // what it did before. No bar problem here: it is already up, so this is the lesser
-          // evil against "unknown error".
-          // ⚠️ SAME CLASS, SAME PLACE: main's fit check is also a backstop, and its tooBig reply
-          // had no branch here either - so a pre-flight that could not run turned a perfectly
-          // clear "not enough room" into "unknown error". [B-203]
-          if (r && r.tooBig) {
-            await _sfRefuseNotEnoughRoom(r.tooBig);
-            r = { ok: false, canceled: true };
-          } else if (r && r.slowWrite) {
-            if (await _sfSlowWriteDialog(r.slowWrite)) { r = { ok: false, canceled: true }; }
-            else {
-              r = await window.electronAPI.exportSourceToDownloads(
-                format ? { uuid, destDir, format, includeAttachments, includeCustomized, confirmSlow: true }
-                       : { uuid, destDir, includeAttachments, includeCustomized, confirmSlow: true });
+        const _call = (confirmSlow) => window.electronAPI.exportManySourcesToDownloads({
+          items: list.map((s) => ({ uuid: s.uuid, label: s.label })),
+          destDir, format, includeAttachments, includeCustomized, confirmSlow,
+        });
+
+        const _run = await _sfRunExport({
+          label: many ? 'sources' : 'source',
+          title: many ? `Exporting ${list.length} sources` : 'Exporting source',
+          destDir,
+          // ⚠️ A delete owns the screen either way: on success it carries straight on to the
+          // delete and must not be interrupted by an ending about the export, and on a cancel it
+          // draws the stopped notice ITSELF so it can add "Nothing was deleted." That is exactly
+          // what `ending: 'none'` promises - a caller that will speak.
+          ending: blockedDelete ? 'none' : undefined,
+          endState: { kind: 'files' },
+          // ⚠️⚠️ THE RUNNER'S PREFLIGHT DRAWS THE REFUSAL, so the fact has to reach IT. Removing
+          // this door's own tooBig branch moved the dialog into the shared preflight - and with
+          // it, the only place that was passing `blockedDelete` to the refusal. Without this, a
+          // delete-with-export aimed at a full card refuses on SPACE and never says the delete
+          // did not happen, which is exactly the gap his rule closed. [2026-09-23]
+          blockedDelete,
+          onCancel: _sfExportCancelOpt.onCancel,
+          // ⭐ SIZE THE WHOLE JOB. Main sizes it again for its own preflight, and that is not a
+          // duplicate measurement of the same thing - this one feeds the BAR and the runner's
+          // destination check, main's is the backstop for callers that never pre-flight.
+          plan: async () => {
+            let bytes = 0, files = 0;
+            for (const s of list) {
+              try {
+                const sz = await _sfSourceExportSize({ uuid: s.uuid });
+                if (sz && sz.ok) { bytes += (sz.bytes || 0); files += (sz.files || 0); }
+              } catch { /* an unsizable source leaves the total short, which reads as "cannot
+                           measure" downstream rather than as a smaller job */ }
             }
-          }
-        } catch (err) {
-          r = { ok: false, error: String(err && err.message || err) };
-        } finally {
-          clearInterval(tick);
-          if (offProg) offProg();
+            return { items: [], totalBytes: bytes, fileCount: files };
+          },
+          // ⭐ THE DOOR OWNS ITS TRANSPORT, THE RUNNER OWNS THE SURFACE. Same contract backup uses.
+          // ⚠️ The stream is already cumulative across sources - main accumulates the byte offset -
+          // so nothing here has to know how many have finished.
+          // ⚠️⚠️ MONOTONIC, BECAUSE THE BULK IMPORT ALREADY LEARNED THIS. Its `_aFloor` exists
+          // because a later pass reporting a smaller fraction dropped the bar to 0 mid-run and
+          // the previous pass "never filled" - the note is still in that code. The same is
+          // possible here: a rebuild's byte count and an archive's byte count are different
+          // measurements of the same source, and nothing guarantees the second starts where the
+          // first stopped. A bar that goes backwards is worse than one that pauses.
+          // ⭐ Found by asking where this already works rather than by reasoning it out again -
+          // the pattern, the position-in-label and the granular detail line are all his: "we have
+          // other examples of this in app like importing multiple... shows an overall and then
+          // the granular progress".
+          subscribe: (sink) => window.electronAPI.onSourceExportProgress((p) => {
+            if (!p) return;
+            const PHASE = { reading: 'Reading files', reconstruct: 'Rebuilding', compress: 'Compressing',
+                            // ⚠️ NAMED, because an unnamed phase is why this one read as a hang.
+                            // It is the tag-writing repack that runs after the archive is built.
+                            // ⚠️ NOT "curation", and not two names. [2026-09-23] These passes carry the
+                            // owner's tags and links into the archive - our concept, not the
+                            // user's: "to a user, they don't know anything about curation etc.
+                            // it's all part of the export." So they say what STAGE it is at, and
+                            // both halves say the same thing because there is no reason for
+                            // anyone to distinguish them.
+                            'curation-unpack': 'Finishing the export',
+                            'curation-repack': 'Finishing the export' };
+            // ⚠️ THE SOURCE NAME LEADS. With one bar over several archives the bytes alone cannot
+            // say which of them is moving, which is the question being asked while it runs.
+            // ⚠️⚠️ THE OVERRIDE REPLACES THE BYTE LINE, IT DOES NOT SIT BESIDE IT. [his catch,
+            // 2026-09-23: "the bytes are getting overwritten by the source name"] The runner uses
+            // `labelOverride` INSTEAD of its own `X of Y`, so a label that names only the source
+            // silently costs the number. Whatever this sends is the whole line.
+            // ⭐ His shape: the name, then what it is doing, then the quantity - "like in fonts
+            // where we see the name of the font followed by the files on the same line... or can
+            // put the bytes after that on that same line since we're showing more details".
+            const _fb = window._sfFormatBytes || ((n) => `${n} B`);
+            const _bytes = (typeof p.bytesDone === 'number' && p.totalBytes)
+              ? `${_fb(p.bytesDone)} of ${_fb(p.totalBytes)}` : null;
+            // ⚠️ "(1 of 2)" ONLY WHEN THERE IS MORE THAN ONE. On a single source it is noise -
+            // the same suppression rule the rest of the app follows for counts of one.
+            const _pos = (p.sourceTotal > 1 && p.sourceIndex)
+              ? `${p.sourceLabel} (${p.sourceIndex} of ${p.sourceTotal})` : p.sourceLabel;
+            const parts = [_pos, PHASE[p.phase] || null, _bytes].filter(Boolean);
+            // ⚠️ A PHASE-LOCAL TICK MUST NOT DRIVE THE JOB BAR. `curation-repack` measures its own
+            // repack, not the export, so its fraction is meaningless against the job's total -
+            // feeding it in is what made the bar and the text disagree. Its NUMBERS still show,
+            // because they are what the user is waiting on; only the bar is left alone.
+            // ⚠️ `phaseLocal` IS GONE. It let the curation passes report numbers that did not
+            // drive the bar - a separate thing happening beside the export. That is exactly the
+            // distinction he rejected ("it's all part of the export"), and it is also what left
+            // the bar frozen while the text moved. Every pass drives the one bar now.
+            const _raw = (typeof p.bytesDone === 'number' && p.totalBytes)
+              ? Math.max(0, Math.min(1, p.bytesDone / p.totalBytes)) : null;
+            if (_raw != null) _fracFloor = Math.max(_fracFloor, _raw);
+            sink({
+              label: parts.join(' · ') || null,
+              frac: _raw == null ? null : _fracFloor,
+              name: p.currentFile || '',
+            });
+          }),
+          produce: async () => {
+            // ⚠️ `confirmSlow: true` because THE RUNNER HAS ALREADY ASKED, exactly as the funnel
+            // does. Main keeps its own check for callers that do not pre-flight.
+            res = await _call(true);
+            // ⚠️⚠️ NO tooBig / slowWrite BRANCHES HERE, AND BOTH ABSENCES ARE DELIBERATE.
+            //  • `slowWrite` is UNREACHABLE: main gates it on `!confirmSlow` and this door always
+            //    passes true, because the runner has already asked. A branch for a reply that
+            //    cannot arrive is the "unreachable code that looks like a guard" the funnel
+            //    deleted on 2026-09-22.
+            //  • `tooBig` CAN still arrive - it is main's backstop for a preflight that could not
+            //    measure - and it is handled in the SHARED ENDING now, so every door gets the real
+            //    refusal instead of "unknown error". A refusal is an ending; this door does not
+            //    own endings.
+            // ⭐ That is what lets the ratchet forbid a door raising its own fit refusal without
+            // the rule being a lie for this one.
+            // ⚠️ `blockedDelete` rides on the RESULT so the shared ending can add its sentence
+            // without the runner having to know what a delete is.
+            return { ...res, blockedDelete };
+          },
+        });
+        // ⚠️⚠️ A REFUSAL READS AS CANCELLED TO THE CALLER, and forgetting this cost a double
+        // dialog for about ten minutes. [2026-09-23]
+        //
+        // Moving the fit refusal into the shared ending left `res` as `{ok:false, tooBig}` - not
+        // `canceled` - so the delete callers fell past their quiet `canceled` branch into the
+        // error branch and showed "Could not export source: unknown error" UNDERNEATH the refusal
+        // that had just explained the problem properly. Two dialogs for one fact.
+        // ⭐ `refusedForSpace` is what tells the callers the refusal has ALREADY spoken, so they
+        // do not add the stopped notice on top. It is set here, at the one place that knows the
+        // ending drew a dialog rather than a toast.
+        // ⚠️⚠️ NO `res` MEANS PRODUCE NEVER RAN, AND THAT IS NOT A FAILURE. [his report,
+        // 2026-09-23: "additional modal after not fit... second shouldn't be there"]
+        //
+        // The runner returns before `produce` whenever its own preflight refuses, the user backs
+        // out of the slow-write warning, or a picker is dismissed. In every one of those a dialog
+        // has ALREADY spoken or the user chose to stop - so falling through to
+        // `return res || { ok:false, error:'export did not run' }` put "Export failed: export did
+        // not run" on top of a perfectly clear "Not enough room".
+        // ⭐ `refusedForSpace` means "an ending already spoke, do not add another" - which is what
+        // the delete callers read it for. The name is narrower than the meaning; the meaning is
+        // the one that matters at both call sites.
+        if (!res || res.tooBig) {
+          return { ok: true, canceled: true, wroteCount: 0, refusedForSpace: true };
         }
-        return r;
+        // ⚠️ The DOOR's result is what callers branch on, not the runner's - the delete contract
+        // reads `canceled` and `ok` and must keep seeing exactly what it saw before.
+        return res || { ok: false, error: 'export did not run' };
       };
       const _sfExportSourceBeforeDelete = async (sourceUuid, requested, destDir, label) => {
         if (!requested || !sourceUuid) return true;
@@ -36910,16 +37169,58 @@ require(['vs/editor/editor.main'], function () {
           // is the thing you would most regret losing, and a customized font's
           // edits exist nowhere else at all ([B-311]). Stated rather than
           // defaulted, because "the caller knows the answer" is the design.
-          const r = await _sfRunSourceExport({ uuid: sourceUuid, destDir, label, includeAttachments: true, includeCustomized: true });
-          // [B-203] Refused for space: the dialog already said so. Stop the delete without
-          // a second message, and WITHOUT the "Nothing was deleted" reassurance - that line
-          // answers a question the user has not asked yet, because the export never ran.
-          if (r && r.canceled) return false;
+          // ⚠️ `blockedDelete` DECLARED HERE, because this is the only place that knows the
+          // export is a precondition. The door does not guess it from the label. [2026-09-23]
+          const r = await _sfRunSourceExport({ sources: [{ uuid: sourceUuid, label }], destDir,
+                                               blockedDelete: true,
+                                               includeAttachments: true, includeCustomized: true });
+          // ⚠️⚠️ THE CALLER SPEAKS, BECAUSE IT DECLARED `ending: 'none'`. That option is a promise
+          // that something else will say what happened, and for three of the four ways a cancel
+          // arrives here a dialog HAS already spoken - the space refusal (which now carries
+          // "Nothing was deleted." itself) and the slow-write backout. What was never covered is
+          // the fourth: the user pressing Cancel, which said nothing at all.
+          // ⭐ His rule, one instead of four cases: whenever an export-before-delete does not
+          // complete, say the delete did not happen, on whatever surface is already speaking.
+          if (r && r.canceled) {
+            if (!r.refusedForSpace) {
+              await _sfExportStoppedNotice({
+                wrote: 0, what: 'sources', blockedDelete: true,
+                // ⭐ TRUE AFTER THE ROLLBACK. Main removes the archives that already landed, so
+                // "nothing was copied" is a fact rather than a reassurance - which is the whole
+                // reason the rollback exists.
+                removedPartial: (r.rolledBack || 0) > 0,
+                leftovers: r.leftovers || [],
+              });
+            }
+            return false;
+          }
           if (!r || !r.ok) {
             promptError('Could not export source', `${(r && r.error) || 'unknown error'}\n\nNothing was deleted.`);
             return false;
           }
-          return true;
+          // ⭐⭐ THE RESULT GOES BACK TO THE CALLER, because `ending: 'none'` promised someone would
+          // speak and on SUCCESS nobody did. [B-420, his report 2026-09-23: "delete and export when a
+          // card is selected get no summary... it was doing that till I told you I didn't get the
+          // eject option... now it's gone altogether"]
+          // ⚠️ The door spoke on CANCEL and on FAILURE and returned a bare `true` on success, so the
+          // one path where there is something worth saying - what was written, and where - was the
+          // only silent one. A boolean cannot carry a destination, so the caller had nothing to show
+          // even if it wanted to.
+          // ⭐ His instruction, and it named the mechanism before the bug was found: "not visible
+          // meaning it has to be sent back to the caller so it can be shown... right?"
+          //
+          // ⚠️⚠️ THE EJECT TICK IS CAPTURED HERE OR IT IS LOST. [B-420, his report 2026-09-23:
+          // "eject after completion didn't carry through. eject button is there, but it doesn't do
+          // it on its own."]
+          // `_sfDeleteProgress.show()` calls `clearEject()` whenever the modal OPENS, which is right
+          // in general - a tick left over from a previous export must never silently eject a card
+          // the next run never asked about. But a delete-with-export spans TWO opens: the export
+          // closes the modal, then the delete phase calls show('Deleting fonts'), the modal is not
+          // active, and the tick is wiped before any ending can read it.
+          // ⭐ So the INTENT is read at the one moment it is still true and carried on the result,
+          // rather than re-read later from a box that has since been reset. The ending asks the
+          // result what the user wanted, not the DOM.
+          return { ...r, wantsEject: _sfDeleteProgress.wantsEject() };
         } catch (err) {
           promptError('Could not export source', `${err && err.message || err}\n\nNothing was deleted.`);
           return false;
@@ -37317,6 +37618,24 @@ require(['vs/editor/editor.main'], function () {
         // "Checking the destination…" over a running export. setTitle touches the heading only,
         // which is why show() is still wrong here: it would reset the bar and the elapsed line
         // mid-run. [B-005 item 4]
+        // ⚠️⚠️ AN EXPORT IN FLIGHT MUST BLOCK CLOSING THE APP. [2026-09-23, his catch: "X worked
+        // on mid export... thought we blocked that... due to corruption risk"]
+        //
+        // `_runQuitGuards` guarded flashing, a Sound Font backup, a bulk import and unsaved work -
+        // and NOT an export, on any of the fourteen doors. The backup guard's own note says why it
+        // blocks hard: "closing mid-write leaves a corrupt partial zip." An export mid-write is the
+        // same hazard, and usually aimed at a FAT32 card, which is the medium this release spent
+        // its SD work protecting.
+        // ⭐ SET HERE rather than at each door - the runner is the one place every migrated door
+        // passes through, so one flag covers all of them and a door added later inherits it. That
+        // is the same argument as the Cancel button and the eject offer living on the modal.
+        // ⚠️ Cleared in the `finally` below, unconditionally: a flag that survives a failed export
+        // would lock the app shut.
+        window._sfExportBusy = true;
+        // ⚠️ ON BEFORE THE FIRST PAINT, OFF IN THE `finally` BELOW. The reserve exists for the
+        // rows this runner is about to fill; leaving it set would hand three blank lines to the
+        // next short flow that borrows this modal. Whoever takes the screen gives it back.
+        try { _sfDeleteProgress.modal()?.classList.add('sf-prog-reserve'); } catch {}
         if (!opts.alreadyOpen) _sfDeleteProgress.show(title, '', 0);
         else _sfDeleteProgress.setTitle(title);
         // ⭐ ARM THE EJECT CHECKBOX HERE, AFTER show(). [B-005 item 4] show() clears it, so
@@ -37354,6 +37673,8 @@ require(['vs/editor/editor.main'], function () {
         try {
           return await work();
         } finally {
+          window._sfExportBusy = false;
+          try { _sfDeleteProgress.modal()?.classList.remove('sf-prog-reserve'); } catch {}
           clearInterval(tick);
           try { off && off(); } catch {}
           try { offD && offD(); } catch {}
@@ -37548,6 +37869,9 @@ require(['vs/editor/editor.main'], function () {
           destDir,
           totalBytes: (plan && plan.totalBytes) || 0,
           fileCount:  _writesOneFile ? 1 : ((plan && plan.fileCount) || 0),
+          // ⚠️ Declared by the door, threaded because the REFUSAL is drawn in there. A door whose
+          // export gates a delete needs the refusal to say so; the runner does not infer it.
+          blockedDelete: door.blockedDelete === true,
         });
         // ⚠️ If we raised it and the preflight took it down for a dialog, it stays down — the
         // operation is over. `_sfRunWithByteProgress` owns hiding it on the path that continues.
@@ -37732,13 +38056,32 @@ require(['vs/editor/editor.main'], function () {
         const sourceLabel = (_sfAllSourcesByUuid[sourceUuid]?.meta?.bundleName)
           || (_sfAllSourcesByUuid[sourceUuid]?.meta?.originalName)
           || '';
+        // ⚠️ The export RESULT, not a boolean - the ending cannot name a destination it was never
+        // given, which is why this door was silent even after the other two learned to speak.
+        let _xr = null;
         if (wantExport) {
-          const ok = await _sfExportSourceBeforeDelete(sourceUuid, wantExport, exportDir, sourceLabel);
-          if (!ok) { await _sfDeleteProgress.hide(); return false; }
+          _xr = await _sfExportSourceBeforeDelete(sourceUuid, wantExport, exportDir, sourceLabel);
+          if (!_xr) { await _sfDeleteProgress.hide(); return false; }
         }
         _sfDeleteProgress.show('Deleting', name);
         const ok = await _sfDeleteEntryAndCleanup(name);
         await _sfDeleteProgress.hide();
+        // ⭐ THE SHARED ENDING. [B-420] Both callers of this helper - the right-click delete and the
+        // entry delete inside source detail - showed nothing at all on success, whether or not an
+        // export had just written a file to a card. His rule: "shouldn't matter where I delete from."
+        // ⚠️ Only on success. A failure has already spoken through _sfDeleteEntryAndCleanup's own
+        // error dialog, and a second surface over it would be the double-ending this work removed.
+        if (ok) {
+          await _sfDeleteOutcome({
+            exportResult: _xr && _xr.exported ? _xr : null,
+            autoEject: _xr && _xr.wantsEject,
+            fontsDeleted: 1,
+            // The source goes only when nothing else references it; _sfDeleteEntryAndCleanup
+            // decides that, so the count is taken from what the export actually covered.
+            sourcesDeleted: (_xr && _xr.exported && _xr.exported.length) || 0,
+            destDir: exportDir, label: sourceLabel,
+          });
+        }
         return ok;
       };
       // Whether deleting this entry will also drop the source archive. True
@@ -38628,6 +38971,94 @@ require(['vs/editor/editor.main'], function () {
       // HTML, attach the listener after render.
       // !! Degrades to a plain notice when the destination is not removable, which is the
       // common case: no row, no button, nothing to explain.
+      // ⭐⭐ THE ONE ENDING EVERY DELETE DOOR USES. [B-420, 2026-09-23]
+      // His rule, and it is the whole thesis of this work arriving on the delete side: *"but I
+      // didn't get either in this case... I did right click delete... I think.... but shouldn't
+      // matter where I delete from."*
+      //
+      // ⚠️ THERE WERE FOUR DELETE DOORS AND THREE BEHAVIOURS when he found this:
+      //   • bulk delete                      - summary, no eject row
+      //   • source detail "Delete source…"   - NOTHING at all
+      //   • entry delete from source detail  - NOTHING at all
+      //   • right-click delete on a card     - NOTHING at all   ← the one he hit
+      // ⭐ I had already written the same summary block twice by hand fixing the first two. A third
+      // and fourth copy is precisely the "eleven doors each grew their own" failure the export
+      // runner exists to end, so this is the ending, not a helper the doors may choose to call.
+      //
+      // ⭐ HIS TWO RULES, both encoded here rather than in each caller:
+      //   1. "since we're saving a file it's supposed to speak. when not saving file it's a toast."
+      //      A plain delete is already visible in the cards disappearing; a modal would restate the
+      //      screen. An export produced a file somewhere, and where it landed is the one fact
+      //      nothing else on screen can ever tell them.
+      //   2. "show in folder is good and conditional" - offered only when there is a folder to show.
+      // ⚠️ AND THE EJECT RIDES HERE, because a delete-and-export to a card ends on this dialog and
+      // there is no later surface: the detail modal closes, the view refreshes, the card is the
+      // thing the user is waiting to pull.
+      // ⚠️ `autoEject` is the user's INTENT, captured when the export finished. It is not re-read
+      // from the checkbox here, because by the time a delete ending runs the progress modal has
+      // reopened for the delete phase and `clearEject()` has wiped it. A DOM read at this point
+      // answers a question about the wrong moment.
+      const _sfDeleteOutcome = async ({ exportResult, fontsDeleted = 0, sourcesDeleted = 0,
+                                        destDir = '', label = '', autoEject } = {}) => {
+        const exp = (exportResult && exportResult.exported) || [];
+        const fonts = `${fontsDeleted} ${fontsDeleted === 1 ? 'font' : 'fonts'}`;
+        const srcs = sourcesDeleted
+          ? ` and ${sourcesDeleted} source ${sourcesDeleted === 1 ? 'archive' : 'archives'}` : '';
+        // Rule 1, the toast half: nothing was written, so there is no fact worth a dialog.
+        if (!exp.length) { showToast(`Deleted ${fonts}${srcs}.`); return; }
+
+        const fmtB = window._sfFormatBytes || ((n) => `${n} B`);
+        const bytes = exp.reduce((n, x) => n + (Number(x.totalBytes) || 0), 0);
+        const one = exp[0];
+        // ⚠️ destDir, NEVER a regex over destPath. destPath is the thing we CREATED - a folder for a
+        // folder export and a .zip FILE for an archive one - so resolving removable media from it
+        // works on exactly one of the two formats. main returns destDir per record for this.
+        const dir = one.destDir || destDir
+          || (one.destPath ? String(one.destPath).replace(/[\/\\][^\/\\]*$/, '') : '');
+        const carried = exp.some((x) => x.curation && x.curation.any);
+        const lines = [
+          `<strong>${_sfEscape(fonts)}${_sfEscape(srcs)}</strong> removed.`,
+          (exp.length === 1
+            ? `The source was exported first${label ? ` — <strong>${_sfEscape(label)}</strong>` : ''}`
+            : `All ${exp.length} sources were exported first`)
+            + (dir ? ` to <span style="opacity:.75;font-family:monospace;font-size:12px;word-break:break-all;">${_sfEscape(dir)}</span>` : '')
+            + (bytes ? ` — ${_sfEscape(fmtB(bytes))}` : '') + '.',
+          carried
+            ? '<span style="color:var(--c-text-sub)">The copy carries your notes, tags and links, so re-importing it brings them back.</span>'
+            : null,
+        ].filter(Boolean);
+
+        const ej = await _sfEjectContext(dir).catch(() => ({}));
+        const p = promptConfirm({
+          title: `Deleted ${fonts}`,
+          messageHtml: lines.join('<br><br>')
+                     + (ej.ejectTarget ? _sfEjectRowHtml(ej.ejectTarget, ej.ejectVocab) : ''),
+          // Rule 2: only offered because an export produced something to reveal.
+          confirmText: 'Show in folder',
+          confirmKind: 'primary',
+          cancelText: 'Done',
+          cancelKind: 'cancel',
+        });
+        // ⭐ Wired AFTER the dialog renders, like every other eject row - the modal is live DOM, so
+        // the eject reports INTO it instead of replacing it.
+        if (ej.ejectTarget) {
+          _sfPlaceEjectRowInButtons();
+          // ⭐ The carried intent wins over the context's own read. `_sfEjectContext` derives
+          // ejectAuto from `_sfDeleteProgress.wantsEject()`, which is correct for a plain export
+          // (one modal, still open) and always FALSE for a delete-with-export (second modal, tick
+          // already cleared). Falling back to it keeps the plain-export path unchanged.
+          _sfWireEjectRow({ target: ej.ejectTarget, vocab: ej.ejectVocab,
+                            auto: (autoEject === undefined ? ej.ejectAuto : autoEject) });
+        }
+        const show = await p;
+        _sfRemoveEjectRow();
+        if (show === true && one.destPath) {
+          const rev = await window.electronAPI.showItemInFolder(one.destPath)
+            .catch((e) => ({ ok: false, error: String(e && e.message || e) }));
+          if (!rev || rev.ok === false) promptError('Could not open the folder', (rev && rev.error) || one.destPath);
+        }
+      };
+
       const _sfCompletionNotice = async ({ title, message, destDir }) => {
         let ctx = {};
         try { ctx = (await _sfEjectContext(destDir)) || {}; } catch { ctx = {}; }
@@ -40335,9 +40766,7 @@ require(['vs/editor/editor.main'], function () {
             ? {
                 label: sourcesToRemove.length === 1 ? 'Export source first' : 'Export sources first',
                 confirmTextChecked: 'Export and Delete',
-                hint: sourcesToRemove.length === 1
-                  ? 'Source archive keeps its original date.'
-                  : 'Source archives keep their original dates.',
+                inline: true,
               }
             : null,
         });
@@ -40380,46 +40809,72 @@ require(['vs/editor/editor.main'], function () {
         // Export sources first if the user opted in. If any export fails,
         // abort the delete so the user has a chance to retry — matches the
         // single-delete flow's "nothing was deleted" guarantee.
+        // ── ⭐⭐ ONE EXPORT OPERATION, NOT A LOOP ───────── [B-420, 2026-09-23, his design]
+        //
+        // THIS USED TO BE A `for` OVER THE SOURCES, calling the single-source export once each and
+        // feeding THIS modal's bar a step count - "Exporting sources (3 of 4)" - with the source
+        // name on the detail line. No bytes, no filenames, on the slowest operation in the app.
+        // It also meant a cancel at three of four left two finished archives at the destination
+        // while telling the user nothing was deleted: a half state they had to go and inspect.
+        //
+        // ⭐ HIS RE-SCOPE: "the caller (delete) hands over 1 or many sources to export. we do it
+        // and return back what we've exported. that gives delete the go ahead to complete." So the
+        // export is one operation with one bar over the whole job, and this flow's own modal steps
+        // aside for its duration rather than competing with it.
+        // ⚠️ AND A CANCEL IS ALL OR NOTHING NOW: main removes the archives that already landed, so
+        // the "nothing was deleted" guarantee this block always claimed is finally matched by a
+        // "nothing was copied" that is equally true.
+        let _exportResult = null;            // what landed, for the ending to report [2026-09-23]
         if (wantExport) {
-          for (let i = 0; i < sourcesToRemove.length; i++) {
-            const src = sourcesToRemove[i];
-            const step = `Exporting sources (${i + 1} of ${sourcesToRemove.length})`;
-            showProgress(step, src.label);
-            try {
-              // Through the shared export, not a second copy of the IPC call.
-              // The sink keeps THIS modal's bar on the step count — one bar
-              // across exports and deletes, which is the bulk design and stays
-              // the bulk design — while the detail line gains the live phase
-              // and moving count it never had. Before this it showed src.label
-              // and nothing else for the whole export, so the slowest operation
-              // in the app looked identical to a hang.
-              //
-              // The filename is deliberately NOT here. This modal gives detail
-              // one line for source AND phase AND counts; the single-source
-              // layout has four separate fields for the same information. The
-              // moving count already answers "is it stuck", which is the job.
-              const er = await _sfRunSourceExport({
-                uuid: src.uuid, destDir: bulkExportDir, label: src.label,
-                includeAttachments: true,   // last copy — same reason as the single-delete path
-                includeCustomized: true,    // and the edits exist nowhere else ([B-311])
-                progress: ({ labelLine }) =>
-                  showProgress(step, [src.label, labelLine].filter(Boolean).join(' · ')),
-              });
-              // [B-203] Same as the single-source path: the space dialog already ran.
-              if (er && er.canceled) { hideProgress(); return false; }
-              if (!er || !er.ok) {
-                hideProgress();
-                await promptError(`Could not export "${src.label}"`, `${(er && er.error) || 'unknown error'}\n\nNothing was deleted.`);
-                return false;
+          hideProgress();                      // the export owns the screen for its duration
+          try {
+            const er = await _sfRunSourceExport({
+              sources: sourcesToRemove.map((s2) => ({ uuid: s2.uuid, label: s2.label })),
+              destDir: bulkExportDir,
+              blockedDelete: true,             // declared: this export gates a delete
+              includeAttachments: true,        // last copy - same reason as the single-delete path
+              includeCustomized: true,         // and the edits exist nowhere else ([B-311])
+            });
+            if (er && er.canceled) {
+              // ⚠️ The space refusal already carried the sentence itself; every other way out
+              // needs the stopped notice to say it.
+              if (!er.refusedForSpace) {
+                await _sfExportStoppedNotice({
+                  wrote: 0, what: 'sources', blockedDelete: true,
+                  removedPartial: (er.rolledBack || 0) > 0,
+                  leftovers: er.leftovers || [],
+                });
               }
-            } catch (err) {
-              hideProgress();
-              await promptError(`Could not export "${src.label}"`, `${err && err.message || err}\n\nNothing was deleted.`);
               return false;
             }
-            stepIdx++;
-            showProgress(`Exporting sources (${i + 1} of ${sourcesToRemove.length})`, src.label);
+            if (!er || !er.ok) {
+              await promptError('Could not export the sources',
+                `${(er && er.error) || 'unknown error'}
+
+Nothing was deleted.`);
+              return false;
+            }
+            // ⚠️⚠️ THE EJECT TICK IS READ HERE OR NOT AT ALL. [B-420] `_sfDeleteProgress.show()`
+            // calls `clearEject()` every time the modal OPENS, and the delete phase below reopens
+            // it - so by the time the ending runs, the box the user ticked during the export has
+            // been reset. Correct behaviour in general (a stale tick must never eject a card the
+            // next run did not ask about); wrong for one operation that spans two opens.
+            // ⭐ Captured as INTENT on the result, so the ending asks what the user wanted rather
+            // than re-reading a control that has since been cleared.
+            _exportResult = { ...er, wantsEject: _sfDeleteProgress.wantsEject() };
+          } catch (err) {
+            await promptError('Could not export the sources',
+              `${err && err.message || err}
+
+Nothing was deleted.`);
+            return false;
           }
+          // ⚠️ Put OUR modal back: the delete phase below drives it, and the export just took the
+          // screen away. Same discipline the destination preflight follows - whoever takes the
+          // screen gives it back.
+          showProgress('Working…', '');
+          progModal?.classList.add('active');
+          stepIdx += sourcesToRemove.length;
         }
         // Delete entries first, then the orphaned sources. Collect per-item
         // failures and surface at the end so one failure doesn't abort the
@@ -40463,6 +40918,42 @@ require(['vs/editor/editor.main'], function () {
           }
           await window.refreshSoundFontsView();
           return true;
+        }
+        // ── ⭐⭐ SAY WHAT WAS DONE. [2026-09-23, his report: "the delete didn't give a summary of
+        // what was done... should have also brought in the return from the export first results"]
+        //
+        // This flow only ever spoke on FAILURE - on success it cleared the selection and
+        // refreshed, silently. That was survivable while the export phase reported nothing worth
+        // carrying; it stopped being survivable once the export began returning WHERE each
+        // archive landed and how big it was, which is the one fact nothing else on screen can
+        // ever tell them.
+        //
+        // ⭐ HIS RULES, all three:
+        //   1. "doesn't appear on nothing exported. it can toast instead." - a plain delete is
+        //      already visible in the cards disappearing; a modal would restate the screen.
+        //   2. "show in folder is good and conditional" - it only means anything when an export
+        //      actually produced a folder to show.
+        //   3. The export's results reach here by being RETURNED to the caller, which is what
+        //      `exported[]` is for. The ending reads the artifact, never re-derives it.
+        {
+          // ⭐ THE SHARED ENDING. [B-420] This door had the summary RIGHT - it is where his three
+          // rules were first written down - and still had no eject row, so a bulk delete-and-export
+          // to a card left the ticked checkbox with nothing to press. Rather than add the row here
+          // and leave four doors each owning a copy of the same decision, the whole block moved into
+          // `_sfDeleteOutcome` and every door calls it. His rule: "shouldn't matter where I delete
+          // from." The three rules themselves now live in that function's header, with him quoted.
+          await _sfDeleteOutcome({
+            exportResult: _exportResult,
+            autoEject: _exportResult && _exportResult.wantsEject,
+            fontsDeleted: names.length,
+            sourcesDeleted: sourcesToRemove.length,
+            // ⚠️ `bulkExportDir`, NOT `exportDir` - this door names it differently, and my first cut
+            // pasted the other door's variable straight in. `node --check` passes that happily; it
+            // would have been a ReferenceError the first time anyone bulk-deleted. Same trap as the
+            // regex rewrite that clobbered the delete handler earlier today: a name that exists
+            // somewhere else in the file is not a name that exists HERE.
+            destDir: bulkExportDir,
+          });
         }
         _sfSelectedNames.clear(); _sfBulkIncludeTracks = null;   // [B-287]
         await window.refreshSoundFontsView();
@@ -40829,7 +41320,7 @@ require(['vs/editor/editor.main'], function () {
           messageHtml,
           confirmText: 'Delete',
           confirmKind: 'danger',
-          checkbox: willRemove ? { label: 'Export source first', hint: 'Source archive keeps its original date.', confirmTextChecked: 'Export and Delete' } : null,
+          checkbox: willRemove ? { label: 'Export source first', confirmTextChecked: 'Export and Delete', inline: true } : null,
         });
         const confirmed = willRemove ? res && res.confirmed : res;
         const wantExport = willRemove ? !!(res && res.checked) : false;
@@ -44590,6 +45081,19 @@ require(['vs/editor/editor.main'], function () {
     if (window._isFlashing) {
       const action = verb === 'closing' ? 'close' : 'install update';
       await promptError(`Cannot ${action}`, `Cannot ${action} while flashing. Wait for flash to complete.`);
+      return false;
+    }
+    // ⚠️ SAME SHAPE AS THE BACKUP GUARD BELOW, AND FOR THE SAME REASON. Blocks rather than
+    // prompts: a half-written archive or a half-copied font folder on a card is not a cost the
+    // user can weigh in a dialog, and on FAT32 it can take the card's directory with it.
+    // ⚠️⚠️ THE MESSAGE POINTS AT CANCEL, WHICH MUST ACTUALLY WORK. If a phase ignores its stop
+    // signal, this dialog becomes a lie and the only way out is the thing it exists to prevent.
+    // [B-426 tracks the curation repack, which is currently exactly that.]
+    if (window._sfExportBusy) {
+      const action = verb === 'closing' ? 'close' : 'install update';
+      await promptError(`Cannot ${action}`,
+        `Cannot ${action} while an export is in progress. Click Cancel on the progress dialog `
+        + `first — it stops between files and removes anything half-written.`);
       return false;
     }
     if (window._sfBackupBusy) {
