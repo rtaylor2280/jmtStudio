@@ -163,14 +163,41 @@ const entriesOf = async (zipPath) => {
      'both archives agree on the sidecar, so the test is not distinguishing the two cases and its '
      + 'pass means nothing');
 
-  // ── the counts describe the ARCHIVE, sidecar included ─────────────
-  // ⚠️ zipFolderToFile's fileCount comes from _selectFolderFiles(srcDir) and does NOT include the
-  // appended entries. Recorded rather than asserted-away: the caller reports `curation` separately,
-  // so the number the user sees is the vendor content, which is the honest reading of "files".
-  ok('the reported fileCount counts the source tree, not the appended sidecar',
-     rWith && rWith.fileCount === 3,
-     `expected the 3 vendor files, got ${rWith && rWith.fileCount}. If this changed deliberately, `
-     + 'the export summary and its tests have to move together.');
+  // ── ⚠️⚠️ THE COUNTS DESCRIBE THE ARCHIVE, APPENDED ENTRIES INCLUDED ──
+  //
+  // ⭐ THIS ASSERTION USED TO SAY THE OPPOSITE, AND IT WAS WRONG. It required fileCount === 3 (the
+  // vendor files only) and justified it as "the honest reading of files". It is not honest: these
+  // numbers are the export's denominator, and the appended entries are compressed like everything
+  // else. Ryan found it on a real export whose customized font carried a pile of tracks he had added
+  // for earlier testing: "you see the progress bars at 100% for a really long time because it was
+  // like 1.4 gigabytes out of 300 MB."
+  // ⚠️⚠️ THE TEST MADE THE DEFECT LOOK DECIDED. A wrong assertion with a confident comment is worse
+  // than no test at all - it converts "nobody has looked at this" into "someone looked and chose
+  // this", and the next reader stops. Bugs are supposed to look like bugs.
+  ok('⚠️⚠️ the reported fileCount includes the appended entries',
+     rWith && rWith.fileCount === 3 + extraEntries.length,
+     `expected ${3 + extraEntries.length} (3 vendor + ${extraEntries.length} appended), got `
+     + `${rWith && rWith.fileCount}. A count that omits what it compressed is a denominator that `
+     + 'cannot reach 100%.');
+  {
+    // The real defect was BYTES, not the file tally: a customized font is large, so the shortfall
+    // pins the bar. Compare the reported total against what is actually on disk.
+    const onDisk = fs.statSync(withPath).size;
+    const vendorOnly = [
+      path.join(srcDir, 'Proffie', 'font', 'hum.wav'),
+      path.join(srcDir, 'Proffie', 'font', 'swing1.wav'),
+      path.join(srcDir, 'readme.txt'),
+    ].reduce((n, f) => n + fs.statSync(f).size, 0);
+    const payloadBytes = plan.entries.reduce((n, e) => n + fs.statSync(e.absPath).size, 0)
+                       + Buffer.byteLength(plan.sidecarJson, 'utf8');
+    ok('⚠️⚠️ totalBytes covers the payload, not just the vendor tree',
+       rWith && rWith.totalBytes >= vendorOnly + payloadBytes - 8,
+       `reported ${rWith && rWith.totalBytes} but the archive carries ${vendorOnly} of vendor `
+       + `content plus ${payloadBytes} of payload. Under-reporting here is what made a 1.05 GB job `
+       + `measure itself against 336 MB. (zip on disk: ${onDisk})`);
+    ok('⭐ and the control proves the payload is big enough to matter',
+       payloadBytes > 0 && vendorOnly > 0);
+  }
 
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
   console.log(failed ? `\nexport-sidecar-in-zip: ${failed} failing`

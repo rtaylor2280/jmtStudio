@@ -33075,19 +33075,25 @@ require(['vs/editor/editor.main'], function () {
         const failures = [];
         for (let i = 0; i < entries.length; i++) {
           const e = entries[i];
-          _sfDeleteProgress.show(
+          // ⭐ Delayed, same as the single-delete door: a one-font source finishes well inside the
+          // gate and never raises a modal, while a real cascade still shows one and then keeps
+          // retitling it. showAfter is idempotent, so the loop does not re-arm the timer each pass.
+          _sfDeleteProgress.showAfter(180,
             entries.length > 1 ? `Deleting fonts (${i + 1} of ${entries.length})` : 'Deleting fonts',
             e.name, i / entries.length);
           const dr = await window.electronAPI.deleteEntry({ name: e.name });
           if (!dr || !dr.ok) failures.push({ name: e.name, error: dr && dr.error || 'unknown error' });
         }
-        _sfDeleteProgress.show('Removing source', sourceLabel);
+        _sfDeleteProgress.showAfter(180, 'Removing source', sourceLabel);
         const sr = await window.electronAPI.deleteSource({ uuid });
         if (!sr || !sr.ok) failures.push({ name: sourceLabel, error: sr && sr.error || 'unknown error' });
         // Free the candidate cache entry — uuid won't be reused.
         else _sfSourceCandidatesCache.delete(uuid);
-        await _sfDeleteProgress.hide();
+        // !! HIDDEN ONLY ON THE FAILURE PATH. The success ending closes it itself, paired with
+        // opening its dialog in the same task - hiding first leaves the screen bare across the
+        // eject lookup, which is the flash he reported.
         if (failures.length) {
+          await _sfDeleteProgress.hide();
           await _sfShowPartialFailures('Some items failed to delete', failures);
         }
         // ⭐⭐ ONE SUMMARY AT THE END, COVERING BOTH HALVES. [B-420]
@@ -33110,6 +33116,7 @@ require(['vs/editor/editor.main'], function () {
             autoEject: _xr && _xr.wantsEject,
             fontsDeleted: entries.length, sourcesDeleted: 1,
             destDir: exportDir, label: sourceLabel,
+            progress: _sfDeleteProgress,
           });
         }
         await _sfCloseSourceDetail();
@@ -37182,6 +37189,11 @@ require(['vs/editor/editor.main'], function () {
           // ⭐ His rule, one instead of four cases: whenever an export-before-delete does not
           // complete, say the delete did not happen, on whatever surface is already speaking.
           if (r && r.canceled) {
+            // !! DROP THE SURFACE BEFORE SPEAKING. The export HANDS ITS MODAL OVER now rather
+            // than closing it (keepOpen), which is right for the path that CONTINUES into a
+            // delete - but a cancel does not continue, and a notice drawn over a live progress
+            // bar is the frozen, undismissable modal the preflight test exists to prevent.
+            await _sfDeleteProgress.hide();
             if (!r.refusedForSpace) {
               await _sfExportStoppedNotice({
                 wrote: 0, what: 'sources', blockedDelete: true,
@@ -37195,6 +37207,7 @@ require(['vs/editor/editor.main'], function () {
             return false;
           }
           if (!r || !r.ok) {
+            await _sfDeleteProgress.hide();   // same reason as the cancel path above
             promptError('Could not export source', `${(r && r.error) || 'unknown error'}\n\nNothing was deleted.`);
             return false;
           }
@@ -37222,6 +37235,7 @@ require(['vs/editor/editor.main'], function () {
           // result what the user wanted, not the DOM.
           return { ...r, wantsEject: _sfDeleteProgress.wantsEject() };
         } catch (err) {
+          await _sfDeleteProgress.hide();   // a throw may have left the handed-over modal up
           promptError('Could not export source', `${err && err.message || err}\n\nNothing was deleted.`);
           return false;
         }
@@ -37362,6 +37376,9 @@ require(['vs/editor/editor.main'], function () {
         },
 
         show(title, detail, frac) {
+          // An immediate raise supersedes a delayed one; leaving the timer armed would re-enter
+          // show() later with stale text.
+          this.cancelPending();
           const t = this.titleEl(), d = this.detailEl(), b = this.barEl(), m = this.modal();
           if (t) t.textContent = title;
           if (d) d.textContent = detail || '';
@@ -37448,12 +37465,45 @@ require(['vs/editor/editor.main'], function () {
         // modal for two frames — but when another surface is going up immediately, that floor
         // holds a finished progress bar over the thing that replaced it. No await, so the
         // caller can pair this with an open and have the browser paint them together.
+        // ⭐⭐ RAISE ONLY IF THE WORK OUTLASTS THE EYE. [B-420, his report 2026-09-23: "there is an
+        // indeterminate window that's smaller before the last screen comes up... it was only there
+        // briefly, and I'm not sure why it would be there because it shouldn't be necessary."]
+        // Deleting one font takes milliseconds, so the delete phase raised a modal, painted an
+        // indeterminate bar, and left again - a flicker between the export and its summary that
+        // told the user nothing. `hide()` already has a minimum-DISPLAY floor so a fast operation
+        // does not flash for two frames; this is the missing other half, a minimum-DURATION gate so
+        // it never appears at all.
+        // ⚠️ The app had this pattern before - the deleted preflight overlay was a 150 ms-delayed
+        // raise - and it went out with that overlay rather than being kept.
+        // ⚠️ IDEMPOTENT: a loop calling this per item must not keep re-arming the timer, or a long
+        // cascade would never show one. Already pending or already up → just retitle.
+        showAfter(ms, title, detail, frac) {
+          if (this.modal()?.classList.contains('active')) { this.show(title, detail, frac); return; }
+          if (this._pending) { this._pendingArgs = [title, detail, frac]; return; }
+          this._pendingArgs = [title, detail, frac];
+          this._pending = setTimeout(() => {
+            this._pending = null;
+            this.show(...(this._pendingArgs || [title, detail, frac]));
+          }, ms);
+        },
+        // ⚠️ EVERY EXIT CANCELS A PENDING RAISE. Without this, work that finishes inside the delay
+        // still pops the modal open afterwards - over whatever replaced it.
+        cancelPending() {
+          if (this._pending) { clearTimeout(this._pending); this._pending = null; }
+          this._pendingArgs = null;
+        },
         hideNow() {
+          this.cancelPending();
           this.clearCancel();
           this.modal()?.classList.remove('active');
           this.startTs = 0;
         },
         async hide(minMs = 200) {
+          // A raise still waiting out its delay must be cancelled, or it fires after this returns.
+          this.cancelPending();
+          // ⚠️ Nothing was ever shown, so there is no minimum-display floor to honour - waiting it
+          // out here would stall the caller for 200 ms to hide a modal that never appeared.
+          if (!this.modal()?.classList.contains('active')) { this.clearCancel(); this.startTs = 0; return; }
           const elapsed = Date.now() - this.startTs;
           if (elapsed < minMs) {
             await new Promise(r => setTimeout(r, minMs - elapsed));
@@ -37945,6 +37995,22 @@ require(['vs/editor/editor.main'], function () {
             onCancel: door.onCancel || null,
             ejectDest: destDir,
             ejectRemovable: pf.removable,
+            // ⭐⭐ HAND THE SURFACE OVER INSTEAD OF TAKING IT DOWN. [B-420, 2026-09-23]
+            // An export that GATES A DELETE is not the end of the operation - the delete runs next
+            // and then an ending speaks. Closing here left the screen bare between the two, which he
+            // saw twice: first as a flash before the summary, and again after I gated the delete
+            // phase's own modal behind a delay ("now it looks like a flash again, probably because
+            // there's a moment when it's not there. Can we just not kill the previous modal while
+            // we're giving the couple milliseconds?").
+            // ⚠️ AND THE CANCEL IS RETIRED REGARDLESS - see the `finally` in _sfRunWithByteProgress,
+            // which calls clearCancel() before consulting keepOpen. That is what makes this safe and
+            // is the other half of his question: "if we do that, then it's possible to hit cancel
+            // when it's too late." The SURFACE persists; the OFFER does not. A button still wired to
+            // a finished export is one that reports cancelling something already done.
+            // ⭐ It also removes the eject-tick reset at the root: the delete phase now retitles an
+            // already-open modal instead of opening a second one, and clearEject() only fires on an
+            // open. The captured-intent fix stays as the belt to this braces.
+            keepOpen: door.blockedDelete === true,
           });
         } catch (e) {
           console.warn('[B-420] produce failed for', door.label, e);
@@ -38063,9 +38129,13 @@ require(['vs/editor/editor.main'], function () {
           _xr = await _sfExportSourceBeforeDelete(sourceUuid, wantExport, exportDir, sourceLabel);
           if (!_xr) { await _sfDeleteProgress.hide(); return false; }
         }
-        _sfDeleteProgress.show('Deleting', name);
+        // ⭐ Delayed: deleting one font finishes well inside the gate, so no modal appears at all.
+        _sfDeleteProgress.showAfter(180, 'Deleting', name);
         const ok = await _sfDeleteEntryAndCleanup(name);
-        await _sfDeleteProgress.hide();
+        // !! NOT HIDDEN HERE. The ending needs the modal still up while it resolves the eject
+        // target, or the screen goes bare for that round trip - the flash he reported. It closes
+        // the progress itself, paired with opening its dialog in the same task.
+        if (!ok) await _sfDeleteProgress.hide();
         // ⭐ THE SHARED ENDING. [B-420] Both callers of this helper - the right-click delete and the
         // entry delete inside source detail - showed nothing at all on success, whether or not an
         // export had just written a file to a card. His rule: "shouldn't matter where I delete from."
@@ -38080,6 +38150,7 @@ require(['vs/editor/editor.main'], function () {
             // decides that, so the count is taken from what the export actually covered.
             sourcesDeleted: (_xr && _xr.exported && _xr.exported.length) || 0,
             destDir: exportDir, label: sourceLabel,
+            progress: _sfDeleteProgress,
           });
         }
         return ok;
@@ -38998,14 +39069,36 @@ require(['vs/editor/editor.main'], function () {
       // from the checkbox here, because by the time a delete ending runs the progress modal has
       // reopened for the delete phase and `clearEject()` has wiped it. A DOM read at this point
       // answers a question about the wrong moment.
+      // ⚠️⚠️ `progress` IS TAKEN, NOT PRE-CLOSED BY THE CALLER, AND THAT IS THE FLASH. [B-420]
+      // His report, 2026-09-23: "there is a screen flash just before this modal comes up as the
+      // previous modal leaves."
+      // ⭐ `_sfShowExportSummary` solved this in July and names it in its own comment: "a caller
+      // that hid its progress before calling would leave the screen bare across that IPC round
+      // trip - which is the flash." The doors were doing exactly that: hide the progress modal,
+      // THEN call this, which spends an IPC round trip resolving the eject target before any dialog
+      // can open. The bare frames in between are what he saw.
+      // ⭐ So the async work happens while the progress modal is STILL UP, and the close is paired
+      // with the open in the same task.
+      // ⚠️ hideNow() for the dialog branch, hide() for the toast branch, and the difference is
+      // deliberate: hide()'s 200 ms floor exists so a fast operation does not flash a modal for two
+      // frames, but when a successor goes up immediately that floor holds a finished progress bar
+      // OVER the thing replacing it. A toast has no successor modal, so it still wants the floor.
       const _sfDeleteOutcome = async ({ exportResult, fontsDeleted = 0, sourcesDeleted = 0,
-                                        destDir = '', label = '', autoEject } = {}) => {
+                                        destDir = '', label = '', autoEject, progress } = {}) => {
+        const _closeSoft = async () => {
+          if (progress && typeof progress.hide === 'function') { try { await progress.hide(); } catch {} }
+        };
+        const _closeNow = () => {
+          if (progress && typeof progress.hideNow === 'function') { try { progress.hideNow(); } catch {} }
+        };
         const exp = (exportResult && exportResult.exported) || [];
         const fonts = `${fontsDeleted} ${fontsDeleted === 1 ? 'font' : 'fonts'}`;
         const srcs = sourcesDeleted
           ? ` and ${sourcesDeleted} source ${sourcesDeleted === 1 ? 'archive' : 'archives'}` : '';
         // Rule 1, the toast half: nothing was written, so there is no fact worth a dialog.
-        if (!exp.length) { showToast(`Deleted ${fonts}${srcs}.`); return; }
+        // ⚠️ The SOFT close here - no successor modal, so the minimum-display floor still applies
+        // and a fast delete must not flash the progress bar for two frames.
+        if (!exp.length) { await _closeSoft(); showToast(`Deleted ${fonts}${srcs}.`); return; }
 
         const fmtB = window._sfFormatBytes || ((n) => `${n} B`);
         const bytes = exp.reduce((n, x) => n + (Number(x.totalBytes) || 0), 0);
@@ -39028,7 +39121,12 @@ require(['vs/editor/editor.main'], function () {
             : null,
         ].filter(Boolean);
 
+        // ⭐ THE ROUND TRIP HAPPENS WHILE THE PROGRESS MODAL IS STILL UP. Resolving the eject target
+        // costs a media lookup and a vocabulary lookup; doing it after the close is what left the
+        // screen bare. Nothing below this line awaits anything before the dialog opens.
         const ej = await _sfEjectContext(dir).catch(() => ({}));
+        // ⭐ Closed and reopened in the SAME task, so the browser paints them together.
+        _closeNow();
         const p = promptConfirm({
           title: `Deleted ${fonts}`,
           messageHtml: lines.join('<br><br>')
@@ -40905,9 +41003,12 @@ Nothing was deleted.`);
           stepIdx++;
           showProgress(`Removing source archives (${i + 1} of ${sourcesToRemove.length})`, src.label);
         }
-        hideProgress();
+        // !! NOT HIDDEN HERE ON SUCCESS. The ending resolves the eject target over IPC before its
+        // dialog can open, and closing first leaves the screen bare for that round trip - the flash
+        // he reported. It closes this modal itself, paired with the open, in the same task.
         _sfAutoClearOnEmpty = true; // bulk delete may empty the filtered view — let the next render auto-clear
         if (failures.length) {
+          hideProgress();
           await _sfShowPartialFailures('Some items failed to delete', failures);
           // Prune successfully-deleted names so retry won't fail on
           // not-found errors; keep the actual failures selected for the
@@ -40953,6 +41054,10 @@ Nothing was deleted.`);
             // regex rewrite that clobbered the delete handler earlier today: a name that exists
             // somewhere else in the file is not a name that exists HERE.
             destDir: bulkExportDir,
+            // !! This door owns its OWN modal, not _sfDeleteProgress, so it hands over the two
+            // closes the ending needs. There is no minimum-display floor here, so both are the
+            // same call - the distinction only matters where hide() enforces one.
+            progress: { hide: hideProgress, hideNow: hideProgress },
           });
         }
         _sfSelectedNames.clear(); _sfBulkIncludeTracks = null;   // [B-287]

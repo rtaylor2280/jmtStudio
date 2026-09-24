@@ -328,8 +328,28 @@ async function zipFolderToFile(srcDir, destZipPath, onProgress, opts = {}) {
   const { Transform } = require('stream');
 
   const { files, strippedFiles, blockedFiles, notedFiles } = await _selectFolderFiles(srcDir);
-  const totalBytes = files.reduce((s, f) => s + f.size, 0);
-  const fileCount = files.length;
+  // ⚠️⚠️ THE EXTRA ENTRIES ARE IN THE ARCHIVE, SO THEY ARE IN THE TOTAL. [B-420, 2026-09-23]
+  // His report, exporting a source whose customized font carried a pile of tracks he had added for
+  // earlier testing: *"you see the progress bars at 100% for a really long time because it was like
+  // 1.4 gigabytes out of 300 MB."*
+  // ⭐ The denominator came from `_selectFolderFiles(srcDir)` alone - the VENDOR tree - while the
+  // sidecar payload rode in through `extraEntries` and was compressed without ever being counted. A
+  // customized font is a whole font, so the shortfall is not a rounding error: the bar pinned at
+  // 100% and stayed there for the rest of the job.
+  // ⚠️ I ASSERTED THIS UNDERCOUNT IN A TEST AND CALLED IT HONEST ("the reported fileCount counts the
+  // source tree, not the appended sidecar"). It is not honest - these numbers describe the ARCHIVE,
+  // and the archive contains every byte we put in it. A test can write a defect down and make it
+  // look decided; that is worse than leaving it undocumented.
+  const _extra = (opts.extraEntries || []);
+  const _extraBytes = _extra.reduce((s, e) => {
+    if (e.buffer) return s + e.buffer.length;
+    try { return s + (fs.statSync(e.absPath).size || 0); } catch { return s; }
+  }, 0);
+  const totalBytes = files.reduce((s, f) => s + f.size, 0) + _extraBytes;
+  const fileCount = files.length + _extra.length;
+  // Buffer entries report no stats on the 'entry' event, so their size is looked up by name.
+  const _extraBufByName = new Map(
+    _extra.filter((e) => e.buffer).map((e) => [e.name, e.buffer.length]));
 
   const archive = archiver('zip', {
     zlib: { level: 1 },
@@ -380,7 +400,12 @@ async function zipFolderToFile(srcDir, destZipPath, onProgress, opts = {}) {
     }
     filesProcessed++;
     lastProgressMs = Date.now();
+    // ⚠️ A BUFFER ENTRY HAS NO stats, so it would be counted in the denominator above and never in
+    // the numerator - leaving the bar permanently short by the sidecar's size. Tiny here (a JSON
+    // document), but a denominator and a numerator that disagree about what they include is the
+    // exact shape of the 1.05 GB-of-336 MB defect this same change fixes, just pointed the other way.
     if (entry.stats && entry.stats.size) bytesProcessed += entry.stats.size;
+    else bytesProcessed += (_extraBufByName.get(entry.name) || 0);
     if (!onProgress) return;
     const now = Date.now();
     if (now - lastEmit > 100 || filesProcessed === fileCount) {
