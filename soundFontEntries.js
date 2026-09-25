@@ -1187,6 +1187,9 @@ async function entryMatchesAt(userData, name, destDir, opts = {}) {
     await _breathe();
     const abs = path.join(destFont, rec.relPath);
     let st = null;
+    // [B-173] point 2 is exactly this call. Counted so the cost is visible in the terminal
+    // before and after that work, rather than argued from the code.
+    sync.countStat();
     try { st = fs.statSync(abs); } catch { st = null; }
     if (!st) { identical = false; continue; }           // library has it, card does not
     const mtime = Math.round(st.mtimeMs);
@@ -1196,7 +1199,9 @@ async function entryMatchesAt(userData, name, destDir, opts = {}) {
     // ⚠️ AWAITED STREAM HASH. [B-398] A breath between files does not help when ONE file is the
     // block: measured 2526ms inside compare:font with the per-file yield already in place. A
     // font's tracks are megabytes each and hashFile reads one whole file synchronously.
-    const destHash = valid ? (reused++, ent[2]) : (hashed++, await hashFileAsync(abs));
+    // [B-173] Counted so a rejected manifest entry is VISIBLE. hashed>0 on a card we just
+    // exported to means entries are not being believed - a validation defect, not a slow disk.
+    const destHash = valid ? (reused++, ent[2]) : (hashed++, sync.countHash(), await hashFileAsync(abs));
     refreshed.set(rec.relPath, [st.size, mtime, destHash]);
     if (destHash !== rec.fileHash) identical = false;
     if (_onBytes) {

@@ -2921,8 +2921,10 @@ ipcMain.handle('common:folderExistsAt', (_, { destDir, targetName } = {}) => {
 ipcMain.handle('common:matchesAt', async (_, { uuid, destDir, targetName } = {}) => {
   return _withExportCancel(async (shouldStop) => {
   try {
-    return await soundFontCommon.commonMatchesAt(app.getPath('userData'), uuid, destDir, targetName,
-                                                 shouldStop);
+    const r = await soundFontCommon.commonMatchesAt(app.getPath('userData'), uuid, destDir, targetName,
+                                                    shouldStop);
+    require('./sfSyncManifest').report('compare common "' + String(targetName || 'common') + '"');
+    return r;
   }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
   });
@@ -3124,6 +3126,10 @@ ipcMain.handle('soundFonts:entryMatchesAt', async (event, { name, destDir, repor
     const r = await soundFontEntries.entryMatchesAt(app.getPath('userData'), name, destDir,
       emit ? { onBytes: emit.onBytes, shouldStop } : { shouldStop });
     if (emit) emit.flush();
+    // [B-173] One line per font in the `npm start` terminal. The loop over fonts is in the
+    // renderer, so this handler IS the per-item boundary and the totals are cumulative for
+    // the borrow: parses should read 1 for a whole scan while reuses climbs with it.
+    require('./sfSyncManifest').report('compare font "' + String(name) + '"');
     return r;
   }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
@@ -3361,7 +3367,9 @@ ipcMain.handle('sharedTracks:planExport', async (event, { destDir } = {}) => {
       last = now;
       try { event.sender.send('sharedTracks:planProgress', { file, done, total }); } catch {}
     };
-    return await soundFontSharedTracks.planExport(app.getPath('userData'), destDir, onFile, shouldStop);
+    const r = await soundFontSharedTracks.planExport(app.getPath('userData'), destDir, onFile, shouldStop);
+    require('./sfSyncManifest').report('compare tracks');
+    return r;
   }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
   });

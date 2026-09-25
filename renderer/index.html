@@ -40578,6 +40578,25 @@ require(['vs/editor/editor.main'], function () {
               tracksDiffering = plan.differing;
               tracksToAdd = plan.toAdd || [];
             }
+            // ⭐⭐ KEEP WHAT THE TRACKS COMPARE HASHED. [B-173, 2026-09-25]
+            //
+            // ⚠️⚠️ MEASURED ON A REAL CARD, NOT FOUND BY READING: after every other manifest hole was
+            // closed, a warm export still reported `hashed=100` on the tracks line while all 29
+            // fonts and common reported `hashed=0`. The manifest on the card held 30 items - 29
+            // fonts plus common - and NO `tracks` item at all, ever.
+            //
+            // ⭐ THE CAUSE IS THIS BRANCH: the font loop and the common loop both record
+            // `observed`; this one read `differing` and `toAdd` and dropped the rest. So the
+            // compare hashed all 100 tracks off the card, learned every hash, and threw them
+            // away - on EVERY run, permanently. Unlike the fonts, this one could never
+            // self-heal, because the records were never produced for anything to commit.
+            //
+            // ⚠️ AND IT IS THE EXPENSIVE HALF: tracks are whole music files. 100 of them was
+            // ~516 MB re-read per scan, which is the difference between a 2-second and a
+            // 10-second warm export on a fast reader, and far worse on a board card.
+            if (plan && Array.isArray(plan.observed) && plan.observed.length) {
+              _scanObserved.set('tracks', plan.observed);
+            }
           } catch {}
           finally { try { offPlan && offPlan(); } catch {} }
           _scanDone++;
@@ -40589,15 +40608,42 @@ require(['vs/editor/editor.main'], function () {
         // ⚠️⚠️ LEAVE BEFORE ANY DECISION OPENS. [B-420, 2026-09-24] The three reads above break
         // out on the flag, but a cancel is only honoured if nothing that follows asks a question
         // — a conflict review drawn after the user pressed Cancel is the app ignoring them and
-        // then demanding an answer. Everything
-        // the scan learned goes with it, and NOTHING WAS WRITTEN, so there is nothing to undo and
-        // nothing owed. `_scanObserved` is deliberately dropped rather than committed — see the
-        // note in the loop: a question must not mutate what it is asking about.
+        // then demanding an answer.
+        // ⚠️ THIS PARAGRAPH USED TO SAY `_scanObserved` IS DELIBERATELY DROPPED HERE. It no longer
+        // is - see the commit inside the branch below. [B-173, 2026-09-25] Nothing was
+        // WRITTEN to the card, which is still true and still the reason no content is left behind;
+        // but the hashes the scan already paid for are kept, because throwing away minutes of
+        // board-card hashing on a cancel means the next attempt pays it again.
         // ⚠️⚠️ AND HIDE IT. This path used to `return false` with the modal still on screen - which
         // was invisible only because `offerCancelNow` had already hidden it on the click. Swapping
         // to the acknowledging cancel exposes the missing hide, so the two changes belong
         // together. [B-420, 2026-09-24]
         if (_scanCanceled) {
+          // ⭐⭐ KEEP WHAT THE ABANDONED SCAN ALREADY HASHED. [B-173, 2026-09-25]
+          //
+          // ⚠️⚠️ THIS REVERSES THE RULE THE COMMENT ABOVE STATES, DELIBERATELY. That rule was "a
+          // question must not mutate what it is asking about", and it was right about WRITING
+          // FONTS - a scan must never leave content behind. It was wrong about the manifest,
+          // which is not content: it describes what is already on the card, and every entry here
+          // was paid for by a hash that actually happened.
+          //
+          // ⭐ THE REASON IS THE BOARD CARD, where hashing is minutes rather than seconds. The
+          // rule, 2026-09-25: a cancel during hashing still gets the manifest update, and so does
+          // any completed copy. Discarding what was already hashed because the user stopped means
+          // the next attempt pays the identical cost - the same
+          // never-converges failure the up-to-date path had, just triggered a different way.
+          //
+          // ⚠️ ONLY FULLY-COMPARED ITEMS ARE IN HERE, BY CONSTRUCTION RATHER THAN BY FILTERING:
+          // a compare that stops mid-item returns { ok, canceled } with NO `observed`, and the
+          // loop above only records a non-empty `observed`. So a half-hashed font contributes
+          // nothing and cannot be recorded as known.
+          if (_scanObserved.size) {
+            try {
+              await window.electronAPI.syncManifestCommit({
+                destDir, items: Object.fromEntries(_scanObserved),
+              });
+            } catch {}
+          }
           try { await _sfDeleteProgress.hide(); } catch {}
           return false;
         }
@@ -40845,10 +40891,47 @@ require(['vs/editor/editor.main'], function () {
           const tracksKept = includeTracks
             ? tracksDiffering.filter(t => !tracksReplace.includes(t)) : [];
           const skippedByChoice = fontsSkipped + commonSkipped + tracksKept.length;
+          // ⭐⭐ RECORD WHAT THE SCAN LEARNED, EVEN THOUGH NOTHING IS BEING WRITTEN. [B-173]
+          //
+          // ⚠️⚠️ THIS PATH USED TO RETURN WITHOUT COMMITTING, AND IT IS THE EXACT CASE [B-402]
+          // SAID ITS DESIGN EXISTED TO FIX. Its own words: "IT MUST COVER ITEMS THAT WERE ONLY
+          // LOOKED AT... a font already identical at the destination - scanned, matched, never
+          // copied - had its hashes thrown away and re-read on every later export. On a card
+          // kept in sync that is most of the card." The write moved to the end of the operation;
+          // this branch returns BEFORE the end and so never reached it.
+          //
+          // ⭐ FOUND ON A REAL CARD 2026-09-25, not by reading: a card with no manifest reported
+          // "Already up to date - 29 fonts, 29 already identical" and STILL had no manifest
+          // afterwards. A manifest is supposed to be self-healing, and this is the case where it
+          // could not: the scan hashed everything, learned everything, and threw it away. It never
+          // converges - every future scan pays the identical cost.
+          //
+          // ⚠️ THE RULE, AND IT IS NOT "COMMIT WHEN WE WROTE SOMETHING": record whatever the
+          // operation learned about the DESTINATION whenever the user went through with the
+          // export. Nothing is written to the card here EXCEPT the manifest, and the manifest
+          // describes what is already on it - so this is recording knowledge, not mutating a
+          // question. The one path that still records nothing is the scan the user ABANDONED.
+          if (_scanObserved.size) {
+            try {
+              await window.electronAPI.syncManifestCommit({
+                destDir, items: Object.fromEntries(_scanObserved),
+              });
+            } catch {}
+          }
           const commonNames = { name: commonMineName, cardName: commonCardName, reason: commonReason };
           await _sfShowExportSummary({
             destDir, names, modeByName, unchangedFonts, commonMissing,
             commonFolderNames: _sfConfigSlotNames(),
+            // ⭐ SAY HOW LONG IT TOOK HERE TOO. 2026-09-25: every other export door ends with
+            // "Took ___". The summary has always rendered it when handed `elapsedSec`; this
+            // call site was the only one that never passed one, so a no-write run was the only
+            // outcome that would not say how long it spent.
+            // ⚠️ `_scanT0` IS THE RIGHT CLOCK HERE, not a narrower one: on this path the scan IS
+            // the whole operation, so the number means the same thing the written path's does -
+            // how long the user waited from pressing Export.
+            // ⭐ And it is the measurement that matters most on this branch: a run that writes
+            // nothing is pure comparison cost, which is what [B-173] is about.
+            elapsedSec: (Date.now() - _scanT0) / 1000,
             // *** WITHOUT THIS THE APP HANGS WITH NO WAY OUT. (B-204) ***
             // The scan overlay is deliberately left up above, because each
             // surface closes it from the inside once it is ready to paint -
@@ -41241,9 +41324,24 @@ require(['vs/editor/editor.main'], function () {
             // copied - had its hashes thrown away and re-read on every later export. On a card
             // kept in sync that is most of the card.
             //
-            // ⚠ A CANCELLED OPERATION NEVER REACHES THIS LINE, which is the whole point: asking
-            // what would change leaves nothing behind.
-            if (!_exportCanceled && _scanObserved.size) {
+            // ⚠️⚠️ A CANCEL COMMITS TOO. [B-173, 2026-09-25] This line used to read
+            // `!_exportCanceled && ...`, on the reasoning that a cancelled operation should
+            // leave nothing behind. That was wrong in the one way that costs the user: a cancelled
+            // export leaves REAL FILES on the card, and a manifest that does not mention them is
+            // how the next run re-hashes work already finished.
+            //
+            // ⭐ THE BACKEND ALREADY SAID SO, in its own words, and was being overruled here:
+            // "THE MANIFEST IS STILL WRITTEN FOR WHAT LANDED... [B-005] item 1's whole argument,
+            // which holds however an export ends." It returns its observations WITH
+            // canceled:true precisely so they can be committed.
+            //
+            // ⚠️ AND NOTHING PARTIAL CAN BE RECORDED, which is what makes this safe rather than
+            // merely cheaper: a cancelled font is taken back off the card (a replace restores the
+            // set-aside original first), a cancelled tracks copy deletes the file that was in
+            // flight, and an interrupted font breaks out of the loop BEFORE its observations are
+            // recorded - so it keeps the scan's record of the original, which after the restore
+            // is exactly what is on the card. The rule, same day: no partials, ever.
+            if (_scanObserved.size) {
               try {
                 await window.electronAPI.syncManifestCommit({
                   destDir, items: Object.fromEntries(_scanObserved),

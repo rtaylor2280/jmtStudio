@@ -443,6 +443,8 @@ async function planExport(userData, destDir, onFile = null, shouldStop = null) {
     done++;
     const dst = path.join(targetDir, name);
     let st = null;
+    // [B-173] point 2 - see the twin in soundFontEntries.
+    sync.countStat();
     try { st = fs.statSync(dst); } catch { st = null; }
     if (!st) { toAdd.push(name); continue; }
 
@@ -454,7 +456,8 @@ async function planExport(userData, destDir, onFile = null, shouldStop = null) {
 
     const { breathe, hashFileAsync } = require('./soundFontFileHash');
     await breathe();
-    let destHash = valid ? entry[2] : await hashFileAsync(dst);
+    // [B-173] - see the twin in soundFontEntries.
+    let destHash = valid ? entry[2] : (sync.countHash(), await hashFileAsync(dst));
     refreshed.set(name, [st.size, mtime, destHash]);
 
     const libHash = libHashes.get(name) || await hashFileAsync(path.join(srcDir, name));
@@ -475,7 +478,13 @@ async function planExport(userData, destDir, onFile = null, shouldStop = null) {
   // ⚠ The old code wrote here AND again after copying, so one export touched the manifest
   // twice, seconds apart, the first describing a state that existed only until the copies
   // landed.
-  return { ok: true, toAdd, unchanged, differing, observed: refreshed };
+  // ⚠️⚠️ AN ARRAY, NOT THE MAP. [B-173, 2026-09-25] This returned `refreshed` raw, and its
+  // sibling `exportToFolder` has always converted to an array for exactly one reason, written
+  // on the commit handler: Maps do not reliably survive IPC. This function IS called across
+  // IPC by the export scan, so the shape had to match its sibling's.
+  // ⚠️ Safe for the in-process caller too - `exportToFolder` does `new Map(plan.observed || [])`,
+  // which takes an array or a Map.
+  return { ok: true, toAdd, unchanged, differing, observed: [...refreshed] };
 }
 
 // ADDITIVE export. Deliberate call 2026-07-31: "always additive not replacing. so

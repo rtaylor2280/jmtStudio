@@ -309,10 +309,31 @@ ok('a cancelled REPLACE tracks export restores the folder it set aside',
      'the scan cannot stop instantly - the flag is read at an item boundary - so a cancel that '
      + 'hides the surface immediately reports a stop that has not happened');
   // ⭐ And the exit that flag reaches must take the surface down itself, since nothing else will.
-  ok('⭐ and the cancelled scan hides its own modal on the way out',
-     /if \(_scanCanceled\) \{[\s\S]{0,200}?_sfDeleteProgress\.hide\(\)/.test(body),
-     'this returned with the modal still on screen; it was invisible only because the '
-     + 'instant-close cancel had already hidden it');
+  // ⚠️⚠️ ANCHORED TO THE BLOCK, NOT TO A CHARACTER COUNT. [B-173, 2026-09-25] This read
+  // `if (_scanCanceled) {[\s\S]{0,200}?hide()` and went RED when the cancel path grew a manifest
+  // commit - the hide was still there, still inside the branch, just past an arbitrary window.
+  // A fixed-width slice measures how much CODE sits between two things, which is not what this
+  // assertion is about; it is about the exit taking its own surface down before returning.
+  // ⚠️ Widened deliberately and recorded as such, so nobody later reads this as an assertion
+  // loosened to get green. Slice the actual block and assert the slice is non-empty first, or a
+  // missing anchor makes every claim about it vacuously true.
+  {
+    const s = body.indexOf('if (_scanCanceled) {');
+    const e = s >= 0 ? body.indexOf('return false;', s) : -1;
+    const block = s >= 0 && e > s ? body.slice(s, e) : '';
+    ok('the cancelled-scan exit was located', block.length > 0,
+       're-anchor if the flag or the early return is renamed - an empty slice passes everything');
+    ok('⭐ and the cancelled scan hides its own modal on the way out',
+       block.includes('_sfDeleteProgress.hide()'),
+       'this returned with the modal still on screen; it was invisible only because the '
+       + 'instant-close cancel had already hidden it');
+    // ⭐ AND IT KEEPS WHAT IT HASHED. [B-173, 2026-09-25] Hashing a board card is minutes;
+    // discarding it on a cancel means the next attempt pays it again.
+    ok('⭐⭐ and it commits what the abandoned scan already learned',
+       block.includes('syncManifestCommit'),
+       'a cancelled scan that throws away its hashes never converges - the same failure the '
+       + 'already-up-to-date path had, reached a different way');
+  }
   ok('⭐ and RETIRES it before handing off to the runner',
      cleared > offered && handoff > cleared,
      'an offer that outlives its phase is a button that cannot stop anything - it hid the modal '

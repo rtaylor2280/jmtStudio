@@ -1271,6 +1271,8 @@ async function commonMatchesAt(userData, uuid, destDir, targetName = 'common', s
     if (!rec || rec.fileHash === '<empty>') continue;
     const abs = path.join(cardDir, rec.relPath);
     let st = null;
+    // [B-173] point 2 - see the twin in soundFontEntries.
+    sync.countStat();
     try { st = fs.statSync(abs); } catch { st = null; }
     if (!st) { identical = false; continue; }
     const mtime = Math.round(st.mtimeMs);
@@ -1278,7 +1280,8 @@ async function commonMatchesAt(userData, uuid, destDir, targetName = 'common', s
     const valid = ent && ent[0] === st.size
       && Math.abs((ent[1] || 0) - mtime) <= sync.MTIME_TOLERANCE_MS;
     // ⚠️ AWAITED STREAM HASH — see the twin in soundFontEntries. [B-398]
-    const destHash = valid ? ent[2] : await hashFileAsync(abs);
+    // [B-173] - see the twin in soundFontEntries.
+    const destHash = valid ? ent[2] : (sync.countHash(), await hashFileAsync(abs));
     refreshed.set(rec.relPath, [st.size, mtime, destHash]);
     if (destHash !== rec.fileHash) identical = false;
     await breathe();

@@ -84,25 +84,202 @@ function manifestPath(destDir) {
 // Same distinction as everywhere else in this file: an unknown resolves toward
 // reading, never toward assuming. "I could not read it" is not "it is not
 // there", and only one of those two justifies a write.
+// ── The manifest is BORROWED, not re-fetched per item ──────────── [B-173 point 1, 2026-09-24]
+//
+// ⭐⭐ MEASURED BEFORE BUILDING, as the entry demands: a 25-font compare parsed the destination
+// manifest TWENTY-FIVE TIMES - `cacheFor` is called once per font and each call read and parsed
+// the whole file. On a real card that is a 505 KB file re-read over USB per font, ~12.3 MB for one
+// scan, to answer questions about a document that cannot have changed.
+//
+// ⭐⭐ WHY A MEMO IS SAFE HERE, AND WHY IT IS VALIDATED RATHER THAN TIMED. [B-402] already made the
+// write a SINGLE commit at the end of an operation, so the manifest on disk does not change while
+// a compare runs. That makes borrowing correct - but "correct because of something another entry
+// did" is exactly the kind of reasoning that rots when the other thing changes.
+//
+// ⚠️ SO THE MEMO IS NOT TRUSTED ON A LIFETIME. It carries the file's size and mtime and re-stats
+// before every use: one stat instead of a full read and parse, and it self-invalidates the moment
+// anything writes the file - including another process, which no borrow/release protocol of ours
+// could have noticed. A stale manifest would make a compare report "unchanged" for a file that
+// changed, and silently skip it on the export. That is a wrong answer about the user's card, not
+// a slow one, so it is not a risk worth taking to save a stat.
+//
+// ⚠️ Keyed by the manifest PATH, so two destinations in one session cannot read each other's.
+let _memo = null;   // { path, size, mtimeMs, result }
+
+function _statQuiet(p) {
+  try { return fs.statSync(p); } catch { return null; }
+}
+
+// ── Counters, so the borrow is VISIBLE while developing ───────── [B-173, 2026-09-25]
+//
+// ⚠️⚠️ THE POINT IS THAT IT IS VISIBLE WHILE THE APP RUNS, NOT THAT THE TESTS PASS. Point 1 is
+// invisible from the chair: a compare that reads the manifest ONCE and one that reads it
+// twenty-five times return the same answer and draw the same screen. The only difference is time
+// over USB, which is precisely the kind of claim a person ends up taking on trust. 2026-09-25:
+// put the numbers where they can be watched while the app runs.
+//
+// ⭐ WHERE THEY GO, and why nothing needed plumbing: the per-font compare is one IPC call each
+// (the loop lives in the renderer), so there is no operation boundary in main to summarise at.
+// Instead every compare prints the RUNNING totals for the current borrow. Watching `parses`
+// stay at 1 while `reuses` climbs IS the assertion, and a regression shows up as a number
+// climbing in the wrong column rather than as a slow export nobody can attribute.
+//
+// ⭐ These also measure what is still to come: `stats` is [B-173] point 2 (~1050 per 25-font
+// compare today, 42 per font), so the same line proves that one when it lands.
+//
+// ⚠️ NO FLAG TO ARM, unlike the stall probe. An instrument you have to switch on is one you find
+// switched off on the day it matters, and this costs one console line per compare.
+// ⚠️ ASCII ONLY in the output - an em dash reaches a Windows terminal as mojibake.
+// ⚠️⚠️ THE STATE IS ON THE LINE FOR ONE REASON: A FRESH CARD LOOKS EXACTLY LIKE A BROKEN BORROW.
+// A newly formatted card has no manifest, and `absent` is deliberately never memoised (there is
+// no stat to validate it against), so EVERY item re-attempts the read and every line reads
+// `parses=1 reuses=0` - the identical shape to a memo that has stopped working. Measured
+// 2026-09-25 on a manifest-less directory, before testing against a freshly reformatted card.
+// Without the state word the instrument cannot answer the only question being asked of it, and
+// the honest reading and the failure reading are the same picture.
+let _counts = { path: null, state: 'none', parses: 0, reuses: 0, stats: 0, hashes: 0 };
+
+// A fresh parse STARTS a new borrow, so the totals reset with it. That makes a line reading
+// `parses=1` mean "picked up once and held", and a line climbing past 1 mean the borrow broke.
+// ⚠️⚠️ MONOTONIC, AND SEPARATE FROM THE TOTALS ON PURPOSE. The report needs to distinguish "this
+// compare consulted the manifest" from "this compare never got that far", and the obvious
+// mechanism - did the totals change - is WRONG in the one case that matters: on a card with no
+// manifest, every item re-reads and every read lands on the SAME values (parses=1, reuses=0),
+// so identical numbers mean the opposite of nothing happening. Caught 2026-09-25 by running the
+// three card states rather than by reading. This counter only ever goes up, so it cannot be
+// ambiguous about whether a read occurred.
+let _touches = 0;
+
+function _countParse(mPath, state) {
+  _touches++;
+  _counts = { path: mPath, state: state || 'none', parses: 1, reuses: 0, stats: 0, hashes: 0 };
+}
+function _countReuse() { _touches++; _counts.reuses++; }
+
+// Bumped by the three compare loops beside their per-file statSync. Kept here rather than in a
+// new module because all three already require this one, so it costs no new wiring.
+function countStat(n) { _counts.stats += (n || 1); }
+
+// ⭐⭐ HASHES READ OFF THE DESTINATION, AND THIS IS THE NUMBER THAT SAYS WHETHER THE MANIFEST IS
+// ACTUALLY BEING BELIEVED. [B-173, 2026-09-25]
+//
+// ⚠️⚠️ ADDED BECAUSE THE FIRST VERSION OF THIS INSTRUMENT COULD NOT ANSWER THE QUESTION IT WAS
+// BUILT FOR. Two warm runs over the same card produced IDENTICAL counters - parses=1, reuses=30,
+// stats=2576 - and took 2 seconds and 10 seconds. Everything measured was the same, so the
+// difference was somewhere unmeasured, and the largest unmeasured thing on this path is whether
+// a recorded hash was trusted or the file was read again.
+//
+// ⭐ IT IS A DISCRIMINATOR, NOT MORE DATA: hashes=0 means the manifest was believed for every
+// file and the time went somewhere outside the compare entirely; hashes>0 means entries are
+// being REJECTED and the card re-read, which is a defect in validation rather than a slow disk.
+// Those two call for opposite work, which is exactly why guessing between them is not on.
+function countHash(n) { _counts.hashes += (n || 1); }
+function counts() { return Object.assign({}, _counts); }
+
+// ⚠️ A plain-words tail rather than a bare state word. `absent` next to `parses=1 reuses=0` still
+// leaves the reader to connect the two; the whole reason the state is here is that the numbers
+// alone read as a failure on a card that has simply never been written to.
+const _STATE_NOTE = {
+  absent:      '  (no manifest on the card yet - every item re-reads, and that is correct)',
+  unreadable:  '  (manifest unreadable - falling back to hashing everything)',
+  incompatible:'  (manifest from another version - it will be rebuilt)',
+};
+
+// ⚠️⚠️ A LINE THAT PRINTS WHEN NOTHING HAPPENED IS THE INSTRUMENT LYING. Found 2026-09-25 while
+// mid-export to a freshly formatted card, `entryMatchesAt` returns `missing` the moment
+// the destination folder does not exist, BEFORE `cacheFor` is reached - so on a fresh card no
+// manifest is consulted at all. The report still fired once per font and would have shown the
+// counters left by something else, which reads as "the borrow is working" over work never done.
+// Compare against the last line printed and say so when nothing moved.
+let _lastTouches = 0;
+
+function report(label) {
+  const c = _counts;
+  const untouched = _lastTouches === _touches;
+  _lastTouches = _touches;
+  console.log('[manifest] ' + String(label || '')
+    + (untouched
+        ? '  no manifest consulted (nothing at the destination to compare)'
+        : '  borrow: parses=' + c.parses + ' reuses=' + c.reuses + ' stats=' + c.stats
+          + ' hashed=' + c.hashes
+          + (_STATE_NOTE[c.state] || '')));
+}
+
+// ⚠️⚠️ THE MEMO HANDS OUT A COPY, NEVER ITS OWN OBJECT. [B-173, 2026-09-24]
+//
+// `mergeItems` and `mergeItem` both do `readState()` and then MUTATE the manifest in place
+// (`m.items[name] = { files }`) before writing it. Handing them the cached object made the memo
+// mutate itself by reference — which happened to look correct, and is exactly the kind of
+// accident that reads as working until it does not: a caller that mutates and then FAILS to
+// write would leave the memo holding records that were never persisted, and the next compare
+// would believe files are recorded on the card that are not there. That is a wrong answer about
+// the user's card, which is the one failure this cache is not allowed to introduce.
+//
+// ⭐ Found by mutation-testing the guard, not by reading: removing the explicit invalidation left
+// every test green because the in-place mutation was keeping the cache accidentally fresh.
+//
+// ⚠️ A clone per call is memory work. The thing it replaces is a 505 KB read and parse off a card
+// over USB, so this is cheap by several orders of magnitude and not worth optimising until
+// measured. Points 2-4 of [B-173] are where the remaining cost actually is.
+function _copyOut(result) {
+  if (!result || !result.manifest) return result;
+  return { manifest: structuredClone(result.manifest), state: result.state };
+}
+
 function readState(destDir) {
   if (!destDir) return { manifest: null, state: 'absent' };
+  const mPath = manifestPath(destDir);
+  const st = _statQuiet(mPath);
+  if (_memo && _memo.path === mPath && st
+      && _memo.size === st.size && _memo.mtimeMs === st.mtimeMs) {
+    _countReuse();
+    return _copyOut(_memo.result);
+  }
+  // ⚠️ ONE EXIT, so every outcome is memoised on the same terms. A `return` added later that
+  // skips the memo would quietly reintroduce the per-item read this exists to remove, and
+  // nothing would go red - it would just get slow again.
+  const keep = (result) => {
+    // Counted here rather than beside the readFileSync so that every outcome which ends a
+    // borrow is counted on the same terms as the one exit above. See the note on `_countParse`.
+    _countParse(mPath, result && result.state);
+    if (st) _memo = { path: mPath, size: st.size, mtimeMs: st.mtimeMs, result };
+    // ⚠️ The CALLER gets a copy too, not the object we just memoised - otherwise the very first
+    // read after a parse hands out the live cache and the mutation problem returns.
+    return _copyOut(result);
+  };
   let raw;
   try {
-    raw = fs.readFileSync(manifestPath(destDir), 'utf8');
+    raw = fs.readFileSync(mPath, 'utf8');
   } catch (err) {
     // ENOENT is a real answer: there is no manifest. Every other errno means
     // one may well be sitting there that we simply could not get at.
-    return { manifest: null, state: (err && err.code === 'ENOENT') ? 'absent' : 'unreadable' };
+    // ⚠️ NOT MEMOISED WHEN ABSENT - there is no stat to validate against, so a later write
+    // would have nothing to invalidate.
+    // ⭐ STILL COUNTED AS A PARSE. The card was touched, and because nothing is memoised this
+    // path repeats per item - so a destination with no manifest reads `parses=1 reuses=0` on
+    // every line, which is the honest picture rather than a borrow that looks like it held.
+    const state = (err && err.code === 'ENOENT') ? 'absent' : 'unreadable';
+    _countParse(mPath, state);
+    return { manifest: null, state };
   }
   let m = null;
-  try { m = JSON.parse(raw); } catch { return { manifest: null, state: 'unreadable' }; }
-  if (!m || typeof m !== 'object') return { manifest: null, state: 'unreadable' };
-  if (m.version !== MANIFEST_VERSION) return { manifest: null, state: 'incompatible' };
+  try { m = JSON.parse(raw); } catch { return keep({ manifest: null, state: 'unreadable' }); }
+  if (!m || typeof m !== 'object') return keep({ manifest: null, state: 'unreadable' });
+  if (m.version !== MANIFEST_VERSION) return keep({ manifest: null, state: 'incompatible' });
   // Right version, no items: malformed rather than obsolete. Refuse to write
   // over it. The escape hatch is the one already documented at the top — delete
   // the file and the next export rebuilds it as it goes.
-  if (!m.items) return { manifest: null, state: 'unreadable' };
-  return { manifest: m, state: 'ok' };
+  if (!m.items) return keep({ manifest: null, state: 'unreadable' });
+  return keep({ manifest: m, state: 'ok' });
+}
+
+// ⚠️ Cleared by OUR writes as well as detected by the stat. The stat alone would catch it, but a
+// filesystem with coarse mtime granularity can land a write inside the same millisecond as the
+// read that preceded it - and on FAT32 the granularity is 2 SECONDS. Belt and braces, and the
+// braces are the cheap half.
+function _forgetMemo(destDir) {
+  if (!destDir) { _memo = null; return; }
+  if (_memo && _memo.path === manifestPath(destDir)) _memo = null;
 }
 
 function read(destDir) {
@@ -133,6 +310,12 @@ function write(destDir, manifest) {
     const withNote = Object.assign({ _note: MANIFEST_NOTE }, manifest);
     fs.writeFileSync(tmpPath, JSON.stringify(withNote));
     fs.renameSync(tmpPath, finalPath);
+    // ⚠️⚠️ THE MEMO MUST GO HERE, NOT BE LEFT TO THE STAT. [B-173, 2026-09-24] FAT32 records
+    // mtime with TWO-SECOND granularity, so a write landing close behind the read that preceded
+    // it can leave size and mtime both unchanged - and a memo validated only by those would then
+    // serve the pre-write manifest. Since this process is the only writer, clearing here is what
+    // actually makes the memo safe; the stat is the backstop for anything outside our control.
+    _forgetMemo(destDir);
     return true;
   } catch {
     // A kill between the write and the rename leaves the temp behind. Clear it
@@ -264,6 +447,10 @@ module.exports = {
   mergeItems,
   manifestPath,
   cacheFor,
+  countStat,
+  countHash,
+  counts,
+  report,
   read,
   readState,
   write,

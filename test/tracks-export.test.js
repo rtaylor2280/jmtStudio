@@ -209,8 +209,15 @@ const TRACKS = {
       { unchanged: 3, differing: 0 });
     check('⭐⭐ and it wrote NOTHING to the destination',
       { manifest: sync.read(dest) === null || sync.read(dest) === undefined }, { manifest: true });
+    // ⚠️ ASSERTED THE WAY THE CONSUMERS READ IT, NOT AS `instanceof Map`. [B-173, 2026-09-25]
+    // This required a Map and went red when the return became an array - which was the CORRECT
+    // change, not a convenience: `planExport` is called across IPC by the export scan, and the
+    // sibling `exportToFolder` has always converted to an array for that exact reason. Both real
+    // consumers do `new Map(plan.observed || [])`, which takes either, so that is the contract
+    // worth pinning. A test that pins the container instead fails on a shape change that no
+    // caller can even observe.
     check('⭐ but it handed back what it hashed, so nothing is re-read later',
-      { n: p1.observed instanceof Map ? p1.observed.size : -1 }, { n: 3 });
+      { n: new Map(p1.observed || []).size }, { n: 3 });
   }
 
   {
