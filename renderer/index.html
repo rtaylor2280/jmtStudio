@@ -39685,7 +39685,7 @@ require(['vs/editor/editor.main'], function () {
         _sfRemoveEjectRow();
       };
 
-      const _sfShowExportSummary = async ({ destDir, names, modeByName, commonOutcomes, tracksOutcome, unchangedFonts, commonMissing, commonFolderNames, elapsedSec, closeProgress, title, destSpace, canceled, ejectTarget, ejectVocab, ejectAuto }) => {
+      const _sfShowExportSummary = async ({ destDir, names, modeByName, commonOutcomes, tracksOutcome, unchangedFonts, commonMissing, commonFolderNames, elapsedSec, closeProgress, title, destSpace, canceled, ejectTarget, ejectVocab, ejectAuto, warnedSlow }) => {
         const esc = _sfEscape;
         const n = (v) => `<strong>${v}</strong>`;
         const plural = (c, w) => `${w}${c === 1 ? '' : 's'}`;
@@ -39842,6 +39842,30 @@ require(['vs/editor/editor.main'], function () {
         if (typeof elapsedSec === 'number') {
           const fmt = window._sfFormatDuration ? window._sfFormatDuration(elapsedSec) : `${Math.round(elapsedSec)}s`;
           tail.push(`Took ${fmt}.`);
+        }
+        // Why the export beat the warning it opened with.
+        //
+        // The slow-destination warning is computed from the SELECTED size and the transport,
+        // before the scan runs, so it cannot know the card is already current and fires on a card
+        // that needs nothing. It is deliberately NOT moved after the scan: it is correct for a
+        // cold card, where the scan itself is the expensive part, and the point is to let someone
+        // out before they pay it. So the loop is closed here instead.
+        //
+        // ⚠️ Both conditions carry weight. Without `warnedSlow` this explains away a surprise
+        // nobody had; without `!wroteSomething` it credits a saving on a run that did the work.
+        //
+        // ⚠️ It claims nothing about speed. The warning promises no duration, so "faster" would be
+        // a comparison against no number, and the elapsed is already on the line above. The only
+        // thing missing from the screen is WHY, so say just that.
+        if (warnedSlow && !wroteSomething) {
+          tail.push('Exporting through a Proffieboard is always slower than a card reader. '
+            // ⚠️ "maintaining", not "keeping". The record lives ON THE CARD, not in the app -
+            // nothing about anyone's cards is held here - and it is upkept rather than stored:
+            // rewritten every run, and self-healing when a file changes outside the app.
+            + "JMT Studio saved you time by maintaining a record of this card's contents, "
+            // ⚠️ "re-read", not "check": every file IS checked. The record is what makes each
+            // check cheap, so claiming it only checked the changes describes a different app.
+            + 'so it only had to re-read and write what changed.');
         }
         // ── How much room is left ────────────────────────────────── [B-203]
         //
@@ -40828,7 +40852,30 @@ require(['vs/editor/editor.main'], function () {
             },
           });
           const choices = await choicesPromise;
-          if (!choices) return false; // user cancelled the whole export, both kinds
+          if (!choices) {
+            // ⭐⭐ THE FOURTH EXIT, AND THE MOST EXPENSIVE ONE TO GET WRONG. [B-173, 2026-09-25]
+            //
+            // ⚠️⚠️ FOUND BY WALKING INTO IT, NOT BY THE SWEEP THAT WAS SUPPOSED TO FIND IT. An
+            // enumeration of every exit between the scan and the commit reported THREE and there
+            // were four - it matched returns at the START of a line, and this one sits after an
+            // `if` on the same line. The instrument answered a narrower question than the one it
+            // was asked, which is the same error as measuring the wrong thing entirely.
+            //
+            // ⭐ AND THIS IS THE STRONGEST CASE OF THE FOUR, not the weakest: by here the scan has
+            // COMPLETED. Every item was hashed, every observation is paid for, and nothing has
+            // been written to the card. Declining the export is a decision about what to WRITE; it
+            // says nothing about what we just learned is already there. Measured cost of getting
+            // it wrong, on a card behind a board's mass-storage bridge: over an hour of hashing,
+            // discarded by pressing Cancel on a dialog.
+            if (_scanObserved.size) {
+              try {
+                await window.electronAPI.syncManifestCommit({
+                  destDir, items: Object.fromEntries(_scanObserved),
+                });
+              } catch {}
+            }
+            return false; // user cancelled the whole export, both kinds
+          }
           if (_sectioned) {
             // [B-357] One cancel, one Continue, both kinds answered together. The
             // sectioned call resolves to one Map per section, in the order declared.
@@ -40932,6 +40979,9 @@ require(['vs/editor/editor.main'], function () {
             // ⭐ And it is the measurement that matters most on this branch: a run that writes
             // nothing is pure comparison cost, which is what [B-173] is about.
             elapsedSec: (Date.now() - _scanT0) / 1000,
+            // ⚠️ Whether the slow-destination warning was ASKED, not whether they accepted it.
+            // The sentence only earns its place if this person was braced for a long wait.
+            warnedSlow: _slowWriteAsked,
             // *** WITHOUT THIS THE APP HANGS WITH NO WAY OUT. (B-204) ***
             // The scan overlay is deliberately left up above, because each
             // surface closes it from the inside once it is ready to paint -

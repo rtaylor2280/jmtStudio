@@ -56,8 +56,22 @@ function ok(name, cond, extra) {
      /const _sfResolveTrackConflicts = async/.test(html)
      && /await _sfResolveTrackConflicts\(/.test(html));
 
-  ok('one cancel abandons the whole export',
-     /if \(!choices\) return false; \/\/ user cancelled the whole export, both kinds/.test(html));
+  // ⚠️ THIS PINNED THE STATEMENT'S EXACT ONE-LINE SPELLING and went red when the exit grew a
+  // manifest commit ([B-173], 2026-09-25) - the behaviour it names was untouched. The property is
+  // that ONE cancel leaves the whole door, covering both kinds; it is not that the cancel is
+  // written on a single line. Sliced to the block and asserted on the exit itself, so the check
+  // survives anything else that has to happen on the way out.
+  {
+    const s = html.indexOf('if (!choices) {');
+    const e = s >= 0 ? html.indexOf('user cancelled the whole export, both kinds', s) : -1;
+    const block = s >= 0 && e > s ? html.slice(s, e) : '';
+    ok('the consolidated cancel was located', block.length > 0,
+       're-anchor if the guard is renamed - an empty slice passes everything below it');
+    ok('one cancel abandons the whole export',
+       block.includes('return false'),
+       'the sectioned review answers fonts and tracks together, so its cancel has to leave the '
+       + 'door entirely - falling through would apply a default to the kind not being looked at');
+  }
 }
 
 // ── sections, and only when they earn their place ──────────────────────────

@@ -110,44 +110,32 @@ function _statQuiet(p) {
   try { return fs.statSync(p); } catch { return null; }
 }
 
-// ── Counters, so the borrow is VISIBLE while developing ───────── [B-173, 2026-09-25]
+// ── Counters, printed once per compare ───────────────────────────────
 //
-// ⚠️⚠️ THE POINT IS THAT IT IS VISIBLE WHILE THE APP RUNS, NOT THAT THE TESTS PASS. Point 1 is
-// invisible from the chair: a compare that reads the manifest ONCE and one that reads it
-// twenty-five times return the same answer and draw the same screen. The only difference is time
-// over USB, which is precisely the kind of claim a person ends up taking on trust. 2026-09-25:
-// put the numbers where they can be watched while the app runs.
+// Borrowing the manifest is invisible from the app: reading it once and reading it per item
+// return the same answer and draw the same screen, and differ only in time over a slow
+// transport. These totals make the difference watchable in the terminal `npm start` runs in.
+// `parses` holding at 1 while `reuses` climbs is the whole assertion.
 //
-// ⭐ WHERE THEY GO, and why nothing needed plumbing: the per-font compare is one IPC call each
-// (the loop lives in the renderer), so there is no operation boundary in main to summarise at.
-// Instead every compare prints the RUNNING totals for the current borrow. Watching `parses`
-// stay at 1 while `reuses` climbs IS the assertion, and a regression shows up as a number
-// climbing in the wrong column rather than as a slow export nobody can attribute.
+// The per-item compare is one IPC call each (the loop is in the renderer), so there is no
+// operation boundary here to summarise at - hence running totals rather than a final line.
 //
-// ⭐ These also measure what is still to come: `stats` is [B-173] point 2 (~1050 per 25-font
-// compare today, 42 per font), so the same line proves that one when it lands.
+// ⚠️ No flag to arm, unlike the stall probe: an instrument you have to switch on is one you
+// find switched off on the day it matters. Cost is one line per compare.
+// ⚠️ ASCII only in the output. An em dash reaches a Windows terminal as mojibake.
 //
-// ⚠️ NO FLAG TO ARM, unlike the stall probe. An instrument you have to switch on is one you find
-// switched off on the day it matters, and this costs one console line per compare.
-// ⚠️ ASCII ONLY in the output - an em dash reaches a Windows terminal as mojibake.
-// ⚠️⚠️ THE STATE IS ON THE LINE FOR ONE REASON: A FRESH CARD LOOKS EXACTLY LIKE A BROKEN BORROW.
-// A newly formatted card has no manifest, and `absent` is deliberately never memoised (there is
-// no stat to validate it against), so EVERY item re-attempts the read and every line reads
-// `parses=1 reuses=0` - the identical shape to a memo that has stopped working. Measured
-// 2026-09-25 on a manifest-less directory, before testing against a freshly reformatted card.
-// Without the state word the instrument cannot answer the only question being asked of it, and
-// the honest reading and the failure reading are the same picture.
+// ⚠️ `state` is on the line because a fresh card otherwise looks identical to a broken borrow:
+// `absent` is never memoised (no stat to validate against), so every item re-attempts the read
+// and every line reads `parses=1 reuses=0` - the same shape as a memo that has stopped working.
 let _counts = { path: null, state: 'none', parses: 0, reuses: 0, stats: 0, hashes: 0 };
 
-// A fresh parse STARTS a new borrow, so the totals reset with it. That makes a line reading
-// `parses=1` mean "picked up once and held", and a line climbing past 1 mean the borrow broke.
-// ⚠️⚠️ MONOTONIC, AND SEPARATE FROM THE TOTALS ON PURPOSE. The report needs to distinguish "this
-// compare consulted the manifest" from "this compare never got that far", and the obvious
-// mechanism - did the totals change - is WRONG in the one case that matters: on a card with no
-// manifest, every item re-reads and every read lands on the SAME values (parses=1, reuses=0),
-// so identical numbers mean the opposite of nothing happening. Caught 2026-09-25 by running the
-// three card states rather than by reading. This counter only ever goes up, so it cannot be
-// ambiguous about whether a read occurred.
+// A fresh parse starts a new borrow, so the totals reset with it: `parses=1` then means "picked
+// up once and held", and anything above 1 means the borrow broke.
+//
+// ⚠️ Monotonic, and separate from the totals on purpose. Deciding whether a compare consulted
+// the manifest by asking whether the totals CHANGED is wrong in the case that matters: on a card
+// with no manifest every read lands on the same values, so identical numbers mean the opposite
+// of nothing happening. This only ever goes up.
 let _touches = 0;
 
 function _countParse(mPath, state) {
@@ -160,19 +148,14 @@ function _countReuse() { _touches++; _counts.reuses++; }
 // new module because all three already require this one, so it costs no new wiring.
 function countStat(n) { _counts.stats += (n || 1); }
 
-// ⭐⭐ HASHES READ OFF THE DESTINATION, AND THIS IS THE NUMBER THAT SAYS WHETHER THE MANIFEST IS
-// ACTUALLY BEING BELIEVED. [B-173, 2026-09-25]
+// Hashes read off the DESTINATION, and the number that says whether the manifest is being
+// believed. Without it, two runs of identical measured work can differ by a factor of ten with
+// nothing on the line to explain it.
 //
-// ⚠️⚠️ ADDED BECAUSE THE FIRST VERSION OF THIS INSTRUMENT COULD NOT ANSWER THE QUESTION IT WAS
-// BUILT FOR. Two warm runs over the same card produced IDENTICAL counters - parses=1, reuses=30,
-// stats=2576 - and took 2 seconds and 10 seconds. Everything measured was the same, so the
-// difference was somewhere unmeasured, and the largest unmeasured thing on this path is whether
-// a recorded hash was trusted or the file was read again.
-//
-// ⭐ IT IS A DISCRIMINATOR, NOT MORE DATA: hashes=0 means the manifest was believed for every
-// file and the time went somewhere outside the compare entirely; hashes>0 means entries are
-// being REJECTED and the card re-read, which is a defect in validation rather than a slow disk.
-// Those two call for opposite work, which is exactly why guessing between them is not on.
+// ⚠️ Read it as a discriminator, not as more data. `hashes=0` means every recorded hash was
+// trusted, so any time spent went somewhere outside the compare. `hashes>0` on a card that was
+// just exported to means entries are being REJECTED and the card re-read, which is a validation
+// defect rather than a slow disk. The two call for opposite work.
 function countHash(n) { _counts.hashes += (n || 1); }
 function counts() { return Object.assign({}, _counts); }
 
