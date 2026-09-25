@@ -90,9 +90,25 @@ function ok(name, cond, extra) {
      === (html.match(/_sfPrimeVolume\(destDir\);/g) || []).length,
      'a pick site without a prime silently falls back to the bare drive letter');
 
+  // ⚠️ RE-ANCHORED 2026-09-24: this pinned `volumeInfo(raw)`, and the argument changed when the
+  // prime learned to accept a subfolder - it now queries the drive ROOT while still keying the
+  // answer to the full destination. The rule was never which variable is passed; it is that the
+  // work is STARTED and not awaited.
   ok('⚠️ priming starts the work without awaiting it',
-     /_sfVolPrime = \{[\s\S]*?p: Promise\.resolve\(\)[\s\S]*?\.then\(\(\) => window\.electronAPI\.volumeInfo\(raw\)\)[\s\S]*?\.catch\(\(\) => null\),/.test(html),
+     /_sfVolPrime = \{[\s\S]*?p: Promise\.resolve\(\)[\s\S]*?\.then\(\(\) => window\.electronAPI\.volumeInfo\([\w.]+\)\)[\s\S]*?\.catch\(\(\) => null\),/.test(html),
      'awaiting here would move the stall to the picker instead of removing it');
+
+  // ⚠️⚠️ AND IT MUST ACCEPT A SUBFOLDER. [B-203 / B-420, 2026-09-24] This required the destination
+  // to BE a drive root and bailed to `_sfVolPrime = null` otherwise, so exporting to
+  // `H:\TEMP_TESTING` - or any folder on a card - silently dropped the free-space line from the
+  // summary. Found in a console log he was reading for an unrelated cancel bug, by the very
+  // diagnostic that was added because this feature once vanished with nothing able to say why.
+  // ⭐ The consumer only needs the VOLUME, and a subfolder shares its root's volume.
+  ok('⭐ the prime accepts ANY absolute path, not only a drive root',
+     /function _sfPrimeVolume[\s\S]{0,400}?\/\^\(\[A-Za-z\]\):\/\.exec\(raw\)/.test(html)
+     && !/function _sfPrimeVolume[\s\S]{0,400}?\^\[A-Za-z\]:\[\\\\\/\]\?\$/.test(html),
+     'a root-only test means every subfolder destination loses its free-space line, and the '
+     + 'omission is silent');
 
   ok('⭐ the summary consumes the primed promise rather than starting a second query',
      /const primed = _sfVolPrime && _sfVolPrime\.dir === raw \? _sfVolPrime\.p : null;/.test(html));

@@ -40,9 +40,32 @@ ok('preload bridges it', /preflightExportDest:/.test(pre));
   ok(`⚠️⚠️ main.js actually CALLS preflight (${mainCalls} sites)`, mainCalls >= 2,
      'sfFile:export and sources:exportToDownloads both size the job in main - if they still '
      + 'compose checkFit + describe themselves, the refactor did nothing');
-  const rendCalls = (H.match(/_sfPreflightDestination\(\{/g) || []).length;
-  ok(`⚠️⚠️ the renderer actually CALLS its preflight helper (${rendCalls} sites)`, rendCalls >= 4,
-     'the renderer-driven doors are the majority - a helper nobody calls is not a refactor');
+  // ⚠️⚠️ THIS COUNTED THE DEFINITION AS A CALL SITE, AND HAD SINCE IT WAS WRITTEN. The pattern
+  // `_sfPreflightDestination({` matches `async function _sfPreflightDestination({ destDir, ...`
+  // just as happily as a call, so the floor of 4 was really a floor of 3 real calls. Found
+  // 2026-09-24 when the primary export migrated and the number fell by one: the test went red
+  // for the right reason and reported the wrong quantity. `await` is what separates them.
+  //
+  // ⚠️⚠️ AND THE DIRECTION OF THE ASSERTION HAD INVERTED. "The renderer-driven doors are the
+  // majority" was true when each door ran its own check; the whole point of [B-420] is that ONE
+  // call inside the runner now serves fourteen doors. A high count is no longer evidence the
+  // helper is used - it is evidence the migration stalled, which `export-runner-ratchet` already
+  // measures from the other side with a ceiling that can only fall.
+  //
+  // ⭐ So what belongs here is the thing that must never stop being true: the RUNNER calls it.
+  // A helper nobody calls is not a refactor, and the runner is now the caller that matters.
+  const rendCalls = (H.match(/await _sfPreflightDestination\(\{/g) || []).length;
+  ok(`⚠️⚠️ the renderer actually CALLS its preflight helper (${rendCalls} real call sites)`,
+     rendCalls >= 2,
+     'a helper nobody calls is not a refactor');
+  {
+    const rs = H.indexOf('const _sfRunExport = async (door');
+    const re = H.indexOf('// Convenience for the export+delete sequence', rs);
+    ok('⚠️⚠️ and the SHARED RUNNER is one of them', rs > 0 && re > rs
+       && /await _sfPreflightDestination\(\{/.test(H.slice(rs, re)),
+       'if the runner stops checking the destination, every migrated door stops checking it too '
+       + '- and each one would look fine on its own');
+  }
 }
 // ── ⚠️⚠️ A REFUSAL MUST NOT ORPHAN THE DOOR'S PROGRESS MODAL ─────────
 //
@@ -260,12 +283,81 @@ ok('a door threads the tally in', /wrote: token\.wrote/.test(main));
   ok('⚠️⚠️ and the module threads the tally into the copy',
      /wrote: opts\.wrote \|\| null/.test(common),
      'a zero tally never crosses the threshold, so the offer never fires');
-  ok('the renderer sends boardCard on the bulk loop calls',
-     /boardCard: _bulkBoardCard/.test(H),
-     'established once per run - re-measuring per font would cost ~1.9s each');
-  const perRunLookups = (H.match(/boardCard: _bulkBoardCard/g) || []).length;
-  ok(`both bulk-loop doors send it (${perRunLookups} call sites)`, perRunLookups >= 2,
-     'fonts and common folders both write in that loop');
+  // ⚠️⚠️ RE-ANCHORED 2026-09-24, AND IT IS THE SAME LESSON AS ITS TWIN ABOVE, WHICH I HAD
+  // ALREADY WRITTEN DOWN AND THEN LEFT THIS COPY PINNED TO A NAME. It asserted the literal
+  // `boardCard: _bulkBoardCard`, and when the primary export moved onto the shared runner that
+  // local disappeared - the runner runs the one preflight and hands `boardCard` into `produce`,
+  // so the value arrives destructured and is passed by shorthand. The behaviour got better and
+  // the test went red.
+  //
+  // ⭐ ASSERT THE INTENT: every renderer call to `exportCommonToFolder` sends boardCard, whatever
+  // the call site happens to call it. The rule is that main must never re-measure it - that is a
+  // ~1,900 ms device lookup, and it is banned at cancel time.
+  const commonCalls = [...H.matchAll(/exportCommonToFolder\(\{[\s\S]{0,400}?\}\)/g)].map((m) => m[0]);
+  ok(`exportCommonToFolder call sites were located (${commonCalls.length})`, commonCalls.length >= 1,
+     're-check the matcher if this dropped to zero');
+  const commonMissing = commonCalls.filter((c) => !/\bboardCard\b/.test(c));
+  ok('every renderer call SENDS boardCard from a preflight',
+     commonMissing.length === 0,
+     'established once per run - re-measuring per font would cost ~1.9s each. Missing in: '
+     + commonMissing.map((c) => c.slice(0, 70).replace(/\s+/g, ' ')).join(' | '));
+}
+
+// ── One export per destination, and the claim always comes back ──────
+//
+// ⚠️⚠️ HE REACHED THIS FOR REAL 2026-09-24. A cancel that hid its surface while the scan kept
+// reading made a live export look finished, so he started a second one at the same destination:
+// *"I clicked cancel... looked like it did... then I started again to same location and it was
+// still in progress."* Two writers in one folder is how a card's directory gets torn up.
+//
+// ⭐ KEYED ON THE DESTINATION, NOT GLOBAL. The export gate in main is deliberately non-exclusive
+// so exports to DIFFERENT places overlap; only the same folder is the hazard.
+{
+  ok('the destination claim exists', /const _sfActiveDests = new Set\(\)/.test(H)
+     && /function _sfClaimDest\(d\)/.test(H),
+     'without it nothing refuses a second export into a folder already being written');
+
+  // ⚠️⚠️ THE RELEASE IS THE DANGEROUS HALF. A claim that is not released wedges that destination
+  // until the app restarts - worse than the bug it fixes - so both holders must release in a
+  // `finally`, never at a `return`. The primary export alone has more than a dozen exits.
+  // ⚠️ MATCHED ON THE CLAIM ITSELF, not on the variable name. A first cut looked for
+  // `const _rel = ` and picked up an unrelated `_rel` in the SD browser 26,000 lines away - the
+  // same identifier-instead-of-intent mistake that had to be corrected three times today.
+  const holders = [...H.matchAll(/const (\w+) = (?:door\.destClaimed === true \? \(\(\) => \{\}\) : )?_sfClaimDest\(/g)]
+    .map((m) => m[1]);
+  ok(`both claim holders were located (${holders.join(', ') || 'none'})`, holders.length === 2,
+     'expected the primary export (at its picker) and the shared runner');
+  for (const h of holders) {
+    // ⚠️ A GENEROUS WINDOW ON PURPOSE. A 400-char one failed on the primary export, whose
+    // `finally` carries six lines explaining why the release is wrapped rather than repeated at
+    // each `return` - so the test went red over prose. The rule is that the release happens in a
+    // `finally`, not that it happens on a particular line of it.
+    const re = new RegExp('\\} finally \\{[\\s\\S]{0,900}?' + h + '\\(\\);');
+    ok(`  ${h} is released in a finally`, re.test(H),
+       'released at a return instead, some exit path will leak the claim and wedge that '
+       + 'destination until restart');
+  }
+
+  ok('⭐ a door that already claimed can say so, so the runner does not refuse its own caller',
+     /const _rel = door\.destClaimed === true \? \(\(\) => \{\}\) : _sfClaimDest\(destDir\)/.test(H)
+     && /destClaimed: true/.test(H),
+     'the primary export claims at its PICKER and holds through the scan - minutes before the '
+     + 'runner sees the job - so without this opt-out the runner would block it');
+
+  // ⭐ AND IT MUST COVER THE SCAN. His second export started while the first was still COMPARING,
+  // with nothing being written and `_sfExportBusy` false the whole time. A guard that only wrapped
+  // the copy would refuse a case that never happened and allow the one that did.
+  {
+    const a = H.indexOf('const _sfBulkSave = async () => {');
+    const b = H.indexOf('const _sfBulkDelete = async () => {', a);
+    const body = a > 0 && b > a ? H.slice(a, b) : '';
+    const claimAt = body.indexOf('_sfClaimDest(destDir)');
+    const scanAt = body.indexOf("_sfDeleteProgress.show('Checking the destination…', '', 0)");
+    ok('⭐ the primary export claims BEFORE its scan, not at the copy',
+       claimAt > 0 && scanAt > claimAt,
+       'claiming at the copy leaves the whole comparison unguarded, which is exactly the window '
+       + 'the second export was started in');
+  }
 }
 
 // ── The cleanup offer reaches the user ───────────────────────────────

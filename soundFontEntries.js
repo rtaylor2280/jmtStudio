@@ -1116,6 +1116,12 @@ function entryFolderExistsAt(name, destDir) {
 // [B-400] `opts.onBytes` reports the DESTINATION-side hashing, which is the expensive half of
 // this question and used to run in total silence behind a right-click Export. A font is hundreds
 // of files; on a card this is seconds of nothing happening.
+// ⚠️⚠️ `opts.shouldStop` HONOURED 2026-09-24 [B-420]. This is a READ - it hashes a whole font at
+// the destination to answer "is it already there" - and it had no stop check, so a cancel during
+// the primary export's conflict scan waited for the current font to finish hashing. Same defect as
+// `planExport`, one size smaller: bounded by a font rather than by a hundred tracks.
+// ⭐ His rule for both: *"why would it need to do anything if all it was doing was analyzing?
+// there's not a copy being made... so it should just stop."*
 async function entryMatchesAt(userData, name, destDir, opts = {}) {
   if (!name || !destDir) return { ok: false, error: 'Missing name or destDir' };
   const srcDir  = path.join(entriesRoot(userData), name);
@@ -1174,6 +1180,9 @@ async function entryMatchesAt(userData, name, destDir, opts = {}) {
   // ⚠️ Shared breath, setImmediate not a microtask - see soundFontFileHash.breathe.
   const { breathe: _breathe, hashFileAsync } = require('./soundFontFileHash');
   for (const rec of libRecords) {
+    // ⚠️ PER FILE. Each iteration can hash megabytes off slow storage; a check only at the top of
+    // the pass would be no better than none.
+    if (opts.shouldStop && opts.shouldStop()) return { ok: true, canceled: true };
     if (!rec || rec.fileHash === '<empty>') continue;   // empty-dir marker
     await _breathe();
     const abs = path.join(destFont, rec.relPath);

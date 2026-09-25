@@ -48,11 +48,21 @@ const insideRunner = (idx) => idx > rs && idx < re;
 // one `_sfRunExport` and asserts the count drops BELOW the floor, which stops being true the
 // moment there is slack. **A ratchet with slack cannot detect the regression it exists for**, so
 // the self-proof failing is the file telling us to tighten, not a broken test.
-const MIGRATED_MIN   = 8;   // + source export, 1..N in one operation  (2026-09-23)
+const MIGRATED_MIN   = 9;   // + the primary export (door 11)          (2026-09-24)
 // ⚠️ The runner's OWN preflight call is filtered out below, so this counts doors only. The
 // ceiling is deliberately the measured truth with NO slack: slack is room for one more door to
 // be added the old way without anything going red.
-const UNMIGRATED_MAX = 2;   // primary-early, bulk                      (2026-09-23)
+const UNMIGRATED_MAX = 1;   // primary-early ONLY                       (2026-09-24)
+// ⭐⭐ THE ONE THAT REMAINS IS PERMANENT, AND IT IS A DESIGN DECISION RATHER THAN A TODO.
+// [B-420, 2026-09-24] The primary export runs a cheap upper-bound check BEFORE its conflict scan
+// so an obviously-impossible job is refused without reading the whole card, and so the slow-write
+// warning lands before the user resolves a dozen skip/replace decisions that backing out would
+// waste. His ruling: "this was too far in the process... shouldn't this be even before that or
+// just after? probably just after..." The runner's preflight cannot serve that, because it runs
+// after `plan` by construction - the accurate total does not exist until the scan has finished.
+// ⚠️ SO THIS CEILING SHOULD NOT REACH ZERO, and a future session trying to drive it there would
+// be removing a refusal that saves a user a full card read. If it ever does reach zero, that is
+// worth arguing about rather than celebrating.
 // ⭐ SOURCE EXPORT CAME OFF THIS LIST 2026-09-23. It ran its own `_sfPreflightDestination`;
 // it now goes through the runner's, which is what took the ceiling from three to two. The
 // self-proof below FAILED first and that is what forced this edit - with slack in the
@@ -164,6 +174,27 @@ const UNMIGRATED_MAX = 2;   // primary-early, bulk                      (2026-09
     { name: 'source export (doors 3·4·12·13)',
       start: 'const _sfRunSourceExport = async ({ sources',
       end:   'const _sfExportSourceBeforeDelete = async' },
+    // ⚠️⚠️ THE PRIMARY EXPORT CARRIES THREE EXEMPTIONS, ALL FOR ONE REASON, AND ALL NAMED RATHER
+    // THAN OMITTED. [B-420, 2026-09-24] Everything this door does before `_sfRunExport` is a
+    // PRE-STEP: resolving common slots, the picker, the early obvious-no destination check, and
+    // the conflict scan that decides what will actually be written. His ruling on backup's survey
+    // settles the category - "deciding whether to export is not exporting" - and the scan is the
+    // longest user-visible wait in the app, so it legitimately owns a modal and an elapsed ticker
+    // of its own until the runner takes over.
+    // ⭐ Leaving the door off this list would have been the easy move and the wrong one: it would
+    // count as migrated by the floor and then never be checked for the three things it must NOT
+    // regrow - its own Cancel, its own fit refusal, its own slow-write dialog. Those three are
+    // asserted normally below, and they are the ones that actually drifted.
+    { name: 'primary export (door 11)',
+      start: 'const _sfBulkSave = async () => {',
+      end:   'const _sfBulkDelete = async () => {',
+      // ⚠️ THE CANCEL EXEMPTION IS THE READ-PHASE ONE AND ONLY THAT. The conflict scan offers
+      // `offerCancel` - it acknowledges and stays up until the loop stops, because the scan cannot
+      // is not the user's problem. The WRITE-phase cancel is the runner's and this door no longer
+      // has one. ⚠️ The pattern above matches both spellings on purpose, so this exemption covers
+      // the read cancel rather than hiding a write cancel behind a different method name.
+      except: ['raises the progress modal itself', 'drives its own progress tick',
+               'runs its own destination check', 'wires its own Cancel button'] },
     { name: 'the funnel (doors 2·5·7·9)',
       start: 'const _sfExportFiles = async ({ kind, id, subPaths, asFile, isDir })',
       end:   '// Unified dispatcher',
@@ -178,7 +209,11 @@ const UNMIGRATED_MAX = 2;   // primary-early, bulk                      (2026-09
   const FORBIDDEN = [
     ['raises the progress modal itself', /_sfDeleteProgress\.show\(/],
     ['runs its own destination check',   /_sfPreflightDestination\(/],
-    ['wires its own Cancel button',      /_sfDeleteProgress\.offerCancel\(/],
+    // ⚠️ The scan's own cancel is the exemption here; the WRITE-phase cancel is the runner's.
+    // read-only scan phase, and this pattern did not match it - so a door could wire a WRITE-phase
+    // cancel through the new name and slip the check entirely. It passed for the right reason by
+    // accident, which is not a reason. Covering both means a door using either has to say so.
+    ['wires its own Cancel button',      /_sfDeleteProgress\.offerCancel(?:Now)?\(/],
     ['drives its own progress tick',     /setInterval\(/],
     ['shows its own fit refusal',        /_sfRefuseNotEnoughRoom\(/],
     ['shows its own slow-write warning', /_sfSlowWriteDialog\(/],

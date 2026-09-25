@@ -21,6 +21,7 @@ const path = require('path');
 const crypto = require('crypto');
 const StreamZip = require('node-stream-zip');
 const { copyTreeWithProgress } = require('./sfExportCopy');
+const { rmWithRetry } = require('./fsRemove');
 
 function commonRoot(userData) {
   return path.join(userData, 'soundFonts', 'common');
@@ -1221,7 +1222,10 @@ function _dirSignals(root, excludeFn) {
 // totals PROVE a difference (prompt, nothing read). Matching ones prove
 // nothing, since a same-size swap defeats them, so they gate INTO the hash
 // and never past it.
-async function commonMatchesAt(userData, uuid, destDir, targetName = 'common') {
+// ⚠️⚠️ `shouldStop` HONOURED 2026-09-24 [B-420], for the same reason as its twin in
+// soundFontEntries: this is a pure READ that hashes 200+ files off a card, and a cancel during the
+// conflict scan used to wait for all of them.
+async function commonMatchesAt(userData, uuid, destDir, targetName = 'common', shouldStop = null) {
   if (!uuid || !destDir) return { ok: false, error: 'Missing uuid or destDir' };
   const libDir  = path.join(commonRoot(userData), uuid, 'files');
   const cardDir = path.join(destDir, targetName || 'common');
@@ -1262,6 +1266,8 @@ async function commonMatchesAt(userData, uuid, destDir, targetName = 'common') {
   // microtask, or it yields to nothing while looking fixed.
   const { breathe, hashFileAsync } = require('./soundFontFileHash');
   for (const rec of libRecords) {
+    // ⚠️ PER FILE - a voicepack common is 214-225 files.
+    if (shouldStop && shouldStop()) return { ok: true, canceled: true };
     if (!rec || rec.fileHash === '<empty>') continue;
     const abs = path.join(cardDir, rec.relPath);
     let st = null;
@@ -1458,17 +1464,55 @@ async function exportCommonToFolder(userData, uuid, destDir, mode = 'rename', on
     catch (err) { return { ok: false, error: `Cannot create destination: ${err.message}` }; }
   }
   targetName = String(targetName || 'common').trim() || 'common';
+  // ⚠️ DECLARED HERE, NOT INSIDE THE `replace` BRANCH. [B-420, 2026-09-24] It is written in that
+  // branch and read by three later places - the cancel restore, the success disposal and the
+  // failure restore - so a `let` inside the branch would be invisible to all of them. This file
+  // is not in strict mode, so the missing declaration would not have thrown: it would have made a
+  // silent GLOBAL that works until two exports overlap. `node --check` passes either way.
+  let asideDir = null;
   const exists = fs.existsSync(path.join(destDir, targetName));
   if (exists) {
     if (mode === 'skip') {
       return { ok: true, skipped: true, destPath: path.join(destDir, targetName) };
     }
     if (mode === 'replace') {
-      // ⚠️ AWAITED — recursive delete of a whole item on the CARD, no yielding. [B-398]
-      // Same defect and same fix as soundFontEntries.exportEntryToFolder; it only fires when the
-      // destination already exists, so re-exporting is the reproduction.
-      try { await fs.promises.rm(path.join(destDir, targetName), { recursive: true, force: true }); }
-      catch (err) { return { ok: false, error: `Cannot remove existing folder: ${err.message}` }; }
+      // ⚠️⚠️ SET ASIDE, DO NOT DELETE. [B-420, 2026-09-24] THIS PATH USED TO REMOVE THE EXISTING
+      // FOLDER AND THEN WRITE, AND THAT HAS NO SAFE FAILURE MODE.
+      //
+      // Reported on a real export: `EPERM: operation not permitted, rmdir
+      // 'D:\Desktop\SD Simulation\common\alts'`. The recursive delete had already removed every
+      // wav and emptied the subfolders before it failed on one directory - so the reply was an
+      // error AND the user's existing common folder was gone, reduced to three empty
+      // directories. The export failed and took the thing it was replacing with it.
+      //
+      // ⚠️ THE CAUSE OF THAT PARTICULAR FAILURE IS STILL UNKNOWN, and this is not a fix for it.
+      // Measured and ruled out: the read-only attribute (read-only directories delete fine there),
+      // the location (a tree built at that same path deletes fine), and a prior hash pass holding
+      // handles. It could not be reproduced. ⭐ WHICH IS THE ARGUMENT FOR THIS CHANGE RATHER THAN
+      // AGAINST IT: the removal is allowed to fail for reasons we do not control, so it must not
+      // be the step that destroys the old folder.
+      //
+      // ⭐⭐ THE PATTERN IS NOT NEW - the FONT export has always done it this way
+      // (soundFontEntries, `ORIGINAL.<name>`), for a different reason: a rename is one metadata
+      // write where a delete is a round trip per file, which is what makes a cancel instant on a
+      // board card. The robustness came along free, and this path never got either half. The
+      // seven `DELETE.*` folders sitting at his destination are the font path surviving exactly
+      // this and moving on.
+      //
+      // ⚠️ SAME DIRECTORY, SO NO EXDEV. Renaming within destDir is same-volume by construction.
+      asideDir = path.join(destDir, `ORIGINAL.${targetName}`);
+      // ⚠️ A stale aside means a previous run died between the rename and the disposal. Its
+      // content is the OLDER copy of a folder the user has since replaced, so the live tree wins;
+      // clearing it is what makes this repeatable instead of jamming on the second attempt.
+      if (fs.existsSync(asideDir)) {
+        try { await rmWithRetry(asideDir); }
+        catch (err) { return { ok: false, error: `Cannot clear a leftover ORIGINAL folder: ${err.message}` }; }
+      }
+      try { await fs.promises.rename(path.join(destDir, targetName), asideDir); }
+      catch (err) {
+        asideDir = null;
+        return { ok: false, error: `Cannot set aside the existing folder: ${err.message}` };
+      }
     } else {
       // Underscore (not parens) — folder names on SD ride the same
       // safety rule as font folders. The user-facing "rename" mode is
@@ -1502,8 +1546,52 @@ async function exportCommonToFolder(userData, uuid, destDir, mode = 'rename', on
       // back, and a half-copied voice pack on a card is worse than an absent one. It boots, it
       // is listed, and it fails at the moment a sound is needed.
       if (require('./sfExportCopy').isCancel(err)) {
-        const out = { ok: true, canceled: true, partialRemoved: false,
-                      destPath: targetDir, item: targetName };
+        const out = { ok: true, canceled: true, partialRemoved: false, restored: false,
+                      destPath: targetDir, item: targetName, leftovers: [] };
+        // ⭐⭐ RESTORE FIRST, DISPOSE SECOND, AND THE ORDER IS THE WHOLE POINT. [B-420,
+        // 2026-09-24] Mirrors the font export exactly. Getting the user's folder back is two
+        // metadata renames - instant even on a board card - and it must not wait behind a
+        // recursive delete that costs a round trip per file. If the process dies between the two
+        // steps they still have a COMPLETE folder under ORIGINAL.<name>, which is why the aside
+        // is renamed back LAST rather than first.
+        // ⚠️ Before this, cancelling a replace here left NOTHING: the old folder had already been
+        // deleted outright and the partial was removed on the way out.
+        if (asideDir) {
+          const junk0 = path.join(destDir, `DELETE.${targetName}`);
+          try {
+            if (fs.existsSync(junk0)) await rmWithRetry(junk0);
+            if (fs.existsSync(targetDir)) {
+              await fs.promises.rename(targetDir, junk0);
+              out.leftovers.push(junk0);
+            }
+          } catch { /* fall through - the restore below matters more than tidiness */ }
+          try {
+            await fs.promises.rename(asideDir, targetDir);
+            out.restored = true;
+            out.destPath = targetDir;
+          } catch {
+            // ⚠️ Their folder is still WHOLE, just under the wrong name. Say so rather than
+            // reporting a clean stop - they need to know ORIGINAL.<name> is theirs and must
+            // not be deleted.
+            out.leftovers.push(asideDir);
+          }
+          const junkLeft = out.leftovers.find((p) => /[\\/]DELETE\./.test(p));
+          if (junkLeft) {
+            const _ed0 = require('./exportDestination');
+            const _wf0 = (opts.wrote && opts.wrote.files) || 0;
+            const _wb0 = (opts.wrote && opts.wrote.bytes) || 0;
+            if (opts.boardCard && _ed0.isSlowWriteJob(_wf0, _wb0)) {
+              out.leftovers = out.leftovers.filter((p) => p !== junkLeft);
+              out.offerCleanup = junkLeft;
+            } else {
+              try {
+                await rmWithRetry(junkLeft);
+                out.leftovers = out.leftovers.filter((p) => p !== junkLeft);
+              } catch { /* keep it named so the user is told it is there */ }
+            }
+          }
+          return out;
+        }
         // ⭐⭐ THE SAME RULE THE FONT EXPORT FOLLOWS. [B-005 item 4] Found reviewing for parity
         // 2026-09-21: this door removed its partial unconditionally while the font door
         // offered on a board card, so cancelling a voice pack could sit through a per-file
@@ -1536,6 +1624,30 @@ async function exportCommonToFolder(userData, uuid, destDir, mode = 'rename', on
       }
       throw err;
     }
+    // ⭐ THE "AND ONLY THEN DELETE THE ORIGINAL" HALF. [B-420, 2026-09-24] Everything above this
+    // line is reversible; past it the new folder is complete at the destination and the parked
+    // copy is genuinely superseded.
+    // ⚠️ RENAMED TO DELETE.<name> BEFORE REMOVAL, NOT REMOVED DIRECTLY. The rename is instant, so
+    // the user's replace is COMPLETE the moment it returns; a disposal that fails or is
+    // interrupted then leaves something whose NAME says what it is, rather than a second copy of
+    // a folder they would have to identify.
+    // ⚠️ NOT FATAL. The export succeeded - a leftover folder is untidy, not broken, and turning
+    // it into an error would report a successful write as a failure. This is precisely the case
+    // that was reported as `Cannot remove existing folder`: it is now a note instead of a loss.
+    let replacedLeftover = null;
+    if (asideDir) {
+      const junk = path.join(destDir, `DELETE.${targetName}`);
+      try {
+        if (fs.existsSync(junk)) await rmWithRetry(junk);
+        await fs.promises.rename(asideDir, junk);
+        replacedLeftover = junk;
+        await rmWithRetry(junk);
+        replacedLeftover = null;
+      } catch {
+        replacedLeftover = fs.existsSync(junk) ? junk
+          : (fs.existsSync(asideDir) ? asideDir : null);
+      }
+    }
     // Human-readable marker, written into the destination so the card can say
     // which voice pack it is carrying. Never written into the library copy.
     try { writeCommonReadme(userData, uuid, targetDir); } catch {}
@@ -1564,13 +1676,24 @@ async function exportCommonToFolder(userData, uuid, destDir, mode = 'rename', on
       }
     } catch {}
     // ⚠️ RETURNED, NOT DROPPED ([B-364]) - same defect and same fix as the entry export.
-    return { ok: true, destPath: targetDir, refused: _exportRefused,
+    return { ok: true, destPath: targetDir, refused: _exportRefused, replacedLeftover,
              observedItem: _observedItem, observed: _observedOut };
   } catch (err) {
     // Best-effort cleanup of a partial copy so the user doesn't end up with
     // half a common folder mixed in with their other content.
     try { fs.rmSync(targetDir, { recursive: true, force: true }); } catch {}
-    return { ok: false, error: String(err && err.message || err) };
+    // ⚠️⚠️ AND PUT THEIR FOLDER BACK. [B-420, 2026-09-24] This branch is any failure that is not
+    // a cancel - an unreadable source, a full card, a write that threw. Before the set-aside
+    // existed there was nothing to restore, because the old folder had already been deleted; now
+    // there is, and failing to put it back would be the same data loss arriving by a different
+    // door. Best effort: if the restore itself fails the folder is still whole under
+    // ORIGINAL.<name>, so it is named in the error rather than silently abandoned.
+    let _restoreNote = '';
+    if (asideDir && fs.existsSync(asideDir)) {
+      try { await fs.promises.rename(asideDir, path.join(destDir, targetName)); }
+      catch { _restoreNote = ` Your previous folder is still at "ORIGINAL.${targetName}".`; }
+    }
+    return { ok: false, error: String(err && err.message || err) + _restoreNote };
   }
 }
 

@@ -4896,7 +4896,7 @@
              carries the border and the button inside it is borderless. The word
              "include" is dropped - a checkbox already means include. [B-287] -->
         <span id="sf-export-group" class="sf-export-group btn-neutral" style="display:none">
-          <button id="btn-sf-bulk-save" class="sf-export-btn" title="Export the selected fonts as Proffie-shaped folders to a destination (SD card, etc.)">&#8599; Export</button>
+          <button id="btn-sf-bulk-save" class="sf-export-btn" title="Export the selected fonts to an SD card as Proffie-shaped folders, with the config's common folders and shared tracks">&#8599; SD Export</button>
           <label id="sf-bulk-tracks-wrap" class="sf-export-tracks">
             <span id="sf-bulk-tracks-label">tracks</span>
             <input type="checkbox" id="sf-bulk-tracks-include">
@@ -7853,6 +7853,11 @@ window._sfRefuseNotEnoughRoom = _sfRefuseNotEnoughRoom;
 // ⚠️ Both axes, because both cost time, and the line sits either side of ONE ORDINARY FONT:
 // [B-238] says "one font going back to a card should not warn at all", and his largest
 // single font is 77 files / 44.62 MB.
+// ⚠️ 60 MB, NOT 100 - and the difference is a real case rather than a round number. 100 MB was
+// the first cut, and it left a single 90 MB font silent through six or seven minutes of writing,
+// because a big font clears the byte limb long before it clears the file limb. The bytes axis
+// only earns its place if it fires on the font that is big without being many. (Absorbed here
+// 2026-09-24 from a second copy of these constants that the primary export kept privately.)
 const SF_SLOW_WRITE_MIN_FILES = 150;
 const SF_SLOW_WRITE_MIN_BYTES = 60 * 1024 * 1024;
 
@@ -8133,9 +8138,30 @@ window._sfExportStoppedNotice = _sfExportStoppedNotice;
 //
 // Returns { proceed, boardCard, removable, destDir }. `proceed:false` means a dialog has
 // already been shown and the caller must simply stop.
+// ⚠️⚠️ `slowWriteDecided` SUPPRESSES THE QUESTION, NOT THE LOOKUP - and the distinction is the
+// whole point of the parameter. [B-420, 2026-09-24]
+//
+// The device lookup produces `boardCard`, which the primary export needs on EVERY call: it is
+// threaded into each per-font `exportEntryToFolder` so the write path knows it is talking to a
+// board. Suppressing the lookup would take that away. What must not happen twice is the DIALOG.
+//
+// ⭐⭐ WHY A DOOR WOULD ASK TWICE AT ALL, AND WHY THE EARLY ONE IS THE KEEPER. The warning has to
+// come BEFORE the conflict scan, because a user who backs out after resolving a dozen skip/replace
+// decisions has had all of them wasted. His catch, and it is recorded at the primary export's own
+// early block: "this was too far in the process... shouldn't this be even before that or just
+// after? probably just after..." But the ACCURATE fit check can only run after that same scan,
+// because the total depends on what was skipped - so the door genuinely needs two preflights, and
+// only the first one may speak.
+//
+// ⚠️ NAMED FOR `overwriteDecided`, WHICH IS THE SAME IDEA ONE STEP LATER: a question this user has
+// already answered for this destination is not asked again. Neither flag means "skip a check" -
+// both mean "the answer already exists".
+//
+// ⚠️ DEFAULT IS UNCHANGED, AND FALSE IS THE SAFE SIDE. A door that forgets to pass it asks the
+// question, which is the behaviour every other call site has today.
 async function _sfPreflightDestination({ destDir, fileSizes = null, totalBytes = 0,
                                          fileCount = 0, dirCount = 0,
-                                         blockedDelete = false } = {}) {
+                                         blockedDelete = false, slowWriteDecided = false } = {}) {
   // `info` is the raw preflight result - bytesFree, blockSize, transport, boardSerial. Doors
   // that only need a go/no-go ignore it; the primary export uses it for its free-space line,
   // and handing it back is what stops that door running a SECOND measurement of its own.
@@ -8262,7 +8288,10 @@ async function _sfPreflightDestination({ destDir, fileSizes = null, totalBytes =
       out.proceed = false;
       return out;
     }
-    if (p.slowWrite) {
+    // ⚠️ `slowWriteDecided` lands HERE and nowhere earlier. The lookup still ran, `out.boardCard`
+    // is still populated, and the caller still gets everything it needs - the only thing skipped
+    // is putting the same question a second time. [B-420, 2026-09-24]
+    if (p.slowWrite && !slowWriteDecided) {
       dropBar();
       // Returns true when the user backed out.
       if (await _sfSlowWriteDialog(p.slowWrite)) { out.proceed = false; return out; }
@@ -11275,14 +11304,30 @@ function _sdDriveLabel(c) {
 // would wear the previous card's name — and swapping cards between exports is exactly what
 // testing does. One lookup per export, thrown away after.
 let _sfVolPrime = null;
+// ⚠️⚠️ THE DRIVE LETTER, NOT THE WHOLE PATH. [B-203 / B-420, 2026-09-24] This used to require the
+// destination to BE a drive root (`/^[A-Za-z]:[\\/]?$/`) and set `_sfVolPrime = null` for anything
+// else - so exporting to `H:\TEMP_TESTING`, or any folder on a card, silently dropped the
+// free-space line from the summary. The consumer only ever needed the VOLUME, and a subfolder is
+// on the same volume as its root.
+//
+// ⭐ FOUND BY ITS OWN DIAGNOSTIC, in a log he was reading for something else entirely:
+//     [B-203] no space line: volume lookup not primed for this destination
+//             {destDir: 'H:\TEMP_TESTING', primedFor: null}
+// That line exists because a previous session made this feature vanish with nothing able to say
+// why, and every exit was given a reason. It then named its own bug.
+//
+// ⚠️ `dir` STAYS THE FULL DESTINATION, because the consumer matches on the exact destDir it was
+// primed for - that is what keeps the answer scoped to THIS export. Only the QUERY uses the root.
 function _sfPrimeVolume(dir) {
   const raw = String(dir || '');
-  if (!/^[A-Za-z]:[\\/]?$/.test(raw)) { _sfVolPrime = null; return; }
+  const m = /^([A-Za-z]):/.exec(raw);
+  if (!m) { _sfVolPrime = null; return; }
+  const root = `${m[1]}:\\`;
   // Started, not awaited. A rejection here must never surface as an unhandled rejection.
   _sfVolPrime = {
     dir: raw,
     p: Promise.resolve()
-      .then(() => window.electronAPI.volumeInfo(raw))
+      .then(() => window.electronAPI.volumeInfo(root))
       .catch(() => null),
   };
 }
@@ -11388,6 +11433,36 @@ const _sfDestIdentity = {
   },
 };
 window._sfDestIdentity = _sfDestIdentity;
+
+// ── One export per destination at a time ───────────────────── [B-420, 2026-09-24]
+//
+// ⚠️⚠️ HE REACHED THIS FOR REAL. A cancel that hid its surface while the scan kept reading made a
+// live export look finished, so he started a second one at the same destination: *"I clicked
+// cancel... looked like it did... then I started again to same location and it was still in
+// progress."* Two writers into one folder is how a card's directory gets torn up, and nothing
+// anywhere refused it.
+//
+// ⚠️ THE EXPORT GATE IN MAIN IS DELIBERATELY NON-EXCLUSIVE - exports from different doors to
+// different places are allowed to overlap, and that is correct. The hazard is the SAME
+// DESTINATION, so that is what this keys on. Two exports to two different cards stay legal.
+//
+// ⚠️⚠️ IT MUST COVER THE SCAN, NOT JUST THE COPY. `window._sfExportBusy` is only true while
+// `_sfRunWithByteProgress` is running, and his second export started while the first was still
+// COMPARING - minutes of reading, with that flag false the whole time. A guard that only wraps the
+// copy would not have refused the thing that actually happened.
+const _sfActiveDests = new Set();
+function _sfDestKey(d) { return String(d || '').replace(/[\\/]+$/, '').toLowerCase(); }
+// Returns a release function, or null when that destination is already being written.
+// ⚠️ An empty destination claims nothing and refuses nothing - a door that has not picked yet
+// must not be blocked by a door that has.
+function _sfClaimDest(d) {
+  const k = _sfDestKey(d);
+  if (!k) return () => {};
+  if (_sfActiveDests.has(k)) return null;
+  _sfActiveDests.add(k);
+  return () => { _sfActiveDests.delete(k); };
+}
+window._sfClaimDest = _sfClaimDest;
 
 // ⚠️ Kept as a thin alias so the existing folder-pick call sites keep working and there is
 // exactly one place that decides what priming means.
@@ -25885,7 +25960,11 @@ require(['vs/editor/editor.main'], function () {
             dupBtn.textContent = `⧉ Duplicate (${n})`;
           }
           if (saveBtn) {
-            saveBtn.textContent = `↗ Export (${n})`;
+            // ⚠️ THE LABEL IS SET HERE, NOT IN THE HTML. [B-420, 2026-09-24] Renaming the button
+            // in its markup looked right and did nothing - this line overwrites it on every
+            // selection change, so the toolbar still read "Export (4)" after the rename. The
+            // count is why it is dynamic; the noun still has to match the markup.
+            saveBtn.textContent = `↗ SD Export (${n})`;
             const grp = document.getElementById('sf-export-group');
             if (grp) grp.style.display = '';   // the button is nested now [B-287]
           }
@@ -37353,6 +37432,15 @@ require(['vs/editor/editor.main'], function () {
           const ejectUp  = !!(w && w.style.display !== 'none');
           a.style.display = (cancelUp || ejectUp) ? 'flex' : 'none';
         },
+        // ⚠️ `offerCancelNow` WAS HERE AND IS GONE. [B-420, 2026-09-24] Added this afternoon for the
+        // conflict scan on the theory that a read-only phase can close instantly, then deleted the
+        // same afternoon when he hit the consequence: the surface vanished while the loop kept
+        // issuing work, the app looked idle, and he started a second export onto the same
+        // destination. The scan now uses `offerCancel` like everything else.
+        // ⭐ The distinction it encoded was real - a cancel need only WAIT when waiting protects
+        // data - but it applies to a single in-flight call (the backup prep screen), not to a
+        // loop. Deleted rather than left available: it had no callers the moment the scan moved
+        // off it, and a method that exists reads as a method that works.
         offerCancel(onCancel) {
           const a = this.actionsEl(), b = this.cancelEl();
           if (!a || !b) return;
@@ -37969,6 +38057,9 @@ require(['vs/editor/editor.main'], function () {
       //   plan              async () => { items, totalBytes, fileCount }
       //   produce           async (ctx) => result     <- the ONLY door-specific code
       //   overwriteDecided  true when the save dialog already asked (archive doors)
+      //   slowWriteDecided  true when the door already warned about a slow destination (door 11)
+      //   destClaimed       true when the door already claimed this destination (door 11, at its
+      //                     picker - it holds the claim across its scan, long before we see it)
       //   ending            optional override; 'none' means a caller owns the screen (doors 12/13)
       const _sfExportEnding = (kind) => (kind === 'files' ? 'toast' : 'summary');
       const _sfRunExport = async (door = {}) => {
@@ -37992,6 +38083,23 @@ require(['vs/editor/editor.main'], function () {
         const destDir = door.destDir || '';
         const out = { ok: false, canceled: false, ending, kind };
         if (!destDir) return out;
+
+        // ⚠️⚠️ ONE EXPORT PER DESTINATION, FOR EVERY DOOR ON THIS RUNNER. [B-420, 2026-09-24]
+        // The gate in main is deliberately non-exclusive so exports to DIFFERENT places overlap
+        // freely; the hazard is two writers in one folder, which is what he reached when a
+        // dishonest cancel made a live export look finished.
+        // ⚠️ `destClaimed` is declared by the door, exactly like `overwriteDecided` and
+        // `slowWriteDecided`: the primary export claims its destination before its own scan -
+        // minutes earlier than the runner ever sees it - so the runner must not try to claim it
+        // a second time and refuse its own caller.
+        const _rel = door.destClaimed === true ? (() => {}) : _sfClaimDest(destDir);
+        if (!_rel) {
+          await promptError('Already exporting there',
+            'Another export is still running to this destination. Wait for it to finish, or '
+            + 'cancel it, before starting another one.');
+          return out;
+        }
+        try {
 
         // ── 1/2: the modal, then plan, then the destination ──
         //
@@ -38085,6 +38193,9 @@ require(['vs/editor/editor.main'], function () {
           // ⚠️ Declared by the door, threaded because the REFUSAL is drawn in there. A door whose
           // export gates a delete needs the refusal to say so; the runner does not infer it.
           blockedDelete: door.blockedDelete === true,
+          // ⚠️ Same shape: declared, never inferred. Only the door knows whether it already put
+          // the slow-write question to this user for this destination. [B-420, 2026-09-24]
+          slowWriteDecided: door.slowWriteDecided === true,
         });
         // ⚠️ If we raised it and the preflight took it down for a dialog, it stays down — the
         // operation is over. `_sfRunWithByteProgress` owns hiding it on the path that continues.
@@ -38294,6 +38405,10 @@ require(['vs/editor/editor.main'], function () {
         // modal nobody can dismiss is not a trade worth leaving to every door to remember.
         try { await _sfDeleteProgress.hide(); } catch {}
         return out;
+        } finally {
+          // ⚠️ Every exit - refusals, a backed-out picker, a cancel, a throw - releases here.
+          _rel();
+        }
       };
 
       // Convenience for the export+delete sequence — picks the right title
@@ -40023,158 +40138,102 @@ require(['vs/editor/editor.main'], function () {
         catch (err) { promptError('Could not open folder picker', err && err.message || err); return false; }
         if (!pick || !pick.ok) return false;
         const destDir = pick.dirPath;
+        // ⚠️⚠️ CLAIMED THE MOMENT THE DESTINATION IS KNOWN, AND HELD THROUGH THE SCAN. [B-420,
+        // 2026-09-24] The comparison is minutes of reading before a byte is written, and that is
+        // precisely the window he started a second export in. Claiming at the copy instead would
+        // refuse a case that never happened while allowing the one that did.
+        //
+        // ⚠️ THE `try` BELOW IS NOT RE-INDENTED, ON PURPOSE. This door's body is ~900 lines with
+        // more than a dozen exit paths; indenting all of it to wrap two lines would turn a
+        // two-line change into an unreviewable diff, and every one of those exits has to release
+        // the claim. The `finally` at the bottom is what makes that true without touching them.
+        const _releaseDest = _sfClaimDest(destDir);
+        if (!_releaseDest) {
+          await promptError('Already exporting there',
+            'Another export is still running to this destination. Wait for it to finish, or '
+            + 'cancel it, before starting another one.\n\nTwo exports writing to the same folder '
+            + 'at once can leave it in a state neither of them intended.');
+          return false;
+        }
+        try {
         _sfPrimeVolume(destDir);   // [B-403] start the volume lookup now; the summary consumes it
         _sfPrimeTransport(destDir); // [B-238] and the device lookup; the warning just below consumes it
 
-        // ── Writing through a Proffieboard is much slower ───────────── [B-238]
+        // ── PHASE 1 of 2: what have we been handed, and can it take this? ─── [B-005 item 4]
         //
-        // ⚠️⚠️ HERE, BEFORE ANY QUESTION IS ASKED. This first sat after the totals were
-        // summed, which is after the tracks question AND the whole per-folder conflict list.
-        // So the user resolved a dozen decisions and was THEN told the export would be slow -
-        // and if that changed their mind, every one of those decisions was wasted. His catch:
-        // "this was too far in the process... shouldn't this be even before that or just
-        // after? probably just after..."
+        // ⭐⭐ ONE PREFLIGHT CALL, WHERE THERE USED TO BE A HAND-ROLLED COPY OF ONE.
+        // [B-420, 2026-09-24] This block identified the destination, ran its own ~1,900 ms
+        // board-card lookup behind its own size threshold, and raised its own
+        // `_sfSlowWriteDialog` - which is `_sfPreflightDestination` reimplemented, down to a
+        // private pair of threshold constants. The helper does all of it, and the early fit
+        // check that used to sit further down came along for free.
         //
-        // ⭐ THE SIZE AND THE TRANSPORT ARE DIFFERENT FACTS AND WERE WRONGLY BUNDLED. The
-        // free-space refuse genuinely needs the byte total, which is not known until later.
-        // This needs only the DEVICE, which is known the moment a destination is chosen.
-        // They were in one place because I wrote them together, not because they belong there.
+        // ⚠️⚠️ AND THE COPY HAD DRIFTED INTO A DOUBLE WARNING. The early fit check below also
+        // called the helper, and the helper decides `classify` from the byte total rather than
+        // from what the caller wants - so on a card behind a Proffieboard, any selection over
+        // the threshold got the slow-write dialog TWICE: once from here, once from there. The
+        // comment down there claimed "classify stays off", which it had no way to make true.
         //
-        // ⚠️ A BAR, NOT A SILENT WAIT. The classify spawns PowerShell and takes ~1.9s, and
-        // the comment on the tracks check below records what a quiet pause right after the
-        // folder picker already cost once.
-        // ⚠️⚠️ A THRESHOLD, BECAUSE THEY ALREADY KNOW IT IS THEIR BOARD. They mounted this
-        // card themselves with `sd 1`, so the dialog cannot tell them anything about their
-        // hardware. The ONLY thing it can add is that this particular job is big enough to
-        // hurt - and below some size it is telling them nothing, which is precisely how
-        // people learn to click through dialogs. His words: "I also wonder if there's a
-        // threshold for when we warn... I mean they know its on their board... so..."
-        // [B-238] said the same from the start: "one font going back to a card should not
-        // warn at all."
+        // ⭐ HIS ORDERING, AND IT IS WHY IDENTITY COMES FIRST. I had argued for the free-space
+        // check first, since it costs 0.2 ms and can refuse outright, so putting a lookup in
+        // front of it makes someone wait to be told no. He argued from the user's side instead:
+        // "they select a destination... so the logical next step is that the app identifies the
+        // drive... it's the app figuring out what it has just been handed. then as part of that
+        // we determine if we will have the space... then we move on." One wait, one modal, a
+        // changing subtitle.
         //
-        // ⭐⭐ FILES FIRST, BYTES SECOND, AND THE MEASUREMENT IS WHY. Measured 2026-09-19 on
-        // his board, exporting Techno to a card over USB mass storage:
-        //     8,076,662 bytes in 44 files, 34 seconds
-        //     = 0.23 MB/s ... and 773 ms PER FILE
-        // Against ~2.2 MB/s for the same kind of work through a card reader, the board is
-        // roughly 10x slower on write - so "much more slowly" is accurate.
-        // ⚠️ But the throughput figure is the less useful one: at 773ms per file, a font's
-        // FILE COUNT predicts the wait far better than its size. Techno is only 7.7 MB and
-        // still took over half a minute. A bytes-only threshold would sit silent through a
-        // font of three hundred small wavs, which is exactly the case that hurts.
-        // ⚠️ Both axes are kept, because both genuinely cost time: at 0.23 MB/s a large font
-        // is slow even with few files.
+        // ⚠️⚠️ AND THE WARNING MUST COME BEFORE THE CONFLICT SCAN. That is a ruling, not a
+        // preference: someone who backs out after resolving a dozen skip/replace decisions has
+        // had every one of them wasted. His catch: "this was too far in the process... shouldn't
+        // this be even before that or just after? probably just after..." So THIS call speaks,
+        // and the accurate one after the scan is handed `slowWriteDecided` and stays quiet.
         //
-        // ⚠️ THE NUMBERS ARE STILL JUDGEMENTS, and they sit either side of ONE ORDINARY
-        // FONT rather than on a clock. [B-238] says "one font going back to a card should
-        // not warn at all", and at 0.23 MB/s a typical font is already ~2.7 minutes - so a
-        // purely time-based line would warn on the case the entry forbids. His rule wins,
-        // and it reads as "a NORMAL font never warns" rather than "one font never warns":
-        //   typical font   37 MB /  81 files -> quiet   (the rule holds)
-        //   two fonts      74 MB / 162 files -> warns on the file axis
-        //   one BIG font   90 MB /  ~100     -> warns on bytes, and deserves to at ~6 min
-        // 100 MB was the first cut and left that last case silent for six or seven minutes.
-        const SLOW_WRITE_WARN_MIN_FILES = 150;
-        const SLOW_WRITE_WARN_MIN_BYTES = 60 * 1024 * 1024;
-        // Fonts only. Tracks are not decided yet and common slots are usually small, so this
-        // understates - which errs toward staying QUIET, the right direction for a warning
-        // whose failure mode is being ignored.
-        let _selBytes = 0, _selFiles = 0;
-        for (const nm of (names || [])) {
-          const e = (_sfAllEntries || []).find(x => x.name === nm);
-          _selBytes += (e && e.meta && e.meta.contentTotalBytes) || 0;
-          _selFiles += (e && e.meta && e.meta.contentFileCount) || 0;
-        }
-
-        // ── PHASE 1 of 3: what have we been handed? ──────────── [B-005 item 4, 2026-09-21]
+        // ⚠️ AN UPPER BOUND, NOT THE REAL TOTAL - and that is the point. The accurate figure
+        // depends on which items the user chooses to skip, and those decisions do not exist yet.
+        // But if even the whole selection cannot fit, the answer is already known and nothing
+        // the scan reads could change it. A "cannot tell yet" falls through to the accurate
+        // check. [B-203]
+        // ⚠️ Tracks are not in this sum - they are not decided yet - so it UNDERSTATES, which is
+        // the safe direction for a refusal.
+        // ⚠️ INLINED, NOT `_sfEntryBytes`. That helper is declared several hundred lines further
+        // down in this same function, so calling it here would be a `const` in its temporal dead
+        // zone - a ReferenceError on every export, and one that `node --check` cannot see because
+        // the syntax is perfectly valid.
         //
-        // ⭐⭐ HIS ORDERING, AND IT IS THE RIGHT ONE. I had argued for the free-space check
-        // first, on the grounds that it costs 0.2 ms and can refuse outright, so putting a
-        // lookup in front of it makes someone wait to be told no. He argued from the user's
-        // side instead: "they select a destination... so the logical next step is that the app
-        // identifies the drive... it's the app figuring out what it has just been handed. then
-        // as part of that we determine if we will have the space... then we move on."
-        //
-        // ⭐ That only becomes free once the phase stops doing too much, which was his next
-        // point: "we don't have to do everything in the identify... so genuinely fast and tiny
-        // logic on it." Identity here is REMOVABLE-OR-NOT at ~85 ms. The board-card question
-        // is a different price and a different phase - see below.
-        //
-        // The three phases, one modal, in this order:
-        //   1. Identifying the destination…      ~85 ms   removable -> arms the safe eject
-        //   2. Checking free space…              ~0.5 ms  can refuse
-        //   3. Checking what is already there…   varies   can ask
-        try {
+        // ⚠️ NO `hide()` ON THE WAY THROUGH. From here until the font scan takes over, THE MODAL
+        // STAYS UP and sub-steps retitle it. Only a DIALOG may take it down, and the helper puts
+        // it back itself. Taking it down here is what once produced three windows for one wait:
+        // "the second modal shouldn't ever appear since the check is already covered in the first
+        // right? it's all part of checking the destination."
+        let _slowWriteAsked = false;
+        {
+          let _upper = 0, _upperFiles = 0;
+          for (const nm of names) {
+            const _e = (_sfAllEntries || []).find(x => x && x.name === nm);
+            _upper += (_e && _e.meta && _e.meta.contentTotalBytes) || 0;
+            _upperFiles += (_e && _e.meta && _e.meta.contentFileCount) || 0;
+          }
+          for (const cs of commonSlots) {
+            const c = _sfCommons.find(x => x.uuid === cs.uuid);
+            _upper += (c && (c.totalBytes || (c.meta && c.meta.contentTotalBytes))) || 0;
+          }
           const _tb = _sfDeleteProgress.barEl();
           _sfDeleteProgress.show('Checking the destination…', 'Identifying the destination…');
           if (_tb) _tb.classList.add('indeterminate');
-          // Cheap, and primed at the folder pick, so this is usually already resolved.
-          // ⚠️ The value is not captured into a local on purpose: it is CACHED on
-          // `_sfDestIdentity`, and every later consumer - the eject checkbox, the summary row
-          // - reads it from there. A local here would be a second copy of one fact, which is
-          // the shape this whole refactor is removing.
-          await _sfDestIdentity.removable(destDir);
-
-          // ── PHASE 1b: is it a card through a Proffieboard? ──
-          //
-          // ⚠️⚠️ THRESHOLD FIRST, LOOKUP SECOND - and this is the ONLY thing that still pays
-          // the ~1,900 ms walk. It changes exactly two behaviours, the slow-write warning and
-          // the cancel-cleanup offer, and both are gated on this same size test. Below it the
-          // answer cannot alter anything, so asking would be pure waiting.
-          // ⚠️ Cached on _sfDestIdentity, so the warning, the cleanup rule and the summary all
-          // read this one answer instead of spawning their own.
-          let _tr = null;
-          try {
-            const _slowEnoughToAsk = _selFiles >= SLOW_WRITE_WARN_MIN_FILES
-                                  || _selBytes >= SLOW_WRITE_WARN_MIN_BYTES;
-            if (_slowEnoughToAsk) {
-              _sfDeleteProgress.show('Checking the destination…', 'Identifying the destination…');
-              _tr = await _sfDestIdentity.boardCard(destDir);
-            }
-          } finally {
-            // ⚠️⚠️ DELIBERATELY NOT STRIPPED HERE ANY MORE. [B-005 item 4, 2026-09-21]
-            // This phase stripped `indeterminate` in its finally while LEAVING THE MODAL UP
-            // for the next phase — so the bar sat dead between sub-steps, and any sub-step
-            // that answered instantly showed nothing but a frozen track. His report on the
-            // primary export: "the second has no bar movement at all... not even sure what it
-            // is or why necesary."
-            // ⭐ The destination check is ONE wait from the user's side, with a changing
-            // subtitle. The bar stays alive across all of it and is handed to the font scan
-            // below, which sets a real fraction and drives it.
+          const _early = await _sfPreflightDestination({
+            destDir, totalBytes: _upper, fileCount: _upperFiles,
+          });
+          // ⭐ Whether the question was ASKED, not whether they said yes - `proceed` already
+          // carries the answer. If this destination is slow enough to warn about, this call has
+          // now warned, and the accurate check must not warn again. [B-420, 2026-09-24]
+          _slowWriteAsked = !!(_early.info && _early.info.slowWrite);
+          if (!_early.proceed) {
+            try { await _sfDeleteProgress.hide(); } catch {}
+            return false;
           }
-          const _slowEnough = _selFiles >= SLOW_WRITE_WARN_MIN_FILES
-                           || _selBytes >= SLOW_WRITE_WARN_MIN_BYTES;
-          if (_tr && _tr.transport === 'proffieboard' && _slowEnough) {
-            await _sfDeleteProgress.hide();
-            // [B-238] The shared dialog. This site spelled the sentence out because it was
-            // the first one built; every wording decision behind it - their vocabulary, the
-            // body adding to the title rather than restating it, the size line - now lives
-            // with _sfSlowWriteDialog, where one edit reaches every door.
-            if (await _sfSlowWriteDialog({ bytes: _selBytes, files: _selFiles })) return false;
-            // A DIALOG borrowed the screen, so put the wait back. Below.
-            _sfDeleteProgress.show('Checking the destination…', 'Identifying the destination…');
-          }
-          // ⚠️⚠️ NO `else { hide() }`. [B-005 item 4, 2026-09-21] THIS WAS THE CAUSE OF THE
-          // EXTRA WINDOWS, and it is worth naming precisely because the two symptoms looked
-          // unrelated. Taking the modal down here left every later sub-step - the tracks
-          // pre-check, the early fit preflight - with nothing on screen, so each one raised
-          // its OWN surface: the modal again, then the small busy overlay. Three windows for
-          // one wait, and his report was exactly that: "the second modal shouldn't ever
-          // appear since the check is already covered in the first right? it's all part of
-          // checking the destination."
-          //
-          // ⭐ THE INVARIANT, and everything below depends on it: from here until the font
-          // scan takes over, THE MODAL STAYS UP. Sub-steps retitle it. Only a DIALOG may
-          // take it down, and whoever shows the dialog puts it back. That also keeps
-          // `_alreadyExplained()` true inside the preflight, which is what suppresses the
-          // small overlay - so the two symptoms had one cure.
-          // ⭐ Wording is free to change; windows are not. His ruling: "if you need more
-          // wording you can... don't care. just don't want more windows."
-        } catch (e) {
-          // ⚠️ Even a failed probe must leave the wait up - the caller carries on, and
-          // hiding here would hand the next sub-step a blank screen to fill. [B-005 item 4]
-          try { _sfDeleteProgress.show('Checking the destination…', 'Identifying the destination…'); } catch {}
-          console.warn('[B-238] slow-write warning did not run:', e);
+          // The helper takes the modal down to draw a dialog and puts it back saying "Checking
+          // free space…". Retitle to what is actually happening next.
+          _sfDeleteProgress.show('Checking the destination…', 'Identifying the destination…');
         }
         // The one remaining ask, and only where there is real evidence to act
         // on: this destination already has a tracks/ folder while the setting
@@ -40327,48 +40386,6 @@ require(['vs/editor/editor.main'], function () {
         // progress bar for the same reason every other long read in this app
         // does: silence reads as a hang, and it is worst exactly when there is
         // most to do.
-        // ── An obvious "no" before a scan that reads the whole card ───── [B-203]
-        //
-        // ⭐⭐ THE ACCURATE FIT CHECK HAS TO COME AFTER THIS SCAN, and that is correct: the
-        // real total depends on which items the user chose to SKIP, and the skip/replace
-        // decisions come out of the comparison below. But the UPPER BOUND does not depend on
-        // any of that - it is the whole selection - and if even that cannot fit, the answer
-        // is already known.
-        //
-        // ⚠️ HIS REPORT: exporting to a card with 0 B free sat through a full 28-item
-        // comparison, then refused. The refusal was right and the numbers were right; the
-        // wait before it was pure cost. The comparison HASHES EVERY FONT at the destination,
-        // which the comment above calls "real time spent off slow storage" - and on a card
-        // that obviously cannot take the export, none of it could change the answer.
-        //
-        // ⭐ It costs one statfs, measured 0.2-0.7 ms, so an early "no" is free and a
-        // "cannot tell yet" simply falls through to the accurate check later.
-        // ⚠️ NO DEVICE LOOKUP HERE. `classify` stays off: the ~1,900 ms question is about
-        // warning, not fitting, and it is asked once, later, by the real preflight.
-        {
-          // ⚠️ INLINED, NOT `_sfEntryBytes`. That helper is declared ~470 lines further down
-          // in this same function, so calling it here is a `const` in its temporal dead zone
-          // - a ReferenceError on every export, and one that `node --check` cannot see
-          // because the syntax is perfectly valid. Same trap as the top-level-vs-nested scope
-          // error earlier tonight: "it exists somewhere in the file" is not "it is usable
-          // here". Two lines of duplication beats moving a declaration 470 lines.
-          let _upper = 0;
-          for (const nm of names) {
-            const _e = (_sfAllEntries || []).find(x => x && x.name === nm);
-            _upper += (_e && _e.meta && _e.meta.contentTotalBytes) || 0;
-          }
-          for (const cs of commonSlots) {
-            const c = _sfCommons.find(x => x.uuid === cs.uuid);
-            _upper += (c && (c.totalBytes || (c.meta && c.meta.contentTotalBytes))) || 0;
-          }
-          if (_upper > 0) {
-            const _early = await _sfPreflightDestination({ destDir, totalBytes: _upper });
-            // ⚠️ Only an outright refusal short-circuits. `proceed` can also be false because
-            // the user backed out of a warning, but no warning can fire here - classify is
-            // off - so a false here means tooBig and nothing else.
-            if (!_early.proceed) { try { await _sfDeleteProgress.hide(); } catch {} return; }
-          }
-        }
 
         const unchangedFonts = [];
         const _scanT0 = Date.now();
@@ -40396,6 +40413,51 @@ require(['vs/editor/editor.main'], function () {
           );
         };
         _sfDeleteProgress.show('Checking the destination…', '', 0);
+        // ⭐⭐ THE SCAN IS CANCELLABLE, AND INSTANTLY. [B-420, 2026-09-24] Reported on a board-card
+        // export: *"no cancel at this stage... wasn't sure if this should be like that or not."*
+        // It should not. This is the longest read in the door - `entryMatchesAt` hashes a whole
+        // font folder per tick, off the card - and on a full card it is minutes. The same phase
+        // on the backup door was ruled cancellable this morning: *"cancel is stop analyzing...
+        // should be instant in that phase."*
+        // ⭐ AND IT IS FREE HERE, WHICH IS THE WHOLE ARGUMENT. Nothing has been written at this
+        // point - the scan only hashes and compares, and it deliberately does not even commit the
+        // manifest it learns (see the note in the loop below). So there is no rollback, no
+        // half-written folder, nothing to protect. `offerCancelNow` rather than `offerCancel` for
+        // exactly that reason.
+        // ⚠️ CHECKED AT EVERY LOOP BOUNDARY, not just once. A flag set during a 4-second hash is
+        // worth nothing if the next three fonts are hashed before anyone looks at it.
+        // ⚠️⚠️ ACKNOWLEDGE AND STAY UP - NOT `offerCancelNow`. [B-420, 2026-09-24] My first cut
+        // used the instant close, copied from the backup prep screen where his ruling was *"cancel
+        // is stop analyzing... should be instant in that phase."* That ruling is right THERE and
+        // wrong HERE, and the difference is what I missed:
+        //
+        //   backup prep : cancel abandons ONE in-flight call. Nothing else starts. Closing is
+        //                 honest because from the user's side it really is over.
+        //   this scan   : cancel must stop a LOOP that keeps issuing new work. The flag is only
+        //                 read at an item boundary, and each item is a whole font-folder hash off
+        //                 the destination - seconds away, not milliseconds.
+        //
+        // ⚠️⚠️ SO THE INSTANT CLOSE WAS A LIE, AND HE HIT THE CONSEQUENCE: the modal vanished, the
+        // scan kept reading, the app looked idle, and he started a SECOND export to the same
+        // destination on top of the first. *"I clicked cancel... looked like it did... then I
+        // started again to same location and it was still in progress."* Nothing guards against
+        // two exports at one destination, so a dishonest cancel is how that gets reached.
+        //
+        // ⭐ The surface stays until the work has actually stopped. That is the same promise the
+        // copy phase makes, and it is short here - one item, not one file at a time across a USB
+        // bridge.
+        // ⚠️⚠️ IT MUST SIGNAL MAIN TOO, NOT JUST SET A FLAG HERE. [B-420, 2026-09-24] The flag is
+        // read between ITEMS, and the tracks comparison is ONE item that internally hashes every
+        // track - so a cancel during it waited for the whole pass. His report: *"it goes through
+        // about 10-20 more files before it cancels."* `sharedTracks:planExport` is now gated, and
+        // this is what reaches it.
+        // ⚠️ Safe to cancel ALL live export tokens here: nothing has been written yet at scan
+        // time, so there is no other export of ours in flight to disturb.
+        let _scanCanceled = false;
+        _sfDeleteProgress.offerCancel(async () => {
+          _scanCanceled = true;
+          await _sfExportCancelOpt.onCancel();
+        });
         _scanTick('');
         // Independent clock, the app's established method (see the import flow).
         // Not because this phase emits no ticks — tracks tick per file — but
@@ -40412,6 +40474,7 @@ require(['vs/editor/editor.main'], function () {
           el.textContent = `${window._sfFormatDuration ? window._sfFormatDuration(sec) : `${Math.round(sec)}s`} elapsed`;
         }, 1000);
         for (const name of names) {
+          if (_scanCanceled) break;
           _scanTick(name);
           try {
             const m = await window.electronAPI.entryMatchesAt({ name, destDir });
@@ -40450,6 +40513,7 @@ require(['vs/editor/editor.main'], function () {
         // WRITTEN UNDER. Checking one name and creating another is the whole class of
         // bug this work removed. [B-014]
         for (const cs of commonSlots) {
+          if (_scanCanceled) break;
           try {
             const mineC = _sfCommons.find(x => x.uuid === cs.uuid);
             cs.packName = (mineC && mineC.meta && mineC.meta.name) || '';
@@ -40493,7 +40557,17 @@ require(['vs/editor/editor.main'], function () {
         // the user answering questions.
         let tracksDiffering = [];
         let tracksToAdd = [];
-        if (includeTracks) {
+        // ⚠️⚠️ THE CANCEL GUARD BELONGS ON EVERY STEP, NOT JUST THE LOOPS. [B-420, 2026-09-24]
+        // The two `for` loops above break on the flag; this step is a SINGLE call and had no
+        // check at all, so a cancel during the FONTS fell straight through to here and started a
+        // BRAND NEW cancel token - one that `cancelAll()` had already run past, so `shouldStop`
+        // was false for all hundred tracks. His screenshots caught it exactly: cancelled at
+        // "Comparing with your library · 11 of 31" on a FONT, and eight seconds later the label
+        // said "Stopping…" over a TRACK filename.
+        // ⭐ SAME SHAPE AS THE COPY LOOP BUG, ONE PHASE EARLIER: a per-call token means every new
+        // call starts unflagged, so the caller has to stop ITSELF. Gating the reads was necessary
+        // and not sufficient - something still has to decline to make the call.
+        if (includeTracks && !_scanCanceled) {
           _scanTick('shared tracks');
           const offPlan = window.electronAPI.onSharedTracksPlanProgress(({ file, done, total } = {}) => {
             _scanTick(file || 'shared tracks', total ? done / total : 0);
@@ -40512,6 +40586,32 @@ require(['vs/editor/editor.main'], function () {
         // Everything that had to be read has been read. Close the scan before
         // any decision opens, so the two never overlap on screen.
         clearInterval(_scanElapsedTicker);
+        // ⚠️⚠️ LEAVE BEFORE ANY DECISION OPENS. [B-420, 2026-09-24] The three reads above break
+        // out on the flag, but a cancel is only honoured if nothing that follows asks a question
+        // — a conflict review drawn after the user pressed Cancel is the app ignoring them and
+        // then demanding an answer. Everything
+        // the scan learned goes with it, and NOTHING WAS WRITTEN, so there is nothing to undo and
+        // nothing owed. `_scanObserved` is deliberately dropped rather than committed — see the
+        // note in the loop: a question must not mutate what it is asking about.
+        // ⚠️⚠️ AND HIDE IT. This path used to `return false` with the modal still on screen - which
+        // was invisible only because `offerCancelNow` had already hidden it on the click. Swapping
+        // to the acknowledging cancel exposes the missing hide, so the two changes belong
+        // together. [B-420, 2026-09-24]
+        if (_scanCanceled) {
+          try { await _sfDeleteProgress.hide(); } catch {}
+          return false;
+        }
+        // ⚠️⚠️ RETIRE THE OFFER WITH THE PHASE THAT OWNED IT. [B-420, 2026-09-24] `show()` does
+        // NOT clear the cancel affordance when the modal is already open, and that is correct: a
+        // running export retitles itself ("Exporting (3 of 7)") and must not lose its Cancel
+        // mid-copy. The consequence here is that the SCAN's Cancel survived into the phases after
+        // it, still wired to a flag nothing reads any more - so clicking it hid the modal and the
+        // export carried on underneath, invisible until the summary appeared. Reported as *"a
+        // cancel here skips straight to export"*.
+        // ⭐ The runner offers its own Cancel for the copy, through `onCancel`. Between the two
+        // there is genuinely nothing to stop - the totals are a sum over data already in hand -
+        // so the honest state is NO button rather than one that cannot do anything.
+        _sfDeleteProgress.clearCancel();
         // [B-357] ⚠️⚠️ A SUPERSEDED NOTE USED TO SIT HERE SAYING THE OPPOSITE of the line
         // above — "the scan is deliberately NOT hidden here", because closing it before the
         // next surface is up leaves a paint with no backdrop (the flash found 2026-07-31).
@@ -40862,346 +40962,402 @@ require(['vs/editor/editor.main'], function () {
             .reduce((sum, f) => sum + (willCopy.has(f.name) ? (f.size || 0) : 0), 0);
           _sfExportFileCount += willCopy.size;
         }
-        // ── Will it fit? ─────────────────────────────────────────── [B-203]
-        //
-        // The total is already summed above, and free space is one statfs - measured at
-        // 0.3ms on every destination tried, including a 2 TB NVMe, an 8 TB share over
-        // SMB, and cards behind four different Proffieboards. Free space is a counter
-        // the filesystem keeps, not a walk, so capacity does not affect the cost.
-        //
-        // ⚠️ REFUSE, DO NOT WARN. Running out mid-write leaves PARTIAL FONT FOLDERS THAT
-        // LOOK PRESENT: the folder is there, some wavs are missing, and nothing says so
-        // until the saber. There is exactly one right answer when the job cannot fit, and
-        // a situation with one right answer does not earn a prompt.
-        //
-        // ⚠️ CLUSTER-ROUNDED, so the comparison is against what the write really consumes.
-        // FAT32 rounds every file up to a cluster (32 KB on his cards), and measured over
-        // 486 real font files that is 4.5% more than the byte sum - worse for small files.
-        //
-        // ⚠️ AND IT NEVER FAILS CLOSED. checkFit returns fits:true whenever it could not
-        // measure, so an unreadable or unusual destination still exports. The numbers are
-        // an improvement on blindness, not a new gate.
-        // ⚠️ `_sfFmtSpace` WAS DELETED HERE. [B-420, 2026-09-23] It was this door's own
-        // non-breaking-space formatter for the "not enough room" refusal, which wrapped
-        // mid-quantity - "496.2" on one line and "MB more room." on the next. That refusal
-        // moved into `_sfRefuseNotEnoughRoom`, which carries the identical formatter, and
-        // this copy was stranded with no callers when it did. It came in on 2026-09-22 in
-        // the eject commit, so it is this work's own leftover rather than an old one.
-        // ⚠️ THE FIX IS NOT LOST, ONLY THE DUPLICATE - checked before deleting, because a
-        // dead formatter and a formatter nobody remembered to call read the same from here.
-        // ⭐ ONE PREFLIGHT, AND THIS DOOR GAINS THE SLOW-WRITE WARNING IT NEVER HAD.
-        // [B-005 item 4] It ran a fit check only; the board-card warning was on the other
-        // doors. Going through the shared helper means the primary export - the one most
-        // likely to be aimed at a card - now asks both questions, and the `info` it hands
-        // back is the same measurement its free-space line uses, so nothing is measured
-        // twice.
-        //
-        // ⚠️ THREE NUMBERS IN THE REFUSAL, AND THE THIRD IS THE ONE THEY ACT ON. Needed and
-        // free let them check our arithmetic; the SHORTFALL turns the dialog into a decision.
-        // His ruling: "it's better to let them know it won't fit and by how much. They don't
-        // want partial write. They have to decide what to change."
-        // ⚠️ DELIBERATELY NOT "13 of these 27 would fit" - that was offered and refused:
-        // choosing what to drop is theirs, and an app that picks a subset is one step from an
-        // app that writes one. Whole export or nothing. (Both live in the shared dialog now.)
-        let _sfDestInfo = null;
-        // ⭐ HOISTED OUT OF THE BLOCK BELOW. [B-005 item 4] The per-item export calls further
-        // down need this verdict, and re-measuring it there would cost a ~1,900 ms device
-        // lookup PER FONT. Established once, used by every write this run makes.
-        let _bulkBoardCard = false;
-        {
-          const _bulkPf = await _sfPreflightDestination({
-            destDir, totalBytes: _sfExportTotalBytes, fileCount: _sfExportFileCount || 0,
-          });
-          _sfDestInfo = _bulkPf.info;
-          _bulkBoardCard = _bulkPf.boardCard;
-          if (!_bulkPf.proceed) {
-            // ⚠️⚠️ CLOSE THE PROGRESS MODAL BEFORE LEAVING. "Preparing to export" is put up at
-            // the top of this flow so pressing Continue produces something on screen
-            // immediately. Returning without hiding it leaves it owned by a function that has
-            // already exited, with a bar that can never move - which reads as a stray second
-            // modal, and is exactly how he reported it: "why a separate modal? and bar doesn't
-            // move on that preparing one... should just be part of the main progress bar one
-            // modal." It is ONE modal; the bug was abandoning it, not creating another.
-            try { await _sfDeleteProgress.hide(); } catch {}
-            return;
-          }
-        }
-
-
-        let _sfExportBytesDone = 0;
-        let _sfExportLabel = '';
-        const _sfExportT0 = Date.now();
-        const _sfFmtB = window._sfFormatBytes || ((n) => `${n} B`);
-        const _sfRenderExportProg = () => {
-          const frac = _sfExportTotalBytes > 0
-            ? _sfExportBytesDone / _sfExportTotalBytes
-            : (totalSteps > 0 ? Math.max(0, stepIdx - 1) / totalSteps : 0);
-          const secs = Math.floor((Date.now() - _sfExportT0) / 1000);
-          const _fmtDur = (s) => (window._sfFormatDuration ? window._sfFormatDuration(s) : `${Math.round(s)}s`);
-          const labelLine = _sfExportTotalBytes > 0
-            ? `Copying · ${_sfFmtB(_sfExportBytesDone)} of ${_sfFmtB(_sfExportTotalBytes)}`
-            : 'Copying';
-          _sfDeleteProgress.setPhase(labelLine, frac, _sfExportLabel || '', `${_fmtDur(secs)} elapsed`);
-        };
-        const _offExportProg = window.electronAPI.onSoundFontExportProgress(({ delta } = {}) => {
-          _sfExportBytesDone += (delta || 0);
-          _sfRenderExportProg();
-        });
-        _sfDeleteProgress.show('Exporting', '', 0);
-        // ⭐⭐ HE BELIEVED THIS ONE ALREADY HAD A CANCEL. It did not - nothing in the export path
-        // offered one, which is exactly what made [B-005] item 4 a 1.8 blocker. It costs one line
-        // here because the mechanism is shared. [B-005 item 4]
-        _sfDeleteProgress.offerCancel(_sfExportCancelOpt.onCancel);
-        // ⚠️ THE LOOP IS IN THE RENDERER, so main stopping the CURRENT font is only half of it.
-        // Without this the next font would start and the cancel would read as "it ignored me" -
-        // the same shape as the bulk-import bug, on the other side of the IPC boundary.
+        // ⚠️⚠️ DECLARED HERE, NOT INSIDE THE CALLBACKS BELOW. [B-420, 2026-09-24] `produce`
+        // writes these and `onCompleted` reads them, and the two are separate closures - so a
+        // `let` inside either is invisible to the other. They live in the door's own scope,
+        // which every callback below closes over.
+        // ⚠️ `_sfDestInfo` WAS DELETED WITH THE OLD FIT BLOCK. It was assigned from the
+        // preflight and never read once: the fit block's comment claimed the summary's
+        // free-space line reused it, and that line actually re-measures with `_sfCheckFit`
+        // because the whole point is the space left AFTER the export. A `let` with a writer and
+        // no reader reads exactly like a wired-up feature.
         let _exportCanceled = false;
-        for (const name of names) {
-          const mode = modeByName.get(name) || 'rename';
-          if (mode === 'skip') {
-            // Already in destination, user chose to keep existing. No IPC
-            // call (it would just confirm the skip); no progress tick.
-            results.skipped++;
-            continue;
-          }
-          stepIdx++;
-          _sfExportLabel = name;
-          _sfDeleteProgress.show(`Exporting (${stepIdx} of ${totalSteps})`, '');
-          _sfRenderExportProg();
-          try {
-            // [B-005 item 4] boardCard established once by this run's preflight, above - not
-            // re-measured per font, which would cost ~1,900 ms each.
-            const r = await window.electronAPI.exportEntryToFolder({ name, destDir, mode,
-                                                                     boardCard: _bulkBoardCard });
-            // ⚠️⚠️ CHECKED BEFORE THE TALLIES BELOW. A cancel comes back ok:true and not-skipped,
-            // so it would fall straight through to results.copied++ and the summary would claim
-            // it exported the font it just abandoned. [B-005 item 4]
-            if (r && r.canceled) { _exportCanceled = true; break; }
-            // [B-402] Accumulate; nothing is written until the whole operation finishes.
-            if (r && r.observedItem && Array.isArray(r.observed)) _scanObserved.set(r.observedItem, r.observed);
-            // [B-364] Gathered across the WHOLE run and raised once at the end. A card
-            // export can touch a hundred fonts, and a dialog per font would be the
-            // feature making itself impossible to use.
-            for (const b of (r && r.refused) || []) _progRefusals.push({ ...b, _kind: 'entry', _id: name });
-            // (3) put on a card. Arguable - you can export a whole library
-            // without looking at any of it - but you have acted on it, and the
-            // alternative is a font living on your saber while still flagged NEW.
-            if (r && r.ok && !r.skipped) window._sfMarkSeen?.(name);
-            if (!r || !r.ok) {
-              failures.push({ name, error: (r && r.error) || 'unknown error' });
-            } else if (r.skipped) {
-              results.skipped++;
-            } else if (mode === 'replace') {
-              results.replaced++;
-            } else {
-              results.copied++;
-            }
-          } catch (err) {
-            failures.push({ name, error: String(err && err.message || err) });
-          }
-        }
-        // One write per slot, each into a folder of ITS OWN name, so a config using
-        // several gets several folders its presets can actually find. [B-014]
-        for (const cs of commonSlots) {
-          if (_exportCanceled) break;                                   // [B-005 item 4]
-          const _mode = _slotMode(cs);
-          if (_mode === 'skip') { results.skipped++; continue; }
-          stepIdx++;
-          _sfExportLabel = cs.slot + ' folder';
-          _sfDeleteProgress.show(`Exporting (${stepIdx} of ${totalSteps})`, '');
-          _sfRenderExportProg();
-          try {
-            const r = await window.electronAPI.exportCommonToFolder({
-              uuid: cs.uuid,
-              destDir,
-              mode: _mode,
-              targetName: cs.slot,
-              boardCard: _bulkBoardCard,   // [B-005 item 4] established once, above
+        let _sfExportLabel = '';
+        let _sfExportT0 = 0;
+        // Folders the destination could not dispose of after a successful replace. Reported by
+        // the shared ending, which already has the sentence for it. [B-420, 2026-09-24]
+        const _bulkLeftovers = [];
+        const _sfFmtB = window._sfFormatBytes || ((n) => `${n} B`);
+
+        // ── ON THE SHARED RUNNER ───────────────────────────────────── [B-420, 2026-09-24]
+        //
+        // ⭐⭐ THE LAST DOOR, AND THE ONE THE RUNNER WAS SHAPED AROUND. Everything above this line
+        // is the door deciding WHAT to export - the common-slot resolution, the picker, the early
+        // destination check, the conflict scan and every skip/replace choice that came out of it.
+        // Everything below is the runner doing the exporting, exactly as it does for the other
+        // thirteen.
+        //
+        // ⚠️ THE SCAN STAYS ABOVE, NOT INSIDE `plan`, AND THAT IS HIS RULING RATHER THAN A
+        // CONVENIENCE: "deciding whether to export is not exporting. The caller does it and calls
+        // this afterwards." Backup's survey-and-confirm screen got the same call. So `plan` here
+        // only reports the numbers the scan already worked out - it is the cheapest plan of any
+        // door, because the expensive part is a pre-step.
+        //
+        // ⚠️ THE MODAL IS ALREADY UP when we arrive, raised by the destination check and driven
+        // through the scan. The runner asks the DOM rather than assuming, finds it open, and
+        // retitles instead of opening a second one.
+        //
+        // ⭐ `overwriteDecided: true` - the scan above IS the comparison the runner would
+        // otherwise ask a door to supply, and every conflict already has an answer.
+        // ⭐ `slowWriteDecided` - the warning was put before the scan on purpose, so the runner's
+        // preflight must not put it again. See the early block above.
+        return await _sfRunExport({
+          label: 'export',
+          // ⚠️ Otherwise the runner titles this "Exporting export" off the label.
+          title: 'Exporting',
+          destDir,
+          endState: { kind: 'tree', path: destDir },
+          overwriteDecided: true,
+          slowWriteDecided: _slowWriteAsked,
+          // ⭐ This door claimed the destination back at the picker, before its scan - see there.
+          // Without this the runner would refuse its own caller. [B-420, 2026-09-24]
+          destClaimed: true,
+          // Its summary carries the eject row, so the toast's action is suppressed.
+          summaryHasEject: true,
+          // ⚠️⚠️ THE RENDERER'S OWN FLAG, AND IT IS THE HALF THAT WAS MISSING. [B-420, 2026-09-24]
+          //
+          // `export:cancel` flags the tokens that are LIVE at that instant, and `_withExportCancel`
+          // mints one PER IPC CALL. This door's produce is a loop of many calls, so cancelling
+          // reaches only the font in flight - which usually finishes anyway - and every font after
+          // it starts with a fresh, unflagged token. Measured, not reasoned: main replied
+          // `{"cancelled":1,"live":1}` and all 26 remaining fonts came back `canceled = false`,
+          // so the export ran to completion and reported success after he asked it to stop.
+          //
+          // ⭐ The comment above the loop has said this since the cancel was built - "the loop is
+          // in the renderer, so main stopping the CURRENT font is only half of it" - and only the
+          // main half was ever implemented. This is the other half.
+          //
+          // ⚠️ NOT A REPLACEMENT FOR THE IPC CANCEL. That one stops the copy that is running, so
+          // the current font does not have to finish before anything happens. This one stops the
+          // NEXT one from starting. Both are needed, which is why both are here.
+          onCancel: async () => {
+            _exportCanceled = true;
+            await _sfExportCancelOpt.onCancel();
+          },
+          // ⭐ THE SENTENCE FOR THE STRETCH BEFORE THE FIRST BYTE. [B-420, 2026-09-24] The bar
+          // opens unsized and only a real tick makes it determinate, and this door's first tick
+          // cannot arrive until the first font's first chunk has been written - an IPC round trip
+          // that is instant on a folder and seconds on a sleeping card. Without this the modal
+          // shows a moving bar and says nothing, which is the gap he named on the source door:
+          // "it shouldn't be showing bytes when it's not even working on a file."
+          startLabel: 'Preparing to copy…',
+
+          // ⚠️ The fit check this replaces lived here as a `_sfPreflightDestination` call of the
+          // door's own, and took the same two numbers. The runner runs it between `plan` and
+          // `produce`, refuses on `tooBig` through the shared dialog, and hands `boardCard` to
+          // produce below - which is the one value the per-font writes need and the reason that
+          // check cannot simply be dropped.
+          plan: async () => ({
+            items: [], totalBytes: _sfExportTotalBytes, fileCount: _sfExportFileCount,
+          }),
+
+          // ⭐⭐ THE DOOR OWNS THE SENTENCE, THE RUNNER OWNS THE SURFACE. [B-420]
+          //
+          // This door reports in DELTAS on `onSoundFontExportProgress`, which the runner supports
+          // directly via `deltas: true` - but that would spend the phase line on a byte count and
+          // lose "(3 of 27)", which is the only thing on screen that says how much of the JOB is
+          // left rather than how many bytes. A 27-font card export is the case this door exists
+          // for, so the count is kept and the bytes ride along beside it.
+          //
+          // ⚠️ ACCUMULATED HERE, NOT BY THE RUNNER. `subscribe` reports ABSOLUTES - mixing it
+          // with the delta channel would double-count every byte, which is why only one of the
+          // two is ever subscribed for a phase.
+          subscribe: (sink) => {
+            let done = 0;
+            return window.electronAPI.onSoundFontExportProgress(({ delta, name } = {}) => {
+              if (typeof delta === 'number') done += delta;
+              if (name) _sfExportLabel = name;
+              sink({
+                done, total: _sfExportTotalBytes,
+                name: _sfExportLabel || '',
+                label: _sfExportTotalBytes > 0
+                  ? `Exporting (${stepIdx} of ${totalSteps}) · ${_sfFmtB(done)} of ${_sfFmtB(_sfExportTotalBytes)}`
+                  : `Exporting (${stepIdx} of ${totalSteps})`,
+              });
             });
-            if (r && r.canceled) { _exportCanceled = true; break; }     // [B-005 item 4]
-            // [B-402] Accumulate; the single commit at the end of the export writes it.
-            if (r && r.observedItem && Array.isArray(r.observed)) _scanObserved.set(r.observedItem, r.observed);
-            for (const b of (r && r.refused) || []) _progRefusals.push({ ...b, _kind: 'common', _id: cs.uuid });
-            if (!r || !r.ok) failures.push({ name: cs.slot, error: (r && r.error) || 'unknown error' });
-            else if (r.skipped) {
-              results.skipped++;
-              commonOutcomes.push({ state: 'kept', slot: cs.slot, reason: commonReason, name: cs.packName || commonMineName, cardName: commonCardName });
-            } else {
-              if (_mode === 'replace') results.replaced++; else results.copied++;
-              commonOutcomes.push({ state: 'written', slot: cs.slot, reason: commonReason, name: cs.packName || commonMineName, cardName: commonCardName });
+          },
+
+          produce: async ({ boardCard }) => {
+            // ⚠️⚠️ STAMPED HERE, NOT WHERE IT IS DECLARED. [B-420, 2026-09-24] The declaration
+            // has to sit in the door's scope so `onCompleted` can read it, and leaving it at its
+            // initial 0 made the summary's elapsed line `Date.now() / 1000` - about 56 years.
+            // Nothing in the suite can see that: it is a real number in a real field, and only
+            // reading the two lines together says it is wrong.
+            // ⭐ And here is the RIGHT moment anyway - the runner's preflight runs before this,
+            // and "took" should measure the copying, not the checking that preceded it.
+            _sfExportT0 = Date.now();
+            // ⚠️ THE LOOP IS IN THE RENDERER, so main stopping the CURRENT font is only half of
+            // it. Without this the next font would start and the cancel would read as "it ignored
+            // me" - the same shape as the bulk-import bug, on the other side of the IPC boundary.
+            for (const name of names) {
+              // ⚠️ CHECKED AT THE TOP, BEFORE THE NEXT CALL IS ISSUED. Waiting for `r.canceled`
+              // alone is what let 26 fonts write after the click. [B-420, 2026-09-24]
+              if (_exportCanceled) break;
+              const mode = modeByName.get(name) || 'rename';
+              if (mode === 'skip') {
+                // Already in destination, user chose to keep existing. No IPC
+                // call (it would just confirm the skip); no progress tick.
+                results.skipped++;
+                continue;
+              }
+              stepIdx++;
+              _sfExportLabel = name;
+              try {
+                // ⭐ `boardCard` established ONCE by the runner's preflight and handed in here -
+                // not re-measured per font, which would cost ~1,900 ms each. [B-005 item 4]
+                const r = await window.electronAPI.exportEntryToFolder({ name, destDir, mode,
+                                                                         boardCard });
+                // ⚠️⚠️ CHECKED BEFORE THE TALLIES BELOW. A cancel comes back ok:true and
+                // not-skipped, so it would fall straight through to results.copied++ and the
+                // summary would claim it exported the font it just abandoned. [B-005 item 4]
+                if (r && r.canceled) { _exportCanceled = true; break; }
+                // [B-402] Accumulate; nothing is written until the whole operation finishes.
+                if (r && r.observedItem && Array.isArray(r.observed)) _scanObserved.set(r.observedItem, r.observed);
+                // [B-364] Gathered across the WHOLE run and raised once at the end by the shared
+                // ending. A card export can touch a hundred fonts, and a dialog per font would be
+                // the feature making itself impossible to use.
+                for (const b of (r && r.refused) || []) _progRefusals.push({ ...b, _kind: 'entry', _id: name });
+                // (3) put on a card. Arguable - you can export a whole library
+                // without looking at any of it - but you have acted on it, and the
+                // alternative is a font living on your saber while still flagged NEW.
+                if (r && r.ok && !r.skipped) window._sfMarkSeen?.(name);
+                if (!r || !r.ok) {
+                  failures.push({ name, error: (r && r.error) || 'unknown error' });
+                } else if (r.skipped) {
+                  results.skipped++;
+                } else if (mode === 'replace') {
+                  results.replaced++;
+                } else {
+                  results.copied++;
+                }
+              } catch (err) {
+                failures.push({ name, error: String(err && err.message || err) });
+              }
             }
-          } catch (err) {
-            failures.push({ name: cs.slot, error: String(err && err.message || err) });
-          }
-        }
-        if (includeTracks && willWriteTracks && !_exportCanceled) {     // [B-005 item 4]
-          stepIdx++;
-          _sfExportLabel = 'shared tracks folder';
-          _sfDeleteProgress.show(`Exporting (${stepIdx} of ${totalSteps})`, '');
-          _sfRenderExportProg();
-          try {
-            const r = await window.electronAPI.sharedTracksExportToFolder({
-              destDir,
-              mode: tracksMode,
-              replace: tracksReplace,
-            });
-            // ⚠️ Tracks report canceled WITH their counts - the additive path keeps every file
-            // that finished, so `added` is real work and belongs in the summary. [B-005 item 4]
-            if (r && r.canceled) _exportCanceled = true;
-            for (const b of (r && r.refused) || []) _progRefusals.push({ ...b, _kind: 'sharedTracks', _id: '' });
-            // [B-402] Accumulate; the single commit below writes it.
-            if (r && r.observedItem && Array.isArray(r.observed)) _scanObserved.set(r.observedItem, r.observed);
-            if (!r || !r.ok) {
-              failures.push({ name: 'tracks', error: (r && r.error) || 'unknown error' });
-            } else {
-              // Kept for the export summary: what shipped, what was replaced,
-              // what the user chose to keep, and WHY tracks were included when
-              // they did not tick the box themselves.
+            // One write per slot, each into a folder of ITS OWN name, so a config using
+            // several gets several folders its presets can actually find. [B-014]
+            for (const cs of commonSlots) {
+              if (_exportCanceled) break;                                 // [B-005 item 4]
+              const _mode = _slotMode(cs);
+              if (_mode === 'skip') { results.skipped++; continue; }
+              stepIdx++;
+              _sfExportLabel = cs.slot + ' folder';
+              try {
+                const r = await window.electronAPI.exportCommonToFolder({
+                  uuid: cs.uuid,
+                  destDir,
+                  mode: _mode,
+                  targetName: cs.slot,
+                  boardCard,                 // [B-005 item 4] established once, by the runner
+                });
+                if (r && r.canceled) { _exportCanceled = true; break; }   // [B-005 item 4]
+                // [B-402] Accumulate; the single commit at the end of the export writes it.
+                if (r && r.observedItem && Array.isArray(r.observed)) _scanObserved.set(r.observedItem, r.observed);
+                for (const b of (r && r.refused) || []) _progRefusals.push({ ...b, _kind: 'common', _id: cs.uuid });
+                // ⚠️⚠️ A LEFTOVER MUST BE SAID OUT LOUD. [B-420, 2026-09-24] `exportCommonToFolder`
+                // parks the previous folder aside and disposes of it after a successful write; if
+                // that disposal fails the export still SUCCEEDED and a `DELETE.<name>` folder is
+                // left at the destination. Observed on a real replace: the folder appeared and
+                // nothing anywhere mentioned it. The font door has always reported this through
+                // the shared ending - this one collected the field and dropped it.
+                // ⭐ An unexplained folder on a card is its own kind of dishonesty, and the name
+                // only helps someone who already trusts it was us.
+                if (r && r.replacedLeftover) _bulkLeftovers.push(r.replacedLeftover);
+                if (!r || !r.ok) failures.push({ name: cs.slot, error: (r && r.error) || 'unknown error' });
+                else if (r.skipped) {
+                  results.skipped++;
+                  commonOutcomes.push({ state: 'kept', slot: cs.slot, reason: commonReason, name: cs.packName || commonMineName, cardName: commonCardName });
+                } else {
+                  if (_mode === 'replace') results.replaced++; else results.copied++;
+                  commonOutcomes.push({ state: 'written', slot: cs.slot, reason: commonReason, name: cs.packName || commonMineName, cardName: commonCardName });
+                }
+              } catch (err) {
+                failures.push({ name: cs.slot, error: String(err && err.message || err) });
+              }
+            }
+            if (includeTracks && willWriteTracks && !_exportCanceled) {   // [B-005 item 4]
+              stepIdx++;
+              _sfExportLabel = 'shared tracks folder';
+              try {
+                const r = await window.electronAPI.sharedTracksExportToFolder({
+                  destDir,
+                  mode: tracksMode,
+                  replace: tracksReplace,
+                });
+                // ⚠️ Tracks report canceled WITH their counts - the additive path keeps every
+                // file that finished, so `added` is real work and belongs in the summary.
+                if (r && r.canceled) _exportCanceled = true;
+                for (const b of (r && r.refused) || []) _progRefusals.push({ ...b, _kind: 'sharedTracks', _id: '' });
+                // [B-402] Accumulate; the single commit below writes it.
+                if (r && r.observedItem && Array.isArray(r.observed)) _scanObserved.set(r.observedItem, r.observed);
+                if (!r || !r.ok) {
+                  failures.push({ name: 'tracks', error: (r && r.error) || 'unknown error' });
+                } else {
+                  // Kept for the export summary: what shipped, what was replaced,
+                  // what the user chose to keep, and WHY tracks were included when
+                  // they did not tick the box themselves.
+                  tracksOutcome = {
+                    reason: tracksReason,
+                    added: (r.added || []).length,
+                    replaced: (r.replaced || []).length,
+                    unchanged: (r.unchanged || []).length,
+                    kept: r.kept || [],
+                  };
+                  if (tracksOutcome.added || tracksOutcome.replaced) results.copied++; else results.skipped++;
+                }
+              } catch (err) {
+                failures.push({ name: 'tracks', error: String(err && err.message || err) });
+              }
+            } else if (includeTracks) {
+              // Included, but nothing needed writing. Worth saying: silence here reads as
+              // "tracks did not ship".
+              // ⚠⚠ AND SOME OF THEM MAY HAVE BEEN DELIBERATELY KEPT. `willWriteTracks` is false
+              // when the user skipped EVERY differing track, so this branch runs for a run that
+              // did make real choices - and it used to hard-code `kept: []`, discarding them
+              // before the summary could say so. The card then read as fully in sync while two
+              // files still differed. Found on his dev pass 2026-09-17: "All 57 shared tracks
+              // were already there", with two he had just chosen to keep.
+              const _keptNow = tracksDiffering.filter(t => !tracksReplace.includes(t));
               tracksOutcome = {
                 reason: tracksReason,
-                added: (r.added || []).length,
-                replaced: (r.replaced || []).length,
-                unchanged: (r.unchanged || []).length,
-                kept: r.kept || [],
+                added: 0, replaced: 0,
+                // ⚠ A kept track is NOT unchanged - it differs, and the user said leave it.
+                // Counting it as unchanged is what let the sentence below claim everything
+                // matched.
+                unchanged: Math.max(0, (window._sfSharedTracksFiles || []).length - _keptNow.length),
+                kept: _keptNow,
               };
-              if (tracksOutcome.added || tracksOutcome.replaced) results.copied++; else results.skipped++;
             }
-          } catch (err) {
-            failures.push({ name: 'tracks', error: String(err && err.message || err) });
-          }
-        } else if (includeTracks) {
-          // Included, but nothing needed writing. Worth saying: silence here reads as
-          // "tracks did not ship".
-          // ⚠⚠ AND SOME OF THEM MAY HAVE BEEN DELIBERATELY KEPT. `willWriteTracks` is false when
-          // the user skipped EVERY differing track, so this branch runs for a run that did make
-          // real choices - and it used to hard-code `kept: []`, discarding them before the summary
-          // could say so. The card then read as fully in sync while two files still differed.
-          // Found on his dev pass 2026-09-17: "All 57 shared tracks were already there", with two
-          // he had just chosen to keep.
-          const _keptNow = tracksDiffering.filter(t => !tracksReplace.includes(t));
-          tracksOutcome = {
-            reason: tracksReason,
-            added: 0, replaced: 0,
-            // ⚠ A kept track is NOT unchanged - it differs, and the user said leave it. Counting
-            // it as unchanged is what let the sentence below claim everything matched.
-            unchanged: Math.max(0, (window._sfSharedTracksFiles || []).length - _keptNow.length),
-            kept: _keptNow,
-          };
-        }
-        _offExportProg();
-        // [B-402] ⭐⭐ THE ONE MANIFEST WRITE, HERE, AT THE END OF THE WHOLE OPERATION.
-        //
-        // His design: "we gather all the information and at the very end we drop a single manifest
-        // update based on what we learned along the way." `_scanObserved` holds everything this
-        // operation learned - what the CONFLICT SCAN hashed at the destination, and what each
-        // export wrote - and none of it cost a read the operation was not already making.
-        //
-        // ⚠⚠ IT MUST COVER ITEMS THAT WERE ONLY LOOKED AT. The first cut wrote per exported
-        // item, so a font already identical at the destination - scanned, matched, never copied -
-        // had its hashes thrown away and re-read on every later export. On a card kept in sync
-        // that is most of the card.
-        //
-        // ⚠ A CANCELLED OPERATION NEVER REACHES THIS LINE, which is the whole point: asking what
-        // would change leaves nothing behind.
-        if (_scanObserved.size) {
-          try {
-            await window.electronAPI.syncManifestCommit({
-              destDir, items: Object.fromEntries(_scanObserved),
+            // [B-402] ⭐⭐ THE ONE MANIFEST WRITE, HERE, AT THE END OF THE WHOLE OPERATION.
+            //
+            // His design: "we gather all the information and at the very end we drop a single
+            // manifest update based on what we learned along the way." `_scanObserved` holds
+            // everything this operation learned - what the CONFLICT SCAN hashed at the
+            // destination, and what each export wrote - and none of it cost a read the operation
+            // was not already making.
+            //
+            // ⚠⚠ IT MUST COVER ITEMS THAT WERE ONLY LOOKED AT. The first cut wrote per exported
+            // item, so a font already identical at the destination - scanned, matched, never
+            // copied - had its hashes thrown away and re-read on every later export. On a card
+            // kept in sync that is most of the card.
+            //
+            // ⚠ A CANCELLED OPERATION NEVER REACHES THIS LINE, which is the whole point: asking
+            // what would change leaves nothing behind.
+            if (!_exportCanceled && _scanObserved.size) {
+              try {
+                await window.electronAPI.syncManifestCommit({
+                  destDir, items: Object.fromEntries(_scanObserved),
+                });
+              } catch {}
+            }
+            // ⭐⭐ `ok: true` WITH `failed` POPULATED, NOT `ok: false`. [B-420, 2026-09-24] The
+            // shared ending tests `!r.ok` FIRST and renders "Export failed - unknown error";
+            // a run where twenty-six fonts landed and one did not is not a failed export. The
+            // ending draws `failed` through `_sfShowPartialFailures` and `refused` through
+            // `_sfShowProgramRefusal`, which is where this door used to do both by hand.
+            return {
+              ok: true,
+              canceled: _exportCanceled,
+              failed: failures,
+              refused: _progRefusals,
+              wroteCount: results.copied + results.replaced,
+              // ⚠️ The shared ending takes ONE, so if several replaces all failed to dispose it
+              // names the first and the rest stay silent. Deliberate rather than overlooked: the
+              // sentence exists to explain an unexpected folder, and a list of them would need a
+              // surface of its own. One is the difference between "unexplained" and "explained";
+              // the second is not.
+              replacedLeftover: _bulkLeftovers[0] || null,
+            };
+          },
+
+          // ⚠️ ONLY ON SUCCESS. The shared ending draws the partial-failure list and the program
+          // refusal before it gets here, and a cancel never reaches this at all - it gets the
+          // stopped notice instead.
+          onCompleted: async () => {
+            // ⚠️ PRESERVED FROM THE OLD DOOR DELIBERATELY: a run with real failures shows the
+            // failure list and NOT the summary, and keeps the selection so the user can see what
+            // is still in scope and retry. The shared ending would happily draw both; whether it
+            // should is a call worth making on purpose rather than by migration.
+            if (failures.length) return;
+            // ── Room left on the card, for the summary ───────────────── [B-203]
+            //
+            // ⭐ NO NEW MECHANISM. [B-403] already primes a volume lookup at the folder picker
+            // and consumes it here, precisely because that query spawns PowerShell and measured
+            // 2666ms. Its result carries `driveType`, and driveType===2 IS "removable" - so the
+            // expensive half of this question was already answered and already paid for. The
+            // first cut of this started a SECOND lookup beside it: two mechanisms to keep in
+            // agreement forever, for one fact.
+            //
+            // ⚠️ THE BYTES COME FRESH FROM statfs, NOT FROM THE PRIMED LOOKUP. Those figures are
+            // from PICKER time, before this export wrote anything, and the whole point of the
+            // line is how much room is left AFTER it. statfs is 0.3ms, so re-reading is free and
+            // the alternative is a stale number that looks authoritative.
+            // ⚠️⚠️ EVERY EXIT SAYS WHY. The first cut had one `catch {}` around the whole block
+            // and no else-branches, so all four ways of getting no line looked identical from
+            // outside - and when the line did not appear on his first real export, nothing
+            // anywhere could say which one had happened. A silent predicate that answers false
+            // raises nothing, which is how a feature reports as shipped while doing nothing.
+            let _sfDestSpace = null;
+            try {
+              const _vp = (_sfVolPrime && _sfVolPrime.dir === String(destDir)) ? _sfVolPrime.p : null;
+              if (!_vp) {
+                console.warn('[B-203] no space line: volume lookup not primed for this destination',
+                  { destDir, primedFor: _sfVolPrime && _sfVolPrime.dir });
+              }
+              const _vol = _vp ? await _vp : null;
+              if (_vp && !_vol) {
+                console.warn('[B-203] no space line: primed volume lookup resolved to null', { destDir });
+              }
+              if (_vol && _vol.driveType !== 2) {
+                console.warn('[B-203] no space line: destination is not removable',
+                  { destDir, driveType: _vol.driveType });
+              }
+              if (_vol && _vol.driveType === 2) {
+                const _now = await _sfCheckFit({ destDir, totalBytes: 0 });
+                const _fresh = (_now && _now.ok && _now.result) || null;
+                if (!_fresh || !_fresh.ok) {
+                  console.warn('[B-203] no space line: could not measure free space',
+                    { destDir, reply: _now });
+                } else {
+                  _sfDestSpace = { removable: true, bytesFree: _fresh.bytesFree, bytesTotal: _fresh.bytesTotal };
+                }
+              }
+            } catch (e) {
+              // ⚠️ Was `catch {}`. A thrown error here - a missing preload bridge, an IPC that
+              // does not exist - is the single most likely cause of the whole feature being
+              // invisible, and it was the one thing the old form could not tell us.
+              console.warn('[B-203] no space line: threw', e);
+            }
+            // ⚠️⚠️ THE RUNNER LEFT THE PROGRESS MODAL UP FOR THIS. `keepOpen` is true for any door
+            // with an `onCompleted`, so the summary takes the surface over in the same task
+            // rather than opening one paint after the modal came down - which is the flash he
+            // caught on door 1. `closeProgress` is what performs that handover.
+            await _sfShowExportSummary({
+              destDir, names, modeByName, commonOutcomes, tracksOutcome, unchangedFonts, commonMissing,
+              commonFolderNames: _sfConfigSlotNames(),
+              elapsedSec: (Date.now() - _sfExportT0) / 1000,
+              closeProgress: () => _sfDeleteProgress.hide(),
+              destSpace: _sfDestSpace,
+              // ⚠️ Always false here: a cancelled run never reaches `onCompleted`. Kept as an
+              // explicit false rather than dropped, because the summary's signature still takes
+              // it and a missing argument reads as "nobody thought about this".
+              canceled: false,
+              // ⭐ The eject lives ON this summary, not in a dialog after it. Resolved here so
+              // the summary can draw the control; `null` simply omits the row. [B-005 item 4]
+              ...(await _sfEjectContext(destDir)),
             });
-          } catch {}
-        }
-        // Snap to a full bar so the operation visibly completes, absorbing any
-        // small drift between the meta byte totals and the bytes actually
-        // copied (e.g. an entry whose contentTotalBytes wasn't stamped yet).
-        _sfExportBytesDone = _sfExportTotalBytes;
-        _sfDeleteProgress.setProgress(1);
-        if (failures.length) {
-          await _sfDeleteProgress.hide();
-          await _sfShowPartialFailures('Some items failed to export', failures);
-          // [B-364] Still raised on the failure path: a program found in the library is
-          // not contingent on the rest of the export having gone well.
-          await _sfShowProgramRefusal({ refused: _progRefusals });
-          // Keep selection on real failures so the user can see what's still
-          // in scope and retry. (Skips don't count as failures — those were
-          // deliberate user choices.)
-          return true;
-        }
-        // Summary first, progress closed behind it. The summary does async work
-        // of its own (it lists the destination), so hiding first would leave the
-        // screen with no overlay across an IPC round trip.
-        // [B-203] Started before the copy and resolved by now for free. Re-measured here
-        // rather than reusing the pre-flight numbers: the whole point of the line is how
-        // much room is left AFTER this export, and the pre-flight figure predates it.
-        // ⚠️ Deliberately not awaited with a timeout or a spinner - if the classification
-        // somehow has not landed, the line is omitted and the summary is unchanged.
-        // ── Room left on the card, for the summary ───────────────── [B-203]
-        //
-        // ⭐ NO NEW MECHANISM. [B-403] already primes a volume lookup at the folder picker
-        // and consumes it at the summary, precisely because that query spawns PowerShell
-        // and measured 2666ms. Its result carries `driveType`, and driveType===2 IS
-        // "removable" - so the expensive half of this question was already answered and
-        // already paid for. The first cut of this started a SECOND lookup beside it: two
-        // mechanisms to keep in agreement forever, for one fact.
-        //
-        // ⚠️ THE BYTES COME FRESH FROM statfs, NOT FROM THE PRIMED LOOKUP. Those figures
-        // are from PICKER time, before this export wrote anything, and the whole point of
-        // the line is how much room is left AFTER it. statfs is 0.3ms, so re-reading is
-        // free and the alternative is a stale number that looks authoritative.
-        // ⚠️⚠️ EVERY EXIT SAYS WHY. The first cut had one `catch {}` around the whole block
-        // and no else-branches, so all four ways of getting no line looked identical from
-        // outside - and when the line did not appear on his first real export, nothing
-        // anywhere could say which one had happened. A silent predicate that answers false
-        // raises nothing, which is how a feature reports as shipped while doing nothing.
-        // The line is still omitted rather than guessed; it just stops being mute about it.
-        let _sfDestSpace = null;
-        try {
-          const _vp = (_sfVolPrime && _sfVolPrime.dir === String(destDir)) ? _sfVolPrime.p : null;
-          if (!_vp) {
-            console.warn('[B-203] no space line: volume lookup not primed for this destination',
-              { destDir, primedFor: _sfVolPrime && _sfVolPrime.dir });
-          }
-          const _vol = _vp ? await _vp : null;
-          if (_vp && !_vol) {
-            console.warn('[B-203] no space line: primed volume lookup resolved to null', { destDir });
-          }
-          if (_vol && _vol.driveType !== 2) {
-            console.warn('[B-203] no space line: destination is not removable',
-              { destDir, driveType: _vol.driveType });
-          }
-          if (_vol && _vol.driveType === 2) {
-            const _now = await _sfCheckFit({ destDir, totalBytes: 0 });
-            const _fresh = (_now && _now.ok && _now.result) || null;
-            if (!_fresh || !_fresh.ok) {
-              console.warn('[B-203] no space line: could not measure free space',
-                { destDir, reply: _now });
-            } else {
-              _sfDestSpace = { removable: true, bytesFree: _fresh.bytesFree, bytesTotal: _fresh.bytesTotal };
-            }
-          }
-        } catch (e) {
-          // ⚠️ Was `catch {}`. A thrown error here - a missing preload bridge, an IPC that
-          // does not exist - is the single most likely cause of the whole feature being
-          // invisible, and it was the one thing the old form could not tell us.
-          console.warn('[B-203] no space line: threw', e);
-        }
-        await _sfShowExportSummary({
-          destDir, names, modeByName, commonOutcomes, tracksOutcome, unchangedFonts, commonMissing,
-          commonFolderNames: _sfConfigSlotNames(),
-          elapsedSec: (Date.now() - _sfExportT0) / 1000,
-          closeProgress: () => _sfDeleteProgress.hide(),
-          destSpace: _sfDestSpace,
-          canceled: _exportCanceled,                                    // [B-005 item 4]
-          // ⭐ The eject lives ON this summary, not in a dialog after it. Resolved here so the
-          // summary can draw the control; `null` simply omits the row. [B-005 item 4]
-          ...(await _sfEjectContext(destDir)),
+            _sfSelectedNames.clear(); _sfBulkIncludeTracks = null;   // [B-287]
+            _sfRenderGrid();
+          },
         });
-        // AFTER the summary, not inside it. The summary reports the export; this is a
-        // separate question about the library, and folding it in would make the
-        // export's own close-out carry a destructive decision.
-        await _sfShowProgramRefusal({ refused: _progRefusals });
-        _sfSelectedNames.clear(); _sfBulkIncludeTracks = null;   // [B-287]
-        _sfRenderGrid();
-        return true;
+        } finally {
+          // ⚠️ EVERY exit path lands here - the refusals, the cancelled scan, the
+          // nothing-to-write run, the runner's own return and any throw. That is the whole
+          // reason the claim is wrapped rather than released at each `return`: this door has
+          // more than a dozen of them, and one missed would wedge the destination until
+          // restart, which is a worse bug than the one being fixed.
+          _releaseDest();
+        }
       };
       const _sfBulkDelete = async () => {
         const names = Array.from(_sfSelectedNames);

@@ -544,102 +544,6 @@ function summarize(payload, attachmentsWritten, customizedWritten) {
   };
 }
 
-// Add the sidecar to a zip that has already been written. Done as a post-step
-// on the finished export rather than inside the three exportToDownloads
-// implementations, because they produce their archive three different ways (a
-// pristine copyFile for zip sources, zipFolderToFile for folder sources, a
-// reconstruct-then-zip for deduped ones) and only ONE of them has a temp tree
-// to drop a file into. One function here covers all three.
-//
-// The pristine fast path stays pristine when there is nothing to carry: an
-// uncurated source never reaches this, so its exported bytes are still the
-// vendor's archive copied verbatim.
-// ⚠️⚠️ `shouldStop` ADDED 2026-09-23, AND IT IS NOT A NICETY. This phase ignored
-// cancellation entirely: he pressed Cancel on a board-card export and watched "Cancelling…
-// (finishing current file)" for over two minutes before killing the app - which is the
-// force-quit-mid-write scenario the whole SD guard exists to prevent. The app let him close,
-// because no quit guard covered an export either (both fixed together).
-// ⭐ `zipFolderToFile` HAS SUPPORTED `opts.shouldStop` ALL ALONG and aborts the archive on it.
-// The repack was one parameter away from being stoppable; nobody passed it.
-// ⚠️ The EXTRACT loop needs its own check - it is the other long half, and a stop signal
-// that only reached the re-zip would still sit through a full extraction of a multi-GB archive.
-async function injectIntoZip(zipPath, payload, onProgress, opts = {}) {
-  const _stop = () => !!(opts.shouldStop && opts.shouldStop());
-  let _exDone = 0, _exTotal = 0;
-  if (!payload) return { ok: true, injected: false, carried: summarize(null) };
-  const sources = require('./soundFontSources');
-  // ⚠️ THE WORKING TREE MUST LIVE BESIDE THE DESTINATION, NOT IN os.tmpdir().
-  // The rebuilt archive is moved into place with renameSync, and rename CANNOT
-  // cross volumes — it throws EXDEV. A user whose Desktop or Downloads is on a
-  // different drive from the system temp (D:\Desktop with temp on C:, which is
-  // exactly Ryan's machine) would hit that every single time. Staging in the
-  // destination's own directory makes the move same-volume by construction.
-  // Cost us a real 708 MB export on 2026-09-02. ([B-283])
-  const tmpDir = fs.mkdtempSync(path.join(path.dirname(zipPath), '.jmt-curation-'));
-  const treeDir = path.join(tmpDir, 'tree');
-  fs.mkdirSync(treeDir, { recursive: true });
-  let zip;
-  try {
-    zip = new StreamZip.async({ file: zipPath, skipEntryNameValidation: true });
-    const entries = await zip.entries();
-    const keys = Object.keys(entries).filter(k => entries[k].name
-      && entries[k].name !== '/' && !entries[k].isDirectory);
-    // ⚠️ The denominator comes from the archive's own directory - `size` is the UNCOMPRESSED
-    // length, which is what the extract actually writes, so the readout matches the work done.
-    _exTotal = keys.reduce((n, k) => n + (entries[k].size || 0), 0);
-    let done = 0;
-    for (const k of keys) {
-      const rel = entries[k].name.replace(/\\/g, '/');
-      const dest = path.resolve(treeDir, rel);
-      if (!dest.startsWith(path.resolve(treeDir) + path.sep)) continue;
-      fs.mkdirSync(path.dirname(dest), { recursive: true });
-      if (_stop()) throw new (require('./sfExportCopy').ExportCancelled)();
-      await zip.extract(entries[k].name, dest);
-      // ⚠️⚠️ REPORT THE EXTRACT, BECAUSE SILENCE READS AS STUCK. [2026-09-23] This phase emitted
-      // NOTHING - not a byte, not a filename - while unpacking the whole archive, so the display
-      // held at "0 B" for minutes and he reasonably concluded it had hung. It had not; it had no
-      // voice. A phase with no readout is indistinguishable from a phase that has died.
-      _exDone += (entries[k].size || 0);
-      if (onProgress) onProgress({ phase: 'curation-unpack', bytesDone: _exDone,
-                                   totalBytes: _exTotal, currentFile: entries[k].name });
-      done++;
-      if (onProgress) onProgress({ phase: 'curation-write', fileCount: done, totalFiles: keys.length });
-    }
-    await zip.close();
-    zip = null;
-    const written = writeIntoTree(treeDir, payload);
-    const outPath = path.join(tmpDir, 'out.zip');
-    await sources.zipFolderToFile(treeDir, outPath, (p) => onProgress && onProgress({
-      phase: 'curation-repack', bytesDone: p.bytesProcessed, totalBytes: p.totalBytes, currentFile: p.currentFile,
-    }), { shouldStop: opts.shouldStop || null });
-    // ⚠️ ORDER IS LOad-BEARING: move the ORIGINAL aside first, put the rebuilt
-    // one in place, and only then delete the original. The first version of this
-    // deleted the destination BEFORE the rename and lost a 708 MB export when
-    // the rename then failed. At no point may the destination path be empty
-    // while the replacement is still only a hope.
-    const backup = `${zipPath}.jmt-prev`;
-    try { fs.rmSync(backup, { force: true }); } catch {}
-    fs.renameSync(zipPath, backup);        // original safe, dest now free
-    try {
-      fs.renameSync(outPath, zipPath);     // same volume by construction
-    } catch (err) {
-      try { fs.renameSync(backup, zipPath); } catch {}  // put it back, exactly as it was
-      throw err;
-    }
-    try { fs.rmSync(backup, { force: true }); } catch {}
-    return { ok: true, injected: true, carried: summarize(payload, written.attachmentsWritten, written.customizedWritten) };
-  } catch (err) {
-    // An export that succeeded must never be destroyed by a failure to decorate
-    // it. Every path above either leaves the original in place or restores it.
-    // carried reports the empty set, not the payload: the archive on disk is the
-    // one WITHOUT the sidecar, so anything else would describe a file that is
-    // not there.
-    return { ok: false, injected: false, carried: summarize(null), error: String(err && err.message || err) };
-  } finally {
-    if (zip) { try { await zip.close(); } catch {} }
-    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
-  }
-}
 
 // Is there a sidecar at the root of this zip? This is the check every ordinary
 // import pays, so it reads the central directory and nothing else — no
@@ -682,73 +586,6 @@ function peekDir(dirPath) {
   } catch { return null; }
 }
 
-// Extract everything EXCEPT the sidecar and the files it points at, then
-// repackage. Returns { zipPath, tmpDir } — the caller owns tmpDir and must
-// remove it. The repackaged archive is what gets hashed and stored, so the
-// stored source is the font as the vendor shipped it, with our additions gone.
-async function stripAndRepackage(zipPath, payload, onProgress) {
-  const sources = require('./soundFontSources');
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jmt-curation-'));
-  const treeDir = path.join(tmpDir, 'tree');
-  fs.mkdirSync(treeDir, { recursive: true });
-  let zip;
-  try {
-    zip = new StreamZip.async({ file: zipPath, skipEntryNameValidation: true });
-    const entries = await zip.entries();
-    const keys = Object.keys(entries).filter((k) => {
-      const e = entries[k];
-      if (!e.name || e.name === '/' || e.isDirectory) return false;
-      if (e.name === SIDECAR_NAME) return false;
-      return true;
-    });
-    // Payload files (the receipts that rode along) are extracted OUT of the way
-    // rather than discarded — they are the point of carrying them — but they do
-    // not go into the tree that gets rehashed, so they cannot affect identity.
-    const payloadDir = path.join(tmpDir, 'payload');
-    const _isPayload = (rel) => rel === PAYLOAD_DIR || rel.startsWith(`${PAYLOAD_DIR}/`);
-    // ⚠️ THE DENOMINATOR MUST COUNT ONLY WHAT THE COUNTER COUNTS. `done` is
-    // incremented for CONTENT files only, so totalling every key made the strip
-    // half stop short of its 50% by exactly the number of receipts riding along.
-    // Invisible on a 1,500-file bundle, obvious on a ten-file font with two
-    // proofs of purchase, where the bar parks at 40% and then jumps.
-    const contentTotal = keys.reduce(
-      (n, k) => n + (_isPayload(entries[k].name.replace(/\\/g, '/')) ? 0 : 1), 0);
-    let done = 0;
-    for (const k of keys) {
-      const rel = entries[k].name.replace(/\\/g, '/');
-      const isPayload = _isPayload(rel);
-      const root = isPayload ? payloadDir : treeDir;
-      const dest = path.resolve(root, rel);
-      if (isPayload) {
-        if (!dest.startsWith(path.resolve(payloadDir) + path.sep)) continue;
-        fs.mkdirSync(path.dirname(dest), { recursive: true });
-        await zip.extract(entries[k].name, dest);
-        continue;
-      }
-      // Zip-slip guard: an entry that resolves outside the tree is not ours.
-      if (!dest.startsWith(path.resolve(treeDir) + path.sep)) continue;
-      fs.mkdirSync(path.dirname(dest), { recursive: true });
-      await zip.extract(entries[k].name, dest);
-      done++;
-      // currentFile keeps the line under the bar alive through the strip half;
-      // without it the filename freezes while only the bar moves, which reads as
-      // stuck on one file rather than working through many.
-      if (onProgress) onProgress({ phase: 'curation-strip', fileCount: done, totalFiles: contentTotal, currentFile: rel });
-    }
-    await zip.close();
-    zip = null;
-    const outPath = path.join(tmpDir, path.basename(zipPath));
-    await sources.zipFolderToFile(treeDir, outPath, (p) => onProgress && onProgress({
-      phase: 'curation-repack', bytesDone: p.bytesProcessed, totalBytes: p.totalBytes, currentFile: p.currentFile,
-    }));
-    try { fs.rmSync(treeDir, { recursive: true, force: true }); } catch {}
-    return { zipPath: outPath, tmpDir, payloadDir };
-  } catch (err) {
-    if (zip) { try { await zip.close(); } catch {} }
-    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
-    throw err;
-  }
-}
 
 // Apply the source half after the import has landed: the curated fields, and
 // the attachments the sidecar carried. Attachments are re-stored from the
@@ -964,8 +801,7 @@ function entryCurationFor(payload, candidatePath) {
 module.exports = {
   SIDECAR_NAME, PAYLOAD_DIR, SCHEMA_VERSION,
   SOURCE_FIELDS, ENTRY_FIELDS,
-  buildForSource, writeIntoTree, planForArchive, injectIntoZip, peekZip, peekDir,
-  stripAndRepackage, summarize,
+  buildForSource, writeIntoTree, planForArchive, peekZip, peekDir, summarize,
   applySourceCuration, entryCurationFor, entryProvenanceFor, restoreCustomizedEntries,
   ENTRY_PROV_FIELDS,
 };

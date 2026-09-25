@@ -10,6 +10,7 @@ const fs = require('fs');
 const fsp = require('fs').promises;   // [B-400] async copy, so the loop can yield
 const path = require('path');
 const { copyTreeWithProgress, copyFileWithProgress } = require('./sfExportCopy');
+const { rmWithRetry } = require('./fsRemove');
 const hashIndex = require('./soundFontSharedTracksHash');
 
 function sharedTracksRoot(userData) {
@@ -391,7 +392,15 @@ function existsAt(destDir) {
 // ⚠️ ASYNC SINCE [B-398]. Every file here is a music track - megabytes each - and this hashes
 // TWO of them per track. Measured 623ms stalled inside tracks:planExport with a per-file yield
 // already in place, because the block is inside ONE hash, not between them.
-async function planExport(userData, destDir, onFile = null) {
+// ⚠️⚠️ `shouldStop` ADDED 2026-09-24 [B-420]. This is a READ - it hashes tracks to work out what
+// would be written - and it had NO cancel of any kind. Its caller (the primary export's conflict
+// scan) checks its own flag between ITEMS, and this whole pass is ONE item, so a cancel during the
+// tracks comparison sat through every remaining file before anything noticed.
+//
+// ⭐ HIS POINT, AND IT IS THE RIGHT ONE: *"why would it need to do anything if all it was doing was
+// analyzing? there's not a copy being made... so it should just stop."* Nothing is written here, so
+// there is nothing to protect and nothing to finish - the only honest behaviour is to stop.
+async function planExport(userData, destDir, onFile = null, shouldStop = null) {
   if (!destDir) return { ok: false, error: 'Missing destDir' };
   const srcDir = sharedTracksRoot(userData);
   if (!fs.existsSync(srcDir)) return { ok: false, error: 'Shared tracks folder not found' };
@@ -427,6 +436,9 @@ async function planExport(userData, destDir, onFile = null) {
 
   let done = 0;
   for (const name of names) {
+    // ⚠️ CHECKED PER FILE. Each iteration can hash a whole track off slow storage, so a check
+    // only at the top of the pass would be no better than none. [B-420, 2026-09-24]
+    if (shouldStop && shouldStop()) return { ok: true, canceled: true };
     if (onFile) { try { onFile(name, done, names.length); } catch {} }
     done++;
     const dst = path.join(targetDir, name);
@@ -623,6 +635,10 @@ async function exportToFolder(userData, destDir, mode = 'rename', onBytes = null
     catch (err) { return { ok: false, error: `Cannot create destination: ${err.message}` }; }
   }
   let targetName = 'tracks';
+  // ⚠️ Declared out here because the `replace` branch writes it and the three exits below read
+  // it. See the twin in soundFontCommon - neither file is in strict mode, so a `let` inside the
+  // branch would not throw, it would make a silent global. [B-420, 2026-09-24]
+  let asideDir = null;
   const exists = fs.existsSync(path.join(destDir, targetName));
   if (exists) {
     if (mode === 'skip') {
@@ -632,8 +648,23 @@ async function exportToFolder(userData, destDir, mode = 'rename', onBytes = null
       // ⚠️ AWAITED — recursive delete of a whole item on the CARD, no yielding. [B-398]
       // Same defect and same fix as soundFontEntries.exportEntryToFolder; it only fires when the
       // destination already exists, so re-exporting is the reproduction.
-      try { await fs.promises.rm(path.join(destDir, targetName), { recursive: true, force: true }); }
-      catch (err) { return { ok: false, error: `Cannot remove existing folder: ${err.message}` }; }
+      // ⚠️⚠️ SET ASIDE, DO NOT DELETE - the twin of the common folder's replace, changed at the
+      // same time and for the same reason. [B-420, 2026-09-24] That one was REPORTED: a recursive
+      // delete failed partway, and because it deletes before it writes, the reply was an error
+      // AND the user's existing folder was already gutted. This path is the identical shape and
+      // was one report away from the identical outcome.
+      // ⭐ Fixing only the one that was reported is how a codebase grows two answers to one
+      // question. The pattern is the font export's, which has always renamed rather than deleted.
+      asideDir = path.join(destDir, `ORIGINAL.${targetName}`);
+      if (fs.existsSync(asideDir)) {
+        try { await rmWithRetry(asideDir); }
+        catch (err) { return { ok: false, error: `Cannot clear a leftover ORIGINAL folder: ${err.message}` }; }
+      }
+      try { await fs.promises.rename(path.join(destDir, targetName), asideDir); }
+      catch (err) {
+        asideDir = null;
+        return { ok: false, error: `Cannot set aside the existing folder: ${err.message}` };
+      }
     } else {
       // First suffix is _2 ([B-343]): the original is implicitly number one.
       let n = 2;
@@ -664,14 +695,64 @@ async function exportToFolder(userData, destDir, mode = 'rename', onBytes = null
       // ⚠️ Same reasoning as the additive path above: finished tracks are complete, playable
       // files and are left where they landed. Nothing is removed. [B-005 item 4]
       if (require('./sfExportCopy').isCancel(err)) {
-        return { ok: true, canceled: true, destPath: targetDir, refused: _refused };
+        const out = { ok: true, canceled: true, destPath: targetDir, refused: _refused,
+                      restored: false, leftovers: [] };
+        // ⭐ RESTORE FIRST, DISPOSE SECOND - see the twin in soundFontCommon for why the order
+        // matters. Finished tracks are complete playable files and are left where they landed,
+        // but on a REPLACE the user's previous folder is parked aside and must come back.
+        if (asideDir) {
+          const junk0 = path.join(destDir, `DELETE.${targetName}`);
+          try {
+            if (fs.existsSync(junk0)) await rmWithRetry(junk0);
+            if (fs.existsSync(targetDir)) {
+              await fs.promises.rename(targetDir, junk0);
+              out.leftovers.push(junk0);
+            }
+          } catch { /* the restore below matters more than tidiness */ }
+          try {
+            await fs.promises.rename(asideDir, targetDir);
+            out.restored = true;
+          } catch { out.leftovers.push(asideDir); }
+          const junkLeft = out.leftovers.find((p) => /[\\/]DELETE\./.test(p));
+          if (junkLeft) {
+            try {
+              await rmWithRetry(junkLeft);
+              out.leftovers = out.leftovers.filter((p) => p !== junkLeft);
+            } catch { /* keep it named so the user is told it is there */ }
+          }
+        }
+        return out;
       }
       throw err;
     }
-    return { ok: true, destPath: targetDir, refused: _refused };
+    // ⭐ Past this line the new folder is complete and the parked copy is superseded. Renamed
+    // before removal so an interrupted disposal leaves something whose NAME says what it is.
+    // ⚠️ Not fatal: the export succeeded, so a leftover is a note rather than an error.
+    let replacedLeftover = null;
+    if (asideDir) {
+      const junk = path.join(destDir, `DELETE.${targetName}`);
+      try {
+        if (fs.existsSync(junk)) await rmWithRetry(junk);
+        await fs.promises.rename(asideDir, junk);
+        replacedLeftover = junk;
+        await rmWithRetry(junk);
+        replacedLeftover = null;
+      } catch {
+        replacedLeftover = fs.existsSync(junk) ? junk
+          : (fs.existsSync(asideDir) ? asideDir : null);
+      }
+    }
+    return { ok: true, destPath: targetDir, refused: _refused, replacedLeftover };
   } catch (err) {
     try { fs.rmSync(targetDir, { recursive: true, force: true }); } catch {}
-    return { ok: false, error: String(err && err.message || err) };
+    // ⚠️ And put their folder back on any non-cancel failure, for the same reason as the twin:
+    // before the set-aside there was nothing to restore because it had already been deleted.
+    let _restoreNote = '';
+    if (asideDir && fs.existsSync(asideDir)) {
+      try { await fs.promises.rename(asideDir, path.join(destDir, targetName)); }
+      catch { _restoreNote = ` Your previous folder is still at "ORIGINAL.${targetName}".`; }
+    }
+    return { ok: false, error: String(err && err.message || err) + _restoreNote };
   }
 }
 

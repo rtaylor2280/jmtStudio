@@ -243,10 +243,219 @@ ok('a cancelled voice-pack export removes its partial when removal is cheap',
 ok('⭐ and OFFERS instead when removal would be slow, exactly as the font door does',
    /opts\.boardCard && _ed\.isSlowWriteJob/.test(common) && /out\.offerCleanup = junk/.test(common),
    'same shape of job, same destination, same thresholds - it must get the same treatment');
-ok('a cancelled tracks export KEEPS what landed',
-   /isCancel\(err\)\) \{\s*\n\s*return \{ ok: true, canceled: true, destPath: targetDir/.test(tracks)
-   && !/isCancel\(err\)\)[\s\S]{0,200}?rm\(targetDir/.test(tracks),
-   'finished tracks are complete playable files; deleting them tidies nothing');
+// ⚠️⚠️ THIS ASSERTED ONE RULE ACROSS TWO FUNCTIONS, AND THEY DO NOT SHARE IT. [B-420,
+// 2026-09-24] `soundFontSharedTracks` exports BOTH `exportToFolderAdditive` - the one every
+// normal tracks export uses, which adds to what is there - and `exportToFolder`, the
+// replace-mode sibling reached from the right-click door. The old anchor matched a literal
+// return shape anywhere in the file, so it was really testing whichever function happened to
+// match first, and it went red when the replace path gained a restore.
+//
+// ⭐ THE RULE IS REAL AND IT BELONGS TO THE ADDITIVE PATH: nothing at the destination was
+// displaced, so a half-finished run leaves complete playable files and deleting them tidies
+// nothing. On a REPLACE the user's previous folder was parked aside, and the partial cannot be
+// kept because it occupies the path the original has to come back to - so it follows the font
+// door's ending instead, which is the same question already answered.
+{
+  const addStart = tracks.indexOf('async function exportToFolderAdditive');
+  const addEnd = tracks.indexOf('\n}', addStart);
+  const additive = addStart > 0 ? tracks.slice(addStart, addEnd) : '';
+  ok('the additive tracks function was located', additive.length > 0,
+     're-anchor if exportToFolderAdditive is renamed');
+  ok('a cancelled ADDITIVE tracks export KEEPS what landed',
+     /isCancel\(err\)\) \{ _canceled = true; \}/.test(additive)
+     && !/rm\(targetDir/.test(additive),
+     'finished tracks are complete playable files; deleting them tidies nothing');
+}
+ok('a cancelled REPLACE tracks export restores the folder it set aside',
+   /rename\(asideDir, targetDir\)/.test(tracks) && /out\.restored = true/.test(tracks),
+   'replace parks the previous folder at ORIGINAL.<name>; not putting it back would leave the '
+   + 'user with neither their old tracks nor a complete new set - which is exactly what the '
+   + 'delete-first version did');
+
+// ── 6b. A cancel OFFER must not outlive the phase that made it ──────
+//
+// ⚠️⚠️ REPORTED 2026-09-24: *"a cancel here skips straight to export"*. The primary export's
+// conflict scan offers a cancel, and `show()` deliberately does NOT clear the cancel affordance
+// when the modal is already open - correct, because a running export retitles itself and must
+// keep its Cancel. The consequence was that the SCAN's button survived into the phases after it,
+// still wired to a flag nothing reads, so clicking it hid the modal while the export ran on
+// underneath.
+//
+// ⚠️⚠️ AND A SECOND REPORT THE SAME HOUR KILLED THE INSTANT-CLOSE VARIANT ENTIRELY: *"I clicked
+// cancel... looked like it did... then I started again to same location and it was still in
+// progress."* The scan is a LOOP - the flag is only read at an item boundary, and each item is a
+// whole font-folder hash - so closing the surface on the click made a still-running scan look
+// finished. `offerCancelNow` was deleted; the scan acknowledges and stays up like every other
+// phase that cannot stop instantly.
+//
+// ⭐ THE RULE IS PAIRING, AND IT IS THE SAME ONE `_btnBusy`/`_btnIdle` taught the same day: an
+// offer has an owner and a lifetime. Assert the ORDER - offered, cleared, and only then handed to
+// the runner, which makes its own offer for the copy.
+{
+  const a = html.indexOf('const _sfBulkSave = async () => {');
+  const b = html.indexOf('const _sfBulkDelete = async () => {', a);
+  ok('the primary export was located for the cancel-lifetime check', a > 0 && b > a,
+     're-anchor if _sfBulkSave is renamed');
+  const body = a > 0 && b > a ? html.slice(a, b) : '';
+  const offered = body.indexOf('offerCancel(');
+  const cleared = body.indexOf('clearCancel()');
+  const handoff = body.indexOf('await _sfRunExport({');
+  ok('the scan offers a cancel', offered > 0,
+     'the conflict scan is the longest read in this door and must be stoppable');
+  // ⭐ AND IT MUST NOT BE THE CLOSE-ON-CLICK KIND. A surface that disappears while the loop keeps
+  // reading is how a cancelled export got a second export started on top of it.
+  ok('⭐ and it is the acknowledging kind, not the instant-close kind',
+     !/offerCancelNow\(/.test(html),
+     'the scan cannot stop instantly - the flag is read at an item boundary - so a cancel that '
+     + 'hides the surface immediately reports a stop that has not happened');
+  // ⭐ And the exit that flag reaches must take the surface down itself, since nothing else will.
+  ok('⭐ and the cancelled scan hides its own modal on the way out',
+     /if \(_scanCanceled\) \{[\s\S]{0,200}?_sfDeleteProgress\.hide\(\)/.test(body),
+     'this returned with the modal still on screen; it was invisible only because the '
+     + 'instant-close cancel had already hidden it');
+  ok('⭐ and RETIRES it before handing off to the runner',
+     cleared > offered && handoff > cleared,
+     'an offer that outlives its phase is a button that cannot stop anything - it hid the modal '
+     + 'and let the export run on invisibly. Order must be: offer, clear, hand off');
+}
+
+// ── 6c. A multi-call door must stop ITSELF, not wait to be told ─────
+//
+// ⚠️⚠️ MEASURED 2026-09-24, and it is the sharpest instance of this defect class in the app.
+// `export:cancel` flags the tokens LIVE at that instant, and `_withExportCancel` mints one per
+// IPC call. The primary export's produce is a LOOP of many calls, so a cancel reached only the
+// font in flight - which finished anyway - and every font after it began with a fresh, unflagged
+// token. The console said it exactly:
+//     [cancel] main replied: {"ok":true,"cancelled":1,"live":1}
+//     [cancel] font Energy returned canceled = false        (and 25 more)
+// The export ran to completion and reported "26 written" after the user asked it to stop.
+//
+// ⭐ THE COMMENT ABOVE THAT LOOP HAD SAID SO SINCE THE CANCEL WAS BUILT - "the loop is in the
+// renderer, so main stopping the CURRENT font is only half of it" - and only the main half was
+// ever implemented. A rule written beside the code it describes is not a check.
+//
+// ⚠️ BOTH HALVES ARE REQUIRED. The IPC cancel stops the copy that is RUNNING; the renderer flag
+// stops the NEXT one from starting. Asserting only one would let the other rot.
+{
+  const a = html.indexOf('const _sfBulkSave = async () => {');
+  const b = html.indexOf('const _sfBulkDelete = async () => {', a);
+  const body = a > 0 && b > a ? html.slice(a, b) : '';
+  const pStart = body.indexOf('produce: async ({ boardCard }) => {');
+  const pEnd = body.indexOf('onCompleted: async () => {', pStart);
+  const produce = pStart > 0 && pEnd > pStart ? body.slice(pStart, pEnd) : '';
+  ok('the produce step was located', produce.length > 0, 're-anchor if the callback is renamed');
+
+  ok('⭐ the door sets its OWN cancel flag, not just the IPC one',
+     /onCancel: async \(\) => \{[\s\S]{0,200}?_exportCanceled = true;[\s\S]{0,200}?_sfExportCancelOpt\.onCancel\(\)/.test(body),
+     'without this the loop keeps issuing calls, each getting a fresh token that was never '
+     + 'flagged - which is how 26 fonts wrote after the click');
+
+  // Every `for` loop that issues an export call must test the flag before issuing the next one.
+  const loops = [...produce.matchAll(/for \(const (?:name of names|cs of commonSlots)\) \{/g)];
+  ok(`both per-item loops were located (${loops.length})`, loops.length === 2,
+     'if a third item loop is added it needs the same guard');
+  const unguarded = loops.filter((m) => {
+    const after = produce.slice(m.index, m.index + 400);
+    return !/if \(_exportCanceled\) break;/.test(after);
+  });
+  ok('⭐ and every per-item loop breaks on it BEFORE issuing the next call',
+     unguarded.length === 0,
+     'a loop that only checks the RETURN value cannot stop until a call happens to come back '
+     + 'cancelled, and a fresh token never does');
+  ok('⚠️ and the tracks step is gated on it too',
+     /if \(includeTracks && willWriteTracks && !_exportCanceled\)/.test(produce),
+     'it is one call rather than a loop, but it must not start after a cancel either');
+}
+
+// ── 6d. Every long READ in the scan can be stopped ──────────────────
+//
+// ⚠️⚠️ HIS REPORT 2026-09-24: *"it goes through about 10-20 more files before it cancels... it says
+// stopping and files are still flying by."* The conflict scan's cancel is a renderer flag read
+// BETWEEN items, and each item is ONE IPC call that hashes a whole font, a whole common folder, or
+// the entire tracks set. So a cancel waited for that call to finish - up to a hundred tracks.
+//
+// ⭐ HIS ARGUMENT IS THE RULE: *"why would it need to do anything if all it was doing was
+// analyzing? there's not a copy being made... so it should just stop."* Nothing is written by any
+// of these, so there is nothing to protect and nothing to finish.
+//
+// ⚠️ TWO HALVES PER READ, and a check on either alone would pass while the bug survived: the
+// HANDLER must take a cancel token, and the MODULE must test it PER FILE.
+{
+  const mainSrc = main.replace(/\/\/.*$/gm, '');
+  const reads = [
+    { name: 'tracks planExport', channel: "'sharedTracks:planExport'",
+      src: read('soundFontSharedTracks.js'), fn: 'async function planExport' },
+    { name: 'entryMatchesAt', channel: "'soundFonts:entryMatchesAt'",
+      src: entries, fn: 'async function entryMatchesAt' },
+    { name: 'commonMatchesAt', channel: "'common:matchesAt'",
+      src: common, fn: 'async function commonMatchesAt' },
+  ];
+  for (const r of reads) {
+    // ⚠️⚠️ BOUNDED BY THE NEXT HANDLER, NEVER BY A CHARACTER COUNT. A 900-char window here read
+    // straight into the FOLLOWING `ipcMain.handle`, which has its own `_withExportCancel` - so
+    // removing the gate from this one left the test green. Proved by mutation. `export-runner-
+    // ratchet.test.js` states the rule in its own header ("two markers, never a character count")
+    // and I wrote the character count anyway.
+    const i = mainSrc.indexOf(`ipcMain.handle(${r.channel}`);
+    const nxt = i > 0 ? mainSrc.indexOf('ipcMain.handle(', i + 10) : -1;
+    const body = i > 0 ? mainSrc.slice(i, nxt > i ? nxt : undefined) : '';
+    ok(`${r.name}: the handler takes a cancel token`,
+       body.length > 0 && /_withExportCancel\(async \(shouldStop\)/.test(body),
+       'an ungated read cannot be stopped no matter what the renderer does');
+
+    const j = r.src.replace(/\/\/.*$/gm, '').indexOf(r.fn);
+    const mod = j > 0 ? r.src.replace(/\/\/.*$/gm, '').slice(j, j + 4000) : '';
+    ok(`  and the module tests it inside its loop`,
+       /for \(const [\w.]+ of [\w.]+\) \{\s*\n\s*if \((?:opts\.)?shouldStop && (?:opts\.)?shouldStop\(\)\) return/.test(mod),
+       'checked once before the loop is the same as not checked - each iteration can hash '
+       + 'megabytes off a card');
+  }
+}
+
+// ── 6e. EVERY step of the scan declines to start after a cancel ─────
+//
+// ⚠️⚠️ THE GUARDS WENT ON THE LOOPS AND THE THING THAT KEPT RUNNING WAS NOT ONE. [B-420,
+// 2026-09-24] The conflict scan is three steps: fonts (a loop), common slots (a loop), and shared
+// tracks (ONE call). Both loops broke on the flag; the tracks step had no check at all, so a cancel
+// during the FONTS fell through to it and started a BRAND NEW cancel token - one `cancelAll()` had
+// already run past - and hashed all hundred tracks with `shouldStop` false throughout.
+//
+// ⭐ His screenshots are the record: cancelled at *"Comparing with your library · 11 of 31"* on a
+// font, and eight seconds later *"Stopping…"* over a track filename.
+//
+// ⚠️ GATING THE READS WAS NECESSARY AND NOT SUFFICIENT. A per-call token means every new call
+// begins unflagged, so the CALLER has to decline to make it. Both halves, or neither works.
+{
+  const a = html.indexOf('const _sfBulkSave = async () => {');
+  const b = html.indexOf('const _sfBulkDelete = async () => {', a);
+  const body = a > 0 && b > a ? html.slice(a, b) : '';
+  const s = body.indexOf('_sfDeleteProgress.offerCancel(async () => {');
+  const e = body.indexOf('if (_scanCanceled) {', s);
+  const scan = s > 0 && e > s ? body.slice(s, e) : '';
+  ok('the scan region was located', scan.length > 0,
+     're-anchor if the cancel offer or the post-scan exit moves');
+
+  ok('⭐ the font loop breaks on the flag',
+     /for \(const name of names\) \{\s*\n(?:\s*\/\/[^\n]*\n)*\s*if \(_scanCanceled\) break;/.test(scan));
+  ok('⭐ the common loop breaks on the flag',
+     /for \(const cs of commonSlots\) \{\s*\n\s*if \(_scanCanceled\) break;/.test(scan));
+  ok('⭐⭐ and the tracks step declines to START',
+     /if \(includeTracks && !_scanCanceled\) \{/.test(scan),
+     'it is a single call, not a loop - without this a cancel during the fonts still hashes '
+     + 'every track, on a token that was minted after the cancel and so was never flagged');
+
+  // ⚠️ AND THE GENERAL FORM, so a FOURTH step added later cannot slip through: every IPC call in
+  // this region must have a `_scanCanceled` test somewhere above it in the same region.
+  const calls = [...scan.matchAll(/await window\.electronAPI\.(\w+)\(/g)]
+    .filter((m) => m[1] !== 'exportCancel');
+  ok(`every scan read was located (${calls.length})`, calls.length >= 4,
+     're-check the matcher if this dropped');
+  const unguarded = calls.filter((m) => !/_scanCanceled/.test(scan.slice(0, m.index)));
+  ok('⭐ every read in the scan has a cancel test before it',
+     unguarded.length === 0,
+     'a step with no guard starts a fresh token after the cancel and runs to completion: '
+     + unguarded.map((m) => m[1]).join(', '));
+}
 
 // ── 7. The button lives on the modal, and never outlives its work ──
 ok('the shared progress modal owns the cancel affordance',

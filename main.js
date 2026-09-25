@@ -2917,11 +2917,15 @@ ipcMain.handle('common:folderExistsAt', (_, { destDir, targetName } = {}) => {
 // different folder, which is exactly when it hashes 200+ files off the card and greys the window.
 // ⚠️ THE `await` IS LOAD-BEARING, not cosmetic: without it the promise escapes this try/catch and
 // a rejection becomes an unhandled one instead of the { ok:false } contract the renderer expects.
+// ⚠️ GATED 2026-09-24 [B-420], same as its twin above.
 ipcMain.handle('common:matchesAt', async (_, { uuid, destDir, targetName } = {}) => {
+  return _withExportCancel(async (shouldStop) => {
   try {
-    return await soundFontCommon.commonMatchesAt(app.getPath('userData'), uuid, destDir, targetName);
+    return await soundFontCommon.commonMatchesAt(app.getPath('userData'), uuid, destDir, targetName,
+                                                 shouldStop);
   }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+  });
 });
 
 // Refresh the marker at a destination WITHOUT copying anything. Used when the
@@ -3104,7 +3108,10 @@ ipcMain.handle('sharedTracks:existsAt', (_, { destDir } = {}) => {
 // [B-402] `writeCache` is accepted and ignored — the compare no longer writes at all, for any
 // caller, so the flag [B-358] added has nothing left to switch off. Kept in the signature so an
 // older renderer passing it cannot throw; drop it once nothing sends it.
+// ⚠️ GATED 2026-09-24 [B-420] so a cancel can reach the hashing. Read-only, so stopping costs
+// nothing and leaves nothing behind.
 ipcMain.handle('soundFonts:entryMatchesAt', async (event, { name, destDir, reportProgress } = {}) => {
+  return _withExportCancel(async (shouldStop) => {
   // [B-400] The destination-side hashing is the expensive half of this question and ran silent
   // behind a right-click Export. Opt-in: the bulk conflict scan drives its own bar already and
   // must not have a second one fighting it.
@@ -3115,11 +3122,12 @@ ipcMain.handle('soundFonts:entryMatchesAt', async (event, { name, destDir, repor
   try {
     const emit = reportProgress ? _sfByteProgressEmitter(event) : null;
     const r = await soundFontEntries.entryMatchesAt(app.getPath('userData'), name, destDir,
-      emit ? { onBytes: emit.onBytes } : {});
+      emit ? { onBytes: emit.onBytes, shouldStop } : { shouldStop });
     if (emit) emit.flush();
     return r;
   }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+  });
 });
 // [B-402] THE ONE WRITER. Every compare and every export now RETURNS what it learned; the
 // renderer accumulates it across the whole operation and commits here, once, at the end.
@@ -3300,13 +3308,49 @@ ipcMain.handle('exportDest:identify', async (_, { destDir } = {}) => {
 ipcMain.handle('soundFonts:listDestFolders', (_, { destDir } = {}) => {
   try {
     if (!destDir || !fs.existsSync(destDir)) return { ok: true, folders: [] };
+    // ⚠️⚠️ THE OPERATING SYSTEM'S OWN FOLDERS ARE NOT FONTS. [B-420, 2026-09-24]
+    //
+    // This filtered dot-prefixed names only, which covers macOS (`.Spotlight-V100`, `.Trashes`)
+    // and misses the one that matters on the platform this app mostly runs on: Windows creates
+    // `System Volume Information` on EVERY removable volume it writes to. So it was counted as a
+    // font at the destination.
+    //
+    // ⭐ HIS CATCH, on a freshly formatted card: *"29 fonts written... but 30 fonts at the
+    // destination"*. 29 fonts + `common` + `tracks` + SVI = 32 folders; the caller reserves
+    // `common` and `tracks`, leaving 30 - and the one not in the selection was SVI, reported as
+    // "1 not part of this export". Both numbers off by exactly that folder.
+    // ⚠️ IT WAS WRONG ON EVERY CARD EXPORT, not just this one. A fresh card makes it visible
+    // because the true count is knowable at a glance; on a populated card it silently inflated
+    // the total by one and asserted a stray font that was never there.
+    //
+    // ⚠️ MATCHED BY NAME, CASE-INSENSITIVELY, because Node's Dirent carries no Windows file
+    // attributes - `hidden` and `system` are not reachable from readdir or stat here, so the
+    // attribute test that would be more general is not available.
+    // ⚠️ `found.NNN` is chkdsk's recovered-cluster output. It appears exactly when a card has been
+    // repaired, which is precisely when someone is looking at a destination listing and trying to
+    // work out what is really on their card.
+    const OS_FOLDERS = new Set([
+      'system volume information',
+      '$recycle.bin',
+      'recycler',
+      'msocache',
+      'system~1',
+    ]);
     const folders = fs.readdirSync(destDir, { withFileTypes: true })
       .filter(e => e.isDirectory() && !e.name.startsWith('.'))
+      .filter(e => !OS_FOLDERS.has(e.name.toLowerCase()) && !/^found\.\d{3}$/i.test(e.name))
       .map(e => e.name);
     return { ok: true, folders };
   } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
+// ⚠️⚠️ GATED 2026-09-24 [B-420]. This is a pure READ - it hashes tracks to decide what a later
+// export would write - and it had no cancel at all, so the primary export's scan sat through every
+// remaining track after the user pressed Cancel. His report: *"it goes through about 10-20 more
+// files before it cancels... it says stopping and files are still flying by."*
+// ⭐ And his argument, which is the whole justification: *"why would it need to do anything if all
+// it was doing was analyzing? there's not a copy being made... so it should just stop."*
 ipcMain.handle('sharedTracks:planExport', async (event, { destDir } = {}) => {
+  return _withExportCancel(async (shouldStop) => {
   try {
     // Per-file ticks so the renderer can show names going past. Throttled: a
     // hundred-plus IPC sends in a tight loop would cost more than the hashing.
@@ -3317,9 +3361,10 @@ ipcMain.handle('sharedTracks:planExport', async (event, { destDir } = {}) => {
       last = now;
       try { event.sender.send('sharedTracks:planProgress', { file, done, total }); } catch {}
     };
-    return await soundFontSharedTracks.planExport(app.getPath('userData'), destDir, onFile);
+    return await soundFontSharedTracks.planExport(app.getPath('userData'), destDir, onFile, shouldStop);
   }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+  });
 });
 ipcMain.handle('sharedTracks:exportToFolder', async (event, { destDir, mode, replace } = {}) => {
   return _withExportCancel(async (shouldStop) => {                       // [B-005 item 4]
