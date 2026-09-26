@@ -1165,6 +1165,48 @@ async function entryMatchesAt(userData, name, destDir, opts = {}) {
   const refreshed = new Map();
   let identical = true, hashed = 0, reused = 0;
 
+  // A file at the destination that the library does not have makes this folder DIFFER.
+  //
+  // The loop below walks the LIBRARY's file list, so anything extra in the destination folder is
+  // structurally invisible to it: three wavs dropped into a font on the card, and every library
+  // file still matches, so the compare reports the folder as ours. The card then holds content
+  // the library does not, the app says it matches, Replace is never offered, and there is no way
+  // to remove them through the app.
+  //
+  // One directory read answers it. The comparison is counts, which is sound only as a NEGATIVE -
+  // a different count proves a difference, a matching one proves nothing - and the per-file pass
+  // below still does the real work. `<empty>` records are directory markers, not files, so they
+  // are subtracted from the library side to match what the walk counts.
+  //
+  // ⭐⭐ AND IT ANSWERS WITHOUT READING A BYTE, so it returns instead of hashing the folder to
+  // confirm what it already knows. Hashing here would be work spent on a question with an answer.
+  //
+  // What that gives up is the observations this pass would have recorded - and they are not lost,
+  // they are DEFERRED to the point where it is known whether they are worth paying for. The
+  // choice does not exist yet at scan time:
+  //   · REPLACE - the folder is about to be overwritten, so anything hashed here was wasted.
+  //   · SKIP    - the card keeps what it has, so what is there is worth recording, INCLUDING the
+  //               extra files. A skipped file is one the user decided to keep, which makes it
+  //               ours to maintain even though we never wrote it.
+  // `recordFolderAt` does that half, called on skip during the export.
+  try {
+    const _libFiles = libRecords.filter((r) => r && r.fileHash !== '<empty>').length;
+    const { dirSignals } = require('./soundFontFileHash');
+    const _cardFiles = dirSignals(destFont).fileCount;
+    if (_cardFiles !== _libFiles) {
+      // ⭐⭐ AND SAY WHETHER THE MANIFEST ALREADY COVERS THIS FOLDER, because both numbers are
+      // already in hand and the caller would otherwise go and re-derive them by walking the
+      // folder again. A folder answered `recorded: true` needs nothing read, nothing stat'd and
+      // no recording pass at all - which is the difference between a phase that flows through
+      // like a hash and one that does not run.
+      // ⚠️ COUNTS ONLY, which is sound for the same reason the check above is: this decides
+      // whether there is anything to LEARN, not whether the folder matches. A swap that keeps
+      // the count identical costs one stale record and is caught the next time the file is read.
+      return { ok: true, exists: true, identical: false, reason: 'signals',
+               recorded: _cardFiles === cache.size };
+    }
+  } catch { /* unreadable destination folder: the per-file pass reports it */ }
+
   // Byte budget for the compare: what the library says each file weighs. Derived from the
   // records we already hold, so it costs no extra reads.
   const _onBytes = typeof opts.onBytes === 'function' ? opts.onBytes : null;
@@ -2166,6 +2208,105 @@ function getEntryContentHash(userData, entryName) {
 
 // [B-398] Measurement only: markAsync/mark return the ORIGINAL function when the probe is off.
 const _sp = require('./stallProbe');
+// Record what is in a destination folder we have been told to KEEP.
+//
+// Called when the user answers Skip for a font that differs. Skip means "leave the card's version
+// alone", which makes that folder theirs-and-ours: a file they chose to keep is one we maintain,
+// even though we never wrote it. So this walks what is actually on the card - including files the
+// library does not have - and hashes all of it.
+//
+// ⚠️ THE OTHER SIDE OF THE DEFERRAL IN `entryMatchesAt`. That compare returns as soon as a
+// differing file count proves a difference, without reading anything, because at that moment
+// nobody knows whether the folder is about to be overwritten. Replace makes the reading pointless;
+// Skip makes it worth doing. This is the Skip half, run when the answer exists.
+//
+// ⚠️ EVERY file, not the library's list. The whole point is the files the library has no record
+// of: hashing them now is what lets a later import of those same files into the library resolve
+// to "already there" without re-reading the card.
+//
+// Returns [[relPath, [size, mtimeMs, hash]], ...] - the shape `syncManifest:commit` takes, as an
+// array because a Map does not survive IPC.
+async function recordFolderAt(destDir, name, opts = {}) {
+  if (!destDir || !name) return { ok: false, error: 'Missing destDir or name' };
+  const folder = path.join(destDir, name);
+  try { if (!fs.statSync(folder).isDirectory()) return { ok: true, observed: [] }; }
+  catch { return { ok: true, observed: [] }; }
+
+  const { hashFileAsync, breathe } = require('./soundFontFileHash');
+  const sync = require('./sfSyncManifest');
+
+  // ⚠️ REUSE WHAT IS ALREADY RECORDED. Only the files the manifest cannot answer for need
+  // reading - which, for a folder that differs because something was ADDED to it, is the added
+  // file and nothing else. Re-hashing the whole folder would re-read tens of megabytes to learn
+  // what is already written down, on the transport where that costs the most.
+  //
+  // Same validity rule the compare uses: size must match and mtime must be within the FAT32
+  // tolerance, or the entry is stale and the file is read.
+  let cache = new Map();
+  try { cache = sync.cacheFor(destDir, name); } catch {}
+
+  // ⚠️ THE WALK IS COLLECTED FIRST SO THE WORK CAN BE SIZED. Without a total the bar has nothing
+  // to be a fraction OF, and a phase that reads whole wavs off a card with a motionless bar is
+  // the "is it hung" shape this surface keeps having to remove. Directory reads and stats are
+  // metadata - cheap next to the hashing that follows.
+  const files = [];
+  {
+    const stack = [{ abs: folder, rel: '' }];
+    while (stack.length) {
+      const { abs, rel } = stack.pop();
+      let entries = [];
+      try { entries = fs.readdirSync(abs, { withFileTypes: true }); } catch { continue; }
+      for (const e of entries) {
+        const childAbs = path.join(abs, e.name);
+        const childRel = rel ? `${rel}/${e.name}` : e.name;
+        if (e.isDirectory()) { stack.push({ abs: childAbs, rel: childRel }); continue; }
+        if (!e.isFile()) continue;
+        // Skipped for the same reason the hash walk skips it, so both sides agree on what counts.
+        if (rel === '' && e.name === 'meta.json') continue;
+        // ⚠️ SIZE AND MTIME TOGETHER, ONCE. The loop below used to stat every file again to get
+        // the mtime, so a folder cost two stats per file - on a card that is the difference
+        // between a phase that is instant and one that paces like a hash.
+        let size = 0, mtime = 0;
+        try { const st = fs.statSync(childAbs); size = st.size; mtime = Math.round(st.mtimeMs); }
+        catch {}
+        files.push({ abs: childAbs, rel: childRel, size, mtime });
+      }
+    }
+  }
+
+  // ⚠️ BYTES, NOT FILE COUNT, and for the reason the tracks add already records: a file-count bar
+  // sits at 99 of 100 with a third of the data still to move. Reported on the same channel
+  // `entryMatchesAt` uses, so the renderer subscribes to one thing rather than learning a new one.
+  const _onBytes = typeof opts.onBytes === 'function' ? opts.onBytes : null;
+  const _total = files.reduce((n, f) => n + (f.size || 0), 0);
+  let _done = 0;
+  if (_onBytes) { try { _onBytes({ done: 0, total: _total, name: '' }); } catch {} }
+
+  const observed = [];
+  {
+    for (const f of files) {
+      if (opts.shouldStop && opts.shouldStop()) return { ok: true, canceled: true };
+      const childAbs = f.abs, childRel = f.rel;
+      // ⚠️ Per file: this reads whole wavs off a card, which is the block [B-398] measured.
+      await breathe();
+      try {
+        const ent = cache.get(childRel);
+        const valid = ent && ent[0] === f.size
+          && Math.abs((ent[1] || 0) - f.mtime) <= sync.MTIME_TOLERANCE_MS;
+        const h = valid ? ent[2] : (sync.countHash(), await hashFileAsync(childAbs));
+        if (h) observed.push([childRel, [f.size, f.mtime, h]]);
+      } catch { /* a file that cannot be read simply goes unrecorded, and is re-read next time */ }
+      // ⚠️ CREDITED WHETHER IT WAS READ OR REUSED. A reused entry costs no I/O, but it is still
+      // one of the files this phase has to get through - crediting only the hashed ones would
+      // stall the bar across every folder the manifest can already answer for, which is most of
+      // them.
+      _done += (f.size || 0);
+      if (_onBytes) { try { _onBytes({ done: _done, total: _total, name: childRel }); } catch {} }
+    }
+  }
+  return { ok: true, observedItem: name, observed };
+}
+
 module.exports = {
   entriesRoot,
   ensureEntriesRoot,
@@ -2180,6 +2321,7 @@ module.exports = {
   readEntryFileBytes,
   exportEntryFileTo,
   entryMatchesAt: _sp.markAsync('compare:font', entryMatchesAt),
+  recordFolderAt: _sp.markAsync('record:kept', recordFolderAt),
   exportEntryToFolder: _sp.markAsync('copy:font', exportEntryToFolder),
   entryFolderExistsAt,
   listEntryFiles,

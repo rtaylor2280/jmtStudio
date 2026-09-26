@@ -7723,7 +7723,6 @@ function promptConfirm(opts) {
   });
 }
 window.promptConfirm = promptConfirm;
-
 // Info-only modal — single OK button, app-styled (vs the native alert()
 // dialog which carries OS chrome and bypasses our visual language).
 // Used for non-recoverable error messages where the user just needs to
@@ -27507,8 +27506,31 @@ require(['vs/editor/editor.main'], function () {
         // [B-400] This door showed NOTHING - not even the indeterminate bar the font and common
         // doors had. The producer inside addFiles has existed since [B-281]; the handler took no
         // `event`, so nothing could ever subscribe to it.
+        // ⚠️⚠️ CANCELLABLE, AND IT WAS NOT. [B-005 item 4] Item 4 named this path - "no cancel on
+        // any cross-location copy... the multi-file track import asked for one" - and closed
+        // having fixed the export doors. Reported 2026-09-25 at 927 MB of 2.14 GB with nothing to
+        // press, and the only exit from that is force-quitting the app, which mid-write to a card
+        // is the corruption the whole SD line of work exists to prevent.
+        // ⚠️ The same shared option every other door uses, so there is no second copy of this
+        // state; the backend stops BETWEEN files, leaving everything already copied complete.
         const res = await _sfRunWithByteProgress('Adding tracks',
-          () => window.electronAPI.sharedTracksAddFiles({ sourceFilePaths: picked.filePaths }));
+          () => window.electronAPI.sharedTracksAddFiles({ sourceFilePaths: picked.filePaths }),
+          { onCancel: _sfExportCancelOpt.onCancel });
+        // ⚠️ A stop is an OUTCOME, not a failure, and it is checked BEFORE `!res.ok` for the same
+        // reason the export doors check it first: a cancel comes back ok, and falling through
+        // would report the files that did land as though nothing had happened.
+        if (res && res.canceled) {
+          // ⚠️ THE SHARED ENDING, NOT A SENTENCE OF THIS DOOR'S OWN. Every other stop in the app
+          // reports through `_sfExportStoppedNotice`, which already gets the singular right and
+          // already says the reassuring part first. Writing one here is how eleven doors drifted.
+          // ⚠️ `what: 'tracks'` because the noun is the only thing that differs.
+          // ⚠️ REFRESHED BEFORE THE NOTICE, NOT AFTER. The list is visible behind the dialog, so
+          // reporting "9 tracks finished copying" over a list that still shows the old contents
+          // makes the app contradict itself at the one moment the user is reading carefully.
+          await _sfRefreshSharedTracksModal();
+          await _sfExportStoppedNotice({ wrote: (res.added || []).length, what: 'tracks' });
+          return;
+        }
         if (!res || !res.ok) {
           promptError('Failed to add files', res?.error || 'unknown error');
           return;
@@ -27558,6 +27580,10 @@ require(['vs/editor/editor.main'], function () {
         // popped a dialog on every successful add, which is the exact thing the comment below
         // argues against. Caught by exercising the builder, not by reading it.
         const _withheld = _dupes > 0 || _skips.length > 0;
+        // ⚠️ SAME REASON AS THE STOP ABOVE: these dialogs are read over the visible list, so the
+        // list has to be right before one opens. It used to refresh only after the dialog closed,
+        // which meant "5 tracks added" was read against a list that did not show them yet.
+        await _sfRefreshSharedTracksModal();
         if ((res.refused || []).length) {
           await _sfShowNotAdded(res.refused, _outcome || undefined);
         } else if (_withheld) {
@@ -27569,7 +27595,7 @@ require(['vs/editor/editor.main'], function () {
         }
         // ⚠️ A CLEAN ADD STAYS SILENT. The refreshed list IS the report, and a dialog that only
         // says "it worked" is the kind that trains people to dismiss the one that matters.
-        await _sfRefreshSharedTracksModal();
+        // The refresh itself already happened above, before any dialog could open over it.
       };
       _sfSharedAddBtn?.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -38907,7 +38933,9 @@ require(['vs/editor/editor.main'], function () {
               }
               return m;
             });
-            cleanup();
+            // The caller closes it, in the same task it opens its successor in. Without
+            // `keepOpen` nothing changes for any other caller of this dialog.
+            cleanup(opts.keepOpen === true);
             resolve(Array.isArray(opts.sections) && opts.sections.length ? maps : maps[0]);
           };
           const onCancel = () => { cleanup(); resolve(null); };
@@ -38959,8 +38987,16 @@ require(['vs/editor/editor.main'], function () {
           };
           syncCaution();
           list.addEventListener('change', syncCaution);
-          const cleanup = () => {
-            modal.classList.remove('active');
+          // ⚠️ `keepUp` LEAVES THE SURFACE ON SCREEN AND ONLY RETIRES THE WIRING. Measured 2026-09-25
+          // with a DOM observer rather than argued: every good transition in this flow shows the
+          // successor BEFORE hiding the predecessor and reads 1-2 ms bare, while this dialog closed
+          // itself on the click and left 20 ms - a whole frame of nothing - while the summary was
+          // built. Three fixes aimed at the awaits in between missed it, because the gap was never
+          // in the work; it was in the ORDER.
+          // ⚠️ APPLY ONLY. A cancel has no successor to hand over to, so it still takes itself
+          // down - leaving it up would strand a dialog nobody can dismiss.
+          const cleanup = (keepUp) => {
+            if (!keepUp) modal.classList.remove('active');
             applyBtn?.removeEventListener('click', onApply);
             cancelBtn?.removeEventListener('click', onCancel);
             modal.removeEventListener('click', onBackdrop);
@@ -39711,7 +39747,13 @@ require(['vs/editor/editor.main'], function () {
         const bits = [];
         if (written) bits.push(`${n(written)} written`);
         if (unchanged) bits.push(`${n(unchanged)} already identical`);
-        if (keptByChoice) bits.push(`${n(keptByChoice)} kept as ${keptByChoice === 1 ? 'it was' : 'they were'}`);
+        // ⚠️ "skipped", because that is the word on the control they pressed. The conflict review
+        // offers Skip and Replace; reporting the outcome in different words makes the reader map
+        // one vocabulary onto another to check their own decision was honoured. Same reason the
+        // tail says "Checked" - it echoes "Checking the destination…" rather than inventing a
+        // synonym. It also removes an agreement problem: "1 kept as it was" / "5 kept as they
+        // were" becomes one form.
+        if (keptByChoice) bits.push(`${n(keptByChoice)} skipped`);
         // Guarded: the standalone tracks export calls this with no fonts at all,
         // which otherwise produced "0 fonts selected. ." with a dangling stop.
         if (names.length) {
@@ -40412,6 +40454,17 @@ require(['vs/editor/editor.main'], function () {
         // most to do.
 
         const unchangedFonts = [];
+        // ⭐⭐ STARTED HERE, AWAITED AT THE END. Resolving the eject offer costs IPC round trips,
+        // and on the nothing-to-write path there is no surface up when the summary is built - so
+        // awaiting it there left the screen bare for exactly that gap, which is the flash. Putting
+        // a progress modal up to cover it only traded one flash for another: conflict review,
+        // brief progress modal, summary.
+        // ⚠️ NOT AWAITED NOW. The scan that follows takes seconds, so by the time the summary
+        // needs this the promise has long settled and the await costs nothing. Nothing is on the
+        // critical path and no surface has to be invented to cover it.
+        // ⚠️ `ejectAuto` is deliberately re-read at use rather than taken from here: it is the
+        // during-the-run checkbox, and the user may set it after this point.
+        const _ejectCtxEarly = _sfEjectContext(destDir);
         const _scanT0 = Date.now();
         // Only count steps we will actually perform, or the bar stops short of
         // full and the "N of M" reads as though something was missed.
@@ -40424,7 +40477,22 @@ require(['vs/editor/editor.main'], function () {
         // read in this app does.
         // [B-402] What the conflict scan hashed, keyed by manifest item, so the export can
         // write it once at the end. Lives for one export attempt and is thrown away with it.
+        // ⚠️⚠️ DECLARED AT THE DOOR'S LEVEL, NOT INSIDE THE REVIEW BLOCK. The first version sat
+        // inside `if (conflicts.length || tracksDiffering.length)`, which closes long before the
+        // exits that call it - so every later use was out of scope, and the one that runs on the
+        // nothing-to-write path sits inside the summary's try/catch, which swallowed the
+        // ReferenceError. The result looked like success: no flash, because the review was still
+        // on screen underneath the summary, fully interactive, with its buttons already unwired.
+        // ⚠️ `keepOpen` moves the responsibility for closing here, so a path that forgets strands
+        // a dialog. Every exit goes through this rather than reaching for the class itself.
+        const _closeReview = () => {
+          try { document.getElementById('modal-sf-save-conflict')?.classList.remove('active'); }
+          catch {}
+        };
         const _scanObserved = new Map();
+        // Folders the compare found already fully described by the manifest. Skipping one of these
+        // costs nothing to decide and saves an entire walk.
+        const _scanFullyRecorded = new Set();
         const _scanTick = (file, sub) => {
           const secs = Math.floor((Date.now() - _scanT0) / 1000);
           const dur = window._sfFormatDuration ? window._sfFormatDuration(secs) : `${secs}s`;
@@ -40512,6 +40580,10 @@ require(['vs/editor/editor.main'], function () {
             // manifest once, at the end, for this destination. If the user cancels, nothing was
             // written and nothing is owed.
             if (m && Array.isArray(m.observed) && m.observed.length) _scanObserved.set(name, m.observed);
+            // ⭐ The compare already held both numbers - what is on the card and what the manifest
+            // records - so it says whether this folder has anything left to learn. Re-deriving it
+            // later means walking and statting the whole folder to find out there was nothing.
+            if (m && m.recorded === true) _scanFullyRecorded.add(name);
           } catch {}
           _scanDone++;
           _scanTick(name);
@@ -40769,6 +40841,10 @@ require(['vs/editor/editor.main'], function () {
           const _tn = tracksDiffering.length;
           const choicesPromise = _sfPromptSaveConflicts(_flatNames, {
             defaultMode: 'replace',
+            // ⚠️ THE REVIEW STAYS UP UNTIL ITS SUCCESSOR IS READY. Closing on the click left a
+            // 20 ms frame of nothing while the summary was built - measured, not guessed. Every
+            // exit below has to take it down, which is what the helper beside them is for.
+            keepOpen: true,
             // With both kinds present the headline covers the whole destination and
             // each section says its own piece; with one kind the existing per-kind
             // wording is still exactly right, so it is left alone.
@@ -40853,6 +40929,7 @@ require(['vs/editor/editor.main'], function () {
           });
           const choices = await choicesPromise;
           if (!choices) {
+            _closeReview();
             // ⭐⭐ THE FOURTH EXIT, AND THE MOST EXPENSIVE ONE TO GET WRONG. [B-173, 2026-09-25]
             //
             // ⚠️⚠️ FOUND BY WALKING INTO IT, NOT BY THE SWEEP THAT WAS SUPPOSED TO FIND IT. An
@@ -40888,6 +40965,97 @@ require(['vs/editor/editor.main'], function () {
             // Tracks only: the flat path was given the track names, so its single Map
             // is the tracks answer.
             tracksReplace = tracksDiffering.filter(n => (choices.get(n) || 'replace') === 'replace');
+          }
+        }
+        // ── Record the folders we were told to KEEP ───────────────────────
+        //
+        // Skip means "leave the card's version alone", which makes that folder ours to maintain:
+        // a file someone decided to keep is managed even though we never wrote it. The compare
+        // stopped reading as soon as a file count proved the folder differed, because at that
+        // moment nobody knew whether it was about to be overwritten. The answer exists now, so
+        // this is where the reading gets paid for - every file in there, including the ones the
+        // library has no record of.
+        //
+        // ⚠️⚠️ IT SITS HERE AND NOT IN THE EXPORT LOOP, and the first cut had it in the loop. A
+        // run where EVERY differing folder was skipped has nothing to write, so `totalSteps` is
+        // zero, the door takes the early exit below, and the loop never runs at all - which is
+        // exactly the run where recording matters most. Verified on a card: six folders skipped,
+        // the summary read "Card left as it was", and not one of them was recorded.
+        //
+        // ⚠️ The modal is deliberately put back up. The conflict dialog took it down, and this
+        // reads whole folders off a card - on a board's USB bridge that is seconds per font.
+        // ⚠️ IT IS A PHASE OF THE EXPORT, NOT A SEPARATE OPERATION. Same title as the copy that
+        // follows, `setPhase` for the section-and-clock layout every other long read uses, its own
+        // ticker so the clock moves while one folder is being read, and a cancel - it does real
+        // work off a card and a surface that does work without those reads as a hang.
+        {
+          // ⚠️ AND NOT THE ONES THE MANIFEST ALREADY DESCRIBES. Recording those reads nothing, but
+          // it still walks and stats every file to discover that - which paces exactly like the
+          // work it is avoiding, and looks identical from the chair: reported as flowing all the
+          // way through the bar exactly as if it were hashing, while reading nothing.
+          const _kept = names.filter((n) => (modeByName.get(n) || 'rename') === 'skip'
+                                         && !_scanFullyRecorded.has(n));
+          if (_kept.length) {
+            let _keptStopped = false;
+            const _kT0 = Date.now();
+            let _kAt = 0, _kName = '', _kSub = 0;
+            const _kTick = () => {
+              const secs = Math.floor((Date.now() - _kT0) / 1000);
+              const dur = window._sfFormatDuration ? window._sfFormatDuration(secs) : `${secs}s`;
+              // ⚠️ THE FRACTION CARRIES THE FOLDER'S OWN PROGRESS, not just how many folders are
+              // done. A single kept folder is `0 of 1` for its whole duration otherwise, and one
+              // folder is the commonest case - a motionless bar over a phase that reads whole
+              // wavs off a card is the shape this surface keeps having to remove.
+              _sfDeleteProgress.setPhase(
+                `Recording what you kept · ${Math.min(_kAt + 1, _kept.length)} of ${_kept.length}`,
+                _kept.length ? (_kAt + Math.min(1, Math.max(0, _kSub))) / _kept.length : 0,
+                _kName,
+                `${dur} elapsed`,
+              );
+            };
+            // ⚠️ The same channel `entryMatchesAt` reports its destination hashing on, subscribed
+            // only for this phase and torn down in the `finally` - a subscription that outlives
+            // its phase repaints a modal belonging to the next one.
+            const _kOff = window.electronAPI.onSoundFontByteProgress((p) => {
+              if (!p) return;
+              if (typeof p.done === 'number' && typeof p.total === 'number' && p.total > 0) {
+                _kSub = p.done / p.total;
+              }
+              if (p.name) _kName = p.name;
+              _kTick();
+            });
+            _sfDeleteProgress.show('Exporting', '', 0);
+            // ⚠️ Successor up, THEN predecessor down - and in that order, or the review sits
+            // behind this phase for its whole duration.
+            _closeReview();
+            _sfDeleteProgress.offerCancel(async () => {
+              _keptStopped = true;
+              await _sfExportCancelOpt.onCancel();
+            });
+            // ⚠️ Independent of the work, for the same reason the scan's is: a single folder can be
+            // seconds on a card, and a clock driven only by work events stops exactly when the
+            // wait is longest.
+            const _kTicker = setInterval(_kTick, 1000);
+            _kTick();
+            try {
+              for (let i = 0; i < _kept.length; i++) {
+                if (_keptStopped) break;
+                // ⚠️ The sub-fraction resets with the folder, or the next one opens showing the
+                // previous one's progress.
+                _kAt = i; _kName = _kept[i]; _kSub = 0; _kTick();
+                try {
+                  const rk = await window.electronAPI.recordFolderAt({ name: _kept[i], destDir });
+                  if (rk && rk.canceled) { _keptStopped = true; break; }
+                  if (rk && rk.observedItem && Array.isArray(rk.observed) && rk.observed.length) {
+                    _scanObserved.set(rk.observedItem, rk.observed);
+                  }
+                } catch { /* a folder we cannot read goes unrecorded and is read again later */ }
+              }
+            } finally {
+              clearInterval(_kTicker);
+              try { _kOff && _kOff(); } catch {}
+              _sfDeleteProgress.clearCancel();
+            }
           }
         }
         // Combined progress count — only items that will actually be written.
@@ -40969,6 +41137,17 @@ require(['vs/editor/editor.main'], function () {
           await _sfShowExportSummary({
             destDir, names, modeByName, unchangedFonts, commonMissing,
             commonFolderNames: _sfConfigSlotNames(),
+            // ⚠️ THE SAME EJECT CONTEXT THE WRITTEN PATH USES, and the reason it was missing here
+            // is worth keeping: the offer was described as riding on the ending itself, but it is
+            // wired per caller - so an ending that nobody remembered to wire simply had no eject,
+            // and the description made the gap invisible. Someone who came to update a card is
+            // finished with it whether or not anything turned out to need writing.
+            // ⚠️ Spreads to nothing when the destination is not removable, so a folder on an
+            // internal disk is unaffected.
+            // ⚠️ Started before the scan, so this await is already settled and the screen never
+            // goes bare waiting for it.
+            ...(await _ejectCtxEarly),
+            ejectAuto: _sfDeleteProgress.wantsEject(),
             // ⭐ SAY HOW LONG IT TOOK HERE TOO. 2026-09-25: every other export door ends with
             // "Took ___". The summary has always rendered it when handed `elapsedSec`; this
             // call site was the only one that never passed one, so a no-write run was the only
@@ -40994,7 +41173,13 @@ require(['vs/editor/editor.main'], function () {
             // this await never resolved. The overlay has no cancel, so the only
             // exit was killing the app.
             // It fires precisely when the export SUCCEEDED and had nothing to do.
-            closeProgress: () => _sfDeleteProgress.hide(),
+            // ⚠️ `hideNow`, not `hide`: this is a handover in the SAME task, and hide() waits out
+            // a minimum-display floor before returning - which is the gap the summary is trying
+            // not to leave. The synchronous close is what lets both paint together.
+            // ⚠️ AND THE REVIEW COMES DOWN HERE TOO, for the same reason and in the same task.
+            // It is the surface actually on screen on this path; closing it any earlier is the
+            // 20 ms of nothing the observer measured.
+            closeProgress: () => { _closeReview(); _sfDeleteProgress.hideNow(); },
             title: skippedByChoice === 0 ? 'Already up to date' : 'Card left as it was',
             // Same shape as the written path: one line per folder, not one for all.
             commonOutcomes: [
@@ -41041,7 +41226,19 @@ require(['vs/editor/editor.main'], function () {
         // Up FIRST, before any totals are summed or listeners wired. Pressing
         // Continue must produce something on screen immediately; the gap before
         // this grew with the size of the selection, which is exactly backwards.
-        _sfDeleteProgress.show('Preparing to export', '', 0);
+        // ⚠️ RETITLE WHEN IT IS ALREADY UP, NEVER RE-SHOW. `show()` wipes the section and elapsed
+        // lines and resets the bar, so calling it here tears down a surface the user has been
+        // watching and rebuilds it - which reads as a second modal for what is one operation.
+        // The recording phase above opens it; with no conflicts to review the scan's surface is
+        // still up; and in both cases this is a phase change, not a new screen.
+        if (_sfDeleteProgress.modal()?.classList.contains('active')) {
+          _sfDeleteProgress.setTitle('Preparing to export');
+        } else {
+          _sfDeleteProgress.show('Preparing to export', '', 0);
+        }
+        // ⚠️ AFTER the progress surface is up, never before: this is the same handover rule the
+        // summary follows, and taking the review down first is what leaves a bare frame.
+        _closeReview();
         const failures = [];
         // [B-364] Programs refused across this whole run — fonts, common slots and
         // tracks alike — raised once after the summary rather than per item.
@@ -41138,6 +41335,10 @@ require(['vs/editor/editor.main'], function () {
           label: 'export',
           // ⚠️ Otherwise the runner titles this "Exporting export" off the label.
           title: 'Exporting',
+          // ⚠️ The surface is ALREADY UP by here - the recording phase or the scan left it open -
+          // so the runner retitles instead of re-showing. Without this it calls show(), which
+          // resets the bar and clears the phase lines, and one export looks like two modals.
+          alreadyOpen: true,
           destDir,
           endState: { kind: 'tree', path: destDir },
           overwriteDecided: true,
@@ -41228,8 +41429,9 @@ require(['vs/editor/editor.main'], function () {
               if (_exportCanceled) break;
               const mode = modeByName.get(name) || 'rename';
               if (mode === 'skip') {
-                // Already in destination, user chose to keep existing. No IPC
-                // call (it would just confirm the skip); no progress tick.
+                // Already in destination, user chose to keep existing. Nothing is written, and
+                // nothing is read: the folder was recorded before this loop, because a run where
+                // everything was skipped never reaches this loop at all.
                 results.skipped++;
                 continue;
               }

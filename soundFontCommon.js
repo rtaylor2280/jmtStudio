@@ -1193,26 +1193,9 @@ function _excludeOurMarkers(root) {
 // Cheap signal: file count + total bytes under `root`, stat only, no reads.
 // Mirrors the hash walk's exclusions (root meta.json, plus `excludeFn`) so the
 // two can never disagree about what they are counting.
-function _dirSignals(root, excludeFn) {
-  let fileCount = 0, totalBytes = 0;
-  const stack = [{ abs: root, rel: '' }];
-  while (stack.length) {
-    const { abs, rel } = stack.pop();
-    let entries = [];
-    try { entries = fs.readdirSync(abs, { withFileTypes: true }); } catch { continue; }
-    for (const e of entries) {
-      const childAbs = path.join(abs, e.name);
-      const childRel = rel ? `${rel}/${e.name}` : e.name;
-      if (excludeFn && !excludeFn(childRel)) continue;
-      if (e.isDirectory()) { stack.push({ abs: childAbs, rel: childRel }); continue; }
-      if (!e.isFile()) continue;
-      if (rel === '' && e.name === 'meta.json') continue; // hash walk skips it too
-      fileCount++;
-      try { totalBytes += fs.statSync(childAbs).size; } catch {}
-    }
-  }
-  return { fileCount, totalBytes };
-}
+// Moved to soundFontFileHash so the font compare can use the same walk under the same rules;
+// a second copy would be two definitions of what 'the shape of this folder' means.
+const _dirSignals = (root, excludeFn) => require('./soundFontFileHash').dirSignals(root, excludeFn);
 
 // Returns { ok, exists, identical, reason }.
 //   exists    — the destination has the folder at all

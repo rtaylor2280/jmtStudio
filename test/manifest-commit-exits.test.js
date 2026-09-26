@@ -69,6 +69,30 @@ for (const [label, anchor, why] of EXITS) {
   ok(`⭐ and it records what the scan learned`, block.includes('syncManifestCommit'), why);
 }
 
+// ⚠️⚠️ THE RECORDING OF KEPT FOLDERS HAS TO BE REACHABLE WHEN NOTHING IS WRITTEN.
+//
+// Answering Skip for every differing folder means there is nothing to export, so `totalSteps` is
+// zero and the door takes its early exit - the export loop never runs. The first version put the
+// recording inside that loop, which made it unreachable in precisely the run that needs it most.
+// Verified on a card before this test existed: six folders skipped, summary read "Card left as it
+// was", not one of them recorded.
+//
+// So this is positional on purpose. The bug was not what the code did, it was where it sat.
+{
+  const record = door.indexOf('electronAPI.recordFolderAt');
+  const nothingToWrite = door.indexOf('if (totalSteps === 0) {');
+  ok('the kept-folder recording was located', record > 0,
+     're-anchor if recordFolderAt is renamed');
+  ok('⭐⭐ and it runs BEFORE the nothing-to-write exit',
+     record > 0 && nothingToWrite > record,
+     'a run where every differing folder was skipped has nothing to write, so it leaves by the '
+     + 'early exit. Recording placed after that point can never run for the case it exists for');
+  ok('⚠️ and there is exactly one place it happens',
+     (door.match(/electronAPI\.recordFolderAt/g) || []).length === 1,
+     'a second copy in the export loop would read every kept folder twice on any run that also '
+     + 'writes something');
+}
+
 // ⚠️⚠️ THE GUARD AGAINST A FIFTH EXIT. This is the check the manual sweep failed to be. It counts
 // the door's OWN exits - `return false` and the handoff to the runner - and ignores the returns
 // inside the conflict dialog's option callbacks, which return strings and arrays rather than

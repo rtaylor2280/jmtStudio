@@ -3077,8 +3077,11 @@ ipcMain.handle('sharedTracks:addFiles', async (event, { sourceFilePaths } = {}) 
   // ever have used it.
   try {
     const emit = _sfByteProgressEmitter(event);
-    const r = await soundFontSharedTracks.addFiles(
-      app.getPath('userData'), sourceFilePaths, null, emit.onBytes);
+    // ⚠️ Under the SHARED gate, not a private flag. The gate is what `export:cancel` flips, and a
+    // second copy of this state is the one thing [B-005] item 4 proved must not be duplicated.
+    const r = await _withExportCancel(async (shouldStop) =>
+      soundFontSharedTracks.addFiles(
+        app.getPath('userData'), sourceFilePaths, null, emit.onBytes, shouldStop));
     emit.flush();
     return r;
   }
@@ -3133,6 +3136,25 @@ ipcMain.handle('soundFonts:entryMatchesAt', async (event, { name, destDir, repor
     return r;
   }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+  });
+});
+// Record a folder the user chose to KEEP, so the work is paid for once rather than on every scan.
+// Partner to the compare above: that one stops as soon as a file count proves a difference, and
+// this one does the reading afterwards, only for folders Skip was answered for.
+ipcMain.handle('soundFonts:recordFolderAt', async (event, { name, destDir } = {}) => {
+  return _withExportCancel(async (shouldStop) => {
+    // ⚠️ `event`, not `_`. Reading a folder off a card is whole wavs per file, so the phase needs
+    // to move within a folder and not only between them - the same channel and the same emitter
+    // `entryMatchesAt` already reports its destination-side hashing on.
+    const emit = _sfByteProgressEmitter(event);
+    try {
+      const r = await soundFontEntries.recordFolderAt(destDir, name,
+        { shouldStop, onBytes: emit.onBytes });
+      emit.flush();
+      require('./sfSyncManifest').report('record kept "' + String(name) + '"');
+      return r;
+    }
+    catch (err) { return { ok: false, error: String(err && err.message || err) }; }
   });
 });
 // [B-402] THE ONE WRITER. Every compare and every export now RETURNS what it learned; the

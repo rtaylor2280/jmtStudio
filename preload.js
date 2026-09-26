@@ -493,6 +493,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   listDestFolders:       (params)     => ipcRenderer.invoke('soundFonts:listDestFolders', params),
   entryMatchesAt:        (params)     => ipcRenderer.invoke('soundFonts:entryMatchesAt', params),
+  recordFolderAt:        (params)     => ipcRenderer.invoke('soundFonts:recordFolderAt', params),
   sharedTracksExportToFolder:(params) => ipcRenderer.invoke('sharedTracks:exportToFolder', params),
   sharedTracksReadFileBytes:(params)  => ipcRenderer.invoke('sharedTracks:readFileBytes', params),
 

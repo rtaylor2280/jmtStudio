@@ -45,7 +45,15 @@ for (const h of ['entries:exportToFolder', 'common:exportAsZip', 'common:exportT
                  'sharedTracks:exportToFolder', 'sfFile:export', 'sources:exportToDownloads',
                  // Added 2026-09-20: it writes a user-chosen destDir and had NO cancel at all.
                  // Missed by every earlier sweep because its name says nothing about exporting.
-                 'sources:extractTo']) {
+                 'sources:extractTo',
+                 // ⚠️⚠️ AN IMPORT, LISTED HERE ON PURPOSE. This section is titled for export doors
+                 // and the gate is named for them, but the property being asserted is "a long copy
+                 // can be stopped", and the direction of the copy does not change that. Found
+                 // 2026-09-25 at 927 MB of 2.14 GB into an add with nothing to press - and
+                 // [B-005] item 4 had NAMED this path ("the multi-file track import asked for
+                 // one") before closing on the export doors alone. Grouping by the name rather
+                 // than by the effect is exactly how it was missed.
+                 'sharedTracks:addFiles']) {
   const i = main.indexOf(`ipcMain.handle('${h}'`);
   const next = i < 0 ? -1 : main.indexOf('ipcMain.handle(', i + 20);
   const body = i < 0 ? '' : main.slice(i, next > i ? next : main.length);

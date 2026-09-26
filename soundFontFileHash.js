@@ -353,6 +353,40 @@ function uniqueFileHashes(records) {
   return Array.from(out);
 }
 
+// Cheap shape of a folder: how many files and how many bytes, walked once.
+//
+// Sound only as a NEGATIVE. Differing counts or totals PROVE the two sides differ; matching ones
+// prove nothing, which is why callers still compare content afterwards. The value is that it sees
+// files the other side does not have at all - something a walk driven by one side's file list
+// structurally cannot.
+//
+// `excludeFn(relPath)` returns truthy to INCLUDE, matching collectFileRecords' contract, so both
+// sides can be measured under the same rules when one carries files the other never will.
+//
+// ⚠️ Root-level meta.json is skipped, because the hash walk skips it too. Measuring it on one
+// side and not the other would report every folder as different.
+function dirSignals(root, excludeFn) {
+  let fileCount = 0, totalBytes = 0;
+  const stack = [{ abs: root, rel: '' }];
+  while (stack.length) {
+    const { abs, rel } = stack.pop();
+    let entries = [];
+    try { entries = fs.readdirSync(abs, { withFileTypes: true }); } catch { continue; }
+    for (const e of entries) {
+      const childAbs = path.join(abs, e.name);
+      const childRel = rel ? `${rel}/${e.name}` : e.name;
+      if (excludeFn && !excludeFn(childRel)) continue;
+      if (e.isDirectory()) { stack.push({ abs: childAbs, rel: childRel }); continue; }
+      if (!e.isFile()) continue;
+      if (rel === '' && e.name === 'meta.json') continue;
+      fileCount++;
+      try { totalBytes += fs.statSync(childAbs).size; } catch {}
+    }
+  }
+  return { fileCount, totalBytes };
+}
+
 module.exports = {
   uniqueFileHashes, hashItemDir, hashBucketChildren, collectFileRecords, collectFileRecordsAsync,
-  hashRecords, hashFile: _hashFile, hashFileAsync, writeFileHashManifest, readFileHashManifest, breathe };
+  hashRecords, hashFile: _hashFile, hashFileAsync, writeFileHashManifest, readFileHashManifest, breathe,
+  dirSignals };

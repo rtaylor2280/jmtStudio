@@ -106,7 +106,7 @@ function _uniqueName(root, desired) {
 // to hash for the duplicate check, once to copy. Counting the copy alone would run the bar at half
 // speed and then jump. A duplicate is never copied, so its copy half is CREDITED the moment it is
 // found - otherwise a duplicate-heavy add would stop short of 100%.
-async function addFiles(userData, sourceFilePaths, onFileProgress, onBytes) {
+async function addFiles(userData, sourceFilePaths, onFileProgress, onBytes, shouldStop) {
   if (!Array.isArray(sourceFilePaths) || sourceFilePaths.length === 0) {
     return { ok: false, error: 'No files supplied' };
   }
@@ -160,7 +160,16 @@ async function addFiles(userData, sourceFilePaths, onFileProgress, onBytes) {
   };
   const _credit = (n, name) => { _bytesDone += (n || 0); _emit(name); };
   _emit('');
+  // ⚠️⚠️ CHECKED AT THE TOP OF THE LOOP, SO A STOP LANDS BETWEEN FILES AND NEVER INSIDE ONE.
+  // The exit from a long add used to be force-quitting the app, and force-quitting mid-write to a
+  // card is the corruption this whole SD line of work exists to prevent - so an add that cannot
+  // be stopped is not merely inconvenient, it pushes people toward the dangerous exit. Reported
+  // 2026-09-25 at 927 MB of 2.14 GB with nothing to press.
+  // ⚠️ Stopping here leaves every file already copied in place and complete. Files not yet reached
+  // are simply not added; nothing is half-written and nothing needs cleaning up.
+  let _stopped = false;
   for (const entry of sourceFilePaths) {
+    if (shouldStop && shouldStop()) { _stopped = true; break; }
     _done++;
     if (typeof onFileProgress === 'function') {
       const _n = (entry && typeof entry === 'object') ? (entry.name || entry.path) : entry;
@@ -291,7 +300,10 @@ async function addFiles(userData, sourceFilePaths, onFileProgress, onBytes) {
   // it moves on.
   _bytesDone = _bytesTotal;
   _emit('');
-  return { ok: true, added, skipped, duplicates, refused: refusedIn };
+  // ⚠️ `canceled` travels with the result rather than being an error: a stop the user asked for
+  // is an outcome, and reporting it as a failure is what [B-005] item 4 had to undo on the
+  // export side. Everything already copied is reported as added, because it was.
+  return { ok: true, canceled: _stopped, added, skipped, duplicates, refused: refusedIn };
 }
 
 function renameFile(userData, oldName, newName) {
