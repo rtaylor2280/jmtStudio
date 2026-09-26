@@ -39983,9 +39983,17 @@ require(['vs/editor/editor.main'], function () {
         if (_repaired && savedBytes > 0) {
           const _fb = (v) => String((window._sfFormatBytes || ((x) => `${x} B`))(v))
             .replace(' ', ' ');
-          tail.push(`JMT Studio kept a record of this card's contents, so repairing `
-            + `${n(_repaired)} ${plural(_repaired, 'font')} wrote only what had changed — `
-            + `${_fb(savedBytes)} did not have to be written again.`);
+          // ⚠️ BUILT FROM THE BOARD-CARD SENTENCE, not written beside it. That line reads
+          // "saved you time by maintaining a record of this card's contents, so it only had to
+          // re-read and write what changed"; this is the same sentence with the MEASURED quantity
+          // where "time" was. Two sentences making the same point in two different shapes is how
+          // a voice comes apart.
+          // ⚠️ "maintaining", not "keeping" - the record lives ON THE CARD and is upkept
+          // rather than stored. The first draft of this line said "kept" three lines under the
+          // comment that says why not.
+          // ⚠️ No font count: the line above already says how many were repaired.
+          tail.push(`JMT Studio saved you ${_fb(savedBytes)} of writing by maintaining a record `
+            + `of this card's contents, so it only had to write what changed.`);
         }
         if (warnedSlow && !wroteSomething) {
           tail.push('Exporting through a Proffieboard is always slower than a card reader. '
