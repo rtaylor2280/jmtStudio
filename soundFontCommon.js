@@ -1240,7 +1240,7 @@ async function commonMatchesAt(userData, uuid, destDir, targetName = 'common', s
   let cache = new Map();
   try { cache = sync.cacheFor(destDir, item); } catch {}
   const refreshed = new Map();
-  let identical = true;
+  let identical = true, _anyMissing = false;
 
   // [B-398] door 2. This loop hashes every file of a common folder AND READS THE CARD, so it was
   // the same main-thread block as the import - on slower storage. His ProffieOS voicepack commons
@@ -1257,7 +1257,9 @@ async function commonMatchesAt(userData, uuid, destDir, targetName = 'common', s
     // [B-173] point 2 - see the twin in soundFontEntries.
     sync.countStat();
     try { st = fs.statSync(abs); } catch { st = null; }
-    if (!st) { identical = false; continue; }
+    // ⚠️ A library file the card does not have means what we examined is NOT the whole
+    // folder, which disqualifies the completeness claim on the return.
+    if (!st) { identical = false; _anyMissing = true; continue; }
     const mtime = Math.round(st.mtimeMs);
     const ent = cache.get(rec.relPath);
     const valid = ent && ent[0] === st.size
@@ -1271,7 +1273,14 @@ async function commonMatchesAt(userData, uuid, destDir, targetName = 'common', s
   }
   // [B-402] Returned, not written — see the twin in soundFontEntries.entryMatchesAt. A compare
   // is a question, and the answer is handed back for the export to record once.
+  // ⚠️⚠️ `complete` LICENSES THE CALLER TO DELETE RECORDS THIS LIST DOES NOT MENTION, so it is
+  // only claimed when the observations really are the whole folder: every library file was
+  // FOUND, and the two sides carry the same file count (measured above, markers subtracted
+  // from both). Counts alone can coincide - one absent, one stray - which is why both.
+  // ⚠️ A cancel returns from inside the loop with no observations, so a partial pass can
+  // never reach this and can never license a deletion.
   return { ok: true, exists: true, identical, reason: identical ? null : 'hash',
+           complete: !_anyMissing && mine.fileCount === theirs.fileCount,
            observed: [...refreshed] };
 }
 

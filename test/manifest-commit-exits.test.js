@@ -93,6 +93,53 @@ for (const [label, anchor, why] of EXITS) {
      + 'writes something');
 }
 
+// ⚠️⚠️ THE REVIEW HANDS OVER, BUT A CANCEL STILL CLOSES ITSELF.
+//
+// `keepOpen` moves the responsibility for closing onto the successor, because a dialog that closes
+// on the click cannot know whether anything is coming after it - which left a frame of nothing
+// between the review and the summary. But a CANCEL has no successor, so it is a final surface and
+// must take itself down. Getting that wrong strands a dialog on screen with its buttons already
+// unwired, which is how the first version of this fix looked like a success: no flash, because the
+// stranded review was covering the hole.
+{
+  const s = html.indexOf('const onApply = () => {');
+  const e = s >= 0 ? html.indexOf('const onBackdrop', s) : -1;
+  const block = s >= 0 && e > s ? html.slice(s, e) : '';
+  ok('the review\'s apply and cancel were located', block.length > 0,
+     're-anchor if onApply/onBackdrop are renamed - an empty slice passes everything');
+  ok('⭐ apply hands the close to its successor',
+     /cleanup\(opts\.keepOpen === true\)/.test(block),
+     'closing on the click is what left a bare frame while the summary was built');
+  ok('⭐⭐ but cancel still closes itself',
+     /const onCancel = \(\) => \{ cleanup\(\); /.test(block),
+     'a cancel opens nothing after it, so nothing else will ever take this surface down');
+  ok('⚠️ and only the apply path may keep it up',
+     /if \(!keepUp\) modal\.classList\.remove\('active'\)/.test(html),
+     'the flag has to be read, or keepOpen silently does nothing and the gap comes back');
+}
+
+// ⚠️ THE RECORDING PHASE DOES REAL WORK, SO IT OFFERS A WAY OUT.
+//
+// It reads whole folders off a card - seconds per font on a board's USB bridge - and a surface
+// that works with no way out is the shape that pushes people toward force-quitting, which mid-write
+// to a card is the corruption the whole SD line of work exists to prevent.
+{
+  const s = html.indexOf('Recording what you kept');
+  const e = s >= 0 ? html.indexOf('totalSteps === 0', s) : -1;
+  const block = s >= 0 && e > s ? html.slice(s, e) : '';
+  ok('the recording phase was located', block.length > 0,
+     're-anchor if the phase label changes');
+  ok('⭐ it offers a cancel', /offerCancel\(/.test(block),
+     'it reads whole folders off a card and had no way out');
+  ok('⚠️ and retires it on the way out, on every path',
+     /finally \{[\s\S]{0,400}?clearCancel\(\)/.test(block),
+     'a handler left wired to a finished phase is a button that reports stopping something '
+     + 'already done');
+  ok('⚠️ the subscription is torn down with it',
+     /finally \{[\s\S]{0,400}?_kOff/.test(block),
+     'a progress subscription that outlives its phase repaints a modal belonging to the next one');
+}
+
 // ⚠️⚠️ THE GUARD AGAINST A FIFTH EXIT. This is the check the manual sweep failed to be. It counts
 // the door's OWN exits - `return false` and the handoff to the runner - and ignores the returns
 // inside the conflict dialog's option callbacks, which return strings and arrays rather than

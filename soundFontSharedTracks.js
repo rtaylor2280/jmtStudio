@@ -496,7 +496,16 @@ async function planExport(userData, destDir, onFile = null, shouldStop = null) {
   // IPC by the export scan, so the shape had to match its sibling's.
   // ⚠️ Safe for the in-process caller too - `exportToFolder` does `new Map(plan.observed || [])`,
   // which takes an array or a Map.
-  return { ok: true, toAdd, unchanged, differing, observed: [...refreshed] };
+  // ⚠️⚠️ `complete` LICENSES THE CALLER TO DELETE RECORDS THIS LIST DOES NOT MENTION. Claimed
+  // only when the observations really are the whole folder: nothing in `toAdd` (every library
+  // track was FOUND at the destination) and the destination holds no more files than the
+  // library has. Counts alone can coincide - one absent, one stray - which is why both.
+  // ⚠️ A cancel returns from inside the loop above with no observations at all, so a partial
+  // pass can never reach this.
+  let _destFiles = -2;
+  try { _destFiles = require('./soundFontFileHash').dirSignals(targetDir).fileCount; } catch {}
+  return { ok: true, toAdd, unchanged, differing, observed: [...refreshed],
+           complete: toAdd.length === 0 && _destFiles === names.length };
 }
 
 // ADDITIVE export. Deliberate call 2026-07-31: "always additive not replacing. so

@@ -40493,6 +40493,11 @@ require(['vs/editor/editor.main'], function () {
         // Folders the compare found already fully described by the manifest. Skipping one of these
         // costs nothing to decide and saves an entire walk.
         const _scanFullyRecorded = new Set();
+        // ⚠️⚠️ ITEMS WHOSE OBSERVATIONS ARE THE WHOLE FOLDER, and the only ones the commit may
+        // DELETE records from. A compare walks the library's file list, so it qualifies only when
+        // nothing was missing and the counts agree; a full folder walk always qualifies; a
+        // cancelled pass never does, because it returns no observations at all.
+        const _scanComplete = new Set();
         const _scanTick = (file, sub) => {
           const secs = Math.floor((Date.now() - _scanT0) / 1000);
           const dur = window._sfFormatDuration ? window._sfFormatDuration(secs) : `${secs}s`;
@@ -40584,6 +40589,7 @@ require(['vs/editor/editor.main'], function () {
             // records - so it says whether this folder has anything left to learn. Re-deriving it
             // later means walking and statting the whole folder to find out there was nothing.
             if (m && m.recorded === true) _scanFullyRecorded.add(name);
+            if (m && m.complete === true) _scanComplete.add(name);
           } catch {}
           _scanDone++;
           _scanTick(name);
@@ -40623,6 +40629,9 @@ require(['vs/editor/editor.main'], function () {
             // [B-402] Same as the fonts above — keyed by the SLOT, because that is the folder
             // name the export will write under and therefore the manifest item it belongs to.
             if (r && Array.isArray(r.observed) && r.observed.length) _scanObserved.set(cs.slot, r.observed);
+            // ⚠️ Same claim, same meaning: only a comparison that accounted for the whole folder
+            // may have records removed from its item.
+            if (r && r.complete === true) _scanComplete.add(cs.slot);
             if (r && r.ok && r.exists) {
               // Decided on CONTENT, not on the marker. A marker states what we
               // wrote last time; the folder can have been edited by hand since,
@@ -40692,6 +40701,7 @@ require(['vs/editor/editor.main'], function () {
             // 10-second warm export on a fast reader, and far worse on a board card.
             if (plan && Array.isArray(plan.observed) && plan.observed.length) {
               _scanObserved.set('tracks', plan.observed);
+              if (plan.complete === true) _scanComplete.add('tracks');
             }
           } catch {}
           finally { try { offPlan && offPlan(); } catch {} }
@@ -40736,7 +40746,7 @@ require(['vs/editor/editor.main'], function () {
           if (_scanObserved.size) {
             try {
               await window.electronAPI.syncManifestCommit({
-                destDir, items: Object.fromEntries(_scanObserved),
+                destDir, items: Object.fromEntries(_scanObserved), complete: [..._scanComplete],
               });
             } catch {}
           }
@@ -40947,7 +40957,7 @@ require(['vs/editor/editor.main'], function () {
             if (_scanObserved.size) {
               try {
                 await window.electronAPI.syncManifestCommit({
-                  destDir, items: Object.fromEntries(_scanObserved),
+                  destDir, items: Object.fromEntries(_scanObserved), complete: [..._scanComplete],
                 });
               } catch {}
             }
@@ -41048,6 +41058,7 @@ require(['vs/editor/editor.main'], function () {
                   if (rk && rk.canceled) { _keptStopped = true; break; }
                   if (rk && rk.observedItem && Array.isArray(rk.observed) && rk.observed.length) {
                     _scanObserved.set(rk.observedItem, rk.observed);
+                    if (rk.complete === true) _scanComplete.add(rk.observedItem);
                   }
                 } catch { /* a folder we cannot read goes unrecorded and is read again later */ }
               }
@@ -41129,7 +41140,7 @@ require(['vs/editor/editor.main'], function () {
           if (_scanObserved.size) {
             try {
               await window.electronAPI.syncManifestCommit({
-                destDir, items: Object.fromEntries(_scanObserved),
+                destDir, items: Object.fromEntries(_scanObserved), complete: [..._scanComplete],
               });
             } catch {}
           }
@@ -41596,7 +41607,7 @@ require(['vs/editor/editor.main'], function () {
             if (_scanObserved.size) {
               try {
                 await window.electronAPI.syncManifestCommit({
-                  destDir, items: Object.fromEntries(_scanObserved),
+                  destDir, items: Object.fromEntries(_scanObserved), complete: [..._scanComplete],
                 });
               } catch {}
             }

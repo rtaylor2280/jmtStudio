@@ -1163,7 +1163,7 @@ async function entryMatchesAt(userData, name, destDir, opts = {}) {
   let cache = new Map();
   try { cache = sync.cacheFor(destDir, name); } catch {}
   const refreshed = new Map();
-  let identical = true, hashed = 0, reused = 0;
+  let identical = true, hashed = 0, reused = 0, _anyMissing = false;
 
   // A file at the destination that the library does not have makes this folder DIFFER.
   //
@@ -1189,10 +1189,13 @@ async function entryMatchesAt(userData, name, destDir, opts = {}) {
   //               extra files. A skipped file is one the user decided to keep, which makes it
   //               ours to maintain even though we never wrote it.
   // `recordFolderAt` does that half, called on skip during the export.
+  // ⚠️ Defaults that can never be equal, so a folder whose counts could not be measured cannot
+  // accidentally claim completeness and license a deletion.
+  let _libFiles = -1, _cardFiles = -2;
   try {
-    const _libFiles = libRecords.filter((r) => r && r.fileHash !== '<empty>').length;
+    _libFiles = libRecords.filter((r) => r && r.fileHash !== '<empty>').length;
     const { dirSignals } = require('./soundFontFileHash');
-    const _cardFiles = dirSignals(destFont).fileCount;
+    _cardFiles = dirSignals(destFont).fileCount;
     if (_cardFiles !== _libFiles) {
       // ⭐⭐ AND SAY WHETHER THE MANIFEST ALREADY COVERS THIS FOLDER, because both numbers are
       // already in hand and the caller would otherwise go and re-derive them by walking the
@@ -1233,7 +1236,9 @@ async function entryMatchesAt(userData, name, destDir, opts = {}) {
     // before and after that work, rather than argued from the code.
     sync.countStat();
     try { st = fs.statSync(abs); } catch { st = null; }
-    if (!st) { identical = false; continue; }           // library has it, card does not
+    // ⚠️ A file the library has and the card does not means the set we just examined is NOT
+    // the whole folder, which disqualifies the completeness claim below.
+    if (!st) { identical = false; _anyMissing = true; continue; }   // library has it, card does not
     const mtime = Math.round(st.mtimeMs);
     const ent = cache.get(rec.relPath);
     const valid = ent && ent[0] === st.size
@@ -1272,7 +1277,17 @@ async function entryMatchesAt(userData, name, destDir, opts = {}) {
   //
   // ⚠️ AS AN ARRAY, not a Map: this return crosses the IPC boundary and a Map does not survive
   // structured cloning intact for our purposes. The export side rebuilds it.
+  // ⚠️⚠️ `complete` MEANS "THESE OBSERVATIONS ARE THE WHOLE FOLDER", AND IT LICENSES DELETION.
+  // The caller may drop records this list does not mention, so it has to be exactly right:
+  //   · every library file was FOUND - one missing means the card holds something we never
+  //     examined, even when the counts happen to agree (one absent, one extra).
+  //   · the card's file count equals the library's - so the files just examined account for
+  //     every file in the folder.
+  // ⚠️ A CANCEL CANNOT REACH HERE. The stop check returns from inside the loop with no
+  // observations at all, so a partial pass can never claim this - which is the whole risk:
+  // records deleted for files the operation never got to.
   return { ok: true, exists: true, identical, reason: identical ? null : 'hash', reused, hashed,
+           complete: !_anyMissing && _cardFiles === _libFiles,
            observed: [...refreshed] };
 }
 
@@ -2304,7 +2319,9 @@ async function recordFolderAt(destDir, name, opts = {}) {
       if (_onBytes) { try { _onBytes({ done: _done, total: _total, name: childRel }); } catch {} }
     }
   }
-  return { ok: true, observedItem: name, observed };
+  // ⚠️ COMPLETE ONLY BECAUSE IT RAN TO THE END. Every stop above returns `canceled` with no
+  // observations, so a partial walk can never license the caller to delete anything.
+  return { ok: true, observedItem: name, observed, complete: true };
 }
 
 module.exports = {

@@ -123,6 +123,48 @@ const FONT = {
        'recording it on one side only would make the folder differ forever');
   }
 
+  {
+    // ⚠️⚠️ THE ONLY DIRECTION THAT DELETES. A record for a file that is not on the card
+    // contradicts the claim that we maintain this, so a comparison that accounted for the WHOLE
+    // folder may drop what it did not see. Everything else still merges, because a compare walks
+    // the library's file list and knows nothing about the rest of the folder.
+    const sync = require('../sfSyncManifest');
+    const { userData, dest } = setup(FONT, FONT);
+
+    // Two records for files that are not there, as a deleted extra would leave behind.
+    sync.mergeItems(dest, { Ahsoka: [['ghost1.wav', [1, 2, 'G1']], ['ghost2.wav', [1, 2, 'G2']]] });
+    const m = await entryMatchesAt(userData, 'Ahsoka', dest);
+    ok('⭐ a folder that matches the library reports its observations as complete',
+       m.identical === true && m.complete === true,
+       'without this the sweep never runs on the case that produces stale records');
+
+    sync.mergeItems(dest, { Ahsoka: m.observed });
+    const merged = (sync.read(dest).items.Ahsoka.files || []).map((f) => f[0]);
+    ok('⚠️ a plain merge still keeps everything, including the stale records',
+       merged.includes('ghost1.wav'),
+       'merging must stay additive - a compare cannot speak for files it never looked at');
+
+    sync.mergeItems(dest, { Ahsoka: m.observed }, { complete: ['Ahsoka'] });
+    const swept = (sync.read(dest).items.Ahsoka.files || []).map((f) => f[0]).sort();
+    ok(`⭐⭐ a complete observation drops records for files that are gone (${swept.length})`,
+       JSON.stringify(swept) === JSON.stringify(['bgndrag/drag1.wav', 'hum.wav', 'swing1.wav']),
+       `the item should describe exactly the folder. Got ${JSON.stringify(swept)}`);
+  }
+
+  {
+    // ⚠️⚠️ THE GUARD, AND THE CASE THAT MAKES COUNTS ALONE INSUFFICIENT. One library file absent
+    // and one stray present leaves the counts equal while the folders differ - so a claim based
+    // on counts would delete records for files it never examined.
+    const card = { ...FONT, 'stray.wav': 'ZZZ' };
+    delete card['swing1.wav'];
+    const { userData, dest } = setup(FONT, card);
+    const m = await entryMatchesAt(userData, 'Ahsoka', dest);
+    ok('⭐⭐ counts can match while the folders differ, and completeness is REFUSED',
+       m.complete === false,
+       'one absent plus one stray is 3 against 3. Claiming completeness here would license '
+       + 'deleting records for a file that was never looked at');
+  }
+
   console.log(failed ? `\n${failed} FAILED` : '\nentry-extra-files: all passing');
   process.exit(failed ? 1 : 0);
 })();

@@ -345,10 +345,21 @@ function cacheFor(destDir, itemName) {
 // records nothing — which is CORRECT rather than merely simpler: the entries it would have
 // written describe files that may not have finished copying, and a missing record self-heals
 // into a re-read while a wrong one does not.
-function mergeItems(destDir, items) {
+// ⚠️⚠️ `opts.complete` NAMES ITEMS WHOSE OBSERVATION IS THE WHOLE FOLDER, and it is the only way
+// a record is ever REMOVED. Merging alone can only add and overwrite, so a file deleted from the
+// card left its record behind for ever - and an entry describing a file that is not there
+// contradicts the claim that we maintain this - the record is described as maintained, so it
+// cannot keep an entry for something that is gone.
+//
+// ⚠️ IT IS OPT-IN BECAUSE MOST OBSERVATIONS ARE PARTIAL. A compare walks the LIBRARY's file list,
+// so its findings say nothing about anything else in that folder; treating them as complete would
+// delete knowledge about files the operation never looked at. Only `recordFolderAt` walks the
+// whole folder, so only its result may claim this.
+function mergeItems(destDir, items, opts = {}) {
   if (!destDir || !items) return false;
   const names = Object.keys(items);
   if (!names.length) return false;
+  const complete = new Set(opts.complete || []);
   const { manifest, state } = readState(destDir);
   if (state === 'unreadable') return false;
   const m = manifest || { version: MANIFEST_VERSION, items: {} };
@@ -356,10 +367,14 @@ function mergeItems(destDir, items) {
   let touched = false;
   for (const itemName of names) {
     const observed = items[itemName] instanceof Map ? items[itemName] : new Map(items[itemName] || []);
-    if (!observed.size) continue;
+    const isComplete = complete.has(itemName);
+    // ⚠️ An empty observation is normally nothing to say - but from a COMPLETE walk it means the
+    // folder is empty, which is a fact worth recording rather than one to skip.
+    if (!observed.size && !isComplete) continue;
     const existing = new Map();
     const rec = m.items[itemName];
-    if (rec && Array.isArray(rec.files)) {
+    // A complete walk starts from nothing, so anything it did not see is dropped.
+    if (!isComplete && rec && Array.isArray(rec.files)) {
       for (const f of rec.files) {
         if (Array.isArray(f) && f.length >= 4) existing.set(f[0], [f[1], f[2], f[3]]);
       }

@@ -3163,10 +3163,13 @@ ipcMain.handle('soundFonts:recordFolderAt', async (event, { name, destDir } = {}
 // ⚠️ A cancelled operation simply never calls this, which is the whole point: a question leaves
 // nothing behind, and a completed operation records everything it saw — including items it only
 // LOOKED at, which the per-item write used to drop.
-ipcMain.handle('syncManifest:commit', (_, { destDir, items } = {}) => {
+ipcMain.handle('syncManifest:commit', (_, { destDir, items, complete } = {}) => {
   try {
     if (!destDir || !items) return { ok: false, error: 'Missing destDir or items' };
-    const wrote = require('./sfSyncManifest').mergeItems(destDir, items);
+    // ⚠️ `complete` names the items whose observations are the WHOLE folder. Only those may
+    // have records removed; everything else merges as before.
+    const wrote = require('./sfSyncManifest').mergeItems(destDir, items,
+      { complete: Array.isArray(complete) ? complete : [] });
     return { ok: true, wrote: !!wrote };
   } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
