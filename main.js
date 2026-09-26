@@ -2734,11 +2734,67 @@ async function _withExportCancel(run, opts = {}) {
   }
 }
 
+// ⭐⭐ PLAN A WHOLE EXPORT BEFORE ANY OF IT IS DRAWN. [B-005 item 7b, 2026-09-26]
+//
+// A door calls this from its `plan:` hook, which already runs before the progress modal appears.
+// Summing `workBytes` gives a denominator that is right from the first frame, instead of the
+// whole-font sum being corrected downward font by font. Watching the total shrink mid-run reads
+// as the app being unsure of itself, and the planning belongs in a phase already on screen.
+//
+// ⚠️ ONLY THE FONTS THAT WILL BE WRITTEN. Ones already identical are resolved by the compare
+// before this is called and must not be planned: they cost a walk and contribute nothing.
+//
+// ⭐ MEASURED BEFORE IT WAS BUILT, on a 29-font card in sync: 0.64 s for every font, 2,263
+// manifest entries reused, ZERO files hashed, nothing read off the card. The cost is a stat per
+// file, and it is the same stat the export used to pay at write time - moved, not added.
+//
+// ⚠️ THE PLANS ARE HANDED BACK AND THEN HANDED IN AGAIN with the export, so that walk happens
+// once per export rather than once here and once there. On a board card each stat is a USB round
+// trip, which is exactly the cost this must not double.
+// ⭐⭐ `known` CLOSES THE DOUBLE HASH. [B-005 item 7b, 2026-09-26]
+//
+// The compare scan already hashed the destination files the card's manifest could not vouch for,
+// and `entryMatchesAt` hands them back as `observed`. Those findings are not written to the
+// manifest until the END of the operation, so without this the plan would hash the very same
+// files again, seconds later, off the same card. It is an array of [relPath, [size, mtime, hash]]
+// per font because it crosses the IPC boundary; `planFolderWrite` merges it OVER the manifest,
+// which is right because the scan's reading is the newer one.
+//
+// ⚠️ ONLY FONTS THE SCAN ACTUALLY HASHED APPEAR HERE. When the file COUNTS differ, the compare
+// proves the folder differs without reading a byte and returns early with no observations - so
+// this saves nothing for a font with added or deleted files, and everything for one whose files
+// were edited in place. That is the same split the deferral was designed around, and it is why
+// this is a saving rather than a re-shuffle.
+ipcMain.handle('entries:planFolderWrites', async (_e, { names, destDir, known } = {}) => {
+  try {
+    if (!Array.isArray(names) || !destDir) return { ok: false, error: 'Missing names or destDir' };
+    const userData = app.getPath('userData');
+    const plans = {};
+    let workBytes = 0;
+    for (const name of names) {
+      let p = null;
+      const _k = (known && Array.isArray(known[name]) && known[name].length)
+        ? new Map(known[name]) : null;
+      try { p = await soundFontEntries.planFolderWrite(userData, name, destDir, { known: _k }); } catch {}
+      // ⚠️ A FONT THAT CANNOT BE PLANNED IS NOT AN ERROR HERE. It falls through to planning
+      // itself inside the export, exactly as it did before any of this existed, and its bar
+      // contribution stays the caller's whole-font estimate. Refusing the whole export because
+      // one folder could not be walked would be a progress-bar improvement breaking an export.
+      if (!p || !p.ok) continue;
+      plans[name] = p;
+      workBytes += (p.workBytes || 0);
+    }
+    return { ok: true, plans, workBytes };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
 // [B-402] `priorObserved` carries what the conflict scan already hashed for THIS destination in
 // THIS operation, so the export can write the manifest once instead of the scan writing it and the
 // export writing it again seconds later. It is an array of [relPath, [size, mtime, hash]] because
 // it crosses the IPC boundary; the module rebuilds the Map.
-ipcMain.handle('entries:exportToFolder', async (event, { name, destDir, mode, syncManifest, priorObserved, boardCard } = {}) => {
+ipcMain.handle('entries:exportToFolder', async (event, { name, destDir, mode, syncManifest, priorObserved, plan, boardCard } = {}) => {
   // ⚠️ THIS ONE HANDLER IS TWO OF HIS DOORS. The right-click "Export font folder…" calls it once;
   // the REGULAR card export loops it, once per font. So cancelling here covers both, and the
   // bulk run stops at a font boundary as well as a file boundary. [B-005 item 4]
@@ -2765,11 +2821,15 @@ ipcMain.handle('entries:exportToFolder', async (event, { name, destDir, mode, sy
         // way at BOTH sites, which is why this is fixed as a pair. [2026-09-23]
         (n, rel) => { token.wrote.bytes += (Number(n) || 0); emit.onBytes(n, rel); },
         { syncManifest: syncManifest !== false, priorObserved, shouldStop,
-          // ⚠️ MOVES THE BAR, NEVER THE TALLY. These are bytes the card already had, so they
-          // count toward the progress denominator (which was sized from the whole font) and
-          // must NOT count toward `token.wrote`, which answers a different question: how much
-          // did we actually put on this card.
-          onSkipped: (n) => { try { emit.onBytes(n, null); } catch {} },
+          // ⚠️ MOVES THE BAR, NEVER THE TALLY. Parking and disposing of files is real work on a
+          // card and has to show on the bar, but it writes nothing - so it must NOT count toward
+          // `token.wrote`, which answers a different question: how much did we actually put on
+          // this card. The cancel-cleanup rule reads that tally to decide whether removing what
+          // landed is slow enough to be worth offering rather than just doing.
+          onUnits: (n) => { try { emit.onBytes(n, null); } catch {} },
+          // ⭐ THE PLAN THE DOOR ALREADY COMPUTED, so this export does not walk the card again.
+          // Absent is fine and means "plan it yourself". [B-005 item 7b, 2026-09-26]
+          plan,
           boardCard: !!token.boardCard, wrote: token.wrote });
       emit.flush();
       return r;

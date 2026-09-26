@@ -21,6 +21,25 @@ const StreamZip = require('node-stream-zip');
 const soundFontSources = require('./soundFontSources');
 const { copyTreeWithProgress } = require('./sfExportCopy');
 
+// ⭐⭐ WHAT ONE FILE COSTS, EXPRESSED AS BYTES. [B-005 item 7b, 2026-09-26]
+//
+// A differential repair does three kinds of work - it writes bytes, it parks files aside, and it
+// disposes of the parked copies - and only the first is measured in bytes. The progress bar needs
+// one currency, so per-file work is converted at this rate.
+//
+// ⭐ MEASURED, NOT PICKED. On REVANTEDJMT (FAT32, direct reader) over two runs: park ~30 ms/file,
+// dispose ~23 ms/file, write ~4.6 MB/s. At that write rate 30 ms is ~142 KB and 23 ms is ~109 KB,
+// so 128 KB sits between them. Delete cost is independent of file SIZE - 200 files of 4 KB took
+// 4765 ms while 4 files of 10 MB took 265 ms - which is why this is per file and not per byte.
+//
+// ⚠️ THE SLOPE TRANSFERS, THE MAGNITUDE DOES NOT. Another card, and especially a card behind a
+// Proffieboard (a USB round trip per file), will have a different constant. That is tolerable by
+// construction: this only sets the PACE at which the bar crosses per-file work. A wrong value
+// paces unevenly; it can never make the bar claim done before the work is finished, because the
+// same number sizes the denominator and advances the numerator. The value it replaced was an
+// implicit zero, which is the only one that does lie.
+const PER_FILE_UNIT = 128 * 1024;
+
 function entriesRoot(userData) {
   return path.join(userData, 'soundFonts', 'library');
 }
@@ -1481,8 +1500,24 @@ async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onB
     // because at that point nothing has been touched.
     let _writeFilter = null;
     if (_differential) {
-      const plan = await planFolderWrite(userData, name, destDir, {
-        known: opts.known || null, shouldStop: opts.shouldStop || null });
+      // ⭐⭐ THE CALLER MAY HAVE PLANNED THIS ALREADY, AND IF SO THIS MUST NOT PLAN IT AGAIN.
+      // [B-005 item 7b, 2026-09-26]
+      //
+      // The export doors now plan every font in their `plan:` hook, because that is what lets the
+      // progress bar be sized correctly before it is drawn - it used to be sized from whole fonts
+      // and then corrected downward per font, and watching the total shrink mid-run read as the
+      // app being unsure of itself.
+      //
+      // ⚠️⚠️ REUSED, NOT RECOMPUTED, AND THAT IS THE WHOLE POINT ON A BOARD CARD. A plan is a stat
+      // per file - 2,263 of them for a 29-font card, measured 2026-09-26 - and every one is a USB
+      // round trip when the card is behind a Proffieboard. Planning here as well would pay that
+      // walk twice for one export, which is precisely the cost the pre-planning was supposed to
+      // move rather than add.
+      //
+      // ⚠️ A caller that does not pre-plan still works: door 1, the tests, and anything written
+      // later fall through to planning here. One behaviour, two entry points - not two designs.
+      const plan = (opts.plan && opts.plan.ok) ? opts.plan
+        : await planFolderWrite(userData, name, destDir, { shouldStop: opts.shouldStop || null });
       if (plan && plan.canceled) {
         return { ok: true, canceled: true, destPath: targetDir, item: targetName,
                  partialRemoved: false, restored: true, leftovers: [] };
@@ -1492,25 +1527,11 @@ async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onB
       }
       const toWrite = new Set(plan.toWrite);
       _writeFilter = (nm, rel) => toWrite.has(rel);
-      // ⭐⭐ CREDIT THE BYTES THIS WRITE NO LONGER HAS TO MOVE. [B-005 item 7b, 2026-09-26]
-      //
-      // The progress denominator is the FONT's size, taken from its meta before anything is
-      // planned - so once the write became differential the bar stopped short by exactly the
-      // amount 7b saves. His report on the first run: "the progress bar never went to 100%".
-      //
-      // ⭐ AND THE CREDIT IS HONEST, not a fudge. The unit of work is "this font, made to match";
-      // a file already correct on the card is part of that work and it completed instantly. The
-      // bar jumping and then moving with the real writes says exactly why the export was fast.
-      // ⚠️ [B-360]'s rule, applied in the other direction: a bar that will not arrive is a wrong
-      // denominator, and the fix is to make the numerator whole rather than to clamp the end.
+      // ⭐ What maintaining the record bought, in bytes that never had to be written. This is a
+      // RESULT and it belongs in the summary, which already states it as "JMT Studio saved you X
+      // of writing". It is deliberately no longer fed to the progress bar - see below.
       _savedOut = Math.max(0, (plan.bytesTotal || 0) - (plan.bytesToWrite || 0));
-      // ⚠️⚠️ ITS OWN CHANNEL, NOT `onBytes`, AND THAT IS NOT TIDINESS. The caller's onBytes sink
-      // also feeds `token.wrote.bytes`, which the cancel-cleanup rule reads to decide whether
-      // removing what landed is slow enough to be worth OFFERING rather than just doing. Crediting
-      // bytes we never wrote through that sink would inflate the tally with work that never
-      // happened and answer that question wrongly. Progress and "what did we actually write" are
-      // two different quantities that happened to share a pipe.
-      if (_savedOut && typeof opts.onSkipped === 'function') { try { opts.onSkipped(_savedOut); } catch {} }
+
       // ⭐ THE TWO KINDS OF FILE THAT MOVE OUT OF THE WAY, and they are different on the way back.
       //   a superseded file - its replacement is about to be written, so undo RESTORES it
       //   an extra the library does not have - Replace means MAKE IT MATCH, so it just goes
@@ -1525,6 +1546,11 @@ async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onB
         if (!fs.existsSync(path.join(targetDir, rel))) { _created.push(rel); continue; }
         await _moveAside(targetDir, asideDir, rel);
         _displaced.push(rel);
+        // ⚠️ THE BAR, NEVER THE TALLY. `opts.onBytes` also feeds `token.wrote.bytes`, which the
+        // cancel-cleanup rule reads to decide whether removing what landed is slow enough to be
+        // worth OFFERING rather than just doing. A park writes nothing to the card, so putting
+        // these units through that sink would answer that question with work that never happened.
+        if (typeof opts.onUnits === 'function') { try { opts.onUnits(PER_FILE_UNIT); } catch {} }
         // ⚠️⚠️ ONLY A SUPERSEDED FILE IS EXPECTING A REPLACEMENT. An EXTRA is parked because the
         // library does not have it and never will, so the post-copy check below must not treat
         // its absence as a write that failed and put it back. First run of the behavioural test
@@ -1554,8 +1580,15 @@ async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onB
           let arrived = false;
           try { arrived = fs.statSync(path.join(targetDir, rel)).isFile(); } catch {}
           if (arrived) continue;
-          try { await _moveAside(asideDir, targetDir, rel); _displaced.splice(_displaced.indexOf(rel), 1); }
-          catch { /* reported by the leftover path; nothing is destroyed */ }
+          try {
+            await _moveAside(asideDir, targetDir, rel);
+            _displaced.splice(_displaced.indexOf(rel), 1);
+            // ⚠️ THE BAR STILL OWES THIS FILE ITS UNIT. It was counted once for parking and once
+            // for disposal; coming back instead of being disposed of is the same per-file move,
+            // so the unit is paid here rather than in the disposal loop. Without this the bar
+            // finishes short by one unit for every file a refusal sends back.
+            if (typeof opts.onUnits === 'function') { try { opts.onUnits(PER_FILE_UNIT); } catch {} }
+          } catch { /* reported by the leftover path; nothing is destroyed */ }
         }
       }
     } catch (err) {
@@ -1747,6 +1780,21 @@ async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onB
         if (fs.existsSync(junk)) await fs.promises.rm(junk, { recursive: true, force: true });
         await fs.promises.rename(asideDir, junk);
         replacedLeftover = junk;
+        // ⭐⭐ UNLINKED ONE AT A TIME SO THE BAR CAN CROSS IT. [B-005 item 7b, 2026-09-26]
+        //
+        // This is the same work the recursive rm below would do - it unlinks each file too - but
+        // done here it can report. Disposal is the longest unrepresented stretch in a repair
+        // (~23 ms per file, ~4.7 s for 200 of them), and it runs AFTER the write, so leaving it
+        // silent is what puts a finished-looking bar in front of a still-working app.
+        //
+        // ⚠️ `_displaced` is exactly what is still parked: anything restored above was spliced
+        // out of it. Failures are swallowed on purpose - the rm that follows is the real
+        // guarantee, and this loop is only here to pace the bar.
+        for (const rel of _displaced) {
+          try { await fs.promises.unlink(path.join(junk, rel)); } catch {}
+          if (typeof opts.onUnits === 'function') { try { opts.onUnits(PER_FILE_UNIT); } catch {} }
+        }
+        // Sweeps the now-empty directories, and anything the loop above could not remove.
         await fs.promises.rm(junk, { recursive: true, force: true });
         replacedLeftover = null;
       } catch {
@@ -2575,6 +2623,11 @@ async function planFolderWrite(userData, name, destDir, opts = {}) {
 
   const toWrite = [], toDisplace = [];
   let unchanged = 0, bytesToWrite = 0, reused = 0, hashed = 0;
+  // ⭐⭐ HOW MANY FILES GET MOVED ASIDE, which is the cost a byte count cannot see. Measured on a
+  // card 2026-09-26: parking is ~30 ms per file and disposing ~23 ms per file, both INDEPENDENT of
+  // file size - 200 files of 4 KB dispose in 4765 ms while 4 files of 10 MB dispose in 265 ms.
+  // Only a file that is already at the destination is parked; a missing one is written outright.
+  let parkCount = 0;
 
   // ⚠️ `<empty>` RECORDS ARE DIRECTORY MARKERS, NOT FILES. They carry no content to compare and
   // the copy walker creates directories on its own, so counting them would report work that does
@@ -2610,12 +2663,13 @@ async function planFolderWrite(userData, name, destDir, opts = {}) {
     // ⚠️ AN UNREADABLE DESTINATION FILE IS NOT A MATCH. A null hash means we could not check, and
     // the safe reading of "could not check" during a MAKE IT MATCH is to write it.
     if (destHash && destHash === r.fileHash) unchanged++;
-    else { toWrite.push(r.relPath); bytesToWrite += (r.size || 0); }
+    // Present and differing, so its copy is parked before the replacement is written.
+    else { toWrite.push(r.relPath); bytesToWrite += (r.size || 0); parkCount++; }
   }
 
   // ⭐ THE OTHER HALF. Anything at the destination the library does not have is what makes
   // Replace mean "make it match" rather than "add to it".
-  for (const rel of present.keys()) if (!libSet.has(rel)) toDisplace.push(rel);
+  for (const rel of present.keys()) if (!libSet.has(rel)) { toDisplace.push(rel); parkCount++; }
 
   // ⚠️ `bytesTotal` IS THE WHOLE FONT, and the caller needs it to keep a progress bar honest:
   // the denominator was sized from the font, so the bytes this plan does NOT write have to be
@@ -2623,7 +2677,32 @@ async function planFolderWrite(userData, name, destDir, opts = {}) {
   // the right denominator, not a clamp.]
   const bytesTotal = libFiles.reduce((n, r) => n + (r.size || 0), 0);
   return { ok: true, toWrite, toDisplace, unchanged, bytesToWrite, bytesTotal, reused, hashed,
+           parkCount, workBytes: planWorkBytes({ bytesToWrite, parkCount }),
            libFiles: libFiles.length, destFiles: present.size };
+}
+
+// ⭐⭐ WHAT THIS REPAIR WILL ACTUALLY COST, IN ONE CURRENCY. [B-005 item 7b, 2026-09-26]
+//
+// The progress bar is sized from this and advanced by the same quantities, so the two cannot
+// drift: every byte in `bytesToWrite` is reported by the copier, and every parked file is
+// reported twice, once when it is moved aside and once when it is disposed of.
+//
+// ⚠️⚠️ THE WORK IS NOT ONLY BYTES, which is why this exists rather than using `bytesToWrite`
+// directly. Measured on a card 2026-09-26, two runs: parking a file costs ~30 ms and disposing of
+// it ~23 ms, both INDEPENDENT of its size. 200 files of 4 KB dispose in 4765 ms while 4 files of
+// 10 MB dispose in 265 ms - 18x longer for one fiftieth of the data. A repair therefore pays per
+// file three times (park, write, dispose) and only the write was ever on the bar: ~53 ms per file
+// of invisible work, which is ~11 s sitting at 100% on a 200-file voicepack, and that is the
+// stretch where someone force-quits mid-write. Through a board the per-file cost rises further,
+// since each one is a USB round trip, so weighting by bytes alone is wrong in exactly the
+// direction that hurts most.
+//
+// ⚠️ A FONT CAN COST MORE IN FILES THAN IN BYTES, and that is not an error to clamp away - a
+// folder whose only change is forty small extras writes nothing at all and still has real work
+// to show.
+function planWorkBytes(plan) {
+  if (!plan) return 0;
+  return (plan.bytesToWrite || 0) + (plan.parkCount || 0) * 2 * PER_FILE_UNIT;
 }
 
 module.exports = {
@@ -2643,6 +2722,7 @@ module.exports = {
   recordFolderAt: _sp.markAsync('record:kept', recordFolderAt),
   exportEntryToFolder: _sp.markAsync('copy:font', exportEntryToFolder),
   planFolderWrite: _sp.markAsync('plan:font', planFolderWrite),
+  planWorkBytes,
   entryFolderExistsAt,
   listEntryFiles,
   migrateSourceLevelFields,

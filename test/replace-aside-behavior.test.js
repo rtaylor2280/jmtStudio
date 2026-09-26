@@ -128,34 +128,125 @@ const LIB = {
   }
 
   {
-    // ⭐⭐ THE BAR HAS TO ARRIVE. [B-005 item 7b, his report on the first real run: "the progress
-    // bar never went to 100%"]
+    // ⭐⭐ THE BAR HAS TO ARRIVE, AND IT MUST NOT ARRIVE EARLY. [B-005 item 7b, 2026-09-26]
     //
-    // The denominator is the FONT's size, fixed before anything is planned, so a differential
-    // write that moves less than the whole font leaves the bar short by exactly what 7b saved -
-    // the saving showing up as an apparent failure to finish.
+    // ⚠️⚠️ THIS CASE USED TO ASSERT THE OPPOSITE AND IT PASSED BOTH TIMES. It required
+    // `wrote + skipped === libTotal` - written when crediting the unwritten bytes into the
+    // NUMERATOR was the mechanism. That produced the reported symptom: the bar sitting at 100%
+    // for most of the run, reading 42.0 MB of 42.1 MB before a byte moved. Once the fix sized the
+    // DENOMINATOR instead, that assertion could only pass if the fix had not happened. A test
+    // whose subject is the thing being changed inverts silently.
     //
-    // ⚠️ THE ASSERTION IS ON THE SUM OF THE DELTAS, not on a final value, because that is what
-    // the bar integrates. Clamping the end would satisfy a "reaches 100%" check while leaving the
-    // middle wrong, and [B-360] is explicit that a clamp is not the fix.
+    // ⭐ SO THE INVARIANT IS RECONCILIATION, NOT A FINAL VALUE: what the bar is SIZED to must
+    // equal what the bar INTEGRATES. Sized = the font's size plus the planned correction;
+    // integrated = every delta the bar receives, bytes and per-file units alike. Asserting a
+    // final 100% would pass on a clamp, and [B-360] is explicit that a clamp is not the fix.
     const card = { ...LIB, 'hum.wav': 'CARD-hum-DIFFERS', 'song1.wav': 'AN-EXTRA' };
     const { userData, dest } = setup(LIB, card);
     const libTotal = Object.values(LIB).reduce((n, v) => n + Buffer.byteLength(v), 0);
-    let wrote = 0, skipped = 0;
+    // ⭐ THE DENOMINATOR NOW COMES FROM THE PLAN, taken BEFORE the export runs - which is exactly
+    // what the door does in its `plan:` hook so the bar is the right size on its first frame.
+    const pre = await entries.planFolderWrite(userData, 'Ahsoka', dest, {});
+    const denominator = entries.planWorkBytes(pre);
+    let wrote = 0, units = 0;
     const res = await entries.exportEntryToFolder(userData, 'Ahsoka', dest, 'replace',
-      (n) => { wrote += n; }, { syncManifest: false, onSkipped: (n) => { skipped += n; } });
-    ok(`⭐⭐ written + skipped covers the whole font (${wrote}+${skipped}/${libTotal})`,
-       res.ok === true && wrote + skipped === libTotal,
-       'the bar is fed byte deltas against a denominator sized from the font, so the bytes not '
-       + 'rewritten must be credited or it can never reach the end');
-    ok('⚠️⚠️ and the SKIPPED bytes do not arrive on the written channel',
-       wrote < libTotal && skipped > 0,
+      (n) => { wrote += n; },
+      { syncManifest: false, plan: pre, onUnits: (n) => { units += n; } });
+    const integrated = wrote + units;        // what the bar actually receives
+    ok(`⭐⭐ the bar arrives exactly (${integrated} of ${denominator})`,
+       res.ok === true && integrated === denominator,
+       'sized and integrated are the same quantity computed two ways, so any drift between them '
+       + 'is a bar that stops short or claims done early');
+    ok('⚠️ the work is not merely the bytes, or this would prove nothing',
+       denominator > (pre.bytesToWrite || 0) && pre.parkCount > 0,
+       `a fixture with nothing parked cannot tell a per-file term from a missing one. `
+       + `parkCount=${pre.parkCount}, bytesToWrite=${pre.bytesToWrite}, work=${denominator}`);
+    ok('⚠️⚠️ per-file units do NOT arrive on the written channel',
+       wrote < libTotal && units > 0,
        'the caller\'s onBytes sink also feeds `token.wrote.bytes`, which decides whether removing '
-       + 'what landed is slow enough to be worth offering. Crediting unwritten bytes through it '
-       + 'answers that question with work that never happened');
-    ok('⚠️ and the export reports what it saved',
-       res.savedBytes === skipped && res.savedBytes > 0,
+       + 'what landed is slow enough to be worth offering. Parking and disposing write nothing to '
+       + 'the card, so putting them through it answers that question with work that never happened');
+    ok('⚠️ and the export still reports what it saved',
+       res.savedBytes === libTotal - wrote && res.savedBytes > 0,
        `the summary says this number, so it has to be the measured one. Got ${res.savedBytes}`);
+  }
+
+  {
+    // ⭐⭐ A SUPPLIED PLAN IS OBEYED, NOT RECOMPUTED. [B-005 item 7b, 2026-09-26]
+    //
+    // ⚠️⚠️ THIS IS THE ONLY THING STANDING BETWEEN ONE WALK AND TWO, and on a board card a walk
+    // is a USB round trip per file - 2,263 of them for a 29-font card. The doors plan in their
+    // `plan:` hook so the bar can be sized before it is drawn, then hand that plan to the export.
+    // If the export ever quietly plans again, every number stays correct, every test stays green,
+    // and the cost silently doubles on the one destination where it hurts. Nothing else can see
+    // that, so it is asserted behaviourally here.
+    //
+    // ⭐ THE PROBE IS A DOCTORED PLAN: one differing file is removed from `toWrite`. Obeyed, that
+    // file keeps its tampered content. Recomputed, the export finds the difference itself and
+    // repairs it - which is the friendlier outcome and the wrong one for this contract.
+    const card = { ...LIB, 'hum.wav': 'CARD-hum-DIFFERS', 'swing1.wav': 'CARD-swing-DIFFERS' };
+    const { userData, dest, font } = setup(LIB, card);
+    const p = await entries.planFolderWrite(userData, 'Ahsoka', dest, {});
+    ok('⚠️ the probe fixture really does present two differing files',
+       p.toWrite.includes('hum.wav') && p.toWrite.includes('swing1.wav'),
+       `if the plan does not list both, this case proves nothing. Got ${JSON.stringify(p.toWrite)}`);
+    const doctored = { ...p, toWrite: p.toWrite.filter((r) => r !== 'swing1.wav') };
+    const res = await entries.exportEntryToFolder(userData, 'Ahsoka', dest, 'replace', null,
+      { syncManifest: false, plan: doctored });
+    const now = readTree(font);
+    ok('⭐⭐ the export wrote exactly what the supplied plan said, and did not re-plan',
+       res.ok === true && now['hum.wav'] === LIB['hum.wav']
+         && now['swing1.wav'] === 'CARD-swing-DIFFERS',
+       'swing1 was withheld from the plan. Repairing it anyway means the export walked the '
+       + 'destination again, which is the second USB round trip per file this design exists to '
+       + `avoid. hum=${now['hum.wav']}, swing1=${now['swing1.wav']}`);
+  }
+
+  {
+    // ⭐⭐ THE PLAN REUSES WHAT THE COMPARE ALREADY HASHED, RATHER THAN READING IT AGAIN.
+    // [B-005 item 7b, the `known` item, 2026-09-26]
+    //
+    // The compare scan hashes the destination files the card's manifest cannot vouch for. Those
+    // findings are not committed to the manifest until the END of the operation, so the plan that
+    // follows seconds later used to hash the very same files off the very same card.
+    //
+    // ⚠️⚠️ THE OBSERVATIONS COME FROM `entryMatchesAt`, NOT FROM A LITERAL I WROTE. A fixture I
+    // author tests my idea of the shape; the bug this guards against is the two modules
+    // disagreeing about it - which is exactly how a field read as `r.hash` against a producer
+    // writing `r.fileHash` shipped green and did nothing. If the compare's format drifts, this
+    // has to go red.
+    //
+    // ⭐ THE COUNTS ARE THE INSTRUMENT. `planFolderWrite` reports `hashed` and `reused`, so the
+    // saving is observable rather than inferred - and the control below proves the same call
+    // DOES hash without the observations, so a zero cannot be mistaken for a plan that did
+    // nothing at all.
+    const card = { ...LIB, 'hum.wav': 'CARD-hum-EDITED!' };   // same COUNT, one file edited
+    const { userData, dest } = setup(LIB, card);
+    const m = await entries.entryMatchesAt(userData, 'Ahsoka', dest, { writeCache: false });
+    ok('⚠️ the compare did the per-file pass and returned observations',
+       m.ok === true && Array.isArray(m.observed) && m.observed.length > 0,
+       'a compare that short-circuits on counts returns none, and then this case proves nothing. '
+       + `Got reason=${m.reason}, observed=${(m.observed || []).length}`);
+
+    const control = await entries.planFolderWrite(userData, 'Ahsoka', dest, {});
+    ok('⚠️ CONTROL: without the observations the plan really does read the card',
+       control.hashed > 0,
+       `if this is already zero the treatment below proves nothing. hashed=${control.hashed}`);
+
+    const reuse = await entries.planFolderWrite(userData, 'Ahsoka', dest,
+      { known: new Map(m.observed) });
+    ok(`⭐⭐ with them it hashes nothing (${control.hashed} -> ${reuse.hashed})`,
+       reuse.hashed === 0 && reuse.reused >= control.reused,
+       `the compare already paid for these reads. hashed=${reuse.hashed}, reused=${reuse.reused}`);
+
+    // ⚠️ AND IT MUST NOT HAVE CHANGED THE ANSWER. A faster plan that decides something different
+    // is not an optimisation, it is a second opinion - and the one that skipped the reading is
+    // the one that would be believed.
+    ok('⚠️⚠️ and the plan it produces is identical to the one that read the card',
+       JSON.stringify([...reuse.toWrite].sort()) === JSON.stringify([...control.toWrite].sort())
+         && reuse.parkCount === control.parkCount
+         && reuse.bytesToWrite === control.bytesToWrite,
+       `reuse=${JSON.stringify(reuse.toWrite)} control=${JSON.stringify(control.toWrite)}`);
   }
 
   {

@@ -396,6 +396,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readEntryDocBytes:     (params)     => ipcRenderer.invoke('entries:readDocBytes', params),
   exportEntryDoc:        (params)     => ipcRenderer.invoke('entries:exportDoc', params),
   exportEntryToFolder:   (params)     => ipcRenderer.invoke('entries:exportToFolder', params),
+  // Plan a whole export up front so the progress bar can be sized before it is drawn.
+  // `known` carries what the compare scan already hashed, so the plan does not re-read it.
+  // { names, destDir, known? } -> { ok, plans: { [name]: plan }, workBytes }
+  planFolderWrites:      (params)     => ipcRenderer.invoke('entries:planFolderWrites', params),
   // [B-203] Will the write fit? 0.3ms, statfs only - safe to call before any write.
   checkExportDest:       (params)     => ipcRenderer.invoke('exportDest:check', params),
   // [B-203] What is the destination attached to? ~1.9s (one PowerShell spawn), so start

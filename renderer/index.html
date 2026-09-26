@@ -40599,7 +40599,9 @@ require(['vs/editor/editor.main'], function () {
         // became differential - before 7b every export rewrote the whole folder, so "written"
         // was the only honest word for both.
         const _scanExisted = new Set();
-        // Bytes the differential write did not have to move because the card already had them.
+        // Bytes this export did not have to write because the card already had them. Seeded
+        // below from the fonts that were whole-font identical, then added to per font by the
+        // differential write. [B-005 item 7b]
         let _savedBytes = 0;
         const _scanTick = (file, sub) => {
           const secs = Math.floor((Date.now() - _scanT0) / 1000);
@@ -41183,6 +41185,51 @@ require(['vs/editor/editor.main'], function () {
         // Byte-identical fonts ride the existing skip path: no IPC call, no
         // progress tick, nothing written.
         for (const n of unchangedFonts) modeByName.set(n, 'skip');
+        // ⭐⭐ A WHOLE FONT NOT WRITTEN IS THE BIGGEST SAVING THERE IS, AND IT WAS NOT COUNTED.
+        // [B-005 item 7b, 2026-09-26]
+        //
+        // The definition is "the entire folder had we had to write it again, minus what we did
+        // write". The per-font figure was exactly that formula, but only for the fonts the export
+        // actually touched. Fonts that matched outright are resolved before the loop and
+        // `continue` past it, so they contributed nothing. On a card in sync that is most of the
+        // card: a real run reported 108.6 MB against ~1.45 GB genuinely not rewritten.
+        //
+        // ⚠️ `unchangedFonts` ONLY, NEVER `modeByName === 'skip'`. That map now holds two very
+        // different meanings: a font that already matched, and a font the USER chose to keep in
+        // the conflict prompt. Only the first is something Studio did for them; counting the
+        // second bills them for their own decision. The same distinction is drawn a few lines
+        // below for `fontsSkipped`, and 2026-07-31 is the note on why conflating them was wrong.
+        //
+        // ⚠️⚠️ IT HAS TO BE SEEDED HERE, ABOVE THE `totalSteps === 0` BAIL. That branch is the
+        // card that is ALREADY FULLY IN SYNC - it draws the same summary and returns - and it is
+        // the case where the whole card is the saving. Seeding any later reports a perfectly
+        // current card as having saved nothing, which is the one run where the number matters
+        // most.
+        //
+        // ⚠️ INLINED, NOT `_sfEntryBytes`, for the reason already written on the fit check above:
+        // that helper is a `const` declared several hundred lines further down this same
+        // function, so calling it here is a temporal-dead-zone ReferenceError on every export -
+        // and `node --check` cannot see it, because the syntax is fine.
+        for (const n of unchangedFonts) {
+          _savedBytes += ((((_sfAllEntries || []).find(x => x && x.name === n) || {})
+            .meta) || {}).contentTotalBytes || 0;
+        }
+        // ⭐ THE VOICE PACK AND THE TRACKS COUNT TOO, settled 2026-09-26: if it was picked to go
+        // on the card and writing it was avoided, it is a saving. Both were part of what the
+        // export was asked to put there, and neither was written.
+        for (const cs of commonCurrentSlots) {
+          const c = (_sfCommons || []).find(x => x.uuid === cs.uuid);
+          _savedBytes += (c && (c.totalBytes || (c.meta && c.meta.contentTotalBytes))) || 0;
+        }
+        // ⚠️ ALREADY THERE MEANS NEITHER MISSING NOR DIFFERENT. A track the user chose to KEEP is
+        // in `tracksDiffering` and stays out of this, for the same reason a kept font does: that
+        // is their decision, not something Studio did for them.
+        if (includeTracks) {
+          const _accounted = new Set([...(tracksToAdd || []), ...(tracksDiffering || [])]);
+          for (const f of (window._sfSharedTracksFiles || [])) {
+            if (!_accounted.has(f.name)) _savedBytes += (f.size || 0);
+          }
+        }
         const willWriteFonts = names.filter(n => (modeByName.get(n) || 'rename') !== 'skip').length;
         const willWriteCommon = commonSlots.filter(cs => _slotMode(cs) !== 'skip').length;
         const willWriteTracks = includeTracks && (tracksToAdd.length || tracksReplace.length) ? 1 : 0;
@@ -41391,6 +41438,53 @@ require(['vs/editor/editor.main'], function () {
           _sfExportFileCount += ((((_sfAllEntries || []).find(x => x && x.name === nm) || {})
             .meta) || {}).contentFileCount || 0;
         }
+        // ⭐⭐ PLAN EVERY FONT NOW, SO THE BAR IS THE RIGHT SIZE BEFORE IT IS DRAWN.
+        // [B-005 item 7b, 2026-09-26]
+        //
+        // The first cut sized this from whole fonts and then corrected downward font by font over
+        // the delta channel, so the total visibly stepped 147.2 -> 107.9 -> 69.6 during the run.
+        // Planning here removes the correction entirely rather than hiding it: one number, fixed
+        // from the first frame, and no new phase on screen because this runs before the modal.
+        //
+        // ⭐ IT COSTS NOTHING THAT WAS NOT ALREADY BEING PAID. Measured on a 29-font card in
+        // sync: 0.64 s, 2,263 manifest stats reused, ZERO files hashed, nothing read off the
+        // card. And the plans are handed to the export below, so the walk happens once for the
+        // whole operation instead of once here and once there - which is what keeps this off the
+        // critical path on a board card, where every stat is a USB round trip.
+        //
+        // ⚠️ REPLACE ONLY. A font being written fresh has nothing at the destination to diff
+        // against, and one the user skipped is not written at all; both keep the whole-font
+        // figure above, which is already right for them.
+        const _plansByFont = new Map();
+        try {
+          const _toPlan = names.filter(n => (modeByName.get(n) || 'rename') === 'replace');
+          if (_toPlan.length) {
+            // ⭐⭐ HAND THE PLAN WHAT THE SCAN ALREADY HASHED. [B-005 item 7b, 2026-09-26]
+            //
+            // The compare pass a moment ago read and hashed the destination files the card's
+            // manifest could not vouch for, and `_scanObserved` has been holding them all along
+            // to write the manifest at the end. Without this they are thrown at the plan's feet
+            // and it reads the same files off the same card a second time.
+            //
+            // ⚠️ THIS IS THE `known` ITEM, AND IT ONLY BITES ON EDITED FILES. A font with files
+            // added or deleted differs by COUNT, which the compare proves without reading
+            // anything, so it contributes no observations and the plan hashes as it always did.
+            const _known = {};
+            for (const n of _toPlan) {
+              const obs = _scanObserved.get(n);
+              if (Array.isArray(obs) && obs.length) _known[n] = obs;
+            }
+            const pr = await window.electronAPI.planFolderWrites({ names: _toPlan, destDir, known: _known });
+            if (pr && pr.ok && pr.plans) {
+              for (const [nm, p] of Object.entries(pr.plans)) {
+                _plansByFont.set(nm, p);
+                // Swap this font's whole-folder estimate for what the repair will actually do.
+                _sfExportTotalBytes += (p.workBytes || 0) - _sfEntryBytes(nm);
+              }
+            }
+          }
+        } catch { /* a door that cannot pre-plan keeps the whole-font sizing and the export
+                     plans each font itself, exactly as it did before this existed */ }
         for (const cs of commonSlots) {
           if (_slotMode(cs) === 'skip') continue;
           const c = _sfCommons.find(x => x.uuid === cs.uuid);
@@ -41556,7 +41650,10 @@ require(['vs/editor/editor.main'], function () {
               try {
                 // ⭐ `boardCard` established ONCE by the runner's preflight and handed in here -
                 // not re-measured per font, which would cost ~1,900 ms each. [B-005 item 4]
+                // ⭐ `plan` is the one computed before the bar was drawn, handed back so the
+                // export does not walk this folder a second time. [B-005 item 7b, 2026-09-26]
                 const r = await window.electronAPI.exportEntryToFolder({ name, destDir, mode,
+                                                                         plan: _plansByFont.get(name) || null,
                                                                          boardCard });
                 // ⚠️⚠️ CHECKED BEFORE THE TALLIES BELOW. A cancel comes back ok:true and
                 // not-skipped, so it would fall straight through to results.copied++ and the
@@ -43236,6 +43333,9 @@ require(['vs/editor/editor.main'], function () {
           //   'identical'  it is already there and matches, so nothing was done
           //   'kept'       it differs and Skip was chosen, so nothing was done
           let _outcome = 'wrote';
+          // The plan `plan:` computed, if it found anything at the destination. Handed to the
+          // export so the folder is walked once for the whole operation. [B-005 item 7b]
+          let _fontPlan = null;
           const _t0 = Date.now();
           const _run = await _sfRunExport({
             label: 'files',
@@ -43266,11 +43366,36 @@ require(['vs/editor/editor.main'], function () {
             onCancel: _sfExportCancelOpt.onCancel,
             // ⭐ No work to do: the size is on the entry's own meta. A door that cannot size
             // itself returns 0, which the preflight reads as "cannot measure" - never as empty.
-            plan: async () => ({
-              items: [],
-              totalBytes: _fontBytes || _m.contentTotalBytes || 0,
-              fileCount: _m.contentFileCount || 0,
-            }),
+            //
+            // ⭐⭐ EXCEPT WHEN THE FONT IS ALREADY THERE, in which case this may become a
+            // differential Replace and the whole-font figure would size the bar for a rewrite
+            // that is not going to happen. [B-005 item 7b, 2026-09-26]
+            //
+            // ⚠️⚠️ THIS DOOR CANNOT KNOW ITS MODE YET - the runner calls `plan` BEFORE `compare`,
+            // and Replace-or-Skip is the user's answer to a question not yet asked. So it plans
+            // unconditionally, which is safe because a plan against a destination that has
+            // nothing finds nothing present, puts every file in `toWrite` and parks none: its
+            // `workBytes` IS the whole font, which is the right size for a plain write. One call,
+            // correct either way, and no separate existence probe to keep in step.
+            //
+            // ⚠️ IF HE THEN CHOOSES SKIP the plan was wasted - measured at ~30 ms for one font
+            // against a warm manifest, and nothing is written, so the bar it sized is never seen.
+            // That is the price of one number that never moves, and it is the right trade: the
+            // alternative was correcting the total after the modal opened, which is the flash
+            // this design exists to remove.
+            plan: async () => {
+              try {
+                const pr = await window.electronAPI.planFolderWrites({
+                  names: [fontName], destDir: pick.destDir });
+                if (pr && pr.ok && pr.plans) _fontPlan = pr.plans[fontName] || null;
+              } catch { /* falls back to the meta figure, which is what it always used */ }
+              return {
+                items: [],
+                totalBytes: _fontPlan ? (_fontPlan.workBytes || 0)
+                                      : (_fontBytes || _m.contentTotalBytes || 0),
+                fileCount: _m.contentFileCount || 0,
+              };
+            },
             // ⚠️⚠️ NO NUMBERING ON THIS DOOR. [2026-09-22, his call]
             //
             // This used to pass `mode: 'rename'`, so a name collision silently produced
@@ -43354,9 +43479,18 @@ require(['vs/editor/editor.main'], function () {
             produce: async ({ decisions, boardCard }) => {
               const mode = (decisions && decisions.mode) || 'rename';
               try {
+                // ⚠️ THE PLAN GOES ONLY ON REPLACE. It describes a differential repair; handing
+                // it to a rename or a fresh write would be describing an operation that is not
+                // happening. The export ignores it off that path anyway - this keeps it true at
+                // the call site rather than relying on that.
+                // ⚠️ And the call stays compact on purpose: `export-wiring` locates every call
+                // site by scanning a fixed window from the opening brace, so a comment inside
+                // the literal pushes the closing brace out of range and the ratchet silently
+                // covers one door fewer. It caught exactly that here.
+                const _planArg = mode === 'replace' ? _fontPlan : null;
                 r = await window.electronAPI.exportEntryToFolder({
                   name: fontName, destDir: pick.destDir, mode,
-                  syncManifest: false, boardCard,
+                  plan: _planArg, syncManifest: false, boardCard,
                 });
               } catch (err) {
                 r = { ok: false, error: String(err && err.message || err) };
