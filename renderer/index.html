@@ -37452,11 +37452,14 @@ require(['vs/editor/editor.main'], function () {
         // taken a live eject checkbox down with it.
         // ⭐ One function decides: the row is visible when either control is.
         _syncActions() {
-          const a = this.actionsEl(), b = this.cancelEl(), w = this.ejectWrapEl();
+          const a = this.actionsEl(), w = this.ejectWrapEl();
           if (!a) return;
-          const cancelUp = !!(b && b.style.display !== 'none' && !b.hidden && b.onclick);
-          const ejectUp  = !!(w && w.style.display !== 'none');
-          a.style.display = (cancelUp || ejectUp) ? 'flex' : 'none';
+          // ⚠️ THE ROW IS KEPT BY A RESERVATION, NOT BY A LIVE BUTTON. [2026-09-25] This used to
+          // ask whether the cancel was WIRED, so retiring the handler collapsed the whole row on
+          // any door that offers no eject checkbox - the same resize as the button's own, one
+          // size larger. `cancelReserved` outlives the handler and dies with the modal.
+          const ejectUp = !!(w && w.style.display !== 'none');
+          a.style.display = (this.cancelReserved || ejectUp) ? 'flex' : 'none';
         },
         // ⚠️ `offerCancelNow` WAS HERE AND IS GONE. [B-420, 2026-09-24] Added this afternoon for the
         // conflict scan on the theory that a read-only phase can close instantly, then deleted the
@@ -37480,6 +37483,10 @@ require(['vs/editor/editor.main'], function () {
           // the other is how a working-state class becomes a permanent one.
           _btnIdle(b, 'Cancel');
           b.style.display = '';
+          // ⚠️ BOTH, because `clearCancel` now retires with `visibility` and a re-offer inside the
+          // same showing would otherwise wire a button nobody can see.
+          b.style.visibility = '';
+          this.cancelReserved = true;
           b.onclick = async () => {
             // ⭐⭐ THE BAR MUST STOP PRETENDING. [B-005 item 4] His report: "this may or may not
             // be hung... really not sure." It was not - it cancelled - but the modal gave him
@@ -37528,7 +37535,32 @@ require(['vs/editor/editor.main'], function () {
           // when the modal stays open for a following phase.
           // ⚠️ `_btnIdle` here for the same reason as in offerCancel: this is the reset path, and a
           // reset that leaves `.busy-dots` on is not a reset. See the note there.
-          if (b) { b.onclick = null; b.disabled = false; _btnIdle(b, 'Cancel'); b.style.display = 'none'; }
+          //
+          // ⚠️⚠️ `visibility`, NOT `display`, AND THAT IS THE WHOLE FIX FOR THE PHANTOM MODAL.
+          // [2026-09-25] `display:none` takes the button OUT OF THE LAYOUT, so the row lost a
+          // button's height while the modal stayed on screen: the box shrank and re-centred, and
+          // a box that changes size and position is a NEW BOX as far as the eye is concerned.
+          // Ryan reported "an extra modal just before the summary" three separate times and no
+          // code accounted for one, because there was never a second modal - only this one
+          // resizing. Found by pausing a screen recording: same phase, same text, Cancel present
+          // in one frame and gone in the next.
+          // ⭐ Reserving with `visibility` rather than a min-height is deliberate: the space is
+          // held BY THE BUTTON ITSELF, so it can never drift from the button's real size the way
+          // a hard-coded height would. `visibility:hidden` also drops it from the tab order, so
+          // the retired cancel is unreachable as well as invisible.
+          if (b) { b.onclick = null; b.disabled = false; _btnIdle(b, 'Cancel'); b.style.visibility = 'hidden'; }
+          this._syncActions();
+        },
+
+        // ⚠️ THE RESERVATION LASTS AS LONG AS THE MODAL DOES, AND NOT ONE PHASE LONGER. Held
+        // across phases on purpose - an export hands scan -> review -> recording -> copy through
+        // the same surface, and a row that came back for each phase would jump at every handover.
+        // It is released only when the modal actually goes down, so the next thing to open this
+        // surface starts with no dead row under it.
+        _retireActions() {
+          this.cancelReserved = false;
+          const b = this.cancelEl();
+          if (b) { b.style.display = 'none'; b.style.visibility = ''; }
           this._syncActions();
         },
 
@@ -37733,6 +37765,7 @@ require(['vs/editor/editor.main'], function () {
         hideNow() {
           this.cancelPending();
           this.clearCancel();
+          this._retireActions();
           this.modal()?.classList.remove('active');
           this.startTs = 0;
         },
@@ -37741,7 +37774,7 @@ require(['vs/editor/editor.main'], function () {
           this.cancelPending();
           // ⚠️ Nothing was ever shown, so there is no minimum-display floor to honour - waiting it
           // out here would stall the caller for 200 ms to hide a modal that never appeared.
-          if (!this.modal()?.classList.contains('active')) { this.clearCancel(); this.startTs = 0; return; }
+          if (!this.modal()?.classList.contains('active')) { this.clearCancel(); this._retireActions(); this.startTs = 0; return; }
           const elapsed = Date.now() - this.startTs;
           if (elapsed < minMs) {
             await new Promise(r => setTimeout(r, minMs - elapsed));
@@ -37749,6 +37782,7 @@ require(['vs/editor/editor.main'], function () {
           // ⚠️ RETIRED ON THE WAY OUT TOO, not only on the way in. A handler left wired to a
           // finished export is a button that reports cancelling something already done.
           this.clearCancel();
+          this._retireActions();
           this.modal()?.classList.remove('active');
           this.startTs = 0;
         },
@@ -54952,5 +54986,6 @@ function _getFreshFieldRange(fieldName) {
 
 <!-- ── Toast host: lightweight transient notifications ── -->
 <div id="toast-host" aria-live="polite"></div>
+
 </body>
 </html>

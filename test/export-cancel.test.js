@@ -507,8 +507,29 @@ ok('it is hidden until an operation opts in',
   ok('⭐ and so is the eject checkbox',
      /this\.clearEject\(\);/.test(openBlock),
      'a box left ticked from a previous export would eject a card this run never asked about');
-  ok('the handler is cleared when the modal closes',
-     /clearCancel\(\);\s*\n\s*this\.modal\(\)\?\.classList\.remove\('active'\)/.test(html));
+  // ⚠️⚠️ THIS PINNED ADJACENCY AND BROKE ON CORRECT CODE - TEN LINES UNDER THE COMMENT SAYING
+  // ADJACENCY IS NOT THE PROPERTY THAT MATTERS. [2026-09-25] It required `clearCancel()` to be
+  // the line immediately before `remove('active')`; adding `_retireActions()` between them went
+  // red while the contract it names was untouched. Now each close path is sliced to its own body
+  // and asked the actual question: does closing this modal retire the handler.
+  //
+  // ⚠️ EACH SLICE ENDS AT THE `remove('active')` IT IS ABOUT. `hide()` holds TWO `clearCancel()`
+  // calls - one on the early return for a modal that never opened, one on the path that actually
+  // closes - so slicing the whole method let a mutation that deleted the real one pass on the
+  // other. Caught by mutation testing, not by reading it.
+  for (const [label, sig] of [
+    ['hideNow', '        hideNow() {'],
+    ['hide',    '          const elapsed = Date.now() - this.startTs;'],
+  ]) {
+    const s = html.indexOf(sig);
+    const e = s >= 0 ? html.indexOf("classList.remove('active')", s) : -1;
+    const body = s >= 0 && e > s ? html.slice(s, e) : '';
+    ok(`${label} was located`, body.length > 0,
+       're-anchor if it is renamed - an empty slice passes everything');
+    ok(`the handler is cleared when the modal closes (${label})`,
+       /clearCancel\(\)/.test(body),
+       'a stale handler is a button reporting it stopped something already finished');
+  }
 }
 // ⚠️ THIS USED TO PIN THE LITERAL STRING "Cancelling… (finishing current file)" ON THE BUTTON.
 // 2026-09-24 the acknowledgement moved to the house convention — `_btnBusy(b, 'Cancelling')`, which
