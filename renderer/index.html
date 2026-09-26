@@ -29216,20 +29216,37 @@ require(['vs/editor/editor.main'], function () {
           };
           const fmtB = (n) => (window._sfFormatBytes ? window._sfFormatBytes(n) : `${n} B`);
           let optPhase = '', optSaved = 0;
+          // ⭐⭐ SIX PHASES, ONE BAR, AND EVERY HANDOVER USED TO BE UNFINISHED. [B-389, 2026-09-26]
+          //
+          // Optimize walks reading -> rebuild -> innercompress -> compress -> verify -> commit,
+          // and each change wrote the bar straight back to 0%. So a phase that had climbed to
+          // 96% dropped to nothing five times in one run, and the LAST phase never filled at all
+          // because the block ended on another 0% reset. The rule, settled 2026-09-16: "even if
+          // it flows all the way up quickly before it goes to the next thing, it should always
+          // flow to 100%."
+          //
+          // ⭐ NO NEW MECHANISM. `makeBarPhaser` already does exactly this for both bulk-import
+          // bars: handover() paints 100%, HOLDS it long enough to be seen, and buffers whatever
+          // is written during the hold so the next phase's opening 0% cannot stomp the fill.
+          // Routing the resets through `write` is what makes the buffering work - a direct
+          // `style.width` assignment goes around the phaser and paints over the 100%.
+          const _optBar = makeBarPhaser(() => _sfImportEls.createBar);
           if (_sfImportEls.createLabel) _sfImportEls.createLabel.textContent = 'Optimizing storage…';
-          if (_sfImportEls.createBar) _sfImportEls.createBar.style.width = '0%';
+          _optBar.write('0%');
           if (_sfImportEls.createDetail) _sfImportEls.createDetail.textContent = '';
           const offOpt = window.electronAPI.onOptimizeProgress((p) => {
             if (!p) return;
             if (p.phase && p.phase !== optPhase) {
+              // ⚠️ Guarded on the OUTGOING phase: the first event has nothing behind it to fill,
+              // and handing over from nothing would open the run with a 100% flash.
+              if (optPhase) _optBar.handover();
               optPhase = p.phase;
-              if (_sfImportEls.createBar) _sfImportEls.createBar.style.width = '0%';
             }
             if (p.savedBytes != null) optSaved = p.savedBytes;
             let frac = 0;
             if (p.totalBytes) frac = Math.min(1, (p.bytesDone || 0) / p.totalBytes);
             else if (p.totalFiles) frac = Math.min(1, (p.fileCount || 0) / p.totalFiles);
-            if (_sfImportEls.createBar) _sfImportEls.createBar.style.width = `${Math.round(frac * 100)}%`;
+            _optBar.write(`${Math.round(frac * 100)}%`);
             if (_sfImportEls.createLabel) {
               // Same metric convention as the other import surfaces: n of m files
               // when the phase counts files, bytes when it streams bytes.
@@ -29244,7 +29261,12 @@ require(['vs/editor/editor.main'], function () {
           });
           try { optRes = await window.electronAPI.optimizeSource({ uuid: _sfImport.uuid }); } catch {}
           if (offOpt) { try { offOpt(); } catch {} }
-          if (_sfImportEls.createBar) _sfImportEls.createBar.style.width = '0%';
+          // ⭐ THE LAST PHASE GETS ITS FILL TOO. [B-389] Optimize used to end by resetting to 0%,
+          // so `commit` - the phase that actually finishes the job - was the one phase guaranteed
+          // never to reach 100. handover() fills it; the reset behind it is written THROUGH the
+          // phaser so it waits out the hold instead of erasing it.
+          if (optPhase) _optBar.handover();
+          _optBar.write('0%');
           if (_sfImportEls.createDetail) _sfImportEls.createDetail.textContent = '';
         }
         // ── Customized rows land NOW, and only the checked ones ([B-311]
