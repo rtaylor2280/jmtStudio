@@ -59,6 +59,33 @@ const MANIFEST_VERSION = 1;
 // read back up to 2s from what we observed.
 const MTIME_TOLERANCE_MS = 2000;
 
+// ⭐⭐ THE ONE DEFINITION OF "THIS RECORD STILL DESCRIBES THIS FILE". [B-005 item 7b, 2026-09-26]
+//
+// Four byte-identical copies of this existed - the font compare, the common compare, the tracks
+// compare and recordFolderAt - and the differential write was about to make a fifth. It is the
+// predicate the whole manifest rests on: it decides whether a file is READ AT ALL, so a copy that
+// drifted would make one surface trust a stale hash while the others re-read, and nothing would
+// look wrong from outside.
+//
+// ⚠️ mtime IS COMPARED WITH A TOLERANCE, NOT FOR EQUALITY. FAT32 stores modified times to two
+// seconds, so exact comparison would invalidate every record on every card the moment it landed.
+// ⚠️⚠️ IT CHECKS THE RECORD IS WELL FORMED ITSELF RATHER THAN TRUSTING ITS CALLER. `cacheFor`
+// drops anything shorter than four fields, so a malformed record cannot arrive by that route
+// today - but the whole reason this function exists is that the rule had no single home, and
+// "safe because of a filter in another function" is the same weakness wearing a different hat.
+// ⭐ The specific trap, found by testing it: `entry[1] || 0` turns a missing mtime into 0, and 0
+// is within tolerance of 0 - so a truncated record would VALIDATE against any size-matched file
+// near the epoch, and then hand the caller `undefined` as its hash.
+// ⚠️ The hash is required too, because that is what `valid` is used FOR at every call site:
+// `valid ? entry[2] : hash(file)`. A record that cannot answer that question is not valid.
+function entryValid(entry, size, mtimeMs) {
+  if (!Array.isArray(entry) || entry.length < 3) return false;
+  if (entry[0] !== size) return false;
+  if (typeof entry[1] !== 'number' || !Number.isFinite(entry[1])) return false;
+  if (!entry[2]) return false;
+  return Math.abs(entry[1] - mtimeMs) <= MTIME_TOLERANCE_MS;
+}
+
 function manifestPath(destDir) {
   return path.join(destDir, MANIFEST_NAME);
 }
@@ -442,6 +469,7 @@ module.exports = {
   MANIFEST_NAME,
   MANIFEST_VERSION,
   MTIME_TOLERANCE_MS,
+  entryValid,
   mergeItems,
   manifestPath,
   cacheFor,

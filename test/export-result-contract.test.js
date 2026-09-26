@@ -95,6 +95,10 @@ const CONTRACT = {
     fields: [
       'destPath', 'written', 'refused', 'skipped',
       'observed', 'observedItem',
+      // [B-005 item 7b, 2026-09-26] Bytes the differential write did not have to move because the
+      // card already had them. The summary states this number, so it has to cross IPC declared
+      // rather than arriving by luck.
+      'savedBytes',
       'tooBig', 'slowWrite', 'wroteCount', 'partialRemoved', 'restored', 'leftovers',
       'offerCleanup', 'teardownIncomplete',
     ],

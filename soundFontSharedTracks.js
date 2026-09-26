@@ -462,9 +462,7 @@ async function planExport(userData, destDir, onFile = null, shouldStop = null) {
 
     const mtime = Math.round(st.mtimeMs);
     const entry = cache.get(name);
-    const valid = entry
-      && entry[0] === st.size
-      && Math.abs((entry[1] || 0) - mtime) <= sync.MTIME_TOLERANCE_MS;
+    const valid = sync.entryValid(entry, st.size, mtime);
 
     const { breathe, hashFileAsync } = require('./soundFontFileHash');
     await breathe();

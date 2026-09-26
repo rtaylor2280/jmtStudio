@@ -2765,6 +2765,11 @@ ipcMain.handle('entries:exportToFolder', async (event, { name, destDir, mode, sy
         // way at BOTH sites, which is why this is fixed as a pair. [2026-09-23]
         (n, rel) => { token.wrote.bytes += (Number(n) || 0); emit.onBytes(n, rel); },
         { syncManifest: syncManifest !== false, priorObserved, shouldStop,
+          // ⚠️ MOVES THE BAR, NEVER THE TALLY. These are bytes the card already had, so they
+          // count toward the progress denominator (which was sized from the whole font) and
+          // must NOT count toward `token.wrote`, which answers a different question: how much
+          // did we actually put on this card.
+          onSkipped: (n) => { try { emit.onBytes(n, null); } catch {} },
           boardCard: !!token.boardCard, wrote: token.wrote });
       emit.flush();
       return r;

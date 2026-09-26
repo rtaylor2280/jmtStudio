@@ -1122,6 +1122,61 @@ function entryFolderExistsAt(name, destDir) {
 // `planExport`, one size smaller: bounded by a font rather than by a hundred tracks.
 // ⭐ His rule for both: *"why would it need to do anything if all it was doing was analyzing?
 // there's not a copy being made... so it should just stop."*
+// ⭐ THE LIBRARY'S PER-FILE RECORDS, resolved one way.        [B-005 item 7b, 2026-09-26]
+//
+// Trusted, and cheap, because they were computed when the entry was hashed and live in the
+// central manifest alongside `meta.contentHash`. Re-deriving them reads the library to learn what
+// is already written down; the dirty flag is the app's own signal that they need recomputing and
+// is honoured rather than second-guessed.
+//
+// ⚠️ EXTRACTED BECAUSE THE DIFFERENTIAL WRITE NEEDS THE SAME ANSWER AS THE COMPARE. If the write
+// resolved the library's hashes even slightly differently from the compare that decided the
+// folder differs, the two would disagree about which files need writing - and the disagreement
+// would look like a working export that quietly skips a file.
+function _libRecordsFor(userData, name, srcDir) {
+  const { readFileHashManifest, collectFileRecords } = require('./soundFontFileHash');
+  let meta = {};
+  try { meta = JSON.parse(fs.readFileSync(path.join(srcDir, 'meta.json'), 'utf8')); } catch {}
+  if (meta.contentHashDirty || !meta.entryUuid || !meta.contentHash) {
+    try { recomputeEntryContentHash(userData, name); } catch {}
+    try { meta = JSON.parse(fs.readFileSync(path.join(srcDir, 'meta.json'), 'utf8')); } catch {}
+  }
+  if (meta.entryUuid) {
+    const mf = readFileHashManifest(fileHashManifestPath(userData, 'entries', meta.entryUuid));
+    if (mf && Array.isArray(mf.records) && mf.contentHash === meta.contentHash) return mf.records;
+  }
+  return collectFileRecords(srcDir);
+}
+
+// ⭐ EVERY FILE ACTUALLY PRESENT IN A DESTINATION FOLDER, with the size and mtime already in hand.
+//
+// ⚠️ ONE STAT PER FILE, CARRYING BOTH. Statting again later for the mtime doubles the metadata
+// cost of a folder, and against a card over USB that is the difference between a phase that is
+// instant and one that paces like a hash.
+// ⚠️ Root `meta.json` is skipped for the same reason the hash walk skips it, so both sides of
+// every comparison agree on what counts as a file of this font.
+function _walkDestFolder(folder) {
+  const files = [];
+  const stack = [{ abs: folder, rel: '' }];
+  while (stack.length) {
+    const { abs, rel } = stack.pop();
+    let entries = [];
+    try { entries = fs.readdirSync(abs, { withFileTypes: true }); } catch { continue; }
+    for (const e of entries) {
+      const childAbs = path.join(abs, e.name);
+      const childRel = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) { stack.push({ abs: childAbs, rel: childRel }); continue; }
+      if (!e.isFile()) continue;
+      if (rel === '' && e.name === 'meta.json') continue;
+      let size = 0, mtime = 0;
+      try { const st = fs.statSync(childAbs); size = st.size; mtime = Math.round(st.mtimeMs); }
+      catch {}
+      files.push({ abs: childAbs, rel: childRel, size, mtime });
+    }
+  }
+  return files;
+}
+
 async function entryMatchesAt(userData, name, destDir, opts = {}) {
   if (!name || !destDir) return { ok: false, error: 'Missing name or destDir' };
   const srcDir  = path.join(entriesRoot(userData), name);
@@ -1136,22 +1191,8 @@ async function entryMatchesAt(userData, name, destDir, opts = {}) {
   // by the same walk. Re-deriving them would read the library to learn what we
   // already wrote down. The dirty flag is the app's own signal that they need
   // recomputing, and it is honoured here rather than second-guessed.
-  const { readFileHashManifest, hashFile } = require('./soundFontFileHash');
-  let meta = {};
-  try { meta = JSON.parse(fs.readFileSync(path.join(srcDir, 'meta.json'), 'utf8')); } catch {}
-  if (meta.contentHashDirty || !meta.entryUuid || !meta.contentHash) {
-    try { recomputeEntryContentHash(userData, name); } catch {}
-    try { meta = JSON.parse(fs.readFileSync(path.join(srcDir, 'meta.json'), 'utf8')); } catch {}
-  }
-  let libRecords = null;
-  if (meta.entryUuid) {
-    const mf = readFileHashManifest(fileHashManifestPath(userData, 'entries', meta.entryUuid));
-    if (mf && Array.isArray(mf.records) && mf.contentHash === meta.contentHash) libRecords = mf.records;
-  }
-  if (!libRecords) {
-    const { collectFileRecords } = require('./soundFontFileHash');
-    libRecords = collectFileRecords(srcDir);
-  }
+  const { hashFile } = require('./soundFontFileHash');
+  const libRecords = _libRecordsFor(userData, name, srcDir);
   if (!libRecords) return { ok: true, exists: true, identical: false, reason: 'unreadable' };
 
   // DESTINATION SIDE. The manifest holds a hash per file; mtime exists only to
@@ -1241,8 +1282,7 @@ async function entryMatchesAt(userData, name, destDir, opts = {}) {
     if (!st) { identical = false; _anyMissing = true; continue; }   // library has it, card does not
     const mtime = Math.round(st.mtimeMs);
     const ent = cache.get(rec.relPath);
-    const valid = ent && ent[0] === st.size
-      && Math.abs((ent[1] || 0) - mtime) <= sync.MTIME_TOLERANCE_MS;
+    const valid = sync.entryValid(ent, st.size, mtime);
     // ⚠️ AWAITED STREAM HASH. [B-398] A breath between files does not help when ONE file is the
     // block: measured 2526ms inside compare:font with the per-file yield already in place. A
     // font's tracks are megabytes each and hashFile reads one whole file synchronously.
@@ -1291,9 +1331,45 @@ async function entryMatchesAt(userData, name, destDir, opts = {}) {
            observed: [...refreshed] };
 }
 
+// ── The differential write's three primitives ───────────── [B-005 item 7b, 2026-09-26]
+//
+// ⭐⭐ A FILE MOVED WITHIN ONE VOLUME IS METADATA, AND THAT IS THE WHOLE ECONOMICS OF 7b. Parking
+// a superseded file costs a directory entry rewrite, not a copy of its bytes - which is why the
+// folder-level pattern (set aside, put the new one in place, dispose last) can come down to file
+// level without the cost coming with it. `destDir` is one volume by construction, so no EXDEV.
+async function _moveAside(fromRoot, toRoot, rel) {
+  const from = path.join(fromRoot, rel), to = path.join(toRoot, rel);
+  await fs.promises.mkdir(path.dirname(to), { recursive: true });
+  // ⚠️ Windows `rename` will not replace a directory and is unreliable over an existing file on
+  // some filesystems; removing the target first makes the behaviour the same everywhere.
+  try { await fs.promises.rm(to, { force: true }); } catch {}
+  await fs.promises.rename(from, to);
+}
+
+// ⚠️⚠️ THE UNDO IS DRIVEN BY A JOURNAL OF WHAT THIS CALL ACTUALLY DID, and it has to be. The old
+// recovery was wholesale - delete the target, rename the aside back - which was correct only
+// while the aside held a COMPLETE font and the target held nothing but our partial. A
+// differential write inverts both: the aside holds a handful of displaced files and the target
+// holds the user's font almost intact. Running the wholesale recovery over that destroys it.
+//
+// ⭐ ORIGINALS GO BACK FIRST. Restoring the user's data outranks tidying ours away, and if the
+// process dies between the two halves, a file we created being left behind is recoverable while
+// a file of theirs still parked under ORIGINAL.<name> is the loss the standing rule exists to
+// prevent.
+async function _undoDifferential(targetDir, asideDir, displaced, created) {
+  for (const rel of displaced) { try { await _moveAside(asideDir, targetDir, rel); } catch {} }
+  for (const rel of created) {
+    try { await fs.promises.rm(path.join(targetDir, rel), { force: true }); } catch {}
+  }
+}
+
 async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onBytes = null, opts = {}) {
   // [B-402] What this export learned, handed back for the caller's single terminal write.
   let _observedOut = null, _observedItem = null;
+  // Bytes this export did NOT have to write because the card already had them. Reported so
+  // the summary can say what maintaining the record bought, in the one unit that is measured
+  // rather than estimated. [B-005 item 7b]
+  let _savedOut = 0;
   if (!name) return { ok: false, error: 'Missing name' };
   if (!destDir) return { ok: false, error: 'Missing destDir' };
   const srcDir = path.join(entriesRoot(userData), name);
@@ -1317,6 +1393,18 @@ async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onB
   // font back to that exact path, the same line deletes the thing the restore just saved.
   // A cleanup that was safe by construction stopped being safe when the construction changed.
   let restoredOriginal = false;
+  // ⭐⭐ THE JOURNAL OF WHAT THIS CALL DID TO AN EXISTING FOLDER. [B-005 item 7b, 2026-09-26]
+  //
+  // A differential replace leaves the user's folder in place and touches individual files, so
+  // "undo" can no longer mean a wholesale swap. `_displaced` are files of theirs now parked under
+  // ORIGINAL.<name>; `_created` are files that were not there before we wrote them. Between them
+  // they describe every change, which is what lets any failure path put the folder back exactly.
+  //
+  // ⚠️ `_differential` GATES THE OLD WHOLESALE RECOVERY OFF. Those paths assume the aside is a
+  // complete font and the target is only our partial - both false here, and both destructive if
+  // run anyway.
+  let _differential = false;
+  const _displaced = [], _created = [], _awaitingWrite = new Set();
   const exists = fs.existsSync(path.join(destDir, targetName));
   if (exists) {
     if (mode === 'skip') {
@@ -1351,8 +1439,20 @@ async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onB
         try { await fs.promises.rm(asideDir, { recursive: true, force: true }); }
         catch (err) { return { ok: false, error: `Cannot clear a leftover ORIGINAL folder: ${err.message}` }; }
       }
-      try { await fs.promises.rename(path.join(destDir, targetName), asideDir); }
-      catch (err) { return { ok: false, error: `Cannot set aside the existing folder: ${err.message}` }; }
+      // ⭐⭐ THE FOLDER STAYS WHERE IT IS. [B-005 item 7b, 2026-09-26]
+      //
+      // It used to be renamed to ORIGINAL.<name> wholesale, which meant every file had to be
+      // copied back from the library whether or not it had changed. Measured cost of that: 44.6 MB
+      // rewritten to restore one 2.1 MB file, and 64.3 MB rewritten across two fonts that needed
+      // NOTHING written at all - they differed only by files added on the card.
+      //
+      // ⭐ HIS FRAMING, and it is the design: bring what we were doing at the folder level down to
+      // the file level. Each superseded file is parked under ORIGINAL.<name> individually, the new
+      // one is written in its place, and the parked copies are disposed of at the end. Every
+      // property of the folder-level rule survives - the destination is never empty, the original
+      // is never deleted before the replacement is in place, and a stop is reversible - while the
+      // cost drops from copying a folder to renaming the files that actually change.
+      _differential = true;
     } else {
       // 'rename' (default) — fall through to "<name>_N" until free.
       // Underscore (not parens) so the resulting folder name is safe
@@ -1375,12 +1475,89 @@ async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onB
     // meta.json files inside font subdirs are kept on the off chance a vendor
     // shipped one.
     const _exportRefused = [];
+    // ⭐⭐ WORK OUT WHAT ACTUALLY HAS TO CHANGE, THEN PARK ONLY THAT. [B-005 item 7b]
+    //
+    // ⚠️ THE PLAN IS ASKED FOR BEFORE ANYTHING MOVES, and a cancel during it costs nothing,
+    // because at that point nothing has been touched.
+    let _writeFilter = null;
+    if (_differential) {
+      const plan = await planFolderWrite(userData, name, destDir, {
+        known: opts.known || null, shouldStop: opts.shouldStop || null });
+      if (plan && plan.canceled) {
+        return { ok: true, canceled: true, destPath: targetDir, item: targetName,
+                 partialRemoved: false, restored: true, leftovers: [] };
+      }
+      if (!plan || !plan.ok) {
+        return { ok: false, error: (plan && plan.error) || `Cannot plan the write for ${name}` };
+      }
+      const toWrite = new Set(plan.toWrite);
+      _writeFilter = (nm, rel) => toWrite.has(rel);
+      // ⭐⭐ CREDIT THE BYTES THIS WRITE NO LONGER HAS TO MOVE. [B-005 item 7b, 2026-09-26]
+      //
+      // The progress denominator is the FONT's size, taken from its meta before anything is
+      // planned - so once the write became differential the bar stopped short by exactly the
+      // amount 7b saves. His report on the first run: "the progress bar never went to 100%".
+      //
+      // ⭐ AND THE CREDIT IS HONEST, not a fudge. The unit of work is "this font, made to match";
+      // a file already correct on the card is part of that work and it completed instantly. The
+      // bar jumping and then moving with the real writes says exactly why the export was fast.
+      // ⚠️ [B-360]'s rule, applied in the other direction: a bar that will not arrive is a wrong
+      // denominator, and the fix is to make the numerator whole rather than to clamp the end.
+      _savedOut = Math.max(0, (plan.bytesTotal || 0) - (plan.bytesToWrite || 0));
+      // ⚠️⚠️ ITS OWN CHANNEL, NOT `onBytes`, AND THAT IS NOT TIDINESS. The caller's onBytes sink
+      // also feeds `token.wrote.bytes`, which the cancel-cleanup rule reads to decide whether
+      // removing what landed is slow enough to be worth OFFERING rather than just doing. Crediting
+      // bytes we never wrote through that sink would inflate the tally with work that never
+      // happened and answer that question wrongly. Progress and "what did we actually write" are
+      // two different quantities that happened to share a pipe.
+      if (_savedOut && typeof opts.onSkipped === 'function') { try { opts.onSkipped(_savedOut); } catch {} }
+      // ⭐ THE TWO KINDS OF FILE THAT MOVE OUT OF THE WAY, and they are different on the way back.
+      //   a superseded file - its replacement is about to be written, so undo RESTORES it
+      //   an extra the library does not have - Replace means MAKE IT MATCH, so it just goes
+      // ⚠️ A file we are about to write that was NOT there before is journalled as `_created`
+      // instead: there is nothing to park, and undo has to DELETE it rather than restore it.
+      for (const rel of [...plan.toDisplace, ...plan.toWrite]) {
+        if (opts.shouldStop && opts.shouldStop()) {
+          await _undoDifferential(targetDir, asideDir, _displaced, _created);
+          return { ok: true, canceled: true, destPath: targetDir, item: targetName,
+                   partialRemoved: false, restored: true, leftovers: [] };
+        }
+        if (!fs.existsSync(path.join(targetDir, rel))) { _created.push(rel); continue; }
+        await _moveAside(targetDir, asideDir, rel);
+        _displaced.push(rel);
+        // ⚠️⚠️ ONLY A SUPERSEDED FILE IS EXPECTING A REPLACEMENT. An EXTRA is parked because the
+        // library does not have it and never will, so the post-copy check below must not treat
+        // its absence as a write that failed and put it back. First run of the behavioural test
+        // caught exactly that: the extra was dutifully restored and Replace stopped meaning
+        // make-it-match.
+        if (toWrite.has(rel)) _awaitingWrite.add(rel);
+      }
+    }
     try {
       await copyTreeWithProgress(srcDir, targetDir, { skipRootMeta: true, onBytes, refused: _exportRefused,
         shouldStop: opts.shouldStop || null,
+        // ⚠️ null for a full write, so the ordinary export is byte-for-byte the operation it was.
+        fileFilter: _writeFilter,
         // ⭐ The tally the cancel-cleanup rule reads. Owned by the caller's token so one
         // object counts for the whole operation, across every font in a bulk run.
         wrote: opts.wrote || null });
+      // ⚠️⚠️ ANYTHING PARKED WHOSE REPLACEMENT NEVER ARRIVED GOES BACK. The copy can decline to
+      // write a file it planned to - `refused` blocks a carryable it will not put on a card - and
+      // without this the user's copy would be parked, never replaced, and then disposed of with
+      // the aside. A silent deletion caused by a safety feature.
+      if (_differential) {
+        for (const rel of _displaced.slice()) {
+          if (!_awaitingWrite.has(rel)) continue;   // an extra: it was parked to GO
+          // ⚠️ `isFile`, not `existsSync`. A library entry that is a DIRECTORY makes the copy
+          // walker create a directory of that name at the destination, which exists happily and
+          // is not the file that was supposed to arrive. Found by the behavioural test.
+          let arrived = false;
+          try { arrived = fs.statSync(path.join(targetDir, rel)).isFile(); } catch {}
+          if (arrived) continue;
+          try { await _moveAside(asideDir, targetDir, rel); _displaced.splice(_displaced.indexOf(rel), 1); }
+          catch { /* reported by the leftover path; nothing is destroyed */ }
+        }
+      }
     } catch (err) {
       // ── Cancelled: take the half-written font back off the card ───── [B-005 item 4]
       //
@@ -1405,6 +1582,30 @@ async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onB
         // be made to wait behind a recursive delete that costs a round trip per file. If the
         // process dies between these two steps the user still has a complete font under
         // ORIGINAL.<name>, which is why the aside is renamed back LAST rather than first.
+        // ⭐⭐ A DIFFERENTIAL REPLACE UNDOES ITS OWN JOURNAL AND NOTHING ELSE. [B-005 item 7b]
+        //
+        // ⚠️⚠️ THE WHOLESALE PATH BELOW WOULD DESTROY THE FONT HERE. It renames `targetDir` to
+        // DELETE.<name> and the aside back into its place - correct while the aside was a COMPLETE
+        // font and the target was only our partial. Under a differential write both are inverted:
+        // the target IS the user's font, minus a few parked files, and the aside holds only those
+        // few. Swapping them would replace a whole font with a handful of files.
+        //
+        // ⭐ AND THE REVERSAL IS CHEAP FOR THE SAME REASON THE WRITE IS. Every step is a rename
+        // inside one directory, so stopping costs what it cost to start - no recursive delete, no
+        // folder-sized copy back.
+        // ⚠️⚠️ AND IT RETURNS HERE. Falling through reaches the retry-rm of `targetDir` below,
+        // which is the ordinary path's way of taking a half-written font back off the card - and
+        // under a differential write `targetDir` is the user's whole font. Found by the
+        // behavioural test on its first run: cancelling mid-copy left an EMPTY folder.
+        if (_differential) {
+          await _undoDifferential(targetDir, asideDir, _displaced, _created);
+          restoredOriginal = true;
+          out.restored = true;
+          out.partialRemoved = true;
+          try { if (asideDir && fs.existsSync(asideDir)) await fs.promises.rm(asideDir, { recursive: true, force: true }); }
+          catch { out.leftovers.push(asideDir); }
+          return out;
+        }
         if (asideDir) {
           // 1. Get the half-written tree out of the way under a name that says what it is.
           const junk = path.join(destDir, `DELETE.${targetName}`);
@@ -1504,7 +1705,14 @@ async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onB
       // ⚠️ THE ASIDE MUST BE PUT BACK HERE TOO. Without this, any mid-copy error - a full
       // card, an unreadable source - left the user's font parked under ORIGINAL.<name> while
       // the error message talked about something else entirely.
-      if (asideDir) {
+      // ⚠️⚠️ A DIFFERENTIAL WRITE UNDOES ITS JOURNAL; THE WHOLESALE SWAP BELOW WOULD DESTROY THE
+      // FONT, for the reason spelled out on the cancel path above.
+      if (_differential) {
+        await _undoDifferential(targetDir, asideDir, _displaced, _created);
+        restoredOriginal = true;
+        try { if (asideDir && fs.existsSync(asideDir)) await fs.promises.rm(asideDir, { recursive: true, force: true }); }
+        catch { /* reported through the thrown error below */ }
+      } else if (asideDir) {
         try {
           if (fs.existsSync(targetDir)) {
             await fs.promises.rm(targetDir, { recursive: true, force: true });
@@ -1530,7 +1738,10 @@ async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onB
     // ⚠️ Not fatal if it fails. The export succeeded; a leftover folder is untidy, not
     // broken, and turning it into an error would report a successful write as a failure.
     let replacedLeftover = null;
-    if (asideDir) {
+    // ⚠️ A DIFFERENTIAL REPLACE MAY HAVE PARKED NOTHING AT ALL - a font that only gained files
+    // displaces none of them - so the aside folder never comes into existence. Renaming a path
+    // that is not there would throw and be reported as a leftover that does not exist.
+    if (asideDir && fs.existsSync(asideDir)) {
       const junk = path.join(destDir, `DELETE.${targetName}`);
       try {
         if (fs.existsSync(junk)) await fs.promises.rm(junk, { recursive: true, force: true });
@@ -1589,7 +1800,7 @@ async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onB
     // exact silent strip the feature exists to prevent. It is also what the removal
     // buttons hang off: no list reaching the renderer means no way to act.
     return { ok: true, destPath: targetDir, refused: _exportRefused,
-             observedItem: _observedItem, observed: _observedOut,
+             observedItem: _observedItem, observed: _observedOut, savedBytes: _savedOut,
              // Non-null only when a replace could not dispose of the superseded copy. The
              // export SUCCEEDED; this just names a folder still sitting at the destination.
              replacedLeftover };
@@ -1607,7 +1818,20 @@ async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onB
     // the divergence between what he believes is on disk and what is on disk that the
     // standing rule exists to prevent. Guarded by existsSync so it cannot fight the inner
     // restore or resurrect a disposal that already succeeded.
-    if (asideDir && !restoredOriginal) {
+    // ⚠️⚠️ AND THE SAME SPLIT HERE, WHICH IS THE MOST DANGEROUS OF THE THREE because this handler
+    // catches everything nobody thought of. Under a differential write `targetDir` is the user's
+    // font and `asideDir` holds only the files this call parked - so `rm(targetDir)` followed by
+    // renaming the aside into its place would trade a whole font for a handful of files, on a
+    // path taken precisely when something unexpected went wrong. [B-005 item 7b]
+    if (_differential && !restoredOriginal) {
+      try {
+        await _undoDifferential(targetDir, asideDir, _displaced, _created);
+        restoredOriginal = true;
+        if (asideDir && fs.existsSync(asideDir)) {
+          await fs.promises.rm(asideDir, { recursive: true, force: true });
+        }
+      } catch { /* the original error is still reported below; nothing is destroyed here */ }
+    } else if (asideDir && !restoredOriginal) {
       try {
         if (fs.existsSync(asideDir)) {
           if (fs.existsSync(targetDir)) {
@@ -1624,7 +1848,10 @@ async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onB
     // font, put back by the failure path above, and this line would delete it - turning a
     // recoverable failure into data loss. The rm is only safe while that path can only
     // contain a partial WE wrote. [B-005 item 4]
-    if (!restoredOriginal) {
+    // ⚠️⚠️ AND NEVER FOR A DIFFERENTIAL WRITE, RESTORED OR NOT. This line's whole licence is that
+    // `targetDir` could only ever hold a partial WE created. A differential replace writes INTO
+    // the user's existing folder, so that licence is gone: here the line deletes the font.
+    if (!restoredOriginal && !_differential) {
       try { fs.rmSync(targetDir, { recursive: true, force: true }); } catch {}
     }
     return { ok: false, error: String(err && err.message || err) };
@@ -2264,30 +2491,7 @@ async function recordFolderAt(destDir, name, opts = {}) {
   // to be a fraction OF, and a phase that reads whole wavs off a card with a motionless bar is
   // the "is it hung" shape this surface keeps having to remove. Directory reads and stats are
   // metadata - cheap next to the hashing that follows.
-  const files = [];
-  {
-    const stack = [{ abs: folder, rel: '' }];
-    while (stack.length) {
-      const { abs, rel } = stack.pop();
-      let entries = [];
-      try { entries = fs.readdirSync(abs, { withFileTypes: true }); } catch { continue; }
-      for (const e of entries) {
-        const childAbs = path.join(abs, e.name);
-        const childRel = rel ? `${rel}/${e.name}` : e.name;
-        if (e.isDirectory()) { stack.push({ abs: childAbs, rel: childRel }); continue; }
-        if (!e.isFile()) continue;
-        // Skipped for the same reason the hash walk skips it, so both sides agree on what counts.
-        if (rel === '' && e.name === 'meta.json') continue;
-        // ⚠️ SIZE AND MTIME TOGETHER, ONCE. The loop below used to stat every file again to get
-        // the mtime, so a folder cost two stats per file - on a card that is the difference
-        // between a phase that is instant and one that paces like a hash.
-        let size = 0, mtime = 0;
-        try { const st = fs.statSync(childAbs); size = st.size; mtime = Math.round(st.mtimeMs); }
-        catch {}
-        files.push({ abs: childAbs, rel: childRel, size, mtime });
-      }
-    }
-  }
+  const files = _walkDestFolder(folder);
 
   // ⚠️ BYTES, NOT FILE COUNT, and for the reason the tracks add already records: a file-count bar
   // sits at 99 of 100 with a third of the data still to move. Reported on the same channel
@@ -2306,8 +2510,7 @@ async function recordFolderAt(destDir, name, opts = {}) {
       await breathe();
       try {
         const ent = cache.get(childRel);
-        const valid = ent && ent[0] === f.size
-          && Math.abs((ent[1] || 0) - f.mtime) <= sync.MTIME_TOLERANCE_MS;
+        const valid = sync.entryValid(ent, f.size, f.mtime);
         const h = valid ? ent[2] : (sync.countHash(), await hashFileAsync(childAbs));
         if (h) observed.push([childRel, [f.size, f.mtime, h]]);
       } catch { /* a file that cannot be read simply goes unrecorded, and is re-read next time */ }
@@ -2322,6 +2525,105 @@ async function recordFolderAt(destDir, name, opts = {}) {
   // ⚠️ COMPLETE ONLY BECAUSE IT RAN TO THE END. Every stop above returns `canceled` with no
   // observations, so a partial walk can never license the caller to delete anything.
   return { ok: true, observedItem: name, observed, complete: true };
+}
+
+// ══ WHAT A REPLACE ACTUALLY HAS TO WRITE ══════════════════ [B-005 item 7b, 2026-09-26]
+//
+// ⭐⭐ THE SPLIT THIS CLOSES, and it was measured rather than argued. Detection has been
+// per-file for a while; the WRITE was not. One wav deleted from G-Grievous outside the app was
+// caught instantly and for free - a missing file is a failed stat, not a hash - and Replace then
+// rewrote the whole 44.6 MB folder to put back 2.1 MB. A second case was purer still: two fonts
+// differed ONLY because files had been ADDED to them on the card, so there was nothing to write
+// at all, and Replace moved 64.3 MB across them anyway (~100 s on a board card).
+//
+// ⚠️⚠️ WHICH IS WHY REPLACE CANNOT SIMPLY BECOME ADDITIVE. With no library change an additive
+// write does nothing and the extras survive - the opposite of what Replace was asked for. The
+// operation is MAKE IT MATCH, so it has two halves and this function returns both: the files to
+// write, and the files to get rid of.
+//
+// ⭐ `known` IS THE SCAN'S OWN OBSERVATIONS, and passing them is what stops the changed files
+// being hashed TWICE. The export scan hashes what the manifest could not answer for, but its
+// findings are not committed to the card until the end of the whole operation - so without this
+// the write would re-hash exactly the files that changed, which are the expensive ones.
+//
+// Returns { ok, toWrite:[rel], toDisplace:[rel], unchanged, bytesToWrite, reused, hashed }.
+// ⚠️ `toDisplace` paths are DESTINATION-relative and may name files no library ever had. Nothing
+// here deletes anything - a plan is a question, and the caller decides what to do with it.
+async function planFolderWrite(userData, name, destDir, opts = {}) {
+  if (!userData || !name || !destDir) return { ok: false, error: 'Missing userData, name or destDir' };
+  const srcDir = path.join(entriesRoot(userData), name);
+  const targetDir = path.join(destDir, name);
+  if (!fs.existsSync(srcDir)) return { ok: false, error: `Entry not found: ${name}` };
+
+  const libRecords = _libRecordsFor(userData, name, srcDir);
+  if (!libRecords) return { ok: false, error: `Cannot read the library copy of ${name}` };
+
+  const { hashFileAsync, breathe } = require('./soundFontFileHash');
+  const sync = require('./sfSyncManifest');
+  const shouldStop = typeof opts.shouldStop === 'function' ? opts.shouldStop : null;
+  const onBytes = typeof opts.onBytes === 'function' ? opts.onBytes : null;
+
+  // Destination side, one stat per file, and the walk doubles as the extras census.
+  const present = new Map();
+  for (const f of _walkDestFolder(targetDir)) present.set(f.rel, f);
+
+  // ⚠️ THE SCAN'S OBSERVATIONS WIN OVER THE CARD'S MANIFEST, because they are NEWER. The manifest
+  // on the card still describes the state before this operation started.
+  let cache = new Map();
+  try { cache = sync.cacheFor(destDir, name); } catch {}
+  if (opts.known) { for (const [rel, v] of opts.known) cache.set(rel, v); }
+
+  const toWrite = [], toDisplace = [];
+  let unchanged = 0, bytesToWrite = 0, reused = 0, hashed = 0;
+
+  // ⚠️ `<empty>` RECORDS ARE DIRECTORY MARKERS, NOT FILES. They carry no content to compare and
+  // the copy walker creates directories on its own, so counting them would report work that does
+  // not exist.
+  const libFiles = libRecords.filter((r) => r && r.fileHash !== '<empty>');
+  const libSet = new Set(libFiles.map((r) => r.relPath));
+
+  // Only the files that must be READ are worth a progress total - the rest is metadata.
+  const _total = libFiles.reduce((n, r) => {
+    const f = present.get(r.relPath);
+    return n + (f && !sync.entryValid(cache.get(r.relPath), f.size, f.mtime) ? (f.size || 0) : 0);
+  }, 0);
+  let _done = 0;
+  if (onBytes) { try { onBytes({ done: 0, total: _total, name: '' }); } catch {} }
+
+  for (const r of libFiles) {
+    // ⚠️ BETWEEN FILES, like every other per-file loop here: one iteration can hash a whole wav
+    // off a card, so a check only at the top would be no better than none.
+    if (shouldStop && shouldStop()) return { ok: true, canceled: true };
+    const f = present.get(r.relPath);
+    if (!f) { toWrite.push(r.relPath); bytesToWrite += (r.size || 0); continue; }
+    const ent = cache.get(r.relPath);
+    let destHash;
+    if (sync.entryValid(ent, f.size, f.mtime)) { destHash = ent[2]; reused++; }
+    else {
+      await breathe();
+      sync.countHash();
+      destHash = await hashFileAsync(f.abs);
+      hashed++;
+      _done += (f.size || 0);
+      if (onBytes) { try { onBytes({ done: _done, total: _total, name: r.relPath }); } catch {} }
+    }
+    // ⚠️ AN UNREADABLE DESTINATION FILE IS NOT A MATCH. A null hash means we could not check, and
+    // the safe reading of "could not check" during a MAKE IT MATCH is to write it.
+    if (destHash && destHash === r.fileHash) unchanged++;
+    else { toWrite.push(r.relPath); bytesToWrite += (r.size || 0); }
+  }
+
+  // ⭐ THE OTHER HALF. Anything at the destination the library does not have is what makes
+  // Replace mean "make it match" rather than "add to it".
+  for (const rel of present.keys()) if (!libSet.has(rel)) toDisplace.push(rel);
+
+  // ⚠️ `bytesTotal` IS THE WHOLE FONT, and the caller needs it to keep a progress bar honest:
+  // the denominator was sized from the font, so the bytes this plan does NOT write have to be
+  // credited or the bar can never arrive. [B-360: the answer to a bar that will not finish is
+  // the right denominator, not a clamp.]
+  const bytesTotal = libFiles.reduce((n, r) => n + (r.size || 0), 0);
+  return { ok: true, toWrite, toDisplace, unchanged, bytesToWrite, bytesTotal, reused, hashed,
+           libFiles: libFiles.length, destFiles: present.size };
 }
 
 module.exports = {
@@ -2340,6 +2642,7 @@ module.exports = {
   entryMatchesAt: _sp.markAsync('compare:font', entryMatchesAt),
   recordFolderAt: _sp.markAsync('record:kept', recordFolderAt),
   exportEntryToFolder: _sp.markAsync('copy:font', exportEntryToFolder),
+  planFolderWrite: _sp.markAsync('plan:font', planFolderWrite),
   entryFolderExistsAt,
   listEntryFiles,
   migrateSourceLevelFields,

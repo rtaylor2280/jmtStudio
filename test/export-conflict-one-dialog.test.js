@@ -151,8 +151,20 @@ function ok(name, cond, extra) {
 {
   ok('⭐⭐ there are two caution texts, not one',
      /_CAUTION_FOLDERS\s+= /.test(html) && /_CAUTION_TRACKS\s+= /.test(html));
+  // ⚠️ ASSERTED ON THE PROPERTY, NOT THE SENTENCE. [B-005 item 7b, 2026-09-26] This pinned the
+  // literal "Replace overwrites the whole folder" and went red when that stopped being TRUE: the
+  // write is differential now, so it writes the differences rather than the folder. The hazard is
+  // unchanged and in fact more important - make-it-match is what REMOVES your additions - so the
+  // second half is still asserted verbatim. Only the mechanism claim was allowed to move.
   ok('⚠️ the folder one still names the FOLDER as the blast radius',
-     /_CAUTION_FOLDERS\s+= 'Replace overwrites the whole folder/.test(html));
+     /_CAUTION_FOLDERS\s+= '[^']*\bfolder\b[^']*'/.test(html)
+     && /_CAUTION_FOLDERS\s+= '[^']*Anything you added or changed there is lost\.'/.test(html),
+     'the two cautions exist because the kinds differ in what they affect - the folder one must '
+     + 'still say folder, and must still say what happens to what you put there');
+  ok('⚠️⚠️ and it no longer claims the WHOLE folder is rewritten',
+     !/_CAUTION_FOLDERS\s+= '[^']*overwrites the whole folder/.test(html),
+     'untrue since the write became differential: it writes only what differs. A warning that '
+     + 'overstates the mechanism gets discounted, and this one has to be believed');
   ok('⚠⚠ and the track one does NOT claim a folder is overwritten',
      /_CAUTION_TRACKS\s+= 'Replace overwrites these files[^']*'/.test(html)
      && !/_CAUTION_TRACKS\s+= '[^']*whole folder/.test(html),

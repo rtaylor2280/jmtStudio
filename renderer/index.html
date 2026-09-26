@@ -38882,7 +38882,7 @@ require(['vs/editor/editor.main'], function () {
       // ⭐ THE WARNING ITSELF IS WORTH KEEPING for both — the risk it names is "you edited
       // this at the destination and Replace will lose that". What differs is the BLAST
       // RADIUS, so that is the only part the wording changes.
-      const _CAUTION_FOLDERS = 'Replace overwrites the whole folder. Anything you added or changed there is lost.';
+      const _CAUTION_FOLDERS = 'Replace makes the folder match your library exactly. Anything you added or changed there is lost.';
       const _CAUTION_TRACKS  = 'Replace overwrites these files. Anything you changed there is lost.';
 
       const _sfPromptSaveConflicts = (conflictNames, opts = {}) => {
@@ -39769,7 +39769,7 @@ require(['vs/editor/editor.main'], function () {
         _sfRemoveEjectRow();
       };
 
-      const _sfShowExportSummary = async ({ destDir, names, modeByName, commonOutcomes, tracksOutcome, unchangedFonts, commonMissing, commonFolderNames, elapsedSec, closeProgress, title, destSpace, canceled, ejectTarget, ejectVocab, ejectAuto, warnedSlow }) => {
+      const _sfShowExportSummary = async ({ destDir, names, modeByName, commonOutcomes, tracksOutcome, unchangedFonts, commonMissing, commonFolderNames, elapsedSec, closeProgress, title, destSpace, canceled, ejectTarget, ejectVocab, ejectAuto, warnedSlow, existedAtDest, savedBytes }) => {
         const esc = _sfEscape;
         const n = (v) => `<strong>${v}</strong>`;
         const plural = (c, w) => `${w}${c === 1 ? '' : 's'}`;
@@ -39786,14 +39786,34 @@ require(['vs/editor/editor.main'], function () {
         }
 
         const unchanged = (unchangedFonts || []).length;
-        const written = names.filter(x => (modeByName.get(x) || 'rename') !== 'skip').length;
+        const _wrote = names.filter(x => (modeByName.get(x) || 'rename') !== 'skip');
+        const written = _wrote.length;
         const keptByChoice = Math.max(0, names.length - written - unchanged);
+        // ⭐⭐ REPAIRED IS NOT THE SAME ACT AS WRITTEN. [B-005 item 7b, his call 2026-09-26:
+        // "repaired is the right one for users"]
+        //
+        // A font the card already had was brought back into line - a few files, sometimes none at
+        // all beyond removing what did not belong. A font the card did not have was placed there.
+        // Reporting both as "written" overstates the first and tells the user nothing about why
+        // an export of 29 fonts took four seconds.
+        //
+        // ⚠️ IT ONLY BECAME SAYABLE TONIGHT. Before the write went differential every export
+        // rewrote the whole folder, so "written" was the honest word for both - the copy was not
+        // wrong, the operation was.
+        // ⚠️ A caller that does not say which fonts existed gets the old single count, so the
+        // other doors are unaffected rather than quietly relabelled.
+        const _existed = new Set(existedAtDest || []);
+        const _repaired = existedAtDest ? _wrote.filter((x) => _existed.has(x)).length : 0;
+        const _placed = existedAtDest ? written - _repaired : written;
 
         // Start from what was ASKED for, so the numbers reconcile against the
         // user's own action. The two kinds of "not written" stay apart: one is
         // the card already being correct, the other is a decision they made.
         const bits = [];
-        if (written) bits.push(`${n(written)} written`);
+        // Each clause drops out at zero, like every other line here - so the common case reads
+        // "10 repaired, 19 already identical" and only a mixed run says both.
+        if (_repaired) bits.push(`${n(_repaired)} repaired`);
+        if (_placed) bits.push(`${n(_placed)} written`);
         if (unchanged) bits.push(`${n(unchanged)} already identical`);
         // ⚠️ "skipped", because that is the word on the control they pressed. The conflict review
         // offers Skip and Replace; reporting the outcome in different words makes the reader map
@@ -39947,6 +39967,26 @@ require(['vs/editor/editor.main'], function () {
         // ⚠️ It claims nothing about speed. The warning promises no duration, so "faster" would be
         // a comparison against no number, and the elapsed is already on the line above. The only
         // thing missing from the screen is WHY, so say just that.
+        // ── What maintaining the record bought, in bytes ──────── [B-005 item 7b, 2026-09-26]
+        //
+        // ⭐ HIS ASK: "if we did any repairs, we can say JMT Studio saved __ mb gb... by
+        // maintaining bla bla based on what we have for board card language."
+        //
+        // ⚠️⚠️ BYTES ONLY, NO TIME, AND THAT WAS HIS CALL ONCE HE SAW THE BASIS. An "est. 4
+        // minutes saved" needs a write speed, and nothing records one - `isSlowWriteJob` is pure
+        // thresholds on file count and bytes. A board card and a reader are roughly 55x apart, so
+        // a single constant would be badly wrong for one of them. The bytes are measured; the
+        // minutes would have been invented, and this sentence only earns its place by being true.
+        //
+        // ⚠️ REPAIRS ONLY. On a font newly placed on the card nothing was saved - every byte had
+        // to be written - so the claim would be false on exactly the run that writes the most.
+        if (_repaired && savedBytes > 0) {
+          const _fb = (v) => String((window._sfFormatBytes || ((x) => `${x} B`))(v))
+            .replace(' ', ' ');
+          tail.push(`JMT Studio kept a record of this card's contents, so repairing `
+            + `${n(_repaired)} ${plural(_repaired, 'font')} wrote only what had changed — `
+            + `${_fb(savedBytes)} did not have to be written again.`);
+        }
         if (warnedSlow && !wroteSomething) {
           tail.push('Exporting through a Proffieboard is always slower than a card reader. '
             // ⚠️ "maintaining", not "keeping". The record lives ON THE CARD, not in the app -
@@ -40546,6 +40586,13 @@ require(['vs/editor/editor.main'], function () {
         // nothing was missing and the counts agree; a full folder walk always qualifies; a
         // cancelled pass never does, because it returns no observations at all.
         const _scanComplete = new Set();
+        // ⭐ WHICH FONTS THE CARD ALREADY HAD. [B-005 item 7b, 2026-09-26] The summary can now
+        // tell REPAIRED from WRITTEN, and the difference only became sayable once the write
+        // became differential - before 7b every export rewrote the whole folder, so "written"
+        // was the only honest word for both.
+        const _scanExisted = new Set();
+        // Bytes the differential write did not have to move because the card already had them.
+        let _savedBytes = 0;
         const _scanTick = (file, sub) => {
           const secs = Math.floor((Date.now() - _scanT0) / 1000);
           const dur = window._sfFormatDuration ? window._sfFormatDuration(secs) : `${secs}s`;
@@ -40638,6 +40685,7 @@ require(['vs/editor/editor.main'], function () {
             // later means walking and statting the whole folder to find out there was nothing.
             if (m && m.recorded === true) _scanFullyRecorded.add(name);
             if (m && m.complete === true) _scanComplete.add(name);
+            if (m && m.exists === true) _scanExisted.add(name);
           } catch {}
           _scanDone++;
           _scanTick(name);
@@ -41195,6 +41243,7 @@ require(['vs/editor/editor.main'], function () {
           const commonNames = { name: commonMineName, cardName: commonCardName, reason: commonReason };
           await _sfShowExportSummary({
             destDir, names, modeByName, unchangedFonts, commonMissing,
+            existedAtDest: [..._scanExisted], savedBytes: _savedBytes,
             commonFolderNames: _sfConfigSlotNames(),
             // ⚠️ THE SAME EJECT CONTEXT THE WRITTEN PATH USES, and the reason it was missing here
             // is worth keeping: the offer was described as riding on the ending itself, but it is
@@ -41507,6 +41556,10 @@ require(['vs/editor/editor.main'], function () {
                 if (r && r.canceled) { _exportCanceled = true; break; }
                 // [B-402] Accumulate; nothing is written until the whole operation finishes.
                 if (r && r.observedItem && Array.isArray(r.observed)) _scanObserved.set(r.observedItem, r.observed);
+                // ⭐ What maintaining the record bought on this run, in bytes we did not have to
+                // write. Summed across every font so the summary can state one measured figure.
+                // [B-005 item 7b]
+                _savedBytes += (r && r.savedBytes) || 0;
                 // [B-364] Gathered across the WHOLE run and raised once at the end by the shared
                 // ending. A card export can touch a hundred fonts, and a dialog per font would be
                 // the feature making itself impossible to use.
@@ -41743,6 +41796,7 @@ require(['vs/editor/editor.main'], function () {
             // caught on door 1. `closeProgress` is what performs that handover.
             await _sfShowExportSummary({
               destDir, names, modeByName, commonOutcomes, tracksOutcome, unchangedFonts, commonMissing,
+              existedAtDest: [..._scanExisted], savedBytes: _savedBytes,
               commonFolderNames: _sfConfigSlotNames(),
               elapsedSec: (Date.now() - _sfExportT0) / 1000,
               closeProgress: () => _sfDeleteProgress.hide(),

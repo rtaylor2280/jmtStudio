@@ -247,7 +247,14 @@ async function copyTreeWithProgress(srcDir, destDir, opts = {}) {
         relBase: relBase ? `${relBase}/${item.name}` : item.name });
     } else if (item.isFile()) {
       if (skipRootMeta && item.name === 'meta.json') continue;
-      if (fileFilter && !fileFilter(item.name)) continue;
+      // ⚠️⚠️ THE FILTER GETS THE RELATIVE PATH, NOT ONLY THE BASENAME. [B-005 item 7b, 2026-09-26]
+      // It used to receive `item.name` alone, which is enough for a SHAPE test - the tracks door
+      // asks "is this a .wav" - and useless for an IDENTITY one. A font is folders of wavs and
+      // the same basename recurs across them, so a differential write filtering on basename
+      // would copy or skip `bgnmelt/hum.wav` and `hum.wav` together.
+      // ⚠️ Existing callers declare one parameter and are unaffected; extra arguments are ignored.
+      const rel = relBase ? `${relBase}/${item.name}` : item.name;
+      if (fileFilter && !fileFilter(item.name, rel)) continue;
       // ⚠️ THE WAY OUT NEEDS THE SAME GUARD AS THE WAY IN ([B-214]). Entries imported
       // before this existed were never filtered, so the library can still hold a program
       // from a card read months ago. Without this, exporting would put it back onto a
@@ -259,7 +266,7 @@ async function copyTreeWithProgress(srcDir, destDir, opts = {}) {
         const v = require('./sdCardDetect').checkCarryableFile(srcPath, item.name);
         if (v.blocked) {
           refused.push({
-            relPath: relBase ? `${relBase}/${item.name}` : item.name,
+            relPath: rel,
             name: item.name,
             kind: v.kind,
             reason: v.reason,
