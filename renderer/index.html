@@ -3004,6 +3004,16 @@
      leaves the jitter protection intact for the ones that do. */
   #sf-bulk-progress-detail { line-height: 1.25; min-height: 1.25em; max-height: 1.25em; overflow: hidden; }
   #sf-bulk-progress-detail:empty { display: none; }
+  /* ⭐⭐ ...UNLESS THIS SHOWING HAS ALREADY USED THE ROW. [B-432, 2026-09-25] The rule above
+     collapses the line for doors that never write one, which is right - but the SCAN writes a
+     name per item and then clears it when the last one is done, so the row vanished and the modal
+     shrank and re-centred WHILE STILL ON SCREEN. Measured: detail 16px -> 0, box 233 -> 196, top
+     388 -> 406. That is the "extra modal" reported three times; nothing opened, the box changed
+     shape. The copy phase never had it because `.sf-prog-reserve` covers it, and that class is
+     added and removed inside the byte-progress runner only.
+     ⚠️ Marked on WRITE, not on phase: a door that never puts text here still collapses, which is
+     the [B-420] report ("why is there a blank space under the bar?") and must stay fixed. */
+  #modal-sf-bulk-progress.sf-prog-detail-used #sf-bulk-progress-detail:empty { display: block; }
   #sf-create-progress-detail { line-height: 1.25; min-height: 1.25em; max-height: 1.25em; overflow: hidden; }
   /* Wider than the default modal so long font paths rarely truncate — and since 2026-09-21
      [B-420] MATCHED TO `#modal-confirm` at 520px, because the two appear back to back in one
@@ -37557,10 +37567,14 @@ require(['vs/editor/editor.main'], function () {
         // the same surface, and a row that came back for each phase would jump at every handover.
         // It is released only when the modal actually goes down, so the next thing to open this
         // surface starts with no dead row under it.
-        _retireActions() {
+        _retireReservations() {
           this.cancelReserved = false;
           const b = this.cancelEl();
           if (b) { b.style.display = 'none'; b.style.visibility = ''; }
+          // ⚠️ The detail row's reservation is released here too, and for the same reason: held
+          // across PHASES so a handover never jumps, dropped with the MODAL so the next caller
+          // does not inherit a blank row it never wrote to.
+          this.modal()?.classList.remove('sf-prog-detail-used');
           this._syncActions();
         },
 
@@ -37621,7 +37635,7 @@ require(['vs/editor/editor.main'], function () {
           this.cancelPending();
           const t = this.titleEl(), d = this.detailEl(), b = this.barEl(), m = this.modal();
           if (t) t.textContent = title;
-          if (d) d.textContent = detail || '';
+          if (d) { d.textContent = detail || ''; if (d.textContent) d.closest('.modal-overlay')?.classList.add('sf-prog-detail-used'); }
           // Section + elapsed lines are the setPhase() layout — reset them so
           // the simpler flows (delete, common-folder ops) don't inherit them.
           const l = this.labelEl(), e = this.elapsedEl();
@@ -37699,13 +37713,13 @@ require(['vs/editor/editor.main'], function () {
           if (this.cancelling) {
             if (l) { l.style.display = ''; l.textContent = 'Stopping…'; }
             if (b) { b.classList.add('indeterminate'); b.style.width = ''; }
-            if (d) d.textContent = file || '';
+            if (d) { d.textContent = file || ''; if (d.textContent) d.closest('.modal-overlay')?.classList.add('sf-prog-detail-used'); }
             if (e) { e.style.display = ''; e.textContent = elapsedText || ''; }
             return;
           }
           if (l) { l.style.display = ''; l.textContent = labelText || ''; }
           if (b) { b.classList.add('indeterminate'); b.style.width = ''; }
-          if (d) d.textContent = file || '';
+          if (d) { d.textContent = file || ''; if (d.textContent) d.closest('.modal-overlay')?.classList.add('sf-prog-detail-used'); }
           if (e) { e.style.display = ''; e.textContent = elapsedText || ''; }
         },
         // Import-convention phase display (2026-07-23): section + metric
@@ -37718,7 +37732,7 @@ require(['vs/editor/editor.main'], function () {
           if (this.cancelling) {
             if (l) { l.style.display = ''; l.textContent = 'Stopping…'; }
             if (b) { b.classList.add('indeterminate'); b.style.width = ''; }
-            if (d) d.textContent = file || '';
+            if (d) { d.textContent = file || ''; if (d.textContent) d.closest('.modal-overlay')?.classList.add('sf-prog-detail-used'); }
             if (e) { e.style.display = ''; e.textContent = elapsedText || ''; }
             return;
           }
@@ -37727,7 +37741,7 @@ require(['vs/editor/editor.main'], function () {
             b.classList.remove('indeterminate');
             b.style.width = Math.max(0, Math.min(1, frac || 0)) * 100 + '%';
           }
-          if (d) d.textContent = file || '';
+          if (d) { d.textContent = file || ''; if (d.textContent) d.closest('.modal-overlay')?.classList.add('sf-prog-detail-used'); }
           if (e) { e.style.display = ''; e.textContent = elapsedText || ''; }
         },
         // [B-357] Synchronous close, for a transition that opens its successor in the SAME
@@ -37765,7 +37779,7 @@ require(['vs/editor/editor.main'], function () {
         hideNow() {
           this.cancelPending();
           this.clearCancel();
-          this._retireActions();
+          this._retireReservations();
           this.modal()?.classList.remove('active');
           this.startTs = 0;
         },
@@ -37774,7 +37788,7 @@ require(['vs/editor/editor.main'], function () {
           this.cancelPending();
           // ⚠️ Nothing was ever shown, so there is no minimum-display floor to honour - waiting it
           // out here would stall the caller for 200 ms to hide a modal that never appeared.
-          if (!this.modal()?.classList.contains('active')) { this.clearCancel(); this._retireActions(); this.startTs = 0; return; }
+          if (!this.modal()?.classList.contains('active')) { this.clearCancel(); this._retireReservations(); this.startTs = 0; return; }
           const elapsed = Date.now() - this.startTs;
           if (elapsed < minMs) {
             await new Promise(r => setTimeout(r, minMs - elapsed));
@@ -37782,7 +37796,7 @@ require(['vs/editor/editor.main'], function () {
           // ⚠️ RETIRED ON THE WAY OUT TOO, not only on the way in. A handler left wired to a
           // finished export is a button that reports cancelling something already done.
           this.clearCancel();
-          this._retireActions();
+          this._retireReservations();
           this.modal()?.classList.remove('active');
           this.startTs = 0;
         },

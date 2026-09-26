@@ -77,8 +77,8 @@ function bodyOf(sig, end = '\n        },') {
   // ⚠️ A RESERVATION THAT IS NEVER RELEASED IS A DEAD ROW UNDER EVERY LATER MODAL. It has to
   // outlive each PHASE (or the handovers jump) and die with the MODAL (or the next thing to use
   // this shared surface opens with empty space beneath it).
-  const block = bodyOf('        _retireActions() {');
-  ok('_retireActions was located', block.length > 0, 're-anchor if it is renamed');
+  const block = bodyOf('        _retireReservations() {');
+  ok('_retireReservations was located', block.length > 0, 're-anchor if it is renamed');
   ok('⚠️ it releases the reservation', /this\.cancelReserved\s*=\s*false/.test(block),
      'held forever, every door that ever offered a cancel keeps a blank row for the session');
 
@@ -88,21 +88,40 @@ function bodyOf(sig, end = '\n        },') {
   ]) {
     const h = bodyOf(sig, end);
     ok(`${label} was located`, h.length > 0, 're-anchor if it is renamed');
-    ok(`⭐ ${label} retires the row on the way down`, /_retireActions\(\)/.test(h),
+    ok(`⭐ ${label} retires the row on the way down`, /_retireReservations\(\)/.test(h),
        'the modal coming down is the ONLY moment the reservation may be dropped - doing it at '
        + 'the end of a phase is the resize this file exists to prevent');
   }
   ok('⚠️ and the never-shown early return retires too',
-     /contains\('active'\)\) \{ this\.clearCancel\(\); this\._retireActions\(\)/.test(html),
+     /contains\('active'\)\) \{ this\.clearCancel\(\); this\._retireReservations\(\)/.test(html),
      'hide() on a modal that never opened still has to leave the row clean for the next caller');
 }
 
 {
-  // The detail line already reserved its own space; this pins it so the pair stays consistent.
-  ok('⚠️ the detail line still reserves its line box',
-     /\.sf-import-progress-detail\s*\{[^}]*min-height:\s*1em/.test(html),
-     'it can go empty between phases, and without this it drops a line the same way the button '
-     + 'dropped a row');
+  // ⚠️⚠️ THE ASSERTION THAT USED TO SIT HERE WAS TRUE AND IRRELEVANT, which is worse than absent.
+  // It checked `min-height: 1em` on `.sf-import-progress-detail` and passed happily for the whole
+  // time the row was collapsing to zero - because `#sf-bulk-progress-detail:empty { display:none }`
+  // overrides it, and a `display:none` element has no height to have a minimum of. It gave cover
+  // to the exact defect this file exists for. Assert the rule that GOVERNS, not a nearby one.
+  ok('the deliberate collapse is still there',
+     /#sf-bulk-progress-detail:empty\s*\{\s*display:\s*none/.test(html),
+     '[B-420] a door that never writes a per-item line must not pay for a blank row - "why is '
+     + 'there a blank space under the bar?" That report must stay fixed');
+  ok('⭐⭐ but a showing that HAS used the row keeps it',
+     /#modal-sf-bulk-progress\.sf-prog-detail-used\s+#sf-bulk-progress-detail:empty\s*\{\s*display:\s*block/.test(html),
+     'the scan writes a name per item and clears it after the last one. Without this the row '
+     + 'vanishes mid-operation: detail 16px -> 0, box 233 -> 196, and the modal re-centres');
+  ok('⭐ and every write of the detail claims it',
+     (html.match(/classList\.add\('sf-prog-detail-used'\)/g) || []).length === 5,
+     'all five writers must mark it, or whichever one runs last in a given flow leaves the row '
+     + 'collapsible and the resize comes back on that path only');
+  ok('⚠️ marked on WRITE, not on phase',
+     /if \(d\.textContent\) d\.closest\('\.modal-overlay'\)\?\.classList\.add/.test(html),
+     'claiming the row whenever a phase starts would reserve it for doors that never use it, '
+     + 'which is the [B-420] blank row again');
+  ok('⚠️ and it is released with the modal',
+     /_retireReservations\(\)[\s\S]{0,600}?classList\.remove\('sf-prog-detail-used'\)/.test(html),
+     'held past the close, the next caller inherits a blank row it never wrote to');
 }
 
 console.log(failed ? `\n${failed} FAILED` : '\nprogress-row-reserved: all passing');
