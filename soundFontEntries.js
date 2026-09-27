@@ -20,6 +20,7 @@ const crypto = require('crypto');
 const StreamZip = require('node-stream-zip');
 const soundFontSources = require('./soundFontSources');
 const { copyTreeWithProgress } = require('./sfExportCopy');
+const { rmWithRetry } = require('./fsRemove');
 
 // ⭐⭐ WHAT ONE FILE COSTS, EXPRESSED AS BYTES. [B-005 item 7b, 2026-09-26]
 //
@@ -1449,6 +1450,15 @@ async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onB
       // ⚠️ SAME DIRECTORY, SO NO EXDEV. Renaming within destDir is same-volume by
       // construction - the second half of the 09-02 rule, and the reason this is not staged
       // through a temp dir.
+      // ⚠️⚠️ A LEFTOVER FROM AN EARLIER RUN IS LEFT ALONE, DELIBERATELY. [B-436, 2026-09-26]
+      // A sweep of every `DELETE.*` here was written and then REMOVED 2026-09-26, and the
+      // second half of it is the part worth keeping: "meaning we delete something later? On a
+      // separate export? Don't think we should. Reporting is good."
+      //   · it deletes on an operation that has nothing to do with the folder being removed
+      //   · and it works AGAINST the reporting added in the same change - a leftover quietly
+      //     swept by the next export is one nobody ever learns about, which is the exact state
+      //     [B-436] exists to end.
+      // Only THIS item's leftover is cleared, below, by the export that owns it.
       asideDir = path.join(destDir, `ORIGINAL.${targetName}`);
       // ⚠️ A stale aside means a previous run died between the rename and the cleanup. Its
       // content is the OLDER copy of a font the user has since replaced, so the live tree
@@ -1777,7 +1787,7 @@ async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onB
     if (asideDir && fs.existsSync(asideDir)) {
       const junk = path.join(destDir, `DELETE.${targetName}`);
       try {
-        if (fs.existsSync(junk)) await fs.promises.rm(junk, { recursive: true, force: true });
+        if (fs.existsSync(junk)) await rmWithRetry(junk);
         await fs.promises.rename(asideDir, junk);
         replacedLeftover = junk;
         // ⭐⭐ UNLINKED ONE AT A TIME SO THE BAR CAN CROSS IT. [B-005 item 7b, 2026-09-26]
@@ -1788,14 +1798,20 @@ async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onB
         // silent is what puts a finished-looking bar in front of a still-working app.
         //
         // ⚠️ `_displaced` is exactly what is still parked: anything restored above was spliced
-        // out of it. Failures are swallowed on purpose - the rm that follows is the real
-        // guarantee, and this loop is only here to pace the bar.
+        // out of it. Failures are swallowed on purpose - the rm that follows is the backstop,
+        // and this loop is only here to pace the bar.
+        // ⚠️⚠️ THAT LINE SAID "the real guarantee" UNTIL [B-436] SHOWED IT WAS NOT ONE. A bare
+        // `fs.rm(force)` can resolve while the directory survives, which is how an empty
+        // `DELETE.<name>` was left on a local disk with nothing reported. It is `rmWithRetry`
+        // now, which verifies the path is actually gone and throws if it is not.
         for (const rel of _displaced) {
           try { await fs.promises.unlink(path.join(junk, rel)); } catch {}
           if (typeof opts.onUnits === 'function') { try { opts.onUnits(PER_FILE_UNIT); } catch {} }
         }
         // Sweeps the now-empty directories, and anything the loop above could not remove.
-        await fs.promises.rm(junk, { recursive: true, force: true });
+        // ⚠️ VERIFIED, not merely attempted - see [B-436]. This is the call whose silent
+        // non-removal produced the leftovers, and the one whose failure must now be reported.
+        await rmWithRetry(junk);
         replacedLeftover = null;
       } catch {
         // Whatever stage it reached, report what is still on disk so the caller can say so.

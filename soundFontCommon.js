@@ -1546,6 +1546,9 @@ async function exportCommonToFolder(userData, uuid, destDir, mode = 'rename', on
       // this and moving on.
       //
       // ⚠️ SAME DIRECTORY, SO NO EXDEV. Renaming within destDir is same-volume by construction.
+      // ⚠️ A LEFTOVER FROM AN EARLIER RUN IS LEFT ALONE - see the note on the font path and
+      // [B-436]. Sweeping them here would delete on an unrelated export and would hide the
+      // very thing the reporting was added to surface.
       asideDir = path.join(destDir, `ORIGINAL.${targetName}`);
       // ⚠️ A stale aside means a previous run died between the rename and the disposal. Its
       // content is the OLDER copy of a folder the user has since replaced, so the live tree wins;
