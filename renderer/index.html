@@ -9857,6 +9857,34 @@ function showToast(message, opts = {}) {
       setTimeout(() => el.remove(), 200);
     }, durationMs);
   };
+  // ⭐⭐ A TOAST DOES NOT EXPIRE WHILE SOMEONE IS READING IT. [B-236, 2026-09-26]
+  //
+  // Point at it and the clock stops; move away and it STARTS OVER rather than resuming. Settled
+  // 2026-08-27, and it is the right shape: the moment you stop inspecting it is the moment you
+  // start deciding, and the window should not be shortened by how long you spent looking.
+  // `arm()` already clears before it sets, so a restart is what it does natively.
+  //
+  // ⚠️ THIS DOES NOT REPLACE THE LONGER ACTION-TOAST CLOCK, and that was ruled on directly:
+  // "I like the higher timer one action always even with fix." An action toast earns its 12s on
+  // its own merit - the reader has a decision to make, not just a sentence to read - and hover
+  // is for the case where even that is not enough. The two are not alternatives.
+  //
+  // ⚠️ ATTACHED ONCE, AT CREATION. The `id` reuse path below re-renders and re-arms an existing
+  // element, and adding the pair again there would stack a listener per repeat on the toasts
+  // that repeat most.
+  // ⚠️ AND IT MUST NOT RESURRECT A TOAST THAT IS ALREADY LEAVING. Once `visible` is off, the
+  // 200 ms removal is already scheduled; re-arming there would set a timer on an element about
+  // to be removed and briefly hold a fading toast under the cursor.
+  const holdWhileRead = (el) => {
+    el.addEventListener('pointerenter', () => {
+      if (!el.classList.contains('visible')) return;
+      clearTimeout(el._dismissTimer);
+    });
+    el.addEventListener('pointerleave', () => {
+      if (!el.classList.contains('visible')) return;
+      arm(el);
+    });
+  };
   // Reuse existing toast with same id if present.
   if (id) {
     const existing = host.querySelector(`[data-toast-id="${id}"]`);
@@ -9872,6 +9900,7 @@ function showToast(message, opts = {}) {
   t.className = 'toast toast-' + kind;
   if (id) t.dataset.toastId = id;
   render(t);
+  holdWhileRead(t);
   host.appendChild(t);
   // Force reflow so the transition kicks in
   requestAnimationFrame(() => t.classList.add('visible'));
