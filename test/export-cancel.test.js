@@ -43,9 +43,11 @@ function ok(name, cond, detail) {
 // six false results in this suite in two days. Anchor on something that must exist.
 for (const h of ['entries:exportToFolder', 'common:exportAsZip', 'common:exportToFolder',
                  'sharedTracks:exportToFolder', 'sfFile:export', 'sources:exportToDownloads',
-                 // Added 2026-09-20: it writes a user-chosen destDir and had NO cancel at all.
-                 // Missed by every earlier sweep because its name says nothing about exporting.
-                 'sources:extractTo',
+                 // ⚠️ `sources:extractTo` WAS HERE from 2026-09-20 and was REMOVED 2026-09-26
+                 // [B-434]: it had zero callers and could never be opened, so the cancel added
+                 // for it guarded nothing. Kept as a note because the reason it was missed for
+                 // so long - a name that says nothing about exporting - still applies to the
+                 // rest of this list.
                  // ⚠️⚠️ AN IMPORT, LISTED HERE ON PURPOSE. This section is titled for export doors
                  // and the gate is named for them, but the property being asserted is "a long copy
                  // can be stopped", and the direction of the copy does not change that. Found

@@ -1778,95 +1778,6 @@ ipcMain.handle('soundFonts:scanFolder', (_, folderPath) => {
   }
 });
 
-// Copy `sourcePath` recursively into userData/soundFonts/<name>/ asynchronously,
-// reporting per-file progress via the `soundFonts:importProgress` IPC event so
-// the renderer can show a progress bar instead of an apparent freeze. Files
-// are enumerated first to compute the total, then copied one at a time;
-// progress emits are throttled to ~100ms or every 10 files (whichever first)
-// so we don't flood IPC on small files. The `_jmt_font_meta.json` is filtered
-// out of any source content so a re-import of a previously-imported folder
-// does not carry the prior identity. On error, any partial destination is
-// cleaned up so the library stays consistent.
-ipcMain.handle('soundFonts:importFont', async (event, { sourcePath, name, metadata }) => {
-  let dest;
-  try {
-    if (!sourcePath || !name) return { ok: false, error: 'Missing sourcePath or name' };
-    const root = _soundFontsRoot();
-    if (!fs.existsSync(root)) fs.mkdirSync(root, { recursive: true });
-    dest = path.join(root, name);
-    if (fs.existsSync(dest)) return { ok: false, error: 'A font with that name already exists' };
-
-    // Walk source to enumerate files (and skip any existing JMT metadata).
-    const files = [];
-    let totalBytes = 0;
-    const walk = (dir, relBase) => {
-      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-        if (e.name === '_jmt_font_meta.json') continue;
-        const full = path.join(dir, e.name);
-        const rel = path.join(relBase, e.name);
-        if (e.isDirectory()) walk(full, rel);
-        else if (e.isFile()) {
-          let size = 0;
-          try { size = fs.statSync(full).size; } catch {}
-          files.push({ full, rel, size });
-          totalBytes += size;
-        }
-      }
-    };
-    walk(sourcePath, '');
-    const total = files.length;
-
-    const send = (payload) => {
-      try { event.sender.send('soundFonts:importProgress', payload); } catch {}
-    };
-    send({ stage: 'starting', current: 0, total, bytes: 0, totalBytes });
-
-    fs.mkdirSync(dest, { recursive: true });
-
-    let copied = 0;
-    let bytesCopied = 0;
-    let lastEmit = Date.now();
-    for (const f of files) {
-      const destPath = path.join(dest, f.rel);
-      const destDir = path.dirname(destPath);
-      if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
-      await fs.promises.copyFile(f.full, destPath);
-      copied++;
-      bytesCopied += f.size;
-      const now = Date.now();
-      if (now - lastEmit > 100 || copied % 10 === 0 || copied === total) {
-        send({
-          stage: 'copying',
-          current: copied,
-          total,
-          bytes: bytesCopied,
-          totalBytes,
-          currentFile: f.rel,
-        });
-        lastEmit = now;
-      }
-    }
-
-    const meta = {
-      schemaVersion: 1,
-      name,
-      author: (metadata && metadata.author) || '',
-      purchased: !!(metadata && metadata.purchased),
-      acquisitionDate: (metadata && metadata.acquisitionDate) || require('./localDate').localDateString(), // [B-339] local, not UTC
-      description: (metadata && metadata.description) || '',
-      linkedStyleLibraryEntry: (metadata && metadata.linkedStyleLibraryEntry) || null,
-      importedAt: new Date().toISOString(),
-    };
-    fs.writeFileSync(path.join(dest, '_jmt_font_meta.json'), JSON.stringify(meta, null, 2));
-
-    send({ stage: 'done', current: total, total, bytes: totalBytes, totalBytes });
-    return { ok: true, name };
-  } catch (err) {
-    // Clean up partial destination so the library doesn't carry an incomplete copy.
-    try { if (dest && fs.existsSync(dest)) fs.rmSync(dest, { recursive: true, force: true }); } catch {}
-    return { ok: false, error: String(err && err.message || err) };
-  }
-});
 // ── Sound Fonts — sources (Phase 1) ────────────────────
 // Sources are the user's archive of purchases as delivered, stored verbatim
 // under userData/soundFonts/sources/<uuid>/. Each source is either a
@@ -2154,34 +2065,6 @@ ipcMain.handle('sources:readFile', async (_, { uuid, path: filePath } = {}) => {
   }
 });
 
-// ⚠️⚠️ THIS DOOR HAD NO CANCEL UNTIL 2026-09-20, AND THE MODULE WAS READY THE WHOLE TIME.
-// `extractTo` has accepted `opts.shouldStop` and threaded it into `_extractZipSubtree` all
-// along; nothing here ever passed one. So the gap was a handler that never asked for a
-// capability that already existed, which is why no amount of reading the extraction code
-// would have revealed it.
-//
-// ⭐ IT WAS MISSED BECAUSE OF ITS NAME. Every sweep for export paths searched for "export",
-// and this one is called extractTo - the same reason it sat outside the [B-005] cancel work
-// on 09-19. Name the category by its EFFECT (it writes a user-chosen destDir) and it is
-// obviously an export door.
-ipcMain.handle('sources:extractTo', async (event, { uuid, path: subPath, destDir } = {}) =>
-  _withExportCancel(async (shouldStop) => {
-    const send = (payload) => {
-      try { event.sender.send('sources:extractProgress', { uuid, ...payload }); } catch {}
-    };
-    try {
-      const source = soundFontSources.openSource(app.getPath('userData'), uuid);
-      if (!source) return { ok: false, error: `Source not found: ${uuid}` };
-      const result = await source.extractTo(subPath || '', destDir, send, { shouldStop });
-      return { ok: true, ...result };
-    } catch (err) {
-      // ⚠️ A cancel is an outcome, not a failure - without this the user's own click comes
-      // back as a red "Export failed: Export cancelled", the exact shape `isCancel` exists
-      // to prevent and the one that bit three other doors on 09-20.
-      if (require('./sfExportCopy').isCancel(err)) return { ok: true, canceled: true };
-      return { ok: false, error: String(err && err.message || err) };
-    }
-  }));
 
 ipcMain.handle('sources:detectVendor', async (_, { uuid } = {}) => {
   try {
@@ -6504,8 +6387,11 @@ ipcMain.handle('versions:export', async (_, name) => {
   // path to guard. This used to dead-end on an error whose only button was OK.
   //
   // NOT the rule for names the app OWNS. A sound font library entry is keyed by its name and
-  // deduped by content hash, so a silent _1 there would fragment the library - soundFonts:importFont
-  // above refuses on purpose and must stay that way. See local/ui-conventions.md. (2026-08-23)
+  // deduped by content hash, so a silent _1 there would fragment the library - the entry creation
+  // path refuses on purpose and must stay that way. See local/ui-conventions.md. (2026-08-23)
+  // ⚠️ This used to cite `soundFonts:importFont` as the example. That handler was removed
+  // 2026-09-26 [B-434] - it wrote to the pre-library layout and nothing could reach it - but the
+  // RULE it illustrated is unchanged and still lives in `createEntry`.
   let dest = path.join(destFolder, name);
   // First copy is _2 ([B-343]): the original is implicitly number one.
   for (let n = 2; fs.existsSync(dest) && n < 1000; n++) dest = path.join(destFolder, `${name}_${n}`);

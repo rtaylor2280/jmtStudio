@@ -234,13 +234,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listSoundFonts:          ()                       => ipcRenderer.invoke('soundFonts:listFonts'),
   listSoundFontsWithMeta:  ()                       => ipcRenderer.invoke('soundFonts:listFontsWithMeta'),
   scanSoundFontFolder:     (folderPath)             => ipcRenderer.invoke('soundFonts:scanFolder', folderPath),
-  importSoundFont:         (params)                 => ipcRenderer.invoke('soundFonts:importFont', params),
-  onSoundFontImportProgress: (cb) => {
-    const handler = (_, data) => cb(data);
-    ipcRenderer.on('soundFonts:importProgress', handler);
-    return () => ipcRenderer.removeListener('soundFonts:importProgress', handler);
-  },
-
   onSoundFontExportProgress: (cb) => {
     const handler = (_, data) => cb(data);
     ipcRenderer.on('soundFonts:exportProgress', handler);
@@ -314,7 +307,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listSourceFiles:       (params)     => ipcRenderer.invoke('sources:listFiles', params),
   listSourceInnerZipFiles: (params)   => ipcRenderer.invoke('sources:listInnerZipFiles', params),
   readSourceFile:        (params)     => ipcRenderer.invoke('sources:readFile', params),
-  extractFromSource:     (params)     => ipcRenderer.invoke('sources:extractTo', params),
   // [B-203] Size a source before any bar goes up, so the checks look like every other door.
   sourceExportSize:      (params)     => ipcRenderer.invoke('sources:exportSize', params),
   exportSourceToDownloads: (params)   => ipcRenderer.invoke('sources:exportToDownloads', params),
@@ -526,12 +518,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('entries:createProgress', handler);
     return () => ipcRenderer.removeListener('entries:createProgress', handler);
   },
-  onSourceExtractProgress: (cb) => {
-    const handler = (_, data) => cb(data);
-    ipcRenderer.on('sources:extractProgress', handler);
-    return () => ipcRenderer.removeListener('sources:extractProgress', handler);
-  },
-
   selectSoundFontSource: (params) => ipcRenderer.invoke('dialog:selectSoundFontSource', params),
 
   readClipboard:   () => ipcRenderer.invoke('clipboard:read'),

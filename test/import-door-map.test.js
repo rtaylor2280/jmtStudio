@@ -50,9 +50,9 @@ ok('the import register exists in the map', mapText.includes('## Import doors �
 // instrument that produced the wrong export count: it finds the ones whose NAME says what they
 // do. This list is maintained by hand, and the sweep below is what stops it going stale.
 const INWARD = [
-  'soundFonts:importFont',
   'sources:import',
-  'sources:extractTo',
+  // ⚠️ `soundFonts:importFont` and `sources:extractTo` were removed 2026-09-26 [B-434] -
+  // both unreachable, both listed here as though covered. door-reachability.test.js guards it.
   'sources:restoreCustomized',
   'common:importFromZip',
   'common:importFromFolder',

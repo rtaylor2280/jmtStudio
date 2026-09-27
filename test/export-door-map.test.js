@@ -42,9 +42,14 @@ const main = fs.readFileSync(path.join(root, 'main.js'), 'utf8');
 // ── What the app actually exposes ────────────────────────────────────
 //
 // ⚠️ MATCH ON THE HANDLER NAME, NOT ON THE WORD "export". `sources:extractTo` and
-// `fileOps:copy` are both export doors whose names say nothing about exporting - and they
+// `fileOps:copy` were both export doors whose names said nothing about exporting - and they
 // are precisely the two that were found with no cancel at all, because every earlier sweep
-// searched for the feature's name instead of its effect.
+// searched for the feature's name instead of its effect. The lesson stands; keep classifying
+// by EFFECT.
+// ⚠️⚠️ `sources:extractTo` WAS REMOVED 2026-09-26 [B-434] and is deliberately not in the
+// list below. It had a handler, a bridge and ZERO callers - never reachable, born unwired -
+// so the cancel it was given on 2026-09-20 and its place in this map were both coverage of
+// something no user could open. `test/door-reachability.test.js` fails if it returns.
 const KNOWN = [
   'entries:exportToFolder',
   'common:exportToFolder',
@@ -52,7 +57,6 @@ const KNOWN = [
   'sharedTracks:exportToFolder',
   'sfFile:export',
   'sfBackup:export',
-  'sources:extractTo',
   'sources:exportToDownloads',
 ];
 

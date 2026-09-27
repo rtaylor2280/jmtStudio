@@ -1,22 +1,21 @@
-// Every door the maps claim is covered must actually be reachable.  [B-389, 2026-09-26]
+// A progress channel with no consumer is a measurement nobody shows.  [B-389, B-435]
 //
-// ⚠️⚠️ FOUND BY AUDITING PROGRESS BARS, WHICH IS NOT WHERE ANYONE WOULD LOOK FOR IT. Two IPC
-// handlers emit progress to channels no renderer subscribes to. Pulling that thread found the
-// reason: nothing in the app can invoke them at all. `sources:extractTo` and
-// `soundFonts:importFont` have a handler, a preload bridge, and ZERO callers - and git says
-// neither ever had one, so they were born unwired rather than regressed.
+// ⚠️⚠️ THIS FILE EXISTS BECAUSE OF WHAT AUDITING PROGRESS BARS TURNED UP, WHICH IS NOT WHERE
+// ANYONE WOULD LOOK FOR IT. Three IPC channels were being emitted with nothing subscribed. Two of
+// them belonged to doors nothing could invoke - `sources:extractTo` and `soundFonts:importFont`,
+// each with a handler, a preload bridge and zero callers, and `git log -S` said neither ever had
+// one. Both were REMOVED 2026-09-26 [B-434]: one wrote to the pre-library layout and the other
+// duplicated a capability `sources:import` already owns.
 //
-// ⭐⭐ THE DEFECT IS NOT THE DEAD CODE, IT IS THE FALSE COVERAGE. `sources:extractTo` is named
-// by export-door-map, import-door-map AND export-cancel as a live door, and on 2026-09-20 it
-// was given a cancel. Three maps and a hardening pass, all spent on a door nobody can open, and
-// every one of those tests passed - because they check MAIN-SIDE properties (the handler exists,
-// it runs under the cancel gate) and none of them asks whether a user can reach it.
+// ⭐⭐ AND THE REASON THAT MATTERED WAS NOT THE DEAD CODE. `sources:extractTo` was named by
+// export-door-map, import-door-map AND export-cancel as a live door, and on 2026-09-20 it was
+// given a cancel it had been missing. A hardening pass and three maps spent on a door nobody
+// could open, every test green - because they check MAIN-SIDE properties (the handler exists, it
+// runs under the cancel gate) and not one of them asked whether a user can reach it.
 //
-// ⭐ SO THIS IS AN ASSERTION, NOT AN EXEMPTION. The other maps keep listing these doors, because
-// the day one is wired up it must already have its cancel and its preflight. What this file adds
-// is the other half: while a door is unreachable, say so out loud, and FAIL THE MOMENT THAT
-// CHANGES so it gets folded into the covered set deliberately rather than silently.
-// The door-map files say it themselves: "an allowlist is how a check quietly stops checking."
+// ⭐ SO WHAT THIS FILE KEEPS DOING, now that those two are gone: it watches the channel that is
+// still orphaned, and it will not let the removed ones come back unnoticed. A send() with no
+// listener fails silently - no error, no warning - so nothing else in the suite can see it.
 'use strict';
 
 const fs = require('fs');
@@ -32,65 +31,70 @@ const ok = (name, cond, why) => {
 const main    = fs.readFileSync(path.join(root, 'main.js'), 'utf8');
 const preload = fs.readFileSync(path.join(root, 'preload.js'), 'utf8');
 
-// Every renderer file, so "no caller" means no caller anywhere rather than no caller in the
-// one file I happened to open.
+// Every renderer file, so "no consumer" means nowhere rather than not-in-the-file-I-opened.
 const rendererDir = path.join(root, 'renderer');
 const rendererText = fs.readdirSync(rendererDir)
   .filter((f) => /\.(js|html)$/i.test(f))
   .map((f) => fs.readFileSync(path.join(rendererDir, f), 'utf8'))
   .join('\n');
 
-// handler -> the preload bridge that would reach it, and why it is listed here.
-const UNREACHABLE = {
-  'sources:extractTo': {
-    bridge: 'extractFromSource',
-    note: 'extract a subtree of a source to a chosen folder; hardened with a cancel 2026-09-20',
-  },
-  'soundFonts:importFont': {
-    bridge: 'importSoundFont',
-    note: 'copy a font folder into the library, with its own progress channel',
-  },
+// ── 1. The removed doors stay removed ────────────────────────────────
+//
+// ⚠️ NOT HOUSEKEEPING. Re-adding either handler without a renderer caller rebuilds exactly the
+// state that cost a cancel and three map entries: something that looks covered and cannot be
+// reached. If one is genuinely wanted, it arrives WITH its caller and this entry comes out.
+const REMOVED = {
+  'soundFonts:importFont': 'wrote to userData/soundFonts/<name>, the pre-library layout; '
+                         + 'superseded by sources:import + createEntry',
+  'sources:extractTo':     'the extractTo MODULE method is alive and used in four places; only '
+                         + 'this user-facing door was never built',
 };
-
-for (const [handler, { bridge, note }] of Object.entries(UNREACHABLE)) {
-  // The handler and the bridge both still exist - if either goes, this entry is stale and
-  // should be deleted rather than left asserting something about nothing.
-  ok(`${handler} still exists in main`, main.includes(`ipcMain.handle('${handler}'`),
-     `the handler is gone, so this entry is stale - remove it (${note})`);
-  ok(`preload still bridges it as ${bridge}`, new RegExp(`\\b${bridge}\\s*:`).test(preload),
-     'the bridge is gone, so this entry is stale - remove it');
-
-  // ⭐⭐ THE ONE THAT MATTERS. Red here is GOOD NEWS that needs acting on, not a broken test.
-  const calls = (rendererText.match(new RegExp(`\\b${bridge}\\s*\\(`, 'g')) || []).length;
-  ok(`${handler} is still unreachable (${bridge}: ${calls} callers)`, calls === 0,
-     `${bridge} now has a caller, so this door is LIVE. It is named by the export and import `
-     + `door maps and by export-cancel as though it were already covered, and that was only `
-     + `true while nobody could open it. Give it the preflight and cancel coverage those maps `
-     + `claim for it, then delete its entry here.`);
+for (const [handler, why] of Object.entries(REMOVED)) {
+  ok(`${handler} is still gone`, !main.includes(`ipcMain.handle('${handler}'`),
+     `it is back. If that is deliberate it needs a renderer caller and door-map coverage in the `
+     + `same change, or it is unreachable again. (removed because: ${why})`);
 }
 
-// ⚠️ And the progress channels they emit to. These are the thread that led here: a send() with
-// no listener is invisible at runtime - no error, no warning, just a measurement nobody shows.
+// ── 2. Channels emitted with nobody listening ────────────────────────
+//
+// `bulkImport:enrichProgress` is the live one, and it is [B-389]'s own known instance: the bulk
+// analyze bar stalls short because the enrich phase reports to a channel no renderer subscribes
+// to. That is [B-435]. Adding a sub-percent to the emitter would have changed nothing.
 const ORPHAN_CHANNELS = {
-  'sources:extractProgress':    'emitted by sources:extractTo',
-  'soundFonts:importProgress':  'emitted by soundFonts:importFont',
-  'bulkImport:enrichProgress':  'emitted during bulk import enrich - the op IS reachable, so this '
-                              + 'one is a genuinely missing consumer rather than a dead door, and '
-                              + 'it is [B-389]\'s own known instance: the analyze bar stalls short '
-                              + 'because the enrich phase reports to nobody',
+  'bulkImport:enrichProgress':
+    'the operation IS reachable, so this is a genuinely missing consumer rather than a dead '
+    + 'door - [B-435]. Fixing it means subscribing, which trips this assertion; clearing this '
+    + 'entry is part of that fix.',
 };
 
 for (const [channel, note] of Object.entries(ORPHAN_CHANNELS)) {
-  const emitted = main.includes(`'${channel}'`);
-  if (!emitted) { ok(`${channel} is no longer emitted`, true); continue; }
-  const listens = new RegExp(`ipcRenderer\\.on\\(\\s*'${channel}'`).test(preload);
-  // The bridge may exist while nothing uses it; what decides is whether a renderer subscribes.
-  const bridgeName = (preload.match(new RegExp(`(\\w+)\\s*:\\s*\\(cb\\)[^}]*?'${channel}'`, 's')) || [])[1];
-  const consumed = bridgeName
-    ? new RegExp(`\\b${bridgeName}\\s*\\(`).test(rendererText) : false;
+  if (!main.includes(`'${channel}'`)) { ok(`${channel} is no longer emitted`, true); continue; }
+  // What decides is whether a RENDERER subscribes - a preload bridge can exist unused.
+  const bridge = (preload.match(new RegExp(`(\\w+)\\s*:\\s*\\(cb\\)[^}]*?'${channel}'`, 's')) || [])[1];
+  const consumed = bridge ? new RegExp(`\\b${bridge}\\s*\\(`).test(rendererText) : false;
   ok(`${channel} still has no renderer consumer`, !consumed,
-     `a consumer appeared for ${channel}. That is the fix - remove this entry. (${note})`);
-  if (!listens) ok(`${channel} bridge still present`, true);
+     `a consumer appeared - that is the fix, so remove this entry. (${note})`);
+}
+
+// ── 3. No NEW channel may be emitted with nothing listening ──────────
+//
+// ⭐ The generalisation, and the reason this file is worth more than its three assertions: the
+// two dead doors were found by noticing an emit with no listener. This catches the next one
+// instead of waiting for another audit to stumble over it.
+const emitted = new Set(
+  (main.match(/\.send\('([A-Za-z]+:[A-Za-z]+Progress)'/g) || [])
+    .map((s) => s.replace(/^.*\.send\('/, '').replace(/'$/, ''))
+);
+for (const channel of [...emitted].sort()) {
+  if (channel in ORPHAN_CHANNELS) continue;
+  const bridge = (preload.match(new RegExp(`(\\w+)\\s*:\\s*\\(cb\\)[^}]*?'${channel}'`, 's')) || [])[1];
+  ok(`${channel} has a renderer consumer`,
+     !!bridge && new RegExp(`\\b${bridge}\\s*\\(`).test(rendererText),
+     bridge ? `${channel} is bridged as ${bridge} and no renderer subscribes to it. Either wire `
+              + `a consumer or stop emitting - a progress event nobody receives is invisible at `
+              + `runtime and costs a phase its bar.`
+            : `${channel} is emitted but preload does not bridge it at all, so no renderer could `
+              + `receive it even if one tried.`);
 }
 
 console.log(`\ndoor-reachability: ${failed === 0 ? 'all passing' : failed + ' FAILED'}`);
