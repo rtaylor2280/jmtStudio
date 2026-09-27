@@ -66,9 +66,12 @@ function enumerateVolumesWindows(removableOnly, onlyLetter = null) {
   const ps = [
     '$vols = Get-CimInstance Win32_LogicalDisk' + filter,
     '$out = foreach ($v in $vols) {',
+    // ⚠️⚠️ `Get-Volume` USED TO RUN HERE, ONCE PER VOLUME, AND IT IS GONE. [B-441] It supplied
+    // HealthStatus, which is now computed in JS from the filesystem's own dirty flag - one
+    // method, this surface and the export refusal both. See `_healthFromDirtyBit` below.
+    // ⭐ Removing it also takes a per-volume cost out of every enumeration: measured
+    // 2026-09-27 at 124 ms warm and 1864 ms cold, inside a loop over every volume.
     '  $letter = $v.DeviceID.TrimEnd(":")',
-    '  $h = $null',
-    '  try { $h = (Get-Volume -DriveLetter $letter -ErrorAction Stop).HealthStatus } catch {}',
     '  [pscustomobject]@{',
     '    drive        = $v.DeviceID',
     '    mountPath    = $v.DeviceID + "\\"',
@@ -78,7 +81,8 @@ function enumerateVolumesWindows(removableOnly, onlyLetter = null) {
     '    hasMedia     = ($null -ne $v.Size)',
     '    sizeBytes    = [int64]$v.Size',
     '    freeBytes    = [int64]$v.FreeSpace',
-    '    health       = $h',
+    // ⚠️ `health` is NOT emitted here any more - it is stamped on in JS below, so that this
+    // surface and the export refusal cannot end up answering from two different signals.
     '    driveType    = [int]$v.DriveType',
     '  }',
     '}',
@@ -100,10 +104,39 @@ function enumerateVolumesWindows(removableOnly, onlyLetter = null) {
         if (err) { resolve([]); return; }
         try {
           const parsed = JSON.parse((stdout || '').trim() || '[]');
-          resolve(Array.isArray(parsed) ? parsed : [parsed]);
+          const rows = Array.isArray(parsed) ? parsed : [parsed];
+          resolve(rows.map((v) => ({ ...v, health: _healthFromDirtyBit(v) })));
         } catch { resolve([]); }
       });
   });
+}
+
+// ── One signal, two surfaces ────────────────────────────────────────────────── [B-441]
+//
+// ⭐⭐ THE SAME CHECK THE EXPORT REFUSAL USES. The rule, 2026-09-27: "one method, both places."
+// The card browser used to get HealthStatus from `Get-Volume` while the export pre-flight read
+// the FAT32 dirty bit - two detectors answering the same question, which is how two surfaces
+// end up telling someone different things about one card.
+// ⚠️ I had claimed they could disagree and had NO evidence for it: on both cards tested they
+// agreed exactly, and Windows' "Full Repair Needed" is most likely reporting that same bit
+// through an API. The reason to unify is one method that can be verified and can travel off
+// Windows - not a defect anyone could demonstrate.
+//
+// ⚠️ THE VOCABULARY IS UNCHANGED ON PURPOSE: 'Healthy' / 'Warning' / null, exactly what
+// `Get-Volume` produced, because three readers compare against those strings - the meta line
+// (`health: …`), the card verdict, and the `OS health:` warning. A drop-in keeps this to one
+// decision instead of a rename spreading across surfaces.
+// ⚠️ null means CANNOT TELL, and must stay distinct from 'Healthy': a folder, a non-FAT32
+// volume, or a volume that will not open is unknown, never confirmed-good.
+function _healthFromDirtyBit(v) {
+  try {
+    const mount = v && (v.mountPath || (v.drive ? v.drive + '\\' : null));
+    if (!mount) return null;
+    const dirty = require('./exportDestination').volumeDirty(mount);
+    if (dirty === true) return 'Warning';
+    if (dirty === false) return 'Healthy';
+    return null;
+  } catch { return null; }
 }
 
 async function enumerateRemovableVolumes() {
@@ -325,7 +358,18 @@ function buildVerdict(card) {
   const kind = cls.kind;
   const noun = card.isFolder ? 'folder' : 'card';
   if (kind === 'unreadable') return { level: 'bad', headline: `This ${noun} couldn't be read.`, detail: 'It may be damaged or not seated properly. Try re-inserting it, or a different reader.' };
-  if (card.health && card.health !== 'Healthy') return { level: 'bad', headline: 'This card reports a health warning.', detail: 'Your computer flags this card as unhealthy, which can mean its files are corrupted. Inspect them before relying on it, and if they are damaged, reformat the card and repopulate it with known-good data before use rather than trusting what is on it now.' };
+  // ⚠️⚠️ SAY THE OPINION, NEVER THE INSTRUCTION. [B-441, settled 2026-09-27] This used to
+  // end "...reformat the card and repopulate it with known-good data". That is irreversible,
+  // and on a card holding the only copy of something it destroys it - which is not a call this
+  // app gets to make for someone, and not one it can make correctly: a mount can report
+  // fiction, and a card has already been called unrecoverable here that was perfectly fine.
+  // ⚠️ IT ALSO SAID "Inspect them before relying on it", WHICH WAS WORSE THAN USELESS - it
+  // prescribed a test that does not work. Files can look completely fine and be corrupt
+  // inside, so an inspection that passes is not evidence of anything, and telling someone to
+  // inspect implies the opposite.
+  // ⭐ Same sentence as the export refusal (`_sfRefuseUnhealthyDestination`), deliberately:
+  // one condition, one wording, whichever surface the user meets first.
+  if (card.health && card.health !== 'Healthy') return { level: 'bad', headline: 'This card reports a health warning.', detail: 'This card is flagged as needing repair, which usually means it is corrupted. Its contents may be incomplete, including files that appear normal.' };
   if (kind === 'empty') return { level: 'good', headline: `This ${noun} is empty.`, detail: 'There is nothing on it to import yet.' };
   if (kind === 'proffie') {
     const headline = card.isFolder ? 'These look like Proffie fonts.' : 'This is a Proffie card.';

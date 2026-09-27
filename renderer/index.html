@@ -7753,7 +7753,10 @@ window.promptError = promptError;
 // verb ("Some files failed to delete"), body is the per-item bullet list.
 // Failed entries can use either `source` or `name` as the identifier field —
 // the helper picks whichever is present so call sites stay simple.
-function _sfShowPartialFailures(title, failed) {
+// ⚠️ async ONLY so the damaged-destination branch can NAME the destination through the one
+// shared builder ([B-403] `_sfDestDisplay`). Every one of this function's call sites already
+// awaited it, so nothing changes for them.
+async function _sfShowPartialFailures(title, failed) {
   // ⭐ RAN OUT OF ROOM IS NOT A LIST OF FILENAMES. When the destination filled up, every
   // remaining file reports the same ENOSPC and the modal becomes five identical lines of
   // "no space left on device, write" - which says the same thing five times and never says
@@ -7761,6 +7764,58 @@ function _sfShowPartialFailures(title, failed) {
   if (_sfIsOutOfSpace(failed)) {
     return promptError('Not enough room',
       'The destination ran out of room partway through, so some files were not written.');
+  }
+  // ⭐ A DAMAGED DESTINATION IS NOT A LIST OF FONT NAMES EITHER. Every item reports the
+  // identical mkdir failure, so the default list says one thing N times in the words of a
+  // syscall, and reads as though each font were at fault. Same rule as the branch above:
+  // one cause, one sentence - and the names stay, because they are what did not land.
+  // ⚠️ RED, AND NOT VIA promptError. promptError forces confirmKind 'primary' (blue), which
+  // is why this first read as a notice rather than a fault - "did not accept" sounded like
+  // the destination had made a decision. The app's own rule is that red means an error or a
+  // destructive action, and the nearest existing neighbours are already red and already this
+  // exact sentence shape: "Could not eject the card" and "Could not inspect backup", both
+  // promptConfirm + confirmKind 'danger' + hideCancel. Matching them rather than inventing a
+  // treatment, and leaving the other 42 promptError call sites alone.
+  // ⚠️ NO CAUSE STATED. That the volume is damaged is not known at this point - only that
+  // every folder failed. Naming a cause here would be a diagnosis dressed as a message.
+  // ⚠️ "The problem is with the destination" IS NOT A DIAGNOSIS. mkdir failing on the
+  // destination locates the failure there by definition - it says WHERE, never WHY. Without
+  // it the modal lists font names under a failure and reads as though the fonts were at
+  // fault, which is the thing the raw syscall list did too.
+  // ⚠️ AND IT DOES NOT SAY "no folder could be created". `failed` carries only the failures,
+  // so whether some OTHER font succeeded in the same run is unknown here. Claiming none
+  // succeeded would be a stronger sentence than the data supports.
+  if (_sfIsFolderCreateFailure(failed)) {
+    const where = _sfFailedDestinationLabel(failed);
+    const items = (failed || []).map(f => f.source || f.name || '?');
+    // ⭐ CAPPED, the same six-then-"and N more" shape as [B-404] and the card warning. The
+    // container scrolls, so a long list cannot push the buttons out of reach - but selecting
+    // all and hitting a bad destination puts every font in here, and a scrolling wall of
+    // names says nothing the count does not.
+    // ⚠️ An overflow of exactly one is not collapsed: "and 1 more" costs more characters
+    // than the name it hides, which is the reason [B-404] states for its own cap.
+    const LIMIT = 6;
+    const shown = items.length > LIMIT + 1 ? items.slice(0, LIMIT) : items;
+    const names = shown.map(n => ` • ${n}`).join('\n')
+                + (items.length > shown.length ? `\n • and ${items.length - shown.length} more` : '');
+    // ⚠️ THE TITLE CARRIES THE FAULT AND WHERE; THE BODY CARRIES THE CONSEQUENCE. Naming the
+    // destination first is what stops the list of font names reading as though the fonts
+    // were at fault, and it says WHERE without claiming WHY - which is all that is known
+    // here. Putting the location in the body as well only repeated "could not be created".
+    // ⭐⭐ ONE BUILDER, NOT A THIRD SPELLING. `_sfDestDisplay` is [B-403]'s shared namer - the
+    // card picker and the export success summary both go through it, and its own comment
+    // asks the right question of any two surfaces that agree: "do they agree because written
+    // the same or because it's one shared builder?" A failure dialog naming the same card is
+    // the same concern, so it takes the same route: "Removable Disk (I:)", "REVANTEDJMT (F:)".
+    // ⚠️ NOT A FRESH PROBE OF THE CARD. `_sfDestDisplay` reads the value the picker already
+    // primed, and falls back to the raw path on a miss or a timeout - it cannot hold the
+    // dialog, which is [B-204]'s rule about a summary that never appears.
+    const dest = (await _sfDestDisplay(where)) || where;
+    return promptConfirm({
+      title: dest ? `There was an issue with ${dest}` : 'There was an issue with the destination',
+      message: `These folders could not be created, so none of their files were written:\n${names}`,
+      confirmText: 'OK', confirmKind: 'danger', hideCancel: true,
+    });
   }
   const lines = (failed || [])
     .map(f => ` • ${f.source || f.name || '?'}: ${f.error || 'unknown'}`)
@@ -7843,6 +7898,62 @@ async function _sfRefuseNotEnoughRoom(fit, { blockedDelete = false } = {}) {
   });
 }
 window._sfRefuseNotEnoughRoom = _sfRefuseNotEnoughRoom;
+
+// ── Refusing a destination the OS has already flagged ───────────────────────── [B-441]
+//
+// ⭐⭐ SAY THE OPINION, NEVER THE INSTRUCTION. Settled 2026-09-27. A plain verdict is
+// what a novice needs and it is what the Crucible would tell them - but prescribing a
+// REFORMAT is not ours to give: it is irreversible, and on a card holding the only copy of
+// something it destroys it. State what the OS reports and what it usually means; stop there.
+//
+// ⭐ THE LOAD-BEARING SENTENCE IS THE LAST ONE: files can look perfectly fine
+// and be corrupt inside. So "it opened, it seems OK" is worth nothing as evidence, and
+// leaving the reader to infer that from a health flag would leave most of them not inferring
+// it at all.
+//
+// ⚠️ NAMED THROUGH `_sfDestDisplay`, the same [B-403] builder the picker, the success summary
+// and the write-failure dialog use. A fourth spelling of a card's name is how two of them
+// end up disagreeing.
+// ⚠️ RED, like "Could not eject the card". `promptError` forces primary/blue, which is what
+// made the write-failure dialog read as a notice rather than a fault.
+// ⚠️⚠️ IT TAKES A CLOSER AND CALLS IT ITSELF, JUST BEFORE SHOWING. This is the second branch
+// of the dialogs-and-transitions rule in `local/ui-conventions.md`, and the first cut broke it:
+// the caller dropped the progress modal and THEN awaited `_sfDestDisplay` in here, so nothing
+// was painted for the length of a naming lookup that can run to 2.5s unprimed.
+// [reported 2026-09-27: "there is a screen flash before this modal comes up ... the previous
+// modal didn't follow the rule"]
+// ⭐ The rule's sharp form is whose job it is: "The next modal is in charge of closing the
+// previous one. The only modal allowed to close itself is a final one." A surface that closes
+// itself cannot know whether a successor is coming, so it cannot know it is leaving a hole.
+// This function is the successor, it knows exactly when it is ready, so it owns the close.
+// ⚠️ `_sfRefuseNotEnoughRoom` gets away with the caller closing first only because it reaches
+// `promptConfirm` with no await in front of it. That is luck, not design - it is the same shape
+// and it would flash the moment anything async were added ahead of its dialog.
+async function _sfRefuseUnhealthyDestination(bad, { blockedDelete = false, destDir = null, closePrevious = null } = {}) {
+  let named = '';
+  try { named = (await _sfDestDisplay(destDir || '')) || ''; } catch {}
+  const label = named || (bad && bad.label) || 'this card';
+  // ⚠️ LAST THING BEFORE THE DIALOG, after every await is done. Anything awaited below this
+  // line reopens the hole this exists to close.
+  try { if (closePrevious) closePrevious(); } catch {}
+  await promptConfirm({
+    title: `There is a problem with ${label}`,
+    // ⚠️⚠️ NOT "Windows", AND NO LONGER "Your computer" EITHER. [B-441, caught 2026-09-27]
+    // "Your computer reports" was true while the verdict came from `Get-Volume`. It is not true
+    // now: the flag is stored ON THE CARD, in its own file system, and we read it. Attributing
+    // it to the machine names a source that no longer produces it.
+    // ⭐ The accurate wording is also the portable one - a flag that travels with the card is
+    // true of it on any machine, so this sentence needs no rework when mac and Linux arrive.
+    message: 'This card is flagged as needing repair, which usually means it is '
+      + 'corrupted. Its contents may be incomplete, including files that appear normal.\n\n'
+      + 'Nothing was exported.'
+      + (blockedDelete ? ' Nothing was deleted.' : ''),
+    confirmText: 'OK',
+    confirmKind: 'danger',
+    hideCancel: true,
+  });
+}
+window._sfRefuseUnhealthyDestination = _sfRefuseUnhealthyDestination;
 
 // ⭐⭐ ONE SLOW-WRITE WARNING, FOR EVERY DOOR. [B-238]
 //
@@ -8287,6 +8398,19 @@ async function _sfPreflightDestination({ destDir, fileSizes = null, totalBytes =
       } catch {}
     };
 
+    // ⚠️ AHEAD OF `tooBig`, matching the order in `preflight` itself. A damaged volume still
+    // reports free space, so "it will not fit" would be an answer computed from a number we
+    // have just been told not to trust - and telling someone about room on a card they should
+    // not write to is the wrong conversation. [B-441]
+    if (p.unhealthy) {
+      // ⚠️ `dropBar` IS HANDED OVER, NOT CALLED. The dialog awaits a naming lookup before it can
+      // show, so a close here would leave the screen bare for the length of it. The successor
+      // owns the close - `local/ui-conventions.md`, dialogs and transitions.
+      await _sfRefuseUnhealthyDestination(p.unhealthy,
+        { blockedDelete, destDir, closePrevious: dropBar });
+      out.proceed = false;
+      return out;
+    }
     if (p.tooBig) {
       // ⚠️ Nothing has been written at this point - the refusal happens BEFORE the write, not
       // as a recovery from one. That is the whole of [B-203].
@@ -8336,9 +8460,58 @@ function _sfIsOutOfSpace(errOrList) {
   if (Array.isArray(errOrList)) return errOrList.length > 0 && errOrList.every(f => has(f && f.error));
   return has(errOrList && errOrList.message ? errOrList.message : errOrList);
 }
+
+// ── A destination that will not take new folders ───────────────────────────────
+//
+// Same shape as out-of-space above, and the same rule: one cause, one sentence. A card
+// whose directory structure is damaged still MOUNTS, still reports free space, and still
+// accepts writes into folders that already exist. What it refuses is a NEW entry. So an
+// export of N fonts fails N times with the identical syscall string, and the modal becomes
+// a list of "ENOENT: no such file or directory, mkdir 'I:\<font>'" - which names each font
+// as the problem when the fonts are fine and the destination is not.
+//
+// Measured 2026-09-27 against a real corrupted FAT32 card, so the shape is observed rather
+// than assumed: the volume reported 11.97 GB free while Get-Volume gave HealthStatus
+// Warning / OperationalStatus "Full Repair Needed" and `fsutil dirty query` said Dirty. Its
+// root held a directory entry whose NAME was raw wav bytes ("RIFF(K..."), i.e. audio data
+// written over the directory region. Exporting a font whose folder already existed on the
+// card SUCCEEDED; deleting that folder made the same font fail. That is what established
+// the condition belongs to the destination and not to any font or to how many were picked.
+//
+// ⚠️ MATCHES mkdir ONLY, NEVER BARE ENOENT. A missing SOURCE file reports ENOENT too, as
+// ", open '<path>'" or ", stat '<path>'", and is an unrelated problem. Folding that in
+// would swap a true raw message for a confident wrong one, which is worse than the raw
+// text this exists to remove.
+function _sfIsFolderCreateFailure(errOrList) {
+  const has = (s) => {
+    const t = String(s || '');
+    return /ENOENT/i.test(t) && /,\s*mkdir\b/i.test(t);
+  };
+  if (Array.isArray(errOrList)) return errOrList.length > 0 && errOrList.every(f => has(f && f.error));
+  return has(errOrList && errOrList.message ? errOrList.message : errOrList);
+}
+
+// The destination as it reads to the person looking at it: the drive for a Windows path,
+// the parent folder elsewhere. Returns '' when no path can be read out of the message, and
+// the caller then drops the location entirely rather than printing a placeholder.
+function _sfFailedDestinationLabel(errOrList) {
+  const first = Array.isArray(errOrList)
+    ? ((errOrList.find(f => f && f.error) || {}).error)
+    : (errOrList && errOrList.message ? errOrList.message : errOrList);
+  const m = /mkdir\s+'([^']+)'/i.exec(String(first || ''));
+  if (!m) return '';
+  const p = m[1];
+  const drive = /^([A-Za-z]:)[\\/]/.exec(p);
+  if (drive) return drive[1];
+  const cut = p.lastIndexOf('/');
+  return cut > 0 ? p.slice(0, cut) : '';
+}
 // Shows the right dialog for a failed export: our sentence when the destination filled up,
 // the raw reason otherwise. Returns true when it handled an out-of-space case.
-function _sfExportFailed(err) {
+// ⚠️ async for the same reason as `_sfShowPartialFailures`: the damaged-destination branch
+// names the destination through [B-403]'s shared builder. Its boolean return is now a
+// promise - checked 2026-09-27, none of its three call sites read it.
+async function _sfExportFailed(err) {
   // ⚠️ A BREADCRUMB, BECAUSE A DIALOG THAT DOES NOT APPEAR LEAVES NO EVIDENCE. When the
   // common-folder export showed nothing on a full destination there was no way to tell
   // whether this ran and was torn down, or never ran at all - the same blindness the four
@@ -8348,10 +8521,25 @@ function _sfExportFailed(err) {
     promptError('Not enough room', 'The destination ran out of room, so the export did not finish.');
     return true;
   }
+  // ⚠️ PARITY WITH THE PARTIAL-FAILURE MODAL. The same card condition arrives here when the
+  // export throws instead of collecting per-item failures, and without this branch one door
+  // explains it while the other prints the syscall.
+  if (_sfIsFolderCreateFailure(err)) {
+    const where = _sfFailedDestinationLabel(err);
+    const dest = (await _sfDestDisplay(where)) || where;
+    promptConfirm({
+      title: dest ? `There was an issue with ${dest}` : 'There was an issue with the destination',
+      message: 'The folders for this export could not be created, so the export did not finish.',
+      confirmText: 'OK', confirmKind: 'danger', hideCancel: true,
+    });
+    return true;
+  }
   promptError('Export failed', String((err && err.message) || err || 'unknown error'));
   return false;
 }
 window._sfIsOutOfSpace = _sfIsOutOfSpace;
+window._sfIsFolderCreateFailure = _sfIsFolderCreateFailure;
+window._sfFailedDestinationLabel = _sfFailedDestinationLabel;
 window._sfExportFailed = _sfExportFailed;
 
 // ── Dirty ──────────────────────────────────────────────
@@ -35466,6 +35654,26 @@ require(['vs/editor/editor.main'], function () {
         // ⭐ One door handling it is how eleven doors each grew their own. The ending owns it now,
         // so every door inherits the real sentence - and the ratchet can forbid doors from
         // raising refusals themselves without that forbidding being a lie.
+        // [B-441] Same ordering rule as the shared preflight: the destination's state is a
+        // more fundamental answer than whether the job fits on it.
+        if (r && r.unhealthy) {
+          // ⚠️ Main's destDir first, the ending's own as the fallback: main knows the path it
+          // actually pre-flighted, which on a funnel door is not always the one this ending
+          // was handed.
+          // ⚠️ The progress modal is handed over as the closer for the same reason as the
+          // shared preflight: this dialog awaits a naming lookup before it can show.
+          await _sfRefuseUnhealthyDestination(r.unhealthy, {
+            blockedDelete: r.blockedDelete === true,
+            destDir: r.destDir || destDir || null,
+            closePrevious: () => {
+              try {
+                const m = document.getElementById('modal-sf-bulk-progress');
+                if (m && m.classList.contains('active')) window._sfDeleteProgress.hideNow();
+              } catch {}
+            },
+          });
+          return false;
+        }
         if (r && r.tooBig) {
           await _sfRefuseNotEnoughRoom(r.tooBig, { blockedDelete: r.blockedDelete === true });
           return false;
@@ -37392,7 +37600,12 @@ require(['vs/editor/editor.main'], function () {
         // ⭐ `refusedForSpace` means "an ending already spoke, do not add another" - which is what
         // the delete callers read it for. The name is narrower than the meaning; the meaning is
         // the one that matters at both call sites.
-        if (!res || res.tooBig) {
+        // ⚠️ `unhealthy` RIDES THE SAME FLAG AS `tooBig`. [B-441] `refusedForSpace` means "an
+        // ending already drew a dialog, do not add another" - its name is narrower than its
+        // meaning, and that meaning is what both delete callers read it for. Leaving this
+        // refusal out would reproduce the exact double-dialog caught on 2026-09-23: a clear
+        // explanation with "Could not export source: unknown error" stacked underneath it.
+        if (!res || res.tooBig || res.unhealthy) {
           return { ok: true, canceled: true, wroteCount: 0, refusedForSpace: true };
         }
         // ⚠️ The DOOR's result is what callers branch on, not the runner's - the delete contract

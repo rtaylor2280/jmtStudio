@@ -265,6 +265,100 @@ function driveKind(destDir) {
   });
 }
 
+// ── Is the destination's file system in a state worth writing to? ──────────── [B-441]
+//
+// ⭐⭐ TWO STAGES, CHEAP ONE FIRST - the same shape this file already uses to gate the
+// board-card walk. MEASURED 2026-09-27 across a healthy card, a damaged one and the system
+// volume:
+//     fsutil dirty query       20-48 ms   "NOT Dirty" on the healthy card, "is Dirty" on the
+//                                         damaged one, "Access is denied" on C: without admin
+//     Get-Volume              124 ms, and 1864 ms cold
+// So a removable export pays ~20 ms, and the expensive verdict is only bought once the cheap
+// probe says something is wrong. fsutil is a plain Win32 console tool - no shell, no profile,
+// no CIM - which is the same reason `driveKind` above chose it.
+//
+// ⚠️⚠️ THE DIRTY BIT ALONE IS NOT SPECIFIC ENOUGH TO REFUSE ON, and this is the whole reason
+// for the second stage. Pulling a card without ejecting sets it too, which people do
+// constantly - so a dirty volume that Windows still calls Healthy PASSES. One clean control
+// card is evidence the bit discriminates, not evidence it is specific.
+//
+// ⚠️ REMOVABLE ONLY - the caller gates this. A fixed drive is not what it is for, and C:
+// cannot even be queried without elevation.
+// ⚠️ DEGRADES TO null, NEVER TO A REFUSAL. [B-028]: failing to identify something is not
+// evidence about it, and an unmeasurable destination must never block a write that was asked
+// for. Every exit below that is not a positive reading returns null.
+// ⚠️ THE ONLY PLATFORM-SPECIFIC PART, and it is deliberately the smallest one: turning a
+// destination PATH into something that can be opened as the volume itself. The decision below
+// is then identical everywhere, because it reads the filesystem rather than asking an OS.
+// ⚠️ mac and Linux are NOT BUILT. Each needs a mount-point -> device-node lookup (`diskutil
+// info -plist`, `/proc/mounts`), and on mac the raw device is likely root-only, which would
+// change the answer rather than just the plumbing. Returning null there means the check does
+// not run, which is the same degrade-to-cannot-tell every other probe here uses. [B-441]
+function rawVolumePath(destDir) {
+  if (process.platform !== 'win32') return null;
+  const m = /^([A-Za-z]):/.exec(path.resolve(String(destDir || '')));
+  // \\.\X: opens the VOLUME rather than a file on it. Verified unelevated 2026-09-27.
+  return m ? '\\\\.\\' + m[1].toUpperCase() + ':' : null;
+}
+
+// Is the FAT32 volume flagged as not cleanly unmounted?
+//
+// ⭐⭐ ONE RULE, NOT ONE PER OS. This reads the dirty flag out of the FILESYSTEM - a 512-byte
+// read of the boot sector - so the verdict does not depend on `fsutil`, PowerShell, `diskutil`
+// or any other tool being present or saying the same thing. The maintenance argument is the
+// deciding one: a single method that holds everywhere beats three that must be kept in
+// agreement forever.
+//
+// ⭐ MEASURED 2026-09-27 against a healthy card and a genuinely damaged one, and cross-checked
+// against `fsutil dirty query`, which agreed on both:
+//     F: healthy   boot[0x41] 0x00   fsutil "NOT Dirty"
+//     I: damaged   boot[0x41] 0x01   fsutil "is Dirty"
+//
+// ⚠️⚠️ THE BOOT BYTE IS THE SIGNAL, NOT FAT[1]. The clean-shutdown bit in FAT[1] (0x08000000)
+// is the more commonly cited flag and it read CLEAN on the damaged card - a version built on
+// it would have silently missed the exact case this exists for. FAT[1] is corroboration at
+// best; it is not consulted here.
+//
+// ⚠️ FAT32 ONLY, and that is a real constraint rather than an oversight: ProffieOS requires
+// FAT32, so a Proffie card is one by definition. Anything else returns null (cannot tell)
+// instead of guessing at a byte that means something different. Warning about the wrong
+// format is SD-management work and out of scope here.
+//
+// ⚠️ DEGRADES TO null, NEVER TO A REFUSAL. [B-028]. A volume that cannot be opened, is not
+// FAT32, or reads short is unknown - and unknown must not block a write that was asked for.
+function volumeDirty(destDir) {
+  const dev = rawVolumePath(destDir);
+  if (!dev) return null;
+  let fd;
+  try { fd = fs.openSync(dev, 'r'); } catch { return null; }
+  try {
+    const bs = Buffer.alloc(512);
+    // A raw volume read must be sector-aligned; offset 0, one sector, is the safe shape.
+    if (fs.readSync(fd, bs, 0, 512, 0) < 512) return null;
+    // ⚠️ CONFIRM IT IS FAT32 BEFORE TRUSTING THE OFFSET. On FAT12/16 the flag lives at 0x25
+    // and 0x41 is something else entirely, so reading it blind would invent a verdict.
+    if (bs.readUInt16LE(0x16) !== 0 || bs.readUInt32LE(0x24) === 0) return null;
+    if (bs.toString('ascii', 0x52, 0x57) !== 'FAT32') return null;
+    return (bs.readUInt8(0x41) & 0x01) === 0x01;
+  } catch {
+    return null;
+  } finally {
+    try { fs.closeSync(fd); } catch {}
+  }
+}
+
+// Returns { dirty: true } ONLY when the destination should not be written to; null otherwise.
+//
+// ⭐ NO SECOND STAGE, and the reason is a correction rather than a simplification. The first
+// cut confirmed a dirty volume with `Get-Volume` because a card pulled without ejecting would
+// otherwise be refused. But a HEALTHY MOUNTED CARD READS CLEAN - F: was mounted and sat at
+// 0x00 throughout - so the bit is not "this was unplugged", it is "this was left mid-write".
+// A card in that state genuinely is unknown, which is what the dialog says. So the case that
+// looked like a false positive is a true one, and the Windows-only confirm bought nothing.
+function destinationHealth(destDir) {
+  return volumeDirty(destDir) === true ? { dirty: true } : null;
+}
+
 // Split out so it can be tested against real device strings without a Windows box.
 // ⚠️ ORDER MATTERS: the Proffieboard test is the most specific and runs first. A
 // Proffieboard IS a USB mass-storage device, so a generic-mass-storage test placed above
@@ -438,6 +532,7 @@ async function preflight(destDir, {
   const out = {
     ok: false, destDir: destDir || null,
     tooBig: null,        // { needBytes, bytesFree, shortfallBytes } when it will not fit
+    unhealthy: null,     // [B-441] { dirty, health, op, label } when the volume needs repair
     slowWrite: null,     // { bytes, files } when big AND on a board card
     boardCard: false,    // carry this: cancel-cleanup reads it, never re-measures
     removable: null,     // null = cannot tell. Drives the eject offer, any removable media.
@@ -482,7 +577,28 @@ async function preflight(destDir, {
   // inspecting the result.
   out.boardCard = isSlowTransport(d.transport);
 
-  // ── 1. Will it fit ──
+  // ── 1. Is it in a state worth writing to at all ── [B-441]
+  //
+  // ⭐⭐ AHEAD OF THE FIT CHECK ON PURPOSE. A damaged volume still reports a free-space
+  // figure - the card this was built for said 11.97 GB free while its root directory held
+  // raw wav bytes in place of file names - so "will it fit" is an answer computed from a
+  // number we have just been told not to trust. Answering the more fundamental question
+  // first also means the user is never told about room on a card they cannot write to.
+  //
+  // ⚠️ REMOVABLE ONLY. `out.removable` is null when we could not tell, and null is not true,
+  // so an unclassifiable destination skips this entirely rather than being probed.
+  if (out.removable === true) {
+    const bad = await destinationHealth(destDir);
+    if (bad) {
+      out.unhealthy = bad;
+      // ⚠️ RETURN WITH THE REFUSAL AND NOTHING ELSE DECIDED - same rule as `tooBig` below.
+      // A door that should not write has no use for a slow-write warning, and stacking two
+      // dialogs on one refusal is a shape already caught once.
+      return out;
+    }
+  }
+
+  // ── 2. Will it fit ──
   //
   // ⚠️ `fits` IS TRUE WHEN WE CANNOT MEASURE - an unmeasurable destination must not block a
   // write the user asked for. Unchanged from checkFit; restated because this is now the only
@@ -506,7 +622,7 @@ async function preflight(destDir, {
     }
   }
 
-  // ── 2. Is it slow enough to be worth warning about ──
+  // ── 3. Is it slow enough to be worth warning about ──
   //
   // ⚠️ THRESHOLD FIRST, LOOKUP SECOND. A job under the limits needs no device lookup at all,
   // and the lookup is the slowest thing in any pre-flight.
@@ -520,4 +636,7 @@ module.exports = {
   describe, checkFit, onDiskCost, classifyTransport, preflight, driveKind,
   SLOW_WRITE_MIN_FILES, SLOW_WRITE_MIN_BYTES, FIT_CHECK_MIN_BYTES,
   isSlowWriteJob, isSlowTransport,
+  // [B-441] Exported so the check can be exercised against real volumes rather than only
+  // through `preflight`, which cannot be pointed at a specific card from a test.
+  volumeDirty, destinationHealth, rawVolumePath,
 };

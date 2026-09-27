@@ -3977,6 +3977,12 @@ async function _sfFileExportImpl(event, { kind, id, paths, suggestedName, asFile
     });
   } catch { /* never fails closed: an unmeasurable destination still exports */ }
 
+  // [B-441] Ahead of tooBig, matching `preflight`'s own order: a volume the OS reports as
+  // needing repair is a more fundamental answer than whether the job fits on it, and its
+  // free-space figure is exactly the number not to trust.
+  if (_pf && _pf.unhealthy) {
+    return { ok: false, unhealthy: _pf.unhealthy, destDir, totalBytes: _bTotal, fileCount: _bFiles };
+  }
   if (_pf && _pf.tooBig) {
     // ⚠️ REFUSE BY RETURNING, NOT BY THROWING. The renderer owns every dialog in this app;
     // main hands back the three numbers and the renderer shows the same sentence every other
@@ -4578,7 +4584,10 @@ ipcMain.handle('sources:exportToDownloads', async (event, { uuid, destDir, forma
           fileCount: flat.length,
           classify: !confirmSlow && require('./exportDestination').isSlowWriteJob(flat.length, need),
         });
-        if (_pf && _pf.tooBig) return { ok: false, tooBig: _pf.tooBig };
+        // [B-441] Ahead of tooBig, same order as `preflight`: a volume the OS reports as needing
+    // repair is the more fundamental answer, and its free-space figure is the number not to trust.
+    if (_pf && _pf.unhealthy) return { ok: false, unhealthy: _pf.unhealthy, destDir: target };
+    if (_pf && _pf.tooBig) return { ok: false, tooBig: _pf.tooBig };
         if (!confirmSlow && _pf && _pf.slowWrite) {
           return { ok: false, slowWrite: _pf.slowWrite };
         }
@@ -4786,6 +4795,9 @@ ipcMain.handle('sources:exportManyToDownloads', async (event, { items = [], dest
       fileCount: grandFiles,
       classify: !confirmSlow && _ed.isSlowWriteJob(grandFiles, grandBytes),
     });
+    // [B-441] Ahead of tooBig, same order as `preflight`: a volume the OS reports as needing
+    // repair is the more fundamental answer, and its free-space figure is the number not to trust.
+    if (_pf && _pf.unhealthy) return { ok: false, unhealthy: _pf.unhealthy, destDir: target };
     if (_pf && _pf.tooBig) return { ok: false, tooBig: _pf.tooBig };
     if (!confirmSlow && _pf && _pf.slowWrite) return { ok: false, slowWrite: _pf.slowWrite };
   } catch { /* never fails closed - failing to measure is not evidence of a problem [B-028] */ }
@@ -6437,6 +6449,9 @@ ipcMain.handle('versions:export', async (_, name) => {
     });
     // ⚠️ REFUSED BEFORE ANYTHING IS WRITTEN. An OS tree that does not fit used to write until
     // the disk filled and then fail with whatever error the filesystem produced.
+    // [B-441] Ahead of tooBig, same order as `preflight`: a volume the OS reports as needing
+    // repair is the more fundamental answer, and its free-space figure is the number not to trust.
+    if (_pf && _pf.unhealthy) return { ok: false, unhealthy: _pf.unhealthy, destDir: destFolder };
     if (_pf && _pf.tooBig) return { ok: false, tooBig: _pf.tooBig };
     if (_pf && _pf.slowWrite) return { ok: false, slowWrite: { ..._pf.slowWrite, destDir: destFolder } };
   } catch { /* never fails closed: an unmeasurable destination still exports */ }
