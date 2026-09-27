@@ -1204,6 +1204,58 @@ const _dirSignals = (root, excludeFn) => require('./soundFontFileHash').dirSigna
 // The cheap signal is only sound as a NEGATIVE: differing counts or byte
 // totals PROVE a difference (prompt, nothing read). Matching ones prove
 // nothing, since a same-size swap defeats them, so they gate INTO the hash
+// ⭐⭐ THE LIBRARY SIDE OF A COMMON COMPARE IS ALREADY WRITTEN DOWN. [B-433, 2026-09-26]
+//
+// This used to call `collectFileRecords(libDir, ...)` on every comparison, which READS AND HASHES
+// the whole library common folder each time. A voicepack common is 214-225 files and ~20 MB, and
+// it was re-read on every export that touched a common folder, to re-learn something recorded when
+// the folder was hashed.
+//
+// ⭐ Fonts already avoid this (`_libRecordsFor` in soundFontEntries reads the central per-file
+// manifest) and tracks avoid it via the tracks hash index. Commons had the manifest WRITTEN all
+// along - `.filehashes/commons/<uuid>.json`, refreshed at creation and whenever a dirty flag
+// resolves, the same lifecycle the tree hash rides - and simply never read it back.
+//
+// ⚠️⚠️ VALIDATED ON SIGNALS, NOT ON THE AGGREGATE HASH, and the difference matters. The entries
+// side compares `mf.contentHash === meta.contentHash`. That cannot be reused here: this manifest is
+// written WITHOUT an aggregate, so `writeFileHashManifest` defaults it to a hash OF THE RECORDS -
+// a different quantity from the folder's `meta.contentHash`. Comparing them would fail for every
+// one of the manifests already on disk, so the fix would have shipped green and saved nothing.
+//
+// ⚠️ THE RECORDS ARE FILTERED THROUGH THE SAME PREDICATE THE SIGNALS WERE. The manifest is
+// written unfiltered, while the compare excludes our own readme markers - so an unfiltered count
+// would disagree with `signals` for any common carrying one, and fall back every time.
+//
+// ⚠️ WHAT THIS TRADES: a library folder edited WITHOUT the dirty flag being set would now be
+// compared against stale hashes instead of being re-read. That is the same bargain the entries
+// side already makes, and the flag is set by every mutating path in this module.
+function _commonLibRecords(userData, uuid, libDir, libFilter, signals) {
+  const { readFileHashManifest, collectFileRecords } = require('./soundFontFileHash');
+  const full = () => collectFileRecords(libDir, null, libFilter);
+  try {
+    let meta = null;
+    try { meta = JSON.parse(fs.readFileSync(path.join(commonRoot(userData), uuid, 'meta.json'), 'utf8')); }
+    catch { return full(); }
+    // A folder whose content is known to have moved has nothing trustworthy recorded yet.
+    if (!meta || meta.contentHashDirty) return full();
+
+    const mf = readFileHashManifest(
+      path.join(userData, 'soundFonts', '.filehashes', 'commons', `${uuid}.json`));
+    if (!mf || !Array.isArray(mf.records)) return full();
+
+    const recs = mf.records.filter((r) => r && r.relPath && libFilter(r.relPath));
+    // ⚠️ The manifest has to describe the folder as it is NOW. Count and bytes are what
+    // `signals` already measured a few lines above, so this check costs nothing beyond the sum.
+    if (!signals || recs.length !== signals.fileCount) return full();
+    let bytes = 0;
+    for (const r of recs) bytes += (r.size || 0);
+    if (bytes !== signals.totalBytes) return full();
+    // ⚠️ A record with no hash cannot answer the question this is here to answer.
+    if (recs.some((r) => !r.fileHash)) return full();
+    return recs;
+  } catch { return full(); }
+}
+
 // and never past it.
 // ⚠️⚠️ `shouldStop` HONOURED 2026-09-24 [B-420], for the same reason as its twin in
 // soundFontEntries: this is a pure READ that hashes 200+ files off a card, and a cancel during the
@@ -1232,7 +1284,7 @@ async function commonMatchesAt(userData, uuid, destDir, targetName = 'common', s
   // supplies a hash per file; mtime says only whether the user invalidated it,
   // and an invalidated or missing entry costs one hash for that file alone.
   const { collectFileRecords, hashFile } = require('./soundFontFileHash');
-  const libRecords = collectFileRecords(libDir, null, libFilter);
+  const libRecords = _commonLibRecords(userData, uuid, libDir, libFilter, mine);
   if (!libRecords) return { ok: true, exists: true, identical: false, reason: 'unreadable' };
 
   const sync = require('./sfSyncManifest');
