@@ -257,6 +257,79 @@ function _showNextHint() {
   }, 28); // ~28ms/char ≈ 35 chars/sec
 }
 
+// ⚠️⚠️ PARKED DELIBERATELY, AND THIS IS NOT THE [B-434] DEAD-CODE SHAPE. [B-254, 2026-09-26]
+//
+// The hint below is complete and correct; it is simply not being shown yet. The entry it came
+// from described a phenomenon that turned out to be something else - the erase PROGRESS BAR that
+// only dfu-util 0.11 draws, which we ship on mac and linux and not on Windows - so what the line
+// should say, and whether it should be platform-split at all, is waiting on the version decision
+// rather than on this code.
+//
+// ⭐ FLIPPING THIS ONE CONSTANT TURNS IT ON. That is the whole point of parking it this way:
+// nothing here has to be rebuilt or remembered, and the copy has already been measured against
+// the line it has to fit in.
+//
+// ⚠️ SO A DEAD-CODE SWEEP MUST NOT TAKE IT. [B-434] removed two IPC doors that had never had a
+// caller and that nobody had decided anything about - the danger there was code looking covered
+// while being unreachable. This is the opposite: a decision, written down, with an entry
+// pointing at it. Check [B-254] before deleting.
+const FLASH_HINTS_ENABLED = false;
+
+// ⭐⭐ THE HINT LINE UNDER THE BUILD BOX, AND WHO GETS IT. [B-254, 2026-09-26]
+//
+// ⚠️ EXTRACTED, NOT EXTENDED. This decision existed as an IDENTICAL 16-line block in doFlash()
+// and doFlashDFU(), and adding the platform default would have made it a longer duplicate in two
+// places. One occupant list, one order, one function - the second copy is the moment to stop.
+//
+// ONE LINE, THREE POSSIBLE OCCUPANTS, in priority order, and the order is the whole design:
+//   1. the SD-guard Easter egg - the user just chose to flash WITHOUT card protection, and
+//      nothing else competes with saying so at that moment
+//   2. a pending lead message - explains the action happening right now (why we recompiled
+//      after fixing the card). Cleared either way: a loser left set would surface on some later
+//      unrelated flash attached to nothing the user did, and a stale message is worse than none
+//   3. the platform hint - the default, and the reason this line was reserved
+function _typeFlashHint() {
+  if (_sdFlash === 'flash-anyway') {
+    typeHintMessage('Flashing without SD card protection. I have a bad feeling about this…');
+    return;
+  }
+  if (_sdFlashLeadMsg || _pendingFlashHint) {
+    typeHintMessage(_sdFlashLeadMsg || _pendingFlashHint);
+    _sdFlashLeadMsg   = null;
+    _pendingFlashHint = null;
+    return;
+  }
+  if (!FLASH_HINTS_ENABLED) return;
+  const hint = _platformFlashHint();
+  if (hint) typeHintMessage(hint);
+}
+
+// ⭐⭐ WHAT THE HINT IS ACTUALLY ANSWERING: "it deleted my fonts". [B-254]
+//
+// Reported on the Crucible (topic 7957) by a Steam Deck user who believed the flash was wiping
+// their SOUND FONTS. It is not - a flash never touches the SD card. What was on screen was
+// dfu-util's ERASE pass drawing a progress bar to 100% before the download bar: two
+// identical-looking bars back to back, the first labelled Erase.
+//
+// ⚠️⚠️ THE CONDITION IS WHICH dfu-util IS BUNDLED, NOT WHICH OS. Measured 2026-09-26:
+//   · 0.9  (our Windows, and the Arduino package on ALL platforms) mentions erasing only as a
+//     verbose log line, "Erasing page size %i at address ...". No bar.
+//   · 0.11 (our mac + linux) draws a full `Erase [====] 100%` bar, same treatment as Download.
+// BOTH ERASE. Erasing before writing is how flash memory works; 0.11 simply narrates it. So this
+// is not a platform behaviour and must not be described to anyone as one.
+// ⚠️ The platform test below is therefore a STAND-IN for "does this build ship 0.11" - true as
+// written, and the thing to re-check before trusting it is the bundled version, not the OS.
+function _platformFlashHint() {
+  const p = (window.electronAPI && window.electronAPI.platform) || '';
+  if (p === 'win32') return 'This should only take a moment.';
+  // ⚠️ 72 chars. `#bm-hint` is nowrap + overflow:hidden, so it CLIPS rather than wraps; the
+  // longest hint already shipping in that line is 81, which is the budget this sits under.
+  if (p === 'darwin' || p === 'linux') {
+    return "That erase is the board's firmware. Your SD card and fonts are untouched.";
+  }
+  return '';
+}
+
 // Types a one-off message into #bm-hint (the italicized, under-the-box hint line),
 // same treatment as the compile hints. Used for the SD-guard flash Easter egg,
 // where the hint cycle isn't running. Cancels any cycling hints; types once and
@@ -803,22 +876,7 @@ async function doFlash() {
   document.getElementById('bm-status').textContent = '';
   document.getElementById('bm-abort').style.display = 'none';
   document.getElementById('bm-close').style.display = 'none';
-  if (_sdFlash === 'flash-anyway') {
-    typeHintMessage('Flashing without SD card protection. I have a bad feeling about this…');
-  } else if (_sdFlashLeadMsg || _pendingFlashHint) {
-    // ONE line, two possible occupants, so they must not step on each other. The SD lead message
-    // wins: it explains the action happening right now (why we just recompiled after fixing the
-    // card). The build-not-stored hint is about a FUTURE compile and is also in the log, so losing
-    // it here costs nothing.
-    //
-    // Both are cleared either way. Leaving the loser set would have it surface on some later,
-    // unrelated flash, attached to nothing the user did - a stale message is worse than no message.
-    // Reachable rather than theoretical: _flashAfterSdFix compiles on a cache miss and auto-flashes,
-    // so a failed save during that compile sets both.
-    typeHintMessage(_sdFlashLeadMsg || _pendingFlashHint);
-    _sdFlashLeadMsg   = null;
-    _pendingFlashHint = null;
-  }
+  _typeFlashHint();
   document.getElementById('bm-retry').style.display = 'none';
   document.getElementById('build-modal').style.display = 'flex';
   startFlashTimer();
@@ -3571,22 +3629,7 @@ async function doFlashDFU() {
   await pauseSerialBeforeFlash();
   setBusy(true);
   setStatus('flash', 'pending', 'Flashing via DFU...');
-  if (_sdFlash === 'flash-anyway') {
-    typeHintMessage('Flashing without SD card protection. I have a bad feeling about this…');
-  } else if (_sdFlashLeadMsg || _pendingFlashHint) {
-    // ONE line, two possible occupants, so they must not step on each other. The SD lead message
-    // wins: it explains the action happening right now (why we just recompiled after fixing the
-    // card). The build-not-stored hint is about a FUTURE compile and is also in the log, so losing
-    // it here costs nothing.
-    //
-    // Both are cleared either way. Leaving the loser set would have it surface on some later,
-    // unrelated flash, attached to nothing the user did - a stale message is worse than no message.
-    // Reachable rather than theoretical: _flashAfterSdFix compiles on a cache miss and auto-flashes,
-    // so a failed save during that compile sets both.
-    typeHintMessage(_sdFlashLeadMsg || _pendingFlashHint);
-    _sdFlashLeadMsg   = null;
-    _pendingFlashHint = null;
-  }
+  _typeFlashHint();
 
   await window.electronAPI.flashDFU();
   setBusy(false);

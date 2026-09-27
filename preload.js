@@ -2,6 +2,12 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
 
+  // ⭐ THE PLATFORM, AS A VALUE RATHER THAN A CALL. [B-254] It never changes, so an IPC round
+  // trip would buy nothing and force every caller to be async. 'win32' | 'darwin' | 'linux'.
+  // ⚠️ NOT navigator.platform or a userAgent sniff - those describe the Chromium build and are
+  // spoofable and deprecated. This is the real process.
+  platform: process.platform,
+
   // ── File operations ──────────────────────────────────
   openFile:      ()                     => ipcRenderer.invoke('dialog:open'),
   readFile:      (filePath)             => ipcRenderer.invoke('file:read', filePath),
