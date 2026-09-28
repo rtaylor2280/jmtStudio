@@ -288,8 +288,17 @@ const FLASH_HINTS_ENABLED = false;
 //      after fixing the card). Cleared either way: a loser left set would surface on some later
 //      unrelated flash attached to nothing the user did, and a stale message is worse than none
 //   3. the platform hint - the default, and the reason this line was reserved
-function _typeFlashHint() {
-  if (_sdFlash === 'flash-anyway') {
+// ⚠️⚠️ `sdFlash` IS A PARAMETER BECAUSE IT WAS NEVER MODULE-LEVEL, AND THAT IS WHAT BROKE IT.
+// [2026-09-28, found the morning after the extraction shipped] The lifted block referenced
+// four identifiers. THREE of them - `_sdFlashLeadMsg`, `_pendingFlashHint`, `FLASH_HINTS_ENABLED`
+// - are module-level and kept working. `_sdFlash` is a `const` local to doFlash() and doFlashDFU(),
+// so the extracted copy resolved three names and threw `ReferenceError` on the fourth.
+// ⚠️ It throws inside an async caller, so the rejection ABORTED THE REST OF THE FLASH: the modal
+// opened, the log box stayed empty, and the status line read "Not flashed". Nothing announced why.
+// ⭐ The partial-survival is the trap worth remembering: an extraction that references mostly
+// module-level state LOOKS correct and runs correct until the one local is reached.
+function _typeFlashHint(sdFlash) {
+  if (sdFlash === 'flash-anyway') {
     typeHintMessage('Flashing without SD card protection. I have a bad feeling about this…');
     return;
   }
@@ -876,7 +885,7 @@ async function doFlash() {
   document.getElementById('bm-status').textContent = '';
   document.getElementById('bm-abort').style.display = 'none';
   document.getElementById('bm-close').style.display = 'none';
-  _typeFlashHint();
+  _typeFlashHint(_sdFlash);
   document.getElementById('bm-retry').style.display = 'none';
   document.getElementById('build-modal').style.display = 'flex';
   startFlashTimer();
@@ -3629,7 +3638,7 @@ async function doFlashDFU() {
   await pauseSerialBeforeFlash();
   setBusy(true);
   setStatus('flash', 'pending', 'Flashing via DFU...');
-  _typeFlashHint();
+  _typeFlashHint(_sdFlash);
 
   await window.electronAPI.flashDFU();
   setBusy(false);
