@@ -88,6 +88,16 @@ const NOT_INWARD = [
   'bulkImport:readCandidateFile', 'bulkImport:matchGuided',
   'dialog:selectBackupImportPath', 'linkImport:browser', 'linkImport:cleanup',
   'favorites:add', 'versions:applyJmtFeatures',
+  // ⚠️ `versions:importProp` is NOT library content either - it copies a chosen .h into an
+  // installed version's props/ folder [B-446]. Listed beside applyJmtFeatures, and flagged in the
+  // register's OPEN block for the same reason: it IS a write inward by the direction rule, just
+  // not into the library this register covers. It is not here because it is safe; its own guards
+  // (checkExecutableFile, .h only, confirm-before-overwrite) are recorded in the register.
+  'versions:importProp',
+  // A pure READ - it returns the list of props this app recorded as user-added, and
+  // writes nothing. Caught by the name heuristic on "added", which is the heuristic
+  // working as designed; naming it here is the answer, not loosening the pattern.
+  'versions:addedProps',
 ];
 
 for (const h of INWARD) {

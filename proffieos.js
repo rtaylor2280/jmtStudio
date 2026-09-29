@@ -540,6 +540,194 @@ function importVersion(sourcePath, versionName, proffieVersion, coreVersion) {
   }
 }
 
+// Copy a single prop header into ONE version's props/ folder. [B-446]
+//
+// Per version by design, settled 2026-09-29: the file lands in the version that was
+// selected and nowhere else. Duplicating a version copies its whole tree, so an
+// imported prop follows a duplicate for free without this having to fan out.
+//
+// ⚠️ THIS IS A DOOR THAT WRITES A CHOSEN FILE INTO THE TREE WE THEN COMPILE, so it
+// refuses two things and neither check is invented here:
+//   · A program. `checkExecutableFile` is the programs-only predicate, by content AND
+//     by name, with the trailing-dot/space strip that stops `evil.exe.` sneaking past.
+//     soundFontAttachments guards with the same one for the same reason.
+//     ⚠️ NOT `checkCarryableFile` - its refusal wording is card-scoped ("no use on a
+//     saber card", "left out") and reads as nonsense in a props folder.
+//   · Anything that is not `.h`. The include the Prop dropdown writes is
+//     `../props/<file>`, so a non-header cannot be compiled by the only path that
+//     would reference it.
+//
+// `overwrite` is opt-in rather than automatic: props/ holds ProffieOS's own shipped
+// props, and writing over saber_fett263_buttons.h is both a real possibility and a
+// legitimate act (re-importing your own prop after editing it is the obvious second
+// use). So the caller confirms; this refuses until it does.
+function importProp(versionName, sourcePath, opts) {
+  const o = opts || {};
+  const name = (versionName || '').trim();
+  if (!name) return { ok: false, error: 'No ProffieOS version selected.' };
+  if (!sourcePath || !fs.existsSync(sourcePath)) {
+    return { ok: false, error: 'That file could not be found.' };
+  }
+
+  const file = path.basename(sourcePath);
+  if (!/\.h$/i.test(file)) {
+    return { ok: false, error: 'A prop must be a .h header file.' };
+  }
+  // Defence in depth against a chosen path carrying separators in its basename.
+  if (file !== path.basename(file) || /[\\/]/.test(file)) {
+    return { ok: false, error: 'That file name cannot be used.' };
+  }
+
+  try {
+    const verdict = require('./sdCardDetect').checkExecutableFile(sourcePath, file);
+    if (verdict && verdict.blocked) {
+      return { ok: false, error: verdict.disguised
+        ? `${file} is a program, despite its name. It was not imported.`
+        : `${file} is a program file, which cannot be a prop. It was not imported.` };
+    }
+  } catch { /* predicate unavailable: fall through to the extension check alone */ }
+
+  const propsDir = path.join(getUserVersionsPath(), name, 'ProffieOS', 'props');
+  if (!fs.existsSync(propsDir)) {
+    return { ok: false, error: `${name} has no props folder — is this a complete ProffieOS tree?` };
+  }
+
+  const dest = path.join(propsDir, file);
+  const existed = fs.existsSync(dest);
+  if (existed && !o.overwrite) {
+    return { ok: false, exists: true, file,
+             error: `${name} already has a prop called ${file}.` };
+  }
+  try {
+    fs.copyFileSync(sourcePath, dest);
+    _recordAddedProp(name, file);
+    // The version's content hash is what decides whether a cached build can be
+    // reused. Adding a file to the tree changes what would compile, so a stale
+    // hash here would hand back a build made without this prop.
+    try { invalidateVersionHash(name); } catch {}
+    return { ok: true, file, versionName: name, replaced: existed };
+  } catch (e) {
+    return { ok: false, error: `Import failed: ${e.message}` };
+  }
+}
+
+// ── Provenance: which props did the USER put here? ─────
+//
+// Import is the only moment this is CERTAIN. Everything after it is inference, so
+// the answer is recorded at the one point we know it rather than reconstructed
+// later from a folder listing that cannot tell a stock prop from a brought one.
+//
+// ⚠️ THE LIMIT IS PART OF THE DESIGN, not a shortfall: versions installed before
+// this existed have no record, so nothing in them is removable until it is
+// imported through the app. That is correct. We genuinely do not know what was in
+// those folders when they arrived, and an app that offers to delete a file it
+// cannot vouch for is the one overstepping. [B-446]
+function _recordAddedProp(versionName, file) {
+  try {
+    const meta  = readVersionMeta(versionName);
+    const added = Array.isArray(meta.addedProps) ? meta.addedProps.slice() : [];
+    if (!added.includes(file)) added.push(file);
+    writeVersionMeta(versionName, { addedProps: added });
+  } catch { /* provenance is a convenience; never fail the import over it */ }
+}
+
+function _forgetAddedProp(versionName, file) {
+  try {
+    const meta = readVersionMeta(versionName);
+    if (!Array.isArray(meta.addedProps)) return;
+    writeVersionMeta(versionName, { addedProps: meta.addedProps.filter(f => f !== file) });
+  } catch { /* as above */ }
+}
+
+// The props in this version that the user added, as a plain array.
+function addedProps(versionName) {
+  const meta = readVersionMeta(versionName);
+  return Array.isArray(meta.addedProps) ? meta.addedProps : [];
+}
+
+// Remove a prop this app put there. [B-446] requirement 3.
+//
+// ⚠️ REFUSES ANYTHING NOT IN addedProps, and that refusal is the feature. A prop
+// that shipped with ProffieOS is not ours to delete, and one we have no record of
+// is one we cannot vouch for - which reads the same way from here.
+function removeProp(versionName, file) {
+  const name = (versionName || '').trim();
+  if (!name) return { ok: false, error: 'No ProffieOS version selected.' };
+  if (!file || file !== path.basename(file) || /[\\/]/.test(file)) {
+    return { ok: false, error: 'That file name cannot be used.' };
+  }
+  if (!addedProps(name).includes(file)) {
+    return { ok: false, error: `${file} was not added through JMT Studio, so it is not ours to delete.` };
+  }
+  const target = path.join(getUserVersionsPath(), name, 'ProffieOS', 'props', file);
+  try {
+    if (fs.existsSync(target)) fs.unlinkSync(target);
+    _forgetAddedProp(name, file);
+    // Removing a file changes what would compile, same as adding one.
+    try { invalidateVersionHash(name); } catch {}
+    return { ok: true, file, versionName: name };
+  } catch (e) {
+    return { ok: false, error: `Could not remove ${file}: ${e.message}` };
+  }
+}
+
+// What would copying this prop into each destination do? [B-446] requirement 4.
+//
+// Answered BEFORE anything is written, because the menu rows carry the consequence
+// and picking a row is the consent - there is no confirm dialog downstream to catch
+// a surprise. `replaces` is why a row reads "(replaces)"; `majorDiffers` is why one
+// reads "(different major)", and that is per DESTINATION rather than per operation:
+// across several destinations a blanket warning either cries wolf over the safe ones
+// or buries the one that matters.
+function planPropCopy(fromVersion, file, toVersions) {
+  const src = path.join(getUserVersionsPath(), fromVersion, 'ProffieOS', 'props', file);
+  const srcMajor = String(getVersionOSVersion(fromVersion) || '').split('.')[0];
+  return (toVersions || []).map(to => {
+    const dest = path.join(getUserVersionsPath(), to, 'ProffieOS', 'props', file);
+    const toMajor = String(getVersionOSVersion(to) || '').split('.')[0];
+    return {
+      version:      to,
+      replaces:     fs.existsSync(dest),
+      majorDiffers: !!(srcMajor && toMajor && srcMajor !== toMajor),
+      ok:           fs.existsSync(src),
+    };
+  });
+}
+
+// Copy one prop into one or more other versions. [B-446] requirement 4.
+function copyPropToVersions(fromVersion, file, toVersions) {
+  const src = path.join(getUserVersionsPath(), fromVersion, 'ProffieOS', 'props', file);
+  if (!fs.existsSync(src)) return { ok: false, error: `${file} is not in ${fromVersion}.` };
+  // ⚠️ SAME RESTRICTION AS removeProp, AND FOR A HARDER REASON THAN SYMMETRY.
+  // A prop that shipped with ProffieOS already exists in every version that ships
+  // it, so copying one across does not ADD anything - it overwrites the
+  // destination's own correct copy with a file written against a different OS
+  // release. That is not a useful operation; it is a way to quietly break a working
+  // tree. Only a prop the user brought here is ours to move. [B-446]
+  if (!addedProps(fromVersion).includes(file)) {
+    return { ok: false, error: `${file} was not added through JMT Studio, so it is not ours to copy.` };
+  }
+
+  const done = [], failed = [];
+  for (const to of (toVersions || [])) {
+    if (to === fromVersion) continue;          // never a destination for itself
+    const propsDir = path.join(getUserVersionsPath(), to, 'ProffieOS', 'props');
+    if (!fs.existsSync(propsDir)) { failed.push({ version: to, error: 'no props folder' }); continue; }
+    try {
+      const replaced = fs.existsSync(path.join(propsDir, file));
+      fs.copyFileSync(src, path.join(propsDir, file));
+      // A copied prop is user-added in its DESTINATION too, or it would land
+      // there unremovable - the exact hole requirement 3 exists to close.
+      _recordAddedProp(to, file);
+      try { invalidateVersionHash(to); } catch {}
+      done.push({ version: to, replaced });
+    } catch (e) {
+      failed.push({ version: to, error: e.message });
+    }
+  }
+  return { ok: failed.length === 0, file, done, failed };
+}
+
 // ── Info ───────────────────────────────────────────────
 
 function getInfo() {
@@ -868,6 +1056,11 @@ module.exports = {
   getUserStylesPath,
   STYLES_FILENAME,
   importVersion,
+  importProp,
+  addedProps,
+  removeProp,
+  planPropCopy,
+  copyPropToVersions,
   getInfo,
   CONFIG_FILENAME,
   listVersionsDetails,

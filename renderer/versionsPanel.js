@@ -268,6 +268,22 @@ function _vpRenderDetail(v) {
       <button class="vp-action-btn" id="vp-btn-export" title="Copy version folder to a location you choose">↗ Export</button>
       <button class="vp-action-btn" id="vp-btn-rename" title="Rename this version">✎ Rename</button>
       <button class="vp-action-btn danger" id="vp-btn-delete" title="Permanently delete this version">✕ Delete</button>
+      <!-- Duplicate / Export / Rename / Delete all act on the version AS A RECORD:
+           copy it, move it, name it, remove it. Import Prop reaches INSIDE it and
+           adds a file, which is a different kind of act, and mid-row it read as a
+           peer of Rename. The divider is the same toolbar-divider element the Config
+           Manager toolbar uses between its own groups. [B-446]
+           It does NOT belong in the right-hand cluster despite being the other
+           handler that writes into a version tree: that group is scoped to JMT
+           add-ons, with its own version label and Learn more, and Import Prop is not
+           a JMT feature. Same category by mechanism, different thing to a reader.
+           NOTE: no backticks in this comment, on purpose. It lives inside a template
+           literal, so a backtick here CLOSES the string and the text after it parses
+           as code. An earlier version wrote a class name in backticks and shipped
+           ".toolbar - divider" as a subtraction, which is valid syntax, passes
+           node --check, and throws ReferenceError at render. -->
+      <div class="ui-divider"></div>
+      <button class="vp-action-btn" id="vp-btn-import-prop" title="Add your own prop .h file to this version's props folder">＋ Import Prop</button>
       <div style="margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
         <div style="display:flex;align-items:center;gap:10px;">
           ${v.jmtVersion ? `<span id="vp-jmt-version-label" style="font-size:0.75rem;color:var(--c-text-dim);">Includes JMT Add-ons v${_vpEsc(v.jmtVersion)}</span>` : '<span id="vp-jmt-version-label" style="display:none;font-size:0.75rem;color:var(--c-text-dim);"></span>'}
@@ -359,6 +375,7 @@ function _vpRenderDetail(v) {
   document.getElementById('vp-btn-duplicate')?.addEventListener('click', () => _vpDuplicate(v));
   document.getElementById('vp-btn-open-folder')?.addEventListener('click', () => window.electronAPI.openVersionFolder(v.name));
   document.getElementById('vp-btn-export')?.addEventListener('click', () => _vpExport(v));
+  document.getElementById('vp-btn-import-prop')?.addEventListener('click', () => _vpImportProp(v));
   document.getElementById('vp-btn-rename')?.addEventListener('click', () => _vpRename(v));
   document.getElementById('vp-btn-delete')?.addEventListener('click', () => _vpDelete(v));
   document.getElementById('vp-btn-jmt')?.addEventListener('click', () => _vpJmtFlow(v));
@@ -403,8 +420,12 @@ function _vpRenderDetail(v) {
   });
 
   // File tree — start inside ProffieOS/
+  // ⚠️ Provenance is warmed BEFORE the tree is built, not alongside it. The rows read
+  // it synchronously, so a fetch racing the render paints every prop in the default
+  // colour and only corrects on the next repaint - which looks like the feature not
+  // working rather than like a race.
   const treeEl = document.getElementById('vp-tree');
-  _vpInitVersionTree(v.name, treeEl);
+  _vpWarmAddedProps(v.name).then(() => _vpInitVersionTree(v.name, treeEl));
 
   // Search
   let _searchTimer = null;
@@ -881,6 +902,36 @@ async function _vpRenderCoreSection(v, opts = {}) {
   });
 }
 
+// Which props the user added, per version, cached so a TREE ROW can ask the question
+// synchronously while it renders. [B-446]
+//
+// ⚠️ The context menu deliberately does NOT read this cache - it re-fetches. A menu
+// opens on demand and must answer for the state right now; a row is painted in bulk
+// and cannot await. Two readers, two correct answers, and the difference is the cost
+// of being wrong: a stale ROW is the wrong colour until the next render, a stale MENU
+// offers to delete something that is not there.
+let _vpAddedPropsCache = Object.create(null);
+
+function _vpAddedPropsFor(versionName) {
+  return _vpAddedPropsCache[versionName] || [];
+}
+
+async function _vpWarmAddedProps(versionName) {
+  try {
+    _vpAddedPropsCache[versionName] = await window.electronAPI.addedProps(versionName) || [];
+  } catch {
+    _vpAddedPropsCache[versionName] = [];
+  }
+}
+
+// Anything that changes what is in a props folder invalidates this. Called from the
+// import, copy and remove paths rather than left to the next full render, because
+// the row colour is the only thing on screen that reports provenance.
+function _vpForgetAddedProps(versionName) {
+  if (versionName) delete _vpAddedPropsCache[versionName];
+  else _vpAddedPropsCache = Object.create(null);
+}
+
 function _vpInitVersionTree(versionName, container) {
   container.innerHTML = '';
   // Static ProffieOS root row — no toggle, always expanded
@@ -1030,6 +1081,18 @@ async function _vpLoadTree(versionName, subPath, container, depth) {
       `;
       const filePath = subPath ? `${subPath}/${entry.name}` : entry.name;
       row.title = `Click to view ${entry.name}`;
+      // A prop the user brought here reads in JMT blue, the marker colour this app
+      // already uses everywhere for a file the user touched rather than one that
+      // shipped (ui-conventions: the Customized badge, "the marker's colour
+      // everywhere else"). [B-446]
+      // ⭐ The knowledge was already there - addedProps decides whether Remove and
+      // Copy are even offered - so this exposes a fact the menu was already acting
+      // on rather than computing a second one.
+      if (_vpAddedPropsFor(versionName).includes(entry.name)
+          && window._isLinkablePropPath?.(filePath)) {
+        row.querySelector('.vp-tree-name').style.color = 'var(--jmt-blue)';
+        row.title = `${entry.name} — added by you. Click to view.`;
+      }
       row.addEventListener('click', () => _vpOpenFile(versionName, filePath, entry.name));
       _vpAttachPropCtxMenu(row, filePath, entry.name, versionName);
       container.appendChild(row);
@@ -1131,28 +1194,237 @@ function _vpCloseFileModal() {
 // Right-click a prop header in the tree to link it without opening it first.
 // Reuses the shared preset-ctx-menu DOM every other browser in the app uses,
 // including its mousedown-to-activate convention.
+// Shared submenu DOM, a SIBLING of preset-ctx-menu rather than a child, so the
+// document-level dismissal listener does not fight it. Same construction as the
+// Sound Fonts card menu's own submenu, deliberately - a second implementation would
+// need its own positioning and its own teardown, and teardown is where that one has
+// already had to be fixed.
+const _vpCtxSubmenu = (() => {
+  let el = null;
+  return () => {
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'preset-ctx-menu';
+      el.style.display = 'none';
+      document.body.appendChild(el);
+    }
+    return el;
+  };
+})();
+
+function _vpCloseCtxMenus() {
+  const main = document.getElementById('preset-ctx-menu');
+  if (main) { main.style.display = 'none'; main.style.minWidth = ''; }
+  const sub = _vpCtxSubmenu();
+  if (sub) { sub.style.display = 'none'; sub.innerHTML = ''; }
+}
+
+// Right-click a prop in the tree. [B-446]
+//
+// Four items, each conditional on something real:
+//   🔗 Link as this config's prop   only with a config open
+//   Copy to <version>               only with exactly ONE other version
+//   Copy to… ▸                      only with TWO OR MORE
+//   Copy to All OS Versions         only with TWO OR MORE
+//   ✕ Remove                        only for props THIS APP added
+//
+// ⚠️ THE CONFIG-OPEN GUARD USED TO GATE THE WHOLE MENU, because Link was the only
+// item. Copy and Remove need no config, so the guard moved onto the Link item; left
+// where it was, the two new actions would have been unreachable on the one screen
+// that is most natural for them.
+//
+// ⚠️ NO CONFIRM DIALOGS ANYWHERE IN HERE, by design. The destination ROW says what
+// it will do - "(replaces)", "(different major)" - so picking it IS the consent. A
+// confirm interrupts after the decision and asks you to make it twice; a labelled
+// row tells you while you are still choosing. Nothing may be replaced by a row that
+// did not say it replaces.
 function _vpAttachPropCtxMenu(row, filePath, fileName, versionName) {
   if (!window._isLinkablePropPath || !window._isLinkablePropPath(filePath)) return;
-  row.addEventListener('contextmenu', e => {
-    // Nothing to link it into, so offer nothing rather than a dead item.
-    if (!(window.isConfigOpen && window.isConfigOpen())) return;
+  row.addEventListener('contextmenu', async e => {
     e.preventDefault();
     const menu = document.getElementById('preset-ctx-menu');
     if (!menu) return;
     menu.innerHTML = '';
-    const item = document.createElement('div');
-    item.className   = 'preset-ctx-item';
-    item.textContent = `\u{1F517} Link ${fileName} as this config's prop`;
-    item.addEventListener('mousedown', ev => {
-      ev.stopPropagation();
-      menu.style.display = 'none';
-      if (window._linkPropFromVersion) window._linkPropFromVersion(filePath, versionName);
-    });
-    menu.appendChild(item);
-    menu.style.left = Math.min(e.clientX, window.innerWidth - 320) + 'px';
+    _vpCtxSubmenu().style.display = 'none';
+
+    const mkItem = (label, opts, onPick) => {
+      const it = document.createElement('div');
+      it.className = 'preset-ctx-item' + (opts && opts.cls ? ` ${opts.cls}` : '');
+      it.textContent = label;
+      if (onPick) {
+        it.addEventListener('mousedown', ev => {
+          ev.stopPropagation();
+          ev.preventDefault();
+          _vpCloseCtxMenus();
+          onPick();
+        });
+      }
+      menu.appendChild(it);
+      return it;
+    };
+
+    const configOpen = !!(window.isConfigOpen && window.isConfigOpen());
+    if (configOpen) {
+      // Same rule as Delete below: the menu is on this file, so it does not name it.
+      // This item predates [B-446] and read "Link scorpio.h as this config's prop".
+      mkItem(`\u{1F517} Link as this config's prop`, null, () => {
+        if (window._linkPropFromVersion) window._linkPropFromVersion(filePath, versionName);
+      });
+    }
+
+    // Provenance decides what is on offer, and it gates COPY as well as REMOVE.
+    // A stock prop already exists in every version that ships it, so copying one
+    // across overwrites the destination's own correct copy with a file from a
+    // different OS release. Only a prop the user brought is ours to move.
+    let added = [];
+    try { added = await window.electronAPI.addedProps(versionName) || []; } catch {}
+    const userAdded = added.includes(fileName);
+
+    // Destinations are every OTHER installed version. The one you are in is not one.
+    const others = !userAdded ? []
+      : (_vpVersions || []).map(v => v.name).filter(n => n !== versionName);
+
+    // One rule about the COUNT, not a pile of conditions. With one destination
+    // "Copy to…" and "Copy to All" are synonyms AND the submenu would be a flyout
+    // wrapping a single row, so a flat item naming the version answers both.
+    if (others.length === 1) {
+      const [only] = others;
+      const [plan] = await window.electronAPI.planPropCopy(versionName, fileName, [only]) || [];
+      mkItem(`Copy to ${only}${_vpCopyRowSuffix(plan)}`, null,
+             () => _vpDoPropCopy(versionName, fileName, [only]));
+    } else if (others.length > 1) {
+      const copyTo = mkItem('Copy to…', { cls: 'has-submenu' }, null);
+      _vpWirePropCopySubmenu(copyTo, versionName, fileName, others);
+      // ⚠️ The only item that cannot name its destinations inline, so it is the one
+      // that still has to speak: the toast afterwards says what it replaced, where.
+      mkItem(`Copy to All OS Versions (${others.length})`, null,
+             () => _vpDoPropCopy(versionName, fileName, others));
+    }
+
+    // Remove is offered ONLY for a prop this app put here. Absence says "we do not
+    // know", which is true; a disabled row claiming the file is protected would be
+    // asserting a permission we do not hold.
+    if (userAdded) {
+      // ⚠️ The menu is already ON this file, so naming it again is telling the reader
+      // something their cursor is pointing at. The DESTINATION earns its place - there
+      // are seven versions and the row must say which one it acts on - the subject does
+      // not. "Delete" rather than "Remove" because Delete is this app's word for it
+      // already, on the version card and in the Sound Fonts card menu.
+      mkItem(`✕ Delete from ${versionName}`, null,
+             () => _vpDoPropRemove(versionName, fileName));
+    }
+
+    if (!menu.children.length) return;   // nothing to offer, so offer nothing
+    menu.style.left = Math.min(e.clientX, window.innerWidth - 340) + 'px';
     menu.style.top  = Math.min(e.clientY, window.innerHeight - 60) + 'px';
     menu.style.display = 'block';
   });
+}
+
+// What a destination row admits to, before anything is written. This IS the consent
+// mechanism, so it must never be silently empty when something would be replaced.
+function _vpCopyRowSuffix(plan) {
+  if (!plan) return '';
+  const notes = [];
+  if (plan.replaces)     notes.push('replaces');
+  if (plan.majorDiffers) notes.push('different major');
+  return notes.length ? `  (${notes.join(', ')})` : '';
+}
+
+function _vpWirePropCopySubmenu(parentItem, fromVersion, fileName, others) {
+  const build = async () => {
+    const sub = _vpCtxSubmenu();
+    sub.innerHTML = '';
+    sub.style.minWidth = '260px';
+    // Seven versions is already normal for him, so the list gets the sized variant
+    // with its own scroll rather than running off the bottom of the screen.
+    sub.classList.add('preset-ctx-submenu-sized');
+
+    const head = document.createElement('div');
+    head.className = 'preset-ctx-submenu-section';
+    head.textContent = 'OS VERSIONS';
+    sub.appendChild(head);
+
+    let plans = [];
+    try { plans = await window.electronAPI.planPropCopy(fromVersion, fileName, others) || []; } catch {}
+    others.forEach((name, i) => {
+      const it = document.createElement('div');
+      it.className = 'preset-ctx-item';
+      it.textContent = `${name}${_vpCopyRowSuffix(plans[i])}`;
+      it.addEventListener('mousedown', ev => {
+        ev.stopPropagation();
+        ev.preventDefault();
+        _vpCloseCtxMenus();
+        _vpDoPropCopy(fromVersion, fileName, [name]);
+      });
+      sub.appendChild(it);
+    });
+
+    const rect = parentItem.getBoundingClientRect();
+    sub.style.display = 'block';
+    sub.style.left = `${rect.right - 2}px`;
+    sub.style.top  = `${rect.top - 4}px`;
+    requestAnimationFrame(() => {
+      const r = sub.getBoundingClientRect();
+      if (r.right  > window.innerWidth  - 8) sub.style.left = `${Math.max(8, rect.left - r.width + 2)}px`;
+      if (r.bottom > window.innerHeight - 8) sub.style.top  = `${Math.max(8, window.innerHeight - r.height - 8)}px`;
+    });
+  };
+  parentItem.addEventListener('mouseenter', build);
+  parentItem.addEventListener('mousedown', ev => { ev.stopPropagation(); ev.preventDefault(); build(); });
+}
+
+async function _vpDoPropCopy(fromVersion, fileName, toVersions) {
+  const res = await window.electronAPI.copyProp(fromVersion, fileName, toVersions);
+  if (!res) return;
+  // Partial success is reported as partial. A blanket "copied" over a run where one
+  // destination failed is the report reading better than the result.
+  if (res.failed && res.failed.length) {
+    window.promptError('Copy prop',
+      `${fileName} could not be copied to: ${res.failed.map(f => `${f.version} (${f.error})`).join(', ')}` +
+      (res.done.length ? `\n\nCopied to ${res.done.length} other version(s).` : ''));
+  } else {
+    const replaced = res.done.filter(d => d.replaced).length;
+    const where = res.done.length === 1 ? res.done[0].version : `${res.done.length} versions`;
+    window.showToast?.(replaced
+      ? `${fileName} copied to ${where}, replacing ${replaced}.`
+      : `${fileName} copied to ${where}.`);
+  }
+  // Provenance just changed for this version, so the cached answer the tree rows
+  // paint from is now wrong. Cleared here, beside the change, rather than trusted
+  // to the next full render. [B-446]
+  _vpForgetAddedProps();
+  window._populatePropSelect?.();
+}
+
+async function _vpDoPropRemove(versionName, fileName) {
+  // ⚠️ Warn when the OPEN config names this prop: removing it turns a working build
+  // into "No such file or directory" at compile. Not a refusal - the Prop field
+  // already goes red and the preflight already blocks, so the honest move is to say
+  // so and let them decide.
+  if (window._propFileFromConfig && window.isConfigOpen && window.isConfigOpen()) {
+    const inUse = window._propFileFromConfig(window._getEditorContent?.() || '');
+    if (inUse === fileName) {
+      const ok = await window.promptConfirm({
+        title:       'This config uses that prop',
+        message:     `The open config names ${fileName}. Deleting it from ${versionName} means this config will not compile until you pick another prop.\n\nDelete it anyway?`,
+        confirmText: 'Delete',
+        confirmKind: 'danger',
+      });
+      if (!ok) return;
+    }
+  }
+  const res = await window.electronAPI.removeProp(versionName, fileName);
+  if (!res?.ok) {
+    if (res?.error) window.promptError('Delete prop', res.error);
+    return;
+  }
+  // Before the render, for the reason spelled out in _vpImportProp: a clear that
+  // lands after _vpRenderDetail wipes the cache between its fetch and its .then().
+  _vpForgetAddedProps();
+  window.showToast?.(`${fileName} deleted from ${versionName}.`);
+  if (_vpSelected) _vpRenderDetail(_vpSelected);
+  window._populatePropSelect?.();
 }
 
 // ── Version actions ────────────────────────────────────
@@ -1173,6 +1445,62 @@ async function _vpExport(v) {
   }
   // On success, shell.showItemInFolder is called from main process
 }
+
+// Add someone's own prop to THIS version's props/ folder. [B-446]
+//
+// The alternative it replaces is the 📂 button, which opens the app's userData
+// folder in a file manager - teaching the exact habit the app exists to remove.
+//
+// ⚠️ Shared with the Prop dropdown's ＋ Import prop… row (index.html), which is why
+// the whole flow lives in one exported function rather than twice. The two entry
+// points differ only in what happens afterwards: the dropdown selects what it just
+// imported, the version card refreshes its file tree.
+async function _vpImportProp(v, opts) {
+  const o = opts || {};
+  let res = await window.electronAPI.importProp(v.name);
+  if (res?.canceled) return null;
+
+  // A collision is a QUESTION, not a failure: re-importing your own prop after
+  // editing it is the obvious second use of this button. The confirm names the file
+  // and the version, and the second call reuses the SAME path main handed back, so
+  // the file cannot change between the question and the answer.
+  if (res && res.exists) {
+    const ok = await window.promptConfirm({
+      title:       'Replace this prop?',
+      message:     `${v.name} already has a prop called ${res.file}.\n\nReplace it with the file you chose?`,
+      confirmText: 'Replace',
+      confirmKind: 'danger',
+    });
+    if (!ok) return null;
+    res = await window.electronAPI.importProp(v.name, res.sourcePath, true);
+  }
+
+  if (!res?.ok) {
+    if (res?.error) window.promptError('Import Prop failed', res.error);
+    return null;
+  }
+  // ⚠️⚠️ INVALIDATE BEFORE RENDERING, NEVER AFTER, AND THIS ORDER IS THE WHOLE BUG.
+  // _vpRenderDetail starts `_vpWarmAddedProps(...).then(buildTree)`. Clearing the
+  // cache on the line AFTER that call runs synchronously, lands between the fetch and
+  // its .then(), and the tree then paints from an empty cache - every prop in the
+  // default colour, with the context menu correctly offering Delete on a row that
+  // does not look added. The guard defeated the thing it was guarding. [B-446]
+  _vpForgetAddedProps();
+  if (!o.quiet) {
+    window.showToast?.(res.replaced
+      ? `${res.file} replaced in ${v.name}.`
+      : `${res.file} added to ${v.name}.`);
+    // The file browser below is now stale by exactly the file just added, and it is
+    // the surface the person is looking at when they press this button.
+    _vpRenderDetail(v);
+  }
+  // The Prop dropdown lists this folder too - whichever door was used. Fired here
+  // rather than at each call site, because a refresh written beside one caller is
+  // exactly the kind that never reaches the other.
+  window._populatePropSelect?.();
+  return res;
+}
+window._vpImportProp = _vpImportProp;
 
 function _vpRename(v) {
   const nameEl = document.querySelector('.vp-detail-name');

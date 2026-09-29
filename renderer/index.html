@@ -417,6 +417,19 @@
   .diff-toggle:hover { background: #252535; opacity: 1; }
   .diff-toggle.active { background: #1a2040; color: #88f; border-color: #4a4a8a; }
   .diff-toggle:disabled { opacity: 0.35; cursor: not-allowed; pointer-events: none; }
+  /* ── Group divider, THE convention for separating button groups (2026-09-29) ──
+     Fixed height, deliberately. `align-self: stretch` grows to the TALLEST ITEM ON
+     THE FLEX LINE, so the same class renders a different height in every row - and
+     in a wrapping row it stretches to whatever else wrapped onto that line. That is
+     not a nicety: the version card's action row carries a two-line JMT cluster at
+     its right end, and a stretched divider there rendered against THAT height rather
+     than the buttons', reading as a heavy full-height rule.
+     ⚠️ Use `.ui-divider` for anything new. `.toolbar-divider` below is the older
+     stretch form, kept because its row is a single line of uniform-height buttons
+     where stretch and fixed look identical; it has 8 live call sites and changing
+     them all during unrelated work would be gratuitous. It becomes a latent defect
+     the day that row can contain something taller. */
+  .ui-divider { width: 1px; height: 18px; background: var(--c-border-strong); margin: 0 4px; flex: 0 0 auto; align-self: center; }
   .toolbar-divider { width: 1px; background: var(--c-border-strong); align-self: stretch; margin: 2px 2px; flex-shrink: 0; }
   #btn-compare:disabled { opacity: 0.35; cursor: not-allowed; pointer-events: none; }
   #btn-compare.active { background: #1a3030; color: #4cf; border-color: #2a6060; }
@@ -17502,6 +17515,11 @@ const _propFileFromPath   = p => p.split('/').pop();
 const _PROP_FALLBACK_SENTENCE =
   'A config that names no prop builds with props/saber.h.';
 
+// The Prop dropdown's non-value row. [B-446] Deliberately not a filename shape, so
+// that if it ever escaped the change handler it could not be mistaken for a prop by
+// _isLinkablePropPath or written into an include.
+const _PROP_IMPORT_SENTINEL = '__import_prop__';
+
 // ⚠️ WHICH INCLUDE IS "THE PROP" IS NOT A QUESTION THIS FILE GETS TO ANSWER.
 // preflight-checks.js already owns it: `vpkPropIncludes` strips comments and reads
 // ONLY inside `#ifdef CONFIG_PROP ... #endif` - what ProffieOS itself compiles - and
@@ -17545,6 +17563,11 @@ const _propFileFromConfig = text => {
   const inc = _propIncludeFromConfig(text);
   return inc ? _propFileFromPath(inc) : null;
 };
+// ⚠️ Exposed because versionsPanel.js needs it to warn before removing the prop the
+// OPEN config names [B-446]. Without this the check would read `undefined` and
+// silently answer "not in use" every time - a guard that cannot fire, which is worse
+// than no guard, because the absence of a warning would read as "this is safe".
+window._propFileFromConfig = _propFileFromConfig;
 
 
 async function _refreshSelectedVersionJmtState() {
@@ -18082,6 +18105,22 @@ async function _populatePropSelect() {
     o.value = o.textContent = f;
     sel.appendChild(o);
   }
+
+  // ＋ Import prop… [B-446] — the second door on _vpImportProp, mirroring the OS
+  // Version field's own ＋ Import version… row. Offered only when the list is real:
+  // with no version selected there is nowhere for the file to go, and an action that
+  // cannot work should not be on screen.
+  // ⚠️ SENTINEL, NOT A VALUE. `_PROP_IMPORT_SENTINEL` must never reach the config or
+  // be matched against it, which is why the change handler intercepts it first and
+  // restores the previous selection before doing anything else. Same shape as
+  // isVersionSentinel, and the reason that function exists.
+  if (files) {
+    const imp = document.createElement('option');
+    imp.value = _PROP_IMPORT_SENTINEL;
+    imp.textContent = '＋ Import prop…';
+    imp.style.color = 'var(--jmt-blue)';
+    sel.appendChild(imp);
+  }
   // No version selected yet, or its tree could not be read: the list is unknown
   // rather than empty, so nothing is claimed about a prop the config may name.
   sel.disabled = !files;
@@ -18141,16 +18180,61 @@ function _scheduleSyncPropFromConfig() {
 }
 window._scheduleSyncPropFromConfig = _scheduleSyncPropFromConfig;
 
-document.getElementById('input-prop').addEventListener('change', (e) => {
-  // Programmatic assignment never reaches here (no event is dispatched), but the
-  // guard matches Board's and costs nothing if that ever changes.
-  if (!e.isTrusted) return;
+// ＋ Import prop… picked from the dropdown. [B-446]
+//
+// Restores the field BEFORE the picker opens, so a cancel is a no-op rather than
+// leaving the sentinel sitting in a field that is supposed to name a prop.
+// ⭐ On success it SELECTS what was just imported: choosing Import from a list of
+// props means you want that prop, and making someone re-open the list to pick the
+// file they just chose is asking the same question twice.
+async function _handlePropImportPick() {
+  const sel = document.getElementById('input-prop');
+  // Put the field back before anything else. The config is the source of truth for
+  // what this field should say, so re-syncing from it is both the restore and the
+  // correct value - no dataset.lastValue to keep in step, unlike the OS Version
+  // field, whose sentinels can be picked with no config open at all.
+  _syncPropFromConfig();
+
+  const versionName = document.getElementById('input-version')?.value;
+  if (!versionName || (window.isVersionSentinel && isVersionSentinel(versionName))) {
+    showToast('Set a ProffieOS version for this config first.');
+    return;
+  }
+  if (!window._vpImportProp) {
+    showToast('Open the OS Versions tab once, then try again.');
+    return;
+  }
+  // quiet: the toast below says what happened AND that it was selected, which the
+  // generic one cannot; two toasts for one action is the thing to avoid.
+  const res = await window._vpImportProp({ name: versionName }, { quiet: true });
+  if (!res?.ok) return;
+
+  await _populatePropSelect();
+  if (!fileIsOpen) {
+    showToast(`${res.file} added to ${versionName}.`);
+    return;
+  }
+  sel.value = res.file;
+  _applyPropChoice(res.file);
+  showToast(res.replaced
+    ? `${res.file} replaced in ${versionName}, and this config now uses it.`
+    : `${res.file} added to ${versionName}, and this config now uses it.`);
+}
+
+// Write a chosen prop into the config. [B-444]
+//
+// ⚠️ SPLIT OUT OF THE CHANGE HANDLER ON PURPOSE, and the reason is a bug this had:
+// the import flow wanted to select what it had just imported and did it by
+// dispatching a synthetic `change`. A synthetic event has `isTrusted === false`, so
+// it hit the handler's own guard and silently did nothing - the field would have
+// shown the new prop while the config still named the old one. A caller that means
+// to apply a choice calls THIS; the event handler exists only to catch a human.
+function _applyPropChoice(choice) {
   if (!fileIsOpen) return;
   const ed = window._monacoEditor || (typeof editor !== 'undefined' ? editor : null);
   if (!ed) return;
 
   const sel    = document.getElementById('input-prop');
-  const choice = sel.value;
   const model  = ed.getModel();
   const text   = ed.getValue();
   const match  = _propIncludeLineInfo(text);
@@ -18190,6 +18274,23 @@ document.getElementById('input-prop').addEventListener('change', (e) => {
   // ProffieOS's conventional ordering - so this reuses it rather than repeating it.
   _doInsertJmtPropInclude(text.split('\n'), -1, null, _propIncludePathFor(choice));
   showToast(`Prop set to ${choice}.`);
+}
+
+document.getElementById('input-prop').addEventListener('change', (e) => {
+  // Programmatic assignment never dispatches an event, so this only ever catches a
+  // human. Kept because Board carries the same guard.
+  if (!e.isTrusted) return;
+
+  const sel = document.getElementById('input-prop');
+
+  // ＋ Import prop… is an ACTION wearing a row. [B-446] Intercepted before anything
+  // reads the value as a prop name.
+  if (sel.value === _PROP_IMPORT_SENTINEL) {
+    _handlePropImportPick();
+    return;
+  }
+
+  _applyPropChoice(sel.value);
 });
 
 // A prop this app can link: a .h sitting DIRECTLY in the tree's props/ folder.

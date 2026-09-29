@@ -136,6 +136,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openVersionFolder:   (name)                  => ipcRenderer.invoke('versions:openFolder', name),
   exportVersion:       (name)                  => ipcRenderer.invoke('versions:export', name),
   listVersionDir:      (name, subPath)         => ipcRenderer.invoke('versions:listDir', { name, subPath }),
+  importProp:          (name, sourcePath, overwrite) => ipcRenderer.invoke('versions:importProp', { name, sourcePath, overwrite }),
+  addedProps:          (name)                  => ipcRenderer.invoke('versions:addedProps', { name }),
+  removeProp:          (name, file)            => ipcRenderer.invoke('versions:removeProp', { name, file }),
+  planPropCopy:        (from, file, to)        => ipcRenderer.invoke('versions:planPropCopy', { from, file, to }),
+  copyProp:            (from, file, to)        => ipcRenderer.invoke('versions:copyProp', { from, file, to }),
   readVersionFile:     (name, subPath)         => ipcRenderer.invoke('versions:readFile', { name, subPath }),
   searchVersionFiles:  (name, query)           => ipcRenderer.invoke('versions:search', { name, query }),
 

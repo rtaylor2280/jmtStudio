@@ -6385,6 +6385,39 @@ ipcMain.handle('versions:openFolder',  (_, name) => {
 ipcMain.handle('versions:listDir',    (_, { name, subPath }) => proffie.listVersionDir(name, subPath || ''));
 ipcMain.handle('versions:readFile',   (_, { name, subPath }) => proffie.readVersionFile(name, subPath));
 ipcMain.handle('versions:search',     (_, { name, query })   => proffie.searchVersionFiles(name, query));
+// Import a prop header into ONE version's props/ folder. [B-446]
+//
+// Two calls, on purpose. The first has no sourcePath, opens the picker and reports
+// back; a collision returns `{ ok:false, exists:true, file }` WITHOUT writing. The
+// renderer confirms, then calls again with that same path and `overwrite:true`.
+// ⚠️ The picker is not re-opened for the confirm - re-picking would let the file
+// change between the question and the answer, so the second call writes exactly the
+// file the confirm named.
+ipcMain.handle('versions:importProp', async (_, { name, sourcePath, overwrite }) => {
+  let src = sourcePath;
+  if (!src) {
+    const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+      title: `Import a prop into "${name}"`,
+      filters: [{ name: 'Prop Header', extensions: ['h'] }],
+      properties: ['openFile'],
+      buttonLabel: 'Import Prop',
+    });
+    if (canceled || !filePaths.length) return { ok: false, canceled: true };
+    src = filePaths[0];
+  }
+  const res = proffie.importProp(name, src, { overwrite: !!overwrite });
+  // Hand the path back so the renderer can re-offer the SAME file on confirm.
+  if (res && res.exists) res.sourcePath = src;
+  return res;
+});
+// Requirement 3 and 4 of the same entry. [B-446]
+// `addedProps` is what decides whether Remove is even offered; `planPropCopy` is
+// what lets each submenu ROW say what it will do, which is what replaces the
+// confirm dialog the menu-only design rules out.
+ipcMain.handle('versions:addedProps',   (_, { name })                  => proffie.addedProps(name));
+ipcMain.handle('versions:removeProp',   (_, { name, file })            => proffie.removeProp(name, file));
+ipcMain.handle('versions:planPropCopy', (_, { from, file, to })        => proffie.planPropCopy(from, file, to));
+ipcMain.handle('versions:copyProp',     (_, { from, file, to })        => proffie.copyPropToVersions(from, file, to));
 ipcMain.handle('versions:export', async (_, name) => {
   const { canceled, filePaths } = await dialog.showOpenDialog(win, {
     title: `Export "${name}" to folder`,
