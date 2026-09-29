@@ -203,7 +203,7 @@ function _vpRenderCards() {
         return;
       }
       if (_vpNotesDirty) {
-        const choice = await (window.promptUnsaved?.('Unsaved notes — save before switching versions?') ?? Promise.resolve('discard'));
+        const choice = await (window.promptUnsaved?.('Unsaved notes. Save before switching versions?') ?? Promise.resolve('discard'));
         if (choice === 'cancel') return;
         if (choice === 'save') await _vpDoSaveNotes();
       }
@@ -660,7 +660,7 @@ async function _vpRenderCoreSection(v, opts = {}) {
         try {
           const back = await window.electronAPI.setCoreForVersion(v.name, revertTo);
           if (back && back.ok && back.appliedToActive) {
-            window.onCoreVersionChanged?.(`Proffieboard Plugin changed to ${back.pinned} — recompile needed`);
+            window.onCoreVersionChanged?.(`Proffieboard Plugin changed to ${back.pinned}, recompile needed`);
           }
         } catch { /* the re-render below still shows the truth */ }
       }
@@ -876,7 +876,7 @@ async function _vpRenderCoreSection(v, opts = {}) {
     // Drop it the same way a board or USB change does, or Flash stays armed
     // over a binary made by the previous tools.
     if (res.appliedToActive && window.onCoreVersionChanged) {
-      window.onCoreVersionChanged(`Proffieboard Plugin changed to ${res.pinned} — recompile needed`);
+      window.onCoreVersionChanged(`Proffieboard Plugin changed to ${res.pinned}, recompile needed`);
     }
   });
 }
@@ -1457,7 +1457,7 @@ async function _vpJmtFlow(v) {
   // Compatibility
   let compatHtml = '';
   if (!proffieVer) {
-    compatHtml = `<div style="color:var(--c-text-dim);margin-bottom:8px;">⚠ ProffieOS version unknown — cannot verify compatibility.</div>`;
+    compatHtml = `<div style="color:var(--c-text-dim);margin-bottom:8px;">⚠ ProffieOS version unknown, so compatibility cannot be verified.</div>`;
   } else if (_semverCompare(proffieVer, manifest.minProffieVersion) < 0) {
     panel.innerHTML = `<span style="color:#e44;">⛔ Requires ProffieOS ${_vpEsc(manifest.minProffieVersion)} or higher. This version is ${_vpEsc(proffieVer)}.</span>`;
     btn.disabled = false;
@@ -1512,7 +1512,7 @@ async function _vpJmtFlow(v) {
   const isMajorUpdate  = !isFirstTime && installedMajor !== null && manifestMajor > installedMajor;
 
   const majorWarnHtml = isMajorUpdate
-    ? `<div style="color:#c90;margin-bottom:8px;font-size:0.8rem;">⚠ This is a major version update. Your existing configs may reference features that have changed — review them after updating.</div>`
+    ? `<div style="color:#c90;margin-bottom:8px;font-size:0.8rem;">⚠ This is a major version update. Your existing configs may reference features that have changed. Review them after updating.</div>`
     : '';
 
   const overwriteNote = !isFirstTime

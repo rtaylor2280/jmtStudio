@@ -472,6 +472,10 @@
   #input-desc     { width: 380px; }
   #input-board    { width: 160px; }
   #input-version  { width: 160px; max-width: 160px; background:var(--c-bg-raised); border:1px solid var(--c-border-input); border-radius:3px; color:var(--c-text); font-size:0.78rem; padding:4px 6px; outline:none; cursor:pointer; overflow:hidden; text-overflow:ellipsis; }
+  /* Wider than Board and OS Version because prop filenames are longer than either
+     ("saber_sabersense_buttons.h" is 26 characters) and this field shows a real
+     filename rather than a curated label. */
+  #input-prop     { width: 210px; max-width: 210px; background:var(--c-bg-raised); border:1px solid var(--c-border-input); border-radius:3px; color:var(--c-text); font-size:0.78rem; padding:4px 6px; outline:none; cursor:pointer; overflow:hidden; text-overflow:ellipsis; }
 
   /* .version-missing rides on the SAME treatment: no version is selected because
      the config asked for one that is not installed, and that is an error state by
@@ -479,13 +483,20 @@
      reusing .field-error because applyOSVersionSignal owns that one and toggles it
      on every repaint; a second writer is how the two would drift. Sharing the
      declarations means they can never LOOK different. (2026-08-19) */
+  /* .prop-missing joins them for the same reason and on the same terms: the config
+     names a prop that is not in the selected version's props/ folder, so the build
+     cannot find it. ⚠️ It is NOT set merely because no prop is chosen - that is a
+     valid config and ProffieOS supplies props/saber.h itself. Its own class, beside
+     its own setter/clearer, so it cannot drift from the other two. (2026-09-29) */
   .field-error,
-  .version-missing {
+  .version-missing,
+  .prop-missing {
     border-color: var(--c-danger-text) !important;
     background: var(--c-danger-bg) !important;
   }
   .field-error:focus,
-  .version-missing:focus { border-color: var(--c-danger-text) !important; }
+  .version-missing:focus,
+  .prop-missing:focus { border-color: var(--c-danger-text) !important; }
   /* The state belongs to the CONTROL, not to its contents. On a <select> the
      danger background is inherited by every option, so opening the dropdown
      showed the whole list on red - which reads as "all of these are wrong"
@@ -493,7 +504,8 @@
      `.field-changed` already resets `option` colour for exactly this reason
      (see above); .field-error simply never got the equivalent. (2026-08-15) */
   .field-error option,
-  .version-missing option {
+  .version-missing option,
+  .prop-missing option {
     background: var(--c-bg-raised);
     color: var(--c-text);
   }
@@ -1499,9 +1511,15 @@
   .prop-pick-empty { padding: 14px 12px; font-size: 0.82rem; color: var(--c-text-muted); }
   /* `text-wrap: balance` evens line lengths, which reads well on the 380px
      default but leaves these wider paragraphs short of the measure. `pretty`
-     still avoids a one-word last line without shrinking every line above it. */
+     still avoids a one-word last line without shrinking every line above it.
+     ⚠️ THE LIST HERE MUST MATCH THE 520px LIST ABOVE. It did not: all four wide
+     modals have the problem, three were fixed, and #modal-prop-pick was left on
+     `balance` until 2026-09-29 - where it broke a two-sentence subtitle after
+     "A config", stranding the subject on the line above its verb. Adding a modal
+     to the width group without adding it here reproduces that exactly. */
   #modal-jmt-conflict .modal p,
   #modal-styles-conflict .modal p,
+  #modal-prop-pick .modal p,
   #modal-prop-missing .modal p { text-wrap: pretty; }
   #modal-sf-text-prompt { z-index: 10015; }
   /* Sits above the library picker (10010) so the rename decision is
@@ -4996,6 +5014,19 @@
       <label>OS Version</label>
       <select id="input-version"></select>
     </div>
+    <!-- Prop reads the same way Board does: the config's #include is the source of
+         truth and this mirrors it. Unlike Board it has a legitimate empty value,
+         because ProffieOS falls back to props/saber.h when nothing sets PROP_TYPE,
+         so an unset Prop is never an error. The only error is naming a prop the
+         selected version does not have. [B-444] -->
+    <div class="meta-field js-config-only">
+      <label>Prop</label>
+      <!-- No static title: _syncPropFromConfig is the single writer for this tooltip,
+           because it has three states to say and only it knows which one is true. A
+           literal here would be a fourth copy of the fallback sentence and the one
+           copy nothing keeps in step. -->
+      <select id="input-prop"></select>
+    </div>
     <!-- One field per shared folder the config DECLARES, generated at runtime. The
          config names the slots and the user fills them, so there is no mode switch
          and no threshold: "Common Folder" is simply what the label reads when the
@@ -7417,6 +7448,9 @@ function setFileOpen(open) {
   if (isElectron) { updateFavButton(); window.updateCompileButton?.(); }
   _updateStylesLinkBtn();
   _updateJmtLinkBtn();
+  // Open and close both land here, and both change what the field should say: a
+  // newly opened config names its own prop, and a closed one names nothing.
+  _populatePropSelect();
   _scheduleStylesInUseRebuild();
   // SF sidecar visibility might depend on whether the open config references
   // ";common" — re-evaluate when file open/close transitions happen.
@@ -7813,7 +7847,15 @@ async function _sfShowPartialFailures(title, failed) {
     const dest = (await _sfDestDisplay(where)) || where;
     return promptConfirm({
       title: dest ? `There was an issue with ${dest}` : 'There was an issue with the destination',
-      message: `These folders could not be created, so none of their files were written:\n${names}`,
+      // ⚠️ "none of their files were written" IS NOT TRUE OF A PARTIAL WRITE, and a pull-the-card
+      // test is exactly the case that produces one: the font being written when the destination
+      // went may have left files behind. Saying nothing landed would send someone looking at a
+      // card that actually holds half a font. The extra sentence appears ONLY when a failure
+      // other than a never-created folder is present, so the folders-only case stays unchanged.
+      message: `These sound fonts were not written:\n${names}`
+        + (_sfHadInFlightFailure(failed)
+            ? '\n\nOne was being written when the problem happened, so the destination may hold a partial copy.'
+            : ''),
       confirmText: 'OK', confirmKind: 'danger', hideCancel: true,
     });
   }
@@ -8482,29 +8524,73 @@ function _sfIsOutOfSpace(errOrList) {
 // ", open '<path>'" or ", stat '<path>'", and is an unrelated problem. Folding that in
 // would swap a true raw message for a confident wrong one, which is worse than the raw
 // text this exists to remove.
+// The destination a failure happened ON, read out of the first quoted path in the message.
+// Windows gives a drive; a posix mount gives its /Volumes entry. Anything else is null, and
+// null disqualifies the collapse below rather than being guessed at.
+function _sfFailureRoot(s) {
+  const m = /'([^']+)'/.exec(String(s || ''));
+  if (!m) return null;
+  const drive = /^([A-Za-z]:)/.exec(m[1]);
+  if (drive) return drive[1].toUpperCase();
+  const vol = /^(\/Volumes\/[^/]+)/.exec(m[1]);
+  return vol ? vol[1] : null;
+}
+
+// ⚠️⚠️ UNANIMITY WAS THE WRONG TEST, AND A REAL PULL-THE-CARD TEST PROVED IT [2026-09-27].
+// This used to require EVERY failure to carry the mkdir signature. Yanking a card mid-write
+// produces exactly one in-flight error plus N destination errors:
+//     Dark_Ani: UNKNOWN: unknown error, open 'I:\Dark_Ani\swing\swing02.wav'   <- the live write
+//     DarkSaber: Cannot create destination: ENOENT ... mkdir 'I:\'             <- x20
+// so `.every()` saw one odd entry and fell through to the raw syscall list - on the single
+// commonest real instance of this fault. The odd entry is not an unrelated error; it is the
+// same story, and it is the one failure that proves a write was actually in progress.
+//
+// ⭐ SCOPED BY DESTINATION INSTEAD OF BY ERROR TEXT. Every failure must name the SAME root,
+// and at least one must be the mkdir signature. That keeps the original protection - a
+// missing SOURCE file lives on another root and still defeats the collapse - without
+// demanding that a partial write look tidy.
 function _sfIsFolderCreateFailure(errOrList) {
-  const has = (s) => {
+  const mk = (s) => {
     const t = String(s || '');
     return /ENOENT/i.test(t) && /,\s*mkdir\b/i.test(t);
   };
-  if (Array.isArray(errOrList)) return errOrList.length > 0 && errOrList.every(f => has(f && f.error));
-  return has(errOrList && errOrList.message ? errOrList.message : errOrList);
+  if (!Array.isArray(errOrList)) return mk(errOrList && errOrList.message ? errOrList.message : errOrList);
+  const list = errOrList || [];
+  if (!list.length) return false;
+  const roots = list.map(f => _sfFailureRoot(f && f.error));
+  if (roots.some(r => !r)) return false;           // a failure we cannot place disqualifies
+  if (new Set(roots).size !== 1) return false;     // all of them, one destination
+  return list.some(f => mk(f && f.error));         // and the destination really did refuse a folder
+}
+
+// True when at least one failure is something OTHER than a folder that was never created -
+// i.e. a write that was already underway when the destination went. The caller uses it to
+// say the card may hold a partial copy, which is not true of the folders-only case.
+function _sfHadInFlightFailure(list) {
+  return (list || []).some(f => {
+    const t = String((f && f.error) || '');
+    return !(/ENOENT/i.test(t) && /,\s*mkdir\b/i.test(t));
+  });
 }
 
 // The destination as it reads to the person looking at it: the drive for a Windows path,
 // the parent folder elsewhere. Returns '' when no path can be read out of the message, and
 // the caller then drops the location entirely rather than printing a placeholder.
+// ⚠️ SCANS FOR THE FIRST FAILURE THAT CAN BE PLACED, not the first failure. This used to read
+// `mkdir '...'` out of entry zero, which worked only while every entry was a mkdir. Once mixed
+// lists were allowed [2026-09-27] entry zero became the in-flight `open` error, no mkdir in it,
+// and the dialog lost the card's name and said "the destination" instead - on the one list that
+// motivated the change. Same helper the collapse uses, so the two can never disagree about
+// which volume they are talking about.
 function _sfFailedDestinationLabel(errOrList) {
-  const first = Array.isArray(errOrList)
-    ? ((errOrList.find(f => f && f.error) || {}).error)
-    : (errOrList && errOrList.message ? errOrList.message : errOrList);
-  const m = /mkdir\s+'([^']+)'/i.exec(String(first || ''));
-  if (!m) return '';
-  const p = m[1];
-  const drive = /^([A-Za-z]:)[\\/]/.exec(p);
-  if (drive) return drive[1];
-  const cut = p.lastIndexOf('/');
-  return cut > 0 ? p.slice(0, cut) : '';
+  if (Array.isArray(errOrList)) {
+    for (const f of errOrList) {
+      const r = _sfFailureRoot(f && f.error);
+      if (r) return r;
+    }
+    return '';
+  }
+  return _sfFailureRoot(errOrList && errOrList.message ? errOrList.message : errOrList) || '';
 }
 // Shows the right dialog for a failed export: our sentence when the destination filled up,
 // the raw reason otherwise. Returns true when it handled an out-of-space case.
@@ -9761,13 +9847,13 @@ function updateChangedIndicators() {
   boardSel.title = noBoard
     ? 'No board detected in this config. Select your Proffieboard to compile.'
     : !boardSel.value
-      ? 'No board selected — select a board before compiling'
+      ? 'No board selected. Select a board before compiling.'
     : boardBuildMoved
         // Names the board that actually produced the binary, from the build
         // record, so this survives a save and travels with a shared config.
-        ? `Last built for ${_boardNameForFqbn(metaCompiledFqbn) || metaCompiledFqbn} — recompile before flashing`
+        ? `Last built for ${_boardNameForFqbn(metaCompiledFqbn) || metaCompiledFqbn}, recompile before flashing`
     : boardBuildUnknown
-        ? `Last compiled ${window.getCompiledAtLabel?.() || 'previously'}, but that build did not record which board it used — recompile to start checking it`
+        ? `Last compiled ${window.getCompiledAtLabel?.() || 'previously'}, but that build did not record which board it used, so recompile to start checking it`
       : '';
 
   // A ProffieOS version and a Proffieboard Plugin are ONE build target, not two.
@@ -13434,7 +13520,7 @@ document.getElementById('btn-cache-confirm').addEventListener('click', async () 
         result.bytesCleared > 0 ? `✓ Cleared (${freed} deleted)` : '✓ Cleared';
       // build-output is untouched by this action, so whatever is staged stays flashable. Only the
       // saved builds are gone, which shows up as a cache MISS the next time a config is checked.
-      if (window.checkCacheForConfig) window.checkCacheForConfig('Cached builds cleared — recompile needed');
+      if (window.checkCacheForConfig) window.checkCacheForConfig('Cached builds cleared, recompile needed');
     } else {
       confirmBtn.textContent = 'Error. Try again';
       confirmBtn.disabled = false;
@@ -13629,7 +13715,7 @@ document.getElementById('btn-workspace-confirm')?.addEventListener('click', asyn
       try { await window.vpRefresh?.(); } catch {}
       // The staged build is gone, so there is nothing to flash until a build exists again. A cache
       // hit will restore one; checkCacheForConfig decides which.
-      if (window.checkCacheForConfig) window.checkCacheForConfig('Build space reset — recompile needed');
+      if (window.checkCacheForConfig) window.checkCacheForConfig('Build space reset, recompile needed');
     } else {
       panel.style.display = 'none';
       btn.disabled = false;
@@ -17399,6 +17485,67 @@ const _PROP_INCLUDE_RE_M       = /^\s*#include\s+"[^"]*\/props\/[^"]+\.h"/m;
 const _propIncludePathFor = file => `../props/${file}`;
 const _propFileFromPath   = p => p.split('/').pop();
 
+// ⚠️ ONE FACT, ONE SENTENCE, THREE SURFACES. The Link Prop button tooltip, the Link a
+// Prop modal subtitle and the Prop dropdown tooltip all have to say what happens when
+// a config names no prop, and on 2026-09-29 they said it three different ways: two
+// reached for "ProffieOS's default" - a category word ProffieOS itself never uses -
+// and the button never named the file at all. Every surface stating this fact now
+// composes from here. Declared beside the other prop constants rather than next to
+// its first reader, because two of the three call sites sit EARLIER in this file and
+// a `const` is not hoisted.
+// Verified, not phrased from memory: ProffieOS.ino:680-682 is
+// `#ifndef PROP_TYPE / #include "props/saber.h" / #endif`.
+// ⚠️ Plain fact, no mechanism and no personification. An earlier draft ended "which
+// ProffieOS includes itself" - the reflexive was doing rhetorical work (it reads as
+// "without you asking") rather than stating anything, and the mechanism belongs on
+// the one surface that teaches it, not on a toast.
+const _PROP_FALLBACK_SENTENCE =
+  'A config that names no prop builds with props/saber.h.';
+
+// ⚠️ WHICH INCLUDE IS "THE PROP" IS NOT A QUESTION THIS FILE GETS TO ANSWER.
+// preflight-checks.js already owns it: `vpkPropIncludes` strips comments and reads
+// ONLY inside `#ifdef CONFIG_PROP ... #endif` - what ProffieOS itself compiles - and
+// `prop-missing-from-version` blocks a compile on exactly that reading. It is
+// exported on `window.preflightChecks` with a comment saying it is exposed for
+// index.html so there is not "a second implementation that drifts".
+// A plain regex over the whole document answers differently for any config carrying
+// a prop include OUTSIDE CONFIG_PROP - a commented-out alternative, or one parked in
+// CONFIG_BOTTOM - and the dropdown would then disagree with the compile preflight
+// about the same file, while both looked right. [B-444]
+const _propIncludeFromConfig = text => {
+  const incs = window.preflightChecks?.vpkPropIncludes?.(text || '') || [];
+  for (const inc of incs) {
+    const p = String(inc).replace(/\\/g, '/');
+    if (window._isLinkablePropPath?.(p)) return p;
+  }
+  return null;
+};
+
+// Where that include physically sits, so the dropdown rewrites THAT line and no
+// other. Located by the exact path the parser returned rather than by a generic
+// pattern, so the line edited is always the line that decides the build.
+const _reEscapeProp = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+function _propIncludeLineInfo(text) {
+  const inc = _propIncludeFromConfig(text);
+  if (!inc) return null;
+  const re = new RegExp(`^([ \\t]*)#include\\s+"${_reEscapeProp(inc)}"[ \\t]*(\\r?\\n)?`, 'm');
+  const m  = re.exec(text);
+  if (!m) return null;
+  return {
+    index:   m.index,
+    length:  m[0].length,
+    indent:  m[1] || '',
+    newline: m[2] || '\n',
+    file:    _propFileFromPath(inc),
+  };
+}
+
+// The prop this config currently names, as a bare filename, or null for none.
+const _propFileFromConfig = text => {
+  const inc = _propIncludeFromConfig(text);
+  return inc ? _propFileFromPath(inc) : null;
+};
+
 
 async function _refreshSelectedVersionJmtState() {
   const verSel = document.getElementById('input-version');
@@ -17425,6 +17572,11 @@ async function _refreshSelectedVersionJmtState() {
     _statPluginVersion         = null;
   }
   _updateJmtLinkBtn();
+  // Prop options come from the SELECTED version's props/ folder, so the list is
+  // only valid for as long as that selection is. Repopulating here is what makes a
+  // prop that exists in one version and not another show as missing rather than
+  // silently staying selected. [B-444]
+  _populatePropSelect();
   updateStatusMeta();
   // The OS Version field reads the plugin too, so it repaints on the same beat.
   // Leaving it out meant the status bar went red while the field above it, which
@@ -17474,7 +17626,7 @@ function _updateJmtLinkBtn() {
   if (!_PROP_INCLUDE_RE_M.test(content)) {
     _jmtLinkBtnMode = 'pick';
     btn.textContent = '\u{1F517} Link Prop';
-    btn.title = 'This config names no prop, so it would build with ProffieOS’s default. Pick one from the selected version.';
+    btn.title = `${_PROP_FALLBACK_SENTENCE} Pick one from the selected version.`;
     btn.style.display = '';
     return;
   }
@@ -17696,7 +17848,7 @@ async function _openPropPicker() {
   const listEl = document.getElementById('modal-prop-pick-list');
   const subEl  = document.getElementById('modal-prop-pick-sub');
   subEl.textContent =
-    `This config names no prop, so it would build with ProffieOS’s default (saber.h) — basic controls only. These are the props in ${selected}.`;
+    `These are the props in ${selected}. ${_PROP_FALLBACK_SENTENCE}`;
   listEl.innerHTML = '<div class="prop-pick-empty">Loading…</div>';
   document.getElementById('modal-prop-pick').classList.add('active');
 
@@ -17788,6 +17940,257 @@ async function _linkPropFromVersion(filePath, browsedVersion) {
   });
 }
 window._linkPropFromVersion = _linkPropFromVersion;
+
+// ── Prop dropdown ──────────────────────────────────────
+// [B-444] A persistent selector beside Board and OS Version. Board is the model and
+// the differences from it are deliberate, and both were decided (2026-09-29):
+//
+//   1. AN EMPTY VALUE IS VALID AND IS NEVER RED. Board red-flags "Select board…"
+//      because a config with no board include cannot compile. A config with no prop
+//      include compiles fine - ProffieOS.ino has `#ifndef PROP_TYPE / #include
+//      "props/saber.h"`, verified in 8.10 - so the only error state here is naming a
+//      prop the selected version does not have, which IS a build failure.
+//   2. CHANGING IT SWAPS THE INCLUDE OUTRIGHT, with no Comment Out / Remove It
+//      modal. That modal belongs to the Link Prop button, which is a wizard for
+//      someone who does not know props exist; a dropdown is a direct selection and
+//      is expected to behave like one.
+//
+// The buttons keep their own behaviour untouched.
+
+// prop_base.h is excluded for the same reason the picker excludes it: it is the base
+// class every prop derives from and including it alone never sets PROP_TYPE, so
+// picking it would silently build the default prop instead.
+async function _propsInSelectedVersion() {
+  const selected = document.getElementById('input-version')?.value;
+  if (!selected || (window.isVersionSentinel && isVersionSentinel(selected))) return null;
+  try {
+    const res = await window.electronAPI.listVersionDir(selected, `${_OS_TREE_ROOT}/props`);
+    if (!res?.ok) return null;
+    return res.entries
+      .filter(e => e.type === 'file'
+                && /\.h$/i.test(e.name)
+                && !_PROP_PICK_EXCLUDE.has(e.name.toLowerCase()))
+      .map(e => e.name)
+      .sort((a, b) => a.localeCompare(b));
+  } catch { return null; }
+}
+
+// ── The three tooltips ─────────────────────────────────
+// Specified 2026-09-29: the red one states plainly what was not found and where
+// it looked; the selected one teaches using the config's OWN define language; the
+// empty one explains the base prop in ProffieOS's vocabulary.
+//
+// ⚠️ "Default" is deliberately absent. ProffieOS does not call it that - `saber.h`
+// line 36 is `#define PROP_TYPE Saber` and `ProffieOS.ino:680` includes that file
+// only `#ifndef PROP_TYPE`. So the honest words are the BASE prop, named Saber, and
+// every sentence below was read out of ProffieOS 8.10 rather than phrased from
+// memory. Keep it that way if these are ever reworded.
+function _propTooltip(state, file, versionName) {
+  switch (state) {
+    case 'missing':
+      return `This config includes ${_propIncludePathFor(file)}, but ${file} is not in the `
+           + `props folder of ${versionName}.`;
+    case 'selected':
+      // ⚠️ THE TEACHING HERE IS THE POINTER, NOT AN EXPLANATION. An earlier version
+      // added "the prop file is what sets PROP_TYPE, and PROP_TYPE is what ProffieOS
+      // builds", which drew "what's all this prop type and such?" - and the
+      // line it describes is already on screen in the editor, so the tooltip's whole
+      // job is to connect this field to that line. Engineering vocabulary stays out
+      // of user-facing copy; CONFIG_PROP earns its place only because it is a word
+      // the user can see in their own file.
+      return `This config's CONFIG_PROP section has #include "${_propIncludePathFor(file)}".`;
+    default:
+      // ⚠️ AN EARLIER DRAFT SAID "so nothing sets PROP_TYPE" AND THAT WAS NOT TRUE.
+      // A config can define PROP_TYPE itself with no prop include at all - ProffieOS's
+      // own proffieboard_v3_verification_config.h:32 does exactly that. Measured
+      // across 173 real configs (ConfigExamples, b226, test-configs, both wild sets):
+      // 107 include a prop, 66 include none, and ZERO define PROP_TYPE bare. So the
+      // case is real but not one anyone hits, and the honest wording states
+      // ProffieOS's RULE rather than asserting what this config does not do.
+      // This is the TEACHING surface, so it carries the mechanism; the button and the
+      // modal carry the shared sentence alone.
+      return `${_PROP_FALLBACK_SENTENCE} ProffieOS.ino includes that file whenever `
+           + 'PROP_TYPE has not been defined.';
+  }
+}
+
+// "None" is the absence of a prop, not the name of one, so it is dimmed - the same
+// treatment and the same reason as populateVersionSelect's empty state, which reads
+// "so it reads as the absence of a value rather than as the name of one".
+// `--c-text-dim` is the documented token for an empty state (ui-components.md) and
+// it already carries both themes: #666 against #ccc text in dark, #888 against #333
+// in light. Lives in one helper because the rule has three callers.
+// ⚠️ Never dim the missing state - that field is an error and wears the red.
+function _paintPropFieldTone(sel) {
+  sel.style.color = (!sel.value && !sel.classList.contains('prop-missing'))
+    ? 'var(--c-text-dim)'
+    : '';
+}
+
+// Mirrors showVersionNotInstalled: a hidden, disabled sentinel carries the collapsed
+// label, and WHICH prop is missing lives in the tooltip because the field truncates.
+function _showPropNotFound(sel, file, versionName) {
+  Array.from(sel.querySelectorAll('option[data-missing]')).forEach(o => o.remove());
+  const missing = document.createElement('option');
+  missing.value       = '';
+  missing.textContent = 'Not found…';
+  missing.title       = _propTooltip('missing', file, versionName);
+  missing.dataset.missing = '1';
+  missing.disabled = true;
+  missing.hidden   = true;
+  sel.insertBefore(missing, sel.firstChild);
+  sel.value = '';
+  sel.classList.add('prop-missing');
+  sel.title = missing.title;
+  _paintPropFieldTone(sel);
+}
+
+function _clearPropNotFound(sel) {
+  Array.from(sel.querySelectorAll('option[data-missing]')).forEach(o => o.remove());
+  sel.classList.remove('prop-missing');
+}
+
+// Rebuild the option list from the selected version, then point it at whatever the
+// config names. Repopulating drops the options but NOT the class, which is how a
+// stale red survives a rebuild, so the missing state is cleared up front and
+// re-applied below if it still holds.
+async function _populatePropSelect() {
+  const sel = document.getElementById('input-prop');
+  if (!sel) return;
+  const versionName = document.getElementById('input-version')?.value || '';
+  const files = await _propsInSelectedVersion();
+
+  sel.innerHTML = '';
+  _clearPropNotFound(sel);
+
+  // Label names the FILE rather than reaching for a word ProffieOS does not use.
+  // "Stock" and "Default" are both inventions; every other row in this list is a
+  // filename, so the empty row saying which file you actually get is both the
+  // consistent choice and the one that teaches. Easy to change: this line and the
+  // 'else' arm of _propTooltip are the only two places the wording lives.
+  const none = document.createElement('option');
+  none.value = '';
+  none.textContent = 'None (saber.h)';
+  none.title = _propTooltip('none');
+  // Dimmed in the open list too, so the row reads as the absence of a prop rather
+  // than as a prop called None sitting above the real ones.
+  none.style.color = 'var(--c-text-dim)';
+  sel.appendChild(none);
+
+  for (const f of (files || [])) {
+    const o = document.createElement('option');
+    o.value = o.textContent = f;
+    sel.appendChild(o);
+  }
+  // No version selected yet, or its tree could not be read: the list is unknown
+  // rather than empty, so nothing is claimed about a prop the config may name.
+  sel.disabled = !files;
+  _syncPropFromConfig({ listKnown: !!files, versionName });
+}
+window._populatePropSelect = _populatePropSelect;
+
+// Point the dropdown at the config. Never dispatches a change event: the change
+// handler is what REWRITES the file, and a programmatic sync must not do that. The
+// board path solves the same problem with a _suppressBoardDirty flag; this one
+// simply does not fire the event, which needs no flag to stay correct.
+function _syncPropFromConfig(opts = {}) {
+  const sel = document.getElementById('input-prop');
+  if (!sel) return;
+  const listKnown   = opts.listKnown !== undefined
+    ? opts.listKnown
+    : !sel.disabled;
+  const versionName = opts.versionName || document.getElementById('input-version')?.value || '';
+
+  const text = (typeof editor !== 'undefined' && editor) ? editor.getValue() : '';
+  const file = fileIsOpen ? _propFileFromConfig(text) : null;
+
+  if (!file) {
+    _clearPropNotFound(sel);
+    sel.value = '';
+    sel.title  = _propTooltip('none');
+    _paintPropFieldTone(sel);
+    return;
+  }
+  const known = Array.from(sel.options).some(o => o.value === file);
+  if (known) {
+    _clearPropNotFound(sel);
+    sel.value = file;
+    sel.title  = _propTooltip('selected', file);
+    _paintPropFieldTone(sel);
+    return;
+  }
+  // Named but absent. Only an ERROR when the list is actually known - if the version
+  // tree could not be read we have no evidence the prop is missing, and reddening
+  // the field on an unread directory would accuse the config of something unproven.
+  if (listKnown) {
+    _showPropNotFound(sel, file, versionName);
+  } else {
+    sel.value = '';
+    sel.title = _propTooltip('selected', file);
+    _paintPropFieldTone(sel);
+  }
+}
+window._syncPropFromConfig = _syncPropFromConfig;
+
+// Debounced on editor content, same 250ms as the board's auto-detect, so holding a
+// key does not re-run the regex per keystroke.
+let _propSyncTimer = null;
+function _scheduleSyncPropFromConfig() {
+  clearTimeout(_propSyncTimer);
+  _propSyncTimer = setTimeout(() => _syncPropFromConfig(), 250);
+}
+window._scheduleSyncPropFromConfig = _scheduleSyncPropFromConfig;
+
+document.getElementById('input-prop').addEventListener('change', (e) => {
+  // Programmatic assignment never reaches here (no event is dispatched), but the
+  // guard matches Board's and costs nothing if that ever changes.
+  if (!e.isTrusted) return;
+  if (!fileIsOpen) return;
+  const ed = window._monacoEditor || (typeof editor !== 'undefined' ? editor : null);
+  if (!ed) return;
+
+  const sel    = document.getElementById('input-prop');
+  const choice = sel.value;
+  const model  = ed.getModel();
+  const text   = ed.getValue();
+  const match  = _propIncludeLineInfo(text);
+
+  // Leaving the missing-prop state by choosing a real one: drop the sentinel first
+  // so the option list stops carrying a value that is not a prop.
+  _clearPropNotFound(sel);
+
+  if (match && match.file === choice) return;    // already what the config says
+
+  if (match) {
+    const startPos = model.getPositionAt(match.index);
+    const endPos   = model.getPositionAt(match.index + match.length);
+    const indent   = match.indent;
+    const newline  = match.newline;
+    // Choosing None removes the line outright rather than commenting it: the config
+    // then names no prop, which is a valid state that builds with saber.h.
+    const newText  = choice ? `${indent}#include "${_propIncludePathFor(choice)}"${newline}` : '';
+    _atomicEdit(ed, 'prop-dropdown-sync', [{
+      range: new monaco.Range(startPos.lineNumber, startPos.column, endPos.lineNumber, endPos.column),
+      text:  newText,
+    }]);
+    if (choice) {
+      showToast(`Prop changed to ${choice} (include updated).`);
+      flashEditorLine(startPos.lineNumber);
+    } else {
+      showToast(`Prop include removed. ${_PROP_FALLBACK_SENTENCE}`);
+    }
+    _updateJmtLinkBtn();
+    return;
+  }
+
+  if (!choice) return;   // None chosen and there was nothing to remove
+
+  // No prop include yet. _doInsertJmtPropInclude already knows where one belongs -
+  // inside CONFIG_PROP, or a fresh block placed before CONFIG_PRESETS to keep
+  // ProffieOS's conventional ordering - so this reuses it rather than repeating it.
+  _doInsertJmtPropInclude(text.split('\n'), -1, null, _propIncludePathFor(choice));
+  showToast(`Prop set to ${choice}.`);
+});
 
 // A prop this app can link: a .h sitting DIRECTLY in the tree's props/ folder.
 // Tree paths carry the version's root segment ("ProffieOS/props/saber.h"), and
@@ -22116,7 +22519,7 @@ let _activeTab = 'config';
 async function switchTab(name) {
   if (_activeTab === name) return;
   if (_activeTab === 'versions' && window.vpHasUnsavedNotes?.()) {
-    const choice = await promptUnsaved('Unsaved OS version notes — save before switching?');
+    const choice = await promptUnsaved('Unsaved OS version notes. Save before switching?');
     if (choice === 'cancel') return;
     if (choice === 'save') await window.vpSaveCurrentNotes?.();
   }
@@ -22264,7 +22667,7 @@ async function buildFavDropdown() {
   updateFavButton();
 
   if (!items.length) {
-    list.innerHTML = '<div class="fav-empty">No favorites yet — star a file to add it</div>';
+    list.innerHTML = '<div class="fav-empty">No favorites yet. Star a file to add it.</div>';
     return;
   }
 
@@ -22296,7 +22699,7 @@ async function buildFavDropdown() {
       updateFavButton();
       row.remove();
       if (!list.querySelector('.fav-item'))
-        list.innerHTML = '<div class="fav-empty">No favorites yet — star a file to add it</div>';
+        list.innerHTML = '<div class="fav-empty">No favorites yet. Star a file to add it.</div>';
       refreshEmptyStateFavs();
     });
 
@@ -22662,6 +23065,7 @@ require(['vs/editor/editor.main'], function () {
       _updateStylesLinkBtn();
       _updateJmtLinkBtn();
       _scheduleAutoDetectBoard();
+      _scheduleSyncPropFromConfig();
     }
     _scheduleStylesInUseRebuild();
     // SF common folder sidecar visibility tracks whether the open config
@@ -46582,7 +46986,7 @@ require(['vs/editor/editor.main'], function () {
     }
     if (hasUnsavedWork()) {
       const fileName = currentFilePath ? currentFilePath.split(/[\\/]/).pop() : 'config file';
-      const choice = await promptUnsaved(`Unsaved changes in "${fileName}" — save before ${verb}?`, { saveAs: true });
+      const choice = await promptUnsaved(`Unsaved changes in "${fileName}". Save before ${verb}?`, { saveAs: true });
       if (choice === 'cancel') return false;
       // Treat a cancelled Save / Save As (file picker dismissed, write failed) as
       // a hard stop — don't tear down under the assumption that it saved.
@@ -46596,21 +47000,21 @@ require(['vs/editor/editor.main'], function () {
         if (choice === 'cancel') return false;
         // discard — proceed without saving
       } else {
-        const choice = await promptUnsaved(`Unsaved changes in Style Library (my_styles.h) — save before ${verb}?`);
+        const choice = await promptUnsaved(`Unsaved changes in Style Library (my_styles.h). Save before ${verb}?`);
         if (choice === 'cancel') return false;
         if (choice === 'save') { await window.saveStylesFile(); }
       }
     }
     if (window.vpHasUnsavedNotes?.()) {
-      const choice = await promptUnsaved(`Unsaved OS version notes — save before ${verb}?`);
+      const choice = await promptUnsaved(`Unsaved OS version notes. Save before ${verb}?`);
       if (choice === 'cancel') return false;
       if (choice === 'save') await window.vpSaveCurrentNotes?.();
     }
     if (_helperAddHasContent()) {
-      if (!await _promptDiscard(`A new helper has unsaved content — discard and ${verb === 'closing' ? 'close' : 'continue'}?`)) return false;
+      if (!await _promptDiscard(`A new helper has unsaved content. Discard and ${verb === 'closing' ? 'close' : 'continue'}?`)) return false;
     }
     if (_addStyleModalHasContent()) {
-      if (!await _promptDiscard(`A new style has unsaved content — discard and ${verb === 'closing' ? 'close' : 'continue'}?`)) return false;
+      if (!await _promptDiscard(`A new style has unsaved content. Discard and ${verb === 'closing' ? 'close' : 'continue'}?`)) return false;
     }
     return true;
   }
@@ -49812,7 +50216,7 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
           if (arrLabels[i + 1]) num.title = arrLabels[i + 1];
           const body = document.createElement('span');
           body.className = 'preset-slot-body';
-          body.innerHTML = '<span class="preset-slot-expr">Missing — click to add</span>';
+          body.innerHTML = '<span class="preset-slot-expr">Missing, click to add</span>';
           missing.appendChild(num);
           missing.appendChild(body);
           missing.addEventListener('click', () => {

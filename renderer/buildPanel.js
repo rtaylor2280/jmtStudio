@@ -372,7 +372,7 @@ window.onEditorContentChanged = () => {
     setFlashEnabled(false);
     cacheCheckPending = true;
     updateCompileButton();
-    setStatus('compile', 'warn', 'Config changed — recompile needed');
+    setStatus('compile', 'warn', 'Config changed, recompile needed');
   }
   // Debounced cache check: if user reverts content to a previously compiled state, restore
   clearTimeout(contentDebounceTimer);
@@ -526,11 +526,11 @@ async function initBuildPanel() {
       _currentBuildDir = null;
       _currentBuildKey = null;
       setFlashEnabled(false);
-      setStatus('compile', 'warn', 'USB mode changed — recompile needed');
+      setStatus('compile', 'warn', 'USB mode changed, recompile needed');
     }
     cacheCheckPending = true;
     updateCompileButton();
-    checkCacheForConfig('USB mode changed — recompile needed');
+    checkCacheForConfig('USB mode changed, recompile needed');
   });
   document.getElementById('input-version').addEventListener('change', onOsVersionChange);
   document.getElementById('bm-close').addEventListener('click', () => {
@@ -539,7 +539,7 @@ async function initBuildPanel() {
   });
   document.getElementById('bm-v1-feedback-link').addEventListener('click', e => {
     e.preventDefault();
-    const subject = encodeURIComponent('JMT Studio — Proffieboard V1 Flash Feedback');
+    const subject = encodeURIComponent('JMT Studio: Proffieboard V1 Flash Feedback');
     const body    = encodeURIComponent('Hi,\n\nI just flashed a Proffieboard V1 using JMT Studio. Here\'s what happened:\n\n');
     window.electronAPI?.openExternal(`mailto:studio@jmtfoundry.com?subject=${subject}&body=${body}`);
   });
@@ -618,7 +618,7 @@ async function initBuildPanel() {
   });
   document.getElementById('bm-dfu-feedback-link').addEventListener('click', e => {
     e.preventDefault();
-    const subject = encodeURIComponent('JMT Studio — DFU Setup Feedback');
+    const subject = encodeURIComponent('JMT Studio: DFU Setup Feedback');
     const body    = encodeURIComponent('Hi,\n\nHere\'s my experience with the DFU/Bootloader mode setup in JMT Studio:\n\n');
     window.electronAPI.openExternal(`mailto:studio@jmtfoundry.com?subject=${subject}&body=${body}`);
   });
@@ -706,7 +706,7 @@ async function doCompile() {
     // on-disk content at all, which is the other reason Discard makes no sense here.
     const _msg = _neverSaved
       ? 'This config has not been saved yet. Give it a name before compiling.'
-      : `Unsaved changes in "${window._currentFilePath.split(/[\\/]/).pop()}" — save before compiling?`;
+      : `Unsaved changes in "${window._currentFilePath.split(/[\\/]/).pop()}". Save before compiling?`;
     // Save As is asked for unconditionally: promptUnsaved suppresses it whenever
     // there is no file path, because "save as" is never valid for something that
     // has never been saved. That rule lives there, once, so every caller gets it.
@@ -722,7 +722,7 @@ async function doCompile() {
   }
   if (window._isStylesDirty?.()) {
     const choice = await window.promptUnsaved(
-      'Unsaved changes in Style Library (my_styles.h) — save before compiling?',
+      'Unsaved changes in Style Library (my_styles.h). Save before compiling?',
       { discard: false }
     );
     if (choice === 'cancel') return;
@@ -858,7 +858,7 @@ async function doFlash() {
     } catch {}
 
     if (adopted) {
-      appendModalLog(`${selectedPort} is gone — using the connected board on ${adopted.path}.`, false);
+      appendModalLog(`${selectedPort} is gone. Using the connected board on ${adopted.path}.`, false);
       selectedPort = adopted.path;
       selectedPortSN = adopted.serialNumber || null;
       selectedPortIsProffieboard = true;
@@ -869,7 +869,7 @@ async function doFlash() {
       if (typeof applyDetectedBoard === 'function') { try { applyDetectedBoard(adopted); } catch {} }
       setStatus('port', 'ok', `Proffieboard on ${adopted.path}`);
     } else {
-      appendModalLog('Selected port disconnected — waiting for board...', true);
+      appendModalLog('Selected port disconnected. Waiting for board...', true);
       showWaitForBoardInModal();
       startPortWatch('wait-flash');
       return;
@@ -1008,7 +1008,7 @@ async function refreshPorts() {
       selectedPort = null;
       selectedPortIsProffieboard = false;
       clearDetectedBoard();
-      setStatus('port', 'warn', `${result.proffieports.length} Proffieboards — select port`);
+      setStatus('port', 'warn', `${result.proffieports.length} Proffieboards, select port`);
     }
   } else {
     // No Proffieboard detected — show all ports for manual inspection but don't select any
@@ -1150,9 +1150,9 @@ function updateUsbChangedIndicator() {
   const usbEl = el('bp-usb-select');
   usbEl.classList.toggle('field-changed', buildMoved);
   usbEl.title = buildMoved
-    ? `Last built with ${USB_LABELS[builtUsb] || builtUsb} — recompile before flashing`
+    ? `Last built with ${USB_LABELS[builtUsb] || builtUsb}, recompile before flashing`
     : buildUnknown
-      ? `Last compiled ${compiledAt}, but that build did not record its USB mode — recompile to start checking it`
+      ? `Last compiled ${compiledAt}, but that build did not record its USB mode, so recompile to start checking it`
       : '';
 }
 
@@ -1264,12 +1264,12 @@ function onInputBoardChange() {
     _currentBuildDir = null;
     _currentBuildKey = null;
     setFlashEnabled(false);
-    setStatus('compile', 'warn', 'Board changed — recompile needed');
+    setStatus('compile', 'warn', 'Board changed, recompile needed');
   }
   selectedFqbn = newFqbn;
   cacheCheckPending = true;
   updateCompileButton();
-  checkCacheForConfig('Board changed — recompile needed');
+  checkCacheForConfig('Board changed, recompile needed');
 }
 
 // Changing the Proffieboard core changes the build identity exactly as a board
@@ -1284,7 +1284,7 @@ function onInputBoardChange() {
 // Called from the Versions panel, and only when the change lands on the
 // version currently selected for building.
 window.onCoreVersionChanged = function (label) {
-  const msg = label || 'Build core changed — recompile needed';
+  const msg = label || 'Build core changed, recompile needed';
   if (compileSuccess) {
     compileSuccess = false;
     _currentBuildDir = null;
@@ -1820,7 +1820,7 @@ function onBuildDone({ type, ok, error, aborted, retriable, needsDfuDriver, sour
         _currentBuildDir = null;
         _currentBuildKey = null;
         setFlashEnabled(false);
-        setStatus('compile', 'warn', 'OS source changed — recompile needed');
+        setStatus('compile', 'warn', 'OS source changed, recompile needed');
         updateCompileButton();
       }
       _flashTargetPort = null;
@@ -3562,7 +3562,7 @@ async function startDfuWaitModal(isRetry = false, autoFlash = true, justInstalle
   setBarMode('success');
 
   if (autoFlash && compileSuccess) {
-    appendModalLog('Firmware ready — flashing now...', false);
+    appendModalLog('Firmware ready. Flashing now...', false);
     doFlashDFU();
   } else {
     appendModalLog('', false);
@@ -3968,12 +3968,12 @@ function onOsVersionChange() {
     _currentBuildDir = null;
     _currentBuildKey = null;
     setFlashEnabled(false);
-    setStatus('compile', 'warn', 'OS version changed — recompile needed');
+    setStatus('compile', 'warn', 'OS version changed, recompile needed');
   }
   cacheCheckPending = true;
   updateCompileButton();
   applyOSVersionSignal();
-  checkCacheForConfig('OS version changed — recompile needed');
+  checkCacheForConfig('OS version changed, recompile needed');
   // Drop the previously-loaded ArgumentName slot map so the next lazy load
   // (when the user opens Advanced) pulls the new version's enum. Don't refetch
   // here — the enum isn't needed unless the user actually opens Advanced or
@@ -3998,14 +3998,14 @@ window.onOsVersionChange        = onOsVersionChange;
 // claiming a valid build (nothing to re-validate).
 window.recheckOnConfigReturn = () => {
   if (!compileSuccess) return;
-  checkCacheForConfig('Source changed — recompile needed');
+  checkCacheForConfig('Source changed, recompile needed');
 };
 window.resetCompileState        = () => {
   compileSuccess = false;
   _currentBuildDir = null;
   _currentBuildKey = null;
   setFlashEnabled(false);
-  setStatus('compile', 'warn', 'Cache cleared — recompile needed');
+  setStatus('compile', 'warn', 'Cache cleared, recompile needed');
   updateCompileButton();
 };
 // Used by `+ New` / Open to scrub stale compile + flash status that belonged
@@ -4101,9 +4101,9 @@ window.setSelectedUsb      = (usb) => {
 // full ProffieOS compile, so a multi-level sweep takes several minutes; the
 // Abort button stops it after the current level.
 window.jmtBench = async (optList = ['os', 'o2']) => {
-  if (!selectedFqbn) { console.warn('[jmtBench] No board selected — pick a board first.'); return; }
+  if (!selectedFqbn) { console.warn('[jmtBench] No board selected. Pick a board first.'); return; }
   const content = window.getEditorContent();
-  console.log(`[jmtBench] Sweeping opt=[${optList.join(', ')}] on ${selectedFqbn}. ${optList.length} full compile(s) — this takes a while...`);
+  console.log(`[jmtBench] Sweeping opt=[${optList.join(', ')}] on ${selectedFqbn}. ${optList.length} full compile(s), this takes a while...`);
   const res = await window.electronAPI.benchCompile(content, selectedFqbn, { usb: selectedUsb }, optList);
   const rows = (res.runs || []).map(r => ({
     opt: r.opt,
@@ -4129,11 +4129,11 @@ window.jmtBench = async (optList = ['os', 'o2']) => {
 // fits flash. Two full compiles, so it takes a while. From the DevTools console:
 //   await jmtBenchLto()
 window.jmtBenchLto = async () => {
-  if (!selectedFqbn) { console.warn('[jmtBenchLto] No board selected — pick a board first.'); return; }
+  if (!selectedFqbn) { console.warn('[jmtBenchLto] No board selected. Pick a board first.'); return; }
   const content = window.getEditorContent();
   const runs = [];
   for (const useLto of [true, false]) {
-    console.log(`[jmtBenchLto] compiling with LTO ${useLto ? 'ON' : 'OFF'} — full compile, hang tight...`);
+    console.log(`[jmtBenchLto] compiling with LTO ${useLto ? 'ON' : 'OFF'}, full compile, hang tight...`);
     const r = await window.electronAPI.compile(content, selectedFqbn, { usb: selectedUsb, bench: true, lto: useLto });
     const flashMax = r.flashMax || 507904;
     runs.push({
@@ -4162,8 +4162,8 @@ window.jmtBenchLto = async () => {
 // recompiles against the current ProffieOS version. From the DevTools console:
 //   await jmtNoLto()
 window.jmtNoLto = async () => {
-  if (!selectedFqbn) { console.warn('[jmtNoLto] No board selected — pick a board first.'); return; }
-  console.log('[jmtNoLto] compiling with LTO OFF — full compile, hang tight...');
+  if (!selectedFqbn) { console.warn('[jmtNoLto] No board selected. Pick a board first.'); return; }
+  console.log('[jmtNoLto] compiling with LTO OFF, full compile, hang tight...');
   const r = await window.electronAPI.compile(window.getEditorContent(), selectedFqbn, { usb: selectedUsb, bench: true, lto: false });
   const flashMax = r.flashMax || 507904;
   const out = {
