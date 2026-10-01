@@ -271,8 +271,11 @@ function _vpRenderDetail(v) {
       <!-- Duplicate / Export / Rename / Delete all act on the version AS A RECORD:
            copy it, move it, name it, remove it. Import Prop reaches INSIDE it and
            adds a file, which is a different kind of act, and mid-row it read as a
-           peer of Rename. The divider is the same toolbar-divider element the Config
-           Manager toolbar uses between its own groups. [B-446]
+           peer of Rename. The divider is the ui-divider element the Config Manager
+           toolbar uses between its own groups. [B-446]
+           (It said toolbar-divider until 2026-09-30: that was a second class doing
+           the same job, and [B-448] migrated every site onto ui-divider and deleted
+           it. test/divider-convention.test.js now fails if either comes back.)
            It does NOT belong in the right-hand cluster despite being the other
            handler that writes into a version tree: that group is scoped to JMT
            add-ons, with its own version label and Learn more, and Import Prop is not
@@ -1091,7 +1094,7 @@ async function _vpLoadTree(versionName, subPath, container, depth) {
       if (_vpAddedPropsFor(versionName).includes(entry.name)
           && window._isLinkablePropPath?.(filePath)) {
         row.querySelector('.vp-tree-name').style.color = 'var(--jmt-blue)';
-        row.title = `${entry.name} — added by you. Click to view.`;
+        row.title = `${entry.name}, added by you. Click to view.`;
       }
       row.addEventListener('click', () => _vpOpenFile(versionName, filePath, entry.name));
       _vpAttachPropCtxMenu(row, filePath, entry.name, versionName);

@@ -17,6 +17,7 @@
   "build": {
     "appId": "com.jmt.proffieos-editor",
     "productName": "JMT-Studio",
+    "copyright": "Copyright 2026 Ryan Taylor. All rights reserved.",
     "npmRebuild": true,
     "directories": {
       "output": "dist"

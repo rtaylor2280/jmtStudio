@@ -86,7 +86,14 @@ const CONTRACT = {
       // as a deliberate contract edit, which is the whole point of declaring these.
       'exported',
       'count', 'totalBytes', 'fileCount',
-      'tooBig', 'slowWrite',
+      // ⚠️ THE THREE PREFLIGHT REFUSALS TRAVEL TOGETHER. main.js returns `{ ok:false, unhealthy }`,
+      // `{ ok:false, tooBig }` and `{ ok:false, slowWrite }` from three consecutive lines in this
+      // handler, and only two of them were declared - so this check went red 2026-09-30 pointing at
+      // a consumer that was correct all along. ⭐ Verified the right way round before editing: the
+      // named handler (`sources:exportManyToDownloads`) genuinely returns `unhealthy`. A stale
+      // contract and a real undeclared read look identical from here, and the difference is one
+      // grep of the handler body - so always confirm which side moved. [B-441]
+      'unhealthy', 'tooBig', 'slowWrite',
       'wroteCount', 'rolledBack', 'partialRemoved', 'leftovers',
       'refusedForSpace', 'blockedDelete',
     ],

@@ -76,21 +76,58 @@ ok('preload bridges it', /preflightExportDest:/.test(pre));
 //
 // ⭐ CAUSE: the doors call `if (!pf.proceed) return;` and do NOT hide first, so the guarantee
 // has to live in the preflight. Every path that sets `proceed:false` drops the bar before
-// showing its dialog. ⚠️ If a new dialog path is added here without `dropBar()`, this fails.
+// showing its dialog. ⚠️ If a new dialog path is added here with neither form below, this fails.
+//
+// ⚠️⚠️ THERE ARE TWO WAYS TO DROP IT, AND COUNTING ONLY THE OBVIOUS ONE MADE THIS GO RED ON A
+// CORRECT CODEBASE (2026-09-30). The third refusal - the unhealthy-destination one - does NOT
+// call `dropBar()`. It HANDS THE FUNCTION OVER as `closePrevious: dropBar`, because that dialog
+// awaits a naming lookup before it can show and closing here would leave the screen bare for the
+// length of it; the successor owns the close (`local/ui-conventions.md`, dialogs and transitions).
+// Verified before widening rather than after: `_sfRefuseUnhealthyDestination` really does invoke
+// `closePrevious()` on entry, so the bar is genuinely dropped on all three paths.
+// ⭐ The lesson worth keeping is not about dividers or dialogs: this check asserted a literal CALL
+// SHAPE for a guarantee that has two legitimate shapes, so the codebase growing a better one read
+// as a regression. Assert the guarantee, not the spelling.
 {
   const i = H.indexOf('async function _sfPreflightDestination');
   const j = H.indexOf('window._sfPreflightDestination', i);
   const fn = (i > 0 && j > i) ? H.slice(i, j) : '';
   ok('the preflight can drop a door\'s bar before a dialog', /const dropBar = \(\) =>/.test(fn));
   const refusals = (fn.match(/out\.proceed = false/g) || []).length;
-  const drops    = (fn.match(/dropBar\(\);/g) || []).length;
-  ok(`every proceed:false path drops the bar first (${refusals} refusals, ${drops} drops)`,
+  const direct   = (fn.match(/dropBar\(\);/g) || []).length;
+  const handover = (fn.match(/closePrevious:\s*dropBar/g) || []).length;
+  const drops    = direct + handover;
+  ok(`every proceed:false path drops the bar first (${refusals} refusals, ${drops} drops`
+     + ` = ${direct} direct + ${handover} handed to the successor)`,
      drops >= refusals && refusals > 0,
      'a door that returns on !proceed never hides the modal itself - if this helper does not, '
      + 'the modal is left on screen owned by a function that has already exited');
   ok('⚠️ and it only hides a modal that is actually up',
      /classList\.contains\('active'\)/.test(fn),
      'hiding unconditionally would close a surface this call never raised');
+
+  // ⚠️⚠️ THE CONTROL, OWED BECAUSE THE CHECK ABOVE WAS JUST WIDENED (2026-09-30). Accepting a
+  // second drop shape makes a passing count easier to reach, and a check loosened to stop a false
+  // alarm is exactly the kind that quietly stops failing at all. So prove the failure case is
+  // still reachable: an added refusal path with neither drop shape must NOT satisfy it.
+  const count = (src) => {
+    const r = (src.match(/out\.proceed = false/g) || []).length;
+    const d = (src.match(/dropBar\(\);/g) || []).length
+            + (src.match(/closePrevious:\s*dropBar/g) || []).length;
+    return { r, d };
+  };
+  {
+    const mutant = fn + '\n  if (p.somethingNew) { out.proceed = false; return out; }\n';
+    const m = count(mutant);
+    ok('⚠️⚠️ a NEW refusal path that drops nothing IS caught', !(m.d >= m.r),
+       `${m.r} refusals vs ${m.d} drops must not pass; if it does, this check is decoration`);
+  }
+  {
+    const fixed = fn + '\n  if (p.somethingNew) { dropBar(); out.proceed = false; return out; }\n';
+    const m = count(fixed);
+    ok('and the same path WITH a drop passes', m.d >= m.r && m.r > 0,
+       'a check that cries wolf on correct code is a check that gets deleted');
+  }
 }
 
 ok('the old refuse+warn pair is gone from every door',

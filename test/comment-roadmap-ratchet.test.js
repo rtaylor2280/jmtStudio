@@ -29,6 +29,35 @@ const PATTERN = /(\bTODO\b|\bFIXME\b|⏭|\bwhen (?:it|that|this|[0-9][0-9a-z.]*)
 // Frozen 2026-09-25. Lower it when real ones are removed; never raise it.
 const BASELINE = 11;
 
+// ⚠️⚠️ WHICH SITES, not just how many - so a failure can name the one that is actually NEW.
+// The report used to be `hits.slice(BASELINE)`: everything past the eleventh in directory-walk
+// order, which has nothing to do with which one was added. On 2026-10-01 it blamed
+// `toolchain.js:654` for a line added in `renderer/index.html`, simply because index.html walks
+// later. A check that fails loudly and points at the wrong file costs more than one that only
+// says the number moved - the first thing it buys is a wasted search.
+//
+// ⚠️ MEASURED, NOT REMEMBERED. The first draft of this list was written from memory and got
+// seven of eleven wrong: it named cacheManager.js, versionsPanel.js and preflight-checks.js,
+// which have none, and missed compileErrors.js, sdCardDetect.js and four test files entirely.
+// Regenerate it by running the same walk rather than by editing it by hand.
+//
+// ⚠️ Keyed on FILE + WORD and counted, not on line numbers. Lines shift constantly; a count per
+// key survives that, and `filter-chip-grouping.test.js` genuinely holds two `⏭` so a plain Set
+// would silently merge them and hide the next one.
+const FROZEN = new Map(Object.entries({
+  'compileErrors.js|when that lands':             1,
+  'main.js|⏭':                                    1,
+  'renderer/index.html|⏭':                        1,
+  'renderer/index.html|will be added':            1,
+  'sdCardDetect.js|todo':                         1,
+  'test/export-runner-ratchet.test.js|todo':      1,
+  'test/export-runner-ratchet.test.js|⏭':         1,
+  'test/filter-chip-grouping.test.js|⏭':          2,
+  'test/mount-sd-comment-on-leave.test.js|⏭':     1,
+  'toolchain.js|when 4.7 lands':                  1,
+}));
+const keyOf = h => `${h.file}|${h.word.toLowerCase()}`;
+
 function walk(dir, out) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
     if (e.isDirectory()) {
@@ -63,12 +92,25 @@ const ok = (name, cond, why) => {
   console.log(`  ${cond ? 'ok  ' : 'FAIL'} ${name}` + (cond || !why ? '' : `\n       ${why}`));
 };
 
+// Everything beyond what the frozen multiset accounts for. A file+word that was already here
+// twice and is now here three times reports the third.
+const seen = new Map();
+const added = [];
+for (const h of hits) {
+  const k = keyOf(h);
+  const n = (seen.get(k) || 0) + 1;
+  seen.set(k, n);
+  if (n > (FROZEN.get(k) || 0)) added.push(h);
+}
+
 ok(`roadmap language in comments has not grown (${hits.length} of ${BASELINE})`,
    hits.length <= BASELINE,
    'a comment that describes work not yet done is wrong the day it ships and nobody goes back '
    + 'to fix it. Say what the code DOES, and why it is shaped that way if a future reader would '
    + 'otherwise undo it. Park the plan where plans live.\n       New: '
-   + hits.slice(BASELINE).map(h => `${h.file}:${h.line} "${h.word}"`).join(', '));
+   + (added.length
+       ? added.map(h => `${h.file}:${h.line} "${h.word}"`).join(', ')
+       : '(count grew but every site matches the frozen set - regenerate FROZEN)'));
 
 if (hits.length < BASELINE) {
   console.log(`  note  down to ${hits.length} - lower BASELINE in this file to hold the gain`);

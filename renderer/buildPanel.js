@@ -4040,6 +4040,12 @@ window.resetBuildStatusForFileLoad = () => {
   updateCompileButton();
 };
 window.getToolchainReady        = () => toolchainReady;
+// [B-229] SD Export asks before putting a config on a card that has never been built.
+// ⚠️ A GETTER, NOT THE VALUE. `compileSuccess` is reassigned in a dozen places in this file;
+// exporting it once would freeze whatever it happened to be at load. It means "a build exists
+// for the content currently in the editor" — set by a successful compile AND by a cache hit,
+// and cleared the moment the content changes — which is exactly the question being asked.
+window.getCompileSuccess        = () => compileSuccess;
 window.resetToolchainStatus     = () => {
   toolchainReady = false;
   // Same single-dominant-signal pattern as the toolchain init flow: red dot,

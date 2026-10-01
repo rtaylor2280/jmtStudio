@@ -424,13 +424,15 @@
      not a nicety: the version card's action row carries a two-line JMT cluster at
      its right end, and a stretched divider there rendered against THAT height rather
      than the buttons', reading as a heavy full-height rule.
-     ⚠️ Use `.ui-divider` for anything new. `.toolbar-divider` below is the older
-     stretch form, kept because its row is a single line of uniform-height buttons
-     where stretch and fixed look identical; it has 8 live call sites and changing
-     them all during unrelated work would be gratuitous. It becomes a latent defect
-     the day that row can contain something taller. */
+     ⚠️ THIS IS THE ONLY DIVIDER CLASS. Two older ones existed - `.toolbar-divider`
+     (stretch, Config Manager toolbar) and `.sf-toolbar-divider` (fixed 18px but on
+     the weaker border colour, Sound Fonts toolbar). Both were the same thing under
+     different names, which is exactly why nobody could tell there was a convention
+     to follow; a third was nearly added before the duplication was noticed. Migrated
+     and DELETED 2026-09-30 [B-448], so reaching for the wrong one is now a broken
+     build rather than a style that quietly drifts. Asserted by
+     test/divider-convention.test.js. */
   .ui-divider { width: 1px; height: 18px; background: var(--c-border-strong); margin: 0 4px; flex: 0 0 auto; align-self: center; }
-  .toolbar-divider { width: 1px; background: var(--c-border-strong); align-self: stretch; margin: 2px 2px; flex-shrink: 0; }
   #btn-compare:disabled { opacity: 0.35; cursor: not-allowed; pointer-events: none; }
   #btn-compare.active { background: #1a3030; color: #4cf; border-color: #2a6060; }
   #btn-compare.active:hover { background: #1f3838; }
@@ -860,6 +862,15 @@
   .sd-rpt-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; flex-shrink: 0; }
   .sd-act-btn { font-size: 0.8rem; padding: 6px 14px; }
   .sd-rpt-sub { font-size: 0.79rem; color: var(--c-text-sub); }
+  /* ── DISCONNECTED, after the card name once it has been ejected ── [B-424, 2026-09-30]
+     ⭐ GEOMETRY COPIED FROM `.sf-card-new-badge`, NOT INVENTED. That is the house "small uppercase
+     pill after a name" and it is already on screen in the Sound Fonts grid, so a second set of
+     metrics would read as a different kind of thing. Only the colour differs: muted rather than
+     green, because this badge reports an ABSENCE and every coloured badge in this app reports a
+     state the thing currently has. */
+  .sd-disconnected-badge { font-size: 0.6rem; font-weight: 700; letter-spacing: .06em;
+                           color: var(--c-text-dim); border: 1px solid var(--c-border-faint);
+                           border-radius: 3px; padding: 0 4px; margin-left: 6px; }
   .sd-rpt-scroll { flex: 1; min-height: 0; overflow-y: auto; }
   .sd-rpt-card { text-align: left; padding: 11px 8px; border-top: 1px solid var(--c-border); cursor: pointer; border-radius: 4px; }
   .sd-rpt-card:hover { background: var(--c-bg-raised); }
@@ -1699,6 +1710,22 @@
     padding: 24px 28px;
     max-width: 380px;
     width: 90%;
+    /* ⚠️ THIS ONE LINE IS LOAD-BEARING AND IT WAS MISSING FOR A LONG TIME.
+       `.modal-btn-close` is `position: absolute; top: 12px; right: 14px`. With no positioned
+       ancestor it resolves against `.modal-overlay`, which is `position: fixed; inset: 0` — so
+       the dialog's own ✕ was drawn in the top-right corner of the SCREEN, over the title bar,
+       where it reads as a window control nobody would click to answer a dialog. 10 of the 14
+       dialogs that carry a ✕ were in that state; the 4 that looked right had each quietly
+       declared `position: relative` on their own `.modal` (doc viewer, library picker, audio,
+       reorganize). Putting it on the base is what stops the next dialog from forgetting.
+       ⭐ Found 2026-09-30 by his stray click on New Config: "don't have a way to get out of
+       this other than to proceed." There was a way out. It was 700px away.
+       Blast radius measured, not assumed: every `position:absolute` class used inside any modal
+       was intersected against the markup, and `.modal-btn-close` is the only one whose
+       containing block changes — the rest (progress bars, input clear/paste, tag dropdowns,
+       toggle track, audio playhead, sidecar resizer) all sit in their own relative wrapper.
+       `test/modal-close-anchor.test.js` fails if this is removed. */
+    position: relative;
   }
   .modal h2 { font-size: 0.95rem; color: var(--c-text-bright); margin-bottom: 8px; }
   .modal p  { font-size: 0.82rem; color: var(--c-text-sub); margin-bottom: 20px; line-height: 1.5; text-wrap: balance; }
@@ -4049,7 +4076,6 @@
                    cursor: pointer; padding: 5px 8px 5px 12px; font-size: 0.8rem; font-weight: 600;
                    white-space: nowrap; }
   .sf-export-btn:hover { color: var(--c-text-bright); }
-  .sf-toolbar-divider { width: 1px; height: 18px; margin: 0 2px; background: var(--c-border); flex: 0 0 auto; }
   #btn-sf-new-filter:hover { color: var(--jmt-green); }
   #btn-sf-new-filter.active { color: var(--jmt-green); border-color: rgba(63,157,82,0.5); background: rgba(63,157,82,0.10); }
   #btn-sf-new-filter #sf-new-count { background: var(--jmt-green); }
@@ -4885,7 +4911,15 @@
         <button id="btn-redo" class="btn-neutral js-config-only" title="Redo (Ctrl+Y)">&#8635;</button>
         <button class="diff-toggle js-config-only" id="diff-toggle-label">&#916; Show Changes</button>
         <button class="diff-toggle js-config-only" id="btn-compare" disabled>&#8644; Compare File</button>
-        <div class="toolbar-divider"></div>
+        <!-- ⚠️ `js-config-only` ON THE DIVIDER TOO. [B-448] Every control to its LEFT - undo, redo,
+             Show Changes, Compare File - carries that class, so with no config open they all vanish
+             and this was left sitting at the toolbar's left edge separating nothing from Favorites.
+             ⭐ A divider is not a control; it is a statement about the two groups either side of it,
+             so its visibility has to follow theirs. `body.no-config .js-config-only { display: none
+             !important }` is a plain CSS rule already applied to <div> elsewhere, so no JS needed.
+             ⚠️ The migration in [B-448] moved seven of these and never asked WHEN each should show.
+             Moving a thing is not the same as understanding it. -->
+        <div class="ui-divider js-config-only"></div>
         <div class="fav-wrap">
           <button id="btn-fav">Favorites &#9662;</button>
           <div id="fav-dropdown">
@@ -4898,7 +4932,7 @@
         <button id="btn-save"     class="btn-green js-config-only" style="display:none">&#8595; Save</button>
         <button id="btn-saveas"   class="btn-green js-config-only" style="display:none">&#8595; Save As</button>
         <button id="btn-download" class="btn-green" style="display:none">&#8595; Download</button>
-        <div class="toolbar-divider" id="divider-styles-ctrl" style="display:none"></div>
+        <div class="ui-divider" id="divider-styles-ctrl" style="display:none"></div>
         <button id="btn-styles-create" class="btn-blue"  style="display:none" title="Create or import a Style Library">&#43; Create Style Library</button>
         <button id="btn-styles-link"   class="btn-blue"  style="display:none" title='Adds #include "my_styles.h" to your config so ProffieOS can use your saved styles'>&#128279; Link Style Library</button>
         <!-- Label and title are set at runtime by _updateJmtLinkBtn: this slot is
@@ -4944,7 +4978,7 @@
           </label>
         </span>
         <button id="btn-sf-bulk-delete" class="btn-red" style="display:none" title="Delete the selected fonts">Delete</button>
-        <div class="toolbar-divider"></div>
+        <div class="ui-divider"></div>
         <div class="styles-tag-filter-wrap">
           <button id="btn-sf-backup-menu" class="btn-neutral" title="Library backup">Backup &#9660;</button>
           <div id="sf-backup-dropdown" class="styles-tag-dropdown" style="display:none;min-width:130px">
@@ -4956,22 +4990,22 @@
             </button>
           </div>
         </div>
-        <div class="toolbar-divider"></div>
+        <div class="ui-divider"></div>
         <button id="btn-sf-create-shared-tracks" class="btn-blue" style="display:none" title="Create a shared tracks folder. Maps to /tracks/ at the SD card root, the universal track location ProffieOS scans for all presets.">&#43; Create Shared Tracks Folder</button>
         <button id="btn-sf-import-toolbar" class="btn-blue" style="display:none" title="Import a sound font into your library. Bulk-import many at once is offered inside.">&#43; Import Sound Font</button>
       </div>
       <div class="tab-btns" id="tab-btns-styles">
         <button id="btn-styles-undo"    class="btn-neutral" title="Undo (Ctrl+Z)" style="display:none">&#8634;</button>
         <button id="btn-styles-redo"    class="btn-neutral" title="Redo (Ctrl+Y)" style="display:none">&#8635;</button>
-        <div class="toolbar-divider" id="toolbar-divider-undoredo" style="display:none"></div>
+        <div class="ui-divider" id="divider-undoredo" style="display:none"></div>
         <button id="btn-styles-save"    class="btn-green"   disabled title="Save Style Library">&#8595; Save</button>
         <button id="btn-styles-discard" class="btn-red"     disabled title="Discard all unsaved changes to the Style Library">&#8617; Discard</button>
         <button id="btn-styles-delete"  class="btn-red"     title="Remove Style Library from JMT Studio">&#128465; Delete</button>
         <button id="btn-styles-append"  class="btn-blue"    title="Append another file to the current Style Library">&#8853; Append</button>
         <button id="btn-styles-export"  class="btn-neutral" title="Export a copy">&#8599; Export</button>
-        <div class="toolbar-divider"></div>
+        <div class="ui-divider"></div>
         <button id="btn-styles-tab-link" class="btn-blue" disabled title="Open a config file to link the Style Library">&#128279; Link Style Library</button>
-        <div class="toolbar-divider"></div>
+        <div class="ui-divider"></div>
         <button id="btn-styles-collapse" class="btn-neutral" title="Condense: rewrites every style to a single line. Comments are preserved as /* */ blocks. File becomes smaller and easier to diff." style="display:none">&#8644; Condense</button>
         <button id="btn-styles-expand"   class="btn-neutral" title="Expand: rewrites every style to indented multi-line for readability. Comments are preserved." style="display:none">&#8645; Expand</button>
         <div class="styles-view-toggle">
@@ -5113,7 +5147,7 @@
               <div id="sf-sort-dropdown-list"></div>
             </div>
           </div>
-          <div class="sf-toolbar-divider"></div>
+          <div class="ui-divider"></div>
           <div class="styles-tag-filter-wrap">
             <button id="btn-sf-tag-filter" class="styles-tag-filter-btn" title="Filter by tag">
               <span class="styles-tag-filter-icon">&#9662;</span> Tags<span id="sf-tag-filter-badge" class="styles-tag-filter-badge" style="display:none">0</span>
@@ -5662,7 +5696,13 @@
 <!-- ── Add Style modal ── -->
 <div class="modal-overlay" id="modal-add-style">
   <div class="modal" style="width:700px;max-width:96vw;max-height:min(92vh,680px);display:flex;flex-direction:column;padding-bottom:16px">
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-shrink:0">
+    <!-- ⚠️ `padding-right` CLEARS THE ✕, which is `position:absolute` and so is NOT in this flex
+         row even though it is written inside it. [B-449] Before the base `.modal` gained
+         `position: relative` the ✕ anchored to the viewport and overlapped nothing; the moment it
+         came home it landed on top of Paste & Parse. ⭐ That is the predicted cost of the fix - ten
+         ✕ buttons reappeared over layouts built while they were parked off-screen - and this was
+         the first one found. 40px = the 14px offset plus the button's own ~26px box. -->
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-shrink:0;padding-right:40px">
       <h2 style="margin:0;flex:1">Add Style</h2>
       <button id="btn-add-style-paste" class="btn-sm-secondary" title="Read clipboard and parse into fields">&#128203; Paste &amp; Parse</button>
       <button class="modal-btn-close" id="btn-add-style-close">&#10005;</button>
@@ -5713,7 +5753,11 @@
   <div class="modal" style="width:380px;max-width:96vw">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
       <h2 style="margin:0;flex:1">New Config</h2>
-      <button class="modal-btn-close" id="btn-new-config-close">&#10005;</button>
+      <!-- title="Cancel", not "Close" like every other ✕ in the app. On a chooser with no
+           Cancel button this ✕ IS the cancel, and it had no title at all until 2026-09-30
+           (B-449) — so hovering it answered nothing, on the one dialog where the question
+           "is this a way out, or is that a window control?" actually gets asked. -->
+      <button class="modal-btn-close" id="btn-new-config-close" title="Cancel">&#10005;</button>
     </div>
     <p style="margin:0 0 16px;font-size:0.82rem;color:var(--c-text-muted)">Start with a blank file or use the default config template (can be modified in Settings).</p>
     <div class="modal-btns" style="justify-content:stretch;gap:10px">
@@ -5728,7 +5772,10 @@
   <div class="modal" style="width:380px;max-width:96vw">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
       <h2 style="margin:0;flex:1">Create Style Library</h2>
-      <button class="modal-btn-close" id="btn-create-styles-close">&#10005;</button>
+      <!-- title="Cancel" for the same reason as New Config — see that dialog. These are the
+           only two choosers in the app with no Cancel button, so they are the only two where
+           the ✕ carries the whole job. -->
+      <button class="modal-btn-close" id="btn-create-styles-close" title="Cancel">&#10005;</button>
     </div>
     <p style="margin:0 0 16px;font-size:0.82rem;color:var(--c-text-muted)">Start with a blank library or import an existing <code>my_styles.h</code> file.</p>
     <div class="modal-btns" style="justify-content:stretch;gap:10px">
@@ -5764,6 +5811,20 @@
      files in that folder — no special-casing needed. -->
 <div class="modal-overlay" id="modal-prop-pick">
   <div class="modal">
+    <!-- ⚠️ CANCEL *AND* ✕ *AND* BACKDROP, AND THAT IS NOT AN EXCEPTION. [B-453] His framing, which
+         is the rule the rest of this was circling: *"user started a process but decided not to
+         proceed and hasn't done anything yet."* Nothing is staged here - picking a prop IS the
+         action - so every exit means the identical harmless thing and having three costs nothing.
+         ⭐ TWO SEPARATE QUESTIONS, and conflating them is what made this look inconsistent:
+           1. IS THERE A VISIBLE WAY OUT? The provision. A chooser with no Cancel must answer it
+              on the ✕, which is why New Config needed `title="Cancel"`.
+           2. IS LEAVING DESTRUCTIVE? The safety. That is what decides whether the backdrop is
+              guarded, and it is about accumulated work, not about button count.
+         Redundant exits are only a problem when they do different things or when one of them
+         destroys something. Here neither is true. Same shape as Add Style with its fields
+         untouched.
+         ⭐ `title="Cancel"` not "Close": you are declining a choice, not shutting a window. -->
+    <button class="modal-btn-close" id="modal-prop-pick-close" title="Cancel">&#10005;</button>
     <h2>Link a Prop</h2>
     <p id="modal-prop-pick-sub"></p>
     <div id="modal-prop-pick-list"></div>
@@ -5808,6 +5869,18 @@
      review (vendor metadata + candidate list with checkboxes). -->
 <div class="modal-overlay" id="modal-sf-import">
   <div class="modal sf-import-modal">
+    <!-- ⚠️ ONE DIALOG, FOUR PHASES, AND THE EXIT IS NOT THE SAME IN ALL OF THEM. [B-453]
+         In the chooser phase nothing is staged, so the footer Cancel was a row of height meaning
+         "none of these" - settled 2026-10-01: "no point in cancel on this one... by convention
+         there's nothing that should hold this up". It is hidden there and the ✕ carries it alone.
+         It returns for review, where the user has ticked which fonts to import.
+         ⚠️⚠️ THE ✕ INHERITS THE BUSY LOCK. `_sfShowPhase` deliberately DISABLES Cancel during
+         progress and creating, because those run an in-flight IPC that cannot be torn down from
+         the renderer and a click would leave a partial source or a partial entry on disk. A ✕ that
+         ignored that would be a NEW DOOR into the exact state the lock exists to prevent.
+         ⚠️ This modal has no backdrop dismissal and must not gain one: an analysis sitting in the
+         review phase is minutes of work. That refusal predates the rule and is its best precedent. -->
+    <button class="modal-btn-close" id="sf-import-close" title="Cancel">&#10005;</button>
     <h2 id="sf-import-title">Import Sound Font</h2>
 
     <div class="sf-import-phase" id="sf-import-phase-pick">
@@ -6412,14 +6485,22 @@
 
 <div class="modal-overlay" id="modal-sf-common-import-chooser">
   <div class="modal">
+    <!-- ⚠️ THE ✕ IS THE EXIT, AND THE CANCEL BUTTON IT REPLACED WAS THE INCONSISTENCY. Found
+         2026-10-01 during [B-449]'s dev test, and it is that entry's question wearing the opposite
+         shape: New Config was a chooser with a ✕ and no Cancel; this was a chooser with a Cancel
+         and no ✕. A footer button meaning "none of these", in a dialog that is three choices and
+         nothing else, spends a row of height saying what the corner already says.
+         ⭐ `title="Cancel"` rather than "Close": the hover has to answer "is this a way out of the
+         choice", not "does this shut the window".
+         ⚠️ This dialog now falls into the class `test/modal-close-anchor.test.js` guards - two or
+         more actions with no Cancel and no Close in the footer - so the title, the backdrop and
+         Escape are all asserted on it. The convention is enforced rather than remembered. -->
+    <button class="modal-btn-close" id="sf-common-import-close" title="Cancel">&#10005;</button>
     <h2>Import Common Folder</h2>
     <div class="sf-import-pick-row">
       <button class="modal-btn-primary" id="sf-common-import-zip">Pick zip file…</button>
       <button class="modal-btn-primary" id="sf-common-import-folder">Pick folder…</button>
       <button class="modal-btn-primary" id="sf-common-import-voicepack">Download voicepack…</button>
-    </div>
-    <div class="modal-btns" style="margin-top: 16px">
-      <button class="modal-btn-cancel" id="sf-common-import-cancel">Cancel</button>
     </div>
   </div>
 </div>
@@ -6903,6 +6984,27 @@
         <input type="checkbox" id="sf-bulk-prog-auto">
         <span>Continue to quick import without review</span>
       </label>
+      <!-- ⭐⭐ EJECT WHEN COMPLETE, for people importing FROM a card. [B-424]
+           His ask: "add the eject option to this screen and to the import finish summary as well
+           as the eject when complete." Eject existed only on the WRITE side - the checkbox during
+           an export, the button on an export summary, the toast action. Someone who came to READ a
+           card is finished with it in exactly the same way and had nowhere to say so.
+           ⚠️ IT SHARES THE LEFT SLOT WITH THE CHECKBOX ABOVE AND THAT IS SAFE BY CONSTRUCTION,
+           not by luck: `margin-right:auto` belongs to whichever of the two is showing, and they are
+           driven from `showPhase` on conditions that cannot both hold - the auto-import offer is
+           analyze-only (`progress && !runInFlight`), this one is run-only (`progress &&
+           runInFlight`). If a third left-hand control is ever added here, that reasoning has to be
+           re-checked rather than assumed.
+           ⚠️ REMOVABLE MEDIA ONLY, and the gate is elsewhere: `showPhase` also requires
+           `ejectOffer.available`, which is set only when the scanned root reports
+           `removable === true`. `null` means "cannot tell", and offering to eject something that
+           might be an internal disk is worse than not offering - the import root is reachable via
+           "Browse a folder or drive", so it is genuinely not always a card. -->
+      <label class="sf-bulk-explain-auto" id="sf-bulk-import-eject-wrap"
+             style="display:none; margin-right:auto;">
+        <input type="checkbox" id="sf-bulk-import-eject">
+        <span>Eject when finished</span>
+      </label>
       <button class="modal-btn-cancel" id="sf-bulk-import-cancel-btn">Cancel</button>
       <button class="modal-btn-cancel" id="sf-bulk-guided-back-btn" style="display:none">&#8249; Back</button>
       <button class="modal-btn-secondary" id="sf-bulk-import-start-btn" style="display:none">Quick import</button>
@@ -7239,13 +7341,33 @@
       </label>
     </div>
 
-    <!-- Hidden in lockstep with the parent's visibility (value preserved). -->
-    <div class="settings-item" id="setting-sf-dupcheck-item">
-      <span class="settings-item-label">
-        Detect duplicate sounds in library picker <span style="color:var(--c-text-dim);font-weight:400">(compares file contents to flag sounds included; usually adds less than a second per font)</span>
-      </span>
+    <!-- ⚠️ "Detect duplicate sounds in library picker" WAS A ROW HERE AND WAS REMOVED 2026-10-01
+         [B-450]. The feature is unchanged and always on; only the control is gone. Three and a
+         half months of daily use produced no perceived slowness and no occasion to turn it off,
+         so the row was spending permanent height to offer a choice nobody had a reason to make -
+         and the one person who had it also could not say what it did without reading the source.
+         ⭐ THE DIAL IS STILL THERE AND WAS KEPT ON PURPOSE: `sfDupCheckEnabled` is still read from
+         the store below, still defaults ON, and still gates every hashing path in the picker. Set
+         it to false in prefs.json and the feature switches off exactly as it always did. Removing
+         a SETTING is not the same as removing the ABILITY to set it, and this removed the first. -->
+
+    <!-- [B-229] Named after the BUTTON, deliberately. "SD Export" is what the control is called
+         in the Sound Fonts toolbar, and the reason for that name is the reason this setting
+         can be worded this narrowly: "we labeled it that because it's supposed to indicate that
+         this isn't about just making backups or moving things around. It is about creating an
+         SD card." A more generic wording would promise the behaviour on the other twelve export
+         doors, which is exactly what it does not do. -->
+    <!-- ⚠️ THIS ROW SHIPPED WITH INLINE HELP ON 2026-09-30 AND THAT WAS COPYING THE ONE ROW THE
+         conventions file names as its outstanding exception. Reusing a pattern without checking
+         whether it IS the pattern is the most repeated mistake in this project, and here the
+         evidence against it was written down, in the file that documents the rule, naming the
+         exact row that got copied. Both are on the tooltip convention now. -->
+    <div class="settings-item" id="setting-sd-config-item"
+         title="Writes your config file to the card next to the fonts, plus a styles file holding
+only the styles that config uses. A readme says what they are.">
+      <span class="settings-item-label">Include the config with SD Export</span>
       <label class="settings-toggle">
-        <input type="checkbox" id="setting-sf-dupcheck-enabled" checked>
+        <input type="checkbox" id="setting-sd-include-config">
         <span class="settings-toggle-track"></span>
       </label>
     </div>
@@ -7297,7 +7419,16 @@
 
     <div class="about-footer">
       <span id="about-restriction-text">This tool is free and fully transparent, but not open for redistribution or modification of the application itself. This ensures consistency and allows me to properly support and troubleshoot it.<br><br>
-      &copy; 2026 JMT. All rights reserved.<br>
+      <!-- ⚠️ THE HOLDER IS A PERSON, THE BRAND IS THE PRODUCT, and they are not the same field.
+           This read "&copy; 2026 JMT" until 2026-10-01 - a brand, which cannot hold a right. The
+           card readme added the same claim under the owner's own name the same day, so the
+           app was about to ship two different answers to who owns it. JMT stays everywhere it
+           already is: the product name, the author field, the domain, the About heading. It just
+           is not the rights holder.
+           ⚠️ `&copy;` here and the WORD "Copyright" in the card readme, deliberately. This is HTML
+           in an app that controls its own encoding; that is a plain-text file written with no BOM
+           onto FAT32 for whatever opens on a double-click. Do not unify them. -->
+      &copy; 2026 Ryan Taylor. All rights reserved.<br>
       JMT Studio may be used for personal and commercial purposes, including managing, configuring, and building lightsabers using ProffieOS.<br>
       Unauthorized copying, modification, distribution, or resale is prohibited. Application code and assets may not be extracted or reused in other projects.<br>
       This tool does not include ProffieOS. Users must supply their own copy.<br>
@@ -8216,7 +8347,7 @@ async function _sfExportStoppedNotice({ wrote = 0, removedPartial = false, what 
   for (const p of (leftovers || [])) {
     const leaf = String(p).split(/[\\/]/).pop();
     if (/^ORIGINAL\./i.test(leaf)) {
-      lines.push(`Your original is safe at the destination under the name "${leaf}". Rename it back — do not delete it.`);
+      lines.push(`Your original is safe at the destination under the name "${leaf}". Rename it back. Do not delete it.`);
     } else if (/^DELETE\./i.test(leaf)) {
       lines.push(`A partly-written copy is left at the destination as "${leaf}". It is safe to delete.`);
     }
@@ -11110,7 +11241,7 @@ async function doSave() {
         setFilePath(hPath);  // clears notice as side-effect, we re-show below
         document.getElementById('input-filename').value = hPath.split(/[\\/]/).pop().replace(/\.h$/i, '');
         window.electronAPI.setLastFile(hPath);
-        _showTxtConvertNotice('Saved as .h — original .txt preserved');
+        _showTxtConvertNotice('Saved as .h, original .txt preserved');
       } else {
         const res = await window.electronAPI.saveFile(currentFilePath, content);
         if (!res.ok) { promptError('Save failed', res.error); return false; }
@@ -11230,14 +11361,46 @@ async function guardUnsaved(msg) {
 }
 
 // ── New ────────────────────────────────────────────────
+// Backdrop click and Escape both cancel.
+// ⚠️ THAT IS AN EXCEPTION, NOT THE DEFAULT. His convention, 2026-09-16: "the default is that
+// modals can't be dismissed by clicking outside them. we have several in app that are allowed
+// and those are fine." Dismiss-on-backdrop is something a dialog has to EARN, and this one
+// earns it on the only ground that counts — a stray dismissal costs nothing. Nothing is in
+// flight, no work exists yet to lose, the dialog is one click to reopen, and the unsaved-work
+// guard has already run and been answered BEFORE this opens. Compare the import flow, where
+// the same click could discard half an hour of analyze: there the answer was no.
+// ⭐ Asked for after a stray click on a high-sensitivity mouse, 2026-09-30, and ruled out
+// the other obvious fix himself: "I don't want to take up space with a button." Correct — a
+// third button in a two-way chooser makes the choice look three-way.
 function _promptNewConfigKind() {
   return new Promise(resolve => {
     const overlay = document.getElementById('modal-new-config');
+    const blank   = document.getElementById('btn-new-config-blank');
+    const tmpl    = document.getElementById('btn-new-config-template');
+    const close   = document.getElementById('btn-new-config-close');
     overlay.classList.add('active');
-    const cleanup = r => { overlay.classList.remove('active'); resolve(r); };
-    document.getElementById('btn-new-config-blank').onclick    = () => cleanup('blank');
-    document.getElementById('btn-new-config-template').onclick = () => cleanup('template');
-    document.getElementById('btn-new-config-close').onclick    = () => cleanup('cancel');
+    // Listeners are added, not assigned, so cleanup can remove them. The document-level
+    // keydown is the one that MUST come off — a leaked Escape handler would keep resolving
+    // a promise nobody is waiting on any more, once per dialog ever opened.
+    const cleanup = r => {
+      overlay.classList.remove('active');
+      blank.removeEventListener('click', onBlank);
+      tmpl.removeEventListener('click', onTemplate);
+      close.removeEventListener('click', onCancel);
+      overlay.removeEventListener('click', onBackdrop);
+      document.removeEventListener('keydown', onKey);
+      resolve(r);
+    };
+    const onBlank    = () => cleanup('blank');
+    const onTemplate = () => cleanup('template');
+    const onCancel   = () => cleanup('cancel');
+    const onBackdrop = e => { if (e.target === overlay) onCancel(); };
+    const onKey      = e => { if (e.key === 'Escape') { e.preventDefault(); onCancel(); } };
+    blank.addEventListener('click', onBlank);
+    tmpl.addEventListener('click', onTemplate);
+    close.addEventListener('click', onCancel);
+    overlay.addEventListener('click', onBackdrop);
+    document.addEventListener('keydown', onKey);
   });
 }
 
@@ -11405,7 +11568,7 @@ async function _pickCardOrFolder() {
     const label = result.mountPath || picked;
     const goBulk = await promptConfirm({
       title: 'This looks like a font collection',
-      message: `This folder holds ${zips} zip archives at its top level — the shape of a font collection, not a Proffie SD card. Bulk Import is built for collections: it scans with real progress and lets you choose what to import.`,
+      message: `This folder holds ${zips} zip archives at its top level, which is the shape of a font collection rather than a Proffie SD card. Bulk Import is built for collections: it scans with real progress and lets you choose what to import.`,
       confirmText: 'Open in Bulk Import',
       confirmKind: 'primary',
       cancelText: 'Browse it here anyway',
@@ -11491,7 +11654,9 @@ function makeBarPhaser(getEl, holdMs = 260) {
 }
 
 // ── SD report / file-browser overlay: drill into a card's folders and files ──
-const _sdReport = { cards: [], stack: [], card: null, textView: false, single: false, context: 'config', fontCtx: null };
+// `ejected` [B-424]: the subject card has been released, so the dialog stops claiming to be live -
+// grey dot, no stale listing, and the spent eject row is left alone instead of being rebuilt.
+const _sdReport = { cards: [], stack: [], card: null, textView: false, single: false, context: 'config', fontCtx: null, ejected: false };
 let _sdHealthJobSeq = 0; // job ids: the single-folder check is the only caller left ([B-361])
 
 // ⚠️ BIDI CONTROLS ARE STRIPPED BEFORE ESCAPING ([B-214]). A right-to-left override
@@ -11519,7 +11684,14 @@ function _sdEnsureOverlay() {
   document.body.appendChild(ov);
   // Closing the report abandons any running folder-badge walk ([B-348]) —
   // no orphaned card reads behind a closed window.
-  ov.querySelector('#sd-rpt-close').onclick = () => { ov.classList.remove('active'); };
+  // ⚠️ [B-424] The eject row is injected into this footer, which is created ONCE and outlives every
+  // card the report ever shows. Leaving it puts a live Eject button wired to a card nobody is
+  // looking at on the next open. Whatever we add to a shared surface, we take away.
+  ov.querySelector('#sd-rpt-close').onclick = () => {
+    _sdEjectSeq++;                               // abandon any in-flight lookup
+    try { if (window._sfRemoveEjectRow) window._sfRemoveEjectRow(); } catch {}
+    ov.classList.remove('active');
+  };
   ov.querySelector('#sd-rpt-back').onclick = _sdBack;
   ov.querySelector('#sd-rpt-browse').onclick = async () => {
     const p = await _pickCardOrFolder();
@@ -11527,6 +11699,7 @@ function _sdEnsureOverlay() {
   };
   ov.querySelector('#sd-rpt-others').onclick = () => {
     _sdReport.stack = []; _sdReport.card = null; _sdReport.single = false; _sdReport.textView = false;
+    _sdReport.ejected = false;   // [B-424] back to the chooser: no card is the subject any more
     _sdRenderList();
   };
   // Up-one-level navigation, same pattern as the SFL file browser: Backspace
@@ -11556,6 +11729,10 @@ function _sdEnsureOverlay() {
 }
 function _sdOpenReport(cards) {
   _sdReport.cards = cards; _sdReport.stack = []; _sdReport.card = null; _sdReport.textView = false;
+  // ⚠️ [B-424] A NEW REPORT IS NEVER BORN EJECTED. The flag suppresses the eject offer and greys
+  // the status dot, so a stale `true` from a previous card would silently disable the feature on
+  // the next one - a defect that looks like 'eject just does not appear any more'.
+  _sdReport.ejected = false;
   _sdReport.single = cards.length === 1;
   _sdReport.fontCtx = null;
   _sdEnsureOverlay(); // ensure the overlay EXISTS, but don't reveal it yet
@@ -11865,9 +12042,21 @@ function _sdLooksLikeFontRoot(entries) {
 //
 function _sdCardSummaryHtml(c, wide) {
   const v = c.verdict || {}, cls = c.classification || {}, ct = cls.counts || {};
-  const dot = v.level === 'good' ? '#3fb950' : v.level === 'bad' ? '#e5534b' : '#d29922';
+  // ⚠️ GREY WINS OVER THE VERDICT ONCE THE CARD IS EJECTED. [B-424, 2026-09-30] Settled as: *"green
+  // isn't right anymore since removed... could be grey, or some other indication of disconnected."*
+  // The verdict is still TRUE - it described a healthy card - but a live-status colour on a volume
+  // that is gone is the dialog asserting something it can no longer know. Grey is the absence of a
+  // claim, which is the accurate thing to show.
+  // ⚠️ Scoped to the card actually ejected, so the multi-card chooser is untouched.
+  const _ejected = _sdReport.ejected && _sdReport.card === c;
+  const dot = _ejected ? 'var(--c-text-dim)'
+            : v.level === 'good' ? '#3fb950' : v.level === 'bad' ? '#e5534b' : '#d29922';
   const hasContent = cls.kind !== 'empty' && cls.kind !== 'unreadable';
-  const label = _sdEsc(_sdDriveLabel(c));
+  // ⭐ His ask: *"some indicator (DISCONNECTED) or something after the name that was already
+  // there."* Appended to the LABEL rather than added at each render site, so both the browse
+  // header and the chooser row get it from one place and cannot drift apart.
+  const label = _sdEsc(_sdDriveLabel(c))
+    + (_ejected ? ` <span class="sd-disconnected-badge" title="This card has been ejected">DISCONNECTED</span>` : '');
   const countsTxt = hasContent ? `${_sdPlur(ct.fonts || 0, 'sound font')} &middot; ${_sdPlur(ct.configs || 0, 'config')} &middot; ${_sdPlur(ct.otherFiles || 0, 'other file')}` : '';
   const metaTxt = c.isFolder ? 'Folder' : `${_sdEsc(c.fileSystem || '')} &middot; ${_sdFmtGB(c.freeBytes)} free of ${_sdFmtGB(c.sizeBytes)} &middot; health: ${_sdEsc(c.health || '?')}`;
   const stats = [countsTxt, metaTxt].filter(Boolean).join(' &middot; ');
@@ -12012,6 +12201,114 @@ function _sdActionRowHtml(c) {
 function _sdActiveRoot() {
   return (_sdReport.stack[0] && _sdReport.stack[0].path) || (_sdReport.card && (_sdReport.card.mountPath || _sdReport.card.drive)) || '';
 }
+
+// ── Eject, on the card report's own footer ──────────────────────── [B-424]
+//
+// ⭐⭐ HIS PLACEMENT CALL, 2026-09-30: "It goes in the footer with other buttons but left
+// justified." That is the pattern `_sfPlaceEjectRowInButtons` already implements - first child of
+// `.modal-btns` carrying `margin-right:auto`, sitting hard left and pushing Close right, with no
+// change to the shared rule every other dialog uses. He noted we had settled this before and not
+// written it down, which is exactly why it is written here and not only in the entry.
+//
+// ⭐ WHY IT IS CARD-LEVEL AND SURVIVES DRILLING DOWN: it belongs with the other card actions,
+// which this file already argues stay visible at every browse depth because "you're just
+// exploring, the card and what you can do with it don't change". Eject is the same kind of act.
+//
+// ⚠️⚠️ `removable === true` ONLY, and this screen is precisely why the rule exists: the report is
+// reachable through "Browse a folder or drive", so its subject is genuinely not always a card.
+// `null` means "cannot tell", and offering to eject something that might be an internal disk is
+// worse than not offering. `_sfEjectContext` returns `{}` for anything that is not removable, so
+// it IS the check rather than a second opinion about it.
+//
+// ⚠️ SEQUENCED, because the lookup is async and the user can switch cards under it. A stale row is
+// an Eject button labelled for one card and wired to another - the worst possible shape for this
+// particular control. Same discipline as the `stack[last] !== cur` guards in the render.
+// ⚠️ Guarded through `window`: the eject helpers are consts inside a later IIFE and this function
+// is lexically above it, so an unguarded call is a ReferenceError. See the note at their export.
+let _sdEjectSeq = 0;
+
+// ── After the eject: the report is describing a card that is not there ────── [B-424, 2026-09-30]
+//
+// ⭐⭐ HIS REPORT, and all three parts were right. After ejecting from this dialog: the file list
+// still showed all 34 folders; clicking one gave "Couldn't read this folder: UNKNOWN: unknown
+// error, scandir 'I:\Darth_Maul'"; and that navigation REBUILT the eject row, so a spent control
+// came back live for a card that was gone. *"not harmful, but clunky."* And on the header:
+// *"green isn't right anymore since removed... could be grey, or some other indication of
+// disconnected."*
+//
+// ⭐ THE FIX IS A STATE, NOT THREE PATCHES. One flag says the subject is gone, and the dot, the
+// body and the eject offer all read it. Refreshing the listing instead would have been worse: it
+// would re-scan a volume that is not there and paint an error where a plain sentence belongs.
+//
+// ⚠️ The header line is deliberately KEPT - *"top is fine since says what it was"*. The
+// dialog still names the card you were looking at; it just stops claiming to be live.
+function _sdMarkEjected() {
+  _sdReport.ejected = true;
+  try {
+    // ⚠️⚠️ THE HEADER IS REBUILT HERE, NOT PRESERVED, AND THE FIRST CUT GOT THAT WRONG. It wiped
+    // `#sd-rpt-body` and then repainted `.sd-rpt-summary` - but the summary is built INSIDE the
+    // body (see `_sdRenderBrowse`), so the wipe deleted the header, the verdict and the action
+    // buttons, and the repaint then queried a node it had just removed and silently did nothing.
+    // The result was a full-size modal holding one italic line. His screenshot. ⭐ The tell was
+    // available without running it: a querySelector immediately after an innerHTML assignment on
+    // the same subtree is asking about something that no longer exists.
+    //
+    // ⚠️ THE ACTION ROW IS DELIBERATELY NOT REBUILT. "Import fonts to library" on a card that has
+    // been released is an offer we cannot honour, and it sat directly under this header.
+    const body = document.getElementById('sd-rpt-body');
+    if (body) {
+      const head = _sdReport.card
+        ? `<div class="sd-rpt-summary">${_sdCardSummaryHtml(_sdReport.card, true)}</div>`
+        : '';
+      // ⚠️ IT DOES NOT REPEAT "Safe to remove." The footer status says exactly that, two inches
+      // below, and the DISCONNECTED badge and the grey dot are already on the line above - so the
+      // fourth statement of one fact was the sentence nobody needed. What this line carries that
+      // nothing else does is WHY the file area is empty.
+      body.innerHTML = head
+        + `<div style="padding:22px 8px;color:var(--c-text-sub);font-style:italic;">`
+        + `This card has been ejected.</div>`;
+    }
+  } catch (e) {
+    console.warn('[B-424] could not mark the report ejected:', e);
+  }
+}
+
+async function _sdSyncEjectRow() {
+  const seq = ++_sdEjectSeq;
+  // ⚠️ ONCE EJECTED, LEAVE THE SPENT ROW ALONE. Every render calls this, so without the guard the
+  // act of navigating re-created a live Eject button for a volume that is gone - which is exactly
+  // what a click on a folder after ejecting produces. The row is already on screen, disabled, with
+  // its status text; removing and rebuilding it is what made it look live again.
+  if (_sdReport.ejected) return;
+  try { if (window._sfRemoveEjectRow) window._sfRemoveEjectRow(); } catch {}
+  try {
+    const card = _sdReport.card;
+    // A folder picked through Browse is not a card, and the multi-card list has no single subject.
+    if (!card || card.isFolder) return;
+    const root = _sdActiveRoot();
+    if (!root || !window._sfEjectContext) return;
+    const ctx = (await window._sfEjectContext(root)) || {};
+    if (seq !== _sdEjectSeq) return;            // switched cards while we were asking
+    if (!ctx.ejectTarget) return;               // not removable, or could not be resolved
+    const btns = document.querySelector('#sd-report-overlay .modal-btns');
+    if (!btns || !window._sfEjectRowHtml) return;
+    const holder = document.createElement('div');
+    holder.innerHTML = window._sfEjectRowHtml(ctx.ejectTarget, ctx.ejectVocab);
+    const row = holder.firstElementChild;
+    if (!row) return;
+    btns.appendChild(row);                      // the placement helper moves it to the front
+    window._sfPlaceEjectRowInButtons('#sd-report-overlay .modal-btns');
+    // ⚠️ `auto: false` always. There is no checkbox on this screen and nothing here was asked to
+    // run on completion - this is someone standing in front of the report deciding to eject now.
+    // ⭐ `onEjected` is what stops this dialog describing a card that is no longer there.
+    window._sfWireEjectRow({
+      target: ctx.ejectTarget, vocab: ctx.ejectVocab, auto: false,
+      onEjected: _sdMarkEjected,
+    });
+  } catch (e) {
+    console.warn('[B-424] card report eject row did not render:', e);
+  }
+}
 async function _sdOpenConfigFromCard() {
   const root = _sdActiveRoot();
   if (!root) return;
@@ -12087,6 +12384,12 @@ async function _sdImportFontsFromCard() {
 }
 async function _sdRenderList() {
   _sdReport.textView = false;
+  // ⚠️ [B-424] NO EJECT ON THE CHOOSER. With several cards listed there is no single subject, and
+  // an Eject button in a footer shared by all of them would be a guess about which one. The call
+  // is here rather than only in the card view because this screen is also reached by going BACK
+  // from a card, where a row is already on the footer. `_sdReport.card` is null by then, so the
+  // shared sync function removes it and returns.
+  _sdSyncEjectRow();
   const cards = _sdReport.cards, n = cards.length;
   const isFolder = n === 1 && cards[0].isFolder;
   const title = isFolder ? 'Folder contents' : (n === 1 ? 'SD card found' : `Multiple SD cards found (${n})`);
@@ -12129,6 +12432,12 @@ async function _sdRenderBrowse() {
   const st = _sdReport.stack, cur = st[st.length - 1];
   const body = _sdSetView('');
   _sdShowOthers(_sdReport.cards.length > 1);
+  // ⚠️ [B-424] NOT AWAITED, so it never delays the listing - which is the one thing this render is
+  // explicitly built to keep instant at every depth (see the note just below). The row appears a
+  // moment after the files, the same way the export runner's checkbox appears a moment into a copy.
+  // It is called on EVERY render rather than once per card because the footer is shared and the
+  // subject changes underneath it; the function removes the old row before deciding on a new one.
+  _sdSyncEjectRow();
   // BROWSE NEVER READS FILE CONTENTS ([B-361]). The listing is the whole of
   // the work, so navigation is instant at every depth: no direct-file check
   // before the paint, no recursive folder badges after it, no footer status,
@@ -13230,7 +13539,7 @@ You may not:
 - use any portion of the application source code in your own projects or products
 - remove or alter any copyright, branding, or attribution
 
-This software is provided "as is", without warranty of any kind, express or implied, including but not limited to the warranties of merchantability and fitness for a particular purpose. In no event shall JMT be liable for any claim, damages, or other liability arising from the use of this software.
+This software is provided "as is", without warranty of any kind, express or implied, including but not limited to the warranties of merchantability and fitness for a particular purpose. In no event shall Ryan Taylor be liable for any claim, damages, or other liability arising from the use of this software.
 
 JMT Studio is a JMT product and is not affiliated with or endorsed by ProffieOS or its contributors.
 
@@ -13238,7 +13547,14 @@ This tool does not include ProffieOS. Users must supply their own copy.
 
 Generated configurations remain fully accessible and editable by the user.
 
-Copyright © 2026 JMT. All rights reserved.`;
+Copyright © 2026 Ryan Taylor. All rights reserved.`;
+
+// ⚠️⚠️ THE LICENCE EXISTS TWICE AND NOTHING KEEPS THE TWO IN AGREEMENT. The text above is a
+// literal in the renderer; `LICENSE.txt` at the repo root is a second copy, and it is the one
+// electron-builder ships into the installer. They were identical until 2026-10-01 only because
+// nobody had edited either. Changing the rights holder that day meant finding and editing BOTH,
+// and the second was found by grepping for how the About panel fills its licence box — not by
+// anything announcing that a second copy existed. [B-451] holds what to do about it.
 
 // Human duration for compile times. Seconds under a minute, whole minutes above — nobody needs
 // "32.4 minutes" and a false precision reads as a promise.
@@ -13791,6 +14107,60 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     reviewBtn:    document.getElementById('sf-bulk-import-review-btn'),
     guidedBackBtn: document.getElementById('sf-bulk-guided-back-btn'),
     guidedImportBtn: document.getElementById('sf-bulk-guided-import-btn'),
+    // [B-424] The eject-when-finished offer, for an import whose source is a removable card.
+    ejectWrap:    document.getElementById('sf-bulk-import-eject-wrap'),
+    ejectBox:     document.getElementById('sf-bulk-import-eject'),
+  };
+  // [B-424] Resolved once per run, asynchronously, from the scanned root. `available` gates the
+  // checkbox; `target`/`vocab` are what the summary row needs. Reset at the start of every run so
+  // one import's card never leaks into the next - same discipline as clearEject on the progress
+  // modal, where an offer inherited from a previous run is a promise nobody made.
+  let ejectOffer = { available: false, target: null, vocab: null };
+
+  // ⭐⭐ [B-424] THE EJECT ROW ON THE FINISH SUMMARY, hard left in the shared button row beside
+  // Done. Same helper, same layout and same three honest outcomes as the export summaries - the
+  // row is built by `_sfEjectRowHtml`, moved by `_sfPlaceEjectRowInButtons`, wired by
+  // `_sfWireEjectRow`. Nothing about ejecting is reimplemented here.
+  //
+  // ⚠️⚠️ IT IS A FUNCTION, NOT INLINE IN THE SUMMARY BUILDER, BECAUSE A FAST IMPORT BEAT THE
+  // LOOKUP AND THE ROW NEVER APPEARED. [found 2026-09-30, his screenshot: a two-source import that
+  // took ONE SECOND and finished with no Eject.] The removability lookup is fired without awaiting
+  // at the start of the run; the summary read `ejectOffer.available` once, at build time, got
+  // `false`, and nothing ever rebuilt it. ⭐ A slow import would have shown the row, which is the
+  // worst shape for a race - it works while you are testing it on a big card and fails on the
+  // common case.
+  // ⚠️ I had even written "the summary reads `ejectOffer` directly, so nothing is lost by staying
+  // quiet here" into the callback. That was exactly backwards, and asserting it in a comment is
+  // what stopped me checking it.
+  // ⭐ So the offer now has ONE renderer that both callers use: the summary builder calls it, and
+  // the removability lookup calls it again on a late arrival. Idempotent by construction - it
+  // removes any existing row before deciding on a new one - so calling it twice draws one button.
+  //
+  // ⚠️ `auto` comes from this dialog's OWN checkbox, never the progress modal's `wantsEject()` -
+  // reading that would be a guarantee about a surface this run never showed.
+  // ⚠️ Guarded through `window`: these are consts in a different scope, and an unguarded call here
+  // is a ReferenceError that blanks the whole summary. Same reason `_fmtSaved` guards
+  // `window._sfFormatBytes`.
+  const syncSummaryEjectRow = () => {
+    try {
+      if (window._sfRemoveEjectRow) window._sfRemoveEjectRow();
+      if (shownPhase !== 'summary') return;
+      if (!ejectOffer.available || !ejectOffer.target) return;
+      if (!window._sfEjectRowHtml || !window._sfPlaceEjectRowInButtons || !window._sfWireEjectRow) return;
+      const holder = document.createElement('div');
+      holder.innerHTML = window._sfEjectRowHtml(ejectOffer.target, ejectOffer.vocab);
+      const row = holder.firstElementChild;
+      if (!row) return;
+      els.phaseSummary?.appendChild(row);
+      window._sfPlaceEjectRowInButtons('#modal-sf-bulk-import .modal-btns');
+      window._sfWireEjectRow({
+        target: ejectOffer.target,
+        vocab:  ejectOffer.vocab,
+        auto:   !!(els.ejectBox && els.ejectBox.checked),
+      });
+    } catch (e) {
+      console.warn('[B-424] import eject row did not render:', e);
+    }
   };
   let currentPlan = null;
   let progressUnsub = null;
@@ -13892,7 +14262,14 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
   // the sibling first would have produced this in one step and with less code.
   //
   // Cancel is present in every phase and the summary has Done, so nothing is trapped.
+  // ⚠️ [B-424] WHICH PHASE IS ON SCREEN, recorded because an async arrival needs to know whether
+  // it is still relevant. The eject lookup is fired without awaiting at the start of a run and can
+  // land AFTER a fast import has already moved to the summary; re-running `showPhase('progress')`
+  // then would drag the modal backwards off the finished screen. Checking a recorded phase keeps
+  // the visibility rule in one place instead of copying its condition into the callback.
+  let shownPhase = null;
   const showPhase = (phase) => {
+    shownPhase = phase;
     if (els.phaseExplain) els.phaseExplain.style.display = phase === 'explain' ? '' : 'none';
     if (els.phaseScan)    els.phaseScan.style.display    = phase === 'scan'    ? '' : 'none';
     if (els.phaseReview)  els.phaseReview.style.display  = phase === 'review'  ? '' : 'none';
@@ -13928,6 +14305,14 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     // then there is no review left to skip, so the offer would describe a choice that is gone.
     if (els.progAutoWrap) {
       els.progAutoWrap.style.display = (phase === 'progress' && !runInFlight) ? '' : 'none';
+    }
+    // ⭐ [B-424] Driven from HERE for the reason the note above gives: the one control in this
+    // dialog that was not phase-driven from this function was the one that leaked onto a screen
+    // where it made no sense. The run-only condition is the mirror of the offer above, so the two
+    // never contend for the left slot.
+    if (els.ejectWrap) {
+      els.ejectWrap.style.display =
+        (phase === 'progress' && runInFlight && ejectOffer.available) ? '' : 'none';
     }
     // Cancel is the escape on every working phase (incl. guided, alongside Back);
     // only the summary hides it (Done takes over). On guided, Back steps to the
@@ -14004,6 +14389,20 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         if (uuids.length) window.electronAPI.bulkImportDiscardPrepared?.({ uuids });
       }
     } catch {}
+    // ⚠️⚠️ [B-424] TAKE THE EJECT ROW BACK OFF THE SHARED BUTTON BAR. It is injected into the
+    // bulk modal's `.modal-btns`, which outlives any one run, so a leftover row is a live Eject
+    // button wired to a finished import's card sitting on the next import's screen. The checkbox
+    // is cleared for the same reason: an offer inherited from a previous run is a promise nobody
+    // made. `closeModal` is the right home because it is the abandon-everything path and so also
+    // covers the X, Esc and Done, rather than living in one button's handler.
+    try { if (window._sfRemoveEjectRow) window._sfRemoveEjectRow(); } catch {}
+    ejectOffer = { available: false, target: null, vocab: null };
+    if (els.ejectBox) els.ejectBox.checked = false;
+    // ⚠️ AND IT DOES NOT HIDE THE CHECKBOX HERE, deliberately. Setting its display was a second
+    // site for the rule `showPhase` owns, and the whole modal is being hidden on the next line
+    // anyway - the next run's `showPhase` decides it from `ejectOffer`, which was just reset. A
+    // redundant assignment is how a one-place rule quietly becomes a two-place rule. Caught by
+    // test/import-eject-wiring.test.js, which counts the sites.
     els.modal?.classList.remove('active');
     const inner = els.modal?.querySelector('.sf-import-modal');
     if (inner) inner.classList.remove('wide');
@@ -16168,6 +16567,42 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     // to decide whether the quick-import offer still means anything. [B-294]
     runInFlight = true;
     showPhase('progress');
+    // ⭐⭐ [B-424] ARM THE EJECT OFFER. Reset first, unconditionally: a stale `available` from a
+    // previous run would draw the checkbox for a card that is no longer the source.
+    //
+    // ⚠️⚠️ THIS SITS *AFTER* `showPhase`, AND THAT IS NOT A STYLE CHOICE. It was written above
+    // the call first, which pushed `runInFlight = true;` and `showPhase('progress')` about 1,100
+    // characters apart and turned `test/bulk-import-explain.test.js` red - a check asserting those
+    // two are adjacent and in that order, because reversing them shows the quick-import offer for
+    // the whole run. The ORDER was never broken, only the adjacency the test uses to police it.
+    // ⭐ The test was left alone: nothing required this block to run before the screen is shown,
+    // so the wrong thing was my placement. A failing check earns a look at the code first.
+    //
+    // ⚠️ NOT AWAITED, DELIBERATELY, and the reasoning is borrowed rather than re-derived - the
+    // export runner makes the same call for the same reason. Establishing that a path is on
+    // removable media costs a device lookup, and blocking the start of an import on it, to decide
+    // whether to draw a checkbox, pays the slowest question for the least consequential answer.
+    //
+    // ⚠️ `_sfEjectContext` returns `{}` for anything that is not removable, so the `available`
+    // flag IS that check rather than a second opinion about it. ⚠️ Guarded through `window`
+    // because it is a const in a different scope - see the note at its definition.
+    ejectOffer = { available: false, target: null, vocab: null };
+    (async () => {
+      try {
+        const root = runPlan && (runPlan.rootDir || null);
+        if (!root || !window._sfEjectContext) return;
+        const ctx = (await window._sfEjectContext(root)) || {};
+        if (!ctx.ejectTarget) return;
+        ejectOffer = { available: true, target: ctx.ejectTarget, vocab: ctx.ejectVocab || null };
+        // ⭐⭐ LANDING LATE IS THE NORMAL CASE, NOT THE EDGE ONE, so both screens are repaired here
+        // rather than only the one that happens to be up when this was written. A two-source import
+        // finishes in about a second and this lookup does not; the first version only re-rendered
+        // the RUN screen, so the summary - already built with `available: false` - never grew the
+        // row at all. [found 2026-09-30 from his screenshot]
+        if (shownPhase === 'progress') showPhase('progress');   // reveals the checkbox
+        else syncSummaryEjectRow();                             // the summary is already up
+      } catch { /* no offer is the safe outcome */ }
+    })();
     // [B-295] during the run, what's at risk is the analysis of the fonts
     // that haven't LANDED yet — everything imported so far is safe, and the
     // tooltip says both halves because saying one reads as both.
@@ -16548,6 +16983,21 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     if (els.summaryElapsed) {
       els.summaryElapsed.textContent = `Took ${_fmtDur(bulkFinalElapsedSec)}.`;
     }
+    // ⭐⭐ [B-424] THE EJECT ROW, hard left in the shared button row beside Done. Same helper,
+    // same layout and same three honest outcomes as the export summaries - the row is built by
+    // `_sfEjectRowHtml`, moved into the button bar by `_sfPlaceEjectRowInButtons`, and wired by
+    // `_sfWireEjectRow`. Nothing about ejecting is reimplemented here.
+    //
+    // ⚠️ THE OLD ROW IS REMOVED FIRST. That helper puts the row inside a SHARED button bar, so a
+    // leftover from a previous run would be a live Eject button pointing at a finished import's
+    // card. Whatever we add to a shared surface, we take away.
+    // ⚠️ `auto` comes from the checkbox on the run screen, not from the progress modal's own
+    // `wantsEject()` - this dialog has its own box, and reading the export one would be a
+    // guarantee about a surface that was never shown.
+    // ⚠️ Guarded through `window`: these are consts in a different scope, and an unguarded call
+    // here is a ReferenceError that blanks the whole summary. Same reason `_fmtSaved` above
+    // guards `window._sfFormatBytes`.
+    syncSummaryEjectRow();
     if (sum.failed.length) {
       const rows = sum.failed.map(f => {
         // Show just the basename of the source path so the list is
@@ -17179,16 +17629,36 @@ let _stylesFileImported = false;
 let _stylesFilePath     = '';  // forward-slash absolute path to userData/my_styles.h
 let _stylesLinked       = false; // true when config contains #include for the library
 
+// ⚠️⚠️ THE DIVIDER FOLLOWS THE GROUP AFTER IT, AND NOTHING ELSE. [B-448]
+// It used to be computed inside `_updateStylesLinkBtn` from `btn-styles-import` and the `linked`
+// flag - neither of which is the group it precedes - so it answered a different question from the
+// one its position asks. The visible result: no divider while "Link Style Library" and "Link Prop"
+// were both sitting right there, which is what he caught.
+// ⭐ THREE INDEPENDENT FUNCTIONS set these three buttons, which is why no single one of them could
+// own the answer: `_updateStylesLinkBtn` (link), `_updateJmtLinkBtn` (jmt / prop) and the
+// styles-file probe (create). Each calls this at its end; whichever runs last is right, because
+// this reads the buttons' CURRENT state instead of re-deriving why they are hidden.
+// ⚠️ Members listed once, by id. A fourth button added to this group and not added here is a
+// divider that lies, and the only way to notice is to be looking at the toolbar in that exact state.
+const _STYLES_CTRL_GROUP = ['btn-styles-create', 'btn-styles-link', 'btn-jmt-link'];
+function _syncStylesCtrlDivider() {
+  const divider = document.getElementById('divider-styles-ctrl');
+  if (!divider) return;
+  const anyVisible = _STYLES_CTRL_GROUP.some(id => {
+    const el = document.getElementById(id);
+    return el && el.style.display !== 'none';
+  });
+  divider.style.display = anyVisible ? '' : 'none';
+}
+
 function _updateStylesLinkBtn() {
   const btn       = document.getElementById('btn-styles-link');
   const tabBtn    = document.getElementById('btn-styles-tab-link');
-  const importBtn = document.getElementById('btn-styles-import');
-  const divider   = document.getElementById('divider-styles-ctrl');
 
   if (!_stylesFileImported) {
     if (btn) btn.style.display = 'none';
-    if (importBtn && divider) divider.style.display = importBtn.style.display !== 'none' ? '' : 'none';
     if (tabBtn) { tabBtn.disabled = true; tabBtn.textContent = '\u{1F517} Link Style Library'; tabBtn.title = 'Open a config file to link the Style Library'; }
+    _syncStylesCtrlDivider();
     return;
   }
 
@@ -17204,9 +17674,7 @@ function _updateStylesLinkBtn() {
   if (btn) {
     btn.style.display = (linked || !fileIsOpen) ? 'none' : '';
   }
-  if (divider && importBtn) {
-    divider.style.display = (importBtn.style.display !== 'none' || !linked) ? '' : 'none';
-  }
+  _syncStylesCtrlDivider();
 
   // Styles tab button — stays, becomes placeholder when linked
   if (tabBtn) {
@@ -17248,6 +17716,18 @@ document.getElementById('btn-create-styles-close').addEventListener('click', () 
 document.getElementById('modal-create-styles').addEventListener('click', e => {
   if (e.target === document.getElementById('modal-create-styles'))
     document.getElementById('modal-create-styles').classList.remove('active');
+});
+// Escape cancels, matching the backdrop click that has always been here and matching New
+// Config, the only other chooser in the app with no Cancel button. Added 2026-09-30 (B-449).
+// ⚠️ These handlers are registered ONCE at load, not per-open, so this one is gated on
+// `.active` — an ungated document-level Escape would fire for a dialog that is not on screen.
+// That is also why it does not need removing: there is exactly one, for the life of the app.
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  const ov = document.getElementById('modal-create-styles');
+  if (!ov || !ov.classList.contains('active')) return;
+  e.preventDefault();
+  ov.classList.remove('active');
 });
 document.getElementById('btn-create-styles-blank').addEventListener('click', async () => {
   document.getElementById('modal-create-styles').classList.remove('active');
@@ -17617,7 +18097,15 @@ let _jmtLinkBtnMode = null;
 // would be offered — otherwise a config with no prop on a plain ProffieOS
 // version gets no affordance at all, and that is exactly the user who does not
 // know props exist.
+// ⚠️ WRAPPED SO THE DIVIDER SYNC CANNOT BE MISSED. [B-448] The inner function has five exits -
+// no file, already wrapped, JMT version, plain version, nothing to offer - and adding the call to
+// each is five chances to forget on the next edit. Same reasoning as "every exit says why": when a
+// function has many returns, the thing that must always happen goes outside it.
 function _updateJmtLinkBtn() {
+  _updateJmtLinkBtnInner();
+  _syncStylesCtrlDivider();
+}
+function _updateJmtLinkBtnInner() {
   const btn = document.getElementById('btn-jmt-link');
   if (!btn) return;
 
@@ -17913,9 +18401,26 @@ async function _openPropPicker() {
   }
 }
 
-document.getElementById('modal-prop-pick-cancel')?.addEventListener('click', () => {
-  document.getElementById('modal-prop-pick').classList.remove('active');
-});
+// ⚠️ ONE CLOSER, THREE WAYS IN. [B-453] Cancel, the ✕ and the backdrop are the same act here -
+// nothing is staged, so none of them can destroy anything - and routing them through one function
+// is what stops them drifting apart later. Escape joins them for the same reason.
+// ⚠️ The listeners are registered once at load, so the Escape handler checks `.active` rather than
+// being added and removed per open. Without that it would fire for whatever else is on screen.
+{
+  const _propPickModal = document.getElementById('modal-prop-pick');
+  const _closePropPick = () => _propPickModal?.classList.remove('active');
+  document.getElementById('modal-prop-pick-cancel')?.addEventListener('click', _closePropPick);
+  document.getElementById('modal-prop-pick-close')?.addEventListener('click', _closePropPick);
+  _propPickModal?.addEventListener('click', (e) => {
+    if (e.target === _propPickModal) _closePropPick();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && _propPickModal?.classList.contains('active')) {
+      e.preventDefault();
+      _closePropPick();
+    }
+  });
+}
 
 // ── Link Prop (from the OS Versions file tree / viewer) ─────────
 // The tree can browse any installed version, but the config is staged into the
@@ -18549,7 +19054,7 @@ function _buildStyleLibraryJmtHeader(createdDate) {
   const today = _jmtLocalDateString();
   const lines = [
     '// ============================================================',
-    '// Style Library  —  JMT Studio (jmtfoundry.com)',
+    '// Style Library  ·  JMT Studio (jmtfoundry.com)',
     `// @jmt:created     ${createdDate || today}`,
     `// @jmt:updated     ${today}`,
     '// ============================================================',
@@ -18779,7 +19284,7 @@ function _switchStylesView(mode) {
   document.getElementById('btn-styles-expand').style.display         = show;
   document.getElementById('btn-styles-undo').style.display           = show;
   document.getElementById('btn-styles-redo').style.display           = show;
-  document.getElementById('toolbar-divider-undoredo').style.display  = show;
+  document.getElementById('divider-undoredo').style.display  = show;
   if (mode === 'visual') _buildStylesVisual();
   if (showCode && _stylesEditorInstance) {
     _stylesEditorInstance.layout();
@@ -19635,6 +20140,91 @@ function _classifyStyleEntries(entries) {
   return entries;
 }
 
+// ── The style library a config actually uses, as a new file ── [B-229]
+//
+// His correction, 2026-09-30: "yes, on the styles, but not the entire thing, just the ones that
+// were used in the config, so we're creating a new one." A maker's library is their whole body
+// of work; the card that ships with one saber has no business carrying all of it.
+//
+// ⚠️⚠️ A SUBSET IS NOT A FILTER, IT IS A CLOSURE. Taking only the styles the config names
+// produces a file that does not compile the moment one of them is built on a helper: helpers are
+// entries no config ever mentions by name, referenced only from inside other styles. So the seed
+// is "named in the config" and then it pulls in anything those styles reference, repeatedly,
+// until nothing new appears. `_classifyStyleEntries` already marks helpers and records `usedBy`;
+// this walks the same relationship in the other direction, and does it transitively because a
+// helper may lean on another helper.
+//
+// ⭐ THE SEED RULE IS THE ONE ALREADY ON SCREEN, deliberately. `_buildStylesVisual` decides the
+// blue "in use" tint with `new RegExp('\\b' + name + '\\b').test(configText)`. Inventing a
+// second, cleverer rule here would mean the file could disagree with the badges the user is
+// looking at while they export — and they would be right to trust the badges.
+//
+// ⚠️ Blocks are sliced from the ORIGINAL TEXT, not re-serialised from the parse. Header
+// comments, attribution, spacing and the impl annotation survive byte-for-byte, which is the
+// whole point of shipping a style to someone else.
+function _sfBuildUsedStylesFile(fullText, configText) {
+  const text = String(fullText || '');
+  const cfg  = String(configText || '');
+  if (!text.trim() || !cfg.trim()) return null;
+
+  const entries = _classifyStyleEntries(_parseStyleEntries(text));
+  if (!entries.length) return null;
+
+  const byName = new Map(entries.map(e => [e.name, e]));
+  const keep   = new Set();
+  const queue  = [];
+  for (const e of entries) {
+    if (new RegExp(`\\b${e.name}\\b`).test(cfg)) { keep.add(e.name); queue.push(e); }
+  }
+  if (!keep.size) return null;
+
+  // Transitive pull-in. Bounded by the entry count: every pass adds at least one name or stops,
+  // and a name can only be added once.
+  while (queue.length) {
+    const cur = queue.pop();
+    const code = cur.usingCode || '';
+    for (const other of entries) {
+      if (keep.has(other.name) || other.name === cur.name) continue;
+      if (new RegExp(`\\b${other.name}\\b`).test(code)) { keep.add(other.name); queue.push(other); }
+    }
+  }
+
+  // ⚠️⚠️ BUILT BY REMOVING WHAT IS UNUSED, NOT BY COLLECTING WHAT IS USED. That is the whole
+  // difference between a file that compiles and one that does not, and the first cut got it
+  // wrong.
+  //
+  // `_parseStyleEntries` only recognises `using NAME =` at the start of a line. A library can
+  // legitimately contain things that are not entries and that entries DEPEND ON — a
+  // `template<int N> using Fade = ...` alias, a `#define`, an include pulled in halfway down.
+  // Collecting only the kept blocks silently dropped every one of them, and it looked correct
+  // because anything sitting BEFORE the first entry landed in the preamble and survived by
+  // position. Move the same helper below the first style and the exported file references a
+  // symbol that is not in it. Nobody finds out until someone tries to build it.
+  //
+  // ⭐ Cutting instead inverts the failure mode: the worst case becomes a stray comment left
+  // behind by a style that was removed, rather than a missing symbol. Over-inclusion is a
+  // cosmetic cost; under-inclusion is a broken file on a stranger's card. And it still does the
+  // job that was asked for — the styles ARE the bulk of a library.
+  const cuts = entries
+    .filter(e => !keep.has(e.name))
+    .map(e => ({
+      from: e.blockStart,
+      to: e.implComment && e.implStart > -1 ? e.implStart + e.implComment.length : e.blockEnd,
+    }))
+    .sort((a, b) => a.from - b.from);
+
+  let out = '', at = 0;
+  for (const c of cuts) { out += text.slice(at, c.from); at = Math.max(at, c.to); }
+  out += text.slice(at);
+
+  // A removed style leaves the blank lines that surrounded it. Collapse runs of three or more
+  // newlines to two so the file does not arrive full of holes.
+  out = out.replace(/\n{3,}/g, '\n\n').replace(/\s+$/, '') + '\n';
+
+  const used = entries.filter(e => keep.has(e.name)).map(e => e.name);
+  return { text: out, used, total: entries.length };
+}
+
 let _inUseRebuildTimer = null;
 function _scheduleStylesInUseRebuild() {
   clearTimeout(_inUseRebuildTimer);
@@ -20112,7 +20702,7 @@ document.getElementById('btn-helper-save').addEventListener('click', async () =>
     const usingM = codeToWrite.match(/^using\s+(\w+)\s*=/);
     if (!usingM) {
       if (!codeToWrite) {
-        _showHelperError('Helper body is empty — enter an expression.', 'body');
+        _showHelperError('Helper body is empty. Enter an expression.', 'body');
         return;
       }
       // Auto-wrap as `using newName = body;` (also strip any trailing semicolon
@@ -20127,7 +20717,7 @@ document.getElementById('btn-helper-save').addEventListener('click', async () =>
     // a non-compiling helper that does nothing.
     const exprPart = codeToWrite.match(/^using\s+\w+\s*=\s*([\s\S]*?)\s*;?\s*$/);
     if (!exprPart || !exprPart[1].trim()) {
-      _showHelperError('Helper expression is empty — fill in something between "=" and ";".', 'body');
+      _showHelperError('Helper expression is empty. Fill in something between "=" and ";".', 'body');
       return;
     }
     const helperValErr = _validateCollapsedStyle(codeToWrite, newName);
@@ -20137,7 +20727,7 @@ document.getElementById('btn-helper-save').addEventListener('click', async () =>
     }
     const allEntries = _classifyStyleEntries(_parseStyleEntries(current));
     if (allEntries.find(e => e.name === newName)) {
-      _showHelperNameError(`"${newName}" already exists — choose a different name.`);
+      _showHelperNameError(`"${newName}" already exists. Choose a different name.`);
       nameInput.focus();
       nameInput.select();
       return;
@@ -20545,8 +21135,8 @@ function _buildStylesVisual() {
     if (hasInUse)    items.push(`<span class="legend-item"><span class="legend-swatch blue"></span>Used in open config</span>`);
     if (hasBroken)   items.push(`<span class="legend-item"><span class="legend-swatch red"></span>Missing helper dependency</span>`);
     if (hasBoth)     items.push(`<span class="legend-item"><span class="legend-swatch both"></span>Both</span>`);
-    if (hasConflict) items.push(`<span class="legend-item"><span class="legend-swatch yellow"></span>Duplicate name — resolve before saving</span>`);
-    if (hasError)    items.push(`<span class="legend-item"><span class="legend-swatch error"></span>Unmatched brackets — syntax error</span>`);
+    if (hasConflict) items.push(`<span class="legend-item"><span class="legend-swatch yellow"></span>Duplicate name, resolve before saving</span>`);
+    if (hasError)    items.push(`<span class="legend-item"><span class="legend-swatch error"></span>Unmatched brackets, syntax error</span>`);
     legendEl.style.display = 'flex';
     // Rebuild legend items without clobbering #styles-footer-meta
     [...legendEl.querySelectorAll('.legend-item')].forEach(el => el.remove());
@@ -21456,7 +22046,7 @@ function _updateHelperBodyValidation() {
     } else if (name && (_helperEditorMode === 'add' || (_helperEditorOrigName && name !== _helperEditorOrigName)) && _stylesEditorInstance) {
       const allEntries = _classifyStyleEntries(_parseStyleEntries(_stylesEditorInstance.getValue()));
       if (allEntries.find(e => e.name === name)) {
-        nameError = `"${name}" already exists — choose a different name.`;
+        nameError = `"${name}" already exists. Choose a different name.`;
       }
     }
   }
@@ -21503,11 +22093,17 @@ function _updateHelperBodyValidation() {
   if (nameError) {
     _showHelperError(nameError, 'name');
   } else if (_helperEditorMode === 'add' && name && !trimmed) {
-    _showHelperError('Helper body is empty — paste a style expression or type one between `=` and `;`.', 'body');
+    _showHelperError('Helper body is empty. Paste a style expression, or type one between `=` and `;`.', 'body');
   } else if (_helperEditorMode === 'add' && name && trimmed && !hasExpr) {
-    _showHelperError("Helper expression is empty — fill in something between '=' and ';'.", 'body');
+    _showHelperError("Helper expression is empty. Fill in something between '=' and ';'.", 'body');
   } else if (bracketErr) {
-    _showHelperError(`${bracketErr.message} — fix before saving.`, 'body');
+    // ⚠️ THE PERIOD IS NOT DECORATION. `bracketErr.message` is a bare fragment with no
+    // terminal punctuation of its own - `_findBracketError` returns 'Unmatched >',
+    // 'Unmatched <', or 'A style must be written as ...'. Dropping the em dash here without
+    // supplying the stop produced "Unmatched > Fix before saving.", two sentences run
+    // together. [B-443] Anything interpolated ahead of a sentence boundary has to be checked
+    // for how it ENDS, not just read as prose in the template.
+    _showHelperError(`${bracketErr.message}. Fix before saving.`, 'body');
   } else {
     _showHelperError('', null);
   }
@@ -23234,8 +23830,17 @@ require(['vs/editor/editor.main'], function () {
         // Sub-settings under "Show Sound Fonts tab" hide in lockstep so
         // they don't dangle in the Settings panel when the parent
         // feature is off. Stored values are preserved.
-        const dupItem = document.getElementById('setting-sf-dupcheck-item');
-        if (dupItem) dupItem.style.display = enabled ? '' : 'none';
+        //
+        // ⚠️ A LIST, BECAUSE THERE IS MORE THAN ONE NOW AND THE SECOND ONE WAS MISSED.
+        // This handled exactly one id for months, so adding a sub-setting on 2026-09-30 and not
+        // thinking about this function left "Include the config with SD Export" visible while the
+        // Sound Fonts tab was hidden — a setting describing a button the user cannot reach,
+        // because SD Export lives in that tab's toolbar. Found 2026-10-01 while removing the
+        // dup-check row [B-450]. Anything added to the Sound Fonts group goes in this array.
+        for (const id of ['setting-sd-config-item']) {
+          const el = document.getElementById(id);
+          if (el) el.style.display = enabled ? '' : 'none';
+        }
       };
       const _refreshSoundFontsToggleLock = async () => {
         const r = await window.electronAPI.listEntries();
@@ -24555,7 +25160,14 @@ require(['vs/editor/editor.main'], function () {
             if (e.key === 'Enter') { e.preventDefault(); onOk(); }
             else if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
           };
-          const onBackdrop = (e) => { if (e.target === modal) onCancel(); };
+          // ⚠️ SILENT BLOCK ONCE THEY HAVE TYPED. [B-453] "Dirty" here is the value differing from
+          // what it opened with, not merely being non-empty - the field is seeded with a suggested
+          // name and pre-selected, so an untouched prompt is safe to dismiss and a renamed one is
+          // not. Escape and Cancel still leave, because those are the user asking to.
+          const _seed = input.value;
+          const onBackdrop = (e) => {
+            if (e.target === modal && input.value === _seed) onCancel();
+          };
           okBtn.addEventListener('click', onOk);
           cancelBtn.addEventListener('click', onCancel);
           input.addEventListener('keydown', onKey);
@@ -27466,17 +28078,39 @@ require(['vs/editor/editor.main'], function () {
         _sfToggleEl.checked = _soundFontsEnabled;
         _sfToggleEl.addEventListener('change', _sfHandleToggle);
       }
-      // Library-picker duplicate-detection toggle. Default ON (true);
-      // null/undefined from the store also resolves to ON so a fresh
-      // install gets the feature without an explicit opt-in.
+      // Library-picker duplicate detection. Default ON (true); null/undefined from the store also
+      // resolves to ON so a fresh install gets the feature without an explicit opt-in.
+      //
+      // ⚠️ NO UI WRITES THIS ANY MORE — the Settings row was removed 2026-10-01 [B-450] because
+      // the choice was noise, not because the knob was wrong. The READ stays, so the only way to
+      // turn it off is `"settings.sfDupCheckEnabled": false` in prefs.json. That is deliberate:
+      // it keeps a lever for a slow machine or a huge font without asking every user to have an
+      // opinion about file hashing.
+      // ⚠️⚠️ SO DO NOT "TIDY" THIS INTO `const _sfDupCheckEnabled = true`. The three call sites in
+      // the picker read it, and collapsing it to a literal is what turns a removed CONTROL into a
+      // removed CAPABILITY — the exact distinction the removal was careful to preserve.
+      // ⭐ `let`, not `const`, for the same reason: it stays assignable so the knob can be restored
+      // to a control without touching the gating code.
       const _sfDupCheckRaw = await window.electronAPI.getSetting('sfDupCheckEnabled', true);
       let _sfDupCheckEnabled = _sfDupCheckRaw === false ? false : true;
-      const _sfDupCheckEl = document.getElementById('setting-sf-dupcheck-enabled');
-      if (_sfDupCheckEl) {
-        _sfDupCheckEl.checked = _sfDupCheckEnabled;
-        _sfDupCheckEl.addEventListener('change', async () => {
-          _sfDupCheckEnabled = !!_sfDupCheckEl.checked;
-          try { await window.electronAPI.setSetting('sfDupCheckEnabled', _sfDupCheckEnabled); } catch {}
+
+      // [B-229] Write the config next to the fonts on an SD Export. ⚠️ DEFAULT OFF, settled
+      // 2026-09-30 and reversing the earlier lean. Read the OPPOSITE way to the setting above:
+      // only an explicit `true` turns it on, so anything unset stays off. Writing someone's
+      // config onto a card they are about to hand to a customer is not a thing to start doing
+      // on their behalf.
+      // ⚠️ EXPORTED ON `window` because the door that reads it lives in a different lexical
+      // scope. Same reason as the eject helpers — see [B-424]. The export is placed AFTER the
+      // declaration on purpose; a TDZ ReferenceError here would abandon the rest of this IIFE.
+      const _sfSdConfigRaw = await window.electronAPI.getSetting('sdExportIncludeConfig', false);
+      let _sfSdIncludeConfig = _sfSdConfigRaw === true;
+      window._sfSdIncludeConfig = () => _sfSdIncludeConfig;
+      const _sfSdConfigEl = document.getElementById('setting-sd-include-config');
+      if (_sfSdConfigEl) {
+        _sfSdConfigEl.checked = _sfSdIncludeConfig;
+        _sfSdConfigEl.addEventListener('change', async () => {
+          _sfSdIncludeConfig = !!_sfSdConfigEl.checked;
+          try { await window.electronAPI.setSetting('sdExportIncludeConfig', _sfSdIncludeConfig); } catch {}
         });
       }
       // Library sentinel is auto-created on first import (see _sfRunImport).
@@ -27485,6 +28119,9 @@ require(['vs/editor/editor.main'], function () {
       // ── Import flow (Phase 1 source-and-entry model) ────
       const _sfImportEls = {
         modal:       document.getElementById('modal-sf-import'),
+        // [B-453] The corner ✕. Shares the Cancel handler and the busy lock - see the markup for
+        // why it must not be an independent exit.
+        closeX:      document.getElementById('sf-import-close'),
         title:       document.getElementById('sf-import-title'),
         reviewSourceSection: document.getElementById('sf-review-source-section'),
         phasePick:   document.getElementById('sf-import-phase-pick'),
@@ -27828,7 +28465,7 @@ require(['vs/editor/editor.main'], function () {
           row.dataset.demourl = trimmed;
           const tb = row.querySelector('.cand-link-toggle');
           if (tb) {
-            tb.title = trimmed ? 'Demo link set — toggle to show/hide' : 'Add demo link';
+            tb.title = trimmed ? 'Demo link set, toggle to show/hide' : 'Add demo link';
             tb.classList.toggle('has-url', !!trimmed);
           }
           if (trimmed && opts.setLast) opts.setLast(trimmed);
@@ -27902,7 +28539,12 @@ require(['vs/editor/editor.main'], function () {
         b.classList.remove('indeterminate');
         b.style.width = `${Math.min(100, Math.max(0, pct))}%`;
       };
+      // ⚠️ The current phase was never stored - every caller passed it and it was forgotten. The
+      // backdrop guard below needs to know it, and reading it back off the DOM would be a second
+      // source for a fact this function already owns. [B-453]
+      let _sfImportPhase = 'pick';
       const _sfShowPhase = (phase) => {
+        _sfImportPhase = phase;
         if (_sfImportEls.phasePick)   _sfImportEls.phasePick.style.display   = phase === 'pick'     ? '' : 'none';
         if (_sfImportEls.phaseProg)   _sfImportEls.phaseProg.style.display   = phase === 'progress' ? '' : 'none';
         if (_sfImportEls.phaseReview) _sfImportEls.phaseReview.style.display = phase === 'review'   ? '' : 'none';
@@ -27916,12 +28558,27 @@ require(['vs/editor/editor.main'], function () {
         // path reopens as soon as the phase advances to review.
         const busy = phase === 'progress' || phase === 'creating';
         if (_sfImportEls.cancelBtn) {
+          // ⚠️ HIDDEN IN THE PICK PHASE. [B-453] Nothing is staged in the chooser, so a footer
+          // button meaning "none of these" is height spent saying what the ✕ already says. It
+          // comes back for review, where there are ticked candidates to abandon and a word is
+          // worth more than a corner. Still rendered in `progress`/`creating` so the lock below
+          // has something to show as locked.
+          _sfImportEls.cancelBtn.style.display = phase === 'pick' ? 'none' : '';
           _sfImportEls.cancelBtn.disabled = busy;
           _sfImportEls.cancelBtn.style.opacity = busy ? '0.45' : '';
           _sfImportEls.cancelBtn.style.cursor = busy ? 'not-allowed' : '';
           _sfImportEls.cancelBtn.title = busy
             ? 'Cancel available once the import finishes'
             : '';
+        }
+        // ⚠️⚠️ THE ✕ CARRIES THE SAME LOCK, and that is the whole reason it is handled here rather
+        // than wired once and forgotten. The busy phases run an IPC the renderer cannot tear down;
+        // an always-live ✕ would reopen the door this lock was built to close.
+        if (_sfImportEls.closeX) {
+          _sfImportEls.closeX.disabled = busy;
+          _sfImportEls.closeX.style.opacity = busy ? '0.35' : '';
+          _sfImportEls.closeX.style.cursor = busy ? 'not-allowed' : '';
+          _sfImportEls.closeX.title = busy ? 'Available once the import finishes' : 'Cancel';
         }
       };
       const _sfOpenImport = () => {
@@ -28289,8 +28946,8 @@ require(['vs/editor/editor.main'], function () {
           _lines.push(_added
             ? `You already had <strong>${_n(_dupes)}</strong>.`
             : (_dupes === 1
-                ? 'Nothing was added — you already have that track.'
-                : `Nothing was added — you already have all <strong>${_n(_dupes)}</strong> of those ${_trk(_dupes)}.`));
+                ? 'Nothing was added. You already have that track.'
+                : `Nothing was added. You already have all <strong>${_n(_dupes)}</strong> of those ${_trk(_dupes)}.`));
         }
         if (_skips.length) {
           // ⚠️ CAPPED, and basenames rather than full paths. The old line printed every source
@@ -31230,7 +31887,7 @@ require(['vs/editor/editor.main'], function () {
           // Three-way prompt mirrors the navigation flows: Cancel
           // (stay open), Discard (close without saving), Save (persist
           // then close — the default closeAfter does the close for us).
-          const choice = await promptUnsaved('Unsaved changes to this sound font — save before closing?');
+          const choice = await promptUnsaved('Unsaved changes to this sound font. Save before closing?');
           if (choice === 'cancel') return;
           if (choice === 'save') {
             const saved = await _sfSaveEntryDetail();
@@ -31971,7 +32628,15 @@ require(['vs/editor/editor.main'], function () {
       });
       _sfPopLinkEls.close?.addEventListener('click', _sfClosePopLink);
       _sfPopLinkEls.cancel?.addEventListener('click', _sfClosePopLink);
-      _sfPopLinkEls.modal?.addEventListener('click', (e) => { if (e.target === _sfPopLinkEls.modal) _sfClosePopLink(); });
+      // ⚠️ SILENT BLOCK ONCE ANYTHING IS TICKED. [B-453] A checkbox list is accumulated work in the
+      // same way the library picker's staged picks are - the user has read a list and made
+      // decisions - and a click beside the window threw them away. Untouched, it still dismisses,
+      // because then there is nothing to protect.
+      _sfPopLinkEls.modal?.addEventListener('click', (e) => {
+        if (e.target !== _sfPopLinkEls.modal) return;
+        if (_sfPopLinkEls.list?.querySelector('input:checked')) return;
+        _sfClosePopLink();
+      });
 
       // ── Add proof of purchase (import-style) ───────────────────────
       // Browse a file, optionally name it, tick which sources it covers (the
@@ -32720,7 +33385,7 @@ require(['vs/editor/editor.main'], function () {
           // Three-way prompt mirrors the entry detail close path:
           // Cancel (stay), Discard (close without saving), Save
           // (persist then close — closeAfter default does the close).
-          const choice = await promptUnsaved('Unsaved changes to this source — save before closing?');
+          const choice = await promptUnsaved('Unsaved changes to this source. Save before closing?');
           if (choice === 'cancel') return;
           if (choice === 'save') {
             const saved = await _sfSaveSourceDetail({ dismissAll });
@@ -33259,7 +33924,7 @@ require(['vs/editor/editor.main'], function () {
         // modal active so the swap-to-entry-detail handshake below
         // still has a from-modal to atomically deactivate.
         if (_sfSourceDirty) {
-          const choice = await promptUnsaved('Unsaved source edits — save before going to this font?');
+          const choice = await promptUnsaved('Unsaved source edits. Save before going to this font?');
           if (choice === 'cancel') return;
           if (choice === 'save') {
             const saved = await _sfSaveSourceDetail({ closeAfter: false });
@@ -33496,7 +34161,7 @@ require(['vs/editor/editor.main'], function () {
       _sfSourceDetailEls.addMoreBtn?.addEventListener('click', async () => {
         if (!_sfSourceOriginalUuid) return;
         if (_sfSourceDirty) {
-          if (!await _promptDiscard('Unsaved source edits — discard them and continue?')) return;
+          if (!await _promptDiscard('Unsaved source edits. Discard them and continue?')) return;
         }
         const uuid = _sfSourceOriginalUuid;
         // Drop the return-to-entry tracking — we're navigating to import,
@@ -33516,7 +34181,7 @@ require(['vs/editor/editor.main'], function () {
       document.getElementById('btn-sf-source-duplicate')?.addEventListener('click', async () => {
         if (!_sfSourceOriginalUuid) return;
         if (_sfSourceDirty) {
-          if (!await _promptDiscard('Unsaved source edits — discard them and continue?')) return;
+          if (!await _promptDiscard('Unsaved source edits. Discard them and continue?')) return;
         }
         const uuid = _sfSourceOriginalUuid;
         _sfSourceDetailReturnToEntry = null;
@@ -35096,7 +35761,16 @@ require(['vs/editor/editor.main'], function () {
       _sfLibPickEls.cancelBtn?.addEventListener('click', _sfCloseLibraryPicker);
       _sfLibPickEls.closeX?.addEventListener('click', _sfCloseLibraryPicker);
       _sfLibPickEls.modal?.addEventListener('click', (e) => {
-        if (e.target === _sfLibPickEls.modal) _sfCloseLibraryPicker();
+        // ⚠️⚠️ SILENT BLOCK WHILE PICKS ARE STAGED. [B-453] The convention has existed since
+        // 2026-08 - "clicking the backdrop is silently blocked when dirty" - and it said EDITABLE
+        // modals, so nobody extended it here: nothing is being typed, so the dialog did not read
+        // as editable. ⭐ But accumulating selections across target switches is this picker's whole
+        // point, deliberately built so picks survive browsing between fonts - and a stray click
+        // beside the window dropped the lot with no prompt and no undo.
+        // ⭐ THE TEST IS "would a stray click destroy something the user built", NOT "is there a
+        // text input". Same silent block as style detail: no prompt, because the user did not ask
+        // to leave and telling them off for a misclick is noise.
+        if (e.target === _sfLibPickEls.modal && !_sfLibPickSelections.length) _sfCloseLibraryPicker();
       });
       document.addEventListener('keydown', (e) => {
         if (e.key !== 'Escape') return;
@@ -36245,7 +36919,7 @@ require(['vs/editor/editor.main'], function () {
         // error - but an unexplained folder on a card is its own kind of dishonesty.
         if (r.replacedLeftover) {
           const leaf = String(r.replacedLeftover).split(/[\\/]/).pop();
-          showToast(`Exported. The previous copy is still at the destination as "${leaf}" — it is safe to delete.`);
+          showToast(`Exported. The previous copy is still at the destination as "${leaf}". It is safe to delete.`);
         }
 
         if (onCompleted) await onCompleted();
@@ -36648,9 +37322,9 @@ require(['vs/editor/editor.main'], function () {
         const rootMulti = _sfReorgBuckets.filter(b => b.location === 'root' && b.files.length >= 2).length;
         const rootSingle = _sfReorgBuckets.filter(b => b.location === 'root' && b.files.length === 1).length;
         let label = '';
-        if (subCount === 0 && rootMulti > 0) label = 'Currently <span class="sf-reorg-layout-label">flat</span> — all files at the root.';
-        else if (rootMulti === 0 && subCount > 0) label = 'Currently <span class="sf-reorg-layout-label">grouped</span> — multi-file sound types in subfolders.';
-        else if (subCount > 0 && rootMulti > 0) label = 'Currently <span class="sf-reorg-layout-label">mixed</span> — some types in subfolders, some at root.';
+        if (subCount === 0 && rootMulti > 0) label = 'Currently <span class="sf-reorg-layout-label">flat</span>, all files at the root.';
+        else if (rootMulti === 0 && subCount > 0) label = 'Currently <span class="sf-reorg-layout-label">grouped</span>, multi-file sound types in subfolders.';
+        else if (subCount > 0 && rootMulti > 0) label = 'Currently <span class="sf-reorg-layout-label">mixed</span>, some types in subfolders, some at root.';
         else label = 'Nothing to restructure yet.';
         if (rootSingle > 0) label += ` <span style="color:var(--c-text-muted)">(${rootSingle} single-file type${rootSingle === 1 ? '' : 's'} will stay at root.)</span>`;
         preview.innerHTML = label;
@@ -36712,7 +37386,7 @@ require(['vs/editor/editor.main'], function () {
           const active = _sfReorgActiveBucket === b.id ? ' active' : '';
           const warn = (b.hasMisnamed || b.isConflict) ? ' warn' : '';
           const tip = [];
-          if (b.hasMisnamed) tip.push(`Contains a file whose name doesn't match the folder — ProffieOS will skip it.`);
+          if (b.hasMisnamed) tip.push(`Contains a file whose name doesn't match the folder, so ProffieOS will skip it.`);
           if (b.isConflict) tip.push(`Both a root-level file and a subfolder for "${b.effect}" exist. Resolve manually.`);
           const title = tip.length ? ` title="${_sfEscape(tip.join(' '))}"` : '';
           return `<button class="sf-reorg-bucket-chip${active}${warn}" data-bucket-id="${_sfEscape(b.id)}"${title}>${_sfEscape(b.label)} <span class="sf-reorg-bucket-count">${b.files.length}</span></button>`;
@@ -37648,7 +38322,7 @@ require(['vs/editor/editor.main'], function () {
           // Save (persist edits, then go). The Save path keeps the entry
           // modal active so the swap-to-source-detail handshake below
           // still has a from-modal to atomically deactivate.
-          const choice = await promptUnsaved('Unsaved changes to this font — save before going to source?');
+          const choice = await promptUnsaved('Unsaved changes to this font. Save before going to source?');
           if (choice === 'cancel') return;
           if (choice === 'save') {
             const saved = await _sfSaveEntryDetail({ closeAfter: false });
@@ -40070,10 +40744,16 @@ require(['vs/editor/editor.main'], function () {
       // ⚠️ RELOCATED, NOT DUPLICATED. The row is built inside messageHtml because that is the
       // only injection point promptConfirm offers, then moved. A second copy in the markup
       // would be a second button, and the whole point is that there is exactly one.
-      const _sfPlaceEjectRowInButtons = () => {
+      // ⚠️⚠️ THE BUTTON ROW IS A PARAMETER AS OF [B-424], NOT A CONSTANT. It was hardcoded to
+      // `#modal-confirm .modal-btns` because every caller was a promptConfirm. The import side
+      // has its own modal, and the choice there was between a second placement function and one
+      // that takes a selector. A second one is a second layout to keep in agreement forever,
+      // which is the defect this helper was created to fix in the first place - see the note
+      // above about the same row having two layouts depending which door you came through.
+      const _sfPlaceEjectRowInButtons = (btnsSel = '#modal-confirm .modal-btns') => {
         try {
           const row  = document.getElementById('sf-eject-row');
-          const btns = document.querySelector('#modal-confirm .modal-btns');
+          const btns = document.querySelector(btnsSel);
           if (!row || !btns) return;
           row.style.marginTop   = '0';
           row.style.marginRight = 'auto';
@@ -40093,7 +40773,9 @@ require(['vs/editor/editor.main'], function () {
       };
 
       // Wires the row up. `auto` is the checkbox having been ticked - it presses the button.
-      const _sfWireEjectRow = ({ target, vocab, auto }) => {
+      // `onEjected` is optional and only the card report uses it today - see the note at the
+      // 'ejected' branch below for why a surface that stays on screen needs it.
+      const _sfWireEjectRow = ({ target, vocab, auto, onEjected }) => {
         const btn = document.getElementById('sf-eject-btn');
         const status = document.getElementById('sf-eject-status');
         if (!btn || !target) return;
@@ -40143,6 +40825,16 @@ require(['vs/editor/editor.main'], function () {
               status.textContent = res.alreadyGone ? 'Already removed.' : 'Safe to remove.';
               status.style.color = 'var(--c-ok, var(--c-text-sub))';
             }
+            // ⭐⭐ [B-424, 2026-09-30] TELL THE CALLER THE VOLUME IS GONE. A summary dialog can
+            // ignore this - it is about to be dismissed - but a surface that keeps SHOWING the
+            // card's contents cannot: the card report went on listing 34 folders after the eject,
+            // and clicking one produced "Couldn't read this folder: UNKNOWN: unknown error,
+            // scandir 'I:\Darth_Maul'". His report. The dialog was describing a card that was no
+            // longer there.
+            // ⚠️ Fires for `alreadyGone` too. From the surface's point of view both mean the same
+            // thing - the volume is not there any more - and only reacting to a FRESH eject would
+            // leave the stale listing up in the one case where it is most certainly wrong.
+            try { if (typeof onEjected === 'function') onEjected(res); } catch {}
             return;
           }
           if (res.status === 'returned') {
@@ -40164,6 +40856,33 @@ require(['vs/editor/editor.main'], function () {
         // ⭐ THE AUTOMATIC CASE IS THE MANUAL CASE. Not a second code path.
         if (auto) btn.click();
       };
+
+      // ⚠️⚠️ EXPOSED BECAUSE THE IMPORT SIDE IS IN A DIFFERENT SCOPE, AND REACHING FOR THEM
+      // WITHOUT THIS IS A ReferenceError. [B-424] These are `const`s inside this IIFE; the bulk
+      // import and SD report code is lexically ABOVE it and cannot see them.
+      //
+      // ⚠️⚠️⚠️ AND THIS BLOCK MUST SIT BELOW *EVERY* DECLARATION IT NAMES. IT DID NOT, AND IT COST
+      // HIM A BROKEN APP (2026-09-30). It was written directly under `_sfRemoveEjectRow`, which put
+      // it ABOVE `const _sfWireEjectRow` - and reading a `const` before its declaration is evaluated
+      // is a temporal-dead-zone ReferenceError, not `undefined`. It threw, which abandoned the rest
+      // of this IIFE, which is what lays out the editor pane: the editor collapsed to zero height
+      // and the log panel sat where it should have been. Console read `Cannot access
+      // '_sfWireEjectRow' before initialization`.
+      // ⭐ THE LESSON THAT GENERALISES, because this is the THIRD ReferenceError this file has
+      // shipped in a fortnight and the first two were about SCOPE: scope was not the problem here,
+      // ORDER was. `const` hoists into the block and then refuses to be read. Placement under the
+      // definition you happen to be looking at is not placement under all of them.
+      // ⚠️ `test/import-eject-wiring.test.js` now asserts the ORDER rather than mere presence - the
+      // original check matched both strings anywhere in the file and passed on the broken build.
+      // ⚠️ Callers must still guard (`window._sfEjectContext ? ... : ...`), the way the summary's
+      // `_fmtSaved` guards `window._sfFormatBytes`. An unguarded call there blanks a whole screen.
+      if (typeof window !== 'undefined') {
+        window._sfEjectContext           = _sfEjectContext;
+        window._sfEjectRowHtml           = _sfEjectRowHtml;
+        window._sfWireEjectRow           = _sfWireEjectRow;
+        window._sfPlaceEjectRowInButtons = _sfPlaceEjectRowInButtons;
+        window._sfRemoveEjectRow         = _sfRemoveEjectRow;
+      }
 
       // == A COMPLETION NOTICE THAT CARRIES THE EJECT BUTTON ============ [B-420]
       //
@@ -40845,6 +41564,48 @@ require(['vs/editor/editor.main'], function () {
       const _sfBulkSave = async () => {
         const names = Array.from(_sfSelectedNames);
         if (names.length === 0) return false;
+
+        // ── Is the config worth shipping? ──────────────────────────── [B-229]
+        //
+        // His, 2026-09-30: "if it hasn't been compiled, we should probably throw a warning. Do
+        // you really want to include this config? It hasn't been compiled."
+        //
+        // ⭐⭐ ASKED HERE, BEFORE ANY WORK, NOT AT THE WRITE. The config is written in
+        // `onCompleted`, minutes later on a real card — and a question that arrives after the
+        // export is a question the user cannot act on: the useful answer to "it has not been
+        // compiled" is to go and compile it, which is only possible before. So the decision is
+        // taken up front and carried down to the write.
+        // ⚠️ IT DOES NOT BLOCK THE EXPORT. Declining removes the CONFIG, not the fonts. The
+        // fonts are the job; this file is a courtesy riding along with it.
+        //
+        // ⚠️ `compileSuccess` covers a cache HIT as well as a fresh compile, so a config that
+        // built last week and has not been touched since does not get nagged. It goes false the
+        // moment the content changes, which is the same content this export is about to write —
+        // so "not compiled" here really does mean "this exact text has never produced a build".
+        let _provSkipConfig = false;
+        try {
+          const _wantCfg = window._sfSdIncludeConfig ? window._sfSdIncludeConfig() : false;
+          const _built   = window.getCompileSuccess ? window.getCompileSuccess() : true;
+          if (_wantCfg && currentFilePath && !_built) {
+            const _go = await promptConfirm({
+              title: 'This config has not been compiled',
+              // ⚠️ Says what the risk IS rather than that there is one. "May not build" is the
+              // thing the recipient would discover the hard way, and it is the only reason to
+              // hesitate — the file is still readable and still accurate about intent.
+              message: `${currentFilePath.split(/[\\/]/).pop()} has not been compiled in its `
+                + 'current state, so it is not known to build. It will still be written to the '
+                + 'card as the source these fonts came from.',
+              confirmText: 'Include it anyway',
+              confirmKind: 'primary',
+              cancelText: 'Leave it out',
+            });
+            if (!_go) _provSkipConfig = true;
+          }
+        } catch (err) {
+          // A failure to ASK must not silently change what gets written. Left false, so the
+          // config still goes on the card and the export behaves as the setting says.
+          console.warn('[B-229] compile-state check failed; including the config as configured', err);
+        }
         // Common inclusion logic:
         //   config refs ;common AND config-selected common is in library → use THAT one
         //   config refs ;common AND config named a common that's missing  → ask (default / fonts-only / cancel)
@@ -42615,6 +43376,116 @@ require(['vs/editor/editor.main'], function () {
             // is still in scope and retry. The shared ending would happily draw both; whether it
             // should is a call worth making on purpose rather than by migration.
             if (failures.length) return;
+
+            // ── The provenance package ──────────────────────────────── [B-229]
+            //
+            // ⭐ THIS DOOR AND NO OTHER. Thirteen doors share `_sfRunExport`; this is the one
+            // behind the `↗ SD Export` button, and that name is the specification:
+            // "we labeled it that because it's supposed to indicate that this isn't about just
+            // making backups or moving things around. It is about creating an SD card."
+            // Putting this on the runner would drop a config into the folder someone asked for
+            // one font — B-179's "getting files out" case, which is the opposite of this.
+            //
+            // ⚠️ AFTER `failures.length`, so a run with real failures writes nothing. A readme
+            // announcing a card that did not finish being written is a lie with a date on it.
+            // ⚠️ NOT gated on the destination being removable, which was the earlier ruling
+            // on this entry: "it's on the export, which isn't about a card, it's about an export
+            // location." Someone staging a card in a folder first gets the same files.
+            //
+            // ⚠️⚠️ EVERY EXIT SAYS WHY, same discipline as the space line immediately below and
+            // for the same reason: four ways to write no config all look identical from outside,
+            // and that is how a feature reports as shipped while doing nothing.
+            try {
+              // ⚠️ FALLBACK IS `false`, MATCHING THE GATE AT THE TOP OF THE EXPORT. The setting
+              // reader sits behind an `await getSetting`, so an IPC failure can leave this
+              // function undefined — and the permissive fallback would then write a config the
+              // user's setting says to leave off, having never asked the not-compiled question
+              // either. A missing reader means "we do not know what they chose", and the default
+              // they chose is off.
+              const _incl = window._sfSdIncludeConfig ? window._sfSdIncludeConfig() : false;
+              const _cfgName = currentFilePath ? currentFilePath.split(/[\\/]/).pop() : '';
+              // ⭐ THE USER'S OWN FILENAME, not a fixed `config.h`. Settled, and the reason is
+              // stronger than preference: a fixed name silently collides the moment two configs
+              // are exported to one card. His one worry — "the ability to know which one it
+              // was" — is answered by the readme naming the file, which is why that inventory
+              // line is not decoration.
+              let _cfgBody = null, _stylesName = '', _stylesBody = null, _stylesUsed = 0;
+              if (!_incl) {
+                console.info('[B-229] config not written: the SD Export setting is off');
+              } else if (_provSkipConfig) {
+                console.info('[B-229] config not written: declined at the not-compiled prompt');
+              } else if (!_cfgName) {
+                console.info('[B-229] config not written: no config file is open');
+              } else {
+                // ⚠️⚠️ THE EDITOR BUFFER, NOT THE FILE ON DISK, AND THAT IS A DECISION.
+                // His catch, 2026-09-30: "it's possible that the config would be dirty at that
+                // point, in which case we're saving a copy of the current version, not the saved
+                // version." Correct — and the current version is the one that has to go, because
+                // the FONT SELECTION came from the same buffer. `_getEditorContent` is what the
+                // in-use detection reads, so writing the saved file instead would put a config on
+                // the card that can reference fonts the card does not have, or omit ones it does.
+                // A provenance file whose two halves disagree is worse than no provenance file.
+                // ⭐ The readme is worded for this: "the source that was exported alongside these
+                // fonts" is true of a dirty buffer. It never claims to be a saved file.
+                _cfgBody = window._getEditorContent ? window._getEditorContent() : null;
+                if (typeof _cfgBody !== 'string') {
+                  console.warn('[B-229] config not written: editor content unavailable');
+                  _cfgBody = null;
+                } else if (isDirty) {
+                  console.info('[B-229] config written from the editor with unsaved changes '
+                    + '(matches the fonts exported; the file on disk differs)');
+                }
+                // ⚠️ `_stylesLinked` is the flag the Link Style Library button already maintains
+                // — not a second reading of the config text. One source for "does this config
+                // use the library", kept current by `_updateStylesLinkBtn`.
+                // ⭐ AND WHAT GOES ON THE CARD IS A NEW FILE, not a copy of the library. His
+                // call: "not the entire thing, just the ones that were used in the config, so
+                // we're creating a new one." See `_sfBuildUsedStylesFile` for why that is a
+                // dependency closure rather than a filter.
+                if (_cfgBody && _stylesLinked) {
+                  const _sres = await window.electronAPI.readStylesFile();
+                  if (typeof _sres !== 'string') {
+                    console.warn('[B-229] style library not written: could not read it', _sres);
+                  } else {
+                    const _sub = _sfBuildUsedStylesFile(_sres, _cfgBody);
+                    if (!_sub) {
+                      console.info('[B-229] style library not written: the config uses none of it');
+                    } else {
+                      _stylesBody = _sub.text;
+                      _stylesName = (_stylesFilePath || 'my_styles.h').split(/[\\/]/).pop();
+                      _stylesUsed = _sub.used.length;
+                      console.info(`[B-229] style library: ${_sub.used.length} of ${_sub.total} entries`);
+                    }
+                  }
+                }
+              }
+              const _prov = await window.electronAPI.writeProvenance({
+                destDir,
+                configName: _cfgName, configContent: _cfgBody,
+                stylesName: _stylesName, stylesContent: _stylesBody,
+                stylesUsed: _stylesUsed,
+                fontCount: names.length,
+                // ⚠️ ONLY `written`. `commonOutcomes` carries three states and the other two are
+                // not this export putting a folder there: `current` means it was already correct
+                // and nothing was copied, `kept` means the user chose to keep their own. The
+                // readme says what the export INCLUDED, so claiming either would overstate it in
+                // the same way the old "4 sound fonts" understated it.
+                // ⚠️ `o.slot` rather than the word "common": a config can point at another slot,
+                // and the summary one screen away already names the real one.
+                commonFolders: (commonOutcomes || [])
+                  .filter(o => o && o.state === 'written')
+                  .map(o => o.slot || 'common'),
+              });
+              if (!_prov || !_prov.ok) {
+                console.warn('[B-229] provenance write incomplete', _prov);
+              }
+            } catch (e) {
+              // ⚠️ Swallowed ON PURPOSE and logged. The fonts are already on the card and the
+              // summary is about to draw; a courtesy file failing must not take the export down
+              // with it. What it must not do is fail silently.
+              console.warn('[B-229] provenance write threw', e);
+            }
+
             // ── Room left on the card, for the summary ───────────────── [B-203]
             //
             // ⭐ NO NEW MECHANISM. [B-403] already primes a volume lookup at the folder picker
@@ -44626,25 +45497,35 @@ require(['vs/editor/editor.main'], function () {
         const zipBtn = document.getElementById('sf-common-import-zip');
         const folderBtn = document.getElementById('sf-common-import-folder');
         const voicepackBtn = document.getElementById('sf-common-import-voicepack');
-        const cancelBtn = document.getElementById('sf-common-import-cancel');
+        // ⚠️ The footer Cancel became the corner ✕ on 2026-10-01 - see the markup for why. The
+        // handler is the same one under a new name, deliberately: a second exit path for the same
+        // act is two things to keep in agreement.
+        const closeBtn = document.getElementById('sf-common-import-close');
         const cleanup = () => {
           modal.classList.remove('active');
           zipBtn?.removeEventListener('click', onZip);
           folderBtn?.removeEventListener('click', onFolder);
           voicepackBtn?.removeEventListener('click', onVoicepack);
-          cancelBtn?.removeEventListener('click', onCancel);
+          closeBtn?.removeEventListener('click', onCancel);
           modal.removeEventListener('click', onBackdrop);
+          document.removeEventListener('keydown', onKey);
         };
         const onZip = () => { cleanup(); _sfImportCommon('zip'); };
         const onFolder = () => { cleanup(); _sfImportCommon('folder'); };
         const onVoicepack = () => { cleanup(); _sfOpenVoicepackPicker(); };
         const onCancel = () => cleanup();
         const onBackdrop = (e) => { if (e.target === modal) cleanup(); };
+        // ⚠️ Escape is now REQUIRED, not a nicety: with no Cancel button the ✕ is the only visible
+        // exit, and the standing resolution is that the ✕ is the provision while backdrop and
+        // Escape are the safety net. Removed in `cleanup` because this listener is on `document`
+        // and the handlers here are registered per-open rather than once at load.
+        const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); cleanup(); } };
         zipBtn?.addEventListener('click', onZip);
         folderBtn?.addEventListener('click', onFolder);
         voicepackBtn?.addEventListener('click', onVoicepack);
-        cancelBtn?.addEventListener('click', onCancel);
+        closeBtn?.addEventListener('click', onCancel);
         modal.addEventListener('click', onBackdrop);
+        document.addEventListener('keydown', onKey);
         modal.classList.add('active');
       };
       document.getElementById('btn-sf-common-import')?.addEventListener('click', _sfOpenImportChooser);
@@ -46163,7 +47044,21 @@ require(['vs/editor/editor.main'], function () {
           };
           const onApply = () => cleanup(collect());
           const onCancel = () => cleanup(null);
-          const onBackdrop = (e) => { if (e.target === modal) onCancel(); };
+          // ⚠️⚠️ SILENT BLOCK WHENEVER THERE ARE CONFLICTS TO DECIDE. [B-453] This is the most
+          // expensive dialog on that entry's list: it renders one radio row per conflicting item
+          // - keep / replace / both, plus a typed name for "both" - so someone working through
+          // twenty conflicts has twenty decisions staged and nothing written yet. A click beside
+          // the window answered all of them with "never mind".
+          // ⭐ Gated on conflicts EXISTING rather than on a radio having been moved. The rows carry
+          // sensible defaults, so "untouched" still represents a review someone is in the middle
+          // of, and re-opening rebuilds the plan from scratch. An adds-only plan asks for no
+          // decisions and still dismisses freely.
+          // ⚠️ Escape and Cancel are untouched - those are the user asking to leave.
+          const onBackdrop = (e) => {
+            if (e.target !== modal) return;
+            if (conflicts > 0) return;
+            onCancel();
+          };
           const onKey = (e) => { if (e.key === 'Escape') onCancel(); };
           applyBtn.addEventListener('click', onApply);
           cancelBtn.addEventListener('click', onCancel);
@@ -46984,6 +47879,31 @@ require(['vs/editor/editor.main'], function () {
       _sfImportEls.linkUrl?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); _sfLinkImport(); } });
       _sfImportEls.linkBrowserBtn?.addEventListener('click', () => _sfBrowserImport(_sfLinkPendingUrl));
       _sfImportEls.cancelBtn?.addEventListener('click', _sfCloseImportAndReturn);
+      // ⚠️ THE SAME FUNCTION, NOT A SECOND EXIT PATH. [B-453] The ✕ replaces the footer Cancel in
+      // the chooser phase and sits beside it in the others, so if the two ever diverged the dialog
+      // would behave differently depending on which phase you happened to leave it from.
+      // `_sfCloseImportAndReturn` also restores whatever modal was stashed underneath.
+      _sfImportEls.closeX?.addEventListener('click', _sfCloseImportAndReturn);
+      // ⚠️⚠️ BACKDROP DISMISSES IN THE CHOOSER AND NOWHERE ELSE. [B-453] Settled as: *"this one
+      // missing backdrop dismiss but should have it to be consistent. no consequence"* - true of
+      // the view he was looking at, and the reason it had none at all was the OTHER phases, where
+      // a stray click discards a finished analysis.
+      // ⭐⭐ THE GUARD IS A FUNCTION OF STATE, NOT OF DIALOG IDENTITY, and this is the clearest case
+      // of it in the app: the same overlay is free to dismiss in `pick` and destructive in
+      // `review`. The library picker guards on staged selections, the merge plan on listed
+      // conflicts, this one on which phase it is in - one rule, three expressions.
+      // ⚠️ THE LINK SUB-VIEW IS GATED ON WHAT IS TYPED, NOT ON BEING OPEN. First cut excluded the
+      // whole view, and he caught it: *"when nothing written yet, it would be backdrop dismissable
+      // by our convention no?"* Correct - the rule is about accumulated work, and an empty field is
+      // none. Excluding the view was me guarding a SCREEN when the convention guards WORK, which is
+      // the same mistake as treating "editable modal" as a kind of dialog rather than a state.
+      _sfImportEls.modal?.addEventListener('click', (e) => {
+        if (e.target !== _sfImportEls.modal) return;
+        if (_sfImportPhase !== 'pick') return;
+        const linkOpen = _sfImportEls.linkBlock && _sfImportEls.linkBlock.style.display !== 'none';
+        if (linkOpen && (_sfImportEls.linkUrl?.value || '').trim()) return;
+        _sfCloseImportAndReturn();
+      });
       _sfImportEls.confirmBtn?.addEventListener('click', _sfConfirmImport);
       // Paste + clear icons on the Website and Link URL fields. Inside-
       // the-field positioning via the .sf-import-url-wrap shell.
@@ -47056,7 +47976,7 @@ require(['vs/editor/editor.main'], function () {
       const action = verb === 'closing' ? 'close' : 'install update';
       await promptError(`Cannot ${action}`,
         `Cannot ${action} while an export is in progress. Click Cancel on the progress dialog `
-        + `first — it stops between files and removes anything half-written.`);
+        + `first, because it stops between files and removes anything half-written.`);
       return false;
     }
     if (window._sfBackupBusy) {

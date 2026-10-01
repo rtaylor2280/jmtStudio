@@ -3122,6 +3122,22 @@ ipcMain.handle('syncManifest:commit', (_, { destDir, items, complete } = {}) => 
   } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
+// ── Provenance package: the readme, and optionally the config, on an SD Export ── [B-229]
+//
+// ⚠️ SD EXPORT ONLY. The renderer calls this from that one door; see exportProvenance.js for
+// why, and do not widen it to the runner without re-reading that note.
+// ⚠️ THE VERSION COMES FROM HERE, NOT FROM THE CALLER. `app.getVersion()` is the only honest
+// source and main is the only side that has it. A renderer-supplied string is a value that can
+// drift from the app it is claiming to be.
+ipcMain.handle('provenance:write', (_, params = {}) => {
+  try {
+    if (!params.destDir) return { ok: false, error: 'Missing destDir' };
+    return require('./exportProvenance').writeProvenance({
+      ...params, appVersion: app.getVersion(),
+    });
+  } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
 // ── Export destination: will it fit, and what is it attached to? ── [B-203]
 //
 // Two handlers because the costs differ by four orders of magnitude and callers must be
